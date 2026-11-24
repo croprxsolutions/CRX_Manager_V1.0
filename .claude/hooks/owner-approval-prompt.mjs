@@ -3,27 +3,30 @@
 // Mason 2026-10-09: replaces Windows Hello so he can approve from his phone;
 // 2026-10-13: a plain "I approve" is enough).
 //   - His WHOLE message is `yes` or `I approve` (or `approve`, `approved`, `yes I approve`)
-//     right after the agent showed a pending request's reference number, or
-//     `approve <6-digit code>`, in the session that built that request
+//     right after this conversation showed a pending request's summary, or
+//     `approve <6-digit code>`; whichever session built the request (Mason, 2026-11-23:
+//     it must carry to the merge captain), but another session's request only right after
+//     this conversation showed its summary word for word, whatever the reply's form
 //     (scripts/owner-approve-migration.mjs) → the request becomes an approval
 //     good for 24 hours (2026-11-20), and the agent is told so.
-//   - A plain `I approve` with no request waiting in this session is ordinary
-//     chat: the hook says nothing.
-//   - Any other message, or the reply in another session → nothing is approved.
+//   - A plain `I approve` when this conversation neither built nor showed a
+//     waiting request is ordinary chat: the hook says nothing.
+//   - Any other message → nothing is approved.
 //     A whole <system-reminder> block the app puts in front of his words is not
 //     part of the message; a message with a reply on one of its lines but other
 //     text as well is refused out loud, never silently (2026-10-20), except a
 //     plain "I approve" line with no request waiting, which is ordinary chat.
 //   - Every message leaves a marker that this session's messages reach this hook;
-//     the request script refuses without it (some sessions never run it, 2026-10-20).
+//     without it the request script warns that his reply must come from another conversation.
 // Claude Code runs this on each message sent into a session. Nothing stops an
 // agent running it by hand with a made-up message; that is the deliberate
 // forgery Mason accepted as the residual (owner-approval-lib.mjs header).
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import {
   approvalAttemptIn, approvalCodeFromReply, isPlainApprovalReply, lastAgentMessageText, ownerRequestDirs, recordPromptHookSeen, recordReplyApproval, replyMark,
-  replyWithoutReminders, resolvePlainReply,
+  replyWithoutReminders, repositoryCheckouts, resolvePlainReply, usedCodeMarkerName,
 } from "./owner-approval-lib.mjs";
 import { OWNER_SOL_SKIP_PURPOSE, acceptAttemptIn, acceptFromReply, skipFromReply } from "./sol-accept-lib.mjs";
 
@@ -38,11 +41,39 @@ let payload;
 try { payload = globalThis.__CRX_ROUTED_HOOK_PAYLOAD ?? JSON.parse(readFileSync(0, "utf8")); } catch { emit(); }
 // Every message, approval or not: proof for the request script that messages in
 // this session reach this hook (some sessions never run it, 2026-10-20).
-try { recordPromptHookSeen({ dirs: ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]), sessionId: payload?.session_id }); }
+const ownDirs = ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
+try { recordPromptHookSeen({ dirs: ownDirs, sessionId: payload?.session_id }); }
 catch { /* a missing marker only makes the request script refuse */ }
+
+// Where a request he answers may be: every checkout of this repository, so his reply in the
+// conversation he is talking to counts for a request a merge captain built elsewhere (Mason,
+// 2026-11-23). Only listed when a message looks like an answer, and once per message.
+let listed = null;
+let listFailed = false;
+const replyDirs = () => (listed ??= ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd(),
+  ...repositoryCheckouts(payload?.cwd || process.cwd(), undefined, () => { listFailed = true; })]));
 
 // The app's reminder block in front of his words is not part of his reply (2026-10-20).
 const reply = replyWithoutReminders(payload?.prompt);
+const readShown = () => lastAgentMessageText(payload?.transcript_path, reply);
+
+// Nothing found to answer. If the other checkouts could not be listed and the agent's last message
+// showed a request, he meant it: say it did not count instead of losing it (Luna MED, round 2).
+function quiet() {
+  if (listFailed) {
+    let shown = "";
+    try { shown = String(readShown() ?? ""); } catch { /* nothing shown */ }
+    // Either summary: a migration's "(Reference N. You don't..." or a Sol skip's "Reference N. Reply before" (Taha LOW, #2389).
+    const ref = /\bReference (\d{6})\. (?:You don't need to type it|Reply before)/.exec(shown);
+    // A code already used here was found and answered: nothing was lost.
+    if (ref && !(listed || []).some((d) => existsSync(path.join(d, usedCodeMarkerName(ref[1]))))) {
+      emit(`OWNER REPLY NOT RECORDED — Mason replied "${reply.trim().slice(0, 40)}", but this project's other folders could not be listed ` +
+        "(git worktree list failed), so the request shown to him may not have been found. Nothing was approved or skipped. " +
+        "Tell him in one line, then show the summary again as the whole last message of your turn.");
+    }
+  }
+  emit();
+}
 
 // `accept <code> <reason>`: Mason accepts ONE Sol finding (sol-accept-lib.mjs, 2026-11-10).
 const accept = acceptFromReply(reply);
@@ -54,7 +85,7 @@ if (accept || acceptAttemptIn(reply)) {
   let res;
   try {
     res = recordReplyApproval({
-      code: accept.code, dirs: ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]), reply,
+      code: accept.code, dirs: replyDirs(), reply,
       sessionId: payload?.session_id, form: "accept", reason: accept.reason, readMark: () => replyMark(payload?.transcript_path, reply),
     });
   } catch (error) {
@@ -64,7 +95,7 @@ if (accept || acceptAttemptIn(reply)) {
   const p = res.payload;
   emit(`SOL FINDING ACCEPTED — Mason accepted finding ${p.finding.n} of ${p.findingCount} on PR #${p.pullRequest} ` +
     `(head ${String(p.prHead).slice(0, 12)}) with the reason "${accept.reason}". ` +
-    "Once every BLOCKER/HIGH of that Sol run is accepted: node scripts/owner-accept-sol-finding.mjs --log, commit only docs/manual/DECISION_LOG.md, " +
+    "Once every BLOCKER/HIGH of that Sol run is accepted: node scripts/owner-accept-sol-finding.mjs --log, commit only the one file it writes, " +
     "then node scripts/write-codex-push-proof.mjs --carry-owner-accepted.");
 }
 
@@ -76,14 +107,13 @@ if (skip) {
   let which;
   let res;
   try {
-    const dirs = ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
+    const dirs = replyDirs();
     which = resolvePlainReply({
-      dirs, sessionId: payload?.session_id, purposes: [OWNER_SOL_SKIP_PURPOSE],
-      readShown: () => lastAgentMessageText(payload?.transcript_path, reply),
+      dirs, ownDirs, sessionId: payload?.session_id, purposes: [OWNER_SOL_SKIP_PURPOSE], readShown,
     });
     if (which.ok) {
       res = recordReplyApproval({
-        code: which.code, dirs, reply, sessionId: payload?.session_id, form: "skip", skip,
+        code: which.code, dirs, reply, sessionId: payload?.session_id, form: "skip", skip, readShown,
         readMark: () => replyMark(payload?.transcript_path, reply),
       });
     }
@@ -102,7 +132,7 @@ if (skip) {
   const p = res.payload;
   emit(`SOL FINDINGS SKIPPED — Mason skipped finding(s) ${res.selected.join(", ")} of ${p.findingCount} on PR #${p.pullRequest} ` +
     `(head ${String(p.prHead).slice(0, 12)}). Acknowledge it in one line and carry on without asking again. ` +
-    "Once every BLOCKER/HIGH of that Sol run is skipped or fixed: node scripts/owner-accept-sol-finding.mjs --log, commit only docs/manual/DECISION_LOG.md, " +
+    "Once every BLOCKER/HIGH of that Sol run is skipped or fixed: node scripts/owner-accept-sol-finding.mjs --log, commit only the one file it writes, " +
     "then node scripts/write-codex-push-proof.mjs --carry-owner-accepted, then keep landing.");
   }
 }
@@ -113,7 +143,7 @@ const plain = !code && isPlainApprovalReply(reply);
 // "I approve" with nothing waiting in this session stays ordinary chat.
 // The note's own lines are not his words, so they are never read as an attempt (CodeRabbit, PR #979).
 const attempt = !code && !plain ? approvalAttemptIn(reply) : null;
-if (!code && !plain && !attempt) emit();
+if (!code && !plain && !attempt) quiet();
 const said = (attempt ? attempt.line : reply.trim()).slice(0, 40);
 
 // Output happens only outside this try: under prompt-router.mjs process.exit
@@ -122,22 +152,18 @@ let which = null;
 let result;
 let waiting = attempt?.kind === "code";
 try {
-  // Only THIS session's folders: a request another session built is never found here.
-  const dirs = ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
-  if (attempt?.kind === "plain") waiting = !resolvePlainReply({ dirs, sessionId: payload?.session_id, readShown: () => "" }).silent;
+  const dirs = replyDirs();
+  // The real last message, so another session's request shown here counts as waiting (Codex P2, #2389).
+  if (attempt?.kind === "plain") waiting = !resolvePlainReply({ dirs, ownDirs, sessionId: payload?.session_id, readShown }).silent;
   if (plain) {
-    which = resolvePlainReply({
-      dirs,
-      sessionId: payload?.session_id,
-      readShown: () => lastAgentMessageText(payload?.transcript_path, reply),
-    });
+    which = resolvePlainReply({ dirs, ownDirs, sessionId: payload?.session_id, readShown });
     if (which.ok) code = which.code;
   }
   // readMark: where his reply lands in the transcript. The apply reads it back there
   // and refuses if a picture or file came with it (Codex P1, PR #900).
   if (code) {
     result = recordReplyApproval({
-      code, dirs, reply, sessionId: payload?.session_id, readMark: () => replyMark(payload?.transcript_path, reply),
+      code, dirs, reply, sessionId: payload?.session_id, readShown, readMark: () => replyMark(payload?.transcript_path, reply),
     });
   }
 } catch (error) {
@@ -153,7 +179,7 @@ if (attempt && !result) {
   ].join("\n"));
 }
 
-if (!result && which?.silent) emit();
+if (!result && which?.silent) quiet();
 if (!result) {
   emit([
     `OWNER APPROVAL NOT RECORDED — Mason replied "${said}", but ${which?.reason || "no request was found"}. Nothing was approved.`,
@@ -168,8 +194,8 @@ if (!result) {
 if (!result.ok) {
   emit([
     `OWNER APPROVAL NOT RECORDED — Mason replied "${said}", but ${result.reason}. Nothing was approved.`,
-    "Tell him in one line. If he still wants the change, run node scripts/owner-approve-migration.mjs again for a fresh request, " +
-      "from this session's own folder: a request is only found by the session it was built in.",
+    "Tell him in one line. If he still wants the change, run node scripts/owner-approve-migration.mjs again for a fresh request " +
+      "and make its summary, exactly as printed, the whole last message of your turn; his reply then counts in this conversation.",
   ].join("\n"));
 }
 
@@ -183,6 +209,8 @@ const p = result.payload;
 emit([
   `OWNER APPROVAL RECORDED — the reply "${said}" in this session approved ${p.migration} (pull request ` +
     `#${p.pullRequest}). It works once, for the next 24 hours, for that exact file (the PR head may move; the SQL may not).`,
-  `Apply it now: node scripts/apply-migration-file.mjs supabase/migrations/${p.migration}.sql (dry run), then again with --confirm.`,
+  p.sessionId === payload?.session_id
+    ? `Apply it now: node scripts/apply-migration-file.mjs supabase/migrations/${p.migration}.sql (dry run), then again with --confirm.`
+    : "Another session built this request: tell that session (or the merge captain) it is approved, with SendMessage if you can; any session may apply it.",
   ...(result.requestLeft ? ["(The used request file could not be removed; it is harmless and needs no action.)"] : []),
 ].join("\n"));

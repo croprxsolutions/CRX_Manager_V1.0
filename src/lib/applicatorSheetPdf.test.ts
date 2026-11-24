@@ -209,14 +209,14 @@ describe('generateApplicatorSheetPdf EPA column (KI-195)', () => {
     for (const format of ['original', 'enhanced', 'custom'] as const) {
       autoTable.mockClear();
       await generateApplicatorSheetPdf(makeSheetData({ products: [
-        product('Kept', '100-1'), product('NoNumber', 'Unknown'), product('Old', 'Not recorded'), product('Blank', null),
+        product('Kept', '100-1'), product('NoNumber', '—'), product('Old', 'Not recorded'), product('Blank', null),
       ] }), format, null);
       const chem = autoTable.mock.calls
         .map((c) => c[1] as { head: string[][]; body: string[][] })
         .find((o) => o.head?.[0]?.includes('Rate / Acre'));
       expect(chem).toBeDefined();
       expect(chem!.head[0].slice(0, 3)).toEqual(['Product', 'EPA Reg. No.', 'Rate / Acre']);
-      expect(chem!.body.map((r) => r[1])).toEqual(['100-1', 'Unknown', 'Not recorded', '—']);
+      expect(chem!.body.map((r) => r[1])).toEqual(['100-1', '—', 'Not recorded', '—']);
       expect(chem!.body.every((r) => r.length === chem!.head[0].length)).toBe(true);
     }
   });

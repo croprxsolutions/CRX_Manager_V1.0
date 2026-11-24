@@ -33,6 +33,8 @@ const LANE_WORDS = new Set([
   "invoice", "invoices", "invoicing", "payment", "payments", "prepay", "prepayment", "prepayments",
   "credit", "credits", "statement", "statements", "billing", "commission", "commissions",
   "month", "receivable", "tax", "discount", "booked", "aging",
+  // Taha's review of #2382 (HIGH 2): AR and month-end words; "write off" is matched as a pair in isLaneName.
+  "ar", "monthly", "receivables", "writeoff", "writeoffs",
 ]);
 // Field billing is Mason's. "field" counts only when it names that work (field app, field invoice…):
 // "Fields" alone means data fields (invoiceRowPdfFields) and stays in the lane (Codex P2, #2303).
@@ -70,14 +72,162 @@ export function isTahaLanePath(name) {
   if (BLOCK_FILES_RE.test(file)) return true;
   if (!/^(?:src|supabase)\//i.test(file)) return false;
   if (LANE_FILE_PREFIXES.some((p) => file.startsWith(p))) return true;
-  const words = wordsOf(file);
-  if (isFieldBilling(words) && !words.some((w) => STRONG_LANE_WORDS.has(w))) return false;
-  return isBill(words) || words.some((w) => LANE_WORDS.has(w));
+  return isLaneName(file);
+}
+
+function isFieldBillingName(name) {
+  const words = wordsOf(name);
+  return isFieldBilling(words) && !words.some((w) => STRONG_LANE_WORDS.has(w));
+}
+
+function isLaneName(name) {
+  if (isFieldBillingName(name)) return false;
+  const words = wordsOf(name);
+  return isBill(words) || words.some((w, i) => LANE_WORDS.has(w) || (w === "write" && /^offs?$/.test(words[i + 1] ?? "")));
+}
+
+// Taha's functions whose names carry no lane word (Taha's review of #2382, HIGH 2: #2324 rebuilt
+// _complete_delivery_authorized_impl, the step in front of the chemical-sale invoice). Prefixes, except the
+// last two pieces, which may sit anywhere in the name. They win over a field word
+// (_guard_credit_memo_application_immutable).
+// Every name may carry a leading "_": the impls and wrappers behind the public names (Taha, #2382 MED 1).
+const TAHA_LANE_FUNCTIONS_RE = new RegExp("^_?(?:complete_delivery|start_and_complete_delivery|void_delivery|cancel_delivery|void_order|cancel_order" +
+  "|update_order_items|price_order|apply_write_off|reverse_write_off|lock_accounting_months|get_customer_balance|get_monthly_summary" +
+  "|prevent_order_shares" +
+  // A sweep of staging (2026-11-24, Taha's ask via Mason): functions whose bodies write his tables but whose names
+  // carry no lane word. Field-billing ones (field app, blend ticket, job, application) stay Mason's and are left out.
+  "|create_direct_order|create_rush_order|bulk_import_order|restore_cancelled_order|close_undelivered_order_remainder" +
+  "|bump_order_item_edit_version|check_unpriced_orders|trg_recalc_order_totals|guard_order_item_shares|validate_order_shares_total" +
+  "|assert_order_line_fits|create_return|receive_return|generate_finance_charges|create_delivery_with_items|create_quick_delivery" +
+  "|edit_delivery|fix_delivery|correct_delivery_brands|batch_cancel_deliveries|delivery_line_matches_order_line" +
+  "|enforce_delivery_items_parent_lock|prebook_quick_delivery_inventory" +
+  // Taha's review of #2408: read-only billing reports, the month lock, and NEW-setting triggers the write sweep missed.
+  "|get_customer_year_end_summary|get_batch_year_end_summaries|check_period_open|preview_finance_charges" +
+  "|get_sales_summary_report|get_sales_detail_report|get_gross_sales_report|get_profitability_report|financial_dashboard_summary" +
+  "|bump_order_edit_version|prevent_oifa_edit_after_post|guard_order_reopen_inactive_product" +
+  ")(?=_|$)|^_?get_ar_|accounting_period|credit_memo", "i");
+const isLaneFunction = (name) => TAHA_LANE_FUNCTIONS_RE.test(name) || isLaneName(name);
+
+// A migration is Taha's when its SQL writes to, locks or changes one of these tables, or creates,
+// replaces, alters or drops a function whose name is in his lane (Taha in Slack, 2026-11-23: #2331
+// and #2338 had neutral file names; #2338 rebuilt the delivery step that writes invoices).
+// Reading a table does not count; a row lock (FOR UPDATE / FOR SHARE) does.
+export const TAHA_LANE_TABLES = [
+  // No "bookings" table exists today (a booking is a quote, then an order); listed so a future one counts.
+  "bookings", "quotes", "quote_items", "quote_sections", "quote_versions", "quote_price_changes", "quote_product_draws",
+  "quote_templates", "quote_pdf_templates",
+  "orders", "order_items", "order_shares", "order_item_shares", "order_line_allocations", "order_item_field_allocations",
+  "inventory_holds",
+  "invoices", "invoice_items", "invoice_shares", "invoice_line_shares", "invoice_line_share_snapshots",
+  "invoice_line_allocations", "invoice_sales_tax_rates", "invoice_standing_discount_rates", "invoice_line_rup_captures",
+  "invoice_line_brand_rup_captures", "invoice_delivery_recovery_capabilities", "split_invoice_creation_claims",
+  "split_invoice_mutation_claims", "split_invoice_provenance", "credit_memo_applications",
+  "payments", "prepay_credits", "prepay_applications",
+  "commissions", "commission_payments", "commission_payment_items", "commission_settlement_events",
+  "commission_earned_state_ledger", "commission_history_cutover",
+  // AR and month-end (Taha's review of #2382, MED 3).
+  "accounting_periods", "write_offs", "ar_reminder_tracking", "credit_memo_sales_tax", "billing_m4_switch",
+  "return_credit_customer_claims",
+];
+// A migration named for field billing may write these (Mason, 2026-11-23: field billing stays his even when it
+// writes the shared invoice tables). Every other lane table still counts there (Taha's review of #2382, HIGH 1);
+// "commissions" is here because Taha asked that #2260, which deletes a field invoice's commissions, keep passing.
+const FIELD_BILLING_TABLES = new Set(["invoices", "invoice_items", "invoice_shares", "invoice_line_shares", "commissions"]);
+const tableRe = (tables) => String.raw`(?:"?public"?\s*\.\s*)?"?(?:${tables.join("|")})"?(?![\w$]|\s*\.)`;
+// "INTO" covers INSERT, MERGE and SELECT INTO; "ON" covers triggers, policies, indexes, grants and comments;
+// TABLE / ONLY / IF [NOT] EXISTS are optional fillers, and a list (TRUNCATE a, invoices) is read to its end (LOW 5).
+const writeRe = (table) => new RegExp(String.raw`\b(?:into|update|delete\s+from|truncate|alter|drop|lock|copy|create(?:\s+unlogged)?\s+table|on)(?:\s+(?:table|only|if\s+(?:not\s+)?exists))*\s+(?:(?:only\s+)?[\w".]+\s*,\s*)*(?:only\s+)?` + table, "i");
+const readRe = (table) => new RegExp(String.raw`\b(?:from|join)(?:\s+only)?\s+` + table, "i");
+const LANE_RES = { write: writeRe(tableRe(TAHA_LANE_TABLES)), read: readRe(tableRe(TAHA_LANE_TABLES)) };
+const FIELD_TABLES = TAHA_LANE_TABLES.filter((t) => !FIELD_BILLING_TABLES.has(t));
+const FIELD_RES = { write: writeRe(tableRe(FIELD_TABLES)), read: readRe(tableRe(FIELD_TABLES)) };
+const ROW_LOCK_RE = /\bfor\s+(?:no\s+key\s+)?update\b|\bfor\s+(?:key\s+)?share\b/i;
+// Booking stock (Taha on #2382): a write that sets inventory.quantity_prebooked, or a function body that does.
+const PREBOOKED_RE = /\bset\b(?:(?!\bwhere\b)[^;])*?\bquantity_prebooked"?\s*=|\bquantity_prebooked"?\s*:=|\binto\s+[\w".]*\binventory"?\s*\([^)]*\bquantity_prebooked\b|\bset\s*\([^)]*\bquantity_prebooked\b|\b(?:column|add|drop|alter|rename)\s+(?:column\s+)?(?:if\s+(?:not\s+)?exists\s+)?"?quantity_prebooked\b/i;
+// Taha's #2382 LOW 2: a PL/pgSQL `NEW.quantity_prebooked = 0;` at a statement start, and RENAME COLUMN x TO quantity_prebooked.
+const PREBOOKED_MORE_RE = /(?:^|;|\bbegin\b|\bthen\b|\belse\b|\bloop\b)\s*(?:"?[\w$]+"?\s*\.\s*)?"?quantity_prebooked"?\s*=(?!=)|\brename\s+(?:column\s+)?[^;]*?\bto\s+"?quantity_prebooked\b/i;
+// The SET branch stops at the first WHERE, so a subquery's WHERE is blanked out first (LOW 2).
+const withoutParens = (t) => { let prev; do { prev = t; t = t.replace(/\([^()]*\)/g, "()"); } while (t !== prev); return t; };
+const QNAME = String.raw`(?:"?public"?\s*\.\s*)?"?([\w$]+)`;
+const FUNCTION_RE = new RegExp(String.raw`\b(?:create(?:\s+or\s+replace)?|alter)\s+(?:function|procedure|routine)\s+` + QNAME, "gi");
+// ALTER FUNCTION … RENAME TO <new name> (MED 4).
+const RENAME_RE = /\balter\s+(?:function|procedure|routine)\b[^;]*?\brename\s+to\s+"?([\w$]+)/gi;
+// DROP FUNCTION a(), b() and GRANT / REVOKE / COMMENT … ON FUNCTION a(), b(): every name in the list (MED 4, LOW 5).
+const FUNCTION_LIST_RE = /\b(?:drop|on)\s+(?:function|procedure|routine)\s+(?:if\s+exists\s+)?([^;]*)/gi;
+const LIST_NAME_RE = new RegExp(String.raw`^\s*` + QNAME);
+function functionNames(text) {
+  const names = [...text.matchAll(FUNCTION_RE), ...text.matchAll(RENAME_RE)].map((m) => m[1]);
+  for (const m of text.matchAll(FUNCTION_LIST_RE)) {
+    let list = m[1];
+    while (/\([^()]*\)/.test(list)) list = list.replace(/\([^()]*\)/g, ""); // argument lists, numeric(10,2) included
+    for (const piece of list.split(/\b(?:to|from|is|cascade|restrict)\b/i)[0].split(",")) {
+      const name = LIST_NAME_RE.exec(piece);
+      if (name) names.push(name[1]);
+    }
+  }
+  return names;
+}
+
+/**
+ * The SQL with its comments blanked. Quoted strings are kept (dynamic SQL in EXECUTE '…' still counts)
+ * and a "--" or "/*" inside one is not a comment. Dollar-quoted text ($$ bodies, $c$ comments) is scanned
+ * as SQL on its own, so a stray quote inside it (Mason's) cannot run past its closing tag (Taha's review
+ * of #2382, LOW 6). A stray quote can only make it keep more text, so a mistake here errs towards refusing.
+ */
+function withoutComments(sql) {
+  let out = "";
+  for (let i = 0; i < sql.length;) {
+    const tag = sql[i] === "$" && !/[\w$]/.test(sql[i - 1] ?? "") && /^\$(?:[A-Za-z_]\w*)?\$/.exec(sql.slice(i, i + 64));
+    if (tag) {
+      const start = i + tag[0].length;
+      const end = sql.indexOf(tag[0], start);
+      const stop = end < 0 ? sql.length : end;
+      out += tag[0] + withoutComments(sql.slice(start, stop)) + (end < 0 ? "" : tag[0]);
+      i = end < 0 ? sql.length : end + tag[0].length;
+    } else if (sql[i] === "'" || sql[i] === '"') {
+      const q = sql[i]; // '…' strings and "…" identifiers: a doubled quote stays inside.
+      const escapes = q === "'" && /[eE]/.test(sql[i - 1] ?? "") && !/[\w$]/.test(sql[i - 2] ?? "");
+      let j = i + 1;
+      for (; j < sql.length; j++) {
+        if (escapes && sql[j] === "\\") { j++; continue; }
+        if (sql[j] === q) { if (sql[j + 1] === q) { j++; continue; } break; }
+      }
+      out += sql.slice(i, j + 1);
+      i = j + 1;
+    } else if (sql.startsWith("--", i)) {
+      while (i < sql.length && sql[i] !== "\n") i++;
+      out += " ";
+    } else if (sql.startsWith("/*", i)) {
+      let depth = 0; // Postgres block comments nest.
+      while (i < sql.length) {
+        if (sql.startsWith("/*", i)) { depth++; i += 2; } else if (sql.startsWith("*/", i)) { depth--; i += 2; if (!depth) break; } else i++;
+      }
+      out += " ";
+    } else out += sql[i++];
+  }
+  return out;
+}
+
+/**
+ * True when this migration SQL touches Taha's lane; unreadable SQL (null) counts, so the block fails closed.
+ * `fieldBilling`: the file is named for field billing, so writes to FIELD_BILLING_TABLES are Mason's.
+ */
+export function isTahaLaneSql(sql, { fieldBilling = false } = {}) {
+  if (typeof sql !== "string") return true;
+  const { write, read } = fieldBilling ? FIELD_RES : LANE_RES;
+  const text = withoutComments(sql);
+  // Second pass joins string pieces ('UPDATE ' || 'invoices …'), so dynamic SQL built in parts still counts.
+  const joined = text.replace(/'\s*\|\|\s*'/g, "");
+  if ([text, joined].some((t) => write.test(t) || PREBOOKED_RE.test(t) || PREBOOKED_MORE_RE.test(t) || PREBOOKED_RE.test(withoutParens(t)))) return true;
+  // A row lock in the same statement as a read of his tables counts (Taha's review of #2382, LOW 9).
+  if (text.split(";").some((statement) => ROW_LOCK_RE.test(statement) && read.test(statement))) return true;
+  return functionNames(text).some(isLaneFunction);
 }
 
 /**
  * Why this merge is refused, or null. `files`: GitHub compare entries
- * ({filename, previous_filename}) or null when they could not be read (refuses).
+ * ({filename, previous_filename, sql?}) or null when they could not be read (refuses).
+ * An entry carrying `sql` (a migration's text, or null when unreadable) is also judged by its SQL.
  */
 export function tahaLaneProblem({ files, now = Date.now() }) {
   if (now >= TAHA_LANE_UNTIL_MS) return null;
@@ -88,6 +238,12 @@ export function tahaLaneProblem({ files, now = Date.now() }) {
     for (const name of [entry?.filename, entry?.previous_filename]) {
       if (typeof name === "string" && isTahaLanePath(name) && !hits.includes(name)) hits.push(name);
     }
+    const name = entry?.filename;
+    // A migration named for field billing stays Mason's when it writes the shared invoice tables (Mason, 2026-11-23),
+    // but the rest of its SQL is still read (Taha's review of #2382, HIGH 1).
+    if (entry && "sql" in entry && typeof name === "string" && !hits.includes(name) && isTahaLaneSql(entry.sql, { fieldBilling: isFieldBillingName(name) })) {
+      hits.push(entry.sql === null ? `${name} (its SQL could not be read)` : name);
+    }
   }
   return hits.length ? { files: hits, reason: `it changes Taha's areas (${hits.slice(0, 5).join(", ")}${hits.length > 5 ? `, and ${hits.length - 5} more` : ""})` } : null;
 }
@@ -96,14 +252,37 @@ export function tahaLaneProblem({ files, now = Date.now() }) {
  * The PR's changed files ({filename, previous_filename}), read the same way as
  * stagingDestructiveProblem (sol-risk-lib.mjs), or null when unreadable.
  */
-export function prFilesOnGitHub({ repo, gh, number }) {
+export function prFilesOnGitHub({ repo, gh, number, headSha }) {
   const repoPath = ghApiRepoPath(repo);
   if (!repoPath || !Number.isInteger(number) || number < 1) return null;
   try {
-    const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq", '.[] | [.status, .filename, (.previous_filename // "")] | @tsv']))
+    const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq",
+      '.[] | [.status, .filename, (.previous_filename // ""), ((.contents_url // "") | ([capture("[?&]ref=(?<r>[0-9a-f]{40})").r][0] // ""))] | @tsv']))
       .split(/\r?\n/).filter(Boolean).map((line) => line.split("\t"));
-    if (rows.some((r) => r.length < 2 || r.length > 3 || !r[1])) return null;
-    return rows.map(([, filename, previous]) => ({ filename, previous_filename: previous || undefined }));
+    if (rows.some((r) => r.length < 2 || r.length > 4 || !r[1])) return null;
+    // The whole list must be GitHub's answer for the pinned head, not a later push (advisory Sol on #2382).
+    if (usableHead(headSha) && rows.some(([status, , , ref]) => status !== "removed" && ref && ref.toLowerCase() !== headSha.toLowerCase())) return null;
+    return rows.map(([status, filename, previous, ref = ""]) => {
+      const entry = { filename, previous_filename: previous || undefined };
+      // Migrations, baselines and hand-run undo scripts are judged by their SQL at the head the merge is pinned to;
+      // a removed or unreadable one, or one GitHub lists at another commit, counts as Taha's (Taha's review of #2382, LOW 7, LOW 8).
+      // A SQL file moved out of the read folders counts as removed there (advisory Sol on #2382).
+      if (SQL_FILE_RE.test(filename) || SQL_FILE_RE.test(previous)) {
+        entry.sql = status === "removed" || !SQL_FILE_RE.test(filename) || !usableHead(headSha) || ref.toLowerCase() !== headSha.toLowerCase() ? null : migrationSql({ repoPath, gh, filename, ref });
+      }
+      return entry;
+    });
+  } catch { return null; }
+}
+
+const SQL_FILE_RE = /^(?:supabase\/(?:migrations|baselines)\/.+|scripts\/smoke\/.+-reverse|scripts\/\.staging-migrations\/.+)\.sql$/i;
+
+function migrationSql({ repoPath, gh, filename, ref }) {
+  if (!/^[0-9a-f]{40}$/i.test(String(ref ?? ""))) return null;
+  try {
+    const filePath = filename.split("/").map(encodeURIComponent).join("/");
+    const sql = String(gh(["api", "-H", "Accept: application/vnd.github.raw", `${repoPath}/contents/${filePath}?ref=${ref}`]));
+    return sql.trim() ? sql : null;
   } catch { return null; }
 }
 

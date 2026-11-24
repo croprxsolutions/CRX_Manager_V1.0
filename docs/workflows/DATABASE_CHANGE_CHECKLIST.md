@@ -10,7 +10,7 @@ Step-by-step guide for ANY database schema change. Follow every step — skippin
 2. **Read the canonical SQL patterns** — use `docs/reference/sql-canonical-patterns.md` for SECURITY DEFINER, actor binding, idempotency, and mutation-result shapes
 3. **Check for related tables** — if you're adding a column to `orders`, think about whether `order_items`, `deliveries`, or `invoices` also need changes
 4. **Plan the migration** — write out what SQL you need before creating the file
-5. **New functions with app callers? Split database-first from the start.** One PR cannot land a migration together with `src/` code that calls its new RPCs, because `src/lib/rpcFixtureLiveDiff.test.ts` fails until those functions are live. Put the migration, its `docs/reference/migrations.d/` record, its proofs and its changelog note in a database-only PR, and name that PR's owner. Database-first works only when the migration still accepts every write the live app sends; if it refuses a write that current `src/` code still makes, land the app change that stops sending it first, or plan one coordinated cutover. Apply it and merge it first; its stamp goes stale if other migrations go live ahead of it. **When you split an existing PR, delete the migration, its record and its proofs from the app PR at split time.** The app PR keeps only the screens, the RPC callers and its changelog line. If you leave the app PR's copy in, a restamp of the database PR puts the same SQL on `main` twice.
+5. **New functions with app callers? Split database-first from the start.** One PR cannot land a migration together with `src/` code that calls its new RPCs, because `src/lib/rpcFixtureLiveDiff.test.ts` fails until those functions are live. Put the migration, its `docs/reference/migrations.d/` record, its proofs and its changelog note in a database-only PR, and name that PR's owner. Database-first works only when the migration still accepts every write the live app sends; if it refuses a write that current `src/` code still makes, land the app change that stops sending it first, or plan one coordinated cutover. Apply it and merge it first; its stamp goes stale if other migrations go live ahead of it (re-date it with `node scripts/restamp-migration.mjs <old-stamp>`, which keeps a clean Sol proof when only the stamp changed). **When you split an existing PR, delete the migration, its record and its proofs from the app PR at split time.** The app PR keeps only the screens, the RPC callers and its changelog line. If you leave the app PR's copy in, a restamp of the database PR puts the same SQL on `main` twice.
 
 ---
 
@@ -162,11 +162,11 @@ The only sanctioned way to apply a migration to the live database:
    chat reply (Mason, 2026-09-29; by reply instead of Windows Hello since 2026-10-09); the apply
    gate refuses them without it: once every proof above is fresh, run
    `node scripts/owner-approve-migration.mjs supabase/migrations/<file>.sql` from the PR's
-   checkout, in the session that will apply it. Show Mason the plain-English summary it prints
-   (with its Reference line) as the last message of your turn, ask him nothing else in that
-   message, and wait for his reply in that same session (the hook looks only in the replying
-   session's folders): `I approve` as a whole message (since 2026-10-13; `approve <code>` also
-   works; he can send it from his phone, through that same conversation). If you say anything else
+   checkout. Show Mason the plain-English summary it prints (with its Reference line) as the
+   last message of your turn, ask him nothing else in that message, and wait for his reply in the
+   conversation that showed it (since 2026-11-23 any conversation, and any session may then apply
+   it, so a merge captain carries his yes): `I approve` as a whole message (since 2026-10-13;
+   `approve <code>` also works; he can send it from his phone). If you say anything else
    first, show the request again: a plain `I approve` only counts when your last message before it
    shows the Reference line. The
    `owner-approval-prompt.mjs` hook records it; the approval covers that file, PR and head, once,

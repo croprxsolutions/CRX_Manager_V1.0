@@ -5,6 +5,10 @@
  */
 
 const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
+  // M9 (20270301180000): a Prepayment Manager check's amount is locked; a check with an application is not deleted.
+  [/^PREPAY_CHECK_AMOUNT_LOCKED\b/, "Nothing was saved. A prepayment check's amount cannot be edited. To correct a mistyped check, delete the whole check and enter it again"],
+  [/^PREPAY_OVERPAYMENT_LOCKED\b/, "Nothing was saved. An overpayment's amount comes from its payment, so it cannot be edited or deleted here. To undo it, void the payment"],
+  [/^PREPAY_CHECK_APPLIED\b/, 'Nothing was deleted. Part of this check was applied to an invoice, so the check cannot be deleted'],
   // KI-85: stock may be placed only at Main Warehouse until transfers exist; nothing was received or added.
   [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. Stock can go only into Main Warehouse until transfers between warehouses exist. Choose Main Warehouse and try again'],
   // #2000 (20270201120000): an inactive customer gets no new orders, deliveries, holds or spray jobs.
@@ -47,6 +51,10 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Nothing was changed. This request was cleared after it got stuck. Check the record, then enter it again as a new request if it is still needed'],
   [/^IDEMPOTENCY_(?:RESULT_INVALID|RECEIPT_MISSING)\b/,
    'Nothing was changed now: the outcome of this request could not be confirmed. Refresh the page before trying again'],
+  // Delivery edit "Unassigned" (20270225170000, 20270226163000): the whole edit rolled back.
+  [/^DRIVER_CHANGED\b/, 'Nothing was saved. The driver was changed since you opened this form. The page now shows the current driver; edit again if needed'],
+  [/^DRIVER_CLEAR_STARTED\b/, 'Nothing was saved. This delivery has started, so it cannot be unassigned. The page now shows it; pick another driver if needed'],
+  [/^Cannot edit delivery items once delivery is in progress/, 'Nothing was saved. This delivery has started, so its items cannot be edited. The page now shows it'],
   // A completion retried under a fresh key after an earlier attempt already completed the record.
   [/^Delivery must be in_progress to complete \(current status: completed\)/,
    'This delivery is already completed. Refresh the page to see it'],
@@ -517,6 +525,9 @@ export function sanitizeError(error: unknown): string {
   // Customer receipt refusals (close_delivery_receipt, KI-25): plain words, no database code.
   if (/^DELIVERY_NOT_COMPLETED:.*receipt/s.test(message)) {
     return 'Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.';
+  }
+  if (/^RECEIPT_HANDLED_ADMIN_ONLY(?::|$)/.test(message)) {
+    return 'Nothing was changed. Only an admin can mark a customer receipt handled.';
   }
   if (/^DELIVERY_RECEIPT_CHANGED(?::|$)/.test(message)) {
     return 'Nothing was changed. This delivery\'s receipt was queued again since. Reload the page.';

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Card, { CardHeader } from '../ui/Card';
 import Button from '../ui/Button';
@@ -9,15 +9,19 @@ import Badge from '../ui/Badge';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { hasRpcCode, RpcErrorCodes, sanitizeError } from '../../lib/db';
-import { SIZE_ROLE_LABELS, updateProductParent, type ProductParent } from '../../lib/productParents';
+import { Sentry } from '../../lib/sentry';
+import { getParentRateSource, SIZE_ROLE_LABELS, updateProductParent, type ProductParent, type RateSource } from '../../lib/productParents';
 import { visibleProductCategories } from '../../lib/productSetup';
 import type { CropOption, ProductCategory, UseTimingOption } from '../../types';
 import UseTimingPicker from './UseTimingPicker';
 import ParentRatesModal from './ParentRatesModal';
+import ParentRateCutoverModal from './ParentRateCutoverModal';
 import ParentIdentityModal from './ParentIdentityModal';
 import MoveProductSizeModal from './MoveProductSizeModal';
 
-export function ReasonField({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (value: string) => void }) {
+export function ReasonField({ id, label, value, onChange, maxLength = 1000 }: {
+  id: string; label: string; value: string; onChange: (value: string) => void; maxLength?: number;
+}) {
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium text-secondary">{label} (required)</label>
@@ -25,7 +29,7 @@ export function ReasonField({ id, label, value, onChange }: { id: string; label:
         id={id}
         className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
         rows={2}
-        maxLength={1000}
+        maxLength={maxLength}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
@@ -185,6 +189,36 @@ function SizeRow({ size, isThisSize, isAdmin, busy, blocked, onMove }: {
  * PAR-1 Parent panel on the product page: what the parent shares with every size, its sizes, and the
  * admin actions. Every write goes through the parent's own checked database call.
  */
+const RATE_SOURCE_LABELS = {
+  loading: 'Checking…', failed: "Couldn't check; reload the page", approved: 'Approved rate (from the rate review)', legacy: 'Old rate',
+} as const;
+
+// RT-4a: which rate the group uses; null while loading, 'failed' when the read failed (no switch is offered).
+function useParentRateSource(parent: ProductParent) {
+  // Read for one parent and version; a read held for another counts as still loading, so no stale action shows.
+  const key = `${parent.id}:${parent.parent_version}`;
+  const [read, setRead] = useState<{ key: string; source: RateSource | 'failed' } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getParentRateSource(parent.id)
+      .then((source) => { if (!cancelled) setRead({ key, source }); })
+      .catch((error: unknown) => {
+        Sentry.captureException(error, { extra: { context: 'product_parent_rate_source' } });
+        if (!cancelled) setRead({ key, source: 'failed' });
+      });
+    return () => { cancelled = true; };
+  }, [key, parent.id]);
+  const rateSource = read?.key === key ? read.source : null;
+  const canSwitch = rateSource === 'legacy' || rateSource === 'approved';
+  return {
+    rateSource: canSwitch ? rateSource : null,
+    label: RATE_SOURCE_LABELS[rateSource ?? 'loading'],
+    action: rateSource === 'approved' ? 'Switch back to old rate' : 'Switch to approved rate',
+    // Why the switch is off while the source is loading or unreadable (the disabled button says it too).
+    waitReason: canSwitch ? undefined : RATE_SOURCE_LABELS[rateSource ?? 'loading'],
+  };
+}
+
 export default function ProductParentPanel({
   parent, productId, isAdmin, profileId, ratesLocked, categoryOptions, timingOptions, cropOptions = [], rateUnitOptions, busy, onChanged,
 }: {
@@ -202,13 +236,15 @@ export default function ProductParentPanel({
   busy: boolean;
   onChanged: () => void;
 }) {
-  const [open, setOpen] = useState<null | 'edit' | 'rates' | 'identity' | { move: string }>(null);
+  const [open, setOpen] = useState<null | 'edit' | 'rates' | 'cutover' | 'identity' | { move: string }>(null);
+  const cutover = useParentRateSource(parent);
   const seedOrEach = parent.product_form === 'seed' || parent.product_form === 'each';
   const close = () => setOpen(null);
   const saved = () => { setOpen(null); onChanged(); };
   const blocked = busy ? 'Save or discard your other changes first' : undefined;
 
   const rows = parentRows(parent, seedOrEach, timingOptions);
+  rows.splice(3, 0, ['Rate in use', cutover.label]);
 
   return (
     <Card>
@@ -228,6 +264,10 @@ export default function ProductParentPanel({
             <Button size="sm" variant="secondary" showChevron={false} disabled={busy || ratesLocked === null} title={blocked}
               onClick={() => setOpen('rates')}>
               {ratesLocked ? 'Correct parent rates' : 'Parent rates'}
+            </Button>
+            <Button size="sm" variant="secondary" showChevron={false} disabled={busy || !cutover.rateSource} title={blocked ?? cutover.waitReason}
+              onClick={() => setOpen('cutover')}>
+              {cutover.action}
             </Button>
             <Button size="sm" variant="secondary" showChevron={false} disabled={busy} title={blocked} onClick={() => setOpen('identity')}>Correct identity</Button>
           </div>
@@ -249,6 +289,9 @@ export default function ProductParentPanel({
       {open === 'rates' && ratesLocked !== null && (
         <ParentRatesModal parent={parent} profileId={profileId} ratesLocked={ratesLocked} unitOptions={rateUnitOptions}
           onClose={close} onSaved={saved} />
+      )}
+      {open === 'cutover' && cutover.rateSource && (
+        <ParentRateCutoverModal parent={parent} profileId={profileId} rateSource={cutover.rateSource} onClose={close} onSaved={saved} />
       )}
       {open === 'identity' && <ParentIdentityModal parent={parent} profileId={profileId} onClose={close} onSaved={saved} />}
       {open !== null && typeof open === 'object' && (

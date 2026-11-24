@@ -2,6 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('explains a refused delivery Unassigned in plain words', () => {
+    expect(sanitizeError({ message: 'DRIVER_CHANGED: the driver was changed since the form opened; reload and try again' }))
+      .toMatch(/^Nothing was saved\. The driver was changed since you opened this form/);
+    expect(sanitizeError({ message: 'DRIVER_CLEAR_STARTED: a started delivery cannot be unassigned; assign another driver instead' }))
+      .toMatch(/^Nothing was saved\. This delivery has started, so it cannot be unassigned/);
+    expect(sanitizeError({ message: 'Cannot edit delivery items once delivery is in progress' }))
+      .toMatch(/^Nothing was saved\. This delivery has started, so its items cannot be edited/);
+  });
+
   it('keeps the product and order details from active-status refusals', () => {
     expect(sanitizeError('PRODUCT_INACTIVE: Atrazine 4L is turned off; an admin must reactivate it before reopening order ORD-42'))
       .toBe('Atrazine 4L is turned off; an admin must reactivate it before reopening order ORD-42');
@@ -52,6 +61,18 @@ describe('sanitizeError', () => {
       'Nothing was saved. The weight of "TEST UAN" changed since you opened it; reload'],
   ])('explains the parent refusal %s by name', (raw, expected) => {
     expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
+  });
+  // M9 (20270301180000): the RAISE text of _edit / _delete_prepay_credit_replay_impl_20261015.
+  it('explains a locked prepayment check amount and an applied check without the raw token', () => {
+    const locked = sanitizeError({ message: "PREPAY_CHECK_AMOUNT_LOCKED: a prepayment check's amount cannot be edited; delete the whole check and enter it again" });
+    expect(locked).toContain('delete the whole check and enter it again');
+    expect(locked).not.toContain('PREPAY_CHECK_AMOUNT_LOCKED');
+    const over = sanitizeError({ message: "PREPAY_OVERPAYMENT_LOCKED: an overpayment comes from its payment and cannot be deleted; void the payment to undo it" });
+    expect(over).toContain('void the payment');
+    expect(over).not.toContain('PREPAY_OVERPAYMENT_LOCKED');
+    const applied = sanitizeError({ message: 'PREPAY_CHECK_APPLIED: part of this check was applied to an invoice; it cannot be deleted' });
+    expect(applied).toContain('applied to an invoice');
+    expect(applied).not.toContain('PREPAY_CHECK_APPLIED');
   });
   it('explains an UNKNOWN_STORAGE_LOCATION refusal without the raw token (KI-85)', () => {
     const message = sanitizeError({ message: 'UNKNOWN_STORAGE_LOCATION: stock can be received only into Main Warehouse until stock transfers between warehouses exist' });
@@ -714,6 +735,8 @@ describe('customer receipt refusals (KI-25)', () => {
       .toBe('Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.');
     expect(sanitizeError(new Error("DELIVERY_RECEIPT_CHANGED: this delivery's receipt was queued again since; reload the page")))
       .toBe("Nothing was changed. This delivery's receipt was queued again since. Reload the page.");
+    expect(sanitizeError(new Error('RECEIPT_HANDLED_ADMIN_ONLY: only an admin can mark a customer receipt handled')))
+      .toBe('Nothing was changed. Only an admin can mark a customer receipt handled.');
   });
   it('leaves the invoice-posting DELIVERY_NOT_COMPLETED sentence alone', () => {
     const msg = 'DELIVERY_NOT_COMPLETED: delivery D-42 for invoice INV-1002 has been deleted. Void this invoice instead of posting it.';

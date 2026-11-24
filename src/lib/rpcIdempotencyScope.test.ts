@@ -263,11 +263,23 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // the public wrappers bind that same receipt. #2135 (20270213100000) re-emits it only to drop its duplicate
   // short-stock warning; changing the literal would orphan existing receipts.
   _complete_delivery_period_preflight_impl: ['complete_delivery'],
+  // Direct EXECUTE is revoked (postgres-only). Each was renamed from its public wrapper with ALTER FUNCTION ...
+  // RENAME TO (20261019200000, 20270104120000), so its receipt lookup kept the public literal that the wrapper binds.
+  // 20270227110000 re-emits them only to make the driver check refuse a delivery with no driver; changing the
+  // literal would orphan existing receipts.
+  _complete_delivery_replay_impl_20261015: ['complete_delivery'],
+  _complete_delivery_evidence_impl_20270104: ['complete_delivery'],
+  _start_and_complete_delivery_impl_20270104: ['start_and_complete_delivery'],
   // Direct EXECUTE is revoked (postgres-only). Replay-binding batch 4a (20261102180000) renamed the
   // live unpost_invoice_group body to this name and re-emits it only to unpost each member through
   // unpost_invoice's renamed body (no per-member key); it keeps the public operation literal so the
   // wrapper binds that same receipt, and changing it would orphan every existing receipt.
   _unpost_invoice_group_replay_impl_20261015: ['unpost_invoice_group'],
+  // Direct EXECUTE is revoked (postgres-only). Batch 4a (20261102180000) renamed the live unpost_invoice body
+  // to this name with ALTER FUNCTION ... RENAME TO, so it kept the public 'unpost_invoice' literal its wrapper
+  // binds. #2265 (20270225210000) re-emits it only to skip voided-payment history rows; changing the literal
+  // would orphan existing receipts.
+  _unpost_invoice_replay_impl_20261015: ['unpost_invoice'],
   // Direct EXECUTE is revoked (postgres-only). Batch 3b (20261019235000) renamed the live
   // cancel_delivery body to this name with ALTER FUNCTION ... RENAME TO, so it kept the public
   // literal the wrapper binds. 20261102140000 re-emits it only to refuse a completed delivery;
@@ -343,6 +355,15 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // changing the literal would orphan existing receipts.
   _section9_cancel_purchase_order_serialized: ['cancel_purchase_order'],
   _section9_create_vendor_bill_intent_impl_20260826: ['create_vendor_bill'],
+  // Section 9 (20260826221000 onward) moved the public AP bodies into these impls behind their public wrappers, so
+  // each kept the public literal its wrapper binds. 20270228160000 (#1912)
+  // re-emits them only to refuse idempotency keys with a non-printable character; changing the literal would orphan
+  // existing receipts.
+  _section9_create_vendor_bill_cumulative_impl: ['create_vendor_bill'],
+  _section9_update_vendor_bill_intent_impl_20260831: ['update_vendor_bill'],
+  _section9_record_vendor_payment_intent_impl_20260831: ['record_vendor_payment'],
+  _section9_void_vendor_bill_intent_impl_20260831: ['void_vendor_bill'],
+  _section9_receive_po_items_intent_impl_20260831: ['receive_po_items'],
   // Direct EXECUTE is revoked (postgres-only). Batch 4a (20261102180000) renamed the live
   // update_field_app_invoice_billing body to this name, so it kept the public literal the wrapper binds.
   // 20261120100000 (KI-14) re-creates it with one more trailing argument (per-invoice terms); changing
@@ -508,6 +529,10 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // Same shape. Repair step 5 (20270113100000) re-emits both only to add the KI-139 / KI-141 refusals.
   _reconcile_negative_inventory_replay_impl_20261015: ['reconcile_negative_inventory'],
   _retire_inventory_item_replay_impl_20261015: ['retire_inventory_item'],
+  // Same shape. M9 (20270301180000) re-emits both only to refuse a balance edit / delete of a credit that has a
+  // refund or returned check recorded on it (money_reversal_lines).
+  _edit_prepay_credit_replay_impl_20261015: ['edit_prepay_credit'],
+  _delete_prepay_credit_replay_impl_20261015: ['delete_prepay_credit'],
   // Restore the Wave A alias exemption when its drafts are promoted from
   // scripts/.staging-migrations/.
 };

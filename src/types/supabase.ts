@@ -18937,6 +18937,15 @@ export type Database = {
         }
         Returns: string
       }
+      create_cycle_count: {
+        Args: {
+          p_idempotency_key?: string
+          p_notes?: string
+          p_performed_by?: string
+          p_warehouse: string
+        }
+        Returns: Json
+      }
       create_delivery_with_items: {
         Args: {
           p_assigned_driver?: string
@@ -19261,6 +19270,8 @@ export type Database = {
       edit_delivery: {
         Args: {
           p_assigned_driver?: string
+          p_clear_driver?: boolean
+          p_expected_driver?: string
           p_delivery_address_id?: string
           p_delivery_id: string
           p_delivery_notes?: string

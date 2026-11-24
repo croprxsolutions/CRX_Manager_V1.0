@@ -119,7 +119,11 @@ const pathCandidates = rawPathCandidates.map((candidate) => {
   if (candidate == null || !pathCandidateCwd) return candidate;
   return path.resolve(pathCandidateCwd, String(candidate));
 });
-if (pathCandidates.some((candidate) => reviewProofPathMentioned(candidate))) {
+// Read-only built-ins cannot create, move, or delete anything, so reading a proof
+// or the state directory through them is never refused (Sol, 2026-11-23: Codex
+// registers this hook for every tool, so its reads were refused here).
+const readOnlyBuiltin = /^(?:read|grep|glob|notebookread|ls)$/i.test(toolName);
+if (!readOnlyBuiltin && pathCandidates.some((candidate) => reviewProofPathMentioned(candidate))) {
   deny("REVIEW PROOF GUARD: Claude/Codex review proof files are wrapper-owned. Run the real review workflow; do not write, edit, move, or delete proof JSON directly.");
 }
 // A native or MCP file-mutation tool (Write/Edit, move_file, delete_directory,
@@ -173,11 +177,8 @@ const isMoveOrDeleteShape =
 const isPureAckWrite = stateDirCandidates.length > 0 &&
   !isMoveOrDeleteShape &&
   stateDirCandidates.every((c) => isAckValvePath(c));
-// Read-only built-ins cannot create, move, or delete anything, yet this rule
-// denied Read, Grep and Glob on the state directory (2026-10-23 audit: 26 denials
-// in 14 days, plus a Glob for a marker file). Name-matched like the
-// enforcement-path exemption further down.
-const readOnlyBuiltin = /^(?:read|grep|glob|notebookread|ls)$/i.test(toolName);
+// readOnlyBuiltin (above): this rule denied Read, Grep and Glob on the state
+// directory (2026-10-23 audit: 26 denials in 14 days, plus a Glob for a marker file).
 if (!readOnlyBuiltin && stateDirCandidates.length > 0 && !isPureAckWrite) {
   deny("REVIEW PROOF GUARD: the review state directory (.claude/session-state) and its wrapper-owned contents cannot be created, moved, or deleted through a file tool. Stale ledger entries are removed with node scripts/remove-applied-ledger-entry.mjs after verifying the live migration ledger.");
 }
@@ -205,6 +206,9 @@ function shellCommandViews(cmd) {
 // Applies ONLY to the shell `command` string (shell syntax). The pathCandidates
 // and hookCwd predicates above/below are literal filesystem paths, NOT shell
 // syntax — quote-stripping them would be wrong, so they stay raw.
+// Shell reads of a proof file stay refused (2026-11-23: a read-only-chain exemption
+// was tried and reverted after three review rounds found writes it let through);
+// read proofs with the Read/Grep/Glob tools, which pass above.
 if (shellCommandViews(command).some((v) => reviewProofPathMentioned(v))) {
   deny("REVIEW PROOF GUARD: direct shell access to Claude/Codex review proof JSON is blocked. Run the real review wrapper instead.");
 }
@@ -628,7 +632,7 @@ if (shellTool) {
     v.split(/&&|\|\||[;|\r\n]/).some((part) => hitsDestructiveVerb(part) && /[$%`!^]/.test(part));
   if ((cdEntersRepoClaude && destructiveViews.some(hitsDestructiveVerb)) ||
       (cdEntersWorktree && destructiveViews.some((v) => hitsDestructiveVerb(v) && climbsOut(v)))) {
-    deny("REVIEW PROOF GUARD: a delete or move after cd into the repo's .claude folder is blocked — that folder holds the guard hooks, workflow sources and wrapper-owned review state. Run the command from the repo root with the full path so the guard can see what it touches.");
+    deny("REVIEW PROOF GUARD: a delete or move after cd into the repo's .claude folder is blocked — that folder holds the guard hooks, workflow sources and wrapper-owned review state. Run the command from the repo root with the full path so the guard can see what it touches, and write file names out in full: a `$VARIABLE` in a move or delete target (e.g. `git mv supabase/migrations/${O}_x.sql …`) is unreadable to the guard, so spell both names out.");
   }
 
   // The enforcement surfaces that live OUTSIDE `.claude`. Added 2026-09-01, when

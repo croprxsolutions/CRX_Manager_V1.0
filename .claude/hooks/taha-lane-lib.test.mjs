@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
   TAHA_LANE_UNTIL_MS, findTahaLaneOverride, isTahaLanePath, isTahaLaneSql, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
-  tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
+  tahaApprovedHead, tahaApprovedOnGitHub, tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
 } from "./taha-lane-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -286,6 +286,24 @@ ok(/taha override #2242 777777/.test(pushed), "after a new push the block is bac
 const refusal = tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: lane, dirs, now: NOW });
 ok(/TAHA LANE BLOCK/.test(refusal) && /taha override #2300 \d{6}/.test(refusal), "a refusal gives Mason the exact line, PR included");
 eq(tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: f("src/pages/Deliveries.tsx"), dirs, now: NOW }), null, "outside the lane, nothing to do");
+// Taha's own sign-off on the exact head lifts the block with no code (Mason, 2026-11-24).
+const taha = { login: "TahaKhanAbdalli" }, mason = { login: "masonwells1" };
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "APPROVED", commit_id: A }], comments: [] }), true, "Taha's Approve on this commit counts");
+eq(tahaApprovedHead({ headSha: B, reviews: [{ user: taha, state: "APPROVED", commit_id: A }], comments: [] }), false, "his Approve on an older commit does not");
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "COMMENTED", commit_id: A }], comments: [] }), false, "a plain review comment is not a sign-off");
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: mason, state: "APPROVED", commit_id: A }], comments: [] }), false, "Mason's account (shared with agents) does not count");
+eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ user: taha, body: `Ready to merge: ${A.slice(0, 12)}` }] }), true, "his Ready to merge line for this commit counts");
+eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ user: taha, body: `Ready to merge: \`${A.slice(0, 12)}\`.` }] }), true, "backticks and a period are fine");
+eq(tahaApprovedHead({ headSha: B, reviews: [], comments: [{ user: taha, body: `Ready to merge: ${A.slice(0, 12)}` }] }), false, "a Ready line for an older commit does not");
+eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ user: taha, body: `Not yet. Ready to merge: ${A.slice(0, 12)} after the fix` }] }), false, "the line must be the whole comment");
+eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ user: mason, body: `Ready to merge: ${A.slice(0, 12)}` }] }), false, "Mason's account cannot post it for Taha");
+eq(tahaApprovedHead({ headSha: A, reviews: null, comments: null }), false, "unreadable is not a sign-off");
+const fakeGh = (reviews, comments) => (args) => (args[2].includes("/reviews") ? reviews : comments).map((r) => JSON.stringify(r)).join("\n");
+eq(tahaApprovedOnGitHub({ repo: undefined, number: 7, headSha: A, gh: fakeGh([{ user: taha, state: "APPROVED", commit_id: A }], []) }), true, "read from GitHub: approved");
+eq(tahaApprovedOnGitHub({ repo: undefined, number: 7, headSha: A, gh: () => { throw new Error("403"); } }), false, "GitHub error: not approved");
+eq(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: lane, dirs, now: NOW, tahaApproved: () => true }), null, "Taha signed off → through, no code");
+const waiting = tahaLaneGate({ prefix: "T", pullRequest: 2401, headSha: A, files: lane, dirs, now: NOW, tahaApproved: () => false });
+ok(/TAHA LANE BLOCK/.test(waiting) && waiting.includes(`Ready to merge: ${A.slice(0, 12)}`), "no sign-off → still blocked, and says how Taha clears it");
 eq(tellTahaOnGitHub({ repo: undefined, pullRequest: 5, body: "x", gh: () => "123" }), true, "GitHub took the comment");
 eq(tellTahaOnGitHub({ repo: undefined, pullRequest: 5, body: "x", gh: () => { throw new Error("403"); } }), false, "a failed post is false");
 

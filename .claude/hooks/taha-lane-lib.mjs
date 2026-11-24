@@ -4,6 +4,9 @@
 // Field billing (field invoices, spray jobs, blend tickets) stays Mason's.
 // #1980 and #1989 merged after Taha asked; a written note did not stop them.
 //
+// Taha's own sign-off on the PR's current commit (a GitHub Approve on it, or his comment
+// `Ready to merge: <commit>`) lets it through with no code (Mason, 2026-11-24).
+//
 // Mason can still let ONE named PR through: the merge refusal issues a 6-digit
 // code for that PR at its current head, and his chat message `taha override #<PR> <code>`
 // (taha-lane-prompt.mjs) turns it into a 24-hour override for that PR at that head
@@ -382,14 +385,55 @@ export function tellTahaOnGitHub({ repo, gh, pullRequest, body }) {
   } catch { return false; }
 }
 
+// Taha's own sign-off on the exact head lifts the block with no code (Mason, 2026-11-24: #2382 needed a code after
+// Taha had reviewed and accepted it). Only his account counts: agents post as Mason, never as Taha.
+const TAHA_LOGIN = "tahakhanabdalli";
+const READY_LINE_RE = /^\s*Ready to merge:\s*`?([0-9a-f]{12,40})`?\s*\.?\s*$/i;
+
+/**
+ * True when Taha approved this PR at exactly `headSha`: a GitHub APPROVED review on that commit,
+ * or a comment that is only `Ready to merge: <12+ chars of that commit>`. `reviews` / `comments`: GitHub's
+ * REST rows ({user:{login}, state, commit_id} / {user:{login}, body}); anything unreadable is false.
+ */
+export function tahaApprovedHead({ reviews, comments, headSha }) {
+  if (!usableHead(headSha)) return false;
+  const head = headSha.toLowerCase();
+  const isTaha = (row) => String(row?.user?.login ?? "").trim().toLowerCase() === TAHA_LOGIN;
+  const approved = Array.isArray(reviews) && reviews.some((r) => isTaha(r) && String(r?.state ?? "").toUpperCase() === "APPROVED" && String(r?.commit_id ?? "").toLowerCase() === head);
+  const ready = Array.isArray(comments) && comments.some((c) => {
+    const m = isTaha(c) && READY_LINE_RE.exec(String(c?.body ?? ""));
+    return Boolean(m) && head.startsWith(m[1].toLowerCase());
+  });
+  return approved || ready;
+}
+
+/** Reads the PR's reviews and comments from GitHub and asks tahaApprovedHead; false when unreadable. */
+export function tahaApprovedOnGitHub({ repo, gh, number, headSha }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath || !usablePr(number) || !usableHead(headSha)) return false;
+  const rows = (url, jq) => String(gh(["api", "--paginate", url, "--jq", jq])).split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+  try {
+    return tahaApprovedHead({
+      headSha,
+      reviews: rows(`${repoPath}/pulls/${number}/reviews?per_page=100`, ".[] | {user: {login: .user.login}, state, commit_id} | tojson"),
+      comments: rows(`${repoPath}/issues/${number}/comments?per_page=100`, ".[] | {user: {login: .user.login}, body} | tojson"),
+    });
+  } catch { return false; }
+}
+
 /**
  * The merge gates' single call: null when the merge may go on, otherwise the
- * refusal text. With Mason's override for this PR and head, `tellTaha(body)`
+ * refusal text. `tahaApproved()` true (Taha signed off on this head) lets it through.
+ * With Mason's override for this PR and head, `tellTaha(body)`
  * must post the PR comment first (once per override); if it can't, the merge is refused.
  */
-export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, notice = () => {} }) {
+export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, notice = () => {}, tahaApproved = () => false }) {
   const problem = tahaLaneProblem({ files, now });
   if (!problem) return null;
+  if (tahaApproved()) {
+    notice(`${prefix}: TAHA LANE — Taha signed off on #${pullRequest} at ${headSha}, so it may merge.\n`);
+    return null;
+  }
   const override = findTahaLaneOverride({ dirs, pullRequest, headSha, now });
   if (override) {
     if (!override.tahaToldAt) {
@@ -408,6 +452,7 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
   return `${prefix}: TAHA LANE BLOCK — #${pullRequest || "?"} is refused because ${problem.reason}. ` +
     "Until Dec 15 agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) " +
     "or change this block, whatever OK line the PR has (Mason to Taha, 2026-11-22). Leave it for Taha: post a PR comment or a KI. " +
+    `It merges once Taha approves this commit on GitHub or comments \`Ready to merge: ${String(headSha ?? "").slice(0, 12)}\` from his own account. ` +
     (code
       ? `Only if Mason wants it merged anyway: tell him why in one line and ask him to send, as a message of its own: taha override #${pullRequest} ${code} ` +
         "(it covers this PR at its current commit only; a new push needs a new code)"

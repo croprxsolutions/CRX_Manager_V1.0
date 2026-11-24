@@ -3,7 +3,9 @@
 - Taha (Slack, 2026-11-24, via Mason) agreed that migrations touching his lanes, booking stock included, wait for him;
   three gaps from his #2382 review were left for this follow-up, which he reviews and merges.
 - A field-word file name ("job", "application") already gets its SQL read since #2382; tests now pin it.
-- `TAHA_LANE_FUNCTIONS_RE` gains 23 of his functions whose names carry no lane word (order, return, finance-charge
-  and delivery functions found by sweeping staging's migrations); field-billing functions stay Mason's.
+- `TAHA_LANE_FUNCTIONS_RE` gains 35 of his functions whose names carry no lane word: 23 order, return,
+  finance-charge and delivery functions found by sweeping staging's migrations, plus (Taha's review of #2408) the
+  year-end, sales, profitability and dashboard reports, the finance-charge preview, the month lock
+  `check_period_open`, and three triggers on orders and order allocations. Field-billing functions stay Mason's.
 - Booking stock: a PL/pgSQL `NEW.quantity_prebooked = …` assignment, a SET that follows a subquery's WHERE, and
   `RENAME COLUMN … TO quantity_prebooked` now count (`.claude/hooks/taha-lane-lib.mjs`).

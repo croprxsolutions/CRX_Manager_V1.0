@@ -136,11 +136,11 @@ BEGIN
   END IF;
 
   v_base := public._order_commission_base_20270304(p_order_id);
-  -- Already on this base with each row its share (every sale with no discount, and every quiet re-save): write nothing.
-  -- A share may be off by the writers' own penny spread (up to a cent a row), never more: a changed split moves it.
-  IF NOT EXISTS (SELECT 1 FROM commissions c JOIN unnest(v_ids, v_pcts) AS r(id, pct) ON r.id = c.id
-                  WHERE c.order_profit IS DISTINCT FROM v_base
-                     OR abs(c.commission_amount - GREATEST(v_base, 0) * r.pct / 100) > 0.01 * v_eligible) THEN
+  -- No discount on the sale and its rows on that profit: the writers' rows stand exactly as today (their own penny
+  -- spread, no extra history). Otherwise every row goes to its exact share below, and only rows that differ are written,
+  -- so a second pass writes nothing and a changed split moves to the cent.
+  IF v_base = (SELECT round(COALESCE(total_profit, 0), 2) FROM orders WHERE id = p_order_id)
+     AND NOT EXISTS (SELECT 1 FROM commissions c WHERE c.id = ANY (v_ids) AND c.order_profit IS DISTINCT FROM v_base) THEN
     RETURN 0;
   END IF;
 
@@ -165,13 +165,16 @@ BEGIN
     UPDATE commissions c
        SET order_profit = v_base, commission_amount = calc.cents / 100.0
       FROM calc
-     WHERE c.id = calc.id;
+     WHERE c.id = calc.id
+       AND (c.order_profit IS DISTINCT FROM v_base OR c.commission_amount IS DISTINCT FROM calc.cents / 100.0);
   ELSE
     -- Some rows are paid or batched: each pending row is its own share (the edit paths' rule).
     UPDATE commissions c
        SET order_profit = v_base, commission_amount = public.compute_commission_amount(v_base, r.pct)
       FROM unnest(v_ids, v_pcts) AS r(id, pct)
-     WHERE c.id = r.id;
+     WHERE c.id = r.id
+       AND (c.order_profit IS DISTINCT FROM v_base
+            OR c.commission_amount IS DISTINCT FROM public.compute_commission_amount(v_base, r.pct));
   END IF;
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RETURN v_count;

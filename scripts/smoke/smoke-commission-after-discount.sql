@@ -16,7 +16,7 @@
 --   G  No discount: commission rows and the commission history ledger are exactly as today
 --   H  A 150-line sale: changing its discount settles at commit in under 4 s (the API's statement timeout is 8 s;
 --      attack run 2026-11-25 measured 21 s on the first draft), on the right base
---   I  A discounted sale's split moved from 60/40 to 70/30 by hand: $210.00 / $90.00 on $300.00
+--   I  A discounted sale's split moved from 60/40 to 70/30 by hand: $210.00 / $90.00 on $300.00; then 70.01/29.99: $210.03 / $89.97
 --   Every sale above: the commission base = total_profit + _order_standing_discount_20270109 (the P&L's figure)
 --
 -- CONTAINER / LOCAL ONLY: completing deliveries draws invoice numbers; the tax rate and discounts are set inside the
@@ -304,6 +304,13 @@ BEGIN
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
   IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '210.00/90.00|300.00' THEN
     v_fails := v_fails || ' (I) a changed split on a discounted sale did not move: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  END IF;
+  -- I2: a one-cent split change (70/30 → 70.01/29.99 on $300 moves $0.03) is not lost in any tolerance (Luna MED).
+  UPDATE commissions SET split_percentage = CASE WHEN recipient_user_id = v_rep1 THEN 70.01 ELSE 29.99 END
+   WHERE order_id = v_order AND status = 'pending';
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '210.03/89.97|300.00' THEN
+    v_fails := v_fails || ' (I) a one-cent split change did not move: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
 
   -- Every sale: the stored base is the P&L's profit after discount.

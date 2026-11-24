@@ -203,7 +203,7 @@ function drawSheet(
     alternateRowStyles: { fillColor: ALT_ROW_BG },
   });
   y = doc.lastAutoTable.finalY + 18;
-  y = drawDirections(doc, data, y, reserve);
+  y = drawDirections(doc, data, y);
 
   // ── Billing splits ─────────────────────────────────────────────────────────
   if (options.includeBillingSplits && data.billingSplits && data.billingSplits.length > 0) {
@@ -352,11 +352,11 @@ function drawSheet(
 }
 
 /** One tappable directions line per mapped field, in stop order. Returns the new y. */
-function drawDirections(doc: JsPDFWithAutoTable, data: ApplicatorSheetData, startY: number, reserve: number): number {
+function drawDirections(doc: JsPDFWithAutoTable, data: ApplicatorSheetData, startY: number): number {
   const margin = 40;
   const located = data.fields.filter((field) => field.location);
   if (located.length === 0) return startY;
-  let y = ensureRoom(doc, startY, 30, margin, reserve);
+  let y = ensureRoom(doc, startY, 30, margin);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(...CHARCOAL);
@@ -365,7 +365,7 @@ function drawDirections(doc: JsPDFWithAutoTable, data: ApplicatorSheetData, star
   doc.setFontSize(8.5);
   located.forEach((field) => {
     const location = field.location as { lat: number; lng: number };
-    y = ensureRoom(doc, y, 12, margin, reserve);
+    y = ensureRoom(doc, y, 12, margin);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...GRAY);
     const coordinates = `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`;

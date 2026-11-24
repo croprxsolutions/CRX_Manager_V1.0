@@ -22,7 +22,7 @@
 //       rewrites src/types/supabase.ts from that project's generated TypeScript types (works
 //       with plain --live too). Read-only either way.
 //
-//   node scripts/regenerate-schema-registry.mjs --from-introspection <file.json | ->
+//   node scripts/regenerate-schema-registry.mjs --from-introspection <file.json | -> [--staging]
 //       Full rebuild from a JSON file of query results (use "-" to read stdin). The fallback
 //       when the token is unavailable (cloud sessions, another machine).
 //
@@ -346,8 +346,8 @@ function stampMode() {
 }
 
 async function main(args) {
+  const projectRef = args.includes("--staging") ? PROJECTS.staging : PROJECTS.live;
   if (args.includes("--live")) {
-    const projectRef = args.includes("--staging") ? PROJECTS.staging : PROJECTS.live;
     console.log(`Reading Supabase project ${projectRef}${projectRef === PROJECTS.staging ? " (staging)" : " (live)"}, read-only.`);
     const data = await liveIntrospection({ projectRef });
     const types = args.includes("--types") ? await fetchTypes({ projectRef }) : null;
@@ -358,8 +358,8 @@ async function main(args) {
     }
     return;
   }
-  if (args.includes("--staging") || args.includes("--types")) {
-    console.error("--staging and --types need --live.");
+  if (args.includes("--types")) {
+    console.error("--types needs --live.");
     process.exit(1);
   }
   const fiIdx = args.indexOf("--from-introspection");
@@ -369,7 +369,10 @@ async function main(args) {
       console.error("Usage: node scripts/regenerate-schema-registry.mjs --from-introspection <file.json | ->");
       process.exit(1);
     }
-    rebuildFromIntrospection(readIntrospectionFile(inputArg));
+    rebuildFromIntrospection(readIntrospectionFile(inputArg), projectRef);
+  } else if (args.includes("--staging")) {
+    console.error("--staging needs --live or --from-introspection.");
+    process.exit(1);
   } else {
     stampMode();
   }

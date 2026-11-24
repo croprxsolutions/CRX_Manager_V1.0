@@ -1,5 +1,5 @@
 -- Written 2026-11-23. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270228170000_parent_epa_correction_on.md. Re-read the live ledger before applying.
+-- docs/reference/migrations.d/20270228220000_parent_epa_correction_on.md. Re-read the live ledger before applying.
 --
 -- PAR-1 EPA-correction enable (build sheet docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md section 7.7;
 -- contract docs/plans/2026-11-23-par1-epa-correction-on-CONTRACT.md). Mason, 2026-11-06: "yes i want to be able to

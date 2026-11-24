@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
-  Save,
   Plus,
   Trash2,
   Search,
@@ -26,6 +25,8 @@ import { fingerprintIntentPayload, getCommittedOrderIdFromMismatch, getIdempoten
 import { useFormDraft } from '../hooks/useFormDraft';
 import { useCreditLimitCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
+import OrderCreateBar from '../components/orders/OrderCreateBar';
+import { useIsPhone } from '../hooks/useIsPhone';
 import { notifyCreditLimitExceeded } from '../lib/notificationTriggers';
 import { sendOrderConfirmedEmail } from '../lib/orderConfirmedEmail';
 import { checkRUPCompliance } from '../lib/rupCompliance';
@@ -128,6 +129,7 @@ export default function NewOrder() {
   // scoped RLS on orders/order_items + PAGE_PERMISSIONS), re-open the routes and
   // these guards already hide all cost/profit/margin from field staff.
   const isFieldStaff = profile?.role === 'driver' || profile?.role === 'applicator';
+  const isPhone = useIsPhone();
   // Cost is admin-only (Mason, 2026-10-15).
   const isAdmin = profile?.role === 'admin';
   useEffect(() => {
@@ -765,9 +767,19 @@ export default function NewOrder() {
     );
   }
 
+  // Running total for the bar that stays on screen; field staff see no prices.
+  const createBarTotal = isFieldStaff ? null : orderTotal;
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      {/* Desktop: the header stays on screen like the Quote Builder's (top-16 = TopBar height; -mx/-mt undo
+          AppLayout main padding; not sticky on short landscape screens). Phone: the bottom bar carries Create Order. */}
+      <div
+        data-testid="order-header"
+        className={isPhone
+          ? 'flex items-center justify-between'
+          : '[@media(min-height:600px)]:sticky top-16 z-20 -mx-4 -mt-4 lg:-mx-6 lg:-mt-6 flex items-center justify-between gap-4 border-b border-gray-200 bg-cream/95 px-4 py-3.5 backdrop-blur lg:px-6'}
+      >
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={() => navigate('/orders')}>
             <ArrowLeft className="w-4 h-4" />
@@ -784,10 +796,9 @@ export default function NewOrder() {
               <span>This customer ordered {duplicateProductNames.join(', ')} in the last 2 days — possible duplicate.</span>
             </div>
           )}
-          <Button onClick={handleSave} disabled={saving}>
-            <Save className="w-4 h-4" />
-            {saving ? 'Creating...' : 'Create Order'}
-          </Button>
+          {!isPhone && (
+            <OrderCreateBar placement="inline" totalDollars={createBarTotal} priceLater={priceLater} saving={saving} onCreate={handleSave} />
+          )}
         </div>
       </div>
 
@@ -1264,6 +1275,10 @@ export default function NewOrder() {
           )}
         </div>
       </Modal>
+
+      {isPhone && (
+        <OrderCreateBar placement="bottom" totalDollars={createBarTotal} priceLater={priceLater} saving={saving} onCreate={handleSave} />
+      )}
     </div>
   );
 }

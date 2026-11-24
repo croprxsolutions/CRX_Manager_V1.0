@@ -89,7 +89,7 @@ Read at `origin/staging` ef21134fc; production checked read-only the same day.
 - Declined suggestion #48 (fold into `guard_product_setup_fields`): re-issuing that larger guard is riskier than a
   six-line trigger.
 
-## Open business decisions (recommended defaults built; Mason may overrule)
+## Business decisions (Mason accepted all four as built, 2026-11-24)
 
 1. What a tick means: "this product's label lists no REI (or no PHI) for the crops we sell it for". Wording on screen:
    "Label gives no REI" / "Label gives no PHI".

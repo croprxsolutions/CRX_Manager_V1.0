@@ -1972,7 +1972,7 @@
     {
       "predicate": "actor-forgery-fin-audit",
       "violation_key": "create_invoice_from_blend_ticket(p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text, p_below_cost_reason text, p_approved_zero_lines jsonb)",
-      "justification": "Reviewed live pg_get_functiondef and trigger on 2026-11-24. The signed-in actor comes from auth.uid(), and the unconditional p_created_by mismatch check runs before replay or writes. The financial audit insert takes the role from that actor and omits actor_id, which the enabled _fill_audit_actor trigger binds to auth.uid(). The nested exception handler is solely in a quote-price lookup after the actor gate. The detector conservatively retains the supplied actor because of that handler.",
+      "justification": "Reviewed live pg_get_functiondef and audit column contract on 2026-11-24. The signed-in actor comes from auth.uid(), and the unconditional p_created_by mismatch check runs before replay or writes. The audit insert takes the role from that actor and omits actor_user_id. In production and staging, actor_user_id is NOT NULL and defaults to auth.uid(), so the insert receives the signed-in actor even without the enabled _fill_audit_actor trigger. The nested quote-price exception handler runs after the actor gate and is why the detector retains the supplied actor.",
       "dated": "2026-11-24",
       "suspect_param": "p_created_by",
       "reviewed_contracts": {
@@ -1986,7 +1986,7 @@
     {
       "predicate": "actor-forgery",
       "violation_key": "create_invoice_from_blend_ticket(p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text, p_below_cost_reason text, p_approved_zero_lines jsonb)",
-      "justification": "Reviewed live pg_get_functiondef and trigger on 2026-11-24. The signed-in actor comes from auth.uid(), and the unconditional p_created_by mismatch check runs before replay or writes. The financial audit insert takes the role from that actor and omits actor_id, which the enabled _fill_audit_actor trigger binds to auth.uid(). The nested exception handler is solely in a quote-price lookup after the actor gate. The detector conservatively retains the supplied actor because of that handler.",
+      "justification": "Reviewed live pg_get_functiondef and audit column contract on 2026-11-24. The signed-in actor comes from auth.uid(), and the unconditional p_created_by mismatch check runs before replay or writes. The audit insert takes the role from that actor and omits actor_user_id. In production and staging, actor_user_id is NOT NULL and defaults to auth.uid(), so the insert receives the signed-in actor even without the enabled _fill_audit_actor trigger. The nested quote-price exception handler runs after the actor gate and is why the detector retains the supplied actor.",
       "dated": "2026-11-24",
       "suspect_param": "p_created_by",
       "reviewed_contracts": {

@@ -103,7 +103,7 @@ Every record keeps who changed it and when, and **never overwrites history**: co
 
 ### Stage 3: Paperwork (office prints)
 
-1. **Applicator sheet:** fields, map pages, directions link, tank contents, safety information. Options: **hide tank contents** (hides amounts and rates; product names and safety stay), **map pages only**. Safety information (REI, PHI, signal word) always prints on every page.
+1. **Applicator sheet:** fields, map pages, directions link, tank contents, safety information. **Tank contents (products, amounts, rates) always print on the applicator job order; there is no option to hide them** (Mason, 2026-11-24 p). Option: **map pages only** (an extra maps print). Safety information (REI, PHI, signal word) always prints on every page.
 2. **Maps:** combined, per field, or both; field numbers are the spray order. Printing what's in the map window and an ink-saver option are [SPRING].
 3. **Loader sheet:** rate per acre, total of each product, **water to add** and **finished gallons** labelled separately [Sol 62], in loader units ("58 GL 7.68 FL OZ"). Views: one big batch, or loads sized to the tank (the existing `job_loader_worksheets` modes).
 4. Printed load sheets for anyone on paper; paper work is entered afterwards [G3.1].
@@ -361,5 +361,6 @@ Sol numbers without a row here are reviewer finding ids kept for traceability; t
 | 2026-11-24 l | Chem Man import: once; fields already in CRX skipped and listed; trial on a local test copy, not staging; live once after the reset; checked by hand |
 | 2026-11-24 m | Staging-only migrations count as current work: slice 0 checks each read-only; ones that fit ride the normal release; a conflicting one gets a replacement migration; Mason is asked only if one changes today's live billing |
 | 2026-11-24 n | Approvals come to Mason in one batch per slice, every gate listed up front |
+| 2026-11-24 p | The applicator always sees tank contents on the job order; the "hide tank contents" print option is dropped |
 | 2026-11-24 o | Waste bills by default (it went in the tank); the office lowers a load's quantity with a reason if it should not bill (Sol round 2 #47) |
 | KI-206 | No EPA registration prints a dash |

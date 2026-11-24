@@ -128,6 +128,13 @@ export interface ApplicatorSheetField {
   acres: number;
   crop: string | null;
   pest: string | null;
+  /** The field's map pin, for the printed directions link (saved jobs only). */
+  location?: { lat: number; lng: number } | null;
+}
+
+/** Google Maps driving directions to a field's map pin. */
+export function fieldDirectionsUrl(location: { lat: number; lng: number }): string {
+  return `https://www.google.com/maps/dir/?api=1&destination=${location.lat.toFixed(6)},${location.lng.toFixed(6)}`;
 }
 
 /** One product line, with the per-product total + gallon/lb conversion. */

@@ -13,7 +13,7 @@ vi.mock('./db', () => ({
   assertRpcResult: <T,>(data: unknown): T => data as T,
 }));
 
-import { fetchJobMapImages, sprayNumbersByFieldId } from './jobMapImages';
+import { fetchJobFieldLocations, fetchJobMapImages, sprayNumbersByFieldId } from './jobMapImages';
 
 const squareBoundary = JSON.stringify({
   type: 'Polygon',
@@ -361,5 +361,20 @@ describe('sprayNumbersByFieldId', () => {
   it('keeps the database order for tied sort_order values', () => {
     expect([...sprayNumbersByFieldId([{ id: 'x', sort_order: 0 }, { id: 'y', sort_order: 0 }]).entries()])
       .toEqual([['x', 1], ['y', 2]]);
+  });
+});
+
+describe('fetchJobFieldLocations', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns each mapped field pin and skips a field without one', async () => {
+    mockRpc.mockResolvedValue({ data: [makeRow(), { ...makeRow(), id: 'field-2', centroid_geojson: null }], error: null });
+    const locations = await fetchJobFieldLocations('job-1');
+    expect([...locations.entries()]).toEqual([['field-1', { lat: 39.15, lng: -89.05 }]]);
+  });
+
+  it('returns no pins when the read is refused', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: 'denied' } });
+    expect((await fetchJobFieldLocations('job-1')).size).toBe(0);
   });
 });

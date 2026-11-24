@@ -129,6 +129,11 @@ function emptyListText(customerChosen: boolean, datesChosen: boolean): { title: 
   return { title: 'No payments yet', description: 'Payment allocations will appear here after you record payments' };
 }
 
+/** The open payment, or null when the filters now hide it from the list. */
+function shownExpandedId(expandedId: string | null, shown: ReadonlyArray<{ id: string }>): string | null {
+  return expandedId && shown.some((p) => p.id === expandedId) ? expandedId : null;
+}
+
 export default function PaymentHistory() {
   const { profile } = useAuth();
   const { toast } = useToast();
@@ -243,14 +248,18 @@ export default function PaymentHistory() {
     setLoadingAllocs(false);
   }, [toast]);
 
+  const closeExpanded = useCallback(() => {
+    // A read still running for the closed payment must not fill the list.
+    allocSeq.current += 1;
+    setExpandedId(null);
+    setAllocations([]);
+    setAllocsFailed(false);
+    setLoadingAllocs(false);
+  }, []);
+
   const toggleExpand = (id: string) => {
     if (expandedId === id) {
-      // A read still running for the closed payment must not fill the list.
-      allocSeq.current += 1;
-      setExpandedId(null);
-      setAllocations([]);
-      setAllocsFailed(false);
-      setLoadingAllocs(false);
+      closeExpanded();
     } else {
       setExpandedId(id);
       fetchAllocations(id);
@@ -308,6 +317,11 @@ export default function PaymentHistory() {
     ? []
     : payments.filter((p) => (!customerId || p.customer_id === customerId)
       && isDayInRange(paymentBusinessDate(p.payment_date, p.created_at), fromDate, toDate));
+  // A payment the filters now hide must not keep its allocations open under another customer.
+  const openId = shownExpandedId(expandedId, shownPayments);
+  useEffect(() => {
+    if (expandedId && !openId) closeExpanded();
+  }, [expandedId, openId, closeExpanded]);
   const customerCaption = customerId ? ` for ${customerName || 'this customer'}` : '';
   const rangeCaption = dateRangeCaption(fromDate, toDate) + customerCaption;
   const emptyText = emptyListText(!!customerId, isFiltered);
@@ -493,13 +507,13 @@ export default function PaymentHistory() {
           />
 
           {/* Expanded allocations for selected payment */}
-          {expandedId && (
+          {openId && (
             <div className="mt-4 border-t border-gray-100 pt-4">
               <h3 className="text-sm font-semibold text-nav-dark mb-3">Invoice Allocations</h3>
               {loadingAllocs ? (
                 <p className="text-sm text-secondary py-4 text-center">Loading allocations...</p>
               ) : allocsFailed ? (
-                <LoadFailedState title="This payment's allocations could not be loaded" onRetry={() => { void fetchAllocations(expandedId); }} />
+                <LoadFailedState title="This payment's allocations could not be loaded" onRetry={() => { void fetchAllocations(openId); }} />
               ) : allocations.length === 0 ? (
                 <p className="text-sm text-secondary py-4 text-center">No invoice allocations for this payment</p>
               ) : (

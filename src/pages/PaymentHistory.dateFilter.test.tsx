@@ -120,3 +120,28 @@ describe('Payment History opened on a range from a link', () => {
     expect(dayParam(null)).toBeNull();
   });
 });
+
+describe('Payment History open payment and filters', () => {
+  it('closes an open payment\'s invoice allocations when the filter hides that payment', async () => {
+    H.tables.invoice_line_allocations = [{
+      id: 'a1', allocation_set_id: 'october', invoice_id: 'i1', amount_cents: 100000, split_percentage: 100,
+      bill_to_customer_id: 'c1', created_at: '2026-10-30T15:00:00Z',
+      invoices: { invoice_number: 'INV-OCT' }, customers: { farm_name: 'Big Farm' },
+    }];
+    render(<MemoryRouter><PaymentHistory /></MemoryRouter>);
+    const row = (await screen.findByText('CHK-october')).closest('tr')!;
+    fireEvent.click(row.querySelector('button')!);
+    expect(await screen.findByText('INV-OCT')).toBeInTheDocument();
+    expect(screen.getByText('Invoice Allocations')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Today' }));
+    expect(screen.queryByText('CHK-october')).not.toBeInTheDocument();
+    expect(screen.queryByText('Invoice Allocations')).not.toBeInTheDocument();
+    expect(screen.queryByText('INV-OCT')).not.toBeInTheDocument();
+
+    // Back on all dates the payment is listed again, closed.
+    fireEvent.click(screen.getByRole('button', { name: 'All dates' }));
+    expect(screen.getByText('CHK-october')).toBeInTheDocument();
+    expect(screen.queryByText('Invoice Allocations')).not.toBeInTheDocument();
+  });
+});

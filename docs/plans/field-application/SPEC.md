@@ -103,7 +103,7 @@ Every record keeps who changed it and when, and **never overwrites history**: co
 
 ### Stage 3: Paperwork (office prints)
 
-1. **Applicator sheet:** fields, map pages, directions link, tank contents, safety information. **Tank contents (products, amounts, rates) always print on the applicator job order; there is no option to hide them** (Mason, 2026-11-24 p). Option: **map pages only** (an extra maps print). Safety information (REI, PHI, signal word) always prints on every page.
+1. **Applicator sheet:** fields, map pages, directions link, tank contents, safety information. **Tank contents (products, amounts, rates) always print on the applicator job order; there is no option to hide them** (Mason, 2026-11-24 p). Option: **map pages only** (an extra maps print). Safety information (signal word, REI, PHI) is off by default; when chosen in the print options, every product's safety prints together on its own sheet (Mason, 2026-11-24).
 2. **Maps:** combined, per field, or both; field numbers are the spray order. Printing what's in the map window and an ink-saver option are [SPRING].
 3. **Loader sheet:** rate per acre, total of each product, **water to add** and **finished gallons** labelled separately [Sol 62], in loader units ("58 GL 7.68 FL OZ"). Views: one big batch, or loads sized to the tank (the existing `job_loader_worksheets` modes).
 4. Printed load sheets for anyone on paper; paper work is entered afterwards [G3.1].

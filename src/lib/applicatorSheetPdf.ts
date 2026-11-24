@@ -33,6 +33,7 @@ import {
   type ApplicatorSheetFormat,
   type ApplicatorSheetCustomConfig,
   type ApplicatorSheetColumns,
+  type ApplicatorSheetSafety,
   DEFAULT_SHEET_COLUMNS,
   SHEET_FORMAT_LABELS,
   fmtNum,
@@ -441,6 +442,39 @@ function appendMapPage(
   }
 }
 
+/**
+ * The optional safety sheet: every product's signal word, REI and PHI on its own
+ * page(s), never cut short (Mason, 2026-11-24: off by default, all of it on its own sheet).
+ */
+function appendSafetySheet(doc: JsPDFWithAutoTable, autoTable: typeof import('jspdf-autotable').default, data: ApplicatorSheetData): void {
+  const items: ApplicatorSheetSafety[] = data.safety ?? [];
+  if (items.length === 0) return;
+  const margin = 40;
+  doc.addPage();
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(...CHARCOAL);
+  doc.text('Safety — Signal Word, REI, PHI', margin, margin + 10);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(...GRAY);
+  doc.text(`Job ${data.job_number} · ${customerLine(data)} · Always read and follow the product label.`, margin, margin + 26);
+  autoTable(doc, {
+    startY: margin + 36,
+    margin: { left: margin, right: margin, bottom: 60 },
+    head: [['Product', 'Signal Word', 'REI', 'PHI']],
+    body: items.map((item) => [
+      item.product_name,
+      item.signal_word ? item.signal_word.toUpperCase() : 'See label',
+      item.rei_hours != null ? `${fmtNum(item.rei_hours)} hr` : 'See label',
+      item.phi_days != null ? `${fmtNum(item.phi_days)} d` : 'See label',
+    ]),
+    styles: { fontSize: 10, cellPadding: 5 },
+    headStyles: { fillColor: CRX_GREEN, textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: ALT_ROW_BG },
+  });
+}
+
 /** Append optional overview and per-field satellite map pages after the crew sheet. */
 function appendMapPages(doc: JsPDFWithAutoTable, data: ApplicatorSheetData): void {
   if (!data.maps) return;
@@ -498,6 +532,7 @@ export async function generateApplicatorSheetPdf(
   };
 
   drawSheet(doc, autoTable, data, theme, resolvedOptions);
+  appendSafetySheet(doc, autoTable, data);
   appendMapPages(doc, data);
 
   // Footer on every page (drawn last so page count is final).

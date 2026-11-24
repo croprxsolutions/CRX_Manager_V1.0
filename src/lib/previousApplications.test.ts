@@ -212,6 +212,7 @@ describe('fetchPreviousApplications', () => {
       blankSections: 0,
       includeBillingSplits: false,
       showBanner: true,
+      includeSafetySheet: false,
     });
 
     expect(mockFetchJobMapImages).not.toHaveBeenCalled();

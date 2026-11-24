@@ -187,6 +187,14 @@ export interface ApplicatorSheetBillingSplit {
   phone: string | null;
 }
 
+/** One product's safety facts for the optional safety sheet. null = not on file (prints "see label"). */
+export interface ApplicatorSheetSafety {
+  product_name: string;
+  signal_word: string | null;
+  rei_hours: number | null;
+  phi_days: number | null;
+}
+
 /** The full, format-agnostic sheet payload. All three layouts read this. */
 export interface ApplicatorSheetData {
   job_number: string;
@@ -206,6 +214,8 @@ export interface ApplicatorSheetData {
   previousApplications?: PreviousFieldApplications[];
   /** Optional billed-customer allocation rows for the operational packet. */
   billingSplits?: ApplicatorSheetBillingSplit[];
+  /** Present only when the safety sheet was chosen: one row per sheet product line. */
+  safety?: ApplicatorSheetSafety[];
 }
 
 // ── Raw input shapes (what JobDetail hands in) ───────────────────────────────

@@ -59,12 +59,18 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 
 | Item | State | Proof / link | Note |
 |---|---|---|---|
-| Paperwork fixes | NOT STARTED | | |
+| 1 Safety sheet (off by default) | IN REVIEW | `feat/field-paper-1`; rendered: off (no safety page), on with 3 products, on with 38 products (all 38 rows, flowing onto a second safety page) | **Mason decision 2026-11-24:** "were not going to print safety info by defualt it will normally be off but if selected it all print on its own sheet". Replaces "safety on every page". New print option "Print safety sheet" (off); a saved preference from before reads as off. Signal word from the product record; REI/PHI from the sheet lines; a missing value prints "See label". The Enhanced/Custom tank-mix table keeps its existing REI/PHI columns |
+| 2 Map pages only print | IN PROGRESS | `feat/field-paper-2` (stacked on 1) | Maps only; a job with no maps refuses plainly. `JobDetail.tsx` lease: paperwork lane (field-paper-2), granted 2026-11-24; released when its PR merges into staging. JobDetail is on the Sol list |
+| 3 Spray-order numbers on maps | IN PROGRESS (stacked on 1) | `feat/field-paper-3` | Overview labels `N · acres`; per-field page title `Stop N`; numbers restart per job (test) |
+| 4 Directions link per field | IN PROGRESS (stacked on 3) | `feat/field-paper-4` | Tappable Google Maps link per mapped field, in stop order, under the field table |
+| 5 Loader water to add + finished gallons | WAITING ON MASON | `feat/field-paper-5` (own branch, not pushed) | Built and rendered. Parked under the 3-round rule (guessing liquid vs dry when the product form is not loaded). Asked Mason 2026-11-24: show water only when every product's form is known, else a dash and a note? |
+| 6 EPA dash / Unknown | PARKED ("Unknown" half) | dash: already prints for any blank number (`applicatorSheetPdf.test.ts`) | No product value says a product is EPA-registered. "Unknown" needs that flag: asked below |
 
 ## Needs another lane
 
 | Asked by | Owning lane | What | Done? |
 |---|---|---|---|
+| Paperwork (group 6) | Database | A product value that says "this product is EPA-registered" (so a registered product with no number prints "Unknown" and an unregistered one prints a dash, KI-206). Today nothing tells the two apart | |
 
 ## Disputed review findings (for the slice batch)
 

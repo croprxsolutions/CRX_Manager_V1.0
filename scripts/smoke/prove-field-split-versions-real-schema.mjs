@@ -59,11 +59,13 @@ const note = (field, cust) => scalar(`SELECT coalesce(notes, '-') FROM public.fi
 // The old Field Setup screen's save: field payload plus the copy rows it read.
 const fieldPayload = (field, owner, name) => `jsonb_build_object('customer_id', '${owner}', 'field_name', '${name}')`;
 const copyRows = (field, notesFor = {}) => `(SELECT coalesce(jsonb_agg(jsonb_build_object('customer_id', customer_id, 'split_pct', split_pct, 'is_primary', is_primary,
-    'notes', CASE customer_id::text ${Object.entries(notesFor).map(([c, n]) => `WHEN '${c}' THEN '${n}'`).join(' ')} ELSE notes END) ORDER BY customer_id), '[]'::jsonb)
+    'notes', CASE customer_id::text ${Object.entries(notesFor).map(([c, n]) => `WHEN '${c}' THEN '${n}'`).join(' ') || `WHEN '' THEN notes`} ELSE notes END) ORDER BY customer_id), '[]'::jsonb)
     FROM public.field_billing_defaults WHERE field_id = '${field}')`;
 const saveField = (field, owner, name, defaults, key) =>
   `u := public.save_field('${field}', ${fieldPayload(field, owner, name)}, ${defaults}, NULL, '${key}');`;
 const commit = (uid, body) => attempt(uid, body, { commit: true });
+// Whole output (scalar keeps only the last line; a sweep packet can span lines).
+const scalarAll = (sql) => docker([...PSQL, '-A', '-t'], { input: sql }).stdout.trim();
 
 try {
   buildContainer({ stopBefore: CANDIDATE });
@@ -229,7 +231,8 @@ try {
   assert.equal(scalar(`SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname ~ '(field_split|field_billing_split|field_billing_cop)'
     AND has_function_privilege('anon', oid, 'EXECUTE');`), '0', 'anon runs none of the new functions');
   assert.equal(scalar(`SELECT string_agg(proname, ',' ORDER BY proname) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
-    AND proname ~ '(field_split|field_billing_split|field_billing_cop)' AND has_function_privilege('authenticated', oid, 'EXECUTE');`),
+    AND proname ~ '(field_split|field_billing_split|field_billing_cop)' AND proname NOT LIKE 'get\_field\_billing\_splits\_for\_%' -- older readers, unchanged
+    AND has_function_privilege('authenticated', oid, 'EXECUTE');`),
     'field_split_as_of,set_field_billing_split', 'signed-in users run only the two entry points');
   console.log('[access] direct writes refused; applicator keeps the copy only; other roles and anon refused');
 
@@ -245,11 +248,14 @@ try {
   // 7. Resolver and dated versions.
   r = attempt(USERS.rep, `v := (SELECT string_agg(field_id::text || ':' || has_split || ':' || coalesce(version_number::text, '-'), ',' ORDER BY field_id)
     FROM public.field_split_as_of(ARRAY['${F3}', '${F4}']::uuid[], DATE '2027-02-28'));`);
-  assert.equal(r, `ok|${F3}:true:1,${F4}:false:-`, `before the dated version: ${r}`);
+  assert.equal(r, `ok|${F3}:true:1,${F4}:true:1`, `before the dated version: ${r}`);
+  r = attempt(USERS.rep, `v := (SELECT has_split || ':' || coalesce(version_number::text, '-') FROM public.field_split_as_of(ARRAY['${F4}']::uuid[], DATE '2026-01-01'));`);
+  assert.equal(r, 'ok|false:-', `F4 before its first split has none: ${r}`);
   r = attempt(USERS.rep, `v := (SELECT version_number || ':' || payers::text FROM public.field_split_as_of(ARRAY['${F3}']::uuid[], DATE '2027-03-01'));`);
   assert.match(r, /^ok\|2:.*70000000/, `from the dated version: ${r}`);
   for (const [args, re] of [[`ARRAY['${F3}', '${F3}']::uuid[], CURRENT_DATE`, /FIELD_SPLIT_DUPLICATE_FIELD/], [`ARRAY['${id('ff')}']::uuid[], CURRENT_DATE`, /FIELD_NOT_FOUND/],
-    [`ARRAY['${F3}']::uuid[], NULL`, /FIELD_SPLIT_DATE_REQUIRED/], [`ARRAY['${F3}', NULL]::uuid[], CURRENT_DATE`, /FIELD_SPLIT_FIELDS_REQUIRED/]]) {
+    [`ARRAY['${F3}']::uuid[], NULL`, /FIELD_SPLIT_DATE_REQUIRED/], [`ARRAY['${F3}', NULL]::uuid[], CURRENT_DATE`, /FIELD_SPLIT_FIELDS_REQUIRED/],
+    [`ARRAY[]::uuid[], CURRENT_DATE`, /FIELD_SPLIT_FIELDS_REQUIRED/]]) {
     r = attempt(USERS.admin, `${refuse(`v := (SELECT count(*) FROM public.field_split_as_of(${args}));`)} v := t;`);
     assert.match(r, re, `resolver refuses ${args}: ${r}`);
   }
@@ -270,13 +276,15 @@ try {
   const writer = spawn('docker', [...PSQL], { stdio: ['pipe', 'pipe', 'pipe'] });
   writer.stdin.end(`BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${USERS.admin}","role":"authenticated"}', true);
     SET LOCAL ROLE authenticated; SELECT public.set_field_billing_split('${F2}', CURRENT_DATE, ${payers([[A, M]])}, NULL, 'lock', 'k-lock');
-    SELECT pg_sleep(6); COMMIT;`);
+    SELECT 'SPLIT_HELD'; SELECT pg_sleep(6); COMMIT;`);
+  let writerErr = '';
+  writer.stderr.on('data', (d) => { writerErr += d; });
+  writer.stdout.on('data', (d) => { writerErr += d; });
   const writerDone = new Promise((resolve) => writer.on('close', resolve));
-  let held = false;
-  for (let i = 0; i < 50 && !held; i += 1) {
-    held = scalar(`SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE a.query ~ 'pg_sleep' AND l.locktype = 'transactionid';`) !== '0';
-  }
-  assert.ok(held, 'the writer is holding its transaction');
+  // Wait without blocking the event loop, so the writer's stdin is actually sent.
+  for (let i = 0; i < 100 && !writerErr.includes('SPLIT_HELD'); i += 1) await new Promise((res) => setTimeout(res, 100));
+  const held = writerErr.includes('SPLIT_HELD');
+  assert.ok(held, `the writer is holding its transaction: ${writerErr}`);
   r = attempt(USERS.admin, `SET LOCAL lock_timeout = '1s'; BEGIN PERFORM 1 FROM public.fields WHERE id = '${F2}' FOR SHARE; t := 'NOT BLOCKED'; EXCEPTION WHEN OTHERS THEN t := SQLSTATE; END; v := t;`);
   assert.equal(r, 'ok|55P03', 'a FOR SHARE reader waits for the split writer');
   assert.equal(await writerDone, 0, 'the writer commits');
@@ -289,11 +297,11 @@ try {
   const actorPredicate = { name: 'actor-forgery', sql: readFileSync(path.join(ROOT, 'scripts/db-invariant-sweeps/predicates/actor-forgery.sql'), 'utf8') };
   const actorEntries = JSON.parse(readFileSync(path.join(ROOT, 'scripts/db-invariant-sweeps/allowlist.json'), 'utf8')).entries
     .filter((entry) => entry.predicate === actorPredicate.name);
-  const packet = JSON.parse(scalar(buildSweepQuery(actorPredicate, actorEntries)));
+  const packet = JSON.parse(scalarAll(buildSweepQuery(actorPredicate, actorEntries)));
   const flagged = subtractAllowlist(packet.predicate, packet.rows, actorEntries, packet.function_contracts)
     .map((row) => row.violation_key).filter((key) => /^(save_field\(|set_field_billing_split|_set_field_billing_split|field_split_as_of)/.test(key));
   const implKey = 'public._save_field_replay_impl_20261015(p_field_id uuid, p_field_payload jsonb, p_billing_defaults jsonb, p_performed_by uuid, p_idempotency_key text)';
-  const implContract = JSON.parse(scalar(`SELECT COALESCE(json_agg(c), '[]'::json) FROM (${functionContractSql([implKey])}) AS c;`));
+  const implContract = JSON.parse(scalarAll(`SELECT COALESCE(json_agg(c), '[]'::json) FROM (${functionContractSql([implKey])}) AS c;`));
   assert.deepEqual(flagged, [], `actor-forgery sweep flags FP-1 functions (impl contract md5 now ${implContract[0]?.contract_md5}): ${flagged.join('; ')}`);
   console.log('[sweep] actor-forgery flags none of save_field, the split writer or the resolver');
 

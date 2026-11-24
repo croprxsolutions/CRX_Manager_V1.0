@@ -594,8 +594,8 @@ BEGIN
   IF p_on_date IS NULL THEN
     RAISE EXCEPTION 'FIELD_SPLIT_DATE_REQUIRED: a date is required' USING ERRCODE = '22023';
   END IF;
-  IF p_field_ids IS NULL OR array_position(p_field_ids, NULL) IS NOT NULL THEN
-    RAISE EXCEPTION 'FIELD_SPLIT_FIELDS_REQUIRED: a list of field ids with no blanks is required' USING ERRCODE = '22023';
+  IF p_field_ids IS NULL OR cardinality(p_field_ids) = 0 OR array_position(p_field_ids, NULL) IS NOT NULL THEN
+    RAISE EXCEPTION 'FIELD_SPLIT_FIELDS_REQUIRED: a non-empty list of field ids with no blanks is required' USING ERRCODE = '22023';
   END IF;
   IF (SELECT count(DISTINCT u) FROM unnest(p_field_ids) u) <> cardinality(p_field_ids) THEN
     RAISE EXCEPTION 'FIELD_SPLIT_DUPLICATE_FIELD: a field is listed twice' USING ERRCODE = '22023';

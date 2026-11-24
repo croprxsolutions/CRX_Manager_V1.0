@@ -19479,13 +19479,13 @@ export type Database = {
       field_split_as_of: {
         Args: { p_field_ids: string[]; p_on_date: string }
         Returns: {
-          effective_from: string
+          effective_from: string | null
           field_id: string
           has_split: boolean
-          history_known: boolean
+          history_known: boolean | null
           payers: Json
-          version_id: string
-          version_number: number
+          version_id: string | null
+          version_number: number | null
         }[]
       }
       fill_tote_from_bulk: {

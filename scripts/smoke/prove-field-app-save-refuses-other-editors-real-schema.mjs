@@ -467,23 +467,23 @@ async function main() {
     COMMIT;`);
   const stopped = apply('candidate.sql');
   assert.notEqual(stopped.status, 0);
-  assert.match(stopped.output, /FIELD_APP_WRONG_EDITOR_PREFLIGHT: a live invoice carries field rows written before direct writes were revoked/);
+  assert.match(stopped.output, /FIELD_APP_WRONG_EDITOR_PREFLIGHT: a draft or unposted invoice carries field rows written before direct writes were revoked/);
   assert.equal(body(), OLD_BODY, 'a stopped apply changes nothing');
   raw(`DELETE FROM public.field_app_location_shares; DELETE FROM public.field_app_locations;
     UPDATE public.invoices SET deleted_at = now() WHERE deleted_at IS NULL;`);
   console.log('[case] a field row written onto a job\'s invoices before the apply stops it at the preflight, even beside a real save in the same transaction (nothing changed); removed');
   // A committed, ordinary field-app save before the apply also stops it (rows written before the revoke cannot be told
-  // apart); once that invoice is cancelled its rows reach no live invoice and the apply goes through.
+  // apart); once that invoice is posted (the save never rebuilds it) its rows reach no draft or unposted invoice and the apply goes through.
   psql(`BEGIN; ${asAdmin}SELECT fwe.save(NULL, ARRAY['${GA}','${GB}']::uuid[], ${key('n')}) IS NOT NULL; COMMIT;`);
   const held = apply('candidate.sql');
   assert.notEqual(held.status, 0);
-  assert.match(held.output, /FIELD_APP_WRONG_EDITOR_PREFLIGHT: a live invoice carries field rows/);
-  raw(`UPDATE public.invoices SET status = 'cancelled' WHERE deleted_at IS NULL;`);
+  assert.match(held.output, /FIELD_APP_WRONG_EDITOR_PREFLIGHT: a draft or unposted invoice carries field rows/);
+  raw(`UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE deleted_at IS NULL AND status IN ('draft', 'unposted');`);
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   raw(`DELETE FROM public.field_app_location_shares; DELETE FROM public.field_app_locations;
     UPDATE public.invoices SET deleted_at = now() WHERE deleted_at IS NULL;`);
-  console.log('[case] a committed ordinary save before the apply also stops it; once its invoices are cancelled the apply goes through (test rows then removed)');
+  console.log('[case] a committed ordinary save before the apply also stops it; once its invoices are posted the apply goes through (test rows then removed)');
   assert.notEqual(body(), OLD_BODY);
   assert.equal(grants(WRAPPER), wrapperGrants, 'the wrapper grants must not change');
   const second = apply('candidate.sql');

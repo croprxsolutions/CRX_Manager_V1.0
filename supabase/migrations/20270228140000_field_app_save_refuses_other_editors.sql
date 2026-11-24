@@ -45,13 +45,13 @@ BEGIN
   END IF;
   -- The check below trusts field rows, and until the revoke below anyone signed in could write any of their columns,
   -- so no row written before it can be told apart from the save's own. Live 2026-11-23 every field row (2) sits on a
-  -- voided or cancelled invoice. Stop for review if any now reaches (by either key) a live invoice that is not voided,
-  -- cancelled or a Split Billing invoice (refused by its stamp whatever its rows).
+  -- voided or cancelled invoice. Stop for review if any now reaches (by either key) a draft or unposted invoice, the only
+  -- statuses the save rebuilds (it refuses a group with any other live member), unless Split Billing (refused by its stamp).
   IF EXISTS (SELECT 1 FROM public.invoices i
                JOIN public.field_app_locations l
                  ON l.invoice_id = i.id OR (i.invoice_group_id IS NOT NULL AND l.invoice_group_id = i.invoice_group_id)
-              WHERE i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled') AND i.field_app_billing_set_id IS NULL) THEN
-    RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_PREFLIGHT: a live invoice carries field rows written before direct writes were revoked; review them before applying';
+              WHERE i.deleted_at IS NULL AND i.status IN ('draft', 'unposted') AND i.field_app_billing_set_id IS NULL) THEN
+    RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_PREFLIGHT: a draft or unposted invoice carries field rows written before direct writes were revoked; review them before applying';
   END IF;
 END;
 $preflight$;

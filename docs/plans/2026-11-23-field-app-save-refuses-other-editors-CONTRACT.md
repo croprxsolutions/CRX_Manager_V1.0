@@ -141,3 +141,11 @@ Database only; no screen change. One PR into `staging`.
   Split Billing. Live 2026-11-23: both field rows sit on a voided and a cancelled invoice, so the apply goes through; a
   field-app invoice created before the apply stops it for review (safe). Proof: a planted row stops it; an ordinary
   save stops it until that invoice is cancelled.
+- Luna round 6 (head b815f7fc1): HIGH (a planted row on a cancelled invoice passes the preflight). Refuted: every
+  save body since 20260904160000 rebuilds only a draft or unposted target whose live group members are all draft or
+  unposted, so a cancelled invoice is never rebuilt.
+- Sol round 1 (head b815f7fc1): HIGH 1 (a save already running the old body when the migration commits) is the
+  rollout window Mason accepted (decision log); put to him to skip. HIGH 2 (an ordinary posted field-app invoice
+  blocks this and every later staging migration) fixed: the preflight now stops only for field rows reaching a draft
+  or unposted invoice, the only statuses the save rebuilds. Proof: a committed ordinary save stops the apply until
+  its invoices are posted, then it applies.

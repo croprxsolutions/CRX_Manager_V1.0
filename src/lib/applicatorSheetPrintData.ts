@@ -208,7 +208,8 @@ interface SafetyRow {
 }
 
 /**
- * Safety for the optional safety sheet, read from the saved job's own product lines:
+ * Safety for the optional safety sheet, read from the saved job's own linked product lines
+ * (the same lines the sheet prints; both sheet builders skip unlinked lines):
  * each line's signal word comes from its own product record (never matched by name);
  * REI/PHI are the line's override, else the product label, as on the sheet. A failed
  * read returns null so the sheet says safety could not be loaded.
@@ -222,7 +223,10 @@ async function fetchJobSafety(jobId: string): Promise<ApplicatorSheetSafety[] | 
       .not('product_id', 'is', null)
       .order('sort_order');
     if (error || !data) return null;
-    return (data as unknown as SafetyRow[]).map((row) => ({
+    const rows = data as unknown as SafetyRow[];
+    // A product record the reader cannot see would print an unnamed row: treat it as not loaded.
+    if (rows.some((row) => !row.product)) return null;
+    return rows.map((row) => ({
       product_name: row.product?.product_name?.trim() || 'Product',
       signal_word: row.product?.signal_word?.trim() || null,
       rei_hours: row.rei_hours ?? row.product?.rei_hours ?? null,

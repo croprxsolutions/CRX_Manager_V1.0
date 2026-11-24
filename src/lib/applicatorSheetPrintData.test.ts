@@ -81,4 +81,10 @@ describe('prepareApplicatorSheetPrintData safety sheet', () => {
     const result = await prepareApplicatorSheetPrintData('job-1', data, { ...options, includeSafetySheet: true });
     expect(result.safety).toBeNull();
   });
+
+  it('marks safety as not loaded when a line’s product record cannot be read', async () => {
+    reply({ data: [{ rei_hours: 4, phi_days: 0, product: null }], error: null });
+    const result = await prepareApplicatorSheetPrintData('job-1', data, { ...options, includeSafetySheet: true });
+    expect(result.safety).toBeNull();
+  });
 });

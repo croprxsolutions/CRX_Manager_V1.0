@@ -39,6 +39,10 @@
 -- ORDERING: after 20270226150000 (whose transfer body this pins).
 
 SET LOCAL lock_timeout = '5s';
+-- Luna: Create Invoice takes its job FOR UPDATE. EXCLUSIVE waits for every transfer holding a job, so the open-invoice
+-- check below sees their lines, and holds later ones until this file commits. Residual: a transfer already inside the
+-- old body and waiting for its job finishes with the old body (apply outside office hours; live has no job invoices).
+LOCK TABLE public.jobs IN EXCLUSIVE MODE;
 
 DO $preflight$
 DECLARE
@@ -65,6 +69,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.invoices i
                JOIN public.invoice_items x ON x.invoice_id = i.id
                JOIN public.job_product_epa k ON k.job_id = i.job_id AND k.product_id = x.product_id AND NOT k.not_recorded
+                                          AND k.epa_registration IS NOT NULL
               WHERE i.status IN ('draft', 'unposted') AND i.deleted_at IS NULL
                 AND public._normalize_epa_registration(x.epa_registration)
                     IS DISTINCT FROM public._normalize_epa_registration(k.epa_registration)) THEN

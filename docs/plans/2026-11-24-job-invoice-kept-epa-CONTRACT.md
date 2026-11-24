@@ -135,3 +135,11 @@ Out of scope: invoices made from blend tickets (a different path), REI/PHI (#232
 - MED: a missing permission list (NULL) slipped through the pre/postflight permission comparison. Fixed: NULL fails.
 - MED: the prover could remove a reused container it did not create. Fixed: a reused container is never removed.
 - LOW: no added-line case. Fixed (4c).
+
+## Luna round after Sol round 1: 1 HIGH, 1 MED, both fixed
+
+- HIGH: a Create Invoice running during the apply could write a catalog number after the open-invoice check. Fixed: the
+  migration takes `jobs` IN EXCLUSIVE MODE first (transfers lock their job FOR UPDATE), 5s lock timeout. Residual: a
+  transfer already inside the old body and waiting for its job finishes with the old body; apply outside office hours.
+- MED: a job that kept no number blocked the apply although the catalog number is the intended value. Fixed: skipped;
+  prover case.

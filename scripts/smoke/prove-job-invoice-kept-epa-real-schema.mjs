@@ -411,6 +411,9 @@ async function main() {
   refusedProbe(`${invoiceCase({ tail: false })}\nRESET ROLE;\n\\i /tmp/candidate.sql`,
     /JOB_INVOICE_KEPT_EPA_PREFLIGHT: an open job invoice has a line whose EPA number is not the job's kept number/);
   console.log('[apply] an open job invoice written under the catalog number stops the apply at its preflight');
+  // Luna: an open invoice of a job that kept no number (catalog number on the line, as intended) does not stop it.
+  assert.equal(okProbe(`${invoiceCase({ products: [NONE], tail: false })}\nRESET ROLE;\n\\i /tmp/candidate.sql\nSELECT 'applied';`), 'applied');
+  console.log('[apply] an open invoice of a job that kept no number does not stop the apply (rolled back)');
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   assert.equal(meta(IMPL), implMeta, 'transfer owner, SECURITY DEFINER, search_path and grants unchanged');

@@ -145,7 +145,7 @@ numbers.sort((a, b) => a - b);
 
 const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
 if (!/^[0-9A-Za-z_-]{8,128}$/.test(String(sessionId || ""))) die("run this inside the Claude Code session Mason will reply in (CLAUDE_CODE_SESSION_ID is not set).");
-if (!promptHookSeen({ dirs: [stateDir], sessionId })) die(hooklessSessionRefusal({ checkout, sessionId }));
+if (!promptHookSeen({ dirs: [stateDir], sessionId })) console.error(hooklessSessionRefusal({ checkout, sessionId }));
 
 const pr = openPullRequest();
 if (carryNow(pr)) die(NO_QUESTION);

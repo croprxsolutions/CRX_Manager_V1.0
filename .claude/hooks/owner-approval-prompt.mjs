@@ -3,19 +3,20 @@
 // Mason 2026-10-09: replaces Windows Hello so he can approve from his phone;
 // 2026-10-13: a plain "I approve" is enough).
 //   - His WHOLE message is `yes` or `I approve` (or `approve`, `approved`, `yes I approve`)
-//     right after the agent showed a pending request's reference number, or
-//     `approve <6-digit code>`, in the session that built that request
+//     right after this conversation showed a pending request's summary, or
+//     `approve <6-digit code>`, in ANY conversation, whichever session built the
+//     request (Mason, 2026-11-23: it must carry to the merge captain)
 //     (scripts/owner-approve-migration.mjs) → the request becomes an approval
 //     good for 24 hours (2026-11-20), and the agent is told so.
-//   - A plain `I approve` with no request waiting in this session is ordinary
-//     chat: the hook says nothing.
-//   - Any other message, or the reply in another session → nothing is approved.
+//   - A plain `I approve` when this conversation neither built nor showed a
+//     waiting request is ordinary chat: the hook says nothing.
+//   - Any other message → nothing is approved.
 //     A whole <system-reminder> block the app puts in front of his words is not
 //     part of the message; a message with a reply on one of its lines but other
 //     text as well is refused out loud, never silently (2026-10-20), except a
 //     plain "I approve" line with no request waiting, which is ordinary chat.
 //   - Every message leaves a marker that this session's messages reach this hook;
-//     the request script refuses without it (some sessions never run it, 2026-10-20).
+//     without it the request script warns that his reply must come from another conversation.
 // Claude Code runs this on each message sent into a session. Nothing stops an
 // agent running it by hand with a made-up message; that is the deliberate
 // forgery Mason accepted as the residual (owner-approval-lib.mjs header).
@@ -23,7 +24,7 @@
 import { readFileSync } from "node:fs";
 import {
   approvalAttemptIn, approvalCodeFromReply, isPlainApprovalReply, lastAgentMessageText, ownerRequestDirs, recordPromptHookSeen, recordReplyApproval, replyMark,
-  replyWithoutReminders, resolvePlainReply,
+  replyWithoutReminders, repositoryCheckouts, resolvePlainReply,
 } from "./owner-approval-lib.mjs";
 import { OWNER_SOL_SKIP_PURPOSE, acceptAttemptIn, acceptFromReply, skipFromReply } from "./sol-accept-lib.mjs";
 
@@ -41,6 +42,12 @@ try { payload = globalThis.__CRX_ROUTED_HOOK_PAYLOAD ?? JSON.parse(readFileSync(
 try { recordPromptHookSeen({ dirs: ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]), sessionId: payload?.session_id }); }
 catch { /* a missing marker only makes the request script refuse */ }
 
+// Where a request he answers may be: every checkout of this repository, so his reply in the
+// conversation he is talking to counts for a request a merge captain built elsewhere (Mason,
+// 2026-11-23). Only listed when a message looks like an answer.
+const replyDirs = () => ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd(),
+  ...repositoryCheckouts(payload?.cwd || process.cwd())]);
+
 // The app's reminder block in front of his words is not part of his reply (2026-10-20).
 const reply = replyWithoutReminders(payload?.prompt);
 
@@ -54,7 +61,7 @@ if (accept || acceptAttemptIn(reply)) {
   let res;
   try {
     res = recordReplyApproval({
-      code: accept.code, dirs: ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]), reply,
+      code: accept.code, dirs: replyDirs(), reply,
       sessionId: payload?.session_id, form: "accept", reason: accept.reason, readMark: () => replyMark(payload?.transcript_path, reply),
     });
   } catch (error) {
@@ -76,7 +83,7 @@ if (skip) {
   let which;
   let res;
   try {
-    const dirs = ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
+    const dirs = replyDirs();
     which = resolvePlainReply({
       dirs, sessionId: payload?.session_id, purposes: [OWNER_SOL_SKIP_PURPOSE],
       readShown: () => lastAgentMessageText(payload?.transcript_path, reply),
@@ -122,8 +129,7 @@ let which = null;
 let result;
 let waiting = attempt?.kind === "code";
 try {
-  // Only THIS session's folders: a request another session built is never found here.
-  const dirs = ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
+  const dirs = replyDirs();
   if (attempt?.kind === "plain") waiting = !resolvePlainReply({ dirs, sessionId: payload?.session_id, readShown: () => "" }).silent;
   if (plain) {
     which = resolvePlainReply({

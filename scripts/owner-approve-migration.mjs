@@ -64,7 +64,7 @@ if (!/^[0-9A-Za-z_-]{8,128}$/.test(String(sessionId || ""))) {
 }
 // Never ask for a reply this conversation cannot hear: some sessions never run
 // message hooks, and Mason's "I approve" was lost there without a word (2026-10-20).
-if (!promptHookSeen({ dirs: [stateDir], sessionId })) die(1, hooklessSessionRefusal({ checkout, sessionId }));
+if (!promptHookSeen({ dirs: [stateDir], sessionId })) console.error(hooklessSessionRefusal({ checkout, sessionId }));
 
 /** Save the request under a fresh code; retry if that code is already pending here. */
 function saveRequest(build) {

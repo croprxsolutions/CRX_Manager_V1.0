@@ -153,7 +153,6 @@ assert.equal(resolvePlainReply({ dirs, sessionId: SESSION, readShown: () => "" }
 assert.match(reply(`approve ${c1}`).reason, /is a Sol finding; accept it with/, "an `approve <code>` reply never accepts a finding");
 assert.match(reply(`accept ${c1}`).reason, /at least two words/, "accept without a reason is refused");
 assert.match(reply(`accept ${c1} it costs $40 only`).reason, /money/, "a reason with a money amount is refused (the log is public)");
-assert.match(reply(`accept ${c1} fine by me`, { sessionId: "other-session-99" }).reason, /different conversation/, "a reply in another conversation is refused");
 assert.match(reply(`accept ${c1} fine by me`, { now: NOW + 25 * 60 * 60 * 1000 }).reason, /expired/, "a stale request is refused");
 // None of those refusals used the code up.
 const ok1 = reply(`accept ${c1} we never sell before switch-on`);
@@ -355,13 +354,14 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const resolveSkip = (shown, sessionId = SESSION) => resolvePlainReply({ dirs, sessionId, readShown: () => shown, purposes: [OWNER_SOL_SKIP_PURPOSE] });
   assert.equal(resolveSkip(shownText).code, r1.code, "resolve: the summary shown alone picks its request");
   assert.match(resolveSkip(`${shownText}\nAlso, want me to merge?`).reason, /did not show/, "resolve: summary plus other words picks nothing");
-  assert.equal(resolveSkip(shownText, "other-session-99").silent, true, "resolve: another conversation sees nothing waiting");
+  // Mason, 2026-11-23: a conversation that shows him the request word for word may take his skip.
+  assert.equal(resolveSkip(shownText, "other-session-99").code, r1.code, "resolve: another conversation that shows the summary picks it");
+  assert.equal(resolveSkip("Merged #900.", "other-session-99").silent, true, "resolve: another conversation that did not show it stays silent");
   assert.notEqual(resolvePlainReply({ dirs, sessionId: SESSION, readShown: () => shownText }).code, r1.code, "resolve: 'I approve' never answers a skip request");
   assert.match(recordReplyApproval({ code: r1.code, dirs, reply: `approve ${r1.code}`, sessionId: SESSION, readMark: markFor("x") }).reason, /answer it with: skip/, "approve never skips");
   assert.match(recordReplyApproval({ code: r1.code, dirs, reply: `accept ${r1.code} fine by me`, sessionId: SESSION, readMark: markFor("x"), form: "accept", reason: "fine by me" }).reason,
     /answer it with: skip/, "the old accept form never answers a skip request");
   assert.match(skipReply(r1.code, "skip 2").reason, /not in the list/, "reply: a number not shown skips nothing");
-  assert.match(skipReply(r1.code, "skip", { sessionId: "other-session-99" }).reason, /different conversation/, "reply: another conversation skips nothing");
   assert.match(skipReply(r1.code, "skip", { now: NOW + 25 * 60 * 60 * 1000 }).reason, /expired/, "reply: a stale request skips nothing");
   const ok3 = skipReply(r1.code, "skip 3");
   assert.equal(ok3.ok, true, `reply: skip 3 records (${ok3.reason})`);
@@ -381,7 +381,7 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   assert.match(verifySolSkip({ approval: { ...receipts[0], replyMark: { ...receipts[0].replyMark, words: "skip" } }, record: rec3 }).reason, /does not hold the recorded reply/,
     "verify: the transcript mark must hold the recorded reply");
   assert.match(verifySolSkip({ approval: { ...receipts[0], replyMark: { ...receipts[0].replyMark, transcript: path.join(root, "other-session.jsonl") } }, record: rec3 }).reason,
-    /different conversation/, "verify: the mark must be in the conversation that asked");
+    /not in the conversation the receipt names/, "verify: the mark must be in the conversation the receipt names");
 
   const readNone = () => null;
   assert.match(collectAcceptances({ record: rec3, readAcceptance: readNone, readSkips: () => readSkipReceipts(stateDir, H3) }).problem, /finding 1/,
@@ -424,10 +424,12 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   assert.match(hook("yes"), /NOT SKIPPED.*reason/, "hook: a bare 'yes' skips nothing and asks for the reason");
   tx(`Here is something else.\n${shown4}`);
   assert.match(hook("skip"), /NOT SKIPPED.*did not show/, "hook: the summary must be the whole last message");
+  tx("Merged #900.");
+  assert.equal(hook("skip", "other-session-99"), "", "hook: another conversation that did not show it stays silent and skips nothing");
+  // Mason, 2026-11-23: the conversation he is talking to shows a captain's request; his word there counts.
   tx(shown4);
-  assert.equal(hook("skip", "other-session-99"), "", "hook: another conversation has nothing waiting, so it skips nothing");
-  const out = hook("skip");
-  assert.match(out, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 1, 2 of 3 on PR #2200/, `hook: one word skips both (${out})`);
+  const out = hook("skip", "other-session-99");
+  assert.match(out, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 1, 2 of 3 on PR #2200/, `hook: one word skips both, from another conversation (${out})`);
   assert.equal(hook("skip"), "", "hook: the same reply again skips nothing more (nothing is waiting, so it is ordinary chat)");
   // "Do you accept the risk?" answered "yes, <reason>" (Mason, 2026-11-22).
   const r5 = skipReq([3]);

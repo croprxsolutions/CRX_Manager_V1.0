@@ -16,23 +16,22 @@
 //      checkout's other proofs.
 //   2. The agent shows Mason the plain-English summary, which ends with the code
 //      as a reference number.
-//   3. He replies `I approve` from anywhere, in THAT conversation, as his next
-//      message (Mason, 2026-10-13: "I just want to say I approve and that's good
-//      enough"). `approve <code>` still works and names the request outright.
-//      owner-approval-prompt.mjs, which Claude Code runs as a UserPromptSubmit hook
-//      on each message sent into a session, turns the request into an APPROVAL good
-//      for 30 minutes only when the reply arrives in the session that built it. A
-//      plain `I approve` counts only when the agent's message just before it showed
-//      that request's reference number, so an "I approve" about something else
-//      never approves a request still waiting from earlier.
+//   3. He replies `I approve` from anywhere, as his next message (Mason, 2026-10-13:
+//      "I just want to say I approve and that's good enough"). `approve <code>`
+//      still works and names the request outright. owner-approval-prompt.mjs, which
+//      Claude Code runs as a UserPromptSubmit hook on each message sent into a
+//      session, turns the request into an APPROVAL good for 24 hours. Since
+//      2026-11-23 (Mason: "make it count" so it carries to the merge captain) the
+//      reply may come in ANY conversation: a plain `I approve` counts only when that
+//      conversation's message just before it showed the request's summary word for
+//      word, so an "I approve" about something else never approves a request.
 //   4. scripts/apply-migration-file.mjs checks it LAST, after the reviewer proofs,
-//      the Sol proof and the landing gate, refuses it in any other session, and
-//      uses it up once.
+//      the Sol proof and the landing gate, in whichever session applies, re-reads
+//      that the plain reply followed the summary, and uses it up once.
 //
 // THE TRADE-OFF MASON ACCEPTED. The reply must be the WHOLE message, so a peer
 // session's message (always wrapped in an envelope or preamble), a subagent's
-// report or a quoted line never matches, and a reply in another conversation
-// never counts. That stops a parked migration being applied by mistake, on a
+// report or a quoted line never matches. That stops a parked migration being applied by mistake, on a
 // misread handoff, or on a relayed "Mason said yes". It does not stop an agent
 // that deliberately fakes the approval — by writing the approval file, or by
 // running the reply hook by hand with a made-up message and session id: agents
@@ -530,14 +529,22 @@ export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now()
       // request, `accept <code> <reason>` an old per-finding Sol request (sol-accept-lib.mjs).
       if (!purposes.includes(p?.purpose)) continue;
       const deadline = Date.parse(p?.expiresAt);
-      if (p?.sessionId === sessionId && String(p?.code) === m[1] && Number.isFinite(deadline) && now <= deadline) live.set(m[1], p);
+      // Any session's request (Mason, 2026-11-23: his reply must carry to the merge captain);
+      // what binds it is that THIS conversation's last message showed it word for word.
+      if (String(p?.code) === m[1] && Number.isFinite(deadline) && now <= deadline) live.set(m[1], p);
     }
   }
   if (!live.size) return { silent: true };
+  // Nothing waiting that this conversation built: unless it showed him one, his words are ordinary chat.
+  const ownWaiting = [...live.values()].some((p) => p?.sessionId === sessionId);
   let shownText;
   try { shownText = String(readShown() ?? ""); }
-  catch (e) { return { ok: false, reason: `what the agent last showed him could not be read (${errText(e)})` }; }
+  catch (e) {
+    if (!ownWaiting) return { silent: true };
+    return { ok: false, reason: `what the agent last showed him could not be read (${errText(e)})` };
+  }
   const shown = [...live].filter(([, p]) => requestShownIn(shownText, p)).map(([c]) => c);
+  if (!shown.length && !ownWaiting) return { silent: true };
   if (!shown.length) {
     return { ok: false, reason: "the agent's message just before it did not show the approval request's summary alone (word for word, nothing else), so it may have been about something else" };
   }
@@ -608,20 +615,35 @@ export function promptHookSeen({ dirs, sessionId }) {
   });
 }
 
-/** What the request script prints instead of a request when the marker is missing. */
+/**
+ * What the request script prints (to stderr, then it carries on) when this session's messages
+ * have not reached the reply hook. Since 2026-11-23 his reply counts in ANY conversation that
+ * shows him the summary word for word, so the request is still built; never send him to a terminal.
+ */
 export function hooklessSessionRefusal({ checkout, sessionId }) {
   return [
-    "owner-approve-migration: REFUSED — do NOT ask Mason to reply \"I approve\" in this conversation.",
-    `No message in this session (${sessionId}) has reached the approval hook: there is no ${promptHookSeenName(sessionId)}`,
-    `in ${path.join(checkout, ".claude", "session-state")}. Usually Claude Code is not running message hooks here (or the hook could not save`,
-    "its marker in that folder); either way his reply could be lost without a word.",
-    "Tell Mason in plain English, then the fix: open a Terminal tab in this same folder,",
-    `  ${checkout}`,
-    "start a fresh `claude` there, and run this script from that session; he replies in that terminal conversation.",
-    "(If this conversation started before this check existed, any new message into it records the marker; then run this again.",
-    "A desktop session in a worktree may run the hooks from the repository's MAIN checkout: if that checkout is behind main,",
-    "its older hook writes no marker, so fast-forward it to main, then any new message records the marker.)",
+    `NOTE: no message in this session (${sessionId}) has reached the approval hook yet (no ${promptHookSeenName(sessionId)}`,
+    `in ${path.join(checkout, ".claude", "session-state")}), so his reply HERE may not be heard.`,
+    "Show him the summary below from a conversation his messages do reach (the one he is talking to, e.g. the one that started you:",
+    "send it there with SendMessage and ask that agent to make it, word for word, the whole last message of its turn). His reply there counts.",
+    "Never send Mason to a terminal for this.",
   ].join("\n");
+}
+
+/**
+ * Every checkout of this repository (`git worktree list`), so a reply in one conversation finds
+ * a request another session built in its own worktree (Mason, 2026-11-23). On any failure only
+ * `cwd` itself: fewer folders can only find fewer requests, never approve the wrong one.
+ */
+export function repositoryCheckouts(cwd, run = (args) => execFileSync("git", args, { cwd, encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] })) {
+  const out = [cwd].filter(Boolean);
+  try {
+    for (const line of String(run(["worktree", "list", "--porcelain"])).split(/\r?\n/)) {
+      const m = /^worktree\s+(.+)$/.exec(line.trim());
+      if (m) out.push(m[1]);
+    }
+  } catch { /* cwd alone */ }
+  return out;
 }
 
 /**
@@ -681,10 +703,10 @@ export function recordReplyApproval({
   if (solAccept && (!/^[0-9a-f]{40}$/i.test(String(p.prHead)) || !Number.isInteger(p.finding?.n) || p.finding.n < 1 || p.finding.n > 99)) {
     return no(`the request for code ${code} names no usable head or finding`);
   }
-  // Sessions that share a checkout share its session-state: the request names the
-  // session that built it, and only a reply in that session counts (Luna HIGH,
-  // round 2, PR #894).
-  if (p.sessionId !== sessionId) return no(`the request for code ${code} was built in a different conversation; Mason must reply in the one that asked him`);
+  // Since 2026-11-23 (Mason: "make it count", so a merge captain can carry it) a reply in ANY
+  // conversation counts: a plain reply only right after that conversation showed this request
+  // word for word (resolvePlainReply now, the proof checks re-read it), a code reply because it
+  // names the request outright. The receipt records where he replied.
   const deadline = Date.parse(p.expiresAt);
   if (!Number.isFinite(deadline) || now > deadline) return no(`the request for code ${code} expired at ${p.expiresAt}`);
   // Where his reply is (replyMark), so the apply can check it was his words alone.
@@ -701,6 +723,7 @@ export function recordReplyApproval({
     // One receipt for every finding he skipped in this reply, so a crash never records half of them.
     ...(solSkip ? { selected } : {}),
     ...(ignored ? { ignored } : {}),
+    repliedIn: sessionId,
     replyMark: mark,
   };
   const out = path.join(dir, selftest ? selfTestResultName(code)
@@ -879,7 +902,9 @@ export function findOwnerApprovals(dirs, safeName) {
  * @param {(mark: object) => void} [args.checkReply]  throws unless his reply was his words alone (assertReplyAlone)
  * @returns {{ok: true, payload: object, expiresAt: string}|{ok: false, reason: string}}
  */
-export function verifyOwnerApproval({ approval, expect, appliedNames = null, usedNonces = new Set(), now = Date.now(), checkReply = assertReplyAlone }) {
+export function verifyOwnerApproval({
+  approval, expect, appliedNames = null, usedNonces = new Set(), now = Date.now(), checkReply = assertReplyAlone, checkShown = assertSkipShown,
+}) {
   const no = (reason) => ({ ok: false, reason });
   const payloadText = approval?.payload;
   if (typeof payloadText !== "string" || approval?.via !== OWNER_APPROVAL_VIA) return no("the approval file is malformed");
@@ -890,10 +915,8 @@ export function verifyOwnerApproval({ approval, expect, appliedNames = null, use
   if (p.project !== expect.project) return no(`it approves project ${p.project}, not ${expect.project}`);
   if (p.migration !== expect.migration) return no(`it approves ${p.migration}, not ${expect.migration}`);
   if (p.queryHash !== expect.queryHash) return no("the migration file changed after Mason approved it (different fingerprint)");
-  // His reply counts only in the conversation that asked him, and that is the one
-  // that must apply it (AGENTS.md: approval in the current conversation).
-  if (!usableSessionId(expect.sessionId)) return no("the applying session is unknown (fail closed)");
-  if (p.sessionId !== expect.sessionId) return no("it was approved in a different conversation than the one applying it; ask Mason here");
+  // Any session may apply it (Mason, 2026-11-23: his yes carries to the merge captain). What
+  // binds it is everything below: exact file, pull request, findings shown, his words, 24 hours, once.
   if (!/^[0-9a-f]{40}$/i.test(String(expect.prHead || "")) || !Number.isInteger(Number(expect.pullRequest)) || !(Number(expect.pullRequest) > 0)) {
     return no("the pull request or its head is unknown (fail closed)");
   }
@@ -932,5 +955,11 @@ export function verifyOwnerApproval({ approval, expect, appliedNames = null, use
   // His reply, read back now that it is written, was his words alone (Codex P1, PR #900).
   try { checkReply(approval.replyMark); }
   catch (e) { return no(`his reply could not be confirmed as the approval words alone (${errText(e)})`); }
+  // A plain `I approve` names no request, so the conversation he replied in must have shown
+  // this one just before it; re-read here now that any session may apply (2026-11-23).
+  if (approvalCodeFromReply(String(approval.reply ?? "")) !== String(p.code)) {
+    try { checkShown(approval.replyMark, p); }
+    catch (e) { return no(`his reply could not be tied to this request (${errText(e)})`); }
+  }
   return { ok: true, payload: p, expiresAt: new Date(expires).toISOString() };
 }

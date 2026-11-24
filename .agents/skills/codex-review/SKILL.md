@@ -16,7 +16,7 @@ Hands a frozen diff to a separate, pinned, isolated Codex reviewer and brings th
 
 **Which review a change gets (Mason, 2026-11-23):** docs and wording only, no app code: no Codex review (CI and the Codex GitHub App still run). Ordinary code off the Sol list: ONE Terra final review on the committed head (`--terra`); fix any BLOCKER/HIGH, commit, and rerun `--terra` on the new head until none remains (the `AGENTS.md` stop rule applies); fix, refute or name as a deferral every MED/LOW; then open the PR. A model never gives the final review of code it helped build: Terra-built code gets Luna, code both Terra and Luna built gets Sol. Sol is not the default for these (~20 minutes, no gate needs it); choose it only for a large or unclear change (`--sol --reason`). Sol-list changes (money, inventory, database, logins): unchanged, Luna rounds then Sol once.
 
-Sol runs **last**: Luna clean → freeze → Sol → push. The proof binds to that exact head; a later Sol-list commit voids it. The guards accept only `gpt-6.2-sol`/`high`; do not "fix" them to accept Luna. Luna also builds (`scripts/codex-build.mjs`), so a Luna round on Codex-built code is self-review; the independent Sol gate is what guards money.
+On a Sol-list change, Sol runs **last**: Luna clean → freeze → Sol → push. The proof binds to that exact head; a later Sol-list commit voids it. The guards accept only `gpt-6.2-sol`/`high`; do not "fix" them to accept Luna. Luna also builds (`scripts/codex-build.mjs`), so a Luna round on Codex-built code is self-review; the independent Sol gate is what guards money.
 
 If the CLI is missing or broken, use `/codex-cross-review` (a paste doc) instead.
 

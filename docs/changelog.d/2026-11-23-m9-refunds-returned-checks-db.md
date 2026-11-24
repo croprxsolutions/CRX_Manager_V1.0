@@ -12,7 +12,7 @@
 - Month-End: a returned check comes off "payments received" in the month it is recorded. Refunds and returned checks are new figures on the summary and the close receipt.
 - Statement: the statement shows "Returned check" and "Refund paid (outside CRX)" rows.
 - Guards: a returned payment, or one whose prepay was refunded, cannot be voided. A credit with a refund or a returned check cannot have its balance edited or be deleted.
-- No screen yet; the UI/UX stage adds the dialog, the badge and the Month-End row. Migration `20270227140000` (local candidate, not applied). Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs`.
+- No screen yet; the UI/UX stage adds the dialog, the badge and the Month-End row. Migration `20270227210000` (local candidate, not applied). Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs`.
 - Sol round 1 fixes (same migration, still a local candidate):
   - Only a check payment can be returned.
   - A split Prepayment Manager check comes back as one event at its face value.
@@ -33,7 +33,7 @@
   - Before any refund or return, one check confirms the records it touches agree: same customer, complete check, totals, invoice amounts and balances. If they don't, it is refused "needs a hand check" with the reason.
   - Two Prepayment Manager checks entered together count as two payments on Month-End.
   - Statements show the check or refund reference only, never the staff reason.
-- Sol round 4 changes (same migration, now `20270227140000`, still a local candidate):
+- Sol round 4 changes (same migration, now `20270227210000`, still a local candidate):
   - Before any refund or return, the whole customer's prepay must agree: every credit matches its history, the stored balance is the credits' total, and every credit came from this customer's own payment and was used on this customer's invoices. Otherwise it is refused "needs a hand check".
   - A Prepayment Manager check comes back only as its whole entry; a partial list of its buckets, or buckets that don't add up to the check, is refused.
   - A returned check never changes a draft, void or deleted invoice.
@@ -41,5 +41,6 @@
   - Void Payment refuses anything that is not a payment.
   - Round 5: a prepay credit with no known source, or one its payment never funded, blocks refunds and returns for that customer until it is checked by hand; a Prepayment Manager entry that mixes two checks is refused.
   - Round 6: a Prepayment Manager credit with no record of its entry, or one whose entry belongs to another customer, is refused; a returned check is refused if another payment put a negative amount on the same invoice.
-  - Round 8: a refund or returned check is refused unless every Prepayment Manager check of the customer matches its entry (its buckets, reference and total); refunding part of a split check locks the amounts of its other buckets too. Migration now `20270227140000`.
+  - Round 8: a refund or returned check is refused unless every Prepayment Manager check of the customer matches its entry (its buckets, reference and total); refunding part of a split check locks the amounts of its other buckets too. Migration now `20270227210000`.
   - Round 9: a refund locks all of the customer's prepay while it runs, so editing another bucket of the same check waits and is then refused; malformed legacy check records are refused.
+  - Round 10: a past-date A/R report is flagged as not rebuildable when a check applied before that date was later unapplied by an invoice void and then returned.

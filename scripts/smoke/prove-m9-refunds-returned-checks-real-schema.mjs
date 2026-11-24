@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Real-schema proof for M9 (refunds paid outside CRX, prepay balance check, returned checks):
- * 20270227140000_m9_refunds_and_returned_checks.sql. Design: docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md.
+ * 20270227210000_m9_refunds_and_returned_checks.sql. Design: docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md.
  * Written first (stage 1: every case failed because the functions did not exist, with setup passing).
  *
  * Container setup and replay copied from prove-month-close-payments-recheck-real-schema.mjs, replaying EVERY
@@ -54,6 +54,8 @@
  *  17) Sol round 8 (fixed in round 9): an entry matches its credits only as an array of distinct ids (an object-key
  *      entry, a bucket listed twice and a non-list entry are refused); a refund locks every credit of the customer, so
  *      an edit of a sibling bucket waits for it and is then refused (two sessions, committed).
+ *  18) Sol round 9: a check applied before an A/R cutoff, whose invoice is voided after it and which is then
+ *      returned, still flags that cutoff (the return no longer hides the credit's change date).
  *
  * Run: node scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs   (needs Docker)
  * Prints M9_REFUNDS_RETURNED_CHECKS_PROOF_PASS when every case passes; otherwise lists each failing case and why and
@@ -74,7 +76,7 @@ const REUSE = process.env.CRX_PROVER_CONTAINER || null;
 const NAME = REUSE ?? `crx-m9-${process.pid}-${Date.now().toString(36)}`;
 const DB = 'postgres';
 const KEEP = REUSE !== null || process.env.CRX_PROVER_KEEP_CONTAINER === '1' || process.env.CRX_PROVER_REPLAY_ONLY === '1';
-const M9 = path.join(ROOT, 'supabase', 'migrations', '20270227140000_m9_refunds_and_returned_checks.sql');
+const M9 = path.join(ROOT, 'supabase', 'migrations', '20270227210000_m9_refunds_and_returned_checks.sql');
 // Marks the containers this script creates; reuse mode refuses any other container.
 const LABEL = 'crx.prover.m9-refunds-returned-checks';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
@@ -274,9 +276,10 @@ function buildContainer() {
 const id = (n) => `e9090000-0000-4000-8000-${n.padStart(12, '0')}`;
 const ADMIN = id('a1'); const REP = id('b1');
 const C = { c1: id('c1'), c2: id('c2'), c3: id('c3'), c4: id('c4'), c5: id('c5'), c6: id('c6'), c7: id('c7'), c8: id('c8'),
-  c9: id('c9'), c10: id('c10') };
+  c9: id('c9'), c10: id('c10'), c11: id('c11') };
 const INV5 = id('e5'); const INV7 = id('e7'); const INV2 = id('e2'); const INV9 = id('e9'); const INV9B = id('e9b');
 const INV8 = { a: id('e8a'), b: id('e8b'), c: id('e8c') };
+const INV11 = { old: id('e11a'), now: id('e11b') };  // case 18: an invoice posted before the A/R cutoff, one today
 const TODAY = "(now() AT TIME ZONE 'America/Chicago')::date";
 const as = (uid) => `RESET ROLE;
 SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);
@@ -346,6 +349,10 @@ function seed() {
     INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, invoice_date, due_date, total_amount_cents, created_by, posted_by, posted_at)
       VALUES ('${INV9}', 'M9-OD-INV', '${C.c9}', 'misc_charge', 'posted', DATE '2026-11-01', DATE '2026-11-10', 10000, '${ADMIN}', '${ADMIN}', now()),
              ${invoiceRow(INV9B, 'M9-OD-INV2', C.c9, "DATE '2026-11-01'", 20000)};
+    -- Case 18: c11 has a $50.00 invoice posted 2026-10-05 (before the cutoff) and a $100.00 one today.
+    INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, invoice_date, due_date, total_amount_cents, created_by, posted_by, posted_at)
+      VALUES ('${INV11.old}', 'M9-AR-OLD', '${C.c11}', 'misc_charge', 'posted', DATE '2026-10-05', DATE '2027-01-31', 5000, '${ADMIN}', '${ADMIN}', '2026-10-05 15:00Z'),
+             ${invoiceRow(INV11.now, 'M9-AR-NOW', C.c11, TODAY, 10000)};
     COMMIT;`);
   // $500.00 Prepayment Manager checks through the real writer (cases 1, 2, 3, 4, 6).
   for (const k of ['c1', 'c2', 'c3', 'c4', 'c6', 'c7', 'c8']) {
@@ -388,7 +395,7 @@ function seed() {
   assert.equal(state.oct, 'closed', 'setup: October 2026 is closed');
   assert.equal(scalar(`SELECT sum(balance_cents) || ':' || (SELECT balance_cents FROM public.invoices WHERE id = '${INV7}') FROM public.prepay_credits WHERE customer_id = '${C.c7}';`), '35000:5000',
     'setup: c7 check has $350 left; its October invoice owes $50');
-  console.log('[setup] admin, rep, ten customers; $500 prepay checks; Oct 15 $1,537 payment paid the $1,237 Oct 5 invoice (+$300 prepay); an October $500 prepay check in two buckets, $150 applied in October; October 2026 closed');
+  console.log('[setup] admin, rep, eleven customers; $500 prepay checks; Oct 15 $1,537 payment paid the $1,237 Oct 5 invoice (+$300 prepay); an October $500 prepay check in two buckets, $150 applied in October; October 2026 closed');
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1060,6 +1067,35 @@ kase('17) Sol round 8: entries match only as arrays of distinct ids; a refund ho
   assert.match(race.b, /PREPAY_CREDIT_HAS_REVERSALS/, `the sibling edit waits, then is refused: ${race.b}`);
   assert.equal(scalar(`SELECT original_amount_cents || ':' || balance_cents FROM public.prepay_credits WHERE id = ${CHECK7B};`), '20000:20000',
     'the sibling keeps its amount');
+});
+
+kase('18) Sol round 9: apply before an A/R cutoff, void the invoice after it, return the check: the cutoff is flagged', () => {
+  const pm = `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C.c11}' AND source_reference = 'M9-C18')`;
+  const r = ran(session(`${as(ADMIN)}
+    SELECT public.create_prepay_check_splits('${C.c11}', 'M9-C18', '[{"label":"A","amount_cents":20000}]'::jsonb, '${ADMIN}', 'm9-c18-pm')::text AS pm \\gset
+    SELECT public.apply_prepay_to_invoice(${pm}, '${INV11.now}', 8000, '${ADMIN}', 'm9-c18-apply')::text AS ap \\gset
+    ${OWNER}
+    -- The check was received before the cutoff, 2026-11-01, and last changed then (its application is on today's
+    -- invoice, which the cutoff does not count).
+    SET CONSTRAINTS ALL IMMEDIATE;
+    ALTER TABLE public.prepay_credits DISABLE TRIGGER set_prepay_credits_updated_at;  -- backdate only; rolled back
+    UPDATE public.prepay_credits SET created_at = '2026-10-20 15:00Z', updated_at = '2026-10-21 15:00Z' WHERE id = ${pm};
+    ALTER TABLE public.prepay_credits ENABLE TRIGGER set_prepay_credits_updated_at;
+    SELECT public.statement_customer_has_later_balance_activity('${C.c11}', DATE '2026-11-01')::text AS before_void \\gset
+    ${as(ADMIN)}
+    -- After the cutoff: the invoice is voided (its application is deleted), then the check bounces.
+    SELECT count(*) FROM (SELECT public.void_invoice('${INV11.now}', 'issued in error', 'm9-c18-void')) v \\gset
+    SELECT public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c18-ret', ${pm})::text AS ret \\gset
+    ${OWNER}
+    SELECT json_build_object('before', :'before_void'::boolean,
+      'apps', (SELECT count(*) FROM public.prepay_applications WHERE prepay_credit_id = ${pm}),
+      'ret', :'ret'::jsonb,
+      'flag', public.statement_customer_has_later_balance_activity('${C.c11}', DATE '2026-11-01'))::text;`));
+  const o = JSON.parse(r.last);
+  assert.equal(o.before, false, 'before the void and the return, the cutoff rebuilds');
+  assert.equal(o.apps, 0, 'the invoice void removed the application');
+  assert.equal(o.ret.invoice_payment_cents + o.ret.prepay_applications_reversed_cents, 0, 'the return touched no invoice');
+  assert.equal(o.flag, true, 'the A/R as of the cutoff is flagged: the return does not hide the removed application');
 });
 
 const admin = (sql) => psql(sql, { user: 'supabase_admin', db: 'template1' });

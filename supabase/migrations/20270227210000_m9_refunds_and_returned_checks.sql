@@ -1,5 +1,5 @@
 -- Written 2026-11-23. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270227140000_m9_refunds_and_returned_checks.md.
+-- docs/reference/migrations.d/20270227210000_m9_refunds_and_returned_checks.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (M9, billing plan 4 Nov / audit 1.3; design docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md):
@@ -56,7 +56,8 @@
 --   7. Statement (_get_customer_statement_scoped_impl): a "Returned check <ref>" row puts back what the check paid; a
 --      "Refund paid (outside CRX) <ref>" row with $0 effect (no staff reason on the statement). statement_customer_has_later_balance_activity: a later returned
 --      check makes an older A/R date unrebuildable (flagged) when it touched an invoice of that date, as a void does;
---      a never-applied credit zeroed by a returned check no longer trips the credit-timestamp test.
+--      the credit-timestamp test is left as it was (round 10: a returned credit still trips it, so an application an
+--      invoice void removed after the cutoff is never hidden).
 --   8. Guards: void_payment refuses a set that is not a payment (NOT_A_PAYMENT), a returned payment and one whose
 --      prepay was refunded, and locks its invoices in one
 --      id-ordered pass; edit_prepay_credit refuses a
@@ -1058,10 +1059,6 @@ AS $function$
         AND (
           (pc.created_at AT TIME ZONE 'America/Chicago')::date > p_as_of_date
           OR (pc.updated_at AT TIME ZONE 'America/Chicago')::date > p_as_of_date
-             -- M9: a credit that was never applied and was zeroed by a returned check changed no invoice
-             AND NOT (EXISTS (SELECT 1 FROM public.money_reversal_lines l JOIN public.money_reversals r ON r.id = l.reversal_id
-                               WHERE l.prepay_credit_id = pc.id AND r.kind = 'returned_check')
-                      AND NOT EXISTS (SELECT 1 FROM public.prepay_applications pa WHERE pa.prepay_credit_id = pc.id))
         )
         AND EXISTS (
           SELECT 1
@@ -1960,11 +1957,7 @@ $m9blk$]),
         AND (mr.entry_date > p_as_of_date OR (mr.created_at AT TIME ZONE 'America/Chicago')::date > p_as_of_date)
         AND i.invoice_date <= p_as_of_date
         AND public.statement_invoice_was_posted_as_of(i.id, i.posted_at, p_as_of_date)
-    )$m9blk$] || ARRAY[$m9blk$
-             -- M9: a credit that was never applied and was zeroed by a returned check changed no invoice
-             AND NOT (EXISTS (SELECT 1 FROM public.money_reversal_lines l JOIN public.money_reversals r ON r.id = l.reversal_id
-                               WHERE l.prepay_credit_id = pc.id AND r.kind = 'returned_check')
-                      AND NOT EXISTS (SELECT 1 FROM public.prepay_applications pa WHERE pa.prepay_credit_id = pc.id))$m9blk$]),
+    )$m9blk$]),
       ('public._get_customer_statement_scoped_impl(uuid,date,date)', ARRAY[$m9blk$
     UNION ALL
 

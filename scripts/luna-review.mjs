@@ -99,8 +99,8 @@ export function parseArgs(argv) {
     throw new Error("Choose one scope: --base, --commit or --uncommitted.");
   }
   if (opts.sol && opts.terra) throw new Error("Choose one reviewer: --sol or --terra.");
-  // Terra is the one independent final review: no settled list, no round cap to lift.
-  if (opts.terra && (opts.settled || opts.after)) throw new Error("--terra is one independent final review; drop --settled and --after-*.");
+  // Terra stays independent: it never sees what an earlier round decided.
+  if (opts.terra && opts.settled) throw new Error("--terra is an independent final review; drop --settled.");
   if (opts.sol && !opts.reason) throw new Error('--sol requires --reason "<why Luna was not enough>".');
   if (opts.reason && !opts.sol) throw new Error("--reason only applies to --sol.");
   // Sol stays independent: it never sees what an earlier round decided (retro, Mason, 2026-11-09).
@@ -526,7 +526,6 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
     const opts = parseArgs(argv);
     const model = opts.sol ? CODEX_REVIEW_MODEL : opts.terra ? TERRA_MODEL : LUNA_MODEL;
     const effort = opts.sol ? CODEX_REVIEW_EFFORT : opts.terra ? TERRA_EFFORT : LUNA_EFFORT;
-    const lunaRound = !opts.sol && !opts.terra;
     if (opts.sol) console.error(`[luna-review] advisory Sol escalation, reason: ${opts.reason}`);
 
     const root = spawnSync(fixedGitExecutable(), ["rev-parse", "--show-toplevel"], { encoding: "utf8", windowsHide: true });
@@ -556,9 +555,9 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
     }
 
     // Luna rounds only: the advisory Sol escalation is the documented way past the guard cap.
-    // Terra counts toward the guard-change cap (a guard change is off the Sol list, so Terra is its reviewer).
+    // Terra rounds count toward both caps like Luna rounds (Terra review of this change, 2026-11-23).
     const guardChange = !opts.sol && GUARD_DIFF_RE.test(frozen.diff);
-    const wholeBranch = lunaRound && Boolean(frozen.baseSha);
+    const wholeBranch = !opts.sol && Boolean(frozen.baseSha);
     const rounds = guardChange || wholeBranch ? branchRounds(git, rootDir) : null;
     if (guardChange && rounds.guard >= GUARD_ROUND_LIMIT) {
       console.log("STOP: third review round on a guard change — drop the carve-out or hand the decision to Mason (AGENTS.md stop rule).");

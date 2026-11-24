@@ -111,7 +111,7 @@ BEGIN
       PERFORM 1 FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
       IF EXISTS (SELECT 1 FROM public.vendor_bills vb
                   WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided') THEN
-        RAISE EXCEPTION 'PO_EDIT_NEEDS_ADMIN: this purchase order has a vendor bill, so only an admin can lower a quantity, remove a line or change a line''s product'
+        RAISE EXCEPTION 'PO_EDIT_NEEDS_ADMIN: this purchase order has a vendor bill, so only an admin can lower a quantity, remove a line or change a line''s product or unit'
           USING ERRCODE = '42501';
       END IF;
     END IF;

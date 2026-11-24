@@ -124,7 +124,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^PO_EDIT_BELOW_BILLED\b/i,
    "This change would leave the vendor bills more than 5% over the purchase order's ordered total. Void or adjust the bill first"],
   [/^PO_EDIT_NEEDS_ADMIN\b/i,
-   "This purchase order has a vendor bill, so only an admin can lower a quantity, remove a line or change a line's product. Ask an admin to make this change"],
+   "This purchase order has a vendor bill, so only an admin can lower a quantity, remove a line or change a line's product or unit. Ask an admin to make this change"],
   [/^PREPAY_BALANCE_SERVER_ONLY\b/i,
    'A prepay balance changes only through prepayments and payments'],
   [/^RETURN_NOT_FOUND\b/i,

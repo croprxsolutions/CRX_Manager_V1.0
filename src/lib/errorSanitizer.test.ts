@@ -343,8 +343,8 @@ describe('sanitizeError', () => {
       .toBe('This would put the vendor bills more than 5% over what has arrived on the purchase order, or over its ordered total. Void or adjust the bill first');
     expect(sanitizeError("PO_EDIT_BELOW_BILLED: this edit would leave the active vendor bills more than 5% over the purchase order's ordered total; void or adjust the bill first"))
       .toBe("This change would leave the vendor bills more than 5% over the purchase order's ordered total. Void or adjust the bill first");
-    expect(sanitizeError("PO_EDIT_NEEDS_ADMIN: this purchase order has a vendor bill, so only an admin can lower a quantity, remove a line or change a line's product"))
-      .toBe("This purchase order has a vendor bill, so only an admin can lower a quantity, remove a line or change a line's product. Ask an admin to make this change");
+    expect(sanitizeError("PO_EDIT_NEEDS_ADMIN: this purchase order has a vendor bill, so only an admin can lower a quantity, remove a line or change a line's product or unit"))
+      .toBe("This purchase order has a vendor bill, so only an admin can lower a quantity, remove a line or change a line's product or unit. Ask an admin to make this change");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can change a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))

@@ -340,7 +340,11 @@ describe('SupplierPricing page', () => {
     expect(screen.getByText('= $15.00 per gal')).toBeInTheDocument();
     expect(screen.getAllByText('for 2 case')).toHaveLength(2);
     expect(screen.getAllByText('per case')).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Approve selected observations' }));
+    // The rows are selected after the review loads; wait for that before opening the dialog.
+    expect(await screen.findByText('You are adding 3 supplier observations. You are changing ZERO sell prices.')).toBeInTheDocument();
+    const approve = screen.getByRole('button', { name: 'Approve selected observations' });
+    await waitFor(() => expect(approve).toBeEnabled());
+    fireEvent.click(approve);
     expect(await screen.findByText(
       'You are adding 3 supplier observations. You are changing ZERO sell prices.'
       + ' Atrazine: $30.00 for 2 case = $3.00 per gal. Atrazine: $30.00 per case = $6.00 per gal.'

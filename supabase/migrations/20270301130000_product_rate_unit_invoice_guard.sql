@@ -17,7 +17,8 @@
 --     update changing rate_unit, inventory_unit or product_form, leaves a rate unit invoices cannot convert (rule 1);
 --     an update changing none of them is never refused (rule 2). PRODUCT_PARENT_SIZE_NOT_RESTORABLE when a change to a
 --     size of an approved group (rate unit, stock unit, unit size or form) would make switching back fail (rule 3).
---     A switch back's own write of each size's restore target is not refused (rule 4).
+--     A switch back's own write of each size's restore target is not refused (rule 4). It reads the size's group
+--     FOR SHARE, so an edit racing a switch is judged against the group as the switch left it.
 --   * BEFORE INSERT OR UPDATE OF product_id, parent_id trigger on product_parent_members: a size joining an approved
 --     group must be restorable (rule 3); takes the group's row lock (FOR SHARE), so a switch running at the same time
 --     either sees the new size or is waited on.
@@ -109,8 +110,11 @@ BEGIN
     RETURN NEW;  -- rule 2: nothing the invoice unit or the switch back depends on changed
   END IF;
   IF TG_OP = 'UPDATE' THEN
+    -- FOR SHARE: a rate switch writing this group makes this edit wait, then read the group as the switch left it
+    -- (an unlocked read could still see it on its old rate and skip rule 3). Same lock as the member trigger.
     SELECT pp.* INTO v_parent FROM public.product_parent_members m JOIN public.product_parents pp ON pp.id = m.parent_id
-     WHERE m.product_id = NEW.id;
+     WHERE m.product_id = NEW.id
+       FOR SHARE OF pp;
     -- Rule 4: a switch back writes the sizes while the group is still approved, its pass held in this transaction,
     -- after writing the old unit on the group row. Only a size receiving exactly its restore target is let through.
     v_restoring := COALESCE(v_parent.rate_source = 'approved'

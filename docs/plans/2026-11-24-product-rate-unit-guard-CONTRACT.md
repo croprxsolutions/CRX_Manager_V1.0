@@ -86,4 +86,11 @@ into a lb group → refused; R6 a product already bad before the guard → a not
 fix saves; R7 groups on their approved rate: an MG size cannot join a blank-approved lb group, an existing size's sold
 unit cannot change to MG (refused today by the earlier sold-unit freeze, before this guard; its leg is a backstop), a good size joins and switching back restores the old rate on every size; a pre-guard bad
 unit is put back by switching back (rule 4); R8 the migration writes no rows, a second run refuses, no API role can
-execute the guard functions. Not proven: two sessions racing a join and a switch (the row lock is by design).
+execute the guard functions. Not proven: two sessions racing a join or a size edit against a switch (the row locks are by design).
+
+## Luna round 1 (2026-11-24)
+
+HIGH: the products trigger read the group without a lock, so a size edit that waited for a switch could still see the
+group on its old rate and skip rule 3. Fixed: it reads the group `FOR SHARE`, like the member trigger, so it waits for
+the switch and then sees the group as the switch left it. A size edit that already holds its row while a switch waits
+for it ends in a database deadlock error for one of the two, which saves nothing; the user retries.

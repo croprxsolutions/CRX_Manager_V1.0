@@ -201,40 +201,32 @@ export async function fetchApplicatorSheetBillingSplits(
   }
 }
 
-interface SafetyRow {
-  rei_hours: number | null;
-  phi_days: number | null;
-  product: { product_name: string | null; signal_word: string | null; rei_hours: number | null; phi_days: number | null } | null;
-}
-
 /**
- * Safety for the optional safety sheet, read from the saved job's own linked product lines
- * (the same lines the sheet prints; both sheet builders skip unlinked lines):
- * each line's signal word comes from its own product record (never matched by name);
- * REI/PHI are the line's override, else the product label, as on the sheet. A failed
- * read returns null so the sheet says safety could not be loaded.
+ * Safety for the optional safety sheet: exactly the job order's product lines, in
+ * order. Each line's signal word is read at print time from its own product record
+ * (by product id, never by name); REI/PHI are the line's own values, as on the job
+ * order. A failed read, or a line product the reader cannot see, returns null so the
+ * sheet says safety could not be loaded. A line without a product id prints "See label".
  */
-async function fetchJobSafety(jobId: string): Promise<ApplicatorSheetSafety[] | null> {
-  try {
-    const { data, error } = await supabase
-      .from('job_chemicals')
-      .select('rei_hours, phi_days, product:products(product_name, signal_word, rei_hours, phi_days)')
-      .eq('job_id', jobId)
-      .not('product_id', 'is', null)
-      .order('sort_order');
-    if (error || !data) return null;
-    const rows = data as unknown as SafetyRow[];
-    // A product record the reader cannot see would print an unnamed row: treat it as not loaded.
-    if (rows.some((row) => !row.product)) return null;
-    return rows.map((row) => ({
-      product_name: row.product?.product_name?.trim() || 'Product',
-      signal_word: row.product?.signal_word?.trim() || null,
-      rei_hours: row.rei_hours ?? row.product?.rei_hours ?? null,
-      phi_days: row.phi_days ?? row.product?.phi_days ?? null,
-    }));
-  } catch {
-    return null;
+async function sheetSafety(products: ApplicatorSheetData['products']): Promise<ApplicatorSheetSafety[] | null> {
+  const ids = [...new Set(products.map((product) => product.product_id).filter((id): id is string => Boolean(id)))];
+  const words = new Map<string, string | null>();
+  if (ids.length > 0) {
+    try {
+      const { data, error } = await supabase.from('products').select('id, signal_word').in('id', ids);
+      if (error || !data) return null;
+      (data as Array<{ id: string; signal_word: string | null }>).forEach((row) => words.set(row.id, row.signal_word?.trim() || null));
+    } catch {
+      return null;
+    }
+    if (ids.some((id) => !words.has(id))) return null;
   }
+  return products.map((product) => ({
+    product_name: product.product_name,
+    signal_word: product.product_id ? words.get(product.product_id) ?? null : null,
+    rei_hours: product.rei_hours,
+    phi_days: product.phi_days,
+  }));
 }
 
 /** Load maps/history/billing additions for every print entry point in one place. */
@@ -253,7 +245,7 @@ export async function prepareApplicatorSheetPrintData(
     options.includeBillingSplits
       ? fetchApplicatorSheetBillingSplits(jobId, data.total_acres)
       : Promise.resolve([]),
-    options.includeSafetySheet ? fetchJobSafety(jobId) : Promise.resolve(undefined),
+    options.includeSafetySheet ? sheetSafety(data.products) : Promise.resolve(undefined),
   ]);
   return {
     ...data,

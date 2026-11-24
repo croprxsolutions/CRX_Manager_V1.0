@@ -1153,6 +1153,7 @@ export default function JobDetail() {
           const lbl = labelById.get(c.product_id);
           return {
             product_name: c.product_name || 'Product',
+            product_id: c.product_id,
             rate_per_acre: parseFloat(c.rate_per_acre) || null,
             rate_unit: c.rate_unit || null,
             // The Total Applied quantity's measure unit (e.g. GAL/LB) — drives the

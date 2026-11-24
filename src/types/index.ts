@@ -93,6 +93,9 @@ export interface Product {
   rei_hours: number | null;
   /** Pre-harvest interval in days, from the product label (NULL = not entered) */
   phi_days: number | null;
+  /** The label gives no REI / no PHI; only while the interval is blank. Never stored as 0. */
+  rei_not_applicable?: boolean;
+  phi_not_applicable?: boolean;
   product_form: ProductForm | null;
   product_family_id?: string | null;
   return_policy?: 'returnable' | 'no_return' | 'not_applicable' | 'unknown';

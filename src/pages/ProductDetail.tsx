@@ -93,12 +93,14 @@ const PRODUCT_NONPRICING_FIELDS = [
   'notes', 'epa_registration', 'product_form', 'inventory_unit',
   'container_unit', 'container_type', 'is_rup', 'signal_word', 'internal_notes',
   'quoting_notes',
-  'rei_hours', 'phi_days', 'max_label_rate', 'max_label_rate_unit', 'use_timings',
+  'rei_hours', 'phi_days', 'rei_not_applicable', 'phi_not_applicable', 'max_label_rate', 'max_label_rate_unit', 'use_timings',
 ] as const satisfies ReadonlyArray<keyof Product>;
 
 // Other screens write these (commit_label_draft writes the six label fields).
 const PRODUCT_FIELDS_WRITTEN_ELSEWHERE = [
   'vendor', 'signal_word', 'rei_hours', 'phi_days', 'epa_registration', 'max_label_rate', 'max_label_rate_unit',
+  // A real label number written elsewhere clears these in the database, so an open page must not re-send them.
+  'rei_not_applicable', 'phi_not_applicable',
 ] as const satisfies ReadonlyArray<(typeof PRODUCT_NONPRICING_FIELDS)[number]>;
 
 const PRODUCT_PRICING_FIELDS = [
@@ -113,6 +115,24 @@ type ProductPricingMarginDrafts = Partial<Record<ProductPricingMarginField, stri
 
 // PAR-1: a grouped size's parent owns these; the page never sends them for one.
 const PARENT_OWNED_FIELDS = ['category', 'use_timings', 'epa_registration', ...PRODUCT_RATE_KEYS] as const;
+
+/** The "label gives no interval" tick under REI or PHI. Ticking clears the number: never a fake 0. */
+function IntervalNotApplicable({ label, checked, disabled, onChange }: {
+  label: string; checked: boolean; disabled: boolean; onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="mt-2 flex items-center gap-2 cursor-pointer">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        disabled={disabled}
+        className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+      />
+      <span className="text-sm text-secondary">{label}</span>
+    </label>
+  );
+}
 
 function nonpricingProductPayload(product: Partial<Product>, persisted?: Product, parentOwned = false): Record<string, unknown> {
   const payload: Record<string, unknown> = Object.fromEntries([
@@ -601,12 +621,20 @@ export default function ProductDetail() {
     if (!persistedProduct || persistedProduct.id !== id || !Number.isInteger(persistedProduct.pricing_version)) {
       throw new Error('Reload this Product before saving details.');
     }
-    const result = await supabaseUntyped
+    const payload = nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct), persistedProduct, parentOwned);
+    let query = supabaseUntyped
       .from('products')
-      .update(nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct), persistedProduct, parentOwned))
+      .update(payload)
       .eq('id', id!)
-      .eq('pricing_version', persistedProduct.pricing_version)
-      .select('id');
+      .eq('pricing_version', persistedProduct.pricing_version);
+    // REI/PHI do not move pricing_version, so an edited pair saves only over the pair this page read.
+    for (const [interval, flag] of [['rei_hours', 'rei_not_applicable'], ['phi_days', 'phi_not_applicable']] as const) {
+      if (!(interval in payload) && !(flag in payload)) continue;
+      const readValue = persistedProduct[interval];
+      query = readValue == null ? query.is(interval, null) : query.eq(interval, readValue);
+      query = query.eq(flag, persistedProduct[flag] ?? false);
+    }
+    const result = await query.select('id');
     if (!result.error && Array.isArray(result.data) && result.data.length === 0) {
       throw new Error('Product details changed after this page loaded. Reload before saving.');
     }
@@ -1650,34 +1678,62 @@ export default function ProductDetail() {
                   <option value="Caution">Caution</option>
                 </select>
               </div>
-              <Input
-                label="REI (hours)"
-                type="number"
-                min={0}
-                step={1}
-                value={reiDraft}
-                onChange={(e) => {
-                  if (reloadRequired) return;
-                  setReiDraft(e.target.value);
-                  update('rei_hours', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
-                }}
-                disabled={!isAdmin}
-                placeholder="From label, e.g. 12"
-              />
-              <Input
-                label="PHI (days)"
-                type="number"
-                min={0}
-                step={1}
-                value={phiDraft}
-                onChange={(e) => {
-                  if (reloadRequired) return;
-                  setPhiDraft(e.target.value);
-                  update('phi_days', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
-                }}
-                disabled={!isAdmin}
-                placeholder="From label, e.g. 30"
-              />
+              <div>
+                <Input
+                  label="REI (hours)"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={reiDraft}
+                  onChange={(e) => {
+                    if (reloadRequired) return;
+                    setReiDraft(e.target.value);
+                    update('rei_hours', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
+                  }}
+                  disabled={!isAdmin || Boolean(product.rei_not_applicable)}
+                  placeholder={product.rei_not_applicable ? 'Not applicable' : 'From label, e.g. 12'}
+                />
+                {!isNew && (
+                  <IntervalNotApplicable
+                    label="Label gives no REI"
+                    checked={Boolean(product.rei_not_applicable)}
+                    disabled={!isAdmin}
+                    onChange={(checked) => {
+                      if (reloadRequired) return;
+                      update('rei_not_applicable', checked);
+                      if (checked) { setReiDraft(''); update('rei_hours', null); }
+                    }}
+                  />
+                )}
+              </div>
+              <div>
+                <Input
+                  label="PHI (days)"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={phiDraft}
+                  onChange={(e) => {
+                    if (reloadRequired) return;
+                    setPhiDraft(e.target.value);
+                    update('phi_days', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
+                  }}
+                  disabled={!isAdmin || Boolean(product.phi_not_applicable)}
+                  placeholder={product.phi_not_applicable ? 'Not applicable' : 'From label, e.g. 30'}
+                />
+                {!isNew && (
+                  <IntervalNotApplicable
+                    label="Label gives no PHI"
+                    checked={Boolean(product.phi_not_applicable)}
+                    disabled={!isAdmin}
+                    onChange={(checked) => {
+                      if (reloadRequired) return;
+                      update('phi_not_applicable', checked);
+                      if (checked) { setPhiDraft(''); update('phi_days', null); }
+                    }}
+                  />
+                )}
+              </div>
             </div>
 
             {epaLookupResult && (

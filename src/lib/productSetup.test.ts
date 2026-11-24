@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Product } from '../types';
 import { hasRpcCode, RpcErrorCodes } from './db';
 import {
-  missingProductSetup, nearMatchNames, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories,
+  isSetupIncomplete, missingProductSetup, nearMatchNames, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories,
 } from './productSetup';
 
 describe('product setup validation and options', () => {
@@ -78,6 +78,15 @@ describe('complete setup and near-match warnings', () => {
   it('treats a saved 0 REI/PHI as set and a blank as unknown', () => {
     expect(missingProductSetup(pesticide)).toEqual([]);
     expect(missingProductSetup({ ...pesticide, rei_hours: null, phi_days: null })).toEqual(['REI', 'PHI']);
+  });
+
+  it('counts a blank REI/PHI marked not applicable as set, each field on its own', () => {
+    const blank = { ...pesticide, rei_hours: null, phi_days: null };
+    expect(missingProductSetup({ ...blank, rei_not_applicable: true })).toEqual(['PHI']);
+    expect(missingProductSetup({ ...blank, phi_not_applicable: true })).toEqual(['REI']);
+    expect(missingProductSetup({ ...blank, rei_not_applicable: true, phi_not_applicable: true })).toEqual([]);
+    expect(missingProductSetup({ ...blank, rei_not_applicable: false, phi_not_applicable: false })).toEqual(['REI', 'PHI']);
+    expect(isSetupIncomplete({ ...blank, rei_not_applicable: true, phi_not_applicable: true })).toBe(false);
   });
 
   it('classes a pesticide by category or by an EPA number', () => {

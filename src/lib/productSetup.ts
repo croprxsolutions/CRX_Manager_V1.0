@@ -114,7 +114,7 @@ export function duplicateProductDraft(source: DuplicateProductSource): Partial<P
 
 export type ProductSetupFields = Pick<Product,
   'category' | 'product_form' | 'inventory_unit' | 'container_size' | 'container_unit'
-  | 'epa_registration' | 'signal_word' | 'rei_hours' | 'phi_days'>;
+  | 'epa_registration' | 'signal_word' | 'rei_hours' | 'phi_days' | 'rei_not_applicable' | 'phi_not_applicable'>;
 
 const PESTICIDE_CATEGORIES = new Set(['Herbicide', 'Fungicide', 'Insecticide']);
 
@@ -124,7 +124,7 @@ function isRegisteredPesticide(product: Partial<Pick<Product, 'category' | 'epa_
   return Boolean(product.epa_registration?.trim()) || PESTICIDE_CATEGORIES.has(product.category?.trim() ?? '');
 }
 
-/** Setup fields still blank. A blank REI/PHI is unknown; a saved 0 is a real 0 and counts as set. RUP is a yes/no that always has a value. */
+/** Setup fields still blank. A blank REI/PHI is unknown unless marked not applicable; a saved 0 is a real 0 and counts as set. RUP is a yes/no that always has a value. */
 export function missingProductSetup(product: Partial<ProductSetupFields>): string[] {
   const missing: string[] = [];
   if (!product.category?.trim()) missing.push('Category');
@@ -135,8 +135,8 @@ export function missingProductSetup(product: Partial<ProductSetupFields>): strin
   if (isRegisteredPesticide(product)) {
     if (!product.epa_registration?.trim()) missing.push('EPA number');
     if (!product.signal_word) missing.push('Signal word');
-    if (product.rei_hours == null) missing.push('REI');
-    if (product.phi_days == null) missing.push('PHI');
+    if (product.rei_hours == null && !product.rei_not_applicable) missing.push('REI');
+    if (product.phi_days == null && !product.phi_not_applicable) missing.push('PHI');
   }
   return missing;
 }

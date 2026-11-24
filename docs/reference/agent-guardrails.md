@@ -138,8 +138,8 @@
 > <n> ...` (any finding he disagrees with: a business call, or a bug or gap too small or impractical to affect the business; an owner-accepted proof counts only for its own PR, by number and repository address, at its exact head, at merge and migration apply, Codex merge guard included) builds ONE request (`crx-owner-sol-skip-v1`) for several findings, its deadline never past the Sol
 > run's own 24 hours, and Mason answers with no code. Exact replies only (Mason, 2026-11-24, #2271: `yes, skip 1` and `yes, except 2`
 > skipped every finding): the first line is `skip` (all shown) or `skip 1 3` (those), and an optional second line is his reason,
-> logged word for word once it passes `reasonProblem` (`skipFromReply`). Nothing else skips: `yes, <reason>`, `I disagree`, `don't fix`,
-> `accept`, `skip them`, `Skip I agree skip it`, a third line, `ok`, `move on`, `merge it` and questions. A reply that starts with skip or
+> logged word for word once it passes `reasonProblem` and never changes what is skipped; blank lines are ignored (`skipFromReply`). Nothing else skips: `yes, <reason>`, `I disagree`, `don't fix`,
+> `accept`, `skip them`, `Skip I agree skip it`, a third non-blank line, `ok`, `move on`, `merge it` and questions. A reply that starts with skip or
 > yes but is not exact is refused out loud (NOT SKIPPED), never silently. A number he names that was not shown is ignored only when he already skipped
 > that finding in the same Sol run (the receipt records it as `ignored`, and `collectAcceptances` counts it only if an earlier receipt covers it).
 > The reply hook records it only when a skip request built in this session is waiting and the agent's last message is exactly

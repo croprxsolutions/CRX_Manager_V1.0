@@ -191,13 +191,14 @@ export const solSkipFileName = (head, code) => `owner-approval-sol-skip-${head}-
 // "yes, except 2" as skipping EVERY finding, and no word list could close that. The first line is
 // `skip` or `skip 1 3`; anything else skips nothing.
 const SKIP_LINE_RE = /^skip(?: (\d{1,2}(?:(?:, ?| | and |, and )\d{1,2})*))?$/;
-// Any line break, Windows' \r\n as one.
-const LINE_SPLIT_RE = /\r\n|[\r\n\x85\p{Zl}\p{Zp}]/u;
+// Any line break, Windows' \r\n as one; vertical tab and form feed too, so they never join lines (Sol LOW).
+const LINE_SPLIT_RE = /\r\n|[\r\n\v\f\x85\p{Zl}\p{Zp}]/u;
 
 /**
  * Mason's skip reply, the WHOLE message: first line `skip` ({ all: true }) or `skip 1 3`
  * ({ numbers: [1, 3] }); an optional second line is his reason, kept word for word (trimmed) as
- * `reason`. Case, spacing and a trailing . or ! on the first line do not matter. A reply that starts
+ * `reason`; it is only logged and never changes what is skipped. Blank lines are ignored. Case,
+ * spacing and a trailing . or ! on the first line do not matter. A reply that starts
  * with skip or yes but is not exact (`yes, skip 1`, `skip them`, a third line) is { refused: true },
  * so the hook says out loud that nothing was skipped. Anything else is null (ordinary chat).
  * `accept <6 digits> ...` is the old form and never reads as a skip (two-digit numbers at most).
@@ -278,8 +279,8 @@ export function solSkipSummary(p) {
     "Every other finding and every other safety check still applies.",
     "",
     `To leave ${nums.length === 1 ? "it" : "them all"} unfixed, reply: skip`,
-    ...(nums.length > 1 ? [`To skip only some, reply skip and their numbers (for example: skip ${nums.slice(0, 2).join(" ")})`] : []),
-    `To give a reason, put it on a second line; it is logged word for word. Any other reply skips nothing, yes included. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
+    ...(nums.length > 1 ? [`To skip only some, reply skip and their numbers (for example: skip ${nums[0]})`] : []),
+    `To give a reason, put it on a second line; it is logged word for word and never changes what is skipped. Any other reply skips nothing, yes included. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
   ];
 }
 

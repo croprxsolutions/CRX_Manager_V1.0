@@ -335,6 +335,8 @@ for (const no of ["ok", "yesterday it worked", "I approve", "move on", "merge it
   "accept only if the totals reconcile", "accept all 1 3", "accept 123456", "accept 123456 fine by me", "I don't want that approach", "skipped", "", "\n\n"]) {
   assert.equal(skipFromReply(no), null, `skip: "${no}" is not a skip`);
 }
+// Vertical tab and form feed are line breaks, never spaces: "skip<VT>2" is skip-all with a one-word reason, refused (Sol LOW).
+for (const vt of ["skip\u000b2", "skip\f2"]) assert.match(skipSelection(skipFromReply(vt), [{ n: 1 }, { n: 2 }]).problem ?? "", /two words/, "skip: a vertical tab or form feed never joins lines");
 for (const no of ["skip 123", "skip the explanation and fix it", "skip\nand merge\nnow"]) {
   assert.equal(skipFromReply(no)?.refused, true, `skip: "${no.replace(/\n/g, "\\n")}" is refused`);
 }
@@ -366,8 +368,8 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const r1 = skipReq([1, 3]);
   assert.equal(Date.parse(r1.payload.expiresAt), Date.parse(rec3.timestamp) + 24 * 60 * 60 * 1000, "request: deadline never past the Sol run's own 24 hours");
   assert.match(r1.payload.summary.join("\n"), /Finding 1 of 3 \(HIGH\).*\nFinding 3 of 3 \(HIGH\)/, "request: lists only the findings asked about");
-  assert.match(r1.payload.summary.join("\n"), /To leave them all unfixed, reply: skip\nTo skip only some, reply skip and their numbers \(for example: skip 1 3\)/, "request: gives the two exact replies");
-  assert.match(r1.payload.summary.join("\n"), /second line.*word for word.*Any other reply skips nothing, yes included\./, "request: says the reason line is logged and nothing else skips");
+  assert.match(r1.payload.summary.join("\n"), /To leave them all unfixed, reply: skip\nTo skip only some, reply skip and their numbers \(for example: skip 1\)/, "request: gives the two exact replies");
+  assert.match(r1.payload.summary.join("\n"), /second line.*word for word and never changes what is skipped\. Any other reply skips nothing, yes included\./, "request: says the reason line is logged and nothing else skips");
   assert.doesNotMatch(r1.payload.summary.join("\n"), /Reply yes/, "request: never invites a yes");
   assert.match(r1.payload.summary.join("\n"), /Pull request: croprxsolutions\/CRX_Manager_V1\.0#2200 /, "request: names the repository and PR");
   assert.doesNotMatch(r1.payload.summary.join("\n"), /accept \d{6}/, "request: no code to type");

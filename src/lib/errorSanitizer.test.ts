@@ -723,6 +723,8 @@ describe('customer receipt refusals (KI-25)', () => {
       .toBe('Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.');
     expect(sanitizeError(new Error("DELIVERY_RECEIPT_CHANGED: this delivery's receipt was queued again since; reload the page")))
       .toBe("Nothing was changed. This delivery's receipt was queued again since. Reload the page.");
+    expect(sanitizeError(new Error('RECEIPT_HANDLED_ADMIN_ONLY: only an admin can mark a customer receipt handled')))
+      .toBe('Nothing was changed. Only an admin can mark a customer receipt handled.');
   });
   it('leaves the invoice-posting DELIVERY_NOT_COMPLETED sentence alone', () => {
     const msg = 'DELIVERY_NOT_COMPLETED: delivery D-42 for invoice INV-1002 has been deleted. Void this invoice instead of posting it.';

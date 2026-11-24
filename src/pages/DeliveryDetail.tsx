@@ -1603,7 +1603,7 @@ export default function DeliveryDetail() {
       // No answer came back: the email may have gone out, so never say it did not (Codex P2).
       if (heldNotSent && err instanceof EmailUnconfirmedError) {
         heldNotSent = false;
-        toast('warning', `Delivery ${delivery.delivery_number}: the email may have gone out. Its receipt is on "Customer receipts to check" and the server will not send it. Check before sending again, then mark it handled.`);
+        toast('warning', `Delivery ${delivery.delivery_number}: the email may have gone out. Its receipt is on "Customer receipts to check" and the server will not send it. Check before sending again; an admin can mark it handled.`);
       }
     } finally {
       if (heldNotSent) warnHeldNotSent(delivery.delivery_number);
@@ -2317,7 +2317,7 @@ export default function DeliveryDetail() {
               open={resendCopyCheck !== null && resendCopyCheck.delivery_id === delivery.id}
               onClose={() => {
                 // The server may already have sent it: never say it did not go out (Taha LOW).
-                if (resendCopyCheck?.outcome === 'paused') toast('warning', `Delivery ${delivery.delivery_number}: the server may already have emailed this receipt. It is on "Customer receipts to check" and the server will not send it again. Check with the customer before sending, then mark it handled.`);
+                if (resendCopyCheck?.outcome === 'paused') toast('warning', `Delivery ${delivery.delivery_number}: the server may already have emailed this receipt. It is on "Customer receipts to check" and the server will not send it again. Check with the customer before sending; an admin can mark it handled.`);
                 setResendCopyCheck(null);
               }}
               onConfirm={() => { void handleResendEmail(resendCopyCheck?.delivery_id); }}

@@ -9,6 +9,9 @@
 --   re-queue after a cancel gives a new one) in two new nullable columns on delivery_receipt_queue.
 --   A rep's 'handled' that would change nothing (none / sent) or hits the in-flight refusal answers as before.
 --   Admins, drivers, 'manual_send', the expected-receipt check and every other line of 20270223120000's body: unchanged.
+--   LIMIT (accepted design, not a hole this closes): Email Confirmation is a hand send from the screen, so the server
+--   cannot tell a real one from a rep who calls manual_send then handled by hand. The rule removes the button and every
+--   rep close of a receipt they did not pause themselves; Mason kept the hand send unchanged (2026-11-23).
 --
 -- idempotency-body-check: exempt -- as 20270223120000: p_idempotency_key is required and checked with
 --   check_idempotency_intent, bound to caller and request; saved with save_idempotency and bound with
@@ -34,9 +37,7 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_CLOSE_DELIVERY_RECEIPT_DRIFT: expected exactly the four-argument close_delivery_receipt (20270223120000)';
   END IF;
   -- The body below is 20270223120000's plus the admin-only rule: refuse if the installed body is any other.
-  IF (SELECT md5(replace(prosrc, E'
-', E'
-')) FROM pg_proc
+  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public.close_delivery_receipt(uuid, text, text, timestamptz)'::regprocedure) <> '8ca6b2b787e780cbd4dc4daeb8f00388' THEN
     RAISE EXCEPTION 'PREFLIGHT_CLOSE_DELIVERY_RECEIPT_DRIFT: close_delivery_receipt body differs from 20270223120000';
   END IF;
@@ -194,8 +195,8 @@ BEGIN
      OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee = 0) THEN
     RAISE EXCEPTION 'POSTFLIGHT: close_delivery_receipt lost its owner, mode, search_path or grants';
   END IF;
-  IF strpos(p.prosrc, 'RECEIPT_HANDLED_ADMIN_ONLY') = 0 THEN
-    RAISE EXCEPTION 'POSTFLIGHT: close_delivery_receipt is missing the admin-only rule';
+  IF md5(replace(p.prosrc, chr(13), '')) <> '7bdba0d9fc0558994204be4c3ee6867f' THEN
+    RAISE EXCEPTION 'POSTFLIGHT: close_delivery_receipt is not this migration''s body (admin-only rule)';
   END IF;
 END;
 $postflight$;

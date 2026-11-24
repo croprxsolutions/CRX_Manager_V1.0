@@ -368,7 +368,12 @@ function drawDirections(doc: JsPDFWithAutoTable, data: ApplicatorSheetData, star
     y = ensureRoom(doc, y, 12, margin, reserve);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...GRAY);
-    const label = `Stop ${field.stop} · ${field.field_name} · ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}  `;
+    const coordinates = `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`;
+    // A long field name is shortened so the tappable link always stays on the page.
+    const room = doc.internal.pageSize.getWidth() - margin * 2 - doc.getTextWidth(`Stop ${field.stop} ·  · ${coordinates}  Open directions`);
+    let name = field.field_name;
+    while (name.length > 1 && doc.getTextWidth(name) > room) name = `${name.slice(0, -2)}…`;
+    const label = `Stop ${field.stop} · ${name} · ${coordinates}  `;
     doc.text(label, margin, y);
     doc.setTextColor(...CRX_GREEN);
     doc.textWithLink('Open directions', margin + doc.getTextWidth(label), y, { url: fieldDirectionsUrl(location) });

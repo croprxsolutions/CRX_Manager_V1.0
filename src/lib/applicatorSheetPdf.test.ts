@@ -21,7 +21,7 @@ const mockDoc = {
   setDrawColor: vi.fn(),
   line: vi.fn(),
   splitTextToSize: vi.fn((text: string) => [text]),
-  getTextWidth: vi.fn(() => 50),
+  getTextWidth: vi.fn((_text: string) => 50),
   getImageProperties: vi.fn(() => ({ width: 1000, height: 700 })),
   addImage: vi.fn(),
   addPage: vi.fn(() => { pageCount += 1; }),
@@ -249,6 +249,17 @@ describe('generateApplicatorSheetPdf directions links', () => {
     const text = mockDoc.text.mock.calls.map((call) => call[0]).filter((value): value is string => typeof value === 'string');
     expect(text.some((value) => value.startsWith('Stop 3 · South 80'))).toBe(true);
     expect(text.some((value) => value.includes('No Pin ·'))).toBe(false);
+  });
+
+  it('shortens a long field name so the link stays on the page', async () => {
+    mockDoc.getTextWidth.mockImplementation((text: string) => text.length * 5);
+    const longName = 'A'.repeat(200);
+    await generateApplicatorSheetPdf(makeSheetData({
+      fields: [{ stop: 1, field_name: longName, county: null, state: null, acres: 1, crop: null, pest: null, location: { lat: 1, lng: 2 } }],
+    }), 'original', null);
+    const [, linkX] = mockDoc.textWithLink.mock.calls[0] as [string, number];
+    expect(linkX + 'Open directions'.length * 5).toBeLessThanOrEqual(612 - 40);
+    mockDoc.getTextWidth.mockImplementation(() => 50);
   });
 
   it('prints no directions block when no field has a map pin', async () => {

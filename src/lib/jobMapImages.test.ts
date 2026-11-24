@@ -13,7 +13,7 @@ vi.mock('./db', () => ({
   assertRpcResult: <T,>(data: unknown): T => data as T,
 }));
 
-import { fetchJobMapImages } from './jobMapImages';
+import { fetchJobMapImages, sprayNumbersByFieldId } from './jobMapImages';
 
 const squareBoundary = JSON.stringify({
   type: 'Polygon',
@@ -244,7 +244,7 @@ describe('fetchJobMapImages', () => {
     const height = Number(size?.[2]);
     expect(width / height).toBeGreaterThan(2);
     const [text, x, y] = context.fillText.mock.calls[0] as [string, number, number];
-    expect(text).toBe('10 ac');
+    expect(text).toBe('1 · 10 ac');
     expect(Math.abs(x - width / 2)).toBeLessThanOrEqual(1);
     expect(Math.abs(y - height / 2)).toBeLessThanOrEqual(1);
   });
@@ -343,5 +343,24 @@ describe('fetchJobMapImages', () => {
 
     expect(result).toBeNull();
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('sprayNumbersByFieldId', () => {
+  it('numbers fields 1, 2, 3 by sort_order and restarts for each job printed together', () => {
+    const jobA = sprayNumbersByFieldId([
+      { id: 'a-west', sort_order: 7 },
+      { id: 'a-east', sort_order: 2 },
+      { id: 'a-north', sort_order: 5 },
+    ]);
+    const jobB = sprayNumbersByFieldId([{ id: 'b-only', sort_order: 9 }, { id: 'b-unset', sort_order: null }]);
+    expect([...jobA.entries()]).toEqual([['a-east', 1], ['a-north', 2], ['a-west', 3]]);
+    // An unset order counts as 0, as on the sheet, so it is Stop 1 here too (Codex P2).
+    expect([...jobB.entries()]).toEqual([['b-unset', 1], ['b-only', 2]]);
+  });
+
+  it('keeps the database order for tied sort_order values', () => {
+    expect([...sprayNumbersByFieldId([{ id: 'x', sort_order: 0 }, { id: 'y', sort_order: 0 }]).entries()])
+      .toEqual([['x', 1], ['y', 2]]);
   });
 });

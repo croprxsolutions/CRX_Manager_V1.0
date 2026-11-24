@@ -344,7 +344,7 @@ Sol numbers without a row here are reviewer finding ids kept for traceability; t
 | M4 | Rained out after mixing: ended with nothing billed; load stays; contents carried or to a tote |
 | M5 | Chem Man bills field work until the switch-on date; never bill planned acres |
 | M6 | Sol capped at two rounds per plan; the lane fixes findings itself; disputed ones and ones adding a crew or office step go in the slice's Mason batch |
-| M7 | No build session starts until Mason says so |
+| M7 | No build session starts until Mason says so. Slices 0–1: go given 2026-11-24 (staging only); slices 2–3 still wait |
 | M8 | Each real pass bills its own service acres; look-alike entries warn |
 | M9 | A substitute with no price holds the whole payer set |
 | 2026-11-24 a | Rounding and splitting follow chemical sales (section 9); all lines add up to the once-rounded job amount per product |

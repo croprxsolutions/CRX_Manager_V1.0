@@ -1,4 +1,4 @@
--- KI-114 / #1958: read-only sweep, run right after 20270228180000_piksi_mg_to_grams is applied (and again a day later).
+-- KI-114 / #1958: read-only sweep, run right after 20270228230000_piksi_mg_to_grams is applied (and again a day later).
 -- The migration refused if any Piksi quote, quote version, job or invoice line existed, so every row this finds was
 -- saved after the apply from a screen still holding MG (Sol HIGH Mason accepted; lasting fix #2261).
 -- Expect ZERO rows. Any row: fix that line's unit/quantity by hand before it is sent, invoiced or delivered.

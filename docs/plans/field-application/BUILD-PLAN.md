@@ -12,10 +12,10 @@ Each slice is released to production on its own, so the crew uses CRX before bil
 |---|---|---|---|---|
 | **0 Clear the ground** | before any real field job exists | Taha's one-time live reset (PR #2407, `20270301100000`: backs up, then deletes a wide set of live test records, field data among them; date set by Taha and Mason, Mason's yes). Decide each of the five staging-only field-billing migrations below, and whether `20270227170000_job_completion_missing_stock_rows` (staging only) releases first or rides with the loads PR. Confirm the read-only facts the contracts list | — | — |
 | **1 Who pays + paperwork** | mid-December | Field splits with history and two share sets; billable acres; paperwork fixes; Chem Man fields imported | FP-1, FP-2 | Field Setup split history; paperwork (no database change): safety info on every page, hide tank contents, map pages only, spray-order numbers on maps, directions link, loader water vs finished gallons in loader units, loader views (one batch or tank-sized loads), a dash for a product with no EPA number |
-| **2 Crew on CRX** | early January | Jobs carry splits; mixer confirms loads (stock leaves at the load for new jobs); applicators log acres; office review closes jobs; fields archived not deleted. **No CRX billing yet** | loads and stock; work entries and statuses; mixer account; FP-4; review checks; FP-3 | mixer tablet; applicator phone; scheduling (field picker by any payer share, daily board by rig, rig carrier default); office review screen with mixed / used / billed view |
+| **2 Crew on CRX** | early January | Jobs carry splits; mixer confirms loads (stock leaves at the load for new jobs); applicators log acres; office review closes jobs; fields archived not deleted. **No CRX billing yet** | loads and stock; work entries and statuses; application services; mixer account; FP-4; review checks; FP-3 | mixer tablet; applicator phone; scheduling (field picker by any payer share, daily board by rig, rig carrier default, application service per job); office review screen with planned / mixed / billed view; season acres report and blend report (S34) |
 | **3 Billing** | the switch-on date Mason picks after staging passes | Per-payer invoices the chemical-sale way, posting as a set, corrections, PDF and email; work before the switch-on date stays billed in Chem Man | billing engine; posting | unposted invoice review (field sections, your share, Shared with, per-line override, invoice date); per-payer PDF and email (Edge Function deploy: Mason's yes) |
 
-**About ten database PRs**, one after another in the database lane: FP-1, FP-2, loads and stock, work entries, mixer account, FP-4, review checks, FP-3, billing engine, posting. The database lane is the critical path; more screen lanes do not speed it up.
+**About eleven database PRs**, one after another in the database lane: FP-1, FP-2, loads and stock, work entries, application services, mixer account, FP-4, review checks, FP-3, billing engine, posting. The database lane is the critical path; more screen lanes do not speed it up.
 
 **Thin end-to-end check, December 20 on staging:** one test job created and printed, one load confirmed on the tablet (stock leaves once), acres logged on the phone, the job closes. If it slips, screens wait and the slice gets the lanes.
 
@@ -27,11 +27,12 @@ Each slice is released to production on its own, so the crew uses CRX before bil
 | FP-2 billable acres | who-pays FP-2 | FP-1 live on staging; after 2026-12-15 (its quote-to-job change, Taha reviews) | S20 |
 | Loads and stock | batch-stock | read-only facts confirmed | S11–S15, S18, S19 |
 | Work entries and statuses | SPEC stages 6–7: entry linked to a load revision, Ready for review / Applied, cancel only at zero acres (Q9, Sol 11), rained out ends with nothing billed (M4), own-entry edits end at close, `jobs.priority` dropped, rig default gal/acre | loads and stock | S21, S27 |
+| Application services | SPEC stage 1 item 8: the existing `application_services` list gains "bills the customer" (yes/no) and an optional outside company (existing `vendors`); jobs keep `application_service_id`; read-only season acres and blend report queries (S34) | work entries | S32–S34 |
 | Mixer account | SPEC section 2 (GR4); `/security-review`; Mason's yes for the role. If late, mixers use their own logins and this PR waits | — | role cases |
 | FP-4 jobs carry splits | who-pays FP-4 | FP-1; `I approve` (grants) | S7 (planned split) |
 | Review checks | SPEC stage 8: missing vs zero, leftover recorded (5% gauge gap), 5% rate check per load, label max warning with note, close remaining acres, shared-load wait | work entries | S16, S17, S20 |
 | FP-3 archive fields | who-pays FP-3 | FP-1; `I approve` (grants) | archive cases |
-| Billing engine | field-billing (all but posting) | FP-2, FP-4, review checks; `I approve` (grants) | S1–S4b, S6–S10, S20, S23, S26, S29–S31 |
+| Billing engine | field-billing (all but posting) | FP-2, FP-4, review checks; `I approve` (grants) | S1–S10, S20, S23, S26, S29–S33 |
 | Posting | field-billing › Authority and timing (posting), Posting switch, B9–B11 | billing engine; window agreed with Mason and Taha for the one refusal in the shared post functions; Taha reviews | S22, S24, S25, S28 |
 
 **Five staging-only field-billing migrations** (marked "LOCAL CANDIDATE — NOT APPLIED"): `20270224110000_retire_per_acre_field_pricing`, `20270224130000_split_save_refuses_blend_billed_job`, `20270226150000_job_transfer_below_cost_whole_line`, `20270205100000_field_app_refuses_payer_change`, `20270228200000_field_app_save_refuses_other_editors`. Slice 0 records one decision each (release now, hold for the billing engine, or replace) with what it changes for today's billing; any release goes in a normal release PR.
@@ -42,7 +43,6 @@ Each slice is released to production on its own, so the crew uses CRX before bil
 |---|---|---|
 | Partial hold release per load | Needs Taha's `inventory_holds`; holds release whole at job close as today | A long job shows less available than is on the shelf |
 | Leftover tracked as a claim, with mix and customer flags | The rig's next load shows the leftover as carried in; the office's mix-differs review catches a mismatch | A carried mix used on a different recipe is caught by review, not flagged at once |
-| One-click "bill actual used" (G5, S5) | The office keeps planned or edits quantities with a reason | One more manual edit when a load is over 5% |
 | Possible-duplicate-load flag | Retry keys already stop double taps | Two tablets confirming one tank is caught at review |
 | Per-payer prices on one field (M2) | One price per product per job in February | — |
 | Tenders, sprayer balances, totes, offline phones | GR1 | Paper fallback on the tablet |

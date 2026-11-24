@@ -13,7 +13,7 @@ One item = one PR (split into a database PR and a screen PR when the item has sc
 1. **1.1 FP-1** field splits with history, per `docs/plans/field-application/CONTRACT-who-pays.md` FP-1 (product and application shares). Its `I approve` gates (the customer foreign-key change from cascade to restrict, revoked grants) wait for Mason's yes; build and prove everything else first.
 2. **1.2 FP-2** billable acres, per `CONTRACT-who-pays.md` FP-2. Not before 2026-12-15 (its quote-to-job change is in Taha's quotes area; Taha reviews it).
 3. **1.3 Batches and stock**, per `docs/plans/field-application/CONTRACT-batch-stock.md`. Partial hold release, leftover claims and the duplicate-load flag are spring. First confirm read-only the facts the contract lists under "Check read-only before building".
-4. **1.4 Chem Man field import**: Mason's export file imported on staging through the FP-1 writer, spot-checked by the office, then live only with Mason's yes and only after Taha's live reset (#2407) has run; a reconciliation count and a repeat-safe rerun.
+4. **1.4 Chem Man field import**: Mason's export file imported on staging through the FP-1 writer, spot-checked by the office, then live once, only with Mason's yes and only after Taha's live reset (#2407) has run; a count of fields imported vs fields in the file, and the office checks the list by hand (Mason 2026-11-24: one-time import, no re-run matching).
 
 ## Worktree
 

@@ -228,7 +228,11 @@ function renderDeliveryPage(
       // Signature, its "Signed by" line and the footer must all fit; otherwise start it on a new page.
       if (y + sigHeight + 25 > doc.internal.pageSize.getHeight() - 45) {
         doc.addPage();
-        y = margin;
+        // A separated second sheet still names its receipt.
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 100);
+        doc.text(`${data.delivery_number} (continued)`, margin, margin);
+        y = margin + 20;
       }
       doc.addImage(data.signature_image_data_url, 'PNG', margin, y, sigWidth, sigHeight);
       y += sigHeight + 5;

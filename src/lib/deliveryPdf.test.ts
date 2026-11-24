@@ -310,7 +310,8 @@ describe('generateDeliveryPdf', () => {
       await generateDeliveryPdf(makeDeliveryData({ delivery_notes: notes, signature_image_data_url: 'data:image/png;base64,iVBORw0KGgo' }));
       expect(mockDoc.addPage).toHaveBeenCalledTimes(1);
       const [, , , y, , h] = mockDoc.addImage.mock.calls[0];
-      expect(y).toBe(40);
+      expect(y).toBe(60);
+      expect(mockDoc.text).toHaveBeenCalledWith(`${makeDeliveryData().delivery_number} (continued)`, 40, 40);
       expect(y + h).toBeLessThan(792 - 45);
     } finally {
       mockDoc.splitTextToSize.mockImplementation((text: string) => [text]);

@@ -43,19 +43,15 @@ BEGIN
      IS DISTINCT FROM '6f73d91a1ba621ec6db56a3cb606d948' THEN
     RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_PREFLIGHT: save_field_app_invoice is not the reviewed body (missing, drifted or already replaced)';
   END IF;
-  -- The check below trusts field rows, and until the revoke below anyone signed in could write them. The save writes
-  -- its field rows in the same transaction as its receipt (same now(), naming that invoice or group), so a row with no such receipt on an editable
-  -- invoice was written some other way and would pass the check (live 2026-11-23: none; every field row has one).
-  -- Stop for review instead. Split Billing invoices are refused by their stamp whatever their rows.
+  -- The check below trusts field rows, and until the revoke below anyone signed in could write any of their columns,
+  -- so no row written before it can be told apart from the save's own. Live 2026-11-23 every field row (2) sits on a
+  -- voided or cancelled invoice. Stop for review if any now reaches (by either key) a live invoice that is not voided,
+  -- cancelled or a Split Billing invoice (refused by its stamp whatever its rows).
   IF EXISTS (SELECT 1 FROM public.invoices i
                JOIN public.field_app_locations l
                  ON l.invoice_id = i.id OR (i.invoice_group_id IS NOT NULL AND l.invoice_group_id = i.invoice_group_id)
-              WHERE i.deleted_at IS NULL AND i.status IN ('draft', 'unposted') AND i.field_app_billing_set_id IS NULL
-                AND NOT EXISTS (SELECT 1 FROM public.idempotency_keys k
-                                 WHERE k.operation = 'save_field_app_invoice' AND k.created_at = l.created_at
-                                   AND ((l.invoice_id IS NOT NULL AND COALESCE(k.result -> 'invoice_ids' ? l.invoice_id::text, false))
-                                     OR (l.invoice_group_id IS NOT NULL AND k.result ->> 'invoice_group_id' = l.invoice_group_id::text)))) THEN
-    RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_PREFLIGHT: an editable invoice carries field rows the field-app save did not write; review them before applying';
+              WHERE i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled') AND i.field_app_billing_set_id IS NULL) THEN
+    RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_PREFLIGHT: a live invoice carries field rows written before direct writes were revoked; review them before applying';
   END IF;
 END;
 $preflight$;

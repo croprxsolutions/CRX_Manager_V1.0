@@ -135,3 +135,9 @@ Database only; no screen change. One PR into `staging`.
   also name the row's invoice (`invoice_ids`) or group (`invoice_group_id`); live 2026-11-23 both field rows match
   their own receipt this way. A Data API request is its own transaction, so this was not reachable from the app; proof
   case added (a planted row beside a real save in one transaction still stops the apply).
+- Luna round 6: HIGH (a planted row could carry both keys and a chosen `created_at`, so the receipt test could be
+  fooled). Simplified instead of patched again: rows written before the revoke cannot be told apart from the save's
+  own, so the preflight stops if any field row reaches (by either key) a live invoice that is not voided, cancelled or
+  Split Billing. Live 2026-11-23: both field rows sit on a voided and a cancelled invoice, so the apply goes through; a
+  field-app invoice created before the apply stops it for review (safe). Proof: a planted row stops it; an ordinary
+  save stops it until that invoice is cancelled.

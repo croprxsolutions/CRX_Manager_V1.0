@@ -209,12 +209,6 @@ describe('SupplierPricing page', () => {
         supplier_product_name: 'Atrazine 4L', cost_cents: 12_500n, price_unit: 'case',
         package_quantity: 1, effective_from: '2026-07-18', effective_to: null,
         price_kind: 'quote', row_status: 'new', validation_errors: [], observation_id: null,
-      }, {
-        id: 'row-2', row_number: 2, product_id: 'product-1', product_name: 'Atrazine',
-        product_supplier_link_id: 'link-1', supplier_sku: 'AND-1',
-        supplier_product_name: 'Atrazine 4L', cost_cents: 900n, price_unit: 'Gal',
-        package_quantity: 2, effective_from: '2026-07-18', effective_to: null,
-        price_kind: 'quote', row_status: 'invalid', validation_errors: ['PRICE_UNIT_MISMATCH'], observation_id: null,
       }],
     });
 
@@ -235,14 +229,6 @@ describe('SupplierPricing page', () => {
       'You are adding 1 supplier observations. You are changing ZERO sell prices.',
     )).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve selected observations' })).toBeInTheDocument();
-    // Each staged cost names its unit, and a refused row says the rule instead of its code.
-    expect(screen.getByText('per case')).toBeInTheDocument();
-    // A cost for a 2-unit package is that package's total, never "per" one unit (Sol HIGH).
-    expect(screen.getByText('for 2 Gal')).toBeInTheDocument();
-    expect(screen.queryByText('per Gal')).not.toBeInTheDocument();
-    // A unit mismatch must say to convert the cost, never to only relabel the unit (Sol HIGH).
-    expect(screen.getByText(/The price unit is not the unit on this product's supplier link.*Do not just change the unit: either convert the cost/)).toBeInTheDocument();
-    expect(screen.queryByText(/PRICE_UNIT_MISMATCH/)).not.toBeInTheDocument();
 
     await waitFor(() => expect(mockGetBasisWorkspace).toHaveBeenCalledWith('product-1'));
     const workspaceLoads = mockGetWorkspace.mock.calls.length;

@@ -56,25 +56,6 @@ import { toSentryError } from '../lib/sentryError';
 
 const today = () => localToday();
 
-// The staging RPC flags rows with codes; staff read the rule instead of the code.
-const ROW_ERROR_MESSAGES: Record<string, string> = {
-  PRICE_UNIT_MISMATCH: "The price unit is not the unit on this product's supplier link, so this cost cannot be compared. Do not just change the unit: either convert the cost to the link's unit (a $30-per-gallon quote on a 5-gallon case link is $150 per case), or link the product in the unit the supplier quoted.",
-  PRICE_UNIT_REQUIRED: 'Enter the supplier price unit.',
-  COST_INVALID: 'The cost is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34.',
-  COST_MUST_BE_POSITIVE: 'The cost must be more than $0.',
-  PACKAGE_QUANTITY_INVALID: 'Package quantity must be a number above 0.',
-  EFFECTIVE_DATE_INVALID: 'The effective date is not a valid date.',
-  EFFECTIVE_RANGE_INVALID: 'The end date is before the effective date.',
-  FORMULA_NOT_ALLOWED: 'This row has an Excel formula. Replace it with a plain value.',
-  LINK_REQUIRED: 'This row is not linked to a product.',
-  LINK_ID_INVALID: "This row's product link is not valid. Download a fresh quote sheet.",
-  LINK_VENDOR_MISMATCH: 'This product link belongs to another supplier or is turned off.',
-  LINK_NOT_CONFIRMED_FOR_REUSE: 'This product link is not confirmed yet. Confirm it on the Product links tab.',
-  PRICE_KIND_INVALID: 'Choose a price type: list, quote, contract, promo or manual.',
-};
-
-const rowErrorText = (code: string) => ROW_ERROR_MESSAGES[code] ?? code.toLowerCase().split('_').join(' ');
-
 const blankLink = {
   productId: '',
   vendorId: '',
@@ -890,24 +871,14 @@ export default function SupplierPricing() {
                       </td>
                       <td className="px-2 py-2 font-medium">{row.product_name || 'Unmatched Product'}</td>
                       <td className="px-2 py-2">{row.supplier_product_name || row.supplier_sku || '—'}</td>
-                      <td className="px-2 py-2 tabular-nums">
-                        {formatSupplierCents(row.cost_cents)}
-                        {/* cost_cents is the total for package_quantity units, so never label it "per" unless that is 1. */}
-                        {row.price_unit && (
-                          <span className="text-secondary">
-                            {row.package_quantity != null && row.package_quantity !== 1
-                              ? ` for ${row.package_quantity} ${row.price_unit}`
-                              : ` per ${row.price_unit}`}
-                          </span>
-                        )}
-                      </td>
+                      <td className="px-2 py-2 tabular-nums">{formatSupplierCents(row.cost_cents)}</td>
                       <td className="px-2 py-2">{row.effective_from || '—'}</td>
                       <td className="px-2 py-2">
                         <Badge variant={eligible ? 'info' : row.row_status === 'approved' ? 'success' : 'warning'}>
                           {row.row_status.replace(/_/g, ' ')}
                         </Badge>
                         {row.validation_errors.length > 0 && (
-                          <p className="mt-1 text-xs text-red-700">{row.validation_errors.map(rowErrorText).join(' ')}</p>
+                          <p className="mt-1 text-xs text-red-700">{row.validation_errors.join(', ')}</p>
                         )}
                         {isAdmin && row.row_status === 'approved' && row.observation_id && (
                           <Button

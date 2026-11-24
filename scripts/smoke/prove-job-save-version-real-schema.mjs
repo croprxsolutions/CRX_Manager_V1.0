@@ -275,7 +275,7 @@ try {
     ${refuse(`r := ${save('[JV] completed', V('c9'), 'jv-completed', ADMIN, 'completed')};`)}
     v := t || '|unchanged=' || (f0 = public._job_edit_version(${JOB})::text);`)), /^ok\|JOB_COMPLETED_CHEMICALS_LOCKED.*\|unchanged=true$/);
   assert.equal(scalar("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure;"),
-    '1a555a89c7d8ddc6b8d5692daa7b14cd', 'the installed save_job must be the body the postflight pins');
+    'e23b3c091b7de416ac8dcdce33ae126f', 'the installed save_job must be the body the postflight pins');
 
   console.log('\nJOB_SAVE_VERSION_PROOF_PASS');
 } finally {

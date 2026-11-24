@@ -14,6 +14,8 @@ export interface LoaderWater {
   over: boolean;
   /** Products whose volume could not be sized (liquid or dry unknown, or a unit with no gallon size). */
   unsized: string[];
+  /** Liquid (or not-known) products with no usable amount: their volume is left out. */
+  missing: string[];
 }
 
 type WaterProduct = Pick<LoaderLoadProduct, 'product_name' | 'amount' | 'unit' | 'product_form'>;
@@ -24,30 +26,33 @@ const AMBIGUOUS_UNITS = new Set(['oz', 'ounce', 'ounces']);
 
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
-/** Gallons this product adds to the tank, or null when it cannot be told. */
-function liquidGallons(product: WaterProduct): number | null {
+/** Gallons this product adds to the tank, or why it cannot be told. */
+function liquidGallons(product: WaterProduct): number | 'unsized' | 'missing' {
   const form = FORMS.includes(product.product_form ?? '') ? product.product_form as ProductForm : null;
   if (form && form !== 'liquid') return 0;
-  if (!Number.isFinite(product.amount)) return null; // a line with no usable amount: its volume is unknown
+  if (!Number.isFinite(product.amount)) return 'missing';
   if (product.amount === 0) return 0;
   const converted = toGallonOrLbEquivalent(product.amount, product.unit, form);
   if (converted?.unit === 'gal') return converted.value;
   const unit = (product.unit ?? '').trim().toLowerCase();
   if (!form && converted?.unit === 'lb' && !AMBIGUOUS_UNITS.has(unit)) return 0;
-  return null;
+  return 'unsized';
 }
 
 /** Finished gallons and water to add for one tank (or the whole batch). */
 export function loaderWater(finishedGal: number, products: readonly WaterProduct[]): LoaderWater {
   let liquid = 0;
   const unsized: string[] = [];
+  const missing: string[] = [];
   for (const product of products) {
     const gal = liquidGallons(product);
-    if (gal === null) unsized.push(product.product_name);
+    if (gal === 'unsized') unsized.push(product.product_name);
+    else if (gal === 'missing') missing.push(product.product_name);
     else liquid += gal;
   }
-  const water = round4(finishedGal - liquid);
-  return { finished_gal: finishedGal, water_gal: Math.max(0, water), over: water < 0, unsized };
+  // Compare before rounding so a sliver over the finished gallons still warns; the epsilon absorbs float drift.
+  const over = liquid - finishedGal > 1e-9;
+  return { finished_gal: finishedGal, water_gal: over ? 0 : Math.max(0, round4(finishedGal - liquid)), over, unsized, missing };
 }
 
 /**
@@ -57,6 +62,15 @@ export function loaderWater(finishedGal: number, products: readonly WaterProduct
 export function loaderTankWater(volume: number, products: readonly WaterProduct[], inputs: readonly Pick<LoaderProductInput, 'total_quantity'>[]): LoaderWater {
   return loaderWater(volume, products.map((product, pi) =>
     (Number.isFinite(inputs[pi]?.total_quantity ?? NaN) ? product : { ...product, amount: NaN })));
+}
+
+/** Why water to add leaves a product out, one sentence per reason. */
+export function loaderWaterNotes(water: Pick<LoaderWater, 'unsized' | 'missing'>): string[] {
+  const notes: string[] = [];
+  const names = (list: string[]) => [...new Set(list)].join(', ');
+  if (water.missing.length > 0) notes.push(`Water to add does not count ${names(water.missing)}: the amount is missing. Fix it on the job, or subtract its volume by hand.`);
+  if (water.unsized.length > 0) notes.push(`Water to add does not count ${names(water.unsized)}: liquid or dry is not known for this unit. Subtract its volume by hand.`);
+  return notes;
 }
 
 /** Gallons in loader units: "58 GL 7.68 FL OZ". */

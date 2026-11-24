@@ -10,7 +10,7 @@ import {
   type LoaderLoadBalanceMode,
   type LoaderProductInput,
 } from '../../lib/loaderWorksheet';
-import { fmtLoaderGallons, loaderTankWater, type LoaderWater } from '../../lib/loaderWorksheetWater';
+import { fmtLoaderGallons, loaderTankWater, loaderWaterNotes, type LoaderWater } from '../../lib/loaderWorksheetWater';
 import {
   condensedLoaderLoadLabel,
   condenseLoaderLoads,
@@ -215,7 +215,10 @@ export function LoaderWorksheetsPanel({
     const water = tankWater(load);
     return <>{fmtLoaderGallons(water.water_gal)}{each}{water.over && <span className="block text-xs font-medium text-amber-700">Products exceed finished gallons</span>}</>;
   };
-  const waterUnsized = selectedComputed?.valid ? [...new Set(selectedComputed.loads.flatMap((load) => tankWater(load).unsized))] : [];
+  const waterNotes = selectedComputed?.valid ? loaderWaterNotes({
+    unsized: selectedComputed.loads.flatMap((load) => tankWater(load).unsized),
+    missing: selectedComputed.loads.flatMap((load) => tankWater(load).missing),
+  }) : [];
   const selectedLoadsDone = selectedComputed
     ? validLoaderLoadDone(selectedWorksheet?.loads_done ?? [], selectedComputed.loads_count)
     : [];
@@ -649,9 +652,7 @@ export function LoaderWorksheetsPanel({
                   </tbody>
                 </table>
               </div>
-              {waterUnsized.length > 0 && (
-                <p className="text-xs text-amber-700">Water to add does not count {waterUnsized.join(', ')}: liquid or dry is not known for this unit. Subtract its volume by hand.</p>
-              )}
+              {waterNotes.map((note) => <p key={note} className="text-xs text-amber-700">{note}</p>)}
               {selectedWeights && (
                 <p className="text-xs text-secondary" role="status">{'caption' in selectedWeights ? selectedWeights.caption : selectedWeights.reason}</p>
               )}

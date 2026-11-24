@@ -21,7 +21,7 @@ import { CRX_GREEN, CHARCOAL, GRAY, ALT_ROW_BG, type JsPDFWithAutoTable } from '
 import { companyFooterInternal, fitCompanyNameFont, type CompanyInfo } from './companyInfo';
 import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { fmtNum, type ApplicatorSheetCustomer } from './applicatorSheetData';
-import { fmtLoaderGallons, loaderTankWater, type LoaderWater } from './loaderWorksheetWater';
+import { fmtLoaderGallons, loaderTankWater, loaderWaterNotes, type LoaderWater } from './loaderWorksheetWater';
 import { loaderGroupWeightText, loaderLoadWeights, loaderWeightCaption, type LoaderProductWeights, type LoaderSourceLine } from './loaderWeights';
 import type { WeightUnitFactors } from '../types';
 import {
@@ -209,7 +209,7 @@ export function loaderPdfWaterRows(data: LoaderWorksheetPdfData, plan: ReturnTyp
     ...product, amount: ws.loads.reduce((sum, load) => sum + (load.products[pi]?.amount ?? 0), 0) }));
   const batch = loaderTankWater(ws.spray_volume, batchProducts, data.products);
   const each = (column: LoaderWorksheetPdfLoadColumn) => (column.loads.length > 1 ? ' each' : '');
-  const marks = (water: LoaderWater) => `${water.over ? ' (!)' : ''}${water.unsized.length > 0 ? ' *' : ''}`;
+  const marks = (water: LoaderWater) => `${water.over ? ' (!)' : ''}${water.unsized.length + water.missing.length > 0 ? ' *' : ''}`;
   const rows = [
     ['Finished gallons', ...tanks.map(({ column, water }) => `${fmtLoaderGallons(water.finished_gal)}${each(column)}`), fmtLoaderGallons(batch.finished_gal)],
     ['Water to add', ...tanks.map(({ column, water }) => `${fmtLoaderGallons(water.water_gal)}${marks(water)}${each(column)}`),
@@ -220,9 +220,7 @@ export function loaderPdfWaterRows(data: LoaderWorksheetPdfData, plan: ReturnTyp
   if (over.length > 0 || batch.over) {
     warnings.push(`(!) The products are more than the finished gallons${over.length > 0 ? ` on ${over.join(', ')}` : ''}: water to add prints 0. Check the recipe and carrier rate.`);
   }
-  if (batch.unsized.length > 0) {
-    warnings.push(`* Water to add does not count ${[...new Set(batch.unsized)].join(', ')}: liquid or dry is not known for this unit. Subtract its volume by hand.`);
-  }
+  warnings.push(...loaderWaterNotes(batch).map((note) => `* ${note}`));
   return { rows, warnings };
 }
 

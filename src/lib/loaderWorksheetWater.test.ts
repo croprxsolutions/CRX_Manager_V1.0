@@ -8,19 +8,22 @@ const p = (product_name: string, amount: number, unit: string, product_form: str
 describe('loaderWater', () => {
   it('subtracts liquid product gallons; dry products add no volume', () => {
     const w = loaderWater(300, [p('L1', 2, 'gal'), p('L2', 64, 'fl oz'), p('D1', 50, 'lb', 'dry'), p('S1', 3, 'each', 'each')]);
-    expect(w).toEqual({ finished_gal: 300, water_gal: 297.5, over: false, unsized: [] });
+    expect(w).toEqual({ finished_gal: 300, water_gal: 297.5, over: false, unsized: [], missing: [] });
   });
 
   it('never prints water below 0 and warns when the recipe is over the finished gallons', () => {
     expect(loaderWater(10, [p('L1', 12, 'gal')])).toMatchObject({ water_gal: 0, over: true });
+    // A sliver over still warns (Terra LOW: rounding first hid it).
+    expect(loaderWater(10, [p('L1', 10.0001, 'gal')])).toMatchObject({ water_gal: 0, over: true });
+    expect(loaderWater(10, [p('L1', 10, 'gal')])).toMatchObject({ water_gal: 0, over: false });
   });
 
   it('flags a product it cannot size instead of guessing', () => {
     // Form unknown + ounces: fluid or weight ounce can't be told.
     expect(loaderWater(100, [p('X', 32, 'oz', null), p('Y', 5, 'lb', null), p('Z', 1, 'gal', null)]))
-      .toEqual({ finished_gal: 100, water_gal: 99, over: false, unsized: ['X'] });
-    expect(loaderWater(100, [p('Bad', 3, 'bag', 'liquid'), p('NoAmount', NaN, 'gal'), p('DryNoAmount', NaN, 'lb', 'dry')]).unsized)
-      .toEqual(['Bad', 'NoAmount']);
+      .toEqual({ finished_gal: 100, water_gal: 99, over: false, unsized: ['X'], missing: [] });
+    expect(loaderWater(100, [p('Bad', 3, 'bag', 'liquid'), p('NoAmount', NaN, 'gal'), p('DryNoAmount', NaN, 'lb', 'dry')]))
+      .toMatchObject({ unsized: ['Bad'], missing: ['NoAmount'] });
   });
 
   it('sizes every load in both tank modes and the batch', () => {

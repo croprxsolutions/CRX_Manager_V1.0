@@ -93,6 +93,6 @@ describe('loaderPdfWaterRows', () => {
     const blank = { ...liquid, products: [{ product_name: 'TEST Blank', total_quantity: null, unit: 'gal', product_form: 'liquid' }] };
     const { rows, warnings } = loaderPdfWaterRows(blank, buildLoaderWorksheetPdfPlan(blank));
     expect(rows[1].at(-1)).toBe('1000 GL *');
-    expect(warnings[0]).toMatch(/does not count TEST Blank/);
+    expect(warnings[0]).toMatch(/does not count TEST Blank: the amount is missing/);
   });
 });

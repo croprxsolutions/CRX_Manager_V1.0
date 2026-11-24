@@ -28,6 +28,39 @@
 - Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:3327`, text sha256 `0f7b61b050aa1d57` (the wording stays with the proof, not here)
   Mason chose to leave it unfixed (plain reply, ref 55666ce4c535)
 
+## 2026-11-23 — #2170: Mason owner-accepted 4 Sol finding(s) at `a939d02c9667`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2170 at `a939d02c9667` (base `015566676500`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270227170000_job_completion_missing_stock_rows.sql:183`, text sha256 `78111d0360bedbaa` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 4125f6dd1f27)
+- Finding 2 (HIGH) at `supabase/migrations/20270227170000_job_completion_missing_stock_rows.sql:182`, text sha256 `97a5579d34ea3f3e` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 4125f6dd1f27)
+- Finding 3 (HIGH) at `supabase/migrations/20270227170000_job_completion_missing_stock_rows.sql:183`, text sha256 `3e465f6c5fa0c68a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 4125f6dd1f27)
+- Finding 4 (HIGH) at `supabase/migrations/20270227170000_job_completion_missing_stock_rows.sql:118`, text sha256 `0b3f6fae33f22310` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 4125f6dd1f27)
+
+## 2026-11-23 — #2170: Mason owner-accepted 3 Sol finding(s) at `20c50d55c114`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2170 at `20c50d55c114` (base `c2a85624e19a`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226120000_job_completion_missing_stock_rows.sql:182`, text sha256 `da0be87da49c87dc` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 4db4a73ed8e7)
+- Finding 2 (HIGH) at `supabase/migrations/20270226120000_job_completion_missing_stock_rows.sql:183`, text sha256 `2758b9a6db65d177` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 4db4a73ed8e7)
+- Finding 3 (HIGH) at `supabase/migrations/20270226120000_job_completion_missing_stock_rows.sql:183`, text sha256 `a97304522644db69` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 4db4a73ed8e7)
+
+## 2026-11-23 — #2170: Mason owner-accepted 2 Sol finding(s) at `a1926307688b`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2170 at `a1926307688b` (base `42039d705cc1`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224170000_job_completion_missing_stock_rows.sql:183`, text sha256 `404b7da3333fcead` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 32353c0230e6)
+- Finding 2 (HIGH) at `supabase/migrations/20270224170000_job_completion_missing_stock_rows.sql:183`, text sha256 `7d3f1d1bb2cd69ed` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 32353c0230e6)
+
+## 2026-11-21 — Job completion waits to create a first stock row, the way deliveries do
+
+**Decision (Mason, this task, 2026-11-21).** Two field jobs that finish together and both need a Main Warehouse stock row that does not exist yet must both finish. Stock ends at the sum of what they used. One job must not fail and need a retry. This is the delivery rule from #2045, applied to job completion. It narrows the 2026-11-18 acceptance of that deadlock as a non-issue, which stopped further patches on #1940; deliveries were fixed after that, and jobs were the piece still open (#2121). Rush-order stock rows stay on #2121.
 ## 2026-11-23 — #2372: Mason owner-accepted 3 Sol finding(s) at `7d3bebb5aeb7`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2372 at `7d3bebb5aeb7` (base `015566676500`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

@@ -641,6 +641,7 @@ DECLARE
   v_current jsonb;
   v_sent jsonb;
   v_diff bigint;
+  v_clear boolean := false;
 BEGIN
   v_actor := auth.uid();
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
@@ -754,11 +755,20 @@ BEGIN
     v_payers := jsonb_build_array(jsonb_build_object(
       'customer_id', (SELECT customer_id FROM public.fields WHERE id = v_field_id),
       'product_share_micro_pct', 100000000, 'application_share_micro_pct', 100000000));
+    v_clear := true;
   END IF;
 
   -- This screen shows product shares above 0% only: when those match today's split, the save carries no split change
   -- (a name-only or notes-only save), so no version is written and a 0% or application-only payer is kept.
-  IF v_payers IS NOT NULL THEN
+  -- A clear compares every payer (0% ones too): it is a no-op only when the owner alone already pays 100% / 100%.
+  IF v_clear THEN
+    IF NOT EXISTS (SELECT 1 FROM public.field_billing_split_payers p
+                    WHERE p.version_id = public._field_split_in_force_20270303(v_field_id, v_today)
+                      AND (p.customer_id IS DISTINCT FROM (v_payers->0->>'customer_id')::uuid
+                           OR p.product_share_micro_pct <> 100000000 OR p.application_share_micro_pct <> 100000000)) THEN
+      v_payers := NULL;
+    END IF;
+  ELSIF v_payers IS NOT NULL THEN
     v_in_force := public._field_split_in_force_20270303(v_field_id, v_today);
     SELECT jsonb_agg(jsonb_build_object('c', customer_id, 'p', product_share_micro_pct) ORDER BY customer_id) INTO v_current
       FROM public.field_billing_split_payers WHERE version_id = v_in_force AND product_share_micro_pct > 0;

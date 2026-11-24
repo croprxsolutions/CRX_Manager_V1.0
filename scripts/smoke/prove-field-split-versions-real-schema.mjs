@@ -170,9 +170,12 @@ try {
   assert.equal(note(F1, A), 'owner note', 'a notes-only save changes the notes');
   assert.equal(copy(F1), `${A}:100.000000:true:owner note`);
   r = commit(USERS.admin, asUser(saveField(F1, A, 'One', `'[]'::jsonb`, 'k-sf-empty')) + ' v := u::text;');
-  assert.equal(versions(F1), v1, 'an empty split writes no version');
+  assert.equal(versions(F1), String(Number(v1) + 1), 'an empty split clears the named 0% payer (a new version)');
+  assert.equal(inForce(F1), `${A}:100000000/100000000`, 'the owner alone');
   assert.equal(note(F1, A), 'owner note', 'and keeps the notes');
-  assert.equal(copy(F1), `${A}:100.000000:true:owner note`, 'and deletes nothing');
+  assert.equal(copy(F1), `${A}:100.000000:true:owner note`, 'and the copy is unchanged');
+  r = commit(USERS.admin, asUser(saveField(F1, A, 'One', `'[]'::jsonb`, 'k-sf-empty2')) + ' v := u::text;');
+  assert.equal(versions(F1), String(Number(v1) + 1), 'an empty split on an owner-alone field writes nothing');
   r = commit(USERS.admin, asUser(saveField(F5, B, 'Five', `'[{"customer_id":"${B}","split_pct":50},{"customer_id":"${C}","split_pct":50}]'::jsonb`, 'k-sf-change')) + ' v := u::text;');
   assert.equal(versions(F5), '2', 'a changed split writes a version');
   assert.equal(note(F5, C), 'landlord note', 'notes not sent stay');
@@ -190,7 +193,7 @@ try {
   assert.match(r, /PER_ACRE_PRICING_RETIRED/, `per-acre price refused: ${r}`);
   r = attempt(USERS.admin, `${refuse(saveField(F5, B, 'Five', `'[{"customer_id":"${B}","split_pct":90}]'::jsonb`, 'k-sf-90'))} v := t;`);
   assert.match(r, /must total 100/, `save_field 90% refused: ${r}`);
-  console.log('[save_field] name-only, notes-only and empty saves write no version; 0% payer survives; price refused');
+  console.log('[save_field] name-only and notes-only saves write no version; an empty save clears to the owner; 0% payer survives; price refused');
 
   // 4. Retries.
   const before = versions(F3);

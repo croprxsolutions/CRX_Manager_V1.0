@@ -603,7 +603,7 @@ export default function DispatchBoard() {
           <div className="flex flex-row lg:flex-col gap-4 lg:gap-5">
             {navGroups.map((group) => (
               <div key={group.label} className="flex-1 lg:flex-none">
-                <p className="px-2 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{group.label}</p>
+                <p className="px-2 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{group.label}</p>
                 <div className="space-y-1">
                   {group.items.map((item) => {
                     const active = section === item.id;
@@ -653,7 +653,7 @@ export default function DispatchBoard() {
                 value={filters.search}
                 onChange={(e) => patchFilter('search', e.target.value)}
                 placeholder="Search job # or customer…"
-                className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark/40 focus:border-crx-green-on-dark"
+                className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark/40 focus:border-crx-green-on-dark"
               />
             </div>
             )}
@@ -717,7 +717,7 @@ export default function DispatchBoard() {
                           All recipes
                         </button>
                         {recipes.length === 0 && (
-                          <p className="px-6 py-2 text-xs text-slate-500">No recipes yet</p>
+                          <p className="px-6 py-2 text-xs text-slate-400">No recipes yet</p>
                         )}
                         {recipes.map((r) => (
                           <button
@@ -762,7 +762,7 @@ export default function DispatchBoard() {
           {/* Active-filter chips (job filters — not shown on the dispatched section) */}
           {section !== 'dispatched' && filtersActive && (
             <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-slate-900/40 border-b border-slate-800 text-xs">
-              <span className="text-slate-500">Filters:</span>
+              <span className="text-slate-400">Filters:</span>
               {filters.status !== 'all' && <FilterChip label={`Status: ${filters.status}`} onClear={() => patchFilter('status', 'all')} />}
               {filters.applicatorId && <FilterChip label={`Applicator: ${applicatorOnly.find((a) => a.id === filters.applicatorId)?.full_name ?? '—'}`} onClear={() => patchFilter('applicatorId', '')} />}
               {activeRecipeName && <FilterChip label={`Recipe: ${activeRecipeName}`} onClear={() => patchFilter('recipeId', '')} />}
@@ -827,7 +827,7 @@ export default function DispatchBoard() {
                       value={filters.search}
                       onChange={(e) => patchFilter('search', e.target.value)}
                       placeholder="Search job # or customer…"
-                      className="w-full pl-9 pr-3 py-3 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark/40"
+                      className="w-full pl-9 pr-3 py-3 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark/40"
                     />
                   </div>
 
@@ -927,7 +927,7 @@ export default function DispatchBoard() {
                                 </span>
                               </div>
                               <p className="mt-1 text-sm text-slate-200 font-medium truncate">{job.customer_name}</p>
-                              {job.field_names && <p className="text-xs text-slate-500 truncate">{job.field_names}</p>}
+                              {job.field_names && <p className="text-xs text-slate-400 truncate">{job.field_names}</p>}
                             </div>
                             <div className="text-right shrink-0">
                               <p className="text-lg font-bold text-white tabular-nums">
@@ -1016,7 +1016,7 @@ export default function DispatchBoard() {
             </div>
             <div className="space-y-4">
               <label className="block">
-                <span className="text-xs font-medium uppercase tracking-wider text-slate-500">Status</span>
+                <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Status</span>
                 <select
                   value={filters.status}
                   onChange={(e) => patchFilter('status', e.target.value as DispatchFilters['status'])}
@@ -1031,7 +1031,7 @@ export default function DispatchBoard() {
                 </select>
               </label>
               <label className="block">
-                <span className="text-xs font-medium uppercase tracking-wider text-slate-500">Applicator</span>
+                <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Applicator</span>
                 <select
                   value={filters.applicatorId}
                   onChange={(e) => patchFilter('applicatorId', e.target.value)}
@@ -1045,11 +1045,11 @@ export default function DispatchBoard() {
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">
-                  <span className="text-xs font-medium uppercase tracking-wider text-slate-500">From</span>
+                  <span className="text-xs font-medium uppercase tracking-wider text-slate-400">From</span>
                   <input type="date" value={filters.startDate} onChange={(e) => patchFilter('startDate', e.target.value)} className="mt-1.5 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-3 text-sm text-slate-100 min-h-[44px]" />
                 </label>
                 <label className="block">
-                  <span className="text-xs font-medium uppercase tracking-wider text-slate-500">To</span>
+                  <span className="text-xs font-medium uppercase tracking-wider text-slate-400">To</span>
                   <input type="date" value={filters.endDate} onChange={(e) => patchFilter('endDate', e.target.value)} className="mt-1.5 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-3 text-sm text-slate-100 min-h-[44px]" />
                 </label>
               </div>
@@ -1082,7 +1082,7 @@ function FilterChip({ label, onClear }: { label: string; onClear: () => void }) 
   return (
     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-200">
       {label}
-      <button onClick={onClear} className="text-slate-500 hover:text-white" aria-label={`Clear ${label}`}>
+      <button onClick={onClear} className="text-slate-400 hover:text-white" aria-label={`Clear ${label}`}>
         <X className="w-3 h-3" />
       </button>
     </span>
@@ -1416,7 +1416,7 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
             <X className="w-3.5 h-3.5" /> Clear
           </button>
         )}
-        <span className="ml-auto text-xs text-slate-500">
+        <span className="ml-auto text-xs text-slate-400">
           {visibleRows.length} dispatched location{visibleRows.length === 1 ? '' : 's'}
         </span>
         <button
@@ -1433,7 +1433,7 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
           <p className="text-slate-400">
             {filterActive ? 'No dispatched locations for this assignee.' : 'Nothing dispatched yet.'}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Hand out field locations from <span className="text-slate-300">Dispatch Jobs</span>.</p>
+          <p className="mt-1 text-xs text-slate-400">Hand out field locations from <span className="text-slate-300">Dispatch Jobs</span>.</p>
         </div>
       ) : (
         visibleRows.map((row) => {
@@ -1470,7 +1470,7 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-slate-200 font-medium truncate">{row.customer_name || 'Unknown'}</p>
-                  <p className="flex items-center gap-1.5 text-xs text-slate-500 truncate">
+                  <p className="flex items-center gap-1.5 text-xs text-slate-400 truncate">
                     <MapPin className="w-3.5 h-3.5" /> {row.field_name || 'Field'}
                   </p>
                 </div>
@@ -1480,7 +1480,7 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
                     {formatAppliedOfTotal(row.job_applied_acres, row.job_total_acres)}
                   </p>
                   {row.location_acres != null && (
-                    <p className="text-xs text-slate-500 tabular-nums">{row.location_acres} ac this location</p>
+                    <p className="text-xs text-slate-400 tabular-nums">{row.location_acres} ac this location</p>
                   )}
                 </div>
               </div>
@@ -1490,12 +1490,12 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
                 <Users className="w-4 h-4 text-crx-green-on-dark" />
                 <span className="text-slate-400">Assigned To:</span>
                 <span className="font-semibold text-slate-100">{row.assignee_name || 'Unknown'}</span>
-                <span className="text-xs text-slate-500">({row.assignee_kind})</span>
+                <span className="text-xs text-slate-400">({row.assignee_kind})</span>
               </div>
 
               {/* The job left the dispatchable window — reassign/undispatch no longer apply. */}
               {canDispatch && !dispatchable && (
-                <p className="mt-3 text-xs text-slate-500">
+                <p className="mt-3 text-xs text-slate-400">
                   This job is {row.job_status} — it can no longer be reassigned or undispatched.
                 </p>
               )}

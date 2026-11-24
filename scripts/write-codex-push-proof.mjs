@@ -124,9 +124,10 @@ export function fixedGitExecutable() {
 // are all disabled; PATH is narrowed to the trusted Git installation plus the
 // platform system directory. Inherited GIT_DIR/GIT_WORK_TREE/GIT_CONFIG_* style
 // overrides are dropped by construction — only the names below survive.
-// Repository-local executable filters and attribute overrides remain denied by
-// the bootstrap classifier. The snapshot builders read raw objects (ls-tree /
-// cat-file) and copy bytes directly, so they never drive Git's worktree
+// Repository-local settings (.git/config, .git/info/attributes) are NOT isolated:
+// their filters and merge drivers still run (accepted gap, see
+// docs/manual/known-issues.d/2026-11-22-carry-merge-local-git-config.md).
+// The snapshot builders read raw objects (ls-tree / cat-file) and copy bytes directly, so they never drive Git's worktree
 // conversion pipeline at all; `git status` DOES drive it, and the isolation
 // above is the only thing that keeps a global attributes file plus a
 // `filter.*.process` from executing an attacker-chosen program during it. The

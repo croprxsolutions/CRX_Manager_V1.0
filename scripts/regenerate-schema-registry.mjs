@@ -17,7 +17,8 @@
 //       The default for /regen-schema-registry.
 //
 //   node scripts/regenerate-schema-registry.mjs --live --staging [--types]
-//       The same rebuild from the STAGING project (fsnjredpmakbmhwowjjt) instead of live, for
+//       The same rebuild from the STAGING project (fsnjredpmakbmhwowjjt), written to
+//       .claude/schema-registry.staging.json (schema-registry.json stays live), for
 //       branches cut from origin/staging (field app BUILD-PLAN slice 0 step 2). --types also
 //       rewrites src/types/supabase.ts from that project's generated TypeScript types (works
 //       with plain --live too). Read-only either way.
@@ -49,7 +50,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { readCredentialToken } from "./lib/supabase-credential.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const registryPath = path.join(here, "..", ".claude", "schema-registry.json");
+const liveRegistryPath = path.join(here, "..", ".claude", "schema-registry.json");
+const registryPath = liveRegistryPath;
+// Staging gets its own file: hooks, tests and the session-staleness check read schema-registry.json as LIVE.
+export const stagingRegistryPath = path.join(here, "..", ".claude", "schema-registry.staging.json");
 const today = new Date().toISOString().slice(0, 10);
 const typesPath = path.join(here, "..", "src", "types", "supabase.ts");
 export const PROJECTS = { live: "rhyzpcqhnizqbxphqdkr", staging: "fsnjredpmakbmhwowjjt" };
@@ -190,6 +194,7 @@ function readIntrospectionFile(inputArg) {
 }
 
 function rebuildFromIntrospection(data, projectRef = PROJECTS.live) {
+  const registryPath = projectRef === PROJECTS.staging ? stagingRegistryPath : liveRegistryPath;
   for (const key of ["migrations_high_water", "sequences", "generated_columns", "check_constraints", "columns"]) {
     if (!Array.isArray(data[key])) {
       console.error(`Introspection input missing array key "${key}" — see header of this script for the format.`);

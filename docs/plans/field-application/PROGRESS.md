@@ -1,30 +1,35 @@
 # Field application: progress
 
-Each lane writes only its own section. States (`GOALS.md` rule 6): NOT STARTED, IN PROGRESS, IN REVIEW (PR open), MERGED (in staging), VERIFIED (applied on staging, scenarios re-run there), LIVE, PARKED (reason), BLOCKED (on what), WAITING ON MASON.
+Each lane writes only its own section. States (`BUILD-PLAN.md` › Rules 5): NOT STARTED, IN PROGRESS, IN REVIEW (PR open), MERGED (in staging), VERIFIED (applied on staging, scenarios re-run there), LIVE, PARKED (reason), BLOCKED (on what), WAITING ON MASON.
 
-## Wave 0: build kit (Claude, kit session)
+## Kit
 
-| Item | State | Proof / link | Note |
-|---|---|---|---|
-| 0.1 Spec, scenarios, waves, contracts, goal briefs | IN REVIEW | draft PR | Sol record in `SOL-KIT-REVIEW.md` |
-| 0.2 Mason's morning answers | DONE 2026-11-24 | `MORNING-QUESTIONS.md` | M7: not yet; wave 1 waits for Mason |
-| 0.3 Fold the kit into the fields-who-pays build sheet | NOT STARTED | | after 0.2 |
-| 0.4 One decision per staging-only field migration | NOT STARTED | | Release flow; Taha or Mason merges |
-| 0.5 Read-only facts marked UNVERIFIED | NOT STARTED | | |
+| Item | State | Note |
+|---|---|---|
+| Master copies (SPEC, contracts, scenarios, build plan) | IN REVIEW | Draft PR #2415; condensed 2026-11-24, rounding now matches chemical sales |
+| Mason's go-ahead to start slice 0 / 1 | WAITING ON MASON | M7: "not yet" |
 
-## W1 DB
+## Slice 0
 
-| Item | State | Proof / link | Note |
-|---|---|---|---|
-| 1.1 FP-1 field split groups | NOT STARTED | | |
-| 1.2 FP-2 billable acres | NOT STARTED | | |
-| 1.3 Batches and stock | NOT STARTED | | |
+| Item | State | Note |
+|---|---|---|
+| Taha's live reset (#2407) | WAITING ON MASON | Date with Taha; Mason's yes |
+| Five staging-only field-billing migrations: one decision each | NOT STARTED | |
+| Read-only facts in the contracts | NOT STARTED | |
 
-## W1 paperwork
+## Slice 1 · DB
 
 | Item | State | Proof / link | Note |
 |---|---|---|---|
-| 1.4 Paperwork fixes (5 groups) | NOT STARTED | | |
+| FP-1 field splits | NOT STARTED | | |
+| FP-2 billable acres | NOT STARTED | | |
+| Chem Man field import | NOT STARTED | | after the reset |
+
+## Slice 1 · paperwork
+
+| Item | State | Proof / link | Note |
+|---|---|---|---|
+| Paperwork fixes | NOT STARTED | | |
 
 ## Needs another lane
 
@@ -33,4 +38,4 @@ Each lane writes only its own section. States (`GOALS.md` rule 6): NOT STARTED, 
 
 ## NEEDS MASON
 
-See `MORNING-QUESTIONS.md`.
+See `BUILD-PLAN.md` › Open questions for Mason.

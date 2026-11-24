@@ -808,7 +808,7 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   for the same product (LOW).
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
   defaults (MED). Decided for field splits (Mason, 2026-11-08): only payers saved on the field's split, or on
-  the job's own split; built in foundation 18.1 (`docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`). Any rep can read another rep's
+  the job's own split; built in foundation 18.1 (`docs/plans/field-application/CONTRACT-who-pays.md`). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).
 - Invoice lines could be written with no unit (from an order line or delivery line with no unit), so they could never
   get a return credit (MED): FIXED by `20270106100000` (applied live 2026-11-11, PR #1731). A new order line with no unit takes the product's

@@ -25,7 +25,7 @@
 | 0.4 | The five staging-only field-billing migrations (GAP-CHECK §1): **one decision per migration** (release now, hold for 4.1, or replace), each with what it changes for today's billing (Sol 095) | A table in `GAP-CHECK.md`; any release goes in a normal release PR (Taha or Mason merges) | Each of the five has a decision |
 | 0.5 | Read-only facts the contracts mark UNVERIFIED: which `complete_job` body and triggers each database runs; PR #1650's policies are live (Sol 097); the importer's payer support (Sol 113) | Notes in the contracts | Each fact confirmed or the contract changed |
 
-**Wave 1 does not start until 0.2 and 0.3 are done** (Sol 094): goals must not build on conflicting instructions.
+**Wave 1 does not start until 0.2 and 0.3 are done and Mason says start** (Sol 094; M7 on 2026-11-24 was "not yet"): goals must not build on conflicting instructions.
 
 ## Wave 1: foundation (late November → mid December)
 
@@ -83,7 +83,7 @@
 
 ## Spring (February → April)
 
-Tender and sprayer balances and fills, totes, offline phones, crop-coloured maps and neighbour toggle, map/ink print options, FP-5b blend tickets on the same engine, FP-6 orders (after Taha's #1524 and #1534 are live), FP-7 (slot and owner set in February). Reporting stays unbuilt until Mason asks [GR12].
+Tender and sprayer balances and fills, totes, offline phones, crop-coloured maps and neighbour toggle, map/ink print options, FP-5b blend tickets on the same engine, per-payer prices on one field (M2), FP-6 orders (after Taha's #1524 and #1534 are live), FP-7 (slot and owner set in February). Reporting stays unbuilt until Mason asks [GR12].
 
 ## If wave 4 or 5 is late (Sol 116)
 

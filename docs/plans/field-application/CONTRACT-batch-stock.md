@@ -71,4 +71,4 @@ Stock leaves once, at batch confirmation, from the confirmed amounts [D1]. Growe
 
 ## Open business decisions
 
-- **M4** (cancel after mixing, zero acres): `MORNING-QUESTIONS.md`.
+- **M4** answered 2026-11-24: a rained-out job after mixing ends with nothing billed; the load stays mixed and its contents are carried or put in a tote; no stock returns.

@@ -172,7 +172,7 @@ Every money table is produced by `scenarios-calc.py` in this folder (exact decim
 
 **S20 Leftover acres closed.** Field C planned 71, sprayed 69. The office closes the last 2 acres. Then C bills 69 and the job can move to drafts. "Missing", "recorded 0 acres" and "closed" are different states; nothing ever falls back to planned acres.
 
-**S21 Cancel.** A job with no acres logged and no confirmed batch can be cancelled. A job with acres cannot (the office closes remaining acres instead). A job with a confirmed batch but no acres (rained out after mixing): see MORNING-QUESTIONS M4; until answered, the build refuses cancel and the office closes the acres, keeping the stock movement.
+**S21 Cancel.** A job with no acres logged and no confirmed batch can be cancelled. A job with acres cannot (the office closes remaining acres instead). A job with a confirmed batch but no acres (rained out after mixing) is not cancelled: the office ends it with nothing billed, the stock movement stays, and the load's contents are carried to the next job or a tote; a note is optional (Mason, M4).
 
 **S22 All-or-nothing posting.** The office posts S1's three drafts; one fails (another user just changed it). Then none are posted, and the office sees which one failed and why.
 
@@ -198,7 +198,7 @@ Every money table is produced by `scenarios-calc.py` in this folder (exact decim
 
 **S26 Spray record corrected after posting.** The office corrects field A's acres on a posted job. Then the posted invoices with a field A section (P1's) are flagged; nothing changes by itself; other payers are not flagged.
 
-**S27 Duplicate entry.** The applicator logged field A, 49 acres, Tuesday on the phone; the office then types the paper ticket for the same field and day. Then CRX warns "possible duplicate"; the office removes it or keeps it (a real second pass; a note is optional, Mason's flags-not-steps rule); acres are never doubled silently. A retry of the same save never creates a second entry.
+**S27 Duplicate entry.** The applicator logged field A, 49 acres, Tuesday on the phone; the office then types the paper ticket for the same field and day. Then CRX warns "possible duplicate"; the office removes it or keeps it (a real second pass; a note is optional, Mason's flags-not-steps rule); acres are never doubled silently. A kept second pass bills its own service and fuel acres (Mason, M8). A retry of the same save never creates a second entry.
 
 **S28 Invoice date backfill.** The office posts on December 5 with the invoice date set to November 22. Then the invoice is dated November 22; each payer's due date follows that payer's terms from November 22; if November is closed, the date is refused with the existing month-close message; each field section shows its spray dates.
 

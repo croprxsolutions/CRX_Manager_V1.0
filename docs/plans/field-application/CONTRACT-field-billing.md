@@ -91,4 +91,4 @@ Every money scenario in `SCENARIOS.md` (S1–S10, S16, S20–S29) becomes a SQL 
 
 ## Open business decisions
 
-- **M1** leftover cent; **M2** per-payer price tiers (Sol kit 010); **M3** what counts as a changed invoice (Sol kit 087). See `MORNING-QUESTIONS.md`.
+Answered by Mason 2026-11-24 (`MORNING-QUESTIONS.md`): **M1** closest to exact (B3 as written). **M2** per-payer prices exist but wait for spring; February bills one price per product per job. **M3** any printed change marks the invoice "Corrected"; the office chooses to re-send; credit and rebill only when dollars changed. **M8** each real pass bills its own service and fuel acres. **M9** a missing substitute price holds the whole set.

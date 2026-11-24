@@ -7,7 +7,7 @@ Each lane writes only its own section. States (`GOALS.md` rule 6): NOT STARTED, 
 | Item | State | Proof / link | Note |
 |---|---|---|---|
 | 0.1 Spec, scenarios, waves, contracts, goal briefs | IN REVIEW | draft PR | Sol record in `SOL-KIT-REVIEW.md` |
-| 0.2 Mason's morning answers | WAITING ON MASON | `MORNING-QUESTIONS.md` | |
+| 0.2 Mason's morning answers | DONE 2026-11-24 | `MORNING-QUESTIONS.md` | M7: not yet; wave 1 waits for Mason |
 | 0.3 Fold the kit into the fields-who-pays build sheet | NOT STARTED | | after 0.2 |
 | 0.4 One decision per staging-only field migration | NOT STARTED | | Release flow; Taha or Mason merges |
 | 0.5 Read-only facts marked UNVERIFIED | NOT STARTED | | |

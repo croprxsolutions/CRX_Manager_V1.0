@@ -1,4 +1,23 @@
-# NEEDS MASON - DECISION REQUIRED: field application build (2026-11-24)
+# Field application build: Mason's answers (2026-11-24)
+
+## Answers (Mason, 2026-11-24, in the build-kit session)
+
+| # | Answer |
+|---|---|
+| M1 | Closest to exact (largest remainder; ties to the bigger share, then the grower) |
+| M2 | Yes, payers on one field can have different prices; **not needed by February 1**: February bills one price per product per job and the office adjusts a rare split-price job by hand; per-payer prices are a spring item |
+| M3 | Mark "Corrected" in CRX; the office chooses whether to re-send; credit and rebill only when dollars changed |
+| M4 | End the job with nothing billed; the mix stays recorded; the tank is carried to the next job or a tote; note optional |
+| M5 | If late, keep billing field work in Chem Man (office retypes acres) until CRX passes its checks; never bill planned acres |
+| M6 | Sol capped at two rounds per plan; leftovers come to Mason as a short list |
+| M7 | **Not yet.** No wave 1 goal starts until Mason says so |
+| M8 | Each real pass bills its own service and fuel acres; suspected duplicates are flagged |
+| M9 | The whole payer set waits until a missing substitute price is entered |
+| Map tab | Keep it; the list stays the default |
+
+The questions as asked follow.
+
+# The questions (as asked)
 
 Nine questions, each with a recommendation; "yes" to a recommendation is enough. **Wave 1 starts only after every question is answered and step 0.3 (the build sheet updated to match) is merged** (`WAVES.md` wave 0).
 

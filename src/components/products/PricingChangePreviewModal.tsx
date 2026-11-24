@@ -30,7 +30,7 @@ const ERROR_MESSAGES: Record<string, string> = {
     'Say where the new price or cost came from, such as a supplier quote (the price_source column on a price sheet).',
   // The database refuses these before saving anything; say which cell rule broke, not the code.
   PRICING_DOLLARS_INVALID:
-    'A price or cost on this row is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34: no $ sign, commas, letters or minus sign. The cost and any tier price you change cannot be blank.',
+    'A price or cost on this row is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34: no $ sign, commas, letters or minus sign. A price-driven row needs all three tier prices; a margin-driven row needs the cost.',
   PRICING_PRICE_INVALID:
     'A tier price must be 0 or more, with at most 2 decimals.',
   PRICING_COST_INVALID:
@@ -393,7 +393,7 @@ function NothingSavedNotice({ preview }: { preview: PricingPreviewResult }) {
   return (
     <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="status">
       Nothing was saved. {problems} row{problems === 1 ? ' needs' : 's need'} attention and {problems === 1 ? 'is' : 'are'} listed first below.
-      {sheet && preview.invalid_count > 0 && ' Fix the Invalid rows in your Excel file, then upload it again.'}
+      {sheet && preview.invalid_count > 0 && ' Fix the Invalid rows in your Excel file, then upload it again. If a row cannot be fixed there (for example, the product was turned off), download a fresh price sheet.'}
       {sheet && preview.conflict_count > 0
         && ' A Conflict row changed in CRX after you downloaded the sheet: download a fresh price sheet and make that change there.'}
       {!sheet && ' Fix the problem shown below, then preview again.'}

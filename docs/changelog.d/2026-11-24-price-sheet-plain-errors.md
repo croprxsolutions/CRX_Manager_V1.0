@@ -5,7 +5,7 @@ Prices and costs saved exactly; this change is wording and layout only. Nothing 
 
 - Price-sheet preview lists Invalid and Conflict rows first. Unchanged rows fold behind "Show N unchanged rows".
   A "Nothing was saved" notice says how to fix the file. About 15 row codes now read as plain English.
-- Plain toasts for a used, expired, old-template or another user's sheet, and for a product listed twice
+- Plain toasts for a used, expired or another user's sheet, and for a product listed twice
   (`errorSanitizer.ts`). Plain parser messages for added or deleted rows and for an unreadable file.
 - Products: the "Pricing .xlsx" tooltip and toast say the search box does not narrow the file. The file name
   uses the Central business day.

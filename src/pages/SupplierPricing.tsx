@@ -892,7 +892,14 @@ export default function SupplierPricing() {
                       <td className="px-2 py-2">{row.supplier_product_name || row.supplier_sku || '—'}</td>
                       <td className="px-2 py-2 tabular-nums">
                         {formatSupplierCents(row.cost_cents)}
-                        {row.price_unit && <span className="text-secondary"> per {row.price_unit}</span>}
+                        {/* cost_cents is the total for package_quantity units, so never label it "per" unless that is 1. */}
+                        {row.price_unit && (
+                          <span className="text-secondary">
+                            {row.package_quantity != null && row.package_quantity !== 1
+                              ? ` for ${row.package_quantity} ${row.price_unit}`
+                              : ` per ${row.price_unit}`}
+                          </span>
+                        )}
                       </td>
                       <td className="px-2 py-2">{row.effective_from || '—'}</td>
                       <td className="px-2 py-2">

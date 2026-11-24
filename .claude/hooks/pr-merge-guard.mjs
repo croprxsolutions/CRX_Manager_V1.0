@@ -548,7 +548,7 @@ function gateRequest(request) {
       pullRequest: Number(pr.number),
       headSha: pr.headRefOid,
       tellTaha: (body) => tellTahaOnGitHub({ repo: request.repo, gh: hardGateGh, pullRequest: Number(pr.number), body }),
-      files: prFilesOnGitHub({ repo: request.repo, gh: hardGateGh, number: Number(pr.number) }),
+      files: prFilesOnGitHub({ repo: request.repo, gh: hardGateGh, number: Number(pr.number), headSha: pr.headRefOid }),
       dirs: skipStateDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]),
       notice: (text) => process.stderr.write(text),
     });

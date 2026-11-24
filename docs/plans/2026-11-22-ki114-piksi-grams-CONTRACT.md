@@ -19,7 +19,7 @@ Read on `origin/staging` `a77855293`; live facts read-only on 2026-11-22 (Supaba
 
 ## Outcome
 
-One data-only migration (`20270226110000_piksi_mg_to_grams.sql`) makes every Piksi unit label say `g`, with **no quantity, price, cost, rate, margin, per-acre price or cost-basis cents changed**.
+One data-only migration (`20270228120000_piksi_mg_to_grams.sql`) makes every Piksi unit label say `g`, with **no quantity, price, cost, rate, margin, per-acre price or cost-basis cents changed**.
 
 | What | From | To |
 |---|---|---|

@@ -226,8 +226,10 @@ export function LoaderWorksheetsPanel({
     dry: selectedComputed.loads.some((load) => tankWater(load).dry),
   } : null;
   // Before the product details load, liquid/dry is not read yet: say so, not "set it on the product".
+  // Other reasons (a missing amount, a unit with no gallon size) still show while loading.
   const waterNotes = !waterWhy ? [] : !weightsShown && waterWhy.unknown.length > 0
-    ? ['Water to add shows once the product details load.'] : loaderWaterNotes(waterWhy);
+    ? ['Water to add shows once the product details load.', ...loaderWaterNotes({ ...waterWhy, unknown: [] })]
+    : loaderWaterNotes(waterWhy);
   const selectedLoadsDone = selectedComputed
     ? validLoaderLoadDone(selectedWorksheet?.loads_done ?? [], selectedComputed.loads_count)
     : [];

@@ -66,7 +66,7 @@ DECLARE
   v_items jsonb := p_items;
   v_old_total bigint;
   v_new_total bigint;
-  v_billed bigint;
+  v_billed numeric;
   v_result jsonb;
 BEGIN
   PERFORM pg_advisory_xact_lock(73492009);
@@ -88,12 +88,19 @@ BEGIN
   IF v_old_total IS NOT NULL THEN
     SELECT total_cost_cents INTO v_new_total FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
     IF v_new_total < v_old_total THEN
-      SELECT COALESCE(SUM(vb.total_cents), 0)::bigint INTO v_billed
+      SELECT COALESCE(SUM(vb.total_cents), 0) INTO v_billed
         FROM public.vendor_bills vb
        WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided';
-      IF v_billed > 0 AND v_billed::numeric * 100 > v_new_total::numeric * 105 THEN
-        RAISE EXCEPTION 'PO_EDIT_BELOW_BILLED: this edit would leave the active vendor bills more than 5%% over the purchase order''s ordered total; void or adjust the bill first'
-          USING ERRCODE = '22023';
+      IF v_billed > 0 AND v_billed * 100 > v_new_total::numeric * 105 THEN
+        -- Amounts go in DETAIL for admins only; reps never see cost figures.
+        IF public.is_admin() THEN
+          RAISE EXCEPTION 'PO_EDIT_BELOW_BILLED: this edit would leave the active vendor bills more than 5%% over the purchase order''s ordered total; void or adjust the bill first'
+            USING ERRCODE = '22023',
+                  DETAIL = jsonb_build_object('po_total_cents', v_new_total, 'active_billed_cents', v_billed)::text;
+        ELSE
+          RAISE EXCEPTION 'PO_EDIT_BELOW_BILLED: this edit would leave the active vendor bills more than 5%% over the purchase order''s ordered total; void or adjust the bill first'
+            USING ERRCODE = '22023';
+        END IF;
       END IF;
     END IF;
   END IF;

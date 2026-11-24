@@ -108,9 +108,13 @@ try {
   const repMsg = attempt(USERS.rep, `${refuse(`r := ${saveAs(USERS.rep, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])};`)} v := t;`);
   assert.match(repMsg, /^ok\|PO_EDIT_BELOW_BILLED: /);
   assert.doesNotMatch(repMsg.replace('5%', ''), /\d|\$/, 'no amounts to a rep');
+  // 4b. Amounts travel in DETAIL to an admin only.
+  const detailOf = (uid, call) => attempt(uid, `BEGIN ${asUser(`r := ${call};`)} t := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS t2 = PG_EXCEPTION_DETAIL; t := COALESCE(NULLIF(t2, ''), '<none>'); END; v := t;`);
+  assert.equal(detailOf(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])), 'ok|{"po_total_cents": 61000, "active_billed_cents": 100000}');
+  assert.equal(detailOf(USERS.rep, saveAs(USERS.rep, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])), 'ok|<none>');
   // 5. Raising a quantity is never refused.
   assert.equal(saved(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 50, 0]]), PO1), 'ok|110000');
-  console.log('[edit PO] 40 -> 1 refused; 36 allowed, 35 refused (5% to the cent); dropped line refused; rep refused, no amounts; raise allowed');
+  console.log('[edit PO] 40 -> 1 refused; 36 allowed, 35 refused (5% to the cent); dropped line refused; rep refused, no amounts (amounts in DETAIL to admins only); raise allowed');
 
   // 6. A bill already over the whole order ($110 on $100): an edit that keeps the total (notes) still saves, a cut does not.
   assert.equal(saved(USERS.admin, save(PO2, 'submitted', [[L2A, 10, 0]], 'call vendor'), PO2), 'ok|10000');

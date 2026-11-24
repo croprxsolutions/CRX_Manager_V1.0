@@ -3507,6 +3507,8 @@ export type Database = {
           created_at: string
           customer_id: string
           delivery_id: string
+          hand_send_by: string | null
+          hand_send_queued_at: string | null
           id: string
           last_error: string | null
           next_attempt_at: string
@@ -3528,6 +3530,8 @@ export type Database = {
           created_at?: string
           customer_id: string
           delivery_id: string
+          hand_send_by?: string | null
+          hand_send_queued_at?: string | null
           id?: string
           last_error?: string | null
           next_attempt_at?: string
@@ -3549,6 +3553,8 @@ export type Database = {
           created_at?: string
           customer_id?: string
           delivery_id?: string
+          hand_send_by?: string | null
+          hand_send_queued_at?: string | null
           id?: string
           last_error?: string | null
           next_attempt_at?: string

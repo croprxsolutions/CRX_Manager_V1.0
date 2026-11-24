@@ -16,7 +16,7 @@ import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 
 // KI-25: customer receipts the server could not confirm it sent (needs_check), plus owed ones still waiting after
 // an hour. The office opens the delivery and uses Email Confirmation, or marks a receipt handled (the server then
-// never sends it). Visible to admins and sales reps (RLS).
+// never sends it). Visible to admins and sales reps (RLS); only an admin marks one handled (Mason, 2026-11-23).
 interface ReceiptRow {
   id: string;
   delivery_id: string;
@@ -46,6 +46,7 @@ export default function ReceiptsToCheck() {
   const savingRef = useRef(false);
   const { toast } = useToast();
   const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin'; // the server refuses a sales rep too (RECEIPT_HANDLED_ADMIN_ONLY)
   const closeIdem = useIdempotencyKey('close_delivery_receipt', profile?.id || '');
 
   useEffect(() => {
@@ -139,7 +140,7 @@ export default function ReceiptsToCheck() {
         Customer receipts to check ({total})
       </h2>
       <p className="mt-1 text-amber-800">
-        These delivery receipts were not confirmed as emailed. Open the delivery and use Email Confirmation if the customer still needs one, or mark it handled once it is dealt with.
+        These delivery receipts were not confirmed as emailed. Open the delivery and use Email Confirmation if the customer still needs one{isAdmin ? ', or mark it handled once it is dealt with.' : '. If it does not need sending, ask an admin to mark it handled.'}
       </p>
       <ul className="mt-2 divide-y divide-amber-200">
         {rows.map((row) => {
@@ -155,7 +156,7 @@ export default function ReceiptsToCheck() {
                 {step && <> {step}</>}
               </span>
               <span className="text-xs text-amber-700 sm:ml-auto">{new Date(row.created_at).toLocaleDateString()}</span>
-              <Button
+              {isAdmin && <Button
                 variant="secondary"
                 size="sm"
                 showChevron={false}
@@ -164,7 +165,7 @@ export default function ReceiptsToCheck() {
                 aria-label={`Mark receipt for ${row.deliveries?.delivery_number || 'this delivery'} handled`}
               >
                 Mark handled
-              </Button>
+              </Button>}
             </li>
           );
         })}

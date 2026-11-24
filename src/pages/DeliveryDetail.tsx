@@ -1541,7 +1541,7 @@ export default function DeliveryDetail() {
 
   // A paused receipt whose hand send never went out: the server will not send it either, so say so (Taha LOW).
   const warnHeldNotSent = (deliveryNumber: string) => {
-    toast('warning', `Delivery ${deliveryNumber}: the email did not go out. Its receipt is on "Customer receipts to check" and the server will not send it. Send it again or mark it handled.`);
+    toast('warning', `Delivery ${deliveryNumber}: the email did not go out. Its receipt is on "Customer receipts to check" and the server will not send it. Send it again, or an admin can mark it handled.`);
   };
 
   // ── Resend Delivery Confirmation Email ──────────────────────────────────

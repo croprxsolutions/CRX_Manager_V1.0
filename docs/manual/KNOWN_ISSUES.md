@@ -262,7 +262,8 @@ A receipt asked for at completion is recorded in the same save in `delivery_rece
 PR #1495) and emailed with retries by the Edge Function `send-delivery-receipts` (PR #1647, live 2026-11-08); the app
 switch to the server receipt merged 2026-11-09 (PR #1649). The close action `close_delivery_receipt`
 (`20261221100000`, ledger `20261109152447`, PR #1678) now has its screens (2026-11-22): each row on "Customer receipts
-to check" (Deliveries) has **Mark handled**, so a handled receipt leaves the list and the server never emails it, and
+to check" (Deliveries) has **Mark handled** (admin-only since `20270301120000`, Mason 2026-11-23; sales reps see the
+list without it), so a handled receipt leaves the list and the server never emails it, and
 Email Confirmation pauses any receipt still queued before its hand send, then marks it handled once the email goes
 out (a failed hand send leaves it on the list). Still open: provider bounce handling (no email bounces are tracked
 on any path). The three rare duplicates Mason accepted on 2026-11-09 (DECISION_LOG) stay accepted.

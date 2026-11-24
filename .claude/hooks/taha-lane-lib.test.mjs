@@ -152,7 +152,10 @@ ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270227180000_f05b_delive
 for (const fn of ["complete_delivery", "_start_and_complete_delivery_impl", "start_and_complete_delivery", "void_delivery", "cancel_delivery", "void_order",
   "cancel_order", "update_order_items", "price_order", "apply_write_off", "reverse_write_off", "close_accounting_period", "reopen_accounting_period",
   "_lock_accounting_months", "get_ar_reminder_candidates", "get_customer_balance_listing", "get_monthly_summary", "prevent_order_shares_edit_after_post",
-  "apply_credit_memo", "ar_snapshot", "monthly_rollup", "write_off_small_balances", "receivables_sweep"]) {
+  "apply_credit_memo", "ar_snapshot", "monthly_rollup", "write_off_small_balances", "receivables_sweep",
+  // Taha's #2382 MED 1: "_"-prefixed impls and wrappers behind the public names.
+  "_void_order_impl_20260714", "_cancel_order_idem_impl_20260721", "_price_order_replay_impl_20261015",
+  "_update_order_items_impl", "_void_delivery_replay_impl_20261015", "_cancel_delivery_replay_impl_20261015"]) {
   ok(isTahaLaneSql(`CREATE OR REPLACE FUNCTION public.${fn}() RETURNS void AS $$ SELECT 1 $$;`), `redefining ${fn} is Taha's`);
 }
 for (const fn of ["completed_delivery_report", "save_job", "get_artifact", "monthly_job_application_report"]) {

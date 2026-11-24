@@ -12,3 +12,8 @@ misses that prompted it (#2331, #2338). Taha's own review and the other merge ga
 
 **Decision (Mason, 2026-11-23):** land as best-effort and log the gaps. Each patch round found new
 cases because the method is text matching; the lane is temporary.
+
+Taha's re-check at `6caed60b3` (issuecomment-7123041210): MED 1 (`_`-prefixed impls and wrappers of
+his functions) is fixed. LOW 2 (three booking-stock write forms no staging migration uses yet:
+a PL/pgSQL `quantity_prebooked = x` assignment, a SET with a `where` subquery before the column, and
+`RENAME COLUMN … TO quantity_prebooked`) is one more case under this accepted best-effort decision.

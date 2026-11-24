@@ -90,9 +90,10 @@ function isLaneName(name) {
 // _complete_delivery_authorized_impl, the step in front of the chemical-sale invoice). Prefixes, except the
 // last two pieces, which may sit anywhere in the name. They win over a field word
 // (_guard_credit_memo_application_immutable).
-const TAHA_LANE_FUNCTIONS_RE = new RegExp("^(?:_?complete_delivery|_?start_and_complete_delivery|void_delivery|cancel_delivery|void_order|cancel_order" +
-  "|update_order_items|price_order|apply_write_off|reverse_write_off|_lock_accounting_months|get_customer_balance|get_monthly_summary" +
-  "|prevent_order_shares)(?=_|$)|^get_ar_|accounting_period|credit_memo", "i");
+// Every name may carry a leading "_": the impls and wrappers behind the public names (Taha, #2382 MED 1).
+const TAHA_LANE_FUNCTIONS_RE = new RegExp("^_?(?:complete_delivery|start_and_complete_delivery|void_delivery|cancel_delivery|void_order|cancel_order" +
+  "|update_order_items|price_order|apply_write_off|reverse_write_off|lock_accounting_months|get_customer_balance|get_monthly_summary" +
+  "|prevent_order_shares)(?=_|$)|^_?get_ar_|accounting_period|credit_memo", "i");
 const isLaneFunction = (name) => TAHA_LANE_FUNCTIONS_RE.test(name) || isLaneName(name);
 
 // A migration is Taha's when its SQL writes to, locks or changes one of these tables, or creates,

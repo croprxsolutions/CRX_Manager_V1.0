@@ -1,5 +1,5 @@
 -- Written 2026-11-23. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270227210000_m9_refunds_and_returned_checks.md.
+-- docs/reference/migrations.d/20270301090000_m9_refunds_and_returned_checks.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (M9, billing plan 4 Nov / audit 1.3; design docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md):
@@ -45,6 +45,9 @@
 --   time, its recorded total, no sibling outside it), for refunds too (CHECK_ENTRY_MISMATCH); a refund or return on
 --   any bucket freezes the amounts of all its siblings (edit / delete guard). Round 9: an entry is matched only as an
 --   array of distinct ids (CHECK_ENTRY_MALFORMED otherwise), and a refund locks every credit of the customer first.
+--   Round 11: a Prepayment Manager check's amounts are locked (edit refuses PREPAY_CHECK_AMOUNT_LOCKED; notes and
+--   reference still change); delete_prepay_credit deletes the whole check (every bucket of its entry, one audit row,
+--   refused if any bucket was applied or reversed), and the gate skips an entry deleted whole.
 --   A return also refuses a draft, void, cancelled or deleted invoice
 --   (RETURN_INVOICE_NOT_OPEN).
 --   5. get_prepay_balance_check(customer?): read-only; received - applied - refunded - returned = expected, against
@@ -363,7 +366,12 @@ BEGIN
                                              WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' AND fal.new_values -> 'credit_ids' @> jsonb_build_array(o.id::text))))
       THEN 'CHECK_BUCKETS'
     WHEN EXISTS (SELECT 1 FROM public.financial_audit_log fal
-                  WHERE fal.operation_type = 'prepay_deleted' AND fal.entity_id = ANY (p_credit_ids))
+                  WHERE fal.operation_type = 'prepay_deleted'
+                    AND (fal.entity_id = ANY (p_credit_ids)
+                         -- a Prepayment Manager check deleted whole names every bucket
+                         OR (jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
+                             AND EXISTS (SELECT 1 FROM unnest(p_credit_ids) c(id)
+                                          WHERE fal.new_values -> 'credit_ids' @> jsonb_build_array(c.id::text)))))
       THEN 'CREDIT_DELETED'
     WHEN EXISTS (SELECT 1 FROM public.financial_audit_log fal
                   WHERE fal.operation_type = 'prepay_edited' AND fal.entity_id = ANY (p_credit_ids)
@@ -433,6 +441,15 @@ BEGIN
       SELECT 1 FROM public.financial_audit_log fal
        WHERE fal.operation_type = 'prepay_credit_created'
          AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
+         -- a check deleted whole (delete_prepay_credit, every bucket at $0) is no longer a receipt
+         AND NOT (EXISTS (SELECT 1 FROM public.financial_audit_log d
+                           WHERE d.operation_type = 'prepay_deleted' AND d.new_values ->> 'whole_check' = 'true'
+                             AND jsonb_typeof(d.new_values -> 'credit_ids') = 'array'
+                             AND (d.new_values -> 'credit_ids') @> (fal.new_values -> 'credit_ids')
+                             AND (d.new_values -> 'credit_ids') <@ (fal.new_values -> 'credit_ids'))
+                  AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) b(id)
+                                    JOIN public.prepay_credits pc ON pc.id::text = b.id
+                                   WHERE pc.original_amount_cents <> 0 OR pc.balance_cents <> 0))
          AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) b(id)
                        JOIN public.prepay_credits pc ON pc.id::text = b.id
                       WHERE pc.customer_id = p_customer_id AND pc.source_type = 'check' AND pc.allocation_set_id IS NULL)
@@ -743,9 +760,15 @@ BEGIN
   -- M9: a credit with a refund or a returned check recorded on it keeps its amounts (the edit would rewrite its
   -- original amount and erase them). Reference, label and notes can still change; the screen always sends the
   -- balance, so an unchanged balance is treated as no balance change.
-  IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
+  -- A Prepayment Manager check's amounts are locked too (its creation entry records them; a mistyped check is deleted
+  -- whole and entered again).
+  IF public._prepay_credit_reversed_20270225(p_credit_id)
+     OR (v_credit.source_type = 'check' AND v_credit.allocation_set_id IS NULL) THEN
     IF p_new_balance_cents IS NOT NULL AND p_new_balance_cents IS DISTINCT FROM v_credit.balance_cents THEN
-      RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; its balance cannot be edited';
+      IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
+        RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; its balance cannot be edited';
+      END IF;
+      RAISE EXCEPTION 'PREPAY_CHECK_AMOUNT_LOCKED: a prepayment check''s amount cannot be edited; delete the whole check and enter it again';
     END IF;
     p_new_balance_cents := NULL;
   END IF;
@@ -851,6 +874,9 @@ BEGIN
     RAISE EXCEPTION 'Admin access required to delete prepay credits';
   END IF;
 
+  -- M9: the customer's credits first, in id order (a refund's order), so a whole-check delete cannot deadlock with it.
+  PERFORM 1 FROM prepay_credits
+   WHERE customer_id = (SELECT pc.customer_id FROM prepay_credits pc WHERE pc.id = p_credit_id) ORDER BY id FOR UPDATE;
   SELECT * INTO v_credit FROM prepay_credits WHERE id = p_credit_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Prepay credit not found: %', p_credit_id; END IF;
 
@@ -858,6 +884,72 @@ BEGIN
   -- original amount and erase them).
   IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
     RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; it cannot be deleted';
+  END IF;
+  -- M9: a Prepayment Manager check is deleted whole: every bucket its creation entry lists, together, in one audit
+  -- row, refused when any bucket was applied or has a refund / returned-check line. Its amounts go to $0 (the entry
+  -- stays; the gate skips an entry deleted whole).
+  IF v_credit.source_type = 'check' AND v_credit.allocation_set_id IS NULL THEN
+    DECLARE
+      v_ids   uuid[];
+      v_total bigint;
+    BEGIN
+      IF (SELECT count(*) FROM financial_audit_log fal
+           WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
+             AND fal.new_values -> 'credit_ids' @> jsonb_build_array(p_credit_id::text)) <> 1 THEN
+        RAISE EXCEPTION 'RECORD_NEEDS_HAND_CHECK: CHECK_BUCKETS (this prepayment check''s entry cannot be identified; delete it by hand)';
+      END IF;
+      SELECT array_agg(DISTINCT b.id::uuid) INTO v_ids
+        FROM financial_audit_log fal
+        CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
+                                                          THEN fal.new_values -> 'credit_ids' END) AS b(id)
+       WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
+         AND fal.new_values -> 'credit_ids' @> jsonb_build_array(p_credit_id::text);
+      PERFORM 1 FROM prepay_credits WHERE id = ANY (v_ids) ORDER BY id FOR UPDATE;
+      IF (SELECT count(*) FROM prepay_credits WHERE id = ANY (v_ids) AND customer_id = v_credit.customer_id
+             AND source_type = 'check' AND allocation_set_id IS NULL) <> cardinality(v_ids) THEN
+        RAISE EXCEPTION 'RECORD_NEEDS_HAND_CHECK: CHECK_BUCKETS (this prepayment check''s buckets do not agree; delete it by hand)';
+      END IF;
+      IF EXISTS (SELECT 1 FROM prepay_applications WHERE prepay_credit_id = ANY (v_ids)) THEN
+        RAISE EXCEPTION 'PREPAY_CHECK_APPLIED: part of this check was applied to an invoice; it cannot be deleted';
+      END IF;
+      IF EXISTS (SELECT 1 FROM unnest(v_ids) c(id) WHERE public._prepay_credit_reversed_20270225(c.id)) THEN
+        RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this check has a refund or returned check recorded; it cannot be deleted';
+      END IF;
+      IF EXISTS (SELECT 1 FROM prepay_credits WHERE id = ANY (v_ids) AND balance_cents IS DISTINCT FROM original_amount_cents) THEN
+        RAISE EXCEPTION 'RECORD_NEEDS_HAND_CHECK: CREDIT_DRIFT (a bucket of this check does not match its amount; delete it by hand)';
+      END IF;
+      SELECT COALESCE(sum(balance_cents), 0) INTO v_total FROM prepay_credits WHERE id = ANY (v_ids);
+      IF v_total = 0 THEN RAISE EXCEPTION 'Prepay credit already has zero balance'; END IF;
+      IF (SELECT COALESCE(prepay_balance_cents, 0) FROM customers WHERE id = v_credit.customer_id) < v_total THEN
+        RAISE EXCEPTION 'RECORD_NEEDS_HAND_CHECK: STORED_BALANCE_LOW (the customer''s stored prepay is below this check; delete it by hand)';
+      END IF;
+      UPDATE prepay_credits
+         SET balance_cents = 0, original_amount_cents = 0,
+             notes = COALESCE(notes, '') || ' [DELETED: ' || p_reason || ']', updated_at = now()
+       WHERE id = ANY (v_ids);
+      UPDATE customers SET prepay_balance_cents = prepay_balance_cents - v_total, updated_at = now()
+       WHERE id = v_credit.customer_id;
+      INSERT INTO financial_audit_log (
+        operation_type, entity_type, entity_id, actor_user_id, old_values, new_values, total_impact_cents, description
+      ) VALUES (
+        'prepay_deleted', 'prepay', p_credit_id, v_actor,
+        jsonb_build_object('total_cents', v_total, 'reference_number', v_credit.source_reference,
+                           'buckets', (SELECT jsonb_agg(jsonb_build_object('id', id, 'original_amount_cents', original_amount_cents,
+                                                                          'bucket_label', bucket_label) ORDER BY id)
+                                         FROM prepay_credits WHERE id = ANY (v_ids))),
+        jsonb_build_object('whole_check', true, 'credit_ids', to_jsonb(v_ids), 'balance_cents', 0, 'original_amount_cents', 0,
+                           'reason', p_reason),
+        -1 * v_total,
+        'Deleted prepayment check ' || COALESCE(v_credit.source_reference, v_credit.id::text) || ' (' || cardinality(v_ids)
+          || ' bucket(s)) — ' || p_reason
+      );
+      IF p_idempotency_key IS NOT NULL THEN
+        INSERT INTO idempotency_keys (idempotency_key, operation, result)
+        VALUES (p_idempotency_key, 'delete_prepay_credit', jsonb_build_object('credit_id', p_credit_id));
+      END IF;
+      RETURN jsonb_build_object('success', true, 'credit_id', p_credit_id, 'credit_ids', to_jsonb(v_ids),
+                                'deleted_balance_cents', v_total);
+    END;
   END IF;
 
   v_old_balance := v_credit.balance_cents;
@@ -1906,9 +1998,15 @@ $m9blk$]),
   -- M9: a credit with a refund or a returned check recorded on it keeps its amounts (the edit would rewrite its
   -- original amount and erase them). Reference, label and notes can still change; the screen always sends the
   -- balance, so an unchanged balance is treated as no balance change.
-  IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
+  -- A Prepayment Manager check's amounts are locked too (its creation entry records them; a mistyped check is deleted
+  -- whole and entered again).
+  IF public._prepay_credit_reversed_20270225(p_credit_id)
+     OR (v_credit.source_type = 'check' AND v_credit.allocation_set_id IS NULL) THEN
     IF p_new_balance_cents IS NOT NULL AND p_new_balance_cents IS DISTINCT FROM v_credit.balance_cents THEN
-      RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; its balance cannot be edited';
+      IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
+        RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; its balance cannot be edited';
+      END IF;
+      RAISE EXCEPTION 'PREPAY_CHECK_AMOUNT_LOCKED: a prepayment check''s amount cannot be edited; delete the whole check and enter it again';
     END IF;
     p_new_balance_cents := NULL;
   END IF;
@@ -1919,6 +2017,75 @@ $m9blk$] || ARRAY[$m9blk$, updated_at = now() /* M9: the cached balance changed 
   IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
     RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; it cannot be deleted';
   END IF;
+  -- M9: a Prepayment Manager check is deleted whole: every bucket its creation entry lists, together, in one audit
+  -- row, refused when any bucket was applied or has a refund / returned-check line. Its amounts go to $0 (the entry
+  -- stays; the gate skips an entry deleted whole).
+  IF v_credit.source_type = 'check' AND v_credit.allocation_set_id IS NULL THEN
+    DECLARE
+      v_ids   uuid[];
+      v_total bigint;
+    BEGIN
+      IF (SELECT count(*) FROM financial_audit_log fal
+           WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
+             AND fal.new_values -> 'credit_ids' @> jsonb_build_array(p_credit_id::text)) <> 1 THEN
+        RAISE EXCEPTION 'RECORD_NEEDS_HAND_CHECK: CHECK_BUCKETS (this prepayment check''s entry cannot be identified; delete it by hand)';
+      END IF;
+      SELECT array_agg(DISTINCT b.id::uuid) INTO v_ids
+        FROM financial_audit_log fal
+        CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
+                                                          THEN fal.new_values -> 'credit_ids' END) AS b(id)
+       WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
+         AND fal.new_values -> 'credit_ids' @> jsonb_build_array(p_credit_id::text);
+      PERFORM 1 FROM prepay_credits WHERE id = ANY (v_ids) ORDER BY id FOR UPDATE;
+      IF (SELECT count(*) FROM prepay_credits WHERE id = ANY (v_ids) AND customer_id = v_credit.customer_id
+             AND source_type = 'check' AND allocation_set_id IS NULL) <> cardinality(v_ids) THEN
+        RAISE EXCEPTION 'RECORD_NEEDS_HAND_CHECK: CHECK_BUCKETS (this prepayment check''s buckets do not agree; delete it by hand)';
+      END IF;
+      IF EXISTS (SELECT 1 FROM prepay_applications WHERE prepay_credit_id = ANY (v_ids)) THEN
+        RAISE EXCEPTION 'PREPAY_CHECK_APPLIED: part of this check was applied to an invoice; it cannot be deleted';
+      END IF;
+      IF EXISTS (SELECT 1 FROM unnest(v_ids) c(id) WHERE public._prepay_credit_reversed_20270225(c.id)) THEN
+        RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this check has a refund or returned check recorded; it cannot be deleted';
+      END IF;
+      IF EXISTS (SELECT 1 FROM prepay_credits WHERE id = ANY (v_ids) AND balance_cents IS DISTINCT FROM original_amount_cents) THEN
+        RAISE EXCEPTION 'RECORD_NEEDS_HAND_CHECK: CREDIT_DRIFT (a bucket of this check does not match its amount; delete it by hand)';
+      END IF;
+      SELECT COALESCE(sum(balance_cents), 0) INTO v_total FROM prepay_credits WHERE id = ANY (v_ids);
+      IF v_total = 0 THEN RAISE EXCEPTION 'Prepay credit already has zero balance'; END IF;
+      IF (SELECT COALESCE(prepay_balance_cents, 0) FROM customers WHERE id = v_credit.customer_id) < v_total THEN
+        RAISE EXCEPTION 'RECORD_NEEDS_HAND_CHECK: STORED_BALANCE_LOW (the customer''s stored prepay is below this check; delete it by hand)';
+      END IF;
+      UPDATE prepay_credits
+         SET balance_cents = 0, original_amount_cents = 0,
+             notes = COALESCE(notes, '') || ' [DELETED: ' || p_reason || ']', updated_at = now()
+       WHERE id = ANY (v_ids);
+      UPDATE customers SET prepay_balance_cents = prepay_balance_cents - v_total, updated_at = now()
+       WHERE id = v_credit.customer_id;
+      INSERT INTO financial_audit_log (
+        operation_type, entity_type, entity_id, actor_user_id, old_values, new_values, total_impact_cents, description
+      ) VALUES (
+        'prepay_deleted', 'prepay', p_credit_id, v_actor,
+        jsonb_build_object('total_cents', v_total, 'reference_number', v_credit.source_reference,
+                           'buckets', (SELECT jsonb_agg(jsonb_build_object('id', id, 'original_amount_cents', original_amount_cents,
+                                                                          'bucket_label', bucket_label) ORDER BY id)
+                                         FROM prepay_credits WHERE id = ANY (v_ids))),
+        jsonb_build_object('whole_check', true, 'credit_ids', to_jsonb(v_ids), 'balance_cents', 0, 'original_amount_cents', 0,
+                           'reason', p_reason),
+        -1 * v_total,
+        'Deleted prepayment check ' || COALESCE(v_credit.source_reference, v_credit.id::text) || ' (' || cardinality(v_ids)
+          || ' bucket(s)) — ' || p_reason
+      );
+      IF p_idempotency_key IS NOT NULL THEN
+        INSERT INTO idempotency_keys (idempotency_key, operation, result)
+        VALUES (p_idempotency_key, 'delete_prepay_credit', jsonb_build_object('credit_id', p_credit_id));
+      END IF;
+      RETURN jsonb_build_object('success', true, 'credit_id', p_credit_id, 'credit_ids', to_jsonb(v_ids),
+                                'deleted_balance_cents', v_total);
+    END;
+  END IF;
+$m9blk$] || ARRAY[$m9blk$  -- M9: the customer's credits first, in id order (a refund's order), so a whole-check delete cannot deadlock with it.
+  PERFORM 1 FROM prepay_credits
+   WHERE customer_id = (SELECT pc.customer_id FROM prepay_credits pc WHERE pc.id = p_credit_id) ORDER BY id FOR UPDATE;
 $m9blk$] || ARRAY[$m9blk$, updated_at = now() /* M9: the cached balance changed */$m9blk$]),
       ('public._month_payments_received_20270208(date,date)', ARRAY[$m9blk$, false AS m9_return$m9blk$] || ARRAY[$m9blk$, false AS m9_return$m9blk$] || ARRAY[$m9blk$, false AS m9_return$m9blk$] || ARRAY[$m9blk$,
               -- M9: one payment per Prepayment Manager entry (its audit row), so two checks entered together count twice

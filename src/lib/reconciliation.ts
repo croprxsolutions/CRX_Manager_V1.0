@@ -835,7 +835,7 @@ export async function runReconciliationChecks(): Promise<ReconciliationReport> {
         .select('id, invoice_id, amount_cents, allocation_set_id', { count: 'exact' })
         .order('id')
         .range(from, to)),
-      // M9 (migration 20270227210000; not in the generated types yet): payments taken back by a returned check.
+      // M9 (migration 20270301090000; not in the generated types yet): payments taken back by a returned check.
       fetchAllRows((from, to) => supabaseUntyped
         .from('money_reversal_lines')
         .select('id, invoice_id, amount_cents', { count: 'exact' })

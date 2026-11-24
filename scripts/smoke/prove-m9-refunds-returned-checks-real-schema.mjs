@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Real-schema proof for M9 (refunds paid outside CRX, prepay balance check, returned checks):
- * 20270227210000_m9_refunds_and_returned_checks.sql. Design: docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md.
+ * 20270301090000_m9_refunds_and_returned_checks.sql. Design: docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md.
  * Written first (stage 1: every case failed because the functions did not exist, with setup passing).
  *
  * Container setup and replay copied from prove-month-close-payments-recheck-real-schema.mjs, replaying EVERY
@@ -37,7 +37,7 @@
  *  12) Sol round 2: a duplicate outside refund needs confirming; a drifted credit blocks a refund even when it is
  *      not drawn (round 4: the whole customer must agree); a return
  *      refuses a drifted credit and a payment whose records do not add up to the check; two checks entered with one
- *      number in one transaction are two payments and come back separately; the recompute trigger function is not
+ *      number in one transaction are two payments on Month-End (round 8: their return is refused); the recompute trigger function is not
  *      executable by API roles.
  *  13) the integrity gate (round 3): each kind of disagreement is refused RECORD_NEEDS_HAND_CHECK with its reason.
  *  14) Sol round 4: the whole customer must agree (a credit minted by another customer's payment, a stored balance
@@ -56,6 +56,9 @@
  *      an edit of a sibling bucket waits for it and is then refused (two sessions, committed).
  *  18) Sol round 9: a check applied before an A/R cutoff, whose invoice is voided after it and which is then
  *      returned, still flags that cutoff (the return no longer hides the credit's change date).
+ *  19) Sol round 10: a Prepayment Manager check's amount cannot be edited (notes and reference can); deleting one
+ *      bucket of a split check deletes every bucket in one audit row; a check with an application cannot be deleted;
+ *      the customer's refunds work after the delete and a re-entry.
  *
  * Run: node scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs   (needs Docker)
  * Prints M9_REFUNDS_RETURNED_CHECKS_PROOF_PASS when every case passes; otherwise lists each failing case and why and
@@ -76,7 +79,7 @@ const REUSE = process.env.CRX_PROVER_CONTAINER || null;
 const NAME = REUSE ?? `crx-m9-${process.pid}-${Date.now().toString(36)}`;
 const DB = 'postgres';
 const KEEP = REUSE !== null || process.env.CRX_PROVER_KEEP_CONTAINER === '1' || process.env.CRX_PROVER_REPLAY_ONLY === '1';
-const M9 = path.join(ROOT, 'supabase', 'migrations', '20270227210000_m9_refunds_and_returned_checks.sql');
+const M9 = path.join(ROOT, 'supabase', 'migrations', '20270301090000_m9_refunds_and_returned_checks.sql');
 // Marks the containers this script creates; reuse mode refuses any other container.
 const LABEL = 'crx.prover.m9-refunds-returned-checks';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
@@ -672,7 +675,13 @@ kase('10) Sol round 1: check-only returns, edited/deleted credits, blank referen
   const r = ran(session(`${as(ADMIN)}
     SELECT public.allocate_payment('${C.c9}', 5000, 'ach', 'M9-ACH', NULL, DATE '2026-11-20', 'm9', '[]'::jsonb, '${ADMIN}', 'm9-c10-ach')::text AS a \\gset
     ${refusal(returned(over9, 'm9-c10-ret-ach'))}
-    SELECT public.edit_prepay_credit(${credit('c3')}, 40000, NULL, NULL, 'refunded by hand', '${ADMIN}', 'm9-c10-edit3')::text AS e \\gset
+    -- A legacy amount edit (made before M9 locked check amounts): the credit rewritten to $400, with its audit row.
+    ${OWNER}
+    UPDATE public.prepay_credits SET original_amount_cents = 40000, balance_cents = 40000 WHERE id = ${credit('c3')};
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents - 10000 WHERE id = '${C.c3}';
+    INSERT INTO public.financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, old_values, new_values, total_impact_cents, description)
+      VALUES ('prepay_edited', 'prepay', ${credit('c3')}, '${ADMIN}', '{"original_amount_cents":50000}'::jsonb, '{"original_amount_cents":40000}'::jsonb, -10000, 'legacy edit');
+    ${as(ADMIN)}
     ${refusal(`public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c10-ret3', ${credit('c3')})`)}
     SELECT public.delete_prepay_credit(${credit('c4')}, 'entered twice', '${ADMIN}', 'm9-c10-del4')::text AS d \\gset
     ${refusal(`public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c10-ret4', ${credit('c4')})`)}
@@ -1096,6 +1105,48 @@ kase('18) Sol round 9: apply before an A/R cutoff, void the invoice after it, re
   assert.equal(o.apps, 0, 'the invoice void removed the application');
   assert.equal(o.ret.invoice_payment_cents + o.ret.prepay_applications_reversed_cents, 0, 'the return touched no invoice');
   assert.equal(o.flag, true, 'the A/R as of the cutoff is flagged: the return does not hide the removed application');
+});
+
+kase('19) Sol round 10: a Prepayment Manager check\'s amount is locked; delete removes the whole check; refunds work after re-entry', () => {
+  const pm1 = `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C.c1}' AND source_type = 'check')`;
+  const fix = (label) => `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C.c2}' AND source_reference = 'FIX-19' AND bucket_label = '${label}' AND original_amount_cents > 0 ORDER BY created_at LIMIT 1)`;
+  const r = ran(session(`${as(ADMIN)}
+    ${refusal(`public.edit_prepay_credit(${pm1}, 40000, NULL, NULL, 'typo', '${ADMIN}', 'm9-c19-edit-amount')`)}
+    SELECT public.edit_prepay_credit(${pm1}, 50000, 'REF-19', NULL, 'note only', '${ADMIN}', 'm9-c19-edit-notes')::text AS note \\gset
+    -- c2: a $500 check mistyped as $300 + $200 buckets; deleting bucket B deletes the whole check.
+    SELECT public.create_prepay_check_splits('${C.c2}', 'FIX-19', '[{"label":"A","amount_cents":30000},{"label":"B","amount_cents":20000}]'::jsonb, '${ADMIN}', 'm9-c19-typo')::text AS typo \\gset
+    SELECT public.delete_prepay_credit(${fix('B')}, 'entered wrong', '${ADMIN}', 'm9-c19-del')::text AS del \\gset
+    SELECT json_agg(original_amount_cents || ':' || balance_cents ORDER BY bucket_label)::text AS after_del
+      FROM public.prepay_credits WHERE customer_id = '${C.c2}' AND source_reference = 'FIX-19' \\gset
+    -- Entered again correctly (in a later transaction in real use: the deleted buckets move back an hour so this one
+    -- transaction does not give both entries one entry time); the customer's refunds still work.
+    ${OWNER}
+    UPDATE public.prepay_credits SET created_at = created_at - interval '1 hour' WHERE customer_id = '${C.c2}' AND source_reference = 'FIX-19';
+    ${as(ADMIN)}
+    SELECT public.create_prepay_check_splits('${C.c2}', 'FIX-19', '[{"label":"A","amount_cents":25000},{"label":"B","amount_cents":25000}]'::jsonb, '${ADMIN}', 'm9-c19-again')::text AS again \\gset
+    SELECT ${refund(C.c2, 1000, 'm9-c19-refund', { ref: 'QB 1901' })}::text AS rf \\gset
+    -- A split check with an application on one bucket cannot be deleted through its other bucket.
+    SELECT public.create_prepay_check_splits('${C.c2}', 'APP-19', '[{"label":"A","amount_cents":10000},{"label":"B","amount_cents":10000}]'::jsonb, '${ADMIN}', 'm9-c19-app')::text AS app \\gset
+    SELECT public.apply_prepay_to_invoice((SELECT id FROM public.prepay_credits WHERE source_reference = 'APP-19' AND bucket_label = 'A'), '${INV2}', 5000, '${ADMIN}', 'm9-c19-apply')::text AS ap \\gset
+    ${refusal(`public.delete_prepay_credit((SELECT id FROM public.prepay_credits WHERE source_reference = 'APP-19' AND bucket_label = 'B'), 'entered wrong', '${ADMIN}', 'm9-c19-del-app')`)}
+    ${OWNER}
+    SELECT json_build_object('note', :'note'::jsonb, 'del', :'del'::jsonb, 'after_del', :'after_del'::jsonb, 'rf', :'rf'::jsonb,
+      'pm1', (SELECT original_amount_cents || ':' || balance_cents || ':' || COALESCE(notes, '') || ':' || reference_number FROM public.prepay_credits WHERE id = ${pm1}),
+      'audits', (SELECT count(*) FROM public.financial_audit_log WHERE operation_type = 'prepay_deleted'
+                   AND new_values ->> 'whole_check' = 'true' AND entity_id = (SELECT id FROM public.prepay_credits WHERE customer_id = '${C.c2}' AND source_reference = 'FIX-19' AND bucket_label = 'B' ORDER BY created_at LIMIT 1)),
+      'stored', (SELECT prepay_balance_cents FROM public.customers WHERE id = '${C.c2}'),
+      'chk', (public.get_prepay_balance_check('${C.c2}') -> 0 ->> 'ok')::boolean)::text;`));
+  assert.deepEqual(r.refused.map((m) => /^([A-Z_]+)/.exec(m)?.[1] ?? m), ['PREPAY_CHECK_AMOUNT_LOCKED', 'PREPAY_CHECK_APPLIED'],
+    `an amount edit on a check; a delete of a split check with an application: ${JSON.stringify(r.refused)}`);
+  const o = JSON.parse(r.last);
+  assert.equal(o.note.success, true, 'a notes and reference edit still saves');
+  assert.match(o.pm1, /^50000:50000:.*note only:REF-19$/, `the check's amount is unchanged; its notes and reference changed: ${o.pm1}`);
+  assert.equal(o.del.credit_ids.length, 2, 'the delete names both buckets');
+  assert.deepEqual(o.after_del.slice(0, 2), ['0:0', '0:0'], 'both buckets of the mistyped check are $0');
+  assert.equal(o.audits, 1, 'one audit row for the whole check');
+  assert.equal(o.rf.amount_cents, 1000, 'a refund works after the delete and re-entry');
+  assert.equal(o.stored, 50000 + 50000 - 1000 + 20000 - 5000, 'the stored balance: the $500 check, the re-entered $500 less the refund, and the $200 check less its $50 applied');
+  assert.equal(o.chk, true, 'the balance check agrees');
 });
 
 const admin = (sql) => psql(sql, { user: 'supabase_admin', db: 'template1' });

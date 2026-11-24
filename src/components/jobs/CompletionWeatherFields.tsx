@@ -86,17 +86,23 @@ export default function CompletionWeatherFields({ value, onChange, otherJobs }: 
   const [looking, setLooking] = useState(false);
   // The form closes (or another job's opens) when this unmounts; a late reply must not fill that form.
   const mounted = useRef(true);
+  const latest = useRef(value);
+  latest.current = value;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const fillFromLastWeather = async () => {
     setLooking(true);
+    const before = { ...value };
     try {
       const row = await readLastWeatherToday(otherJobs.map((j) => j.job_id));
       if (!mounted.current) return;
       if (!row) {
         toast('info', 'No weather saved on your jobs today yet.');
       } else {
-        onChange(patchFrom(row));
+        // A box typed into while this was loading keeps what was typed.
+        const patch = patchFrom(row);
+        for (const k of Object.keys(patch) as (keyof WeatherValues)[]) if (latest.current[k] !== before[k]) delete patch[k];
+        onChange(patch);
         const jobNumber = otherJobs.find((j) => j.job_id === row.job_id)?.job_number ?? 'your last job';
         const at = new Date(row.updated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
         toast('info', `Filled from ${jobNumber} (${at}). Check it before you complete.`);

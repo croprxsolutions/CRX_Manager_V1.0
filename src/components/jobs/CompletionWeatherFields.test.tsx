@@ -128,6 +128,18 @@ describe('CompletionWeatherFields', () => {
     expect(H.toast).not.toHaveBeenCalled();
   });
 
+  it('keeps a value typed while the lookup was still loading', async () => {
+    H.rows = [{ job_id: 'job-a', wind_speed: 7, wind_direction: 'SW', temperature: 68, humidity: 55, updated_at: '2026-11-24T15:00:00Z' }];
+    let release: () => void = () => {};
+    H.hold = new Promise<void>((r) => { release = r; });
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Use last weather' }));
+    fireEvent.change(screen.getByLabelText('Wind Speed (mph)'), { target: { value: '9' } });
+    release();
+    await waitFor(() => expect(saved().temperature).toBe('68'));
+    expect(saved()).toEqual({ wind_speed: '9', wind_direction: 'SW', temperature: '68', humidity: '55' });
+  });
+
   it('hides the button when there are no other jobs to copy from', () => {
     render(<Harness otherJobs={[]} />);
     expect(screen.queryByRole('button', { name: 'Use last weather' })).not.toBeInTheDocument();

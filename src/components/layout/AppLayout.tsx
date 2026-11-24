@@ -10,6 +10,7 @@ import WhatsNewDialog from '../ui/WhatsNewDialog';
 import { useAuth } from '../../contexts/AuthContext';
 import { recordPageVisit } from '../../lib/recentPages';
 import { usePageMeta } from '../../hooks/usePageMeta';
+import { isModalOpen, isTypingTarget } from '../../hooks/useSaveShortcut';
 
 export default function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -34,12 +35,15 @@ export default function AppLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, title, accent]);
 
-  // Global Ctrl+K / Cmd+K shortcut
+  // Global Ctrl+K / Cmd+K shortcut, and "/" to open search when the person is not typing in a field.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         setPaletteOpen((prev) => !prev);
+      } else if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTypingTarget(e.target) && !isModalOpen()) {
+        e.preventDefault();
+        setPaletteOpen(true);
       }
     };
     document.addEventListener('keydown', handler);

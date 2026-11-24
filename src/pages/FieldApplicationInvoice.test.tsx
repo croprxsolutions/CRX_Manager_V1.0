@@ -280,6 +280,16 @@ describe('FieldApplicationInvoice — new invoice (no id)', () => {
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
+  it('Ctrl+S runs the same Save, including its checks', async () => {
+    await renderPage();
+    const dateInput = screen.getByText('Transaction Date').parentElement?.querySelector('input[type="date"]');
+    fireEvent.change(dateInput as HTMLInputElement, { target: { value: '' } });
+    fireEvent.keyDown(document, { key: 's', ctrlKey: true });
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Choose a transaction date before saving.'));
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
   it('clicking Save calls save_field_app_invoice with the 7-arg Phase 1 shape', async () => {
     mockRpc.mockResolvedValueOnce({
       data: { invoice_ids: ['new-inv-1'], invoice_group_id: null },

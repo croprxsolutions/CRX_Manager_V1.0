@@ -26,6 +26,7 @@ import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { assertInvoiceSendable } from '../lib/invoiceSendDisposition';
 import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, type InvoiceBillTo } from '../lib/invoiceBulkEmail';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useSaveShortcut } from '../hooks/useSaveShortcut';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import PriceInput from '../components/invoices/PriceInput';
@@ -2123,6 +2124,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         c.farm_name.toLowerCase().includes(customerSearch.toLowerCase())
       ).slice(0, 10)
     : [];
+
+  // Ctrl+S / Cmd+S presses Save changes, only while that button is shown and can be clicked.
+  useSaveShortcut(handleSave, editable && !loading && !(!isNew && id && loadFailedId === id) && !saving && !addingProduct && !postFlowBusy);
 
   if (loading) {
     return (

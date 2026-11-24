@@ -24,6 +24,7 @@ import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { fingerprintIntentPayload, getCommittedOrderIdFromMismatch, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { useFormDraft } from '../hooks/useFormDraft';
+import { useSaveShortcut } from '../hooks/useSaveShortcut';
 import { useCreditLimitCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
 import { notifyCreditLimitExceeded } from '../lib/notificationTriggers';
@@ -756,6 +757,9 @@ export default function NewOrder() {
   const orderTotal = validItems.reduce((cents, i) => cents + Math.round(i.total_price * 100), 0) / 100;
   const orderProfit = validItems.reduce((cents, i) => cents + Math.round(i.profit * 100), 0) / 100;
   const orderMargin = orderTotal > 0 ? (orderProfit / orderTotal) * 100 : 0;
+
+  // Ctrl+S / Cmd+S presses Create Order, only while that button can be clicked.
+  useSaveShortcut(handleSave, !loading && !saving);
 
   if (loading) {
     return (

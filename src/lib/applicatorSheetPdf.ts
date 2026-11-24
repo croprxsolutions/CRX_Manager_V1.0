@@ -98,7 +98,15 @@ export interface ApplicatorSheetPdfOptions {
   blankSections?: number;
   includePreviousApplications?: boolean;
   showBanner?: boolean;
+  /**
+   * Print only the map pages (an extra maps print for the crew); no job order.
+   * Tank contents always print on the full sheet; there is no option to hide them (Mason, 2026-11-24).
+   */
+  mapsOnly?: boolean;
 }
+
+/** Thrown when a map-only print has no map page to print. */
+export const NO_MAP_PAGES_MESSAGE = 'This job has no field maps to print. Draw or import field boundaries first.';
 
 /**
  * Draw one applicator sheet with the given theme. Shared by all three formats so
@@ -599,11 +607,20 @@ export async function generateApplicatorSheetPdf(
     blankSections: options.blankSections ?? 0,
     includePreviousApplications: options.includePreviousApplications !== false,
     showBanner: options.showBanner !== false,
+    mapsOnly: options.mapsOnly === true,
   };
 
-  drawSheet(doc, autoTable, data, theme, resolvedOptions);
-  appendSafetySheet(doc, autoTable, data);
-  appendMapPages(doc, data);
+  if (resolvedOptions.mapsOnly) {
+    appendMapPages(doc, data);
+    // jsPDF opens on a blank first page; with no map page added there is nothing to print.
+    if (doc.getNumberOfPages() === 1) throw new Error(NO_MAP_PAGES_MESSAGE);
+    doc.deletePage(1);
+  } else {
+    drawSheet(doc, autoTable, data, theme, resolvedOptions);
+    // The optional safety sheet goes with the job order, not with a map-pages-only print.
+    appendSafetySheet(doc, autoTable, data);
+    appendMapPages(doc, data);
+  }
 
   // Footer on every page (drawn last so page count is final).
   const pageCount = doc.getNumberOfPages();
@@ -612,5 +629,5 @@ export async function generateApplicatorSheetPdf(
     drawFooter(doc, 40, theme.footerText, company);
   }
 
-  doc.save(filename || `applicator-sheet-${format}-${data.job_number}.pdf`);
+  doc.save(filename || (resolvedOptions.mapsOnly ? `field-maps-${data.job_number}.pdf` : `applicator-sheet-${format}-${data.job_number}.pdf`));
 }

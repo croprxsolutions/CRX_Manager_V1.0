@@ -6,7 +6,8 @@
  */
 import { assertRpcResult, supabase } from './db';
 import { fmtNum, type ApplicatorSheetBillingSplit, type ApplicatorSheetData, type ApplicatorSheetSafety, type PreviousFieldApplications } from './applicatorSheetData';
-import { type ApplicatorPrintOptions, mapImageOptions } from './applicatorPrintOptions';
+import { type ApplicatorPrintOptions, DEFAULT_APPLICATOR_PRINT_OPTIONS, mapImageOptions } from './applicatorPrintOptions';
+import { generateApplicatorSheetPdf } from './applicatorSheetPdf';
 import { fetchJobFieldLocations, fetchJobMapImages } from './jobMapImages';
 
 interface ApplicationRecordJoin {
@@ -271,4 +272,18 @@ export async function prepareApplicatorSheetPrintData(
     // Safety is off unless chosen; when chosen it prints on its own sheet (Mason, 2026-11-24).
     safety,
   };
+}
+
+/**
+ * The "Map pages only" print: overview plus per-field maps for a saved job, with no
+ * job order. Throws NO_MAP_PAGES_MESSAGE when the job has no map.
+ */
+export async function printApplicatorMapPages(jobId: string, data: ApplicatorSheetData): Promise<void> {
+  const options: ApplicatorPrintOptions = {
+    ...DEFAULT_APPLICATOR_PRINT_OPTIONS,
+    mapPages: 'both',
+    includePreviousApplications: false,
+    includeBillingSplits: false,
+  };
+  await generateApplicatorSheetPdf(await prepareApplicatorSheetPrintData(jobId, data, options), 'original', null, { mapsOnly: true });
 }

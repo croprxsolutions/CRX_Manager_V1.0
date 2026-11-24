@@ -3038,6 +3038,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _invoice_brand_recopy: 'internal B-1b helper (20270106110000): called only by the recopy trigger and the one-time backfill; rewrites only the derived brand snapshot on open drafts; every API-role EXECUTE is revoked',
   _invoice_brand_recopy_invoice: 'internal B-1b helper (20270106110000): called only by _invoice_brand_recopy and the backfill; rewrites only the derived brand snapshot on one open draft; every API-role EXECUTE is revoked',
   _sync_invoice_line_brand_captures: 'internal B-1b helper (20270106110000): called only by the _capture_invoice_line_rup trigger to keep one RUP capture per brand on a line; every API-role EXECUTE is revoked',
+  _capture_invoice_line_rup: '#2341 re-emit (local candidate 20270303100000): AFTER INSERT OR UPDATE row trigger function on invoice_items; writes the line\'s RUP capture only for the line being written (the line\'s writer owns idempotency); Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked. Prune once the candidate is in the generated snapshot',
   // DM-2 private helpers: the keyed weight writers own replay protection and trigger functions are not callable.
   _write_parent_density: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',
   _write_size_net_weight: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',

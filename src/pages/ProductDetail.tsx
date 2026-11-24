@@ -337,17 +337,6 @@ export default function ProductDetail() {
       });
     return () => { cancelled = true; };
   }, [id, isNew, parentReload]);
-  // Generics keep their EPA numbers on the group's brands (the four places fetchParentEpaNumbers reads), for the setup badge.
-  const [groupHasEpa, setGroupHasEpa] = useState(false);
-  useEffect(() => {
-    setGroupHasEpa(false);
-    if (!parent) return undefined;
-    let cancelled = false;
-    fetchParentEpaNumbers(parent.id)
-      .then((numbers) => { if (!cancelled) setGroupHasEpa(numbers.length > 0); })
-      .catch((error: unknown) => Sentry.captureException(error, { extra: { context: 'product_detail_group_epa' } }));
-    return () => { cancelled = true; };
-  }, [parent]);
 
   const [product, setProduct] = useState<Partial<Product>>(() => ({
     product_name: '',
@@ -558,6 +547,18 @@ export default function ProductDetail() {
   }, [productIdRef]);
   // Another product's brands never sit under this product's number.
   useEffect(() => { setBrandRegistrations([]); setBrandsRead('loading'); }, [id]);
+  // Generics keep their EPA numbers on the group's brands (the four places fetchParentEpaNumbers reads), for the setup badge.
+  const [groupHasEpa, setGroupHasEpa] = useState(false);
+  useEffect(() => { setGroupHasEpa(false); }, [parent]);
+  // Re-read after every brand list change too, so clearing a brand's last number brings the badge back without a reload.
+  useEffect(() => {
+    if (!parent) return undefined;
+    let cancelled = false;
+    fetchParentEpaNumbers(parent.id)
+      .then((numbers) => { if (!cancelled) setGroupHasEpa(numbers.length > 0); })
+      .catch((error: unknown) => Sentry.captureException(error, { extra: { context: 'product_detail_group_epa' } }));
+    return () => { cancelled = true; };
+  }, [parent, brandRegistrations]);
   const productLoaded = persistedProduct?.id === id;
   // The brand list's clock starts once the product (and so the Brands section) has loaded.
   const [brandsReadSlow, setBrandsReadSlow] = useState(false);

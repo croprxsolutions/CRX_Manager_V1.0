@@ -67,5 +67,7 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 
 ## Disputed review findings (for the slice batch)
 
-| PR | Finding | Lane's position |
-|---|---|---|
+The repo is public: one-line summaries only, no customer data, and no exploit detail for an open access bug (AGENTS.md › Public security write-ups).
+
+| PR | Sol run (head sha) | Finding | Lane's position | Disposition / follow-up |
+|---|---|---|---|---|

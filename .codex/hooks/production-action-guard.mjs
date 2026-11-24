@@ -760,7 +760,7 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh, claim = 
       pullRequest: lanePr,
       headSha: pullRequest.headRefOid,
       tellTaha: (body) => tellTahaOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), pullRequest: lanePr, body }),
-      files: prFilesOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), number: lanePr }),
+      files: prFilesOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), number: lanePr, headSha: pullRequest.headRefOid }),
       dirs: skipStateDirs([repoDir]),
       now: nowMs, // undefined → the lib's own Date.now() default
       notice: (text) => process.stderr.write(text),

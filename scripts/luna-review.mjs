@@ -7,6 +7,8 @@
 //   node scripts/luna-review.mjs --commit <sha>       one commit
 //   node scripts/luna-review.mjs --uncommitted        working tree, including untracked files
 //   node scripts/luna-review.mjs --sol --reason "..." advisory Sol escalation (never a gate pass)
+//   node scripts/luna-review.mjs --terra               one Terra final review of ordinary code (off
+//                                                     the Sol list; advisory, never a gate pass)
 //   node scripts/luna-review.mjs --settled <file>     findings already refuted or deferred (Luna only)
 //   node scripts/luna-review.mjs --after-simplify "..."   past the 6-round cap (also --after-rebase,
 //                                                         --after-new-approach); see "round caps"
@@ -37,6 +39,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { isMoneyPath } from "../.claude/hooks/codex-bot-review-lib.mjs";
+import { solRiskPathProblem } from "../.claude/hooks/sol-risk-lib.mjs";
+import { TAHA_LANE_UNTIL_MS, isTahaLanePath } from "../.claude/hooks/taha-lane-lib.mjs";
 import {
   CODEX_REVIEW_EFFORT,
   CODEX_REVIEW_MODEL,
@@ -52,6 +57,27 @@ import {
 // a one-line change here; see docs/reference/codex-model-tuning.md for how to probe a name.
 export const LUNA_MODEL = "gpt-6-luna";
 export const LUNA_EFFORT = "xhigh";
+// Final review for ordinary code off the Sol list (Mason, 2026-11-23). `gpt-6.2-terra` is refused
+// for this account like a bogus name (probed 2026-11-23), so Terra stays 6.1.
+export const TERRA_MODEL = "gpt-6.1-terra";
+export const TERRA_EFFORT = "high";
+let RESULT = "LUNA";
+
+// Terra is only for ordinary code: refuse a diff touching the Sol list, money code (tests included),
+// any .sql file, or Taha's lanes while they run (Taha's review of PR #2405). Returns why, or null.
+export function terraRefusal(diff, now = Date.now()) {
+  const headers = diff.match(/^diff --git .*$/gm) ?? [];
+  const names = headers.flatMap((h) => h.match(/^diff --git a\/(\S+) b\/(\S+)$/)?.slice(1) ?? []);
+  if (names.length !== headers.length * 2) return "a changed file name could not be read";
+  for (const name of names) {
+    const sol = solRiskPathProblem(name);
+    if (sol) return `${sol}: run Luna, then Sol`;
+    if (isMoneyPath(name)) return `${name} is money or inventory code: run Luna, then Sol`;
+    if (/\.sql$/i.test(name)) return `${name} is SQL: run Luna, then Sol`;
+    if (now < TAHA_LANE_UNTIL_MS && isTahaLanePath(name)) return `${name} is in Taha's lanes: run Luna`;
+  }
+  return null;
+}
 export const EXIT_CLEAN = 0;
 export const EXIT_FINDINGS = 1;
 export const EXIT_DID_NOT_RUN = 2;
@@ -66,7 +92,7 @@ const OPAQUE_CHANGE_RE = /^(?:Binary files .* differ|GIT binary patch)$/m;
 export const SETTLED_MAX_BYTES = 8 * 1024;
 
 export function parseArgs(argv) {
-  const opts = { base: null, commit: null, uncommitted: false, sol: false, reason: "", settled: null, after: null };
+  const opts = { base: null, commit: null, uncommitted: false, sol: false, terra: false, reason: "", settled: null, after: null };
   const value = (flag, index) => {
     const next = argv[index];
     // A leading dash would reach git as an option, and an option is not a reason.
@@ -81,6 +107,7 @@ export function parseArgs(argv) {
     else if (arg === "--settled") opts.settled = value(arg, ++i);
     else if (arg === "--uncommitted") opts.uncommitted = true;
     else if (arg === "--sol") opts.sol = true;
+    else if (arg === "--terra") opts.terra = true;
     else if (AFTER_FLAGS[arg]) {
       if (opts.after) throw new Error("Give one --after-* flag per run: the one step you actually took.");
       opts.after = { step: AFTER_FLAGS[arg], reason: value(arg, ++i).trim() };
@@ -91,6 +118,9 @@ export function parseArgs(argv) {
   if ([opts.base, opts.commit, opts.uncommitted].filter(Boolean).length > 1) {
     throw new Error("Choose one scope: --base, --commit or --uncommitted.");
   }
+  if (opts.sol && opts.terra) throw new Error("Choose one reviewer: --sol or --terra.");
+  // Terra stays independent: it never sees what an earlier round decided.
+  if (opts.terra && opts.settled) throw new Error("--terra is an independent final review; drop --settled.");
   if (opts.sol && !opts.reason) throw new Error('--sol requires --reason "<why Luna was not enough>".');
   if (opts.reason && !opts.sol) throw new Error("--reason only applies to --sol.");
   // Sol stays independent: it never sees what an earlier round decided (retro, Mason, 2026-11-09).
@@ -424,7 +454,7 @@ function lunaCapStop(rounds) {
   console.log('  (a) simplify: run a fresh "attack this plan for simplicity" session      --after-simplify "<session or reason>"');
   console.log('  (b) merge or rebase onto current main, then re-plan                      --after-rebase "<what changed>"');
   console.log('  (c) change approach: ask Mason the business rule behind the mechanism   --after-new-approach "<his answer>"');
-  console.log(`LUNA RESULT: STOPPED after ${rounds.luna} whole-branch Luna rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);
+  console.log(`${RESULT} RESULT: STOPPED after ${rounds.luna} whole-branch Luna rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);
   return EXIT_FINDINGS;
 }
 
@@ -483,7 +513,7 @@ export function scopeHint(label, dirty = false, defaultBase = false) {
 }
 
 function reportDidNotRun(reason, advice) {
-  console.log(`LUNA RESULT: DID NOT RUN (exit ${EXIT_DID_NOT_RUN}). THIS IS NOT A REVIEW AND NOT A CLEAN RESULT.`);
+  console.log(`${RESULT} RESULT: DID NOT RUN (exit ${EXIT_DID_NOT_RUN}). THIS IS NOT A REVIEW AND NOT A CLEAN RESULT.`);
   console.log(`Why: ${reason}`);
   if (advice) console.log(advice);
   return EXIT_DID_NOT_RUN;
@@ -499,7 +529,7 @@ function report(run, { label, defaultBase, diffLines, files, model, effort, dirt
   }
   console.log(run.text.trimEnd());
   console.log();
-  console.log(`LUNA RESULT: ${run.outcome === "clean" ? "CLEAN" : `FINDINGS ${run.count}`} (exit ${exitCode})`);
+  console.log(`${RESULT} RESULT: ${run.outcome === "clean" ? "CLEAN" : `FINDINGS ${run.count}`} (exit ${exitCode})`);
   console.log(`Reviewed: ${label}, ${files} file(s), ${diffLines} diff lines, by ${model} at ${effort}.`);
   console.log("Advisory only: this is not a Sol proof and satisfies no gate.");
   if (settledNote) console.log(settledNote);
@@ -514,9 +544,10 @@ function report(run, { label, defaultBase, diffLines, files, model, effort, dirt
 export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth = codeHealthGate } = {}) {
   try {
     const opts = parseArgs(argv);
-    const model = opts.sol ? CODEX_REVIEW_MODEL : LUNA_MODEL;
-    const effort = opts.sol ? CODEX_REVIEW_EFFORT : LUNA_EFFORT;
+    const model = opts.sol ? CODEX_REVIEW_MODEL : opts.terra ? TERRA_MODEL : LUNA_MODEL;
+    const effort = opts.sol ? CODEX_REVIEW_EFFORT : opts.terra ? TERRA_EFFORT : LUNA_EFFORT;
     if (opts.sol) console.error(`[luna-review] advisory Sol escalation, reason: ${opts.reason}`);
+    RESULT = opts.terra ? "TERRA" : "LUNA";
 
     const root = spawnSync(fixedGitExecutable(), ["rev-parse", "--show-toplevel"], { encoding: "utf8", windowsHide: true });
     if (root.status !== 0) throw new Error("Not inside a git checkout.");
@@ -533,6 +564,8 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
     }
     const frozen = freezeDiff(git, opts);
     const settled = opts.settled ? readSettled(opts.settled) : null;
+    const refused = opts.terra && frozen.diff.trim() ? terraRefusal(frozen.diff, codexDeps.now ?? Date.now()) : null;
+    if (refused) return reportDidNotRun(`Not ordinary code, so Terra may not give the final review: ${refused}.`);
 
     if (!frozen.diff.trim()) return reportDidNotRun(`Empty diff for ${frozen.label}: nothing was reviewed.`);
     // A binary file, or a text file marked -diff in .gitattributes, carries no content to review.
@@ -545,12 +578,13 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
     }
 
     // Luna rounds only: the advisory Sol escalation is the documented way past the guard cap.
+    // Terra rounds count toward both caps like Luna rounds (Terra review of this change, 2026-11-23).
     const guardChange = !opts.sol && GUARD_DIFF_RE.test(frozen.diff);
     const wholeBranch = !opts.sol && Boolean(frozen.baseSha);
     const rounds = guardChange || wholeBranch ? branchRounds(git, rootDir) : null;
     if (guardChange && rounds.guard >= GUARD_ROUND_LIMIT) {
       console.log("STOP: third review round on a guard change — drop the carve-out or hand the decision to Mason (AGENTS.md stop rule).");
-      console.log(`LUNA RESULT: STOPPED after ${rounds.guard} guard-change rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);
+      console.log(`${RESULT} RESULT: STOPPED after ${rounds.guard} guard-change rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);
       return EXIT_FINDINGS;
     }
     // shortcut: a detached HEAD has no branch to count against, so it is not capped; check out a branch to be capped.

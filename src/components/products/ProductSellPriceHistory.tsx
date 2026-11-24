@@ -158,7 +158,9 @@ export default function ProductSellPriceHistory({ productId, reloadToken = 0 }: 
             <li key={point.id} className="border-b border-gray-100 pb-3 last:border-0">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <span className="text-sm font-medium text-nav-dark">{formatDay(point.at)}</span>
-                <span className="text-xs text-secondary">{sourceLabel(point.source)}</span>
+                <span className="text-xs text-secondary">
+                  {point.changedBy ? `${sourceLabel(point.source)} · ${point.changedBy}` : sourceLabel(point.source)}
+                </span>
               </div>
               <dl className="mt-1 grid grid-cols-3 gap-2 text-sm tabular-nums">
                 {TIERS.map((tier) => {

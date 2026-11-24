@@ -16,9 +16,12 @@
  *      nothing changes; the current version saves;
  *   4. no expected_version saves as today;
  *   5. the page's own dispatch, carried into its version, saves; with someone else's dispatch change too, refused;
- *   6. printing, applied acres and a chemical's cost leave the version unchanged;
+ *   2 also: the retry's result says "replayed": true;
+ *   6. printing, applied acres and a chemical's cost leave the version (all but rev) unchanged; rev moves;
+ *      6b. a change put back leaves it unchanged too, and moves rev;
  *   7. a driver, or a rep denied the Job Schedule page, is refused job_edit_version; a sales rep gets one;
  *      a rep denied the page while their save waits for the job lock is refused once it clears;
+ *      a denial while a rep's save is uncommitted waits for it (the profile is held FOR SHARE);
  *   8. a malformed expected_version is refused; a driver's save carrying one gets INSUFFICIENT_ROLE;
  *   9. 20270226150000's refusal still fires: a completed job's chemicals can't change, current version or not.
  *
@@ -57,11 +60,11 @@ const V = (name) => `(SELECT ver FROM undo_paths.versions WHERE name = '${name}'
 const elsewhere = (sql) => psql(`BEGIN;\n${claims(ADMIN)}\n${sql};\nCOMMIT;`);
 
 /** Session A saves from `expectedSql` and holds its transaction open for 8 s; resolves when it commits. */
-function holdingSave(expectedSql, key) {
+function holdingSave(expectedSql, key, who = ADMIN) {
   const h = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { stdio: ['pipe', 'pipe', 'pipe'] });
   let err = '';
   h.stderr.on('data', (d) => { err += d; });
-  h.stdin.end(`BEGIN;\n${claims(ADMIN)}\nSET LOCAL ROLE authenticated;\nSELECT ${save('[JV] first save', expectedSql, key)};\nRESET ROLE;\nSELECT pg_sleep(8);\nCOMMIT;\n`);
+  h.stdin.end(`BEGIN;\n${claims(who)}\nSET LOCAL ROLE authenticated;\nSELECT ${save('[JV] first save', expectedSql, key, who)};\nRESET ROLE;\nSELECT pg_sleep(8);\nCOMMIT;\n`);
   return new Promise((resolve) => h.on('close', (code) => resolve({ code, err })));
 }
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -134,7 +137,7 @@ try {
     f0 := public._job_edit_version(${JOB})::text; n := (SELECT count(*) FROM public.activity_feed);
     ${asUser(`r2 := ${save('[JV] lost reply', V('c2'), 'jv-lost')};`)}
     ${refuse(`r3 := ${save('[JV] lost reply', V('c2'), 'jv-new-key')};`)}
-    v := 'same=' || (r = r2) || '|unchanged=' || (f0 = public._job_edit_version(${JOB})::text)
+    v := 'same=' || ((r || '{"replayed": true}') = r2) || '|unchanged=' || (f0 = public._job_edit_version(${JOB})::text)
       || '|activity+' || ((SELECT count(*) FROM public.activity_feed) - n) || '|notes=' || ${notes} || '|new key=' || t;`));
   assert.equal(c2, `ok|same=true|unchanged=true|activity+0|notes=[JV] lost reply|new key=${CHANGED}`);
 
@@ -179,7 +182,20 @@ try {
   remember('c6');
   elsewhere(`UPDATE public.jobs SET printed_at = now(), updated_at = now() + interval '1 minute', applied_acres = 5 WHERE id = ${JOB};
     UPDATE public.job_chemicals SET cost_per_unit_cents = 999 WHERE job_id = ${JOB}`);
-  assert.equal(show('6 print / applied acres / cost', commit(`v := (public._job_edit_version(${JOB}) = ${V('c6')})::text;`)), 'ok|true');
+  // Same check as save_job (all but rev); rev moves on any write.
+  const sameButRev = (name) => `((public._job_edit_version(${JOB}) - 'rev') = (${V(name)} - 'rev'))::text
+    || '/rev moved=' || (public._job_edit_version(${JOB}) ->> 'rev' <> ${V(name)} ->> 'rev')`;
+  assert.equal(show('6 print / applied acres / cost', commit(`v := ${sameButRev('c6')};`)), 'ok|true/rev moved=true');
+
+  // 6b. A change put back (job column, field line, dispatch): core and dispatches as before, rev moved, so the
+  // page's version reads before and after its form catch it (Sol round 12).
+  const putBack = (name, change, undo) => { remember(name); elsewhere(change); elsewhere(undo); return commit(`v := ${sameButRev(name)};`); };
+  assert.equal(show('6b put back', [
+    putBack('c6b1', `UPDATE public.jobs SET notes = '[JV] x' WHERE id = ${JOB}`, `UPDATE public.jobs SET notes = '[JV] after own dispatch' WHERE id = ${JOB}`),
+    putBack('c6b2', `UPDATE public.job_fields SET pests = '[JV] x' WHERE id = ${loc(0)}`, `UPDATE public.job_fields SET pests = NULL WHERE id = ${loc(0)}`),
+    putBack('c6b3', `UPDATE public.job_location_dispatches SET dispatch_status = 'cancelled' WHERE job_field_id = ${loc(1)}`,
+      `UPDATE public.job_location_dispatches SET dispatch_status = 'dispatched' WHERE job_field_id = ${loc(1)}`),
+  ].join(' ; ')), ['c6b1', 'c6b2', 'c6b3'].map(() => 'ok|true/rev moved=true').join(' ; '));
 
   // 7. Who may read a version.
   assert.equal(show('7 driver', attempt(DRIVER, `${refuse(`r := public.job_edit_version(${JOB});`)} v := t;`)), 'ok|INSUFFICIENT_ROLE');
@@ -222,6 +238,14 @@ try {
   keyHolder.stdin.end(`BEGIN;\nSELECT pg_advisory_xact_lock(hashtextextended('crx:idempotency:jv-new-denial', 0));\nSELECT pg_sleep(8);\nROLLBACK;\n`);
   assert.match(await deniedWhileWaiting('rep denied while a new job waits', new Promise((resolve) => keyHolder.on('close', (code) => resolve({ code }))),
     save('[JV] rep denied while a new job waits', null, 'jv-new-denial', REP).replace(`public.save_job(${JOB},`, 'public.save_job(NULL,')), /^ok\|INSUFFICIENT_ROLE/);
+  // The last role check holds the rep's profile until commit: a denial meanwhile waits (Sol round 12).
+  const repHolder = holdingSave(null, 'jv-rep-hold', REP);
+  waitForHolder();
+  const blocked = psql(`SET lock_timeout = '1s'; SET session_replication_role = replica;
+    UPDATE public.profiles SET denied_pages = array_append(coalesce(denied_pages, '{}'), 'jobs') WHERE id = '${REP}';`, { allowFailure: true });
+  show('7 denial during a rep\'s save', blocked.status === 0 ? 'LANDED' : blocked.stderr.trim());
+  assert.match(blocked.stderr, /lock timeout/, 'a denial must wait for the rep\'s save to commit');
+  assert.equal((await repHolder).code, 0, 'the rep\'s holding save failed');
   // The same save from a rep who keeps access goes through, so the refusal above is the denial, not the role.
   assert.equal(show('7 rep with access, save', attempt(REP, `${refuse(`r := ${save('[JV] rep save', null, null, REP)};`)} v := t;`)), 'ok|NOT REFUSED');
   // The admin holding save above sent no chemicals and so cleared case 6's: put it back for case 9.
@@ -243,7 +267,7 @@ try {
     ${refuse(`r := ${save('[JV] completed', V('c9'), 'jv-completed', ADMIN, 'completed')};`)}
     v := t || '|unchanged=' || (f0 = public._job_edit_version(${JOB})::text);`)), /^ok\|JOB_COMPLETED_CHEMICALS_LOCKED.*\|unchanged=true$/);
   assert.equal(scalar("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure;"),
-    '2d45c5530c4210e25a15dc43b1e5e56a', 'the installed save_job must be the body the postflight pins');
+    'e789d7e4948e2892bdd1ef86c96ad57b', 'the installed save_job must be the body the postflight pins');
 
   console.log('\nJOB_SAVE_VERSION_PROOF_PASS');
 } finally {

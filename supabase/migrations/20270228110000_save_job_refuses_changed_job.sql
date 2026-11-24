@@ -23,7 +23,11 @@
 --      page, as edit_jobs (20270203110000) does (Sol round 2). With a version, the job's dispatch rows are
 --      held FOR SHARE before the compare, so a crew deletion cannot change them mid-save (Sol round 2).
 --      The role check runs again after the lock waits (a new job's save takes its key lock first), so a rep
---      denied the page while the save waited is refused (Sol rounds 10, 11).
+--      denied the page while the save waited is refused (Sol rounds 10, 11); that last check holds the
+--      caller's profile FOR SHARE, so a denial cannot land between it and commit (Sol round 12). A save
+--      answered by replay carries "replayed": true, so the page skips its crew/loader follow-up (Sol round 12).
+--   The version also carries "rev" (row versions of the job and its lines and dispatches), which any write
+--   changes; save_job does not compare it. The page reads the version before and after its form (Sol round 12).
 --
 -- idempotency-body-check: exempt -- save_job's p_idempotency_key is unchanged and passed through to the
 -- impl, whose replay is unchanged; the new compare is skipped exactly when that replay will answer.
@@ -81,7 +85,16 @@ AS $fn$
     'dispatches', (SELECT COALESCE(jsonb_agg(x.t ORDER BY x.t), '[]'::jsonb) FROM (
       SELECT d.job_field_id || '|' || COALESCE(d.applicator_id::text, '') || '|' || COALESCE(d.crew_id::text, '')
              || '|' || d.dispatch_status AS t
-        FROM job_location_dispatches d WHERE d.job_id = j.id) x)
+        FROM job_location_dispatches d WHERE d.job_id = j.id) x),
+    -- Changes on EVERY write to these rows, even one that puts a value back (Sol round 12). Not compared by
+    -- save_job (printing and applied records write these rows too); the page reads the version before and
+    -- after its form and reloads if this moved, so the form is the state its version describes.
+    'rev', md5(jsonb_build_array(j.xmin::text,
+      (SELECT COALESCE(jsonb_agg(x.t ORDER BY x.t), '[]'::jsonb) FROM (
+         SELECT 'f' || f.id || ':' || f.xmin AS t FROM job_fields f WHERE f.job_id = j.id
+         UNION ALL SELECT 's' || s.id || ':' || s.xmin FROM job_field_shares s WHERE s.job_id = j.id
+         UNION ALL SELECT 'c' || c.id || ':' || c.xmin FROM job_chemicals c WHERE c.job_id = j.id
+         UNION ALL SELECT 'd' || d.id || ':' || d.xmin FROM job_location_dispatches d WHERE d.job_id = j.id) x))::text)
   ) END
   FROM (SELECT p_job_id AS id) k
   LEFT JOIN jobs j ON j.id = k.id
@@ -190,8 +203,10 @@ BEGIN
     END IF;
   END IF;
   -- Again after the lock waits above (Sol rounds 10, 11): a rep denied the Job Schedule page while this save waited is refused.
-  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true
-                   AND (role = 'admin' OR (role = 'sales_rep' AND NOT coalesce('jobs' = ANY (denied_pages), false)))) THEN
+  -- FOR SHARE holds the profile until commit, so a denial either lands first (and this refuses) or waits for the save (Sol round 12).
+  PERFORM 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true
+            AND (role = 'admin' OR (role = 'sales_rep' AND NOT coalesce('jobs' = ANY (denied_pages), false))) FOR SHARE;
+  IF NOT FOUND THEN
     RAISE EXCEPTION 'INSUFFICIENT_ROLE';
   END IF;
   IF public.is_admin() THEN
@@ -209,6 +224,10 @@ BEGIN
         EXCEPT ALL
         SELECT product_id, quantity, unit, customer_supplied FROM jsonb_to_recordset(v_before) AS b(product_id uuid, quantity numeric, unit text, customer_supplied boolean))) THEN
     RAISE EXCEPTION 'JOB_COMPLETED_CHEMICALS_LOCKED: This job is complete, so its chemicals can''t be changed: completion already took them from stock. Nothing was saved.' USING ERRCODE = 'P0001';
+  END IF;
+  -- A replayed save tells the page so: it then skips its unchecked crew/loader follow-up and asks for a reload (Sol round 12).
+  IF v_replay AND jsonb_typeof(v_result) = 'object' THEN
+    v_result := v_result || jsonb_build_object('replayed', true);
   END IF;
   RETURN v_result;
 END;
@@ -239,7 +258,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = '2d45c5530c4210e25a15dc43b1e5e56a'
+                    AND md5(replace(p.prosrc, chr(13), '')) = 'e789d7e4948e2892bdd1ef86c96ad57b'
                     AND p.prosecdef AND p.proowner = 'postgres'::regrole
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]) THEN
     RAISE EXCEPTION 'JOB_VERSION_POSTFLIGHT: save_job is not the body, owner or settings this file installs';

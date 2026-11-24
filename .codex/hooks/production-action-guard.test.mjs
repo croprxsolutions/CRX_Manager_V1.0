@@ -643,6 +643,21 @@ try {
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
     nowMs: Date.now(), runGh: () => ordinaryPrJson,
   }).blocked, false, "...and merges once the exact-SHA Sol proof exists");
+  // The guard passes the PR's base to the proof check: a main review does not prove a PR into staging (Taha, #2226 LOW 3c).
+  for (const [reviewRef, blocked] of [["origin/main", true], ["origin/staging", false]]) {
+    writeProof(ordinary.repo, {
+      codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high", review_ref: reviewRef, release_rules: false,
+      head_sha: ordinary.sha, base_sha: ordinary.base, timestamp: new Date().toISOString(),
+    });
+    assert.equal(evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+      nowMs: Date.now(), runGh: () => ordinaryPrJson,
+    }).blocked, blocked, `a ${reviewRef} review ${blocked ? "does not prove" : "proves"} a PR into staging`);
+  }
+  writeProof(ordinary.repo, {
+    codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
+    head_sha: ordinary.sha, base_sha: ordinary.base, timestamp: new Date().toISOString(),
+  });
   // The Follow-ups merge veto was removed (Mason, 2026-11-23): a PR with no section merges.
   for (const body of ["## Summary\nx", "## Follow-ups\n- fix later"]) {
     assert.equal(evaluateProductionAction({
@@ -710,8 +725,10 @@ try {
   assert.match(cutOffComments.reason, /more comments than the gate reads at once/);
   // Sol once before the PR (Mason, 2026-10-29): a proof of an earlier commit covers
   // the commits after it only when those are low risk themselves (Sol, 2026-10-29).
-  for (const [later, expectBlocked, label] of [
+  for (const [later, expectBlocked, label, reviewRef] of [
     ["src/lib/invoiceMath.ts", true, "a later money commit needs a fresh Sol review"],
+    // The earlier-commit path passes the PR's base too (Taha, #2226 LOW 3c).
+    ["docs/plans/later.md", true, "an earlier main review does not cover a PR into staging", "origin/main"],
     ["docs/plans/later.md", false, "a later notes commit merges on the earlier Sol review"],
     ["docs/reference/sql-canonical-patterns.md", false, "a later commit off the Sol list merges on the earlier Sol review"],
   ]) {
@@ -719,6 +736,7 @@ try {
     writeProof(branch.repo, {
       codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
       head_sha: branch.sha, base_sha: branch.base, timestamp: new Date().toISOString(),
+      ...(reviewRef ? { review_ref: reviewRef, release_rules: false } : {}),
     });
     mkdirSync(path.join(branch.repo, ...path.dirname(later).split("/")), { recursive: true });
     writeFileSync(path.join(branch.repo, ...later.split("/")), "export const x = 1;\n", "utf8");
@@ -734,7 +752,8 @@ try {
         if (args[0] === "api" && /\/compare\//.test(String(args[1]))) {
           compared.push(String(args[1]));
           return JSON.stringify({ status: "ahead", ahead_by: 1, behind_by: 0, merge_base: branch.sha, head,
-            files: [{ filename: later, previous_filename: null, status: "added", changes: 1 }] });
+            // With reviewRef, the PR's whole diff is on the Sol list, so a missing proof is not excused.
+            files: [{ filename: reviewRef && String(args[1]).includes(`${branch.base}...`) ? "src/lib/invoiceMath.ts" : later, previous_filename: null, status: "added", changes: 1 }] });
         }
         if (args.some((a) => /object\(expression/.test(String(a)))) {
           return JSON.stringify({ data: { repository: { d0: { entries: [{ name: path.basename(later), mode: 0o100644, type: "blob" }] } } } });
@@ -743,7 +762,9 @@ try {
       },
     });
     assert.equal(verdict.blocked, expectBlocked, label);
-    assert.ok(compared.includes(`repos/{owner}/{repo}/compare/${branch.sha}...${head}`), `the later commits were compared (${later})`);
+    // Refused at the earlier-commit search itself, not later when the found proof is checked.
+    if (reviewRef) assert.match(verdict.reason, /Missing required Sol high-effort proof/, `${label}: never picked as the earlier proof`);
+    if (!reviewRef) assert.ok(compared.includes(`repos/{owner}/{repo}/compare/${branch.sha}...${head}`), `the later commits were compared (${later})`);
   }
   // Money PRs need a completed CodeRabbit review of the head (Mason, 2026-10-21).
   // Same merge-ready, Sol-proven PR; only the requirement answer changes.

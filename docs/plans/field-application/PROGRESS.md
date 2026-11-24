@@ -2,7 +2,7 @@
 
 Each lane writes only its own section; a slice 2 or 3 lane adds its own section when it starts. The shared lines (lease, Mason batches, release state) are written by the database lane. States (`BUILD-PLAN.md` › Rules 5): NOT STARTED, IN PROGRESS, IN REVIEW (PR open), MERGED (in staging), VERIFIED (applied on staging, scenarios re-run there), READY FOR RELEASE, LIVE, PARKED (reason), BLOCKED (on what), WAITING ON MASON.
 
-`JobDetail.tsx` lease: none.
+`JobDetail.tsx` lease: paperwork lane (field-paper-2), granted 2026-11-24; released when its PR merges into staging.
 
 ## Kit
 

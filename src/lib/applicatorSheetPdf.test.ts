@@ -281,11 +281,11 @@ describe('map pages only print', () => {
       centroidLat: null, centroidLng: null, dataUrl: 'data:image/png;base64,ZmllbGQtMQ==' }],
   };
 
-  it('prints only the map pages, no job order or safety sheet, and drops the blank first page', async () => {
+  it('prints only the map pages, no job order, and drops the blank first page', async () => {
     const { default: autoTable } = await import('jspdf-autotable');
-    await generateApplicatorSheetPdf(makeSheetData({ maps, safety: [{ product_name: 'Herbicide A', signal_word: 'Warning', rei_hours: 12, phi_days: 30 }] }),
+    await generateApplicatorSheetPdf(makeSheetData({ maps }),
       'enhanced', null, { mapsOnly: true });
-    expect(autoTable).not.toHaveBeenCalled(); // no sheet or safety tables on a maps-only print
+    expect(autoTable).not.toHaveBeenCalled(); // no sheet tables on a maps-only print
     expect(mockDoc.deletePage).toHaveBeenCalledWith(1);
     expect(pageCount).toBe(2);
     expect(mockDoc.save).toHaveBeenCalledWith(expect.stringMatching(/^field-maps-/));

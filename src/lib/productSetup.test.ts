@@ -158,4 +158,10 @@ describe('matchReadIntervals', () => {
     matchReadIntervals(q, { phi_days: 14 }, read);
     expect(calls).toEqual(['phi_days = 30', 'phi_not_applicable = false', 'epa_registration = 100-1234']);
   });
+
+  it('guards a flag-only save (number unchanged, so not sent) the same way', () => {
+    const { q, calls } = recorder();
+    matchReadIntervals(q, { phi_not_applicable: false }, { ...read, phi_days: null, phi_not_applicable: true });
+    expect(calls).toEqual(['phi_days is null', 'phi_not_applicable = true', 'epa_registration = 100-1234']);
+  });
 });

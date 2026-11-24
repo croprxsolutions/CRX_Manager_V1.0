@@ -118,10 +118,11 @@ type ProductPricingMarginDrafts = Partial<Record<ProductPricingMarginField, stri
 const PARENT_OWNED_FIELDS = ['category', 'use_timings', 'epa_registration', ...PRODUCT_RATE_KEYS] as const;
 
 /** The "label gives no interval" tick under REI or PHI. Ticking clears the number: never a fake 0. */
-function IntervalNotApplicable({ label, checked, disabled, onChange }: {
-  label: string; checked: boolean; disabled: boolean; onChange: (checked: boolean) => void;
+function IntervalNotApplicable({ label, checked, disabled, epaPending, onChange }: {
+  label: string; checked: boolean; disabled: boolean; epaPending: boolean; onChange: (checked: boolean) => void;
 }) {
   return (
+    <>
     <label className="mt-2 flex items-center gap-2 cursor-pointer">
       <input
         type="checkbox"
@@ -132,6 +133,8 @@ function IntervalNotApplicable({ label, checked, disabled, onChange }: {
       />
       <span className="text-sm text-secondary">{label}</span>
     </label>
+    {epaPending && <p className="mt-1 text-xs text-secondary">Save the new EPA number first, then tick for its label.</p>}
+    </>
   );
 }
 
@@ -148,6 +151,11 @@ function nonpricingProductPayload(product: Partial<Product>, persisted?: Product
   if (persisted) {
     for (const field of PRODUCT_FIELDS_WRITTEN_ELSEWHERE) {
       if (payload[field] === (persisted[field] ?? null)) delete payload[field];
+    }
+    // A new EPA number clears the ticks in the database (a new label needs a fresh review), so none ride along.
+    if ('epa_registration' in payload) {
+      delete payload.rei_not_applicable;
+      delete payload.phi_not_applicable;
     }
   }
   return payload;
@@ -421,7 +429,7 @@ export default function ProductDetail() {
   const [unitRequired, setUnitRequired] = useState(false);
   const [reiDraft, setReiDraft] = useState('');
   // What the REI/PHI box held when its "not applicable" tick went on, so unticking puts it back.
-  const intervalDraftBeforeTick = useRef<{ rei?: string; phi?: string }>({});
+  const intervalDraftBeforeTick = useRef<{ read?: Product | null; rei?: string; phi?: string }>({});
   const [phiDraft, setPhiDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [costModal, setCostModal] = useState(false);
@@ -625,6 +633,11 @@ export default function ProductDetail() {
     pricingPreviewIntentRef.current = null;
     intervalDraftBeforeTick.current = {};
   }, [id, resetApplyPricingKey, resetPreviewPricingKey]);
+
+  // Ticks belong to the saved EPA number; while a new one is unsaved they show off and stay locked (the save drops them).
+  const epaPending = Boolean(persistedProduct) && (product.epa_registration?.trim() || null) !== (persistedProduct?.epa_registration?.trim() || null);
+  const reiNotApplicable = Boolean(product.rei_not_applicable) && !epaPending;
+  const phiNotApplicable = Boolean(product.phi_not_applicable) && !epaPending;
 
   const saveExistingProductDetails = async () => {
     const validation = productSetupValidationMessage(product, reiDraft, phiDraft, persistedProduct);
@@ -1699,18 +1712,20 @@ export default function ProductDetail() {
                     setReiDraft(e.target.value);
                     update('rei_hours', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
                   }}
-                  disabled={!isAdmin || saving || reloadRequired || Boolean(product.rei_not_applicable)}
-                  placeholder={product.rei_not_applicable ? 'Not applicable' : 'From label, e.g. 12'}
+                  disabled={!isAdmin || saving || reloadRequired || reiNotApplicable}
+                  placeholder={reiNotApplicable ? 'Not applicable' : 'From label, e.g. 12'}
                 />
                 {!isNew && (
                   <IntervalNotApplicable
                     label="Label gives no REI"
-                    checked={Boolean(product.rei_not_applicable)}
-                    disabled={!isAdmin || saving || reloadRequired}
+                    checked={reiNotApplicable}
+                    disabled={!isAdmin || saving || reloadRequired || epaPending}
+                    epaPending={epaPending}
                     onChange={(checked) => {
-                      if (reloadRequired) return;
+                      if (reloadRequired || epaPending) return;
                       update('rei_not_applicable', checked);
-                      // Unticking puts back what the box held, so a mis-click never erases a number.
+                      // Unticking puts back what the box held before this read's tick, so a mis-click never erases a number.
+                      if (intervalDraftBeforeTick.current.read !== persistedProduct) intervalDraftBeforeTick.current = { read: persistedProduct };
                       if (checked) intervalDraftBeforeTick.current.rei = reiDraft;
                       const draft = checked ? '' : intervalDraftBeforeTick.current.rei ?? String(persistedProduct?.rei_hours ?? '');
                       setReiDraft(draft);
@@ -1731,18 +1746,20 @@ export default function ProductDetail() {
                     setPhiDraft(e.target.value);
                     update('phi_days', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
                   }}
-                  disabled={!isAdmin || saving || reloadRequired || Boolean(product.phi_not_applicable)}
-                  placeholder={product.phi_not_applicable ? 'Not applicable' : 'From label, e.g. 30'}
+                  disabled={!isAdmin || saving || reloadRequired || phiNotApplicable}
+                  placeholder={phiNotApplicable ? 'Not applicable' : 'From label, e.g. 30'}
                 />
                 {!isNew && (
                   <IntervalNotApplicable
                     label="Label gives no PHI"
-                    checked={Boolean(product.phi_not_applicable)}
-                    disabled={!isAdmin || saving || reloadRequired}
+                    checked={phiNotApplicable}
+                    disabled={!isAdmin || saving || reloadRequired || epaPending}
+                    epaPending={epaPending}
                     onChange={(checked) => {
-                      if (reloadRequired) return;
+                      if (reloadRequired || epaPending) return;
                       update('phi_not_applicable', checked);
-                      // Unticking puts back what the box held, so a mis-click never erases a number.
+                      // Unticking puts back what the box held before this read's tick, so a mis-click never erases a number.
+                      if (intervalDraftBeforeTick.current.read !== persistedProduct) intervalDraftBeforeTick.current = { read: persistedProduct };
                       if (checked) intervalDraftBeforeTick.current.phi = phiDraft;
                       const draft = checked ? '' : intervalDraftBeforeTick.current.phi ?? String(persistedProduct?.phi_days ?? '');
                       setPhiDraft(draft);

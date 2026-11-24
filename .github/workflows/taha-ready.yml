@@ -1,0 +1,75 @@
+# Taha ready bot (Mason and Taha, 2026-11-24): labels our PRs that are ready for Taha's Approve and pings
+# him once per PR head in #crx-work. Deterministic script, no AI model: .github/scripts/taha-ready.mjs.
+# The Slack token lives in the release-bot environment, which only main may use, so the bot runs from
+# main (schedule, after CI, by hand) and only the ping job opens that environment.
+name: Taha ready bot
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_run:
+    workflows: ['CI -- Lint, Type Check, Test, Build']
+    types: [completed]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/scripts/taha-ready*.mjs
+      - .github/workflows/taha-ready.yml
+
+permissions: {}
+
+jobs:
+  test:
+    name: Taha ready bot tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: node --test .github/scripts/taha-ready.test.mjs
+
+  label:
+    name: Label PRs ready for Taha
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency: { group: taha-ready-label, cancel-in-progress: false }
+    permissions:
+      contents: read
+      checks: read
+      statuses: read
+      issues: write
+      pull-requests: write
+    outputs:
+      pings: ${{ steps.run.outputs.pings }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/taha-ready.mjs label
+
+  ping:
+    name: Ping Taha in Slack
+    needs: label
+    if: needs.label.outputs.pings != '' && needs.label.outputs.pings != '0'
+    runs-on: ubuntu-latest
+    environment: release-bot
+    concurrency: { group: taha-ready-ping, cancel-in-progress: false }
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          SLACK_RELEASE_TOKEN: ${{ secrets.SLACK_RELEASE_TOKEN }}
+          SLACK_RELEASE_CHANNEL: ${{ secrets.SLACK_RELEASE_CHANNEL }}
+        run: node .github/scripts/taha-ready.mjs ping

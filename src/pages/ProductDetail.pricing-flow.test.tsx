@@ -453,6 +453,26 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.queryByText('Loading cost history…')).not.toBeInTheDocument();
   });
 
+  it('Cost History lists only real cost changes, the newest 20, with No cost for a blank side and business-day dates', async () => {
+    // Newest first, as the server sorts: price-only rows (cost unchanged) sit among 30 real changes.
+    const rows = Array.from({ length: 35 }, (_, i) => (i % 7 === 3
+      ? { id: `same-${i}`, old_cost: 50, new_cost: 50, change_note: `Price only ${i}`, changed_at: '2026-08-04T12:00:00Z' }
+      : { id: `real-${i}`, old_cost: i === 0 ? null : 49, new_cost: 50, change_note: `Real change ${i}`,
+        // 03:00 UTC on Aug 5 is still Aug 4 in the business time zone.
+        changed_at: '2026-08-05T03:00:00Z' }));
+    costHistoryLoadResult = { data: rows, error: null };
+    render(<ProductDetail />);
+    const first = await screen.findByText('Real change 0');
+    expect(screen.getAllByText(/^Real change \d+$/)).toHaveLength(20);
+    expect(screen.queryByText(/^Price only/)).not.toBeInTheDocument();
+    expect(screen.getByText('Real change 22')).toBeInTheDocument();
+    expect(screen.queryByText('Real change 23')).not.toBeInTheDocument();
+    const entry = first.parentElement!;
+    expect(within(entry).getByText('No cost')).toBeInTheDocument();
+    expect(within(entry).getByText('8/4/2026')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('$undefined');
+  });
+
   it('rejects a direct detail save when the loaded pricing version is stale', async () => {
     productMutationResult = { data: [], error: null };
     render(<ProductDetail />);

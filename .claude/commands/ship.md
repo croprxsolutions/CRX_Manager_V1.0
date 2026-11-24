@@ -168,6 +168,7 @@ Deferred: <items with homes>
 - **His items.** Taha's six items are his through 2026-12-15, the billing plan among them. Before starting anything that might be one, ask Taha. When Mason directs money or billing work, warn him in one line of any overlap and follow his call; his field application invoice work is his.
 - **He lands his own PRs**; his own clean Sol run on the final commit satisfies the Sol rule. No agent of Mason's monitors his PRs.
 - **We hold ours** (Step 8 item 4a).
+- **`ready-for-taha` label** (Mason, 2026-11-24) marks OUR PRs waiting on Taha: PRs in his lanes and fixes we built in his area. Never on his own PRs. Add it only once Sol is clean (where needed) and checks are green, with his review request: `gh pr edit <n> --add-label ready-for-taha --add-reviewer TahaKhanAbdalli`. Merge only after his Approve review on the current head (`pr-readiness` shows NOT READY until then); after any push, re-request his review. Remove the label at merge. The 4-hour hold, `taha override` and `needs-coderabbit` are unchanged.
 
 ## Staging
 

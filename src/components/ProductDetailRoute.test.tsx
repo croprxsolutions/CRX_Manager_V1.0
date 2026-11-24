@@ -92,6 +92,9 @@ vi.mock('../lib/db', () => {
     sanitizeError: (error: unknown) => error instanceof Error ? error.message : String(error),
     assertRpcResult: (value: unknown) => value,
     checkMutationResult: vi.fn(),
+    // The Parent panel's rate-switch modal reads these when it loads.
+    RpcErrorCodes: {},
+    hasRpcCode: () => false,
   };
 });
 vi.mock('../lib/costFields', async (importOriginal) => ({
@@ -175,7 +178,7 @@ describe('ProductDetailRoute', () => {
     expect(screen.getByLabelText('Quoting Notes')).toHaveValue('Y quote guidance');
   });
 
-  it('shows not found without X details or Save when Y fails, and Back navigates', async () => {
+  it('shows a load failure (not X details, not Save) when Y fails, and Back navigates', async () => {
     const router = mountAt(productX.id);
     fireEvent.change(await screen.findByLabelText('Quoting Notes'), { target: { value: 'X-only edit' } });
     mockProductRead.mockImplementation(async (id: string) => id === productY.id
@@ -183,7 +186,8 @@ describe('ProductDetailRoute', () => {
       : { data: productX, error: null });
 
     await act(async () => { await router.navigate(`/products/${productY.id}`); });
-    expect(await screen.findByText('Product not found')).toBeInTheDocument();
+    expect(await screen.findByText('Could not load this product.')).toBeInTheDocument();
+    expect(screen.queryByText('Product not found')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Quoting Notes')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save Changes' })).not.toBeInTheDocument();
     expect(mockProductUpdate).not.toHaveBeenCalled();

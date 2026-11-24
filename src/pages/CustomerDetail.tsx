@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, lazy, Suspense } from 'react';
 import { billingM4Enabled } from '../lib/billingFeatures';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote, ChevronDown, Users, Lightbulb, FolderOpen, History, Map, Package, Wallet, ShoppingBasket, Receipt, Lock } from 'lucide-react';
+import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote, ChevronDown, Users, Lightbulb, FolderOpen, History, Map, Package, Wallet, ShoppingBasket, Receipt, Lock, RotateCcw } from 'lucide-react';
 import type { InputHTMLAttributes, ReactNode } from 'react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -275,7 +275,11 @@ export default function CustomerDetail() {
   // null = not being edited (the field shows the saved rate).
   const [discountDraft, setDiscountDraft] = useState<string | null>(null);
   const [discountSaving, setDiscountSaving] = useState(false);
-  useEffect(() => { setDiscountDraft(null); }, [id]);
+  // The customer and row version the Reactivate dialog was opened on: it never shows on another
+  // customer, and confirming applies only to the version shown when it opened (Sol HIGH, round 3).
+  const [reactivateOpenFor, setReactivateOpenFor] = useState<{ id: string; rowVersion: number | null } | null>(null);
+  const [reactivating, setReactivating] = useState(false);
+  useEffect(() => { setDiscountDraft(null); setReactivateOpenFor(null); }, [id]);
 
   // Financials tab state
   interface TxnRow { transaction_date: string; transaction_type: string; reference_number: string; amount_cents: number; running_balance: number }
@@ -844,7 +848,9 @@ export default function CustomerDetail() {
         // Guarded before the toast: a superseded timeline read must not report
         // its failure over the customer the operator is looking at now.
         if (isStale()) return;
-        if (tlError) toast('error', 'Failed to load timeline');
+        // A failed read keeps the entries already shown, not a false "No activity" (#2227 Sol MED).
+        // The section-level spinner is cleared here too: the early return skips the shared clear below (Sol r2 MED).
+        if (tlError) { toast('error', 'Failed to load timeline'); setSectionLoading(selectedTab, false); return; }
 
         // PR-07 follow-up: resolve performer names via profile_public_view (safe
         // columns only) so non-admin users still see actor names after
@@ -1334,6 +1340,69 @@ export default function CustomerDetail() {
     }
   };
 
+  // #2197: staff are told to reactivate an inactive customer before new work. Same direct update the
+  // Customers list uses to deactivate (RLS governs it). Admins and sales reps, as the database allows (Mason, 2026-11-22).
+  const reactivateCustomer = async () => {
+    if (!id || isNew || reactivating) return;
+    const opened = reactivateOpenFor;
+    const visit = visitRef.current;
+    setReactivating(true);
+    try {
+      // The version from when the dialog opened, not whatever a later reload installed.
+      const previousRowVersion = opened?.id === id ? opened.rowVersion : null;
+      // A lost reply to an earlier try that did commit also lands here, so the message does not claim who changed it (#2227).
+      const changedElsewhere = () => toast('warning', 'Nothing was changed: this customer changed since you opened the page, or an earlier Reactivate already went through. Reload the page to check.');
+      if (previousRowVersion === null) { changedElsewhere(); return; }
+      // Only the exact version this admin was shown: an old confirmation must not undo a newer deactivation.
+      const result = await supabase
+        .from('customers')
+        .update({ is_active: true })
+        .eq('id', id)
+        .eq('is_active', false)
+        .eq('row_version', previousRowVersion)
+        .select('*');
+      if (result.error) throw result.error;
+      if (Array.isArray(result.data) && result.data.length === 0) {
+        if (currentIdRef.current === id && visitRef.current === visit) changedElsewhere();
+        return;
+      }
+      checkMutationResult(result, 'reactivate customer');
+      // Logged as soon as the write commits, even if the admin has already left the page.
+      if (profile?.id) {
+        void Promise.resolve(logActivity({
+          event: 'customer_updated',
+          description: 'Customer reactivated',
+          performedBy: profile.id,
+          entityType: 'customer',
+          customerId: id,
+        }))
+          // An open Timeline shows the new entry (#2227); fetchTabData ignores a customer the admin has left.
+          .then((logged) => { if (logged && openSectionsRef.current.has('timeline')) void fetchTabData('timeline'); })
+          .catch(() => {});
+      }
+      if (currentIdRef.current !== id || visitRef.current !== visit) return;
+      const nextRowVersion = (result.data as Array<{ row_version?: unknown }>)[0]?.row_version;
+      const rowVersionResult = resolveDirectMutationRowVersion(previousRowVersion, nextRowVersion);
+      customerRowVersionRef.current = rowVersionResult.rowVersion;
+      keepCleanAfterDiscountRef.current = !isDirty;
+      setCustomer((c) => ({ ...c, is_active: true }));
+      if (rowVersionResult.kind === 'recovery') {
+        staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
+        setStaleSaveOpen(true);
+        toast('warning', 'The customer was reactivated, but another customer edit may have completed at the same time. Your current edits were kept; reload before saving other customer changes.');
+      } else {
+        toast('success', `${customer.farm_name || 'Customer'} is active again.`);
+      }
+    } catch (error: unknown) {
+      Sentry.captureException(toSentryError(error), { extra: { context: 'CustomerDetail.reactivateCustomer' } });
+      toast('error', sanitizeError(error));
+    } finally {
+      setReactivating(false);
+      // A late reply from a customer the admin has left must not close another customer's dialog.
+      setReactivateOpenFor((open) => (open?.id === id ? null : open));
+    }
+  };
+
   if (loading) {
     return <div className="animate-pulse"><div className="h-64 bg-gray-200 rounded" /></div>;
   }
@@ -1372,6 +1441,16 @@ export default function CustomerDetail() {
         { label: 'Customers', href: '/customers' },
         { label: isNew ? 'New Customer' : (customer.farm_name || 'Customer') },
       ]} />
+      <ConfirmModal
+        open={!!id && reactivateOpenFor?.id === id}
+        onClose={() => { if (!reactivating) setReactivateOpenFor(null); }}
+        onConfirm={() => void reactivateCustomer()}
+        title="Reactivate customer"
+        message={`Reactivate ${customer.farm_name || 'this customer'}? Staff can then create orders, holds, deliveries and jobs for them again.`}
+        confirmLabel="Reactivate"
+        variant="info"
+        loading={reactivating}
+      />
       <RecordVersionConflictDialog
         open={staleSaveOpen}
         entityLabel="customer"
@@ -1392,8 +1471,14 @@ export default function CustomerDetail() {
           <h1 className="font-heading text-3xl font-bold leading-tight break-words text-nav-dark md:text-4xl">
             {isNew ? 'New Customer' : customer.farm_name}
           </h1>
+          {!isNew && customer.is_active === false && <Badge variant="default">Inactive</Badge>}
         </div>
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
+          {!isNew && (isAdmin || profile?.role === 'sales_rep') && customer.is_active === false && (
+            <Button variant="primary" size="sm" icon={<RotateCcw className="w-4 h-4" />} showChevron={false} disabled={saving} onClick={() => setReactivateOpenFor(id ? { id, rowVersion: customerRowVersionRef.current } : null)}>
+              Reactivate
+            </Button>
+          )}
           {!isNew && (
             <Button variant="secondary" size="sm" icon={<PhoneCall className="w-4 h-4" />} showChevron={false} onClick={() => setLogInteractionOpen(true)}>
               Log Call

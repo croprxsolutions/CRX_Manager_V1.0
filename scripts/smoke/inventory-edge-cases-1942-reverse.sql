@@ -38,6 +38,18 @@ BEGIN
      OR NOT has_function_privilege('service_role', 'public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'ROLLBACK_REFUSED: a function''s security, search_path or grants changed after #1942';
   END IF;
+  -- #2135 (20270213100000) removed the outer wrapper's short-stock check and relies on #1942's: undo #2135 first.
+  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
+       WHERE oid = to_regprocedure('public._complete_delivery_period_preflight_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)'))
+     = 'f13018d7449506ff80c69facfb51b000' THEN
+    RAISE EXCEPTION 'ROLLBACK_REFUSED: #2135 relies on this body; run scripts/smoke/single-short-stock-warning-reverse.sql first';
+  END IF;
+  -- #2225 (20270226173000) dropped the short-stock ledger trigger that the restored body relies on: undo #2225 first.
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mark_delivery_aggregate_short_stock'
+                   AND tgrelid = 'public.inventory_transactions'::regclass AND tgenabled = 'O'
+                   AND tgtype = 7) THEN  -- BEFORE INSERT FOR EACH ROW: only that shape can flag the new row
+    RAISE EXCEPTION 'ROLLBACK_REFUSED: the short-stock ledger trigger is gone; run scripts/smoke/drop-inert-delivery-short-stock-trigger-reverse.sql first';
+  END IF;
 END;
 $refuse$;
 

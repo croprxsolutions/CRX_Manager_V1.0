@@ -1238,6 +1238,7 @@ function collisionPromptSkipsWork(prompt) {
   const source = {
     codex_ran: true, verdict: "clean", model: CODEX_REVIEW_MODEL, reasoning_effort: CODEX_REVIEW_EFFORT,
     head_sha: head, base_sha: "2".repeat(40), timestamp: new Date(nowMs - 60_000).toISOString(),
+    review_ref: "origin/main", release_rules: false,
   };
   assert.equal(carrySourceProofProblem(source, { headSha: head, nowMs }), null, "carry: a fresh clean Sol proof carries");
   assert.equal(
@@ -1394,6 +1395,281 @@ function collisionPromptSkipsWork(prompt) {
   }
 }
 
+// ── carry-forward after a base merge (Mason, 2026-11-22, #2226) ─────────────
+// A feature branch that merged origin/staging always gets the full review (Sol found a new hole in
+// that carry in each of 7 rounds); hotfix/ and release/ branches merging origin/main still carry.
+{
+  const scriptPath = fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url));
+  const STAGING = "origin/staging";
+  const PR_URL = "https://github.com/example/app/pull/77";
+  // One throwaway repo: main and staging at one commit, a feature branch with one code change.
+  // A hotfix/ branch is reviewed against origin/main instead, where the collision check still runs.
+  const setup = (branch = "hotfix/x") => {
+    const target = branch.startsWith("hotfix/") ? "origin/main" : STAGING;
+    const repo = tempDir("crx-carry-staging-");
+    const git = (...args) => execFileSync("git", ["-c", "user.name=Carry Test", "-c", "user.email=carry@example.invalid", ...args], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const commitAll = (message) => { git("add", "-A"); git("commit", "-qm", message); return git("rev-parse", "HEAD"); };
+    const file = (rel) => path.join(repo, ...rel.split("/"));
+    const write = (rel, text) => { mkdirSync(path.dirname(file(rel)), { recursive: true }); writeFileSync(file(rel), text); };
+    const readProof = (headSha) => JSON.parse(readFileSync(codexPushProofPath(repo, headSha), "utf8"));
+    const writeProof = (headSha, proof) => {
+      const proofPath = codexPushProofPath(repo, headSha);
+      mkdirSync(path.dirname(proofPath), { recursive: true });
+      writeFileSync(proofPath, JSON.stringify(proof));
+    };
+    // Land a commit on a remote-tracking ref without leaving the feature branch.
+    const land = (ref, message, edit) => {
+      git("switch", "-q", "--detach", ref);
+      edit();
+      const sha = commitAll(message);
+      git("update-ref", `refs/remotes/${ref}`, sha);
+      git("switch", "-q", branch);
+      return sha;
+    };
+    const carry = (...extra) => spawnSync(process.execPath, [scriptPath, "--carry-forward", ...extra], { cwd: repo, encoding: "utf8" });
+    git("init", "-q", "-b", "main");
+    git("config", "core.autocrlf", "false");
+    write(".gitignore", ".claude/session-state/\n");
+    // The repo's real rule: GitHub ignores it, a local merge honours it.
+    write(".gitattributes", "docs/manual/DECISION_LOG.md merge=union\n");
+    write("src/a.ts", "export const a = 1;\n");
+    write("src/cfg.ts", 'export const cfg = { password: "x" };\n');
+    write("src/cfg.sql", '-- password: "y"\nselect 1;\n');
+    write("docs/manual/DECISION_LOG.md", "# Decisions\n- old entry\n");
+    write("docs/manual/note.md", "# Note\nDo the safe thing.\n");
+    write("docs/twin.md", "# Note\nDo the safe thing.\n");
+    const base = commitAll("base");
+    git("update-ref", "refs/remotes/origin/main", base);
+    git("update-ref", "refs/remotes/origin/staging", base);
+    git("switch", "-q", "-c", branch, target);
+    write("src/a.ts", "export const a = 2;\n");
+    const reviewedHead = commitAll("pr change");
+    writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: target }));
+    return { repo, git, commitAll, file, write, readProof, writeProof, land, carry, base, reviewedHead, target, branch };
+  };
+  const withRepo = (fn, branch) => { const ctx = setup(branch); try { fn(ctx); } finally { rmSync(ctx.repo, { recursive: true, force: true }); } };
+  // A carried proof for `head` on the same base (a restamp-shaped carry needs no model call to fake).
+  const sameBaseCarry = (head, source) => buildCarryForwardProof({ headSha: head, baseSha: source.base_sha, source, mode: "restamp" });
+
+  // 1a. A feature branch that merged staging never carries, even a docs-only merge (Mason, 2026-11-22, Sol r7).
+  withRepo(({ git, write, land, carry, target }) => {
+    assert.equal(target, STAGING, "feature setup: reviewed against staging");
+    land(target, "a docs-only PR landed on staging", () => write("docs/manual/notes.md", "# Notes\n"));
+    git("merge", "-q", "--no-edit", target);
+    const refused = carry();
+    assert.equal(refused.status, 1, `carry: a staging merge is refused (${refused.stdout})`);
+    assert.match(refused.stderr, /needs the full review/, "carry: says a staging merge needs the full review");
+  }, "claude/feature-x");
+
+  // 1b. On a hotfix/ branch, a docs-only main merge carries with no model call, bound to the main tip.
+  withRepo(({ repo, git, write, land, carry, writeProof, readProof, reviewedHead, base, target }) => {
+    const mainTip = land(target, "a docs-only PR landed on main", () => write("docs/manual/notes.md", "# Notes\n"));
+    git("merge", "-q", "--no-edit", target);
+    const mergedHead = git("rev-parse", "HEAD");
+
+    // A staging review's proof never seeds a main carry, nor one with no review kind.
+    writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: STAGING }));
+    assert.match(carry().stderr, /records a origin\/staging review/, "carry: a staging proof is refused");
+    writeProof(reviewedHead, { ...buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean" }), review_ref: undefined });
+    assert.match(carry().stderr, /records no review kind/, "carry: a proof with no review kind is refused");
+    writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: GUARDED_BASE }));
+
+    const ok = carry();
+    assert.equal(ok.status, 0, `carry: a docs-only main merge carries with no model call (${ok.stderr})`);
+    const minted = readProof(mergedHead);
+    assert.equal(minted.carry.mode, "disjoint", "carry: minted as a disjoint carry");
+    assert.equal(minted.base_sha, mainTip, "carry: bound to the main tip");
+    assert.equal(minted.review_ref, GUARDED_BASE, "carry: keeps the review kind for the next carry");
+    assert.equal(proofValid(minted, mergedHead, Date.now(), mainTip), true, "carry: the gates accept it for the merged head and main tip");
+    assert.equal(proofValidForMerge({
+      data: minted, headSha: mergedHead, nowMs: Date.now(), baseSha: mainTip,
+      isAncestor: (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b], { cwd: repo }).status === 0,
+      mergeBase: (a, b) => git("merge-base", a, b),
+    }), true, "carry: the PR merge gate accepts it against GitHub's main base");
+
+    // A hand edit inside the merge commit is refused.
+    write("src/c.ts", "export const sneaky = true;\n");
+    git("add", ".");
+    git("commit", "-q", "--amend", "--no-edit");
+    assert.match(carry().stderr, /something else changed/, "carry: an edited merge is refused");
+  });
+
+  // 2. Both sides add a DECISION_LOG entry (the #2185 case): the union merge is clean, so the
+  //    shared file is not "something else changed". On a hotfix/ branch it gets the focused check;
+  //    a staging merge always needs the full review (Mason, 2026-11-22).
+  for (const [branch, base, expect] of [["hotfix/x", "origin/main", "check"], ["claude/feature-x", "origin/staging", "refuse"]]) {
+    withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
+      const log = file("docs/manual/DECISION_LOG.md");
+      const append = (text) => writeFileSync(log, readFileSync(log, "utf8") + text);
+      append("- PR entry\n");
+      const head = commitAll("pr decision entry");
+      writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+      land(base, "another PR's decision entry", () => append("- base entry\n"));
+      git("merge", "-q", "--no-edit", base);
+      const dry = carry("--dry-run");
+      if (expect === "check") {
+        assert.match(dry.stdout, /collision check needed: both sides changed 1 file/, `${branch}: a shared DECISION_LOG needs a look (${dry.stderr})`);
+        assert.equal(dry.status, 0, `${branch}: a union-merged DECISION_LOG gets the focused check (${dry.stderr})`);
+      } else {
+        assert.equal(dry.status, 1, `${branch}: a staging merge is refused`);
+        assert.match(dry.stderr, /needs the full review/, `${branch}: says why`);
+      }
+    }, branch);
+  }
+
+  // 3. Both sides rewrite the same existing DECISION_LOG line: union keeps both, so refused (Sol MED 4).
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
+    const log = file("docs/manual/DECISION_LOG.md");
+    const swap = (to) => writeFileSync(log, readFileSync(log, "utf8").replace("- old entry", to));
+    swap("- old entry, PR version");
+    const head = commitAll("pr rewrites a decision");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land(target, "staging rewrites it too", () => swap("- old entry, staging version"));
+    git("merge", "-q", "--no-edit", target);
+    const refused = carry("--dry-run");
+    assert.equal(refused.status, 1, "carry: contradictory union edits are refused");
+    assert.match(refused.stderr, /edited or removed existing lines/, "carry: says why");
+  });
+
+  // 3a. A repo-local diff converter that hides the rewritten line must not make it look additions-only (Sol r3 HIGH 1).
+  withRepo(({ repo, git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
+    git("config", "diff.hide.textconv", "sed /old.entry/d");
+    writeFileSync(`${repo}/.git/info/attributes`, "docs/manual/DECISION_LOG.md diff=hide\n");
+    const log = file("docs/manual/DECISION_LOG.md");
+    const swap = (to) => writeFileSync(log, readFileSync(log, "utf8").replace("- old entry", to));
+    swap("- old entry, PR version");
+    const head = commitAll("pr rewrites a decision");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land(target, "staging rewrites it too", () => swap("- old entry, staging version"));
+    git("merge", "-q", "--no-edit", target);
+    const refused = carry("--dry-run");
+    assert.equal(refused.status, 1, `carry: a diff converter cannot hide a rewrite (${refused.stdout})`);
+    assert.match(refused.stderr, /edited or removed existing lines/, "carry: says why");
+  });
+
+  // 3b. Staging drops the union rule while both sides rewrite the line: git still merged with the PR
+  // side's union rule, so the rule is read from each side, not the merged tree (Luna MED).
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
+    const log = file("docs/manual/DECISION_LOG.md");
+    const swap = (to) => writeFileSync(log, readFileSync(log, "utf8").replace("- old entry", to));
+    swap("- old entry, PR version");
+    const head = commitAll("pr rewrites a decision");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land(target, "staging drops the rule and rewrites it", () => {
+      writeFileSync(file(".gitattributes"), "");
+      swap("- old entry, staging version");
+    });
+    git("merge", "-q", "--no-edit", target);
+    const refused = carry("--dry-run");
+    assert.equal(refused.status, 1, "carry: a union rule dropped by one side still refuses");
+    assert.match(refused.stderr, /edited or removed existing lines|does not merge cleanly/, "carry: says why");
+  });
+
+  // 4. The branch already holds a commit staging gains later, so the reviewed diff is not what
+  //    the PR now changes: refused, whichever side reverts it (Sol round 1 HIGH 1, round 2 BLOCKER 1).
+  for (const branchReverts of [false, true]) {
+    withRepo(({ git, write, file, carry, commitAll, writeProof, base, target, branch }) => {
+      git("switch", "-q", "-c", "shared", base);
+      write("src/auth.ts", "export const strict = true;\n");
+      const shared = commitAll("shared tightening");
+      git("switch", "-q", branch);
+      git("merge", "-q", "--no-edit", "shared");
+      if (branchReverts) {
+        git("revert", "--no-edit", shared);
+        write("docs/manual/pr-note.md", "# PR note\n");
+        commitAll("pr note");
+      }
+      const head = git("rev-parse", "HEAD");
+      writeProof(head, buildCodexPushProof({ headSha: head, baseSha: base, verdict: "clean", reviewRef: target }));
+      git("switch", "-q", "--detach", shared);
+      if (branchReverts) {
+        write("docs/manual/staging-note.md", "# Staging note\n");
+        commitAll("staging note");
+      } else {
+        git("revert", "--no-edit", "HEAD");
+      }
+      git("update-ref", `refs/remotes/${target}`, git("rev-parse", "HEAD"));
+      git("switch", "-q", branch);
+      git("merge", "-q", "--no-edit", target);
+      assert.equal(existsSync(file("src/auth.ts")), false, "shared-commit setup: the merged branch lacks the shared check");
+      const refused = carry("--dry-run");
+      assert.equal(refused.status, 1, `carry: a branch holding a later base commit is refused (branch reverts: ${branchReverts})`);
+      assert.match(refused.stderr, /common ancestor is not the reviewed base/, "carry: says why");
+    });
+  }
+
+  // 5. An owner-accepted proof never carries onto a new base, with or without its list (Sol r4 HIGH 1-2).
+  withRepo(({ git, write, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
+    const source = readProof(reviewedHead);
+    write("docs/manual/DECISION_LOG.md", `${readFileSync(file("docs/manual/DECISION_LOG.md"), "utf8")}- accepted\n`);
+    const head = commitAll("owner acceptance");
+    const accepted = buildCarryForwardProof({ headSha: head, baseSha: source.base_sha, source, mode: "owner_accepted" });
+    accepted.owner_accepted = [{ n: 1, severity: "HIGH", text: "a business call", reason: "not live yet", pull_request: 77, pull_request_url: PR_URL }];
+    land(target, "docs-only staging PR", () => write("docs/manual/more.md", "# More\n"));
+    git("merge", "-q", "--no-edit", target);
+    const lostList = sameBaseCarry(head, { ...accepted, head_sha: reviewedHead });
+    delete lostList.owner_accepted;
+    for (const [label, proof] of [["with its list", accepted], ["that lost its list", lostList]]) {
+      writeProof(head, proof);
+      const refused = carry("--dry-run");
+      assert.equal(refused.status, 1, `carry: an owner-accepted proof ${label} is refused`);
+      assert.match(refused.stderr, /owner-accepted, not fixed/, `carry: says why (${label})`);
+    }
+  });
+
+  // 6. A rename on the base side that moves a file the PR changed is refused (Sol r4 HIGH 1, MED 1).
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
+    writeFileSync(file("src/a.ts"), "export const a = 2;\nexport const b = 3;\n");
+    const head = commitAll("pr edits a.ts again");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land(target, "staging moves a.ts", () => git("mv", "src/a.ts", "src/moved.ts"));
+    git("merge", "-q", "--no-edit", target);
+    const refused = carry("--dry-run");
+    assert.equal(refused.status, 1, `carry: a base-side rename of a PR file is refused (${refused.stdout})`);
+    assert.match(refused.stderr, /renamed or copied src\/a\.ts/, "carry: names the moved file");
+  });
+
+  // 7. A copy of a file the base side left unchanged is still seen (Sol r5 HIGH 3).
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
+    writeFileSync(file("docs/manual/note.md"), "# Note\nDo the safer thing.\n");
+    const head = commitAll("pr corrects the note");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land(target, "staging copies the old note into a command", () => {
+      mkdirSync(file(".claude/commands"), { recursive: true });
+      // Same basename as the twin, so Git names the twin (unchanged by the PR) as the source.
+      writeFileSync(file(".claude/commands/twin.md"), "# Note\nDo the safe thing.\n");
+    });
+    git("merge", "-q", "--no-edit", target);
+    const refused = carry("--dry-run");
+    assert.equal(refused.status, 1, `carry: a copy of a PR-changed file is refused (${refused.stdout})`);
+    // Git may name the base's unchanged twin (docs/twin.md) as the source; any copy refuses (Sol r6 HIGH 3).
+    assert.match(refused.stderr, /renamed or copied docs\/(manual\/note|twin)\.md/, "carry: names the copied file");
+  });
+
+  // 8. A base delta that removes a credential-shaped line, or changes a binary file, is never sent (Sol r5 HIGH 4, MED).
+  for (const [label, edit, why] of [
+    ["a removed credential", (file) => writeFileSync(file("src/cfg.ts"), "export const cfg = {};\n"), /removed or edited existing lines/],
+    // A removed line that itself starts with "--" shows as "---" in the patch (Sol r6 HIGH 1).
+    ["a removed credential comment", (file) => writeFileSync(file("src/cfg.sql"), "select 1;\n"), /removed or edited existing lines/],
+    // Any removed line, credential-shaped or not (no pattern catches every format; Sol r7 HIGH 3).
+    ["a removed plain line", (file) => writeFileSync(file("src/cfg.sql"), '-- password: "y"\n'), /removed or edited existing lines/],
+    ["a binary change",(file) => writeFileSync(file("src/blob.bin"), Buffer.from([0, 1, 2, 0, 3])), /changed a binary file/],
+  ]) {
+    // On a hotfix/ branch, where the collision check still runs.
+    withRepo(({ git, file, land, carry, readProof, reviewedHead }) => {
+      land("origin/main", `main: ${label}`, () => edit(file));
+      git("merge", "-q", "--no-edit", "origin/main");
+      assert.ok(readProof(reviewedHead), "hotfix carry: the reviewed head has its proof");
+      const refused = carry();
+      assert.equal(refused.status, 1, `hotfix carry: ${label} is refused before any model call (${refused.stdout})`);
+      assert.match(refused.stderr, why, `hotfix carry: says why (${label})`);
+    }, "hotfix/x");
+  }
+  assert.match(buildCollisionCheckPrompt(), /BLOCKERS {2}— at least one blocker\/high-severity collision or other blocker\/high problem/, "collision prompt: any blocker counts in the verdict");
+}
+
 // ── restamp carry (Mason, 2026-11-04), end to end on a throwaway repository ──
 {
   const scriptPath = fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url));
@@ -1425,7 +1701,7 @@ function collisionPromptSkipsWork(prompt) {
     mkdirSync(path.dirname(sqlPath(OLD)), { recursive: true });
     mkdirSync(path.dirname(recordPath(OLD)), { recursive: true });
     writeFileSync(sqlPath(OLD), "CREATE TABLE rate_lock (id bigint);\n");
-    writeFileSync(recordPath(OLD), `# ${OLD}\n\nCandidate; apply as ${OLD}.\n`);
+    writeFileSync(recordPath(OLD), `**LOCAL CANDIDATE — NOT APPLIED.** \`${OLD}.sql\`. Candidate; apply as ${OLD}.\n`);
     writeFileSync(path.join(repo, "src", "a.ts"), "export const a = 2;\n");
     const reviewedHead = commitAll("pr change");
     const proofPath = codexPushProofPath(repo, reviewedHead);
@@ -1467,8 +1743,12 @@ function collisionPromptSkipsWork(prompt) {
     }, /src\/a\.ts changed beyond the timestamp/);
     refused("a record edit beyond the stamp", () => {
       restamp();
-      writeFileSync(recordPath(NEW), `# ${NEW}\n\nApplied.\n`);
+      writeFileSync(recordPath(NEW), `**LOCAL CANDIDATE — NOT APPLIED.** \`${NEW}.sql\`. Edited.\n`);
     }, /changed beyond the timestamp/);
+    refused("an applied record (Taha, #2384 LOW 6)", () => {
+      restamp();
+      writeFileSync(recordPath(NEW), `**APPLIED LIVE 2026-11-23**, ledger version \`20261123000000\` carrying name \`${NEW}\`.\n`);
+    }, /not a LOCAL CANDIDATE record/);
     refused("a copy that keeps the old migration", () => {
       writeFileSync(sqlPath(NEW), readFileSync(sqlPath(OLD)));
     }, /does not rename exactly one migration/);
@@ -1483,6 +1763,11 @@ function collisionPromptSkipsWork(prompt) {
       restamp();
       writeFileSync(path.join(repo, "supabase", "config.toml"), "x = 1\n");
     }, /another database file/);
+    // A reviewed head whose proof is a post-apply carry is live under its stamp (Taha, #2384 LOW 6).
+    const cleanProof = readFileSync(proofPath, "utf8");
+    writeFileSync(proofPath, JSON.stringify({ ...JSON.parse(cleanProof), carried_forward: true, carry: { mode: "post_apply", from_head: reviewedHead, from_base: base } }));
+    refused("a post-apply source proof", () => { restamp(); }, /post-apply carry/);
+    writeFileSync(proofPath, cleanProof);
     // Only ONE commit on top of the reviewed head carries.
     git("reset", "-q", "--hard", reviewedHead);
     restamp();
@@ -1533,6 +1818,7 @@ function collisionPromptSkipsWork(prompt) {
     write(`docs/reference/migrations.d/${MIG}.md`, `# ${MIG}\n\nStatus: APPLIED LIVE 2026-11-04 (ledger 20261104220928).\n`);
     write("docs/changelog.d/2026-11-04-void.md", "- Void fix. Applied live 2026-11-04.\n");
     write("docs/manual/KNOWN_ISSUES.md", "# Known issues\n\nKI-94: fixed live 2026-11-04.\n");
+    write("docs/manual/known-issues.d/2026-11-04-void-follow-up.md", "## 2026-11-04 — Void follow-up\n\nFound while applying.\n");
   };
   const paperwork = () => {
     notes();
@@ -1720,6 +2006,12 @@ function collisionPromptSkipsWork(prompt) {
   assert.match(one("docs/changelog.d/x.md", "120000", "120000"), /changed type or mode/, "post-apply: a symlink is refused");
   assert.match(one("docs/changelog.d/x.md", "100644", "100755"), /changed type or mode/, "post-apply: an executable bit is refused");
   assert.match(one("docs/manual/KNOWN_ISSUES.md", "000000", "100644"), /was added/, "post-apply: only notes may be added");
+  assert.equal(one("docs/manual/known-issues.d/2026-11-22-x.md", "000000", "100644"), null, "post-apply: a new known-issues entry is paperwork");
+  assert.match(one("docs/manual/known-issues.d/README.md"), /instruction file|not post-apply paperwork/, "post-apply: the known-issues README is not paperwork");
+  assert.match(one("docs/manual/known-issues.d/notes.md", "000000", "100644"), /was added|not post-apply paperwork/, "post-apply: an undated known-issues file is not paperwork");
+  assert.equal(one("docs/manual/known-issues.d/2026-11-22-x.md", "100644", "000000"), null, "post-apply: a fixed known-issues entry may be deleted");
+  assert.match(one("docs/manual/known-issues.d/notes.md", "100644", "000000"), /deleted/, "post-apply: only dated known-issues files may be deleted");
+  assert.match(one("docs/changelog.d/x.md", "100644", "000000"), /deleted/, "post-apply: other paperwork may not be deleted");
   assert.match(one("docs/changelog.d/sub/x.md"), /not post-apply paperwork/, "post-apply: no nested folders");
   assert.match(one("docs/manual/known_issues.md"), /not post-apply paperwork/, "post-apply: paths match exactly");
   assert.match(postApplyProblem({ entries: [], readFile: read }), /changes nothing/, "post-apply: an empty commit is refused");
@@ -1851,7 +2143,7 @@ not json
     const named = logWith("2026-11-09 — Rounding stays per line on #1653", "**Decision (Mason):** keep it.");
     const r5 = solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Something else", "No PR here."), today });
     assert.equal(r5.refuse, true, "round stop: round 5 without a decision entry refuses");
-    assert.match(r5.message, /Sol round 5 on PR #1653.*no Sol tokens were spent.*ask Mason the business trade-off.*AGENTS\.md, Operating Contract.*DECISION_LOG\.md.*names #1653.*re-run/, "round stop: says round, ask Mason, record #n, rerun");
+    assert.match(r5.message, /Sol round 5 on PR #1653.*no Sol tokens were spent.*ask Mason the business trade-off.*AGENTS\.md, Operating Contract.*new file in docs\/manual\/decision-log\.d\/.*names #1653.*re-run/, "round stop: says round, ask Mason, record #n, rerun");
     assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: named, today }).refuse, false, "round stop: round 5 with today's entry naming #1653 proceeds");
     assert.equal(solRoundGate({ round: 8, prNumber: 1653, decisionLog: logWith("2026-11-09 — Trade-off", "**Decision (Mason):** loss over duplicate for PR #1653."), today }).refuse, false, "round stop: 'PR #n' in the body counts");
     assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-10-13 (recorded 2026-11-09) — late record", "**Decision:** Mason keeps #1653 as is."), today }).refuse, false, "round stop: a recorded-today date counts");
@@ -1877,7 +2169,7 @@ not json
       assert.equal(Number(status.match(/would be round (\d+) on PR #1916/)?.[1]), round, "round line: prints the round the stop uses");
       assert.equal(Number(gate.message.match(/Sol round (\d+) on PR #1916/)?.[1]), round, "round line: the stop names the same round");
       assert.equal(round, 5, "round line: pre-PR runs count");
-      assert.match(status, /rounds 1-4 run freely; from round 5 a DECISION_LOG\.md entry dated 2026-11-09 or later must name this PR: none yet/, "round line: says the cap and what unlocks it");
+      assert.match(status, /rounds 1-4 run freely; from round 5 a decision-log entry dated 2026-11-09 or later must name this PR: none yet/, "round line: says the cap and what unlocks it");
       assert.match(solRoundStatusLine({ round, prNumber: 1916, decisionLog: logWith("2026-11-09 — X", "**Decision (Mason):** #1916"), today }), /: found\)\.$/, "round line: says when the unlock is present");
       assert.match(solRoundStatusLine({ round: 1, prNumber: null, decisionLog: "", today }), /round 1 on this branch \(no PR yet\)/, "round line: no PR yet");
     }
@@ -1888,7 +2180,7 @@ not json
       assert.equal(futureDecisionLogDates(diff("+## 2026-11-08 — Yesterday"), today), null, "future date: the past passes");
       assert.equal(futureDecisionLogDates("", today), null, "future date: no decision-log change passes");
       const late = futureDecisionLogDates(diff("+## 2026-11-10 — Rounds for #1916", "+**Decision (Mason):** up to 7."), today);
-      assert.match(late, /SOL PRE-FLIGHT: docs\/manual\/DECISION_LOG\.md gains an entry dated after today \(2026-11-09, Central time\), so no Sol tokens were spent\.\n  - ## 2026-11-10 — Rounds for #1916\nRe-date it/, "future date: a future heading refuses and names the line");
+      assert.match(late, /SOL PRE-FLIGHT: the decision log \(docs\/manual\/DECISION_LOG\.md or docs\/manual\/decision-log\.d\/\) gains an entry dated after today \(2026-11-09, Central time\), so no Sol tokens were spent\.\n  - ## 2026-11-10 — Rounds for #1916\nRe-date it/, "future date: a future heading refuses and names the line");
       assert.match(futureDecisionLogDates(diff("+## 2026-11-09 — Today", "+**Decision (Mason, 2026-11-10 night):** yes."), today), /- \*\*Decision \(Mason, 2026-11-10 night\)/, "future date: a future date in the Decision line refuses");
       assert.match(futureDecisionLogDates(diff("+## 2026-10-13 (recorded 2026-11-10) — late"), today), /recorded 2026-11-10/, "future date: a future recorded date refuses");
       assert.equal(futureDecisionLogDates(diff("+## 2026-11-09 — Plan due 2026-12-01"), today), null, "future date: a date after the heading's dash is not the entry date");
@@ -2297,9 +2589,10 @@ not json
         return { result, state };
       };
 
-      const found = factsWith(() => [[mine(1167, { draft: true })]]);
+      const prUrl = "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1167";
+      const found = factsWith(() => [[mine(1167, { draft: true, html_url: prUrl, base: { ref: "staging", repo: { full_name: `${OWNER}/${NAME}` } } })]]);
       assert.equal(found.result.unreadable, undefined, "facts: a PR found through the list is readable");
-      assert.deepEqual(found.result.pr, { number: 1167, draft: true }, "facts: the head resolves to its PR");
+      assert.deepEqual(found.result.pr, { number: 1167, draft: true, url: prUrl, baseRef: "staging" }, "facts: the head resolves to its PR, its address and its base");
       assert.equal(found.state.lookups, 2, "facts: the same list lookup serves the first read and the final re-read");
 
       assert.equal(factsWith(() => [[]]).result.pr, null, "facts: no PR at this head is reported as none");
@@ -2487,12 +2780,13 @@ not json
     // What a BLOCKERS run leaves, and Mason's two accept replies.
     const findings = parseSolFindings("SOL_FINDING 1 HIGH: src/sale.ts:1 - a sale before switch-on is not checked\nSOL_FINDING 2 BLOCKER: src/sale.ts:1 - x\nSOL_FINDING_COUNT 2\n").findings;
     mkdirSync(stateDir, { recursive: true });
-    writeFileSync(path.join(stateDir, blockersRecordName(reviewed)), JSON.stringify(buildBlockersRecord({ headSha: reviewed, baseSha: base, findings })));
-    const accept = (n, code, reason) => {
+    // The shape saveBlockersRecord writes: the record plus the review kind (Sol round 2, 2026-11-22).
+    writeFileSync(path.join(stateDir, blockersRecordName(reviewed)), JSON.stringify({ ...buildBlockersRecord({ headSha: reviewed, baseSha: base, findings }), review_ref: GUARDED_BASE, release_rules: false }));
+    const accept = (n, code, reason, at = reviewed) => {
       const now = Date.now();
       writeApprovalRequest(stateDir, buildSolAcceptPayload({
-        record: JSON.parse(readFileSync(path.join(stateDir, blockersRecordName(reviewed)), "utf8")), n, pullRequest: 4242,
-        issuedAt: new Date(now - 1000).toISOString(), expiresAt: new Date(now + 60 * 60 * 1000).toISOString(), nonce: `n${code}`, code, sessionId: SESSION,
+        record: JSON.parse(readFileSync(path.join(stateDir, blockersRecordName(at)), "utf8")), n, pullRequest: 4242, pullRequestUrl: "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242",
+        issuedAt: new Date(now - 1000).toISOString(), expiresAt: new Date(now + 60 * 60 * 1000).toISOString(), nonce: `${code}${code}`, code, sessionId: SESSION,
       }));
       const text = `accept ${code} ${reason}`;
       const transcript = path.join(transcripts, `t${code}.jsonl`);
@@ -2521,8 +2815,22 @@ not json
     assert.equal(minted.carry.mode, "owner_accepted");
     assert.equal(minted.codex_ran, false, "owner-accepted e2e: never claims a clean review ran");
     assert.deepEqual(minted.owner_accepted.map((a) => [a.n, a.reason]), [[1, "we never sell before switch-on"], [2, "not a live SaaS yet"]]);
+    assert.deepEqual(minted.owner_accepted.map((a) => a.pull_request_url), ["https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242", "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242"], "owner-accepted e2e: the proof names the PR's repository");
     assert.equal(proofValid(minted, logHead, Date.now(), base), true, "owner-accepted e2e: the gates accept it for the logged head");
     assert.equal(proofValid(minted, reviewed, Date.now(), base), false, "owner-accepted e2e: and for no other head");
+    assert.equal(minted.review_ref, GUARDED_BASE, "owner-accepted e2e: the proof keeps the review kind for a later carry");
+    {
+      // The real owner-accepted proof never carries onto a later base: that needs the full review.
+      git("switch", "-q", "main");
+      write("docs/manual/notes.md", "# Notes\n");
+      git("update-ref", "refs/remotes/origin/main", commitAll("docs-only main PR"));
+      git("switch", "-q", "feature");
+      git("merge", "-q", "--no-edit", "origin/main");
+      const later = run(scriptPath, "--carry-forward", "--dry-run");
+      assert.equal(later.status, 1, "owner-accepted e2e: a later base merge does not carry the acceptance");
+      assert.match(later.stderr, /owner-accepted, not fixed/, "owner-accepted e2e: says why");
+      git("reset", "-q", "--hard", logHead);
+    }
 
     const refused = (label, mutate, why) => {
       git("reset", "-q", "--hard", logHead);
@@ -2556,9 +2864,140 @@ not json
     const stale = run(scriptPath, "--carry-owner-accepted");
     assert.equal(stale.status, 1, "owner-accepted e2e: acceptances of an earlier Sol run are refused");
     assert.match(stale.stderr, /earlier Sol run/);
+
+    // A PR into staging (Mason, 2026-11-23): --log writes its own new decision-log.d/ file, never
+    // DECISION_LOG.md, so parallel PRs cannot conflict; the carry accepts exactly that one new file.
+    git("switch", "-q", "-c", "staging-pr", base);
+    write("src/sale.ts", "export const sell = () => 3;\n");
+    const reviewedS = commitAll("staging pr change");
+    writeFileSync(path.join(stateDir, blockersRecordName(reviewedS)), JSON.stringify({ ...buildBlockersRecord({ headSha: reviewedS, baseSha: base, findings }), review_ref: "origin/staging", release_rules: false }));
+    accept(1, "333333", "we never sell before switch-on", reviewedS);
+    accept(2, "444444", "not a live SaaS yet", reviewedS);
+    const logBefore = readFileSync(file(LOG), "utf8");
+    const loggedS = run(logScript, "--log");
+    assert.equal(loggedS.status, 0, `owner-accepted e2e (staging): --log writes the entry (${loggedS.stderr})`);
+    assert.equal(readFileSync(file(LOG), "utf8"), logBefore, "owner-accepted e2e (staging): DECISION_LOG.md is untouched");
+    const added = git("status", "--porcelain", "--untracked-files=all").split("\n").map((l) => l.slice(3)).filter(Boolean);
+    assert.equal(added.length, 1, `owner-accepted e2e (staging): one new file (${added})`);
+    const FRAG = added[0];
+    assert.match(FRAG, new RegExp(`^docs/manual/decision-log\\.d/\\d{4}-\\d{2}-\\d{2}-pr4242-sol-skip-${reviewedS.slice(0, 12)}\\.md$`), "owner-accepted e2e (staging): dated, PR-named fragment");
+    assert.match(loggedS.stdout, new RegExp(`Wrote the entry to ${FRAG.replace(/[.]/g, "\\.")}`));
+    assert.match(readFileSync(file(FRAG), "utf8"), /^## \d{4}-\d{2}-\d{2} — #4242: Mason owner-accepted 2 Sol finding\(s\)[\s\S]*not a live SaaS yet \(ref [^)]+\)\n$/,"owner-accepted e2e (staging): one entry, one trailing newline");
+    const fragHead = commitAll("docs: Mason skipped Sol findings");
+    const okS = run(scriptPath, "--carry-owner-accepted");
+    assert.equal(okS.status, 0, `owner-accepted e2e (staging): the proof is written (${okS.stderr})`);
+    const mintedS = JSON.parse(readFileSync(codexPushProofPath(repo, fragHead), "utf8"));
+    assert.equal(mintedS.carry.mode, "owner_accepted");
+    assert.equal(proofValid(mintedS, fragHead, Date.now(), base), true, "owner-accepted e2e (staging): the gates accept it for the logged head");
+    // The round-5 reader (decisionLogAt) sees the fragment entry like one in DECISION_LOG.md.
+    const { decisionLogAt } = await import("./write-codex-push-proof.mjs");
+    assert.ok(decisionLogAt(repo, fragHead).some((t) => t.includes("#4242: Mason owner-accepted 2")), "owner-accepted e2e (staging): the decision-log readers find the fragment");
+    const refusedS = (label, mutate, why) => {
+      git("reset", "-q", "--hard", fragHead);
+      mutate();
+      git("reset", "-q", "--soft", reviewedS);
+      const squashed = commitAll(`refused: ${label}`);
+      const result = run(scriptPath, "--carry-owner-accepted");
+      assert.equal(result.status, 1, `owner-accepted e2e (staging): ${label} is refused`);
+      assert.match(result.stderr, why, `owner-accepted e2e (staging): ${label} says why`);
+      assert.equal(existsSync(codexPushProofPath(repo, squashed)), false, `owner-accepted e2e (staging): nothing written for ${label}`);
+    };
+    refusedS("the entry also in DECISION_LOG.md", () => write(LOG, `${logBefore}x\n`), /must only add the new file docs\/manual\/decision-log\.d\//);
+    refusedS("an edited fragment", () => write(FRAG, readFileSync(file(FRAG), "utf8").replace("not a live SaaS yet", "approved by everyone")), /must hold exactly the entry/);
+    refusedS("the entry only in DECISION_LOG.md", () => { rmSync(file(FRAG)); write(LOG, `${logBefore}x\n`); }, /must only add the new file/);
+
+    // A carried skip (Taha LOW, #2383): a later head of the same staging PR, Sol marks the finding the same as
+    // the one Mason skipped, and the carried entry goes in its own new fragment. --log needs `gh pr view` for
+    // this path, which a throwaway repo has none of, so the test writes what --log writes through the same
+    // two functions (ownerAcceptLogTarget, decisionFragmentText) and runs the real carry check on it.
+    const { carriedDecisionLogEntry, carryForRecord, decisionFragmentText, ownerAcceptLogTarget, priorAcceptances } = await import("../.claude/hooks/sol-accept-lib.mjs");
+    const { readLocalProofs } = await import("./write-codex-push-proof.mjs");
+    git("reset", "-q", "--hard", fragHead);
+    write("docs/notes.md", "# Notes\n");
+    const laterS = commitAll("later staging pr change, sale.ts untouched");
+    const PR_URL = "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242";
+    const candidates = priorAcceptances(readLocalProofs(repo), { prNumber: 4242, prUrl: PR_URL });
+    assert.ok(["333333333333/1", "444444444444/2"].every((k) => candidates.some((x) => x.key === k)), `carried e2e: Mason's two skips are shown to Sol (${candidates.map((x) => x.key)})`);
+    const sameFindings = parseSolFindings("SOL_FINDING 1 HIGH: src/sale.ts:1 - a sale before switch-on is still not checked SAME_AS_ACCEPTED 333333333333/1\nSOL_FINDING_COUNT 1\n", { labels: true }).findings;
+    const carriedRecord = { ...buildBlockersRecord({ headSha: laterS, baseSha: base, findings: sameFindings, carryCandidates: candidates }), review_ref: "origin/staging", release_rules: false };
+    writeFileSync(path.join(stateDir, blockersRecordName(laterS)), JSON.stringify(carriedRecord));
+    const c = carryForRecord({ record: carriedRecord, proofs: readLocalProofs(repo), prNumber: 4242, prUrl: PR_URL, git: (args) => git(...args) });
+    assert.equal(c.problem, undefined, `carried e2e: the skip carries (${c.problem})`);
+    const carriedEntry = carriedDecisionLogEntry({ record: carriedRecord, accepted: c.accepted });
+    const carriedTarget = ownerAcceptLogTarget(carriedRecord, carriedEntry);
+    assert.match(carriedTarget.path, new RegExp(`^docs/manual/decision-log\\.d/\\d{4}-\\d{2}-\\d{2}-pr4242-sol-skip-${laterS.slice(0, 12)}\\.md$`), "carried e2e: its own dated, PR-named fragment");
+    assert.match(carriedEntry, /Mason's earlier skip carried to 1 repeat Sol finding/);
+    write(carriedTarget.path, decisionFragmentText(carriedEntry));
+    const carriedHead = commitAll("docs: carried Sol skip");
+    const okC = run(scriptPath, "--carry-owner-accepted");
+    assert.equal(okC.status, 0, `carried e2e: the carried proof is written (${okC.stderr})`);
+    const mintedC = JSON.parse(readFileSync(codexPushProofPath(repo, carriedHead), "utf8"));
+    assert.equal(mintedC.carry.mode, "owner_accepted_carried", "carried e2e: mode owner_accepted_carried");
+    assert.equal(proofValid(mintedC, carriedHead, Date.now(), base), true, "carried e2e: the gates accept it for the logged head");
+    // The same carry written to DECISION_LOG.md instead is refused.
+    git("reset", "-q", "--hard", laterS);
+    write(LOG, `${logBefore}x\n`);
+    const wrongC = commitAll("carried entry in the big log");
+    const refusedC = run(scriptPath, "--carry-owner-accepted");
+    assert.equal(refusedC.status, 1, "carried e2e: the big log is refused for a staging PR");
+    assert.match(refusedC.stderr, /must only add the new file docs\/manual\/decision-log\.d\//);
+    assert.equal(existsSync(codexPushProofPath(repo, wrongC)), false, "carried e2e: nothing written");
   } finally {
     rmSync(repo, { recursive: true, force: true, maxRetries: 5 });
     rmSync(transcripts, { recursive: true, force: true, maxRetries: 5 });
+  }
+}
+
+// ── Decision-log fragments (Mason, 2026-11-22): an entry written ONLY in decision-log.d/ ──
+// must unlock the round-5 stop and be date-checked, exactly like one in DECISION_LOG.md.
+{
+  const { decisionLogAt, DECISION_LOG_DIR } = await import("./write-codex-push-proof.mjs");
+  const repo = tempDir("crx-decision-fragments-");
+  const git = (...args) => execFileSync("git", ["-c", "user.name=Fragment Test", "-c", "user.email=fragment@example.invalid", ...args], {
+    cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  const write = (rel, text) => { const f = path.join(repo, ...rel.split("/")); mkdirSync(path.dirname(f), { recursive: true }); writeFileSync(f, text); };
+  const commit = () => { git("add", "-A"); git("commit", "-qm", "x"); return git("rev-parse", "HEAD"); };
+  const branchFrom = (name, ref) => git("switch", "-q", "-c", name, ref);
+  const today = "2026-11-22";
+  const gate = (ref) => solRoundGate({ round: 5, prNumber: 2270, decisionLog: decisionLogAt(repo, ref), today });
+  try {
+    git("init", "-q", "-b", "main");
+    git("config", "core.autocrlf", "false");
+    write("docs/manual/DECISION_LOG.md", "# Decision Log\n\n## 2026-11-01 — older\n\n**Decision (Mason):** #2270 old.\n");
+    write(`${DECISION_LOG_DIR}/README.md`, "## 2026-11-22 — README is not an entry\n\n**Decision (Mason):** #2270\n");
+    const base = commit();
+    assert.equal(gate(base).refuse, true, "fragments: no fragment and an old entry refuse round 5 (README is not read)");
+    write(`${DECISION_LOG_DIR}/2026-11-22-pr2270-trade-off.md`, "## 2026-11-22 — Trade-off for #2270\n\n**Decision (Mason, in chat, 2026-11-22).** Keep it.\n");
+    const named = commit();
+    assert.equal(gate(named).refuse, false, "fragments: an entry ONLY in decision-log.d/ unlocks round 5");
+    assert.match(solRoundStatusLine({ round: 5, prNumber: 2270, decisionLog: decisionLogAt(repo, named), today }), /: found\)\.$/, "fragments: the status line finds it");
+    assert.equal(gate(base).refuse, true, "fragments: the head without the fragment still refuses");
+    // A non-ASCII name is read too (git quotes it in ls-tree output without -z; Codex App P2).
+    branchFrom("curly", base);
+    git("config", "core.quotePath", "true");
+    write(`${DECISION_LOG_DIR}/2026-11-22-mason’s-decision.md`, "## 2026-11-22 — Mason’s call on #2270\n\n**Decision (Mason, in chat).** Keep it.\n");
+    assert.equal(gate(commit()).refuse, false, "fragments: a non-ASCII fragment name unlocks round 5");
+    // Only direct, dated children are entries (Taha LOW, #2277).
+    branchFrom("odd", base);
+    const entry = "## 2026-11-22 — Call on #2270\n\n**Decision (Mason, in chat).** Keep it.\n";
+    write(`${DECISION_LOG_DIR}/notes.md`, entry);
+    write(`${DECISION_LOG_DIR}/old/2026-11-22-nested.md`, entry);
+    assert.equal(gate(commit()).refuse, true, "fragments: undated and nested files are not entries");
+    // Text in one file never joins another file's entry.
+    branchFrom("glue", base);
+    write(`${DECISION_LOG_DIR}/2026-11-22-a.md`, "## 2026-11-22 — Unrelated, no newline at the end");
+    write(`${DECISION_LOG_DIR}/2026-11-22-b.md`, "**Decision (Mason):** #2270 with no heading of its own.\n");
+    assert.equal(gate(commit()).refuse, true, "fragments: a headless fragment cannot borrow another fragment's date");
+    // The future-date pre-flight reads the folder too.
+    branchFrom("late", base);
+    write(`${DECISION_LOG_DIR}/2026-11-23-late.md`, "## 2026-11-23 — Tomorrow\n\n**Decision (Mason):** #2270\n");
+    const late = commit();
+    const diff = git("diff", "-U0", base, late, "--", "docs/manual/DECISION_LOG.md", `${DECISION_LOG_DIR}/`);
+    assert.match(futureDecisionLogDates(diff, today), /- ## 2026-11-23 — Tomorrow/, "fragments: a future-dated fragment refuses before Sol");
+    assert.deepEqual(decisionLogAt(repo, "no-such-ref"), [], "fragments: an unreadable head reads as nothing, so round 5 refuses");
+  } finally {
+    rmSync(repo, { recursive: true, force: true, maxRetries: 5 });
   }
 }
 

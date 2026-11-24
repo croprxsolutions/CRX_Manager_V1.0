@@ -55,7 +55,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useLatestRef } from '../hooks/useLatestRef';
-import { sanitizeError, supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpcCode, rpcAuthErrorMessage, RpcErrorCodes } from '../lib/db';
+import { sanitizeError, supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpcCode, rpcAuthErrorMessage, rpcCodeDetail, RpcErrorCodes } from '../lib/db';
 import {
   convertQuoteToOrderWithRowVersion,
   createQuoteVersionWithRowVersion,
@@ -87,7 +87,8 @@ import { sendOrderConfirmedEmail } from '../lib/orderConfirmedEmail';
 import { trackBusinessEvent } from '../lib/metrics';
 import { localDatePlusDays, localToday, parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { computeSeason, seasonEndDate } from '../utils/season';
-import { loadQuoteValidDays, pickedExpiryStart } from '../lib/appSettingDefaults';
+import { loadQuoteValidDays, pickedExpiryStart, loadTimingWindows, timingWindowStart, type BookingTiming, type BookingConfidence, type TimingWindows } from '../lib/appSettingDefaults';
+import Select from '../components/ui/Select';
 import { downloadQuotePdf, generateQuotePdf } from '../lib/quotePdf';
 import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
 import { escapeHtml } from '../lib/proofNotification';
@@ -134,6 +135,7 @@ import type {
   JobStatus,
 } from '../types';
 import type { Json } from '../types/supabase';
+import { pairCompareLines } from '../lib/quoteCompare';
 
 interface LocalSection {
   _key: string;
@@ -144,8 +146,21 @@ interface LocalSection {
   section_header_notes: string | null;
   needed_by_date: string | null;
   field_id: string | null;
+  timing?: BookingTiming | null;
+  confidence?: BookingConfidence | null;
   items: LocalItem[];
 }
+
+const TIMING_OPTIONS = [
+  { value: 'pre_plant', label: 'Pre-plant' },
+  { value: 'in_season', label: 'In season' },
+  { value: 'late_summer', label: 'Late summer' },
+];
+const CONFIDENCE_OPTIONS = [
+  { value: 'firm', label: 'Firm' },
+  { value: 'likely', label: 'Likely' },
+  { value: 'maybe', label: 'Maybe' },
+];
 
 type CalcMode = 'rate_acres' | 'units_direct';
 
@@ -285,6 +300,8 @@ type DrawRequestLine = { product_id: string; quantity: number; extra_price?: 'to
 const isDrawRequest = (request: unknown): request is DrawRequestLine[] => Array.isArray(request)
   && request.every((line) => typeof line?.product_id === 'string' && Number.isFinite(line.quantity) && line.quantity > 0
     && (line.extra_price === undefined || line.extra_price === 'today' || line.extra_price === 'booked'));
+
+const isRowVersionNote = (request: unknown): request is number => Number.isSafeInteger(request) && (request as number) > 0;
 
 let keyCounter = 0;
 // The price changes save_quote recorded on this quote's sent lines (quote_price_changes, read-only
@@ -441,6 +458,19 @@ export default function QuoteBuilder() {
   // S14: a draw whose reply never came, kept in this tab across a reload (see pendingRetry).
   const [pendingDraw, setPendingDraw] = useState<PendingRetry<DrawRequestLine[]> | null>(null);
   const drawPendingName = JSON.stringify(['draw_down_quote', profile?.id || '', id || '']);
+  // KI-190: the booking version a kept draw was sent with, under the same key, so a resend
+  // carries exactly the version the rep approved.
+  const drawVersionPendingName = JSON.stringify(['draw_down_quote_version', profile?.id || '', id || '']);
+  // With a key, clear only notes that still belong to that key: a late reply for an earlier
+  // send must not wipe a newer draw's note. Without one (the rep's own "forget"), clear both.
+  const clearDrawNotes = (key?: string) => {
+    if (key === undefined || loadPendingRetry(drawPendingName, isDrawRequest)?.key === key) {
+      clearPendingRetry(drawPendingName);
+    }
+    if (key === undefined || loadPendingRetry(drawVersionPendingName, isRowVersionNote)?.key === key) {
+      clearPendingRetry(drawVersionPendingName);
+    }
+  };
   // Booking settlement (roadmap #6c): read-only booked/drawn/remaining + prepay
   // position for an open booking (sent/revised quote), via get_booking_settlement.
   const [bookingSettlement, setBookingSettlement] = useState<BookingSettlement | null>(null);
@@ -456,6 +486,10 @@ export default function QuoteBuilder() {
   const [saving, setSaving] = useState(false);
   // Kept locally rather than in generated DB types until post-apply regeneration.
   const quoteRowVersionRef = useRef<number | null>(null);
+  // KI-190: the booking version the open Partial Order dialog was prepared from, read from the
+  // database before its balance, and the quote it belongs to.
+  const [drawSnapshot, setDrawSnapshot] = useState<{ quoteId: string; rowVersion: number } | null>(null);
+  const currentQuoteIdRef = useRef<string | undefined>(undefined);
   // Unlike the dialog's open/closed state, this latch survives "Keep Editing".
   // Only a complete, stable Quote reload may clear it.
   const quoteVersionRecoveryRequiredRef = useRef(false);
@@ -568,6 +602,16 @@ export default function QuoteBuilder() {
         setChosenExpiryDate((current) => (current === null ? null : pickedExpiryStart(todayInBusinessTz(), days, seasonEndDate(computeSeason(parseLocalDate(todayInBusinessTz()))))));
       }
     });
+    return () => { cancelled = true; };
+  }, []);
+  // Booking timing windows: picking a timing fills an empty needed-by date (A-R1).
+  // null until the saved windows arrive; the Timing pick waits so it never fills a date from the defaults.
+  const [timingWindows, setTimingWindows] = useState<TimingWindows | null>(null);
+  // Section key -> the needed-by date a Timing pick filled this session, so it still counts as auto-filled on a later day.
+  const autoFilledNeededBy = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    void loadTimingWindows().then((w) => { if (!cancelled) setTimingWindows(w); });
     return () => { cancelled = true; };
   }, []);
   const [headerNotes, setHeaderNotes] = useState('');
@@ -1434,6 +1478,8 @@ export default function QuoteBuilder() {
       section_header_notes: s.section_header_notes,
       needed_by_date: s.needed_by_date || null,
       field_id: s.field_id || null,
+      timing: s.timing ?? null,
+      confidence: s.confidence ?? null,
       items: dbItems
         .filter((item) => item.section_id === s.id)
         .map((item) => {
@@ -2131,6 +2177,23 @@ export default function QuoteBuilder() {
     );
   };
 
+  const setSectionTiming = (key: string, timing: BookingTiming | null) => {
+    // Read before the updater so a replayed updater sees the same values (it must stay pure).
+    const priorAutoFilled = autoFilledNeededBy.current.get(key);
+    const filled = timing && timingWindows ? timingWindowStart(timingWindows, timing, todayInBusinessTz()) : null;
+    setSections((prev) => prev.map((s) => {
+      if (s._key !== key) return s;
+      // A live job's section keeps its needed-by date (save_quote refuses SECTION_HAS_JOB_LOCKED).
+      const jobLocked = Boolean(s.id && sectionJobs[s.id] && sectionJobs[s.id].status !== 'cancelled');
+      if (jobLocked || !filled) return { ...s, timing };
+      // Only a date this screen's Timing pick filled follows the new timing; any other date (typed, or saved earlier) stays.
+      const autoFilled = Boolean(s.needed_by_date && priorAutoFilled === s.needed_by_date);
+      if (s.needed_by_date && !autoFilled) return { ...s, timing };
+      autoFilledNeededBy.current.set(key, filled);
+      return { ...s, timing, needed_by_date: filled };
+    }));
+  };
+
   const updateSectionField = (key: string, field: keyof LocalSection, value: string | null) => {
     setSections((prev) =>
       prev.map((s) => (s._key === key ? { ...s, [field]: value } : s))
@@ -2534,6 +2597,8 @@ export default function QuoteBuilder() {
       section_header_notes: sec.section_header_notes || null,
       needed_by_date: sec.needed_by_date || null,
       field_id: sec.field_id || null,
+      timing: sec.timing ?? null,
+      confidence: sec.confidence ?? null,
       items: sec.items
         .filter((item) => item.product_id)
         .map((item) => {
@@ -3705,6 +3770,12 @@ export default function QuoteBuilder() {
   };
 
 
+  // KI-190: a late reply for a booking this screen no longer shows must not touch it.
+  useEffect(() => {
+    currentQuoteIdRef.current = id;
+    setDrawSnapshot(null);
+  }, [id]);
+
   // Partial booking draw-down: open the modal with the per-product balance
   const openDrawDownModal = async () => {
     if (!id) return false;
@@ -3716,9 +3787,16 @@ export default function QuoteBuilder() {
     }
     let loaded = false;
     setPendingDraw(loadPendingRetry(drawPendingName, isDrawRequest));
+    setDrawSnapshot(null);
     setDrawLoading(true);
     setShowDrawModal(true);
     try {
+      // KI-190: read the booking's version BEFORE its balance. A draw that lands in between
+      // makes the server refuse (safe); the draw sends this version.
+      const versionRes = await supabase.from('quotes').select('id, row_version').eq('id', id).maybeSingle();
+      if (versionRes.error) throw versionRes.error;
+      const loadedRowVersion = readRowVersion((versionRes.data as { row_version?: unknown } | null)?.row_version);
+      if (loadedRowVersion === null) throw new Error('The booking version could not be read');
       const [itemsRes, drawsRes, jobDrawsRes] = await Promise.all([
         supabase.from('quote_items').select('product_id, total_units_needed').eq('quote_id', id),
         supabase.from('quote_product_draws').select('product_id, quantity_drawn').eq('quote_id', id),
@@ -3767,6 +3845,7 @@ export default function QuoteBuilder() {
         })
         .sort((a, b) => a.product_name.localeCompare(b.product_name));
       setDrawRows(rows);
+      setDrawSnapshot({ quoteId: id, rowVersion: loadedRowVersion });
       loaded = true;
     } catch (error: unknown) {
       Sentry.captureException(error, { tags: { source: 'critical_action', action: 'draw_down_quote_load' } });
@@ -3775,6 +3854,41 @@ export default function QuoteBuilder() {
     }
     setDrawLoading(false);
     return loaded;
+  };
+
+  // KI-190: close the draw dialog and ask for a reload of the whole booking.
+  const openDrawReloadPrompt = (message: string) => {
+    setShowDrawModal(false);
+    quoteVersionRecoveryRequiredRef.current = true;
+    staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
+    setStaleSaveOpen(true);
+    toast('warning', message);
+    setDrawing(false);
+  };
+
+  // KI-190: the server refused a draw because the booking is not at the version it carried.
+  // The receipt check runs first, so this send ordered nothing.
+  const handleDrawStaleWrite = (error: unknown, resend: boolean, drawScope: string, drawKey: string) => {
+    if (resend) {
+      // The first send under this key may still be on its way: keep the note, flagged for a
+      // hand check that blocks new draws until the rep has looked.
+      markPendingRetryForCheck(drawPendingName);
+    } else {
+      clearDrawNotes(drawKey);
+      drawDownIdem.resetKeyFor(drawScope);
+    }
+    // A late reply for a booking this screen no longer shows changes nothing else here.
+    if (currentQuoteIdRef.current !== drawScope) { setDrawing(false); return; }
+    const kept = loadPendingRetry(drawPendingName, isDrawRequest);
+    setPendingDraw(kept ? { ...kept, expired: resend } : null);
+    if (resend) {
+      openDrawReloadPrompt('This retry was refused because the booking changed. The first attempt may still go through, so check the orders on this booking before drawing again.');
+      return;
+    }
+    const detail = rpcCodeDetail(error, RpcErrorCodes.QUOTE_STALE_WRITE)?.replace(/^[:\s]+/, '') ?? '';
+    openDrawReloadPrompt(detail
+      ? detail.charAt(0).toUpperCase() + detail.slice(1)
+      : 'This booking changed since you opened it. Nothing was ordered. Reload to see what is left and the prices, then try again.');
   };
 
   // `resume` re-sends a draw whose reply never came, exactly as it was sent and with its key, so the
@@ -3828,8 +3942,34 @@ export default function QuoteBuilder() {
     const drawKey = resume?.key ?? kept?.key ?? drawDownIdem.getKeyFor(drawScope);
     // An earlier send with this key got no reply, so it may have made the order.
     const earlierUnresolved = kept?.key === drawKey;
+    // KI-190: the dialog's balance belongs to drawSnapshot; its booked prices come from this
+    // screen. For a fresh draw both must be the same booking version, or the rep would order
+    // against terms they never saw: reload first, before any retry note exists. A resend of an
+    // earlier draw skips this: the server returns that draw's order if it went through, and
+    // checks the version itself if it didn't.
+    const drawVersion = drawSnapshot?.quoteId === id ? drawSnapshot.rowVersion : null;
+    if (!resume && !earlierUnresolved
+        && (drawVersion === null || drawVersion !== quoteRowVersionRef.current)) {
+      openDrawReloadPrompt('This booking changed since you opened it. Nothing was ordered. Reload to see what is left and the prices, then try again.');
+      return;
+    }
     // Without the note, a lost reply could not be finished after a reload, and a fresh key could draw twice.
     if (!savePendingRetry(drawPendingName, drawKey, drawPayload)) {
+      setDrawing(false);
+      toast('error', 'This browser could not keep a safety note for the Partial Order, so it was not sent. Allow this site to store data, or use another browser, then try again.');
+      return;
+    }
+    // The version this send carries: a fresh draw's dialog version, or the version kept with
+    // the earlier send under this key (none for a note from before KI-190: the server then
+    // returns that draw's order if it went through, and refuses it if not).
+    const keptVersion = loadPendingRetry(drawVersionPendingName, isRowVersionNote);
+    const sendVersion = resume || earlierUnresolved
+      ? (keptVersion?.key === drawKey ? keptVersion.request : null)
+      : drawVersion;
+    if (!resume && !earlierUnresolved && sendVersion !== null
+        && !savePendingRetry(drawVersionPendingName, drawKey, sendVersion)) {
+      // Without it a lost reply could only be resent with no version: don't send.
+      clearDrawNotes(drawKey);
       setDrawing(false);
       toast('error', 'This browser could not keep a safety note for the Partial Order, so it was not sent. Allow this site to store data, or use another browser, then try again.');
       return;
@@ -3840,11 +3980,14 @@ export default function QuoteBuilder() {
         p_draws: drawPayload,
         p_performed_by: profile!.id,
         p_idempotency_key: drawKey,
+        // KI-190: the booking version the dialog was prepared from. A booking that another
+        // draw or an edit changed since is refused (QUOTE_STALE_WRITE), as Whole Convert does.
+        p_expected_row_version: sendVersion,
       }, reason)));
       if (error) throw error;
       const result = assertRpcResult<{ status: string; order_id?: string; order_number?: string; warnings?: string[]; fully_drawn?: boolean; extra_order_id?: string; extra_order_number?: string }>(data, 'draw_down_quote');
       drawDownIdem.resetKeyFor(drawScope);
-      clearPendingRetry(drawPendingName);
+      clearDrawNotes(drawKey);
       setPendingDraw(null);
       toast('success', `Order ${result.order_number || ''} created${result.fully_drawn ? '. Booking fully drawn' : '. Booking stays open'}`
         + (result.extra_order_number ? `. The amount over the booking is order ${result.extra_order_number}.` : ''));
@@ -3867,7 +4010,7 @@ export default function QuoteBuilder() {
       // so does an earlier lost reply: some refusals (cutover, sign-in) come before the receipt
       // check, so refusing this send says nothing about whether that earlier one made the order.
       if ((isBelowCostApprovalHandledError(error) || isDefinitiveRpcRejection(error)) && !earlierUnresolved) {
-        clearPendingRetry(drawPendingName);
+        clearDrawNotes(drawKey);
         setPendingDraw(null);
       }
       if (isBelowCostApprovalHandledError(error)) {
@@ -3887,7 +4030,7 @@ export default function QuoteBuilder() {
         // earlier send may have made an order: keep the note, flagged for a hand check, which blocks
         // new draws until the rep confirms. Another user's key says nothing was made here.
         if (bindingRejection === 'actor') {
-          clearPendingRetry(drawPendingName);
+          clearDrawNotes(drawKey);
         } else {
           markPendingRetryForCheck(drawPendingName);
         }
@@ -3904,7 +4047,7 @@ export default function QuoteBuilder() {
           : null;
 
         if (committedOrderId) {
-          clearPendingRetry(drawPendingName);
+          clearDrawNotes(drawKey);
           setPendingDraw(null);
           setShowDrawModal(false);
           toast('warning', 'An earlier attempt with this retry already created an order. No new draw was made. Opening that order now.');
@@ -3932,6 +4075,13 @@ export default function QuoteBuilder() {
           ? `That retry belongs to another signed-in user, so nothing new was drawn. ${recoveryStep}`
           : `The database could not confirm this retry outcome, so nothing was drawn now. ${recoveryStep}`);
         setDrawing(false);
+        return;
+      }
+
+      // KI-190: the booking changed since this screen loaded it, and nothing was ordered.
+      // Reload the whole quote (balance and booked prices) before another draw.
+      if (hasRpcCode(error, RpcErrorCodes.QUOTE_STALE_WRITE)) {
+        handleDrawStaleWrite(error, Boolean(resume || earlierUnresolved), drawScope, drawKey);
         return;
       }
 
@@ -4352,14 +4502,17 @@ export default function QuoteBuilder() {
     );
   }
 
-  // The quote cannot be edited while a save or order creation runs: an edit made then
+  // The quote cannot be edited while a save, mark-presented or order creation runs: an edit made then
   // would not be in what was written, and the page usually moves on afterwards.
-  const formLocked = saving || converting || drawing;
+  const formLocked = saving || converting || drawing || markingPresented || bookingAsOrder;
   // A saved quote whose status can't be edited (sent, accepted, closed...) shows its values but takes no
   // edits: none could be saved, and each one only raised "Unsaved changes". Tabs, History, collapse,
   // the job link and Schedule job still work.
   const readOnly = isEditing && !canEdit;
   const editLocked = formLocked || readOnly;
+  // Another rep's booking: its save may change prices only (QUOTE_PRICE_ONLY_FOR_OTHER_REPS).
+  const planningLocked = editLocked || (isEditing && !isAdmin
+    && (!profile?.id || loadedQuoteOwner?.quoteId !== id || loadedQuoteOwner?.createdBy !== profile.id));
 
   // Header actions (spec "Actions by state"). Each action keeps today's show and enable
   // conditions and handler; only where it sits changes.
@@ -5350,45 +5503,69 @@ export default function QuoteBuilder() {
                   Job {sectionJobs[sec.id].job_number} was scheduled from this section. Its products, quantities, prices, needed-by date and field stay as booked; a new name or notes here does not change the job, so change those on the job too.
                 </p>
               )}
-              {isPlanned && (
-                <div className="order-last w-full flex flex-wrap items-start gap-x-6 gap-y-1">
-                  <div className="w-full sm:w-52">
-                    <div className="mb-1 flex items-center gap-1 text-sm font-medium text-secondary">
-                      Needed by
-                      <HelpTip text="When the customer needs the product, not when the quote expires. Used for inventory forecasting and delivery scheduling." />
-                    </div>
-                    <DatePicker
-                      aria-label="Needed by"
-                      value={sec.needed_by_date || null}
-                      onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
-                      disabled={editLocked || Boolean(sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled')}
+              {/* Planning picks feed the purchasing plan on every booking; only a Planned booking holds stock. */}
+              <div className="order-last w-full flex flex-wrap items-start gap-x-6 gap-y-1">
+                <div className="w-full sm:w-52">
+                  <div className="mb-1 flex items-center gap-1 text-sm font-medium text-secondary">
+                    Needed by
+                    <HelpTip text="When the customer needs the product, not when the quote expires. Used for inventory forecasting and delivery scheduling." />
+                  </div>
+                  <DatePicker
+                    aria-label="Needed by"
+                    value={sec.needed_by_date || null}
+                    onChange={(value) => { autoFilledNeededBy.current.delete(sec._key); updateSectionField(sec._key, 'needed_by_date', value || null); }}
+                    disabled={planningLocked || Boolean(sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled')}
+                  />
+                </div>
+                <div className="w-full sm:w-40">
+                  <Select
+                    id={`section-timing-${sec._key}`}
+                    label="Timing"
+                    placeholder="Not set"
+                    options={TIMING_OPTIONS}
+                    value={sec.timing ?? ''}
+                    onChange={(e) => setSectionTiming(sec._key, (e.target.value || null) as BookingTiming | null)}
+                    disabled={planningLocked || !timingWindows}
+                  />
+                </div>
+                {/* Internal rating: hidden in Customer view, like costs. */}
+                {!customerView && (
+                  <div className="w-full sm:w-40">
+                    <Select
+                      id={`section-confidence-${sec._key}`}
+                      label="Confidence"
+                      placeholder="Not set"
+                      options={CONFIDENCE_OPTIONS}
+                      value={sec.confidence ?? ''}
+                      onChange={(e) => updateSectionField(sec._key, 'confidence', e.target.value || null)}
+                      disabled={planningLocked}
                     />
                   </div>
-                  {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
-                  {quoteId && activePlannedHolds.length > 0 && (
-                    <div className="sm:pt-8 flex flex-col items-start gap-0.5 text-xs text-secondary">
-                      {Array.from(new Set(sec.items.map((item) => item.product_id).filter(Boolean))).map((productId) => {
-                        const holds = activePlannedHolds.filter((candidate) => candidate.product_id === productId);
-                        if (holds.length === 0) return null;
-                        const heldQuantity = holds.reduce((sum, hold) => sum + hold.quantity, 0);
-                        const earliestExpiry = holds.reduce<string | null>((earliest, hold) => {
-                          if (hold.expires_at == null) return earliest;
-                          return earliest == null || hold.expires_at < earliest ? hold.expires_at : earliest;
-                        }, null);
-                        const unit = products.find((product) => product.id === productId)?.inventory_unit;
-                        const isLapsed = earliestExpiry != null && earliestExpiry.slice(0, 10) <= localToday();
-                        return (
-                          <span key={productId}>
-                            Held: {heldQuantity}{unit ? ` ${unit}` : ''} &middot; {earliestExpiry ? (
-                              <>expires <span className={isLapsed ? 'text-red-600 font-medium' : undefined}>{parseLocalDate(earliestExpiry.slice(0, 10)).toLocaleDateString()}{isLapsed ? ' (lapsed)' : ''}</span></>
-                            ) : 'no expiry (no needed-by date)'}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
+                {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
+                {isPlanned && quoteId && activePlannedHolds.length > 0 && (
+                  <div className="sm:pt-8 flex flex-col items-start gap-0.5 text-xs text-secondary">
+                    {Array.from(new Set(sec.items.map((item) => item.product_id).filter(Boolean))).map((productId) => {
+                      const holds = activePlannedHolds.filter((candidate) => candidate.product_id === productId);
+                      if (holds.length === 0) return null;
+                      const heldQuantity = holds.reduce((sum, hold) => sum + hold.quantity, 0);
+                      const earliestExpiry = holds.reduce<string | null>((earliest, hold) => {
+                        if (hold.expires_at == null) return earliest;
+                        return earliest == null || hold.expires_at < earliest ? hold.expires_at : earliest;
+                      }, null);
+                      const unit = products.find((product) => product.id === productId)?.inventory_unit;
+                      const isLapsed = earliestExpiry != null && earliestExpiry.slice(0, 10) <= localToday();
+                      return (
+                        <span key={productId}>
+                          Held: {heldQuantity}{unit ? ` ${unit}` : ''} &middot; {earliestExpiry ? (
+                            <>expires <span className={isLapsed ? 'text-red-600 font-medium' : undefined}>{parseLocalDate(earliestExpiry.slice(0, 10)).toLocaleDateString()}{isLapsed ? ' (lapsed)' : ''}</span></>
+                          ) : 'no expiry (no needed-by date)'}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
 
             {!isCollapsed && (
@@ -5713,7 +5890,7 @@ export default function QuoteBuilder() {
                     <>
                       {confirmRestore === selectedVersion.id ? (
                         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1">
-                          <span className="text-sm text-amber-800">Restore V{selectedVersion.version_number}?</span>
+                          <span className="text-sm text-amber-800">Restore V{selectedVersion.version_number}? Timing and Confidence will be cleared.</span>
                           <Button
                             size="sm"
                             icon={<CheckCircle className="w-3.5 h-3.5" />}
@@ -5846,21 +6023,27 @@ export default function QuoteBuilder() {
               {/* Item-level comparison */}
               {(() => {
                 const versionItems = (selectedVersion.snapshot_data?.sections || []).flatMap(
-                  s => (s.items || []).map(i => ({ ...i, section: s.section_name }))
+                  s => (s.items || []).map(i => ({
+                    line_id: i.quote_item_id ?? null,
+                    product_id: i.product_id,
+                    product_name: i.product_name,
+                    price_per_unit: i.price_per_unit,
+                    total_price: i.total_price,
+                    section: s.section_name,
+                  }))
                 );
                 const currentItems = sections.flatMap(
                   s => s.items.filter(i => i.product_id).map(i => ({
+                    line_id: i.id ?? null,
                     product_id: i.product_id,
                     product_name: i.product?.product_name || '',
                     price_per_unit: i.price_per_unit,
                     total_price: i.total_price,
-                    total_units_needed: i.total_units_needed,
                     section: s.section_name,
                   }))
                 );
-                const vMap = new Map(versionItems.map(i => [i.product_id, i]));
-                const cMap = new Map(currentItems.map(i => [i.product_id, i]));
-                const allProductIds = new Set([...vMap.keys(), ...cMap.keys()]);
+                // KI-201: pair by the saved line, never by product alone.
+                const compareRows = pairCompareLines(versionItems, currentItems);
 
                 return (
                   <div className="overflow-x-auto">
@@ -5876,16 +6059,20 @@ export default function QuoteBuilder() {
                         </tr>
                       </thead>
                       <tbody>
-                        {Array.from(allProductIds).map((pid) => {
-                          const vItem = vMap.get(pid);
-                          const cItem = cMap.get(pid);
+                        {compareRows.map(({ key, version: vItem, current: cItem }) => {
                           const isAdded = !vItem && cItem;
                           const isRemoved = vItem && !cItem;
-                          const priceChanged = vItem && cItem && Math.abs(vItem.price_per_unit - cItem.price_per_unit) > 0.001;
+                          const priceChanged = vItem && cItem && (
+                            Math.abs(vItem.price_per_unit - cItem.price_per_unit) > 0.001
+                            || Math.abs(vItem.total_price - cItem.total_price) > 0.005
+                          );
                           const bgClass = isAdded ? 'bg-green-50' : isRemoved ? 'bg-red-50' : priceChanged ? 'bg-amber-50' : '';
                           return (
-                            <tr key={pid} className={`border-b border-gray-100 ${bgClass}`}>
-                              <td className="py-1 pr-2 text-nav-dark">{vItem?.product_name || cItem?.product_name || ''}</td>
+                            <tr key={key} className={`border-b border-gray-100 ${bgClass}`}>
+                              <td className="py-1 pr-2 text-nav-dark">
+                                {vItem?.product_name || cItem?.product_name || ''}
+                                <span className="block text-secondary">{cItem?.section || vItem?.section}</span>
+                              </td>
                               <td className="py-1 px-2 text-right text-secondary">{vItem ? fmt(vItem.price_per_unit) : '-'}</td>
                               <td className="py-1 px-2 text-right text-secondary">{cItem ? fmt(cItem.price_per_unit) : '-'}</td>
                               <td className="py-1 px-2 text-right text-secondary">{vItem ? fmt(vItem.total_price) : '-'}</td>
@@ -6187,7 +6374,7 @@ export default function QuoteBuilder() {
                 <Button
                   size="sm"
                   onClick={() => {
-                    clearPendingRetry(drawPendingName);
+                    clearDrawNotes();
                     setPendingDraw(null);
                   }}
                   className="shrink-0 min-h-11 md:min-h-10"
@@ -6345,7 +6532,7 @@ export default function QuoteBuilder() {
             await handleRestoreVersion(lastSentVersion.id, lastSentVersion.version_number);
           }}
           title={`Rewind to version ${lastSentVersion.version_number}?`}
-          message={`Put this quote back to version ${lastSentVersion.version_number}, the version last sent to the customer? Changes made since then, saved or not, are discarded.`}
+          message={`Put this quote back to version ${lastSentVersion.version_number}, the version last sent to the customer? Changes made since then, saved or not, are discarded, and every section's Timing and Confidence are cleared.`}
           confirmLabel={`Rewind to version ${lastSentVersion.version_number}`}
           variant="info"
           icon={RotateCcw}

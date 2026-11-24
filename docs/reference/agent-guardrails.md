@@ -85,10 +85,14 @@
 > re-review. `node scripts/write-codex-push-proof.mjs --carry-forward` mints a carried proof
 > (`codex_ran: false`, `carried_forward: true`, `carry.mode` `disjoint` or `collision_check`, `carry.from_head` /
 > `from_base`) for a head that is exactly the conflict-free merge of the Sol-reviewed head (clean proof under 24
-> hours old, as is the original full review behind a chain of carries) and today's origin/main: with no model call
-> only when the PR's files and main's new files do not overlap and one side is plain documentation (notes-folder `.md` files,
+> hours old, as is the original full review behind a chain of carries) and today's `origin/main` tip, on `hotfix/` and
+> `release/` branches only (a feature branch that merged `origin/staging` always needs the full review, and the gates
+> refuse any proof carried onto a staging base; Mason, 2026-11-22, #2226), never from an owner-accepted
+> proof, never across a rename of a file the other side changed, and never across any copy: with no model call
+> only when the PR's files and the base's new files do not overlap and one side is plain documentation (notes-folder `.md` files,
 > which excludes every rule file, in regular non-executable files only); otherwise, including any two code changes in different files, only
-> after a focused Sol collision check returns CLEAN. The check starts from the database, guard, CI, dependency and
+> after a focused Sol collision check returns CLEAN, and only when main's changes add text lines and remove or edit
+> none (a removed line may be a credential, and the delta goes to the reviewer). The check starts from the database, guard, CI, dependency and
 > rule files (`CARRY_HOT_PATHS`) and counts any other blocker it sees. `proofValid()` in `codex-push-lib.mjs`
 > accepts that shape on the same exact-head, exact-base and 24-hour terms as a full proof (the 24 hours also bind the
 > original full review at the root of the chain), so both merge gates and the push gate honour it, and the migration
@@ -120,7 +124,7 @@
 > `post_apply`, same `base_sha` as the source) only when HEAD is ONE ordinary commit on top of a
 > head with a clean Sol proof under 24 hours old (the original full review too), and every file it touches is a
 > regular non-executable file among: `docs/reference/migrations.d/<name>.md` for a migration the reviewed PR adds
-> and `docs/changelog.d/*.md` (edited or added; never a `README.md` or agent instruction file), `docs/manual/KNOWN_ISSUES.md` and `.claude/schema-registry.json` (edited), `src/lib/rpcContracts.test.ts` when its
+> and `docs/changelog.d/*.md` (edited or added; never a `README.md` or agent instruction file), `docs/manual/KNOWN_ISSUES.md` and `.claude/schema-registry.json` (edited), `docs/manual/known-issues.d/*.md` (edited or added), `src/lib/rpcContracts.test.ts` when its
 > only change is adding the PR's own migration timestamps to `MIGRATIONS_AWAITING_TYPE_REGENERATION` (Mason, 2026-11-05), and
 > `scripts/db-invariant-sweeps/allowlist.json`, where every changed entry keeps its position, predicate and other
 > fields, keeps the signature before `#` with a NEW 12-hex hash, appends to its justification, and has a real
@@ -131,7 +135,21 @@
 > PR's migrations) returns CLEAN (`records_check` `sol`; Sol HIGH x2 on the PR that added this). `carriedSolProof()` accepts `post_apply` only with an unchanged base, so every gate that
 > accepts the other carries accepts it on the same head/base/24-hour terms.
 >
-> **Owner-accepted Sol findings (Mason, 2026-11-10).** When Sol answers BLOCKERS, the wrapper saves its numbered
+> **Owner-accepted Sol findings (Mason, 2026-11-10; plain-word skips 2026-11-21).** Since 2026-11-21 `owner-accept-sol-finding.mjs
+> <n> ...` (any finding he disagrees with: a business call, or a bug or gap too small or impractical to affect the business; an owner-accepted proof counts only for its own PR, by number and repository address, at its exact head, at merge and migration apply, Codex merge guard included) builds ONE request (`crx-owner-sol-skip-v1`) for several findings, its deadline never past the Sol
+> run's own 24 hours, and Mason answers in plain words with no code: the whole message `yes, <reason>` to the summary's "do you accept the risk?"
+> (2026-11-22; the reason passes `reasonProblem` and is logged), or `skip`, `skip 1 3`, `I disagree`, `I don't want that`,
+> `don't fix`, `accept` and the like (`skipFromReply`; since 2026-11-22 `skip` or `accept` with only agreeing filler words, such as `accept skip` or
+> `Skip I agree skip it`, also counts (an allow-list: any other word, such as none, reject or until, skips nothing); a bare `yes`, `ok`, `move on`, `merge it` and questions skip nothing;
+> `that` or `it` skips only when the list holds one finding). A number he names that was not shown is ignored only when he already skipped
+> that finding in the same Sol run (the receipt records it as `ignored`, and `collectAcceptances` counts it only if an earlier receipt covers it).
+> The reply hook records it only when a skip request built in this session is waiting and the agent's last message is exactly
+> its summary (`resolvePlainReply` with `purposes`, the same check as the migration `I approve`), into one receipt per reply
+> (`owner-approval-sol-skip-<head>-<code>.json`, `selected` numbers), which `verifySolSkip` re-checks against the Sol run, the
+> findings shown, his reply read back from the transcript, and the agent's last message before it being this request's
+> summary (`assertSkipShown`). The log records a fixed sentence, never free text. The older flow
+> below (one request per finding, `accept <code> <reason>`) only describes requests built before then (such a reply names no repository, so since 2026-11-22 the carry refuses it and Mason is asked again); the script
+> now always builds the skip request. When Sol answers BLOCKERS, the wrapper saves its numbered
 > `SOL_FINDING` list as `codex-review-blockers-<head>.json` (review-proof-guard protects it) only when Sol's
 > `SOL_FINDING_COUNT` line matches the list; any later run on that head deletes it. For a finding Mason judges a
 > business non-issue, `node scripts/owner-accept-sol-finding.mjs <n>` (clean checkout at that head, open PR into
@@ -140,11 +158,13 @@
 > 24 hours, only for that finding; `approve` cannot answer it and `accept` cannot answer a migration request; a reason
 > under two words, over 300 characters, or with money amounts, emails, phone numbers, `#<number>` or markup is
 > refused without using the code). Once every finding of the run is accepted, `--log` writes the deterministic
-> `DECISION_LOG.md` entry (PR, each finding's `file:line` and text hash, his reason, date; never the finding's wording,
+> decision-log entry (since 2026-11-23 a PR into `staging` gets its own new file
+> `docs/manual/decision-log.d/<date>-pr<n>-sol-skip-<head>.md`, so parallel PRs never conflict; a review against `main`
+> still writes `DECISION_LOG.md`, the one file `release-flow.mjs` lets ride on a release head) (PR, each finding's `file:line` and text hash, his reason, date; never the finding's wording,
 > because an accepted finding is unfixed and the repo is public); commit that file alone on top of the reviewed head,
 > then `node scripts/write-codex-push-proof.mjs --carry-owner-accepted` mints a carried proof (`carry.mode`
 > `owner_accepted`, `root_review.owner_accepted`, same base, the original run's 24 hours, `codex_ran` false) only when
-> the commit's sole change is exactly that entry and the code running is the bytes committed at that head. A PR that
+> the commit's sole change is exactly that entry (one new fragment file, or the `DECISION_LOG.md` insertion) and the code running is the bytes committed at that head. A PR that
 > changes hooks, `.codex`, `.husky`, `.github`, `scripts/lib`, `package.json` or the proof, approval and apply scripts
 > cannot use this path: a review that was not clean cannot vouch for gate code. Later carries (main merge, restamp,
 > post-apply) keep the acceptances and tell their focused Sol check the findings are accepted, not fixed. It satisfies
@@ -162,9 +182,9 @@
 > "Last verified" stamp is fixed before Sol instead of voiding its proof (PR #1650, the sixth time).
 > **Sol round hard stop (Mason, 2026-11-09).** Every full run prints "Sol round N" (ledger `sol-rounds.jsonl`, counted
 > per branch commit); rounds 3–4 add the AGENTS.md stop-rule reminder. From round 5 the run refuses with no Codex call
-> and nothing recorded (`solRoundGate()`), unless `docs/manual/DECISION_LOG.md` at the reviewed head has an entry whose
+> and nothing recorded (`solRoundGate()`), unless the decision log at the reviewed head (`docs/manual/DECISION_LOG.md` or any `docs/manual/decision-log.d/*.md`, each file read on its own; `decisionLogAt()`) has an entry whose
 > heading carries a real date of today (Central) or later, with a `**Decision` line naming Mason, that names the PR as `#<n>`. So: ask Mason the business
-> trade-off, record his answer naming the PR, commit, re-run. `--dry-run` prints the would-be refusal and exits 0;
+> trade-off, record his answer naming the PR as a new `decision-log.d/` file, commit, re-run. The future-date pre-flight reads the same folder. `--dry-run` prints the would-be refusal and exits 0;
 > the carries never count rounds. Why: PR #1653 reached round 8 past a warning-only line before Mason was asked.
 >
 > **Autonomous landing (Mason, 2026-09-26) — this block supersedes older wording in the rows below where they
@@ -292,6 +312,8 @@
 >
 > Last reconciled against `.claude/settings.json` and `.codex/hooks.json` hook wiring on 2026-10-30.
 
+> **Taha's lanes (Mason 2026-11-22, until the end of Dec 15 Central):** both merge gates refuse any agent merge into `staging` of a PR whose `src/` or `supabase/` files are in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing), whatever OK line it has; field billing (field app/invoice, spray, blend, application, job paths) is Mason's and passes; a PR that edits the block's own wiring is refused too. An unreadable or 250+ file list refuses. The refusal issues a 6-digit code bound to the PR's current head; Mason's message of its own `taha override #<PR> <code>` lets that PR at that commit through for 24 hours (a new push needs a new code), and the gate itself posts a PR comment tagging Taha before allowing it, or refuses (`taha-lane-lib.mjs`, `taha-lane-prompt.mjs`). Names, not file contents, decide the lane.
+
 ---
 
 ### Schema-Aware PreToolUse Hooks (`.claude/hooks/`)
@@ -347,13 +369,13 @@ Runs on Codex's `*` (all-tools) PreToolUse matcher through portable POSIX and Wi
 ### UserPromptSubmit Hooks (`.claude/hooks/`)
 These run when Mason submits a prompt, BEFORE Claude reads it. They inject extra context via `additionalContext` — they don't block — so Mason's intent is preserved while Claude is forced to slow down on risky wording or nudged toward the right workflow.
 
-`prompt-router.mjs` is the single registered command for this event. It reads the prompt once and invokes only `hold-latch-prompt.mjs`, (since 2026-10-09) `owner-approval-prompt.mjs` and (since 2026-10-22) `coderabbit-skip-prompt.mjs` on both Claude and Codex. `ship-intent-reminder.mjs` was unwired on 2026-10-29 (Mason): its word list matched nearly every message and added the `/ship` text and landing policy each time, which `AGENTS.md` already states every session; Mason deleted the file the same day. Of the remaining modules, the last records Mason's `I approve` (or `approve <code>`) reply for a parked migration and does nothing on any other message. On 2026-10-02 (Mason) five other reminder modules were unwired, and PR #882 deleted them (2026-10-06): `dangerous-phrase-warning`, `codex-gauntlet-reminder`, `agent-pair-review-reminder`, `codex-to-claude-handoff-reminder` and `autopilot-intent-reminder`. They duplicated the user-level risky-phrase nudge or the ship reminder and fired on agent reports as often as on Mason's words.
+`prompt-router.mjs` is the single registered command for this event. It reads the prompt once and invokes only `hold-latch-prompt.mjs`, (since 2026-10-09) `owner-approval-prompt.mjs` (since 2026-10-22) `coderabbit-skip-prompt.mjs` and (since 2026-11-22) `taha-lane-prompt.mjs` on both Claude and Codex. `ship-intent-reminder.mjs` was unwired on 2026-10-29 (Mason): its word list matched nearly every message and added the `/ship` text and landing policy each time, which `AGENTS.md` already states every session; Mason deleted the file the same day. Of the remaining modules, the last records Mason's `I approve` (or `approve <code>`) reply for a parked migration and does nothing on any other message. On 2026-10-02 (Mason) five other reminder modules were unwired, and PR #882 deleted them (2026-10-06): `dangerous-phrase-warning`, `codex-gauntlet-reminder`, `agent-pair-review-reminder`, `codex-to-claude-handoff-reminder` and `autopilot-intent-reminder`. They duplicated the user-level risky-phrase nudge or the ship reminder and fired on agent reports as often as on Mason's words.
 
 | Hook | What it warns on / reminds | Why |
 |------|------------------|-----|
 | `ship-intent-reminder.mjs` | **Removed 2026-10-29 (Mason)** — unwired and deleted | Formerly reminded Claude to drive build/fix/ship messages through `/ship`; `AGENTS.md` routes that work instead |
 
-`release-pass-prompt.mjs` (Claude only, since 2026-11-20) records Mason's `ship the release` / `go live #<n>` as a 24-hour pass for that session (`release-pass-lib.mjs`); `pr-merge-guard.mjs` then lets that session merge the release or hotfix into `main` and the back-merge into `staging`, and `migration-landing-gate-lib.mjs` accepts it in place of Taha's `Ready to merge:` comment. `stop the release` withdraws it. Every other merge and apply gate still runs. The same day, `owner-approval-prompt.mjs` started accepting a plain `yes` (still only right after the request it names), approvals last 24 hours, and they survive the PR head moving (the SQL hash still binds); a destructive migration no longer blocks a `staging` merge.
+Mason's release pass (`ship the release` / `go live #<n>`, added 2026-11-20 by #2098) was removed on 2026-11-22 (Mason, after Sol kept finding new holes in it): `release-pass-prompt.mjs` is no longer routed, and `pr-merge-guard.mjs` and `migration-landing-gate-lib.mjs` again leave merging the release, hotfixes and the back-merge to Taha or Mason, and a live apply waits for Taha's own `Ready to merge:` comment. Kept from 2026-11-20: `owner-approval-prompt.mjs` started accepting a plain `yes` (still only right after the request it names), approvals last 24 hours, and they survive the PR head moving (the SQL hash still binds); a destructive migration no longer blocks a `staging` merge.
 
 `hold-latch-prompt.mjs` is also a UserPromptSubmit hook — see the Correction-mined guards table below for what it does.
 

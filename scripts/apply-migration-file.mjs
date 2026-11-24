@@ -71,6 +71,7 @@ import {
 } from "../.claude/hooks/migration-apply-lib.mjs";
 import { assertWrappable } from "../.claude/hooks/migration-wrappability-lib.mjs";
 import { checkLiveMigrationOrdering } from "../.claude/hooks/migration-ordering-lib.mjs";
+import { checkLivePrerequisite, prerequisiteFor, prerequisiteGuardSql } from "../.claude/hooks/migration-prerequisite-lib.mjs";
 import { assertApprovalStillValid, ownerOnceGuardSql, recordUsedApproval } from "../.claude/hooks/owner-approval-lib.mjs";
 import { CREDENTIAL_TARGET, readCredentialToken } from "./lib/supabase-credential.mjs";
 import { withRestampHint } from "./lib/migration-restamp-hint.mjs";
@@ -418,6 +419,7 @@ try {
     // --confirm re-reads the live ledger before transmitting (below), so the
     // snapshot's age is not refused here.
     liveOrderingRecheck: true,
+    livePrerequisiteRecheck: true,
   });
 } catch (err) {
   die(2,
@@ -445,6 +447,7 @@ if (coderabbitSkip) {
 if (!confirm) {
   console.log("");
   console.log("DRY RUN — nothing was transmitted. Re-run with --confirm to apply for real.");
+  if (prerequisiteFor(migName, sql)) console.log("Live prerequisite (#2193) not checked in a dry run: --confirm reads the live count first and refuses below the threshold.");
   const reviews = coderabbitSkip
     ? "whose PR's final Sol review is clean and whose CodeRabbit review Mason skipped"
     : "whose PR's final Sol and CodeRabbit reviews are clean";
@@ -458,6 +461,17 @@ if (!token) {
   die(1,
     "apply-migration-file: no token (SUPABASE_ACCESS_TOKEN is unset and Credential Manager gave\n" +
     "none), so there is no way to reach the management API. Do not write it to a file.");
+}
+
+// ── LIVE PREREQUISITE (#2193) ──────────────────────────────────────────────
+// The modes-of-action load must follow the live EPA batch fill: count how many of
+// its list rows match an active ingredient now, and refuse below the threshold.
+// Fails closed. Every other migration has no prerequisite and passes untouched.
+// Runs before the ordering re-check so that one stays the last read (Sol MED).
+{
+  const pre = await checkLivePrerequisite({ fetchImpl: fetch, projectId, token, name: migName, sql });
+  if (!pre.ok) die(2, pre.reason);
+  if (!pre.skipped) console.log(`Live prerequisite passed: ${pre.matched} of ${pre.listed} list rows match an active ingredient.`);
 }
 
 // ── LIVE ORDERING RE-CHECK ─────────────────────────────────────────────────
@@ -511,9 +525,18 @@ if (ownerApproval) {
   catch (err) { die(2, `apply-migration-file: ${err?.message || err}. Refusing to transmit.`); }
 }
 
+// LIVE PREREQUISITE, ENFORCED INSIDE THE TRANSACTION (#2193, Sol HIGH). The read
+// above is an early, friendly refusal; this re-count runs under the ingredient
+// lock, so an ingredient retired after that read still stops the load here.
+// Plain BEGIN is READ COMMITTED: the re-count sees every commit made before the
+// SHARE lock was granted, and the lock blocks any later retirement (#2230).
+let prerequisiteGuard = "";
+try { prerequisiteGuard = prerequisiteGuardSql({ tag, name: migName, sql }); }
+catch (err) { die(2, `apply-migration-file: ${err?.message || err}. Refusing to transmit.`); }
+
 // One transaction: the migration and its ledger row commit together or not at all.
 const wrapped =
-  `BEGIN;\n${ownerOnceGuard}${sql}\n;\n` +
+  `BEGIN;\n${ownerOnceGuard}${prerequisiteGuard}${sql}\n;\n` +
   `INSERT INTO supabase_migrations.schema_migrations (version, name, statements, created_by)\n` +
   `VALUES (${dq}${version}${dq}, ${dq}${migName}${dq}, ARRAY[${dq}${sql}${dq}], ${dq}${createdBy}${dq});\n` +
   `COMMIT;`;

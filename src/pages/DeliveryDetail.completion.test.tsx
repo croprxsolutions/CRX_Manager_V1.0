@@ -15,7 +15,7 @@
  *     and it fills without a reload.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const SIGNATURE_DATA_URL = `data:image/png;base64,iVBORw0KGgo${'A'.repeat(669)}`;
@@ -62,7 +62,7 @@ vi.mock('../lib/db', () => ({
       }),
     },
   },
-  supabaseUntyped: { from: mockFrom },
+  supabaseUntyped: { from: mockFrom, rpc: mockRpc },
   sanitizeError: (e: unknown) => (e as Error)?.message || 'Error',
   checkMutationResult: vi.fn(),
   assertRpcResult: (d: unknown, op: string) => {
@@ -71,6 +71,21 @@ vi.mock('../lib/db', () => ({
   },
 }));
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => auth }));
+// Drivers read farms through get_driver_customers (#2018); serve it from the fake customers rows.
+vi.mock('../lib/driverFarms', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/driverFarms')>();
+  return {
+    ...actual,
+    // Office users read the fake customers table as before; a driver gets only the lookup's fields.
+    fetchDeliveryFarm: (id: string, isDriver: boolean) => {
+      if (!isDriver) return actual.fetchDeliveryFarm(id, false);
+      const c = ((tables.data.customers ?? []) as { id: string; farm_name: string; email?: string | null }[])
+        .find((row) => row.id === id);
+      const data = c ? { id: c.id, farm_name: c.farm_name, phone: null, email: c.email ?? null, billing_address: null, shipping_address: null } : null;
+      return Promise.resolve({ data, error: null });
+    },
+  };
+});
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
@@ -79,7 +94,7 @@ vi.mock('../lib/notificationTriggers', () => ({
 }));
 vi.mock('../lib/connectivity', () => ({ hasSignal: () => Promise.resolve(true), NO_SIGNAL_MESSAGE: 'no signal' }));
 vi.mock('../lib/deliveryPdf', () => ({ downloadDeliveryPdf: vi.fn() }));
-vi.mock('../lib/emailService', () => ({ sendEmail: mockSendEmail, buildEmailHtml: () => '<p></p>' }));
+vi.mock('../lib/emailService', () => ({ sendEmail: mockSendEmail, buildEmailHtml: () => '<p></p>', EmailUnconfirmedError: class extends Error {} }));
 vi.mock('../lib/rupCompliance', () => ({ checkRUPCompliance: () => Promise.resolve({ compliant: true, warnings: [] }) }));
 vi.mock('../lib/deliverySplitBilling', () => ({
   fetchSplitBillingOrderIds: () => Promise.resolve({ data: new Set(), error: null }), SPLIT_BILLING_BLOCK_REASON: '', billSplitFailed: () => false, BILL_SPLIT_FAILED_MESSAGE: '',
@@ -494,4 +509,212 @@ describe('Invoices on this sale card', () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringMatching(/Draft invoices CS-2026-0005-1, CS-2026-0005-2 created/)));
     expect(await screen.findByRole('link', { name: /CS-2026-0005-1/ })).toHaveAttribute('href', '/invoices/inv-1');
   });
+});
+
+// KI-25 follow-up (20261221100000): Email Confirmation pauses a queued receipt before its hand send, so the server
+// cannot email a second copy afterwards, and marks it handled once the email went out.
+describe('Email Confirmation and the server receipt queue', () => {
+  const COMPLETED = { ...OPEN_DELIVERY, status: 'completed', completed_at: '2026-10-21T15:00:00Z', signed_by: 'Pat' };
+  const answer = (over: Record<string, unknown> = {}) => ({
+    data: { delivery_id: 'del-1', outcome: 'paused', previous_status: 'pending', sent_at: null, send_authorized_at: null, queued_at: '2026-10-21T15:00:00.123456+00:00', ...over },
+    error: null,
+  });
+  const closeCalls = () => mockRpc.mock.calls.filter(([name]) => name === 'close_delivery_receipt').map(([, args]) => args.p_reason);
+
+  beforeEach(() => { tables.data.deliveries = [{ ...COMPLETED }]; });
+
+  it('pauses the queued receipt before sending, then marks it handled', async () => {
+    const order: string[] = [];
+    mockRpc.mockImplementation((name: string, args: { p_reason?: string }) => {
+      if (name === 'close_delivery_receipt') order.push(`close:${args.p_reason}`);
+      return Promise.resolve(answer(args.p_reason === 'handled' ? { outcome: 'closed', previous_status: 'needs_check' } : {}));
+    });
+    mockSendEmail.mockImplementation(() => { order.push('send'); return Promise.resolve({ success: true }); });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(order).toEqual(['close:manual_send', 'send', 'close:handled']));
+    expect(mockToast).toHaveBeenCalledWith('success', 'Confirmation email sent to farmer@example.test');
+  });
+
+  it('a failed send leaves the receipt paused on the office list (never marked handled)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer()));
+    mockSendEmail.mockRejectedValue(new Error('provider down'));
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'provider down'));
+    expect(closeCalls()).toEqual(['manual_send']);
+    // The office is told the server will not send it either (Taha LOW).
+    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/did not go out.*server will not send it/));
+  });
+
+  it('an unconfirmed send never says the email did not go out (Codex P2)', async () => {
+    const { EmailUnconfirmedError } = await import('../lib/emailService');
+    mockRpc.mockImplementation(() => Promise.resolve(answer()));
+    mockSendEmail.mockRejectedValue(new EmailUnconfirmedError('no answer; this email may have been sent'));
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/may have gone out.*Check before sending again/)));
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/did not go out/));
+    expect(closeCalls()).toEqual(['manual_send']);
+  });
+
+  it('cancelling the second-copy question says the server may already have sent it (Taha LOW)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ send_authorized_at: '2026-10-21T15:04:00Z' })));
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/may already have emailed.*Check with the customer before sending/)));
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/did not go out/));
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it('asks before sending another copy when the server already emailed it, and sends only on yes', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'sent', previous_status: 'sent', sent_at: '2026-10-21T15:05:00Z', send_authorized_at: '2026-10-21T15:04:00Z' })));
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    expect(await screen.findByText(/The server already emailed this receipt/)).toBeInTheDocument();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Send another copy' }));
+    await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
+    // The confirmed copy is asked again (the server re-checks the delivery is still completed), without a second dialog.
+    await waitFor(() => expect(closeCalls()).toEqual(['manual_send', 'manual_send', 'handled']));
+  });
+
+  it('while the server is emailing it, says to try again in a minute and sends nothing', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: { message: 'DELIVERY_RECEIPT_SENDING: this delivery receipt is being emailed right now' } }));
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', 'The server is emailing this receipt right now. Try again in a minute.'));
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+  it('a confirmed second copy sends nothing when the delivery was voided meanwhile (Sol HIGH)', async () => {
+    let calls = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name !== 'close_delivery_receipt') return Promise.resolve({ data: null, error: null });
+      calls += 1;
+      return Promise.resolve(calls === 1
+        ? answer({ outcome: 'sent', previous_status: 'sent', sent_at: '2026-10-21T15:05:00Z' })
+        : { data: null, error: { message: 'DELIVERY_NOT_COMPLETED: this delivery is not completed any more; do not send its receipt' } });
+    });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send another copy' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/not completed any more/))); // wording: errorSanitizer.test.ts
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it('closes only the receipt it paused: the pause answer queued_at goes back unchanged (#2251)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer()));
+    mockSendEmail.mockResolvedValue({ success: true });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(closeCalls()).toEqual(['manual_send', 'handled']));
+    const calls = mockRpc.mock.calls.filter(([name]) => name === 'close_delivery_receipt').map(([, args]) => args);
+    expect(calls[0]).not.toHaveProperty('p_expected_queued_at'); // the pause takes whatever receipt is queued (Mason, 2026-11-22)
+    expect(calls[1].p_expected_queued_at).toBe('2026-10-21T15:00:00.123456+00:00'); // to the microsecond, never through Date
+  });
+
+  it('when the server says the receipt changed during the send, leaves it and never says to mark it handled (#2251)', async () => {
+    mockRpc.mockImplementation((_name: string, args: { p_reason?: string }) => Promise.resolve(args.p_reason === 'handled'
+      ? { data: null, error: { message: "DELIVERY_RECEIPT_CHANGED: this delivery's receipt was queued again since; reload the page" } }
+      : answer()));
+    mockSendEmail.mockResolvedValue({ success: true });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/receipt changed while it was sending, so it was left as it is/)));
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/Mark it handled there/));
+    expect(closeCalls()).toEqual(['manual_send', 'handled']); // no retry without the receipt it named (#2291)
+  });
+
+  it('when the close cannot be confirmed, never says to mark it handled (Sol HIGH, #2251)', async () => {
+    mockRpc.mockImplementation((_name: string, args: { p_reason?: string }) => Promise.resolve(args.p_reason === 'handled'
+      ? { data: null, error: { message: 'Failed to fetch' } }
+      : answer()));
+    mockSendEmail.mockResolvedValue({ success: true });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/could not confirm its receipt was closed.*before marking anything handled/)));
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/Mark it handled there/));
+  });
+
+  it('with none queued at the start, warns when one was queued during the send and closes nothing (Sol LOW, #2251)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
+    mockSendEmail.mockImplementation(async () => {
+      tables.data.delivery_receipt_queue = [{ status: 'pending', sent_at: null, send_authorized_at: null }];
+      return { success: true };
+    });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/new receipt was queued .* while the email was sending/)));
+    expect(closeCalls()).toEqual(['manual_send']);
+  });
+
+  it('says the server emailed it too when a receipt queued meanwhile was already sent (Sol MED, #2291)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
+    mockSendEmail.mockImplementation(async () => {
+      tables.data.delivery_receipt_queue = [{ status: 'sent', sent_at: '2026-10-21T15:11:00Z', send_authorized_at: '2026-10-21T15:10:30Z' }];
+      return { success: true };
+    });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/server has emailed it or may have/)));
+  });
+
+  it('does not warn about a receipt queued meanwhile that someone already marked handled (#2291)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
+    mockSendEmail.mockImplementation(async () => {
+      tables.data.delivery_receipt_queue = [{ status: 'cancelled', sent_at: null, send_authorized_at: null }];
+      return { success: true };
+    });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('delivery_receipt_queue'));
+    await act(async () => { await Promise.resolve(); });
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/new receipt was queued/));
+  });
+
+  it('says it could not check when the follow-up queue read fails (#2291)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
+    mockFrom.mockImplementation((table: string) => table === 'delivery_receipt_queue'
+      ? { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: { message: 'Failed to fetch' } }) }) }) }
+      : buildChain(table));
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/could not check whether a new receipt was queued/)));
+  });
+
+  it('with no receipt queued when the send started, closes nothing afterwards (#2251)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
+    mockSendEmail.mockResolvedValue({ success: true });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    // The follow-up runs to its end (the queue read is its last step) before the check (Sol LOW).
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('delivery_receipt_queue'));
+    await act(async () => { await Promise.resolve(); });
+    expect(closeCalls()).toEqual(['manual_send']);
+  });
+
+});
+
+describe('Email Confirmation warning belongs to its own delivery', () => {
+  it('a late "already sent" answer for delivery A never opens the warning on delivery B', async () => {
+    tables.data.deliveries = [{ ...OPEN_DELIVERY, status: 'completed', completed_at: '2026-10-21T15:00:00Z', signed_by: 'Pat' }];
+    let finishA: (v: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => name === 'close_delivery_receipt'
+      ? new Promise((resolve) => { finishA = resolve; })
+      : Promise.resolve({ data: null, error: null }));
+    const view = render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }, { timeout: 3000 }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('close_delivery_receipt', expect.anything()));
+    // The office moves to delivery B before A's answer arrives.
+    route.id = 'del-2';
+    tables.data.deliveries = [{ ...OPEN_DELIVERY, id: 'del-2', delivery_number: 'DEL-2', status: 'completed', completed_at: '2026-10-21T15:00:00Z', signed_by: 'Pat' }];
+    view.rerender(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    await screen.findAllByText('DEL-2', undefined, { timeout: 3000 });
+    finishA({ data: { delivery_id: 'del-1', outcome: 'sent', previous_status: 'sent', sent_at: '2026-10-21T15:05:00Z', send_authorized_at: null }, error: null });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole('button', { name: 'Send another copy' })).not.toBeInTheDocument();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
 });

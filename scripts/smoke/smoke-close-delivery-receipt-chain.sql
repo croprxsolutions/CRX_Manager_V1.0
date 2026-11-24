@@ -109,10 +109,11 @@ BEGIN
     END;
   END IF;
 
-  -- 5. Grants.
-  IF NOT has_function_privilege('authenticated', 'public.close_delivery_receipt(uuid,text,text)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.close_delivery_receipt(uuid,text,text)', 'EXECUTE')
-     OR has_function_privilege('service_role', 'public.close_delivery_receipt(uuid,text,text)', 'EXECUTE') THEN
+  -- 5. Grants, on the one installed signature (three arguments before 20270223120000, four after).
+  IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'close_delivery_receipt') <> 1
+     OR NOT has_function_privilege('authenticated', (SELECT oid FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'close_delivery_receipt'), 'EXECUTE')
+     OR has_function_privilege('anon', (SELECT oid FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'close_delivery_receipt'), 'EXECUTE')
+     OR has_function_privilege('service_role', (SELECT oid FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'close_delivery_receipt'), 'EXECUTE') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: close_delivery_receipt grants are not authenticated-only';
   END IF;
 

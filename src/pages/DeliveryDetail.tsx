@@ -29,7 +29,7 @@ import { loadDeliveryBrandInfo } from '../lib/deliveryBrandPaper';
 import { receiptBrandNotes } from '../../supabase/functions/_shared/brandNotes.ts';
 import { logActivity } from '../lib/activityLogger';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
-import { sendEmail } from '../lib/emailService';
+import { sendEmail, EmailUnconfirmedError } from '../lib/emailService';
 import { buildDeliveryReceiptHtml } from '../lib/deliveryReceiptEmail';
 import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
 import { fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
@@ -46,6 +46,11 @@ import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { formatCentsMinus } from '../lib/money';
 import { invoiceStatusBadge } from '../lib/statusLabel';
 import { Sentry } from '../lib/sentry';
+import { fetchDeliveryFarm } from '../lib/driverFarms';
+import {
+  RECEIPT_SENDING_NOW_MESSAGE, closeDeliveryReceipt, isReceiptChanged, isReceiptSendingNow, receiptCloseScope,
+  receiptMayAlreadyBeSent, readQueuedReceipt, queuedMeanwhileWarning, type ReceiptCloseResult,
+} from '../lib/receiptsToCheck';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
 import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
@@ -64,6 +69,7 @@ import { useDeliveryBrands } from '../components/deliveries/useDeliveryBrands';
 import { DeliveryBrandsPanel } from '../components/deliveries/DeliveryBrandPicker';
 import CorrectBrandsModal from '../components/deliveries/CorrectBrandsModal';
 import { brandWarnings } from '../lib/deliveryBrands';
+import { deliveryLineFigures, fetchOtherOpenByOrderLine } from '../lib/deliveryLineRemaining';
 import type {
   Delivery, DeliveryItem, DeliveryPhoto, DeliveryRemainder,
   Customer, CustomerAddress, Profile, OrderItem, DeliveryIssueType, DeliveryCompletionEvidence, ReceiptRecipient,
@@ -133,6 +139,7 @@ export default function DeliveryDetail() {
   const voidIdem = useIdempotencyKey('void_delivery', profile?.id || '');
   const reassignIdem = useIdempotencyKey('reassign_delivery', profile?.id || '');
   const createInvoiceIdem = useIdempotencyKey('create_invoice_for_unbilled_delivery', profile?.id || '');
+  const receiptCloseIdem = useIdempotencyKey('close_delivery_receipt', profile?.id || '');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const paperTicketInputRef = useRef<HTMLInputElement>(null);
 
@@ -182,6 +189,9 @@ export default function DeliveryDetail() {
   // Claimed synchronously at the start of a completion, so a second tap never starts a second attempt.
   const completeClaimRef = useRef(false);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [resendCopyCheck, setResendCopyCheck] = useState<ReceiptCloseResult | null>(null);
+  // An "already sent" answer belongs to the delivery it was asked for; a new route never reuses it (Luna LOW).
+  useEffect(() => { setResendCopyCheck(null); }, [id]);
   const [quickTaskOpen, setQuickTaskOpen] = useState(false);
   const [deliveryQtys, setDeliveryQtys] = useState<Record<string, number>>({});
   const [driverIssueType, setDriverIssueType] = useState<DeliveryIssueType>('none');
@@ -268,7 +278,7 @@ export default function DeliveryDetail() {
   const [confirming, setConfirming] = useState(false);
 
   // Order context for items display
-  const [orderItemContext, setOrderItemContext] = useState<Record<string, { ordered: number; delivered: number; remaining: number }>>({});
+  const [orderItemContext, setOrderItemContext] = useState<Record<string, { ordered: number; delivered: number; remaining: number; otherOpen: number }>>({});
 
   // Parent order for cross-link
   const [parentOrder, setParentOrder] = useState<{ id: string; order_number: string } | null>(null);
@@ -307,6 +317,8 @@ export default function DeliveryDetail() {
   }, [id]);
 
   const isDriver = role === 'driver';
+  // The load shape is fixed at first render: a role refresh must not reload and reset entered quantities (Sol #2165 r4).
+  const [loadAsDriver] = useState(isDriver);
   const isAdmin = role === 'admin';
   const isAdminOrRep = role === 'admin' || role === 'sales_rep';
   const canEdit = isAdminOrRep && delivery?.status !== 'completed' && delivery?.status !== 'cancelled';
@@ -384,11 +396,12 @@ export default function DeliveryDetail() {
       const photoSeq = ++photoSeqRef.current;
       try {
         const [custRes, itemsRes, addrRes, driverRes, photosRes] = await Promise.all([
-          supabase.from('customers').select('*').eq('id', del.customer_id).maybeSingle(),
+          // A driver reads the farm through get_driver_customers (#2018): nothing financial.
+          fetchDeliveryFarm(del.customer_id, loadAsDriver),
           supabase.from('delivery_items').select('*, product:products(id, product_name, sku, unit_size, packaging_variant, container_size, container_unit, inventory_unit, return_policy, is_full_tote_only, product_family:product_families(name))').eq('delivery_id', id!),
           del.delivery_address_id
             ? supabase.from('customer_addresses').select('*').eq('id', del.delivery_address_id).maybeSingle()
-            : Promise.resolve({ data: null }),
+            : Promise.resolve({ data: null, error: null }),
           // PR-07 follow-up: read driver name via profile_public_view (UI uses
           // only .full_name — see lines ~1534/1626/2395).
           del.assigned_driver
@@ -403,6 +416,12 @@ export default function DeliveryDetail() {
         if (itemsRes.error || !itemsRes.data || custRes.error) {
           Sentry.captureException(itemsRes.error ?? custRes.error ?? new Error('delivery_items read returned no list'), { extra: { context: 'load_delivery_items', deliveryId: del.id } });
           failLoad('Failed to load delivery items');
+          return;
+        }
+        // An unread delivery site fails the load, or Navigate would fall back to the farm's default address.
+        if (del.delivery_address_id && (addrRes.error || !addrRes.data)) {
+          Sentry.captureException(addrRes.error ?? new Error('delivery site not found'), { extra: { context: 'load_delivery_address', deliveryId: del.id } });
+          failLoad("Could not load this delivery's site address");
           return;
         }
 
@@ -433,11 +452,12 @@ export default function DeliveryDetail() {
           // same question. `order_item_field_allocations` is admin/sales_rep
           // readable (RLS `oifa_select`); a driver never sees the button anyway.
           const orderIdForSplitCheck = del.order_id;
-          const [oiRes, orderRes, invRes, splitRes, externalBillingRes] = await Promise.all([
+          const [oiRes, otherOpenRes, orderRes, invRes, splitRes, externalBillingRes] = await Promise.all([
             supabase
               .from('order_items')
               .select('id, total_units_needed, quantity_delivered, quantity_remaining')
               .eq('order_id', del.order_id),
+            fetchOtherOpenByOrderLine(del.order_id, del.id),
             supabase
               .from('orders')
               .select('id, order_number, quote_id')
@@ -494,12 +514,13 @@ export default function DeliveryDetail() {
           if (oiRes.error) {
             toast('error', sanitizeError(oiRes.error));
           } else if (oiRes.data) {
-            const ctx: Record<string, { ordered: number; delivered: number; remaining: number }> = {};
+            const ctx: Record<string, { ordered: number; delivered: number; remaining: number; otherOpen: number }> = {};
             oiRes.data.forEach((oi: { id: string; total_units_needed: number; quantity_delivered: number; quantity_remaining: number }) => {
               ctx[oi.id] = {
                 ordered: oi.total_units_needed,
                 delivered: oi.quantity_delivered,
                 remaining: oi.quantity_remaining,
+                otherOpen: otherOpenRes[oi.id] ?? 0,
               };
             });
             setOrderItemContext(ctx);
@@ -587,7 +608,7 @@ export default function DeliveryDetail() {
     }
     setLoadFailedId(null);
     setLoading(false);
-  }, [id, toast]);
+  }, [id, toast, loadAsDriver]);
 
   useEffect(() => {
     if (id) fetchDelivery();
@@ -1447,16 +1468,83 @@ export default function DeliveryDetail() {
     await finishCompleted(completeResult);
   };
 
+  // KI-25: pause any receipt still queued for the server before a hand send; null = stop (the server is sending it now).
+  const pauseQueuedReceipt = async (deliveryId: string): Promise<ReceiptCloseResult | null> => {
+    try {
+      const scope = receiptCloseScope(deliveryId, 'manual_send');
+      const paused = await closeDeliveryReceipt(deliveryId, 'manual_send', receiptCloseIdem.getKeyFor(scope));
+      receiptCloseIdem.resetKeyFor(scope);
+      return paused;
+    } catch (err: unknown) {
+      if (isReceiptSendingNow(err)) {
+        if (signatureRouteIdRef.current === deliveryId) toast('warning', RECEIPT_SENDING_NOW_MESSAGE); // only on its own page (Luna LOW)
+        return null;
+      }
+      throw err;
+    }
+  };
+
+  // After the hand send: mark the paused receipt handled. A failure only leaves it on the office list.
+  const closeSentReceipt = async (deliveryId: string, queuedAt: string | null, deliveryNumber: string) => {
+    if (!queuedAt) {
+      // None was queued when the send started, so none is closed; one queued meanwhile may still be emailed (Sol LOW).
+      // A failed read says so rather than staying silent; each warning names its delivery, as the page may have moved on (#2291).
+      const warning = await readQueuedReceipt(deliveryId).then(queuedMeanwhileWarning,
+        () => 'The email went out, but the app could not check whether a new receipt was queued meanwhile. The server may email the customer a second receipt.');
+      if (warning) toast('warning', `Delivery ${deliveryNumber}: ${warning}`);
+      return;
+    }
+    // Only the receipt this send covered: the server refuses if it was queued again since (#2251).
+    const scope = receiptCloseScope(deliveryId, 'handled', queuedAt);
+    try {
+      await closeDeliveryReceipt(deliveryId, 'handled', receiptCloseIdem.getKeyFor(scope), queuedAt);
+      receiptCloseIdem.resetKeyFor(scope);
+    } catch (err: unknown) {
+      if (isReceiptChanged(err)) {
+        receiptCloseIdem.resetKeyFor(scope); // a refusal is final for this receipt: never keep its key (#2291)
+        toast('warning', "The email went out. This delivery's receipt changed while it was sending, so it was left as it is.");
+        return;
+      }
+      // The email went out; the paused receipt just stays on the office list for someone to mark handled.
+      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+        level: 'warning', extra: { context: 'close_delivery_receipt after Email Confirmation', deliveryId },
+      });
+      // Not "mark it handled": the close may have failed because a newer receipt the customer is owed replaced it (Sol HIGH).
+      toast('warning', 'The email went out, but the app could not confirm its receipt was closed. Check "Customer receipts to check" before marking anything handled: if this delivery was completed again, the customer may be owed a newer receipt.');
+    }
+  };
+
+  // A paused receipt whose hand send never went out: the server will not send it either, so say so (Taha LOW).
+  const warnHeldNotSent = (deliveryNumber: string) => {
+    toast('warning', `Delivery ${deliveryNumber}: the email did not go out. Its receipt is on "Customer receipts to check" and the server will not send it. Send it again or mark it handled.`);
+  };
+
   // ── Resend Delivery Confirmation Email ──────────────────────────────────
-  const handleResendEmail = async () => {
-    if (!delivery || !customer?.email) {
+  // KI-25: before the hand send, any receipt still queued for the server is paused on the office list, so the server
+  // cannot email a second copy afterwards; once this email goes out it is marked handled. A hand send that fails
+  // leaves it on "Customer receipts to check" instead of lost. confirmedFor: the delivery whose "already sent"
+  // warning the office confirmed; it skips the pause only for that same delivery (Luna HIGH: a late answer for
+  // another delivery must never stand in for this one's pause).
+  const handleResendEmail = async (confirmedFor?: string) => {
+    if (!delivery || !customer?.email || !profile) {
       toast('error', customer?.email ? 'Delivery not loaded' : 'No customer email on file');
       return;
     }
+    setResendCopyCheck(null);
     setSendingEmail(true);
+    let heldNotSent = false;
     try {
+      // Always asked, a confirmed second copy too: the server refuses a delivery no longer completed (Sol HIGH).
+      const paused = await pauseQueuedReceipt(delivery.id);
+      if (!paused) return;
+      heldNotSent = paused.outcome === 'paused';
+      // The office moved to another delivery while this answer was on its way: send nothing, show nothing.
+      if (signatureRouteIdRef.current !== delivery.id) return;
+      if (confirmedFor !== delivery.id && receiptMayAlreadyBeSent(paused)) { heldNotSent = false; setResendCopyCheck(paused); return; }
       // The current picks, so a brand corrected after completion shows (Brand PR B-3).
       const brandInfo = await loadDeliveryBrandInfo(delivery.id);
+      // Moved to another delivery during the lookup: send nothing; the paused receipt stays listed (Luna MED).
+      if (signatureRouteIdRef.current !== delivery.id) return;
       const deliveredLines = items
         .filter((item) => (item.quantity_delivered ?? item.quantity) > 0)
         .map((item) => ({ name: item.product?.product_name || 'Product', qty: item.quantity_delivered ?? item.quantity, ...brandInfo.get(item.id) }));
@@ -1482,11 +1570,20 @@ export default function DeliveryDetail() {
         resource_id: delivery.id,
         idempotency_key: `delivery-resend-${delivery.id}-${Date.now()}`,
       });
+      heldNotSent = false;
       toast('success', `Confirmation email sent to ${customer.email}`);
+      await closeSentReceipt(delivery.id, paused.queued_at, delivery.delivery_number);
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
+      // No answer came back: the email may have gone out, so never say it did not (Codex P2).
+      if (heldNotSent && err instanceof EmailUnconfirmedError) {
+        heldNotSent = false;
+        toast('warning', `Delivery ${delivery.delivery_number}: the email may have gone out. Its receipt is on "Customer receipts to check" and the server will not send it. Check before sending again, then mark it handled.`);
+      }
+    } finally {
+      if (heldNotSent) warnHeldNotSent(delivery.delivery_number);
+      setSendingEmail(false);
     }
-    setSendingEmail(false);
   };
 
   // U16a: office-visible twin of IntegrityCleanup's admin-only backfill (finding #78).
@@ -1554,7 +1651,7 @@ export default function DeliveryDetail() {
 
   const addressText = address
     ? [address.address_line, address.city, address.state, address.zip].map((part) => part?.trim()).filter(Boolean).join(', ')
-    : customer?.billing_address?.trim() || '';
+    : customer?.shipping_address?.trim() || customer?.billing_address?.trim() || '';
   const fullAddress = addressText || 'No address on file';
 
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`;
@@ -2184,12 +2281,28 @@ export default function DeliveryDetail() {
                 size="sm"
                 icon={<Mail className="w-4 h-4" />}
                 showChevron={false}
-                onClick={handleResendEmail}
+                onClick={() => { void handleResendEmail(); }}
                 loading={sendingEmail}
               >
                 Email Confirmation
               </Button>
             )}
+            <ConfirmModal
+              open={resendCopyCheck !== null && resendCopyCheck.delivery_id === delivery.id}
+              onClose={() => {
+                // The server may already have sent it: never say it did not go out (Taha LOW).
+                if (resendCopyCheck?.outcome === 'paused') toast('warning', `Delivery ${delivery.delivery_number}: the server may already have emailed this receipt. It is on "Customer receipts to check" and the server will not send it again. Check with the customer before sending, then mark it handled.`);
+                setResendCopyCheck(null);
+              }}
+              onConfirm={() => { void handleResendEmail(resendCopyCheck?.delivery_id); }}
+              title="Receipt may already be sent"
+              message={resendCopyCheck?.sent_at
+                ? `The server already emailed this receipt to the customer on ${new Date(resendCopyCheck.sent_at).toLocaleString()}. Send another copy?`
+                : 'The server may already have emailed this receipt to the customer. Send another copy?'}
+              confirmLabel="Send another copy"
+              variant="warning"
+              loading={sendingEmail}
+            />
             <Button
               variant="secondary"
               size="sm"
@@ -2356,7 +2469,7 @@ export default function DeliveryDetail() {
                 onChange={(e) => setEditAddress(e.target.value)}
                 className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
               >
-                <option value="">Use billing address</option>
+                <option value="">Use farm address (shipping, else billing)</option>
                 {addresses.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.label} - {[a.address_line, a.city, a.state].filter(Boolean).join(', ')}
@@ -2609,7 +2722,7 @@ export default function DeliveryDetail() {
                   {delivery.status === 'completed' && (
                     <th className="px-4 py-3 text-right font-medium text-secondary">Actual</th>
                   )}
-                  <th className="px-4 py-3 text-right font-medium text-secondary">Remaining After</th>
+                  <th className="px-4 py-3 text-right font-medium text-secondary" title="Ordered, less what is delivered and what is on open deliveries">Remaining After</th>
                   <th className="px-4 py-3 text-left font-medium text-secondary">Unit</th>
                   {items.some((i) => i.tote_number) && (
                     <th className="px-4 py-3 text-left font-medium text-secondary">Tote #</th>
@@ -2620,10 +2733,15 @@ export default function DeliveryDetail() {
                 {items.map((item) => {
                   const ctx = orderItemContext[item.order_item_id];
                   const ordered = ctx?.ordered ?? item.quantity;
-                  const prevDelivered = ctx?.delivered ?? 0;
                   const thisDelivery = item.quantity;
-                  const actualDelivered = delivery.status === 'completed' ? item.quantity_delivered : thisDelivery;
-                  const remainingAfter = Math.max(0, ordered - prevDelivered - actualDelivered);
+                  const { prevDelivered, remainingAfter } = deliveryLineFigures({
+                    status: delivery.status,
+                    ordered,
+                    orderDelivered: ctx?.delivered ?? 0,
+                    otherOpen: ctx?.otherOpen ?? 0,
+                    scheduled: thisDelivery,
+                    actual: item.quantity_delivered ?? 0,
+                  });
                   return (
                     <tr key={item.id} className="border-b border-gray-50">
                       <td className="px-4 py-3 font-medium text-nav-dark">

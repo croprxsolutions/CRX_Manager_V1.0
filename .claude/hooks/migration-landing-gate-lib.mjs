@@ -25,7 +25,6 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { findReleasePass, releasePassCovers } from "./release-pass-lib.mjs";
 import {
   headContainsBaseOnGitHub,
   proofSearchDirs,
@@ -42,6 +41,7 @@ import {
   collectCodexThreads,
 } from "./codex-bot-review-lib.mjs";
 import { findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
+import { ownerAcceptedForPr, usesCarriedSkip } from "./sol-accept-lib.mjs";
 import { readTeammateComments, teammateCommentsDenial, READY_TO_MERGE_LINE } from "./teammate-comments-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
@@ -275,14 +275,8 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   }
   const hold = tahaHoldProblem(pr, now);
   if (hold) return refuse(`${number}: ${hold}`);
-  // Mason's release pass for this PR in this session stands in for Taha's go-ahead (release-pass-lib.mjs, 2026-11-20).
-  let passed = false;
-  try {
-    const pass = findReleasePass({ dirs: skipStateDirs([dir, process.env.CLAUDE_PROJECT_DIR, process.cwd()]), sessionId, now });
-    passed = releasePassCovers(pass, { base: "main", headRef, number: pr?.number });
-  } catch { passed = false; }
-  const ready = passed ? null : readyToMergeProblem({ comments: pr?.comments, head, now });
-  if (ready) return refuse(`${number}: ${ready} (Or Mason says \`ship the release\` / \`go live ${number}\` in this session.)`);
+  const ready = readyToMergeProblem({ comments: pr?.comments, head, now });
+  if (ready) return refuse(`${number}: ${ready}`);
   if (pullRequestReviewBlocked(pr)) return refuse(`${number} has an unresolved CHANGES_REQUESTED review.`);
   if (!pullRequestChecksGreen(pr)) {
     return refuse(`${number} is not merge-ready: mergeStateStatus must be CLEAN and the newest run of every check green.`);
@@ -438,19 +432,21 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
       return refuse(`${number}'s head ${head.slice(0, 12)} does not contain staging's tip ${stagingTip.slice(0, 12) || "(unreadable)"}: staging moved after the release guard ran. Wait for the bot to refresh release/next (no staging merges during the release), then re-run the checks and Sol.`);
     }
   }
-  let proven = false;
+  // Every proof is read first, so a carried skip can find Mason's own acceptance in any folder (2026-11-22).
+  const proofs = [];
   for (const stateDir of proofSearchDirs(dir, listWorktrees || (() => git(["worktree", "list", "--porcelain"])))) {
     try {
       if (!existsSync(stateDir)) continue;
       for (const file of readdirSync(stateDir)) {
         if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(file)) continue;
-        let data;
-        try { data = JSON.parse(readFileSync(path.join(stateDir, file), "utf8")); } catch { continue; }
-        if (proofValid(data, head, now, baseSha, APPLY_SOL_PROOF_MAX_AGE_MS)) { proven = true; break; }
+        try { proofs.push(JSON.parse(readFileSync(path.join(stateDir, file), "utf8"))); } catch { continue; }
       }
     } catch { /* an unreadable directory holds no proof — keep looking */ }
-    if (proven) break;
   }
+  // A carried repeat skip is for staging PRs only, never a live apply, whatever the outer mode (Sol, 2026-11-23).
+  const proven = proofs.some((data) => proofValid(data, head, now, baseSha, APPLY_SOL_PROOF_MAX_AGE_MS)
+    && !usesCarriedSkip(data)
+    && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead: String(data.head_sha).toLowerCase() === String(head).toLowerCase(), proofs, nowMs: now }));
   if (!proven) {
     return refuse(`no fresh gpt-6.2-sol/high proof is bound to ${number}'s head ${head.slice(0, 12)} and base ${baseSha.slice(0, 12)}.`);
   }

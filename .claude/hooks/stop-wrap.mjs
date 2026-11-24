@@ -515,6 +515,7 @@ const LEDGER_RES = [
   ENTRY_RE,
   /^docs\/CHANGELOG\.md$/,
   /^docs\/manual\/[^/]+\.md$/,
+  /^docs\/manual\/(?:decision-log|known-issues)\.d\/\d{4}-\d{2}-\d{2}-[^/]+\.md$/,
   /^docs\/reference\/agent-guardrails\.md$/,
   /^docs\/reference\/migration-history\.md$/,
   /^docs\/reference\/migrations\.d\/\d{14}_[^/]+\.md$/,
@@ -773,8 +774,8 @@ try {
           `📓 Commits exist this session but no ledger file was touched —\n` +
           `     record the work where it belongs. PREFERRED: add docs/changelog.d/<YYYY-MM-DD>-<slug>.md,\n` +
           `     a new dated file of your own — two sessions never write the same path, so it cannot\n` +
-          `     conflict. Otherwise docs/manual/*.md (DECISION_LOG for a policy or business call,\n` +
-          `     KNOWN_ISSUES for a bug, OWNER_PLAYBOOK for a how-to), docs/reference/migration-history.md\n` +
+          `     conflict. Otherwise a new file in docs/manual/decision-log.d/ (a policy or business call)\n` +
+          `     or docs/manual/known-issues.d/ (a bug), docs/manual/*.md (OWNER_PLAYBOOK for a how-to), docs/reference/migration-history.md\n` +
           `     (a schema change), docs/reference/agent-guardrails.md (guard or hook behavior), a docs/loops/\n` +
           `     ledger, or docs/CHANGELOG.md for general work (node scripts/log-session.mjs --summary '...').`
         );

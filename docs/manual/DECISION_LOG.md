@@ -1,5 +1,638 @@
 # Decision Log
 
+## 2026-11-23 — #2372: Mason owner-accepted 3 Sol finding(s) at `7d3bebb5aeb7`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2372 at `7d3bebb5aeb7` (base `015566676500`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:96`, text sha256 `2b543c4a8e4e38b5` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref cb4b852f3709)
+- Finding 2 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:99`, text sha256 `bafc22425cfe9fea` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref cb4b852f3709)
+- Finding 3 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:51`, text sha256 `40b54920e9b17d4c` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref cb4b852f3709)
+
+## 2026-11-23 — #2372: Mason owner-accepted 4 Sol finding(s) at `99b9e9ba7e0e`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2372 at `99b9e9ba7e0e` (base `2a4b17f13baa`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:51`, text sha256 `3d60ebdec0dcb4ec` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 3949b4d093b4)
+- Finding 2 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:96`, text sha256 `a44329d5a48b94b3` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 3949b4d093b4)
+- Finding 3 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:79`, text sha256 `5f10a71b9616c61e` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 3949b4d093b4)
+- Finding 4 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:99`, text sha256 `dc2d5bb0b45ec653` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 3949b4d093b4)
+## 2026-11-23 — #2248: Mason's earlier skip carried to 5 repeat Sol finding(s) at `47d594e25f95`
+
+**Carried automatically (2026-11-23).** Sol's full review of PR #2248 at `47d594e25f95` (base `f91774df22ea`) found 5 BLOCKER/HIGH finding(s); Sol marked each the same as one Mason skipped on this pull request.
+- Finding 1 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:105`, text sha256 `4126081fa8fba083`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+- Finding 2 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:113`, text sha256 `ed73e8847ce2751f`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+- Finding 3 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:116`, text sha256 `b1d7cacf6d92b881`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+- Finding 4 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:154`, text sha256 `fdcd29918ecd0586`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+- Finding 5 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:257`, text sha256 `0ba7ad6523e3e450`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+
+## 2026-11-23 — #2248: Mason owner-accepted 5 Sol finding(s) at `a9f282bc7b09`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2248 at `a9f282bc7b09` (base `3dd8f9bbf7dc`) found 5 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:105`, text sha256 `e97b7427fefb3576` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a01e8b2547a1)
+- Finding 2 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:113`, text sha256 `5fc32abb80f0166a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a01e8b2547a1)
+- Finding 3 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:116`, text sha256 `772b908beab04ba1` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a01e8b2547a1)
+- Finding 4 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:154`, text sha256 `e4e00227b1c6e3ca` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a01e8b2547a1)
+- Finding 5 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:257`, text sha256 `215e683e9440f958` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a01e8b2547a1)
+
+## 2026-11-23 — #2248: Mason owner-accepted 4 Sol finding(s) at `b8e98b96bc76`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2248 at `b8e98b96bc76` (base `3bae6de0f2aa`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226140000_po_vendor_link.sql:105`, text sha256 `f4d2e0966879e620` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref be8c4e200812)
+- Finding 2 (HIGH) at `supabase/migrations/20270226140000_po_vendor_link.sql:113`, text sha256 `329c67dbb617fc4a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref be8c4e200812)
+- Finding 3 (HIGH) at `supabase/migrations/20270226140000_po_vendor_link.sql:154`, text sha256 `bae46cfecc8b8ca5` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref be8c4e200812)
+- Finding 4 (HIGH) at `supabase/migrations/20270226140000_po_vendor_link.sql:257`, text sha256 `7d08fe11a5c45869` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref be8c4e200812)
+
+## 2026-11-22 — #2248: Mason owner-accepted 4 Sol finding(s) at `3c21932f1d32`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2248 at `3c21932f1d32` (base `6aceb0747958`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224150000_po_vendor_link.sql:93`, text sha256 `cd02e7cc7a140ec7` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 5ab1851b81b5)
+- Finding 2 (HIGH) at `supabase/migrations/20270224150000_po_vendor_link.sql:95`, text sha256 `b8e61dfbb6d379bb` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 5ab1851b81b5)
+- Finding 3 (HIGH) at `supabase/migrations/20270224150000_po_vendor_link.sql:247`, text sha256 `75b7cbbe04a0db27` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 5ab1851b81b5)
+- Finding 4 (HIGH) at `supabase/migrations/20270224150000_po_vendor_link.sql:282`, text sha256 `15a71b28eed51e13` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 5ab1851b81b5)
+
+## 2026-11-22 — #2248: Mason owner-accepted 2 Sol finding(s) at `f8ec641a8de9`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2248 at `f8ec641a8de9` (base `bdd733f9b071`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224150000_po_vendor_link.sql:94`, text sha256 `4797e988388a23ab` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 0ef975a607d3)
+- Finding 2 (HIGH) at `supabase/migrations/20270224150000_po_vendor_link.sql:141`, text sha256 `b2cf0efa72ae067e` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 0ef975a607d3)
+
+## 2026-11-22 — #2248: Mason owner-accepted 3 Sol finding(s) at `5de9ea34eb65`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2248 at `5de9ea34eb65` (base `a7785529318b`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270217130000_po_vendor_link.sql:95`, text sha256 `0721da6a38581ad1` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 326ba930acf4)
+- Finding 2 (HIGH) at `supabase/migrations/20270217130000_po_vendor_link.sql:92`, text sha256 `35ee9e3a32e7a739` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 326ba930acf4)
+- Finding 3 (HIGH) at `supabase/migrations/20270217130000_po_vendor_link.sql:247`, text sha256 `1790af9de30452a0` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 326ba930acf4)
+## 2026-11-23 — #2337: Mason owner-accepted 3 Sol finding(s) at `4c8c43249b67`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2337 at `4c8c43249b67` (base `2a4b17f13baa`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:2918`, text sha256 `b08949ec6eff6613` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 40bd26e7f564)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:5513`, text sha256 `789804598375ae0a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 40bd26e7f564)
+- Finding 3 (HIGH) at `src/pages/JobDetail.tsx:2935`, text sha256 `4d4729381240b9b8` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 40bd26e7f564)
+
+## 2026-11-23 — #2337: Mason owner-accepted 3 Sol finding(s) at `cd5f79b8e0e2`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2337 at `cd5f79b8e0e2` (base `e499bdbe9450`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:2896`, text sha256 `5bde7b41dd16c020` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d6dcdbb4e90e)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:5459`, text sha256 `81c2c4e9e10c21a1` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d6dcdbb4e90e)
+- Finding 3 (HIGH) at `src/pages/JobDetail.tsx:2903`, text sha256 `fca1b8826d90146d` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d6dcdbb4e90e)
+
+## 2026-11-23 — #2358: Mason owner-accepted 8 Sol finding(s) at `d5b0cb8da2bd`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2358 at `d5b0cb8da2bd` (base `3dd8f9bbf7dc`) found 8 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:5174`, text sha256 `5d8aaeb60ff4b6f0` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:4946`, text sha256 `0d804e696d80fea7` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 3 (HIGH) at `src/components/jobs/JobAttachments.tsx:288`, text sha256 `fbd6ba9544733c59` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 4 (HIGH) at `src/pages/JobDetail.tsx:4960`, text sha256 `2a2221ce00e13e39` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 5 (HIGH) at `src/pages/JobDetail.tsx:1847`, text sha256 `9e913d15613f7d05` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 6 (HIGH) at `src/pages/JobDetail.tsx:3905`, text sha256 `8bcdf4f7753cf782` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 7 (HIGH) at `src/pages/JobDetail.tsx:3325`, text sha256 `bb67d341e6d06be4` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 8 (HIGH) at `src/pages/JobDetail.tsx:709`, text sha256 `4dbb8aeaf0f2c75b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+
+## 2026-11-23 — #2358: Mason owner-accepted 6 Sol finding(s) at `a41ec1170a54`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2358 at `a41ec1170a54` (base `70755dfe6f00`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:5174`, text sha256 `5d8aaeb60ff4b6f0` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 90d9625dd458)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:4946`, text sha256 `0d804e696d80fea7` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 90d9625dd458)
+- Finding 3 (HIGH) at `src/pages/JobDetail.tsx:1847`, text sha256 `9e913d15613f7d05` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 90d9625dd458)
+- Finding 4 (HIGH) at `src/pages/JobDetail.tsx:4960`, text sha256 `2a2221ce00e13e39` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 25f08ad94619)
+- Finding 5 (HIGH) at `src/pages/JobDetail.tsx:3325`, text sha256 `bb67d341e6d06be4` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 25f08ad94619)
+- Finding 6 (HIGH) at `src/pages/JobDetail.tsx:709`, text sha256 `34987d3ae445f70b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 25f08ad94619)
+
+## 2026-11-23 — #2358: Mason owner-accepted 3 Sol finding(s) at `fbb9e843d58a`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2358 at `fbb9e843d58a` (base `3bae6de0f2aa`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:5166`, text sha256 `893ae33c605aef6b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 6cc24030ac43)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:4952`, text sha256 `0dcea86f0e3caeff` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 6cc24030ac43)
+- Finding 3 (HIGH) at `src/pages/JobDetail.tsx:1847`, text sha256 `01aa2c1e83be718f` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 6cc24030ac43)
+## 2026-11-23 — #2323: Mason owner-accepted 6 Sol finding(s) at `883d1dc5dc08`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2323 at `883d1dc5dc08` (base `70755dfe6f00`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226173000_drop_inert_delivery_short_stock_trigger.sql:53`, text sha256 `a80606facf350cc4` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 2 (HIGH) at `scripts/smoke/inventory-edge-cases-1942-reverse.sql:48`, text sha256 `249c334ba717d53b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 3 (HIGH) at `scripts/smoke/single-short-stock-warning-reverse.sql:16`, text sha256 `9d76cbd19056bfbd` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 4 (HIGH) at `scripts/smoke/single-short-stock-warning-reverse.sql:24`, text sha256 `1ff52e10dc3cde86` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 5 (HIGH) at `scripts/smoke/drop-inert-delivery-short-stock-trigger-reverse.sql:20`, text sha256 `32d2129b98edca50` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 6 (HIGH) at `scripts/smoke/prove-drop-inert-delivery-short-stock-trigger-real-schema.mjs:120`, text sha256 `88224e97255247a3` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+
+## 2026-11-23 — #2323: Mason owner-accepted 5 Sol finding(s) at `99b6566efc1a`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2323 at `99b6566efc1a` (base `5b549b9e4f2f`) found 5 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226173000_drop_inert_delivery_short_stock_trigger.sql:53`, text sha256 `c2655063231cd77e` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+- Finding 2 (HIGH) at `scripts/smoke/inventory-edge-cases-1942-reverse.sql:48`, text sha256 `dfac12cf31b9fd25` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+- Finding 3 (HIGH) at `scripts/smoke/single-short-stock-warning-reverse.sql:16`, text sha256 `9d76cbd19056bfbd` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+- Finding 4 (HIGH) at `scripts/smoke/drop-inert-delivery-short-stock-trigger-reverse.sql:20`, text sha256 `2f55a0e394113457` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+- Finding 5 (HIGH) at `scripts/smoke/prove-drop-inert-delivery-short-stock-trigger-real-schema.mjs:120`, text sha256 `1479e90b28371571` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+
+## 2026-11-23 — #2258: Mason's earlier skip carried to 2 repeat Sol finding(s) at `a092bca8b71c`
+
+**Carried automatically (2026-11-23).** Sol's full review of PR #2258 at `a092bca8b71c` (base `ac09b76f9877`) found 2 BLOCKER/HIGH finding(s); Sol marked each the same as one Mason skipped on this pull request.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:278`, text sha256 `dc59d01a4a69202a`: carried from ref 85379a983ed7 at `ede225b742c3` to `a092bca8b71c`; Sol marked it the same
+- Finding 2 (HIGH) at `src/pages/CycleCounts.tsx:279`, text sha256 `1cffde4ab865ba7c`: carried from ref ac3f23505870 at `975d42607513` to `a092bca8b71c`; Sol marked it the same
+
+## 2026-11-22 — #2258: Mason owner-accepted 1 Sol finding(s) at `bc3a7201ea7b`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `bc3a7201ea7b` (base `6aceb0747958`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:278`, text sha256 `1002073490faeb54` (the wording stays with the proof, not here)
+  Mason's reason: too small to eeffect anything (ref 2a2066ef4333)
+
+## 2026-11-22 — #2258: Mason owner-accepted 2 Sol finding(s) at `22fb41ad3422`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `22fb41ad3422` (base `bdd733f9b071`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:278`, text sha256 `aae4366d8301e44f` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 07edd845a7bd)
+- Finding 2 (HIGH) at `src/pages/CycleCounts.tsx:279`, text sha256 `fc975c95a963b758` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 07edd845a7bd)
+
+## 2026-11-22 — #2258: Mason owner-accepted 2 Sol finding(s) at `59cef43c12b5`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `59cef43c12b5` (base `47b378731762`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:278`, text sha256 `c641f9d0631096b3` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 85379a983ed7)
+- Finding 2 (HIGH) at `src/pages/CycleCounts.tsx:279`, text sha256 `56b8b47959726181` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 85379a983ed7)
+
+## 2026-11-22 — #2258: Mason owner-accepted 2 Sol finding(s) at `389bc90baa5d`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `389bc90baa5d` (base `9c77cd3a5d22`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:279`, text sha256 `331f0a93f85b220c` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref ac3f23505870)
+- Finding 2 (HIGH) at `src/pages/CycleCounts.tsx:278`, text sha256 `f9d9155095ebf9c3` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref ac3f23505870)
+
+## 2026-11-22 — #2258: Mason owner-accepted 1 Sol finding(s) at `c81e3b653b92`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `c81e3b653b92` (base `f9750a8a4b66`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:279`, text sha256 `93cc29ef46522238` (the wording stays with the proof, not here)
+  Mason's reason: too small won’t happen (ref 6775f6a52ea3)
+## 2026-11-23 — #2247: Mason owner-accepted 6 Sol finding(s) at `3f0ff8fb7e3c`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2247 at `3f0ff8fb7e3c` (base `3bae6de0f2aa`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:298`, text sha256 `5dcd88b221a38594` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 2 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:215`, text sha256 `365719c8277f40b9` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 3 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:423`, text sha256 `ecd4a78e359ce89a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 4 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:382`, text sha256 `77ee4da304cf4f67` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 5 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:775`, text sha256 `bbdef6769b9abdd7` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 6 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:325`, text sha256 `b8e753c1a019819f` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+
+## 2026-11-23 — #2247: Mason owner-accepted 6 Sol finding(s) at `e50b0e90a218`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2247 at `e50b0e90a218` (base `02629ac33259`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:298`, text sha256 `e051e2f85744d456` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 2 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:215`, text sha256 `98649a0e735db722` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 3 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:423`, text sha256 `fd4216074a0d0c98` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 4 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:382`, text sha256 `1c7cf745428d65cc` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 5 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:775`, text sha256 `7c71ed52feec47a6` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 6 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:1098`, text sha256 `775dfd0879355bf8` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+
+## 2026-11-22 — #2247 / #2283: a completed job's chemicals can't be changed
+
+**Decision (Mason, 2026-11-22, in chat: "Refuse now, build later").** He first chose "Edit + stock follows" (with the spray record "Update it too"); the plan's challenge and its re-check found that design did not settle (lot numbers, lot amounts, legacy units, missing spray records, races with completion). So #2247 makes `save_job` refuse any change to a completed job's chemical lines (product, quantity, unit, grower-supplied), naming why, and the edit-with-stock-following feature becomes its own follow-up PR. The job screen already hid Save on completed jobs, so office work is unchanged. This replaces the "accepted as pre-existing" stock gap in the entry below.
+
+## 2026-11-22 — #2247: a job stays editable until invoiced; invoices bill the payer saved on the job
+
+**Decision (Mason, 2026-11-22, in chat, after Sol round 8 hit the stop rule).** Office staff must keep editing a spray job after the applicator marks it complete, so it does not lock at completion. "Lock it when rep or admin says it is posted": once a rep or admin creates its invoice, the job's chemicals, fields and billing split can't change until that invoice is voided. Create Invoice bills what is on the job at that moment, to the billing split saved on the job (the one the job screen shows); only a field with no saved split falls back to its Field Setup split, as the job screen does. The round-7 refusal of a grower-supplied line that took company stock is withdrawn (Sol round 8 found it could refuse a valid job). Accepted as pre-existing, pending a follow-up: editing a completed job's chemicals does not adjust the stock that completion already took, so stock can disagree with the invoice.
+
+## 2026-11-22 — #2247: every field has a billing split; a job bills each owner the acres of their own fields
+
+**Decision (Mason, 2026-11-22, in chat).** "in field setup we always have the billing split set per field ... the total acres of John field is all billed to him and the field that is 50/50 is split accordingly on those acres." For #2247, Create Invoice refuses and names any job field with no billing split instead of guessing a payer (live check: 0 of 5 fields lack one). Requiring a split when a field is created is a separate Field Setup follow-up.
+
+## 2026-11-22 — #2247: spray-job invoice lines book today's product cost; the grower's $0 line stays editable
+
+**Decision (Mason, 2026-11-22, "Today's product cost" and "Yes, same as custom lines").** For #2247, when a spray job becomes an invoice each chemical line books today's product cost per sold unit, as field-application invoices do (a job's saved cost can be per a different unit or $0; Sol rounds 3 and 4 flagged each choice in turn). A customer-supplied chemical stays a $0 information line with no product link; a priced edit to it in the invoice editor is accepted like any custom line (no restricted-use sales record, since CRX did not sell it). Sol round 5 on #2247 may run.
+## 2026-11-23 — #2330: Mason owner-accepted 2 Sol finding(s) at `f497bf5e6801`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2330 at `f497bf5e6801` (base `de5387c0b4b6`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:982`, text sha256 `92250e5b4c870e33` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 463a87918bc1)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:982`, text sha256 `87efb2b3d6fccdcd` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 463a87918bc1)
+
+## 2026-11-23 — #2330: Mason owner-accepted 1 Sol finding(s) at `9f486882345f`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2330 at `9f486882345f` (base `e499bdbe9450`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:982`, text sha256 `e652920fc9ae23b3` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref b8cc463e916e)
+## 2026-11-23 — #2339: Mason owner-accepted 1 Sol finding(s) at `72ad09a97efa`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2339 at `72ad09a97efa` (base `d5a2696ab035`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270225170000_edit_delivery_unassign_driver.sql:163`, text sha256 `0b58c3bcd5704aec` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 916ef4a93319)
+
+## 2026-11-22 — #2260: Mason owner-accepted 1 Sol finding(s) at `2986f407e617`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2260 at `2986f407e617` (base `47947bc95348`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224130000_split_save_refuses_blend_billed_job.sql:468`, text sha256 `32047052df1dc593` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 23b34b05e204)
+
+## 2026-11-22 — #2260: Mason owner-accepted 1 Sol finding(s) at `4d163d2f76dd`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2260 at `4d163d2f76dd` (base `6aceb0747958`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224130000_split_save_refuses_blend_billed_job.sql:468`, text sha256 `b4e9fb8b4fb0cabc` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a468655881f9)
+
+## 2026-11-22 — #2260: Mason owner-accepted 1 Sol finding(s) at `855ce0932fc2`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2260 at `855ce0932fc2` (base `9c77cd3a5d22`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270220100000_split_save_refuses_blend_billed_job.sql:468`, text sha256 `4a61b3259237e652` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 85a503d1eaa9)
+
+## 2026-11-22 — #2260: Mason owner-accepted 1 Sol finding(s) at `554e0478f5fa`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2260 at `554e0478f5fa` (base `a7785529318b`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270220100000_split_save_refuses_blend_billed_job.sql:468`, text sha256 `5e2a94a0171ff80b` (the wording stays with the proof, not here)
+  Mason's reason: I acceot (ref eb5211ed82bb)
+
+## 2026-11-22 — #2063: a job a blend ticket billed is not billed again by a split field invoice
+
+**Decision (Mason, 2026-11-22: "Yes, accept all four" in the Lane A session; "Accept all four (Recommended)" in the bug-captain session).** (1) A blend-ticket invoice counts as billing its job from creation, drafts included, until it is voided, cancelled or deleted (the rule Transfer to Invoice and the blend invoice already use). (2) A refused split save names the blend ticket and its invoice number, never the amount, and says to void that invoice first or ask an admin. (3) Bills entered without choosing the job are not caught; accepted gap. (4) A split set whose invoices were all voided keeps holding its job, unchanged; a possible follow-up. Lane A builds #2063 (supersedes the issue note naming Taha). Sol round 1 narrowed (2): the message names only the invoice numbers the person may already open (a rep sees "an invoice you cannot open" for an admin's invoice, never a count); Sol round 3 dropped the ticket number (user-typed text) and the message now says to ask an admin to void or delete it (voiding is admin-only). Contract: `docs/plans/2026-11-22-job-double-bill-blend-CONTRACT.md`.
+
+**Decision (Mason, 2026-11-22, in the bug-captain session: "Ship with today's rule (Recommended)"), on Sol round 2's one HIGH.** A draft whose blend-ticket link was set by hand through the general invoice save still blocks the job's split invoice: the same rule Transfer to Invoice and the blend-ticket invoice already use. It can only wrongly hold a job, never double-bill, and the refusal says to void the invoice or ask an admin. Closing that loose link in the general invoice save is follow-up #2254 (owner Taha, his invoice area).
+## 2026-11-22 — #2242: Mason owner-accepted 2 Sol finding(s) at `89407911738d`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2242 at `89407911738d` (base `a7a12c782afc`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224120000_month_close_payments_received_recheck.sql:302`, text sha256 `59670961b0754f02` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref de195cfaecbc)
+- Finding 2 (HIGH) at `supabase/migrations/20270224120000_month_close_payments_received_recheck.sql:420`, text sha256 `bd0b32c47999ddba` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref de195cfaecbc)
+
+## 2026-11-22 — #2242: Mason owner-accepted 2 Sol finding(s) at `ee1201f695d0`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2242 at `ee1201f695d0` (base `a21539cca47c`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224120000_month_close_payments_received_recheck.sql:302`, text sha256 `fac90885cb488954` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 532bce79b230)
+- Finding 2 (HIGH) at `supabase/migrations/20270224120000_month_close_payments_received_recheck.sql:420`, text sha256 `62b1a947d098fdc1` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 532bce79b230)
+
+## 2026-11-22 — #2242: Mason owner-accepted 4 Sol finding(s) at `6e88570402f7`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2242 at `6e88570402f7` (base `9c77cd3a5d22`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:225`, text sha256 `f4a1f06ce1ba3fd1` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 475344108573)
+- Finding 2 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:301`, text sha256 `fb251f884cab2521` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 475344108573)
+- Finding 3 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:342`, text sha256 `2b39642bfbd5683c` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 475344108573)
+- Finding 4 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:420`, text sha256 `febe7dad3ff40142` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 475344108573)
+
+## 2026-11-22 — #2242: Mason owner-accepted 3 Sol finding(s) at `45ea58992506`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2242 at `45ea58992506` (base `a7785529318b`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:225`, text sha256 `41e6f35169a9d380` (the wording stays with the proof, not here)
+  Mason's reason: I accept the risk small (ref 2446394212b1)
+- Finding 2 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:342`, text sha256 `c042e4fd26071826` (the wording stays with the proof, not here)
+  Mason's reason: I accept the risk small (ref 2446394212b1)
+- Finding 3 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:301`, text sha256 `1e38154081a33ee1` (the wording stays with the proof, not here)
+  Mason's reason: I accept the risk small (ref 2446394212b1)
+
+## 2026-11-22 — PR #2242: a retried close replays only the month's current close
+
+**Decision (Mason, 2026-11-22, in the Lane B session):** "Refuse it". A retried close shows its saved receipt only if the month's current close is the one that retry made. If the month was reopened and closed again since, the retry is refused (`CLOSE_REOPENED_SINCE`) instead of showing the older, superseded totals; the screen asks the admin to check the month's status. Why: Sol round 7 showed an old retry could return a superseded receipt as success. The alternative was accepting that rare case.
+
+## 2026-11-22 — PR #2242: a retried close is refused once the month was reopened
+
+**Decision (Mason, 2026-11-22):** "Refuse and re-close (Recommended)" in the bug-captain session, and "Database refuses it" in the Lane B session. If a close went through but its reply was lost, and the month was reopened before that screen refreshed (for example from another tab), retrying the close no longer shows the old "Period closed" receipt: the database refuses it (`CLOSE_REOPENED_SINCE`), the month stays open, and the screen asks the admin to review and close again. Why: Sol rounds 5 and 6 showed that the old receipt could say "closed" while the month was open and still taking postings; a screen-only fix cannot see a reopen made elsewhere. The alternative was accepting that rare gap.
+
+## 2026-11-22 — PR #2242: Month-End close re-check accepts an edit saved in the same instant as the click
+
+**Decision (Mason, 2026-11-22, in the bug-captain session):** "A: accept the gap (Recommended)", confirmed in the Lane B session as "Yes, option A". The database close re-check (#2175) catches edits made while the admin reviews the month. An edit saved in the same instant as the Close click shows on the Month-End screen, not on the saved close receipt, the same as an edit made after the close. Why: Sol rounds 1, 3 and 4 kept finding writers that could land during the close itself (prepayment edits, invoice voids, delivery voids, commission payouts); blocking all of them would change other writers (some Taha's until 2026-12-15), and the table lock tried in round 3 could deadlock with an invoice void. PR #2242 removes that lock; no writer changes. This entry also opens Sol round 5 for PR #2242.
+
+## 2026-11-22 — KI-129 / #2195: prepayment checks count as payments received
+
+**Decision (Mason, 2026-11-22, relayed by the bug-sprint captain):** "yes should count as payment received". Month-End payments received counts each Prepayment Manager check in the month it was entered, at its current amount (all buckets of one check are one payment); Record Payment checks count in full (an overpayment's prepay credit is not added again); voided payments and deleted old-style payments do not count. A later edit or delete of a prepayment check changes that month's screen figure, never a closed month's saved close receipt. Made in migration `20270224120000_month_close_payments_received_recheck.sql` (live only once applied) with the #2175 close re-check (the 2026-11-21 entry below asked for both together).
+
+
+## 2026-11-22 — #2240: Mason owner-accepted 2 Sol finding(s) at `54ce44b595c3`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2240 at `54ce44b595c3` (base `6aceb0747958`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/FieldSetup.tsx:609`, text sha256 `f3d5374444ac05ca` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 57355198d609)
+- Finding 2 (HIGH) at `supabase/migrations/20270224110000_retire_per_acre_field_pricing.sql:48`, text sha256 `755eccadb5dcb531` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 57355198d609)
+
+## 2026-11-22 — PR #2240: per-acre pricing screens ship with #2239
+
+**Decision (Mason, in chat 2026-11-22, before Sol round 7 on PR #2240):** "Yes, it covers 2240". His "Yes, simplify" decision for #2239 also covers #2240. #2240 removes the Field Setup "Price Override ($/ac)" and "Pricing Note" boxes and the grower-share banners. It merges right after #2239, so no release is cut between the two.
+
+## 2026-11-22 — #2239: Mason owner-accepted 2 Sol finding(s) at `77ebcbce17ae`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2239 at `77ebcbce17ae` (base `9c77cd3a5d22`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270219100000_retire_per_acre_field_pricing.sql:48`, text sha256 `186bf85a11f94915` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a440a2d5e289)
+- Finding 2 (HIGH) at `supabase/migrations/20270219100000_retire_per_acre_field_pricing.sql:38`, text sha256 `36e6de0ebddd6969` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a440a2d5e289)
+
+## 2026-11-22 — #2239: Mason owner-accepted 1 Sol finding(s) at `edee8e99ff41`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2239 at `edee8e99ff41` (base `a7785529318b`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270219100000_retire_per_acre_field_pricing.sql:48`, text sha256 `27e1ec0e7015ca3a` (the wording stays with the proof, not here)
+  Mason's reason: doesn’t apply to us (ref 021e0aa1ad04)
+
+## 2026-11-22 — PR #2239: per-acre field pricing retired with two constraints only
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 3 on PR #2239):** "Yes, simplify". Per-acre field pricing was never used (live, read-only: 0 of 6 field billing splits and 0 of 3 invoice shares carry a per-acre price or note; 0 invoice lines carry per-acre wording). The migration adds the two CHECK constraints (`field_billing_defaults_no_per_acre_price`, `invoice_shares_no_per_acre_price`) and does not search invoice history for per-acre invoices. Line-by-line billing, percent splits between payers and quoted prices are unchanged.
+## 2026-11-22 — #2264: Mason owner-accepted 1 Sol finding(s) at `11f3f026b9ef`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2264 at `11f3f026b9ef` (base `bdd733f9b071`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224100000_f05_order_line_quantity_guard.sql:64`, text sha256 `e23b6d9637ecd6bd` (the wording stays with the proof, not here)
+  Mason's reason: too small to effect buisness (ref d240b31a7419)
+
+## 2026-11-22 — #2264: Mason owner-accepted 1 Sol finding(s) at `fdf75b56929b`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2264 at `fdf75b56929b` (base `f9750a8a4b66`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270218100000_f05_order_line_quantity_guard.sql:62` (the file's name when Sol reviewed it; since restamped to `20270224100000`), text sha256 `a0571bb37993f57e` (the wording stays with the proof, not here)
+  Mason's reason: old double-booked orders get fixed by hand in F05b (ref cfb23a2ce43d)
+## 2026-11-22 — PR #2226: staging merges never carry a Sol proof; skipped Sol findings never carry onto a newer base
+
+**Final rule:** a feature branch that merges `origin/staging` always needs a new full Sol review; `--carry-forward` is only for `hotfix/` and `release/` branches merging `origin/main` (round 7 decision below). The earlier decisions are kept as history.
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 4: "Yes, full review").** *(Its first sentence was replaced by the round 7 decision.)* `--carry-forward` now works after merging `origin/staging` into a feature branch, as it already did after merging `origin/main`. A proof whose BLOCKER/HIGH findings Mason skipped (owner-accepted) never carries onto a newer base: once the branch merges its base again, it needs a full Sol review. This is stricter than before, when an owner-accepted main-bound proof could carry. Sol rounds 1-4 each found a new way the carried owner-accepted form could cover a defect that new base code had widened, so that path was removed rather than patched.
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 5: "Yes, free carry only").** A staging merge keeps an earlier Sol review only in the free case: the PR's files and staging's new files do not overlap and one side is notes only. Any other staging merge, including both sides adding to `DECISION_LOG.md`, gets a full Sol review. The focused collision check stays only for `hotfix/` and `release/` branches merging `main`.
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 6: "Keep 10-30 rule").** Sol round 6 pointed out that the merge gates can still accept a Sol review of an earlier commit after a staging merge that "free carry only" would send to a full review. That is the 2026-10-30 rule (a later commit that touches no Sol-list file needs no new Sol), and Mason kept it: a staging merge that touches no Sol-list file keeps the earlier review, like any other harmless later commit, and one that touches the list is still refused at merge. The round's other two findings were fixed: the credential check on a collision delta now reads removed lines that start with `--`, and any copied file refuses the carry.
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 7: "Yes, drop it").** Sol found a new HIGH in the staging carry in each of 7 rounds, so it is removed rather than patched again. A feature branch that merges `origin/staging` always needs a new full Sol review, and the gates refuse any proof carried onto a staging base, including one minted earlier. Mason's reason: everything on staging is fully reviewed again before it is released to the live app. The carry stays for `hotfix/` and `release/` branches merging `origin/main`, and its collision check now runs only when main's changes add lines and remove or edit none (a removed line may be a credential, and no pattern catches every format). This replaces the "free carry only" decision above.
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 8: "Fix #1, then I merge").** Round 8 found 4 HIGHs. #1 (an older carried proof that records no review kind could still count at a staging merge) is fixed: only a proof carried onto `origin/main` counts. Mason overrides the other three and merges this PR by hand, with no further Sol round: #3 (`.claude/hooks/pr-merge-guard.mjs:681`, an earlier proof still counts after a staging merge that touches no Sol-list file) is his round-6 "keep the 10-30 rule" decision; #2 (`.claude/hooks/codex-push-lib.mjs:1763`, how far a restamp or post-apply carry can stretch an older owner acceptance) and #4 (`scripts/write-codex-push-proof.mjs:3314`, a release-rules review reused by the live migration gate for a hotfix) are gaps in older gate features this PR did not add, left to their own follow-up. None is a money, stock or customer-data bug.
+
+## 2026-11-22 — #2256: Mason owner-accepted 3 Sol finding(s) at `591e6a34de34`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2256 at `591e6a34de34` (base `9c77cd3a5d22`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/components/deliveries/ReceiptsToCheck.tsx:96`, text sha256 `8fa2f87a2f18aafb` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 1ba4939db9f5)
+- Finding 2 (HIGH) at `src/pages/DeliveryDetail.tsx:1493`, text sha256 `e1351c2ce5dcdaec` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 1ba4939db9f5)
+- Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:1550`, text sha256 `cf5fc817743fe50a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 56304b763489)
+
+## 2026-11-22 — #2256: Mason owner-accepted 3 Sol finding(s) at `f218cd0a6cb3`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2256 at `f218cd0a6cb3` (base `d069dc004e94`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/DeliveryDetail.tsx:1493`, text sha256 `cc1e48c10a3de110` (the wording stays with the proof, not here)
+  Mason's reason: I accept not big chance (ref b9bbd42731de)
+- Finding 2 (HIGH) at `src/components/deliveries/ReceiptsToCheck.tsx:96`, text sha256 `7066242aa819f205` (the wording stays with the proof, not here)
+  Mason's reason: I accept not big chance (ref b9bbd42731de)
+- Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:1562`, text sha256 `4e2720e2b1b9e457` (the wording stays with the proof, not here)
+  Mason's reason: I accept not big chance (ref b9bbd42731de)
+
+## 2026-11-22 — #1980: Mason owner-accepted 2 Sol finding(s) at `596e9a966c78`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #1980 at `596e9a966c78` (base `a7785529318b`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/QuoteBuilder.tsx:5788`, text sha256 `62289c837c8d5bff` (the wording stays with the proof, not here)
+  Mason's reason: I accept it is small chance (ref cae96f3067fd)
+- Finding 2 (HIGH) at `src/pages/QuoteBuilder.tsx:5436`, text sha256 `21fde77b4c797bc5` (the wording stays with the proof, not here)
+  Mason's reason: I accept it is small chance (ref cae96f3067fd)
+
+## 2026-11-22 — #1980: Mason approves Sol round 6 now that #1989 has landed
+
+**Decision (Mason, in chat, 2026-11-22: "Yes, run Sol").** Sol round 5 on #1980 found that the Purchasing tab could count PO stock another booking had already claimed. On 2026-11-21 Mason chose to hold #1980 until #1989 (the booking line is the reservation) landed, rather than accept the finding. #1989 merged to staging on 2026-11-22 (`6e77a9e7a`), and #1980 now reads its coverage, late-PO, follow-up, unbacked-hold and Check data keys. Mason approved running Sol round 6 on #1980 at that state.
+
+## 2026-11-21 — #1980: Mason chose to drop "restore keeps Timing/Confidence"
+
+**Decision (Mason, in chat, 2026-11-21: "Yes and log for future work").** Sol round 3 on #1980 found that keeping each section's Timing and Confidence across a version restore or rewind (matched by section name) could give an old product a new section's Firm pick, or pair a current Firm pick with an older needed-by date. Mason chose to drop that change: a restore or rewind keeps its existing behavior and clears Timing and Confidence (blank never counts as Firm), and both restore prompts say so. A safe design (picks stored in each version snapshot) is logged in #1977 as future work. This entry names #1980 so Sol may run round 5 on it.
+
+## 2026-11-19 — #1980: Mason owner-accepted 1 Sol finding(s) at `e2225f84faab`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1980 at `e2225f84faab` (base `5f87729d2685`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/components/inventory/PurchasingTab.tsx:250`, text sha256 `472a69929a17b261` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref e8d08e3a7329)
+## 2026-11-22 — PR #2231 (#2193): Mason overrides Sol round 4's one HIGH; hand merge
+
+**Decision (Mason, 2026-11-22, relayed by the bug captain: "A").** Sol round 4 (head `d86e4eefc`) left one HIGH: the MCP apply door runs the guard code from the main checkout, so the new prerequisite check protects that door only once the main checkout is updated past this PR. Override reason: the check is active once installed, and the modes-of-action load is applied only at release, after this PR lands; the script door (the normal path) carries the check itself. The race Sol raised in rounds 1-3 is fixed (in-transaction re-count under the ingredient lock). The skip tool cannot accept findings on gate files, and the agent merge guard needs a clean Sol on them, so Mason or Taha merges PR #2231 by hand; agents do not land it. Sol's MED/LOW findings are tracked in #2230.
+
+## 2026-11-22 — #2193: hard block on the modes-of-action load until the live EPA batch fill has run
+
+**Decision (Mason, 2026-11-22, relayed by the bug captain: "go with a").** This replaces the 2026-11-18 "no in-migration readiness check, release step only" rule for the live apply. The migration itself stays unchanged (already applied on staging). The live-apply tooling refuses `20270205150000_ingredient_modes_of_action_load` (any stamp) until at least **90 of its 123 list rows** match an active ingredient on live, by the load's own rule (CAS decides; a unique name counts when one side has no CAS), and shows the count when it refuses. The script door reads the live count before it transmits (an early refusal, fails closed) and, at Mason's choice ("Yes, real fix (A)", relayed by the bug captain, after a Sol skip proved impossible on guard files), counts again inside the apply transaction under the ingredient lock, so an ingredient retired in between still stops the load; the MCP door refuses this load outright. **Why 90:** live read 99 of 123 on 2026-11-22, after the 2026-11-21 EPA batch fill; before the fill the app had few ingredients; some list rows are salts or chemicals CRX does not stock, so 123 is not expected. Change the number only with Mason. Release step: `.claude/commands/ship.md` › Staging.
+
+## 2026-11-22 — #1989: Mason owner-accepted 1 Sol finding(s) at `52212b29d85a`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #1989 at `52212b29d85a` (base `9f791a20dcb3`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270216110000_purchasing_plan_booking_reservations.sql:256`, text sha256 `2eba2d64c8ca47b1` (the wording stays with the proof, not here)
+  Mason's reason: impossible numbers don't exist in real data (ref b001eb1cd7ba)
+
+## 2026-11-22 — #1989: impossible stored values are skipped and flagged
+
+**Decision (Mason, in chat, 2026-11-22: "Skip and flag them").** Sol round 10 on #1989 found three more HIGHs from the same mechanism (stored values that are not real: a booking dated at the database's minimum date, a NaN order quantity, a delivery scheduled at infinity). Asked the business trade-off, Mason chose: treat any quantity that is not a finite number, and any date outside 2000-2099, as bad data. The purchasing plan leaves only the bad piece out of the stock math, choosing the side that never buys short: a bad booking date counts as no date; a bad job date counts as today; a bad delivery is left out (the good ones still date the order); a bad hold expiry counts as no expiry; a bad stock, PO or draw value is not counted; a job with a bad line keeps its draw only up to its good lines. The record is listed under a new `check_data` list so someone fixes it. This replaces the round-9 rule that only skipped NaN and infinity.
+
+## 2026-11-22 — 3 more Sol rounds approved for #1989 (to round 13)
+
+**Decision (Mason, in chat, 2026-11-22: "i approve up to 3x more rounds").** Sol rounds 8 and 9 on #1989 each found HIGHs about stored values that are not real stock (a year-300000 PO date; NaN or infinite quantities and dates). Round 9's fix closes that class in one place: the allocator and its inputs ignore any non-finite quantity or date. This entry approves up to 3 more Sol rounds on #1989 beyond the earlier 3, so up to round 13; it waives no finding. If the same mechanism returns a BLOCKER or HIGH again, stop and put the business trade-off to Mason.
+
+## 2026-11-22 — Up to 3 Sol rounds approved for #1989 (booking-reservations redesign)
+
+**Decision (Mason, in chat, 2026-11-22: "Yes, approve Sol", then "approve up to 3 more sols").** #1989 was rebuilt from scratch to the 2026-11-21 redesign (the booking line is the reservation; contract `docs/plans/2026-11-21-booking-reservations-CONTRACT.md`), so it needs a fresh Sol review past the round-5 cap. This entry approves up to 3 more Sol rounds on #1989; it waives no finding.
+
+## 2026-11-21 — #1989 redesign: the booking line is the reservation; Firm first; a late PO is cover, never a second buy
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, build it"; first build "Per product").** After Sol raised a new HIGH on "which hold belongs to which line and PO" in rounds 5, 6, 7 and on Nov 20, Mason redesigned #1989 from the start. In `get_purchasing_plan` the open booking LINE is the reservation and the plan never reads a counted booking's or active job's own hold rows. One allocation per product, worked out fresh on every read, gives coverage and buying: shelf, then POs by date; orders, jobs, manual holds and Firm lines first, then Likely, then Maybe. A late PO counts as cover (flagged) and adds no buy. A reservation lasts while the booking is open; a line 14 days past its need date is flagged for follow-up. Stale holds take shelf stock only and never buy. A draft Planned booking counts like a sent one. Contract: `docs/plans/2026-11-21-booking-reservations-CONTRACT.md` (v4, replaces `2026-11-18-purchasing-held-stock-CONTRACT.md`); migration `20270207140000`.
+**Reverses:**
+- 2026-11-18 "held stock always counts as spoken for" (decision "1"): a Maybe booking's stock may now go to a Firm need elsewhere; the Maybe line then shows *not covered* and is not bought for.
+- 2026-11-18 "I agree cap it" (a draft booking's hold counted as must-buy, even for Maybe): a draft Planned booking now counts exactly like a sent one, by each line's own confidence and date.
+- Buying for a need whose only PO lands after it (`20270127110000`, #1971/#1990): a late PO keeps its claim and the plan never buys twice for it, for orders, jobs, manual holds and bookings alike.
+**Supersedes:** "2026-11-21 — #1989 rebuild: holds keep taking incoming stock (option B)" and "2026-11-19 — holds take incoming stock first" (the draw guess of that entry stays).
+
+## 2026-11-21 — #1989 rebuild: holds keep taking incoming stock (option B); Mason takes #1989 back from Taha
+
+**Decision (Mason, in chat, 2026-11-21: "option B").** Sol's Nov 20 review of #1989 raised four HIGHs on the hold and PO-claim logic, so the round-cap rule put the trade-off to Mason: (A) holds count only stock on the shelf, or (B) keep "holds take incoming stock first" (2026-11-19) and fix the HIGHs inside it. He chose B. The rebuild on #1990's body: a hold claims only PO stock arriving by its own expiry (earliest-expiring first); a Maybe, Likely, unset or undated line's claimed part keeps its own class and date and only reserves its PO stock; a hold whose source is gone, closed or converted, or beside a set-aside line, or a job hold on an unconvertible line, reserves shelf stock only and never buys. Mason started this session on 2026-11-21 to fix and land #1989, taking it back from the 2026-11-19 handover to Taha. Contract: `docs/plans/2026-11-18-purchasing-held-stock-CONTRACT.md` rules 9-11.
+
+## 2026-11-19 — #1989: Mason owner-accepted 1 Sol finding(s) at `eb7dc3196550`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1989 at `eb7dc3196550` (base `b81667dddc5b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270128150000_purchasing_plan_held_stock_never_free.sql:357`, text sha256 `26b59541609dbae7` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref afd784259870)
+
+## 2026-11-19 — Purchasing plan: the safe draw guess, and holds take incoming stock first (#1989)
+
+**Decision (Mason, in chat, 2026-11-19), after Sol round 5 on PR #1989** (third round in a row with a HIGH on draw allocation, so the business trade-off was put to him). (1) "Safe guess": draws keep the `20270127110000` least-sure, latest-first rule; matching each order to the line it names is dropped. Accepted cost: the plan may suggest buying for a Firm line an order already drew. (2) "Holds claim POs first": the part of a hold not on the shelf takes incoming purchase-order stock first, on each PO's date, as the hold does on receipt.
+**Supersedes:** the "order draws follow the line the order names" entry below.
+
+## 2026-11-19 — Sol round 5 approved for PR #1989 (purchasing plan held stock)
+
+**Decision (Mason, in chat, 2026-11-19: "ok round 5").** A fifth Sol round may run on PR #1989 after the round-4 fixes (draw order matching `draw_down_quote` exactly; a named line's excess shown as over-drawn). If round 5 raises another BLOCKER or HIGH on the draw-allocation mechanism, stop patching and put the business trade-off to Mason (AGENTS.md, Operating Contract).
+
+## 2026-11-19 — Purchasing plan: order draws follow the line the order names, else document order (#1989)
+
+**Decision (Mason, in chat, 2026-11-19: "a"), after Sol round 3 on PR #1989.** `get_purchasing_plan` takes an order draw off the booking line its order line names (`order_items.quote_item_id`, as `draw_down_quote` stamps it), and any draw left over off the lines top-down in document order, the way the writer itself takes it. Chosen over "earliest-needed first" (Taha's review): going by date could erase a Firm line the order never drew and suggest buying nothing.
+**Supersedes:** the "earliest-needed lines first" draw order in the entry below. `_sync_planned_holds` still goes by date; that mismatch predates this PR and is a follow-up.
+
+## 2026-11-18 — Purchasing plan: holds that count today are capped at the shelf; unknown draws come off the earliest lines (#1989)
+
+**Decision (Mason, in chat, 2026-11-18: "I agree cap it"), after Taha's review of PR #1989.** In `get_purchasing_plan`, a manual hold or a crop-program hold that does not cover its booking's own line (for example a draft booking's) counts today only up to the stock on the shelf; the rest of a crop-program hold counts at its booking's need date, the same way a sent booking's line does, so a hold never makes the plan say "order now" for stock nobody needs yet. Also from Taha's review: a draw whose section is unknown (an order's) now comes off the earliest-needed lines first, matching how `_sync_planned_holds` consumes draws.
+**Supersedes:** the "least-sure first, latest first" draw order of `20270127110000` (#1971), and the "still counts today as before" wording for uncovered holds in the entry below.
+
+## 2026-11-18 — Purchasing plan: held stock always counts as spoken for (reverses rule 2 of the #1971 entry below)
+
+**Decision (Mason, in chat, 2026-11-18: "1").** After Sol round 2 on PR #1980 found that stock held for a Maybe booking read as free, Mason chose: held stock is always spoken for in `get_purchasing_plan`, whatever the booking's confidence, but a hold never makes the plan buy on its own. A hold covering its booking's (or job's) own lines counts today only up to the stock on the shelf left after other holds, backing Firm lines first; the unbacked part stays as the booking line with its own date and confidence (a Maybe line stays shown only).
+**Supersedes:** rule (2) of "2026-11-18 — Purchasing plan: no 'expedite a later PO' alternative; a Maybe booking's held stock follows its confidence". Rule (1) stands.
+## 2026-11-22 — PR #2248 (KI-144): one vendor name = one vendor
+
+**Decision (Mason, relayed from his conversation with the bugs-triage session, 2026-11-22: "go with a"):** a purchase order keeps the vendor name it was written with ("Keep original name", earlier the same day), and a vendor may not be created, renamed or restored to a name already printed on another vendor's purchase orders; the app refuses it and suggests a slightly different name (for example "Acme Ag LLC"). Raised after Sol round 3 reached the AGENTS.md mechanism cap on vendor-name reuse.
+
+## 2026-11-22 — A purchase order keeps its original vendor name after a rename (KI-144)
+
+**Decision (Mason, relayed by the Lane E bug captain 2026-11-22):** "Keep original name." Renaming a vendor does not change the name on its old purchase orders; reports and bill checks find those POs by the vendor's id.
+
+**Why:** a PO is a document sent to a vendor; its printed name is history. Until now the PO stored only the name, so after a rename the vendor-bill check (and some reports) no longer matched the vendor's own old POs.
+
+**What this implies:** `purchase_orders.vendor_id` links each PO to its vendor (set by the server from the vendor name when the PO is written; never by the screen). A vendor bill on a linked PO must come from that vendor. POs whose name matches no single active vendor stay unlinked and keep the old name check; linking the 3 live ones is still To-Do decision 23.
+
+## 2026-11-22 — #2197: sales reps may reactivate an inactive customer from its page
+
+**Decision (Mason, 2026-11-22, relayed by the bug captain: "Yes, reps too").** The customer page's Reactivate button shows for admins and sales reps, matching what the database already allows (`customers_update` policy: admin or sales rep) and the #2048 refusal text ("An admin or sales rep must reactivate"). Screen-only change; the database rule is unchanged. Drivers and applicators still get no button and are refused by the database.
+## 2026-11-22 — PR #2244 (KI-197): stale-screen PO cost check covers cost and product only (accepted risk)
+
+**Decision (Mason, relayed from his conversation with the bugs-triage session, 2026-11-22: "go with B"):** a purchase-order cost correction is refused when the line's cost or product changed after the screen loaded it. A PO vendor change or a product unit change in that window is NOT checked: an accepted risk, since only admins correct costs. Raised after Sol round 3 reached the AGENTS.md mechanism cap.
+
+## 2026-11-22 — A PO cost correction is judged against what arrived (KI-151)
+
+**Decision (Mason, relayed by the Lane E bug captain 2026-11-22):** "if cost is edited it needs edited if only receive 8 of 10 should show owing 2. if edited quantity to 8 and we receive 8 then we shouldn't show anymore coming". Cost corrections on a purchase order are judged against what actually arrived, not what was ordered.
+
+**Why:** since KI-143, vendor bills are already limited by what arrived (capped at the ordered total; the ordered total before anything arrives). The cost-correction check still used the ordered total, so a received line could be cut below what was billed for it.
+
+**Follow-up decision (Mason, 2026-11-22, in the Lane E session, "Yes, that rule"):** a cost cut is refused only when that cut itself puts the bills over the line. A bill already over what arrived (for example billed in full up front, goods still coming) does not block a correction.
+
+**What this implies:** a cost cut is refused when it moves the PO's active vendor bills from within 5% to more than 5% over what arrived (like the bill check, capped at the ordered total; the ordered total before anything arrives). Separately, as before KI-151, no cut may leave the bills more than 5% over the ordered total, even when a bill was already confirmed over it (Sol round 2, 2026-11-22: else a $110 bill on a $100 order lets the order be cut to $0). Owed and still-coming quantities are unchanged: receiving 8 of 10 still shows 2 coming, and a line whose ordered quantity matches what arrived shows nothing coming. Raising a cost is never refused.
+
+## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 6 left 2 HIGH findings on the skip mechanism itself):** "then we will override SOL if we need to I don't want over complicated codes to type I want it to explicitly ask if I accept the risk and I say yes with reason and that's good enough". The skip request now asks plainly whether he accepts the risk of leaving the findings unfixed; `yes` and a reason is enough, and the reason is logged. Round 6's two findings (`.claude/hooks/sol-accept-lib.mjs:233`, `scripts/owner-accept-sol-finding.mjs:107`) are left unfixed as his business call: both concern how far a skip he gave can stretch, not money, stock, customer data or logins. This PR changes gate files, so the agent merge guard still requires a clean Sol; Mason or Taha merges it by hand.
+
+## 2026-11-22 — Sol round 5 on PR #2199: keep the skip simple
+
+**Decision (Mason, in chat 2026-11-21, after Sol gate round 4):** "i want to make sure we dont overcomplicate or overbuild this". The bug/judgment labels from round 3 are removed. He may skip any Sol finding he disagrees with: a business call, or a bug or gap so small or impractical it will never affect the business. The agent says plainly when a finding is a real money, stock, data or security bug. A skip counts only for the PR it was given for. Round 5 reviews that simpler design (entry below).
+
+## 2026-11-21 — Mason skips review findings in plain words, no codes
+
+**Decision (Mason, 2026-11-21; PR #2199).** "I need to just be able to tell it I don't want that." Typing `accept <code> <reason>` once per Sol finding was too slow (nine codes on one release). Now one request lists every finding and he answers once: `skip` (all) or `skip 1 3` (only those), with no code and no reason. `ok`, `yes`, `move on` and `merge it` skip nothing, because they too often mean "go on" or "merge after fixing" (Sol plan review). He may skip any Sol finding he disagrees with: a business call, or a bug or gap so small or impractical it will never affect the business (Mason, 2026-11-21, after Sol gate round 4: "i want to make sure we dont overcomplicate or overbuild this"). The agent must say plainly when a finding is a real money, stock, data or security bug. A skip counts only for the PR it was given for. A plain-words decline for Luna, Astra, Codex and gauntlet findings was dropped from this change after the Sol gate review. Unchanged: PRs that change gate or approval files still cannot skip Sol findings; migration approvals; every check and merge gate. Plan: `docs/plans/2026-11-21-owner-decline-findings-PLAN.md`.
+## 2026-11-22 — Mason's release pass removed (supersedes the 2026-11-20 release-pass decision)
+
+**Decision (Mason, in chat, 2026-11-22: "Take it out").** Sol found 6 BLOCKER/HIGH in the release pass on release #2189 and 5 new ones in round 2 on the fixes, all in the same mechanism (the AGENTS.md three-round stop). Mason chose to remove the pass rather than keep patching. Taha or Mason again merges the release, hotfixes and the back-merge, and live applies wait for Taha's `Ready to merge:` comment. Kept from 2026-11-20: the plain `yes` (24 hours, surviving head moves) for a destructive migration, and a destructive migration may merge into `staging`. The unpushed fix branch `claude/release-pass-sol-fixes` is superseded and not landed. Rollout: a session on a checkout from before this change still has the pass code, so no agent acts on `ship the release` / `go live #<n>` from now on, whatever its checkout says, and Mason will not send them (Mason confirmed in chat, 2026-11-22: "Yes, I agree"). Checked 2026-11-22: no recorded pass exists in any CRX checkout or worktree on Mason's computer.
+## 2026-11-22 — #2185: Mason owner-accepted 3 Sol finding(s) at `6e92876aa47e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-22).** Sol's review of PR #2185 at `6e92876aa47e` (base `104ea5afe5bc`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/components/products/ProductVendorsSection.tsx:221`, text sha256 `bbbd0728aecafee1` (the wording stays with the proof, not here)
+  Mason's reason: can’t hapone (ref b4db10190568)
+- Finding 2 (HIGH) at `src/pages/ProductDetail.tsx:441`, text sha256 `1e972ef0cb7168f8` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref f0d1b4bfc761)
+- Finding 3 (HIGH) at `src/components/products/ProductVendorsSection.tsx:227`, text sha256 `7e85905a56efea6d` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 4096755d03d7)
+
+## 2026-11-22 — #2185: Mason re-confirmed the vendor-change block and the accepted two-admins case
+
+**Decision (Mason, 2026-11-22, "Yes, re-confirm").** For #2185, vendor changes on the product page stay off while the Product has unsaved edits, or is saving or loading, and a vendor change re-reads the whole Product (the 2026-11-21 decision). The two-admins case accepted on 2026-11-21 (two admins changing the same product's preferred vendor within seconds, so a copy keeps the older vendor) stays accepted as a business non-issue.
+
+## 2026-11-21 — #2185: Mason owner-accepted 1 Sol finding(s) at `d66cf2bff2ed`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2185 at `d66cf2bff2ed` (base `f08df8ad6407`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/components/products/ProductVendorsSection.tsx:221`, text sha256 `f5320b8720eb0a44` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 48c944edbcb7)
+
+## 2026-11-21 — #2185: a vendor change re-reads the product; vendor changes wait for unsaved Product edits
+
+**Decision (Mason, 2026-11-21, "Yes, block").** On the product page, vendor changes are off while the Product has unsaved edits, or is saving or loading ("Save or discard your Product changes before changing vendors."). After any vendor link, the page re-reads the whole Product instead of copying a vendor name from the Vendors section, and keeps Save, New product and Add a size off until that read lands; a failed read locks editing until Reload Product succeeds. This replaces patching the vendor name in place, which produced a new race in each of three review rounds (KI-170).
+## 2026-11-21 — Quote-to-invoice audit answers: booking salesperson, shared-field pricing, sent-version cutoff, applied acres
+
+**Decision (Mason, in chat, 2026-11-21, To-Do decisions 30-33 from the [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)):**
+(30, "booking salesperson") an order converted from a booking takes the booking's salesperson; only the conversion functions set it, and a rep still cannot name another salesperson by hand.
+(31, "I agree") on a shared-field job the grower who owns the booked quote pays the booked price (falling back to their own eligible quote or tier when it cannot be used); each other grower pays their own eligible sent quote or, with none, their tier price; a manual job-line price wins; conflicting eligible prices for one grower and product are refused.
+(32, "I agree") earlier field work bills the latest quote version **sent** on or before the application date (clarifies the earlier "written on or before" wording; matches #1966).
+(33, "yes always bill if actual sprayed acres") a finished job always bills, splits payer shares and takes stock for the acres actually sprayed, not the planned acres.
+**Why:** the commission and booking already belong to the booking's rep; each grower should pay the price they were quoted; and customers pay for what was applied.
+**What this forbids/implies:** KI-191, KI-198, KI-185 and #2075 are built to these rules; Transfer, office auto-draft and Split Billing must agree.
+## 2026-11-22 — F05: two open loads holding the same units: neither completes until the office cancels one
+
+The staging audit (2026-11-21) found one order line scheduled past what was ordered, so 2 ordered ended 3 delivered. The fix (`20270224100000_f05_order_line_quantity_guard.sql`, first drafted as `20270218100000`) refuses any write that would put delivered + open loads past what was ordered.
+
+**Decision (Mason, in chat, 2026-11-22: "yes"):** where two open loads already hold the same units from before the fix, completing either in a way that would deliver more than was ordered is refused until the office cancels or reduces the extra load (a partial completion that still fits with the other open load is allowed). The driver is told to call the office; stock never moves twice. Rejected: first load to complete wins (the second driver finds out only at the farm).
+
+**Follow-up decision (Mason, in chat, 2026-11-22: "drop it"):** the refusal only tells the driver to call the office; no "complete the extra load with 0 delivered" tip (the delivery screens refuse an all-zero completion, Sol r2). A leftover double-booked line the office cannot cancel because a return is logged stays blocked until the F05b cleanup fixes it by hand; before the live apply, count those lines and fix each one. Rejected: letting the office cancel an undelivered load despite a return on the line (changes the return rule; bigger and riskier). Superseded: Mason's earlier "Reword the hint" (record 0 only if the extra load never went out).
+
+## 2026-11-21 — #2165: Mason owner-accepted 1 Sol finding(s) at `2c95807df876`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2165 at `2c95807df876` (base `1b127b005e8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/pages/Deliveries.tsx:902`, text sha256 `2c0b6c5b7684ea0d` (the wording stays with the proof, not here)
+  Mason's reason: cant happen (ref 168e652b8a1d)
+
+## 2026-11-21 — #2165 (#2018): a delivery with no site goes to the farm's shipping address, else billing
+
+Sol round 6 found Field Mode and the office Navigate button used the billing address while the printed load sheet and slip used shipping first.
+
+**Decision (Mason, in chat, 2026-11-21: "Shipping first"):** every screen sends a no-site delivery to the shipping address, else billing; the office choice now reads "Use farm address (shipping, else billing)".
+
+## 2026-11-21 — #2165 (#2018): Mason approved Sol round 5 on the driver screens
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, run round 5").** Sol rounds 1-4 on #2165 each found a different screen-side problem, and each was fixed: address typing, a missing delivery site falling back to the farm's default address, a missing stop site, and a role refresh resetting entered quantities. Round 3 also raised the drivers' whole-row farm read; Mason accepted that for one release ("Yes, accept it"), the same as on #2161, and #2162 removes it. Smaller items are deferred to #2167. This entry names #2165 so Sol may run round 5 on it.
+
 ## 2026-11-21 — #2187: Mason owner-accepted 1 Sol finding(s) at `4e4e44138acc`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2187 at `4e4e44138acc` (base `f3e880f9710f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
@@ -870,7 +1503,7 @@ Later the same day Mason settled the 14 held: today's rate kept on the 9 that di
 **Operative rule.** Active readiness totals and live-rate readers retain their existing scope. The new download explicitly requests inactive history; old no-argument downloads remain active-only. PostgreSQL checks current group activity under the existing locks. Proposal: `docs/plans/2026-11-14-inactive-rate-review-CONTRACT.md`, issue #1814. Candidate only; no apply, merge or deployment.
 
 Last verified: 2026-10-29. Adding an entry does not change this date.
-Update triggers: append when an architectural/policy/business decision is made or reversed.
+Update triggers: when an architectural/policy/business decision is made or reversed, add a NEW file in `docs/manual/decision-log.d/` (one per entry; see its README), not here (2026-11-22). This file stays as the history; the owner-accept `--log` entry is the one thing still written here.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
 settled calls. Newest first, roughly — a few entries from the same week sit slightly out of date

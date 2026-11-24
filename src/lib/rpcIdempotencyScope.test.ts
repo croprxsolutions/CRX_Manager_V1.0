@@ -258,11 +258,28 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // (20261019235000) re-emits the body only to retarget its keyless per-delivery cancel; changing
   // the literal would orphan the wrapper's receipt binding.
   _batch_cancel_deliveries_replay_impl_20261015: ['batch_cancel_deliveries'],
+  // Direct EXECUTE is revoked (postgres-only). 20260716202000 renamed the live complete_delivery body to this
+  // name with ALTER FUNCTION ... RENAME TO, so its replay lookup kept the public 'complete_delivery' literal and
+  // the public wrappers bind that same receipt. #2135 (20270213100000) re-emits it only to drop its duplicate
+  // short-stock warning; changing the literal would orphan existing receipts.
+  _complete_delivery_period_preflight_impl: ['complete_delivery'],
+  // Direct EXECUTE is revoked (postgres-only). Each was renamed from its public wrapper with ALTER FUNCTION ...
+  // RENAME TO (20261019200000, 20270104120000), so its receipt lookup kept the public literal that the wrapper binds.
+  // 20270227110000 re-emits them only to make the driver check refuse a delivery with no driver; changing the
+  // literal would orphan existing receipts.
+  _complete_delivery_replay_impl_20261015: ['complete_delivery'],
+  _complete_delivery_evidence_impl_20270104: ['complete_delivery'],
+  _start_and_complete_delivery_impl_20270104: ['start_and_complete_delivery'],
   // Direct EXECUTE is revoked (postgres-only). Replay-binding batch 4a (20261102180000) renamed the
   // live unpost_invoice_group body to this name and re-emits it only to unpost each member through
   // unpost_invoice's renamed body (no per-member key); it keeps the public operation literal so the
   // wrapper binds that same receipt, and changing it would orphan every existing receipt.
   _unpost_invoice_group_replay_impl_20261015: ['unpost_invoice_group'],
+  // Direct EXECUTE is revoked (postgres-only). Batch 4a (20261102180000) renamed the live unpost_invoice body
+  // to this name with ALTER FUNCTION ... RENAME TO, so it kept the public 'unpost_invoice' literal its wrapper
+  // binds. #2265 (20270225210000) re-emits it only to skip voided-payment history rows; changing the literal
+  // would orphan existing receipts.
+  _unpost_invoice_replay_impl_20261015: ['unpost_invoice'],
   // Direct EXECUTE is revoked (postgres-only). Batch 3b (20261019235000) renamed the live
   // cancel_delivery body to this name with ALTER FUNCTION ... RENAME TO, so it kept the public
   // literal the wrapper binds. 20261102140000 re-emits it only to refuse a completed delivery;

@@ -19,7 +19,7 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 | Slice | Ask | Recommendation | Answer |
 |---|---|---|---|
 | 0–1 | Go for slices 0 and 1 (M7) | Yes, once the kit is merged into staging | **Yes** (2026-11-24): kit merge, tooling PR, FP-1, into staging only |
-| 0–1 | Date for Taha's live reset (#2407), and the yes to fill, re-stamp and apply it | A date before mid-December, agreed with Taha | |
+| 0–1 | Date for Taha's live reset (#2407), and the yes to fill, re-stamp and apply it | A date before mid-December, agreed with Taha | **Done**: already applied live 2026-11-24 07:09 UTC (see Slice 0) |
 | 0–1 (added later) | Any staging-only migration that changes today's live billing (only if slice 0 finds one; asked before the release that carries it, not before the go) | Per slice 0 step 3, with the before-and-after customer effect | |
 | 0–1 | Drop the kit's extra `I approve` for non-destructive field migrations (FP-1, FP-3, FP-4, engine grants) | Yes | **Yes** (2026-11-24). Mason 2026-11-24 (slice 0–1 batch): no extra kit `I approve` for non-destructive field migrations; they apply under AGENTS.md › Autonomous landing (Taha's `Ready to merge`, the migration-apply proof gate). Mason's yes stays for anything the repo's guard classes as destructive (it asks him itself), Taha's reset, logins and roles, Edge Function deploys, production switches, `field_billing_start_date` and the live Chem Man import. |
 | 0–1 | Where the Chem Man export file lives (private, outside the repo), and the yes for the one live import after the reset | A private folder Mason names | **Later**: no export yet; asked again when FP-1 is VERIFIED (see Chem Man import above) |
@@ -33,7 +33,7 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 |---|---|---|
 | Kit merged into staging (pre-build checklist, before any session) | NOT STARTED | docs-only PR from #2415 |
 | Tooling: registry and types from staging | NOT STARTED | before any field migration merges |
-| Taha's live reset (#2407) | WAITING ON MASON | merged into staging; live apply needs the batch yes |
+| Taha's live reset (#2407) | LIVE | `20270301100000_live_test_data_reset` applied live 2026-11-24 07:09 UTC (ledger version `20261124070916`). Read-only check that day: live has 0 jobs, 0 invoices, 5 fields; no `field_billing_defaults.price_override_cents` set; none of the six staging-only migrations applied live |
 | Read-only facts in the contracts | NOT STARTED | |
 
 **Staging-only migrations** (slice 0 step 3):

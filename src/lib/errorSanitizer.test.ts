@@ -2,6 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('explains a refused product price sheet without its code', () => {
+    for (const code of ['WORKBOOK_V2_EXPORT_REQUIRED', 'WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED']) {
+      expect(sanitizeError({ message: code })).toMatch(/^No prices were changed\. This price sheet can no longer be used: it was already applied/);
+    }
+    expect(sanitizeError(new Error('PRICING_DUPLICATE_PRODUCT_ID')))
+      .toBe('No prices were changed. The same product appears on more than one row of the price sheet. Download a fresh price sheet and make your changes in it, without copying or pasting product rows');
+  });
+
   it('explains a refused delivery Unassigned in plain words', () => {
     expect(sanitizeError({ message: 'DRIVER_CHANGED: the driver was changed since the form opened; reload and try again' }))
       .toMatch(/^Nothing was saved\. The driver was changed since you opened this form/);

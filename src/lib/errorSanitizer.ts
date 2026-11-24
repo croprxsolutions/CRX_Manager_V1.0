@@ -15,6 +15,10 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^CUSTOMER_INACTIVE_NEW_WORK\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added'],
   [/violates check constraint "inventory_holds_source_needs_customer"/, 'Nothing was saved. A stock hold for a spray job or quote must name its customer'],
   [/^WORK_CUSTOMER_MOVE_NOT_ALLOWED\b/, 'Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery'],
+  // Product price sheet: the server refuses a used, expired or someone else's sheet, or a sheet listing a product twice.
+  [/^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/,
+   'No prices were changed. This price sheet can no longer be used: it was already applied, is more than 7 days old, came from an older template, or was downloaded by another user. Download a fresh price sheet and make your changes in it'],
+  [/^PRICING_DUPLICATE_PRODUCT_ID\b/, 'No prices were changed. The same product appears on more than one row of the price sheet. Download a fresh price sheet and make your changes in it, without copying or pasting product rows'],
   [/^PRODUCT_CATEGORY_RETIRED\b/, 'This category is retired. Choose an active category'],
   [/^PRODUCT_CATEGORY_NAME_REQUIRED\b/, 'Enter a category name'],
   [/^PRODUCT_CATEGORY_FIELDS_REQUIRED\b/, 'Choose a category status and sort order'],

@@ -3,7 +3,7 @@
  *
  * Sprint 11: Financial Workflows
  */
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { DollarSign, XCircle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -14,6 +14,7 @@ import DatePicker from '../components/ui/DatePicker';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Modal from '../components/ui/Modal';
+import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, assertRpcResult } from '../lib/db';
@@ -31,6 +32,7 @@ import {
   paymentBusinessDate,
 } from '../lib/paymentDateRange';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useCustomerParam } from '../hooks/useCustomerParam';
 import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { formatCents as fmt } from '../lib/money';
 
@@ -67,8 +69,9 @@ const QUICK_CHOICES = [
   { key: 'all', label: 'All dates' },
 ] as const;
 
-// From/To pickers plus Today / This month / All dates. Days are Chicago business days.
-function PaymentDateFilter({ fromDate, toDate, onChange }: {
+// The customer box, From/To pickers plus Today / This month / All dates. Days are Chicago business days.
+function PaymentDateFilter({ customerBox, fromDate, toDate, onChange }: {
+  customerBox: ReactNode;
   fromDate: string | null;
   toDate: string | null;
   onChange: (from: string | null, to: string | null) => void;
@@ -82,7 +85,8 @@ function PaymentDateFilter({ fromDate, toDate, onChange }: {
   };
   return (
     <Card>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start">
+        {customerBox}
         <div className="w-full sm:w-48">
           <DatePicker label="From" value={fromDate} onChange={(v) => onChange(v, toDate)} />
         </div>
@@ -116,6 +120,15 @@ function PaymentDateFilter({ fromDate, toDate, onChange }: {
   );
 }
 
+// What the empty list says, by which filters are set.
+function emptyListText(customerChosen: boolean, datesChosen: boolean): { title: string; description: string } {
+  if (customerChosen) {
+    return { title: `No payments for this customer${datesChosen ? ' in these dates' : ''}`, description: 'Change the customer or the dates' };
+  }
+  if (datesChosen) return { title: 'No payments in these dates', description: 'Change the dates or choose All dates' };
+  return { title: 'No payments yet', description: 'Payment allocations will appear here after you record payments' };
+}
+
 export default function PaymentHistory() {
   const { profile } = useAuth();
   const { toast } = useToast();
@@ -144,6 +157,8 @@ export default function PaymentHistory() {
   const [searchParams] = useSearchParams();
   const [fromDate, setFromDate] = useState<string | null>(() => dayParam(searchParams.get('from')));
   const [toDate, setToDate] = useState<string | null>(() => dayParam(searchParams.get('to')));
+  // The A/R screens' shared customer box (?customer=, carried between tabs). Empty = every customer.
+  const { customerId, customerName, customerLabel, setCustomer } = useCustomerParam();
 
   // A refresh after voiding a payment is a multi-page read; an older, slower
   // load must not overwrite the newer list, so only the latest may set state.
@@ -288,11 +303,14 @@ export default function PaymentHistory() {
 
   const rangeInvalid = isRangeBackwards(fromDate, toDate);
   const isFiltered = !!(fromDate || toDate);
-  // Display only: the list, totals and export cover the payments dated inside the range.
+  // Display only: the list, totals and export cover the chosen customer's payments dated inside the range.
   const shownPayments = rangeInvalid
     ? []
-    : payments.filter((p) => isDayInRange(paymentBusinessDate(p.payment_date, p.created_at), fromDate, toDate));
-  const rangeCaption = dateRangeCaption(fromDate, toDate);
+    : payments.filter((p) => (!customerId || p.customer_id === customerId)
+      && isDayInRange(paymentBusinessDate(p.payment_date, p.created_at), fromDate, toDate));
+  const customerCaption = customerId ? ` for ${customerName || 'this customer'}` : '';
+  const rangeCaption = dateRangeCaption(fromDate, toDate) + customerCaption;
+  const emptyText = emptyListText(!!customerId, isFiltered);
 
   const totalPayments = shownPayments.filter((p) => p.is_active).reduce((s, p) => s + (p.total_payment_cents || 0), 0);
   const activeCount = shownPayments.filter((p) => p.is_active).length;
@@ -402,6 +420,21 @@ export default function PaymentHistory() {
 
       {/* Date filter: totals a day's deposit or a month's payments. */}
       <PaymentDateFilter
+        customerBox={(
+          <div className="w-full sm:w-64">
+            <label htmlFor="payment-history-customer" className="block text-sm font-medium text-nav-dark mb-1">Customer</label>
+            <CustomerSearchPicker
+              id="payment-history-customer"
+              value={customerId}
+              selectedLabel={customerLabel}
+              onSelect={(customer) => setCustomer(customer)}
+              // A past payment can belong to a customer who is inactive now.
+              activeOnly={false}
+              placeholder="All customers"
+              ariaLabel="Payment History customer"
+            />
+          </div>
+        )}
         fromDate={fromDate}
         toDate={toDate}
         onChange={(from, to) => { setFromDate(from); setToDate(to); }}
@@ -452,8 +485,8 @@ export default function PaymentHistory() {
             searchable
             searchPlaceholder="Search payments..."
             searchKeys={['farm_name', 'check_number', 'reference_number', 'payment_method']}
-            emptyTitle={isFiltered ? 'No payments in these dates' : 'No payments yet'}
-            emptyDescription={isFiltered ? 'Change the dates or choose All dates' : 'Payment allocations will appear here after you record payments'}
+            emptyTitle={emptyText.title}
+            emptyDescription={emptyText.description}
             loading={loading}
             loadError={loadFailed}
             onRetry={() => { void fetchPayments(); }}

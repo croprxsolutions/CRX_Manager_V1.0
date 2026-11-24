@@ -24,6 +24,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { fetchCustomerStatement } from '../lib/customerStatement';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
+import { useCustomerParam } from '../hooks/useCustomerParam';
 import { Sentry } from '../lib/sentry';
 import { exportToCSV, fmtCSV, formatProductMoneyCSV } from '../lib/csvExport';
 import { AR_AGING_LABELS, agingCents, isPricedAgingRow } from '../lib/arAging';
@@ -107,9 +108,8 @@ export default function ARaging() {
   const [asOfDate, setAsOfDate] = useState(() => todayInBusinessTz());
 
   // Statement
-  // The picker searches every customer; the page keeps the chosen one's name.
-  const [selectedCustomer, setSelectedCustomer] = useState('');
-  const [selectedCustomerName, setSelectedCustomerName] = useState('');
+  // The A/R screens' shared customer box: the choice lives in ?customer= and carries between tabs.
+  const { customerId: selectedCustomer, customerName: selectedCustomerName, customerLabel, setCustomer } = useCustomerParam();
   const [stmtStart, setStmtStart] = useState(() => localDatePlusDays(-90));
   const [stmtEnd, setStmtEnd] = useState(localToday());
   const [statementData, setStatementData] = useState<CustomerStatementRow[]>([]);
@@ -449,8 +449,7 @@ export default function ARaging() {
     const seq = ++statementLoadSeq.current;
     setLoading(true);
     setStmtCustomerName(custName);
-    setSelectedCustomer(custId);
-    setSelectedCustomerName(custName);
+    setCustomer({ id: custId, farm_name: custName });
     // Every row, page by page (src/lib/customerStatement.ts).
     const { data, error } = await fetchCustomerStatement(custId, stmtStart, stmtEnd);
     if (seq !== statementLoadSeq.current) return;
@@ -1106,10 +1105,9 @@ export default function ARaging() {
                 <CustomerSearchPicker
                   id="ar-statement-customer"
                   value={selectedCustomer}
-                  selectedLabel={selectedCustomerName}
+                  selectedLabel={customerLabel}
                   onSelect={(customer) => {
-                    setSelectedCustomer(customer?.id ?? '');
-                    setSelectedCustomerName(customer?.farm_name ?? '');
+                    setCustomer(customer);
                     // A changed customer or date needs a fresh load, even back to a loaded one (Sol, #1049).
                     setStmtLoadedKey(null);
                   }}

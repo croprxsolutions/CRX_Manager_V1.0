@@ -13,13 +13,15 @@ import ARaging from './ARaging';
 import PaymentHistory from './PaymentHistory';
 import PrepaymentManagerPanel from '../components/prepay/PrepaymentManagerPanel';
 import CustomerTransactionReview from './CustomerTransactionReview';
+import { CUSTOMER_PARAM } from '../hooks/useCustomerParam';
 
 // F4: one Accounts Receivable workspace that gathers the four previously-separate
 // admin-only money screens (Aging / Payment History / Prepayments / Ledger) under
 // one tabbed page, with a "Net Money Position" summary strip on top. This v1
 // renders each existing page as-is in a tab (only the active tab mounts) — it does
 // NOT change any page's logic or roles. The old routes still work; converting them
-// to redirects and sharing a single customer picker across tabs are follow-ups.
+// to redirects is a follow-up. Every tab picks its customer with the same box, kept in
+// ?customer=, and switching tabs keeps it, so the customer carries from tab to tab.
 // NOTE: /payments (PaymentAllocation) is intentionally NOT merged here — it is
 // admin+sales_rep and must stay its own page (AGENTS.md CRX Hard Rule).
 
@@ -34,6 +36,7 @@ export default function AccountsReceivable() {
   const [searchParams, setSearchParams] = useSearchParams();
   const raw = searchParams.get('tab');
   const tab = TABS.some((t) => t.key === raw) ? (raw as (typeof TABS)[number]['key']) : 'aging';
+  const customerId = searchParams.get(CUSTOMER_PARAM);
 
   // Net Money Position: total owed (get_ar_aging, dollars) minus unused customer
   // prepay credits (prepay_credits.balance_cents) and open credit memos
@@ -177,7 +180,7 @@ export default function AccountsReceivable() {
         {TABS.map((t) => (
           <button
             key={t.key}
-            onClick={() => setSearchParams({ tab: t.key })}
+            onClick={() => setSearchParams(customerId ? { tab: t.key, [CUSTOMER_PARAM]: customerId } : { tab: t.key })}
             className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors ${
               tab === t.key
                 ? 'border-crx-green text-crx-green'

@@ -55,6 +55,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useLatestRef } from '../hooks/useLatestRef';
+import { useSaveShortcut } from '../hooks/useSaveShortcut';
 import { sanitizeError, supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpcCode, rpcAuthErrorMessage, rpcCodeDetail, RpcErrorCodes } from '../lib/db';
 import {
   convertQuoteToOrderWithRowVersion,
@@ -4480,6 +4481,12 @@ export default function QuoteBuilder() {
 
   const pct = (n: number) => `${n.toFixed(1)}%`; // net_margin is already stored as percentage
 
+  // Save draft's disabled state, shared by the page's Save buttons, the preview's Save quote and Ctrl+S.
+  const saveDraftDisabled = (!canEdit && isEditing) || (!isEditing && quoteNumberLoading) || (!isDirty && !saving);
+  // Ctrl+S / Cmd+S presses Save draft, only while that button is on screen and can be clicked.
+  useSaveShortcut(handleSaveDraft, !loading && !(isEditing && id && installedQuoteId !== id && quoteLoadFailedId === id)
+    && (!isEditing || canEdit) && !saveDraftDisabled && !saving);
+
   if (loading) {
     return (
       <div className="animate-pulse space-y-4">
@@ -4584,13 +4591,20 @@ export default function QuoteBuilder() {
       onClick={handleSaveDraft}
       loading={saving}
       // Nothing to save until something changes: repeated clicks would only resend the same quote.
-      disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading) || (!isDirty && !saving)}
+      disabled={saveDraftDisabled}
       title={!isDirty && !saving ? 'No changes to save' : undefined}
       className={`${tall} ${className}`}
     >
       {saving ? 'Saving…' : savesAsRevised ? 'Save changes' : 'Save draft'}
     </Button>
   );
+  // The preview's send panel: an unsaved quote offers Save quote first, and Email says why it is off.
+  const quoteUnsaved = !quoteId || isDirty;
+  const previewNeedsSave = quoteUnsaved && showSaveDraft;
+  // A new quote with no customer picked yet is told to save (which asks for the customer), not that an email is missing.
+  const emailBlockedReason = (selectedCustomer || !quoteUnsaved) && !selectedCustomer?.email
+    ? 'No email on file for this customer'
+    : quoteUnsaved ? 'Save the quote before emailing it.' : null;
   const previewButton = (variant: 'primary' | 'secondary') => (
     <Button variant={variant} icon={<Eye className="w-4 h-4" />} onClick={handlePreviewQuote} className={tall}>
       Preview &amp; send
@@ -6265,15 +6279,31 @@ export default function QuoteBuilder() {
             </div>
           </div>
           <div className="flex shrink-0 flex-col gap-2.5 border-t border-gray-200 bg-white px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:border-l md:px-6 md:pb-5">
+            {/* An unsaved quote can't be emailed: Save quote runs the page's own Save draft, then Email turns on. */}
+            {previewNeedsSave && (
+              <Button
+                variant="primary"
+                icon={<Save className="w-4 h-4" />}
+                onClick={handleSaveDraft}
+                loading={saving}
+                disabled={saveDraftDisabled}
+                className="h-11 w-full"
+              >
+                {saving ? 'Saving…' : 'Save quote'}
+              </Button>
+            )}
             <Button
-              variant="primary"
+              variant={previewNeedsSave ? 'secondary' : 'primary'}
               icon={<Send className="w-4 h-4" />}
               onClick={handleEmailToGrower}
               loading={emailingGrower}
+              disabled={emailBlockedReason !== null}
+              aria-describedby={emailBlockedReason ? 'quote-email-blocked-reason' : undefined}
               className="h-11 w-full"
             >
               {emailingGrower ? 'Sending…' : 'Email to grower'}
             </Button>
+            {emailBlockedReason && <p id="quote-email-blocked-reason" className="-mt-1 text-xs text-secondary">{emailBlockedReason}</p>}
             <div className="flex gap-2.5">
               <Button
                 variant="secondary"

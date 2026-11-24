@@ -6642,28 +6642,122 @@ describe('QuoteBuilder', () => {
       });
     });
 
-    it("Email to grower is refused with today's messages when unsaved, unsaved changes, or no email", async () => {
+    it('Email to grower is off with a reason when the quote is new, has unsaved changes, or the customer has no email', async () => {
       renderQuoteBuilder();
       let dialog = await openPreview();
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Email to grower' }));
-      expect(mockToast).toHaveBeenCalledWith('warning', 'Save the quote before emailing it.');
+      expect(within(dialog).getByRole('button', { name: 'Email to grower' })).toBeDisabled();
+      expect(within(dialog).getByRole('button', { name: 'Email to grower' })).toHaveAccessibleDescription('Save the quote before emailing it.');
+      expect(within(dialog).getByRole('button', { name: 'Save quote' })).toBeInTheDocument();
       cleanup();
 
       serveAt('draft');
       await screen.findByRole('heading', { level: 1, name: 'Q-version-test' });
       await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+      // A saved, unchanged quote: Email is on and there is nothing to save.
+      dialog = await openPreview();
+      expect(within(dialog).getByRole('button', { name: 'Email to grower' })).toBeEnabled();
+      expect(within(dialog).queryByRole('button', { name: 'Save quote' })).not.toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
       fireEvent.change(screen.getByPlaceholderText(/top of the quote/i), { target: { value: 'Changed' } });
       dialog = await openPreview();
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Email to grower' }));
-      expect(mockToast).toHaveBeenCalledWith('warning', 'You have unsaved changes. Save the quote before emailing it.');
+      expect(within(dialog).getByRole('button', { name: 'Email to grower' })).toBeDisabled();
+      expect(within(dialog).getByText('Save the quote before emailing it.')).toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: 'Save quote' })).toBeEnabled();
       cleanup();
 
       serveAt('draft', { ...QUOTE_FIXTURE_CUSTOMER, email: null });
       dialog = await openPreview();
       expect(within(dialog).getByText('No email address on file')).toBeInTheDocument();
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Email to grower' }));
-      expect(mockToast).toHaveBeenCalledWith('error', 'This customer has no email address on file.');
+      expect(within(dialog).getByRole('button', { name: 'Email to grower' })).toBeDisabled();
+      expect(within(dialog).getByRole('button', { name: 'Email to grower' })).toHaveAccessibleDescription('No email on file for this customer');
       expect(mockSendEmail).not.toHaveBeenCalled();
+    });
+
+    it('Save quote in the preview runs the page save, then Email to grower turns on without leaving the preview', async () => {
+      serveAt('draft');
+      await screen.findByRole('heading', { level: 1, name: 'Q-version-test' });
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+        ? { data: { status: 'saved', quote_id: 'quote-version-test', row_version: 8, item_ids: {} }, error: null }
+        : { data: null, error: null }));
+      fireEvent.change(screen.getByPlaceholderText(/top of the quote/i), { target: { value: 'Changed' } });
+      const dialog = await openPreview();
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save quote' }));
+      await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Email to grower' })).toBeEnabled());
+      // The same save as the page's Save draft: one save_quote, as a draft, with the edit.
+      const saves = mockRpc.mock.calls.filter(([name]) => name === 'save_quote');
+      expect(saves).toHaveLength(1);
+      expect(saves[0][1]).toEqual(expect.objectContaining({ p_quote_payload: expect.objectContaining({ header_notes: 'Changed' }) }));
+      expect(mockToast).toHaveBeenCalledWith('success', 'Quote saved as draft');
+      expect(within(dialog).queryByRole('button', { name: 'Save quote' })).not.toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: 'Preview and send' })).toBeInTheDocument();
+    });
+
+    it('a new quote saved from the preview opens its saved page and the preview comes back ready to email', async () => {
+      const fixture = makeQuoteFixture('draft', 7);
+      mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? { ...fixture.quote, customer: QUOTE_FIXTURE_CUSTOMER }
+        : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? [fixture.item]
+          : table === 'products' ? [fixture.product] : table === 'customers' ? [{ ...QUOTE_FIXTURE_CUSTOMER, default_commission_split: { splits: [] } }] : [], error: null }));
+      mockRpc.mockImplementation((name: string) => Promise.resolve({ data: name === 'save_quote'
+        ? { quote_id: fixture.quote.id, row_version: 7, item_ids: {} }
+        : name === 'generate_quote_number' ? 'Q-new-preview' : null, error: null }));
+      const router = createMemoryRouter([{ path: '/quotes/new', element: <QuoteBuilder /> },
+        { path: '/quotes/:id', element: <QuoteBuilder /> }], { initialEntries: ['/quotes/new'] });
+      mockNavigate.mockImplementation((path: string) => { void router.navigate(path); });
+      const view = render(<RouterProvider router={router} />);
+      try {
+        fireEvent.change(await screen.findByRole('combobox', { name: 'Customer' }), { target: { value: 'Farm' } });
+        fireEvent.click(await screen.findByRole('option', { name: /Farm/ }));
+        fireEvent.click(screen.getByRole('button', { name: 'Add one' }));
+        fireEvent.click(screen.getByRole('button', { name: /Select product/i }));
+        const picker = await screen.findByPlaceholderText('Search by name, SKU, category, or vendor...');
+        fireEvent.click(within(picker.closest('[role="dialog"]') as HTMLElement).getAllByText(fixture.product.product_name).slice(-1)[0]);
+        fireEvent.change(screen.getByRole('spinbutton', { name: 'Quantity' }), { target: { value: '2' } });
+        const dialog = await openPreview();
+        expect(within(dialog).getByRole('button', { name: 'Email to grower' })).toBeDisabled();
+
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Save quote' }));
+        await waitFor(() => expect(router.state.location.pathname).toBe(`/quotes/${fixture.quote.id}`));
+        // The saved quote loads (the page shows its skeleton meanwhile), then the preview is back.
+        await screen.findByRole('heading', { level: 1, name: fixture.quote.quote_number });
+        const reopened = await screen.findByRole('dialog', { name: 'Preview and send' });
+        await waitFor(() => expect(within(reopened).getByRole('button', { name: 'Email to grower' })).toBeEnabled());
+        expect(within(reopened).queryByRole('button', { name: 'Save quote' })).not.toBeInTheDocument();
+        expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote')).toHaveLength(1);
+      } finally {
+        view.unmount();
+        mockNavigate.mockReset();
+        router.dispose();
+      }
+    });
+
+    it('Ctrl+S saves the quote like Save draft, and does nothing with no changes or while a dialog is open', async () => {
+      serveAt('draft');
+      await screen.findByRole('heading', { level: 1, name: 'Q-version-test' });
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+        ? { data: { status: 'saved', quote_id: 'quote-version-test', row_version: 8, item_ids: {} }, error: null }
+        : { data: null, error: null }));
+      const saveCount = () => mockRpc.mock.calls.filter(([name]) => name === 'save_quote').length;
+      const ctrlS = () => act(async () => {
+        fireEvent.keyDown(document, { key: 's', ctrlKey: true });
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      await ctrlS();
+      expect(saveCount()).toBe(0);
+
+      fireEvent.change(screen.getByPlaceholderText(/top of the quote/i), { target: { value: 'Changed' } });
+      await openPreview();
+      await ctrlS();
+      expect(saveCount()).toBe(0);
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+      await ctrlS();
+      await waitFor(() => expect(saveCount()).toBe(1));
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+      expect(mockToast).toHaveBeenCalledWith('success', 'Quote saved as draft');
     });
 
     it('Mark as presented is enabled only for draft and revised', async () => {

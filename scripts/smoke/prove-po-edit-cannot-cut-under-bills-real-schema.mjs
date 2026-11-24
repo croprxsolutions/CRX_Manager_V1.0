@@ -134,7 +134,24 @@ try {
       UPDATE public.vendor_bills SET status = 'voided' WHERE purchase_order_id = '${PO1}'; SET LOCAL session_replication_role = origin;
       ${asUser(`r := ${saveAs(uid, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])};`)} v := ${total(PO1)};`), 'ok|61000');
   }
-  console.log('[edit PO] billed PO: every line change refused for admin and rep (cut, raise, add, drop, cost, mixed), same text, no amounts; notes edits save; $0 bill counts; no bill / voided bill: edits save');
+  // Edit PO ignores a received quantity in its payload (receipts are the only writer), so it saves and stays 0.
+  const RECEIVED_EDIT = 'ok|NOT REFUSED|0';
+  // 4b. Luna: any change counts, however small; a received quantity sent in the edit cannot change a billed line.
+  assert.equal(refused(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40.000001, 0]]), PO1), `${LOCKED}|100000`);
+  assert.equal(attempt(USERS.admin, `${refuse(`r := ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 5]])};`)}
+    v := COALESCE(split_part(t, ':', 1), '') || '|' || (SELECT quantity_received FROM public.purchase_order_items WHERE id = '${L1B}');`),
+    RECEIVED_EDIT);
+  // 4c. Luna HIGH: a bill created after the save starts (here by a trigger during the inner save, standing in for a
+  // create_vendor_bill that commits while the save waits for the PO lock) still locks the lines.
+  assert.equal(attempt(USERS.rep, `EXECUTE $x$CREATE FUNCTION public.poeb_race_bill() RETURNS trigger LANGUAGE plpgsql
+      SECURITY DEFINER SET search_path = public, pg_temp AS $f$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM public.vendor_bills WHERE purchase_order_id = NEW.purchase_order_id) THEN
+          INSERT INTO public.vendor_bills (vendor_id, purchase_order_id, bill_number, bill_date, due_date, subtotal_cents, total_cents)
+            VALUES ('${VENDOR}', NEW.purchase_order_id, 'POEB-RACE', CURRENT_DATE, CURRENT_DATE + 30, 1000, 1000);
+        END IF; RETURN NEW; END $f$$x$;
+    EXECUTE $x$CREATE TRIGGER poeb_race AFTER UPDATE ON public.purchase_order_items FOR EACH ROW EXECUTE FUNCTION public.poeb_race_bill()$x$;
+    ${refuse(`r := ${saveAs(USERS.rep, PO4, 'submitted', [[L4A, 1, 0]])};`)} v := split_part(t, ':', 1) || '|' || ${total(PO4)};`), `${LOCKED}|10000`);
+  console.log('[edit PO] billed PO: every line change refused for admin and rep (cut, raise, add, drop, cost, mixed, tiny), same text, no amounts; notes edits save; $0 bill counts; a bill created mid-save counts; no bill / voided bill: edits save');
   // 5. A replay of a saved notes edit returns the receipt, is not refused, and writes no second activity entry.
   const k = key();
   const keyed = () => save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0]], 'replayed').replace(/'po-edit-bills-\d+'\)$/, `'${k}')`);

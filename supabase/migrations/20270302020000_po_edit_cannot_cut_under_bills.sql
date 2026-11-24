@@ -5,7 +5,7 @@
 --    unreceived quantity, drop a line, or an admin's lower cost on an unreceived line). Mason, 2026-11-24, after three
 --    Sol rounds found leaks in a rep/admin split: one rule for everyone. Once a PO has an active (not deleted, not
 --    voided) vendor bill, an Edit PO save that changes its lines at all (adds or removes a line, or changes a line's
---    quantity, product, unit or cost) is refused (PO_BILLED_LINES_LOCKED); header edits (notes, dates, status) still
+--    quantity, product, unit, cost or received quantity) is refused (PO_BILLED_LINES_LOCKED); header edits (notes, dates, status) still
 --    save. To change lines, void the bill, edit, then enter the bill again (create_vendor_bill applies its limits);
 --    a cost correction goes through set_purchase_order_item_costs, which keeps the 5% rule. The refusal depends only
 --    on the caller's own edit and whether a bill exists, never on a role, cost or bill amount, and names no amount.
@@ -18,7 +18,8 @@
 -- Same signature, owner and grants; the body is the 20261021140000 wrapper (md5-pinned below) plus the check around
 -- the unchanged inner save. Lock order: the advisory lock first (as before); the inner save locks the lines and the PO;
 -- only when a billed PO's lines changed is the PO row locked again (already held then) before bills are re-read, which
--- serializes with create_vendor_bill (it locks the PO). A replay changes no line, so it takes no extra lock. No data changes (live 2026-11-22: no vendor bill is linked to a PO).
+-- serializes with create_vendor_bill (it locks the PO). A replay changes no line, so it takes no extra lock. Any change
+-- to a line's quantity ordered or received, product, unit or cost counts, however small. No data changes (live 2026-11-22: no vendor bill is linked to a PO).
 --
 -- idempotency-body-check: exempt -- the key, fingerprint and receipt stay in the unchanged inner save; a refused save
 --   rolls back with its receipt, and a replay changes no line so it is never refused.
@@ -74,13 +75,14 @@ BEGIN
       INTO v_items
       FROM jsonb_array_elements(p_items) WITH ORDINALITY AS t(e, o);
   END IF;
-  -- Mason, 2026-11-24: once a PO has an active vendor bill, Edit PO cannot change its lines, for anyone. Snapshot them
-  -- only for such a PO (one indexed EXISTS otherwise). Every other writer of a PO's lines takes the advisory lock above.
-  IF p_po_id IS NOT NULL AND EXISTS (
-       SELECT 1 FROM public.vendor_bills vb
-        WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided') THEN
+  -- Mason, 2026-11-24: once a PO has an active vendor bill, Edit PO cannot change its lines, for anyone. Snapshot an
+  -- existing PO's lines every time (not only when a bill exists now): a bill created while this save waits for the PO
+  -- lock is still caught by the check after the save. Every other writer of a PO's lines takes the advisory lock above;
+  -- the snapshot is never returned, and the inner save checks the caller before anything is compared or refused.
+  IF p_po_id IS NOT NULL THEN
     SELECT COALESCE(jsonb_object_agg(poi.id::text, jsonb_build_object(
-             'q', poi.quantity_ordered, 'p', poi.product_id, 'u', poi.unit_size, 'c', poi.unit_cost)), '{}'::jsonb)
+             'q', poi.quantity_ordered, 'r', poi.quantity_received, 'p', poi.product_id, 'u', poi.unit_size,
+             'c', poi.unit_cost)), '{}'::jsonb)
       INTO v_old_lines
       FROM public.purchase_order_items poi WHERE poi.purchase_order_id = p_po_id;
   END IF;
@@ -94,13 +96,12 @@ BEGIN
          SELECT 1 FROM jsonb_each(v_old_lines) o
            LEFT JOIN public.purchase_order_items poi ON poi.id = o.key::uuid AND poi.purchase_order_id = p_po_id
           WHERE poi.id IS NULL
-             -- shortcut: a change under 0.000001 is ignored, so a screen's float round-trip of a stored quantity never
-             -- refuses a notes edit.
-             OR abs(poi.quantity_ordered - (o.value->>'q')::numeric) > 0.000001
+             OR poi.quantity_ordered IS DISTINCT FROM (o.value->>'q')::numeric
+             OR poi.quantity_received IS DISTINCT FROM (o.value->>'r')::numeric
              OR poi.product_id IS DISTINCT FROM (o.value->>'p')::uuid
              OR poi.unit_size IS DISTINCT FROM (o.value->>'u')
              OR poi.unit_cost IS DISTINCT FROM (o.value->>'c')::numeric)) THEN
-    -- The bill may have been voided while the save waited: re-check it under the PO row lock create_vendor_bill takes.
+    -- Read the bills under the PO row lock create_vendor_bill takes: one created or voided while the save waited counts.
     PERFORM 1 FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
     IF EXISTS (SELECT 1 FROM public.vendor_bills vb
                 WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided') THEN

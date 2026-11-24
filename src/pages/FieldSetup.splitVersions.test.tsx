@@ -106,8 +106,8 @@ describe('Field Setup — FP-1 split versions', () => {
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Field updated'));
     expect(calls('set_field_billing_split')).toHaveLength(0);
-    // save_field gets today's split back exactly as loaded, so it writes no version (0% payers are not sent).
-    expect(calls('save_field')[0].p_billing_defaults).toEqual([{ customer_id: 'customer-1', split_pct: '100.000000' }]);
+    // null = field details only: save_field leaves the split (and its 0% payer) and the notes alone.
+    expect(calls('save_field')[0].p_billing_defaults).toBeNull();
   });
 
   it('a notes-only save sends notes and no split', async () => {

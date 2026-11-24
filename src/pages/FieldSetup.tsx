@@ -54,6 +54,7 @@ import { loadFieldSplit, type SplitVersion } from '../lib/fieldSplitLoad';
 import {
   clearSplitSaveKey,
   evenMicroShares,
+  MICRO_100,
   microToPctText,
   pctTextToMicro,
   splitProblem,
@@ -654,13 +655,9 @@ function FieldSetupPage() {
       const fieldPayload = fieldPayloadOf(field);
       const detailsChanged = isNew || JSON.stringify(fieldPayload) !== JSON.stringify(fieldPayloadOf(loadedFieldRef.current ?? {}));
 
-      // The split is saved by set_field_billing_split below, so save_field must leave it alone. A new field sends
-      // none; an existing one sends today's split back as loaded (product shares above 0%, exact to the
-      // micro-percent), which save_field reads as "no split change" and writes no version.
-      // shortcut: echo until save_field takes a "leave the split alone" argument; then send that instead.
-      const billingPayload = isNew ? [] : (inForceSplit?.payers ?? [])
-        .filter((p) => p.product_share_micro_pct > 0)
-        .map((p) => ({ customer_id: p.customer_id, split_pct: (p.product_share_micro_pct / 1_000_000).toFixed(6) }));
+      // The split and notes are saved by set_field_billing_split below: save_field gets none (null = field details
+      // only, leave the split and notes alone). Never '[]' on an existing field: that clears the split to the owner.
+      const billingPayload = isNew ? [] : null;
 
       // save_field checks only the key. A new field keeps one key until confirmed, so an edited retry after a lost
       // reply replays the field it already created; an edit to an existing field gets a key per exact payload.
@@ -678,7 +675,7 @@ function FieldSetupPage() {
         ({ data, error } = await supabase.rpc('save_field', {
           p_field_id: (isNew ? null : id) as string,
           p_field_payload: fieldPayload,
-          p_billing_defaults: billingPayload,
+          p_billing_defaults: billingPayload as unknown as Json,
           p_performed_by: profile!.id,
           p_idempotency_key: saveFieldIdem.getKeyFor(saveScope),
         }));
@@ -1454,7 +1451,7 @@ function FieldSetupPage() {
                       const total = side === 'product' ? productTotal : appTotal;
                       return (
                         <div key={side} className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium ${
-                          total === 100_000_000 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                          total === MICRO_100 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
                         }`}>
                           <span>{side === 'product' ? 'Product total' : 'Application total'}</span>
                           <span>{microToPctText(total)}%</span>

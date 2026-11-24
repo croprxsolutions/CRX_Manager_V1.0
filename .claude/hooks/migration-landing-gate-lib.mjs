@@ -443,8 +443,13 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
       }
     } catch { /* an unreadable directory holds no proof — keep looking */ }
   }
+  // A proof counts only for the review it records: a main review, under the release-only rules only for the
+  // release PR. A proof that records no review kind is refused (Sol r8 on #2226; Sol r1 HIGH 3 and LOW).
+  const reviewFits = (data) => data?.review_ref === "origin/main"
+    && (data?.release_rules === false || (data?.release_rules === true && headRef === "release/next"));
   // A carried repeat skip is for staging PRs only, never a live apply, whatever the outer mode (Sol, 2026-11-23).
-  const proven = proofs.some((data) => proofValid(data, head, now, baseSha, APPLY_SOL_PROOF_MAX_AGE_MS)
+  const proven = proofs.some((data) => reviewFits(data)
+    && proofValid(data, head, now, baseSha, APPLY_SOL_PROOF_MAX_AGE_MS)
     && !usesCarriedSkip(data)
     && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead: String(data.head_sha).toLowerCase() === String(head).toLowerCase(), proofs, nowMs: now }));
   if (!proven) {

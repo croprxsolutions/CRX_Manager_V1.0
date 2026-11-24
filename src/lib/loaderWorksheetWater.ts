@@ -7,7 +7,7 @@
  * (prints a dash) and the note says why. Nothing is guessed from the unit.
  */
 import { toGallonOrLbEquivalent } from './chemCalculator';
-import type { LoaderLoadProduct, LoaderProductInput } from './loaderWorksheet';
+import type { LoaderLoad, LoaderLoadProduct, LoaderProductInput } from './loaderWorksheet';
 import type { ProductForm } from '../types';
 
 export interface LoaderWater {
@@ -102,4 +102,20 @@ export function fmtLoaderGallons(gal: number): string {
   const rest = Math.round((totalOz - whole * 128) * 100) / 100;
   if (rest === 0) return `${whole} GL`;
   return whole === 0 ? `${rest} FL OZ` : `${whole} GL ${rest} FL OZ`;
+}
+
+/**
+ * Water for one tank on the job page. The page lists linked lines only and carries no liquid/dry form;
+ * the weights read (`readLoad`, the same tank of the same plan) has every job line and each product's form.
+ * Unlinked lines count as unknown, as on the PDF. Without the read, water is not known (Codex P2, #2466).
+ */
+export function loaderPanelTankWater(load: LoaderLoad, inputs: readonly Pick<LoaderProductInput, 'total_quantity'>[], readLoad: LoaderLoad | null): LoaderWater {
+  // Only a real product id is looked up: unlinked lines must never share (and borrow) one another's form.
+  const formById = new Map((readLoad?.products ?? []).filter((product) => product.product_id)
+    .map((product) => [product.product_id as string, product.product_form ?? null]));
+  const linked = load.products.map((product) => ({ ...product,
+    product_form: product.product_form ?? (product.product_id ? formById.get(product.product_id) ?? null : null) }));
+  const unlinked = (readLoad?.products ?? []).filter((product) => !product.product_id).map((product) => ({ ...product, product_form: null }));
+  const water = loaderTankWater(load.volume, [...linked, ...unlinked], [...inputs, ...unlinked.map(() => ({ total_quantity: 0 }))]);
+  return readLoad ? water : { ...water, water_gal: null };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeLoaderWorksheet } from './loaderWorksheet';
-import { fmtLoaderGallons, fmtLoaderWater, loaderWater, loaderWaterNotes } from './loaderWorksheetWater';
+import { fmtLoaderGallons, fmtLoaderWater, loaderPanelTankWater, loaderWater, loaderWaterNotes } from './loaderWorksheetWater';
 
 const p = (product_name: string, amount: number, unit: string, product_form: string | null = 'liquid') =>
   ({ product_name, amount, unit, product_form });
@@ -54,5 +54,26 @@ describe('fmtLoaderGallons', () => {
     expect(fmtLoaderGallons(300)).toBe('300 GL');
     expect(fmtLoaderGallons(0.5)).toBe('64 FL OZ');
     expect(fmtLoaderGallons(0)).toBe('0 GL');
+  });
+});
+
+describe('loaderPanelTankWater (job page)', () => {
+  const linked = { product_name: 'TEST Liquid', total_quantity: 2, unit: 'Gal', product_id: 'p1' };
+  const unlinked = { product_name: 'TEST Unlinked', total_quantity: 5, unit: 'Gal', product_id: null };
+  const plan = (products: object[]) => computeLoaderWorksheet({ total_acres: 10, carrier_rate_gpa: 10, tank_capacity: 100, products: products as never });
+  const shown = plan([linked]);
+  const read = (products: object[]) => plan(products.map((x) => ({ ...x, product_form: 'liquid' }))).loads[0];
+
+  it('uses the read for each product form', () => {
+    expect(loaderPanelTankWater(shown.loads[0], [linked], read([linked]))).toMatchObject({ water_gal: 98, unknown: [] });
+  });
+
+  it('withholds water when the job also has an unlinked line (Codex P2)', () => {
+    const w = loaderPanelTankWater(shown.loads[0], [linked], read([linked, unlinked]));
+    expect(w).toMatchObject({ water_gal: null, unknown: ['TEST Unlinked'] });
+  });
+
+  it('withholds water until the read is there, even with no products listed', () => {
+    expect(loaderPanelTankWater(plan([]).loads[0], [], null)).toMatchObject({ water_gal: null, finished_gal: 100 });
   });
 });

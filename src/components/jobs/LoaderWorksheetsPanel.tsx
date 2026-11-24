@@ -10,7 +10,7 @@ import {
   type LoaderLoadBalanceMode,
   type LoaderProductInput,
 } from '../../lib/loaderWorksheet';
-import { fmtLoaderGallons, fmtLoaderWater, loaderTankWater, loaderWaterNotes, type LoaderWater } from '../../lib/loaderWorksheetWater';
+import { fmtLoaderGallons, fmtLoaderWater, loaderPanelTankWater, loaderWaterNotes, type LoaderWater } from '../../lib/loaderWorksheetWater';
 import {
   condensedLoaderLoadLabel,
   condenseLoaderLoads,
@@ -207,14 +207,9 @@ export function LoaderWorksheetsPanel({
     ? selectedLoaderWeights(weightsRead, selectedWorksheet, selectedComputed)
     : null;
   const weightsShown = selectedWeights && 'weights' in selectedWeights ? selectedWeights : null;
-  // The job page's lines carry no liquid/dry form; the weights read does (by product), when it has loaded.
-  // Only a real product id is looked up: unlinked lines must never share (and borrow) one another's form.
-  const formById = new Map((weightsShown?.ws.loads[0]?.products ?? [])
-    .filter((product) => product.product_id).map((product) => [product.product_id as string, product.product_form ?? null]));
-  const formOf = (product: LoaderLoad['products'][number]) =>
-    product.product_form ?? (product.product_id ? formById.get(product.product_id) ?? null : null);
-  const tankWater = (load: LoaderLoad): LoaderWater => loaderTankWater(load.volume,
-    load.products.map((product) => ({ ...product, product_form: formOf(product) })), products);
+  // Forms and unlinked lines come from the weights read of the same tank; without it water is not known.
+  const tankWater = (load: LoaderLoad): LoaderWater => loaderPanelTankWater(load, products,
+    weightsShown?.ws.loads[selectedComputed?.loads.indexOf(load) ?? -1] ?? null);
   const waterCell = (load: LoaderLoad, each = '') => {
     const water = tankWater(load);
     return <>{fmtLoaderWater(water)}{water.water_gal === null ? '' : each}{water.over && <span className="block text-xs font-medium text-amber-700">Products exceed finished gallons</span>}</>;
@@ -227,7 +222,7 @@ export function LoaderWorksheetsPanel({
   } : null;
   // Before the product details load, liquid/dry is not read yet: say so, not "set it on the product".
   // Other reasons (a missing amount, a unit with no gallon size) still show while loading.
-  const waterNotes = !waterWhy ? [] : !weightsShown && waterWhy.unknown.length > 0
+  const waterNotes = !waterWhy ? [] : !weightsShown
     ? ['Water to add shows once the product details load.', ...loaderWaterNotes({ ...waterWhy, unknown: [] })]
     : loaderWaterNotes(waterWhy);
   const selectedLoadsDone = selectedComputed

@@ -4505,6 +4505,7 @@ export type Database = {
           notes: string | null
           price_override_cents: number | null
           pricing_note: string | null
+          source_split_version_id: string | null
           split_pct: number
           updated_at: string
         }
@@ -4517,6 +4518,7 @@ export type Database = {
           notes?: string | null
           price_override_cents?: number | null
           pricing_note?: string | null
+          source_split_version_id?: string | null
           split_pct: number
           updated_at?: string
         }
@@ -4529,10 +4531,18 @@ export type Database = {
           notes?: string | null
           price_override_cents?: number | null
           pricing_note?: string | null
+          source_split_version_id?: string | null
           split_pct?: number
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "field_billing_defaults_source_split_version_id_fkey"
+            columns: ["source_split_version_id"]
+            isOneToOne: false
+            referencedRelation: "field_billing_split_versions"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "field_billing_defaults_customer_id_fkey"
             columns: ["customer_id"]
@@ -4542,6 +4552,99 @@ export type Database = {
           },
           {
             foreignKeyName: "field_billing_defaults_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "fields"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      field_billing_split_payers: {
+        Row: {
+          application_share_micro_pct: number
+          created_at: string
+          customer_id: string
+          id: string
+          product_share_micro_pct: number
+          version_id: string
+        }
+        Insert: {
+          application_share_micro_pct: number
+          created_at?: string
+          customer_id: string
+          id?: string
+          product_share_micro_pct: number
+          version_id: string
+        }
+        Update: {
+          application_share_micro_pct?: number
+          created_at?: string
+          customer_id?: string
+          id?: string
+          product_share_micro_pct?: number
+          version_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "field_billing_split_payers_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "field_billing_split_payers_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "field_billing_split_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      field_billing_split_versions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          created_txid: unknown
+          effective_from: string
+          field_id: string
+          history_known: boolean
+          id: string
+          reason: string | null
+          version_number: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          created_txid?: unknown
+          effective_from: string
+          field_id: string
+          history_known?: boolean
+          id?: string
+          reason?: string | null
+          version_number: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          created_txid?: unknown
+          effective_from?: string
+          field_id?: string
+          history_known?: boolean
+          id?: string
+          reason?: string | null
+          version_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "field_billing_split_versions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "field_billing_split_versions_field_id_fkey"
             columns: ["field_id"]
             isOneToOne: false
             referencedRelation: "fields"
@@ -4636,6 +4739,61 @@ export type Database = {
             columns: ["field_id"]
             isOneToOne: false
             referencedRelation: "fields"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      field_payer_notes: {
+        Row: {
+          created_at: string
+          customer_id: string
+          field_id: string
+          id: string
+          notes: string | null
+          pricing_note: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          field_id: string
+          id?: string
+          notes?: string | null
+          pricing_note?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          field_id?: string
+          id?: string
+          notes?: string | null
+          pricing_note?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "field_payer_notes_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "field_payer_notes_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "fields"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "field_payer_notes_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -19318,6 +19476,18 @@ export type Database = {
         }
         Returns: number
       }
+      field_split_as_of: {
+        Args: { p_field_ids: string[]; p_on_date: string }
+        Returns: {
+          effective_from: string
+          field_id: string
+          has_split: boolean
+          history_known: boolean
+          payers: Json
+          version_id: string
+          version_number: number
+        }[]
+      }
       fill_tote_from_bulk: {
         Args: {
           p_expected: Json
@@ -21634,6 +21804,17 @@ export type Database = {
           p_idempotency_key?: string
           p_label_draft_id?: string
           p_reason: string
+        }
+        Returns: Json
+      }
+      set_field_billing_split: {
+        Args: {
+          p_effective_from: string
+          p_field_id: string
+          p_idempotency_key?: string
+          p_notes?: Json
+          p_payers: Json
+          p_reason?: string
         }
         Returns: Json
       }

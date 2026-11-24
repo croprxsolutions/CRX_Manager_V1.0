@@ -349,6 +349,9 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // Same rename for start_job; 20261217100000 (KI-73 part C) re-emits it only to end whole-job access with
   // the job. Changing the literal would orphan existing receipts.
   _start_job_replay_impl_20261015: ['start_job'],
+  // Batch 4d (20261114200000) renamed the save_field body; field application FP-1 (20270303120000) re-emits it to
+  // save splits through the versioned writer and keeps the public 'save_field' literal the wrapper's receipts use.
+  _save_field_replay_impl_20261015: ['save_field'],
   // Direct EXECUTE is revoked (postgres-only; service_role on the cancel layer, pinned by batch 4c). Both were renamed
   // from the public cancel_purchase_order and create_vendor_bill bodies (ALTER FUNCTION ... RENAME TO), so they kept the
   // public literal their wrapper binds. 20270103180000 (KI-142) re-emits them only to refuse a closed PO and to bill one;

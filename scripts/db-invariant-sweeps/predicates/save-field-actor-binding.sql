@@ -5,11 +5,14 @@
 -- review and an intentional fingerprint update.
 -- Two accepted shapes: that body as public.save_field itself (before KI-10
 -- batch 4d), or that body renamed unchanged to _save_field_replay_impl_20261015
--- behind the exact reviewed batch 4d wrapper (20261114200000, live 2026-11-06).
+-- behind the exact reviewed batch 4d wrapper (20261114200000, live 2026-11-06),
+-- or that wrapper in front of the field application FP-1 impl body
+-- (20270303120000_field_split_versions: splits saved through the versioned writer).
 
 WITH pins AS (
   SELECT '1db4e4fe60469c50dcb4ae5ae892fb0781919422f8624cc3626368195f1850cf'::text AS reviewed_body,
-         '54bc2ac100ec93402ce3990b387b8b7f2bd2549e7746dfe2d72162ceaba345c7'::text AS batch4d_wrapper
+         '54bc2ac100ec93402ce3990b387b8b7f2bd2549e7746dfe2d72162ceaba345c7'::text AS batch4d_wrapper,
+         'ce4489f4990be0dcde75a70f26ddd6589b8baf1d1ad9ed8ca992a1278e503c17'::text AS fp1_impl
 ), installed AS (
   SELECT p.proname, encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') AS body_sha
   FROM pg_proc p
@@ -26,5 +29,6 @@ WHERE NOT EXISTS (
 )
 AND NOT (
   EXISTS (SELECT 1 FROM installed WHERE proname = 'save_field' AND body_sha = pins.batch4d_wrapper)
-  AND EXISTS (SELECT 1 FROM installed WHERE proname = '_save_field_replay_impl_20261015' AND body_sha = pins.reviewed_body)
+  AND EXISTS (SELECT 1 FROM installed WHERE proname = '_save_field_replay_impl_20261015'
+              AND body_sha IN (pins.reviewed_body, pins.fp1_impl))
 );

@@ -40,6 +40,16 @@ BEGIN
      IS DISTINCT FROM '6f73d91a1ba621ec6db56a3cb606d948' THEN
     RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_PREFLIGHT: save_field_app_invoice is not the reviewed body (missing, drifted or already replaced)';
   END IF;
+  -- The check below trusts field rows, and until the revoke below anyone signed in could write them. An editable
+  -- job- or blend-made invoice carrying field rows would pass it (live 2026-11-23: none); stop for review instead.
+  IF EXISTS (SELECT 1 FROM public.invoices i
+              WHERE i.deleted_at IS NULL AND i.status IN ('draft', 'unposted')
+                AND (i.job_id IS NOT NULL OR i.blend_ticket_id IS NOT NULL)
+                AND EXISTS (SELECT 1 FROM public.field_app_locations l
+                             WHERE l.invoice_id = i.id
+                                OR (i.invoice_group_id IS NOT NULL AND l.invoice_group_id = i.invoice_group_id))) THEN
+    RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_PREFLIGHT: an editable job- or blend-ticket invoice carries field rows; review them before applying';
+  END IF;
 END;
 $preflight$;
 

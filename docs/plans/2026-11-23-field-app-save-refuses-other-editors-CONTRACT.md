@@ -114,3 +114,7 @@ Database only; no screen change. One PR into `staging`.
 - `migration-drift-reviewer`: no drift. M1 (live order) is checked by the apply script. L1 (screen shows the
   `FIELD_APP_WRONG_EDITOR:` prefix) is cosmetic; the screen never sends these invoices. L2/L3 (a different refusal
   message for already-refused invoices; nothing written either way): accepted.
+- Luna round 2 HIGH: a field row written directly before the revoke lands would survive it. Live 2026-11-23 (read-only):
+  no invoice linked to a job or blend ticket carries field rows. The preflight now stops the apply, for review, if any
+  editable (draft/unposted) job- or blend-ticket invoice carries field rows at apply time; proof case added (a committed
+  forged row stops the apply with nothing changed).

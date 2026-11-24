@@ -450,6 +450,19 @@ async function main() {
   console.log('[before] a sales rep may also update and delete field rows and insert, update and delete their shares directly');
 
   stageText('candidate.sql', lf(CANDIDATE));
+  // A field row a sales rep wrote onto a job's invoices before the apply (committed) stops the apply for review.
+  psql(`BEGIN; ${asRep}CREATE TEMP TABLE j AS SELECT fwe.job() AS id;
+    SELECT public.transfer_job_to_invoice((SELECT id FROM j), auth.uid(), ${key('t')});
+    INSERT INTO public.field_app_locations (invoice_group_id, field_id, total_acres)
+      SELECT i.invoice_group_id, '${GJ}', 100 FROM invoices i WHERE i.job_id = (SELECT id FROM j) AND i.customer_id = '${A}';
+    COMMIT;`);
+  const stopped = apply('candidate.sql');
+  assert.notEqual(stopped.status, 0);
+  assert.match(stopped.output, /FIELD_APP_WRONG_EDITOR_PREFLIGHT: an editable job- or blend-ticket invoice carries field rows/);
+  assert.equal(body(), OLD_BODY, 'a stopped apply changes nothing');
+  raw(`DELETE FROM public.field_app_locations WHERE field_id = '${GJ}';
+    UPDATE public.invoices SET deleted_at = now() WHERE job_id IS NOT NULL AND deleted_at IS NULL;`);
+  console.log('[case] a field row written onto a job\'s invoices before the apply stops it at the preflight (nothing changed); removed');
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   assert.notEqual(body(), OLD_BODY);

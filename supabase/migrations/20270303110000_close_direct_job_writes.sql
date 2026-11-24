@@ -72,9 +72,8 @@ BEGIN
   END IF;
 
   -- The screens' replacement path must exist first: edit_jobs (20270203110000, PR A), callable by signed-in users.
-  IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-                  WHERE n.nspname = 'public' AND p.proname = 'edit_jobs'
-                    AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) THEN
+  IF to_regprocedure('public.edit_jobs(uuid[], jsonb, text, uuid, text)') IS NULL
+     OR NOT has_function_privilege('authenticated', to_regprocedure('public.edit_jobs(uuid[], jsonb, text, uuid, text)'), 'EXECUTE') THEN
     RAISE EXCEPTION 'PREFLIGHT_DIRECT_JOB_WRITES_DRIFT: public.edit_jobs is missing or not executable by authenticated; apply 20270203110000 first';
   END IF;
 

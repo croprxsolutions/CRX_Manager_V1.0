@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270302010000_save_job_refuses_changed_job.sql (contract:
+ * Real-schema proof for 20270302160000_save_job_refuses_changed_job.sql (contract:
  * docs/plans/2026-11-23-job-save-version-check-CONTRACT.md). Builds the checked-in baseline plus every
  * post-baseline migration BEFORE the candidate in a network-disabled PostgreSQL container
  * (scripts/smoke/undo-paths/harness.mjs), seeds a job, and:
@@ -34,7 +34,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, seed, ref, psql, scalar, attempt, asUser, refuse, claims, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270302010000_save_job_refuses_changed_job.sql';
+const CANDIDATE = '20270302160000_save_job_refuses_changed_job.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const { admin: ADMIN, rep: REP, driver: DRIVER, applicator: APPLICATOR } = USERS;
 const CHANGED = 'JOB_CHANGED_SINCE_LOADED: This job changed after you opened it. Nothing was saved. Reload the page to see the job as it is now, then make your edits again.';

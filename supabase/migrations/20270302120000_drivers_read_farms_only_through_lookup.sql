@@ -21,9 +21,10 @@
 --    than yesterday (before: "Unknown"); Mason decided drivers may see every farm's name (2026-11-21).
 --
 -- Go-live: Mason lifted the "apply only after #2165 is live in production" hold on 2026-11-24, so this ships in the
--- same release as the #2165 driver screens. A driver on an older app copy reads customers directly and would see
--- "Unknown customer" and no phone or address until they fully close and reopen the app; both drivers do that
--- before the production apply (Mason accepted the cached-app risk, 2026-11-22). No row changes.
+-- same release as the #2165 driver screens. This applies minutes before that release's app goes live, and the old
+-- screens read customers directly, so a driver sees "Unknown customer" and no phone or address until the new app is
+-- live AND they fully close and reopen it. Apply when no driver is on a route; once the app is live the office has
+-- both drivers reopen it (Mason accepted the cached-app risk, 2026-11-22). No row changes.
 --
 -- Recovery: fix forward (repair the helper, the list or the screens); the drivers' whole-row read stays closed.
 -- Restoring it (the 20261013220000 customers_select) would reopen the credit, prepay, terms and notes exposure and

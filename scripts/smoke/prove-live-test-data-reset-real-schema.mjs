@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270227150000_live_test_data_reset.sql (one-time live test-data reset, Mason 2026-11-23).
+ * Real-schema proof for 20270301100000_live_test_data_reset.sql (one-time live test-data reset, Mason 2026-11-23).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), then seeds:
@@ -32,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, claims, scalar, docker, USERS, ROOT, NAME } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270227150000_live_test_data_reset.sql';
+const CANDIDATE = '20270301100000_live_test_data_reset.sql';
 const RAW = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const flag = (n) => ['1', 'true'].includes(String(process.env[n] ?? '').toLowerCase());
 const KEEP = flag('KEEP_CONTAINER');
@@ -60,10 +60,10 @@ const boolConst = (name) => {
 };
 assert.equal(boolConst('c_clear_logs'), true, 'this proof covers the default sections (logs on)');
 assert.equal(boolConst('c_clear_team_notes_on_cleared'), false, 'this proof covers the default sections (team notes kept)');
-assert.equal(boolConst('c_clear_backup_snapshots'), false, 'this proof covers the default sections (backup snapshots kept)');
+assert.equal(boolConst('c_clear_backup_snapshots'), true, 'this proof covers the chosen sections (backup snapshots and runs cleared, Mason 2026-11-24)');
 const RECEIPTS = ['idempotency_keys', 'offline_action_receipts', 'retired_uncertain_requests'];
 const LOGS_ALL = ['email_log', 'integrity_alerts', 'failed_notifications', 'watchdog_flag_dismissals', 'watchdog_flags',
-  ...(boolConst('c_clear_receipts') ? RECEIPTS : [])];
+  ...(boolConst('c_clear_receipts') ? RECEIPTS : []), 'backup_snapshots', 'backup_runs'];
 const LOGS_FILTERED = { activity_feed: 'related_entity', notifications: 'related_entity', financial_audit_log: 'entity' };
 const PIN_QUERY = (/-- PIN QUERY BEGIN\n([\s\S]*?)-- PIN QUERY END/.exec(RAW)?.[1] ?? '').split('\n').map((l) => l.replace(/^-- ?/, '')).join('\n');
 assert.match(PIN_QUERY, /pg_control_system/, 'the PIN QUERY block is missing');

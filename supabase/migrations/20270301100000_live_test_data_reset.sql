@@ -76,7 +76,8 @@
 --                                  after it as a new one; a kept receipt only replays its old answer.
 --   c_clear_team_notes_on_cleared (default OFF) team notes linked to a cleared record, with their comments,
 --                                  attachments, tags and note_activity_log. Off: every note stays (its link dangles).
---   c_clear_backup_snapshots (default OFF) backup_snapshots rows of cleared tables. backup_runs always stay.
+--   c_clear_backup_snapshots (ON, Mason 2026-11-24) every backup_snapshots row (the app's weekly copies, which hold the
+--                                  test rows) and every backup_runs row; both are backed up first like everything else.
 -- Then: inventory quantity_available / quantity_prebooked / quantity_on_order to 0 and last_counted_at to NULL (rows
 -- kept); customers.prepay_balance_cents to 0; the six number sequences restarted so the next number is 0001.
 -- NUMBERING: ORD (order_number_seq), Q (quote_number_seq), INV / CS / MC / CM (invoice_number_seq, cs_, mc_,
@@ -108,7 +109,7 @@ DECLARE
   c_clear_logs constant boolean := true;
   c_clear_receipts constant boolean := false;
   c_clear_team_notes_on_cleared constant boolean := false;
-  c_clear_backup_snapshots constant boolean := false;
+  c_clear_backup_snapshots constant boolean := true;
 
   c_backup constant text := 'reset_backup_20261123';
   -- md5 of the sorted, comma-joined public table names this file classified (the proof checks it against the schema).
@@ -309,7 +310,8 @@ BEGIN
       jsonb_build_object('t', 'team_notes', 'w', 'linked_entity_id IN (SELECT id FROM pg_temp.reset_ids)'));
   END IF;
   IF c_clear_backup_snapshots THEN
-    v_plan := v_plan || jsonb_build_array(jsonb_build_object('t', 'backup_snapshots', 'w', format('table_name = ANY (%L::text[])', v_core)));
+    v_plan := v_plan || jsonb_build_array(jsonb_build_object('t', 'backup_snapshots', 'w', 'true'),
+      jsonb_build_object('t', 'backup_runs', 'w', 'true'));
   END IF;
   FOR r IN SELECT e->>'t' t, e->>'w' w FROM jsonb_array_elements(v_plan) e LOOP
     EXECUTE format('CREATE TABLE %I.%I AS SELECT * FROM public.%I WHERE %s', c_backup, r.t, r.t, r.w);

@@ -62,6 +62,15 @@ describe('sanitizeError', () => {
   ])('explains the parent refusal %s by name', (raw, expected) => {
     expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
   });
+  // M9 (20270301120000): the RAISE text of _edit / _delete_prepay_credit_replay_impl_20261015.
+  it('explains a locked prepayment check amount and an applied check without the raw token', () => {
+    const locked = sanitizeError({ message: "PREPAY_CHECK_AMOUNT_LOCKED: a prepayment check's amount cannot be edited; delete the whole check and enter it again" });
+    expect(locked).toContain('delete the whole check and enter it again');
+    expect(locked).not.toContain('PREPAY_CHECK_AMOUNT_LOCKED');
+    const applied = sanitizeError({ message: 'PREPAY_CHECK_APPLIED: part of this check was applied to an invoice; it cannot be deleted' });
+    expect(applied).toContain('applied to an invoice');
+    expect(applied).not.toContain('PREPAY_CHECK_APPLIED');
+  });
   it('explains an UNKNOWN_STORAGE_LOCATION refusal without the raw token (KI-85)', () => {
     const message = sanitizeError({ message: 'UNKNOWN_STORAGE_LOCATION: stock can be received only into Main Warehouse until stock transfers between warehouses exist' });
     expect(message).toContain('only into Main Warehouse');

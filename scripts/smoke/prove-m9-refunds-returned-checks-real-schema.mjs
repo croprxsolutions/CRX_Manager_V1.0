@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Real-schema proof for M9 (refunds paid outside CRX, prepay balance check, returned checks):
- * 20270301090000_m9_refunds_and_returned_checks.sql. Design: docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md.
+ * 20270301120000_m9_refunds_and_returned_checks.sql. Design: docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md.
  * Written first (stage 1: every case failed because the functions did not exist, with setup passing).
  *
  * Container setup and replay copied from prove-month-close-payments-recheck-real-schema.mjs, replaying EVERY
@@ -79,7 +79,7 @@ const REUSE = process.env.CRX_PROVER_CONTAINER || null;
 const NAME = REUSE ?? `crx-m9-${process.pid}-${Date.now().toString(36)}`;
 const DB = 'postgres';
 const KEEP = REUSE !== null || process.env.CRX_PROVER_KEEP_CONTAINER === '1' || process.env.CRX_PROVER_REPLAY_ONLY === '1';
-const M9 = path.join(ROOT, 'supabase', 'migrations', '20270301090000_m9_refunds_and_returned_checks.sql');
+const M9 = path.join(ROOT, 'supabase', 'migrations', '20270301120000_m9_refunds_and_returned_checks.sql');
 // Marks the containers this script creates; reuse mode refuses any other container.
 const LABEL = 'crx.prover.m9-refunds-returned-checks';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';

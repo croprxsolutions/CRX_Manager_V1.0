@@ -1,5 +1,5 @@
 -- Written 2026-11-23. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270301090000_m9_refunds_and_returned_checks.md.
+-- docs/reference/migrations.d/20270301120000_m9_refunds_and_returned_checks.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (M9, billing plan 4 Nov / audit 1.3; design docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md):

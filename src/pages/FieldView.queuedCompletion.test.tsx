@@ -17,6 +17,7 @@ const H = vi.hoisted(() => ({
   online: false,
   queued: new Set<string>(),
   queueAction: vi.fn(),
+  listLoads: 0,
 }));
 
 const SAVED_TEXT = 'Completion saved on this phone — will send when signal returns';
@@ -45,7 +46,10 @@ vi.mock('../lib/db', async () => {
     ...actual,
     supabase: {
       from: () => reply(),
-      rpc: (name: string) => reply(name === 'get_dispatched_list' ? DISPATCHED : []),
+      rpc: (name: string) => {
+        if (name === 'get_dispatched_list') H.listLoads += 1;
+        return reply(name === 'get_dispatched_list' ? DISPATCHED : []);
+      },
     },
   };
 });
@@ -146,5 +150,30 @@ describe('FieldView: a completion saved offline', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(await screen.findByRole('button', { name: 'Complete Job' })).toBeTruthy();
     expect(screen.queryByText(SAVED_TEXT)).toBeNull();
+  });
+
+  it('waits for signal before reloading the list after a saved completion leaves the queue', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    H.queued = new Set(['job-1']);
+    await renderFieldView();
+    const loadsAtStart = H.listLoads;
+
+    // Sent during a brief reconnect, then signal dropped again: no reload that would fail and blank the list.
+    H.queued = new Set();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(H.listLoads).toBe(loadsAtStart);
+    expect(screen.getByText('J-100')).toBeTruthy();
+  });
+
+  it('reloads the list after a saved completion leaves the queue while online', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    H.online = true;
+    H.queued = new Set(['job-1']);
+    await renderFieldView();
+    const loadsAtStart = H.listLoads;
+
+    H.queued = new Set();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    await waitFor(() => expect(H.listLoads).toBeGreaterThan(loadsAtStart));
   });
 });

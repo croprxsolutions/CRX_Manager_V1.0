@@ -285,13 +285,18 @@ export default function FieldView() {
   useEffect(() => { fetchCards(); }, [fetchCards]);
 
   // A saved completion left the queue (sent, needs attention, or discarded): reload so a
-  // sent one shows the job as done instead of offering Complete again.
+  // sent one shows the job as done instead of offering Complete again. Wait for signal:
+  // a reload that fails offline would blank the whole job list.
   const prevQueuedJobIds = useRef(queuedJobIds);
+  const reloadAfterSend = useRef(false);
   useEffect(() => {
-    const left = [...prevQueuedJobIds.current].some((id) => !queuedJobIds.has(id));
+    if ([...prevQueuedJobIds.current].some((id) => !queuedJobIds.has(id))) reloadAfterSend.current = true;
     prevQueuedJobIds.current = queuedJobIds;
-    if (left) void fetchCards();
-  }, [queuedJobIds, fetchCards]);
+    if (reloadAfterSend.current && isOnline) {
+      reloadAfterSend.current = false;
+      void fetchCards();
+    }
+  }, [queuedJobIds, fetchCards, isOnline]);
 
   // --- Map geometry for the visible job locations (best-effort) ---------------------
   useEffect(() => {

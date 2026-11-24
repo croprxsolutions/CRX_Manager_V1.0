@@ -409,11 +409,14 @@ export async function getQueuedJobCompletionIds(currentUserId: string | null): P
   const queued = new Set<string>();
   if (!currentUserId) return queued;
   for (const action of await getPendingActions()) {
-    if (action.operation !== 'complete_job' || !action.entityId) continue;
+    if (action.operation !== 'complete_job') continue;
+    // Older saved rows carry the job only in params, as prepareLegacyQueuedAction reads it.
+    const jobId = action.entityId ?? action.params.p_job_id;
+    if (typeof jobId !== 'string' || jobId.length === 0) continue;
     if (getActionOwnerUserId(action) !== currentUserId) continue;
     if (action.status === 'needs_attention' || action.status === 'office_resolved') continue;
     if (action.retryCount >= OFFLINE_MAX_RETRIES) continue;
-    queued.add(action.entityId);
+    queued.add(jobId);
   }
   return queued;
 }

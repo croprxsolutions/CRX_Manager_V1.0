@@ -471,6 +471,25 @@ describe('getQueuedJobCompletionIds', () => {
     expect([...await getQueuedJobCompletionIds(null)]).toEqual([]);
   });
 
+  it('counts an older saved completion that carries the job only in params', async () => {
+    await getPendingActions(); // create the current store
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open('crx_offline_queue');
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    const { entityId: _omit, ...legacyRow } = completeJob('job-legacy');
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('pending_actions', 'readwrite');
+      tx.objectStore('pending_actions').add(legacyRow);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+
+    expect(await getQueuedJobCompletionIds('user-1')).toEqual(new Set(['job-legacy']));
+  });
+
   it('drops a completion once it is removed from the queue (sent or discarded)', async () => {
     const id = await queueAction(completeJob('job-1'));
     expect(await getQueuedJobCompletionIds('user-1')).toEqual(new Set(['job-1']));

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270301210000_po_edit_cannot_cut_under_bills.sql (Mason, 2026-11-23, Taha's #2266 questions:
+ * Real-schema proof for 20270302020000_po_edit_cannot_cut_under_bills.sql (Mason, 2026-11-23, Taha's #2266 questions:
  * "The 5% rule also applies when Edit PO lowers a quantity, and the exception covers bills that went over because a
  * receipt was reversed").
  *
@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, attempt, asUser, refuse, id, USERS, ROOT, NAME, docker, psql, scalar, claims } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270301210000_po_edit_cannot_cut_under_bills.sql';
+const CANDIDATE = '20270302020000_po_edit_cannot_cut_under_bills.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });

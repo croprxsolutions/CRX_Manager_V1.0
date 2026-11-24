@@ -123,12 +123,13 @@ BEGIN
   IF p_order_id IS NULL THEN
     RETURN 0;
   END IF;
-  v_base := public._order_commission_base_20270304(p_order_id);
-
   -- Two passes: decide without locks (most passes change nothing and take none), then lock only the rows to move and
   -- decide again, so a payout that batched one meanwhile keeps it. Locking every row of the sale up front could
   -- deadlock two transactions that each already hold a different row of it (Luna MED).
   LOOP
+    -- Read again after the lock: a transaction that changed another payer's discount on this sale and moved these rows
+    -- first has committed by then, so its discount is in the base (Luna HIGH, round 5).
+    v_base := public._order_commission_base_20270304(p_order_id);
     SELECT array_agg(c.id ORDER BY c.id), array_agg(c.split_percentage ORDER BY c.id), count(*), sum(c.split_percentage)
       INTO v_ids, v_pcts, v_eligible, v_split_total
       FROM commissions c

@@ -74,6 +74,22 @@ export function dropTodaySnapshot(screen: string, userId: string | null | undefi
   }
 }
 
+/** Removes every saved copy on this device (sign-out): gate codes and phone numbers must not outlive the session. */
+export function dropAllSnapshots(): void {
+  const store = storage();
+  if (!store) return;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i);
+      if (key?.startsWith(PREFIX)) keys.push(key);
+    }
+    keys.forEach((key) => store.removeItem(key));
+  } catch {
+    // Unreadable store: nothing the app could show from it either.
+  }
+}
+
 /** "8:14 AM": the time a saved copy was loaded, for the no-signal banner. */
 function snapshotTimeLabel(savedAt: string): string {
   const d = new Date(savedAt);

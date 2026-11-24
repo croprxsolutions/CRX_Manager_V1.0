@@ -225,6 +225,11 @@ function renderDeliveryPage(
     // Embed captured signature image
     try {
       const { width: sigWidth, height: sigHeight } = fitSignature(doc.getImageProperties(data.signature_image_data_url));
+      // Signature, its "Signed by" line and the footer must all fit; otherwise start it on a new page.
+      if (y + sigHeight + 25 > doc.internal.pageSize.getHeight() - 45) {
+        doc.addPage();
+        y = margin;
+      }
       doc.addImage(data.signature_image_data_url, 'PNG', margin, y, sigWidth, sigHeight);
       y += sigHeight + 5;
     } catch {

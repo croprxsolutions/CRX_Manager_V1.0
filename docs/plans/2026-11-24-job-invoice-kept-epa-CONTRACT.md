@@ -46,7 +46,9 @@ Smallest change, one migration `20270303100000_job_invoice_kept_epa.sql`, no scr
    chemical reads: `COALESCE(_job_kept_epa(p_job_id, jc.product_id), p.epa_registration)` instead of
    `p.epa_registration`. Owner, SECURITY DEFINER, search_path, grants, idempotency and the wrapper unchanged.
 3. `_capture_invoice_line_rup` re-emitted from 20270106110000 with one change in the per-line insert: the stored number
-   is `COALESCE(_normalize_epa_registration(_job_kept_epa(<line's invoice job_id>, product)), <catalog, as today>)`.
+   is the kept number (normalized) when the line's own number is the number the job kept for its product (as Create
+   Invoice writes it), else the catalog's, as today. A line added later under another number (Add product) keeps its
+   own capture (Sol round 1).
    When a kept number is used, its signal word is that registration's (else the product's), and the status is Yes when
    that registration says Yes (otherwise the status as today, so any Yes still wins). Brand captures and the re-capture
    rule are unchanged. "The product's own number" for a job's line is the number the product had when sprayed.
@@ -87,6 +89,8 @@ stored values, left as its own issue).
 3. Two-owner job (group branch): every owner's line shows A.
 4. Customer-supplied line on the same job shows A (no capture, as today).
 4b. Two products on one job each show their own kept number.
+4c. A line of the same product added to the job's invoice under today's number is captured under that number.
+4d. An open job invoice already written under the catalog's number stops the apply (preflight).
 5. When the kept row has no number (NULL, either kept state), then the line and capture show the catalog number B.
 6. When the invoice is not from a job, nothing changes: a line and its capture take the catalog number.
 7. The transfer body equals the pinned body with only the two EPA reads changed (billing logic untouched).
@@ -121,3 +125,13 @@ Out of scope: invoices made from blend tickets (a different path), REI/PHI (#232
 - Existing rows, authority, idempotency, wrapper: unchanged; live has no kept rows and no job invoices.
 - Ordering: the preflight pins 20270226150000's body, so the migration cannot apply before it.
 - The rest restate pre-existing behavior outside this change.
+
+## Sol round 1 (gpt-6.2-sol high, 2026-11-24): 1 HIGH, 3 MED, 1 LOW, all fixed
+
+- HIGH: an added line of the same product (Add product, under today's number) was captured under the job's kept number.
+  Fixed: the kept number is captured only when the line itself carries it. Prover case 4c.
+- MED: a job draft written before the apply under the catalog's number would post without the kept number. Fixed: the
+  preflight stops while any open job invoice has a line whose number is not the job's kept number. Prover case 4d.
+- MED: a missing permission list (NULL) slipped through the pre/postflight permission comparison. Fixed: NULL fails.
+- MED: the prover could remove a reused container it did not create. Fixed: a reused container is never removed.
+- LOW: no added-line case. Fixed (4c).

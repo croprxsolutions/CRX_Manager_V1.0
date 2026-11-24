@@ -19,11 +19,13 @@
 --   2. _transfer_job_to_invoice_intent_impl_20260908 (re-emitted from 20270226150000, md5 pinned): both chemical reads
 --      (single invoice and owner group) take the kept number, else the catalog's as before. Nothing else changes.
 --   3. _capture_invoice_line_rup (re-emitted from 20270106110000, md5 pinned, live): a line on an invoice made from a
---      job stores the kept number (normalized as captures are) with that registration's signal word (else the
---      product's), and is Yes when that registration says Yes (any Yes still wins); a line with no kept number, and
---      every line of an invoice not made from a job, is captured exactly as before. Brand captures and the re-capture
---      rule are unchanged.
---   No row changes (live 2026-11-24: no kept rows, no job invoices). Owners, SECURITY DEFINER, search_path and grants of
+--      job whose own number is the number the job kept for its product (as Create Invoice writes it) stores that
+--      number (normalized as captures are) with that registration's signal word (else the product's), and is Yes when
+--      that registration says Yes (any Yes still wins). Every other line (no kept number, a line added under another
+--      number, an invoice not made from a job) is captured exactly as before. Brand captures and the re-capture rule
+--      are unchanged.
+--   No row changes (live 2026-11-24: no kept rows, no job invoices). The preflight stops if an open job invoice
+--   already has a line whose number differs from the job's kept number (it would post under the catalog's). Owners, SECURITY DEFINER, search_path and grants of
 --   both re-emitted functions are unchanged.
 --
 -- NOT CHANGED: generate_rup_sales_records (its own capture insert runs only for a line with no capture; the capture
@@ -52,13 +54,21 @@ BEGIN
     RAISE EXCEPTION 'JOB_INVOICE_KEPT_EPA_PREFLIGHT: the restricted-use capture body is not the reviewed one (20270106110000)';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid IN (v_transfer, v_capture)
-              AND NOT (p.prosecdef AND p.proowner = 'postgres'::regrole
+              AND NOT COALESCE(p.prosecdef AND p.proowner = 'postgres'::regrole
                        AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
-                       AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[])) THEN
+                       AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[], false)) THEN
     RAISE EXCEPTION 'JOB_INVOICE_KEPT_EPA_PREFLIGHT: an owner, setting or grant of the transfer or capture is not the reviewed one';
   END IF;
   IF to_regclass('public.job_product_epa') IS NULL OR to_regprocedure('public._normalize_epa_registration(text)') IS NULL THEN
     RAISE EXCEPTION 'JOB_INVOICE_KEPT_EPA_PREFLIGHT: job_product_epa or _normalize_epa_registration is missing';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.invoices i
+               JOIN public.invoice_items x ON x.invoice_id = i.id
+               JOIN public.job_product_epa k ON k.job_id = i.job_id AND k.product_id = x.product_id AND NOT k.not_recorded
+              WHERE i.status IN ('draft', 'unposted') AND i.deleted_at IS NULL
+                AND public._normalize_epa_registration(x.epa_registration)
+                    IS DISTINCT FROM public._normalize_epa_registration(k.epa_registration)) THEN
+    RAISE EXCEPTION 'JOB_INVOICE_KEPT_EPA_PREFLIGHT: an open job invoice has a line whose EPA number is not the job''s kept number; correct it first';
   END IF;
   IF to_regprocedure('public._job_kept_epa(uuid,uuid)') IS NOT NULL THEN
     RAISE EXCEPTION 'JOB_INVOICE_KEPT_EPA_PREFLIGHT: already applied';
@@ -912,8 +922,9 @@ BEGIN
   v_same_product := TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id;
   PERFORM public._epa_registration_lock(false);
   INSERT INTO public.invoice_line_rup_captures AS c (invoice_item_id, epa_registration, rup_status, signal_word, source)
-  -- #2341: a line of an invoice made from a job records the number the job kept for the product (k.n), with that
-  -- registration's signal word, and Yes when that registration says Yes; else exactly as before.
+  -- #2341: a line of an invoice made from a job that carries the number the job kept for its product (as Create
+  -- Invoice writes it) records that number (k.n), with that registration's signal word, and Yes when that
+  -- registration says Yes. Any other line (an added line under the current number, say) is captured exactly as before.
   SELECT NEW.id, COALESCE(k.n, f.epa_registration),
          CASE WHEN EXISTS (SELECT 1 FROM public.epa_registrations r WHERE r.epa_registration = k.n AND r.rup_status = 'yes')
               THEN 'yes' ELSE f.rup_status END,
@@ -923,7 +934,8 @@ BEGIN
          'save'
     FROM public._invoice_line_rup_facts(NEW.product_id, NEW.epa_registration) f
    CROSS JOIN LATERAL (SELECT public._normalize_epa_registration(public._job_kept_epa(
-           (SELECT i.job_id FROM public.invoices i WHERE i.id = NEW.invoice_id), NEW.product_id)) AS n) k
+           (SELECT i.job_id FROM public.invoices i WHERE i.id = NEW.invoice_id), NEW.product_id)) AS kn) kk
+   CROSS JOIN LATERAL (SELECT CASE WHEN kk.kn = public._normalize_epa_registration(NEW.epa_registration) THEN kk.kn END AS n) k
   ON CONFLICT (invoice_item_id) DO UPDATE
     SET epa_registration = EXCLUDED.epa_registration,
         -- a Yes always wins (Mason, 2026-11-10): a re-capture on the same product never turns a Yes back
@@ -938,15 +950,15 @@ BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '53ecf1279da3aa7ea1590f440c6eb225'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-          WHERE p.oid = 'public._capture_invoice_line_rup()'::regprocedure) IS DISTINCT FROM 'b17179c4050f12a74be549c3c628dc77' THEN
+          WHERE p.oid = 'public._capture_invoice_line_rup()'::regprocedure) IS DISTINCT FROM '263009a66a66952f30f9237d5dd3edc8' THEN
     RAISE EXCEPTION 'JOB_INVOICE_KEPT_EPA_POSTFLIGHT: a re-emitted body is not this file''s';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_proc p
               WHERE p.oid IN ('public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure,
                               'public._capture_invoice_line_rup()'::regprocedure)
-                AND NOT (p.prosecdef AND p.proowner = 'postgres'::regrole
+                AND NOT COALESCE(p.prosecdef AND p.proowner = 'postgres'::regrole
                          AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
-                         AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[])) THEN
+                         AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[], false)) THEN
     RAISE EXCEPTION 'JOB_INVOICE_KEPT_EPA_POSTFLIGHT: an owner, setting or grant changed';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a

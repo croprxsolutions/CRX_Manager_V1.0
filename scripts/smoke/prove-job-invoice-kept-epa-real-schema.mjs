@@ -338,6 +338,10 @@ function seed() {
       RETURN (SELECT format('%s/%s(%s,%s)', x.epa_registration, c.epa_registration, c.rup_status, COALESCE(c.signal_word, '-')) FROM invoice_items x
                 LEFT JOIN invoice_line_rup_captures c ON c.invoice_item_id = x.id WHERE x.id = v_x);
     END $f$;
+    -- Add product on the job's invoice: one more line of p_product, number left blank (filled from today's catalog).
+    CREATE FUNCTION kx.add_line(p_job uuid, p_product uuid) RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $f$
+      INSERT INTO invoice_items (invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, cost_cents, sort_order)
+      SELECT i.id, p_product, 'added', 1, 'Gal', 5000, 5000, 3000, 99 FROM invoices i WHERE i.job_id = p_job AND i.deleted_at IS NULL $f$;
     GRANT USAGE ON SCHEMA kx TO authenticated;
     GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA kx TO authenticated;`, { user: 'supabase_admin' });
   console.log(`[prover] test rows: an admin; farms A and B; field A (A 100%), field A+B (A 60%, B 40%); a chemical (EPA ${OLD_NUM}), a chemical whose kept registration ${R_OLD} is restricted use (Danger) and whose corrected ${R_NEW} is not (Caution) and a chemical with no EPA number`);
@@ -347,15 +351,16 @@ const asAdmin = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","rol
 const key = () => `'kept-' || gen_random_uuid()`;
 // One rolled-back case as the signed-in admin: make the job, record the spray (or not), correct the catalog, then
 // Create Invoice through the app's own transfer_job_to_invoice; returns the invoice lines' numbers.
-const invoiceCase = ({ field = G, products = [P], supplied = false, before = 'spray', post = false }) => `${asAdmin}
+const invoiceCase = ({ field = G, products = [P], supplied = false, before = 'spray', post = false, add = null, tail = true }) => `${asAdmin}
 CREATE TEMP TABLE j AS SELECT kx.job('${field}', ARRAY[${products.map((x) => `'${x}'`).join(',')}]::uuid[], ${supplied}) AS id;
 ${before === 'spray' ? 'SELECT kx.spray((SELECT id FROM j));' : 'SELECT kx.not_recorded((SELECT id FROM j));'}
 SELECT kx.set_epa('${P}', '${NEW_NUM}'), kx.set_epa('${R}', '${R_NEW}'), kx.set_epa('${NONE}', '100-2090');
 SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', ${key()});
+${add ? `SELECT kx.add_line((SELECT id FROM j), '${add}');` : ''}
 ${post ? `-- As the app posts: the version the list loaded from invoices_postable.
 SELECT public.post_invoice(v.id, public.invoice_postable_version(v), ${key()}) FROM invoices_postable v
   WHERE v.id IN (SELECT i.id FROM invoices i WHERE i.job_id = (SELECT id FROM j));` : ''}
-SELECT kx.epas((SELECT id FROM j)) || ' | records=' || kx.records((SELECT id FROM j));`;
+${tail ? "SELECT kx.epas((SELECT id FROM j)) || ' | records=' || kx.records((SELECT id FROM j));" : ''}`;
 
 const CASES = {
   single: invoiceCase({}),
@@ -365,6 +370,8 @@ const CASES = {
   supplied: invoiceCase({ supplied: true }),
   keptNoNumber: invoiceCase({ products: [NONE] }),
   notRecorded: invoiceCase({ before: 'not_recorded' }),
+  // Sol r1: Add product bills more of the same product under today's number; that line keeps its own number.
+  addedLine: invoiceCase({ products: [R], add: R }),
 };
 const EXPECT_BEFORE = {
   single: `A:1:${NEW_NUM}/${NEW_NUM}(no,Caution) | records=none`,
@@ -379,6 +386,7 @@ const EXPECT_AFTER = {
   supplied: `A:supplied:${OLD_NUM}/- | records=none`,  // grower's own: no catalog link, so no capture or record (unchanged)
   keptNoNumber: 'A:3:100-2090/100-2090(unknown,-) | records=none',  // D1 (a): no kept number -> the catalog's
   notRecorded: `A:1:${NEW_NUM}/${NEW_NUM}(no,Caution) | records=none`,  // D1 (a)
+  addedLine: `A:2:${R_OLD}/${R_OLD}(yes,Danger) A:2:${R_NEW}/${R_NEW}(no,Caution) | records=none`,
 };
 const plainLine = (typed) => `${asAdmin}SELECT kx.set_epa('${P}', '${NEW_NUM}'); SELECT kx.plain_invoice_line('${P}', ${typed ? `'${typed}'` : 'NULL'});`;
 
@@ -399,6 +407,10 @@ async function main() {
   console.log(`[before] invoices not made from a job (blank, typed): ${plainBefore.join(' ; ')}`);
 
   stageText('candidate.sql', lf(CANDIDATE));
+  // Sol r1: an open job invoice already written under the catalog's number stops the apply (rolled back).
+  refusedProbe(`${invoiceCase({ tail: false })}\nRESET ROLE;\n\\i /tmp/candidate.sql`,
+    /JOB_INVOICE_KEPT_EPA_PREFLIGHT: an open job invoice has a line whose EPA number is not the job's kept number/);
+  console.log('[apply] an open job invoice written under the catalog number stops the apply at its preflight');
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   assert.equal(meta(IMPL), implMeta, 'transfer owner, SECURITY DEFINER, search_path and grants unchanged');
@@ -434,4 +446,5 @@ async function main() {
 }
 
 try { await main(); }
-finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }
+// Sol r1: never remove a container this run did not create.
+finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }

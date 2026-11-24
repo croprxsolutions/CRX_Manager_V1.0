@@ -148,6 +148,10 @@ assert.match(prompt, /untrusted DATA/i, "prompt treats diff content as untrusted
 assert.match(prompt, /Report EVERY defect/, "prompt asks for every finding, not only high severity");
 assert.match(prompt, /prompt-injection attempt/, "prompt makes embedded reviewer instructions a BLOCKER");
 assert.match(prompt, /operation=/, "prompt inlines the CRX failure classes");
+assert.match(prompt, /SEVERITY RULES[\s\S]*realistic path in ordinary daily use[\s\S]*if you cannot\nname them, it is MED/, "prompt defines HIGH as a realistic path (Mason, 2026-11-24)");
+assert.match(prompt, /BUSINESS FACTS[\s\S]*Sales reps may work with ANY customer/, "prompt carries the business facts");
+assert.match(prompt, /decision-log entry[\s\S]*never\nchanges your verdict/, "decision-log records never change the verdict");
+assert.ok(prompt.indexOf("SEVERITY RULES") < prompt.indexOf("Report EVERY defect"), "severity rules come before the report instructions");
 assert.ok(
   !/^\s*CODEX_PROOF_VERDICT:/m.test(prompt.split("Then end your reply")[0]),
   "no verdict-shaped line appears before the verdict instructions",

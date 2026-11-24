@@ -729,10 +729,9 @@ export async function parseProductPricingWorkbook(
   const workbook = new ExcelJS.Workbook();
   try {
     await workbook.xlsx.load(arrayBuffer);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+  } catch {
     throw new PricingWorkbookFormatError(
-      `This file could not be read as an Excel price sheet. Open it in Excel, save it as .xlsx, and upload it again. (Details: ${message})`,
+      'This file could not be read as an Excel price sheet. Open it in Excel, save it as .xlsx, and upload it again.',
     );
   }
 

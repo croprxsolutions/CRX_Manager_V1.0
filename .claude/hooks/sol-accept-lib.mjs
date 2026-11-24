@@ -17,7 +17,7 @@
 //      "owner_accepted") bound to the new head, which the merge and apply gates accept.
 // Since 2026-11-21 (Mason: "I need to just be able to tell it I don't want that") step 2
 // builds ONE request for several findings and he answers in plain words, no code:
-// `skip`, `skip 1 3`, `I don't want that` (skipFromReply). The old per-finding
+// `skip` or `skip 1 3`, optionally a reason line (skipFromReply; exact replies only since 2026-11-24). The old per-finding
 // `accept <code> <reason>` reply still works for requests built before then.
 // The same trust boundary as Mason's migration approval (owner-approval-lib.mjs
 // header): it stops a mistaken or relayed acceptance, not an agent forging files.
@@ -187,51 +187,29 @@ export const OWNER_SOL_SKIP_VIA = "chat-reply-skip";
 export const SKIP_REASON = "chose to leave it unfixed";
 export const solSkipFileName = (head, code) => `owner-approval-sol-skip-${head}-${code}.json`;
 
-const SKIP_ALL_RES = [
-  /^(?:skip|accept|don't fix|do not fix)(?: (?:them|these|those|all|all of them|them all|it|that))?$/,
-  /^leave (?:them|these|those|it|that)(?: alone)?$/,
-  /^i (?:don't|do not) want (?:that|those|these|them|it)(?: fixed)?$/,
-  /^i disagree(?: with (?:that|those|these|them|it|all of them))?$/,
-];
-const SKIP_SOME_RE = /^(?:skip|accept|don't fix|do not fix) (?:findings? )?(\d{1,2}(?:(?:, ?| | and |, and )\d{1,2})*)$/;
-// A looser reply (2026-11-22 retro: "Skip I agree skip it", "accept skip" were refused on #2256):
-// skip or accept plus ONLY the agreeing filler words below. An allow-list, not a block-list: any other
-// word ("none", "reject 2", "the jargon", "until") skips nothing (security review, 2026-11-22).
-// Numbers stay with SKIP_SOME_RE's exact shape; a question mark never counts.
-const LOOSE_WORDS = new Set(["skip", "accept", "i", "agree", "ok", "okay", "yes", "yeah", "yep", "sure", "fine", "please", "go", "ahead",
-  "just", "and", "all", "them", "these", "those", "it", "that"]);
-function looseSkip(t) {
-  if (/\?/.test(t)) return null;
-  // "the risk" only as "accept the risk" (the summary's own question); "skip the risk" skips nothing (Luna round 2).
-  const words = t.replace(/\baccept the risk\b/g, "accept").split(/[\s,;:.!]+/).filter(Boolean);
-  if (!words.some((w) => w === "skip" || w === "accept") || !words.every((w) => LOOSE_WORDS.has(w))) return null;
-  // "that"/"it" only when EVERY skip/accept points at it ("Skip I agree skip it" = all of them).
-  const single = words.every((w, i) => (w !== "skip" && w !== "accept") || words[i + 1] === "it" || words[i + 1] === "that");
-  return single ? { all: true, single: true } : { all: true };
-}
+// Exact replies only (Mason, 2026-11-24, #2271): free-text "yes, <reason>" read "yes, skip 1" and
+// "yes, except 2" as skipping EVERY finding, and no word list could close that. The first line is
+// `skip` or `skip 1 3`; anything else skips nothing.
+const SKIP_LINE_RE = /^skip(?: (\d{1,2}(?:(?:, ?| | and |, and )\d{1,2})*))?$/;
+// Any line break, Windows' \r\n as one.
+const LINE_SPLIT_RE = /\r\n|[\r\n\x85\p{Zl}\p{Zp}]/u;
 
 /**
- * Mason's plain skip reply, the WHOLE message: { all: true } or { numbers: [...] }; else null.
- * Case, curly apostrophes, spacing and a trailing . or ! do not matter. `yes, <reason>` skips them all
- * (a bare `yes` parses but skipSelection refuses it for want of a reason). Questions, "ok",
- * "move on", "merge it" and anything with other words are not a skip (Sol plan review: those
- * too often mean "go on" or "merge after fixing"). `accept <6 digits> ...` is the old form and
- * never reads as a skip (two-digit numbers at most).
+ * Mason's skip reply, the WHOLE message: first line `skip` ({ all: true }) or `skip 1 3`
+ * ({ numbers: [1, 3] }); an optional second line is his reason, kept word for word (trimmed) as
+ * `reason`. Case, spacing and a trailing . or ! on the first line do not matter. A reply that starts
+ * with skip or yes but is not exact (`yes, skip 1`, `skip them`, a third line) is { refused: true },
+ * so the hook says out loud that nothing was skipped. Anything else is null (ordinary chat).
+ * `accept <6 digits> ...` is the old form and never reads as a skip (two-digit numbers at most).
  */
 export function skipFromReply(prompt) {
-  const raw = String(prompt ?? "");
-  if (BREAK_RE.test(raw.trim())) return null;
-  const t = raw.toLowerCase().replace(/[‘’ʼ]/g, "'").replace(/\s*[.!]+\s*$/, "").replace(/[ \t]+/g, " ").trim();
-  if (!t) return null;
-  // `yes, <reason>` answers the request's "do you accept the risk?" for every finding it lists
-  // (Mason, 2026-11-22). A bare `yes` still parses so the hook can ask him for the reason.
-  const yes = /^yes\b[\s,:;.!\-–—]*(.*)$/i.exec(raw.trim());
-  // A question or a condition is not acceptance: "yes, can you explain first?" skips nothing (Codex P1, #2199).
-  if (yes) return /\?|\b(?:if|unless|but|after|first|once|when|explain|why|what|how)\b/i.test(yes[1]) ? null : { all: true, reason: yes[1].trim() };
-  // "that"/"it" name ONE finding: they skip only when the list has one (Luna, 2026-11-21).
-  if (SKIP_ALL_RES.some((re) => re.test(t))) return / (?:it|that)(?: alone| fixed)?$/.test(t) ? { all: true, single: true } : { all: true };
-  const m = SKIP_SOME_RE.exec(t);
-  return m ? { numbers: m[1].split(/\D+/).filter(Boolean).map(Number) } : looseSkip(t);
+  const lines = String(prompt ?? "").split(LINE_SPLIT_RE).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return null;
+  const first = lines[0].toLowerCase().replace(/\s*[.!]+$/, "").replace(/\s+/g, " ");
+  const m = lines.length <= 2 ? SKIP_LINE_RE.exec(first) : null;
+  if (!m) return /^(?:skip|yes)\b/.test(first) ? { refused: true } : null;
+  const skip = m[1] ? { numbers: m[1].split(/\D+/).filter(Boolean).map(Number) } : { all: true };
+  return lines[1] ? { ...skip, reason: lines[1] } : skip;
 }
 
 /**
@@ -243,11 +221,11 @@ export function skipFromReply(prompt) {
 export function skipSelection(skip, shownFindings, alreadySkipped = []) {
   const shown = (shownFindings || []).map((f) => f.n);
   if (!skip) return { problem: "his reply is not a skip" };
+  if (skip.refused) return { problem: "only an exact reply skips: skip (all of them) or skip and the numbers (skip 1 3), with an optional reason on a second line" };
   if (skip.reason !== undefined) {
     const bad = reasonProblem(skip.reason);
-    if (bad) return { problem: `he said yes, but ${bad}; ask him for the reason again` };
+    if (bad) return { problem: `his reason line cannot be logged: ${bad}; ask him to reply again` };
   }
-  if (skip.all && skip.single && shown.length !== 1) return { problem: `his reply says "that" or "it" but the list has ${shown.length} findings; he replies skip (all of them) or skip and the numbers` };
   if (skip.all) return shown.length ? { numbers: shown } : { problem: "the request shows no findings" };
   const nums = skip.numbers || [];
   if (!nums.length) return { problem: "his reply names no finding" };
@@ -299,9 +277,9 @@ export function solSkipSummary(p) {
     `Each skipped finding's file and line, and your reason, go in ${DECISION_LOG_PATH}, which is public; the finding's wording stays private.`,
     "Every other finding and every other safety check still applies.",
     "",
-    `Do you accept the risk of leaving ${nums.length === 1 ? "it" : "them"} unfixed? Reply yes and your reason (for example: yes, too small to ever affect the business).`,
-    ...(nums.length > 1 ? [`To skip only some, reply skip and their numbers (for example: skip ${nums[0]})`] : []),
-    `Skip, I disagree or don't fix also work. A bare yes with no reason, ok, or a question skips nothing. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
+    `To leave ${nums.length === 1 ? "it" : "them all"} unfixed, reply: skip`,
+    ...(nums.length > 1 ? [`To skip only some, reply skip and their numbers (for example: skip ${nums.slice(0, 2).join(" ")})`] : []),
+    `To give a reason, put it on a second line; it is logged word for word. Any other reply skips nothing, yes included. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
   ];
 }
 

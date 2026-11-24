@@ -136,17 +136,17 @@
 >
 > **Owner-accepted Sol findings (Mason, 2026-11-10; plain-word skips 2026-11-21).** Since 2026-11-21 `owner-accept-sol-finding.mjs
 > <n> ...` (any finding he disagrees with: a business call, or a bug or gap too small or impractical to affect the business; an owner-accepted proof counts only for its own PR, by number and repository address, at its exact head, at merge and migration apply, Codex merge guard included) builds ONE request (`crx-owner-sol-skip-v1`) for several findings, its deadline never past the Sol
-> run's own 24 hours, and Mason answers in plain words with no code: the whole message `yes, <reason>` to the summary's "do you accept the risk?"
-> (2026-11-22; the reason passes `reasonProblem` and is logged), or `skip`, `skip 1 3`, `I disagree`, `I don't want that`,
-> `don't fix`, `accept` and the like (`skipFromReply`; since 2026-11-22 `skip` or `accept` with only agreeing filler words, such as `accept skip` or
-> `Skip I agree skip it`, also counts (an allow-list: any other word, such as none, reject or until, skips nothing); a bare `yes`, `ok`, `move on`, `merge it` and questions skip nothing;
-> `that` or `it` skips only when the list holds one finding). A number he names that was not shown is ignored only when he already skipped
+> run's own 24 hours, and Mason answers with no code. Exact replies only (Mason, 2026-11-24, #2271: `yes, skip 1` and `yes, except 2`
+> skipped every finding): the first line is `skip` (all shown) or `skip 1 3` (those), and an optional second line is his reason,
+> logged word for word once it passes `reasonProblem` (`skipFromReply`). Nothing else skips: `yes, <reason>`, `I disagree`, `don't fix`,
+> `accept`, `skip them`, `Skip I agree skip it`, a third line, `ok`, `move on`, `merge it` and questions. A reply that starts with skip or
+> yes but is not exact is refused out loud (NOT SKIPPED), never silently. A number he names that was not shown is ignored only when he already skipped
 > that finding in the same Sol run (the receipt records it as `ignored`, and `collectAcceptances` counts it only if an earlier receipt covers it).
 > The reply hook records it only when a skip request built in this session is waiting and the agent's last message is exactly
 > its summary (`resolvePlainReply` with `purposes`, the same check as the migration `I approve`), into one receipt per reply
 > (`owner-approval-sol-skip-<head>-<code>.json`, `selected` numbers), which `verifySolSkip` re-checks against the Sol run, the
 > findings shown, his reply read back from the transcript, and the agent's last message before it being this request's
-> summary (`assertSkipShown`). The log records a fixed sentence, never free text. The older flow
+> summary (`assertSkipShown`). The log records a fixed sentence, or his reason line word for word. The older flow
 > below (one request per finding, `accept <code> <reason>`) only describes requests built before then (such a reply names no repository, so since 2026-11-22 the carry refuses it and Mason is asked again); the script
 > now always builds the skip request. When Sol answers BLOCKERS, the wrapper saves its numbered
 > `SOL_FINDING` list as `codex-review-blockers-<head>.json` (review-proof-guard protects it) only when Sol's

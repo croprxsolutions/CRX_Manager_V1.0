@@ -283,16 +283,33 @@ assert.equal(carriedSolProof(chained), true, "chain: a same-base post_apply of a
 assert.equal("owner_accepted" in buildCarryForwardProof({ headSha: H2, baseSha: BASE, source: { head_sha: H1, base_sha: BASE, timestamp: iso(NOW) }, mode: "restamp" }), false,
   "chain: an ordinary carry gains no acceptance");
 
-// ── Skipping in plain words: one request, one reply, no code (Mason, 2026-11-21) ──
-for (const yes of ["skip", "Skip.", "SKIP!", "skip all", "skip them", "skip these", "accept", "Accept all", "don't fix", "Don’t fix them",
-  "do not fix", "I don’t want those", "i do not want them fixed", "leave them", "  skip  ", "I disagree", "I disagree.", "i disagree with them"]) {
+// ── Skipping: one request, one exact reply, no code (Mason, 2026-11-21; exact replies only since 2026-11-24, #2271) ──
+// The first line is `skip` (all shown) or `skip 1 3` (those); an optional second line is his reason,
+// logged word for word. Nothing else skips, "yes, <reason>" included.
+const skips = (reply) => { const r = skipFromReply(reply); return Boolean(r) && !r.refused; };
+for (const yes of ["skip", "Skip.", "SKIP!", "  skip  "]) {
   assert.deepEqual(skipFromReply(yes), { all: true }, `skip: "${yes}" skips everything shown`);
 }
-for (const one of ["I don't want that", "leave it alone", "skip it", "don't fix that", "i do not want it fixed", "I disagree with that"]) {
-  assert.deepEqual(skipFromReply(one), { all: true, single: true }, `skip: "${one}" names one finding`);
+assert.deepEqual(skipFromReply("skip\ntoo small to ever affect the business"), { all: true, reason: "too small to ever affect the business" }, "skip: a reason line is kept");
+assert.deepEqual(skipFromReply("Skip 1 3\r\n  We never sell before switch-on, Taha agrees.  "), { numbers: [1, 3], reason: "We never sell before switch-on, Taha agrees." },
+  "skip: the reason line is kept word for word (case and punctuation), only trimmed");
+assert.deepEqual(skipFromReply("skip 2\n\nnot worth it"), { numbers: [2], reason: "not worth it" }, "skip: a blank line before the reason does not matter");
+assert.deepEqual(skipSelection(skipFromReply("skip\ntoo small to matter"), [{ n: 1 }, { n: 3 }]), { numbers: [1, 3] }, "selection: skip with a reason = every finding shown");
+assert.match(skipSelection(skipFromReply("skip\ncosts $500"), [{ n: 1 }]).problem, /money/, "selection: a reason line the public log cannot hold skips nothing");
+assert.match(skipSelection(skipFromReply("skip\nsmall"), [{ n: 1 }]).problem, /two words/, "selection: a one-word reason line skips nothing");
+// #2271: "yes, skip 1" and "yes, except 2" skipped EVERY finding. Now no free-text reply skips anything;
+// one that starts like a skip or a yes comes back refused, so the hook says NOT SKIPPED out loud.
+for (const no of ["yes", "Yes.", "yes, skip 1", "yes, except 2", "Yes, too small to ever matter.", "yes - we never sell before switch-on",
+  "yes, I object to waiving these", "yes, subject to Taha signing off", "skip all", "skip them", "skip it", "skip 1 but fix 3", "skip?",
+  "Skip I agree skip it", "skip\nreason one\nreason two"]) {
+  const r = skipFromReply(no);
+  assert.equal(r?.refused, true, `skip: "${no.replace(/\n/g, "\\n")}" is refused, not a skip`);
+  assert.match(skipSelection(r, [{ n: 1 }, { n: 2 }]).problem, /skip \(all of them\) or skip and the numbers/, `selection: "${no.replace(/\n/g, "\\n")}" skips nothing and says the exact reply`);
 }
-assert.deepEqual(skipSelection(skipFromReply("I don't want that"), [{ n: 1 }]), { numbers: [1] }, "skip: 'that' skips a lone finding");
-for (const no of ["I disagree, fix it later", "do you disagree?", "disagree"]) assert.equal(skipFromReply(no), null, `skip: "${no}" skips nothing`);
+for (const no of ["I disagree", "I don't want that", "don't fix", "do not fix them", "accept", "accept all", "leave them", "please skip", "accept skip", "ok skip them",
+  "I disagree, fix it later", "do you disagree?", "disagree"]) {
+  assert.equal(skipFromReply(no), null, `skip: "${no}" skips nothing (exact replies only)`);
+}
 // A skip counts only for the PR it was given for (Sol gate rounds 3-4).
 {
   const U7 = "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/7";
@@ -312,22 +329,14 @@ for (const no of ["I disagree, fix it later", "do you disagree?", "disagree"]) a
   assert.equal(ownerAcceptedForPr({ carry: { mode: "carry_forward", root_review: { owner_accepted: true } } }, pr7), false, "PR binding: a carry that lost its acceptance list is refused");
   assert.equal(ownerAcceptedForPr({ carry: { mode: "owner_accepted" } }, pr7), false, "PR binding: an owner-accepted carry with no list is refused");
 }
-assert.match(skipSelection(skipFromReply("I don't want that"), [{ n: 1 }, { n: 2 }]).problem, /"that" or "it"/, "skip: 'that' never skips a list of two");
 assert.deepEqual(skipFromReply("skip 1 3"), { numbers: [1, 3] }, "skip: numbers");
 assert.deepEqual(skipFromReply("skip 1, 3 and 4"), { numbers: [1, 3, 4] }, "skip: a list with commas and and");
-assert.deepEqual(skipFromReply("don't fix finding 2"), { numbers: [2] }, "skip: 'finding 2'");
-{
-  const shownF0 = [{ n: 1 }, { n: 3 }];
-  assert.deepEqual(skipFromReply("Yes, too small to ever matter."), { all: true, reason: "too small to ever matter." }, "skip: yes with a reason skips everything shown");
-  assert.deepEqual(skipSelection(skipFromReply("yes - we never sell before switch-on"), shownF0), { numbers: [1, 3] }, "selection: yes with a reason = every finding shown");
-  assert.match(skipSelection(skipFromReply("yes"), shownF0).problem, /reason/, "selection: a bare yes skips nothing and asks for the reason");
-  assert.match(skipSelection(skipFromReply("yes, costs $500"), shownF0).problem, /money/, "selection: a reason the public log cannot hold skips nothing");
-}
-for (const no of ["ok", "yesterday it worked", "yes\nand merge", "Yes, can you explain this first?", "yes if Taha agrees",
-  "yes but fix finding 2", "yes, after the release", "Yes what does it mean", "I approve", "move on", "merge it", "no", "no, fix it", "skip?", "skip the explanation and fix it",
-  "I don't want that approach", "accept only if the totals reconcile", "accept all 1 3", "accept 123456", "accept 123456 fine by me",
-  "skip\nand merge", "skip 123", ""]) {
+for (const no of ["ok", "yesterday it worked", "I approve", "move on", "merge it", "no", "no, fix it", "don't fix finding 2", "accept 1 3",
+  "accept only if the totals reconcile", "accept all 1 3", "accept 123456", "accept 123456 fine by me", "I don't want that approach", "skipped", "", "\n\n"]) {
   assert.equal(skipFromReply(no), null, `skip: "${no}" is not a skip`);
+}
+for (const no of ["skip 123", "skip the explanation and fix it", "skip\nand merge\nnow"]) {
+  assert.equal(skipFromReply(no)?.refused, true, `skip: "${no.replace(/\n/g, "\\n")}" is refused`);
 }
 const shownF = [{ n: 1 }, { n: 3 }];
 assert.deepEqual(skipSelection({ all: true }, shownF), { numbers: [1, 3] }, "selection: all = every finding shown");
@@ -357,8 +366,9 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const r1 = skipReq([1, 3]);
   assert.equal(Date.parse(r1.payload.expiresAt), Date.parse(rec3.timestamp) + 24 * 60 * 60 * 1000, "request: deadline never past the Sol run's own 24 hours");
   assert.match(r1.payload.summary.join("\n"), /Finding 1 of 3 \(HIGH\).*\nFinding 3 of 3 \(HIGH\)/, "request: lists only the findings asked about");
-  assert.match(r1.payload.summary.join("\n"), /Do you accept the risk of leaving them unfixed\? Reply yes and your reason/, "request: asks plainly whether he accepts the risk");
-  assert.match(r1.payload.summary.join("\n"), /A bare yes with no reason, ok, or a question skips nothing\./, "request: says what skips nothing");
+  assert.match(r1.payload.summary.join("\n"), /To leave them all unfixed, reply: skip\nTo skip only some, reply skip and their numbers \(for example: skip 1 3\)/, "request: gives the two exact replies");
+  assert.match(r1.payload.summary.join("\n"), /second line.*word for word.*Any other reply skips nothing, yes included\./, "request: says the reason line is logged and nothing else skips");
+  assert.doesNotMatch(r1.payload.summary.join("\n"), /Reply yes/, "request: never invites a yes");
   assert.match(r1.payload.summary.join("\n"), /Pull request: croprxsolutions\/CRX_Manager_V1\.0#2200 /, "request: names the repository and PR");
   assert.doesNotMatch(r1.payload.summary.join("\n"), /accept \d{6}/, "request: no code to type");
   const shownText = r1.payload.summary.join("\n");
@@ -404,8 +414,10 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
     "collect: findings 1 and 2 still open");
   const r2 = skipReq(undefined);
   assert.equal(r2.payload.findings.length, 3, "request: --all lists every finding");
-  assert.equal(skipReply(r2.code, "I don't want that").ok, false, "reply: 'that' on a list of three skips nothing");
-  assert.equal(skipReply(r2.code, "I don't want those").ok, true, "reply: plain words skip them all");
+  assert.match(skipReply(r2.code, "yes, skip 1").reason, /skip \(all of them\) or skip and the numbers/, "reply: #2271 'yes, skip 1' skips nothing");
+  assert.match(skipReply(r2.code, "yes, except 2").reason, /skip \(all of them\) or skip and the numbers/, "reply: #2271 'yes, except 2' skips nothing");
+  assert.equal(readSkipReceipts(stateDir, H3).length, 1, "reply: a refused reply writes no receipt");
+  assert.equal(skipReply(r2.code, "skip").ok, true, "reply: skip skips them all");
   const got3 = collectAcceptances({ record: rec3, readAcceptance: readNone, readSkips: () => readSkipReceipts(stateDir, H3), checkReply: assertReplyAlone, checkShown: assertSkipShown });
   assert.equal(got3.problem, undefined, `collect: all three skipped (${got3.problem})`);
   assert.deepEqual(got3.accepted.map((a) => [a.payload.finding.n, a.reason]), [[1, SKIP_REASON], [2, SKIP_REASON], [3, SKIP_REASON]]);
@@ -437,7 +449,9 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const shown4 = r4.payload.summary.join("\n");
   tx(shown4);
   assert.equal(hook("ok"), "", "hook: 'ok' is ordinary chat and skips nothing");
-  assert.match(hook("yes"), /NOT SKIPPED.*reason/, "hook: a bare 'yes' skips nothing and asks for the reason");
+  assert.match(hook("yes"), /NOT SKIPPED.*skip \(all of them\) or skip and the numbers/, "hook: a bare 'yes' skips nothing and says the exact reply");
+  assert.match(hook("yes, skip 1"), /NOT SKIPPED/, "hook: #2271 'yes, skip 1' skips nothing, out loud");
+  assert.match(hook("yes, except 2"), /NOT SKIPPED/, "hook: #2271 'yes, except 2' skips nothing, out loud");
   tx(`Here is something else.\n${shown4}`);
   assert.match(hook("skip"), /NOT SKIPPED.*did not show/, "hook: the summary must be the whole last message");
   tx("Merged #900.");
@@ -447,11 +461,20 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const out = hook("skip", "other-session-99");
   assert.match(out, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 1, 2 of 3 on PR #2200/, `hook: one word skips both, from another conversation (${out})`);
   assert.equal(hook("skip"), "", "hook: the same reply again skips nothing more (nothing is waiting, so it is ordinary chat)");
-  // "Do you accept the risk?" answered "yes, <reason>" (Mason, 2026-11-22).
+  // Exact reply plus a reason line (Mason, 2026-11-24, #2271): the reason is logged word for word.
   const r5 = skipReq([3]);
   tx(r5.payload.summary.join("\n"));
-  const outYes = hook("Yes, too small to ever affect the business");
-  assert.match(outYes, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 3 of 3/, `hook: yes with a reason skips (${outYes})`);
+  assert.match(hook("Yes, too small to ever affect the business"), /NOT SKIPPED/, "hook: 'yes, <reason>' no longer skips");
+  const outR = hook("skip 3\nToo small to ever affect the business.");
+  assert.match(outR, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 3 of 3/, `hook: skip with a reason line skips (${outR})`);
+  {
+    const r6 = skipReq([3]);
+    assert.equal(skipReply(r6.code, "skip 3\nToo small to ever affect the business.").ok, true, "reply: skip with a reason line records");
+    const rc = readSkipReceipts(stateDir, H3).find((r) => JSON.parse(r.payload).code === r6.code);
+    const v = verifySolSkip({ approval: rc, record: rec3, checkReply: assertReplyAlone, checkShown: assertSkipShown });
+    assert.equal(v.ok, true, `verify: a two-line reply's receipt holds (${v.reason})`);
+    assert.equal(v.reason, "Too small to ever affect the business.", "verify: the reason line comes back word for word");
+  }
   // A skip request still waiting must not swallow a plain `yes` to the migration request he
   // was just shown (Codex P2, #2199).
   skipReq([1]);
@@ -468,25 +491,22 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   // as skips). Every case runs, so one run lists each failure. ──
   const fails = [];
   const t = (name, fn) => { try { fn(); } catch (e) { fails.push(`${name}: ${e.message.split("\n")[0]}`); } };
-  t("'Skip I agree skip it' skips all", () => assert.deepEqual(skipFromReply("Skip I agree skip it"), { all: true }));
-  t("'accept skip' skips all", () => assert.deepEqual(skipFromReply("accept skip"), { all: true }));
-  t("'Skip, I agree.' skips all", () => assert.deepEqual(skipFromReply("Skip, I agree."), { all: true }));
-  t("'please skip' skips all", () => assert.deepEqual(skipFromReply("please skip"), { all: true }));
-  t("'ok skip them' skips all", () => assert.deepEqual(skipFromReply("ok skip them"), { all: true }));
-  t("'yeah accept it' names one", () => assert.deepEqual(skipFromReply("yeah accept it"), { all: true, single: true }));
-  t("'accept the risk' skips all", () => assert.deepEqual(skipFromReply("accept the risk"), { all: true }));
+  // Since 2026-11-24 (#2271) the looser 2026-11-22 forms skip nothing: exact replies only.
+  for (const no of ["Skip I agree skip it", "accept skip", "Skip, I agree.", "please skip", "ok skip them", "yeah accept it", "accept the risk"]) {
+    t(`'${no}' skips nothing (exact replies only)`, () => assert.equal(skips(no), false));
+  }
   // Security review, 2026-11-22: each of these was read as a skip by a block-list parser.
   for (const no of ["please skip 1 and 2", "skip nothing", "skip none of them", "accept none", "I wont skip", "I wouldn't skip these", "I refuse to accept these",
     "nope skip", "I cant accept that", "skip two", "skip two and three", "skip the minor ones", "skip the low severity ones", "skip the nits", "skip this",
     "accept this", "skip 1 keep 2", "accept 1 reject 2", "skip 1, repair 2", "accept the risk on 2, patch 3", "skip 1 of 3", "skip for 2 days",
     "skip the details", "skip the summary", "skip the jargon please", "skip the review", "I accept your recommendation", "skip until Taha checks",
     "skip before the release", "skip them before merging", "skip, address them", "I might accept", "skip 1 or 2", "skip finding one", "skip the risk", "skip the risk talk", "accept the"]) {
-    t(`'${no}' skips nothing (security review)`, () => assert.equal(skipFromReply(no), null));
+    t(`'${no}' skips nothing (security review)`, () => assert.equal(skips(no), false));
   }
   for (const no of ["Skip I agree skip it?", "skip it if Taha agrees", "accept skip but fix 2 first", "skip them when the release is out", "skip, but why?",
     "don't skip", "do not accept that", "never skip these", "skip all except 2", "skip the 2nd one", "skip one of them", "skip the rest", "hold on, skip",
     "skip it later", "skip and fix it", "accept skip 1 all", "skip it 1", "accept 1234567", "I'll skip lunch today then we can talk about the plan for next week ok"]) {
-    t(`'${no}' still skips nothing`, () => assert.equal(skipFromReply(no), null));
+    t(`'${no}' still skips nothing`, () => assert.equal(skips(no), false));
   }
   t("selection: an unshown number already skipped is ignored", () => assert.deepEqual(skipSelection({ numbers: [1, 2, 3] }, [{ n: 1 }, { n: 2 }], [3]), { numbers: [1, 2], ignored: [3] }));
   t("selection: an unshown number NOT skipped still refuses", () => assert.match(skipSelection({ numbers: [1, 2, 3] }, [{ n: 1 }, { n: 2 }], [4]).problem, /finding 3 was not in the list/));
@@ -525,12 +545,12 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const rec5b = { ...rec5, timestamp: iso(NOW - 10 * 60 * 1000) };
   t("reply: a skip from an earlier Sol run on this head does not count", () => assert.match(skipReply(reqFor(rec5b, [1, 2]), "skip 1 2 and 3").reason ?? "", /finding 3 was not in the list/));
   // The real hook, end to end.
-  for (const said of ["Skip I agree skip it", "accept skip"]) {
+  for (const said of ["skip", "skip 1 2"]) {
     const r = skipReq([1, 2]);
     tx(r.payload.summary.join("\n"));
     t(`hook: '${said}' skips both`, () => assert.match(hook(said), /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 1, 2 of 3/));
   }
-  t("hook: a question still skips nothing", () => { const r = skipReq([1, 2]); tx(r.payload.summary.join("\n")); assert.equal(/SKIPPED —/.test(hook("Skip I agree skip it?")), false); });
+  t("hook: a question still skips nothing", () => { const r = skipReq([1, 2]); tx(r.payload.summary.join("\n")); assert.match(hook("Skip I agree skip it?"), /NOT SKIPPED/); });
   assert.equal(fails.length, 0, `natural skip replies:\n  ${fails.join("\n  ")}`);
 
 }

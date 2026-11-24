@@ -2,6 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('explains a refused delivery Unassigned in plain words', () => {
+    expect(sanitizeError({ message: 'DRIVER_CHANGED: the driver was changed since the form opened; reload and try again' }))
+      .toMatch(/^Nothing was saved\. The driver was changed since you opened this form/);
+    expect(sanitizeError({ message: 'DRIVER_CLEAR_STARTED: a started delivery cannot be unassigned; assign another driver instead' }))
+      .toMatch(/^Nothing was saved\. This delivery has started, so it cannot be unassigned/);
+    expect(sanitizeError({ message: 'Cannot edit delivery items once delivery is in progress' }))
+      .toMatch(/^Nothing was saved\. This delivery has started, so its items cannot be edited/);
+  });
+
   it('keeps the product and order details from active-status refusals', () => {
     expect(sanitizeError('PRODUCT_INACTIVE: Atrazine 4L is turned off; an admin must reactivate it before reopening order ORD-42'))
       .toBe('Atrazine 4L is turned off; an admin must reactivate it before reopening order ORD-42');

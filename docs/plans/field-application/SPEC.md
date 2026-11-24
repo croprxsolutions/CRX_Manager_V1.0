@@ -135,7 +135,7 @@ In plain words, these are the "things" the system needs. Each one keeps who chan
 
 ### Stage 2: Schedule and dispatch (office)
 
-1. **Daily board: a list by rig, no map** [Q12, Mason 2026-11-23]. Each rig shows its jobs for the day, with filters by tag, date and status. Tick several jobs to print or map them together [3g].
+1. **Daily board: a list by rig** [Q12, Mason 2026-11-23]; CRX's existing Map tab stays, with the list shown first [Mason 2026-11-24]. Each rig shows its jobs for the day, with filters by tag, date and status. Tick several jobs to print or map them together [3g].
    - **Spray order:** the office **drags and drops fields into the order they should be sprayed**, numbered 1, 2, 3 … [Q13]. **Numbering is per job: every job starts at 1**, even when three jobs go out to the same sprayer [Sol 86]. That order and those numbers appear on the printed maps, the applicator sheet and the applicator's phone. There is **no job priority** setting; the order is the plan.
 2. Set the **dispatch date** (when crews go). It is kept separate from the job date and the application date (the legal and pricing date).
 3. Assign the applicator(s) and rig. Changing the rig after dispatch is allowed. A rig change is only an assignment: a container-to-container move is logged **only if liquid really moved** [Q10, Sol 55].
@@ -246,7 +246,7 @@ flowchart TD
 | **Rate check (per mix)** [G4, Q11, Sol 4] | For each mix that sprayed the job: actual product rate = product in that mix actually used ÷ acres it sprayed. When a mix served several jobs, its solution used is split across them by acres, so they all share one actual rate. **A job sharing a load with a job still spraying stays field-complete, and its invoice waits until that load is used up, put in a tote or gauge-checked**; the office can force it with a reason [Sol 6]. More than **5% (office-adjustable)** off planned puts the job on the **review list** with planned vs actual and the dollar difference. One click: **keep planned rate** or **bill actual used**. |
 | **Over label maximum** [G6] | Checked **field by field** (a whole-job average can hide one field) [Sol 3]. The office writes what happened; the legal record keeps the actual rate and the note. A warning, never a block. |
 | **Extra acres** [D3, replaced by Sol 37] | Sprayed more than planned: **logged by the applicator and billed like any sprayed acre.** Shown on the review screen for information only. No office check. |
-| **Overlapping passes** | No special rule (Mason 2026-11-24: a non-issue [Sol 38, 61]). Every pass stays on the legal record; if the acres are wrong, the office edits them with a reason. |
+| **Overlapping passes** | No special rule (Mason 2026-11-24: a non-issue [Sol 38, 61]). Each real pass bills its own service and fuel acres; a suspected duplicate entry is flagged [M8]. Every pass stays on the legal record; if the acres are wrong, the office edits them with a reason. |
 | **Waste and extra visits** [D11, Q6] | Approved by any office role, with a reason. Applicators only report them. Waste always says where the solution went (a tote, or sprayed off on a named field with acres, date and weather as a legal application record); it is never just dumped. Leftover nobody can use goes in a tote and is dealt with **outside the system** [Sol 9]. Not billed unless the office adds it with a reason. |
 | **Mix differed from recipe** [Q2] | The office reviews the mixer's change. It bills what actually went in the tank unless the office chooses otherwise, and prices any substitute product that has no agreed price. |
 | **Remaining acres** | All sprayed, or closed with a reason [G1, D1b]. |
@@ -283,8 +283,8 @@ Each line uses the field's **product share** (products) or **application share**
    - **No flat fees** on field jobs [Sol 67]. **No sales tax on field work** [Sol 48].
    - **Grower-supplied and "customer's own / already paid" product:** shown, no charge [Sol 34].
    - **Payer split:** the split in force **on the day each field was sprayed**; the office can always edit it before posting [Sol 41].
-   - **Prices:** locked quote or booking prices carry forward. An unlocked price uses **one price from the first spray day** for the whole job [Sol 66]. Line by line, never a flat price per acre [2026-11-22 rule].
-   - **Cents:** worked in whole cents. Any leftover cent goes to the **payer with the biggest share on that line** (never to someone at 0%) [Sol 69].
+   - **Prices:** locked quote or booking prices carry forward. An unlocked price uses **one price from the first spray day** for the whole job [Sol 66]. Line by line, never a flat price per acre [2026-11-22 rule]. **One price per product per job** in February, even when payers on one field have different price agreements; per-payer prices come in spring [M2]. A substitute with no price holds the whole payer set until the office prices it [M9].
+   - **Cents:** worked in whole cents. Each field line is priced on its own, then split; leftover cents go **closest to exact** (largest remainder; ties to the bigger share, then the grower; never someone at 0%) [Sol 69, M1].
 3. **Each invoice shows:** each field section (field name, acres, rate per acre), line items labelled **"field total"** and **"your share"** [Sol 71], a **"Shared with"** note, and only **that payer's** fields. A payer sees their own amounts and who shares the bill, never other payers' prices or CRX's cost [Codex rule, A1]. **No zero-dollar invoices** are made: a payer whose share is all zero gets none [Sol 75].
 4. **Office edits before posting:**
    - **Per-line share override:** for example one payer takes 100% of one product and the others 0%, without changing other lines. Every payer's cents still add up to the original line.
@@ -294,7 +294,7 @@ Each line uses the field's **product share** (products) or **application share**
    - Any rep may edit any draft [2026-11-21].
 4a. **Invoice date** defaults to the day it is posted, and the office **can backfill it before posting** (for example to the spray date) when it is a week or two behind. Due date follows the customer's normal terms. Spray dates show on each field section [GR7].
 5. **Print options:** with or without maps (usually without), ink saver, full colour.
-6. **Overlap warning:** an invoice typed up by hand for the same field, date and product as a job warns the office and needs a reason [B04]. A second billing of already-billed work is refused.
+6. **Overlap warning:** an invoice typed up by hand for the same field, date and product as a job warns the office; a note is optional [B04; flags, not steps]. A second billing of already-billed work is refused.
 
 ### Stage 10: Post, send, statements, corrections
 
@@ -302,8 +302,8 @@ Each line uses the field's **product share** (products) or **application share**
 2. Print or email each payer's invoice (email only [D5]). It appears on that payer's monthly **statement** like any other invoice.
 3. **Corrections** [D9]:
    - **Unposted:** edit with a reason.
-   - **Posted, no money applied, month open:** unpost the **whole payer set**, fix, repost, with a reason. "No money applied" means no payment, prepay, credit or write-off on any invoice in the set [Sol 45]. A reposted invoice is marked **"Corrected"** [Sol 79].
-   - **After money or month close:** credit and rebill **only the invoices that changed** [Sol 46].
+   - **Posted, no money applied, month open:** unpost the **whole payer set**, fix, repost, with a reason. "No money applied" means no payment, prepay, credit or write-off on any invoice in the set [Sol 45]. A reposted invoice is marked **"Corrected"** [Sol 79]. Any change to what the printed invoice shows (amount, acres, date, field, product) marks it Corrected; the office chooses whether to re-send [M3].
+   - **After money or month close:** credit and rebill **only the invoices whose dollars changed** [Sol 46, M3].
    - Correcting a posted job's spray record flags its invoices for the office [Sol 47].
    - The legal application record keeps its own audit trail. Stock is only ever corrected by a new reversing entry, never by editing.
 4. **First real multi-payer job is checked by hand** before field billing goes on for everyone [D12], using a short checklist I write [Sol 51]. The office compares each payer's invoice against the field records and stock (the stock vs sprayed vs billed view in stage 8).
@@ -352,7 +352,7 @@ stateDiagram-v2
 
 `Scheduled` → `In progress` (first batch or work entry) → `Paused` (optional, remaining acres + note) → `Ready for review` (applicators marked applied) → `Needs office decision` (any check in stage 8 failed) → `Applied / closed` → `Invoiced (unposted)` → `Posted`.
 
-Also: `Cancelled` (before any batch; after a batch only with **zero acres sprayed** and all its solution moved, put in a tote or sprayed off and recorded [Q9, Sol 11]). A job stopped partway closes its leftover acres instead and goes through review and billing.
+Also: `Cancelled` (before any batch; after a batch only with **zero acres sprayed** and all its solution moved, put in a tote or sprayed off and recorded [Q9, Sol 11]). Rained out after mixing: the job ends with nothing billed; the mix stays recorded and no stock returns; a note is optional [M4]. A job stopped partway closes its leftover acres instead and goes through review and billing.
 
 ---
 
@@ -367,7 +367,7 @@ Also: `Cancelled` (before any batch; after a batch only with **zero acres spraye
 6. Product search with default rate, unit and warehouse; all editable; over-rate **warns, never blocks**; "customer's own / already paid" option [Sol 34]; grower name and acres beside field names [Sol 57]
 7. Rig with default carrier rate, editable per job; one value used in every output
 8. One service charge per job (multi-rig later, not designed out)
-9. Tags and filters; tick-several to map or print together; **daily board listed by rig (no map)** [Q12]
+9. Tags and filters; tick-several to map or print together; **daily board listed by rig (list first; Map tab kept)** [Q12]
 9a. **Drag-and-drop spray order of fields, numbered 1, 2, 3 per job** (each job restarts at 1), shown on maps, sheets and the phone; no priority field [Q13, Sol 86]
 10. Job date, dispatch date and application date kept separate
 11. Assign applicator(s) and rig; change rig mid-job
@@ -425,7 +425,7 @@ Also: `Cancelled` (before any batch; after a batch only with **zero acres spraye
 50. Lines per field: service and fuel on sprayed acres; product at the rate of the mix that sprayed the field (or approved actual) × sprayed acres × share; split on the day sprayed; one price from the first spray day; no tax [Sol 4, 41, 48, 66, 68]
 51. No flat fees [Sol 67]; grower-supplied and already-paid lines at no charge; no zero-dollar invoices [Sol 34, 75]
 52. Locked quote and booking prices carried forward; line-by-line only
-53. Whole cents; leftover cent to the biggest share on the line [Sol 69]
+53. Whole cents; leftover cent closest to exact (ties: bigger share, then grower) [Sol 69, M1]
 54. Field sections, "field total" and "your share" labels, "Shared with" note, only this payer's fields [Sol 71]
 55. Per-line share override that keeps cents reconciled
 56. Edit with a reason; measured usage with a reason; logged price refresh that never touches locked lines [Sol 43]
@@ -517,6 +517,21 @@ Facts found in the code (not asked): CRX already has application services with s
 
 ---
 
+## 9d. Build-kit answers (Mason, 2026-11-24)
+
+| # | Question | Answer |
+|---|---|---|
+| M1 | Leftover penny on an uneven split | Closest to exact (largest remainder); ties to the bigger share, then the grower |
+| M2 | Different prices for payers on one field | They exist, but February bills one price per product per job; per-payer prices in spring |
+| M3 | Posted invoice wrong date or name, right dollars | Marked "Corrected"; the office chooses to re-send; credit and rebill only when dollars changed |
+| M4 | Rained out after mixing | Job ends with nothing billed; the mix stays recorded; tank carried or to a tote |
+| M5 | Billing not ready by February 1 | Field work stays billed in Chem Man until CRX passes its checks; never bill planned acres |
+| M6 | Reviewer disagreements | Sol capped at two rounds per plan; leftovers come to Mason |
+| M7 | Start building wave 1 | **Not yet**: no build session starts until Mason says so |
+| M8 | Two real passes over the same acres | Each pass bills its own service and fuel acres |
+| M9 | Substitute with no price | The whole payer set waits until it is priced |
+| — | Daily board Map tab | Keep it; list first |
+
 ## 10. What happens next
 
 1. **Done 2026-11-23, reviewed by Sol 2026-11-24:** every business question is answered, including Sol's (section 9b). The two small items left (the shared "office staff" check and applicators fixing their own entries until the job closes) are routine technical choices, marked [ENGINEERING].
@@ -548,7 +563,7 @@ Sources: the original Codex and Claude decision registers in Mason's private rev
 - Each field has separate **product shares** and **application shares**, each totalling 100%. Application and fuel use the application shares. A payer may be 0% on one side.
 - Every draft line fills from those defaults. The office can change a line's shares before posting without changing the field. Only payers saved on that field or job can be picked.
 - A field's split can change from any date the office picks. A saved draft keeps its split until an explicit, logged refresh.
-- The main payer gets any leftover cent. **Refined 2026-11-24:** the biggest share on that line gets it, never a 0% payer [Sol 69].
+- The main payer gets any leftover cent. **Refined 2026-11-24:** closest to exact (largest remainder), ties to the bigger share then the grower, never a 0% payer [Sol 69, M1].
 - Each payer sees their own amounts and who shares the bill, never other payers' prices or internal cost.
 - A posted payer set can be unposted, edited and reposted only while no payment, prepay, credit or write-off touches it and the month is open. After that: credit and rebill.
 - Fields are archived, never deleted. Open or unbilled work blocks archiving.

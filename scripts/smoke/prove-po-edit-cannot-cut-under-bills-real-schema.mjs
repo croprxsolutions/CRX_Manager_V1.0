@@ -134,25 +134,34 @@ try {
       UPDATE public.vendor_bills SET status = 'voided' WHERE purchase_order_id = '${PO1}'; SET LOCAL session_replication_role = origin;
       ${asUser(`r := ${saveAs(uid, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])};`)} v := ${total(PO1)};`), 'ok|61000');
   }
-  assert.equal(refused(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0]]).replace('[POEB] Chem', '[POEB] Renamed'), PO1), `${LOCKED}|100000`);
-  // Edit PO ignores a received quantity in its payload (receipts are the only writer), so it saves and stays 0.
-  const RECEIVED_EDIT = 'ok|NOT REFUSED|0';
-  // 4b. Luna: any change counts, however small; a received quantity sent in the edit cannot change a billed line.
+  // 4b. Any change counts, however small, and line notes count; a resent catalog name is not a change (the stored
+  // name is kept); a received quantity sent in the edit changes nothing (receipts are the only writer).
   assert.equal(refused(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40.000001, 0]]), PO1), `${LOCKED}|100000`);
+  assert.equal(refused(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0]]).replace('"unit_size":"Gal"', '"unit_size":"Gal","notes":"deliver to barn"'), PO1), `${LOCKED}|100000`);
+  assert.equal(attempt(USERS.admin, `${asUser(`r := ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0]]).replace('[POEB] Chem', '[POEB] Renamed')};`)}
+    v := (SELECT string_agg(DISTINCT product_name, ',') FROM public.purchase_order_items WHERE purchase_order_id = '${PO1}');`), 'ok|[POEB] Chem');
   assert.equal(attempt(USERS.admin, `${refuse(`r := ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 5]])};`)}
     v := COALESCE(split_part(t, ':', 1), '') || '|' || (SELECT quantity_received FROM public.purchase_order_items WHERE id = '${L1B}');`),
-    RECEIVED_EDIT);
-  // 4c. Luna HIGH: a bill created after the save starts (here by a trigger during the inner save, standing in for a
-  // create_vendor_bill that commits while the save waits for the PO lock) still locks the lines.
-  assert.equal(attempt(USERS.rep, `EXECUTE $x$CREATE FUNCTION public.poeb_race_bill() RETURNS trigger LANGUAGE plpgsql
-      SECURITY DEFINER SET search_path = public, pg_temp AS $f$ BEGIN
-        IF NOT EXISTS (SELECT 1 FROM public.vendor_bills WHERE purchase_order_id = NEW.purchase_order_id) THEN
-          INSERT INTO public.vendor_bills (vendor_id, purchase_order_id, bill_number, bill_date, due_date, subtotal_cents, total_cents)
-            VALUES ('${VENDOR}', NEW.purchase_order_id, 'POEB-RACE', CURRENT_DATE, CURRENT_DATE + 30, 1000, 1000);
-        END IF; RETURN NEW; END $f$$x$;
-    EXECUTE $x$CREATE TRIGGER poeb_race AFTER UPDATE ON public.purchase_order_items FOR EACH ROW EXECUTE FUNCTION public.poeb_race_bill()$x$;
-    ${refuse(`r := ${saveAs(USERS.rep, PO4, 'submitted', [[L4A, 1, 0]])};`)} v := split_part(t, ':', 1) || '|' || ${total(PO4)};`), `${LOCKED}|10000`);
-  console.log('[edit PO] billed PO: every line change refused for admin and rep (cut, raise, add, drop, cost, mixed, tiny), same text, no amounts; notes edits save; $0 bill counts; a bill created mid-save counts; no bill / voided bill: edits save');
+    'ok|NOT REFUSED|0');
+  // The real Edit PO screen sends a blank unit as null: a stored blank or null unit is not a change.
+  for (const stored of ['NULL', "''"]) {
+    assert.equal(attempt(USERS.admin, `SET LOCAL session_replication_role = replica;
+      UPDATE public.purchase_order_items SET unit_size = ${stored} WHERE id = '${L2A}'; SET LOCAL session_replication_role = origin;
+      ${asUser(`r := ${save(PO2, 'submitted', [[L2A, 10, 0]], 'call vendor').replace('"unit_size":"Gal"', '"unit_size":null')};`)} v := ${total(PO2)};`), 'ok|10000');
+  }
+  // 4c. Sol round 3 HIGH: a rep's huge quantity on a billed PO is refused before any arithmetic, with the same text
+  // as every other refusal (no overflow error that would depend on the hidden cost).
+  assert.equal(msgOf(USERS.rep, saveAs(USERS.rep, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 10000000000000000, 0]])), repBig);
+  // 4d. Sol round 3 HIGH: the same line twice (two spellings of its id) is refused, and nothing (cost log, cost
+  // confirmation) is written: an admin's $9 then $10 on one line.
+  const dup = save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0, 900], [L1B, 40, 0]]).replace(`"id":"${L1B}"`, `"id":"${L1B.toUpperCase()}"`);
+  assert.equal(attempt(USERS.admin, `n := (SELECT count(*) FROM public.purchase_order_item_cost_changes);
+    ${refuse(`r := ${dup};`)} v := split_part(t, ':', 1) || '|' || ((SELECT count(*) FROM public.purchase_order_item_cost_changes) = n)::text;`), `${LOCKED}|true`);
+  // 4e. An admin's notes edit on a billed PO writes no cost log either (costs are left out of a billed PO's lines).
+  assert.equal(attempt(USERS.admin, `n := (SELECT count(*) FROM public.purchase_order_item_cost_changes);
+    ${asUser(`r := ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0]], 'admin note')};`)}
+    v := ((SELECT count(*) FROM public.purchase_order_item_cost_changes) = n)::text;`), 'ok|true');
+  console.log('[edit PO] billed PO: every line change refused before saving, for admin and rep (cut, raise, add, drop, cost, mixed, tiny, line notes, huge, duplicate id), same text, no amounts, no side effects; notes edits save; $0 bill counts; no bill / voided bill: edits save');
   // 5. A replay of a saved notes edit returns the receipt, is not refused, and writes no second activity entry.
   const k = key();
   const keyed = () => save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0]], 'replayed').replace(/'po-edit-bills-\d+'\)$/, `'${k}')`);

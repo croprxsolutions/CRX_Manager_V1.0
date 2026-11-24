@@ -5,24 +5,25 @@
 --    unreceived quantity, drop a line, or an admin's lower cost on an unreceived line). Mason, 2026-11-24, after three
 --    Sol rounds found leaks in a rep/admin split: one rule for everyone. Once a PO has an active (not deleted, not
 --    voided) vendor bill, an Edit PO save that changes its lines at all (adds or removes a line, or changes a line's
---    quantity, product or its name, unit, cost or received quantity) is refused (PO_BILLED_LINES_LOCKED); header edits (notes, dates, status) still
---    save. To change lines, void the bill, edit, then enter the bill again (create_vendor_bill applies its limits);
---    a cost correction goes through set_purchase_order_item_costs, which keeps the 5% rule. The refusal depends only
---    on the caller's own edit and whether a bill exists, never on a role, cost or bill amount, and names no amount.
+--    quantity, product, unit, line notes or cost) is refused (PO_BILLED_LINES_LOCKED) before anything is saved; header
+--    edits (notes, dates) still save. To change lines, void the bill, edit, then enter the bill again (create_vendor_bill
+--    applies its limits); a cost correction goes through set_purchase_order_item_costs, which keeps the 5% rule. The
+--    refusal depends only on the caller's own edit and whether a bill exists, never on a role, cost or bill amount, and
+--    names no amount. A billed PO's unchanged lines are saved without costs and with their stored product name.
 -- 2. Reversed receipts: no change. set_purchase_order_item_costs (20270223100000) refuses a cut on the received-value
 --    limit only when the bills were within it before the cut, whatever put them over: a prepaid bill or a reversed
 --    receipt (a receipt can be reversed only while no active bill is on the PO, so that bill is entered again after
 --    the reversal, with create_vendor_bill's confirmed reason). Proved, with real receipts and reversals, by
 --    scripts/smoke/prove-po-edit-cannot-cut-under-bills-real-schema.mjs.
 --
--- Same signature, owner and grants; the body is the 20261021140000 wrapper (md5-pinned below) plus the check around
--- the unchanged inner save. Lock order: the advisory lock first (as before); the inner save locks the lines and the PO;
--- only when a billed PO's lines changed is the PO row locked again (already held then) before bills are re-read, which
--- serializes with create_vendor_bill (it locks the PO). A replay changes no line, so it takes no extra lock. Any change
--- to a line's quantity ordered or received, product, unit or cost counts, however small. No data changes (live 2026-11-22: no vendor bill is linked to a PO).
+-- Same signature, owner and grants; the body is the 20261021140000 wrapper (md5-pinned below) plus the check before
+-- the unchanged inner save. Lock order: the advisory lock first (as before), then the PO row (create_vendor_bill locks
+-- it too, so no bill appears or is voided mid-save), then the inner save. App calls run READ COMMITTED (PostgREST), so
+-- the bill read after the lock sees every committed bill. No data changes (live 2026-11-22: no vendor bill is linked to
+-- a PO).
 --
 -- idempotency-body-check: exempt -- the key, fingerprint and receipt stay in the unchanged inner save; a refused save
---   rolls back with its receipt, and a replay changes no line so it is never refused.
+--   rolls back before the inner save runs, and a replay of a saved key skips the check and gets its receipt.
 -- caller-analysis: save_purchase_order :: src/pages/PurchaseOrderDetail.tsx (Edit PO), NewPurchaseOrder.tsx and
 --   BulkPOImport.tsx (new POs: no bills, never checked); same arguments; new error code mapped in errorSanitizer.ts.
 --
@@ -65,7 +66,6 @@ CREATE OR REPLACE FUNCTION public.save_purchase_order(
 SET search_path = public, pg_temp AS $function$
 DECLARE
   v_items jsonb := p_items;
-  v_old_lines jsonb;
   v_result jsonb;
 BEGIN
   PERFORM pg_advisory_xact_lock(73492009);
@@ -75,41 +75,57 @@ BEGIN
       INTO v_items
       FROM jsonb_array_elements(p_items) WITH ORDINALITY AS t(e, o);
   END IF;
-  -- Mason, 2026-11-24: once a PO has an active vendor bill, Edit PO cannot change its lines, for anyone. Snapshot an
-  -- existing PO's lines every time (not only when a bill exists now): a bill created while this save waits for the PO
-  -- lock is still caught by the check after the save. Every other writer of a PO's lines takes the advisory lock above;
-  -- the snapshot is never returned, and the inner save checks the caller before anything is compared or refused.
-  IF p_po_id IS NOT NULL THEN
-    SELECT COALESCE(jsonb_object_agg(poi.id::text, jsonb_build_object(
-             'q', poi.quantity_ordered, 'r', poi.quantity_received, 'p', poi.product_id, 'n', poi.product_name, 'u', poi.unit_size,
-             'c', poi.unit_cost)), '{}'::jsonb)
-      INTO v_old_lines
-      FROM public.purchase_order_items poi WHERE poi.purchase_order_id = p_po_id;
+  -- Mason, 2026-11-24: once a PO has an active vendor bill, Edit PO cannot change its lines, for anyone. Checked
+  -- BEFORE the inner save, so a refused edit never runs its arithmetic or side effects. Only for a caller the inner
+  -- save would accept (signed in, acting as themself, admin or rep; anyone else is refused there, unchanged), and not
+  -- for a replay of a saved key (the inner save returns its receipt and changes nothing).
+  IF p_po_id IS NOT NULL AND auth.uid() IS NOT NULL AND p_performed_by = auth.uid()
+     AND (public.is_admin() OR public.is_sales_rep())
+     AND (p_idempotency_key IS NULL OR public.check_idempotency(p_idempotency_key, 'save_purchase_order') IS NULL) THEN
+    -- The PO row lock create_vendor_bill also takes: no bill can be added or voided until this save commits.
+    PERFORM 1 FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
+    IF EXISTS (SELECT 1 FROM public.vendor_bills vb
+                WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided') THEN
+      -- The edit must send exactly the stored lines (each once, by id) with the same quantity, product, unit (blank and
+      -- null alike, as the screen sends), line notes and, when sent, cost. Equality only: no casts or arithmetic on
+      -- what was sent. A rep's costs were
+      -- removed above, so a rep's refusal never depends on a cost.
+      IF jsonb_typeof(v_items) IS DISTINCT FROM 'array'
+         OR jsonb_array_length(v_items)
+              <> (SELECT count(*) FROM public.purchase_order_items poi WHERE poi.purchase_order_id = p_po_id)
+         OR jsonb_array_length(v_items)
+              <> (SELECT count(DISTINCT poi.id) FROM jsonb_array_elements(v_items) AS t(e)
+                    JOIN public.purchase_order_items poi
+                      ON jsonb_typeof(t.e) = 'object' AND poi.purchase_order_id = p_po_id
+                     AND poi.id = public._cost_step2_try_uuid(t.e->>'id'))
+         OR EXISTS (
+              SELECT 1 FROM jsonb_array_elements(v_items) AS t(e)
+                JOIN public.purchase_order_items poi
+                  ON jsonb_typeof(t.e) = 'object' AND poi.purchase_order_id = p_po_id
+                 AND poi.id = public._cost_step2_try_uuid(t.e->>'id')
+               WHERE (t.e->'quantity_ordered') IS DISTINCT FROM to_jsonb(poi.quantity_ordered)
+                  OR (t.e->>'product_id') IS DISTINCT FROM poi.product_id::text
+                  OR NULLIF(t.e->>'unit_size', '') IS DISTINCT FROM NULLIF(poi.unit_size, '')
+                  OR (t.e ? 'notes' AND NULLIF(t.e->>'notes', '') IS DISTINCT FROM NULLIF(to_jsonb(poi)->>'notes', ''))
+                  OR (t.e ? 'unit_cost' AND (t.e->'unit_cost') IS DISTINCT FROM COALESCE(to_jsonb(poi.unit_cost), 'null'::jsonb))
+                  OR (t.e ? 'unit_cost_cents'
+                      AND (t.e->'unit_cost_cents') IS DISTINCT FROM COALESCE(to_jsonb(poi.unit_cost_cents), 'null'::jsonb))) THEN
+        RAISE EXCEPTION 'PO_BILLED_LINES_LOCKED: this purchase order has a vendor bill, so its lines cannot be changed here; void the bill first, or have an admin use Correct Unit Cost'
+          USING ERRCODE = '22023';
+      END IF;
+      -- Unchanged lines: save them without costs (an omitted cost is kept, so no cost confirmation or cost log) and
+      -- with the stored product name (the screen resends the current catalog name).
+      SELECT jsonb_agg((t.e - 'unit_cost' - 'unit_cost_cents') || jsonb_build_object('product_name', poi.product_name)
+                       ORDER BY t.o)
+        INTO v_items
+        FROM jsonb_array_elements(v_items) WITH ORDINALITY AS t(e, o)
+        JOIN public.purchase_order_items poi
+          ON poi.purchase_order_id = p_po_id AND poi.id = public._cost_step2_try_uuid(t.e->>'id');
+    END IF;
   END IF;
   v_result := public._section9_save_purchase_order_serialized(
     p_po_id, p_po_payload, v_items, p_performed_by, p_idempotency_key
   );
-  IF v_old_lines IS NOT NULL AND (
-       (SELECT count(*) FROM public.purchase_order_items poi WHERE poi.purchase_order_id = p_po_id)
-         <> (SELECT count(*) FROM jsonb_object_keys(v_old_lines))
-       OR EXISTS (
-         SELECT 1 FROM jsonb_each(v_old_lines) o
-           LEFT JOIN public.purchase_order_items poi ON poi.id = o.key::uuid AND poi.purchase_order_id = p_po_id
-          WHERE poi.id IS NULL
-             OR poi.quantity_ordered IS DISTINCT FROM (o.value->>'q')::numeric
-             OR poi.quantity_received IS DISTINCT FROM (o.value->>'r')::numeric
-             OR poi.product_id IS DISTINCT FROM (o.value->>'p')::uuid
-             OR poi.product_name IS DISTINCT FROM (o.value->>'n')
-             OR poi.unit_size IS DISTINCT FROM (o.value->>'u')
-             OR poi.unit_cost IS DISTINCT FROM (o.value->>'c')::numeric)) THEN
-    -- Read the bills under the PO row lock create_vendor_bill takes: one created or voided while the save waited counts.
-    PERFORM 1 FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
-    IF EXISTS (SELECT 1 FROM public.vendor_bills vb
-                WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided') THEN
-      RAISE EXCEPTION 'PO_BILLED_LINES_LOCKED: this purchase order has a vendor bill, so its lines cannot be changed here; void the bill first, or have an admin use Correct Unit Cost'
-        USING ERRCODE = '22023';
-    END IF;
-  END IF;
   RETURN v_result;
 END;
 $function$;

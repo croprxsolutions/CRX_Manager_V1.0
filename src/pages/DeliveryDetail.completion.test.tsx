@@ -536,6 +536,17 @@ describe('Email Confirmation and the server receipt queue', () => {
     expect(mockToast).toHaveBeenCalledWith('success', 'Confirmation email sent to farmer@example.test');
   });
 
+  it('a sales rep sends it but never marks it handled: it stays listed for an admin (Mason, 2026-11-24)', async () => {
+    setRole('sales_rep');
+    mockRpc.mockImplementation(() => Promise.resolve(answer()));
+    mockSendEmail.mockResolvedValue({ success: true });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringMatching(/stays on "Customer receipts to check" until an admin marks it handled/)));
+    expect(mockSendEmail).toHaveBeenCalledTimes(1);
+    expect(closeCalls()).toEqual(['manual_send']);
+  });
+
   it('a failed send leaves the receipt paused on the office list (never marked handled)', async () => {
     mockRpc.mockImplementation(() => Promise.resolve(answer()));
     mockSendEmail.mockRejectedValue(new Error('provider down'));

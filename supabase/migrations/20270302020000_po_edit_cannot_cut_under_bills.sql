@@ -82,13 +82,18 @@ BEGIN
   IF p_po_id IS NOT NULL AND auth.uid() IS NOT NULL AND p_performed_by = auth.uid()
      AND (public.is_admin() OR public.is_sales_rep())
      AND (p_idempotency_key IS NULL OR public.check_idempotency(p_idempotency_key, 'save_purchase_order') IS NULL) THEN
-    -- The PO row lock create_vendor_bill also takes: no bill can be added or voided until this save commits.
+    -- The PO row lock create_vendor_bill also takes: no bill can be added until this save commits (a bill voided
+    -- meanwhile only means this save is refused and can be retried). The bill read below must see bills committed
+    -- while this save waited for the lock, which only READ COMMITTED guarantees (app calls through the API use it).
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+      RAISE EXCEPTION 'PO_SAVE_READ_COMMITTED_REQUIRED: save purchase orders in a READ COMMITTED transaction'
+        USING ERRCODE = '25001';
+    END IF;
     PERFORM 1 FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
     IF EXISTS (SELECT 1 FROM public.vendor_bills vb
                 WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided') THEN
       -- The edit must send exactly the stored lines (each once, by id) with the same quantity, product, unit (blank and
-      -- null alike, as the screen sends), line notes and, when sent, cost. Equality only: no casts or arithmetic on
-      -- what was sent. A rep's costs were
+      -- null alike, as the screen sends), line notes and, when sent, cost. No arithmetic touches a cost. A rep's costs were
       -- removed above, so a rep's refusal never depends on a cost.
       IF jsonb_typeof(v_items) IS DISTINCT FROM 'array'
          OR jsonb_array_length(v_items)
@@ -103,7 +108,9 @@ BEGIN
                 JOIN public.purchase_order_items poi
                   ON jsonb_typeof(t.e) = 'object' AND poi.purchase_order_id = p_po_id
                  AND poi.id = public._cost_step2_try_uuid(t.e->>'id')
-               WHERE (t.e->'quantity_ordered') IS DISTINCT FROM to_jsonb(poi.quantity_ordered)
+               -- shortcut: a quantity within 0.000000001 of the stored one is not a change (the browser resends a
+               -- stored quantity as a double); the stored quantity is what gets saved, so nothing drifts.
+               WHERE abs((t.e->>'quantity_ordered')::numeric - poi.quantity_ordered) > 0.000000001
                   OR (t.e->>'product_id') IS DISTINCT FROM poi.product_id::text
                   OR NULLIF(t.e->>'unit_size', '') IS DISTINCT FROM NULLIF(poi.unit_size, '')
                   OR (t.e ? 'notes' AND NULLIF(t.e->>'notes', '') IS DISTINCT FROM NULLIF(to_jsonb(poi)->>'notes', ''))
@@ -113,10 +120,12 @@ BEGIN
         RAISE EXCEPTION 'PO_BILLED_LINES_LOCKED: this purchase order has a vendor bill, so its lines cannot be changed here; void the bill first, or have an admin use Correct Unit Cost'
           USING ERRCODE = '22023';
       END IF;
-      -- Unchanged lines: save them without costs (an omitted cost is kept, so no cost confirmation or cost log) and
-      -- with the stored product name and line notes (the screen resends the catalog name and may omit notes).
+      -- Unchanged lines: save the STORED line (its own id spelling, quantity, product, name, unit and notes), not the
+      -- caller's copy, and without costs (an omitted cost is kept, so no cost confirmation or cost log).
       SELECT jsonb_agg((t.e - 'unit_cost' - 'unit_cost_cents')
-                         || jsonb_build_object('product_name', poi.product_name, 'notes', to_jsonb(poi)->'notes')
+                         || jsonb_build_object('id', poi.id, 'product_id', poi.product_id, 'product_name', poi.product_name,
+                                               'unit_size', poi.unit_size, 'quantity_ordered', poi.quantity_ordered,
+                                               'quantity_received', poi.quantity_received, 'notes', to_jsonb(poi)->'notes')
                        ORDER BY t.o)
         INTO v_items
         FROM jsonb_array_elements(v_items) WITH ORDINALITY AS t(e, o)

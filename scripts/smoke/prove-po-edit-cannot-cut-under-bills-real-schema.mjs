@@ -137,6 +137,21 @@ try {
   // 4b. Any change counts, however small, and line notes count; a resent catalog name is not a change (the stored
   // name is kept); a received quantity sent in the edit changes nothing (receipts are the only writer).
   assert.equal(refused(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40.000001, 0]]), PO1), `${LOCKED}|100000`);
+  // Sol round 4 HIGH: an admin's header-only save that spells a line id in capitals keeps the line's cost and total.
+  assert.equal(attempt(USERS.admin, `${asUser(`r := ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0]], 'admin note').replace(`"id":"${L1B}"`, `"id":"${L1B.toUpperCase()}"`)};`)}
+    v := ${total(PO1)} || '|' || (SELECT unit_cost_cents FROM public.purchase_order_items WHERE id = '${L1B}');`), 'ok|100000|1000');
+  // Sol round 4 MED: a stored null unit sent back as '' saves the stored null, not ''.
+  assert.equal(attempt(USERS.admin, `SET LOCAL session_replication_role = replica;
+    UPDATE public.purchase_order_items SET unit_size = NULL WHERE id = '${L2A}'; SET LOCAL session_replication_role = origin;
+    ${asUser(`r := ${save(PO2, 'submitted', [[L2A, 10, 0]], 'call vendor').replace('"unit_size":"Gal"', '"unit_size":""')};`)}
+    v := COALESCE((SELECT unit_size FROM public.purchase_order_items WHERE id = '${L2A}'), '<null>');`), 'ok|<null>');
+  // Sol round 4 MED: a billed-PO save outside READ COMMITTED is refused (it could miss a bill committed while it waited).
+  const rr = psql(`BEGIN ISOLATION LEVEL REPEATABLE READ;
+${claims(USERS.admin)}
+SET LOCAL ROLE authenticated;
+    SELECT ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0]], 'rr note')};
+ROLLBACK;`, { allowFailure: true });
+  assert.match(rr.stderr, /PO_SAVE_READ_COMMITTED_REQUIRED/);
   assert.equal(refused(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0]]).replace('"unit_size":"Gal"', '"unit_size":"Gal","notes":"deliver to barn"'), PO1), `${LOCKED}|100000`);
   assert.equal(attempt(USERS.admin, `${asUser(`r := ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0]]).replace('[POEB] Chem', '[POEB] Renamed')};`)}
     v := (SELECT string_agg(DISTINCT product_name, ',') FROM public.purchase_order_items WHERE purchase_order_id = '${PO1}');`), 'ok|[POEB] Chem');

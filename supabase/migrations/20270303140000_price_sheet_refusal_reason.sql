@@ -94,12 +94,13 @@ BEGIN
         AND p.prosecdef AND p.provolatile = 's' AND p.proconfig = ARRAY['search_path=public, pg_temp']) THEN
     RAISE EXCEPTION 'POSTFLIGHT_SECURITY: security definer, volatility or search_path wrong';
   END IF;
-  IF has_function_privilege('anon', 'public.get_pricing_workbook_export_refusal_reason(uuid)', 'EXECUTE')
-     OR has_function_privilege('service_role', 'public.get_pricing_workbook_export_refusal_reason(uuid)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.get_pricing_workbook_export_refusal_reason(uuid)', 'EXECUTE')
-     OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) x
+  -- Only the owner and authenticated may hold EXECUTE (no default-privilege leftovers for any other role).
+  IF NOT has_function_privilege('authenticated', 'public.get_pricing_workbook_export_refusal_reason(uuid)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.get_pricing_workbook_export_refusal_reason(uuid)', 'EXECUTE')
+     OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) x
                 WHERE p.oid = 'public.get_pricing_workbook_export_refusal_reason(uuid)'::regprocedure
-                  AND x.grantee = 0 AND x.privilege_type = 'EXECUTE') THEN
+                  AND x.privilege_type = 'EXECUTE' AND x.grantee <> p.proowner
+                  AND (x.grantee = 0 OR pg_get_userbyid(x.grantee) <> 'authenticated')) THEN
     RAISE EXCEPTION 'POSTFLIGHT_GRANTS: execute must be authenticated only';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK';

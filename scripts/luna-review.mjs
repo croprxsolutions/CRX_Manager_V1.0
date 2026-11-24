@@ -41,7 +41,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { isMoneyPath } from "../.claude/hooks/codex-bot-review-lib.mjs";
 import { solRiskPathProblem } from "../.claude/hooks/sol-risk-lib.mjs";
-import { TAHA_LANE_UNTIL_MS, isTahaLanePath } from "../.claude/hooks/taha-lane-lib.mjs";
+import { isTahaLanePath } from "../.claude/hooks/taha-lane-lib.mjs";
 import {
   CODEX_REVIEW_EFFORT,
   CODEX_REVIEW_MODEL,
@@ -74,7 +74,7 @@ export function terraRefusal(diff, now = Date.now()) {
     if (sol) return `${sol}: run Luna, then Sol`;
     if (isMoneyPath(name)) return `${name} is money or inventory code: run Luna, then Sol`;
     if (/\.sql$/i.test(name)) return `${name} is SQL: run Luna, then Sol`;
-    if (now < TAHA_LANE_UNTIL_MS && isTahaLanePath(name)) return `${name} is in Taha's lanes: run Luna`;
+    if (isTahaLanePath(name)) return `${name} is in Taha's lanes: run Luna`;
   }
   return null;
 }

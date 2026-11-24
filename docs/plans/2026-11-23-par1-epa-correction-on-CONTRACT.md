@@ -66,12 +66,12 @@ Smallest change:
   App: KI-195's screens must be deployed to production before the apply, or a sprayed job printed from the old app
   would show the product's (new) number. Already-deployed app works with either database state.
 - Timing: double click / retry use the existing key; stale version refused (existing, proven).
-- Undo: correct back to the old number with a reason (a new event, not a restore: sizes added since take it too).
+- Undo: correct back to the old number with a reason (a new event, not a restore: sizes added since take it too). Adding a number to a parent that had none is one-way: a number can't be cleared, and old blank-line invoices for those sizes reprint with the added number (Taha review LOW 1).
   The migration's rollback re-emits ONLY the switch as false and keeps the line-copy year-end reader; restoring the old
   reader after a correction would print the new number on old invoices (Astra #45).
 - Exceptions already accepted (record map): a job sprayed or finished before `20261204120000` prints **Not recorded**
   rather than any number; a blank invoice line for a size that had no number shows the new number (Mason accepted,
-  record map follow-up 4); invoices and RUP records made after the correction take the new number, except a draft line
+  record map, Parent EPA correction section, 2026-11-07); invoices and RUP records made after the correction take the new number, except a draft line
   saved before the correction and posted after without being re-saved: it keeps the number (and restricted-use capture)
   it was saved with, which is what that invoice prints (Sol r2 LOW). A deleted draft
   invoice restored after a correction behaves as any draft: saving it fills its lines from the trigger.

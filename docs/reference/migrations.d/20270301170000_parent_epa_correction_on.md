@@ -10,4 +10,4 @@ Proof: `node scripts/smoke/prove-parent-epa-correction-on-real-schema.mjs` (`PAR
 
 Cost-exposure allowlist: post-apply keys `get_customer_year_end_summary(...)#f08f29e8fbf0` and `get_batch_year_end_summaries(...)#05cb984dfa90` (container-computed by the prover); they show in the sweep until the apply. No cost, profit or margin output added.
 
-Rollback (its own reviewed migration): re-emit `_product_parent_epa_correction_enabled()` as `SELECT false` ONLY (the clearing refusal can stay). Keep this file's year-end body: after any correction, the old body would print the new number on old invoices. Corrections already made stay as logged events; undo one by correcting back through the same screen.
+Rollback (its own reviewed migration): re-emit `_product_parent_epa_correction_enabled()` as `SELECT false` ONLY (the clearing refusal can stay). Keep this file's year-end body: after any correction, the old body would print the new number on old invoices. Corrections already made stay as logged events; undo one by correcting back through the same screen, except adding a number to a parent that had none: a number can't be cleared, so that one is one-way.

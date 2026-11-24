@@ -63,6 +63,8 @@ jobs:
     concurrency: { group: taha-ready-ping, cancel-in-progress: false }
     permissions:
       contents: read
+      checks: read
+      statuses: read
       issues: write
       pull-requests: read
     steps:

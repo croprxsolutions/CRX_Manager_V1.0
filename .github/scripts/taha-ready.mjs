@@ -3,11 +3,11 @@
 //          review once (a) it touches his lane (taha-lane-lib.mjs, the merge block's own test),
 //          (b) it needs no Sol (sol-risk-lib.mjs, the merge gate's own classifier) and
 //          (c) every required check is green. It never removes the label.
-//   ping:  post once per PR head to #crx-work for each labelled PR Taha has not reviewed at that head.
-//          The first post needs only the label; a later head needs his review request again.
+//   ping:  post once per PR head to #crx-work for each labelled PR waiting on Taha (needsPing).
 //          A hidden PR comment per head is the dedupe record, written before Slack is called.
 // Sol proofs are files on the builder's computer, never on GitHub, so this bot cannot see a clean Sol:
-// a PR on the Sol list is left for the agent, which labels it after Sol (the ping still covers it).
+// a PR on the Sol list is left for the agent, which labels it (or re-requests Taha) after Sol; the bot
+// pings for it once that happens after the head's push.
 // Usage: node .github/scripts/taha-ready.mjs <label|ping> [--dry-run]
 import { spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
@@ -63,22 +63,30 @@ export const pingMarker = (sha) => `<!-- taha-ready-ping ${String(sha).toLowerCa
 const pinged = (comments, sha) => (comments ?? []).filter((c) => BOT_LOGINS.has(c.author?.login) && /<!-- taha-ready-ping [0-9a-f]{40} -->/.test(c.body ?? ''))
   .map((c) => /<!-- taha-ready-ping ([0-9a-f]{40}) -->/.exec(c.body)[1]).filter((s) => sha === undefined || s === String(sha).toLowerCase());
 
-// Ping once per head, only with required checks green. The first ping trusts whoever added the label
-// (an agent adds it only after a clean Sol). A review request can outlive a push, so a later head is
-// pinged only when Taha is requested AND the bot itself can see it needs no Sol; a new head on the Sol
-// list is the agent's to announce. Returns { ping, why }; checks/sol are thunks as in decide().
-export function needsPing(pr, comments, { checks, sol }) {
+// True when the label or Taha's review request came after the head was pushed (the earliest check suite
+// on the head stands for the push). ship.md has agents do either only after a clean Sol on that head.
+export function askedAfterPush(pushTimes, askTimes) {
+  const times = (text) => String(text ?? '').split(/\r?\n/).map((t) => Date.parse(t)).filter(Number.isFinite);
+  const pushed = times(pushTimes);
+  const asked = times(askTimes);
+  return pushed.length > 0 && asked.length > 0 && Math.max(...asked) > Math.min(...pushed);
+}
+
+// Ping once per head while Taha is requested and required checks are green. Off the Sol list the bot
+// checks readiness itself. A Sol-list head needs the label or his review request added after the push,
+// because the bot cannot see Sol proofs and a request or label can outlive a push.
+// checks/sol/asked are thunks as in decide(); returns { ping, why }.
+export function needsPing(pr, comments, { checks, sol, asked }) {
   const no = (why) => ({ ping: false, why });
   if (!hasLabel(pr) || pr.isDraft || isTahasPr(pr)) return no('not a labelled, ready PR of ours');
   if (tahaReviewedHead(pr)) return no('Taha already reviewed this head');
   if (pinged(comments, pr.headRefOid).length) return no('already pinged for this head');
+  if (!tahaRequested(pr)) return no('Taha is not requested');
   const checkProblem = requiredChecksProblem(checks());
   if (checkProblem) return no(checkProblem);
-  if (!pinged(comments).length) return { ping: true, why: 'first ping' };
-  if (!tahaRequested(pr)) return no('new head, Taha not re-requested');
-  const risk = sol();
-  if (risk?.risky !== false) return no('new head on the Sol list: the agent tells Taha after Sol');
-  return { ping: true, why: 'new head, Taha re-requested' };
+  if (sol()?.risky === false) return { ping: true, why: 'no Sol needed, checks green' };
+  if (asked()) return { ping: true, why: 'Sol-list PR labelled or re-requested after its latest push' };
+  return no('Sol-list PR: waiting for the label or a review request made after the latest push');
 }
 
 export const pingText = (pr) => `<@${TAHA_SLACK}> ${link(pr.url, `#${pr.number}`)} ${esc(pr.title)} is waiting on your Approve (head ${String(pr.headRefOid).slice(0, 7)})`;
@@ -107,6 +115,10 @@ async function handle(pr, mode, dry) {
     checks: () => requiredChecks(pr.number),
     lane: () => tahaLaneProblem({ files: prFilesOnGitHub({ repo: REPO, gh, number: pr.number, headSha: pr.headRefOid }) }),
     sol: () => solRiskOnGitHub({ baseSha: pr.baseRefOid, headSha: pr.headRefOid, repo: REPO, gh }),
+    asked: () => askedAfterPush(
+      tryGh(['api', '--paginate', `repos/${REPO}/commits/${pr.headRefOid}/check-suites?per_page=100`, '--jq', '.check_suites[].created_at']),
+      tryGh(['api', '--paginate', `repos/${REPO}/issues/${pr.number}/events?per_page=100`, '--jq',
+        `.[] | select((.event == "labeled" and .label.name == "${LABEL}") or (.event == "review_requested" and ((.requested_reviewer.login // "") | ascii_downcase) == "${TAHA_LOGIN}")) | .created_at`])),
   };
   // Everything above was read for one head; a push since then means this run judged the wrong commit.
   const moved = () => currentHead(pr.number) !== pr.headRefOid;
@@ -118,7 +130,7 @@ async function handle(pr, mode, dry) {
       gh(['api', `repos/${REPO}/issues/${pr.number}/labels`, '-f', `labels[]=${LABEL}`]);
       gh(['api', `repos/${REPO}/pulls/${pr.number}/requested_reviewers`, '-f', 'reviewers[]=TahaKhanAbdalli']);
     }
-    if (d.act) { pr.labels = [...(pr.labels ?? []), { name: LABEL }]; pr.reviewRequests = [{ login: 'TahaKhanAbdalli' }]; }
+    if (d.act) { pr.labels = [...(pr.labels ?? []), { name: LABEL }]; pr.reviewRequests = [...(pr.reviewRequests ?? []), { login: 'TahaKhanAbdalli' }]; }
   }
   const p = needsPing(pr, pr.comments, facts);
   if (!p.ping) return 0;

@@ -1,7 +1,7 @@
 // Run: node --test .github/scripts/taha-ready.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, needsPing, pingMarker, pingText, requiredChecksProblem } from './taha-ready.mjs';
+import { askedAfterPush, decide, needsPing, pingMarker, pingText, requiredChecksProblem } from './taha-ready.mjs';
 
 const HEAD = 'a'.repeat(40);
 const NEW = 'b'.repeat(40);
@@ -51,39 +51,49 @@ test('requiredChecksProblem names what is not green', () => {
 const bot = (sha) => ({ author: { login: 'github-actions' }, body: `Pinged.\n\n${pingMarker(sha)}` });
 const labelled = (o) => pr({ labels: [{ name: 'ready-for-taha' }], ...o });
 
-const P = (p, c, f = ok) => needsPing(p, c, f).ping;
+const T = { reviewRequests: [{ login: 'TahaKhanAbdalli' }] };
+const solList = { ...ok, sol: () => ({ risky: true, reason: 'supabase/' }) };
+const P = (p, c, f = ok) => needsPing(p, c, { asked: () => false, ...f }).ping;
 
-test('ping dedupe: once per head, never twice', () => {
-  assert.equal(P(labelled(), []), true);
-  assert.equal(P(labelled(), [bot(HEAD)]), false);
-  assert.equal(P(labelled({ reviewRequests: [{ login: 'TahaKhanAbdalli' }] }), [bot(HEAD)]), false);
+test('ping dedupe: once per head, never twice; a new head pings again', () => {
+  assert.equal(P(labelled(T), []), true);
+  assert.equal(P(labelled(T), [bot(HEAD)]), false);
+  assert.equal(P(labelled({ ...T, headRefOid: NEW }), [bot(HEAD)]), true);
 });
 
-test('no ping while required checks are not green', () => {
-  assert.equal(P(labelled(), [], { ...ok, checks: () => [{ name: 'CI', bucket: 'pending' }] }), false);
+test('no ping unless Taha is requested and required checks are green', () => {
+  assert.equal(P(labelled(), []), false);
+  assert.equal(P(labelled(T), [], { ...ok, checks: () => [{ name: 'CI', bucket: 'pending' }] }), false);
 });
 
-test('a new head pings again only when Taha is re-requested and it needs no Sol', () => {
-  const req = { headRefOid: NEW, reviewRequests: [{ login: 'TahaKhanAbdalli' }] };
-  assert.equal(P(labelled({ headRefOid: NEW }), [bot(HEAD)]), false);
-  assert.equal(P(labelled(req), [bot(HEAD)]), true);
-  // A request that outlived a push to a Sol-list head is not proof Sol ran again.
-  assert.equal(P(labelled(req), [bot(HEAD)], { ...ok, sol: () => ({ risky: true, reason: 'supabase/' }) }), false);
+test('a Sol-list head pings only when labelled or re-requested after its push', () => {
+  assert.equal(P(labelled(T), [], solList), false);
+  assert.equal(P(labelled({ ...T, headRefOid: NEW }), [bot(HEAD)], solList), false);
+  assert.equal(P(labelled({ ...T, headRefOid: NEW }), [bot(HEAD)], { ...solList, asked: () => true }), true);
+  assert.equal(P(labelled(T), [], { ...ok, sol: () => undefined, asked: () => false }), false);
+});
+
+test('askedAfterPush compares the newest ask with the push', () => {
+  const push = '2026-11-24T10:00:00Z\n2026-11-24T10:05:00Z';
+  assert.equal(askedAfterPush(push, '2026-11-24T09:00:00Z\n2026-11-24T10:01:00Z'), true);
+  assert.equal(askedAfterPush(push, '2026-11-24T09:59:00Z'), false);
+  assert.equal(askedAfterPush(null, '2026-11-24T11:00:00Z'), false);
+  assert.equal(askedAfterPush(push, null), false);
+  assert.equal(askedAfterPush('garbage', 'garbage'), false);
 });
 
 test('only the bot can write a dedupe record', () => {
-  assert.equal(P(labelled({ headRefOid: NEW, reviewRequests: [{ login: 'TahaKhanAbdalli' }] }), [{ author: { login: 'masonwells1' }, body: pingMarker(NEW) }]), true);
-  assert.equal(P(labelled(), [{ author: { login: 'masonwells1' }, body: pingMarker(HEAD) }]), true);
+  assert.equal(P(labelled(T), [{ author: { login: 'masonwells1' }, body: pingMarker(HEAD) }]), true);
 });
 
 test('no ping without the label, on drafts, on Taha PRs, or once he reviewed the head', () => {
-  const lazy = { checks: never, sol: never };
-  assert.equal(P(pr(), [], lazy), false);
-  assert.equal(P(labelled({ isDraft: true }), [], lazy), false);
-  assert.equal(P(labelled({ author: { login: 'TahaKhanAbdalli' } }), [], lazy), false);
-  assert.equal(P(labelled({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'CHANGES_REQUESTED', commit: { oid: HEAD } }] }), [], lazy), false);
+  const lazy = { checks: never, sol: never, asked: never };
+  assert.equal(P(pr(T), [], lazy), false);
+  assert.equal(P(labelled({ ...T, isDraft: true }), [], lazy), false);
+  assert.equal(P(labelled({ ...T, author: { login: 'TahaKhanAbdalli' } }), [], lazy), false);
+  assert.equal(P(labelled({ ...T, reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'CHANGES_REQUESTED', commit: { oid: HEAD } }] }), [], lazy), false);
   // A dismissed review no longer counts as having seen the head.
-  assert.equal(P(labelled({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'DISMISSED', commit: { oid: HEAD } }] }), []), true);
+  assert.equal(P(labelled({ ...T, reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'DISMISSED', commit: { oid: HEAD } }] }), []), true);
 });
 
 test('ping text escapes PR titles and names the short head', () => {

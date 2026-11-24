@@ -1,4 +1,4 @@
-import type { Cell, CellValue, Worksheet } from 'exceljs';
+import type { Cell, CellValue, Workbook, Worksheet } from 'exceljs';
 import type {
   PricingPreviewResult,
   PricingWorkbookExport,
@@ -703,10 +703,10 @@ function readManifest(manifest: Worksheet): Record<(typeof MANIFEST_KEYS)[number
   return Object.fromEntries(entries) as Record<(typeof MANIFEST_KEYS)[number], string>;
 }
 
-function validateHeaders(worksheet: Worksheet): void {
+function validateHeaders(worksheet: Worksheet, ignoredTrailingColumns: number): void {
   const headerRow = worksheet.getRow(1);
   const headers = Array.from(
-    { length: headerRow.cellCount },
+    { length: Math.max(headerRow.cellCount - ignoredTrailingColumns, 0) },
     (_, index) => {
       const cell = headerRow.getCell(index + 1);
       if (isFormulaValue(cell.value)) {
@@ -746,9 +746,8 @@ function parsePricingRow(worksheet: Worksheet, rowNumber: number): PricingWorksh
   };
 }
 
-export async function parseProductPricingWorkbook(
-  arrayBuffer: ArrayBuffer,
-): Promise<ParsedPricingWorkbook> {
+/** Archive safety checks, then one ExcelJS load. */
+export async function loadPricingWorkbook(arrayBuffer: ArrayBuffer): Promise<Workbook> {
   await validatePricingWorkbookArchive(arrayBuffer);
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
@@ -759,7 +758,36 @@ export async function parseProductPricingWorkbook(
       'This file could not be read as an Excel price sheet. Open it in Excel, save it as .xlsx, and upload it again.',
     );
   }
+  return workbook;
+}
 
+/** Rows holding any value outside the ignored columns, as actualRowCount would count them were those columns removed. */
+function rowsWithValues(worksheet: Worksheet, ignoredFrom: number, ignoredTo: number): number {
+  let count = 0;
+  worksheet.eachRow((row) => {
+    let counted = false;
+    row.eachCell((_, column) => {
+      if (column < ignoredFrom || column > ignoredTo) counted = true;
+    });
+    if (counted) count += 1;
+  });
+  return count;
+}
+
+export async function parseProductPricingWorkbook(
+  arrayBuffer: ArrayBuffer,
+): Promise<ParsedPricingWorkbook> {
+  return parseLoadedPricingWorkbook(await loadPricingWorkbook(arrayBuffer));
+}
+
+/**
+ * Parse an already loaded price sheet. ignoredTrailingColumns skips that many locked columns right
+ * after the CRX headers (the supplier-evidence summary); the caller must have checked their headers.
+ */
+export function parseLoadedPricingWorkbook(
+  workbook: Workbook,
+  ignoredTrailingColumns = 0,
+): ParsedPricingWorkbook {
   const worksheet = workbook.getWorksheet(PRICING_WORKBOOK_SHEET);
   if (!worksheet) {
     throw new PricingWorkbookFormatError(`Missing required worksheet ${PRICING_WORKBOOK_SHEET}.`);
@@ -769,7 +797,7 @@ export async function parseProductPricingWorkbook(
     throw new PricingWorkbookFormatError('Missing CRX workbook manifest. Export a fresh pricing workbook.');
   }
 
-  validateHeaders(worksheet);
+  validateHeaders(worksheet, ignoredTrailingColumns);
   const manifest = readManifest(manifestWorksheet);
   if (!/^(?:0|[1-9][0-9]*)$/.test(manifest.row_count)) {
     throw new PricingWorkbookFormatError('The workbook manifest row count is invalid.');
@@ -778,7 +806,14 @@ export async function parseProductPricingWorkbook(
   if (rowCount > MAX_PRICING_WORKBOOK_ROWS) {
     throw new PricingWorkbookFormatError(`Pricing workbooks are limited to ${MAX_PRICING_WORKBOOK_ROWS} rows.`);
   }
-  if (worksheet.actualRowCount - 1 !== rowCount) {
+  const valueRows = ignoredTrailingColumns === 0
+    ? worksheet.actualRowCount
+    : rowsWithValues(
+      worksheet,
+      PRICING_WORKBOOK_HEADERS.length + 1,
+      PRICING_WORKBOOK_HEADERS.length + ignoredTrailingColumns,
+    );
+  if (valueRows - 1 !== rowCount) {
     throw new PricingWorkbookFormatError(
       'Rows were added to or deleted from the Pricing Update sheet. Keep every downloaded row (leave a row as it is to skip it), or download a fresh price sheet.',
     );

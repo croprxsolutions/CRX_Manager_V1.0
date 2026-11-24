@@ -115,7 +115,7 @@ used to fire on almost every message was removed on 2026-10-29.
 `unattended-autopilot` auto-approves routine calls overnight, only when Mason arms it.
 
 **5. Session housekeeping.** At start: `session-staleness` (schema snapshot behind migrations,
-missing backup), `worktree-awareness` (other sessions working), `worktree-cleanup` (removes finished
+missing backup), `worktree-cleanup` (removes finished
 worktrees), `session-snapshot`, `session-heartbeat`, `session-context-reminder`. At the end of a turn:
 `stop-wrap` (uncommitted files, unapplied migrations, undeployed functions). Codex also runs
 `stop-verify` (refuses "done" until the change was actually run and observed); Claude's wiring of

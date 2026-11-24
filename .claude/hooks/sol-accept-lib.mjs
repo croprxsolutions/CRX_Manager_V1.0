@@ -7,7 +7,7 @@
 //      numbered BLOCKER/HIGH findings (SOL_FINDING lines) bound to the reviewed head
 //      and base: codex-review-blockers-<head>.json.
 //   2. scripts/owner-accept-sol-finding.mjs <n> builds a request for finding n; Mason
-//      replies `accept <code> <reason>` in the session that built it
+//      replies `accept <code> <reason>` (in the session that built it: the skip reply carries since 2026-11-23, accept does not)
 //      (owner-approval-prompt.mjs records it through owner-approval-lib.mjs).
 //   3. When every BLOCKER/HIGH of that run is accepted, `--log` writes the
 //      decision-log entry (a new decision-log.d/ file on a staging PR, else
@@ -366,7 +366,11 @@ export function verifySolSkip({ approval, record, checkReply, checkShown }) {
   if (![issued, deadline, approved].every(Number.isFinite) || approved < issued || approved > deadline) return no("it has no usable time window");
   const mark = approval.replyMark;
   if (!mark || mark.words !== String(approval.reply ?? "").trim()) return no("where his reply is in the conversation does not hold the recorded reply");
-  if (path.basename(String(mark.transcript ?? ""), ".jsonl") !== p.sessionId) return no("his reply is in a different conversation from the one that asked");
+  // Any conversation may carry his reply (Mason, 2026-11-23); the receipt names which one, and
+  // assertSkipShown below proves that conversation showed him this request just before it.
+  if (path.basename(String(mark.transcript ?? ""), ".jsonl") !== String(approval.repliedIn ?? p.sessionId)) {
+    return no("his reply is not in the conversation the receipt names");
+  }
   try { checkReply?.(mark); }
   catch (e) { return no(`his reply could not be confirmed as his words alone (${e?.message || e})`); }
   // Required: a plain `skip` names no request, so what he was shown is what binds it.
@@ -724,7 +728,8 @@ export function carriedAcceptances({ record, prNumber, prUrl, proofs, nowMs = Da
     accepted.push({
       ok: true, carried: true, reason: CARRIED_REASON, approvedAt: c.root.accepted_at,
       payload: { pullRequest: prNumber, pullRequestUrl: want, finding: f, nonce: c.root.ref },
-      carried_from: { head_sha: c.root.head_sha, ref: c.root.ref, n: c.root.n, accepted_at: c.root.accepted_at, severity: c.root.severity },
+      // original_base_sha: the base Mason first skipped it against, kept as a record when it carries onto a newer base.
+      carried_from: { head_sha: c.root.head_sha, ref: c.root.ref, n: c.root.n, accepted_at: c.root.accepted_at, severity: c.root.severity, original_base_sha: c.from_base },
     });
   }
   return { accepted };
@@ -775,7 +780,8 @@ export function carriedDecisionLogEntry({ record, accepted }) {
       `found ${record.findings.length} BLOCKER/HIGH finding(s); Sol marked each the same as one Mason skipped on this pull request.`,
     ...accepted.map((a) => `- Finding ${a.payload.finding.n} (${a.payload.finding.severity}) at ${findingLocation(a.payload.finding.text)}, ` +
       `text sha256 \`${textHash(a.payload.finding.text)}\`: carried from ref ${String(a.carried_from.ref).slice(0, 12)} at ` +
-      `\`${String(a.carried_from.head_sha).slice(0, 12)}\` to \`${head}\`; Sol marked it the same`),
+      `\`${String(a.carried_from.head_sha).slice(0, 12)}\` to \`${head}\`; Sol marked it the same; first skipped against base ` +
+      `\`${String(a.carried_from.original_base_sha).slice(0, 12)}\``),
     "",
     "",
   ].join("\n");

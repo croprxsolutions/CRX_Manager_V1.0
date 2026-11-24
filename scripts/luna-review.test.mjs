@@ -24,8 +24,7 @@ import {
   scopeHint,
   parseArgs,
   readSettled,
-  runLunaReview,
-} from "./luna-review.mjs";
+  runLunaReview, terraRefusal } from "./luna-review.mjs";
 import { fixedGitExecutable } from "./write-codex-push-proof.mjs";
 import { tempDir } from "./lib/test-temp-dir.mjs";
 
@@ -246,6 +245,27 @@ for (const counter of ["{\"feature\": 2", "null", "{\"feature\": \"bad\"}"]) {
   // Commit-scoped and Sol runs are not whole-branch rounds: never counted, never stopped.
   const sol = lunaRoundsOn("docs/a.md", seeded, ["sol"]);
   assert.deepEqual([sol.spawned, sol.counter["feature luna-rounds"]], [1, 6]);
+  // A Terra final review (Mason, 2026-11-23) runs on Terra and counts toward both caps like Luna.
+  const terra = lunaRoundsOn("docs/a.md", undefined, [["--terra"]]);
+  assert.deepEqual([terra.spawned, terra.counter["feature luna-rounds"]], [1, 1]);
+  assert.match(terra.printed, /gpt-6.1-terra/);
+  assert.match(terra.printed, /TERRA RESULT: FINDINGS 1/);
+  // Terra refuses anything off "ordinary code" without calling Codex (Taha's review of #2405).
+  const sql = lunaRoundsOn("supabase/migrations/x.sql", undefined, [["--terra"]]);
+  assert.deepEqual([sql.spawned, sql.exits], [0, [EXIT_DID_NOT_RUN]]);
+  assert.match(sql.printed, /TERRA RESULT: DID NOT RUN[\s\S]*run Luna, then Sol/);
+  const diffOf = (...names) => names.map((n) => `diff --git a/${n} b/${n}\n+x\n`).join("");
+  const before = Date.UTC(2026, 11, 1), after = Date.UTC(2026, 11, 17);
+  for (const name of ["supabase/migrations/x.sql", "supabase/x.sql", "src/lib/inventory.test.ts"]) assert.match(terraRefusal(diffOf(name), after) ?? "", /Sol/, name);
+  for (const name of ["src/pages/OrderDetail.tsx", "src/components/reports/ReportShell.tsx", "src/lib/purchasingHolds.ts"]) {
+    assert.match(terraRefusal(diffOf(name), before) ?? "", /Taha's lanes|Sol/, name);
+  }
+  assert.equal(terraRefusal(diffOf("src/components/reports/ReportShell.tsx"), after), null);
+  assert.equal(terraRefusal(diffOf("docs/a.md", "scripts/luna-review.mjs"), before), null);
+  assert.match(terraRefusal('diff --git "a/sp ace.ts" "b/sp ace.ts"\n', before), /could not be read/);
+  assert.equal(lunaRoundsOn("docs/a.md", seeded, [["--terra"]]).spawned, 0);
+  assert.equal(lunaRoundsOn("docs/a.md", seeded, [["--terra", "--after-simplify", "cut scope"]]).spawned, 1);
+  assert.equal(lunaRoundsOn(".claude/hooks/x.mjs", undefined, ["luna", "luna", ["--terra"]]).spawned, 2);
   // A damaged whole-branch count fails closed too.
   for (const bad of [{ "feature luna-rounds": "six" }, { "feature luna-rounds": -100 }, { "feature luna-unlocks": [null, null] },
     { "feature luna-unlocks": [{ step: "simplify", reason: " " }] }, { "feature luna-unlocks": [{ step: "other", reason: "x" }] }]) {
@@ -400,6 +420,9 @@ assert.equal(nextStepHint("- BLOCKER: a.sql:3 — grants anon\n- MED: b.ts:2\nLU
   assert.equal(parseArgs(["--settled", "s.md"]).settled, "s.md");
   assert.throws(() => parseArgs(["--sol", "--reason", "r", "--settled", "s.md"]), /Sol never sees/);
   assert.throws(() => parseArgs(["--settled", "--sol"]), /needs a value/);
+  assert.equal(parseArgs(["--terra"]).terra, true);
+  assert.throws(() => parseArgs(["--terra", "--settled", "s.md"]), /independent final review/);
+  assert.throws(() => parseArgs(["--terra", "--sol", "--reason", "r"]), /one reviewer/);
 
   // End to end: the list reaches Luna's stdin; an oversized one stops the run before Codex.
   const repoDir = path.join(dir, "repo");

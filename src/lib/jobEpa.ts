@@ -5,18 +5,19 @@
 import { supabase } from './db';
 
 const EPA_NOT_RECORDED = 'Not recorded';
-const EPA_UNKNOWN = 'Unknown';
+// Mason 2026-11-24: a product kept with no number (most adjuvants/fertilizers) prints a dash, as before the spray.
+const EPA_NONE = '—';
 
 export interface KeptEpa {
   epa_registration: string | null;
   not_recorded: boolean;
 }
 
-/** Print text for one product: the kept number, `Unknown` (kept with no number), `Not recorded`, else the catalog's. */
+/** Print text for one product: the kept number, a dash (kept with no number), `Not recorded`, else the catalog's. */
 export function jobEpaText(kept: KeptEpa | undefined, catalog: string | null): string | null {
   if (!kept) return catalog;
   if (kept.not_recorded) return EPA_NOT_RECORDED;
-  return kept.epa_registration ?? EPA_UNKNOWN;
+  return kept.epa_registration?.trim() || EPA_NONE;
 }
 
 async function assertJobVisible(jobId: string): Promise<void> {

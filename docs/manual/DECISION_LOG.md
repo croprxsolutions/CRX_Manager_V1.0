@@ -1,5 +1,80 @@
 # Decision Log
 
+## 2026-11-24 — Rate switch: a label maximum whose unit cannot be compared needs no over-label reason
+
+**Decision:** switching a product group to its approved rate asks for a typed over-label reason only when the rate is above a label maximum the app can compare; a maximum whose unit or basis it cannot compare ("not checked") lets the switch through with no reason, as Rate Review's own approval does. Mason, 2026-11-24, answering P1's Sol round 2 HIGH: "No, keep as is".
+**Why:** one rule in both places; the switch publishes a rate Rate Review already approved under that rule.
+**What this forbids/implies:** do not add a reason requirement for "not checked" to the switch alone (`20270301200000_rate_switch_recheck.sql`); a change to this rule changes Rate Review too and needs Mason's new decision.
+
+## 2026-11-23 — Terra is the final review for ordinary code; Sol stays on money, inventory, database and logins
+
+**Decision (Mason, in chat, 2026-11-23: "i want docs, simple edits etc to not spend 20 min waiting on sol … keep sol on money, database, and inventory … use terra where we can for final review", then chose A on each question and "Yes, build it").** Reverses part (3) of the 2026-11-06 entry ("Terra is not added as a second reviewer"). Docs and wording with no app code get no Codex review; ordinary code off `docs/reference/sol-required-paths.md` gets ONE `gpt-6.1-terra`/`high` final review (`node scripts/luna-review.mjs --terra`) instead of Luna rounds or Sol; Sol-list changes keep Luna then Sol. A large or unclear change may choose Sol; no size limit is enforced. Terra is advisory: no gate checks for it and it never counts as the Sol proof.
+**Why:** agents were running Sol (~20 minutes) on docs and simple edits that no gate requires, because the ladder named no lighter final review. Terra is faster and cheaper than Sol and stronger than Luna; the risky paths keep the same gates.
+
+## 2026-11-23 — Release #2388 Sol HIGH 1: drivers see farm contacts only for their own deliveries
+
+**Decision (Mason, in chat, 2026-11-23: fix all three release findings before release).** Replaces the 2026-11-21 "drivers may see name, phone, email and delivery address for every farm" part of the #2161 entry. `get_driver_customers` now answers only a driver who still has the Deliveries or My Route page, and only for farms on their own not-deleted, not cancelled or voided deliveries that are open, scheduled from yesterday on, or completed since yesterday (`20270228150000_driver_farm_lookup_scope.sql`). Never the financial fields, as before.
+## 2026-11-23 — #2364: Mason owner-accepted 7 Sol finding(s) at `67c24bf16161`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2364 at `67c24bf16161` (base `3dd8f9bbf7dc`) found 7 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/DeliveryDetail.tsx:842`, text sha256 `72da35a23d0ee1c6` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref b7629205c86f)
+- Finding 2 (HIGH) at `src/pages/DeliveryDetail.tsx:860`, text sha256 `cb63feb9add7d837` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d0a4fc3887a2)
+- Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:3332`, text sha256 `fdb4cf900b71e4d5` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d0a4fc3887a2)
+- Finding 4 (HIGH) at `src/pages/DeliveryDetail.tsx:857`, text sha256 `791249ddc2e34fb2` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d0a4fc3887a2)
+- Finding 5 (HIGH) at `src/pages/DeliveryDetail.tsx:694`, text sha256 `8bdd3375bb19c76b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref b7629205c86f)
+- Finding 6 (HIGH) at `src/pages/DeliveryDetail.tsx:847`, text sha256 `54747ba83878958b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d0a4fc3887a2)
+- Finding 7 (HIGH) at `src/pages/DeliveryDetail.tsx:3328`, text sha256 `ea8b822d5b28cd91` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref b7629205c86f)
+
+## 2026-11-23 — #2364: Mason owner-accepted 3 Sol finding(s) at `98c8c9897fec`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2364 at `98c8c9897fec` (base `5b549b9e4f2f`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/DeliveryDetail.tsx:839`, text sha256 `f5151f234f7425fa` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 55666ce4c535)
+- Finding 2 (HIGH) at `src/pages/DeliveryDetail.tsx:857`, text sha256 `039117bb703021ba` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 55666ce4c535)
+- Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:3327`, text sha256 `0f7b61b050aa1d57` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 55666ce4c535)
+
+## 2026-11-23 — #2170: Mason owner-accepted 4 Sol finding(s) at `a939d02c9667`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2170 at `a939d02c9667` (base `015566676500`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270227170000_job_completion_missing_stock_rows.sql:183`, text sha256 `78111d0360bedbaa` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 4125f6dd1f27)
+- Finding 2 (HIGH) at `supabase/migrations/20270227170000_job_completion_missing_stock_rows.sql:182`, text sha256 `97a5579d34ea3f3e` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 4125f6dd1f27)
+- Finding 3 (HIGH) at `supabase/migrations/20270227170000_job_completion_missing_stock_rows.sql:183`, text sha256 `3e465f6c5fa0c68a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 4125f6dd1f27)
+- Finding 4 (HIGH) at `supabase/migrations/20270227170000_job_completion_missing_stock_rows.sql:118`, text sha256 `0b3f6fae33f22310` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 4125f6dd1f27)
+
+## 2026-11-23 — #2170: Mason owner-accepted 3 Sol finding(s) at `20c50d55c114`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2170 at `20c50d55c114` (base `c2a85624e19a`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226120000_job_completion_missing_stock_rows.sql:182`, text sha256 `da0be87da49c87dc` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 4db4a73ed8e7)
+- Finding 2 (HIGH) at `supabase/migrations/20270226120000_job_completion_missing_stock_rows.sql:183`, text sha256 `2758b9a6db65d177` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 4db4a73ed8e7)
+- Finding 3 (HIGH) at `supabase/migrations/20270226120000_job_completion_missing_stock_rows.sql:183`, text sha256 `a97304522644db69` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 4db4a73ed8e7)
+
+## 2026-11-23 — #2170: Mason owner-accepted 2 Sol finding(s) at `a1926307688b`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2170 at `a1926307688b` (base `42039d705cc1`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224170000_job_completion_missing_stock_rows.sql:183`, text sha256 `404b7da3333fcead` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 32353c0230e6)
+- Finding 2 (HIGH) at `supabase/migrations/20270224170000_job_completion_missing_stock_rows.sql:183`, text sha256 `7d3f1d1bb2cd69ed` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 32353c0230e6)
+
+## 2026-11-21 — Job completion waits to create a first stock row, the way deliveries do
+
+**Decision (Mason, this task, 2026-11-21).** Two field jobs that finish together and both need a Main Warehouse stock row that does not exist yet must both finish. Stock ends at the sum of what they used. One job must not fail and need a retry. This is the delivery rule from #2045, applied to job completion. It narrows the 2026-11-18 acceptance of that deadlock as a non-issue, which stopped further patches on #1940; deliveries were fixed after that, and jobs were the piece still open (#2121). Rush-order stock rows stay on #2121.
 ## 2026-11-23 — #2372: Mason owner-accepted 3 Sol finding(s) at `7d3bebb5aeb7`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2372 at `7d3bebb5aeb7` (base `015566676500`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

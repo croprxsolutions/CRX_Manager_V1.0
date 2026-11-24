@@ -26,8 +26,8 @@
 --
 -- save_field changes (same signature, wrapper unchanged; only _save_field_replay_impl_20261015 is replaced):
 --   - a NULL p_billing_defaults leaves the split and notes as they are (field details only; before: NULL deleted the split);
---   - an empty p_billing_defaults on a field that has a split writes a version with the owner at 100% from Central
---     today (before: it deleted the split, so billing fell back to the owner); on a field with no split it writes nothing;
+--   - an empty p_billing_defaults on a field with a split in force is refused (FIELD_SPLIT_CLEAR_REFUSED; before: it
+--     deleted the split and Create Invoice then stopped for that field); on a field with no split in force it writes nothing;
 --   - a split equal to today's in-force product shares (payers above 0%) writes no version (an old-screen name-only
 --     save); a different one writes a version starting Central today with product = application shares;
 --   - each element's notes go to field_payer_notes; is_primary is ignored (the copy marks the owner primary when paying, else the largest share);
@@ -578,7 +578,7 @@ BEGIN
   RETURN v_result;
 END;
 $function$;
-REVOKE ALL ON FUNCTION public.set_field_billing_split(uuid, date, jsonb, jsonb, text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.set_field_billing_split(uuid, date, jsonb, jsonb, text, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.set_field_billing_split(uuid, date, jsonb, jsonb, text, text) TO authenticated;
 
 -- Who pays for each field on a date. Billing calls it inside the invoice transaction after FOR SHARE on each field
@@ -620,7 +620,7 @@ BEGIN
    ORDER BY u.ord;
 END;
 $function$;
-REVOKE ALL ON FUNCTION public.field_split_as_of(uuid[], date) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.field_split_as_of(uuid[], date) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.field_split_as_of(uuid[], date) TO authenticated;
 
 -- ---------------------------------------------------------------------------------------------------------------
@@ -643,7 +643,6 @@ DECLARE
   v_current jsonb;
   v_sent jsonb;
   v_diff bigint;
-  v_clear boolean := false;
 BEGIN
   v_actor := auth.uid();
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
@@ -750,27 +749,17 @@ BEGIN
     v_field_id := p_field_id;
   END IF;
 
-  -- Every payer removed (the screen always sends the whole split): the field goes back to its owner at 100%, as the
-  -- old delete-the-split save did. A field with no split writes nothing; one already the owner alone is a no-op below.
+  -- Every payer removed while a split is in force: refused. A field with no split stops Create Invoice by name and never
+  -- falls back to a payer (20270226150000), and history cannot express "nobody pays", so the office names the payer.
+  -- A field with no split in force writes nothing.
   IF p_field_id IS NOT NULL AND jsonb_array_length(p_billing_defaults) = 0
      AND public._field_split_in_force_20270303(v_field_id, v_today) IS NOT NULL THEN
-    v_payers := jsonb_build_array(jsonb_build_object(
-      'customer_id', (SELECT customer_id FROM public.fields WHERE id = v_field_id),
-      'product_share_micro_pct', 100000000, 'application_share_micro_pct', 100000000));
-    v_clear := true;
+    RAISE EXCEPTION 'FIELD_SPLIT_CLEAR_REFUSED: who pays for this field is already set and has history; it cannot be left blank. Enter who pays now.' USING ERRCODE = '22023';
   END IF;
 
   -- This screen shows product shares above 0% only: when those match today's split, the save carries no split change
   -- (a name-only or notes-only save), so no version is written and a 0% or application-only payer is kept.
-  -- A clear compares every payer (0% ones too): it is a no-op only when the owner alone already pays 100% / 100%.
-  IF v_clear THEN
-    IF NOT EXISTS (SELECT 1 FROM public.field_billing_split_payers p
-                    WHERE p.version_id = public._field_split_in_force_20270303(v_field_id, v_today)
-                      AND (p.customer_id IS DISTINCT FROM (v_payers->0->>'customer_id')::uuid
-                           OR p.product_share_micro_pct <> 100000000 OR p.application_share_micro_pct <> 100000000)) THEN
-      v_payers := NULL;
-    END IF;
-  ELSIF v_payers IS NOT NULL THEN
+  IF v_payers IS NOT NULL THEN
     v_in_force := public._field_split_in_force_20270303(v_field_id, v_today);
     SELECT jsonb_agg(jsonb_build_object('c', customer_id, 'p', product_share_micro_pct) ORDER BY customer_id) INTO v_current
       FROM public.field_billing_split_payers WHERE version_id = v_in_force AND product_share_micro_pct > 0;

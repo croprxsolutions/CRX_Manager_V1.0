@@ -63,6 +63,8 @@ const copyRows = (field, notesFor = {}) => `(SELECT coalesce(jsonb_agg(jsonb_bui
     FROM public.field_billing_defaults WHERE field_id = '${field}')`;
 const saveField = (field, owner, name, defaults, key) =>
   `u := public.save_field('${field}', ${fieldPayload(field, owner, name)}, ${defaults}, NULL, '${key}');`;
+// The writer's "today" is the Central date; CURRENT_DATE is UTC in the container and runs a day ahead in the evening.
+const TODAY = "(now() AT TIME ZONE 'America/Chicago')::date";
 const commit = (uid, body) => attempt(uid, body, { commit: true });
 // Whole output (scalar keeps only the last line; a sweep packet can span lines).
 const scalarAll = (sql) => docker([...PSQL, '-A', '-t'], { input: sql }).stdout.trim();
@@ -116,7 +118,7 @@ try {
   console.log('[backfill] version 1 on every field with a split, thirds exact, notes kept');
 
   // 2. The writer: thirds, refusals, 0% payers.
-  let r = commit(USERS.admin, asUser(`${setSplit(F4, 'CURRENT_DATE', payers([[A, 33333334], [B, 33333333], [C, 33333333]]), 'k-thirds')} v := r::text;`));
+  let r = commit(USERS.admin, asUser(`${setSplit(F4, TODAY, payers([[A, 33333334], [B, 33333333], [C, 33333333]]), 'k-thirds')} v := r::text;`));
   assert.match(r, /^ok\|.*"wrote_version": true/, `thirds save: ${r}`);
   assert.equal(inForce(F4), `${A}:33333334/33333334,${B}:33333333/33333333,${C}:33333333/33333333`);
   assert.equal(copy(F4), `${A}:33.333334:true:-,${B}:33.333333:false:-,${C}:33.333333:false:-`, 'owner E is not a payer: the largest share (lowest id on a tie) is primary');
@@ -130,15 +132,15 @@ try {
     ['no date', payers([[A, M]]), /FIELD_SPLIT_DATE_REQUIRED/, 'NULL'],
     ['infinite date', payers([[A, M]]), /FIELD_SPLIT_DATE_REQUIRED/, "'-infinity'::date"],
   ];
-  for (const [label, rows, re, date = 'CURRENT_DATE'] of bad) {
+  for (const [label, rows, re, date = TODAY] of bad) {
     r = attempt(USERS.admin, `${refuse(setSplit(F1, date, rows, `k-bad-${label}`))} v := t;`);
     assert.match(r, re, `RPC must refuse ${label}: ${r}`);
   }
   // Direct SQL (as the table owner, past every grant): the triggers still refuse.
   const direct = (body) => attempt(USERS.admin, `BEGIN ${body} SET CONSTRAINTS ALL IMMEDIATE; t := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN t := SQLERRM; END; v := t;`);
-  assert.match(direct(`INSERT INTO public.field_billing_split_versions (id, field_id, version_number, effective_from) VALUES ('${id('99')}', '${F1}', 9, CURRENT_DATE);`),
+  assert.match(direct(`INSERT INTO public.field_billing_split_versions (id, field_id, version_number, effective_from) VALUES ('${id('99')}', '${F1}', 9, ${TODAY});`),
     /FIELD_SPLIT_NO_PAYERS/, 'direct: a version with no payers');
-  assert.match(direct(`INSERT INTO public.field_billing_split_versions (id, field_id, version_number, effective_from) VALUES ('${id('99')}', '${F1}', 9, CURRENT_DATE);
+  assert.match(direct(`INSERT INTO public.field_billing_split_versions (id, field_id, version_number, effective_from) VALUES ('${id('99')}', '${F1}', 9, ${TODAY});
     INSERT INTO public.field_billing_split_payers (version_id, customer_id, product_share_micro_pct, application_share_micro_pct) VALUES ('${id('99')}', '${A}', 90000000, 90000000);`),
     /FIELD_SPLIT_NOT_100/, 'direct: 90%');
   assert.match(direct(`INSERT INTO public.field_billing_split_payers (version_id, customer_id, product_share_micro_pct, application_share_micro_pct)
@@ -148,16 +150,16 @@ try {
   assert.match(direct(`DELETE FROM public.field_billing_split_versions WHERE field_id = '${F1}';`), /FIELD_SPLIT_HISTORY_APPEND_ONLY/);
   assert.match(direct(`TRUNCATE public.field_billing_split_payers CASCADE;`), /FIELD_SPLIT_HISTORY_APPEND_ONLY/);
   // Until FP-4 the copy (one share per payer) still feeds job billing: a landlord at 0% application is refused.
-  r = attempt(USERS.rep, `${refuse(setSplit(F2, 'CURRENT_DATE', payers([[A, 60000000, M], [D, 40000000, 0]]), 'k-landlord'))} v := t;`);
+  r = attempt(USERS.rep, `${refuse(setSplit(F2, TODAY, payers([[A, 60000000, M], [D, 40000000, 0]]), 'k-landlord'))} v := t;`);
   assert.match(r, /FIELD_SPLIT_SHARES_MUST_MATCH_UNTIL_FP4/, `differing share sets refused until FP-4: ${r}`);
-  r = commit(USERS.rep, asUser(`${setSplit(F2, 'CURRENT_DATE', payers([[A, 60000000], [D, 40000000]]), 'k-landlord-even')} v := r::text;`));
+  r = commit(USERS.rep, asUser(`${setSplit(F2, TODAY, payers([[A, 60000000], [D, 40000000]]), 'k-landlord-even')} v := r::text;`));
   assert.match(r, /^ok\|.*"wrote_version": true/, `matching share sets save: ${r}`);
   assert.equal(copy(F2), `${A}:60.000000:true:-,${D}:40.000000:false:-`);
   // A named party at 0% on both sides.
-  r = commit(USERS.admin, asUser(`${setSplit(F1, 'CURRENT_DATE', payers([[A, M], [D, 0]]), 'k-named0')} v := r::text;`));
+  r = commit(USERS.admin, asUser(`${setSplit(F1, TODAY, payers([[A, M], [D, 0]]), 'k-named0')} v := r::text;`));
   assert.match(r, /^ok\|.*"wrote_version": true/, `0%/0% named payer saves: ${r}`);
   assert.equal(copy(F1), `${A}:100.000000:true:-`, 'the copy leaves out a 0% product payer');
-  r = commit(USERS.admin, asUser(`${setSplit(F6, 'CURRENT_DATE', 'NULL', 'k-notes-only', `'[{"customer_id":"${B}","notes":"rpc note"}]'::jsonb`)} v := r::text;`));
+  r = commit(USERS.admin, asUser(`${setSplit(F6, TODAY, 'NULL', 'k-notes-only', `'[{"customer_id":"${B}","notes":"rpc note"}]'::jsonb`)} v := r::text;`));
   assert.match(r, /^ok\|.*"version_number": 1.*"wrote_version": false|^ok\|.*"wrote_version": false.*"version_number": 1/, `a notes-only RPC save reports the in-force version: ${r}`);
   console.log('[writer] thirds exact; RPC and direct refusals; 0% payers save');
 
@@ -172,21 +174,13 @@ try {
   assert.equal(versions(F1), v1, 'a notes-only save writes no version');
   assert.equal(note(F1, A), 'owner note', 'a notes-only save changes the notes');
   assert.equal(copy(F1), `${A}:100.000000:true:owner note`);
-  r = commit(USERS.admin, asUser(saveField(F1, A, 'One', `'[]'::jsonb`, 'k-sf-empty')) + ' v := u::text;');
-  assert.equal(versions(F1), String(Number(v1) + 1), 'an empty split clears the named 0% payer (a new version)');
-  assert.equal(inForce(F1), `${A}:100000000/100000000`, 'the owner alone');
-  assert.equal(note(F1, A), 'owner note', 'and keeps the notes');
-  assert.equal(copy(F1), `${A}:100.000000:true:owner note`, 'and the copy is unchanged');
-  r = commit(USERS.admin, asUser(saveField(F1, A, 'One', `'[]'::jsonb`, 'k-sf-empty2')) + ' v := u::text;');
-  assert.equal(versions(F1), String(Number(v1) + 1), 'an empty split on an owner-alone field writes nothing');
+  r = attempt(USERS.admin, `${refuse(saveField(F1, A, 'One', `'[]'::jsonb`, 'k-sf-empty'))} v := t;`);
+  assert.match(r, /FIELD_SPLIT_CLEAR_REFUSED/, `an empty split on a field with a split is refused (Create Invoice never falls back to a payer): ${r}`);
+  assert.equal(versions(F1), v1, 'and writes nothing');
+  assert.equal(inForce(F1), `${A}:100000000/100000000,${D}:0/0`, 'the split is unchanged');
   r = commit(USERS.admin, asUser(saveField(F5, B, 'Five', `'[{"customer_id":"${B}","split_pct":50},{"customer_id":"${C}","split_pct":50}]'::jsonb`, 'k-sf-change')) + ' v := u::text;');
   assert.equal(versions(F5), '2', 'a changed split writes a version');
   assert.equal(note(F5, C), 'landlord note', 'notes not sent stay');
-  r = commit(USERS.admin, asUser(saveField(F5, B, 'Five', `'[]'::jsonb`, 'k-sf-clear')) + ' v := u::text;');
-  assert.equal(versions(F5), '3', 'removing every payer writes a version');
-  assert.equal(inForce(F5), `${B}:100000000/100000000`, 'the field goes back to its owner at 100%');
-  assert.equal(copy(F5), `${B}:100.000000:true:-`, 'and the copy follows');
-  assert.equal(note(F5, C), 'landlord note', 'notes stay');
   const f3Before = versions(F3);
   r = commit(USERS.admin, asUser(saveField(F3, A, 'Three details only', 'NULL::jsonb', 'k-sf-null')) + ' v := u::text;');
   assert.equal(r, `ok|${F3}`, `details-only save: ${r}`);
@@ -196,7 +190,7 @@ try {
   assert.match(r, /PER_ACRE_PRICING_RETIRED/, `per-acre price refused: ${r}`);
   r = attempt(USERS.admin, `${refuse(saveField(F5, B, 'Five', `'[{"customer_id":"${B}","split_pct":90}]'::jsonb`, 'k-sf-90'))} v := t;`);
   assert.match(r, /must total 100/, `save_field 90% refused: ${r}`);
-  console.log('[save_field] name-only and notes-only saves write no version; an empty save clears to the owner; 0% payer survives; price refused');
+  console.log('[save_field] name-only and notes-only saves write no version; an empty save on a split field is refused; 0% payer survives; price refused');
 
   // 4. Retries.
   const before = versions(F3);
@@ -206,16 +200,16 @@ try {
   assert.equal(versions(F3), String(Number(before) + 1), 'and writes nothing more');
   r = attempt(USERS.admin, `${refuse(setSplit(F3, "DATE '2027-03-01'", payers([[A, 10000000], [B, 90000000]]), 'k-retry'))} v := t;`);
   assert.match(r, /IDEMPOTENCY_INTENT_MISMATCH/, `same key, different payers refused: ${r}`);
-  r = attempt(USERS.admin, `${refuse(`r := public.set_field_billing_split('${F3}', CURRENT_DATE, ${payers([[A, M]])}, NULL, NULL, NULL);`)} v := t;`);
+  r = attempt(USERS.admin, `${refuse(`r := public.set_field_billing_split('${F3}', ${TODAY}, ${payers([[A, M]])}, NULL, NULL, NULL);`)} v := t;`);
   assert.match(r, /IDEMPOTENCY_KEY_REQUIRED/);
-  r = attempt(USERS.admin, `${refuse(setSplit(F3, 'CURRENT_DATE', payers([[A, M]]), 'k-tab\t'))} v := t;`);
+  r = attempt(USERS.admin, `${refuse(setSplit(F3, TODAY, payers([[A, M]]), 'k-tab\t'))} v := t;`);
   assert.match(r, /IDEMPOTENCY_KEY_REQUIRED/, `a key with a tab is refused: ${r}`);
   console.log('[retries] same key replays; a different request under it is refused');
 
   // 5. Access.
   for (const stmt of [`INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct) VALUES ('${F4}', '${X}', 1);`,
     `UPDATE public.field_billing_defaults SET split_pct = split_pct;`, `DELETE FROM public.field_billing_defaults;`,
-    `INSERT INTO public.field_billing_split_versions (field_id, version_number, effective_from) VALUES ('${F4}', 50, CURRENT_DATE);`,
+    `INSERT INTO public.field_billing_split_versions (field_id, version_number, effective_from) VALUES ('${F4}', 50, ${TODAY});`,
     `INSERT INTO public.field_payer_notes (field_id, customer_id, notes) VALUES ('${F4}', '${E}', 'x');`]) {
     r = attempt(USERS.admin, `${refuse(stmt)} v := t;`);
     assert.match(r, /permission denied/, `direct write refused for an admin: ${stmt} -> ${r}`);
@@ -225,9 +219,9 @@ try {
   for (const [who, uid] of [['applicator', USERS.applicator], ['inactive applicator', OFF_APP], ['driver', USERS.driver], ['entity_recipient', ENTITY]]) {
     assert.equal(attempt(uid, asUser(`v := (SELECT count(*) FROM public.field_billing_split_versions) + (SELECT count(*) FROM public.field_billing_split_payers)
       + (SELECT count(*) FROM public.field_payer_notes);`)), 'ok|0', `${who} reads no version or notes row`);
-    r = attempt(uid, `${refuse(setSplit(F2, 'CURRENT_DATE', payers([[A, M]]), `k-${who}`))} v := t;`);
+    r = attempt(uid, `${refuse(setSplit(F2, TODAY, payers([[A, M]]), `k-${who}`))} v := t;`);
     assert.match(r, /Permission denied/, `${who} cannot save a split: ${r}`);
-    r = attempt(uid, `${refuse(`v := (SELECT count(*) FROM public.field_split_as_of(ARRAY['${F2}']::uuid[], CURRENT_DATE));`)} v := t;`);
+    r = attempt(uid, `${refuse(`v := (SELECT count(*) FROM public.field_split_as_of(ARRAY['${F2}']::uuid[], ${TODAY}));`)} v := t;`);
     assert.match(r, /Permission denied/, `${who} cannot call the resolver: ${r}`);
   }
   assert.equal(attempt(OFF_APP, asUser(`v := (SELECT count(*) FROM public.field_billing_defaults);`)), 'ok|0', 'an inactive applicator reads no split');
@@ -259,9 +253,9 @@ try {
   assert.equal(r, 'ok|false:-', `F4 before its first split has none: ${r}`);
   r = attempt(USERS.rep, `v := (SELECT version_number || ':' || payers::text FROM public.field_split_as_of(ARRAY['${F3}']::uuid[], DATE '2027-03-01'));`);
   assert.match(r, /^ok\|2:.*70000000/, `from the dated version: ${r}`);
-  for (const [args, re] of [[`ARRAY['${F3}', '${F3}']::uuid[], CURRENT_DATE`, /FIELD_SPLIT_DUPLICATE_FIELD/], [`ARRAY['${id('ff')}']::uuid[], CURRENT_DATE`, /FIELD_NOT_FOUND/],
-    [`ARRAY['${F3}']::uuid[], NULL`, /FIELD_SPLIT_DATE_REQUIRED/], [`ARRAY['${F3}', NULL]::uuid[], CURRENT_DATE`, /FIELD_SPLIT_FIELDS_REQUIRED/],
-    [`ARRAY[]::uuid[], CURRENT_DATE`, /FIELD_SPLIT_FIELDS_REQUIRED/]]) {
+  for (const [args, re] of [[`ARRAY['${F3}', '${F3}']::uuid[], ${TODAY}`, /FIELD_SPLIT_DUPLICATE_FIELD/], [`ARRAY['${id('ff')}']::uuid[], ${TODAY}`, /FIELD_NOT_FOUND/],
+    [`ARRAY['${F3}']::uuid[], NULL`, /FIELD_SPLIT_DATE_REQUIRED/], [`ARRAY['${F3}', NULL]::uuid[], ${TODAY}`, /FIELD_SPLIT_FIELDS_REQUIRED/],
+    [`ARRAY[]::uuid[], ${TODAY}`, /FIELD_SPLIT_FIELDS_REQUIRED/]]) {
     r = attempt(USERS.admin, `${refuse(`v := (SELECT count(*) FROM public.field_split_as_of(${args}));`)} v := t;`);
     assert.match(r, re, `resolver refuses ${args}: ${r}`);
   }
@@ -281,7 +275,7 @@ try {
   // A split save holds the field row; an invoice writer's FOR SHARE on that field waits for it.
   const writer = spawn('docker', [...PSQL], { stdio: ['pipe', 'pipe', 'pipe'] });
   writer.stdin.end(`BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${USERS.admin}","role":"authenticated"}', true);
-    SET LOCAL ROLE authenticated; SELECT public.set_field_billing_split('${F2}', CURRENT_DATE, ${payers([[A, M]])}, NULL, 'lock', 'k-lock');
+    SET LOCAL ROLE authenticated; SELECT public.set_field_billing_split('${F2}', ${TODAY}, ${payers([[A, M]])}, NULL, 'lock', 'k-lock');
     SELECT 'SPLIT_HELD'; SELECT pg_sleep(6); COMMIT;`);
   let writerErr = '';
   writer.stderr.on('data', (d) => { writerErr += d; });

@@ -155,14 +155,80 @@ describe('field Drafts: the same rows post with the same RPC arguments', () => {
   });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('posting every postable draft sends exactly what Post All sent', async () => {
+  const renderDrafts = async () => {
     render(<MemoryRouter><FieldInvoicesUnpostedPanel /></MemoryRouter>);
     await waitFor(() => expect(screen.getAllByText('FA-1').length).toBeGreaterThan(0));
+  };
+  const confirmPost = async (label: string) => {
+    fireEvent.click(within(screen.getByRole('toolbar')).getByRole('button', { name: `${label}…` }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: label }));
+  };
 
-    fireEvent.click(screen.getByRole('button', { name: /Post All/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Post 3 invoice(s)' }));
+  // Before the shared bar this was "Post All" -> "Post 3 invoice(s)"; the calls are the same.
+  it('Select All + Post sends exactly what Post All sent', async () => {
+    await renderDrafts();
+    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+    await confirmPost('Post 3 invoices');
 
     await waitFor(() => expect(H.rpc).toHaveBeenCalledTimes(3));
     expect(rpcCalls()).toEqual(POST_ALL_CALLS);
+  });
+
+  it('ticking some drafts posts just those, with the same arguments and in list order', async () => {
+    await renderDrafts();
+    fireEvent.click(within(rowOf('FA-3')).getByRole('checkbox'));
+    fireEvent.click(within(rowOf('FA-1')).getByRole('checkbox'));
+    await confirmPost('Post 2 invoices');
+
+    await waitFor(() => expect(H.rpc).toHaveBeenCalledTimes(2));
+    expect(rpcCalls()).toEqual([POST_ALL_CALLS[0], POST_ALL_CALLS[2]]);
+  });
+
+  it('split-group and other-season rows have no tick box, and no group post is ever sent from here', async () => {
+    await renderDrafts();
+    for (const n of ['FA-GRP-A', 'FA-GRP-B', 'FA-OLD']) {
+      expect(within(rowOf(n)).queryByRole('checkbox')).not.toBeInTheDocument();
+    }
+    expect(within(rowOf('FA-GRP-A')).getByText('Split invoice · post from its page')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+    await confirmPost('Post 3 invoices');
+    await waitFor(() => expect(H.rpc).toHaveBeenCalledTimes(3));
+    expect(H.rpc.mock.calls.map(([name]) => name)).not.toContain('post_invoice_group');
+    expect(H.rpc.mock.calls.map(([, args]) => (args as { p_invoice_id?: string }).p_invoice_id)).not.toContain('FA-OLD');
+  });
+
+  it('a ticked draft that a filter hides is dropped, so it is never posted', async () => {
+    await renderDrafts();
+    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+    fireEvent.change(screen.getByLabelText('Inv. Nbr'), { target: { value: 'FA-1' } });
+    fireEvent.change(screen.getByLabelText('Inv. Nbr'), { target: { value: '' } });
+    expect(within(rowOf('FA-2')).getByRole('checkbox')).not.toBeChecked();
+    expect(within(screen.getByRole('toolbar')).getByText('1 selected')).toBeInTheDocument();
+    await confirmPost('Post 1 invoice');
+    await waitFor(() => expect(H.rpc).toHaveBeenCalledTimes(1));
+    expect(rpcCalls()).toEqual([POST_ALL_CALLS[0]]);
+  });
+
+  it('a draft that fails stays ticked, and its retry reuses the same idempotency key', async () => {
+    let failFa2 = true;
+    H.rpc.mockImplementation((_name: string, args: { p_invoice_id: string }) => {
+      if (args.p_invoice_id === 'FA-2' && failFa2) {
+        failFa2 = false;
+        const failed = Promise.resolve({ data: null, error: { message: 'network' } });
+        return Object.assign(failed, { throwOnError: () => Promise.reject(new Error('network')) });
+      }
+      return rpcSucceeds();
+    });
+    await renderDrafts();
+    fireEvent.click(within(rowOf('FA-2')).getByRole('checkbox'));
+    await confirmPost('Post 1 invoice');
+    await waitFor(() => expect(H.rpc).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('toolbar')).toBeInTheDocument());
+    expect(within(rowOf('FA-2')).getByRole('checkbox')).toBeChecked();
+
+    await confirmPost('Post 1 invoice');
+    await waitFor(() => expect(H.rpc).toHaveBeenCalledTimes(2));
+    const [first, second] = H.rpc.mock.calls.map(([, args]) => (args as { p_idempotency_key: string }).p_idempotency_key);
+    expect(second).toBe(first);
   });
 });

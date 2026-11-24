@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Printer, FileClock, Mail, Pencil, X, Search, ClipboardCheck, ArrowLeft, MoreHorizontal } from 'lucide-react';
+import { FileText, Printer, FileClock, Mail, Pencil, X, Search, ClipboardCheck, ArrowLeft, MoreHorizontal, Users } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
+import Badge from '../ui/Badge';
 import ConfirmModal from '../ui/ConfirmModal';
 import MobileCardList from '../ui/MobileCardList';
 import MultiSelectDropdown, { type MultiSelectOption } from '../jobs/MultiSelectDropdown';
@@ -26,6 +27,9 @@ import { sendEmail, buildEmailHtml, invoiceEmailSnapshot, isInvoiceEmailSuppress
 import { useAuth } from '../../contexts/AuthContext';
 import { formatCents as fmt } from '../../lib/money';
 import SeasonTag from '../invoices/SeasonTag';
+import InvoiceSelectionBar, { InvoiceRowCheckbox, SelectAllToggle } from '../invoices/InvoiceSelection';
+import { invoiceStatusBadge } from '../../lib/statusLabel';
+import { parseLocalDate } from '../../lib/dateUtils';
 import { isCurrentSeason, otherSeasonLabels } from '../../lib/invoiceSeasonWindow';
 import { SkeletonTable } from '../ui/Skeleton';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../../lib/pagedRead';
@@ -45,13 +49,14 @@ import { toSentryError } from '../../lib/sentryError';
 // Field-app parity #22: the dedicated "Unposted Field Application Invoices"
 // working tray (ChemMan's /#/invoices/unposted). Lists ONLY not-yet-posted
 // field invoices (status draft|unposted), with the ChemMan filter bar,
-// per-row print/email/edit, footer totals, and bottom bulk actions (Print All /
-// Print Invoice Report / Post All). The combined status-filterable list stays at
-// /field-invoices. Money is integer cents end-to-end (display via formatCents).
+// per-row print/email/edit, footer totals, bottom print actions (Print All /
+// Print Invoice Report), and the tick-and-post bar the Chemical Invoices list
+// also uses. The combined status-filterable list stays at /field-invoices.
+// Money is integer cents end-to-end (display via formatCents).
 
 type UnpostedFieldInvoiceRow = FieldInvoiceListRow & {
   invoice_group_id: string | null;
-  /** Version loaded with the row; Post All refuses an invoice changed since. */
+  /** Version loaded with the row; posting refuses an invoice changed since. */
   invoice_post_version: string | null;
 };
 
@@ -83,6 +88,24 @@ const chips = (values: string[]) => {
   );
 };
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+const dueLabel = (row: FieldInvoiceListRow) => (row.due_date ? parseLocalDate(row.due_date).toLocaleDateString() : '—');
+
+const statusBadge = (row: FieldInvoiceListRow) => {
+  const s = invoiceStatusBadge(row.status);
+  return <Badge variant={s.variant} normalCase>{s.label}</Badge>;
+};
+
+// A split invoice posts with its whole group, which this tab never does, so it has no tick box.
+const splitMark = (row: UnpostedFieldInvoiceRow) =>
+  row.invoice_group_id ? (
+    <span className="mt-0.5 flex items-center gap-1 text-xs text-secondary">
+      <Users className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      Split invoice · post from its page
+    </span>
+  ) : null;
+
 export default function FieldInvoicesUnpostedPanel() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -94,7 +117,9 @@ export default function FieldInvoicesUnpostedPanel() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [filters, setFilters] = useState<FieldInvoiceListFilters>(emptyFieldInvoiceFilters);
   const [busy, setBusy] = useState(false);
-  const [showPostAll, setShowPostAll] = useState(false);
+  const [showPostConfirm, setShowPostConfirm] = useState(false);
+  // Ticked invoices. Only invoices this tab may post can be ticked (see postAllPlan).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [manualInvoiceMenuOpen, setManualInvoiceMenuOpen] = useState(false);
   // Per-row action guard so a double-click can't fire two prints/emails.
   const rowActionRef = useRef(false);
@@ -102,7 +127,7 @@ export default function FieldInvoicesUnpostedPanel() {
   // Per-invoice/per-group idempotency keys from a keyed ref cache so a network-retry
   // (post committed server-side but response lost) reuses the SAME key per
   // invoice and the server dedup matches instead of double-posting. Minted
-  // once per invoice; cleared on a clean Post All run. (Mirrors OrderDetail's
+  // once per invoice; cleared once that invoice posts. (Mirrors OrderDetail's
   // postDraftKeysRef pattern; avoids the inline-generate double-execution class.)
   const postKeysRef = useRef<Record<string, string>>({});
 
@@ -398,10 +423,11 @@ export default function FieldInvoicesUnpostedPanel() {
     });
   };
 
-  // --- POST ALL targets (2026-10-09). The list shows unposted invoices from EVERY season,
-  // but the server does not check the season when posting, so Post All posts only THIS
-  // season's stand-alone invoices (as the Posted tab's Unpost All does). An invoice from
-  // another season (or with no season) is left out and posted from its own invoice page.
+  // --- POSTABLE targets (2026-10-09; the rule Post All used). The list shows unposted invoices
+  // from EVERY season, but the server does not check the season when posting, so this tab posts
+  // only THIS season's stand-alone invoices (as the Posted tab's Unpost All does); only those
+  // get a tick box. An invoice from another season (or with no season) is left out and
+  // posted from its own invoice page.
   // Split groups are left out too: post_invoice_group posts every member, including ones
   // this page cannot see, and a season check in the browser cannot bind what the database
   // then posts (Codex Sol HIGH on PR #895). A split group is posted from its invoice page
@@ -417,15 +443,46 @@ export default function FieldInvoicesUnpostedPanel() {
     }
     return { individualTargets, skippedRows, skippedGroupCount: skippedGroupIds.size };
   }, [visible]);
-  const postTargetCount = postAllPlan.individualTargets.length;
   const skippedSeasonCount = postAllPlan.skippedRows.length;
   const skippedGroupCount = postAllPlan.skippedGroupCount;
 
-  // --- POST ALL (posts every displayed THIS-SEASON stand-alone invoice, after confirm).
-  const postAll = async () => {
-    setShowPostAll(false);
+  // What Post acts on: ticked rows that are still postable targets in view, in list order.
+  // Ticking every target ("Select All") posts exactly what Post All did.
+  const postableIds = postAllPlan.individualTargets.map((t) => t.id).join(',');
+  const selectedTargets = postAllPlan.individualTargets.filter((t) => selected.has(t.id));
+  const selectedRows = visible.filter((row) => selected.has(row.id));
+  const selectedTotalCents = selectedRows.reduce((sum, row) => sum + row.total_amount_cents, 0);
+  const postTargetCount = selectedTargets.length;
+  // A tick on a row that a filter hides, that a reload no longer returns, or that stopped
+  // being postable here is dropped at once, so it can never be posted later by surprise.
+  useEffect(() => {
+    const postable = new Set(postableIds.split(','));
+    setSelected((prev) => {
+      const kept = [...prev].filter((id) => postable.has(id));
+      return kept.length === prev.size ? prev : new Set(kept);
+    });
+  }, [postableIds, selected]);
+  const toggleRow = (id: string) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+  const allPostableSelected = selectedTargets.length > 0 && selectedTargets.length === postAllPlan.individualTargets.length;
+  const toggleAll = () => setSelected(allPostableSelected ? new Set() : new Set(postAllPlan.individualTargets.map((t) => t.id)));
+  // Only postAllPlan's targets get a tick box, so the box and Post follow one rule.
+  const postableIdSet = new Set(postAllPlan.individualTargets.map((t) => t.id));
+  const isPostableHere = (row: UnpostedFieldInvoiceRow) => postableIdSet.has(row.id);
+  const selectBox = (row: UnpostedFieldInvoiceRow) => (
+    <InvoiceRowCheckbox invoiceNumber={row.invoice_number} checked={selected.has(row.id)} onToggle={() => toggleRow(row.id)} />
+  );
+
+  // --- POST SELECTED (the ticked THIS-SEASON stand-alone invoices, after confirm). The same
+  // calls, one post_invoice per invoice in list order, that Post All made for every target.
+  const postSelected = async () => {
+    setShowPostConfirm(false);
     if (!profile) { toast('error', 'Profile not loaded — please refresh.'); return; }
-    const { individualTargets } = postAllPlan;
+    const individualTargets = selectedTargets;
     const targetCount = individualTargets.length;
     if (targetCount === 0) { toast('error', 'No invoices to post'); return; }
     await runCriticalAction({
@@ -496,7 +553,7 @@ export default function FieldInvoicesUnpostedPanel() {
   }
 
   return (
-    <div className="min-w-0 space-y-4">
+    <div className={`min-w-0 space-y-4 ${selected.size > 0 ? 'max-md:pb-48' : ''}`}>
       {/* Header */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
@@ -614,6 +671,32 @@ export default function FieldInvoicesUnpostedPanel() {
         </div>
       </Card>
 
+      {/* Tick-and-post: the same bar and Select All as the Chemical Invoices list. */}
+      {visible.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {postAllPlan.individualTargets.length > 0 && (
+            <SelectAllToggle
+              clears={allPostableSelected}
+              onToggle={toggleAll}
+              title={allPostableSelected
+                ? 'Clears every selected invoice.'
+                : "Selects every invoice in view that can be posted here: this season's invoices that are not part of a split."}
+            />
+          )}
+          <span className="text-sm text-secondary">
+            {postAllPlan.individualTargets.length} of {visible.length} invoice(s) in view can be posted here.
+          </span>
+        </div>
+      )}
+      <InvoiceSelectionBar
+        selectedCount={selectedRows.length}
+        selectedTotalCents={selectedTotalCents}
+        onClear={() => setSelected(new Set())}
+        postCount={postTargetCount}
+        onPost={() => setShowPostConfirm(true)}
+        posting={busy}
+      />
+
       {/* Table */}
       <Card padding={false}>
         {visible.length === 0 && (
@@ -627,6 +710,9 @@ export default function FieldInvoicesUnpostedPanel() {
           getRowLabel={(row) => `Edit invoice ${row.invoice_number} for ${row.customer_name}`}
           onRowClick={(row) => navigate(editPath(row))}
           className="p-3"
+          renderLeading={(row) => (isPostableHere(row)
+            ? <label className="-ml-2 flex h-11 w-11 shrink-0 items-center justify-center">{selectBox(row)}</label>
+            : <span aria-hidden="true" className="-ml-2 w-11 shrink-0" />)}
           renderCard={(row) => (
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -636,8 +722,10 @@ export default function FieldInvoicesUnpostedPanel() {
                 </p>
                 <p className="mt-1 text-xs text-secondary">
                   {new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()} · {row.total_acres.toLocaleString()} ac
+                  {row.due_date ? ` · Due ${dueLabel(row)}` : ''}
                 </p>
-                <div className="mt-1"><SeasonTag season={row.season} /></div>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">{statusBadge(row)}<SeasonTag season={row.season} /></div>
+                {splitMark(row)}
               </div>
               <div className="shrink-0 text-right">
                 <p className="font-semibold text-nav-dark">{fmt(row.total_amount_cents)}</p>
@@ -650,24 +738,28 @@ export default function FieldInvoicesUnpostedPanel() {
           desktop={<div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
+              {/* The same leading columns as the Chemical Invoices list: Invoice #, Customer, Date, Due, Total, Status. */}
               <tr className="border-b border-gray-100 text-left text-xs text-secondary uppercase tracking-wide">
-                <th className="px-3 py-2 font-medium">Job #</th>
+                <th className="w-10 px-3 py-2 font-medium"><span className="sr-only">Select</span></th>
                 <th className="px-3 py-2 font-medium">Invoice #</th>
                 <th className="px-3 py-2 font-medium">Customer</th>
+                <th className="px-3 py-2 font-medium">Date</th>
+                <th className="px-3 py-2 font-medium">Due</th>
+                <th className="px-3 py-2 font-medium text-right">Total</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Job #</th>
                 <th className="px-3 py-2 font-medium">Locations</th>
                 <th className="px-3 py-2 font-medium">Crops</th>
                 <th className="px-3 py-2 font-medium">Applicators</th>
                 <th className="px-3 py-2 font-medium">Chemicals</th>
                 <th className="px-3 py-2 font-medium text-right">Acres</th>
-                <th className="px-3 py-2 font-medium text-right">Total</th>
-                <th className="px-3 py-2 font-medium">Transaction</th>
                 <th className="px-3 py-2 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-3 py-10 text-center text-secondary">
+                  <td colSpan={14} className="px-3 py-10 text-center text-secondary">
                     No unposted field invoices{hasFilters ? ' match these filters' : ''}.
                   </td>
                 </tr>
@@ -678,24 +770,28 @@ export default function FieldInvoicesUnpostedPanel() {
                     className="border-b border-gray-50 hover:bg-gray-50/60 cursor-pointer"
                     onClick={() => navigate(editPath(row))}
                   >
-                    <td className="px-3 py-2 text-gray-700">{row.job_number || '—'}</td>
+                    <td className="px-3 py-2">{isPostableHere(row) ? selectBox(row) : null}</td>
                     <td className="px-3 py-2">
                       <span className="inline-flex items-center gap-1.5 font-medium text-nav-dark">
                         <FileText className="w-3.5 h-3.5 text-crx-green shrink-0" />
                         {row.invoice_number}
                       </span>
+                      {splitMark(row)}
                     </td>
                     <td className="px-3 py-2 text-gray-700">{row.customer_name}</td>
+                    <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
+                      {new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}
+                      <div className="mt-0.5"><SeasonTag season={row.season} /></div>
+                    </td>
+                    <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{dueLabel(row)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-medium">{fmt(row.total_amount_cents)}</td>
+                    <td className="px-3 py-2">{statusBadge(row)}</td>
+                    <td className="px-3 py-2 text-gray-700">{row.job_number || '—'}</td>
                     <td className="px-3 py-2">{chips(row.locations)}</td>
                     <td className="px-3 py-2">{chips(row.crops)}</td>
                     <td className="px-3 py-2">{chips(row.applicators)}</td>
                     <td className="px-3 py-2">{chips(row.chemicals)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-gray-700">{row.total_acres.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-medium">{fmt(row.total_amount_cents)}</td>
-                    <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
-                      {new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}
-                      <div className="mt-0.5"><SeasonTag season={row.season} /></div>
-                    </td>
                     <td className="px-3 py-2">
                       <div className="flex items-center justify-end gap-1">
                         <button
@@ -747,12 +843,13 @@ export default function FieldInvoicesUnpostedPanel() {
             {visible.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-gray-200 bg-gray-50/60 font-semibold text-nav-dark">
-                  <td className="px-3 py-2" colSpan={7}>
+                  <td className="px-3 py-2" colSpan={5}>
                     Invoices Displayed: {totals.count}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{totals.totalAcres.toLocaleString()}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt(totals.totalAmountCents)}</td>
-                  <td className="px-3 py-2" colSpan={2}></td>
+                  <td className="px-3 py-2" colSpan={6}></td>
+                  <td className="px-3 py-2 text-right tabular-nums">{totals.totalAcres.toLocaleString()}</td>
+                  <td className="px-3 py-2"></td>
                 </tr>
               </tfoot>
             )}
@@ -765,9 +862,9 @@ export default function FieldInvoicesUnpostedPanel() {
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-secondary">
-            Bulk actions apply to all {totals.count} invoice(s) currently shown.
-            {skippedSeasonCount > 0 && ` Post All leaves out ${skippedSeasonCount} invoice(s) not from this season.`}
-            {skippedGroupCount > 0 && ` Post All leaves out ${skippedGroupCount} split group(s); post each from its invoice page.`}
+            The print buttons use all {totals.count} invoice(s) currently shown. To post, tick invoices above.
+            {skippedSeasonCount > 0 && ` ${skippedSeasonCount} invoice(s) not from this season have no tick box; post each from its invoice page.`}
+            {skippedGroupCount > 0 && ` ${skippedGroupCount} split group(s) have no tick box; post each from its invoice page.`}
           </p>
           <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
             <Button variant="secondary" size="sm" icon={<Printer className="w-4 h-4" />} onClick={() => printAll('current')} loading={busy} disabled={visible.length === 0}>
@@ -779,29 +876,17 @@ export default function FieldInvoicesUnpostedPanel() {
             <Button variant="secondary" size="sm" icon={<FileText className="w-4 h-4" />} onClick={printReport} loading={busy} disabled={visible.length === 0}>
               Print Invoice Report
             </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<ClipboardCheck className="w-4 h-4" />}
-              onClick={() => setShowPostAll(true)}
-              disabled={busy || postTargetCount === 0}
-              title={skippedSeasonCount > 0 || skippedGroupCount > 0
-                ? "Posts this season's stand-alone invoices in view. Invoices from another season and split groups are left out; post each one from its invoice page."
-                : 'Post every invoice in view'}
-            >
-              Post All
-            </Button>
           </div>
         </div>
       </Card>
 
       <ConfirmModal
-        open={showPostAll}
-        onClose={() => setShowPostAll(false)}
-        onConfirm={postAll}
-        title="Post all displayed invoices?"
+        open={showPostConfirm}
+        onClose={() => setShowPostConfirm(false)}
+        onConfirm={postSelected}
+        title={`Post ${plural(postTargetCount, 'invoice')}?`}
         message={
-          `Post ${postTargetCount} invoice(s) in the current view? Posting commits them to accounts receivable and is logged.` +
+          'Posting commits them to accounts receivable and is logged.' +
           (skippedSeasonCount > 0
             ? ` ${skippedSeasonCount} invoice(s) not from this season (${otherSeasonLabels(postAllPlan.skippedRows)}) are NOT included.`
             : '') +
@@ -810,7 +895,7 @@ export default function FieldInvoicesUnpostedPanel() {
             : '') +
           (skippedSeasonCount > 0 ? ' To post an older invoice, open it and post it from its invoice page.' : '')
         }
-        confirmLabel={`Post ${postTargetCount} invoice(s)`}
+        confirmLabel={`Post ${plural(postTargetCount, 'invoice')}`}
         variant="info"
         icon={ClipboardCheck}
         loading={busy}

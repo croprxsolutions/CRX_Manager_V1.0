@@ -285,6 +285,6 @@ describe('generateApplicatorSheetPdf safety sheet (Mason, 2026-11-24)', () => {
     ] }), 'original', null);
     const body = (await safetyTable())!.body;
     expect(body[0]).toEqual(['TEST A', '—', 'See label', '12 hr (label now 48 hr: check label)', '7 d']);
-    expect(body[1]).toEqual(['TEST B', '—', 'See label', 'See label', '14 d']);
+    expect(body[1]).toEqual(['TEST B', '—', 'See label', 'See label', 'See label (label now 14 d)']);
   });
 });

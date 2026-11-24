@@ -453,7 +453,7 @@ function appendMapPage(
  */
 function safetyInterval(line: number | null, label: number | null, unit: string): string {
   const valid = (value: number | null): value is number => value != null && Number.isFinite(value) && value >= 0;
-  if (!valid(line)) return valid(label) ? `${fmtNum(label)} ${unit}` : 'See label';
+  if (!valid(line)) return valid(label) ? `See label (label now ${fmtNum(label)} ${unit})` : 'See label';
   if (valid(label) && label !== line) return `${fmtNum(line)} ${unit} (label now ${fmtNum(label)} ${unit}: check label)`;
   return `${fmtNum(line)} ${unit}`;
 }

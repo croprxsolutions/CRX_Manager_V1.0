@@ -51,26 +51,39 @@ test('requiredChecksProblem names what is not green', () => {
 const bot = (sha) => ({ author: { login: 'github-actions' }, body: `Pinged.\n\n${pingMarker(sha)}` });
 const labelled = (o) => pr({ labels: [{ name: 'ready-for-taha' }], ...o });
 
+const P = (p, c, f = ok) => needsPing(p, c, f).ping;
+
 test('ping dedupe: once per head, never twice', () => {
-  assert.equal(needsPing(labelled(), []), true);
-  assert.equal(needsPing(labelled(), [bot(HEAD)]), false);
-  assert.equal(needsPing(labelled({ reviewRequests: [{ login: 'TahaKhanAbdalli' }] }), [bot(HEAD)]), false);
+  assert.equal(P(labelled(), []), true);
+  assert.equal(P(labelled(), [bot(HEAD)]), false);
+  assert.equal(P(labelled({ reviewRequests: [{ login: 'TahaKhanAbdalli' }] }), [bot(HEAD)]), false);
 });
 
-test('a new head pings again only when Taha is re-requested', () => {
-  assert.equal(needsPing(labelled({ headRefOid: NEW }), [bot(HEAD)]), false);
-  assert.equal(needsPing(labelled({ headRefOid: NEW, reviewRequests: [{ login: 'TahaKhanAbdalli' }] }), [bot(HEAD)]), true);
+test('no ping while required checks are not green', () => {
+  assert.equal(P(labelled(), [], { ...ok, checks: () => [{ name: 'CI', bucket: 'pending' }] }), false);
+});
+
+test('a new head pings again only when Taha is re-requested and it needs no Sol', () => {
+  const req = { headRefOid: NEW, reviewRequests: [{ login: 'TahaKhanAbdalli' }] };
+  assert.equal(P(labelled({ headRefOid: NEW }), [bot(HEAD)]), false);
+  assert.equal(P(labelled(req), [bot(HEAD)]), true);
+  // A request that outlived a push to a Sol-list head is not proof Sol ran again.
+  assert.equal(P(labelled(req), [bot(HEAD)], { ...ok, sol: () => ({ risky: true, reason: 'supabase/' }) }), false);
 });
 
 test('only the bot can write a dedupe record', () => {
-  assert.equal(needsPing(labelled(), [{ author: { login: 'masonwells1' }, body: pingMarker(HEAD) }]), true);
+  assert.equal(P(labelled({ headRefOid: NEW, reviewRequests: [{ login: 'TahaKhanAbdalli' }] }), [{ author: { login: 'masonwells1' }, body: pingMarker(NEW) }]), true);
+  assert.equal(P(labelled(), [{ author: { login: 'masonwells1' }, body: pingMarker(HEAD) }]), true);
 });
 
 test('no ping without the label, on drafts, on Taha PRs, or once he reviewed the head', () => {
-  assert.equal(needsPing(pr(), []), false);
-  assert.equal(needsPing(labelled({ isDraft: true }), []), false);
-  assert.equal(needsPing(labelled({ author: { login: 'TahaKhanAbdalli' } }), []), false);
-  assert.equal(needsPing(labelled({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: HEAD } }] }), []), false);
+  const lazy = { checks: never, sol: never };
+  assert.equal(P(pr(), [], lazy), false);
+  assert.equal(P(labelled({ isDraft: true }), [], lazy), false);
+  assert.equal(P(labelled({ author: { login: 'TahaKhanAbdalli' } }), [], lazy), false);
+  assert.equal(P(labelled({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'CHANGES_REQUESTED', commit: { oid: HEAD } }] }), [], lazy), false);
+  // A dismissed review no longer counts as having seen the head.
+  assert.equal(P(labelled({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'DISMISSED', commit: { oid: HEAD } }] }), []), true);
 });
 
 test('ping text escapes PR titles and names the short head', () => {

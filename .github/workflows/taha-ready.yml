@@ -56,7 +56,8 @@ jobs:
   ping:
     name: Ping Taha in Slack
     needs: label
-    if: needs.label.outputs.pings != '' && needs.label.outputs.pings != '0'
+    # !cancelled(): one unreadable PR fails the label job but must not hold back the others' pings.
+    if: ${{ !cancelled() && needs.label.outputs.pings != '' && needs.label.outputs.pings != '0' }}
     runs-on: ubuntu-latest
     environment: release-bot
     concurrency: { group: taha-ready-ping, cancel-in-progress: false }

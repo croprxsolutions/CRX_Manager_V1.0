@@ -335,7 +335,7 @@ Sol numbers without a row here are reviewer finding ids kept for traceability; t
 | Sol 37 | Extra acres bill as sprayed, no office check |
 | Sol 41 | Split on the day sprayed; editable before posting |
 | Sol 47 | A spray-record correction after posting flags invoices; it changes nothing by itself |
-| Sol 48 | No sales tax on field work |
+| Sol 48 | No sales tax on field work and no tax checkbox, unlike chemical sales (confirmed by Mason 2026-11-24) |
 | Sol 75 | No zero-dollar invoices |
 | Sol 66 | One price from the first spray day; locked prices win |
 | Sol 67 | No flat fees |

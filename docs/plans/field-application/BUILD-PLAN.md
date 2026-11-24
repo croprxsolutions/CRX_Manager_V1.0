@@ -82,6 +82,5 @@ The release PR and its merge commit; each migration's name and the live ledger s
 
 ## Open questions for Mason
 
-1. **Sales tax on field work.** SPEC says none (Sol 48). Chemical sales now have a per-sale tax checkbox, off by default. Keep "none", or add the same checkbox?
-2. **Posting window.** The posting PR adds one refusal to the shared post functions Taha owns: agree a window with Taha (after 2026-12-15).
-3. **Reset date.** When Taha's live reset (#2407) runs; slice 1's field import waits for it.
+1. **Posting window.** The posting PR adds one refusal to the shared post functions Taha owns: agree a window with Taha (after 2026-12-15).
+2. **Reset date.** When Taha's live reset (#2407) runs; slice 1's field import waits for it.

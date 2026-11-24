@@ -317,7 +317,7 @@ function seed() {
         FROM invoices i JOIN customers c ON c.id = i.customer_id
        WHERE c.farm_name LIKE '[PROVER] FWE%' AND i.deleted_at IS NULL;
     $f$;
-    -- Every [PROVER] invoice, line, share and field row as stored, plus receipts, feed and audit sizes.
+    -- Every [PROVER] invoice, line, share, field row and field-row share as stored, plus every receipt, feed and audit row.
     CREATE FUNCTION fwe.rows() RETURNS text LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $f$
       SELECT md5(COALESCE((SELECT string_agg(to_jsonb(i)::text, '|' ORDER BY i.id) FROM invoices i JOIN customers c ON c.id = i.customer_id
           WHERE c.farm_name LIKE '[PROVER] FWE%'), '')
@@ -326,7 +326,10 @@ function seed() {
         || COALESCE((SELECT string_agg(to_jsonb(x)::text, '|' ORDER BY x.id) FROM invoice_shares x JOIN invoices i ON i.id = x.invoice_id
           JOIN customers c ON c.id = i.customer_id WHERE c.farm_name LIKE '[PROVER] FWE%'), '')
         || COALESCE((SELECT string_agg(to_jsonb(l)::text, '|' ORDER BY l.id) FROM field_app_locations l WHERE l.field_id IN ('${GA}', '${GB}', '${GJ}', '${GS}')), '')
-        || (SELECT count(*) FROM idempotency_keys)::text || '/' || (SELECT count(*) FROM activity_feed)::text || '/' || (SELECT count(*) FROM financial_audit_log)::text);
+        || COALESCE((SELECT string_agg(to_jsonb(s)::text, '|' ORDER BY s.id) FROM field_app_location_shares s), '')
+        || COALESCE((SELECT string_agg(to_jsonb(k)::text, '|' ORDER BY k.id) FROM idempotency_keys k), '')
+        || COALESCE((SELECT string_agg(to_jsonb(f)::text, '|' ORDER BY f.id) FROM activity_feed f), '')
+        || COALESCE((SELECT string_agg(to_jsonb(a)::text, '|' ORDER BY a.id) FROM financial_audit_log a), ''));
     $f$;
     -- Test-only shortcut: mark an engine-built group as a Split Billing set's (triggers skipped).
     CREATE FUNCTION fwe.make_split(p_group uuid) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
@@ -462,13 +465,18 @@ async function main() {
     COMMIT;`);
   const stopped = apply('candidate.sql');
   assert.notEqual(stopped.status, 0);
-  assert.match(stopped.output, /FIELD_APP_WRONG_EDITOR_PREFLIGHT: an editable job- or blend-ticket invoice carries field rows/);
+  assert.match(stopped.output, /FIELD_APP_WRONG_EDITOR_PREFLIGHT: an editable invoice carries field rows the field-app save did not write/);
   assert.equal(body(), OLD_BODY, 'a stopped apply changes nothing');
   raw(`DELETE FROM public.field_app_locations WHERE field_id = '${GJ}';
     UPDATE public.invoices SET deleted_at = now() WHERE job_id IS NOT NULL AND deleted_at IS NULL;`);
   console.log('[case] a field row written onto a job\'s invoices before the apply stops it at the preflight (nothing changed); removed');
+  // A committed, ordinary field-app save before the apply (its rows carry its receipt) does not stop it.
+  psql(`BEGIN; ${asAdmin}SELECT fwe.save(NULL, ARRAY['${GA}','${GB}']::uuid[], ${key('n')}) IS NOT NULL; COMMIT;`);
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
+  raw(`DELETE FROM public.field_app_locations WHERE invoice_group_id IS NOT NULL;
+    UPDATE public.invoices SET deleted_at = now() WHERE deleted_at IS NULL AND invoice_group_id IS NOT NULL;`);
+  console.log('[case] an ordinary committed field-app save before the apply does not stop it (test rows then removed)');
   assert.notEqual(body(), OLD_BODY);
   assert.equal(grants(WRAPPER), wrapperGrants, 'the wrapper grants must not change');
   const second = apply('candidate.sql');
@@ -476,7 +484,7 @@ async function main() {
   assert.match(second.output, /FIELD_APP_WRONG_EDITOR_PREFLIGHT/);
   console.log(`[case] the candidate applies (new body md5 ${body()}, EXECUTE unchanged: ${wrapperGrants}); a second apply stops at its preflight`);
 
-  const FOREIGN = /FIELD_APP_WRONG_EDITOR: Nothing was saved\. This invoice has no fields from the field application invoice screen \(it was made from a job or a blend ticket, or it is no longer active\), so its farms and lines cannot be rebuilt here\./;
+  const FOREIGN = /FIELD_APP_WRONG_EDITOR: Nothing was saved\. This invoice has no fields from the field application invoice screen \((it was made another way, such as from a job or a blend ticket)\), so its farms and lines cannot be rebuilt here\./;
   refusedProbe(JOB_GROUP, FOREIGN);
   refusedProbe(JOB_GROUP_REP, FOREIGN);
   console.log("[after] job billed A+B, A's invoice saved on the field-app screen: refused FIELD_APP_WRONG_EDITOR (admin and sales rep)");

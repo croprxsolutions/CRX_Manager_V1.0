@@ -43,15 +43,17 @@ BEGIN
      IS DISTINCT FROM '6f73d91a1ba621ec6db56a3cb606d948' THEN
     RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_PREFLIGHT: save_field_app_invoice is not the reviewed body (missing, drifted or already replaced)';
   END IF;
-  -- The check below trusts field rows, and until the revoke below anyone signed in could write them. An editable
-  -- job- or blend-made invoice carrying field rows would pass it (live 2026-11-23: none); stop for review instead.
+  -- The check below trusts field rows, and until the revoke below anyone signed in could write them. The save writes
+  -- its field rows in the same transaction as its receipt (same now()), so a row with no such receipt on an editable
+  -- invoice was written some other way and would pass the check (live 2026-11-23: none; every field row has one).
+  -- Stop for review instead. Split Billing invoices are refused by their stamp whatever their rows.
   IF EXISTS (SELECT 1 FROM public.invoices i
-              WHERE i.deleted_at IS NULL AND i.status IN ('draft', 'unposted')
-                AND (i.job_id IS NOT NULL OR i.blend_ticket_id IS NOT NULL)
-                AND EXISTS (SELECT 1 FROM public.field_app_locations l
-                             WHERE l.invoice_id = i.id
-                                OR (i.invoice_group_id IS NOT NULL AND l.invoice_group_id = i.invoice_group_id))) THEN
-    RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_PREFLIGHT: an editable job- or blend-ticket invoice carries field rows; review them before applying';
+               JOIN public.field_app_locations l
+                 ON l.invoice_id = i.id OR (i.invoice_group_id IS NOT NULL AND l.invoice_group_id = i.invoice_group_id)
+              WHERE i.deleted_at IS NULL AND i.status IN ('draft', 'unposted') AND i.field_app_billing_set_id IS NULL
+                AND NOT EXISTS (SELECT 1 FROM public.idempotency_keys k
+                                 WHERE k.operation = 'save_field_app_invoice' AND k.created_at = l.created_at)) THEN
+    RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_PREFLIGHT: an editable invoice carries field rows the field-app save did not write; review them before applying';
   END IF;
 END;
 $preflight$;
@@ -125,7 +127,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM public.field_app_locations l
                     WHERE (v_group IS NULL AND l.invoice_id = p_invoice_id)
                        OR (v_group IS NOT NULL AND l.invoice_group_id = v_group)) THEN
-      RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR: Nothing was saved. This invoice has no fields from the field application invoice screen (it was made from a job or a blend ticket, or it is no longer active), so its farms and lines cannot be rebuilt here.'
+      RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR: Nothing was saved. This invoice has no fields from the field application invoice screen (it was made another way, such as from a job or a blend ticket), so its farms and lines cannot be rebuilt here.'
         USING ERRCODE = 'P0001';
     END IF;
   END IF;
@@ -151,7 +153,7 @@ DECLARE
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public.save_field_app_invoice(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)'))
-     IS DISTINCT FROM 'a583c46ce9b52ee9bb8968ae15566fac' THEN
+     IS DISTINCT FROM '397f1c5c70f4a7e73566263f2cc18f06' THEN
     RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_POSTFLIGHT: save_field_app_invoice is not the reviewed new body';
   END IF;
   IF has_function_privilege('anon', 'public.save_field_app_invoice(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'EXECUTE')

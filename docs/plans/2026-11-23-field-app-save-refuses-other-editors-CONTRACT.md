@@ -125,3 +125,9 @@ Database only; no screen change. One PR into `staging`.
   commits keeps the old behavior) accepted: every function replacement has this window; the lock makes an in-flight save
   that reaches its field-row delete wait for the commit, and live has 0 job-made groups and no job or blend invoice with
   field rows, and the screen never sends these saves.
+- Luna round 4: HIGH (the preflight covered only job/blend invoices; the generic invoice editor can also create an
+  editable field-application invoice) fixed: the preflight now stops if any field row on an editable, non-Split-Billing
+  invoice lacks a `save_field_app_invoice` receipt from its own transaction (same `created_at`; live 2026-11-23 every
+  field row has one); proof cases: a planted row stops the apply, an ordinary committed save does not. LOW (message said
+  "job or blend ticket, or no longer active") reworded to "made another way, such as from a job or a blend ticket".
+  LOW (snapshot compared counts) fixed: field-row shares, receipts, feed and audit rows compared in full.

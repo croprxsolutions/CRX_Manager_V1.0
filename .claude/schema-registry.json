@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-11-13",
-    "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
+    "generated_at": "2026-11-24",
+    "generated_from": "Supabase project fsnjredpmakbmhwowjjt (STAGING) — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261113011216",
+    "migrations_high_water": "20261222110000",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -312,38 +312,54 @@
       "20260722190000_commission_split_lost_update_guard",
       "20260722222743_product_families_return_policy_foundation",
       "20260726210000_void_vendor_payment_vendor_liveness",
-      "20260728123224_secdef_pricing_reads_office_only",
-      "20260728193000_revoke_anon_execute_non_policy_functions",
-      "20260728232500_revoke_anon_execute_rls_role_helpers",
-      "20260729231031_vendor_bill_period_close_lock",
-      "20260730121951_close_accounting_period_idempotency_recheck",
-      "20260730140000_accounting_period_immutable_date_math",
-      "20260730170743_vendor_bill_month_lock_helper_acl_postflight",
-      "20260730201230_quote_customer_row_version_guard",
-      "20260730233835_ap_period_close_boundary_hardening",
-      "20260802162805_bind_idempotency_to_mutation_intent",
-      "20260803131507_fix_statement_balance_disclosure",
-      "20260805124533_fix_historical_ar_report_cutoffs",
-      "20260805170848_fix_customer_balance_paid_invoice_totals",
-      "20260805204716_harden_bulk_order_import_lifecycle",
-      "20260807153000_profile_role_lock_covers_insert",
-      "20260807221500_log_customer_fact_rpc",
-      "20260809154649_active_team_note_assignment_actor",
+      "20260727231652_quote_and_rate_reads_office_only",
+      "20260728182141_secdef_pricing_reads_office_only",
+      "20260728231350_revoke_anon_execute_non_policy_functions",
+      "20260728233459_revoke_anon_execute_rls_role_helpers",
+      "20260729015706_application_service_cost_admin_only",
+      "20260729035923_application_service_atomic_save",
+      "20260729125227_secure_profile_public_directory",
+      "20260729125251_pin_contact_sync_search_path",
+      "20260729125314_application_service_cost_exact_text",
+      "20260729163243_harden_profile_directory_followups",
+      "20260729213733_supplier_pricing_phase3c_return_policy_classification",
+      "20260729222311_bind_save_field_actor",
+      "20260730114102_vendor_bill_period_close_lock",
+      "20260730124308_close_accounting_period_idempotency_recheck",
+      "20260730140808_accounting_period_immutable_date_math",
+      "20260730174628_vendor_bill_month_lock_helper_acl_postflight",
+      "20260730235031_quote_customer_row_version_guard",
+      "20260731001654_ap_period_close_boundary_hardening",
+      "20260803010917_bind_idempotency_to_mutation_intent",
+      "20260803221244_fix_statement_balance_disclosure",
+      "20260805151605_fix_historical_ar_report_cutoffs",
+      "20260805171334_fix_customer_balance_paid_invoice_totals",
+      "20260805211951_harden_bulk_order_import_lifecycle",
+      "20260805220757_reject_nonfinite_bulk_import_values",
+      "20260805224819_snapshot_bulk_import_product_cost",
+      "20260806000752_authorize_bulk_import_product_cost",
+      "20260806004644_bind_bulk_import_intent_and_profit",
+      "20260806012423_lock_bulk_import_cost_snapshot",
+      "20260806023048_surface_bulk_import_inventory_warnings",
+      "20260807215532_profile_role_lock_covers_insert",
+      "20260807220323_log_customer_fact_rpc",
+      "20260809130108_team_note_completion_rpc_and_assignment_notify",
       "20260809170500_restore_batch_apply_prepayments_actor_guard",
       "20260809170600_cancel_order_zeroes_quantity_remaining",
       "20260809170700_revoke_inventory_truncate_and_mark_payments_dead",
       "20260809170800_round_money_to_whole_cents",
       "20260809170900_round_line_profit_with_revenue",
       "20260809230500_single_canonical_line_profit",
-      "20260810022500_backfill_stale_line_profit",
+      "20260810010308_active_team_note_assignment_actor",
+      "20260810025159_backfill_stale_line_profit",
       "20260810150000_commission_basis_from_canonical_order_header",
       "20260810150500_save_quote_whole_cent_total_cost",
       "20260810151000_whole_cent_money_check_constraints",
-      "20260810183629_reconcile_pending_commission_snapshots",
-      "20260811122851_assign_customers_sales_rep",
+      "20260810235207_reconcile_pending_commission_snapshots",
       "20260811130000_bind_commission_payout_idempotency_to_intent",
+      "20260811183317_assign_customers_sales_rep",
       "20260811200000_blend_ticket_order_whole_cent_totals",
-      "20260811230423_log_customer_sales_rep_assignment",
+      "20260812003315_log_customer_sales_rep_assignment",
       "20260812010000_blend_ticket_order_header_runtime_assert",
       "20260812011000_restore_quote_version_whole_cent_money",
       "20260812115235_snapshot_cost_reporting",
@@ -380,6 +396,7 @@
       "20260903230000_commission_report_snapshot_contract",
       "20260904160000_invoice_date_fallbacks_chicago",
       "20260904180000_invoice_season_follows_invoice_date",
+      "20260904185900_refuse_null_job_field_acres",
       "20260906120000_preview_field_app_season_follows_invoice_date",
       "20260908120000_close_pr535_live_gaps",
       "20260908130000_bind_create_inventory_hold_receipt_to_intent",
@@ -588,6 +605,94 @@
       "20270107100000_epa_long_name_keeps_cas_match",
       "20270108100000_ingredient_modes_of_action",
       "20270109100000_delivery_receipt_brands",
+      "20270109100100_standing_grower_discount",
+      "20270109100200_sales_tax_checkbox",
+      "20270109100300_sales_tax_rep_no_salesman",
+      "20270109100400_sales_tax_not_revenue",
+      "20270110110000_inactive_rate_review_cleanup",
+      "20270113100000_stock_checks_negative_onorder_chicago",
+      "20270115100000_moa_group_code_equivalence",
+      "20270116100000_ki99_void_reverses_write_offs",
+      "20270117120000_billing_sol_fixes_staging",
+      "20270117130000_standing_discount_in_order_profit",
+      "20270117140000_billing_m4_db_switch",
+      "20270119130000_one_open_count_per_stock_row",
+      "20270119160000_registration_adjuvants",
+      "20270120100000_priority_integrity_followups",
+      "20270120140000_grower_share_cost_in_sold_unit",
+      "20270120150000_grower_share_line_saves_for_admins_and_reps",
+      "20270121100000_ki137_powder_keg_each_piksi_mg_labels",
+      "20270121110000_line_unit_is_stock_unit",
+      "20270121120000_stock_unit_keeps_history",
+      "20270124140000_draft_tax_follows_box_on_post",
+      "20270125100000_product_rate_cutover",
+      "20270125110000_save_quote_keeps_section_ids",
+      "20270125163000_ki81_invoices_bill_sent_quote_price",
+      "20270126100000_product_rate_direct_writes_revoked",
+      "20270126110000_inventory_cleanup_ki161_163_150",
+      "20270127110000_booking_timing_purchasing_plan",
+      "20270127120000_booking_live_job_guard",
+      "20270127130000_security_batch_ki121_ki123",
+      "20270127200000_ki146_farm_group_no_loops",
+      "20270128140000_customer_deactivation_checks_open_work",
+      "20270129100000_standing_discount_recompute_internal_only",
+      "20270129140000_ki81_quote_price_matches_stock_unit",
+      "20270129150000_booking_guard_rep_and_delete",
+      "20270129160000_release_fixes_1990",
+      "20270129171000_field_app_refuses_product_without_sold_unit",
+      "20270129180000_ki81_quote_line_sent_field",
+      "20270129190000_blend_invoice_release_fixes",
+      "20270129210000_customer_deactivation_open_work_followups",
+      "20270130100000_epa_batch_commit_checks_at_save",
+      "20270201100000_page_access_locks_reports",
+      "20270201110000_farm_group_top_parent_lists",
+      "20270201120000_inactive_customer_refuses_new_work",
+      "20270201130000_stock_unit_history_names_movements_holds",
+      "20270201140000_adjust_inventory_key_printable_only",
+      "20270201180000_grower_share_rep_needs_price_to_cover_cost",
+      "20270203110000_job_writes_through_rpcs",
+      "20270203120000_inventory_edge_cases_1942",
+      "20270204120000_driver_available_deliveries",
+      "20270205100000_field_app_refuses_payer_change",
+      "20270205150000_ingredient_modes_of_action_load",
+      "20270206100000_rate_review_parent_changed_warning",
+      "20270206110000_pnl_commission_share_billed",
+      "20270207120000_driver_farm_billing_address",
+      "20270208100000_orders_total_price_finite",
+      "20270209160000_create_cycle_count_one_step",
+      "20270210110000_completed_job_delete_admin_only",
+      "20270213100000_single_short_stock_warning",
+      "20270216110000_purchasing_plan_booking_reservations",
+      "20270217120000_po_cost_expected_cost_check",
+      "20270223100000_po_cost_cut_judged_against_received",
+      "20270223120000_close_delivery_receipt_expected_receipt",
+      "20270224100000_f05_order_line_quantity_guard",
+      "20270224110000_retire_per_acre_field_pricing",
+      "20270224120000_month_close_payments_received_recheck",
+      "20270224130000_split_save_refuses_blend_billed_job",
+      "20270224200000_product_import_preview_refuses_unknown_fields",
+      "20270225100000_partial_order_checks_booking_version",
+      "20270225170000_edit_delivery_unassign_driver",
+      "20270225193000_job_proof_kept_epa",
+      "20270225210000_unpost_ignores_voided_payment_history",
+      "20270226150000_job_transfer_below_cost_whole_line",
+      "20270226163000_edit_delivery_expected_driver",
+      "20270226173000_drop_inert_delivery_short_stock_trigger",
+      "20270226213000_refuse_impossible_quantities_and_dates",
+      "20270227110000_delivery_driver_checks_need_a_driver",
+      "20270227120000_po_vendor_link",
+      "20270227160000_rate_cutover_refuses_unrestorable",
+      "20270227170000_job_completion_missing_stock_rows",
+      "20270228150000_driver_farm_lookup_scope",
+      "20270228160000_idempotency_keys_printable_only",
+      "20270228200000_field_app_save_refuses_other_editors",
+      "20270228210000_purchasing_plan_requires_inventory_page",
+      "20270301100000_live_test_data_reset",
+      "20270301130000_product_rate_unit_invoice_guard",
+      "20270301180000_m9_refunds_and_returned_checks",
+      "20270301200000_rate_switch_recheck",
+      "20270301220000_mark_handled_admin_only",
+      "20270302120000_drivers_read_farms_only_through_lookup",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -627,9 +732,6 @@
       "ap_polish_partial",
       "ap_structural_fixes",
       "application_records_table",
-      "application_service_atomic_save",
-      "application_service_cost_admin_only",
-      "application_service_cost_exact_text",
       "application_services",
       "applicator_license_gates",
       "applicator_license_holder_xor",
@@ -660,7 +762,6 @@
       "audit_safety_fixes",
       "audit_transfer_job_to_invoice",
       "audit_void_invoice_v3",
-      "authorize_bulk_import_product_cost",
       "auto_expire_holds_first_and_bracket",
       "auto_expire_quotes_constrain_statuses",
       "backfill_blank_commission_recipient",
@@ -671,11 +772,9 @@
       "batch_rpc_idempotency",
       "batch_rpc_idempotency_entity_type_fix",
       "batch_year_end_and_cleanup",
-      "bind_bulk_import_intent_and_profit",
       "bind_bulk_po_claim_to_vendor",
       "bind_bulk_po_identity_ascii_fold",
       "bind_bulk_po_replay_content",
-      "bind_save_field_actor",
       "blend_invoice_app_service_guard",
       "blend_invoice_column_fix",
       "blend_ticket_access_and_atomicity",
@@ -943,7 +1042,6 @@
       "harden_commission_payment_creation",
       "harden_invoice_existing_customer_scope",
       "harden_maintenance_secdef_revoke_authenticated",
-      "harden_profile_directory_followups",
       "harden_sales_financial_scope",
       "harden_storage_buckets_mime_size",
       "high_priority_fixes",
@@ -980,7 +1078,6 @@
       "layer2_quote_job_reservation_coordination",
       "link_quick_delivery_invoice_to_delivery",
       "load_recipe_column_fix",
-      "lock_bulk_import_cost_snapshot",
       "lock_order_shares_when_invoice_posted",
       "lock_purchase_order_initial_status",
       "log_failed_notification_restore_defaults",
@@ -1032,7 +1129,6 @@
       "phase5_inventory_enhancements",
       "phase6_returns_rma",
       "phase7_reporting_compliance_rebates",
-      "pin_contact_sync_search_path",
       "planned_programs",
       "po_cancel_soft_delete",
       "po_receive_skip_cost_update_default",
@@ -1062,7 +1158,6 @@
       "quick_delivery_optional_invoice",
       "quick_delivery_server_pricing_and_audit_log",
       "quick_receive",
-      "quote_and_rate_reads_office_only",
       "quote_items_calc_mode_and_price_unit",
       "quote_pdf_templates",
       "quote_section_header_notes",
@@ -1077,9 +1172,7 @@
       "receiving_system_enhancements",
       "recompute_pending_commissions_on_order_item_edit",
       "record_vendor_payment_rpc",
-      "refuse_null_job_field_acres",
       "reject_blank_bulk_po_identity",
-      "reject_nonfinite_bulk_import_values",
       "release_holds_on_quote_cancel",
       "remaining_money_inventory_hardening",
       "rename_invoice_temperature",
@@ -1132,7 +1225,6 @@
       "seasonal_rollover",
       "section9_po_ap_high_remediation",
       "secure_bulk_po_fingerprint_trigger",
-      "secure_profile_public_directory",
       "security_audit_2026_05_11",
       "security_audit_auth_uid_enforcement",
       "sentinel_exclude_credit_memos",
@@ -1142,7 +1234,6 @@
       "slim_dashboard_summary",
       "smart_pricing_rpc",
       "smart_pricing_schema",
-      "snapshot_bulk_import_product_cost",
       "split_invoices_jsonb_fix",
       "sprint0_emergency_fixes",
       "sprint16_payment_allocation",
@@ -1159,12 +1250,9 @@
       "strict_actor_quote_rpcs",
       "strict_actor_reverse_rpcs",
       "strict_actor_six_admin_rpcs",
-      "supplier_pricing_phase3c_return_policy_classification",
       "supplier_pricing_workbook_v2_product_info",
-      "surface_bulk_import_inventory_warnings",
       "team_board_phase2_and_delivery_rpc_fixes",
       "team_board_v2",
-      "team_note_completion_rpc_and_assignment_notify",
       "team_note_tags_rls",
       "tighten_blend_ticket_field_crop_history_rls",
       "tighten_customer_profile_rls_part1",
@@ -1608,6 +1696,7 @@
     "commissions",
     "cost_history",
     "credit_memo_applications",
+    "credit_memo_sales_tax",
     "customer_addresses",
     "customer_application_rates",
     "customer_document_restores",
@@ -1653,6 +1742,8 @@
     "job_notifications",
     "job_product_epa",
     "job_tag_assignments",
+    "money_reversal_lines",
+    "money_reversals",
     "note_activity_log",
     "note_tags",
     "notifications",
@@ -1682,6 +1773,8 @@
     "product_parent_density_values",
     "product_parent_events",
     "product_rate_correction_passes",
+    "product_rate_cutover_label_reasons",
+    "product_rate_cutover_passes",
     "product_rate_draft_events",
     "product_rate_events",
     "product_rate_lock",
@@ -1846,7 +1939,8 @@
         "draw_down_quote",
         "restore_quote_version",
         "duplicate_quote",
-        "create_invoice_from_blend_ticket"
+        "create_invoice_from_blend_ticket",
+        "field_app_grower_share"
       ],
       "constraints": [
         "below_cost_approvals_operation_check"
@@ -2543,7 +2637,9 @@
         "rup_sales_voided",
         "receiving_reversed",
         "payment_deleted",
-        "allocation_set_deleted"
+        "allocation_set_deleted",
+        "prepay_refunded_outside",
+        "payment_returned"
       ],
       "constraints": [
         "financial_audit_log_operation_type_check"
@@ -2877,6 +2973,25 @@
         "legacy_vendor_resolution_source_table_check"
       ]
     },
+    "money_reversal_lines.line_kind": {
+      "values": [
+        "prepay_credit",
+        "invoice_payment",
+        "prepay_application"
+      ],
+      "constraints": [
+        "money_reversal_lines_line_kind_check"
+      ]
+    },
+    "money_reversals.kind": {
+      "values": [
+        "outside_refund",
+        "returned_check"
+      ],
+      "constraints": [
+        "money_reversals_kind_check"
+      ]
+    },
     "ocr_processing_queue.status": {
       "values": [
         "pending",
@@ -3198,7 +3313,9 @@
         "size_moved",
         "identity_corrected",
         "rates_set",
-        "rates_corrected"
+        "rates_corrected",
+        "rates_promoted",
+        "rates_restored"
       ],
       "constraints": [
         "product_parent_events_event_type_check"
@@ -3383,6 +3500,15 @@
       ],
       "constraints": [
         "product_parents_product_form_check"
+      ]
+    },
+    "product_parents.rate_source": {
+      "values": [
+        "legacy",
+        "approved"
+      ],
+      "constraints": [
+        "product_parents_rate_source_check"
       ]
     },
     "product_rate_draft_events.event_type": {
@@ -3653,6 +3779,26 @@
       ],
       "constraints": [
         "purchase_orders_status_check"
+      ]
+    },
+    "quote_sections.confidence": {
+      "values": [
+        "firm",
+        "likely",
+        "maybe"
+      ],
+      "constraints": [
+        "quote_sections_confidence_check"
+      ]
+    },
+    "quote_sections.timing": {
+      "values": [
+        "pre_plant",
+        "in_season",
+        "late_summer"
+      ],
+      "constraints": [
+        "quote_sections_timing_check"
       ]
     },
     "quotes.status": {
@@ -4088,6 +4234,18 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "allocation_sets",
+      "constraint": "allocation_sets_payment_has_date",
+      "def": "CHECK (((entity_type <> 'payment'::text) OR (payment_date IS NOT NULL)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "app_settings",
+      "constraint": "app_settings_sales_tax_rate_chk",
+      "def": "CHECK (((setting_key <> 'sales_tax_rate'::text) OR (setting_value ~ '^[0-9]{1,2}(\\.[0-9]{1,3})?$'::text)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "application_record_fields",
       "constraint": "application_record_fields_acres_check",
       "def": "CHECK ((acres >= (0)::numeric))",
@@ -4140,6 +4298,12 @@
       "constraint": "below_cost_approvals_unit_price_cents_check",
       "def": "CHECK ((unit_price_cents >= 0))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "billing_m4_switch",
+      "constraint": "billing_m4_switch_one_row",
+      "def": "CHECK (id)",
+      "reason": "unparseable — hooks do NOT validate this constraint"
     },
     {
       "table": "blend_recipe_items",
@@ -4454,6 +4618,18 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "customers",
+      "constraint": "customers_standing_discount_pct_range",
+      "def": "CHECK (((standing_discount_pct >= (0)::numeric) AND (standing_discount_pct <= (100)::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "cycle_count_items",
+      "constraint": "cycle_count_items_expected_variance_finite",
+      "def": "CHECK (((expected_qty <> ALL (ARRAY['NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric])) AND (variance <> ALL (ARRAY['NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric]))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "cycle_counts",
       "constraint": "cycle_counts_item_revision_nonnegative_chk",
       "def": "CHECK ((item_revision >= 0))",
@@ -4475,6 +4651,12 @@
       "table": "deliveries",
       "constraint": "deliveries_no_proof_record_check",
       "def": "CHECK (((COALESCE(completion_evidence, ''::text) <> 'no_proof'::text) OR ((completion_no_proof_by IS NOT NULL) AND (completion_no_proof_at IS NOT NULL) AND (completion_no_proof_by_name IS NOT NULL) AND (completion_evidence_ref IS NOT NULL) AND ((char_length(completion_evidence_ref) >= 10) AND (char_length(completion_evidence_ref) <= 500)) AND (status IS NOT NULL) AND (status <> ALL (ARRAY['scheduled'::text, 'in_progress'::text])))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "deliveries",
+      "constraint": "deliveries_scheduled_date_window_chk",
+      "def": "CHECK (((scheduled_date >= '2000-01-01'::date) AND (scheduled_date <= '2099-12-31'::date)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -4553,6 +4735,18 @@
       "table": "delivery_items",
       "constraint": "chk_di_quantity",
       "def": "CHECK ((quantity > (0)::numeric))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "delivery_items",
+      "constraint": "delivery_items_quantity_delivered_finite_chk",
+      "def": "CHECK (((quantity_delivered > '-Infinity'::numeric) AND (quantity_delivered < 'Infinity'::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "delivery_items",
+      "constraint": "delivery_items_quantity_finite_chk",
+      "def": "CHECK (((quantity > '-Infinity'::numeric) AND (quantity < 'Infinity'::numeric)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -4791,6 +4985,12 @@
     },
     {
       "table": "field_billing_defaults",
+      "constraint": "field_billing_defaults_no_per_acre_price",
+      "def": "CHECK (((price_override_cents IS NULL) AND (pricing_note IS NULL)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "field_billing_defaults",
       "constraint": "field_billing_defaults_split_pct_check",
       "def": "CHECK (((split_pct > (0)::numeric) AND (split_pct <= (100)::numeric)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
@@ -4832,10 +5032,34 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "inventory",
+      "constraint": "inventory_quantity_available_finite_chk",
+      "def": "CHECK (((quantity_available > '-Infinity'::numeric) AND (quantity_available < 'Infinity'::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "inventory",
+      "constraint": "inventory_quantity_on_order_finite_chk",
+      "def": "CHECK (((quantity_on_order > '-Infinity'::numeric) AND (quantity_on_order < 'Infinity'::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "inventory",
+      "constraint": "inventory_quantity_prebooked_finite_chk",
+      "def": "CHECK (((quantity_prebooked > '-Infinity'::numeric) AND (quantity_prebooked < 'Infinity'::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "inventory_holds",
       "constraint": "inventory_holds_quantity_check",
       "def": "CHECK ((quantity >= (0)::numeric))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "inventory_holds",
+      "constraint": "inventory_holds_source_needs_customer",
+      "def": "CHECK (((source_id IS NULL) OR (customer_id IS NOT NULL) OR (is_active IS NOT TRUE)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
     },
     {
       "table": "invoice_items",
@@ -4886,9 +5110,33 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "invoice_sales_tax_rates",
+      "constraint": "invoice_sales_tax_rates_range",
+      "def": "CHECK (((rate_pct >= (0)::numeric) AND (rate_pct < (100)::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "invoice_shares",
+      "constraint": "invoice_shares_no_per_acre_price",
+      "def": "CHECK (((price_per_acre_cents IS NULL) AND (pricing_note IS NULL)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "invoice_shares",
       "constraint": "invoice_shares_split_percentage_check",
       "def": "CHECK (((split_percentage > (0)::numeric) AND (split_percentage <= (100)::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "invoice_standing_discount_rates",
+      "constraint": "invoice_standing_discount_rates_drafted_range",
+      "def": "CHECK (((drafted_rate_pct >= (0)::numeric) AND (drafted_rate_pct <= (100)::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "invoice_standing_discount_rates",
+      "constraint": "invoice_standing_discount_rates_range",
+      "def": "CHECK (((rate_pct >= (0)::numeric) AND (rate_pct <= (100)::numeric)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -5012,6 +5260,12 @@
       "reason": "unparseable — hooks do NOT validate this constraint"
     },
     {
+      "table": "job_chemicals",
+      "constraint": "job_chemicals_quantity_finite_chk",
+      "def": "CHECK (((quantity > '-Infinity'::numeric) AND (quantity < 'Infinity'::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "job_dispatch_preservation",
       "constraint": "job_dispatch_preservation_one_assignee_check",
       "def": "CHECK (((applicator_id IS NOT NULL) <> (crew_id IS NOT NULL)))",
@@ -5097,6 +5351,12 @@
     },
     {
       "table": "jobs",
+      "constraint": "jobs_job_date_window_chk",
+      "def": "CHECK (((job_date >= '2000-01-01'::date) AND (job_date <= '2099-12-31'::date)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "jobs",
       "constraint": "jobs_loader_tank_capacity_pos",
       "def": "CHECK (((loader_tank_capacity IS NULL) OR (loader_tank_capacity > (0)::numeric)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
@@ -5117,6 +5377,42 @@
       "table": "legacy_vendor_resolution",
       "constraint": "legacy_vendor_resolution_review_shape",
       "def": "CHECK ((((review_status = 'pending'::text) AND (vendor_id IS NULL) AND (reviewed_at IS NULL)) OR ((review_status = 'approved'::text) AND (vendor_id IS NOT NULL) AND (reviewed_at IS NOT NULL)) OR ((review_status = 'rejected'::text) AND (vendor_id IS NULL) AND (reviewed_at IS NOT NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "money_reversal_lines",
+      "constraint": "money_reversal_lines_amount_cents_check",
+      "def": "CHECK ((amount_cents > 0))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "money_reversal_lines",
+      "constraint": "money_reversal_lines_shape",
+      "def": "CHECK ((((line_kind = 'prepay_credit'::text) AND (prepay_credit_id IS NOT NULL) AND (invoice_id IS NULL) AND (prepay_application_id IS NULL)) OR ((line_kind = 'invoice_payment'::text) AND (invoice_id IS NOT NULL) AND (prepay_credit_id IS NULL) AND (prepay_application_id IS NULL)) OR ((line_kind = 'prepay_application'::text) AND (prepay_application_id IS NOT NULL) AND (prepay_credit_id IS NOT NULL) AND (invoice_id IS NOT NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "money_reversals",
+      "constraint": "money_reversals_amount_cents_check",
+      "def": "CHECK ((amount_cents > 0))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "money_reversals",
+      "constraint": "money_reversals_occurred_on",
+      "def": "CHECK ((((kind <> 'returned_check'::text) OR (occurred_on IS NOT NULL)) AND ((occurred_on IS NULL) OR (occurred_on <= entry_date))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "money_reversals",
+      "constraint": "money_reversals_reason_check",
+      "def": "CHECK ((reason ~ '\\S'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "money_reversals",
+      "constraint": "money_reversals_source",
+      "def": "CHECK ((((kind = 'outside_refund'::text) AND (allocation_set_id IS NULL) AND (prepay_credit_id IS NULL)) OR ((kind = 'returned_check'::text) AND (num_nonnulls(allocation_set_id, prepay_credit_id) = 1))))",
       "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -5205,8 +5501,26 @@
     },
     {
       "table": "order_items",
+      "constraint": "order_items_quantity_delivered_finite_chk",
+      "def": "CHECK (((quantity_delivered > '-Infinity'::numeric) AND (quantity_delivered < 'Infinity'::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "order_items",
+      "constraint": "order_items_quantity_remaining_finite_chk",
+      "def": "CHECK (((quantity_remaining > '-Infinity'::numeric) AND (quantity_remaining < 'Infinity'::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "order_items",
       "constraint": "order_items_total_price_whole_cents_chk",
       "def": "CHECK (((total_price = round(total_price, 2)) AND (total_price > '-Infinity'::numeric) AND (total_price < 'Infinity'::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "order_items",
+      "constraint": "order_items_total_units_needed_finite_chk",
+      "def": "CHECK (((total_units_needed > '-Infinity'::numeric) AND (total_units_needed < 'Infinity'::numeric)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -5225,6 +5539,12 @@
       "table": "orders",
       "constraint": "orders_total_cost_whole_cents_chk",
       "def": "CHECK (((total_cost IS NULL) OR ((total_cost = round(total_cost, 2)) AND (total_cost > '-Infinity'::numeric) AND (total_cost < 'Infinity'::numeric))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "orders",
+      "constraint": "orders_total_price_finite",
+      "def": "CHECK (((total_price < '1000000000000000'::numeric) AND (total_price = round(total_price, 2))))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -5811,8 +6131,26 @@
     },
     {
       "table": "product_parents",
+      "constraint": "product_parents_rate_source_event_pair",
+      "def": "CHECK (((rate_source = 'approved'::text) = (rate_source_event_id IS NOT NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parents",
       "constraint": "product_parents_safener_check",
       "def": "CHECK (((safener IS NULL) OR ((btrim(safener) <> ''::text) AND (length(safener) <= 200))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rate_cutover_label_reasons",
+      "constraint": "product_rate_cutover_label_reasons_over_label_reason_check",
+      "def": "CHECK (((over_label_reason ~ '[[:alnum:]]'::text) AND (length(over_label_reason) <= 500)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rate_draft_events",
+      "constraint": "product_rate_draft_events_actor_required",
+      "def": "CHECK (((changed_by IS NOT NULL) OR ((event_type = 'outcome_cleared'::text) AND (NOT (reason IS DISTINCT FROM 'the parent''s rates changed'::text)))))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -5902,7 +6240,7 @@
     {
       "table": "product_rates",
       "constraint": "product_rates_over_label_reason_check",
-      "def": "CHECK (((over_label_reason IS NULL) OR ((btrim(over_label_reason, ' \t\r\n '::text) <> ''::text) AND (over_label_reason = btrim(over_label_reason, ' \t\r\n '::text)) AND (length(over_label_reason) <= 500))))",
+      "def": "CHECK (((over_label_reason IS NULL) OR ((_product_rate_reason_trim(over_label_reason) <> ''::text) AND (over_label_reason = _product_rate_reason_trim(over_label_reason)) AND (length(over_label_reason) <= 500))))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -6060,6 +6398,12 @@
       "constraint": "products_current_cost_cent_scale_chk",
       "def": "CHECK (((current_cost IS NULL) OR ((current_cost = round(current_cost, 2)) AND (current_cost > '-Infinity'::numeric) AND (current_cost < 'Infinity'::numeric))))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "products",
+      "constraint": "products_inventory_unit_has_alnum",
+      "def": "CHECK ((inventory_unit ~ '[[:alnum:]]'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
     },
     {
       "table": "products",
@@ -6486,12 +6830,6 @@
       "constraint": "write_offs_amount_cents_check",
       "def": "CHECK ((amount_cents > 0))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
-    },
-    {
-      "table": "app_settings",
-      "constraint": "app_settings_sales_tax_rate_chk",
-      "def": "CHECK (((setting_key <> 'sales_tax_rate'::text) OR (setting_value ~ '^[0-9]{1,2}(\\.[0-9]{1,3})?$'::text)))",
-      "reason": "regex on one setting key — not an IN-list; hooks do NOT validate this constraint"
     }
   ],
   "not_null_columns": {
@@ -6699,6 +7037,15 @@
       "with_default": [
         "id",
         "created_at",
+        "updated_at"
+      ]
+    },
+    "billing_m4_switch": {
+      "no_default": [
+        "enabled"
+      ],
+      "with_default": [
+        "id",
         "updated_at"
       ]
     },
@@ -6947,6 +7294,18 @@
       "with_default": [
         "id",
         "applied_at"
+      ]
+    },
+    "credit_memo_sales_tax": {
+      "no_default": [
+        "invoice_id",
+        "line_key",
+        "customer_id",
+        "line_cents",
+        "tax_cents"
+      ],
+      "with_default": [
+        "frozen_at"
       ]
     },
     "customer_addresses": {
@@ -7961,6 +8320,31 @@
         "updated_at"
       ]
     },
+    "money_reversal_lines": {
+      "no_default": [
+        "reversal_id",
+        "line_kind",
+        "amount_cents"
+      ],
+      "with_default": [
+        "id",
+        "created_at"
+      ]
+    },
+    "money_reversals": {
+      "no_default": [
+        "kind",
+        "customer_id",
+        "entry_date",
+        "amount_cents",
+        "reason",
+        "performed_by"
+      ],
+      "with_default": [
+        "id",
+        "created_at"
+      ]
+    },
     "note_activity_log": {
       "no_default": [
         "user_id",
@@ -8634,7 +9018,8 @@
         "parent_version",
         "is_active",
         "created_at",
-        "updated_at"
+        "updated_at",
+        "rate_source"
       ]
     },
     "product_rate_correction_passes": {
@@ -8644,11 +9029,28 @@
       ],
       "with_default": []
     },
+    "product_rate_cutover_label_reasons": {
+      "no_default": [
+        "event_id",
+        "parent_id",
+        "over_label_reason",
+        "created_by"
+      ],
+      "with_default": [
+        "created_at"
+      ]
+    },
+    "product_rate_cutover_passes": {
+      "no_default": [
+        "txid",
+        "parent_id"
+      ],
+      "with_default": []
+    },
     "product_rate_draft_events": {
       "no_default": [
         "parent_id",
-        "event_type",
-        "changed_by"
+        "event_type"
       ],
       "with_default": [
         "id",
@@ -8773,7 +9175,8 @@
     "products": {
       "no_default": [
         "product_name",
-        "product_form"
+        "product_form",
+        "inventory_unit"
       ],
       "with_default": [
         "id",
@@ -9645,6 +10048,11 @@
       "created_at",
       "updated_at"
     ],
+    "billing_m4_switch": [
+      "id",
+      "enabled",
+      "updated_at"
+    ],
     "blend_recipe_items": [
       "id",
       "recipe_id",
@@ -9941,6 +10349,14 @@
       "reversed_at",
       "reversed_by",
       "reversal_reason"
+    ],
+    "credit_memo_sales_tax": [
+      "invoice_id",
+      "line_key",
+      "customer_id",
+      "line_cents",
+      "tax_cents",
+      "frozen_at"
     ],
     "customer_addresses": [
       "id",
@@ -10787,7 +11203,8 @@
       "invoice_id",
       "rate_pct",
       "set_by",
-      "set_at"
+      "set_at",
+      "drafted_rate_pct"
     ],
     "invoices": [
       "id",
@@ -11152,6 +11569,30 @@
       "reviewed_at",
       "created_at",
       "updated_at"
+    ],
+    "money_reversal_lines": [
+      "id",
+      "reversal_id",
+      "line_kind",
+      "prepay_credit_id",
+      "invoice_id",
+      "prepay_application_id",
+      "amount_cents",
+      "created_at"
+    ],
+    "money_reversals": [
+      "id",
+      "kind",
+      "customer_id",
+      "entry_date",
+      "amount_cents",
+      "reference",
+      "reason",
+      "allocation_set_id",
+      "prepay_credit_id",
+      "occurred_on",
+      "performed_by",
+      "created_at"
     ],
     "note_activity_log": [
       "id",
@@ -11817,11 +12258,24 @@
       "created_by",
       "created_at",
       "updated_by",
-      "updated_at"
+      "updated_at",
+      "rate_source",
+      "rate_source_event_id"
     ],
     "product_rate_correction_passes": [
       "txid",
       "product_id"
+    ],
+    "product_rate_cutover_label_reasons": [
+      "event_id",
+      "parent_id",
+      "over_label_reason",
+      "created_by",
+      "created_at"
+    ],
+    "product_rate_cutover_passes": [
+      "txid",
+      "parent_id"
     ],
     "product_rate_draft_events": [
       "id",
@@ -12089,7 +12543,8 @@
       "total_cost_cents",
       "closed_at",
       "closed_by",
-      "close_reason"
+      "close_reason",
+      "vendor_id"
     ],
     "quote_items": [
       "id",
@@ -12155,7 +12610,9 @@
       "section_notes",
       "section_header_notes",
       "needed_by_date",
-      "field_id"
+      "field_id",
+      "timing",
+      "confidence"
     ],
     "quote_templates": [
       "id",

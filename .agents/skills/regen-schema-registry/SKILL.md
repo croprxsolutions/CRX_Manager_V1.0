@@ -26,6 +26,8 @@ node -e "const fs=require('node:fs');fs.mkdirSync('.claude/session-state',{recur
 node scripts/regenerate-schema-registry.mjs --live
 ```
 
+   **Staging mode (field app BUILD-PLAN slice 0 step 2):** on a branch cut from `origin/staging`, after a staging database apply, run `node scripts/regenerate-schema-registry.mjs --live --staging --types` instead. It reads the staging project (`fsnjredpmakbmhwowjjt`) read-only, rebuilds the registry from it (`_meta.generated_from` says STAGING) and rewrites `src/types/supabase.ts` from staging's generated types. Commit both in the next database PR (or a small follow-up PR). After a LIVE apply, refresh from live as above (`--types` works with plain `--live` too). The Supabase MCP is bound to production, so the staging mode never uses it.
+
 2. **Fallback, only if `--live` can't read the token** (cloud session, another machine): run each `INTROSPECTION_QUERIES` entry via Supabase MCP `execute_sql`, one statement per call (the MCP drops all but the last statement in a multi-statement call). Do NOT skip Q6 (`applied_names`); it powers the name-based staleness comparison. Save the rows under each key in one JSON file and run `node scripts/regenerate-schema-registry.mjs --from-introspection <path-to-queries.json>`. Q5 can be split by table-name range if the MCP response is too large.
 
 If this fails:

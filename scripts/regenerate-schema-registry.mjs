@@ -16,6 +16,12 @@
 //       (scripts/lib/supabase-credential.mjs; approved use, docs/manual/SERVICES_AND_ACCOUNTS.md).
 //       The default for /regen-schema-registry.
 //
+//   node scripts/regenerate-schema-registry.mjs --live --staging [--types]
+//       The same rebuild from the STAGING project (fsnjredpmakbmhwowjjt) instead of live, for
+//       branches cut from origin/staging (field app BUILD-PLAN slice 0 step 2). --types also
+//       rewrites src/types/supabase.ts from that project's generated TypeScript types (works
+//       with plain --live too). Read-only either way.
+//
 //   node scripts/regenerate-schema-registry.mjs --from-introspection <file.json | ->
 //       Full rebuild from a JSON file of query results (use "-" to read stdin). The fallback
 //       when the token is unavailable (cloud sessions, another machine).
@@ -45,7 +51,9 @@ import { readCredentialToken } from "./lib/supabase-credential.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const registryPath = path.join(here, "..", ".claude", "schema-registry.json");
 const today = new Date().toISOString().slice(0, 10);
-const QUERY_URL = "https://api.supabase.com/v1/projects/rhyzpcqhnizqbxphqdkr/database/query";
+const typesPath = path.join(here, "..", "src", "types", "supabase.ts");
+export const PROJECTS = { live: "rhyzpcqhnizqbxphqdkr", staging: "fsnjredpmakbmhwowjjt" };
+const apiBase = (ref) => `https://api.supabase.com/v1/projects/${ref}`;
 
 // Q1-Q6. Each key is the input key its rows are stored under.
 export const INTROSPECTION_QUERIES = {
@@ -92,10 +100,10 @@ export const INTROSPECTION_QUERIES = {
 const MUST_HAVE_ROWS = new Set(["migrations_high_water", "columns", "applied_names"]);
 
 /** Runs Q1-Q6 against live, read-only, and returns the introspection input object. Fails closed. */
-export async function liveIntrospection({ fetchImpl = fetch, token = readCredentialToken() } = {}) {
+export async function liveIntrospection({ fetchImpl = fetch, token = readCredentialToken(), projectRef = PROJECTS.live } = {}) {
   const data = {};
   for (const [key, query] of Object.entries(INTROSPECTION_QUERIES)) {
-    const res = await fetchImpl(QUERY_URL, {
+    const res = await fetchImpl(`${apiBase(projectRef)}/database/query`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ query, read_only: true }),
@@ -109,6 +117,19 @@ export async function liveIntrospection({ fetchImpl = fetch, token = readCredent
     data[key] = rows;
   }
   return data;
+}
+
+/** Fetches the project's generated TypeScript types (public schema). Fails closed on anything but a non-empty string. */
+export async function fetchTypes({ fetchImpl = fetch, token = readCredentialToken(), projectRef = PROJECTS.live } = {}) {
+  const res = await fetchImpl(`${apiBase(projectRef)}/types/typescript?included_schemas=public`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(180_000),
+  });
+  const text = await res.text();
+  let body;
+  try { body = JSON.parse(text); } catch { throw new Error(`types: HTTP ${res.status}, response is not JSON`); }
+  if (!res.ok || typeof body?.types !== "string" || !body.types.includes("public:")) throw new Error(`types: HTTP ${res.status}: ${text.slice(0, 300)}`);
+  return body.types;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -168,7 +189,7 @@ function readIntrospectionFile(inputArg) {
   return data;
 }
 
-function rebuildFromIntrospection(data) {
+function rebuildFromIntrospection(data, projectRef = PROJECTS.live) {
   for (const key of ["migrations_high_water", "sequences", "generated_columns", "check_constraints", "columns"]) {
     if (!Array.isArray(data[key])) {
       console.error(`Introspection input missing array key "${key}" — see header of this script for the format.`);
@@ -253,7 +274,7 @@ function rebuildFromIntrospection(data) {
     _meta: {
       registry_version: 2,
       generated_at: today,
-      generated_from: "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
+      generated_from: `Supabase project ${projectRef}${projectRef === PROJECTS.staging ? " (STAGING)" : ""} — public schema introspection`,
       regenerate_with: "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
       purpose: "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
       note: "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
@@ -326,8 +347,20 @@ function stampMode() {
 
 async function main(args) {
   if (args.includes("--live")) {
-    rebuildFromIntrospection(await liveIntrospection());
+    const projectRef = args.includes("--staging") ? PROJECTS.staging : PROJECTS.live;
+    console.log(`Reading Supabase project ${projectRef}${projectRef === PROJECTS.staging ? " (staging)" : " (live)"}, read-only.`);
+    const data = await liveIntrospection({ projectRef });
+    const types = args.includes("--types") ? await fetchTypes({ projectRef }) : null;
+    rebuildFromIntrospection(data, projectRef);
+    if (types) {
+      writeFileSync(typesPath, types.endsWith("\n") ? types : `${types}\n`);
+      console.log(`Wrote src/types/supabase.ts from ${projectRef}.`);
+    }
     return;
+  }
+  if (args.includes("--staging") || args.includes("--types")) {
+    console.error("--staging and --types need --live.");
+    process.exit(1);
   }
   const fiIdx = args.indexOf("--from-introspection");
   if (fiIdx !== -1) {

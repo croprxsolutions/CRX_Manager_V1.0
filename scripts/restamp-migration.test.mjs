@@ -56,6 +56,19 @@ const latin1 = (text) => Buffer.from(text, "utf8").toString("latin1");
   assert.equal(judge({ branchAdded: [`supabase/migrations/20270101000000_other.sql`, `supabase/migrations/${OLD}_${STEM}.sql`] }), null, "restamp rule: a branch migration below both stamps is fine");
   assert.match(judge({ branchAdded: [`supabase/migrations/${OLD}_zz.sql`] }), /sits between/, "restamp rule: another branch migration sharing the old stamp is refused");
   assert.match(judge({ branchAdded: [`supabase/migrations/${NEW}_zz.sql`] }), /sits between/, "restamp rule: another branch migration on the new stamp is refused");
+  const note = {};
+  restampProblem({ entries, branchAdded: [], note, readFile: (side, file) => latin1(file.endsWith(".sql") ? (side === "old" ? oldSql : goodSql) : file.endsWith(".md") ? (side === "old" ? record(OLD, oldSql) : record(NEW, goodSql)) : (side === "old" ? `run ${OLD}_${STEM}.sql\n` : `run ${NEW}_${STEM}.sql\n`)) });
+  assert.deepEqual(note.sqlSha256, { from: sha(oldSql), to: sha(goodSql) }, "restamp rule: a header self-link change reports the SQL hash move");
+  const applied = (stamp, sql) => record(stamp, sql).replace("**LOCAL CANDIDATE — NOT APPLIED.**", `**APPLIED LIVE 2026-11-23**, ledger version \`20261123000000\` carrying name \`${stamp}_${STEM}\`.`);
+  assert.match(judge({ oldRecord: applied(OLD, oldSql), newRecord: applied(NEW, goodSql) }), /not a LOCAL CANDIDATE record/, "restamp rule: an applied record is refused");
+  // The body's own self-link (e.g. a COMMENT ON string) stays; only the header's changes (Taha LOW 1).
+  const linkBody = `COMMENT ON TABLE t IS 'docs/reference/migrations.d/${OLD}_${STEM}.md';\n`;
+  const withBody = (stamp) => header(stamp) + linkBody;
+  const judgeSql = (before, after) => restampProblem({ entries, branchAdded: [], readFile: (side, file) => latin1(file.endsWith(".sql") ? (side === "old" ? before : after) : file.endsWith(".md") ? (side === "old" ? record(OLD, before) : record(NEW, after)) : (side === "old" ? `run ${OLD}_${STEM}.sql\n` : `run ${NEW}_${STEM}.sql\n`)) });
+  assert.equal(judgeSql(withBody(OLD), withBody(NEW)), null, "restamp rule: header link moves, body link stays, carries");
+  assert.match(judgeSql(withBody(OLD), header(NEW) + linkBody.split(`${OLD}_`).join(`${NEW}_`)), /the migration's SQL changed/, "restamp rule: the body's self-link swapped is refused");
+  const crHeader = (stamp) => `-- note\rSELECT 1; -- docs/reference/migrations.d/${stamp}_${STEM}.md\n\n`;
+  assert.match(judgeSql(crHeader(OLD) + body, crHeader(NEW) + body), /the migration's SQL changed/, "restamp rule: a lone carriage return in the header is refused");
 }
 
 // The command, end to end.

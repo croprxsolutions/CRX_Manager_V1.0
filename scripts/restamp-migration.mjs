@@ -85,6 +85,8 @@ const newRecord = `docs/reference/migrations.d/${newStem}.md`;
 const regular = (file) => existsSync(file) && lstatSync(file).isFile();
 if (!regular(oldSql)) fail(`${oldSql} is not an ordinary file`);
 if (!regular(oldRecord)) fail(`${oldRecord} is missing; every migration needs its record (docs/reference/migrations.d/README.md)`);
+// An applied migration's record names the live ledger's stamp; it keeps its name (Taha, #2384 LOW 6).
+if (!readFileSync(oldRecord, "latin1").trimStart().startsWith("**LOCAL CANDIDATE")) fail(`${oldRecord} is not a LOCAL CANDIDATE record; an applied migration keeps its name`);
 for (const dest of [newSql, newRecord]) if (existsSync(dest)) fail(`${dest} already exists`);
 const reviewed = git("rev-parse", "HEAD");
 if (!existsSync(codexPushProofPath(process.cwd(), reviewed))) console.error(`note: no Sol proof for ${reviewed.slice(0, 12)} in this worktree; the restamp commits, but nothing will carry.`);

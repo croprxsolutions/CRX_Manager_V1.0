@@ -1701,7 +1701,7 @@ function collisionPromptSkipsWork(prompt) {
     mkdirSync(path.dirname(sqlPath(OLD)), { recursive: true });
     mkdirSync(path.dirname(recordPath(OLD)), { recursive: true });
     writeFileSync(sqlPath(OLD), "CREATE TABLE rate_lock (id bigint);\n");
-    writeFileSync(recordPath(OLD), `# ${OLD}\n\nCandidate; apply as ${OLD}.\n`);
+    writeFileSync(recordPath(OLD), `**LOCAL CANDIDATE — NOT APPLIED.** \`${OLD}.sql\`. Candidate; apply as ${OLD}.\n`);
     writeFileSync(path.join(repo, "src", "a.ts"), "export const a = 2;\n");
     const reviewedHead = commitAll("pr change");
     const proofPath = codexPushProofPath(repo, reviewedHead);
@@ -1743,8 +1743,12 @@ function collisionPromptSkipsWork(prompt) {
     }, /src\/a\.ts changed beyond the timestamp/);
     refused("a record edit beyond the stamp", () => {
       restamp();
-      writeFileSync(recordPath(NEW), `# ${NEW}\n\nApplied.\n`);
+      writeFileSync(recordPath(NEW), `**LOCAL CANDIDATE — NOT APPLIED.** \`${NEW}.sql\`. Edited.\n`);
     }, /changed beyond the timestamp/);
+    refused("an applied record (Taha, #2384 LOW 6)", () => {
+      restamp();
+      writeFileSync(recordPath(NEW), `**APPLIED LIVE 2026-11-23**, ledger version \`20261123000000\` carrying name \`${NEW}\`.\n`);
+    }, /not a LOCAL CANDIDATE record/);
     refused("a copy that keeps the old migration", () => {
       writeFileSync(sqlPath(NEW), readFileSync(sqlPath(OLD)));
     }, /does not rename exactly one migration/);
@@ -1759,6 +1763,11 @@ function collisionPromptSkipsWork(prompt) {
       restamp();
       writeFileSync(path.join(repo, "supabase", "config.toml"), "x = 1\n");
     }, /another database file/);
+    // A reviewed head whose proof is a post-apply carry is live under its stamp (Taha, #2384 LOW 6).
+    const cleanProof = readFileSync(proofPath, "utf8");
+    writeFileSync(proofPath, JSON.stringify({ ...JSON.parse(cleanProof), carried_forward: true, carry: { mode: "post_apply", from_head: reviewedHead, from_base: base } }));
+    refused("a post-apply source proof", () => { restamp(); }, /post-apply carry/);
+    writeFileSync(proofPath, cleanProof);
     // Only ONE commit on top of the reviewed head carries.
     git("reset", "-q", "--hard", reviewedHead);
     restamp();

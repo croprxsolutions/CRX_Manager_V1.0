@@ -100,3 +100,15 @@ The design above was narrowed in response; the shipped rule is:
 - r3 HIGH refuted: restamping above migrations that already landed on staging is the purpose. Staging
   ran those first, the PR stamp check (`stampProblems`) requires the new stamp above the base's newest,
   so after the restamp live applies in the order staging did; without it live would flip that order.
+
+## Taha's review (#2384, 6 LOW)
+
+- Fixed: LOW 1 (the carry changes the self-link in header lines only, matching the command; a lone
+  carriage return in the header refuses); LOW 3 (a carried proof records `carry.sql_sha256` and says
+  the SQL hash moved); LOW 6 (the command and the carry refuse a record that is not LOCAL CANDIDATE,
+  and the carry refuses a post-apply source proof). Tests added for each; the four 11-23 replays
+  give the same results.
+- Deferred, with reason: LOW 2 (`origin` matches `next-migration-stamp`; a fork without `staging`
+  refuses safely; the pre-push lane block already stops a Taha-branch push); LOW 4 (`--to` is the
+  override; a stamp that collides with an open PR fails that PR's stamp check, safely); LOW 5 (CRLF in
+  the body is the 2026-11-04 rule, pinned by its own test; tightening it is a separate change).

@@ -512,7 +512,7 @@ describe('price sheet refusal wording', () => {
     for (const code of ['WORKBOOK_V2_EXPORT_REQUIRED', 'WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED']) {
       expect(priceSheetRefusalText({ message: code }, expiresAt, after)).toMatch(/This price sheet expired \(sheets last 7 days\)/);
       expect(priceSheetRefusalText(new Error(code), expiresAt, before))
-        .toBe('No prices were changed. This price sheet was already applied, or was downloaded by another user. Download a fresh one');
+        .toBe('No prices were changed. This price sheet was already applied, was downloaded by another user, or came from an older template. Download a fresh one');
     }
   });
 

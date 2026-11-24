@@ -185,7 +185,7 @@ describe('SupplierPricing page', () => {
         vendor_id: 'vendor-1', vendor_name: 'The Andersons', supplier_sku: 'AND-1',
         supplier_product_name: 'Atrazine 4L', supplier_uom: 'case',
         supplier_pack_description: '2 x 2.5 gal', inventory_units_per_supplier_unit: 5,
-        conversion_unit: 'gallons', comparison_status: 'comparable', comparison_note: null,
+        conversion_unit: ' Gallon', comparison_status: 'comparable', comparison_note: null,
         link_status: 'confirmed', is_reusable: true, is_preferred: true, is_active: true,
       }, {
         id: 'link-2', product_id: 'product-1', product_name: 'Atrazine',
@@ -350,6 +350,53 @@ describe('SupplierPricing page', () => {
       + ' Atrazine: $30.00 for 2 case = $3.00 per gal. Atrazine: $30.00 per case = $6.00 per gal.'
       + ' Atrazine: $150.00 for 2 case = $15.00 per gal.',
     )).toBeInTheDocument();
+  });
+
+  it('shows no converted cost for a link in another unit, and says so for an oversized package', async () => {
+    const link = (id: string, conversionUnit: string) => ({
+      id, product_id: 'product-1', product_name: 'Atrazine',
+      vendor_id: 'vendor-1', vendor_name: 'The Andersons', supplier_sku: id,
+      supplier_product_name: 'Atrazine', supplier_uom: 'case',
+      supplier_pack_description: null, inventory_units_per_supplier_unit: 5,
+      conversion_unit: conversionUnit, comparison_status: 'comparable', comparison_note: null,
+      link_status: 'confirmed', is_reusable: true, is_preferred: false, is_active: true,
+    });
+    const row = (id: string, linkId: string, packageQuantity: number) => ({
+      id, row_number: Number(id.slice(-1)), product_id: 'product-1', product_name: 'Atrazine',
+      product_supplier_link_id: linkId, supplier_sku: linkId, supplier_product_name: 'Atrazine',
+      cost_cents: 3_000n, price_unit: 'case', package_quantity: packageQuantity,
+      effective_from: '2026-07-18', effective_to: null, price_kind: 'quote', row_status: 'new',
+      validation_errors: [], observation_id: null,
+    });
+    mockGetWorkspace.mockResolvedValue({
+      vendors: [{ id: 'vendor-1', name: 'The Andersons' }],
+      products: [{ id: 'product-1', product_name: 'Atrazine', sku: 'A-1', inventory_unit: 'gal' }],
+      // link-qt converts to quarts, not the product's gallons: cost-basis would not use it.
+      links: [link('link-qt', 'qt'), link('link-gal', 'gal')],
+      imports: [{
+        id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
+        document_date: '2026-07-18', ingestion_method: 'quick_quote', status: 'needs_review',
+        row_count: 2, eligible_row_count: 2, approved_observation_count: 0,
+        source_document_name: null, created_at: '2026-07-18T12:00:00Z',
+      }],
+      aliases: [],
+      evidence: [],
+    });
+    mockGetImport.mockResolvedValue({
+      id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
+      document_date: '2026-07-18', ingestion_method: 'quick_quote',
+      format_version: 'crx-supplier-quick-quote-phase1b-v1', status: 'needs_review',
+      source_document_name: null, row_count: 2, eligible_row_count: 2,
+      approved_observation_count: 0, created_at: '2026-07-18T12:00:00Z',
+      rows: [row('row-1', 'link-qt', 1), row('row-2', 'link-gal', 10_000_000)],
+    });
+
+    renderSupplierPricing();
+    fireEvent.click(await screen.findByRole('button', { name: /The Andersons/ }));
+
+    expect(await screen.findByText('cannot compare to inventory units')).toBeInTheDocument();
+    expect(screen.getByText('converted cost not shown (package size too large)')).toBeInTheDocument();
+    expect(screen.queryByText(/^= \$/)).not.toBeInTheDocument();
   });
 
   it('keeps the workbook supplier selected through its immediate workspace refresh', async () => {

@@ -367,7 +367,7 @@ function PreviewRow({ row, sheet }: { row: PricingPreviewRow; sheet: boolean }) 
           <div className="text-sm font-semibold text-nav-dark">{product.name}</div>
           {product.detail && <div className="mt-0.5 text-xs text-secondary">{product.detail}</div>}
           {/* sequence is the row's 1-based place in the upload; row 1 of the sheet is the header. */}
-          {sheet && <div className="mt-0.5 text-xs text-secondary">Excel row {(row.sequence + 1).toLocaleString()}</div>}
+          {sheet && <div className="mt-0.5 text-xs text-secondary">Excel row {row.sequence + 1}</div>}
         </div>
         <span
           className={`rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_CLASSES[row.row_status]}`}

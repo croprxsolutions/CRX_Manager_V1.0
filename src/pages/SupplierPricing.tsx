@@ -76,7 +76,7 @@ const ROW_ERROR_MESSAGES: Record<string, string> = {
   PRICE_KIND_INVALID: 'Choose a price type: list, quote, contract, promo or manual.',
 };
 
-const rowErrorText = (code: string) => ROW_ERROR_MESSAGES[code] ?? code.toLowerCase().split('_').join(' ');
+const rowErrorText = (code: string) => ROW_ERROR_MESSAGES[code] ?? `${code.toLowerCase().split('_').join(' ')}.`;
 
 const blankLink = {
   productId: '',
@@ -123,14 +123,17 @@ function convertedCostText(row: SupplierImportReviewRow, workspace: SupplierPric
   if (!link || row.cost_cents === null) return null;
   // The server gives no per-unit cost unless the link is comparable with a factor above 0.
   const factor = link.inventory_units_per_supplier_unit;
-  if (link.comparison_status !== 'comparable' || !link.is_active || factor === null || !(Number(factor) > 0)) {
+  const inventoryUnit = workspace?.products.find((product) => product.id === link.product_id)?.inventory_unit;
+  // Cost-basis selection also needs the link's unit to be the product's inventory unit.
+  const unitsDiffer = !!inventoryUnit && !!link.conversion_unit
+    && inventoryUnit.trim().toLowerCase() !== link.conversion_unit.trim().toLowerCase();
+  if (link.comparison_status !== 'comparable' || !link.is_active || factor === null || !(Number(factor) > 0) || unitsDiffer) {
     return 'cannot compare to inventory units';
   }
   const unitCost = supplierUnitCostCents(row.cost_cents, row.package_quantity, factor);
-  // A quantity too large to repeat exactly: show nothing rather than a guess.
-  if (unitCost === null) return null;
-  const unit = workspace?.products.find((product) => product.id === link.product_id)?.inventory_unit
-    || link.conversion_unit || 'inventory unit';
+  // A quantity too large to repeat exactly: say so rather than guess.
+  if (unitCost === null) return 'converted cost not shown (package size too large)';
+  const unit = inventoryUnit || link.conversion_unit || 'inventory unit';
   return `= ${formatSupplierCents(unitCost)} per ${unit}`;
 }
 

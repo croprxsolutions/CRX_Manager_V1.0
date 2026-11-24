@@ -630,8 +630,9 @@ describe('Products governed inline pricing flow', () => {
     })));
   });
 
-  it('says an expired price sheet expired, before any preview', async () => {
+  it('lets the server refuse an expired price sheet, then says it expired', async () => {
     mockParsePricing.mockResolvedValue({ exportId: 'export-1', expiresAt: '2020-01-01T00:00:00+00:00', rows: [] });
+    mockPreviewPricing.mockRejectedValue({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
     const { container } = render(<Products />);
     await screen.findByRole('button', { name: 'Review Pricing File' });
     const input = container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!;
@@ -641,7 +642,8 @@ describe('Products governed inline pricing flow', () => {
       'error',
       'No prices were changed. This price sheet expired (sheets last 7 days). Download a fresh one',
     ));
-    expect(mockPreviewPricing).not.toHaveBeenCalled();
+    // The browser clock only picks the wording; the server decides whether the sheet is refused.
+    expect(mockPreviewPricing).toHaveBeenCalledTimes(1);
   });
 
   it('says a current price sheet the server refuses was already applied or belongs to another user', async () => {
@@ -654,7 +656,7 @@ describe('Products governed inline pricing flow', () => {
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'error',
-      'No prices were changed. This price sheet was already applied, or was downloaded by another user. Download a fresh one',
+      'No prices were changed. This price sheet was already applied, was downloaded by another user, or came from an older template. Download a fresh one',
     ));
   });
 

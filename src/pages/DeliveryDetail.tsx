@@ -564,7 +564,6 @@ export default function DeliveryDetail() {
           // Orphan delivery: no order, so no split-billing state, order, invoices,
           // sibling deliveries or quote to carry over from a previously viewed delivery.
           setOrderNeedsSplitBilling(false);
-          setBilledOutsideCrxReason(null);
           setParentOrder(null);
           setRelatedInvoices(mergeRelatedInvoices([], byDelivery));
           setInvoicesLoaded(true);

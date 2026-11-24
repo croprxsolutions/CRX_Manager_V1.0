@@ -401,7 +401,9 @@ export function tahaApprovedHead({ reviews, comments, headSha }) {
   const isTaha = (row) => String(row?.user?.login ?? "").trim().toLowerCase() === TAHA_LOGIN;
   const approved = Array.isArray(reviews) && reviews.some((r) => isTaha(r) && String(r?.state ?? "").toUpperCase() === "APPROVED" && String(r?.commit_id ?? "").toLowerCase() === head);
   const ready = Array.isArray(comments) && comments.some((c) => {
-    const m = isTaha(c) && READY_LINE_RE.exec(String(c?.body ?? ""));
+    // An edited comment does not count: repo admins (Mason's account, which agents use) can edit Taha's comments.
+    const unedited = typeof c?.created_at === "string" && c.created_at === c?.updated_at;
+    const m = isTaha(c) && unedited && READY_LINE_RE.exec(String(c?.body ?? ""));
     return Boolean(m) && head.startsWith(m[1].toLowerCase());
   });
   return approved || ready;
@@ -416,7 +418,7 @@ export function tahaApprovedOnGitHub({ repo, gh, number, headSha }) {
     return tahaApprovedHead({
       headSha,
       reviews: rows(`${repoPath}/pulls/${number}/reviews?per_page=100`, ".[] | {user: {login: .user.login}, state, commit_id} | tojson"),
-      comments: rows(`${repoPath}/issues/${number}/comments?per_page=100`, ".[] | {user: {login: .user.login}, body} | tojson"),
+      comments: rows(`${repoPath}/issues/${number}/comments?per_page=100`, ".[] | {user: {login: .user.login}, body, created_at, updated_at} | tojson"),
     });
   } catch { return false; }
 }

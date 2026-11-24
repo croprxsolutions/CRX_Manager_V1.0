@@ -67,6 +67,8 @@ interface CommandPaletteProps {
 // ── Constants ──────────────────────────────────────────────────────
 
 const DEBOUNCE_MS = 300;
+/** The most results the list shows at once. */
+const MAX_RESULTS = 25;
 
 const ENTITY_ICONS: Record<PaletteEntityType, React.ReactNode> = {
   customer: <Users className="w-4 h-4" />,
@@ -334,8 +336,12 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
       });
     }
 
+    // Quotes come from their own read after the entity search. Keep room for them, so a broad
+    // search whose other matches fill the list still shows its matching quotes.
+    const entityRoom = Math.max(0, MAX_RESULTS - items.length - quoteResults.length);
+
     // Entity results from RPC
-    for (const r of entityResults) {
+    for (const r of entityResults.slice(0, entityRoom)) {
       const price = r.entity_type === 'product' ? productPrices.get(r.id) : undefined;
       items.push({
         id: `${r.entity_type}-${r.id}`,
@@ -356,7 +362,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
       });
     }
 
-    return items.slice(0, 25);
+    return items.slice(0, MAX_RESULTS);
   }, [query, entityResults, quoteResults, productPrices, availablePages]);
 
   // Reset active index when results change

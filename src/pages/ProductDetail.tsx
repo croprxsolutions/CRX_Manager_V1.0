@@ -293,6 +293,20 @@ async function readVendorManufacturerChoices(): Promise<{ vendors: string[]; man
   return { vendors: distinct(data.map((p) => p.vendor)), manufacturers: distinct(data.map((p) => p.manufacturer)) };
 }
 
+type IntervalFilterable<Q> = { is(column: string, value: null): Q; eq(column: string, value: unknown): Q };
+
+// REI/PHI do not move pricing_version, so an edited pair saves only over the pair this page read.
+function matchReadIntervals<Q extends IntervalFilterable<Q>>(query: Q, payload: object, read: Product): Q {
+  let filtered = query;
+  for (const [interval, flag] of [['rei_hours', 'rei_not_applicable'], ['phi_days', 'phi_not_applicable']] as const) {
+    if (!(interval in payload) && !(flag in payload)) continue;
+    const readValue = read[interval];
+    filtered = readValue == null ? filtered.is(interval, null) : filtered.eq(interval, readValue);
+    filtered = filtered.eq(flag, read[flag] ?? false);
+  }
+  return filtered;
+}
+
 export default function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -627,14 +641,7 @@ export default function ProductDetail() {
       .update(payload)
       .eq('id', id!)
       .eq('pricing_version', persistedProduct.pricing_version);
-    // REI/PHI do not move pricing_version, so an edited pair saves only over the pair this page read.
-    for (const [interval, flag] of [['rei_hours', 'rei_not_applicable'], ['phi_days', 'phi_not_applicable']] as const) {
-      if (!(interval in payload) && !(flag in payload)) continue;
-      const readValue = persistedProduct[interval];
-      query = readValue == null ? query.is(interval, null) : query.eq(interval, readValue);
-      query = query.eq(flag, persistedProduct[flag] ?? false);
-    }
-    const result = await query.select('id');
+    const result = await matchReadIntervals(query, payload, persistedProduct).select('id');
     if (!result.error && Array.isArray(result.data) && result.data.length === 0) {
       throw new Error('Product details changed after this page loaded. Reload before saving.');
     }

@@ -1924,6 +1924,9 @@ export function proofSearchDirs(root, listWorktrees) {
 // once, and the settled rule is proof from THIS session (DECISION_LOG 2026-07-13).
 //
 // So: search this session's OWN checkout and the primary one, and nothing else.
+// One exception (Mason, 2026-11-23): his OWN approval receipt is looked for in every checkout
+// (migration-apply-lib.mjs), so a merge captain can apply what he approved elsewhere; that receipt
+// binds the exact SQL, PR, his words and the summary he was shown, once. Proofs stay as here.
 // `hookCwd` is the working directory the harness reports for the tool call —
 // the same field codex-push-guard.mjs and pr-merge-guard.mjs already trust — and
 // it is honoured ONLY after `git worktree list` confirms it belongs to this

@@ -56,15 +56,22 @@ function die(code, msg) {
 
 const checkout = process.cwd();
 const stateDir = path.join(checkout, ".claude", "session-state");
-// The request is bound to the Claude Code session that builds it: Mason's reply
-// counts only there, and only that session may apply it.
+// The request records the session that builds it. Since 2026-11-23 his reply counts in any
+// conversation whose last message showed the summary word for word, and any session may apply it.
 const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
 if (!/^[0-9A-Za-z_-]{8,128}$/.test(String(sessionId || ""))) {
   die(1, "owner-approve-migration: run this from inside the Claude Code session that will apply the migration (CLAUDE_CODE_SESSION_ID is not set).");
 }
 // Never ask for a reply this conversation cannot hear: some sessions never run
 // message hooks, and Mason's "I approve" was lost there without a word (2026-10-20).
-if (!promptHookSeen({ dirs: [stateDir], sessionId })) die(1, hooklessSessionRefusal({ checkout, sessionId }));
+// Hookless here: his reply in THIS chat would be lost, so refuse unless the agent says it will
+// show the summary in a conversation he does talk to (--show-elsewhere; security review MED).
+const showElsewhere = process.argv.includes("--show-elsewhere");
+if (!promptHookSeen({ dirs: [stateDir], sessionId })) {
+  if (!showElsewhere) die(1, `${hooklessSessionRefusal({ checkout, sessionId })}
+Then run this again with --show-elsewhere.`);
+  console.error(hooklessSessionRefusal({ checkout, sessionId }));
+}
 
 /** Save the request under a fresh code; retry if that code is already pending here. */
 function saveRequest(build) {
@@ -77,7 +84,7 @@ function saveRequest(build) {
   return die(1, "owner-approve-migration: could not find a free code; try again.");
 }
 
-const argv = process.argv.slice(2);
+const argv = process.argv.slice(2).filter((a) => a !== "--show-elsewhere");
 
 if (argv.length === 1 && argv[0] === "--selftest") {
   const now = Date.now();

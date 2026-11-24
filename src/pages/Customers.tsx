@@ -24,6 +24,7 @@ import { SkeletonTable } from '../components/ui/Skeleton';
 import { filteredEmptyProps } from '../components/ui/filteredEmpty';
 import { listSortParam, oneOf, parseListSort, useUrlListState } from '../hooks/useUrlListState';
 import type { Customer } from '../types';
+import { phoneDialHref } from '../lib/phoneDial';
 
 /** Sentinel for the "no rep assigned" option — a real rep id is never this. */
 const UNASSIGNED_REP = '__unassigned__';
@@ -714,7 +715,7 @@ export default function Customers() {
 function PhoneLink({ phone }: { phone: string }) {
   return (
     <a
-      href={`tel:${phone.replace(/[^\d+]/g, '')}`}
+      href={phoneDialHref(phone)}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       className="inline-flex min-h-11 items-center gap-1 whitespace-nowrap text-crx-green hover:underline md:min-h-0"

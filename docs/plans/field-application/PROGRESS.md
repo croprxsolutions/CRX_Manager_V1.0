@@ -31,29 +31,29 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 
 | Item | State | Note |
 |---|---|---|
-| Kit merged into staging (pre-build checklist, before any session) | NOT STARTED | docs-only PR from #2415 |
-| Tooling: registry and types from staging | NOT STARTED | before any field migration merges |
+| Kit merged into staging (pre-build checklist, before any session) | MERGED | #2415 merged 2026-11-24 (head `dfe7837fd`) |
+| Tooling: registry and types from staging | MERGED | #2439 (`b47e63c9e`): `regenerate-schema-registry.mjs --live --staging [--types]` writes `.claude/schema-registry.staging.json`; the live registry stays live. Follow-up (other lanes): staging-generated `src/types/supabase.ts` breaks 45 call sites (invoices, reports, orders, cockpit), so it is not committed yet; migrations add their own type entries until that drift is fixed |
 | Taha's live reset (#2407) | LIVE | `20270301100000_live_test_data_reset` applied live 2026-11-24 07:09 UTC (ledger version `20261124070916`). Read-only check that day: live has 0 jobs, 0 invoices, 5 fields; no `field_billing_defaults.price_override_cents` set; none of the six staging-only migrations applied live |
-| Read-only facts in the contracts | NOT STARTED | |
+| Read-only facts in the contracts | VERIFIED | Read-only 2026-11-24. `field_billing_defaults`: live 5 fields / 6 rows, staging 0; 0 per-acre prices or notes; every primary payer is the field owner; save_field is its only database writer and the app never writes it directly. Readers: 18 database functions live (+ `_job_transfer_shares_20270207` on staging); screens `SelectLocationsModal`, applicator sheet, billed-customers lookup, chemical application report, loader worksheet, Field Setup, Job Detail, Order Detail. `fields.customer_id` ON DELETE CASCADE on both; no customer-delete flow in the app. `jobs` triggers: 17 live, 18 staging (`zz_inactive_customer_new_work_20270129`). `complete_job` differs (staging carries `20270227170000`). 9 pg_cron jobs on each |
 
 **Staging-only migrations** (slice 0 step 3):
 
 | Migration | In source | Applied on staging | Applied live | Fits the kit? | Action |
 |---|---|---|---|---|---|
-| `20270224110000_retire_per_acre_field_pricing` | yes | | | | |
-| `20270224130000_split_save_refuses_blend_billed_job` | yes | | | | |
-| `20270226150000_job_transfer_below_cost_whole_line` | yes | | | | |
-| `20270205100000_field_app_refuses_payer_change` | yes | | | | |
-| `20270228200000_field_app_save_refuses_other_editors` | yes | | | | |
-| `20270227170000_job_completion_missing_stock_rows` | yes | | | | |
+| `20270224110000_retire_per_acre_field_pricing` | yes | yes (20261123031639) | no | yes (FP-1 relies on it) | ships in the next release |
+| `20270224130000_split_save_refuses_blend_billed_job` | yes | yes (20261123053153) | no | yes | ships in the next release |
+| `20270226150000_job_transfer_below_cost_whole_line` | yes | yes (20261123153401) | no | yes (changes live transfer quantities; Mason decided 2026-11-21/22) | ships in the next release; no new ask |
+| `20270205100000_field_app_refuses_payer_change` | yes | yes (20261121221854) | no | yes | ships in the next release |
+| `20270228200000_field_app_save_refuses_other_editors` | yes | yes (20261124080322) | no | yes | ships in the next release |
+| `20270227170000_job_completion_missing_stock_rows` | yes | yes (20261124042000) | no | yes | ships in the next release |
 
 ## Slice 1 · DB
 
 | Item | State | Proof / link | Note |
 |---|---|---|---|
-| FP-1 field splits + payer notes | NOT STARTED | | |
-| Chem Man field import | NOT STARTED | | trial on a local copy; live after the reset |
-| FP-2 billable acres | NOT STARTED | | after 2026-12-15, Taha reviews |
+| FP-1 field splits + payer notes | IN PROGRESS | branch `feat/field-1.1-fp1-splits` | migration `20270303120000_field_split_versions`; Docker proof, Luna, Sol, then the PR. Field Setup screen PR follows |
+| Chem Man field import | WAITING ON MASON | | needs Mason's export (private folder he names); trial on a local copy after FP-1; live after his yes |
+| FP-2 billable acres | PARKED | | until after 2026-12-15 (its quote-to-job change is in Taha's quotes area); then with Taha's review |
 
 ## Slice 1 · paperwork
 

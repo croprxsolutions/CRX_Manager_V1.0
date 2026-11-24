@@ -228,14 +228,18 @@ export default function PaymentHistory() {
     setLoadingAllocs(false);
   }, [toast]);
 
+  const closeExpanded = () => {
+    // A read still running for the closed payment must not fill the list.
+    allocSeq.current += 1;
+    setExpandedId(null);
+    setAllocations([]);
+    setAllocsFailed(false);
+    setLoadingAllocs(false);
+  };
+
   const toggleExpand = (id: string) => {
     if (expandedId === id) {
-      // A read still running for the closed payment must not fill the list.
-      allocSeq.current += 1;
-      setExpandedId(null);
-      setAllocations([]);
-      setAllocsFailed(false);
-      setLoadingAllocs(false);
+      closeExpanded();
     } else {
       setExpandedId(id);
       fetchAllocations(id);
@@ -284,6 +288,18 @@ export default function PaymentHistory() {
         fetchPayments();
       },
     });
+  };
+
+  // A new range that hides the opened payment closes its allocations too, so they never show
+  // under a list that no longer has that payment.
+  const changeRange = (from: string | null, to: string | null) => {
+    setFromDate(from);
+    setToDate(to);
+    if (!expandedId) return;
+    const open = payments.find((p) => p.id === expandedId);
+    const stillShown = !!open && !isRangeBackwards(from, to)
+      && isDayInRange(paymentBusinessDate(open.payment_date, open.created_at), from, to);
+    if (!stillShown) closeExpanded();
   };
 
   const rangeInvalid = isRangeBackwards(fromDate, toDate);
@@ -404,7 +420,7 @@ export default function PaymentHistory() {
       <PaymentDateFilter
         fromDate={fromDate}
         toDate={toDate}
-        onChange={(from, to) => { setFromDate(from); setToDate(to); }}
+        onChange={changeRange}
       />
 
       {/* Summary Cards: hidden while loading, after a failed load, and for an impossible range, where $0 would read as "no payments". */}

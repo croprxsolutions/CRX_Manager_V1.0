@@ -22,6 +22,8 @@ import { useToast } from '../components/ui/Toast';
 import { supabase, checkMutationResult, assertRpcResult } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
+import { applyTableSearchSort } from '../lib/tableSearchSort';
+import { fetchLastStatementEmailedAt, formatStatementEmailedDate } from '../lib/statementEmailLog';
 import { fetchCustomerStatement } from '../lib/customerStatement';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import { Sentry } from '../lib/sentry';
@@ -44,6 +46,14 @@ import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
 import type { ARAgingRow, ARAgingPricedRow, CustomerStatementRow, SeasonComparisonRow, DetailedStatementData, StatementOptions } from '../types';
 
 type TabKey = 'aging' | 'statement' | 'season';
+
+// The aging table's search box matches the customer name.
+const AGING_SEARCH_KEYS = ['farm_name'];
+
+/** "1 statement" / "12 statements". */
+function statementCount(n: number): string {
+  return `${n} statement${n === 1 ? '' : 's'}`;
+}
 
 
 function statementKey(customerId: string, start: string, end: string): string {
@@ -80,6 +90,11 @@ export default function ARaging() {
 
   // Batch statement selection
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
+  // The aging table's search box, kept here so Select All and the batch actions see the same rows as the screen.
+  const [agingSearch, setAgingSearch] = useState('');
+  // When each customer's statement was last emailed (from the email log); null until read.
+  const [lastEmailedAt, setLastEmailedAt] = useState<Map<string, string> | null>(null);
+  const [lastEmailedFailed, setLastEmailedFailed] = useState(false);
   const [showBatchStatementDialog, setShowBatchStatementDialog] = useState(false);
   const [batchPrinting, setBatchPrinting] = useState(false);
 
@@ -188,6 +203,36 @@ export default function ARaging() {
     setLoading(false);
   }, [seasonA, seasonB, toast]);
 
+  const loadLastEmailed = useCallback(async () => {
+    try {
+      setLastEmailedAt(await fetchLastStatementEmailedAt());
+      setLastEmailedFailed(false);
+    } catch (err) {
+      Sentry.captureException(err, { tags: { source: 'fetch', page: 'ar_aging', action: 'load_last_statement_emailed' } });
+      setLastEmailedAt(null);
+      setLastEmailedFailed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'aging') void loadLastEmailed();
+  }, [tab, loadLastEmailed]);
+
+  // Batch print and email act only on customers the table is showing right now. Select All
+  // picks the rows the search leaves on screen, and a ticked customer the search hides is
+  // dropped from the selection at once, so a hidden customer is never printed or emailed.
+  const visibleAgingRows = applyTableSearchSort(agingData, AGING_SEARCH_KEYS, agingSearch, null, 'asc');
+  const visibleAgingKey = visibleAgingRows.map((r) => r.customer_id).join(',');
+  useEffect(() => {
+    const inView = new Set(visibleAgingKey.split(','));
+    setSelectedCustomers((prev) => {
+      const kept = [...prev].filter((id) => inView.has(id));
+      return kept.length === prev.size ? prev : new Set(kept);
+    });
+  }, [visibleAgingKey, selectedCustomers]);
+  const selectedVisibleIds = visibleAgingRows.filter((r) => selectedCustomers.has(r.customer_id)).map((r) => r.customer_id);
+  const allVisibleSelected = visibleAgingRows.length > 0 && selectedVisibleIds.length === visibleAgingRows.length;
+
   useEffect(() => {
     if (tab === 'aging') fetchAging();
     if (tab === 'season') fetchSeasonComparison();
@@ -235,6 +280,16 @@ export default function ARaging() {
     { current: 0, d30: 0, d60: 0, d90: 0, over90: 0, total: 0 }
   );
 
+  // A failed or unfinished read says so: it must never read as "never emailed".
+  const lastEmailedCell = (customerId: string) => {
+    if (lastEmailedFailed) return <span className="text-amber-700" title="The email log could not be read. Reload the page to try again.">Could not load</span>;
+    if (!lastEmailedAt) return <span className="text-secondary">…</span>;
+    const sentAt = lastEmailedAt.get(customerId);
+    return sentAt
+      ? <span className="whitespace-nowrap">{formatStatementEmailedDate(sentAt)}</span>
+      : <span className="text-secondary">None on record</span>;
+  };
+
   const unavailableItem = (r: ARAgingRow) => (
     <li key={r.customer_id}>
       <span className="font-medium">{r.farm_name}</span>
@@ -252,6 +307,7 @@ export default function ARaging() {
         <input
           type="checkbox"
           checked={selectedCustomers.has(r.customer_id)}
+          aria-label={`Select ${r.farm_name}`}
           onChange={(e) => {
             e.stopPropagation();
             toggleCustomerSelect(r.customer_id);
@@ -350,6 +406,11 @@ export default function ARaging() {
           ? <span className="font-mono text-amber-600" title="Unapplied credit memo balance - apply it to an invoice before dunning or charging interest">{fmtCents(openCredit)}</span>
           : <span className="text-secondary">—</span>;
       },
+    },
+    {
+      key: 'last_statement_emailed',
+      header: 'Last emailed',
+      render: (r) => lastEmailedCell(r.customer_id),
     },
     {
       key: 'invoice_count' as keyof ARAgingPricedRow,
@@ -522,10 +583,10 @@ export default function ARaging() {
   };
 
   const toggleAllCustomers = () => {
-    if (selectedCustomers.size === agingData.length && agingData.length > 0) {
+    if (allVisibleSelected) {
       setSelectedCustomers(new Set());
     } else {
-      setSelectedCustomers(new Set(agingData.map((r) => r.customer_id)));
+      setSelectedCustomers(new Set(visibleAgingRows.map((r) => r.customer_id)));
     }
   };
 
@@ -534,7 +595,7 @@ export default function ARaging() {
     await runCriticalAction({
       action: async () => {
         const stmtDataList: DetailedStatementData[] = [];
-        for (const custId of selectedCustomers) {
+        for (const custId of selectedVisibleIds) {
           const { data, error } = await supabase.rpc('get_detailed_statement_data', {
             p_customer_id: custId,
             p_as_of_date: options.as_of_date,
@@ -752,7 +813,7 @@ export default function ARaging() {
         // Resolve every selected statement before sending the first email. If
         // one historical cutoff is unsafe, fail the action before it can become
         // an unreported partial send.
-        for (const custId of selectedCustomers) {
+        for (const custId of selectedVisibleIds) {
           const { data, error } = await supabase.rpc('get_detailed_statement_data', {
             p_customer_id: custId,
             p_as_of_date: options.as_of_date,
@@ -836,6 +897,8 @@ export default function ARaging() {
       setLoading: setEmailingStatements,
       sentryTag: 'email_batch_statements',
     });
+    // The Last emailed column shows the sends that just went out.
+    void loadLastEmailed();
   };
 
   const seasonOptions = Array.from({ length: 5 }, (_, i) => currentSeason - i);
@@ -859,7 +922,7 @@ export default function ARaging() {
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold font-heading text-nav-dark">AR Aging & Statements</h2>
         <div className="flex gap-2">
-          {selectedCustomers.size > 0 && (
+          {selectedVisibleIds.length > 0 && (
             <>
               <Button
                 variant="secondary"
@@ -868,7 +931,7 @@ export default function ARaging() {
                 onClick={() => setShowBatchStatementDialog(true)}
                 loading={batchPrinting}
               >
-                Batch Print ({selectedCustomers.size})
+                Batch Print ({selectedVisibleIds.length})
               </Button>
               <Button
                 variant="secondary"
@@ -877,7 +940,7 @@ export default function ARaging() {
                 onClick={() => setShowEmailStatementsConfirm(true)}
                 loading={emailingStatements}
               >
-                Email Statements ({selectedCustomers.size})
+                Email {statementCount(selectedVisibleIds.length)}
               </Button>
             </>
           )}
@@ -944,12 +1007,15 @@ export default function ARaging() {
               <Button variant="secondary" size="sm" onClick={fetchAging}>
                 Refresh
               </Button>
-              {agingData.length > 0 && (
+              {visibleAgingRows.length > 0 && (
                 <button
                   onClick={toggleAllCustomers}
                   className="text-xs text-crx-green hover:underline ml-2"
                 >
-                  {selectedCustomers.size === agingData.length ? 'Deselect All' : 'Select All'}
+                  {allVisibleSelected
+                    ? 'Deselect All'
+                    // With a search typed, say that only the customers it shows are picked.
+                    : agingSearch.trim() ? `Select All ${visibleAgingRows.length} Shown` : 'Select All'}
                 </button>
               )}
               <div className="ml-auto">
@@ -1051,7 +1117,9 @@ export default function ARaging() {
                 loading={loading}
                 searchable
                 searchPlaceholder="Search customers..."
-                searchKeys={['farm_name']}
+                searchKeys={AGING_SEARCH_KEYS}
+                searchValue={agingSearch}
+                onSearchChange={setAgingSearch}
                 emptyTitle={agingUnavailable.length > 0 ? 'No balances can be shown for this date' : 'No outstanding receivables'}
                 emptyDescription={agingUnavailable.length > 0
                   ? 'Every customer with a balance on this date is listed above as one that cannot be shown.'
@@ -1339,8 +1407,8 @@ export default function ARaging() {
           handleEmailBatchStatements({ mode: 'summary', show_shares: true, as_of_date: asOfDate });
         }}
         title="Email Statements"
-        message={`Email statements to ${selectedCustomers.size} selected customer(s)?`}
-        confirmLabel="Send Emails"
+        message={`Email a statement to each of the ${selectedVisibleIds.length} selected customer${selectedVisibleIds.length === 1 ? '' : 's'} ? Only customers shown in the list (after your search) are included.`}
+        confirmLabel={`Email ${statementCount(selectedVisibleIds.length)}`}
         variant="info"
         loading={emailingStatements}
       />

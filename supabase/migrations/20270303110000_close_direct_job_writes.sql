@@ -71,6 +71,13 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_DIRECT_JOB_WRITES_DRIFT: the API roles'' grants on jobs / job_fields are not the recorded shape: %', v_acl;
   END IF;
 
+  -- The screens' replacement path must exist first: edit_jobs (20270203110000, PR A), callable by signed-in users.
+  IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                  WHERE n.nspname = 'public' AND p.proname = 'edit_jobs'
+                    AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) THEN
+    RAISE EXCEPTION 'PREFLIGHT_DIRECT_JOB_WRITES_DRIFT: public.edit_jobs is missing or not executable by authenticated; apply 20270203110000 first';
+  END IF;
+
   -- A function that runs as the caller and writes either table would break once the grants go. Dynamic SQL cannot
   -- be read statically; the live reads on 2026-11-22 and 2026-11-24 found no caller-rights function that writes either
   -- table. pg_get_function_sqlbody adds SQL-standard (BEGIN ATOMIC) bodies, which prosrc leaves empty.

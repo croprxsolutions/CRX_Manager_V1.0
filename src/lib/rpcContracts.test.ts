@@ -2941,6 +2941,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // (20270126110000 renamed it, so no generated type carries it yet); keyed by complete_delivery's p_idempotency_key.
   // Prune once the generated types carry it.
   '_complete_delivery_authorized_impl_20270122',
+  // 20270301180000 (M9, local candidate): refund paid outside CRX and returned (bounced) check; each requires its key
+  // and saves and binds its receipt. The screen PR adds the generated types and prunes these entries.
+  'record_outside_refund',
+  'record_returned_check',
 ]);
 
 /**
@@ -3101,6 +3105,12 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   //     the moment its migration stopped being newer than the high-water. It is
   //     not exempt from anything now; it is simply no longer discovered, and a
   //     dead entry would silently pre-suppress any future RPC reusing the name.
+  // M9 (local candidate 20270301180000): the statement-level trigger on money_reversal_lines; never an RPC.
+  _recompute_prepay_credits_from_lines_20270225:
+    'AFTER INSERT FOR EACH STATEMENT trigger on money_reversal_lines: sets each credit its new lines name to the balance its own rows give (convergent, so a replay writes the same value); the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked. Prune once the candidate is in the generated snapshot',
+  // M9 (local candidate 20270301180000): re-emitted with the reversal-line terms; a trigger function, never an RPC.
+  _recompute_prepay_credit_balance:
+    'AFTER INSERT/DELETE trigger on prepay_applications: recomputes one credit balance from its rows, now including M9 reversal lines (convergent, so a replay writes the same value); the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function and M9 revokes API-role EXECUTE. Prune once the candidate is in the generated snapshot',
   _recompute_po_on_order_for_products:
     'internal convergent PO-cache recomputation helper; trigger parents own the transaction and direct browser EXECUTE is revoked',
   // Trigger-only helpers whose migrations are now at or below the live registry

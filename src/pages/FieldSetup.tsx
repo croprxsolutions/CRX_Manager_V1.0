@@ -5,7 +5,6 @@ import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Input from '../components/ui/Input';
-import Badge from '../components/ui/Badge';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
@@ -47,14 +46,63 @@ import {
 } from '../lib/fieldObstacles';
 import type { Feature, MultiPolygon, Polygon } from 'geojson';
 import type { Field, FieldObstacle, FieldObstacleKind } from '../types';
+import type { Json } from '../types/supabase';
 import { toSentryError } from '../lib/sentryError';
+import { localToday } from '../lib/dateUtils';
+import FieldSplitHistory from '../components/fields/FieldSplitHistory';
+import { loadFieldSplit, type SplitVersion } from '../lib/fieldSplitLoad';
+import {
+  clearSplitSaveKey,
+  evenMicroShares,
+  microToPctText,
+  pctTextToMicro,
+  splitProblem,
+  splitSaveErrorMessage,
+  splitSaveKey,
+} from '../lib/fieldSplit';
 
+// One payer row of the split being edited: the typed text plus its exact micro-percent (null while blank/invalid).
 interface BillingSplit {
   customer_id: string;
   customer_name: string;
-  split_pct: number;
-  is_primary: boolean;
-  notes: string;
+  productText: string;
+  productMicro: number | null;
+  appText: string;
+  appMicro: number | null;
+}
+
+const splitRowsFrom = (version: SplitVersion | null): BillingSplit[] =>
+  (version?.payers ?? []).map((p) => ({
+    customer_id: p.customer_id,
+    customer_name: p.customer_name,
+    productText: microToPctText(p.product_share_micro_pct),
+    productMicro: p.product_share_micro_pct,
+    appText: microToPctText(p.application_share_micro_pct),
+    appMicro: p.application_share_micro_pct,
+  }));
+const splitShape = (rows: BillingSplit[]) =>
+  JSON.stringify(rows.map((r) => [r.customer_id, r.productMicro, r.appMicro]).sort());
+
+function fieldPayloadOf(field: Partial<Field>) {
+  return {
+    customer_id: field.customer_id,
+    field_name: field.field_name,
+    legal_description: field.legal_description || null,
+    county: field.county || null,
+    state: field.state || 'IL',
+    // Send the loaded (server-authoritative) total_acres — never a client preview/estimate,
+    // so we can never persist a value the acreage RPC would reject. The acreage RPCs own the
+    // precise total_acres when geometry/override change; a successful one syncs it back below.
+    total_acres: field.total_acres ?? null,
+    fsa_farm_number: field.fsa_farm_number || null,
+    fsa_tract_number: field.fsa_tract_number || null,
+    fsa_field_number: field.fsa_field_number || null,
+    crop_type: field.crop_type || null,
+    soil_type: field.soil_type || null,
+    irrigation: field.irrigation || false,
+    notes: field.notes || null,
+    is_active: field.is_active ?? true,
+  };
 }
 
 const FIELD_CONTEXT_OVERLAY_STORAGE_KEY = 'crx.fieldSetup.showOtherFieldBoundaries';
@@ -136,6 +184,13 @@ function FieldSetupPage() {
   });
 
   const [billingSplits, setBillingSplits] = useState<BillingSplit[]>([]);
+  // FP-1: the split is saved as a dated version; notes are per payer and never make a version.
+  const today = useMemo(() => localToday(), []);
+  const [splitFrom, setSplitFrom] = useState(today);
+  const [payerNotes, setPayerNotes] = useState<Record<string, string>>({});
+  const [splitHistory, setSplitHistory] = useState<SplitVersion[]>([]);
+  const [inForceSplit, setInForceSplit] = useState<SplitVersion | null>(null);
+  const loadedNotesRef = useRef<Record<string, string>>({});
   const [loading, setLoading] = useState(!isNew);
   // The field's read failed: say so, never "Field not found" or a form missing its saved values (To-Do 10.5).
   const [loadError, setLoadError] = useState(false);
@@ -279,9 +334,22 @@ function FieldSetupPage() {
       if (editedMidSave) setIsDirty(true);
       return;
     }
-    if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current) return;
+    if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current
+      && payerNotes === loadedNotesRef.current && splitFrom === today) return;
     setIsDirty(true);
-  }, [field, billingSplits]);
+  }, [field, billingSplits, payerNotes, splitFrom, today]);
+
+  // Shows the split saved in the FP-1 tables and makes it the clean state.
+  const applySplitData = useCallback((data: Awaited<ReturnType<typeof loadFieldSplit>>) => {
+    const rows = splitRowsFrom(data.inForce);
+    loadedSplitsRef.current = rows;
+    loadedNotesRef.current = data.notes;
+    setBillingSplits(rows);
+    setPayerNotes(data.notes);
+    setSplitHistory(data.history);
+    setInForceSplit(data.inForce);
+    setSplitFrom(today);
+  }, [today]);
 
   // Only the newest field read may set the page: moving to another field (or Try again) can
   // start one while an older read is still in flight.
@@ -386,45 +454,31 @@ function FieldSetupPage() {
         setFsaOpen(true);
       }
 
-      // Fetch billing defaults
-      const { data: defaults, error: defaultsError } = await supabase
-        .from('field_billing_defaults')
-        .select('*, customer:customers!field_billing_defaults_customer_id_fkey(farm_name)')
-        .eq('field_id', id)
-        .order('split_pct', { ascending: false });
-      if (superseded()) return;
-      // Save sends the whole split list, so a form shown without the saved splits would erase them.
-      if (defaultsError || !Array.isArray(defaults)) {
-        Sentry.captureException(defaultsError ?? new Error('Billing splits read returned no list'), { tags: { source: 'fetch', action: 'load_field_billing_defaults' } });
+      // Split history and payer notes (FP-1 tables). A form shown without the saved split could save over it.
+      let splitData: Awaited<ReturnType<typeof loadFieldSplit>>;
+      try {
+        splitData = await loadFieldSplit(id, today);
+      } catch (splitError) {
+        if (superseded()) return;
+        Sentry.captureException(toSentryError(splitError), { tags: { source: 'fetch', action: 'load_field_split_versions' } });
         toast('error', 'Failed to load field');
         setLoadError(true);
         setLoading(false);
         return;
       }
-
-      if (defaults && defaults.length > 0) setBillingOpen(true);
-      // Always replace the splits, even with none: Save sends this whole list, so splits left over
-      // from another field (or an earlier read) must never stay on screen.
-      const loadedSplits: BillingSplit[] = (defaults ?? []).map((d: { customer_id: string; customer?: { farm_name: string | null } | null; split_pct: number; is_primary: boolean; notes?: string | null }) => ({
-          customer_id: d.customer_id,
-          customer_name: d.customer?.farm_name || 'Unknown',
-          split_pct: Number(d.split_pct),
-          is_primary: d.is_primary,
-          notes: d.notes || '',
-        }));
-      loadedSplitsRef.current = loadedSplits;
-      setBillingSplits(loadedSplits);
+      if (superseded()) return;
+      if (splitData.history.length > 0) setBillingOpen(true);
+      applySplitData(splitData);
     } else {
       // No such field: show "Field not found", never the form of the field open before.
       loadedFieldRef.current = {};
-      loadedSplitsRef.current = [];
       setField(loadedFieldRef.current);
-      setBillingSplits(loadedSplitsRef.current);
+      applySplitData({ history: [], inForce: null, notes: {} });
     }
     setLoadError(false);
     setLoading(false);
     setTimeout(() => { initialLoadDone.current = true; }, 0);
-  }, [id, toast]);
+  }, [id, toast, today, applySplitData]);
 
   useEffect(() => {
     if (!isNew && id) {
@@ -498,7 +552,8 @@ function FieldSetupPage() {
 
   const update = (key: string, value: unknown) => setField((f) => ({ ...f, [key]: value }));
 
-  const splitTotal = billingSplits.reduce((sum, s) => sum + s.split_pct, 0);
+  const productTotal = billingSplits.reduce((sum, s) => sum + (s.productMicro ?? 0), 0);
+  const appTotal = billingSplits.reduce((sum, s) => sum + (s.appMicro ?? 0), 0);
 
   // Two-acre model: the polygon area is a client preview of the server-measured acres;
   // the typed override is what actually bills (billable = override ?? measured ?? legacy total).
@@ -535,7 +590,7 @@ function FieldSetupPage() {
     }
     setBillingSplits((prev) => [
       ...prev,
-      { customer_id: customerId, customer_name: customerName, split_pct: 0, is_primary: prev.length === 0, notes: '' },
+      { customer_id: customerId, customer_name: customerName, productText: '0', productMicro: 0, appText: '0', appMicro: 0 },
     ]);
     setSplitPickerKey((k) => k + 1);
   };
@@ -544,20 +599,22 @@ function FieldSetupPage() {
     setBillingSplits((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const updateSplit = (idx: number, key: keyof BillingSplit, value: unknown) => {
+  const updateShare = (idx: number, side: 'product' | 'app', text: string) => {
     setBillingSplits((prev) =>
-      prev.map((s, i) => (i === idx ? { ...s, [key]: value } : s))
+      prev.map((s, i) => (i !== idx ? s
+        : side === 'product' ? { ...s, productText: text, productMicro: pctTextToMicro(text) }
+        : { ...s, appText: text, appMicro: pctTextToMicro(text) }))
     );
   };
 
+  // Exact thirds etc. in micro-percent on both sides; the screen shows two decimals.
   const distributeEvenly = () => {
-    if (billingSplits.length === 0) return;
-    const each = Math.floor((10000 / billingSplits.length)) / 100;
-    const remainder = 100 - each * billingSplits.length;
+    const shares = evenMicroShares(billingSplits.length);
     setBillingSplits((prev) =>
       prev.map((s, i) => ({
         ...s,
-        split_pct: i === 0 ? +(each + remainder).toFixed(2) : each,
+        productMicro: shares[i], productText: microToPctText(shares[i]),
+        appMicro: shares[i], appText: microToPctText(shares[i]),
       }))
     );
   };
@@ -572,10 +629,18 @@ function FieldSetupPage() {
       return;
     }
 
-    if (billingSplits.length > 0 && Math.abs(splitTotal - 100) > 0.01) {
-      toast('error', `Billing splits must total 100% (currently ${splitTotal.toFixed(2)}%)`);
-      return;
+    // Only a changed split (payers, shares or start date) writes a version; a name-only or notes-only save sends none.
+    const splitChanged = splitShape(billingSplits) !== splitShape(loadedSplitsRef.current ?? []) || splitFrom !== today;
+    if (splitChanged) {
+      const problem = splitFrom ? splitProblem(billingSplits) : 'Choose the date the split starts.';
+      if (problem) {
+        toast('error', problem);
+        return;
+      }
     }
+    const notesChanges = billingSplits
+      .filter((r) => (payerNotes[r.customer_id] ?? '').trim() !== (loadedNotesRef.current[r.customer_id] ?? '').trim())
+      .map((r) => ({ customer_id: r.customer_id, notes: (payerNotes[r.customer_id] ?? '').trim() || null }));
 
     // Same 0.1–5000 band the import + the measured-boundary path enforce — so a typed override
     // (e.g. "what the monitor showed", with no map drawn) goes through the same safety gate.
@@ -586,80 +651,62 @@ function FieldSetupPage() {
 
     setSaving(true);
     try {
-      const fieldPayload = {
-        customer_id: field.customer_id,
-        field_name: field.field_name,
-        legal_description: field.legal_description || null,
-        county: field.county || null,
-        state: field.state || 'IL',
-        // Send the loaded (server-authoritative) total_acres — never a client preview/estimate,
-        // so we can never persist a value the acreage RPC would reject. The acreage RPCs own the
-        // precise total_acres when geometry/override change; a successful one syncs it back below.
-        total_acres: field.total_acres ?? null,
-        fsa_farm_number: field.fsa_farm_number || null,
-        fsa_tract_number: field.fsa_tract_number || null,
-        fsa_field_number: field.fsa_field_number || null,
-        crop_type: field.crop_type || null,
-        soil_type: field.soil_type || null,
-        irrigation: field.irrigation || false,
-        notes: field.notes || null,
-        is_active: field.is_active ?? true,
-      };
+      const fieldPayload = fieldPayloadOf(field);
+      const detailsChanged = isNew || JSON.stringify(fieldPayload) !== JSON.stringify(fieldPayloadOf(loadedFieldRef.current ?? {}));
 
-      const billingPayload = billingSplits.map((s) => ({
-        customer_id: s.customer_id,
-        split_pct: s.split_pct,
-        is_primary: s.is_primary,
-        notes: s.notes || null,
-      }));
+      // The split is saved by set_field_billing_split below, so save_field must leave it alone. A new field sends
+      // none; an existing one sends today's split back as loaded (product shares above 0%, exact to the
+      // micro-percent), which save_field reads as "no split change" and writes no version.
+      // shortcut: echo until save_field takes a "leave the split alone" argument; then send that instead.
+      const billingPayload = isNew ? [] : (inForceSplit?.payers ?? [])
+        .filter((p) => p.product_share_micro_pct > 0)
+        .map((p) => ({ customer_id: p.customer_id, split_pct: (p.product_share_micro_pct / 1_000_000).toFixed(6) }));
 
       // save_field checks only the key. A new field keeps one key until confirmed, so an edited retry after a lost
       // reply replays the field it already created; an edit to an existing field gets a key per exact payload.
       const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, fieldPayload, billingPayload]);
-      if (lastFieldSaveScopeRef.current && lastFieldSaveScopeRef.current !== saveScope) saveFieldIdem.resetKeyFor(lastFieldSaveScopeRef.current);
-      lastFieldSaveScopeRef.current = saveScope;
       // Acreage is left out: applying the latest acreage to a field with the same details is what the user wants.
-      const attempt = fingerprintIntentPayload([fieldPayload, billingPayload]);
-      if (isNew && !saveFieldIdem.hasKeyFor('new')) firstNewAttemptRef.current = attempt;
-      const changedNewRetry = isNew && firstNewAttemptRef.current !== attempt;
-      const { data, error } = await supabase.rpc('save_field', {
-        p_field_id: (isNew ? null : id) as string,
-        p_field_payload: fieldPayload,
-        p_billing_defaults: billingPayload,
-        p_performed_by: profile!.id,
-        p_idempotency_key: saveFieldIdem.getKeyFor(saveScope),
-      });
+      const attempt = fingerprintIntentPayload([fieldPayload]);
+      let changedNewRetry = false;
+      let data: unknown = id;
+      let error: { message: string } | null = null;
+      if (detailsChanged) {
+        if (lastFieldSaveScopeRef.current && lastFieldSaveScopeRef.current !== saveScope) saveFieldIdem.resetKeyFor(lastFieldSaveScopeRef.current);
+        lastFieldSaveScopeRef.current = saveScope;
+        if (isNew && !saveFieldIdem.hasKeyFor('new')) firstNewAttemptRef.current = attempt;
+        changedNewRetry = isNew && firstNewAttemptRef.current !== attempt;
+        ({ data, error } = await supabase.rpc('save_field', {
+          p_field_id: (isNew ? null : id) as string,
+          p_field_payload: fieldPayload,
+          p_billing_defaults: billingPayload,
+          p_performed_by: profile!.id,
+          p_idempotency_key: saveFieldIdem.getKeyFor(saveScope),
+        }));
+      }
 
       if (error) {
-        toast('error', rpcAuthErrorMessage(error) ?? error.message);
+        toast('error', rpcAuthErrorMessage(error as Parameters<typeof rpcAuthErrorMessage>[0]) ?? error.message);
       } else {
-        assertRpcResult(data, 'save_field');
-        saveFieldIdem.resetKeyFor(saveScope);
-        const savedFieldId = isNew ? data : id;
+        if (detailsChanged) {
+          assertRpcResult(data, 'save_field');
+          saveFieldIdem.resetKeyFor(saveScope);
+        }
+        const savedFieldId = (isNew ? data : id) as string;
 
         // A changed retry's reply may be a field an earlier attempt created with other details. Read it back:
-        // if it holds what this save sent, this save created it and its acreage belongs on it.
+        // if it holds what this save sent, this save created it and its acreage and split belong on it.
         let createdBySave = !changedNewRetry;
         if (changedNewRetry) {
           const { data: saved } = await supabase
             .from('fields')
             .select('customer_id, field_name, legal_description, county, state, fsa_farm_number, fsa_tract_number, fsa_field_number, crop_type, soil_type, irrigation, notes, is_active')
-            .eq('id', savedFieldId as string)
+            .eq('id', savedFieldId)
             .maybeSingle();
           const sent: Record<string, unknown> = { ...fieldPayload };
-          const { data: savedSplits, error: splitsError } = await supabase
-            .from('field_billing_defaults')
-            .select('customer_id, split_pct, is_primary, notes')
-            .eq('field_id', savedFieldId as string);
-          // Unreadable splits cannot prove this save created the field, so the screen takes the safe warning path.
-          if (splitsError) Sentry.captureException(splitsError, { tags: { source: 'fetch', action: 'verify_new_field_billing' } });
-          const splitKey = (rows: Array<{ customer_id: string; split_pct: number; is_primary: boolean; notes: string | null }>) =>
-            JSON.stringify(rows.map((r) => [r.customer_id, Number(r.split_pct), r.is_primary, r.notes ?? null]).sort());
-          createdBySave = !!saved && Object.entries(saved).every(([k, v]) => (v ?? null) === (sent[k] ?? null))
-            && !splitsError && Array.isArray(savedSplits) && splitKey(savedSplits) === splitKey(billingPayload);
+          createdBySave = !!saved && Object.entries(saved).every(([k, v]) => (v ?? null) === (sent[k] ?? null));
         }
         if (!createdBySave) {
-          toast('warning', 'An earlier save may already have created this field. Opening it now; check its details and re-enter any acreage or boundary.');
+          toast('warning', 'An earlier save may already have created this field. Opening it now; check its details and re-enter any acreage, boundary or billing split.');
           skipUnsavedPromptRef.current = true;
           navigate(`/fields/${savedFieldId}`, { replace: true });
           setSaving(false);
@@ -736,6 +783,51 @@ function FieldSetupPage() {
           }
         }
 
+        // Split and payer notes: one dated version per split change; notes never make a version.
+        let splitSaved = false;
+        if (splitChanged || notesChanges.length > 0) {
+          const request = {
+            p_field_id: savedFieldId,
+            p_effective_from: splitFrom,
+            p_payers: splitChanged
+              ? billingSplits.map((r) => ({
+                customer_id: r.customer_id,
+                product_share_micro_pct: r.productMicro,
+                application_share_micro_pct: r.appMicro,
+              }))
+              : null,
+            p_notes: notesChanges.length > 0 ? notesChanges : null,
+            p_reason: 'Saved from Field Setup',
+          };
+          try {
+            const { data: sData, error: sErr } = await supabase.rpc('set_field_billing_split', {
+              ...request,
+              p_payers: request.p_payers as unknown as Json, // null = no split change (notes only)
+              p_notes: request.p_notes as unknown as Json,
+              // Same request, same key, across retries and reloads (contract rule 3).
+              p_idempotency_key: splitSaveKey(profile!.id, savedFieldId, fingerprintIntentPayload(request)),
+            });
+            if (sErr) throw sErr;
+            assertRpcResult(sData, 'set_field_billing_split');
+            clearSplitSaveKey(profile!.id, savedFieldId);
+            splitSaved = true;
+          } catch (splitError) {
+            const message = splitSaveErrorMessage((splitError as { message?: string } | null)?.message ?? 'Failed to save the billing split.');
+            Sentry.captureException(toSentryError(splitError), { tags: { source: 'critical_action', action: 'set_field_billing_split' } });
+            toast('error', isNew ? `Field created, but its billing split was not saved: ${message} Enter it again and save.` : message);
+            persistError = true;
+          }
+        }
+        if (splitSaved && !isNew) {
+          try {
+            applySplitData(await loadFieldSplit(savedFieldId, today));
+          } catch (reloadError) {
+            Sentry.captureException(toSentryError(reloadError), { tags: { source: 'fetch', action: 'reload_field_split_versions' } });
+            toast('warning', 'The split was saved, but its history could not be reloaded. Reload the page to see it.');
+          }
+        }
+        if (detailsChanged) loadedFieldRef.current = field; // saved: a retry after a later failure skips save_field
+
         const savedAcres = acresPatch;
         if (persistError) {
           if (savedAcres) setField((f) => ({ ...f, ...savedAcres }));
@@ -751,7 +843,8 @@ function FieldSetupPage() {
         }
 
         if (savedAcres) {
-          adoptSavedBaselineRef.current = isNew ? null : { field, splits: billingSplits }; // the synced acres are saved, not an edit
+          // the synced acres are saved, not an edit (a reloaded split is the saved one too)
+          adoptSavedBaselineRef.current = isNew ? null : { field, splits: splitSaved ? loadedSplitsRef.current ?? [] : billingSplits };
           setField((f) => ({ ...f, ...savedAcres }));
         }
         setIsDirty(false);
@@ -1303,65 +1396,81 @@ function FieldSetupPage() {
             {billingOpen && (
               <div className="mt-4">
                 <p className="text-xs text-secondary mb-4">
-                  Define how costs for this field are split between customers. Splits must total 100%.
+                  Who pays for this field. Product shares and application shares must each total 100%; a payer can be 0%.
+                  Each change is kept in the history below.
                 </p>
 
                 {billingSplits.length > 0 && (
                   <div className="space-y-3 mb-4">
+                    <div className="flex items-center gap-3 px-3 text-xs text-secondary">
+                      <span className="flex-1">Payer</span>
+                      <span className="w-24">Product</span>
+                      <span className="w-24">Application</span>
+                      <span className="w-6" />
+                    </div>
                     {billingSplits.map((split, idx) => (
                       <div key={split.customer_id} className="p-3 border border-gray-100 rounded-lg space-y-2">
                         <div className="flex items-center gap-3">
                           <div className="flex-1 min-w-0">
                             <span className="text-sm font-medium text-nav-dark">{split.customer_name}</span>
-                            {split.is_primary && (
-                              <Badge variant="success" className="ml-2">Primary</Badge>
-                            )}
                           </div>
-                          <div className="w-28">
-                            <div className="relative">
+                          {(['product', 'app'] as const).map((side) => (
+                            <div key={side} className="w-24 relative">
                               <input
-                                type="number"
-                                value={split.split_pct}
-                                onChange={(e) => updateSplit(idx, 'split_pct', parseFloat(e.target.value) || 0)}
-                                min={0}
-                                max={100}
-                                step={0.01}
-                                className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green pr-7"
+                                type="text"
+                                inputMode="decimal"
+                                aria-label={`${side === 'product' ? 'Product' : 'Application'} share for ${split.customer_name}`}
+                                value={side === 'product' ? split.productText : split.appText}
+                                onChange={(e) => updateShare(idx, side, e.target.value)}
+                                className={`w-full px-3 py-1.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green pr-7 ${
+                                  (side === 'product' ? split.productMicro : split.appMicro) == null ? 'border-red-300' : 'border-gray-200'
+                                }`}
                               />
                               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-secondary">%</span>
                             </div>
-                          </div>
-                          {!split.is_primary && (
-                            <button
-                              onClick={() => {
-                                setBillingSplits((prev) =>
-                                  prev.map((s, i) => ({ ...s, is_primary: i === idx }))
-                                );
-                              }}
-                              className="text-xs text-secondary hover:text-crx-green"
-                              title="Set as primary"
-                            >
-                              Set Primary
-                            </button>
-                          )}
+                          ))}
                           <button
+                            type="button"
                             onClick={() => removeBillingSplit(idx)}
-                            className="text-gray-400 hover:text-red-500 p-1"
+                            aria-label={`Remove ${split.customer_name} from the split`}
+                            className="w-6 text-gray-400 hover:text-red-500 p-1"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
+                        <input
+                          type="text"
+                          aria-label={`Notes for ${split.customer_name}`}
+                          value={payerNotes[split.customer_id] ?? ''}
+                          onChange={(e) => setPayerNotes((prev) => ({ ...prev, [split.customer_id]: e.target.value }))}
+                          maxLength={2000}
+                          placeholder="Notes for this payer (optional)"
+                          className="w-full px-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                        />
                       </div>
                     ))}
 
-                    <div className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium ${
-                      Math.abs(splitTotal - 100) < 0.01
-                        ? 'bg-emerald-50 text-emerald-700'
-                        : 'bg-amber-50 text-amber-700'
-                    }`}>
-                      <span>Total</span>
-                      <span>{splitTotal.toFixed(2)}%</span>
-                    </div>
+                    {(['product', 'app'] as const).map((side) => {
+                      const total = side === 'product' ? productTotal : appTotal;
+                      return (
+                        <div key={side} className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium ${
+                          total === 100_000_000 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                        }`}>
+                          <span>{side === 'product' ? 'Product total' : 'Application total'}</span>
+                          <span>{microToPctText(total)}%</span>
+                        </div>
+                      );
+                    })}
+
+                    <label className="flex items-center gap-3 text-sm">
+                      <span className="text-secondary">Split starts on</span>
+                      <input
+                        type="date"
+                        value={splitFrom}
+                        onChange={(e) => setSplitFrom(e.target.value)}
+                        className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                      />
+                    </label>
                   </div>
                 )}
 
@@ -1377,6 +1486,13 @@ function FieldSetupPage() {
                   placeholder="Search customer to add to billing split..."
                   ariaLabel="Add customer to billing split"
                 />
+
+                {!isNew && (
+                  <div className="mt-6">
+                    <h4 className="text-sm font-medium text-nav-dark mb-2">Split history</h4>
+                    <FieldSplitHistory history={splitHistory} inForceId={inForceSplit?.id ?? null} />
+                  </div>
+                )}
               </div>
             )}
           </Card>

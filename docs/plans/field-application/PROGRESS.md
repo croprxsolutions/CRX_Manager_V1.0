@@ -83,6 +83,12 @@ Paperwork follow-ups (logged, not fixed; none touches money, stock or data):
 - #2468 LOW: safety continuation pages don't repeat the record date.
 - #2468 LOW: the 40-row test checks table rows, not a rendered page 2 (covered by a render before merge).
 
+## Slice 1 · Field Setup screen
+
+| Item | State | Proof / link | Note |
+|---|---|---|---|
+| FP-1 screen half (split versions, history, payer notes, retry key) | IN PROGRESS | | Branch `feat/field-1.1-setup-screen`. Merges only after FP-1 is VERIFIED on staging, rebased on fresh `origin/staging` and re-proved in the browser |
+
 ## Needs another lane
 
 | Asked by | Owning lane | What | Done? |

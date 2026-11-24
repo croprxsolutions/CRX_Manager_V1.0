@@ -21,8 +21,6 @@ export interface LoaderWater {
 type WaterProduct = Pick<LoaderLoadProduct, 'product_name' | 'amount' | 'unit' | 'product_form'>;
 
 const FORMS: readonly string[] = ['liquid', 'dry', 'seed', 'each'];
-// With the form unknown, an ounce could be a fluid ounce or a weight ounce: never guess.
-const AMBIGUOUS_UNITS = new Set(['oz', 'ounce', 'ounces']);
 
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
@@ -32,11 +30,9 @@ function liquidGallons(product: WaterProduct): number | 'unsized' | 'missing' {
   if (form && form !== 'liquid') return 0;
   if (!Number.isFinite(product.amount)) return 'missing';
   if (product.amount === 0) return 0;
+  // With the form unknown only a volume unit counts: a liquid can be measured by weight, so a weight unit is never "no volume".
   const converted = toGallonOrLbEquivalent(product.amount, product.unit, form);
-  if (converted?.unit === 'gal') return converted.value;
-  const unit = (product.unit ?? '').trim().toLowerCase();
-  if (!form && converted?.unit === 'lb' && !AMBIGUOUS_UNITS.has(unit)) return 0;
-  return 'unsized';
+  return converted?.unit === 'gal' ? converted.value : 'unsized';
 }
 
 /** Finished gallons and water to add for one tank (or the whole batch). */

@@ -19,9 +19,11 @@ describe('loaderWater', () => {
   });
 
   it('flags a product it cannot size instead of guessing', () => {
-    // Form unknown + ounces: fluid or weight ounce can't be told.
-    expect(loaderWater(100, [p('X', 32, 'oz', null), p('Y', 5, 'lb', null), p('Z', 1, 'gal', null)]))
-      .toEqual({ finished_gal: 100, water_gal: 99, over: false, unsized: ['X'], missing: [] });
+    // Form unknown: ounces (fluid or weight?) and pounds (a liquid can be sold by weight) are never "no volume".
+    expect(loaderWater(100, [p('X', 32, 'oz', null), p('Y', 50, 'lb', null), p('Z', 1, 'gal', null)]))
+      .toEqual({ finished_gal: 100, water_gal: 99, over: false, unsized: ['X', 'Y'], missing: [] });
+    // A known liquid measured by weight cannot be sized without its density either.
+    expect(loaderWater(100, [p('W', 50, 'lb', 'liquid')]).unsized).toEqual(['W']);
     expect(loaderWater(100, [p('Bad', 3, 'bag', 'liquid'), p('NoAmount', NaN, 'gal'), p('DryNoAmount', NaN, 'lb', 'dry')]))
       .toMatchObject({ unsized: ['Bad'], missing: ['NoAmount'] });
   });

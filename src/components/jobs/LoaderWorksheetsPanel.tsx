@@ -223,6 +223,7 @@ export function LoaderWorksheetsPanel({
     unknown: selectedComputed.loads.flatMap((load) => tankWater(load).unknown),
     unsized: selectedComputed.loads.flatMap((load) => tankWater(load).unsized),
     missing: selectedComputed.loads.flatMap((load) => tankWater(load).missing),
+    dry: selectedComputed.loads.some((load) => tankWater(load).dry),
   } : null;
   // Before the product details load, liquid/dry is not read yet: say so, not "set it on the product".
   const waterNotes = !waterWhy ? [] : !weightsShown && waterWhy.unknown.length > 0

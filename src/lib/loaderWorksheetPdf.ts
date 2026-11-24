@@ -216,7 +216,8 @@ export function loaderPdfWaterRows(data: LoaderWorksheetPdfData, plan: ReturnTyp
     ...(batch.water_gal === null ? [`— = not known: ${[
       ...(batch.unknown.length > 0 ? ['set liquid/dry on the product'] : []),
       ...(batch.unsized.length > 0 ? ["a liquid's unit has no gallon size"] : []),
-      ...(batch.missing.length > 0 ? ['an amount is missing'] : [])].join('; ')}`] : [])].join('\n');
+      ...(batch.missing.length > 0 ? ['an amount is missing'] : [])].join('; ')}`] : []),
+    ...(batch.dry ? ['dry products not counted as volume'] : [])].join('\n');
   const rows = [
     ['Finished gallons', ...tanks.map(({ column, water }) => `${fmtLoaderGallons(water.finished_gal)}${each(column)}`), fmtLoaderGallons(batch.finished_gal)],
     [label, ...tanks.map(({ column, water }) => `${fmtLoaderWater(water)}${marks(water)}${water.water_gal === null ? '' : each(column)}`),

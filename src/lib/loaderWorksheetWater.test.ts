@@ -8,7 +8,8 @@ const p = (product_name: string, amount: number, unit: string, product_form: str
 describe('loaderWater', () => {
   it('subtracts liquid product gallons; dry products add no volume', () => {
     const w = loaderWater(300, [p('L1', 2, 'gal'), p('L2', 64, 'fl oz'), p('D1', 50, 'lb', 'dry'), p('S1', 3, 'each', 'each')]);
-    expect(w).toEqual({ finished_gal: 300, water_gal: 297.5, over: false, unknown: [], unsized: [], missing: [] });
+    expect(w).toEqual({ finished_gal: 300, water_gal: 297.5, over: false, unknown: [], unsized: [], missing: [], dry: true });
+    expect(loaderWaterNotes(w)).toEqual(['Dry products are not counted as volume in water to add.']);
   });
 
   it('never prints water below 0 and warns when the recipe is over the finished gallons', () => {
@@ -21,7 +22,9 @@ describe('loaderWater', () => {
   it('shows water only when known: never guesses liquid or dry from the unit (Mason, 2026-11-24)', () => {
     // Form not on file, even with a gallon unit: not known.
     expect(loaderWater(100, [p('X', 32, 'oz', null), p('Z', 1, 'gal', null), p('L', 1, 'gal')]))
-      .toEqual({ finished_gal: 100, water_gal: null, over: false, unknown: ['X', 'Z'], unsized: [], missing: [] });
+      .toEqual({ finished_gal: 100, water_gal: null, over: false, unknown: ['X', 'Z'], unsized: [], missing: [], dry: false });
+    // No form AND no amount: both reported at once (Terra LOW).
+    expect(loaderWater(100, [p('Q', NaN, 'gal', null)])).toMatchObject({ unknown: ['Q'], missing: ['Q'] });
     // A known liquid measured by weight cannot be sized without its density.
     expect(loaderWater(100, [p('W', 50, 'lb', 'liquid')])).toMatchObject({ water_gal: null, unsized: ['W'] });
     expect(loaderWater(100, [p('Bad', 3, 'bag', 'liquid'), p('NoAmount', NaN, 'gal'), p('DryNoAmount', NaN, 'lb', 'dry')]))

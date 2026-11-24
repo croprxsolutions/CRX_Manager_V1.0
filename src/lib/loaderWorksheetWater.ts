@@ -20,8 +20,10 @@ export interface LoaderWater {
   unknown: string[];
   /** Liquid products whose unit has no gallon size (e.g. measured by weight). */
   unsized: string[];
-  /** Liquid products with no usable amount. */
+  /** Liquid products, or products of unknown form, with no usable amount. */
   missing: string[];
+  /** A dry, seed or "each" product is in the mix: counted as no volume, and the sheet says so. */
+  dry: boolean;
 }
 
 type WaterProduct = Pick<LoaderLoadProduct, 'product_name' | 'amount' | 'unit' | 'product_form'>;
@@ -49,18 +51,22 @@ export function loaderWater(finishedGal: number, products: readonly WaterProduct
   const missing: string[] = [];
   for (const product of products) {
     const gal = liquidGallons(product);
-    if (gal === 'unknown') unknown.push(product.product_name);
-    else if (gal === 'unsized') unsized.push(product.product_name);
+    if (gal === 'unknown') {
+      unknown.push(product.product_name);
+      // Report a missing amount now too, so the job is fixed in one pass.
+      if (!Number.isFinite(product.amount)) missing.push(product.product_name);
+    } else if (gal === 'unsized') unsized.push(product.product_name);
     else if (gal === 'missing') missing.push(product.product_name);
     else liquid += gal;
   }
   // Compare before rounding so a sliver over the finished gallons still warns; the epsilon absorbs float drift.
   // The known liquids alone can already overfill, so this warns even when water itself is not known.
   const over = liquid - finishedGal > 1e-9;
+  const dry = products.some((product) => product.product_form && product.product_form !== 'liquid' && FORMS.includes(product.product_form) && product.amount !== 0);
   if (unknown.length + unsized.length + missing.length > 0) {
-    return { finished_gal: finishedGal, water_gal: null, over, unknown, unsized, missing };
+    return { finished_gal: finishedGal, water_gal: null, over, unknown, unsized, missing, dry };
   }
-  return { finished_gal: finishedGal, water_gal: over ? 0 : Math.max(0, round4(finishedGal - liquid)), over, unknown, unsized, missing };
+  return { finished_gal: finishedGal, water_gal: over ? 0 : Math.max(0, round4(finishedGal - liquid)), over, unknown, unsized, missing, dry };
 }
 
 /**
@@ -73,12 +79,14 @@ export function loaderTankWater(volume: number, products: readonly WaterProduct[
 }
 
 /** Why water to add is not shown, one sentence per reason. */
-export function loaderWaterNotes(water: Pick<LoaderWater, 'unknown' | 'unsized' | 'missing'>): string[] {
+export function loaderWaterNotes(water: Pick<LoaderWater, 'unknown' | 'unsized' | 'missing' | 'dry'>): string[] {
   const notes: string[] = [];
   const names = (list: string[]) => [...new Set(list)].join(', ');
   if (water.unknown.length > 0) notes.push(`Water to add not shown: set liquid/dry on the product for ${names(water.unknown)}.`);
   if (water.unsized.length > 0) notes.push(`Water to add not shown: the gallons of ${names(water.unsized)} cannot be worked out from its unit.`);
   if (water.missing.length > 0) notes.push(`Water to add not shown: the amount of ${names(water.missing)} is missing. Fix it on the job.`);
+  // The stated limit of the calculation (Mason: "only when known" counts dry as known).
+  if (water.dry) notes.push('Dry products are not counted as volume in water to add.');
   return notes;
 }
 

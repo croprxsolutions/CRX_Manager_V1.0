@@ -76,10 +76,10 @@ describe('loaderPdfWaterRows', () => {
   it('prints finished gallons and water to add per tank and for the whole batch', () => {
     const { rows, warnings } = loaderPdfWaterRows(liquid, buildLoaderWorksheetPdfPlan(liquid));
     expect(rows[0]).toEqual(['Finished gallons', '300 GL', '300 GL', '300 GL', '100 GL', '1000 GL']);
-    expect(rows[1][0]).toBe('Water to add');
+    expect(rows[1][0]).toBe('Water to add\ndry products not counted as volume');
     expect(rows[1][1]).toBe('287 GL 108.8 FL OZ'); // 300 − 12.15 gal
     expect(rows[1].at(-1)).toBe('959 GL 64 FL OZ'); // 1000 − 40.5
-    expect(warnings).toEqual([]);
+    expect(warnings).toEqual(['Dry products are not counted as volume in water to add.']);
   });
 
   it('prints 0 and a warning when the recipe is more than the finished gallons', () => {
@@ -104,7 +104,7 @@ describe('loaderPdfWaterRows', () => {
     const { rows, warnings } = loaderPdfWaterRows(unknown, buildLoaderWorksheetPdfPlan(unknown));
     expect(rows[0].at(-1)).toBe('1000 GL');
     expect(rows[1].at(-1)).toBe('—');
-    expect(rows[1][0]).toBe('Water to add\n— = not known: set liquid/dry on the product');
-    expect(warnings).toEqual(['Water to add not shown: set liquid/dry on the product for TEST Unset.']);
+    expect(rows[1][0]).toBe('Water to add\n— = not known: set liquid/dry on the product\ndry products not counted as volume');
+    expect(warnings).toEqual(['Water to add not shown: set liquid/dry on the product for TEST Unset.', 'Dry products are not counted as volume in water to add.']);
   });
 });

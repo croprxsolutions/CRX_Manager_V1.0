@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { buildInMemoryQuery } from '../test-utils/inMemoryQuery';
-import { firstOfBusinessMonth, isDayInRange, paymentBusinessDate } from '../lib/paymentDateRange';
+import { dayParam, firstOfBusinessMonth, isDayInRange, paymentBusinessDate } from '../lib/paymentDateRange';
 
 type Row = Record<string, unknown>;
 
@@ -102,5 +102,21 @@ describe('payment date range helpers', () => {
   it('starts the month on the Chicago month, not the UTC one', () => {
     // 7 PM Chicago on Oct 31 is Nov 1 in UTC.
     expect(firstOfBusinessMonth(new Date('2026-11-01T00:00:00Z'))).toBe('2026-10-01');
+  });
+});
+
+describe('Payment History opened on a range from a link', () => {
+  it('reads ?from=&to= and totals only that range', async () => {
+    render(<MemoryRouter initialEntries={['/payment-history?from=2026-11-01&to=2026-11-30']}><PaymentHistory /></MemoryRouter>);
+    expect(await screen.findByText('CHK-early')).toBeInTheDocument();
+    expect(activeTotal()).toHaveTextContent('$175.00');
+    expect(activeTotal()).toHaveTextContent('in selected dates');
+    expect(screen.queryByText('CHK-october')).not.toBeInTheDocument();
+  });
+
+  it('ignores a value that is not a day', () => {
+    expect(dayParam('2026-11-01')).toBe('2026-11-01');
+    expect(dayParam('11/01/2026')).toBeNull();
+    expect(dayParam(null)).toBeNull();
   });
 });

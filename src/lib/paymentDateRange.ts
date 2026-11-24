@@ -42,3 +42,8 @@ export function dateRangeCaption(from: string | null, to: string | null): string
   if (preset === 'today') return 'today';
   return preset === 'month' ? 'this month' : 'in selected dates';
 }
+
+/** A YYYY-MM-DD value from the address bar, or null for anything else. */
+export function dayParam(value: string | null): string | null {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}

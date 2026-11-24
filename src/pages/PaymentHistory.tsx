@@ -4,6 +4,7 @@
  * Sprint 11: Financial Workflows
  */
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { DollarSign, XCircle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -23,6 +24,7 @@ import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import {
   dateRangeCaption,
   dateRangePreset,
+  dayParam,
   firstOfBusinessMonth,
   isDayInRange,
   isRangeBackwards,
@@ -137,9 +139,11 @@ export default function PaymentHistory() {
   const [voidReason, setVoidReason] = useState('');
   const [savingVoid, setSavingVoid] = useState(false);
 
-  // Date filter (Chicago business days, inclusive). Empty = all dates, as before.
-  const [fromDate, setFromDate] = useState<string | null>(null);
-  const [toDate, setToDate] = useState<string | null>(null);
+  // Date filter (Chicago business days, inclusive). Empty = all dates, as before. A link may
+  // open the page on a range (?from=YYYY-MM-DD&to=YYYY-MM-DD, e.g. from Month-End Close).
+  const [searchParams] = useSearchParams();
+  const [fromDate, setFromDate] = useState<string | null>(() => dayParam(searchParams.get('from')));
+  const [toDate, setToDate] = useState<string | null>(() => dayParam(searchParams.get('to')));
 
   // A refresh after voiding a payment is a multi-page read; an older, slower
   // load must not overwrite the newer list, so only the latest may set state.

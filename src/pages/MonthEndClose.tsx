@@ -5,6 +5,7 @@
  * Sprint 10: Month-End Close
  */
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { Calendar, CheckCircle, AlertCircle, FileText, Download, Lock, RotateCcw } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -70,6 +71,28 @@ function getPeriodForMonth(year: number, month: number): { start: string; end: s
   const end = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
   const label = new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   return { start, end, label };
+}
+
+interface ChecklistLink {
+  to: string;
+  label: string;
+}
+
+// Where each checklist line's items can be opened. Display only: the checks themselves are unchanged.
+// Invoices has no URL filter (its open drafts show from every season by default); Field Invoices
+// opens on its Drafts tab; Payment History opens on this month's dates.
+function checklistLinks(period: { start: string; end: string }): Record<string, ChecklistLink[]> {
+  return {
+    invoices: [
+      { to: '/invoices', label: 'Open chemical invoices' },
+      { to: '/field-invoices?tab=drafts', label: 'Open field invoice drafts' },
+    ],
+    payments: [{ to: `/payment-history?from=${period.start}&to=${period.end}`, label: 'Open payment history' }],
+    deliveries: [{ to: '/deliveries', label: 'Open deliveries' }],
+    commissions: [{ to: '/commission-payments', label: 'Open commission payments' }],
+    rushOrders: [{ to: '/orders', label: 'Open orders' }],
+    financeCharges: [{ to: '/ar-aging', label: 'Open AR Aging' }],
+  };
 }
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -226,6 +249,7 @@ export default function MonthEndClose() {
   }, [current.start, current.end, isClosed]);
 
   // Checklist items
+  const links = checklistLinks(current);
   const checklist = summary
     ? [
         {
@@ -234,6 +258,7 @@ export default function MonthEndClose() {
           detail: summary.invoices.draft_count > 0
             ? `${summary.invoices.draft_count} unposted invoice(s) remain`
             : `${summary.invoices.posted_count} recognized, ${summary.invoices.voided_count} voided`,
+          links: summary.invoices.draft_count > 0 ? links.invoices : undefined,
         },
         {
           label: 'Payments reconciled',
@@ -243,11 +268,13 @@ export default function MonthEndClose() {
             ? 'No payments this period'
             : `${summary.payments.count} payments totaling ${fmt(summary.payments.total_cents)} — verify and check box to confirm`,
           reviewKey: summary.payments.count > 0 ? 'payments' : undefined,
+          links: summary.payments.count > 0 ? links.payments : undefined,
         },
         {
           label: 'Deliveries completed',
           done: summary.deliveries.count === summary.deliveries.completed_count || summary.deliveries.count === 0,
           detail: `${summary.deliveries.completed_count}/${summary.deliveries.count} deliveries completed`,
+          links: summary.deliveries.completed_count < summary.deliveries.count ? links.deliveries : undefined,
         },
         {
           label: 'Commissions reviewed',
@@ -257,6 +284,7 @@ export default function MonthEndClose() {
             ? 'No commissions this period'
             : `${fmt(summary.commissions.earned_cents)} ${summary.commissions.basis === 'billed_share' ? 'on sales billed this period' : 'earned'}, ${summary.commissions.paid_count} paid — verify and check box to confirm`,
           reviewKey: summary.commissions.earned_cents !== 0 ? 'commissions' : undefined,
+          links: summary.commissions.earned_cents !== 0 ? links.commissions : undefined,
         },
         {
           label: 'Rush orders priced',
@@ -272,11 +300,13 @@ export default function MonthEndClose() {
               ? 'No unpriced rush orders'
               : `${needsPricingCount} order(s) still need pricing (unbilled revenue) — price them or verify and check the box`,
           reviewKey: needsPricingError || needsPricingCount > 0 ? 'needs_pricing' : undefined,
+          links: needsPricingError || needsPricingCount > 0 ? links.rushOrders : undefined,
         },
         {
           label: 'Finance charges generated (optional)',
           done: true,
           detail: 'Generate from AR Aging page if needed — this step is optional',
+          links: links.financeCharges,
         },
         // #2175: without the figures' review token the server refuses the close; say why Close stays off.
         ...(summary.review_token ? [] : [{
@@ -650,6 +680,19 @@ export default function MonthEndClose() {
                     {item.label}
                   </p>
                   <p className="text-xs text-secondary">{item.detail}</p>
+                  {item.links && (
+                    <div className="flex flex-wrap gap-x-4">
+                      {item.links.map((l) => (
+                        <Link
+                          key={l.to}
+                          to={l.to}
+                          className="inline-flex min-h-[44px] items-center text-xs font-medium text-crx-green hover:underline sm:min-h-0 sm:pt-1"
+                        >
+                          {l.label}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
                   {'reviewKey' in item && item.reviewKey && !item.done && (
                     <label className="mt-1.5 flex items-center gap-2 cursor-pointer">
                       <input

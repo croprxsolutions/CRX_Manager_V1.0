@@ -304,6 +304,10 @@ function matchReadIntervals<Q extends IntervalFilterable<Q>>(query: Q, payload: 
     filtered = readValue == null ? filtered.is(interval, null) : filtered.eq(interval, readValue);
     filtered = filtered.eq(flag, read[flag] ?? false);
   }
+  // A tick is judged against the label the page showed, so a new EPA number saved meanwhile refuses it.
+  if ('rei_not_applicable' in payload || 'phi_not_applicable' in payload) {
+    filtered = read.epa_registration == null ? filtered.is('epa_registration', null) : filtered.eq('epa_registration', read.epa_registration);
+  }
   return filtered;
 }
 
@@ -1704,7 +1708,7 @@ export default function ProductDetail() {
                   <IntervalNotApplicable
                     label="Label gives no REI"
                     checked={Boolean(product.rei_not_applicable)}
-                    disabled={!isAdmin}
+                    disabled={!isAdmin || saving || reloadRequired}
                     onChange={(checked) => {
                       if (reloadRequired) return;
                       update('rei_not_applicable', checked);
@@ -1732,7 +1736,7 @@ export default function ProductDetail() {
                   <IntervalNotApplicable
                     label="Label gives no PHI"
                     checked={Boolean(product.phi_not_applicable)}
-                    disabled={!isAdmin}
+                    disabled={!isAdmin || saving || reloadRequired}
                     onChange={(checked) => {
                       if (reloadRequired) return;
                       update('phi_not_applicable', checked);

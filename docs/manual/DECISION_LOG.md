@@ -1,5 +1,22 @@
 # Decision Log
 
+## 2026-11-22 — #2217: Mason owner-accepted 1 Sol finding(s) at `e197b9d15d20`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2217 at `e197b9d15d20` (base `6e77a9e7a5e2`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md:189`, text sha256 `f9bb6a325e5e9451` (the wording stays with the proof, not here)
+  Mason's reason: drivers will reopen the app before go live (ref dfc1fa09484a)
+
+## 2026-11-22 — #2217: Mason owner-accepted 1 Sol finding(s) at `1781bf249fd2`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2217 at `1781bf249fd2` (base `ab0f6cdfc7ae`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md:189`, text sha256 `5b2dacfd3fce03b9` (the wording stays with the proof, not here)
+  Mason's reason: drivers will reopen the app before go live (ref 1cec6671310f)
+
+## 2026-11-22 — #2217: Mason owner-accepted 1 Sol finding(s) at `15153d2a666e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-22).** Sol's review of PR #2217 at `15153d2a666e` (base `17a72d0ee032`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md:189`, text sha256 `e2e592cbe2a95507` (the wording stays with the proof, not here)
+  Mason's reason: drivers will reopen the app before go-live (ref b7022addabd2)
 ## 2026-11-24 — Rate switch: a label maximum whose unit cannot be compared needs no over-label reason
 
 **Decision:** switching a product group to its approved rate asks for a typed over-label reason only when the rate is above a label maximum the app can compare; a maximum whose unit or basis it cannot compare ("not checked") lets the switch through with no reason, as Rate Review's own approval does. Mason, 2026-11-24, answering P1's Sol round 2 HIGH: "No, keep as is".

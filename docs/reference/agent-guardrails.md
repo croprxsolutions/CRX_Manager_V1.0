@@ -158,11 +158,13 @@
 > 24 hours, only for that finding; `approve` cannot answer it and `accept` cannot answer a migration request; a reason
 > under two words, over 300 characters, or with money amounts, emails, phone numbers, `#<number>` or markup is
 > refused without using the code). Once every finding of the run is accepted, `--log` writes the deterministic
-> `DECISION_LOG.md` entry (PR, each finding's `file:line` and text hash, his reason, date; never the finding's wording,
+> decision-log entry (since 2026-11-23 a PR into `staging` gets its own new file
+> `docs/manual/decision-log.d/<date>-pr<n>-sol-skip-<head>.md`, so parallel PRs never conflict; a review against `main`
+> still writes `DECISION_LOG.md`, the one file `release-flow.mjs` lets ride on a release head) (PR, each finding's `file:line` and text hash, his reason, date; never the finding's wording,
 > because an accepted finding is unfixed and the repo is public); commit that file alone on top of the reviewed head,
 > then `node scripts/write-codex-push-proof.mjs --carry-owner-accepted` mints a carried proof (`carry.mode`
 > `owner_accepted`, `root_review.owner_accepted`, same base, the original run's 24 hours, `codex_ran` false) only when
-> the commit's sole change is exactly that entry and the code running is the bytes committed at that head. A PR that
+> the commit's sole change is exactly that entry (one new fragment file, or the `DECISION_LOG.md` insertion) and the code running is the bytes committed at that head. A PR that
 > changes hooks, `.codex`, `.husky`, `.github`, `scripts/lib`, `package.json` or the proof, approval and apply scripts
 > cannot use this path: a review that was not clean cannot vouch for gate code. Later carries (main merge, restamp,
 > post-apply) keep the acceptances and tell their focused Sol check the findings are accepted, not fixed. It satisfies

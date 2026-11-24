@@ -135,7 +135,8 @@ export function missingProductSetup(product: Partial<ProductSetupFields>, groupH
   if (!product.inventory_unit?.trim()) missing.push('Inventory unit');
   if (product.container_size == null || !(product.container_size > 0)) missing.push('Container size');
   if (!product.container_unit?.trim()) missing.push('Container unit');
-  if (isRegisteredPesticide(product)) {
+  // An EPA number on the group makes it a registered pesticide too, so its label fields still count.
+  if (groupHasEpa || isRegisteredPesticide(product)) {
     if (!product.epa_registration?.trim() && !groupHasEpa) missing.push('EPA number');
     if (!product.signal_word) missing.push('Signal word');
     if (product.rei_hours == null) missing.push('REI');

@@ -92,6 +92,7 @@ describe('complete setup and near-match warnings', () => {
     expect(isSetupIncomplete(generic)).toBe(true);
     expect(isSetupIncomplete(generic, new Set(['gen']))).toBe(false);
     // Other label fields still count.
+    expect(missingProductSetup({ ...base, category: 'Adjuvant' }, true)).toEqual(['Signal word', 'REI', 'PHI']);
     expect(isSetupIncomplete({ ...generic, signal_word: null }, new Set(['gen']))).toBe(true);
 
     const size = (id: string) => ({ product_id: id });

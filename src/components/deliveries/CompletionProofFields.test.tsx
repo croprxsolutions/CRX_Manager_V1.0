@@ -81,4 +81,27 @@ describe('CompletionProofFields', () => {
     fireEvent.click(box);
     expect(onChange).toHaveBeenCalledWith(false);
   });
+
+  it('shows no issue picker unless the screen asks for one', () => {
+    setup();
+    expect(screen.queryByLabelText(/Report an issue/)).not.toBeInTheDocument();
+  });
+
+  it('reports an issue in the same step: notes appear once a type is chosen', () => {
+    const issue = { type: 'none' as const, notes: '', onTypeChange: vi.fn(), onNotesChange: vi.fn() };
+    setup({ issue });
+    const picker = screen.getByLabelText(/Report an issue/);
+    expect(picker).toHaveValue('none');
+    expect(picker).toHaveClass('h-12');
+    expect(screen.queryByLabelText('Describe the issue')).not.toBeInTheDocument();
+    fireEvent.change(picker, { target: { value: 'other' } });
+    expect(issue.onTypeChange).toHaveBeenCalledWith('other');
+  });
+
+  it('passes the typed notes back unchanged', () => {
+    const issue = { type: 'other' as const, notes: '', onTypeChange: vi.fn(), onNotesChange: vi.fn() };
+    setup({ issue });
+    fireEvent.change(screen.getByLabelText('Describe the issue'), { target: { value: 'cap broken' } });
+    expect(issue.onNotesChange).toHaveBeenCalledWith('cap broken');
+  });
 });

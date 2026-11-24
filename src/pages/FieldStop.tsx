@@ -30,7 +30,7 @@ import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idem
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, countLeftAtSitePhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
 import { fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
-import type { DeliveryCompletionEvidence, ReceiptRecipient } from '../types';
+import type { DeliveryCompletionEvidence, DeliveryIssueType, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
 import { logActivity } from '../lib/activityLogger';
@@ -50,6 +50,7 @@ import { fetchNextRouteStopId, ROUTE_NO_SIGNAL_MESSAGE } from '../lib/routeStops
 import StopContactActions, { type StopCoords } from '../components/route/StopContactActions';
 import StopSavedCopy, { type SavedStopCopy } from '../components/route/StopSavedCopy';
 import CompletionProofFields, { EmailReceiptOption, ProofOption } from '../components/deliveries/CompletionProofFields';
+import { ISSUE_TYPE_LABELS } from '../lib/deliveryIssueTypes';
 import { dropTodaySnapshot, readTodaySnapshot, saveTodaySnapshot } from '../lib/todaySnapshot';
 
 interface StopItem {
@@ -189,6 +190,9 @@ export default function FieldStop() {
   const [usePaperTicket, setUsePaperTicket] = useState(false);
   const [paperDeliveredOn, setPaperDeliveredOn] = useState(todayInBusinessTz());
   const [emailOnComplete, setEmailOnComplete] = useState(true);
+  // A problem with the delivery (short, damaged, refused...), sent with the completion exactly as the delivery detail sends it.
+  const [issueType, setIssueType] = useState<DeliveryIssueType>('none');
+  const [issueNotes, setIssueNotes] = useState('');
   // The receipt address when the customer row is hidden from this driver (see fetchReceiptRecipient).
   const [receiptRecipient, setReceiptRecipient] = useState<ReceiptRecipient | null>(null);
   // What the completion response said about billing, for the Done step (the same data the toasts use).
@@ -201,6 +205,7 @@ export default function FieldStop() {
     setSavedCopy(null);
     setUsePaperTicket(false); setNoOnePresent(false); setSignedBy(''); setSignatureDataUrl(null);
     setPaperDeliveredOn(todayInBusinessTz()); setPhotos([]); setEmailOnComplete(true); setDoneBilling(null);
+    setIssueType('none'); setIssueNotes('');
   }, [id]);
   // Brand PR B (B-2): which brand went off the truck, saved before completion. Never blocks a completion.
   const brandState = useDeliveryBrands(id, !!delivery && delivery.id === id && (delivery.status === 'scheduled' || delivery.status === 'in_progress'));
@@ -405,7 +410,7 @@ export default function FieldStop() {
       ? hasPaperTicketPhoto(photos) && isValidPaperDeliveredOn(paperDeliveredOn)
       : !!signatureDataUrl;
   // What the driver can still edit while the signal check runs; compared after the check.
-  const completionInputs = JSON.stringify([signedBy, deliveryQtys, usePaperTicket, noOnePresent, paperDeliveredOn, signatureDataUrl, emailOnComplete]);
+  const completionInputs = JSON.stringify([signedBy, deliveryQtys, usePaperTicket, noOnePresent, paperDeliveredOn, signatureDataUrl, emailOnComplete, issueType, issueNotes]);
   const completionInputsRef = useLatestRef(completionInputs);
   const hasAnyQty = items.some((it) => (deliveryQtys[it.id] ?? it.quantity) > 0);
 
@@ -526,6 +531,9 @@ export default function FieldStop() {
       p_signed_by: signedBy,
       p_performed_by: profile.id,
       ...(quantitiesJson ? { p_quantities: quantitiesJson } : {}),
+      // The issue as the delivery detail sends it (DeliveryDetail runComplete): nothing when none is reported.
+      ...(issueType !== 'none' ? { p_issue_type: issueType } : {}),
+      ...(issueNotes.trim() ? { p_issue_notes: issueNotes.trim() } : {}),
       ...(usePaperTicket && paperDeliveredAt(paperDeliveredOn) ? { p_completed_at: paperDeliveredAt(paperDeliveredOn) } : {}),
       p_evidence: completionEvidence,
       // KI-25: the receipt is recorded in the same save and emailed by the server (send-delivery-receipts),
@@ -535,7 +543,7 @@ export default function FieldStop() {
       ...(evidencePhoto ? { p_evidence_ref: evidencePhoto.id } : {}),
     };
     // check_idempotency replays by key and operation only: bind the key to this exact
-    // payload (stop, signer, quantities, ticket date) so an edited retry, or another
+    // payload (stop, signer, quantities, issue, ticket date) so an edited retry, or another
     // stop, mints a fresh key. complete_delivery refuses an already-completed delivery.
     // Fingerprint the date the driver chose, not the completion time derived from it:
     // "today" sends no p_completed_at but becomes a past date after midnight, and an
@@ -864,6 +872,7 @@ export default function FieldStop() {
                 uploading: uploadingPhoto,
               }}
               onSignatureChange={setSignatureDataUrl}
+              issue={{ type: issueType, notes: issueNotes, onTypeChange: setIssueType, onNotesChange: setIssueNotes }}
               extraOptions={(
                 <ProofOption
                   checked={noOnePresent}
@@ -925,6 +934,9 @@ export default function FieldStop() {
               <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Delivery</dt><dd className={isPartial ? 'font-semibold text-amber-800' : 'text-nav-dark'}>{isPartial ? `Partial — ${shortCount} short` : 'Full delivery'}</dd></div>
               <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Signed by</dt><dd className="text-nav-dark text-right break-words">{signedBy || '—'}</dd></div>
               <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Photos</dt><dd className="text-nav-dark">{photos.length}</dd></div>
+              {issueType !== 'none' && (
+                <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Issue</dt><dd className="font-semibold text-amber-800 text-right">{ISSUE_TYPE_LABELS[issueType]}</dd></div>
+              )}
             </dl>
             {/* Always shown: a receipt is asked for unless unticked, even when this screen cannot see the email. */}
             <div className="border-t border-gray-100 px-4 py-1">

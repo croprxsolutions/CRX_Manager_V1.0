@@ -36,18 +36,24 @@ export default function SignatureCanvas({
     });
 
     // Match the drawing surface to the box (high-DPI aware). The box resizes when a phone
-    // rotates, so redo it then and rescale any strokes already drawn to keep the pen under the finger.
+    // rotates, so redo it then. Strokes already drawn keep their shape: a bigger box leaves them
+    // where they are, a smaller one shrinks them evenly so the whole signature stays inside.
     let sizedWidth = 0;
+    let sizedHeight = 0;
     const fitToBox = () => {
       const boxWidth = canvas.offsetWidth;
-      if (!boxWidth || boxWidth === sizedWidth) return;
-      const scale = sizedWidth ? boxWidth / sizedWidth : 1;
+      const boxHeight = canvas.offsetHeight;
+      if (!boxWidth || (boxWidth === sizedWidth && boxHeight === sizedHeight)) return;
+      const scale = sizedWidth && sizedHeight
+        ? Math.min(1, boxWidth / sizedWidth, boxHeight / sizedHeight)
+        : 1;
       const strokes = pad.toData();
       const ratio = Math.max(window.devicePixelRatio || 1, 1);
       canvas.width = boxWidth * ratio;
-      canvas.height = canvas.offsetHeight * ratio;
+      canvas.height = boxHeight * ratio;
       canvas.getContext('2d')?.scale(ratio, ratio);
       sizedWidth = boxWidth;
+      sizedHeight = boxHeight;
       pad.clear();
       if (strokes.length) {
         pad.fromData(strokes.map((g) => ({ ...g, points: g.points.map((p) => ({ ...p, x: p.x * scale, y: p.y * scale })) })));

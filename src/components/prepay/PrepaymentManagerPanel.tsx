@@ -55,6 +55,10 @@ interface PrepayCredit {
 /** A Prepayment Manager check (not a payment's overpayment): its amounts are locked and it is deleted whole (M9). */
 const isPrepaymentCheck = (credit: PrepayCredit) => credit.source_type === 'check' && !credit.allocation_set_id;
 const CHECK_AMOUNT_LOCKED_HINT = 'Check amounts are locked. To correct a mistyped check, delete the whole check and enter it again.';
+/** A payment's overpayment: its payment records its amount, so it is never edited or deleted here; the payment is voided. */
+const isOverpayment = (credit: PrepayCredit) => credit.source_type === 'overpayment';
+const OVERPAYMENT_LOCKED_HINT = 'Overpayment amounts come from their payment. To undo one, void the payment.';
+const CREDIT_COLUMNS = 'id, customer_id, original_amount_cents, balance_cents, reference_number, bucket_label, notes, payment_method, source_type, source_reference, allocation_set_id, created_at';
 /** The parts of one Prepayment Manager check: its buckets share the check's reference and entry time. */
 const checkParts = (credit: PrepayCredit, all: PrepayCredit[]) => all.filter((c) => isPrepaymentCheck(c)
   && c.customer_id === credit.customer_id && c.source_reference === credit.source_reference && c.created_at === credit.created_at);
@@ -121,6 +125,10 @@ export default function PrepaymentManagerPanel() {
   // Delete credit modal
   const [deleteCredit, setDeleteCredit] = useState<PrepayCredit | null>(null);
   const [deleteReason, setDeleteReason] = useState('');
+  // A check's parts, read by the check itself (the credits list can stop at the row cap): null while loading.
+  const [deleteParts, setDeleteParts] = useState<PrepayCredit[] | null>(null);
+  const [deletePartsFailed, setDeletePartsFailed] = useState(false);
+  const deletePartsSeq = useRef(0);
   const [savingDelete, setSavingDelete] = useState(false);
 
   // (Assign-to-booking earmark modal removed 2026-06-14 — earmark engine shelved:
@@ -209,7 +217,7 @@ export default function PrepaymentManagerPanel() {
     setCreditsFailed(false);
     const { data, error } = await supabase
       .from('prepay_credits')
-      .select('id, customer_id, original_amount_cents, balance_cents, reference_number, bucket_label, notes, payment_method, source_type, source_reference, allocation_set_id, created_at')
+      .select(CREDIT_COLUMNS)
       .eq('customer_id', customerId)
       .order('created_at', { ascending: false });
     // Another customer was opened (or this one closed) while this loaded.
@@ -250,8 +258,8 @@ export default function PrepaymentManagerPanel() {
 
   const handleSaveEdit = async () => {
     if (!editCredit) return;
-    // A Prepayment Manager check's amount is locked: send its balance unchanged, so notes and reference still save.
-    const newBalanceCents = isPrepaymentCheck(editCredit) ? editCredit.balance_cents : parseDollarsToCents(editForm.balance);
+    // A Prepayment Manager check's or an overpayment's amount is locked: send its balance unchanged, so notes and reference still save.
+    const newBalanceCents = isPrepaymentCheck(editCredit) || isOverpayment(editCredit) ? editCredit.balance_cents : parseDollarsToCents(editForm.balance);
     // null = refused for excess precision. Never let it through as 0: the RPC
     // would wipe this live prepay bucket's balance to $0.
     if (newBalanceCents === null) {
@@ -299,9 +307,22 @@ export default function PrepaymentManagerPanel() {
   };
 
   // Delete credit
-  const openDelete = (credit: PrepayCredit) => {
+  const openDelete = async (credit: PrepayCredit) => {
+    const seq = ++deletePartsSeq.current;
     setDeleteCredit(credit);
     setDeleteReason('');
+    setDeleteParts(null);
+    setDeletePartsFailed(false);
+    if (!isPrepaymentCheck(credit)) return;
+    // Every part of this check (same customer, reference and entry time), however long the customer's list is.
+    let query = supabase.from('prepay_credits').select(CREDIT_COLUMNS)
+      .eq('customer_id', credit.customer_id).eq('source_type', 'check').is('allocation_set_id', null)
+      .eq('created_at', credit.created_at);
+    query = credit.source_reference === null ? query.is('source_reference', null) : query.eq('source_reference', credit.source_reference);
+    const { data, error } = await query;
+    if (seq !== deletePartsSeq.current) return;
+    if (error || !data) setDeletePartsFailed(true);
+    else setDeleteParts(checkParts(credit, data as PrepayCredit[]));
   };
 
   const handleConfirmDelete = async () => {
@@ -862,9 +883,9 @@ export default function PrepaymentManagerPanel() {
                                 >
                                   <Pencil className="w-3.5 h-3.5" />
                                 </button>
-                                {cr.balance_cents > 0 && (
+                                {cr.balance_cents > 0 && !isOverpayment(cr) && (
                                   <button
-                                    onClick={() => openDelete(cr)}
+                                    onClick={() => { void openDelete(cr); }}
                                     className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                     title="Delete credit"
                                   >
@@ -901,11 +922,11 @@ export default function PrepaymentManagerPanel() {
                 <span className="font-medium text-crx-green">{fmt(editCredit.balance_cents)}</span>
               </div>
             </div>
-            {isPrepaymentCheck(editCredit) ? (
+            {isPrepaymentCheck(editCredit) || isOverpayment(editCredit) ? (
               <div>
                 <span className="text-sm font-medium text-nav-dark">Balance</span>
                 <p className="mt-1 text-sm font-medium" data-testid="locked-check-balance">{fmt(editCredit.balance_cents)}</p>
-                <p className="mt-1 text-xs text-secondary">{CHECK_AMOUNT_LOCKED_HINT}</p>
+                <p className="mt-1 text-xs text-secondary">{isOverpayment(editCredit) ? OVERPAYMENT_LOCKED_HINT : CHECK_AMOUNT_LOCKED_HINT}</p>
               </div>
             ) : (
               <Input
@@ -973,13 +994,15 @@ export default function PrepaymentManagerPanel() {
                 <span>{deleteCredit.bucket_label || '—'}</span>
               </div>
               {isPrepaymentCheck(deleteCredit) ? (() => {
-                const parts = checkParts(deleteCredit, customerCredits);
+                const parts = deleteParts ?? [];
                 const total = parts.reduce((sum, c) => sum + c.balance_cents, 0);
                 return (
                   <div className="flex justify-between">
                     <span className="text-secondary">Whole check to remove</span>
                     <span className="font-medium text-red-600" data-testid="whole-check-total">
-                      {fmt(total)} ({parts.length} part{parts.length === 1 ? '' : 's'})
+                      {deletePartsFailed ? 'Could not load this check. Close and try again.'
+                        : deleteParts === null ? 'Loading…'
+                        : `${fmt(total)} (${parts.length} part${parts.length === 1 ? '' : 's'})`}
                     </span>
                   </div>
                 );
@@ -1002,6 +1025,7 @@ export default function PrepaymentManagerPanel() {
               <Button
                 onClick={handleConfirmDelete}
                 loading={savingDelete}
+                disabled={isPrepaymentCheck(deleteCredit) && deleteParts === null}
                 icon={<Trash2 className="w-4 h-4" />}
                 className="bg-red-600 hover:bg-red-700 text-white"
               >

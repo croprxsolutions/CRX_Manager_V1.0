@@ -11,6 +11,8 @@ type Row = Record<string, unknown>;
 
 const H = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
+  // The credits list a capped API page returns (null: every row); the check's own parts query still sees every row.
+  listPage: null as Row[] | null,
   toast: vi.fn(),
   rpc: vi.fn(),
 }));
@@ -20,7 +22,10 @@ vi.mock('../../lib/db', async () => {
   return {
     ...actual,
     supabase: {
-      from: (table: string) => buildInMemoryQuery(H.tables[table] ?? []),
+      from: (table: string) => {
+        if (table === 'prepay_credits' && H.listPage) { const page = H.listPage; H.listPage = null; return buildInMemoryQuery(page); }
+        return buildInMemoryQuery(H.tables[table] ?? []);
+      },
       rpc: H.rpc,
     },
   };
@@ -73,12 +78,31 @@ describe('Prepay Manager: Prepayment Manager check amounts (M9)', () => {
     })));
   });
 
-  it("keeps the balance editable for a payment's overpayment credit", async () => {
+  it("locks a payment's overpayment credit too: balance read-only, sent unchanged, and no delete (Sol PR final H1)", async () => {
     H.tables.prepay_credits = [credit('k1', 'CHK-1001', { source_type: 'overpayment', allocation_set_id: 'set-1' })];
+    H.rpc.mockResolvedValue({ data: { success: true }, error: null });
     await openCredits();
+    expect(screen.queryByTitle('Delete credit')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTitle('Edit credit'));
-    expect(screen.getByLabelText('Balance ($)')).toBeInTheDocument();
-    expect(screen.queryByTestId('locked-check-balance')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Balance ($)')).not.toBeInTheDocument();
+    expect(screen.getByTestId('locked-check-balance')).toHaveTextContent('$300.00');
+    expect(screen.getByText('Overpayment amounts come from their payment. To undo one, void the payment.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'paid twice' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(H.rpc).toHaveBeenCalledWith('edit_prepay_credit', expect.objectContaining({
+      p_credit_id: 'k1', p_new_balance_cents: 30000, p_notes: 'paid twice',
+    })));
+  });
+
+  it('totals the whole check from all its parts even when the credits list stopped before a part (Sol PR final H6)', async () => {
+    const k1 = credit('k1', 'CHK-1001');
+    const k2 = credit('k2', 'CHK-1001', { balance_cents: 20000, original_amount_cents: 20000 });
+    H.tables.prepay_credits = [k1, k2];
+    H.listPage = [k1];  // the list's API page ends before k2
+    await openCredits();
+    expect(screen.queryByText('$200.00')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Delete credit'));
+    expect(await screen.findByText('$500.00 (2 parts)')).toBeInTheDocument();
   });
 
   it('deleting a check shows the whole check before it goes, and the toast names all its parts', async () => {
@@ -89,7 +113,7 @@ describe('Prepay Manager: Prepayment Manager check amounts (M9)', () => {
     fireEvent.click(screen.getAllByTitle('Delete credit').find((b) => b.closest('tr')?.textContent?.includes('$300.00'))!);
 
     expect(screen.getByText(/This deletes the whole check: every part of it goes to \$0 together/)).toBeInTheDocument();
-    expect(screen.getByTestId('whole-check-total')).toHaveTextContent('$500.00 (2 parts)');
+    await waitFor(() => expect(screen.getByTestId('whole-check-total')).toHaveTextContent('$500.00 (2 parts)'));
     fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'entered wrong' } });
     fireEvent.click(screen.getByRole('button', { name: /Delete Whole Check/ }));
 

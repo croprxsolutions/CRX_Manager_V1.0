@@ -48,6 +48,8 @@
 --   Round 11: a Prepayment Manager check's amounts are locked (edit refuses PREPAY_CHECK_AMOUNT_LOCKED; notes and
 --   reference still change); delete_prepay_credit deletes the whole check (every bucket of its entry, one audit row,
 --   refused if any bucket was applied or reversed), and the gate skips an entry deleted whole.
+--   Round 14: an overpayment's amount is locked too (edit and delete refuse PREPAY_OVERPAYMENT_LOCKED; its payment is
+--   voided instead), so no Prepayment Manager action can break its payment's totals.
 --   A return also refuses a draft, void, cancelled or deleted invoice
 --   (RETURN_INVOICE_NOT_OPEN).
 --   5. get_prepay_balance_check(customer?): read-only; received - applied - refunded - returned = expected, against
@@ -761,12 +763,17 @@ BEGIN
   -- original amount and erase them). Reference, label and notes can still change; the screen always sends the
   -- balance, so an unchanged balance is treated as no balance change.
   -- A Prepayment Manager check's amounts are locked too (its creation entry records them; a mistyped check is deleted
-  -- whole and entered again).
+  -- whole and entered again). So is an overpayment's: its payment records it (an edit would break the payment's totals
+  -- and stop the customer's refunds and returns); the payment is voided instead.
   IF public._prepay_credit_reversed_20270225(p_credit_id)
-     OR (v_credit.source_type = 'check' AND v_credit.allocation_set_id IS NULL) THEN
+     OR (v_credit.source_type = 'check' AND v_credit.allocation_set_id IS NULL)
+     OR v_credit.source_type = 'overpayment' THEN
     IF p_new_balance_cents IS NOT NULL AND p_new_balance_cents IS DISTINCT FROM v_credit.balance_cents THEN
       IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
         RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; its balance cannot be edited';
+      END IF;
+      IF v_credit.source_type = 'overpayment' THEN
+        RAISE EXCEPTION 'PREPAY_OVERPAYMENT_LOCKED: an overpayment''s amount comes from its payment and cannot be edited; void the payment to undo it';
       END IF;
       RAISE EXCEPTION 'PREPAY_CHECK_AMOUNT_LOCKED: a prepayment check''s amount cannot be edited; delete the whole check and enter it again';
     END IF;
@@ -886,6 +893,11 @@ BEGIN
   -- original amount and erase them).
   IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
     RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; it cannot be deleted';
+  END IF;
+  -- M9: an overpayment comes from its payment (a delete would break the payment's totals and stop the customer's
+  -- refunds and returns); the payment is voided instead, which removes its credit.
+  IF v_credit.source_type = 'overpayment' THEN
+    RAISE EXCEPTION 'PREPAY_OVERPAYMENT_LOCKED: an overpayment comes from its payment and cannot be deleted; void the payment to undo it';
   END IF;
   -- M9: a Prepayment Manager check is deleted whole: every bucket its creation entry lists, together, in one audit
   -- row, refused when any bucket was applied or has a refund / returned-check line. Its amounts go to $0 (the entry
@@ -2012,12 +2024,17 @@ $m9blk$]),
   -- original amount and erase them). Reference, label and notes can still change; the screen always sends the
   -- balance, so an unchanged balance is treated as no balance change.
   -- A Prepayment Manager check's amounts are locked too (its creation entry records them; a mistyped check is deleted
-  -- whole and entered again).
+  -- whole and entered again). So is an overpayment's: its payment records it (an edit would break the payment's totals
+  -- and stop the customer's refunds and returns); the payment is voided instead.
   IF public._prepay_credit_reversed_20270225(p_credit_id)
-     OR (v_credit.source_type = 'check' AND v_credit.allocation_set_id IS NULL) THEN
+     OR (v_credit.source_type = 'check' AND v_credit.allocation_set_id IS NULL)
+     OR v_credit.source_type = 'overpayment' THEN
     IF p_new_balance_cents IS NOT NULL AND p_new_balance_cents IS DISTINCT FROM v_credit.balance_cents THEN
       IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
         RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; its balance cannot be edited';
+      END IF;
+      IF v_credit.source_type = 'overpayment' THEN
+        RAISE EXCEPTION 'PREPAY_OVERPAYMENT_LOCKED: an overpayment''s amount comes from its payment and cannot be edited; void the payment to undo it';
       END IF;
       RAISE EXCEPTION 'PREPAY_CHECK_AMOUNT_LOCKED: a prepayment check''s amount cannot be edited; delete the whole check and enter it again';
     END IF;
@@ -2031,6 +2048,11 @@ $m9blk$] || ARRAY[$m9blk$
   -- original amount and erase them).
   IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
     RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; it cannot be deleted';
+  END IF;
+  -- M9: an overpayment comes from its payment (a delete would break the payment's totals and stop the customer's
+  -- refunds and returns); the payment is voided instead, which removes its credit.
+  IF v_credit.source_type = 'overpayment' THEN
+    RAISE EXCEPTION 'PREPAY_OVERPAYMENT_LOCKED: an overpayment comes from its payment and cannot be deleted; void the payment to undo it';
   END IF;
   -- M9: a Prepayment Manager check is deleted whole: every bucket its creation entry lists, together, in one audit
   -- row, refused when any bucket was applied or has a refund / returned-check line. Its amounts go to $0 (the entry

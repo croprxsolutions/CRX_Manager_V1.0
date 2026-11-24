@@ -67,6 +67,9 @@ describe('sanitizeError', () => {
     const locked = sanitizeError({ message: "PREPAY_CHECK_AMOUNT_LOCKED: a prepayment check's amount cannot be edited; delete the whole check and enter it again" });
     expect(locked).toContain('delete the whole check and enter it again');
     expect(locked).not.toContain('PREPAY_CHECK_AMOUNT_LOCKED');
+    const over = sanitizeError({ message: "PREPAY_OVERPAYMENT_LOCKED: an overpayment comes from its payment and cannot be deleted; void the payment to undo it" });
+    expect(over).toContain('void the payment');
+    expect(over).not.toContain('PREPAY_OVERPAYMENT_LOCKED');
     const applied = sanitizeError({ message: 'PREPAY_CHECK_APPLIED: part of this check was applied to an invoice; it cannot be deleted' });
     expect(applied).toContain('applied to an invoice');
     expect(applied).not.toContain('PREPAY_CHECK_APPLIED');

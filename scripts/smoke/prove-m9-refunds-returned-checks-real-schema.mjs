@@ -282,7 +282,7 @@ function buildContainer() {
 const id = (n) => `e9090000-0000-4000-8000-${n.padStart(12, '0')}`;
 const ADMIN = id('a1'); const REP = id('b1');
 const C = { c1: id('c1'), c2: id('c2'), c3: id('c3'), c4: id('c4'), c5: id('c5'), c6: id('c6'), c7: id('c7'), c8: id('c8'),
-  c9: id('c9'), c10: id('c10'), c11: id('c11') };
+  c9: id('c9'), c10: id('c10'), c11: id('c11'), c12: id('c12') };
 const INV5 = id('e5'); const INV7 = id('e7'); const INV2 = id('e2'); const INV9 = id('e9'); const INV9B = id('e9b');
 const INV8 = { a: id('e8a'), b: id('e8b'), c: id('e8c') };
 const INV11 = { old: id('e11a'), now: id('e11b') };  // case 18: an invoice posted before the A/R cutoff, one today
@@ -401,7 +401,7 @@ function seed() {
   assert.equal(state.oct, 'closed', 'setup: October 2026 is closed');
   assert.equal(scalar(`SELECT sum(balance_cents) || ':' || (SELECT balance_cents FROM public.invoices WHERE id = '${INV7}') FROM public.prepay_credits WHERE customer_id = '${C.c7}';`), '35000:5000',
     'setup: c7 check has $350 left; its October invoice owes $50');
-  console.log('[setup] admin, rep, eleven customers; $500 prepay checks; Oct 15 $1,537 payment paid the $1,237 Oct 5 invoice (+$300 prepay); an October $500 prepay check in two buckets, $150 applied in October; October 2026 closed');
+  console.log('[setup] admin, rep, twelve customers; $500 prepay checks; Oct 15 $1,537 payment paid the $1,237 Oct 5 invoice (+$300 prepay); an October $500 prepay check in two buckets, $150 applied in October; October 2026 closed');
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1192,6 +1192,32 @@ kase('20) Sol final: a whole-check delete needs an open receipt month and a whol
   assert.deepEqual(o.before.map((b) => b.original_amount_cents).sort((a, b) => a - b), [5000, 10000], 'the audit keeps the amounts before the delete');
   assert.deepEqual([o.d1.credit_ids.length, o.d1.deleted_balance_cents], [2, 15000], 'the delete receipt names both parts and $150');
   assert.deepEqual([o.d2.credit_ids, o.d2.deleted_balance_cents, o.d2.idempotent], [o.d1.credit_ids, 15000, true], 'the retry answers with the same receipt');
+});
+
+kase('21) Sol PR final H1: an overpayment\'s amount is locked (edit and delete refused); the customer\'s refunds still work', () => {
+  const over = `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C.c12}' AND source_type = 'overpayment')`;
+  const chk = `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C.c12}' AND source_reference = 'CHK-21')`;
+  const r = ran(session(`${as(ADMIN)}
+    -- c12: a $200 check paid nothing yet, so all $200 is an overpayment credit; plus an unrelated $100 prepayment check.
+    SELECT public.allocate_payment('${C.c12}', 20000, 'check', 'M9-OVER-21', '2121', ${TODAY}, 'm9', '[]'::jsonb, '${ADMIN}', 'm9-c21-pay')::text AS pay \\gset
+    SELECT public.create_prepay_check_splits('${C.c12}', 'CHK-21', '[{"label":"A","amount_cents":10000}]'::jsonb, '${ADMIN}', 'm9-c21-chk')::text AS chk \\gset
+    ${refusal(`public.edit_prepay_credit(${over}, 15000, NULL, NULL, 'lower it', '${ADMIN}', 'm9-c21-edit-amount')`)}
+    ${refusal(`public.delete_prepay_credit(${over}, 'entered wrong', '${ADMIN}', 'm9-c21-del')`)}
+    SELECT public.edit_prepay_credit(${over}, 20000, 'REF-21', NULL, 'note only', '${ADMIN}', 'm9-c21-edit-notes')::text AS note \\gset
+    SELECT ${refund(C.c12, 1000, 'm9-c21-refund', { credit: chk, ref: 'QB 2101' })}::text AS rf \\gset
+    ${OWNER}
+    SELECT json_build_object('note', :'note'::jsonb, 'rf', :'rf'::jsonb,
+      'over', (SELECT original_amount_cents || ':' || balance_cents || ':' || reference_number FROM public.prepay_credits WHERE id = ${over}),
+      'stored', (SELECT prepay_balance_cents FROM public.customers WHERE id = '${C.c12}'),
+      'ok', (public.get_prepay_balance_check('${C.c12}') -> 0 ->> 'ok')::boolean)::text;`));
+  assert.deepEqual(r.refused.map((m) => /^([A-Z_]+)/.exec(m)?.[1] ?? m), ['PREPAY_OVERPAYMENT_LOCKED', 'PREPAY_OVERPAYMENT_LOCKED'],
+    `an amount edit and a delete of an overpayment: ${JSON.stringify(r.refused)}`);
+  const o = JSON.parse(r.last);
+  assert.equal(o.note.success, true, 'a notes and reference edit still saves');
+  assert.equal(o.over, '20000:20000:REF-21', "the overpayment's amount is unchanged");
+  assert.equal(o.rf.amount_cents, 1000, "a refund from the customer's other check still works");
+  assert.equal(o.stored, 20000 + 10000 - 1000, 'the stored balance');
+  assert.equal(o.ok, true, 'the balance check agrees');
 });
 
 const admin = (sql) => psql(sql, { user: 'supabase_admin', db: 'template1' });

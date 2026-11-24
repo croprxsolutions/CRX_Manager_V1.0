@@ -101,7 +101,10 @@ try {
   refused(USERS.admin, correct('k-off'), /PRODUCT_PARENT_EPA_CORRECTION_OFF/);
   console.log('[PAR1-ON] BEFORE: an admin\'s EPA correction is refused (switched off)');
 
-  docker(['cp', path.join(ROOT, 'supabase', 'migrations', CANDIDATE), `${NAME}:/tmp/candidate.sql`]);
+  // Stage the candidate with LF endings, as the replay and the live apply see it: a CRLF copy on a Windows
+  // checkout puts a carriage return into every function body and changes the cost-exposure keys checked below.
+  docker(['exec', '-i', NAME, 'sh', '-c', 'cat > /tmp/candidate.sql'], {
+    input: fs.readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n') });
   let r = applyFile(false);
   assert.notEqual(r.status, 0); assert.match(out(r), /PARENT_EPA_CORRECTION_ON_NOT_IN_TRANSACTION/);
   assert.equal(scalar('SELECT public._product_parent_epa_correction_enabled();'), 'f', 'a refused apply leaves the switch off');

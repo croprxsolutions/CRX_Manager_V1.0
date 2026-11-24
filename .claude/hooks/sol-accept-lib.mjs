@@ -10,7 +10,8 @@
 //      replies `accept <code> <reason>` in the session that built it
 //      (owner-approval-prompt.mjs records it through owner-approval-lib.mjs).
 //   3. When every BLOCKER/HIGH of that run is accepted, `--log` writes the
-//      DECISION_LOG.md entry; it is committed alone on top of the reviewed head.
+//      decision-log entry (a new decision-log.d/ file on a staging PR, else
+//      DECISION_LOG.md; ownerAcceptLogTarget); it is committed alone on top of the reviewed head.
 //   4. write-codex-push-proof.mjs --carry-owner-accepted checks that commit adds
 //      exactly that entry and writes a carried Sol proof (carry.mode
 //      "owner_accepted") bound to the new head, which the merge and apply gates accept.
@@ -511,6 +512,24 @@ export function insertDecisionEntry(log, entry) {
   const at = text.search(/^## /m);
   return at < 0 ? `${text.replace(/\n*$/, "\n\n")}${entry}` : `${text.slice(0, at)}${entry}${text.slice(at)}`;
 }
+
+export const DECISION_LOG_DIR = "docs/manual/decision-log.d";
+
+/**
+ * Where `--log` writes `entry` (Mason, 2026-11-23). A PR into staging gets its own new file in
+ * decision-log.d/, so parallel PRs never conflict on DECISION_LOG.md (GitHub ignores merge=union and a
+ * catch-up merge voids the exact-head carry). A review against main keeps DECISION_LOG.md, the one
+ * file .github/scripts/release-flow.mjs lets ride on a release head.
+ * @returns {{path: string, fragment: boolean}}
+ */
+export function ownerAcceptLogTarget(record, entry) {
+  if (record?.review_ref !== "origin/staging") return { path: DECISION_LOG_PATH, fragment: false };
+  const m = /^## (\d{4}-\d{2}-\d{2}) — #(\d+):/.exec(String(entry));
+  if (!m || !SHA_RE.test(String(record.head_sha))) throw new Error("the entry names no date and pull request");
+  return { path: `${DECISION_LOG_DIR}/${m[1]}-pr${m[2]}-sol-skip-${String(record.head_sha).slice(0, 12).toLowerCase()}.md`, fragment: true };
+}
+/** A fragment file's exact text: the entry, one entry per file, ending in one newline. */
+export const decisionFragmentText = (entry) => String(entry).replace(/\n+$/, "\n");
 
 /**
  * Every BLOCKER/HIGH of `record` must carry a valid acceptance, all for one pull request.

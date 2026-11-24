@@ -1549,6 +1549,8 @@ export interface PurchaseOrder {
   closed_at?: string | null;
   closed_by?: string | null;
   close_reason?: string | null;
+  /** KI-144: the vendor the PO's text named when written; kept across vendor renames. */
+  vendor_id?: string | null;
 }
 
 export interface PurchaseOrderItem {

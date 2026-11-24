@@ -1753,7 +1753,7 @@ function reviewProofValid(data, headSha, nowMs, ranKey, expectedBaseSha, maxAgeM
 // commit only updated the records after a live migration apply.
 // An "owner_accepted" carry (Mason, 2026-11-10) keeps the same base: the reviewed
 // run found BLOCKER/HIGH findings, Mason accepted every one by `accept <code>`, and
-// the one new commit only adds that DECISION_LOG.md entry (sol-accept-lib.mjs).
+// the one new commit only adds that decision-log entry (sol-accept-lib.mjs ownerAcceptLogTarget).
 const CARRY_SHA_RE = /^[0-9a-f]{40}$/i;
 export function carriedSolProof(data) {
   const carry = data?.carry;

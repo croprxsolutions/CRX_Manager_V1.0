@@ -11,14 +11,16 @@
 //     No code, no reason. Never send or relay the reply yourself.
 //
 //   node scripts/owner-accept-sol-finding.mjs --log
-//     Once every BLOCKER/HIGH of that run is skipped: writes the DECISION_LOG.md entry. With no reply,
+//     Once every BLOCKER/HIGH of that run is skipped: writes the decision-log entry. A PR into staging gets
+//     a new file docs/manual/decision-log.d/<date>-pr<n>-sol-skip-<head>.md (Mason, 2026-11-23: parallel PRs
+//     never conflict on it); a review against main still writes DECISION_LOG.md. With no reply,
 //     when Sol marked EVERY finding the same as one Mason skipped on this staging PR in the last 7 days,
 //     writes the carried entry instead (Mason, 2026-11-22; sol-accept-lib.mjs carryForRecord).
-//     Commit that file alone, then: node scripts/write-codex-push-proof.mjs --carry-owner-accepted
+//     Commit that one file alone, then: node scripts/write-codex-push-proof.mjs --carry-owner-accepted
 
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   OWNER_REQUEST_MAX_AGE_MS,
@@ -40,9 +42,11 @@ import { pullRequestUrlFor,
   carriedDecisionLogEntry,
   carryForRecord,
   collectAcceptances,
+  decisionFragmentText,
   decisionLogEntry,
   gateFilesIn,
   insertDecisionEntry,
+  ownerAcceptLogTarget,
   readSkipReceipts,
   skipDeadlineMs,
   solAcceptFileName,
@@ -103,7 +107,7 @@ function carryNow(pr) {
   const c = carryForRecord({ record, proofs: readLocalProofs(checkout), git, prNumber: pr.number, prUrl: pr.url });
   return c.problem ? null : c;
 }
-const NO_QUESTION = "Sol marked every finding a repeat of a skip Mason already gave on this pull request, so it carries: do not ask him. Run node scripts/owner-accept-sol-finding.mjs --log, commit docs/manual/DECISION_LOG.md alone, then node scripts/write-codex-push-proof.mjs --carry-owner-accepted";
+const NO_QUESTION = "Sol marked every finding a repeat of a skip Mason already gave on this pull request, so it carries: do not ask him. Run node scripts/owner-accept-sol-finding.mjs --log, commit the one file it writes alone, then node scripts/write-codex-push-proof.mjs --carry-owner-accepted";
 
 const argv = process.argv.slice(2);
 
@@ -116,13 +120,19 @@ if (argv.length === 1 && argv[0] === "--log") {
   if (carried) entry = carriedDecisionLogEntry({ record, accepted: carried.accepted });
   else if (!got.problem) entry = decisionLogEntry({ record, accepted: got.accepted });
   else die(`${got.problem}. Every BLOCKER/HIGH of the run needs Mason's own skip reply first.`);
-  const file = path.join(checkout, ...DECISION_LOG_PATH.split("/"));
-  // Untrimmed: the proof writer rebuilds this file from the committed bytes exactly.
-  const committed = String(execFileSync("git", ["show", `HEAD:${DECISION_LOG_PATH}`], {
-    cwd: checkout, encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024,
-  }));
-  writeFileSync(file, insertDecisionEntry(committed, entry), "utf8");
-  console.log(`Wrote the entry to ${DECISION_LOG_PATH}. Commit that file alone, then run:`);
+  const target = ownerAcceptLogTarget(record, entry);
+  const file = path.join(checkout, ...target.path.split("/"));
+  if (target.fragment) {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, decisionFragmentText(entry), "utf8");
+  } else {
+    // Untrimmed: the proof writer rebuilds this file from the committed bytes exactly.
+    const committed = String(execFileSync("git", ["show", `HEAD:${DECISION_LOG_PATH}`], {
+      cwd: checkout, encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024,
+    }));
+    writeFileSync(file, insertDecisionEntry(committed, entry), "utf8");
+  }
+  console.log(`Wrote the entry to ${target.path}. Commit that one file alone, then run:`);
   console.log("  node scripts/write-codex-push-proof.mjs --carry-owner-accepted");
   process.exit(0);
 }

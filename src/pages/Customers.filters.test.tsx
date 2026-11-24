@@ -491,4 +491,29 @@ describe('Customers list filters', () => {
       }
     }
   });
+
+  it('an empty list says the search or filters hide the customers, and Clear filters restores the default view', async () => {
+    renderCustomers();
+    await screen.findByText('Active Assigned Farm');
+
+    fireEvent.change(screen.getByLabelText('Filter by tier'), { target: { value: '3' } });
+    fireEvent.change(screen.getByPlaceholderText('Search customers...'), { target: { value: 'Active' } });
+    expect(await screen.findByText('No customers match your search or filters')).toBeInTheDocument();
+    expect(screen.queryByText('No customers yet')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(await screen.findByText('Active Assigned Farm')).toBeInTheDocument();
+    expect(screen.getByText('Active Unassigned Farm')).toBeInTheDocument();
+    // The default view stays the active book.
+    expect(screen.queryByText('Retired Farm')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by tier')).toHaveValue('');
+    expect(screen.getByPlaceholderText('Search customers...')).toHaveValue('');
+  });
+
+  it('says "No customers yet" only when there are none on file', async () => {
+    mockTables([]);
+    renderCustomers();
+    expect(await screen.findByText('No customers yet')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument();
+  });
 });

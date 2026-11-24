@@ -32,6 +32,7 @@ import type { PickListData } from '../lib/orderPickListPdf';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
+import { filteredEmptyProps } from '../components/ui/filteredEmpty';
 import type { Order } from '../types';
 import { getSeasonDates } from '../utils/season';
 import { toSentryError } from '../lib/sentryError';
@@ -97,6 +98,14 @@ export default function Orders() {
   }), [debouncedSearch, statusFilter, planFilter, pricingFilter, splitFilter, sort]);
   const queryKey = JSON.stringify(query);
   const listBusy = isListBusy(pageLoading, search, debouncedSearch);
+  const filtering = hasOrderFilters(search, [statusFilter, planFilter, pricingFilter, splitFilter]);
+  const clearFilters = () => {
+    setSearch('');
+    setStatusFilter('');
+    setPlanFilter('');
+    setPricingFilter('');
+    setSplitFilter('');
+  };
 
   // Each page is read from the bookmark (the last row) of the page before it, so orders removed in
   // between never push one past the screen. afters[i] is page i's bookmark; the last one is on screen.
@@ -686,18 +695,7 @@ export default function Orders() {
             sortState={sort}
             onSortChange={setSort}
             onRowClick={(row) => navigate(`/orders/${row.id}`)}
-            emptyTitle="No orders yet"
-            emptyDescription="Start by creating a quote in Sales → Quotes, then convert it to an order. Or create a direct order below."
-            emptyAction={
-              <div className="flex gap-2">
-                <Button variant="secondary" icon={<FileText className="w-4 h-4" />} onClick={() => navigate('/quotes/new')}>
-                  New Quote
-                </Button>
-                <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/orders/new')}>
-                  New Order
-                </Button>
-              </div>
-            }
+            {...ordersEmptyProps(filtering, clearFilters, navigate)}
             loading={listBusy}
             loadError={loadFailed}
             onRetry={fetchOrders}
@@ -826,6 +824,30 @@ function OrdersPager({ totals, page, rowsShown, busy, hasNext, onPrevious, onNex
 /** Rows on screen are stale while a read runs or a typed search waits out its 300 ms debounce; Select All also waits for its own read. */
 function isListBusy(pageLoading: boolean, search: string, debouncedSearch: string, selectingAll = false): boolean {
   return pageLoading || selectingAll || search.trim() !== debouncedSearch;
+}
+
+/** "No orders yet" only when nothing hides them: a search or filter that matches nothing says so and offers to clear it. */
+function ordersEmptyProps(filtering: boolean, onClear: () => void, navigate: (to: string) => void) {
+  if (filtering) return filteredEmptyProps('orders', onClear);
+  return {
+    emptyTitle: 'No orders yet',
+    emptyDescription: 'Start by creating a quote in Sales → Quotes, then convert it to an order. Or create a direct order below.',
+    emptyAction: (
+      <div className="flex gap-2">
+        <Button variant="secondary" icon={<FileText className="w-4 h-4" />} onClick={() => navigate('/quotes/new')}>
+          New Quote
+        </Button>
+        <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/orders/new')}>
+          New Order
+        </Button>
+      </div>
+    ),
+  };
+}
+
+/** A typed search or any filter narrows the list, so an empty list is not proof there are no orders. */
+function hasOrderFilters(search: string, filters: string[]): boolean {
+  return search.trim() !== '' || filters.some(Boolean);
 }
 
 /** State saved for one query (page, totals, "select all"), or null once the query has changed. */

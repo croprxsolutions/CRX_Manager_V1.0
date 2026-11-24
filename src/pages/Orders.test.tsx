@@ -39,7 +39,7 @@ vi.mock('../components/ui/PageHeader', () => ({
 }));
 // The table shows each row's tick box (the first column) and the filters, so selection can be driven.
 vi.mock('../components/ui/DataTable', () => ({
-  default: ({ data, columns, filters, loading, loadError, searchValue, onSearchChange }: {
+  default: ({ data, columns, filters, loading, loadError, searchValue, onSearchChange, emptyTitle, emptyAction }: {
     data: Array<{ id: string; order_number: string }>;
     searchValue?: string;
     onSearchChange?: (v: string) => void;
@@ -47,11 +47,14 @@ vi.mock('../components/ui/DataTable', () => ({
     filters?: ReactNode;
     loading?: boolean;
     loadError?: boolean;
+    emptyTitle?: string;
+    emptyAction?: ReactNode;
   }) => (
     <div>
       <input aria-label="Search orders or products…" value={searchValue ?? ''} onChange={(e) => onSearchChange?.(e.target.value)} />
       {filters}
       {loadError ? <span>could not be loaded</span> : <span>{`${data.length} rows shown`}</span>}
+      {!loading && !loadError && data.length === 0 && <div>{emptyTitle}{emptyAction}</div>}
       {loading ? <span>rows loading</span> : data.map((row) => (
         <div key={row.id}>
           {row.order_number}
@@ -222,6 +225,34 @@ describe('Orders list pages through the database', () => {
     await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_keyset_page', expect.objectContaining({ p_needs_split_billing: true })));
     expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Select All 120/ })).not.toBeInTheDocument();
+  });
+
+  it('an empty list says the filters hide the orders, and Clear filters brings the whole list back', async () => {
+    const all = Array.from({ length: 3 }, (_, i) => order(i));
+    mockRpc.mockImplementation((_fn: string, args: PageArgs & { p_status?: string; p_search?: string }) =>
+      Promise.resolve({ data: pageOf(args.p_status || args.p_search ? [] : all, args), error: null }));
+    renderPage();
+    await screen.findByText('3 rows shown');
+
+    fireEvent.change(screen.getByLabelText('Filter by order status'), { target: { value: 'voided' } });
+    fireEvent.change(screen.getByLabelText('Search orders or products…'), { target: { value: 'nothing' } });
+    expect(await screen.findByText('No orders match your search or filters')).toBeInTheDocument();
+    expect(screen.queryByText('No orders yet')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(await screen.findByText('3 rows shown')).toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by order status')).toHaveValue('');
+    expect(screen.getByLabelText('Search orders or products…')).toHaveValue('');
+    const lastArgs = mockRpc.mock.calls[mockRpc.mock.calls.length - 1][1];
+    expect(lastArgs.p_status).toBeUndefined();
+    expect(lastArgs.p_search).toBeUndefined();
+  });
+
+  it('says "No orders yet" only when no search or filter is set', async () => {
+    serveOrders([]);
+    renderPage();
+    expect(await screen.findByText('No orders yet')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument();
   });
 
   it('a failed read says so and shows no count or total', async () => {

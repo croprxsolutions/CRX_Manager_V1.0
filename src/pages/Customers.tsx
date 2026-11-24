@@ -21,6 +21,7 @@ import { namesCutFarm } from '../lib/customerDeactivation';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { SkeletonTable } from '../components/ui/Skeleton';
+import { filteredEmptyProps } from '../components/ui/filteredEmpty';
 import type { Customer } from '../types';
 
 /** Sentinel for the "no rep assigned" option — a real rep id is never this. */
@@ -63,6 +64,7 @@ export default function Customers() {
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
   const [repFilter, setRepFilter] = useState('');
   const [needsFilter, setNeedsFilter] = useState<ProfileNeedFilter>('');
+  const [search, setSearch] = useState('');
   const [repNames, setRepNames] = useState<Record<string, string>>({});
   const [assignableReps, setAssignableReps] = useState<Array<{ id: string; name: string }>>([]);
   const [assignableRepsLoading, setAssignableRepsLoading] = useState(true);
@@ -174,6 +176,15 @@ export default function Customers() {
     if (needsFilter && needsFilter !== 'ready' && !needs.includes(needsFilter)) return false;
     return true;
   });
+
+  // Back to the default view: the active book, no search (every status when none is active, so Clear always shows someone).
+  const clearFilters = () => {
+    setSearch('');
+    setStatusFilter(customers.some((c) => c.is_active) ? 'active' : 'all');
+    setRepFilter('');
+    setTierFilter('');
+    setNeedsFilter('');
+  };
 
   // Only reps that actually hold accounts in the loaded book — an empty option
   // that always filters to zero rows is worse than no option.
@@ -596,14 +607,19 @@ export default function Customers() {
             searchable
             searchPlaceholder="Search customers..."
             searchKeys={['farm_name', 'contact_name', 'phone', 'email']}
+            searchValue={search}
+            onSearchChange={setSearch}
             onRowClick={(row) => navigate(`/customers/${row.id}`)}
-            emptyTitle="No customers yet"
-            emptyDescription="Add your first customer to start quoting"
-            emptyAction={
-              <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/customers/new')}>
-                Add Customer
-              </Button>
-            }
+            // The whole book is loaded, so an empty list with customers on file means a search or filter hides them.
+            {...(customers.length > 0 ? filteredEmptyProps('customers', clearFilters) : {
+              emptyTitle: 'No customers yet',
+              emptyDescription: 'Add your first customer to start quoting',
+              emptyAction: (
+                <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/customers/new')}>
+                  Add Customer
+                </Button>
+              ),
+            })}
             loading={loading}
             loadError={loadError}
             onRetry={retryCustomers}

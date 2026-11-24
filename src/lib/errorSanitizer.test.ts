@@ -7,7 +7,7 @@ describe('sanitizeError', () => {
       expect(sanitizeError({ message: code })).toMatch(/^Nothing was saved\. This price sheet can no longer be used: it was already applied/);
     }
     expect(sanitizeError(new Error('PRICING_DUPLICATE_PRODUCT_ID')))
-      .toBe('Nothing was saved. The same product appears on more than one row of the price sheet. Delete the extra copy and upload it again');
+      .toBe('Nothing was saved. The same product appears on more than one row of the price sheet. Download a fresh price sheet and make your changes in it, without copying or pasting product rows');
   });
 
   it('explains a refused delivery Unassigned in plain words', () => {

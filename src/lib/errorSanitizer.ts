@@ -18,8 +18,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Product price sheet: the server refuses a used, expired or someone else's sheet, or a sheet listing a product twice.
   [/^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/,
    'Nothing was saved. This price sheet can no longer be used: it was already applied, is more than 7 days old, came from an older template, or was downloaded by another user. Download a fresh price sheet and make your changes in it'],
-  [/^PRICING_DUPLICATE_PRODUCT_ID\b/, 'Nothing was saved. The same product appears on more than one row of the price sheet. Delete the extra copy and upload it again'],
-  [/^PRODUCT_CATEGORY_RETIRED\b/,'This category is retired. Choose an active category'],
+  [/^PRICING_DUPLICATE_PRODUCT_ID\b/, 'Nothing was saved. The same product appears on more than one row of the price sheet. Download a fresh price sheet and make your changes in it, without copying or pasting product rows'],
+  [/^PRODUCT_CATEGORY_RETIRED\b/, 'This category is retired. Choose an active category'],
   [/^PRODUCT_CATEGORY_NAME_REQUIRED\b/, 'Enter a category name'],
   [/^PRODUCT_CATEGORY_FIELDS_REQUIRED\b/, 'Choose a category status and sort order'],
   [/^PRODUCT_CATEGORY_NAME_TOO_LONG\b/, 'Use 100 characters or fewer for a category name'],

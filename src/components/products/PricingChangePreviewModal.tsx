@@ -30,7 +30,7 @@ const ERROR_MESSAGES: Record<string, string> = {
     'Say where the new price or cost came from, such as a supplier quote (the price_source column on a price sheet).',
   // The database refuses these before saving anything; say which cell rule broke, not the code.
   PRICING_DOLLARS_INVALID:
-    'A price or cost on this row is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34: no $ sign, commas, letters or minus sign. Price and cost cells cannot be blank.',
+    'A price or cost on this row is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34: no $ sign, commas, letters or minus sign. The cost and any tier price you change cannot be blank.',
   PRICING_PRICE_INVALID:
     'A tier price must be 0 or more, with at most 2 decimals.',
   PRICING_COST_INVALID:
@@ -40,9 +40,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   PRICING_MARGIN_INVALID:
     'Each margin % must be from 0 up to, but not including, 100.',
   PRICE_DRIVEN_FIELDS_INVALID:
-    'A price-driven row needs all three tier prices filled in.',
+    'A price-driven change needs all three tier prices filled in, and no margin % changes.',
   MARGIN_DRIVEN_FIELDS_INVALID:
-    'A margin-driven row needs all three tier margin % cells filled in.',
+    'A margin-driven change needs all three tier margin % values filled in, and no price changes.',
   PRICE_DRIVEN_COMPANION_FIELDS_CHANGED:
     'This row is price-driven, so its margin % cells must stay as downloaded. Change the prices, or set pricing_mode to margin_driven to change margins.',
   MARGIN_DRIVEN_COMPANION_FIELDS_CHANGED:
@@ -64,7 +64,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   WORKBOOK_IDENTITY_OR_BASELINE_TAMPERED:
     'Protected product or baseline pricing details no longer match the exported worksheet.',
   WORKBOOK_BLANK_MODE_CHANGED_VALUES:
-    'Prices or costs changed on this row, but its pricing_mode cell is blank. Choose price_driven or margin_driven.',
+    'Prices, costs or margin % changed on this row, but its pricing_mode cell is blank. Choose price_driven or margin_driven.',
   WORKBOOK_V2_EXPORT_REQUIRED:
     'This workbook is from an older template. Export a fresh Product pricing workbook and try again.',
   PRODUCT_INFO_FIELDS_REQUIRED:
@@ -525,7 +525,7 @@ export default function PricingChangePreviewModal({
               aria-expanded={showUnchanged}
               onClick={() => setUnchangedOpenFor(showUnchanged ? null : preview)}
             >
-              {showUnchanged ? 'Hide' : 'Show'} {foldedRows.length} unchanged row{foldedRows.length === 1 ? '' : 's'}
+              {showUnchanged ? 'Hide' : 'Show'} {foldedRows.length.toLocaleString()} unchanged row{foldedRows.length === 1 ? '' : 's'}
             </Button>
           )}
         </div>

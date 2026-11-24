@@ -1366,7 +1366,7 @@ export default function Products() {
                 onClick={() => void handleExportPricingWorkbook(false)}
                 loading={workbookBusy}
                 disabled={listBlocked || !parentsReady || filtered.length === 0}
-                title="The selected products, or every active product the category, vendor and status filters show. The search box does not narrow this file."
+                title="The selected products, or every active product the filters show. The search box does not narrow this file."
               >
                 Pricing .xlsx
               </Button>

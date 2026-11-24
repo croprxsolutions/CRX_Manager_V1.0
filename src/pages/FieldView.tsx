@@ -85,6 +85,7 @@ import FieldBoundaryLayer from '../components/map/FieldBoundaryLayer';
 import ErrorBoundary from '../components/ErrorBoundary';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import PhoneHeader from '../components/ui/PhoneHeader';
+import CompletionWeatherFields from '../components/jobs/CompletionWeatherFields';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -801,15 +802,12 @@ export default function FieldView() {
                         <WifiOff className="w-4 h-4" aria-hidden="true" /> You're offline &mdash; this will save now and sync when you reconnect.
                       </p>
                     )}
+                    <CompletionWeatherFields
+                      value={completeForm}
+                      onChange={(patch) => setCompleteForm((p) => ({ ...p, ...patch }))}
+                      otherJobs={cards.filter((c) => c.job_id !== card.job_id)}
+                    />
                     <div className="grid grid-cols-2 gap-2 mb-3">
-                      <FieldInput label="Wind Speed (mph)" value={completeForm.wind_speed}
-                        onChange={(v) => setCompleteForm((p) => ({ ...p, wind_speed: v }))} />
-                      <FieldInput label="Wind Direction" value={completeForm.wind_direction}
-                        onChange={(v) => setCompleteForm((p) => ({ ...p, wind_direction: v }))} placeholder="e.g. NW" />
-                      <FieldInput label="Temperature (°F)" value={completeForm.temperature}
-                        onChange={(v) => setCompleteForm((p) => ({ ...p, temperature: v }))} />
-                      <FieldInput label="Humidity (%)" value={completeForm.humidity}
-                        onChange={(v) => setCompleteForm((p) => ({ ...p, humidity: v }))} />
                       <FieldInput label="Actual Gallons" value={completeForm.actual_gallons_applied}
                         onChange={(v) => setCompleteForm((p) => ({ ...p, actual_gallons_applied: v }))} />
                     </div>
@@ -1065,15 +1063,16 @@ function Section({ icon, title, tone = 'green', children }: { icon: JSX.Element;
 
 /** Compact labeled number input for the Complete Job form. */
 function FieldInput({
-  label, value, onChange, placeholder,
-}: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  label, value, onChange,
+}: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <label className="block">
       <span className="block text-sm font-semibold text-nav-dark mb-1">{label}</span>
       <input
-        type={placeholder ? 'text' : 'number'}
+        type="number"
+        inputMode="decimal"
+        step="any"
         value={value}
-        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         className="h-11 w-full bg-white border border-gray-300 rounded-lg px-3 text-base text-nav-dark placeholder:text-gray-500"
       />

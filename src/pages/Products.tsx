@@ -290,6 +290,14 @@ export default function Products() {
   const [workbookBusy, setWorkbookBusy] = useState(false);
   const [tableRevision, setTableRevision] = useState(0);
   const [isEditingProducts, setIsEditingProducts] = useState(false);
+  // A floor read failed while the table was in edit mode: its floor drafts were typed against floors that may since
+  // have changed, so they stay unsaveable until the edit is cancelled or saved, even after Try again (#2308).
+  const [floorDraftsVoid, setFloorDraftsVoid] = useState(false);
+  if (floorsFailed && isEditingProducts && !floorDraftsVoid) setFloorDraftsVoid(true);
+  const changeEditMode = (editing: boolean) => {
+    setIsEditingProducts(editing);
+    if (!editing) setFloorDraftsVoid(false);
+  };
   const pricingWorkbookInputRef = useRef<HTMLInputElement>(null);
 
   const previewPricingIdem = useIdempotencyKey('preview_product_pricing_changes', profile?.id || '');
@@ -763,6 +771,7 @@ export default function Products() {
       if (hasFloor) {
         // A draft typed before the floors read failed must not save over floors this page cannot show (#2160).
         if (marginFloorsLoadFailed) throw new Error('Margin floors have not loaded. Use Try again, then enter the floor changes again.');
+        if (floorDraftsVoid) throw new Error('Margin floors were read again after a failure. Cancel, then enter the floor changes again.');
         return await saveMarginFloors(changes);
       }
 
@@ -931,11 +940,15 @@ export default function Products() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `crx-product-pricing-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      anchor.download = `crx-product-pricing-${todayInBusinessTz()}.xlsx`;
       anchor.click();
       URL.revokeObjectURL(url);
       exportPricingIdem.resetKeyFor(exportIntent);
-      toast('success', `Exported ${productIds.length} Product pricing row(s).`);
+      // The table's search box lives inside the table, so a filtered export never sees it.
+      const scope = !fullSheet && selectedRows.length === 0
+        ? ' The search box does not narrow this file: tick products to export only those.'
+        : '';
+      toast('success', `Exported ${productIds.length} Product pricing row(s).${scope}`);
     } catch (error) {
       toast('error', sanitizeError(error));
     } finally {
@@ -1353,7 +1366,7 @@ export default function Products() {
                 onClick={() => void handleExportPricingWorkbook(false)}
                 loading={workbookBusy}
                 disabled={listBlocked || !parentsReady || filtered.length === 0}
-                title="The selected products, or every active product the filters show"
+                title="The selected products, or every active product the filters show. The search box does not narrow this file."
               >
                 Pricing .xlsx
               </Button>
@@ -1466,7 +1479,7 @@ export default function Products() {
             loadError={loadError}
             onRetry={retryProducts}
             canEdit={isAdmin && !listStale}
-            onEditModeChange={setIsEditingProducts}
+            onEditModeChange={changeEditMode}
             onSave={handleBulkSave}
             headerActions={(
               <>

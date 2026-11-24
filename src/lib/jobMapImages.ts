@@ -17,6 +17,8 @@ const MAPBOX_FETCH_TIMEOUT_MS = 10_000;
 
 export interface JobFieldMapImage {
   fieldId: string;
+  /** Spray order on this job, 1-based (from job_fields.sort_order; restarts per job). */
+  sprayNumber?: number;
   fieldName: string;
   customerName: string | null;
   acres: number | null;
@@ -107,6 +109,7 @@ interface BoundaryFeatureCollection {
 
 interface ParsedJobField {
   id: string;
+  sprayNumber: number;
   name: string;
   customerId: string;
   acres: number | null;
@@ -512,8 +515,9 @@ async function addAcreageLabels(
   options: Pick<BuildStaticUrlOptions, 'width' | 'height' | 'padding'>,
 ): Promise<string> {
   const labels: AcreageLabel[] = fields.flatMap((field) => {
-    const text = formatAcreageLabel(field.acres);
-    return field.centroidLat != null && field.centroidLng != null && text
+    const acres = formatAcreageLabel(field.acres);
+    const text = acres ? `${field.sprayNumber} · ${acres}` : String(field.sprayNumber);
+    return field.centroidLat != null && field.centroidLng != null
       ? [{ lat: field.centroidLat, lng: field.centroidLng, text }]
       : [];
   });
@@ -631,6 +635,18 @@ async function fieldObstacleFeatures(fieldIds: string[]): Promise<BoundaryFeatur
 }
 
 /**
+ * Number one job's fields 1..n in spray order (sort_order, then the RPC's order),
+ * counting every job field, mapped or not, so map numbers match the sheet's stops.
+ * An unset sort_order counts as 0, exactly as the sheet's fetch does (chemicalApplicationReportFetch).
+ */
+export function sprayNumbersByFieldId(rows: Array<Pick<JobMapFieldRow, 'id' | 'sort_order'>>): Map<string, number> {
+  return new Map(rows
+    .map((row, index) => ({ id: row.id, order: row.sort_order ?? 0, index }))
+    .sort((first, second) => first.order - second.order || first.index - second.index)
+    .map((row, rank) => [row.id, rank + 1] as const));
+}
+
+/**
  * Fetch the satellite overview and close-up maps for one saved job.
  *
  * Failures are deliberately non-fatal: a field sheet remains printable without a
@@ -666,6 +682,8 @@ export async function fetchJobMapImages(
     } catch (error) {
       console.warn('Unable to load job-specific field acres for applicator-sheet maps.', error);
     }
+    // Spray numbers 1, 2, 3 follow job_fields.sort_order for THIS job only (Sol 86).
+    const sprayNumberById = sprayNumbersByFieldId(rows);
     const fields = rows
       .map((row): ParsedJobField | null => {
         const geometry = parseGeoJsonGeometry(row.boundary_geojson);
@@ -673,6 +691,7 @@ export async function fetchJobMapImages(
         const centroid = centroidFromGeoJson(row.centroid_geojson);
         return {
           id: row.id,
+          sprayNumber: sprayNumberById.get(row.id) ?? 0,
           name: row.field_name,
           customerId: row.customer_id,
           acres: jobAcresByFieldId.get(row.id) ?? null,
@@ -681,7 +700,8 @@ export async function fetchJobMapImages(
           geometry,
         };
       })
-      .filter((field): field is ParsedJobField => field !== null);
+      .filter((field): field is ParsedJobField => field !== null)
+      .sort((first, second) => first.sprayNumber - second.sprayNumber);
 
     if (fields.length === 0) {
       console.warn('Skipping applicator-sheet maps because this job has no field boundaries.');
@@ -728,6 +748,7 @@ export async function fetchJobMapImages(
         if (!dataUrl) continue;
         perField.push({
           fieldId: field.id,
+          sprayNumber: field.sprayNumber,
           fieldName: field.name,
           customerName: customerNames.get(field.customerId) ?? null,
           acres: field.acres,

@@ -153,9 +153,8 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId,
         <div className="space-y-3">
           <p className="text-xs text-gray-600">
             The lowest net margin (profit % of price) this product should sell at. Tiers below it are flagged here and
-            on the Products list. The price sheet does not check floors yet, so a below-floor price can still be
-            applied there without a warning. Leave it blank for no floor. The floor saves on its own with Save floor,
-            not with Save Changes.
+            on the Products list. The price sheet warns about a below-floor price and asks for a reason before it
+            is applied. Leave it blank for no floor. The floor saves on its own with Save floor, not with Save Changes.
           </p>
           {underTiers.length > 0 && (
             <div className="flex items-start gap-2 p-2 rounded-lg border border-amber-300 bg-amber-50 text-xs text-amber-900" role="status">

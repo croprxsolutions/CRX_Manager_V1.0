@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-24 — Rate switch: a label maximum whose unit cannot be compared needs no over-label reason
+
+**Decision:** switching a product group to its approved rate asks for a typed over-label reason only when the rate is above a label maximum the app can compare; a maximum whose unit or basis it cannot compare ("not checked") lets the switch through with no reason, as Rate Review's own approval does. Mason, 2026-11-24, answering P1's Sol round 2 HIGH: "No, keep as is".
+**Why:** one rule in both places; the switch publishes a rate Rate Review already approved under that rule.
+**What this forbids/implies:** do not add a reason requirement for "not checked" to the switch alone (`20270301200000_rate_switch_recheck.sql`); a change to this rule changes Rate Review too and needs Mason's new decision.
+
 ## 2026-11-23 — Terra is the final review for ordinary code; Sol stays on money, inventory, database and logins
 
 **Decision (Mason, in chat, 2026-11-23: "i want docs, simple edits etc to not spend 20 min waiting on sol … keep sol on money, database, and inventory … use terra where we can for final review", then chose A on each question and "Yes, build it").** Reverses part (3) of the 2026-11-06 entry ("Terra is not added as a second reviewer"). Docs and wording with no app code get no Codex review; ordinary code off `docs/reference/sol-required-paths.md` gets ONE `gpt-6.1-terra`/`high` final review (`node scripts/luna-review.mjs --terra`) instead of Luna rounds or Sol; Sol-list changes keep Luna then Sol. A large or unclear change may choose Sol; no size limit is enforced. Terra is advisory: no gate checks for it and it never counts as the Sol proof.

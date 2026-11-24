@@ -1535,7 +1535,7 @@ export default function DeliveryDetail() {
         level: 'warning', extra: { context: 'close_delivery_receipt after Email Confirmation', deliveryId },
       });
       // Not "mark it handled": the close may have failed because a newer receipt the customer is owed replaced it (Sol HIGH).
-      toast('warning', 'The email went out, but the app could not confirm its receipt was closed. Check "Customer receipts to check" before marking anything handled: if this delivery was completed again, the customer may be owed a newer receipt.');
+      toast('warning', 'The email went out, but the app could not confirm its receipt was closed. It stays on "Customer receipts to check" for an admin, who should check it before marking anything handled: if this delivery was completed again, the customer may be owed a newer receipt.');
     }
   };
 

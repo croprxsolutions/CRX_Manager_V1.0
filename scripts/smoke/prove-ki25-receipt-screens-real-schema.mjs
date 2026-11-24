@@ -120,6 +120,17 @@ try {
   assert.match(repClose('ki25s-h2-wrong'), /RECEIPT_HANDLED_ADMIN_ONLY/,
     'a failed send, another address, another sender, a send before the pause or another delivery is no proof');
   assert.equal(status(D(2)), 'needs_check', 'refused closes leave it listed');
+  // A send made before this receipt was queued is for an earlier receipt (L2), even if the pause is older still.
+  const pausedAt = `(SELECT hand_send_at FROM public.delivery_receipt_queue WHERE delivery_id = '${D(2)}')`;
+  // Only the queue time can refuse it here: drop the earlier decoy (it is after the queue time) and pause before queueing.
+  psql(`DELETE FROM public.email_log WHERE idempotency_key = 'delivery_completed:delivery:${D(2)}:before-pause';
+    UPDATE public.delivery_receipt_queue SET hand_send_at = created_at - interval '10 minutes' WHERE delivery_id = '${D(2)}';`);
+  logSend('before-queued', { at: "(SELECT created_at FROM public.delivery_receipt_queue WHERE delivery_id = '" + D(2) + "') - interval '1 second'" });
+  assert.match(repClose('ki25s-h2-old'), /RECEIPT_HANDLED_ADMIN_ONLY/, 'a send before the receipt was queued is no proof');
+  // A repeat pause by the same rep keeps the first pause time, so it never moves past a send already logged (Luna MED).
+  const firstPause = scalar(`SELECT ${pausedAt}::text;`);
+  assert.equal(JSON.parse(close(USERS.rep, D(2), 'manual_send', 'ki25s-pause-2b')).outcome, 'paused');
+  assert.equal(scalar(`SELECT ${pausedAt}::text;`), firstPause, 'a repeat pause keeps the first pause time');
   logSend('real');
   assert.equal(lastJson(closeAt(USERS.rep, D(2), 'handled', 'ki25s-handled-2', paused.queued_at)).outcome, 'closed',
     'the rep who paused it closes it after their logged hand send, as DeliveryDetail does');

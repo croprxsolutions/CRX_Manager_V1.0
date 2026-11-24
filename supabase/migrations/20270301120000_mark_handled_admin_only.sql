@@ -12,6 +12,9 @@
 --   re-queue after a cancel gives a new one) in three new nullable columns on delivery_receipt_queue.
 --   A rep's 'handled' that would change nothing (none / sent) or hits the in-flight refusal answers as before.
 --   Admins, drivers, 'manual_send', the expected-receipt check and every other line of 20270223120000's body: unchanged.
+--   KNOWN LIMITS (no worse than the server's own sender, which also emails the address on file): a rep can edit the
+--   customer's email (customers_update allows reps) before sending, and a rep calling send-email by hand writes the
+--   email body; the rule proves an email to the address on file went out, not what it said.
 --   A rep whose send was not logged as sent (provider failure, a lost post-send update) is refused: the receipt stays
 --   on "Customer receipts to check" for an admin (fails safe).
 --
@@ -151,7 +154,8 @@ BEGIN
                 WHERE starts_with(e.idempotency_key, 'delivery_completed:delivery:' || p_delivery_id::text || ':')
                   AND e.status = 'sent' AND e.created_by = v_actor AND e.customer_id = v_row.customer_id
                   AND lower(btrim(e.recipient_email)) = lower(btrim(c.email))
-                  AND e.created_at >= v_row.hand_send_at - interval '1 minute')) THEN
+                  AND e.created_at >= v_row.hand_send_at - interval '1 minute'
+                  AND e.created_at >= v_row.created_at)) THEN  -- never a send made for an earlier receipt
     -- Mason, 2026-11-23: only an admin marks a receipt handled. A sales rep may close only the receipt they paused
     -- for their own Email Confirmation and then emailed (the screen's close after the hand send).
     RAISE EXCEPTION 'RECEIPT_HANDLED_ADMIN_ONLY: only an admin can mark a customer receipt handled'
@@ -164,7 +168,12 @@ BEGIN
            -- Who paused this receipt for a hand send, and which receipt (a re-queue gives a new created_at).
            hand_send_by = CASE WHEN p_reason = 'manual_send' THEN v_actor ELSE hand_send_by END,
            hand_send_queued_at = CASE WHEN p_reason = 'manual_send' THEN v_row.created_at ELSE hand_send_queued_at END,
-           hand_send_at = CASE WHEN p_reason = 'manual_send' THEN clock_timestamp() ELSE hand_send_at END,
+           -- A repeat pause of this receipt by the same user (a retry) keeps the first pause time, so it never moves
+           -- past a send already logged (Luna MED).
+           hand_send_at = CASE WHEN p_reason <> 'manual_send' THEN hand_send_at
+                               WHEN v_row.status = 'needs_check' AND v_row.hand_send_by = v_actor
+                                    AND v_row.hand_send_queued_at = v_row.created_at AND v_row.hand_send_at IS NOT NULL
+                               THEN v_row.hand_send_at ELSE clock_timestamp() END,
            last_error = left(CASE WHEN p_reason = 'handled'
                                   THEN 'Marked handled by ' || left(COALESCE(v_name, 'staff'), 60) || '; the server will not send it.'
                                   ELSE 'Email Confirmation started by ' || left(COALESCE(v_name, 'staff'), 60)
@@ -210,7 +219,7 @@ BEGIN
      OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee = 0) THEN
     RAISE EXCEPTION 'POSTFLIGHT: close_delivery_receipt lost its owner, mode, search_path or grants';
   END IF;
-  IF md5(replace(p.prosrc, chr(13), '')) <> '340cd88d9c3cc582c112fe4f1a3f43a6' THEN
+  IF md5(replace(p.prosrc, chr(13), '')) <> '87de5a691187908d12ba14497b73b42d' THEN
     RAISE EXCEPTION 'POSTFLIGHT: close_delivery_receipt is not this migration''s body (admin-only rule)';
   END IF;
 END;

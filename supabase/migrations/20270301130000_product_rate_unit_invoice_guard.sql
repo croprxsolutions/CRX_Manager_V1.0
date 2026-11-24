@@ -49,7 +49,7 @@ $preflight$;
 
 CREATE FUNCTION public._product_rate_unit_invoiceable(p_rate_unit text, p_sold_unit text, p_form text) RETURNS boolean
 LANGUAGE sql IMMUTABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-  SELECT NULLIF(btrim(p_rate_unit), '') IS NULL
+  SELECT COALESCE(p_rate_unit, '') = ''  -- only these fall back to the sold unit in the field app; spaces do not
       OR COALESCE(p_sold_unit, '') !~ '[[:alnum:]]'
       OR public.field_app_priced_quantity(1, p_rate_unit, p_sold_unit, p_form) IS NOT NULL;
 $function$;
@@ -103,7 +103,7 @@ DECLARE
   v_problem text;
 BEGIN
   IF TG_OP = 'UPDATE'
-     AND NULLIF(btrim(NEW.rate_unit), '') IS NOT DISTINCT FROM NULLIF(btrim(OLD.rate_unit), '')
+     AND NEW.rate_unit IS NOT DISTINCT FROM OLD.rate_unit
      AND NEW.inventory_unit IS NOT DISTINCT FROM OLD.inventory_unit
      AND NEW.unit_size IS NOT DISTINCT FROM OLD.unit_size
      AND NEW.product_form IS NOT DISTINCT FROM OLD.product_form THEN
@@ -130,7 +130,7 @@ BEGIN
 
   -- Rule 1.
   IF NOT v_restoring
-     AND (TG_OP = 'INSERT' OR NULLIF(btrim(NEW.rate_unit), '') IS DISTINCT FROM NULLIF(btrim(OLD.rate_unit), '')
+     AND (TG_OP = 'INSERT' OR NEW.rate_unit IS DISTINCT FROM OLD.rate_unit
           OR NEW.inventory_unit IS DISTINCT FROM OLD.inventory_unit OR NEW.product_form IS DISTINCT FROM OLD.product_form)
      AND NOT public._product_rate_unit_invoiceable(NEW.rate_unit, NEW.inventory_unit, NEW.product_form::text) THEN
     RAISE EXCEPTION 'PRODUCT_RATE_UNIT_NOT_INVOICEABLE: field-app invoices could not convert the rate unit "%" of "%" to its sold unit "%" (%); use a rate unit that converts, or leave it blank',
@@ -142,7 +142,9 @@ BEGIN
   IF TG_OP = 'UPDATE' AND NOT v_restoring AND v_parent.rate_source = 'approved' THEN
     v_problem := public._product_size_restore_problem(v_parent.id, NEW.rate_unit, NEW.inventory_unit, NEW.unit_size,
                                                       NEW.product_form::text);
-    IF v_problem IS NOT NULL THEN
+    -- A size that already could not switch back stays editable (like rule 2); only a change that breaks it is refused.
+    IF v_problem IS NOT NULL AND public._product_size_restore_problem(v_parent.id, OLD.rate_unit, OLD.inventory_unit,
+                                                                      OLD.unit_size, OLD.product_form::text) IS NULL THEN
       RAISE EXCEPTION 'PRODUCT_PARENT_SIZE_NOT_RESTORABLE: "%" could not be switched back to its old rate after this change to "%": %; switch the group back to its old rate first',
         v_parent.name, NEW.product_name, v_problem
         USING ERRCODE = 'check_violation';

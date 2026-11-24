@@ -94,3 +94,17 @@ HIGH: the products trigger read the group without a lock, so a size edit that wa
 group on its old rate and skip rule 3. Fixed: it reads the group `FOR SHARE`, like the member trigger, so it waits for
 the switch and then sees the group as the switch left it. A size edit that already holds its row while a switch waits
 for it ends in a database deadlock error for one of the two, which saves nothing; the user retries.
+
+## Sol round 1 (2026-11-24)
+
+- HIGH fixed: a rate unit of only spaces was treated as blank, but the field app copies it (it falls back to the sold
+  unit only on an empty value), so invoices refused it. Only NULL or an empty string is blank now, and rules 1-2 compare
+  the stored text, so changing a blank to spaces is a change. Prover: a spaces-only rate unit on a Gal product is refused.
+- MED fixed: rule 3 refused any edit to a size that already could not switch back (for example a unit-size fix). It now
+  refuses only a change that breaks a size that could switch back. Prover: a unit-size edit on such a size saves.
+- MED (deadlock) left as designed: an edit already holding a size's row while a switch or its preview holds the group
+  ends in a database deadlock error for one of them. Nothing is saved; the user retries. Taking the group lock first is
+  not possible from a row trigger.
+- LOW answered: the browser role cannot write products directly (permission denied, checked by the prover run), so
+  the direct writes stay as the database owner and are labelled as proof for any writer; the spaces case is also proven
+  through the app's group rates save as the signed-in admin (that save already refuses it as an unknown unit).

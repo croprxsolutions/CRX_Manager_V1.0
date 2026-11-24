@@ -150,6 +150,14 @@ function main() {
   // A direct INSERT carrying the bad unit is refused by the same rule.
   refused(attempt(ADMIN, `INSERT INTO public.products (product_name, sku, product_form, inventory_unit, unit_size, rate_unit)
     VALUES ('[RUG] r3-direct', 'RUG-R3-DIRECT', 'dry', 'MG', 'MG', 'Lb'); v := 'x';`), NOT_INVOICEABLE);
+  // Direct table writes run as the database owner on purpose: the browser role cannot write products at all
+  // (permission denied), so these show the trigger refuses any writer, e.g. a migration or a service job.
+  // A rate unit of only spaces is not blank to the field app (it copies it), so it is refused too (Sol r1 HIGH),
+  // directly and through the app's group rates save.
+  // (the group rates save already refuses it as an unknown unit before this guard)
+  refused(rates(P.Mg, 3, '   ', 'rug-r3-spaces-rates'), /PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATE_UNIT_NOT_INVOICEABLE/);
+  refused(attempt(ADMIN, `INSERT INTO public.products (product_name, sku, product_form, inventory_unit, unit_size, rate_unit)
+    VALUES ('[RUG] r3-spaces', 'RUG-R3-SPACES', 'liquid', 'Gal', 'Gal', '   '); v := 'x';`), NOT_INVOICEABLE);
 
   // R4: a blank rate that keeps a unit invoices cannot convert is refused; blank rate and unit saves; a converting
   // unit saves.
@@ -183,6 +191,8 @@ function main() {
   ok(add(P.Appr, 'qt', 'rug-r7-appr', { commit: true }));
   ok(cutover(P.Appr, 'restore', 'rug-restore-Appr', { commit: true }));
   assert.equal(sizeUnits(P.Appr), 'Gal:48 oz,qt:48 oz');
+  // A size that already could not switch back (lb on MG) stays editable: a unit size fix saves (Sol r1 MED).
+  ok(attempt(ADMIN, `UPDATE public.products SET unit_size = '1 MG' WHERE id = '${P.OldBadSize}'; v := 'x';`));
   // Rule 4: switching back puts a pre-guard bad unit back (lb on MG), which rule 1 would refuse elsewhere.
   ok(cutover(P.OldBad, 'restore', 'rug-restore-OldBad', { commit: true }));
   assert.equal(sizeUnits(P.OldBad), 'MG:2 Lb');

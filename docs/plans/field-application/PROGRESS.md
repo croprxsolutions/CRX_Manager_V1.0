@@ -91,7 +91,7 @@ Paperwork follow-ups (logged, not fixed; none touches money, stock or data):
 | Set Primary removed; main payer is the database rule (owner if paying, else largest share) | DONE (Mason, 2026-11-24) | | PR body must say it reaches live in the SAME release as FP-1 |
 | Save locks the page and reloads fresh | DONE (Mason, 2026-11-24) | | Replaced keep-editing-and-merge after the save/reload logic drew a HIGH in Luna rounds 2, 4 and 5 |
 | Different product and application shares | DEFERRED to FP-4 | | Screen shows both columns but refuses unequal shares with the database's plain message until FP-4 |
-| Note edited on a payer then removed before save | FOLLOW-UP | | The note change is not sent; re-adding the payer shows the old note (visible, editable). Needs the notes RPC to accept removed payers |
+| Note edited on a payer then removed before save | DONE | | Sent when that payer already has a saved note on the field (FP-1 keeps those editable) |
 
 ## Needs another lane
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  clearSplitSaveKey, evenMicroShares, microToPctText, pctTextToMicro, splitProblem, splitSaveErrorMessage, splitSaveKey,
+  clearSplitSaveKey, evenMicroShares, payerNoteChanges, microToPctText, pctTextToMicro, splitProblem, splitSaveErrorMessage, splitSaveKey,
 } from './fieldSplit';
 
 describe('field split shares (micro-percent)', () => {
@@ -34,6 +34,15 @@ describe('field split shares (micro-percent)', () => {
     expect(splitSaveErrorMessage('FIELD_SPLIT_CLEAR_REFUSED: who pays is already set')).toMatch(/cannot be left blank/);
     expect(splitSaveErrorMessage('PAGE_ACCESS_DENIED: fields')).toMatch(/Fields & Maps/);
     expect(splitSaveErrorMessage('something else')).toBe('something else');
+  });
+});
+
+describe('payer note changes', () => {
+  it('keeps an edit to a payer removed before saving when that payer has a saved note; skips unsaved strangers', () => {
+    const saved = { a: 'old', b: 'landlord' };
+    expect(payerNoteChanges(['a'], { a: 'old', b: 'landlord, call first', c: 'typed then removed' }, saved))
+      .toEqual([{ customer_id: 'b', notes: 'landlord, call first' }]);
+    expect(payerNoteChanges(['a'], { a: ' old ', b: 'landlord' }, saved)).toEqual([]);
   });
 });
 

@@ -54,6 +54,18 @@ export function splitProblem(rows: SplitShareRow[]): string | null {
   return null;
 }
 
+/**
+ * Payer-note edits to send: for payers in the split, plus anyone with a saved note on this field (the database keeps
+ * those editable), so an edit to a payer removed before saving is not silently dropped.
+ */
+export function payerNoteChanges(
+  payerIds: string[], notes: Record<string, string>, saved: Record<string, string>,
+): Array<{ customer_id: string; notes: string | null }> {
+  return [...new Set([...payerIds, ...Object.keys(saved)])]
+    .filter((id) => (notes[id] ?? '').trim() !== (saved[id] ?? '').trim())
+    .map((id) => ({ customer_id: id, notes: (notes[id] ?? '').trim() || null }));
+}
+
 const SHARES_MUST_MATCH = 'For now each payer\'s product and application shares must be the same; different shares come with the next billing update.';
 
 const SERVER_MESSAGES: Array<[string, string]> = [

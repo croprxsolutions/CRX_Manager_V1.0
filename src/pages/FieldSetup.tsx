@@ -57,6 +57,7 @@ import {
   MICRO_100,
   microToExactPct,
   microToPctText,
+  payerNoteChanges,
   pctTextToMicro,
   splitProblem,
   splitSaveErrorMessage,
@@ -343,7 +344,7 @@ function FieldSetupPage() {
       if (editedMidSave) setIsDirty(true);
       return;
     }
-    const notesSame = billingSplits.every((r) => (payerNotes[r.customer_id] ?? '').trim() === (loadedNotesRef.current[r.customer_id] ?? '').trim());
+    const notesSame = payerNoteChanges(billingSplits.map((r) => r.customer_id), payerNotes, loadedNotesRef.current).length === 0;
     if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current && notesSame && splitFrom === today) return;
     setIsDirty(true);
   }, [field, billingSplits, payerNotes, splitFrom, today]);
@@ -687,9 +688,7 @@ function FieldSetupPage() {
         return;
       }
     }
-    const notesChanges = billingSplits
-      .filter((r) => (payerNotes[r.customer_id] ?? '').trim() !== (loadedNotesRef.current[r.customer_id] ?? '').trim())
-      .map((r) => ({ customer_id: r.customer_id, notes: (payerNotes[r.customer_id] ?? '').trim() || null }));
+    const notesChanges = payerNoteChanges(billingSplits.map((r) => r.customer_id), payerNotes, loadedNotesRef.current);
 
     // Same 0.1–5000 band the import + the measured-boundary path enforce — so a typed override
     // (e.g. "what the monitor showed", with no map drawn) goes through the same safety gate.

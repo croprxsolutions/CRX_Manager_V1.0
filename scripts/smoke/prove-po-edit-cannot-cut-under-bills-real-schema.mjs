@@ -149,6 +149,11 @@ try {
       UPDATE public.purchase_order_items SET unit_size = ${stored} WHERE id = '${L2A}'; SET LOCAL session_replication_role = origin;
       ${asUser(`r := ${save(PO2, 'submitted', [[L2A, 10, 0]], 'call vendor').replace('"unit_size":"Gal"', '"unit_size":null')};`)} v := ${total(PO2)};`), 'ok|10000');
   }
+  // Luna: a save that leaves line notes out keeps the stored notes on a billed PO.
+  assert.equal(attempt(USERS.admin, `SET LOCAL session_replication_role = replica;
+    UPDATE public.purchase_order_items SET notes = 'deliver to barn' WHERE id = '${L1B}'; SET LOCAL session_replication_role = origin;
+    ${asUser(`r := ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0]], 'admin note')};`)}
+    v := (SELECT notes FROM public.purchase_order_items WHERE id = '${L1B}');`), 'ok|deliver to barn');
   // 4c. Sol round 3 HIGH: a rep's huge quantity on a billed PO is refused before any arithmetic, with the same text
   // as every other refusal (no overflow error that would depend on the hidden cost).
   assert.equal(msgOf(USERS.rep, saveAs(USERS.rep, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 10000000000000000, 0]])), repBig);

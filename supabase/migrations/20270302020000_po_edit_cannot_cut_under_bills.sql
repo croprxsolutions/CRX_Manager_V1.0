@@ -114,8 +114,9 @@ BEGIN
           USING ERRCODE = '22023';
       END IF;
       -- Unchanged lines: save them without costs (an omitted cost is kept, so no cost confirmation or cost log) and
-      -- with the stored product name (the screen resends the current catalog name).
-      SELECT jsonb_agg((t.e - 'unit_cost' - 'unit_cost_cents') || jsonb_build_object('product_name', poi.product_name)
+      -- with the stored product name and line notes (the screen resends the catalog name and may omit notes).
+      SELECT jsonb_agg((t.e - 'unit_cost' - 'unit_cost_cents')
+                         || jsonb_build_object('product_name', poi.product_name, 'notes', to_jsonb(poi)->'notes')
                        ORDER BY t.o)
         INTO v_items
         FROM jsonb_array_elements(v_items) WITH ORDINALITY AS t(e, o)

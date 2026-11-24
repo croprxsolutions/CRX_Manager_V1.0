@@ -490,6 +490,14 @@ function afterCases() {
   d = delivery(A(), 'in_progress', DRV);
   refused(completeNoProof(d, 'pbl-6a', B(), DRV), /NO_PROOF_ADMIN_ONLY/, DRV);
   refused(completeTicket(d, 'pbl-6b', id('999999'), B()), /PAPER_TICKET_PHOTO_MISSING/);
+  // The same photo id in capitals is not a way round the load check: the evidence step reads only the lower-case
+  // spelling, so it refuses the call as a missing photo before this check runs.
+  const u = delivery(A());
+  const uPhoto = photo(u, A());
+  swap(u, B(), 'pbl-6u-edit');
+  start(u, 'pbl-6u-start');
+  refused(completeTicket(u, 'pbl-6u', uPhoto.toUpperCase()), /PAPER_TICKET_PHOTO_MISSING/);
+  assert.equal(status(u), 'in_progress');
   const other = delivery(A(), 'in_progress');
   refused(`SELECT public.complete_delivery(p_delivery_id => '${other}', p_signed_by => '[PROVER] Customer', p_performed_by => '${DRV}',
     p_idempotency_key => 'pbl-6c', p_evidence => 'no_proof', p_evidence_ref => '[PROVER] customer was away, office confirmed', p_lines_seen => ${J(B())})`,
@@ -501,7 +509,7 @@ function afterCases() {
   const z = delivery(A(), 'in_progress');
   const zLine = scalar(`SELECT id FROM public.delivery_items WHERE delivery_id = '${z}';`);
   refused(completeSig(z, 'pbl-6z', B()).replace(', p_lines_seen', `, p_quantities => ${J({ [zLine]: 0 })}, p_lines_seen`), /DELIVERY_NOTHING_DELIVERED/);
-  console.log('[case 6] with a stale list: a driver\'s no-proof attempt still gets NO_PROOF_ADMIN_ONLY, a missing ticket photo PAPER_TICKET_PHOTO_MISSING, a driver not on the load "Not authorized", nothing delivered DELIVERY_NOTHING_DELIVERED');
+  console.log('[case 6] with a stale list: a driver\'s no-proof attempt still gets NO_PROOF_ADMIN_ONLY, a missing ticket photo (or a bound one in capitals) PAPER_TICKET_PHOTO_MISSING, a driver not on the load "Not authorized", nothing delivered DELIVERY_NOTHING_DELIVERED');
 
   // 7. A retry of case 1's completed call returns its saved receipt, even though its list is now stale... and a
   //    different list under the same key is the same completion (the list is not part of the fingerprint).

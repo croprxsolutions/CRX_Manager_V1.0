@@ -435,7 +435,7 @@ if (verdict?.decision !== "allow") {
 console.log("APPLY GATE PASSED — ordering, autopilot state, destructive-content, reviewer proof and Codex gate all satisfied.");
 const ownerApproval = verdict.ownerApproval || null;
 if (ownerApproval) {
-  console.log(`OWNER APPROVAL: an approval recorded from Mason's reply in this session covers this exact file, pull request and head (valid until ${ownerApproval.expiresAt}; one use).`);
+  console.log(`OWNER APPROVAL: an approval recorded from Mason's reply covers this exact file and pull request (valid until ${ownerApproval.expiresAt}; one use).`);
 }
 // Mason's per-PR "skip coderabbit" waiver stood in for the review: say so,
 // never "clean" (Codex App P2 on #1035).
@@ -528,6 +528,8 @@ if (ownerApproval) {
 // LIVE PREREQUISITE, ENFORCED INSIDE THE TRANSACTION (#2193, Sol HIGH). The read
 // above is an early, friendly refusal; this re-count runs under the ingredient
 // lock, so an ingredient retired after that read still stops the load here.
+// Plain BEGIN is READ COMMITTED: the re-count sees every commit made before the
+// SHARE lock was granted, and the lock blocks any later retirement (#2230).
 let prerequisiteGuard = "";
 try { prerequisiteGuard = prerequisiteGuardSql({ tag, name: migName, sql }); }
 catch (err) { die(2, `apply-migration-file: ${err?.message || err}. Refusing to transmit.`); }

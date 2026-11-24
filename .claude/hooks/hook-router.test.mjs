@@ -138,8 +138,8 @@ try {
   rmSync(temp, { recursive: true, force: true });
 }
 
-eq(promptModulesFor("codex").length, 2, "Codex prompt router has two shared modules (owner-approval reply, CodeRabbit skip)");
-eq(promptModulesFor("claude").length, 2, "Claude prompt router has no Claude-only modules");
+eq(promptModulesFor("codex").length, 3, "Codex prompt router has three shared modules (owner-approval reply, CodeRabbit skip, Taha lane override)");
+eq(promptModulesFor("claude").length, 3, "Claude prompt router has no Claude-only modules");
 ok(!promptModulesFor("claude").includes("./hold-latch-prompt.mjs"), "the hold latch is not routed (Mason, 2026-10-29)");
 for (const surface of ["claude", "codex"]) {
   ok(promptModulesFor(surface).includes("./owner-approval-prompt.mjs"), `${surface} still routes the owner-approval reply`);

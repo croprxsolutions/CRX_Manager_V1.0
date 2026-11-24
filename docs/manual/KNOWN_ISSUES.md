@@ -54,7 +54,8 @@ Fix first: see "Top 5" in [MASTER_FIX_PLAN.md](MASTER_FIX_PLAN.md).
 There are 28 items: 2 BLOCKER and 26 HIGH (statuses re-checked against PRs merged to staging).
 - 11 (SOL-1 to SOL-6, SOL-8 to SOL-12) are resolved: Mason chose to remove the staging-only release pass, and PR #2203 merged to staging 2026-11-22.
 - 7 are fixed on staging but not live yet (SOL-7, KI-129 payments part, KI-125, #2196, #2063, KI-199, KI-119).
-- 10 are open, partly open or check-first.
+- 1 is resolved as disproved (KI-75, 2026-11-23).
+- 9 are open, partly open or check-first.
 
 Each item's full entry is in its area section below. "Severity unsure" marks a rating that needs more checking. "Check first" means a credible report that reading the code could not settle.
 
@@ -85,7 +86,7 @@ Each item's full entry is in its area section below. "Severity unsure" marks a r
 | Quotes and bookings | KI-190 | HIGH | Open | Two reps drawing from one booking can order at quantities or prices that neither of them saw. | Taha |
 | Orders and deliveries | KI-167 | HIGH (severity unsure) | Open | The office must fix a line's unit by hand before it can be re-delivered. No amounts change. | Taha |
 | Inventory | KI-168 | HIGH (severity unsure) | Open | That purchase cannot be used as an actual-cost basis. Nothing reads it yet because costing is parked. | Agent (unassigned) |
-| Payments | KI-75 | HIGH (severity unsure) | Check first | Applying a credit memo could clash with another action happening at the same moment. | Taha |
+| Payments | KI-75 | HIGH (severity unsure) | Resolved: disproved 2026-11-23 (two-session test; the key lock serializes it) | Applying a credit memo could clash with another action happening at the same moment. | None (closed) |
 | Permissions | KI-169 | HIGH | Open | Hiding Invoices or Record Payments from a person still lets them reach those actions in the database. | Taha |
 | Permissions | KI-119 | HIGH | Fixed on staging, not live | A person with Reports hidden can still pull report data. | Agent (release) |
 
@@ -445,6 +446,8 @@ recomputing margins from prices; consider failing closed instead of defaulting t
 Re-checked 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md)): 587 of 588 margins
 consistent, 1 outlier. Related catalog gaps found the same day, all for Mason (To-Do decision 27): 3 products have
 Tier 2 above Tier 3; 3 active products have no cost, 4 have no Tier 1 price, and 12 have no container size.
+Answered 2026-11-23 (Mason: "Intended, leave them"): those catalog gaps are intended and need no fix. The stale
+margins above are not part of that answer.
 
 ### KI-160 — Two stock counts open on the same product apply the same correction twice
 
@@ -478,6 +481,9 @@ fully received PO's header total is 1¢ off the sum of its 39 lines (rounding or
 Repair step 5 (To-Do 0.17).
 
 ### KI-144 — A purchase order's vendor is free text, not a link to the vendor list
+
+> **Fix in review (Lane E, 2026-11-22):** database part `20270227120000_po_vendor_link.sql` (link column for new POs, no
+> backfill (Mason: "drop old-po linking"), bill check by vendor id; Mason: "Keep original name"). Stays open until the screens and reports read the link.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-10.
 
@@ -919,6 +925,14 @@ days)", and have `save_customer` refuse terms the parser would default.
 
 ### KI-75 — Retry-key detail (extends KI-10, KI-11)
 
+> **Closed 2026-11-23 (disproved), Taha:** the credit-memo apply race cannot happen. `check_idempotency` takes
+> `pg_advisory_xact_lock('crx:idempotency:' || key)` before it reads (`20260714230000_gauntlet_core_guards`,
+> `20260716160000_fix_idempotency_committed_replay_guard`), so every call with one key waits for the first to commit.
+> Two-session test on a synthetic local database, session A holding its transaction open 6 s: the same key and same
+> arguments → B waits, then returns A's application id (one application, memo debited once); the same key with
+> another target → B is refused with `IDEMPOTENCY_ARGUMENT_MISMATCH` and the second invoice is untouched. Nothing
+> else in this entry is open.
+
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Check first · HIGH · Taha (to 2026-12-15) · plan W1-13. The credit-memo apply race after the lock was not re-proven in this pass.
 
 **HIGH on money paths · OPEN · money**
@@ -1016,19 +1030,6 @@ Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`
 `get_monthly_summary.ar_balance_cents` has no date filter, so a past month shows today's receivables. The AR Aging tab
 has the real as-of figure. Fix: relabel "Current AR (today)" or reuse `get_ar_aging(p_period_end)`.
 
-### KI-133 — Profitability and Gross Sales report booked orders as "revenue" without saying so
-
-> **Fix in review (Lane E, 2026-11-22):** the reports say "Booked Sales" with a one-line basis note. Drafts need no
-> filter: the database refuses a draft order status (`orders_status_check`), so Gross Sales cannot include one.
-
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-26.
-
-**LOW · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 decision conflicts) · unassigned**
-Both sum confirmed and partly fulfilled order lines, so undelivered value counts as revenue and profit and credits are
-not subtracted, while Bottom Line P&L uses posted invoices. The order basis is recorded intent (sales-reports build
-sheet, "roadmap area 2"), but the screens don't say "booked". The two also differ on drafts (Gross Sales includes
-them; none exist today). Fix: label as booked sales and align the draft filter.
-
 ### KI-154 — A commission can be paid out before the customer has paid
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Mason decision · plan W2-23.
@@ -1042,22 +1043,6 @@ credits move a commission (returns are KI-13). Decided 2026-11-13 (DECISION_LOG)
 is invoiced (by share billed, KI-125) and becomes payable only when the customer pays, a partial payment releasing the
 same share. Fix later: enforce the payable rule, per sale and per paid share, in the payout function.
 - **Commission basis ignores the standing discount (re-verified 2026-11-21, [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)).** Order commission is figured from `orders.total_profit` before the standing grower discount (`20270117130000_standing_discount_in_order_profit.sql` ~L21 says "commission after the discount is its own planned change"), while the invoice and profit reports subtract the discount. Not tracked elsewhere; latent on production while the billing switch is off. Separate from the payout gap above (payout checks pending status ~L1154-1183 and header-to-items balance ~L744-761 in `20261204100000`, but no customer-payment eligibility). To-Do 8.5 needs two distinct acceptance checks: commission is figured on profit after the standing discount, and it is released in proportion to customer payments.
-
-### KI-135 — "Inventory Value" label: relabel as pricing-basis value (D12 item 7)
-
-> **Fix in review (Lane E, 2026-11-22):** labels say "price-list cost"; the per-row report and CSV mark rows left out of
-> the total (CSV value blank, "In Total" column); profit and margin carry the saved-pricing-cost note.
-
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-27.
-
-**LOW · OPEN · inventory/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #3) · unassigned**
-The value bug itself is fixed (closed list, item 21). What remains is D12 item 7: label the Inventory page card and the
-Reports Inventory Cost total as a value at price-list cost, not a book or accounting value. The same applies to margin
-and profit figures built on the saved pricing cost: label them "margin at saved pricing cost", since that cost is not
-necessarily what the supplier bill said ([business logic review](../audits/2026-11-11-business-logic-review.md) finding 7).
-Also (2026-11-13 [Product Master review](../audits/2026-11-13-product-master-review.md) C-10): the per-row Inventory Cost
-report and its CSV (`_get_inventory_cost_report_cost_impl_20261019`, `Reports.tsx`) still list negative and $0-cost
-rows, so summing the CSV reproduces the old wrong total. Fix: match the rows to the summary's exclusions, or mark them.
 
 ### Also open in this area (tracked as GitHub issues or parked fixes; plain-English detail in [the plan](MASTER_FIX_PLAN.md))
 
@@ -1115,6 +1100,8 @@ Fix it together with KI-157, where every invoice PDF reads the live product name
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Mason (field-app billing) · plan W1-03 · #2176.
 
+> **MUST DO (Mason, 2026-11-22).** Sol round 9 on #2247 re-found this on the transfer's saved-split path (`job_field_shares` x `acres_to_treat`, `20270226150000` ~L415). Mason skipped it for #2247 on the condition that this known issue (KI-185, GitHub #2176) is fixed next, in its own PR after #2247; it is no longer CAN-WAIT (To-Do 5.7). #2247 itself still bills planned acres.
+
 **HIGH · OPEN (source-confirmed on main and staging; not reproduced end to end) · field-app billing/stock · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 6) · Mason (field-app billing) · GitHub #2176**
 Job completion stores the actual acres per field on the application record (`_complete_job_replay_impl_20261015`,
 `20261217100000` ~L783-813; with no acres supplied it falls back to the plan) but never updates `job_fields` or `job_chemicals`. Transfer to Invoice
@@ -1152,7 +1139,7 @@ total, billed unit and unit price, unchanged charge, both grouping configuration
 
 ### KI-195 — The Chemical Application Report prints today's EPA number, not the job's saved one
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Mason (field-app billing) · plan W2-26 · #2183.
+> **2026-11-23:** Fix in review (PR to staging; migration `20270225193000` not yet applied) · MED · plan W2-26 · #2183. The four printouts read `job_product_epa`; REI/PHI sources are unchanged; see `docs/changelog.d/2026-11-23-ki195-printouts-kept-epa.md`. The description below is the state before this fix.
 
 **MED · OPEN (source-confirmed) · restricted-use/regulatory records · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 1) · unassigned · GitHub #2183**
 Sprayed jobs keep their EPA number in `job_product_epa` (`20261204120000` ~L143-152), including an explicit unknown,
@@ -1206,6 +1193,8 @@ product 1,001 and beyond (2026-11-08; live only once the function is redeployed,
 ### KI-187 — A blend ticket's app record and its linked job's completion can each take the stock
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Mason (field-app billing) · plan W1-07 · #2178 (open).
+>
+> **2026-11-23:** PR #2366 (a trigger fix) was closed unmerged; Mason moved this fix into the chemical application rebuild. Its 15 known gaps and decisions: [decision entry](decision-log.d/2026-11-23-f06-ki187-paused-for-chem-app-rebuild.md); To-Do row 5.8.
 
 **HIGH (conditional) · OPEN (source-confirmed on main and staging; not reproduced) · inventory/field app · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 6) · unassigned · GitHub #2178**
 "Create App Record" on a blend ticket deducts stock (`20260713060200` ~L194-198, now wrapped as
@@ -1344,7 +1333,8 @@ The [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) (sweep 3 #9) re-confirm
 logged here, not as a new KI.
 The 2026-11-02 cost audit noted more functions in this same ownership and role-check area (not cost); the list is in
 Mason's private notes until the scoping work is built. It also noted that an admin's automatic draft invoice for a job
-with a below-cost line always fails, so that job is billed by hand.
+with a below-cost line always fails, so that job is billed by hand; candidate 20270226150000 (not yet live) writes each job line's
+real quantity in the sold unit, so the ordinary check judges it exactly; a unit that can't convert stops Create Invoice by name.
 
 ### KI-07 — Other small security gaps
 
@@ -1412,6 +1402,8 @@ get their own lock. Exploit-level detail is held privately until the fix is live
 Mason decided 2026-11-19 that Page Access also locks money actions, but the Invoices and Record Payments actions wait
 for Taha after 2026-12-15 (billing is his area until then). Reuse `public._require_page_access` from KI-119's
 migration, adding those page keys to it.
+Also in scope (Sol round 9 on #2247, 2026-11-22; Mason skipped it there as pre-existing): Create Invoice from a job
+(`transfer_job_to_invoice`) checks only for an active admin or sales rep, not the rep's denied Job Schedule and Field Invoices pages.
 
 ### KI-122 — An admin password reset leaves the user's existing sign-ins open and is not audited
 
@@ -2001,7 +1993,7 @@ Entries 1–6 were closed during the original rewrite; their older proof records
    (browser only, no migration): both totals come from `src/lib/inventoryValue.ts` and value only stock above zero with a
    cost, in exact whole cents; the Reports total adds the database's own rounded row values. Checked live 2026-11-11 as
    admin: the Inventory card and the Reports Inventory Cost total show the same figure, each with "19 below zero, not
-   counted". The D12 item 7 relabel stays open under KI-135.
+   counted". The D12 item 7 relabel is closed item 67 (KI-135).
 22. **KI-108, five products' stored stock did not match their transaction history** — closed 2026-11-11 by PR #1770, migration `20270103150000_ki108_stock_matches_history` (applied live 2026-11-11 9:17 AM Central, ledger `20261111151710`). Mason chose on 2026-11-10 to trust the history: Black Strap Molasses Tote 2,000 → 675, Start Right 2.0 Tote 670.19 → 140.19, 2,4D Amine Bulk 55 → 0, Start Right 2.0 2.5G 290 → 280; 2,4D Amine 2.5 Gal keeps 25 and got the missing +95 opening-stock row. Black Strap Bulk (−1,325) already matched and was not touched. Proven by `scripts/smoke/prove-ki108-stock-matches-history.mjs`; after the apply a read-only live check found every product's stored stock equal to its history and no open stock count, and the `/integrity-report` Inventory Ledger check passed (117 rows). Stock counts that overlap stock movement stay open as KI-134.
 23. **KI-134, a stock count double-counted anything that moved while the count was open** — closed 2026-11-11 by PR #1775, migration `20270103170000_cycle_count_variance_vs_onhand_at_count` (applied live 2026-11-11 1:21 PM Central, ledger `20261111192101`, with Mason's in-chat approval): each saved count line is now compared with the on hand read at that save, so a receipt or delivery during an open count is no longer applied twice by Complete. Proven by `scripts/smoke/prove-cycle-count-onhand-at-count-real-schema.mjs` (`CYCLE_COUNT_ONHAND_PROOF_PASS`) and the live smoke `update_cycle_count_item` (PASS, rolled back). Mason accepted the remaining window (stock posted between looking at a shelf and saving its count; DECISION_LOG 2026-11-11); D12 procedure: post a product's receipts and deliveries before counting it.
 24. **KI-142, a partly received purchase order could never be closed short** — closed 2026-11-11 by PR #1798 (database and list screens), migration `20270103180000_po_close_short` (applied live 2026-11-11 3:14 PM Central, ledger `20261111211435`, with Mason's `I approve` for its column grant), and PR #1807 (Close Short button, banner, records). A closed PO drops its unreceived remainder from on order, is final, can be billed only up to what arrived, and its line costs can be raised but never lowered (Mason, 2026-11-11). Proven by `scripts/smoke/prove-po-close-short-real-schema.mjs`; live read-only after apply: the function, three guard triggers and three columns exist, and no PO is closed. Which live POs to close is Mason's To-Do decision 23. Deferred polish: #1804.
@@ -2048,6 +2040,8 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 64. **KI-83 — The `idempotency_keys` table has no TypeScript type** — closed 2026-11-21 by the [master-plan re-check](MASTER_FIX_PLAN.md): `src/types/index.ts:1856` `IdempotencyKey`, on both staging and origin/main. Entry header still says "FIX IN REVIEW"; stale.
 65. **KI-166 — A quote for a product with no stock unit is priced as if sold by the each** — closed 2026-11-21 by the [master-plan re-check](MASTER_FIX_PLAN.md): `20270129171000_field_app_refuses_product_without_sold_unit.sql:40` `inventory_unit SET NOT NULL` + alnum CHECK (also on origin/main). The `COALESCE(...,'Ea')` fallback remains but is unreachable (`20270121110000:210`, `20270125110000:725`). This is the entry's own proposed fix Closed: every product now must have a stock unit (20270129171000, live).
 66. **KI-82 — The open quote screen can show a stale cost for a line it just saved** — closed 2026-11-22 (triage): PR #1209 merged to `main` 2026-10-30 (`QuoteBuilder.tsx` `refreshSavedLineCosts` re-reads the saved cost after an admin save). Original text appended to the archive. Fixed parts also removed in this triage and appended to the archive: KI-16 (Quote Builder line math in exact cents, PRs #1430 and #1892), KI-73 (parts A, B, C), KI-74 (cost paths, `invoice_post_version`), KI-76 (season fallbacks, the whole-order quantity cap and the posted-invoice delivery void: PR #1174, `20261029160000`, live 2026-10-30).
+67. **KI-135 (D12 item 7), "Inventory Value" read like a book value** — closed 2026-11-23 by PR #2259 (labels only, merged to staging 2026-11-23; not live in production until the next release): the Inventory page card reads "Inventory Value (price-list cost)", the Reports total "Inventory value at price-list cost", and profit and margin carry a "saved pricing cost" note. The per-row Inventory Cost table marks rows left out of the total, and its CSV leaves their value blank with an "In Total" column, so the column sums to the total. Label seen on the local test copy 2026-11-23. Original text appended to the archive.
+68. **KI-133, Profitability and Gross Sales called booked orders "revenue"** — closed 2026-11-23 by PR #2259 (labels only, merged to staging 2026-11-23; not live in production until the next release): both reports and their CSVs say "Booked Sales", the "Revenue Summary" tab is "Booked Sales Summary", and one line under them says they are order-based, credits are not subtracted, and Bottom Line P&L uses posted invoices. The draft-filter half needs no change: `orders_status_check` refuses a draft order status, so Gross Sales cannot include one. Note and tab seen on the local test copy 2026-11-23. The one note does not yet say Profitability subtracts standing discounts while Gross Sales does not: tracked in #2299. Original text appended to the archive.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

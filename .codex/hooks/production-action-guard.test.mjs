@@ -10,6 +10,8 @@ import { renderSweepQuery } from "../../.claude/hooks/live-testdata-lib.mjs";
 import { buildSweepQuery } from "../../scripts/db-invariant-sweeps/allowlist-match.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import { claimOrRefuse } from "../../.claude/hooks/pr-claim-lib.mjs";
+import { skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
+import { recordTahaLaneOverride, TAHA_LANE_UNTIL_MS } from "../../.claude/hooks/taha-lane-lib.mjs";
 
 // Since 2026-10-19 (Luna round 3) the merge gate FAILS CLOSED when it cannot
 // read the PR's review threads, because unresolved CodeRabbit threads block a
@@ -110,9 +112,10 @@ const isPrFileList = (args) => args?.[0] === "api" && args?.[1] === "--paginate"
 // And an unchanged .github/ tree (merge-base, then the same tree sha at head and merge-base).
 const isMergeBase = (args) => args?.[0] === "api" && /\/compare\/[0-9a-f]{40}\.\.\.[0-9a-f]{40}$/.test(String(args?.[1] ?? "")) && args?.[3] === ".merge_base_commit.sha";
 const isRootTree = (args) => args?.[0] === "api" && /\/git\/trees\/[0-9a-f]{40}$/.test(String(args?.[1] ?? ""));
-const withMainCompareDefault = (runGh, answer = MAIN_INSIDE_STAGING) => runGh && ((args, ...rest) => (isMainCompare(args) ? answer : isReleasePrList(args) ? "" : isPrFileList(args) ? "" : isMergeBase(args) ? "c".repeat(40) : isRootTree(args) ? "t".repeat(40) : runGh(args, ...rest)));
+// The PR's own file list answers "" (no files) unless a test passes `prFiles` (Taha lane block, #2303).
+const withMainCompareDefault = (runGh, answer = MAIN_INSIDE_STAGING, prFiles = "") => runGh && ((args, ...rest) => (isMainCompare(args) ? answer : isReleasePrList(args) ? "" : isPrFileList(args) ? prFiles : isMergeBase(args) ? "c".repeat(40) : isRootTree(args) ? "t".repeat(40) : runGh(args, ...rest)));
 const evaluateProductionAction = (options) => evaluateProductionActionRaw(
-  { ...options, runGh: ((inner) => (options?.rawMainCompare ? inner : withMainCompareDefault(inner, options?.mainCompare)))(
+  { ...options, runGh: ((inner) => (options?.rawMainCompare ? inner : withMainCompareDefault(inner, options?.mainCompare, options?.prFiles)))(
     options?.rawThreads ? options?.runGh : withThreadDefault(options?.runGh)) },
 );
 
@@ -605,6 +608,33 @@ try {
   });
   assert.equal(ordinaryMerge.blocked, true, "a non-risky PR merge into main still needs the Sol proof");
   assert.match(ordinaryMerge.reason, /every merge into main needs an exact-SHA Sol proof/, "and says it is the landing rule, not a risk finding");
+
+  // Taha lane block (#2303): the same staging merge, but the PR changes a quote screen.
+  const quoteFiles = "modified\tsrc/pages/QuoteBuilder.tsx\t";
+  mkdirSync(path.join(ordinary.repo, ".claude"), { recursive: true }); // the code is saved under .claude, as in a real checkout
+  const laneNow = TAHA_LANE_UNTIL_MS - 24 * 3600e3; // frozen before the cutoff so this test still runs after Dec 15
+  const afterCutoff = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: TAHA_LANE_UNTIL_MS + 1, runGh: () => ordinaryPrJson, prFiles: quoteFiles,
+  });
+  assert.doesNotMatch(afterCutoff.reason ?? "", /TAHA LANE/, "after Dec 15 the lane block is off");
+  const laneMerge = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: laneNow, runGh: () => ordinaryPrJson, prFiles: quoteFiles,
+  });
+  assert.equal(laneMerge.blocked, true, "a staging merge in Taha's areas is refused");
+  assert.match(laneMerge.reason, /TAHA LANE BLOCK — #5 is refused because it changes Taha's areas \(src\/pages\/QuoteBuilder\.tsx\)/, "and names the file");
+  const laneCode = /taha override #5 (\d{6})/.exec(laneMerge.reason)?.[1];
+  assert.ok(laneCode, "and gives Mason the exact line to send");
+  assert.equal(recordTahaLaneOverride({ dirs: skipStateDirs([ordinary.repo]), pullRequest: 5, code: laneCode, now: laneNow }).ok, true, "Mason's line records the override");
+  const posted = [];
+  const overridden = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo, nowMs: laneNow + 60e3, prFiles: quoteFiles,
+    runGh: (args) => (args[0] === "api" && args.includes("POST") ? (posted.push(args), "987") : ordinaryPrJson),
+  });
+  assert.doesNotMatch(overridden.reason ?? "", /TAHA LANE/, "with the override the lane block lets it on to the next gate");
+  assert.equal(posted.length, 1, "and the gate posted the comment telling Taha");
+  assert.ok(posted[0].some((a) => /issues\/5\/comments$/.test(a)) && posted[0].some((a) => a.startsWith("body=@TahaKhanAbdalli")), "on PR #5, tagging Taha");
   writeProof(ordinary.repo, {
     codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
     head_sha: ordinary.sha, base_sha: ordinary.base, timestamp: new Date().toISOString(),
@@ -1235,7 +1265,7 @@ try {
       `every listed protected file is protected by the regex too: ${file}`,
     );
   }
-  assert.equal(PROTECTED_HARNESS_FILES.length, 25, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  assert.equal(PROTECTED_HARNESS_FILES.length, 26, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
   // session-context-reminder writes the rules every later Codex session starts from,
   // so Codex may not edit it either.
   for (const file of [".claude/hooks/session-context-reminder.mjs", ".claude\\hooks\\session-context-reminder.mjs", ".claude/hooks/../hooks/session-context-reminder.mjs"]) {

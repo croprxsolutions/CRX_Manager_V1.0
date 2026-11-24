@@ -158,11 +158,13 @@
 > 24 hours, only for that finding; `approve` cannot answer it and `accept` cannot answer a migration request; a reason
 > under two words, over 300 characters, or with money amounts, emails, phone numbers, `#<number>` or markup is
 > refused without using the code). Once every finding of the run is accepted, `--log` writes the deterministic
-> `DECISION_LOG.md` entry (PR, each finding's `file:line` and text hash, his reason, date; never the finding's wording,
+> decision-log entry (since 2026-11-23 a PR into `staging` gets its own new file
+> `docs/manual/decision-log.d/<date>-pr<n>-sol-skip-<head>.md`, so parallel PRs never conflict; a review against `main`
+> still writes `DECISION_LOG.md`, the one file `release-flow.mjs` lets ride on a release head) (PR, each finding's `file:line` and text hash, his reason, date; never the finding's wording,
 > because an accepted finding is unfixed and the repo is public); commit that file alone on top of the reviewed head,
 > then `node scripts/write-codex-push-proof.mjs --carry-owner-accepted` mints a carried proof (`carry.mode`
 > `owner_accepted`, `root_review.owner_accepted`, same base, the original run's 24 hours, `codex_ran` false) only when
-> the commit's sole change is exactly that entry and the code running is the bytes committed at that head. A PR that
+> the commit's sole change is exactly that entry (one new fragment file, or the `DECISION_LOG.md` insertion) and the code running is the bytes committed at that head. A PR that
 > changes hooks, `.codex`, `.husky`, `.github`, `scripts/lib`, `package.json` or the proof, approval and apply scripts
 > cannot use this path: a review that was not clean cannot vouch for gate code. Later carries (main merge, restamp,
 > post-apply) keep the acceptances and tell their focused Sol check the findings are accepted, not fixed. It satisfies
@@ -310,6 +312,8 @@
 >
 > Last reconciled against `.claude/settings.json` and `.codex/hooks.json` hook wiring on 2026-10-30.
 
+> **Taha's lanes (Mason 2026-11-22, until the end of Dec 15 Central):** both merge gates refuse any agent merge into `staging` of a PR whose `src/` or `supabase/` files are in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing), whatever OK line it has; field billing (field app/invoice, spray, blend, application, job paths) is Mason's and passes; a PR that edits the block's own wiring is refused too. An unreadable or 250+ file list refuses. The refusal issues a 6-digit code bound to the PR's current head; Mason's message of its own `taha override #<PR> <code>` lets that PR at that commit through for 24 hours (a new push needs a new code), and the gate itself posts a PR comment tagging Taha before allowing it, or refuses (`taha-lane-lib.mjs`, `taha-lane-prompt.mjs`). Names, not file contents, decide the lane.
+
 ---
 
 ### Schema-Aware PreToolUse Hooks (`.claude/hooks/`)
@@ -365,7 +369,7 @@ Runs on Codex's `*` (all-tools) PreToolUse matcher through portable POSIX and Wi
 ### UserPromptSubmit Hooks (`.claude/hooks/`)
 These run when Mason submits a prompt, BEFORE Claude reads it. They inject extra context via `additionalContext` — they don't block — so Mason's intent is preserved while Claude is forced to slow down on risky wording or nudged toward the right workflow.
 
-`prompt-router.mjs` is the single registered command for this event. It reads the prompt once and invokes only `hold-latch-prompt.mjs`, (since 2026-10-09) `owner-approval-prompt.mjs` and (since 2026-10-22) `coderabbit-skip-prompt.mjs` on both Claude and Codex. `ship-intent-reminder.mjs` was unwired on 2026-10-29 (Mason): its word list matched nearly every message and added the `/ship` text and landing policy each time, which `AGENTS.md` already states every session; Mason deleted the file the same day. Of the remaining modules, the last records Mason's `I approve` (or `approve <code>`) reply for a parked migration and does nothing on any other message. On 2026-10-02 (Mason) five other reminder modules were unwired, and PR #882 deleted them (2026-10-06): `dangerous-phrase-warning`, `codex-gauntlet-reminder`, `agent-pair-review-reminder`, `codex-to-claude-handoff-reminder` and `autopilot-intent-reminder`. They duplicated the user-level risky-phrase nudge or the ship reminder and fired on agent reports as often as on Mason's words.
+`prompt-router.mjs` is the single registered command for this event. It reads the prompt once and invokes only `hold-latch-prompt.mjs`, (since 2026-10-09) `owner-approval-prompt.mjs` (since 2026-10-22) `coderabbit-skip-prompt.mjs` and (since 2026-11-22) `taha-lane-prompt.mjs` on both Claude and Codex. `ship-intent-reminder.mjs` was unwired on 2026-10-29 (Mason): its word list matched nearly every message and added the `/ship` text and landing policy each time, which `AGENTS.md` already states every session; Mason deleted the file the same day. Of the remaining modules, the last records Mason's `I approve` (or `approve <code>`) reply for a parked migration and does nothing on any other message. On 2026-10-02 (Mason) five other reminder modules were unwired, and PR #882 deleted them (2026-10-06): `dangerous-phrase-warning`, `codex-gauntlet-reminder`, `agent-pair-review-reminder`, `codex-to-claude-handoff-reminder` and `autopilot-intent-reminder`. They duplicated the user-level risky-phrase nudge or the ship reminder and fired on agent reports as often as on Mason's words.
 
 | Hook | What it warns on / reminds | Why |
 |------|------------------|-----|

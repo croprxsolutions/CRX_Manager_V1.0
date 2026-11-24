@@ -300,9 +300,9 @@ describe('vendor-bill accounting-period close serialization', () => {
     ]) expect(proof).toContain(marker);
     expect(proof).toContain("SET LOCAL ROLE authenticated; INSERT INTO public.accounting_periods");
     const deliverySmoke = source('scripts', 'smoke', 'smoke-delivery-accounting-period-guard.sql');
-    expect(deliverySmoke).toContain("v_closed_date := DATE '1990-01-15';");
-    expect(deliverySmoke).toContain("v_open_date := DATE '1990-02-15';");
-    expect(deliverySmoke).toContain("v_second_open_date := DATE '1990-03-15';");
+    expect(deliverySmoke).toContain("v_closed_date := DATE '2000-01-15';");
+    expect(deliverySmoke).toContain("v_open_date := DATE '2000-02-15';");
+    expect(deliverySmoke).toContain("v_second_open_date := DATE '2000-03-15';");
     expect(deliverySmoke).toContain('enforce_delivery_accounting_period');
     expect(deliverySmoke).not.toContain('CURRENT_DATE');
     const section9 = smokeSpecs.specs.section9_po_ap_high_remediation;

@@ -2,7 +2,8 @@
 // Tests for the live migration prerequisite (#2193): the modes-of-action load is
 // refused until the live EPA batch fill has run.
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -119,8 +120,19 @@ const owner = evaluateMigrationApply({ name: LOAD, query: SQL, projectId: "rhyzp
 assert.equal(owner.decision, "block");
 assert.match(owner.reason, /MIGRATION PREREQUISITE \(#2193\)/);
 // Only with the live re-check flag does this gate step aside (later gates still run).
-const script = evaluateMigrationApply({ name: LOAD, query: SQL, projectId: "rhyzpcqhnizqbxphqdkr", projectDir: ROOT, cwd: ROOT, ownerApprovalDoor: true, livePrerequisiteRecheck: true });
-assert.doesNotMatch(String(script.reason || ""), /MIGRATION PREREQUISITE \(#2193\)/);
+// A throwaway project folder, so the later gates write no session state into this checkout (#2230 LOW).
+const scratchProject = mkdtempSync(path.join(tmpdir(), "moa-2230-"));
+mkdirSync(path.join(scratchProject, "supabase", "migrations"), { recursive: true });
+writeFileSync(path.join(scratchProject, "supabase", "migrations", `${LOAD}.sql`), SQL);
+try {
+  const script = evaluateMigrationApply({ name: LOAD, query: SQL, projectId: "rhyzpcqhnizqbxphqdkr", projectDir: scratchProject, cwd: scratchProject, ownerApprovalDoor: true, livePrerequisiteRecheck: true });
+  assert.doesNotMatch(String(script.reason || ""), /MIGRATION PREREQUISITE \(#2193\)/);
+  // The next gate really ran and refused (no applied-migration snapshot), so stepping aside is not a pass.
+  assert.equal(script.decision, "block");
+  assert.match(String(script.reason || ""), /MIGRATION ORDERING GUARD/);
+} finally {
+  rmSync(scratchProject, { recursive: true, force: true });
+}
 
 // The one caller that sets the flag reads the live count and dies on a refusal
 // before the transaction it transmits is built.

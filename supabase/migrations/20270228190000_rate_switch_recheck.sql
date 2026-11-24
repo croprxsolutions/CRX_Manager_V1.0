@@ -30,9 +30,11 @@
 --   Live read 2026-11-24: 413 active groups have a promotable outcome; 0 have an approved row failing the form or
 --   basis check; 0 approved defaults carry an over-label reason.
 --
--- ROLLBACK (its own reviewed migration): drop the three functions and re-create the two public ones from
---   20270125100000 (bodies md5 a923a78b5329538c1d7e7d76902349a6 and 1d199caeea7f94b0b7b1f94d99768694) with their
---   grants. Events already written keep their extra keys, which nothing reads.
+-- ROLLBACK (its own reviewed migration): drop _rate_cutover_recheck and re-create the two public functions with the
+--   20270125100000 bodies (md5 a923a78b5329538c1d7e7d76902349a6 and 1d199caeea7f94b0b7b1f94d99768694) but KEEP these
+--   signatures and this fingerprint (the trailing p_over_label_reason, ignored except in the fingerprint), so a switch
+--   committed with a reason whose answer was lost still replays its receipt on retry. Events already written keep
+--   their extra keys, which nothing reads.
 --
 -- ORDERING: after 20270227160000. Not re-runnable (preflight refuses).
 
@@ -106,12 +108,13 @@ BEGIN
       RAISE EXCEPTION 'PRODUCT_PARENT_CUTOVER_OVER_LABEL_REASON_TOO_LONG: keep the over-label reason to 500 characters';
     END IF;
   END IF;
-  -- The label check joins `expected`, so commit refuses as stale when the label or its maximum changed after the
-  -- preview, even if a reason was given for the maximum the admin saw.
+  -- A fingerprint of the label check joins `expected` (text, so no digit is lost on its way through the browser):
+  -- commit refuses as stale when the label check's result changed after the preview (its status, or for an
+  -- over-label rate the maximum and registration it is above), even if a reason was given for the maximum the admin saw.
   RETURN p_plan || jsonb_build_object('label_check', v_check,
       'over_label_reason', CASE WHEN v_check->>'status' = 'above' THEN v_reason END)
     || CASE WHEN v_check IS NULL THEN '{}'::jsonb
-            ELSE jsonb_build_object('expected', (p_plan->'expected') || jsonb_build_object('label_check', v_check)) END;
+            ELSE jsonb_build_object('expected', (p_plan->'expected') || jsonb_build_object('label_check_md5', md5(v_check::text))) END;
 END;
 $function$;
 ALTER FUNCTION public._rate_cutover_recheck(uuid, jsonb, text) OWNER TO postgres;
@@ -128,6 +131,10 @@ DECLARE
   v_plan jsonb;
 BEGIN
   PERFORM public._product_parent_require_admin();
+  -- The EPA registry lock first, then the group's rows (the order the label editors take them in).
+  IF p_direction = 'promote' THEN
+    PERFORM pg_advisory_xact_lock_shared(20261210, hashtext('crx_epa_registration'));
+  END IF;
   BEGIN
     v_plan := public._rate_cutover_recheck(p_parent_id, public._rate_cutover_plan(p_parent_id, p_direction), p_over_label_reason);
   EXCEPTION WHEN raise_exception OR check_violation THEN
@@ -164,6 +171,14 @@ BEGIN
   v_existing := public._product_parent_replay(p_idempotency_key, 'commit_parent_rate_cutover', v_fp);
   IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
   v_reason := public._product_parent_reason(p_reason, 'reason', true);
+  IF p_direction = 'promote' THEN
+    -- Sol MED 4: the label maximum must be read as committed now, not from an older snapshot.
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+      RAISE EXCEPTION 'PRODUCT_PARENT_CUTOVER_ISOLATION: switch rates in a read committed transaction';
+    END IF;
+    -- The EPA registry lock first, then the group's rows (the order the label editors take them in).
+    PERFORM pg_advisory_xact_lock_shared(20261210, hashtext('crx_epa_registration'));
+  END IF;
   v_plan := public._rate_cutover_recheck(p_parent_id, public._rate_cutover_plan(p_parent_id, p_direction), p_over_label_reason);
   -- Strict: the whole expected object (versions, RT-3 rows, every size's snapshot and prices) must equal today's.
   IF p_expected IS NULL OR jsonb_typeof(p_expected) <> 'object' OR p_expected IS DISTINCT FROM v_plan->'expected' THEN

@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 process.env.UNDO_PATHS_CONTAINER ||= `crx-rsr-${process.pid}-${Date.now().toString(36)}`;
-const { buildContainer, removeContainer, seedUsers, scalar, psql, attempt, asUser, USERS, ROOT, NAME, docker } =
+const { buildContainer, removeContainer, seedUsers, scalar, psql, attempt, asUser, claims, USERS, ROOT, NAME, docker } =
   await import('./undo-paths/harness.mjs');
 
 const CANDIDATE = '20270228190000_rate_switch_recheck.sql';
@@ -162,6 +162,15 @@ function main() {
   const plan = previewJson(P.Over, 'promote', { over: '  Mason OK for this field trial  ' });
   assert.equal(plan.eligible, true); assert.equal(plan.label_check.status, 'above');
   assert.equal(plan.over_label_reason, 'Mason OK for this field trial');
+  // The preview names the maximum the reason is given for; `expected` binds it by a text fingerprint (Sol MED 3).
+  assert.deepEqual(plan.label_check.above.map((m) => `${m.epa_registration} ${m.max_label_rate} ${m.max_label_rate_unit}`), ['100-1 32 fl oz/acre']);
+  assert.equal(typeof plan.expected.label_check_md5, 'string'); assert.equal(plan.expected.label_check, undefined);
+  // Sol MED 4: a switch in a repeatable read transaction (an older snapshot of the maximum) is refused.
+  const rr = psql(`BEGIN ISOLATION LEVEL REPEATABLE READ; ${claims(ADMIN)}
+    SET LOCAL ROLE authenticated;
+    SELECT public.commit_parent_rate_cutover('${P.Over}', 'promote', '{}'::jsonb, 'x', 'rsr-rr', 'reason');
+    ROLLBACK;`, { allowFailure: true });
+  assert.match(`${rr.stdout}${rr.stderr}`, /PRODUCT_PARENT_CUTOVER_ISOLATION/);
   const over = go(P.Over, 'promote', 'rsr-over-1', { over: '  Mason OK for this field trial  ', commit: true });
   assert.equal(over.receipt.rate_source, 'approved'); assert.equal(over.receipt.rate_per_acre, '40');
   assert.equal(over.receipt.over_label_reason, 'Mason OK for this field trial');

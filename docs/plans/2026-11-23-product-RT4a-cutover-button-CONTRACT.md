@@ -128,8 +128,11 @@ Migration `20270228190000_rate_switch_recheck.sql` adds `_rate_cutover_recheck`,
   characters, the `product_rates.over_label_reason` limit) lets it through, and is recorded with the label check in the
   `rates_promoted` event's `after_values` and in the receipt. A reason sent when the rate is not above is not recorded.
   `not_checked` (no label maximum on file) passes, as it does in Rate Review.
-- **Commit re-checks.** A label maximum lowered after the preview refuses the commit. The over-label reason is part of
-  the idempotency fingerprint: the same key with another reason is `IDEMPOTENCY_PAYLOAD_MISMATCH`.
+- **Commit re-checks.** A label check whose result changed after the preview refuses the commit as stale: a rate that
+  went from within to above its maximum, or, for a rate already above, a different maximum or registration. A
+  maximum lowered but still above the rate is not a change (the rate stays within). The screen shows the maximums an
+  over-label reason overrides before the switch. The over-label reason is part of the idempotency fingerprint: the
+  same key with another reason is `IDEMPOTENCY_PAYLOAD_MISMATCH`.
 - **Signatures.** `preview_parent_rate_cutover(uuid, text, p_over_label_reason text DEFAULT NULL)` and
   `commit_parent_rate_cutover(uuid, text, jsonb, text, p_idempotency_key text DEFAULT NULL, p_over_label_reason text DEFAULT NULL)`;
   the old signatures are dropped, so positional 2- and 5-argument calls keep their meaning.
@@ -163,3 +166,14 @@ Migration `20270228190000_rate_switch_recheck.sql` adds `_rate_cutover_recheck`,
   (15) the screen sends the over-label reason only when typed, so it also works before the migration is applied.
   (16) migrations apply in one transaction (the prover applies the file with `psql -1`); rollback stays its own
   reviewed migration. (6) `_product_rate_check_values` takes the label-registry lock every label writer takes.
+
+### Sol round 1 (2026-11-24): 2 HIGH, 3 MED, 3 LOW
+
+Fixed: (1 HIGH) a promote takes the EPA registry lock before the group's rows, the order the label editors use, so the
+two cannot deadlock; (2 HIGH) the switch screen shows the label maximums the over-label reason overrides, from the
+same preview the switch commits; (3 MED) `expected` binds the label check by a text fingerprint, so a maximum with
+many digits cannot fail as stale on its way through the browser; (4 MED) the commit refuses outside read committed,
+so it cannot read an older maximum; (5 MED) the rollback keeps these signatures and the fingerprint; (6 LOW) this
+contract's stale-preview wording; (8 LOW) the reason box stops at 500 characters. Deferred: (7 LOW) an approved
+default whose basis is no longer confirmed is refused by the planner's `PRODUCT_PARENT_CUTOVER_DEFAULT_INVALID` before
+the re-approve check, so its message does not say "re-approve in Rate Review" (it is still refused).

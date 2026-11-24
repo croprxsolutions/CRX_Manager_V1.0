@@ -31,6 +31,16 @@ function switchablePlan(preview: RateCutoverPreview | null, overLabel: string): 
 }
 const planKeyParts = (plan: Eligible | null) => [plan?.expected ?? null, plan?.over_label_reason ?? null];
 
+// The label maximums the over-label reason is given for, as the preview read them.
+function OverLabelMaximums({ plan }: { plan: Eligible }) {
+  return (
+    <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900" data-testid="rate-cutover-label-max">
+      {`Above the label maximum: ${(plan.label_check?.above ?? [])
+        .map((max) => `EPA ${max.epa_registration} allows ${max.max_label_rate} ${max.max_label_rate_unit}`).join('; ')}.`}
+    </p>
+  );
+}
+
 // Text that belongs to one scope (a group and direction); another scope starts empty.
 function useScopedText(scope: string): [string, (text: string) => void] {
   const [held, setHeld] = useState({ scope: '', text: '' });
@@ -199,8 +209,9 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
             : `Puts back the rate, unit and suggested rate ${parent.name} had before the switch, on all ${parent.sizes.length} size(s), with per-acre prices at today's stock prices.`}
         </p>
         {needsOverLabel && (
-          <ReasonField id="rate-cutover-over-label" label="Over-label reason (why use a rate above the label maximum)" value={overLabel} onChange={setOverLabel} />
+          <ReasonField id="rate-cutover-over-label" label="Over-label reason (why use a rate above the label maximum)" value={overLabel} onChange={setOverLabel} maxLength={500} />
         )}
+        {plan?.label_check?.status === 'above' && <OverLabelMaximums plan={plan} />}
         {warning && <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900" role="alert">{warning}</p>}
         {plan && <CutoverTable plan={plan} seedOrEach={seedOrEach} />}
         {plan && <ReasonField id="rate-cutover-reason" label="Reason" value={reason} onChange={setReason} />}

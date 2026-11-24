@@ -246,7 +246,10 @@ export type RateCutoverPreview =
     target: RateValues;
     expected: Record<string, unknown> & { sizes: ParentRatePreviewSize[] };
     // 20270228190000: a promote's label check (Rate Review's statuses) and the over-label reason it will record.
-    label_check?: { status: string; message?: string | null } | null;
+    label_check?: {
+      status: string;
+      above?: { epa_registration: string; max_label_rate: number | string; max_label_rate_unit: string }[] | null;
+    } | null;
     over_label_reason?: string | null;
   };
 

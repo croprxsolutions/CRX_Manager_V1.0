@@ -62,7 +62,8 @@ describe('RT-4a rate cut-over modal', () => {
   });
 
   it('over the label maximum: asks for an over-label reason, previews with it, and switches with it (#2379)', async () => {
-    const above = { ...eligible, label_check: { status: 'above' }, over_label_reason: 'trial plot' };
+    const above = { ...eligible, over_label_reason: 'trial plot', label_check: { status: 'above',
+      above: [{ epa_registration: '100-1', max_label_rate: 32, max_label_rate_unit: 'fl oz/acre' }] } };
     mockPreview
       .mockResolvedValueOnce({ parent_id: 'par1', direction: 'promote', eligible: false,
         refusal: 'PRODUCT_PARENT_CUTOVER_OVER_LABEL: the approved rate is above the current label maximum; type an over-label reason to switch' })
@@ -72,10 +73,13 @@ describe('RT-4a rate cut-over modal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('type an over-label reason');
     const box = screen.getByLabelText(/Over-label reason/);
+    expect(box).toHaveAttribute('maxLength', '500');
     fireEvent.change(box, { target: { value: ' trial plot ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     await screen.findByTestId('rate-cutover-table');
     expect(mockPreview).toHaveBeenLastCalledWith('par1', 'promote', ' trial plot ');
+    // The maximum the reason overrides is on screen before the switch (Sol HIGH 2).
+    expect(screen.getByTestId('rate-cutover-label-max')).toHaveTextContent('Above the label maximum: EPA 100-1 allows 32 fl oz/acre.');
     // Editing the reason after the preview retires it: preview again with the new text.
     fireEvent.change(box, { target: { value: 'other' } });
     expect(screen.queryByRole('button', { name: 'Switch to approved rate' })).toBeNull();

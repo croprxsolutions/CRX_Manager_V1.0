@@ -213,7 +213,10 @@ export function loaderPdfWaterRows(data: LoaderWorksheetPdfData, plan: ReturnTyp
   // The row itself says what its marks mean, so a page break can never part the numbers from the reason.
   const label = ['Water to add',
     ...(tanks.some(({ water }) => water.over) || batch.over ? ['(!) products exceed finished gallons: check recipe'] : []),
-    ...(batch.unknown.length > 0 ? ['— = set liquid/dry on the product'] : batch.water_gal === null ? ['— = not known: see note below'] : [])].join('\n');
+    ...(batch.water_gal === null ? [`— = not known: ${[
+      ...(batch.unknown.length > 0 ? ['set liquid/dry on the product'] : []),
+      ...(batch.unsized.length > 0 ? ["a liquid's unit has no gallon size"] : []),
+      ...(batch.missing.length > 0 ? ['an amount is missing'] : [])].join('; ')}`] : [])].join('\n');
   const rows = [
     ['Finished gallons', ...tanks.map(({ column, water }) => `${fmtLoaderGallons(water.finished_gal)}${each(column)}`), fmtLoaderGallons(batch.finished_gal)],
     [label, ...tanks.map(({ column, water }) => `${fmtLoaderWater(water)}${marks(water)}${water.water_gal === null ? '' : each(column)}`),
@@ -222,7 +225,7 @@ export function loaderPdfWaterRows(data: LoaderWorksheetPdfData, plan: ReturnTyp
   const warnings: string[] = [];
   const over = tanks.filter(({ water }) => water.over).map(({ column }) => column.label);
   if (over.length > 0 || batch.over) {
-    warnings.push(`(!) The products are more than the finished gallons${over.length > 0 ? ` on ${over.join(', ')}` : ''}: water to add prints 0. Check the recipe and carrier rate.`);
+    warnings.push(`(!) The products are more than the finished gallons${over.length > 0 ? ` on ${over.join(', ')}` : ''}:${batch.water_gal === null ? '' : ' water to add prints 0.'} Check the recipe and carrier rate.`);
   }
   warnings.push(...loaderWaterNotes(batch));
   return { rows, warnings };

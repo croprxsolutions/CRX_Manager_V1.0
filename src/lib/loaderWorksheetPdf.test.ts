@@ -96,7 +96,7 @@ describe('loaderPdfWaterRows', () => {
     expect(rows[1].slice(1)).toEqual(['—', '—', '—', '—', '—']);
     expect(warnings).toEqual(['Water to add not shown: the amount of TEST Blank is missing. Fix it on the job.']);
     // The reason rides on the same row as the dashes (Terra HIGH: a page break could part them).
-    expect(rows[1][0]).toBe('Water to add\n— = not known: see note below');
+    expect(rows[1][0]).toBe('Water to add\n— = not known: an amount is missing');
   });
 
   it('prints a dash and "set liquid/dry on the product" when any product form is not on file (Mason: only when known)', () => {
@@ -104,7 +104,7 @@ describe('loaderPdfWaterRows', () => {
     const { rows, warnings } = loaderPdfWaterRows(unknown, buildLoaderWorksheetPdfPlan(unknown));
     expect(rows[0].at(-1)).toBe('1000 GL');
     expect(rows[1].at(-1)).toBe('—');
-    expect(rows[1][0]).toBe('Water to add\n— = set liquid/dry on the product');
+    expect(rows[1][0]).toBe('Water to add\n— = not known: set liquid/dry on the product');
     expect(warnings).toEqual(['Water to add not shown: set liquid/dry on the product for TEST Unset.']);
   });
 });

@@ -140,6 +140,14 @@ try {
     v := 'same=' || ((r || '{"replayed": true}') = r2) || '|unchanged=' || (f0 = public._job_edit_version(${JOB})::text)
       || '|activity+' || ((SELECT count(*) FROM public.activity_feed) - n) || '|notes=' || ${notes} || '|new key=' || t;`));
   assert.equal(c2, `ok|same=true|unchanged=true|activity+0|notes=[JV] lost reply|new key=${CHANGED}`);
+  // A new job's retry is marked too (Luna round 12); its first call is not.
+  const newJob = save('[JV] new job', null, 'jv-new-replay').replace(`public.save_job(${JOB},`, 'public.save_job(NULL,');
+  assert.equal(show('2 new-job retry', commit(`${asUser(`r := ${newJob}; r2 := ${newJob};`)}
+    v := coalesce(r ->> 'replayed', 'none') || '|' || (r2 ->> 'replayed') || '|same job=' || (r ->> 'job_id' = r2 ->> 'job_id');`)), 'ok|none|true|same job=true');
+  // A rep denied the page is refused for the role, not told the job changed (Luna round 12).
+  psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_append(coalesce(denied_pages, '{}'), 'jobs') WHERE id = '${REP}';`);
+  assert.match(show('2 denied rep, stale version', attempt(REP, `${refuse(`r := ${save('[JV] denied', V('c2'), null, REP)};`)} v := t;`)), /^ok\|INSUFFICIENT_ROLE/);
+  psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_remove(denied_pages, 'jobs') WHERE id = '${REP}';`);
 
   // 3. Someone else changes a job column, a field line, or a dispatch: refused, nothing changes. Current: saves.
   const staleAfter = (name, change) => {
@@ -267,7 +275,7 @@ try {
     ${refuse(`r := ${save('[JV] completed', V('c9'), 'jv-completed', ADMIN, 'completed')};`)}
     v := t || '|unchanged=' || (f0 = public._job_edit_version(${JOB})::text);`)), /^ok\|JOB_COMPLETED_CHEMICALS_LOCKED.*\|unchanged=true$/);
   assert.equal(scalar("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure;"),
-    'e789d7e4948e2892bdd1ef86c96ad57b', 'the installed save_job must be the body the postflight pins');
+    '1a555a89c7d8ddc6b8d5692daa7b14cd', 'the installed save_job must be the body the postflight pins');
 
   console.log('\nJOB_SAVE_VERSION_PROOF_PASS');
 } finally {

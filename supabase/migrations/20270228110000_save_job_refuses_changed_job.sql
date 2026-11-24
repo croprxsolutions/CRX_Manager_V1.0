@@ -166,23 +166,29 @@ BEGIN
                                    ELSE t.e END ORDER BY t.o), '[]'::jsonb)
       INTO v_chemicals FROM jsonb_array_elements(p_chemicals) WITH ORDINALITY AS t(e, o);
   END IF;
-  -- A new job's save waits for its key here, before the role check below, not later inside the impl (Sol round 11).
-  IF p_job_id IS NULL AND p_idempotency_key IS NOT NULL AND btrim(p_idempotency_key) <> '' THEN
+  -- Every keyed save (new job too) waits for its key here, before the role check below, not later inside the impl (Sol round 11).
+  IF p_idempotency_key IS NOT NULL AND btrim(p_idempotency_key) <> '' THEN
     PERFORM pg_advisory_xact_lock(hashtextextended('crx:idempotency:' || p_idempotency_key, 0));
+    -- A live receipt for the key means the impl replays it or refuses: it writes nothing, so a retry after a
+    -- lost reply gets its stored result (marked "replayed" below, new job too: Luna round 12). FOR SHARE holds
+    -- the receipt until commit: an expired-key sweep elsewhere cannot delete it in between and turn the impl's
+    -- lookup into an unchecked first call.
+    PERFORM 1 FROM public.idempotency_keys WHERE idempotency_key = p_idempotency_key AND operation = 'save_job'
+                   AND (expires_at IS NULL OR expires_at >= now()) FOR SHARE;
+    v_replay := FOUND;
   END IF;
   IF p_job_id IS NOT NULL THEN
-    IF p_idempotency_key IS NOT NULL AND btrim(p_idempotency_key) <> '' THEN
-      PERFORM pg_advisory_xact_lock(hashtextextended('crx:idempotency:' || p_idempotency_key, 0));
-      -- A live receipt for the key means the impl replays it or refuses: it writes nothing, so a retry after a
-      -- lost reply gets its stored result. FOR SHARE holds the receipt until commit: an expired-key sweep
-      -- elsewhere cannot delete it in between and turn the impl's lookup into an unchecked first call.
-      IF v_expected IS NOT NULL THEN
-        PERFORM 1 FROM public.idempotency_keys WHERE idempotency_key = p_idempotency_key AND operation = 'save_job'
-                       AND (expires_at IS NULL OR expires_at >= now()) FOR SHARE;
-        v_replay := FOUND;
-      END IF;
-    END IF;
     SELECT j.status = 'completed' INTO v_completed FROM public.jobs j WHERE j.id = p_job_id FOR UPDATE;
+  END IF;
+  -- Again after the lock waits above (Sol rounds 10, 11), and before the version compare, so a denied caller learns
+  -- nothing about the job (Luna round 12): a rep denied the Job Schedule page while this save waited is refused.
+  -- FOR SHARE holds the profile until commit, so a denial either lands first (and this refuses) or waits for the save (Sol round 12).
+  PERFORM 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true
+            AND (role = 'admin' OR (role = 'sales_rep' AND NOT coalesce('jobs' = ANY (denied_pages), false))) FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'INSUFFICIENT_ROLE';
+  END IF;
+  IF p_job_id IS NOT NULL THEN
     -- Under the job row lock: refuse a save over a change made after the page read the job.
     IF v_expected IS NOT NULL AND NOT v_replay THEN
       -- The job row lock does not stop a crew deletion's cascade on dispatches: hold them until commit.
@@ -201,13 +207,6 @@ BEGIN
                                               'customer_supplied', jc.customer_supplied)), '[]'::jsonb)
         INTO v_before FROM public.job_chemicals jc WHERE jc.job_id = p_job_id;
     END IF;
-  END IF;
-  -- Again after the lock waits above (Sol rounds 10, 11): a rep denied the Job Schedule page while this save waited is refused.
-  -- FOR SHARE holds the profile until commit, so a denial either lands first (and this refuses) or waits for the save (Sol round 12).
-  PERFORM 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true
-            AND (role = 'admin' OR (role = 'sales_rep' AND NOT coalesce('jobs' = ANY (denied_pages), false))) FOR SHARE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'INSUFFICIENT_ROLE';
   END IF;
   IF public.is_admin() THEN
     v_result := public._save_job_cost_step2_impl(p_job_id, p_job_payload, p_fields, v_chemicals, p_performed_by, p_idempotency_key);
@@ -258,7 +257,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = 'e789d7e4948e2892bdd1ef86c96ad57b'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '1a555a89c7d8ddc6b8d5692daa7b14cd'
                     AND p.prosecdef AND p.proowner = 'postgres'::regrole
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]) THEN
     RAISE EXCEPTION 'JOB_VERSION_POSTFLIGHT: save_job is not the body, owner or settings this file installs';

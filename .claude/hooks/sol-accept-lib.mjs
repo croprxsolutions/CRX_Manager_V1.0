@@ -7,7 +7,7 @@
 //      numbered BLOCKER/HIGH findings (SOL_FINDING lines) bound to the reviewed head
 //      and base: codex-review-blockers-<head>.json.
 //   2. scripts/owner-accept-sol-finding.mjs <n> builds a request for finding n; Mason
-//      replies `accept <code> <reason>` (in any conversation since 2026-11-23)
+//      replies `accept <code> <reason>` (in the session that built it: the skip reply carries since 2026-11-23, accept does not)
 //      (owner-approval-prompt.mjs records it through owner-approval-lib.mjs).
 //   3. When every BLOCKER/HIGH of that run is accepted, `--log` writes the
 //      decision-log entry (a new decision-log.d/ file on a staging PR, else

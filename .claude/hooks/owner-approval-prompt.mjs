@@ -63,7 +63,8 @@ function quiet() {
   if (listFailed) {
     let shown = "";
     try { shown = String(readShown() ?? ""); } catch { /* nothing shown */ }
-    const ref = /\(Reference (\d{6})\. You don't need to type it\.\)/.exec(shown);
+    // Either summary: a migration's "(Reference N. You don't..." or a Sol skip's "Reference N. Reply before" (Taha LOW, #2389).
+    const ref = /\bReference (\d{6})\. (?:You don't need to type it|Reply before)/.exec(shown);
     // A code already used here was found and answered: nothing was lost.
     if (ref && !(listed || []).some((d) => existsSync(path.join(d, usedCodeMarkerName(ref[1]))))) {
       emit(`OWNER REPLY NOT RECORDED — Mason replied "${reply.trim().slice(0, 40)}", but this project's other folders could not be listed ` +

@@ -990,15 +990,16 @@ export function verifyOwnerApproval({
   try { checkReply(approval.replyMark); }
   catch (e) { return no(`his reply could not be confirmed as the approval words alone (${errText(e)})`); }
   // The receipt names the conversation he replied in; the mark must point into that conversation.
-  const repliedIn = approval.repliedIn == null ? null : String(approval.repliedIn);
-  if (repliedIn !== null && path.basename(String(approval.replyMark?.transcript ?? ""), ".jsonl") !== repliedIn) {
+  // No `repliedIn` (an older receipt): the session that built it, as verifySolSkip does (Taha LOW, #2389).
+  const repliedIn = String(approval.repliedIn ?? p.sessionId);
+  if (path.basename(String(approval.replyMark?.transcript ?? ""), ".jsonl") !== repliedIn) {
     return no("his reply is not in the conversation the receipt names");
   }
   // A plain `I approve` names no request, and a reply in another conversation than the one that
   // built it may be about anything: either way the conversation he replied in must have shown this
   // one just before it, re-read here (2026-11-23). His words come from the mark, not the receipt.
   const words = String(approval.replyMark?.words ?? approval.reply ?? "");
-  if (approvalCodeFromReply(words) !== String(p.code) || (repliedIn !== null && repliedIn !== String(p.sessionId))) {
+  if (approvalCodeFromReply(words) !== String(p.code) || repliedIn !== String(p.sessionId)) {
     try { checkShown(approval.replyMark, p); }
     catch (e) { return no(`his reply could not be tied to this request (${errText(e)})`); }
   }

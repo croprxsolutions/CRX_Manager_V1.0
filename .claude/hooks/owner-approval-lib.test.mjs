@@ -99,11 +99,15 @@ const expect = {
   categories: CATS,
   sessionId: SID,
 };
+const MARK0 = { transcript: path.join("x", `${SID}.jsonl`), from: 0, written: true, words: `approve ${base.code}` };
 const approve = (over = {}, approval = {}) => ({
   payload: buildApprovalPayload({ ...base, ...over }),
   approvedAt: new Date(APPROVED).toISOString(),
   via: OWNER_APPROVAL_VIA,
   reply: `approve ${base.code}`,
+  // As the hook writes it: where he replied, and his words there (the transcript is named by session id).
+  repliedIn: SID,
+  replyMark: MARK0,
   ...approval,
 });
 // Reading his reply back from a transcript is tested on its own below
@@ -136,11 +140,11 @@ const check = (approval, over = {}) => verifyOwnerApproval({
   ok(v.expiresAt === new Date(APPROVED + OWNER_APPROVAL_MAX_AGE_MS).toISOString(), "it expires 24 hours after Mason replied");
   ok(OWNER_APPROVAL_MAX_AGE_MS === 24 * 60 * 60 * 1000, "an approval lasts 24 hours (Mason, 2026-11-20)");
   let seen = "unset";
-  ok(check(approve({}, { replyMark: { from: 7 } }), { checkReply: (m) => { seen = m; } }).ok && seen?.from === 7,
+  ok(check(approve({}, { replyMark: { ...MARK0, from: 7 } }), { checkReply: (m) => { seen = m; } }).ok && seen?.from === 7,
     "the apply checks the reply the approval points at");
   refuses(check(approve(), { checkReply: () => { throw new Error("his reply carried a picture or file"); } }), "picture or file",
     "an approval whose reply was not the words alone is refused (Codex P1, PR #900)");
-  refuses(check(approve(), { checkReply: undefined }), "does not say where his reply is",
+  refuses(check(approve({}, { replyMark: undefined }), { checkReply: undefined }), "does not say where his reply is",
     "by default an approval that does not say where his reply is is refused");
 }
 
@@ -171,13 +175,17 @@ ok(check(approve(), { expect: { ...expect, sessionId: undefined } }).ok, "the ap
 // A plain `I approve` names no request: the conversation he replied in must have shown this one.
 {
   let shownFor = null;
-  ok(check(approve({}, { reply: "I approve", replyMark: { from: 3 } }), { checkShown: (m, p) => { shownFor = [m.from, p.code]; } }).ok
+  ok(check(approve({}, { reply: "I approve", replyMark: { ...MARK0, from: 3, words: "I approve" } }), { checkShown: (m, p) => { shownFor = [m.from, p.code]; } }).ok
     && shownFor?.[0] === 3 && shownFor?.[1] === base.code, "a plain reply is checked against what his conversation showed him");
-  refuses(check(approve({}, { reply: "I approve" }), { checkShown: () => { throw new Error("not this request's summary"); } }),
+  refuses(check(approve({}, { reply: "I approve", replyMark: { ...MARK0, words: "I approve" } }), { checkShown: () => { throw new Error("not this request's summary"); } }),
     "could not be tied to this request", "a plain reply after some other message is refused at the apply");
   let called = false;
   ok(check(approve(), { checkShown: () => { called = true; throw new Error("x"); } }).ok && !called,
     "a code reply names the request outright, so no shown check");
+  // Taha LOW, #2389: an older receipt with no repliedIn is tied to the session that built the request.
+  refuses(check(approve({}, { repliedIn: undefined, replyMark: { ...MARK0, transcript: path.join("x", `${OTHER_SID}.jsonl`) } })),
+    "conversation the receipt names", "a receipt with no repliedIn whose reply is in another conversation is refused");
+  ok(check(approve({}, { repliedIn: undefined })).ok, "a receipt with no repliedIn, replied in the building session, still verifies");
 }
 refuses(check(approve({ project: "someotherproject" })), "approves project", "an approval for another project is refused");
 refuses(check(approve(), { expect: { ...expect, categories: [...CATS, { category: "deletes-data", reason: "DROP TABLE" }] } }), "deletes data",
@@ -952,6 +960,11 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       `a reply to a shown request that the failed folder listing may have hidden is refused out loud: ${lost}`);
     ok(run("prompt-router.mjs", "I approve", SID, tx([masonSaid("ok"), agentSaid("Merged #900.")])) === "",
       "with no request shown, a plain \"I approve\" stays ordinary chat even when the listing failed");
+    // Taha LOW, #2389: a Sol skip summary ends "Reference N. Reply before ..."; that is caught too.
+    const lostSkip = run("prompt-router.mjs", "skip", SID, tx([masonSaid("ok"),
+      agentSaid("Sol found 1 issue.\nReference 323232. Reply before Nov 24, 2026, 9:00 PM Central.")]));
+    ok(lostSkip.includes("OWNER REPLY NOT RECORDED") && lostSkip.includes("could not be listed"),
+      `a skip reply to a shown skip request the failed listing may have hidden is refused out loud: ${lostSkip}`);
 
     // Mason, 2026-11-23: a merge captain built the request; he answers "I approve" in the
     // conversation he is talking to, which showed it word for word. It records, and the

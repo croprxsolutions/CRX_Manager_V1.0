@@ -2005,7 +2005,10 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   const replyDir = tempDir("crx-apply-reply-");
   let replies = 0;
   const markFor = (content) => {
-    const f = path.join(replyDir, `t${replies++}.jsonl`);
+    // Claude Code names a transcript by its session id; the apply checks the receipt against it.
+    const tdir = path.join(replyDir, `t${replies++}`);
+    mkdirSync(tdir, { recursive: true });
+    const f = path.join(tdir, "sess-mason-chat-0001.jsonl");
     const said = (id, text) => JSON.stringify({ type: "assistant", message: { id, role: "assistant", content: [{ type: "text", text }] } });
     writeFileSync(f, `${said("m1", "Approve this ONE change ...")}\n`);
     const mark = replyMark(f, "approve 482913");

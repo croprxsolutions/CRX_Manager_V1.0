@@ -10,7 +10,7 @@ import {
   type LoaderLoadBalanceMode,
   type LoaderProductInput,
 } from '../../lib/loaderWorksheet';
-import { fmtLoaderGallons, loaderTankWater, loaderWaterNotes, type LoaderWater } from '../../lib/loaderWorksheetWater';
+import { fmtLoaderGallons, fmtLoaderWater, loaderTankWater, loaderWaterNotes, type LoaderWater } from '../../lib/loaderWorksheetWater';
 import {
   condensedLoaderLoadLabel,
   condenseLoaderLoads,
@@ -217,12 +217,16 @@ export function LoaderWorksheetsPanel({
     load.products.map((product) => ({ ...product, product_form: formOf(product) })), products);
   const waterCell = (load: LoaderLoad, each = '') => {
     const water = tankWater(load);
-    return <>{fmtLoaderGallons(water.water_gal)}{each}{water.over && <span className="block text-xs font-medium text-amber-700">Products exceed finished gallons</span>}</>;
+    return <>{fmtLoaderWater(water)}{water.water_gal === null ? '' : each}{water.over && <span className="block text-xs font-medium text-amber-700">Products exceed finished gallons</span>}</>;
   };
-  const waterNotes = selectedComputed?.valid ? loaderWaterNotes({
+  const waterWhy = selectedComputed?.valid ? {
+    unknown: selectedComputed.loads.flatMap((load) => tankWater(load).unknown),
     unsized: selectedComputed.loads.flatMap((load) => tankWater(load).unsized),
     missing: selectedComputed.loads.flatMap((load) => tankWater(load).missing),
-  }) : [];
+  } : null;
+  // Before the product details load, liquid/dry is not read yet: say so, not "set it on the product".
+  const waterNotes = !waterWhy ? [] : !weightsShown && waterWhy.unknown.length > 0
+    ? ['Water to add shows once the product details load.'] : loaderWaterNotes(waterWhy);
   const selectedLoadsDone = selectedComputed
     ? validLoaderLoadDone(selectedWorksheet?.loads_done ?? [], selectedComputed.loads_count)
     : [];

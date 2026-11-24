@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeLoaderWorksheet } from './loaderWorksheet';
-import { fmtLoaderGallons, loaderWater } from './loaderWorksheetWater';
+import { fmtLoaderGallons, fmtLoaderWater, loaderWater, loaderWaterNotes } from './loaderWorksheetWater';
 
 const p = (product_name: string, amount: number, unit: string, product_form: string | null = 'liquid') =>
   ({ product_name, amount, unit, product_form });
@@ -8,7 +8,7 @@ const p = (product_name: string, amount: number, unit: string, product_form: str
 describe('loaderWater', () => {
   it('subtracts liquid product gallons; dry products add no volume', () => {
     const w = loaderWater(300, [p('L1', 2, 'gal'), p('L2', 64, 'fl oz'), p('D1', 50, 'lb', 'dry'), p('S1', 3, 'each', 'each')]);
-    expect(w).toEqual({ finished_gal: 300, water_gal: 297.5, over: false, unsized: [], missing: [] });
+    expect(w).toEqual({ finished_gal: 300, water_gal: 297.5, over: false, unknown: [], unsized: [], missing: [] });
   });
 
   it('never prints water below 0 and warns when the recipe is over the finished gallons', () => {
@@ -18,14 +18,16 @@ describe('loaderWater', () => {
     expect(loaderWater(10, [p('L1', 10, 'gal')])).toMatchObject({ water_gal: 0, over: false });
   });
 
-  it('flags a product it cannot size instead of guessing', () => {
-    // Form unknown: ounces (fluid or weight?) and pounds (a liquid can be sold by weight) are never "no volume".
-    expect(loaderWater(100, [p('X', 32, 'oz', null), p('Y', 50, 'lb', null), p('Z', 1, 'gal', null)]))
-      .toEqual({ finished_gal: 100, water_gal: 99, over: false, unsized: ['X', 'Y'], missing: [] });
-    // A known liquid measured by weight cannot be sized without its density either.
-    expect(loaderWater(100, [p('W', 50, 'lb', 'liquid')]).unsized).toEqual(['W']);
+  it('shows water only when known: never guesses liquid or dry from the unit (Mason, 2026-11-24)', () => {
+    // Form not on file, even with a gallon unit: not known.
+    expect(loaderWater(100, [p('X', 32, 'oz', null), p('Z', 1, 'gal', null), p('L', 1, 'gal')]))
+      .toEqual({ finished_gal: 100, water_gal: null, over: false, unknown: ['X', 'Z'], unsized: [], missing: [] });
+    // A known liquid measured by weight cannot be sized without its density.
+    expect(loaderWater(100, [p('W', 50, 'lb', 'liquid')])).toMatchObject({ water_gal: null, unsized: ['W'] });
     expect(loaderWater(100, [p('Bad', 3, 'bag', 'liquid'), p('NoAmount', NaN, 'gal'), p('DryNoAmount', NaN, 'lb', 'dry')]))
-      .toMatchObject({ unsized: ['Bad'], missing: ['NoAmount'] });
+      .toMatchObject({ water_gal: null, unsized: ['Bad'], missing: ['NoAmount'] });
+    expect(loaderWaterNotes(loaderWater(100, [p('X', 1, 'gal', null)]))).toEqual(['Water to add not shown: set liquid/dry on the product for X.']);
+    expect(fmtLoaderWater({ water_gal: null })).toBe('—');
   });
 
   it('sizes every load in both tank modes and the batch', () => {
@@ -34,7 +36,7 @@ describe('loaderWater', () => {
         products: [{ product_name: 'L', total_quantity: 40, unit: 'gal', product_form: 'liquid' },
           { product_name: 'D', total_quantity: 100, unit: 'lb', product_form: 'dry' }] });
       const waters = ws.loads.map((load) => loaderWater(load.volume, load.products));
-      const total = waters.reduce((s, w) => s + w.water_gal, 0);
+      const total = waters.reduce((s, w) => s + (w.water_gal ?? NaN), 0);
       expect(Math.round(total * 10000) / 10000).toBe(960); // 1000 finished − 40 liquid
       waters.forEach((w, i) => expect(w.water_gal).toBeCloseTo(ws.loads[i].volume * 0.96, 4));
     }

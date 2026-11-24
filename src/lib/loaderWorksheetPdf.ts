@@ -21,7 +21,7 @@ import { CRX_GREEN, CHARCOAL, GRAY, ALT_ROW_BG, type JsPDFWithAutoTable } from '
 import { companyFooterInternal, fitCompanyNameFont, type CompanyInfo } from './companyInfo';
 import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { fmtNum, type ApplicatorSheetCustomer } from './applicatorSheetData';
-import { fmtLoaderGallons, loaderTankWater, loaderWaterNotes, type LoaderWater } from './loaderWorksheetWater';
+import { fmtLoaderGallons, fmtLoaderWater, loaderTankWater, loaderWaterNotes, type LoaderWater } from './loaderWorksheetWater';
 import { loaderGroupWeightText, loaderLoadWeights, loaderWeightCaption, type LoaderProductWeights, type LoaderSourceLine } from './loaderWeights';
 import type { WeightUnitFactors } from '../types';
 import {
@@ -209,23 +209,22 @@ export function loaderPdfWaterRows(data: LoaderWorksheetPdfData, plan: ReturnTyp
     ...product, amount: ws.loads.reduce((sum, load) => sum + (load.products[pi]?.amount ?? 0), 0) }));
   const batch = loaderTankWater(ws.spray_volume, batchProducts, data.products);
   const each = (column: LoaderWorksheetPdfLoadColumn) => (column.loads.length > 1 ? ' each' : '');
-  const marks = (water: LoaderWater) => `${water.over ? ' (!)' : ''}${water.unsized.length + water.missing.length > 0 ? ' *' : ''}`;
+  const marks = (water: LoaderWater) => (water.over ? ' (!)' : '');
   // The row itself says what its marks mean, so a page break can never part the numbers from the reason.
-  const left = [...new Set([...batch.missing, ...batch.unsized])];
   const label = ['Water to add',
     ...(tanks.some(({ water }) => water.over) || batch.over ? ['(!) products exceed finished gallons: check recipe'] : []),
-    ...(left.length > 0 ? [`* leaves out ${left.join(', ')}: subtract by hand`] : [])].join('\n');
+    ...(batch.unknown.length > 0 ? ['— = set liquid/dry on the product'] : batch.water_gal === null ? ['— = not known: see note below'] : [])].join('\n');
   const rows = [
     ['Finished gallons', ...tanks.map(({ column, water }) => `${fmtLoaderGallons(water.finished_gal)}${each(column)}`), fmtLoaderGallons(batch.finished_gal)],
-    [label, ...tanks.map(({ column, water }) => `${fmtLoaderGallons(water.water_gal)}${marks(water)}${each(column)}`),
-      `${fmtLoaderGallons(batch.water_gal)}${marks(batch)}`],
+    [label, ...tanks.map(({ column, water }) => `${fmtLoaderWater(water)}${marks(water)}${water.water_gal === null ? '' : each(column)}`),
+      `${fmtLoaderWater(batch)}${marks(batch)}`],
   ];
   const warnings: string[] = [];
   const over = tanks.filter(({ water }) => water.over).map(({ column }) => column.label);
   if (over.length > 0 || batch.over) {
     warnings.push(`(!) The products are more than the finished gallons${over.length > 0 ? ` on ${over.join(', ')}` : ''}: water to add prints 0. Check the recipe and carrier rate.`);
   }
-  warnings.push(...loaderWaterNotes(batch).map((note) => `* ${note}`));
+  warnings.push(...loaderWaterNotes(batch));
   return { rows, warnings };
 }
 

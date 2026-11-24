@@ -93,9 +93,18 @@ describe('loaderPdfWaterRows', () => {
   it('flags a line with no amount instead of counting it as no volume', () => {
     const blank = { ...liquid, products: [{ product_name: 'TEST Blank', total_quantity: null, unit: 'gal', product_form: 'liquid' }] };
     const { rows, warnings } = loaderPdfWaterRows(blank, buildLoaderWorksheetPdfPlan(blank));
-    expect(rows[1].at(-1)).toBe('1000 GL *');
-    expect(warnings[0]).toMatch(/does not count TEST Blank: the amount is missing/);
-    // The reason rides on the same row as the starred numbers (Terra HIGH: a page break could part them).
-    expect(rows[1][0]).toBe('Water to add\n* leaves out TEST Blank: subtract by hand');
+    expect(rows[1].slice(1)).toEqual(['—', '—', '—', '—', '—']);
+    expect(warnings).toEqual(['Water to add not shown: the amount of TEST Blank is missing. Fix it on the job.']);
+    // The reason rides on the same row as the dashes (Terra HIGH: a page break could part them).
+    expect(rows[1][0]).toBe('Water to add\n— = not known: see note below');
+  });
+
+  it('prints a dash and "set liquid/dry on the product" when any product form is not on file (Mason: only when known)', () => {
+    const unknown = { ...liquid, products: [...liquid.products, { product_name: 'TEST Unset', total_quantity: 5, unit: 'gal', product_form: null }] };
+    const { rows, warnings } = loaderPdfWaterRows(unknown, buildLoaderWorksheetPdfPlan(unknown));
+    expect(rows[0].at(-1)).toBe('1000 GL');
+    expect(rows[1].at(-1)).toBe('—');
+    expect(rows[1][0]).toBe('Water to add\n— = set liquid/dry on the product');
+    expect(warnings).toEqual(['Water to add not shown: set liquid/dry on the product for TEST Unset.']);
   });
 });

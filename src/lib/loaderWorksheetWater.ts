@@ -65,7 +65,7 @@ export function loaderWaterNotes(water: Pick<LoaderWater, 'unsized' | 'missing'>
   const notes: string[] = [];
   const names = (list: string[]) => [...new Set(list)].join(', ');
   if (water.missing.length > 0) notes.push(`Water to add does not count ${names(water.missing)}: the amount is missing. Fix it on the job, or subtract its volume by hand.`);
-  if (water.unsized.length > 0) notes.push(`Water to add does not count ${names(water.unsized)}: liquid or dry is not known for this unit. Subtract its volume by hand.`);
+  if (water.unsized.length > 0) notes.push(`Water to add does not count ${names(water.unsized)}: its gallons cannot be worked out from this unit (or it is not known to be liquid or dry). Subtract its volume by hand.`);
   return notes;
 }
 

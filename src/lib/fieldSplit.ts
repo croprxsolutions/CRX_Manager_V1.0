@@ -73,17 +73,22 @@ export function splitSaveErrorMessage(message: string): string {
 }
 
 // Contract rule 3: one retry key per save action, kept across retries and page reloads. Every unconfirmed
-// request for a field keeps its own key, so going back to an earlier unconfirmed request replays it.
+// request for a field keeps its own key until a save for that field is confirmed.
 const KEY_PREFIX = 'crx:field-split-save:v1:';
 const memoryKeys = new Map<string, string>();
 
+function readKeys(slot: string): Record<string, string> {
+  let text: string | null = null;
+  try { text = window.sessionStorage.getItem(slot); } catch { /* storage blocked: use the in-memory copy */ }
+  try {
+    const parsed: unknown = JSON.parse(text ?? memoryKeys.get(slot) ?? '{}');
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, string> : {};
+  } catch { return {}; }
+}
+
 export function splitSaveKey(userId: string, fieldId: string, requestFingerprint: string): string {
   const slot = `${KEY_PREFIX}${userId}:${fieldId}`;
-  let stored: Record<string, string> = {};
-  try {
-    const parsed: unknown = JSON.parse(window.sessionStorage.getItem(slot) ?? memoryKeys.get(slot) ?? '{}');
-    if (parsed && typeof parsed === 'object') stored = parsed as Record<string, string>;
-  } catch { /* unreadable: start a new key */ }
+  const stored = readKeys(slot);
   if (typeof stored[requestFingerprint] === 'string') return stored[requestFingerprint];
   const key = generateIdempotencyKey('set_field_billing_split', userId);
   const record = JSON.stringify({ ...stored, [requestFingerprint]: key });
@@ -92,13 +97,12 @@ export function splitSaveKey(userId: string, fieldId: string, requestFingerprint
   return key;
 }
 
-/** Only after that request's save is confirmed; other unconfirmed requests keep their keys. */
-export function clearSplitSaveKey(userId: string, fieldId: string, requestFingerprint: string): void {
+/**
+ * After a confirmed save. The page reloads fresh, so every earlier unconfirmed request is superseded: sending it
+ * again is a new change (e.g. going back to the old split) and must write a new version, not replay an old reply.
+ */
+export function clearSplitSaveKey(userId: string, fieldId: string): void {
   const slot = `${KEY_PREFIX}${userId}:${fieldId}`;
-  let stored: Record<string, string> = {};
-  try { stored = JSON.parse(window.sessionStorage.getItem(slot) ?? memoryKeys.get(slot) ?? '{}') ?? {}; } catch { /* nothing readable */ }
-  delete stored[requestFingerprint];
-  const record = JSON.stringify(stored);
-  memoryKeys.set(slot, record);
-  try { window.sessionStorage.setItem(slot, record); } catch { /* the in-memory copy is updated */ }
+  memoryKeys.delete(slot);
+  try { window.sessionStorage.removeItem(slot); } catch { /* nothing stored */ }
 }

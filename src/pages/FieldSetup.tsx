@@ -658,7 +658,7 @@ function FieldSetupPage() {
       });
       if (sErr) throw sErr;
       assertRpcResult(sData, 'set_field_billing_split');
-      clearSplitSaveKey(profile!.id, savedFieldId, fingerprintIntentPayload(request));
+      clearSplitSaveKey(profile!.id, savedFieldId);
     } catch (splitError) {
       const message = splitSaveErrorMessage((splitError as { message?: string } | null)?.message ?? 'Failed to save the billing split.');
       Sentry.captureException(toSentryError(splitError), { tags: { source: 'critical_action', action: 'set_field_billing_split' } });

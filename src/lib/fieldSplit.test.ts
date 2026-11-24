@@ -47,8 +47,9 @@ describe('split save retry key (contract rule 3)', () => {
     expect(second).toMatch(/^set_field_billing_split:user-1:/);
     // Going back to an earlier unconfirmed request replays its key.
     expect(splitSaveKey('user-1', 'field-1', 'request-A')).toBe(first);
-    clearSplitSaveKey('user-1', 'field-1', 'request-B');
+    clearSplitSaveKey('user-1', 'field-1');
     expect(splitSaveKey('user-1', 'field-1', 'request-B')).not.toBe(second);
-    expect(splitSaveKey('user-1', 'field-1', 'request-A')).toBe(first); // confirming B keeps A's key
+    // After a confirmed save, going back to A is a new change: it must not replay A's old reply.
+    expect(splitSaveKey('user-1', 'field-1', 'request-A')).not.toBe(first);
   });
 });

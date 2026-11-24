@@ -159,7 +159,7 @@ The job reaches **Ready for review** when Job done is tapped [D8, GR3]. **A clea
 | **Shared load** | Needed to invoice, not to close | A job sharing a load with a job still spraying closes; its invoices wait until that load is settled: its leftover recorded and every job on it Ready for review or closed. The office can settle the load by hand with a reason [Sol 6]. |
 | **Rate check per load** [G4, Q11] | Flag | Billed vs planned per load and product (planned = each job's own recipe rate × that job's acres from the load, added up); more than **5% (office-adjustable)** of planned either way puts the job on the review list with planned vs billed and the dollar difference. A load shared by jobs gives them one rate. The office can edit a load's used quantity with a reason (measured usage, shown beside the raw amount). Zero-acre jobs skip it. |
 | **Mix differed from recipe** [Q2], stock short [Sol 32], possible duplicate entry, extra field, extra acres, unpriced substitute [M9] | Flag | Shown on the review list; the office acts only if it wants to (pricing a substitute is needed before posting, not closing). |
-| **Waste** [D11, Q6] | Flag | Approved by any office role with a reason. Not billed unless the office adds it with a reason. |
+| **Waste** [D11, Q6] | Flag | Approved by any office role with a reason. **Billed by default** as part of what went in the tank (Mason, 2026-11-24 o); the office can lower that load's quantity with a reason. |
 
 The office closes the job → **Applied**; the legal spray record is written then. A save, duplicate decision or close all take the job row lock, and close re-reads the job, so a save in flight lands before or after, never half. An optional "job done" email (off by default) goes to every payer, each seeing only their own fields [Q8, D5].
 
@@ -304,7 +304,7 @@ Sol numbers without a row here are reviewer finding ids kept for traceability; t
 | Q2 | Mixer edits the load's mix; the job is flagged; bill what went in the tank |
 | Q3 | A field's split can change from any date the office picks; drafts keep theirs until a logged refresh. A vendor-sourced line on another customer's job: allowed, flagged |
 | Q5 | Fields: admins and reps archive, only admins restore, blocked while work is open. Tender driver: any login [SPRING] |
-| Q6 | Wasted solution not billed unless the office adds it; never just dumped |
+| Q6 | Wasted solution is billed by default as tank contents; the office can lower it with a reason (replaced 2026-11-24 o); never just dumped |
 | Q7 | Offline phones sync later; a job can't close while entries wait [SPRING] |
 | Q8 | Optional "job done" email, off by default, to every payer, own fields only |
 | Q9 | Each payer's invoice shows who shares the bill. Cancel only at zero acres sprayed |
@@ -361,4 +361,5 @@ Sol numbers without a row here are reviewer finding ids kept for traceability; t
 | 2026-11-24 l | Chem Man import: once; fields already in CRX skipped and listed; trial on a local test copy, not staging; live once after the reset; checked by hand |
 | 2026-11-24 m | Staging-only migrations count as current work: slice 0 checks each read-only; ones that fit ride the normal release; a conflicting one gets a replacement migration; Mason is asked only if one changes today's live billing |
 | 2026-11-24 n | Approvals come to Mason in one batch per slice, every gate listed up front |
+| 2026-11-24 o | Waste bills by default (it went in the tank); the office lowers a load's quantity with a reason if it should not bill (Sol round 2 #47) |
 | KI-206 | No EPA registration prints a dash |

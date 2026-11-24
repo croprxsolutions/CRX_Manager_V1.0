@@ -54,7 +54,7 @@ describe('prepareApplicatorSheetPrintData safety sheet', () => {
     job_number: 'JOB-1', customers: [], scheduled_date: '2026-07-11', scheduled_time: null, applicator_name: null,
     vehicle_name: null, fields: [], total_acres: 0, loader_comment: null,
     products: [line('TEST Same', 'p-1', 12, 7), line('TEST Same', 'p-2', 48, null), line('TEST Old', null, null, 3)],
-    safety: [{ product_name: 'TEST stale', epa_registration: null, signal_word: 'Danger', rei_hours: 1, phi_days: 1, label_rei_hours: 1, label_phi_days: 1 }],
+    safety: [{ product_name: 'TEST stale', epa_registration: null, signal_word: 'Danger', rei_hours: 1, phi_days: 1 }],
   };
   const options = { mapPages: 'none' as const, includePreviousApplications: false, previousApplicationsPerField: 3,
     blankSections: 0, includeBillingSplits: false, showBanner: true };
@@ -67,13 +67,14 @@ describe('prepareApplicatorSheetPrintData safety sheet', () => {
   });
 
   it('lists exactly the job order lines, each with its own product signal word, even when names repeat', async () => {
-    reply({ data: [{ id: 'p-1', signal_word: 'Caution', rei_hours: 24, phi_days: 7 }, { id: 'p-2', signal_word: 'Danger', rei_hours: 48, phi_days: null }], error: null });
+    reply({ data: [{ id: 'p-1', epa_registration: '100-1', signal_word: 'Caution', rei_hours: 24, phi_days: 7 }, { id: 'p-2', epa_registration: null, signal_word: 'Danger', rei_hours: 48, phi_days: null }], error: null });
     const result = await prepareApplicatorSheetPrintData('job-1', data, { ...options, includeSafetySheet: true });
     expect(mockFrom).toHaveBeenCalledWith('products');
     expect(result.safety).toEqual([
-      { product_name: 'TEST Same', epa_registration: null, signal_word: 'Caution', rei_hours: 12, phi_days: 7, label_rei_hours: 24, label_phi_days: 7 },
-      { product_name: 'TEST Same', epa_registration: null, signal_word: 'Danger', rei_hours: 48, phi_days: null, label_rei_hours: 48, label_phi_days: null },
-      { product_name: 'TEST Old', epa_registration: null, signal_word: null, rei_hours: null, phi_days: 3, label_rei_hours: null, label_phi_days: null },
+      // Every value from today's product record, never the line's saved REI/PHI (Mason: "Yes, today's records").
+      { product_name: 'TEST Same', epa_registration: '100-1', signal_word: 'Caution', rei_hours: 24, phi_days: 7 },
+      { product_name: 'TEST Same', epa_registration: null, signal_word: 'Danger', rei_hours: 48, phi_days: null },
+      { product_name: 'TEST Old', epa_registration: null, signal_word: null, rei_hours: null, phi_days: null },
     ]);
   });
 
@@ -83,7 +84,7 @@ describe('prepareApplicatorSheetPrintData safety sheet', () => {
   });
 
   it('marks safety as not loaded when a line product record cannot be read', async () => {
-    reply({ data: [{ id: 'p-1', signal_word: 'Caution', rei_hours: 24, phi_days: 7 }], error: null });
+    reply({ data: [{ id: 'p-1', epa_registration: null, signal_word: 'Caution', rei_hours: 24, phi_days: 7 }], error: null });
     expect((await prepareApplicatorSheetPrintData('job-1', data, { ...options, includeSafetySheet: true })).safety).toBeNull();
   });
 });

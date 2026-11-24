@@ -203,6 +203,7 @@ export async function fetchApplicatorSheetBillingSplits(
 
 interface ProductSafetyRow {
   id: string;
+  epa_registration: string | null;
   signal_word: string | null;
   rei_hours: number | null;
   phi_days: number | null;
@@ -210,18 +211,18 @@ interface ProductSafetyRow {
 
 /**
  * Safety for the optional safety sheet: exactly the job order's product lines, in
- * order. Each line's signal word and current label REI/PHI are read at print time
- * from its own product record (by product id, never by name); the line's own REI/PHI
- * stay as on the job order and the sheet flags any difference. A failed read, or a
- * line product the reader cannot see, returns null so the sheet says safety could
- * not be loaded. A line without a product id prints "See label" for the signal word.
+ * order. Every value (EPA no., signal word, REI, PHI) comes from that line's own
+ * product record as it is today (by product id, never by name; Mason 2026-11-24),
+ * so one row never mixes sources. A failed read, or a line product the reader cannot
+ * see, returns null so the sheet says safety could not be loaded. A line without a
+ * product id prints "See label".
  */
 async function sheetSafety(products: ApplicatorSheetData['products']): Promise<ApplicatorSheetSafety[] | null> {
   const ids = [...new Set(products.map((product) => product.product_id).filter((id): id is string => Boolean(id)))];
   const labels = new Map<string, ProductSafetyRow>();
   if (ids.length > 0) {
     try {
-      const { data, error } = await supabase.from('products').select('id, signal_word, rei_hours, phi_days').in('id', ids);
+      const { data, error } = await supabase.from('products').select('id, epa_registration, signal_word, rei_hours, phi_days').in('id', ids);
       if (error || !data) return null;
       (data as ProductSafetyRow[]).forEach((row) => labels.set(row.id, row));
     } catch {
@@ -233,12 +234,10 @@ async function sheetSafety(products: ApplicatorSheetData['products']): Promise<A
     const label = product.product_id ? labels.get(product.product_id) : undefined;
     return {
       product_name: product.product_name,
-      epa_registration: product.epa_registration?.trim() || null,
+      epa_registration: label?.epa_registration?.trim() || null,
       signal_word: label?.signal_word?.trim() || null,
-      rei_hours: product.rei_hours,
-      phi_days: product.phi_days,
-      label_rei_hours: label?.rei_hours ?? null,
-      label_phi_days: label?.phi_days ?? null,
+      rei_hours: label?.rei_hours ?? null,
+      phi_days: label?.phi_days ?? null,
     };
   });
 }

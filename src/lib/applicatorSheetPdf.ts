@@ -446,16 +446,9 @@ function appendMapPage(
  * The optional safety sheet: every product's signal word, REI and PHI on its own
  * page(s), never cut short (Mason, 2026-11-24: off by default, all of it on its own sheet).
  */
-/**
- * One safety interval cell: the job line's value (as on the job order), with the
- * label's current value beside it when they differ. A blank or negative value is not
- * a real interval and prints "See label".
- */
-function safetyInterval(line: number | null, label: number | null, unit: string): string {
-  const valid = (value: number | null): value is number => value != null && Number.isFinite(value) && value >= 0;
-  if (!valid(line)) return valid(label) ? `See label (label now ${fmtNum(label)} ${unit})` : 'See label';
-  if (valid(label) && label !== line) return `${fmtNum(line)} ${unit} (label now ${fmtNum(label)} ${unit}: check label)`;
-  return `${fmtNum(line)} ${unit}`;
+/** One safety interval cell; a blank or negative value is not a real interval. */
+function safetyInterval(value: number | null, unit: string): string {
+  return value != null && Number.isFinite(value) && value >= 0 ? `${fmtNum(value)} ${unit}` : 'See label';
 }
 
 function appendSafetySheet(doc: JsPDFWithAutoTable, autoTable: typeof import('jspdf-autotable').default, data: ApplicatorSheetData): void {
@@ -472,7 +465,8 @@ function appendSafetySheet(doc: JsPDFWithAutoTable, autoTable: typeof import('js
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(...GRAY);
-  const intro = doc.splitTextToSize(`${heading} · Always read and follow the product label.`, width) as string[];
+  const printed = new Date().toLocaleDateString();
+  const intro = doc.splitTextToSize(`${heading} · From product records on ${printed} · Always read and follow the product label.`, width) as string[];
   doc.text(intro, margin, margin + 26);
   const startY = margin + 30 + intro.length * 11;
   if (items.length === 0) {
@@ -488,13 +482,15 @@ function appendSafetySheet(doc: JsPDFWithAutoTable, autoTable: typeof import('js
   autoTable(doc, {
     startY,
     margin: { left: margin, right: margin, top: margin + 20, bottom: 60 },
-    head: [['Product', 'EPA Reg. No.', 'Signal Word', 'REI', 'PHI']],
-    body: items.map((item) => [
+    // "#" is the line's place on the job order: it tells same-named lines apart.
+    head: [['#', 'Product', 'EPA Reg. No.', 'Signal Word', 'REI', 'PHI']],
+    body: items.map((item, index) => [
+      String(index + 1),
       item.product_name,
       item.epa_registration || '—',
       item.signal_word ? item.signal_word.toUpperCase() : 'See label',
-      safetyInterval(item.rei_hours, item.label_rei_hours, 'hr'),
-      safetyInterval(item.phi_days, item.label_phi_days, 'd'),
+      safetyInterval(item.rei_hours, 'hr'),
+      safetyInterval(item.phi_days, 'd'),
     ]),
     styles: { fontSize: 10, cellPadding: 5 },
     headStyles: { fillColor: CRX_GREEN, textColor: 255, fontStyle: 'bold' },
@@ -505,7 +501,8 @@ function appendSafetySheet(doc: JsPDFWithAutoTable, autoTable: typeof import('js
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(...GRAY);
-      doc.text(`Safety (continued) · ${heading}`, margin, margin + 6, { maxWidth: width });
+      // One line only, so it never runs into the repeated table header.
+      doc.text((doc.splitTextToSize(`Safety (continued) · ${heading}`, width) as string[])[0], margin, margin + 6);
     },
   });
 }

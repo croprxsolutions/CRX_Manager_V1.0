@@ -5,7 +5,7 @@
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), applies the candidate (autocommit refused,
  * POSTFLIGHT_OK, re-apply refused), then as the signed-in user checks:
- *   1. a driver gets only farms on their own not-deleted deliveries that are open, scheduled from yesterday on, or
+ * *   1. a driver gets only farms on their own not-deleted, not cancelled or voided deliveries that are open, scheduled from yesterday on, or
  *      completed since yesterday;
  *      never a farm on someone else's, an unassigned, a deleted or an old completed delivery;
  *   2. the same seven keys, nothing financial, addresses as before;
@@ -25,8 +25,8 @@ const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDA
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });
 // A today, B overdue in progress, C old completed, D completed yesterday, E another driver's, F unassigned, G deleted,
-// H overdue but completed just now.
-const FARMS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+// H overdue but completed just now, I cancelled today.
+const FARMS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
 const ID = Object.fromEntries(FARMS.map((f, i) => [f, id(`c${i + 1}`)]));
 const OTHER = id('a9');
 const ALL = `ARRAY['${FARMS.map((f) => ID[f]).join("','")}']::uuid[]`;
@@ -49,10 +49,11 @@ try {
       ('FS-E', gen_random_uuid(), '${ID.E}', '${USERS.admin}', CURRENT_DATE, 'scheduled', '${OTHER}', NULL, NULL),
       ('FS-F', gen_random_uuid(), '${ID.F}', '${USERS.admin}', CURRENT_DATE, 'scheduled', NULL, NULL, NULL),
       ('FS-G', gen_random_uuid(), '${ID.G}', '${USERS.admin}', CURRENT_DATE, 'scheduled', '${USERS.driver}', now(), NULL),
-      ('FS-H', gen_random_uuid(), '${ID.H}', '${USERS.admin}', CURRENT_DATE - 5, 'completed', '${USERS.driver}', NULL, now());` });
+      ('FS-H', gen_random_uuid(), '${ID.H}', '${USERS.admin}', CURRENT_DATE - 5, 'completed', '${USERS.driver}', NULL, now()),
+      ('FS-I', gen_random_uuid(), '${ID.I}', '${USERS.admin}', CURRENT_DATE, 'cancelled', '${USERS.driver}', NULL, NULL);` });
 
   // Before the fix: the same driver reads every farm, including other drivers' and unassigned ones.
-  assert.equal(attempt(USERS.driver, NAMES), 'ok|Farm A,Farm B,Farm C,Farm D,Farm E,Farm F,Farm G,Farm H', 'baseline leaks every farm');
+  assert.equal(attempt(USERS.driver, NAMES), 'ok|Farm A,Farm B,Farm C,Farm D,Farm E,Farm F,Farm G,Farm H,Farm I', 'baseline leaks every farm');
 
   const auto = apply();
   assert.match(`${auto.stdout}${auto.stderr}`, /PREFLIGHT_FAIL: run this file as one transaction/, 'autocommit apply must refuse');
@@ -64,7 +65,7 @@ try {
   console.log('[apply] autocommit refused, applied once with POSTFLIGHT_OK, re-apply refused');
 
   assert.equal(attempt(USERS.driver, NAMES), 'ok|Farm A,Farm B,Farm D,Farm H', 'only farms on the driver\'s own open or recent deliveries');
-  console.log('[scope] driver gets A (today), B (overdue, in progress), D (yesterday), H (completed just now); not C (old), E (other driver), F (unassigned), G (deleted)');
+  console.log('[scope] driver gets A (today), B (overdue, in progress), D (yesterday), H (completed just now); not C (old), E (other driver), F (unassigned), G (deleted), I (cancelled)');
 
   const lookupA = asUser(`r := public.get_driver_customers(ARRAY['${ID.A}']::uuid[]);`);
   assert.equal(attempt(USERS.driver, `${lookupA} v := (SELECT string_agg(k, ',' ORDER BY k) FROM jsonb_object_keys(r->'rows'->0) k);`),

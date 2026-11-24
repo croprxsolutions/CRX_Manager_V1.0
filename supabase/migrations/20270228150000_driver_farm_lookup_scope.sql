@@ -6,10 +6,10 @@
 -- Changes only get_driver_customers(uuid[]):
 --   1. The caller must be an active driver who still has the Deliveries or the My Route page (an admin has not put
 --      both 'deliveries' and 'my-route' in profiles.denied_pages); otherwise the same "Not authorized" refusal.
---   2. A requested farm is returned only when it is on a not-deleted delivery assigned to the caller that is either
---      still open (scheduled or in progress, so an overdue stop on My Route keeps its farm), scheduled from yesterday
---      on (the customers_select driver window), or completed since yesterday (so an overdue stop the driver just
---      finished keeps its farm for the receipt). Other ids are simply absent, as unknown ids already were.
+--   2. A requested farm is returned only when it is on a not-deleted, not cancelled or voided delivery assigned to
+--      the caller that is still open (scheduled or in progress, so an overdue stop on My Route keeps its farm),
+--      scheduled from yesterday on (the customers_select driver window), or completed since yesterday (so an overdue
+--      stop the driver just finished keeps its farm for the receipt). Other ids are simply absent, as unknown ids already were.
 -- Same keys, the 500-id limit, owner, SECURITY DEFINER, search_path and grants (CREATE OR REPLACE). This replaces
 -- the 2026-11-21 "drivers may see these for every farm" decision. No row changes.
 --
@@ -71,6 +71,7 @@ BEGIN
          WHERE d.customer_id = c.id
            AND d.assigned_driver = auth.uid()
            AND d.deleted_at IS NULL
+           AND d.status NOT IN ('cancelled', 'voided')
            AND (d.status IN ('scheduled', 'in_progress') OR d.scheduled_date >= CURRENT_DATE - 1
                 OR d.completed_at >= CURRENT_DATE - 1))
   ), '[]'::jsonb));
@@ -89,7 +90,7 @@ BEGIN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: get_driver_customers must be definer, stable, fixed search_path, authenticated only';
   END IF;
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
-       WHERE oid = to_regprocedure('public.get_driver_customers(uuid[])')) IS DISTINCT FROM '0ae1858c59e344e9f8b27e5e10eed86c' THEN
+       WHERE oid = to_regprocedure('public.get_driver_customers(uuid[])')) IS DISTINCT FROM 'd0750901bc7ab9f9fed1897217b0084f' THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: get_driver_customers is not this file''s body';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK';

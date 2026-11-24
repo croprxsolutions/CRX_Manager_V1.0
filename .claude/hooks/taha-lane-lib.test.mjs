@@ -286,42 +286,33 @@ ok(/taha override #2242 777777/.test(pushed), "after a new push the block is bac
 const refusal = tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: lane, dirs, now: NOW });
 ok(/TAHA LANE BLOCK/.test(refusal) && /taha override #2300 \d{6}/.test(refusal), "a refusal gives Mason the exact line, PR included");
 eq(tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: f("src/pages/Deliveries.tsx"), dirs, now: NOW }), null, "outside the lane, nothing to do");
-// Taha's own sign-off on the exact head lifts the block with no code (Mason, 2026-11-24).
+// Taha's own GitHub Approve on the exact head lifts the block with no code (Mason, 2026-11-24).
 const taha = { login: "TahaKhanAbdalli" }, mason = { login: "masonwells1" };
-eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "APPROVED", commit_id: A }], comments: [] }), true, "Taha's Approve on this commit counts");
-eq(tahaApprovedHead({ headSha: B, reviews: [{ user: taha, state: "APPROVED", commit_id: A }], comments: [] }), false, "his Approve on an older commit does not");
-eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "COMMENTED", commit_id: A }], comments: [] }), false, "a plain review comment is not a sign-off");
-eq(tahaApprovedHead({ headSha: A, reviews: [{ user: mason, state: "APPROVED", commit_id: A }], comments: [] }), false, "Mason's account (shared with agents) does not count");
-const at = { created_at: "2026-11-24T06:00:00Z", updated_at: "2026-11-24T06:00:00Z" };
-eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ ...at, user: taha, body: `Ready to merge: ${A.slice(0, 12)}` }] }), true, "his Ready to merge line for this commit counts");
-eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ ...at, user: taha, body: `Ready to merge: \`${A.slice(0, 12)}\`.` }] }), false, "one line for both gates: the apply gate's, so no backticks or period (Taha's review of #2406, LOW 1)");
-// Taha's review of #2406, LOW 3: look-alikes that must not count.
-for (const [row, why] of [
-  [{ ...at, user: taha, body: "**Technical review only; not an OK to merge (lane PR, needs Taha's OK).**" }, "his review header"],
-  [{ ...at, user: taha, body: `> Ready to merge: ${A.slice(0, 12)}` }, "a quoted Ready line"],
-  [{ ...at, user: taha, body: `Ready to merge: ${A.slice(0, 12)}\nOne more thing first.` }, "a Ready line with notes under it"],
-  [{ ...at, user: { login: "TahaKhanAbdalli2" }, body: `Ready to merge: ${A.slice(0, 12)}` }, "a look-alike login"],
-]) eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [row] }), false, `${why} is not a sign-off`);
-eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "COMMENTED", commit_id: A, body: `Ready to merge: ${A.slice(0, 12)}` }], comments: [] }), false, "a COMMENTED review whose body is a Ready line is not a sign-off");
-// LOW 2: his latest deciding review wins, and requesting changes takes a sign-off back.
-const rv = (state, commit_id, submitted_at) => ({ user: taha, state, commit_id, submitted_at });
-eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A, "2026-11-24T05:00:00Z"), rv("CHANGES_REQUESTED", A, "2026-11-24T05:30:00Z")], comments: [] }), false, "Approve then Request changes on the same head: held");
-eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A, "2026-11-24T05:00:00Z"), rv("COMMENTED", A, "2026-11-24T05:30:00Z")], comments: [] }), true, "Approve then a plain comment review: still approved, as on GitHub");
-eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A, "2026-11-24T05:00:00Z"), rv("DISMISSED", A, "2026-11-24T05:30:00Z")], comments: [] }), false, "a dismissed approval no longer counts");
-eq(tahaApprovedHead({ headSha: A, reviews: [rv("CHANGES_REQUESTED", A, "2026-11-24T07:00:00Z")], comments: [{ ...at, user: taha, body: `Ready to merge: ${A.slice(0, 12)}` }] }), false, "a Ready line from before his Request changes is taken back");
-eq(tahaApprovedHead({ headSha: A, reviews: [rv("CHANGES_REQUESTED", A, "2026-11-24T05:00:00Z")], comments: [{ ...at, user: taha, body: `Ready to merge: ${A.slice(0, 12)}` }] }), true, "a Ready line after his Request changes counts");
-eq(tahaApprovedHead({ headSha: B, reviews: [], comments: [{ ...at, user: taha, body: `Ready to merge: ${A.slice(0, 12)}` }] }), false, "a Ready line for an older commit does not");
-eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ ...at, user: taha, body: `Not yet. Ready to merge: ${A.slice(0, 12)} after the fix` }] }), false, "the line must be the whole comment");
-eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ ...at, user: mason, body: `Ready to merge: ${A.slice(0, 12)}` }] }), false, "Mason's account cannot post it for Taha");
-eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ ...at, updated_at: "2026-11-24T07:00:00Z", user: taha, body: `Ready to merge: ${A.slice(0, 12)}` }] }), false, "an edited comment does not count (an admin could have edited it)");
-eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ user: taha, body: `Ready to merge: ${A.slice(0, 12)}` }] }), false, "no timestamps: not provably unedited");
-eq(tahaApprovedHead({ headSha: A, reviews: null, comments: null }), false, "unreadable is not a sign-off");
-const fakeGh = (reviews, comments) => (args) => (args[2].includes("/reviews") ? reviews : comments).map((r) => JSON.stringify(r)).join("\n");
-eq(tahaApprovedOnGitHub({ repo: undefined, number: 7, headSha: A, gh: fakeGh([{ user: taha, state: "APPROVED", commit_id: A }], []) }), true, "read from GitHub: approved");
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "APPROVED", commit_id: A }] }), true, "Taha's Approve on this commit counts");
+eq(tahaApprovedHead({ headSha: B, reviews: [{ user: taha, state: "APPROVED", commit_id: A }] }), false, "his Approve on an older commit does not");
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "COMMENTED", commit_id: A }] }), false, "a plain review comment is not a sign-off");
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: mason, state: "APPROVED", commit_id: A }] }), false, "Mason's account (shared with agents) does not count");
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: { login: "TahaKhanAbdalli2" }, state: "APPROVED", commit_id: A }] }), false, "a look-alike login does not count");
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "COMMENTED", commit_id: A, body: `Ready to merge: ${A.slice(0, 12)}` }] }), false, "a COMMENTED review whose body is a Ready line is not a sign-off");
+// Taha, Slack 2026-11-24: Approve is the only sign-off; a Ready to merge comment no longer lifts the block.
+const ready = { created_at: "2026-11-24T06:00:00Z", updated_at: "2026-11-24T06:00:00Z", user: taha, body: `Ready to merge: ${A.slice(0, 12)}` };
+eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [ready] }), false, "his Ready to merge comment alone is not a sign-off");
+// His latest deciding review wins; requesting changes or dismissing takes a sign-off back.
+const rv = (state, commit_id) => ({ user: taha, state, commit_id });
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A), rv("CHANGES_REQUESTED", A)] }), false, "Approve then Request changes on the same head: held");
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A), rv("COMMENTED", A)] }), true, "Approve then a plain comment review: still approved, as on GitHub");
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A), rv("DISMISSED", A)] }), false, "a dismissed approval no longer counts");
+// Taha, Slack 2026-11-24: GitHub shows a dismissed Request changes as DISMISSED; his older Approve must not count again.
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A), rv("DISMISSED", A)], comments: [ready] }), false, "Approve, then a Request changes that was dismissed: still held, Ready line or not");
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A), rv("DISMISSED", A), rv("APPROVED", A)] }), true, "a fresh Approve after the dismissal counts");
+eq(tahaApprovedHead({ headSha: A, reviews: null }), false, "unreadable is not a sign-off");
+const fakeGh = (reviews) => (args) => { if (!args[2].includes("/reviews")) throw new Error("only reviews are read"); return reviews.map((r) => JSON.stringify(r)).join("\n"); };
+eq(tahaApprovedOnGitHub({ repo: undefined, number: 7, headSha: A, gh: fakeGh([{ user: taha, state: "APPROVED", commit_id: A }]) }), true, "read from GitHub: approved");
+eq(tahaApprovedOnGitHub({ repo: undefined, number: 7, headSha: A, gh: fakeGh([{ user: taha, state: "APPROVED", commit_id: A }, { user: taha, state: "DISMISSED", commit_id: A }]) }), false, "read from GitHub: dismissed after the Approve");
 eq(tahaApprovedOnGitHub({ repo: undefined, number: 7, headSha: A, gh: () => { throw new Error("403"); } }), false, "GitHub error: not approved");
 eq(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: lane, dirs, now: NOW, tahaApproved: () => true }), null, "Taha signed off → through, no code");
 const waiting = tahaLaneGate({ prefix: "T", pullRequest: 2401, headSha: A, files: lane, dirs, now: NOW, tahaApproved: () => false });
-ok(/TAHA LANE BLOCK/.test(waiting) && waiting.includes(`Ready to merge: ${A.slice(0, 12)}`), "no sign-off → still blocked, and says how Taha clears it");
+ok(/TAHA LANE BLOCK/.test(waiting) && /presses Approve on GitHub on this commit \(a{12}\)/.test(waiting) && !waiting.includes("Ready to merge"), "no sign-off → still blocked, and says Approve is how Taha clears it");
 eq(tellTahaOnGitHub({ repo: undefined, pullRequest: 5, body: "x", gh: () => "123" }), true, "GitHub took the comment");
 eq(tellTahaOnGitHub({ repo: undefined, pullRequest: 5, body: "x", gh: () => { throw new Error("403"); } }), false, "a failed post is false");
 

@@ -4,8 +4,8 @@
 // Field billing (field invoices, spray jobs, blend tickets) stays Mason's.
 // #1980 and #1989 merged after Taha asked; a written note did not stop them.
 //
-// Taha's own sign-off on the PR's current commit (a GitHub Approve on it, or his comment
-// `Ready to merge: <commit>`) lets it through with no code (Mason, 2026-11-24).
+// Taha's own GitHub Approve on the PR's current commit lets it through with no code
+// (Mason, 2026-11-24; comments do not count, Taha 2026-11-24).
 //
 // Mason can still let ONE named PR through: the merge refusal issues a 6-digit
 // code for that PR at its current head, and his chat message `taha override #<PR> <code>`
@@ -16,14 +16,12 @@
 // coderabbit-skip-lib.mjs: an agent that runs the prompt hook by hand with a forged
 // message gets through; this is an honest-mistake net, not a security boundary.
 //
-// The Codex production gate imports this at startup: Node built-ins, codex-push-lib and teammate-comments-lib
-// (which imports nothing) only.
+// The Codex production gate imports this at startup: Node built-ins and codex-push-lib only.
 
 import { randomInt } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ghApiRepoPath } from "./codex-push-lib.mjs";
-import { READY_TO_MERGE_LINE } from "./teammate-comments-lib.mjs";
 
 // End of Dec 15 in Central time (06:00 UTC on Dec 16). After it the block is off.
 export const TAHA_LANE_UNTIL_MS = Date.UTC(2026, 11, 16, 6, 0, 0);
@@ -393,41 +391,27 @@ const TAHA_LOGIN = "tahakhanabdalli";
 const DECISIVE_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 
 /**
- * True when Taha approved this PR at exactly `headSha`: his latest deciding review (APPROVED, CHANGES_REQUESTED or
- * DISMISSED) is APPROVED on that commit, or he commented only `Ready to merge: <12+ chars of that commit>` (the apply
- * gate's own line, READY_TO_MERGE_LINE), unedited, after his latest CHANGES_REQUESTED. To take a sign-off back he
- * deletes the line or requests changes (Taha's review of #2406, LOW 2). `reviews` / `comments`: GitHub's REST rows,
- * oldest first ({user:{login}, state, commit_id, submitted_at} / {user:{login}, body, created_at, updated_at});
- * anything unreadable is false.
+ * True only when Taha's latest deciding review (APPROVED, CHANGES_REQUESTED or DISMISSED) is an APPROVED review on
+ * exactly `headSha`. A comment, `Ready to merge:` line included, is not a sign-off (Taha, Slack 2026-11-24: Approve
+ * is the one sign-off, as in pr-readiness and ship.md). A dismissed review is deciding, so dismissing his Request
+ * changes never revives an older Approve; he approves again. `reviews`: GitHub's REST rows, oldest first
+ * ({user:{login}, state, commit_id}); anything unreadable is false.
  */
-export function tahaApprovedHead({ reviews, comments, headSha }) {
-  if (!usableHead(headSha) || !Array.isArray(reviews) || !Array.isArray(comments)) return false;
-  const head = headSha.toLowerCase();
+export function tahaApprovedHead({ reviews, headSha }) {
+  if (!usableHead(headSha) || !Array.isArray(reviews)) return false;
   const isTaha = (row) => String(row?.user?.login ?? "").trim().toLowerCase() === TAHA_LOGIN;
   const deciding = reviews.filter((r) => isTaha(r) && DECISIVE_REVIEW_STATES.has(String(r?.state ?? "").toUpperCase())).at(-1);
-  const state = String(deciding?.state ?? "").toUpperCase();
-  if (state === "APPROVED" && String(deciding?.commit_id ?? "").toLowerCase() === head) return true;
-  const heldSince = state === "CHANGES_REQUESTED" ? Date.parse(String(deciding?.submitted_at ?? "")) : -Infinity;
-  if (Number.isNaN(heldSince)) return false;
-  return comments.some((c) => {
-    // An edited comment does not count: repo admins (Mason's account, which agents use) can edit Taha's comments.
-    const unedited = typeof c?.created_at === "string" && c.created_at === c?.updated_at;
-    const m = isTaha(c) && unedited && Date.parse(c.created_at) > heldSince && READY_TO_MERGE_LINE.exec(String(c?.body ?? ""));
-    return Boolean(m) && head.startsWith(m[1].toLowerCase());
-  });
+  return String(deciding?.state ?? "").toUpperCase() === "APPROVED" && String(deciding?.commit_id ?? "").toLowerCase() === headSha.toLowerCase();
 }
 
-/** Reads the PR's reviews and comments from GitHub and asks tahaApprovedHead; false when unreadable. */
+/** Reads the PR's reviews from GitHub and asks tahaApprovedHead; false when unreadable. */
 export function tahaApprovedOnGitHub({ repo, gh, number, headSha }) {
   const repoPath = ghApiRepoPath(repo);
   if (!repoPath || !usablePr(number) || !usableHead(headSha)) return false;
-  const rows = (url, jq) => String(gh(["api", "--paginate", url, "--jq", jq])).split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
   try {
-    return tahaApprovedHead({
-      headSha,
-      reviews: rows(`${repoPath}/pulls/${number}/reviews?per_page=100`, ".[] | {user: {login: .user.login}, state, commit_id, submitted_at} | tojson"),
-      comments: rows(`${repoPath}/issues/${number}/comments?per_page=100`, ".[] | {user: {login: .user.login}, body, created_at, updated_at} | tojson"),
-    });
+    const reviews = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/reviews?per_page=100`, "--jq", ".[] | {user: {login: .user.login}, state, commit_id} | tojson"]))
+      .split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+    return tahaApprovedHead({ headSha, reviews });
   } catch { return false; }
 }
 
@@ -462,7 +446,7 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
   return `${prefix}: TAHA LANE BLOCK — #${pullRequest || "?"} is refused because ${problem.reason}. ` +
     "Until Dec 15 agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) " +
     "or change this block, whatever OK line the PR has (Mason to Taha, 2026-11-22). Leave it for Taha: post a PR comment or a KI. " +
-    `It merges once Taha approves this commit on GitHub or comments \`Ready to merge: ${String(headSha ?? "").slice(0, 12)}\` from his own account (he takes it back by deleting that line or requesting changes). ` +
+    `It merges once Taha presses Approve on GitHub on this commit (${String(headSha ?? "").slice(0, 12)}) from his own account; a comment does not count, and a later Request changes or dismissal takes it back. ` +
     (code
       ? `Only if Mason wants it merged anyway: tell him why in one line and ask him to send, as a message of its own: taha override #${pullRequest} ${code} ` +
         "(it covers this PR at its current commit only; a new push needs a new code)"

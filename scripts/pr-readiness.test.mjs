@@ -2,7 +2,7 @@
 // Self-test for pr-readiness's pure helpers with fixture PR views.
 // Run: node scripts/pr-readiness.test.mjs
 import assert from "node:assert/strict";
-import { checkCounts, codexReviewedHead, formatBlock, openThreads, teammateLines } from "./pr-readiness.mjs";
+import { checkCounts, codexReviewedHead, formatBlock, openThreads, tahaApprovalLine, teammateLines } from "./pr-readiness.mjs";
 
 const HEAD = "282ae54fa945a6a5f9a7030c7f643cf784ec69a8";
 const OLD = "ad4718cbd6d8d8833aeb486a55ade591ab8b8169";
@@ -52,5 +52,16 @@ assert.doesNotMatch(cut, /^  unanswered teammate comments: 0$/);
 const block = formatBlock(7, { title: "t", statusCheckRollup: [] }, { nodes: [] }, "NO SOL NEEDED: x", null).split("\n");
 assert.match(block[2], /^  unanswered teammate comments: UNREADABLE/);
 assert.doesNotMatch(block.join("\n"), /READY: yes/);
+
+// ready-for-taha: only Taha's latest decisive review on the exact head counts.
+const labelled = { headRefOid: HEAD, labels: [{ name: "ready-for-taha" }] };
+const taha = (state, sha = HEAD) => ({ author: { login: "TahaKhanAbdalli" }, commit: { oid: sha }, state });
+assert.equal(tahaApprovalLine(7, { headRefOid: HEAD, reviews: [taha("APPROVED")] }), null);
+assert.match(tahaApprovalLine(7, labelled), /waiting on Taha - NOT READY: .*282ae54fa945/);
+assert.match(tahaApprovalLine(7, { ...labelled, reviews: [taha("APPROVED", OLD)] }), /NOT READY/);
+assert.match(tahaApprovalLine(7, { ...labelled, reviews: [{ ...taha("APPROVED"), author: { login: "mason" } }] }), /NOT READY/);
+assert.match(tahaApprovalLine(7, { ...labelled, reviews: [taha("APPROVED"), taha("CHANGES_REQUESTED")] }), /NOT READY/);
+assert.equal(tahaApprovalLine(7, { ...labelled, reviews: [taha("APPROVED"), taha("COMMENTED")] }), "  ready-for-taha: Taha APPROVED the head");
+assert.equal(formatBlock(7, { ...labelled, title: "t", statusCheckRollup: [] }, { nodes: [] }, "NO SOL NEEDED: x", null).split("\n")[3].startsWith("  ready-for-taha: waiting"), true);
 
 console.log("pr-readiness.test: all assertions passed");

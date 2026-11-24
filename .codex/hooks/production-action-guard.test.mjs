@@ -643,19 +643,13 @@ try {
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
     nowMs: Date.now(), runGh: () => ordinaryPrJson,
   }).blocked, false, "...and merges once the exact-SHA Sol proof exists");
-  // Follow-ups gate (Mason, 2026-11-09): the same mergeable PR, but its description lists nothing.
-  for (const [body, why] of [["## Summary\nx", /no `## Follow-ups` section/], ["## Follow-ups\n- fix later", /name no issue/]]) {
-    const missing = evaluateProductionAction({
+  // The Follow-ups merge veto was removed (Mason, 2026-11-23): a PR with no section merges.
+  for (const body of ["## Summary\nx", "## Follow-ups\n- fix later"]) {
+    assert.equal(evaluateProductionAction({
       toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
       nowMs: Date.now(), runGh: () => JSON.stringify({ ...JSON.parse(ordinaryPrJson), body }),
-    });
-    assert.equal(missing.blocked, true, "a PR without a usable Follow-ups section cannot merge");
-    assert.match(missing.reason, why);
+    }).blocked, false, "the Follow-ups section never blocks a merge");
   }
-  assert.equal(evaluateProductionAction({
-    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
-    nowMs: Date.now(), runGh: () => JSON.stringify({ ...JSON.parse(ordinaryPrJson), body: "## Follow-ups\n- #1700 later" }),
-  }).blocked, false, "a Follow-ups line naming an issue merges");
   // A teammate's comment is the only thing wrong with this otherwise mergeable PR.
   const teammateAnswer = (comments) => (args) => (
     args.some((a) => /reviewThreads\(last:100\)/.test(String(a)))
@@ -4046,25 +4040,15 @@ try {
       assert.match(mergeUpdated({ claim: realClaim("claude-B") }).reason || "", /LANDING CLAIM/, "#1948: another session is then refused");
       assert.equal(mergeUpdated({ claim: realClaim("") }).blocked, false, "#1948: no session id fails open");
       assert.equal(mergeUpdated({ claim: realClaim("codex-A") }).blocked, false, "#1948: the holder keeps merging");
-      // Pushes claim too: a ref-less push claims the current branch, a dry run claims nothing.
+      // Ordinary pushes take no claim (Mason, 2026-11-23): a push to a claimed branch is
+      // allowed and records nothing.
       const pushAs = (sessionId, command) => evaluateProductionAction({
         toolName: "PowerShell", toolInput: { command }, repoDir: stale.repo, nowMs: now, claim: realClaim(sessionId),
       });
-      assert.equal(pushAs("codex-C", "git push origin HEAD:refs/heads/claude/other").blocked, false, "#1948: a push to a free branch is allowed");
-      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/other"]?.session, "codex-C", "#1948: ...and claims its destination");
-      assert.match(pushAs("codex-D", "git push origin HEAD:claude/other").reason || "", /CODEX PRODUCTION GATE: LANDING CLAIM/, "#1948: another session's push to it is refused");
-      assert.equal(pushAs("codex-D", "git push --dry-run origin HEAD:claude/other").blocked, false, "#1948: a dry run is never refused");
-      // Luna MED: a multi-ref push refused on one destination claims none of the others.
-      assert.match(pushAs("codex-D", "git push origin HEAD:claude/free HEAD:claude/other").reason || "", /LANDING CLAIM/, "#1948: a multi-ref push touching a claimed branch is refused");
-      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/free"], undefined, "#1948: ...and its free destination stays unclaimed");
-      // Codex App P2 on #2041: a push in a command refused later claims nothing.
-      assert.equal(pushAs("codex-D", "git push origin HEAD:claude/free && git push --force origin HEAD:claude/x").blocked, true, "a command with a forced push is refused");
-      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/free"], undefined, "#1948: ...and its allowed push claims nothing");
-      // Codex App P2 on #2041: an explicit refspec claims only its destination, never the upstream.
-      git(stale.repo, ["config", "branch.feature/test.remote", "origin"]);
-      git(stale.repo, ["config", "branch.feature/test.merge", "refs/heads/claude/other"]);
-      assert.equal(pushAs("codex-E", "git push origin HEAD:claude/mine").blocked, false, "#1948: an explicit refspec is not refused for another session's upstream");
-      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/mine"]?.session, "codex-E", "#1948: ...and claims its own destination at the allow point");
+      assert.equal(pushAs("claude-B", "git push origin HEAD:feature/test").blocked, false, "a push to a branch another session claimed is allowed");
+      assert.equal(pushAs("codex-C", "git push origin HEAD:refs/heads/claude/other").blocked, false, "a push to a free branch is allowed");
+      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/other"], undefined, "...and claims nothing");
+      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["feature/test"]?.session, "codex-A", "a push never moves an existing claim");
     }
     PIN = ` --match-head-commit ${stale.sha}`; // the cases below use the original head again
 

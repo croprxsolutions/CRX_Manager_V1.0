@@ -24,7 +24,8 @@ vi.mock('../../lib/db', () => ({
 }));
 vi.mock('../../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast }) }));
-vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1' } }) }));
+const auth = { profile: { id: 'u1', role: 'admin' } };
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => auth }));
 
 import ReceiptsToCheck from './ReceiptsToCheck';
 
@@ -37,7 +38,16 @@ const rows = (n: number) => Array.from({ length: n }, (_, i) => row(i));
 const show = () => render(<MemoryRouter><ReceiptsToCheck /></MemoryRouter>);
 
 describe('ReceiptsToCheck', () => {
-  beforeEach(() => { answers.length = 0; ranges.length = 0; rpc.mockReset(); toast.mockReset(); });
+  beforeEach(() => { answers.length = 0; ranges.length = 0; rpc.mockReset(); toast.mockReset(); auth.profile.role = 'admin'; });
+
+  it('a sales rep sees the list but no Mark handled button, and is told to ask an admin (Mason, 2026-11-23)', async () => {
+    auth.profile.role = 'sales_rep';
+    answers.push({ data: [row(1)], error: null, count: 1 });
+    show();
+    expect(await screen.findByText('D-1')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Mark receipt for/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/ask an admin to mark it handled/)).toBeInTheDocument();
+  });
 
   it('marks a receipt handled after confirming, once even on a double click, and reloads the list', async () => {
     let finishClose: (a: { data: unknown; error: unknown }) => void = () => {};

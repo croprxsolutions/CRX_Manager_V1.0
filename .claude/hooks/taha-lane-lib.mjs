@@ -93,7 +93,19 @@ function isLaneName(name) {
 // Every name may carry a leading "_": the impls and wrappers behind the public names (Taha, #2382 MED 1).
 const TAHA_LANE_FUNCTIONS_RE = new RegExp("^_?(?:complete_delivery|start_and_complete_delivery|void_delivery|cancel_delivery|void_order|cancel_order" +
   "|update_order_items|price_order|apply_write_off|reverse_write_off|lock_accounting_months|get_customer_balance|get_monthly_summary" +
-  "|prevent_order_shares)(?=_|$)|^_?get_ar_|accounting_period|credit_memo", "i");
+  "|prevent_order_shares" +
+  // A sweep of staging (2026-11-24, Taha's ask via Mason): functions whose bodies write his tables but whose names
+  // carry no lane word. Field-billing ones (field app, blend ticket, job, application) stay Mason's and are left out.
+  "|create_direct_order|create_rush_order|bulk_import_order|restore_cancelled_order|close_undelivered_order_remainder" +
+  "|bump_order_item_edit_version|check_unpriced_orders|trg_recalc_order_totals|guard_order_item_shares|validate_order_shares_total" +
+  "|assert_order_line_fits|create_return|receive_return|generate_finance_charges|create_delivery_with_items|create_quick_delivery" +
+  "|edit_delivery|fix_delivery|correct_delivery_brands|batch_cancel_deliveries|delivery_line_matches_order_line" +
+  "|enforce_delivery_items_parent_lock|prebook_quick_delivery_inventory" +
+  // Taha's review of #2408: read-only billing reports, the month lock, and NEW-setting triggers the write sweep missed.
+  "|get_customer_year_end_summary|get_batch_year_end_summaries|check_period_open|preview_finance_charges" +
+  "|get_sales_summary_report|get_sales_detail_report|get_gross_sales_report|get_profitability_report|financial_dashboard_summary" +
+  "|bump_order_edit_version|prevent_oifa_edit_after_post|guard_order_reopen_inactive_product" +
+  ")(?=_|$)|^_?get_ar_|accounting_period|credit_memo", "i");
 const isLaneFunction = (name) => TAHA_LANE_FUNCTIONS_RE.test(name) || isLaneName(name);
 
 // A migration is Taha's when its SQL writes to, locks or changes one of these tables, or creates,
@@ -132,6 +144,10 @@ const FIELD_RES = { write: writeRe(tableRe(FIELD_TABLES)), read: readRe(tableRe(
 const ROW_LOCK_RE = /\bfor\s+(?:no\s+key\s+)?update\b|\bfor\s+(?:key\s+)?share\b/i;
 // Booking stock (Taha on #2382): a write that sets inventory.quantity_prebooked, or a function body that does.
 const PREBOOKED_RE = /\bset\b(?:(?!\bwhere\b)[^;])*?\bquantity_prebooked"?\s*=|\bquantity_prebooked"?\s*:=|\binto\s+[\w".]*\binventory"?\s*\([^)]*\bquantity_prebooked\b|\bset\s*\([^)]*\bquantity_prebooked\b|\b(?:column|add|drop|alter|rename)\s+(?:column\s+)?(?:if\s+(?:not\s+)?exists\s+)?"?quantity_prebooked\b/i;
+// Taha's #2382 LOW 2: a PL/pgSQL `NEW.quantity_prebooked = 0;` at a statement start, and RENAME COLUMN x TO quantity_prebooked.
+const PREBOOKED_MORE_RE = /(?:^|;|\bbegin\b|\bthen\b|\belse\b|\bloop\b)\s*(?:"?[\w$]+"?\s*\.\s*)?"?quantity_prebooked"?\s*=(?!=)|\brename\s+(?:column\s+)?[^;]*?\bto\s+"?quantity_prebooked\b/i;
+// The SET branch stops at the first WHERE, so a subquery's WHERE is blanked out first (LOW 2).
+const withoutParens = (t) => { let prev; do { prev = t; t = t.replace(/\([^()]*\)/g, "()"); } while (t !== prev); return t; };
 const QNAME = String.raw`(?:"?public"?\s*\.\s*)?"?([\w$]+)`;
 const FUNCTION_RE = new RegExp(String.raw`\b(?:create(?:\s+or\s+replace)?|alter)\s+(?:function|procedure|routine)\s+` + QNAME, "gi");
 // ALTER FUNCTION … RENAME TO <new name> (MED 4).
@@ -202,7 +218,7 @@ export function isTahaLaneSql(sql, { fieldBilling = false } = {}) {
   const text = withoutComments(sql);
   // Second pass joins string pieces ('UPDATE ' || 'invoices …'), so dynamic SQL built in parts still counts.
   const joined = text.replace(/'\s*\|\|\s*'/g, "");
-  if ([text, joined].some((t) => write.test(t) || PREBOOKED_RE.test(t))) return true;
+  if ([text, joined].some((t) => write.test(t) || PREBOOKED_RE.test(t) || PREBOOKED_MORE_RE.test(t) || PREBOOKED_RE.test(withoutParens(t)))) return true;
   // A row lock in the same statement as a read of his tables counts (Taha's review of #2382, LOW 9).
   if (text.split(";").some((statement) => ROW_LOCK_RE.test(statement) && read.test(statement))) return true;
   return functionNames(text).some(isLaneFunction);

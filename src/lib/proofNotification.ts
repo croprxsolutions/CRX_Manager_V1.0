@@ -272,7 +272,7 @@ export interface ProofDraftFieldLine {
 export interface ProofDraftProductLine {
   label: string; // "Headline Fungicide @ 1 oz/ac"
   signalWord: string | null;
-  /** EPA Reg. No. as printed: the kept number, "Unknown", "Not recorded", or null when there is none. */
+  /** EPA Reg. No. as printed: the kept number, "—" (kept with no number), "Not recorded", or null when there is none. */
   epa: string | null;
   safeTiming: string | null;
 }

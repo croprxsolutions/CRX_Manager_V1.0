@@ -34,6 +34,65 @@ function assertEntrypointAllowed(payload, label) {
   assert.equal(result.stdout, "", `${label}: must allow`);
 }
 
+// 2026-11-23: proof files are read with the Read/Grep/Glob tools; every shell
+// command naming one stays refused, plain reads included (a read-only-chain
+// exemption was reverted after Codex and Taha found writes it let through, PR #2396).
+const PROOF = ".claude/session-state/codex-review-f8987ca2e979c16a0fdf4db6ca2f49f41600e7c9.json";
+for (const command of [
+  `cat /c/CRX_wt/pr-1985/${PROOF}`,
+  `cat ${PROOF} | head -20`,
+  `jq .verdict ${PROOF}`,
+  `ls -t .claude/session-state/codex-review-*.json | head -3`,
+  `cd /c/CRX_wt/x && grep -n "verdict\\|model" ${PROOF} 2>&1 | head -5`,
+  `S=.claude/session-state; cat $S/sol-rounds.jsonl | tail -5; echo; ls -la $S/codex-review-*.json`,
+  `grep -o '"model":"[^"]*"' ${PROOF} 2>/dev/null`,
+  `gh pr checks 1985 --repo o/r 2>&1 | sort | uniq -c; cat ${PROOF} | head`,
+  `git -C /c/CRX_wt/x log --oneline -3; ls -l ${PROOF}`,
+  `find /c/CRX_wt -maxdepth 6 -name "codex-review-71e3066e*.json" 2>/dev/null | head`,
+  `cat .claude/session-state/owner-approval-x.json; ls AUTOPILOT.on`,
+]) assertEntrypointDenied({ tool_name: "Bash", tool_input: { command } }, /REVIEW PROOF GUARD/, `shell read stays refused: ${command}`);
+for (const tool_name of ["Grep", "Glob"]) assertEntrypointAllowed({ tool_name, tool_input: { pattern: "verdict", path: `C:/CRX_wt/x/${PROOF}` } }, `${tool_name} of a proof file`);
+assertEntrypointAllowed({ tool_name: "Read", tool_input: { file_path: `C:/CRX_wt/x/${PROOF}` } }, "Read of a proof file");
+for (const command of [
+  `cat x > ${PROOF}`,
+  `cat a.json | tee ${PROOF}`,
+  `cat ${PROOF}; rm -f ${PROOF}`,
+  `cat ${PROOF} && cp fake.json ${PROOF}`,
+  `cat $(echo ${PROOF})`,
+  `cat ${PROOF} | sort -o ${PROOF}`,
+  `cp fake.json ${PROOF}`,
+  `S=$(echo x); cat ${PROOF}`,
+  `find .claude/session-state -name "codex-review-*.json" -delete`,
+  `find . -name "codex-review-*.json" -exec cp fake.json {} ;`,
+  `sort -o ${PROOF} ${PROOF}`,
+  // Codex GitHub review, PR #2396: attached and quoted spellings of the same writes.
+  `cat a | sort -o${PROOF}`,
+  `cat a | sort "-o" ${PROOF}`,
+  `cat a | sort --output=${PROOF}`,
+  `cat a | sort -r ${PROOF}`,
+  `git diff "--output=${PROOF}"`,
+  `git log --output ${PROOF}`,
+  `git -C /c/x show --out=${PROOF} HEAD`,
+  `find . -name "codex-review-*.json" "-delete"`,
+  `find . -name x -fprint ${PROOF}`,
+  `find . -name x \\-delete; ls ${PROOF}`,
+  `git -c core.pager='cp fake.json ${PROOF}' log -1`,
+  `GIT_PAGER='cp fake.json ${PROOF}' git log -1`,
+  `cat a.json & cp fake.json ${PROOF}`,
+  `X='$(cp fake.json ${PROOF})'; echo \${X@P}`,
+  `ls ${PROOF} |& cp fake.json ${PROOF}`,
+  `git fetch --upload-pack='cp fake.json ${PROOF}' /c/x`,
+  `git -C /c/x fetch -q origin main; cat ${PROOF}`,
+  `git -C /c/x diff --output=${PROOF}`,
+  `ls ${PROOF}; uniq a.json ${PROOF}`,
+  `cat ${PROOF}; sed -i s/a/b/ ${PROOF}`,
+  `cat ${PROOF}; node -e "require('fs').writeFileSync('${PROOF}','{}')"`,
+  `grep x ${PROOF}; echo {} >> ${PROOF}`,
+  `cat ${PROOF} "$(rm -f ${PROOF})"`,
+  `grep x ${PROOF}; python - <<'EOF'\nopen('${PROOF}','w')\nEOF`,
+]) assertEntrypointDenied({ tool_name: "Bash", tool_input: { command } }, /REVIEW PROOF GUARD/, `still refused: ${command}`);
+assertEntrypointDenied({ tool_name: "Write", tool_input: { file_path: `C:/CRX_wt/x/${PROOF}`, content: "{}" } }, /REVIEW PROOF GUARD/, "Write of a proof file");
+
 // Native Codex apply_patch passes its patch as a raw tool_input STRING, while
 // other clients nest it in patch. Both real JSON/stdin shapes must route their
 // destination headers through the same protection and preserve documentation

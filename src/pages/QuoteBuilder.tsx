@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Save,
@@ -69,6 +69,7 @@ import { clearPendingRetry, loadPendingRetry, markPendingRetryForCheck, savePend
 import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
+import BookingDrawLines, { type DrawRow } from '../components/quotes/BookingDrawLines';
 import { BelowCostApprovalHandledError, isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import { catalogPricePerAcre, computeQuoteTotals, getQuoteTierPrice, isTierPriceMissing, recalcItem as recalcQuoteLine, validateCommissionSplits } from '../lib/quoteCalc';
 import { buildCommissionSplitPatch, nextLoadedSplitSnapshot } from '../lib/commissionSplitConcurrency';
@@ -279,21 +280,6 @@ function priceRaise(
   const fromCents = Math.round(saved.price * 100);
   const toCents = Math.round(item.price_per_unit * 100);
   return toCents > fromCents ? { fromCents, toCents } : null;
-}
-
-interface DrawRow {
-  product_id: string;
-  product_name: string;
-  booked: number;
-  drawn: number;
-  remaining: number;
-  qty: string;
-  unit: string | null;
-  // Item 10: a quantity over `remaining` is allowed; the extra is its own order at the price the
-  // rep picks (20261029110000). The booked price is the last booked line's, as the server uses.
-  bookedPrice: number | null;
-  todayPrice: number | null;
-  extraPrice: 'today' | 'booked';
 }
 
 type DrawRequestLine = { product_id: string; quantity: number; extra_price?: 'today' | 'booked' };
@@ -3856,6 +3842,22 @@ export default function QuoteBuilder() {
     return loaded;
   };
 
+  // A "Draw from booking" link (the New Order page's open-booking notice) arrives with ?draw=1.
+  // Once this booking and the product list have loaded, open the draw window once and drop the
+  // flag, so a refresh or Back does not open it again. The window works exactly as from the menu.
+  const drawRequested = new URLSearchParams(location.search).get('draw') === '1';
+  const openDrawDownModalRef = useLatestRef(openDrawDownModal);
+  const autoDrawHandledForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!drawRequested || !id || loading || installedLoadGeneration === 0 || !referenceDataReady) return;
+    if (autoDrawHandledForRef.current === id) return;
+    autoDrawHandledForRef.current = id;
+    const otherParams = new URLSearchParams([...new URLSearchParams(location.search)].filter(([name]) => name !== 'draw')).toString();
+    navigate({ pathname: location.pathname, search: otherParams ? `?${otherParams}` : '' }, { replace: true });
+    if (canDraw) void openDrawDownModalRef.current();
+    else toast('info', 'This quote is not an open booking, so there is nothing to draw from it.');
+  }, [drawRequested, id, loading, installedLoadGeneration, referenceDataReady, canDraw, location.pathname, location.search, navigate, toast, openDrawDownModalRef]);
+
   // KI-190: close the draw dialog and ask for a reload of the whole booking.
   const openDrawReloadPrompt = (message: string) => {
     setShowDrawModal(false);
@@ -6402,79 +6404,7 @@ export default function QuoteBuilder() {
             {drawLoading ? (
               <p className="text-sm text-secondary">Loading booking balance…</p>
             ) : (
-              <div className="max-h-80 overflow-y-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-secondary border-b">
-                      <th className="py-2 pr-2">Product</th>
-                      <th className="py-2 pr-2 text-right">Booked</th>
-                      <th className="py-2 pr-2 text-right">Drawn</th>
-                      <th className="py-2 pr-2 text-right">Remaining</th>
-                      <th className="py-2 text-right">Send now</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {drawRows.map((row, idx) => {
-                      const over = Math.round(((parseFloat(row.qty) || 0) - row.remaining) * 100) / 100;
-                      const setRow = (patch: Partial<DrawRow>) => {
-                        const next = [...drawRows];
-                        next[idx] = { ...row, ...patch };
-                        setDrawRows(next);
-                      };
-                      return (
-                      <Fragment key={row.product_id}>
-                      <tr className={over > 0 && row.remaining > 0 ? '' : 'border-b last:border-0'}>
-                        <td className="py-2 pr-2">{row.product_name}</td>
-                        <td className="py-2 pr-2 text-right">{row.booked}{row.unit ? ` ${row.unit}` : ''}</td>
-                        <td className="py-2 pr-2 text-right">{row.drawn}{row.unit ? ` ${row.unit}` : ''}</td>
-                        <td className="py-2 pr-2 text-right font-medium">{row.remaining}{row.unit ? ` ${row.unit}` : ''}</td>
-                        <td className="py-2 text-right">
-                          <div className="inline-flex items-center gap-1">
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={row.qty}
-                              // Locked while the order is created: a later change would not be in it.
-                              disabled={drawing || row.remaining <= 0}
-                              onChange={(e) => setRow({ qty: e.target.value })}
-                              aria-label={`Quantity to draw for ${row.product_name}`}
-                              className="w-24 px-2 py-1 text-sm text-right border border-gray-200 rounded-lg disabled:bg-gray-50"
-                            />
-                            {row.unit && <span className="text-xs text-secondary">{row.unit}</span>}
-                          </div>
-                        </td>
-                      </tr>
-                      {over > 0 && row.remaining > 0 && (
-                        <tr className="border-b last:border-0">
-                          <td colSpan={5} className="pb-2 text-xs text-secondary">
-                            <p>
-                              {over}{row.unit ? ` ${row.unit}` : ''} over the booking. Booked {row.bookedPrice != null ? formatUSD(row.bookedPrice) : 'not set'},
-                              {' '}today {row.todayPrice != null ? formatUSD(row.todayPrice) : 'not set'}. The extra goes on its own order at:
-                            </p>
-                            <div className="mt-1 flex gap-4">
-                              {(['today', 'booked'] as const).map((choice) => (
-                                <label key={choice} className="inline-flex items-center gap-1 text-nav-dark">
-                                  <input
-                                    type="radio"
-                                    name={`extra-price-${row.product_id}`}
-                                    checked={row.extraPrice === choice}
-                                    disabled={drawing}
-                                    onChange={() => setRow({ extraPrice: choice })}
-                                  />
-                                  {choice === 'today' ? "Today's price" : 'Booked price'}
-                                </label>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                      </Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <BookingDrawLines rows={drawRows} onChange={setDrawRows} drawing={drawing} stacked={isPhone} />
             )}
           </div>
         </Modal>

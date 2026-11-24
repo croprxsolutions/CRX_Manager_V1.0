@@ -1768,6 +1768,29 @@ describe('QuoteBuilder', () => {
       expect(await screen.findByText('Reload this quote before saving?')).toBeInTheDocument();
     });
 
+    it('Send all remaining fills each line with what is left; Create order still sends it', async () => {
+      const dialog = await openDrawAndEnter('', { booked: 5, drawn: 1.5 });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Send all remaining' }));
+      expect(within(dialog).getByRole('spinbutton', { name: 'Quantity to draw for Product' })).toHaveValue(3.5);
+      // Filling sends nothing by itself: the rep confirms with the window's own button.
+      expect(mockRpc.mock.calls.some(([name]) => name === 'draw_down_quote')).toBe(false);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
+      await waitFor(() => expect(sentDraws()).toEqual([{ product_id: 'product-1', quantity: 3.5 }]));
+    });
+
+    it('a ?draw=1 link opens the draw window by itself and drops the flag', async () => {
+      const fixture = configureDrawDownFixture({ message: 'unused' });
+      render(
+        <MemoryRouter initialEntries={[`/quotes/${fixture.quote.id}/edit?draw=1`]}>
+          <Routes><Route path="/quotes/:id/edit" element={<QuoteBuilder />} /></Routes>
+        </MemoryRouter>,
+      );
+      const dialog = await screen.findByRole('dialog', { name: 'Create order from booking' });
+      expect(await within(dialog).findByRole('spinbutton', { name: 'Quantity to draw for Product' })).toHaveValue(null);
+      expect(mockNavigate).toHaveBeenCalledWith({ pathname: `/quotes/${fixture.quote.id}/edit`, search: '' }, { replace: true });
+      expect(mockRpc.mock.calls.some(([name]) => name === 'draw_down_quote')).toBe(false);
+    });
+
     it('sends the booked price when the rep picks it', async () => {
       const dialog = await openDrawAndEnter('3');
       fireEvent.click(within(dialog).getByRole('radio', { name: /Booked price/ }));

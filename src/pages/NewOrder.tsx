@@ -8,6 +8,7 @@ import {
   RotateCcw,
   AlertTriangle,
   X,
+  PackageOpen,
 } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -822,23 +823,24 @@ export default function NewOrder() {
             <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
               <div className="min-w-0 flex-1">
                 <p>
-                  This customer has {openBookings.length} open booking{openBookings.length === 1 ? '' : 's'} —{' '}
-                  {openBookings.map((booking, index) => (
-                    <span key={booking.id}>
-                      {index > 0 && ', '}
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/quotes/${booking.id}`)}
-                        className="font-medium underline decoration-blue-400 underline-offset-2 hover:text-blue-700"
-                      >
-                        Quote {booking.quote_number}
-                      </button>
-                    </span>
-                  ))}.
+                  This customer has {openBookings.length} open booking{openBookings.length === 1 ? '' : 's'}.
+                  Product on a booking should usually be drawn from it (locked price) instead of a new order.
                 </p>
-                <p className="mt-1 text-blue-800">
-                  Product on a booking should usually be DRAWN from it (locked price) instead of a new order.
-                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {openBookings.map((booking) => (
+                    // Opens the booking with its "Create order from booking" window already open.
+                    <Button
+                      key={booking.id}
+                      variant="secondary"
+                      size="sm"
+                      icon={<PackageOpen className="h-4 w-4" />}
+                      onClick={() => navigate(`/quotes/${booking.id}?draw=1`)}
+                      className="min-h-11 md:min-h-9"
+                    >
+                      Draw from Quote {booking.quote_number}
+                    </Button>
+                  ))}
+                </div>
               </div>
               <button
                 type="button"

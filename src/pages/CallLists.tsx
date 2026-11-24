@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { ArrowUpRight, CalendarClock, ChevronDown, ChevronUp, DollarSign, Phone, PhoneCall, RefreshCw, Search, Users } from 'lucide-react';
+import { ArrowUpRight, CalendarClock, ChevronDown, ChevronUp, DollarSign, FileText, Phone, PhoneCall, RefreshCw, Search, Users } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import CustomerPrepCard from '../components/customers/CustomerPrepCard';
@@ -776,7 +776,11 @@ export default function CallLists() {
                       </div>
                       <div className="flex flex-col gap-2 sm:flex-row lg:flex-col lg:min-w-[132px]">
                         <Button type="button" variant="secondary" className="min-h-11 w-full" icon={peeking ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />} showChevron={false} aria-expanded={peeking} onClick={() => setPeekKey(peeking ? null : key)}>Call prep</Button>
-                        <Button type="button" variant="secondary" className="min-h-11 w-full" icon={<ArrowUpRight className="h-4 w-4" />} showChevron={false} onClick={() => navigate(`/customers/${row.customer_id}`)}>Open</Button>
+                        {/* A stale quote is the thing to follow up: open it directly; the customer stays one tap away. */}
+                        {'quote_id' in row && row.quote_id && (
+                          <Button type="button" variant="secondary" className="min-h-11 w-full" icon={<FileText className="h-4 w-4" />} showChevron={false} onClick={() => navigate(`/quotes/${row.quote_id}`)}>Open quote</Button>
+                        )}
+                        <Button type="button" variant="secondary" className="min-h-11 w-full" icon={<ArrowUpRight className="h-4 w-4" />} showChevron={false} onClick={() => navigate(`/customers/${row.customer_id}`)}>{'quote_id' in row ? 'Open customer' : 'Open'}</Button>
                         <Button type="button" variant="primary" className="min-h-11 w-full" icon={<PhoneCall className="h-4 w-4" />} showChevron={false} disabled={!profile?.id} onClick={() => setLogCustomer(row)}>Log call</Button>
                       </div>
                     </div>

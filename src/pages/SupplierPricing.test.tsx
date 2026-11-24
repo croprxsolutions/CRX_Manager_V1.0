@@ -187,6 +187,13 @@ describe('SupplierPricing page', () => {
         supplier_pack_description: '2 x 2.5 gal', inventory_units_per_supplier_unit: 5,
         conversion_unit: 'gallons', comparison_status: 'comparable', comparison_note: null,
         link_status: 'confirmed', is_reusable: true, is_preferred: true, is_active: true,
+      }, {
+        id: 'link-2', product_id: 'product-1', product_name: 'Atrazine',
+        vendor_id: 'vendor-1', vendor_name: 'The Andersons', supplier_sku: 'AND-2',
+        supplier_product_name: 'Atrazine bulk', supplier_uom: 'tote',
+        supplier_pack_description: null, inventory_units_per_supplier_unit: null,
+        conversion_unit: null, comparison_status: 'not_comparable', comparison_note: null,
+        link_status: 'confirmed', is_reusable: true, is_preferred: false, is_active: true,
       }],
       imports: [{
         id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
@@ -209,6 +216,24 @@ describe('SupplierPricing page', () => {
         supplier_product_name: 'Atrazine 4L', cost_cents: 12_500n, price_unit: 'case',
         package_quantity: 1, effective_from: '2026-07-18', effective_to: null,
         price_kind: 'quote', row_status: 'new', validation_errors: [], observation_id: null,
+      }, {
+        id: 'row-2', row_number: 2, product_id: 'product-1', product_name: 'Atrazine',
+        product_supplier_link_id: 'link-1', supplier_sku: 'AND-1',
+        supplier_product_name: 'Atrazine 4L', cost_cents: 900n, price_unit: 'Gal',
+        package_quantity: 2, effective_from: '2026-07-18', effective_to: null,
+        price_kind: 'quote', row_status: 'invalid', validation_errors: ['PRICE_UNIT_MISMATCH'], observation_id: null,
+      }, {
+        id: 'row-3', row_number: 3, product_id: 'product-1', product_name: 'Atrazine',
+        product_supplier_link_id: 'link-2', supplier_sku: 'AND-2',
+        supplier_product_name: 'Atrazine bulk', cost_cents: 50_000n, price_unit: 'tote',
+        package_quantity: 1, effective_from: '2026-07-18', effective_to: null,
+        price_kind: 'quote', row_status: 'cannot_compare', validation_errors: [], observation_id: null,
+      }, {
+        id: 'row-4', row_number: 4, product_id: 'product-1', product_name: 'Atrazine',
+        product_supplier_link_id: 'link-1', supplier_sku: 'AND-1',
+        supplier_product_name: 'Atrazine 4L', cost_cents: 25_001n, price_unit: 'case',
+        package_quantity: 2, effective_from: '2026-07-18', effective_to: null,
+        price_kind: 'quote', row_status: 'changed', validation_errors: [], observation_id: null,
       }],
     });
 
@@ -226,9 +251,29 @@ describe('SupplierPricing page', () => {
 
     await waitFor(() => expect(mockGetImport).toHaveBeenCalledWith('import-1'));
     expect(await screen.findByText(
-      'You are adding 1 supplier observations. You are changing ZERO sell prices.',
+      'You are adding 3 supplier observations. You are changing ZERO sell prices.',
     )).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve selected observations' })).toBeInTheDocument();
+    // Each staged cost names its unit, and a refused row says the rule instead of its code.
+    expect(screen.getByText('per case')).toBeInTheDocument();
+    // A cost for a 2-unit package is that package's total, never "per" one unit (Sol HIGH).
+    expect(screen.getByText('for 2 Gal')).toBeInTheDocument();
+    expect(screen.queryByText('per Gal')).not.toBeInTheDocument();
+    // Before approval, each cost shows what the server will record per inventory unit:
+    // $125.00 / 1 / 5 = $25.00, and $250.01 for 2 cases / 2 / 5 = 25.001 = $25.00 per gallon.
+    expect(screen.getAllByText('= $25.00 per gallon')).toHaveLength(2);
+    expect(screen.getByText('cannot compare to inventory units')).toBeInTheDocument();
+    // A refused row (here its unit is not the link's) gets no conversion: it would mean nothing.
+    expect(screen.queryByText('= $0.90 per gallon')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve selected observations' }));
+    expect(await screen.findByText(
+      'You are adding 3 supplier observations. You are changing ZERO sell prices. Atrazine: $125.00 per case = $25.00 per gallon.'
+      + ' Atrazine: $500.00 per tote, cannot compare to inventory units. Atrazine: $250.01 for 2 case = $25.00 per gallon.',
+    )).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    // A unit mismatch must say to convert the cost, never to only relabel the unit (Sol HIGH).
+    expect(screen.getByText(/The price unit is not the unit on this product's supplier link.*Do not just change the unit: either convert the cost/)).toBeInTheDocument();
+    expect(screen.queryByText(/PRICE_UNIT_MISMATCH/)).not.toBeInTheDocument();
 
     await waitFor(() => expect(mockGetBasisWorkspace).toHaveBeenCalledWith('product-1'));
     const workspaceLoads = mockGetWorkspace.mock.calls.length;

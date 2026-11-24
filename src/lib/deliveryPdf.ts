@@ -311,7 +311,7 @@ export async function generateBatchDeliveryPdf(dataList: PdfDeliveryData[]) {
     return;
   }
 
-  // Multiple deliveries — one page each
+  // Multiple deliveries — each starts on a new page (a long one may take two)
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
 
   for (let i = 0; i < dataList.length; i++) {

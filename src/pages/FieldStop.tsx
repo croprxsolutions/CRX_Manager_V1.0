@@ -260,6 +260,8 @@ export default function FieldStop() {
     };
     if (error || !data) {
       if (error) Sentry.captureException(error, { tags: { source: 'fetch', page: 'field-stop' } });
+      // The server answered: this stop is not the driver's (reassigned or gone), so its saved copy goes too.
+      else dropTodaySnapshot(stopSnapshotKey(id), userIdRef.current);
       showSavedCopyOrLeave(!!error);
       return;
     }

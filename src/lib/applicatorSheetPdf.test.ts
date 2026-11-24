@@ -43,7 +43,7 @@ vi.mock('jspdf-autotable', () => ({
   }),
 }));
 
-import { generateApplicatorSheetPdf } from './applicatorSheetPdf';
+import { generateApplicatorSheetPdf, NO_MAP_PAGES_MESSAGE } from './applicatorSheetPdf';
 
 function makeSheetData(overrides: Partial<ApplicatorSheetData> = {}): ApplicatorSheetData {
   return {
@@ -265,5 +265,43 @@ describe('generateApplicatorSheetPdf directions links', () => {
   it('prints no directions block when no field has a map pin', async () => {
     await generateApplicatorSheetPdf(makeSheetData(), 'original', null);
     expect(mockDoc.textWithLink).not.toHaveBeenCalled();
+  });
+});
+
+describe('map pages only print', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pageCount = 1;
+    mockDoc.lastAutoTable = { finalY: 300 };
+    mockDoc.splitTextToSize.mockImplementation((text: string) => [text]);
+  });
+  const maps = {
+    overview: 'data:image/png;base64,b3ZlcnZpZXc=',
+    perField: [{ fieldId: 'field-1', sprayNumber: 1, fieldName: 'North 40', customerName: null, acres: 40,
+      centroidLat: null, centroidLng: null, dataUrl: 'data:image/png;base64,ZmllbGQtMQ==' }],
+  };
+
+  it('prints only the map pages, no job order, and drops the blank first page', async () => {
+    const { default: autoTable } = await import('jspdf-autotable');
+    await generateApplicatorSheetPdf(makeSheetData({ maps }),
+      'enhanced', null, { mapsOnly: true });
+    expect(autoTable).not.toHaveBeenCalled(); // no sheet tables on a maps-only print
+    expect(mockDoc.deletePage).toHaveBeenCalledWith(1);
+    expect(pageCount).toBe(2);
+    expect(mockDoc.save).toHaveBeenCalledWith(expect.stringMatching(/^field-maps-/));
+  });
+
+  it('refuses a maps-only print with no maps instead of saving a blank page', async () => {
+    await expect(generateApplicatorSheetPdf(makeSheetData({ maps: null }), 'original', null, { mapsOnly: true }))
+      .rejects.toThrow(NO_MAP_PAGES_MESSAGE);
+    expect(mockDoc.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps the full sheet (tank contents) when maps-only is not asked for', async () => {
+    const { default: autoTable } = await import('jspdf-autotable');
+    await generateApplicatorSheetPdf(makeSheetData({ maps }), 'enhanced', null, {});
+    expect(autoTable).toHaveBeenCalled();
+    expect(mockDoc.deletePage).not.toHaveBeenCalled();
+    expect(pageCount).toBe(3);
   });
 });

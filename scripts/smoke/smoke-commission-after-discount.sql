@@ -17,6 +17,7 @@
 --   H  A 150-line sale: changing its discount settles at commit in under 4 s (the API's statement timeout is 8 s;
 --      attack run 2026-11-25 measured 21 s on the first draft), on the right base
 --   I  A discounted sale's split moved from 60/40 to 70/30 by hand: $210.00 / $90.00 on $300.00; then 70.01/29.99: $210.03 / $89.97
+--   J  An undiscounted sale's split moved from 60/40 to 70/30 by hand: $280.00 / $120.00 on $400.00 (G stays untouched)
 --   Every sale above: the commission base = total_profit + _order_standing_discount_20270109 (the P&L's figure)
 --
 -- CONTAINER / LOCAL ONLY: completing deliveries draws invoice numbers; the tax rate and discounts are set inside the
@@ -313,6 +314,20 @@ BEGIN
     v_fails := v_fails || ' (I) a one-cent split change did not move: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
 
+  -- J: the split moved on an undiscounted sale (no customer discount; tax only).
+  UPDATE customers SET standing_discount_pct = 0 WHERE id = v_customer;
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, true,
+    jsonb_build_object('splits', jsonb_build_array(
+      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
+      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40))), 'j-' || v_suffix);
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'j-' || v_suffix);
+  UPDATE commissions SET split_percentage = CASE WHEN recipient_user_id = v_rep1 THEN 70 ELSE 30 END
+   WHERE order_id = v_order AND status = 'pending';
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '280.00/120.00|400.00' THEN
+    v_fails := v_fails || ' (J) a changed split on an undiscounted sale did not move: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  END IF;
+
   -- Every sale: the stored base is the P&L's profit after discount.
   v_got := (SELECT string_agg(o.order_name || ' ' || c.order_profit || ' vs ' || (o.total_profit + _order_standing_discount_20270109(o.id)), '; ')
               FROM orders o JOIN commissions c ON c.order_id = o.id AND c.status = 'pending' AND c.deleted_at IS NULL
@@ -325,6 +340,6 @@ BEGIN
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: commission is on the profit after the standing discount, never on tax (A-I)';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: commission is on the profit after the standing discount, never on tax (A-J)';
 END
 $smoke$;

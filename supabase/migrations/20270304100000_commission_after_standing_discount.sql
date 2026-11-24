@@ -116,66 +116,79 @@ DECLARE
   v_split_total numeric;
   v_ids uuid[];
   v_pcts numeric[];
+  v_new numeric[];
+  v_locked boolean := false;
   v_count int := 0;
 BEGIN
   IF p_order_id IS NULL THEN
     RETURN 0;
   END IF;
-  -- Hold the sale's rows first (a payout batching them waits, or is waited on), then read who may move.
-  PERFORM 1 FROM commissions WHERE order_id = p_order_id AND deleted_at IS NULL ORDER BY id FOR UPDATE;
-
-  SELECT array_agg(c.id ORDER BY c.id), array_agg(c.split_percentage ORDER BY c.id), count(*), sum(c.split_percentage)
-    INTO v_ids, v_pcts, v_eligible, v_split_total
-    FROM commissions c
-   WHERE c.order_id = p_order_id AND c.deleted_at IS NULL AND c.status = 'pending'
-     AND NOT EXISTS (SELECT 1 FROM commission_payment_items cpi
-                       JOIN commission_payments cp ON cp.id = cpi.commission_payment_id
-                      WHERE cpi.commission_id = c.id AND cp.status <> 'voided');
-  IF v_eligible = 0 THEN
-    RETURN 0;
-  END IF;
-
   v_base := public._order_commission_base_20270304(p_order_id);
-  -- No discount on the sale and its rows on that profit: the writers' rows stand exactly as today (their own penny
-  -- spread, no extra history). Otherwise every row goes to its exact share below, and only rows that differ are written,
-  -- so a second pass writes nothing and a changed split moves to the cent.
-  IF v_base = (SELECT round(COALESCE(total_profit, 0), 2) FROM orders WHERE id = p_order_id)
-     AND NOT EXISTS (SELECT 1 FROM commissions c WHERE c.id = ANY (v_ids) AND c.order_profit IS DISTINCT FROM v_base) THEN
-    RETURN 0;
-  END IF;
 
-  SELECT count(*) INTO v_live FROM commissions
-   WHERE order_id = p_order_id AND deleted_at IS NULL AND status <> 'cancelled';
+  -- Two passes: decide without locks (most passes change nothing and take none), then lock only the rows to move and
+  -- decide again, so a payout that batched one meanwhile keeps it. Locking every row of the sale up front could
+  -- deadlock two transactions that each already hold a different row of it (Luna MED).
+  LOOP
+    SELECT array_agg(c.id ORDER BY c.id), array_agg(c.split_percentage ORDER BY c.id), count(*), sum(c.split_percentage)
+      INTO v_ids, v_pcts, v_eligible, v_split_total
+      FROM commissions c
+     WHERE c.order_id = p_order_id AND c.deleted_at IS NULL AND c.status = 'pending'
+       AND NOT EXISTS (SELECT 1 FROM commission_payment_items cpi
+                         JOIN commission_payments cp ON cp.id = cpi.commission_payment_id
+                        WHERE cpi.commission_id = c.id AND cp.status <> 'voided');
+    IF v_eligible = 0 THEN
+      RETURN 0;
+    END IF;
+    SELECT count(*) INTO v_live FROM commissions
+     WHERE order_id = p_order_id AND deleted_at IS NULL AND status <> 'cancelled';
 
-  IF v_live = v_eligible AND v_split_total > 0 THEN
-    -- The whole live set: exact to the cent (largest remainder, as _close_undelivered_order_remainder_20260718).
-    v_base_cents := round(GREATEST(v_base, 0) * 100)::bigint;
-    WITH raw AS (
-      SELECT r.id, v_base_cents::numeric * r.pct / v_split_total AS raw_cents
-        FROM unnest(v_ids, v_pcts) AS r(id, pct)
-    ), ranked AS (
-      SELECT raw.id, floor(raw.raw_cents)::bigint AS base_cents,
-             row_number() OVER (ORDER BY raw.raw_cents - floor(raw.raw_cents) DESC, raw.id) AS remainder_rank,
-             sum(floor(raw.raw_cents)::bigint) OVER () AS allocated
-        FROM raw
-    ), calc AS (
-      SELECT id, base_cents + CASE WHEN remainder_rank <= v_base_cents - allocated THEN 1 ELSE 0 END AS cents
-        FROM ranked
-    )
-    UPDATE commissions c
-       SET order_profit = v_base, commission_amount = calc.cents / 100.0
-      FROM calc
-     WHERE c.id = calc.id
-       AND (c.order_profit IS DISTINCT FROM v_base OR c.commission_amount IS DISTINCT FROM calc.cents / 100.0);
-  ELSE
-    -- Some rows are paid or batched: each pending row is its own share (the edit paths' rule).
-    UPDATE commissions c
-       SET order_profit = v_base, commission_amount = public.compute_commission_amount(v_base, r.pct)
-      FROM unnest(v_ids, v_pcts) AS r(id, pct)
-     WHERE c.id = r.id
-       AND (c.order_profit IS DISTINCT FROM v_base
-            OR c.commission_amount IS DISTINCT FROM public.compute_commission_amount(v_base, r.pct));
-  END IF;
+    -- No discount on the sale, its rows on that profit, and each row a true rounding of its share (the writers' own
+    -- penny spread, under a cent; the set adding up to the profit when it is the whole set): the writers' rows stand
+    -- exactly as today, with no extra history. A split changed by hand fails this and is put right below (Luna HIGH).
+    IF v_base = (SELECT round(COALESCE(total_profit, 0), 2) FROM orders WHERE id = p_order_id)
+       AND NOT EXISTS (SELECT 1 FROM commissions c JOIN unnest(v_ids, v_pcts) AS r(id, pct) ON r.id = c.id
+                        WHERE c.order_profit IS DISTINCT FROM v_base
+                           OR abs(c.commission_amount - GREATEST(v_base, 0) * r.pct / 100) >= 0.01)
+       AND (v_live <> v_eligible
+            OR (SELECT sum(commission_amount) FROM commissions WHERE id = ANY (v_ids)) = GREATEST(v_base, 0)) THEN
+      RETURN 0;
+    END IF;
+
+    IF v_live = v_eligible AND v_split_total > 0 THEN
+      -- The whole live set: exact to the cent (largest remainder, as _close_undelivered_order_remainder_20260718).
+      v_base_cents := round(GREATEST(v_base, 0) * 100)::bigint;
+      SELECT array_agg(calc.cents / 100.0 ORDER BY calc.id) INTO v_new
+        FROM (
+          SELECT ranked.id, ranked.base_cents
+                   + CASE WHEN ranked.remainder_rank <= v_base_cents - ranked.allocated THEN 1 ELSE 0 END AS cents
+            FROM (
+              SELECT raw.id, floor(raw.raw_cents)::bigint AS base_cents,
+                     row_number() OVER (ORDER BY raw.raw_cents - floor(raw.raw_cents) DESC, raw.id) AS remainder_rank,
+                     sum(floor(raw.raw_cents)::bigint) OVER () AS allocated
+                FROM (SELECT r.id, v_base_cents::numeric * r.pct / v_split_total AS raw_cents
+                        FROM unnest(v_ids, v_pcts) AS r(id, pct)) raw
+            ) ranked
+        ) calc;
+    ELSE
+      -- Some rows are paid or batched: each pending row is its own share (the edit paths' rule).
+      SELECT array_agg(public.compute_commission_amount(v_base, r.pct) ORDER BY r.id) INTO v_new
+        FROM unnest(v_ids, v_pcts) AS r(id, pct);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM commissions c JOIN unnest(v_ids, v_new) AS r(id, amount) ON r.id = c.id
+                    WHERE c.order_profit IS DISTINCT FROM v_base OR c.commission_amount IS DISTINCT FROM r.amount) THEN
+      RETURN 0;
+    END IF;
+    EXIT WHEN v_locked;
+    PERFORM 1 FROM commissions WHERE id = ANY (v_ids) ORDER BY id FOR UPDATE;
+    v_locked := true;
+  END LOOP;
+
+  UPDATE commissions c
+     SET order_profit = v_base, commission_amount = r.amount
+    FROM unnest(v_ids, v_new) AS r(id, amount)
+   WHERE c.id = r.id
+     AND (c.order_profit IS DISTINCT FROM v_base OR c.commission_amount IS DISTINCT FROM r.amount);
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RETURN v_count;
 END

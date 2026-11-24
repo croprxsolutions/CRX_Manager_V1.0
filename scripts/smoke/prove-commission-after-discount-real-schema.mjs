@@ -340,7 +340,7 @@ async function main() {
   const before = chain(NEW_CHAIN);
   assert.ok(!before.pass, 'the new chain must fail before the candidate');
   for (const step of ['(A) commission is not 180/120', '(A) unticking tax', '(B) the 3-way rows', '(C) the Bill Split base',
-    '(D) half invoiced', '(D) after Cancel Remaining', '(F) batched row moved', '(H) the 150-line sale', '(I) a changed split']) {
+    '(D) half invoiced', '(D) after Cancel Remaining', '(F) batched row moved', '(H) the 150-line sale', '(I) a changed split', '(J) a changed split']) {
     assert.ok(before.fail.includes(step), `BEFORE: expected ${step} to fail, got: ${before.fail}`);
   }
   assert.ok(!/SMOKE_SETUP|\(E\)|\(G\)/.test(before.fail), `BEFORE: the fixture or a control failed: ${before.fail}`);
@@ -367,7 +367,7 @@ async function main() {
   const after = chain(NEW_CHAIN);
   assert.ok(after.pass, `AFTER: the new chain fails: ${after.fail}`);
   covering('AFTER', passedBefore);
-  console.log('[case] 4 AFTER: the new chain passes (A-I), and every covering chain that passed before still passes');
+  console.log('[case] 4 AFTER: the new chain passes (A-J), and every covering chain that passed before still passes');
   // 5. RE-APPLY
   const again = apply('cand.sql');
   assert.notEqual(again.status, 0); assert.match(again.output, /COMMISSION_AFTER_DISCOUNT_PREFLIGHT: already applied/);

@@ -280,6 +280,22 @@ BEGIN
     IF v_unsaved IS NOT NULL THEN
       RAISE EXCEPTION 'PRODUCT_PARENT_EPA_RUP_LOST: % is restricted-use only through its current EPA number. Mark it restricted-use first, then correct the number', v_unsaved;
     END IF;
+    -- Taha review of 78c34a1f3: the gain direction. A draft or unposted line keeps its saved number and capture, so a
+    -- correction to a restricted-use number would let it post a restricted-use sale with no restricted-use record.
+    SELECT string_agg(DISTINCT COALESCE(i.invoice_number, i.id::text) || ' (' || i.status || ')', ', ')
+      INTO v_unsaved
+      FROM public.invoice_items ii
+      JOIN public.invoices i ON i.id = ii.invoice_id
+      JOIN public.product_parent_members m ON m.product_id = ii.product_id
+      JOIN public.products p ON p.id = ii.product_id
+     WHERE m.parent_id = p_parent.id AND i.deleted_at IS NULL AND i.status IN ('draft', 'unposted')
+       AND NOT COALESCE(p.is_rup, false)
+       AND EXISTS (SELECT 1 FROM public.epa_registrations r WHERE r.epa_registration = v_epa AND r.rup_status = 'yes')
+       AND NOT EXISTS (SELECT 1 FROM public.epa_registrations r
+                        WHERE r.epa_registration = public._normalize_epa_registration(ii.epa_registration) AND r.rup_status = 'yes');
+    IF v_unsaved IS NOT NULL THEN
+      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_RUP_DRAFT: invoice % has a line for this product saved under a number that is not restricted-use, so posting it after this correction would make no restricted-use record. Post or delete it first, or remove that line, then correct the number', v_unsaved;
+    END IF;
   END IF;
   RETURN jsonb_build_object(
     'formulation_type', CASE WHEN p_changes ? 'formulation_type' THEN NULLIF(btrim(p_changes->>'formulation_type'), '') ELSE p_parent.formulation_type END,

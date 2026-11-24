@@ -73,7 +73,9 @@ Smallest change:
   rather than any number; a blank invoice line for a size that had no number shows the new number (Mason accepted,
   record map, Parent EPA correction section, 2026-11-07); invoices and RUP records made after the correction take the new number, except a draft line
   saved before the correction and posted after without being re-saved: it keeps the number (and restricted-use capture)
-  it was saved with, which is what that invoice prints (Sol r2 LOW). A deleted draft
+  it was saved with, which is what that invoice prints (Sol r2 LOW). The one case that would lose a record is refused:
+  a correction to a restricted-use number while a draft or unposted line of a size is saved under a number that is not
+  restricted-use (`PRODUCT_PARENT_EPA_RUP_DRAFT`, save and preview; Taha review of 78c34a1f3). A deleted draft
   invoice restored after a correction behaves as any draft: saving it fills its lines from the trigger.
 - Clearing: refused (Mason, 2026-11-23, Sol r1 #1): this file re-emits `_product_parent_identity_after` with an added
   check, so save and preview refuse a blank number (`PRODUCT_PARENT_INVALID`).

@@ -167,6 +167,26 @@ try {
     DELETE FROM public.epa_registrations WHERE epa_registration = '${NEW}';`);
   console.log('[PAR1-ON] AFTER: a correction that would drop restricted-use status is refused (save and preview); allowed when the new number is restricted-use or the size is marked');
 
+  // Taha review of 78c34a1f3 (the gain direction): a draft line saved under a number that is not restricted-use keeps
+  // that number and capture, so a correction to a restricted-use number is refused until the draft is dealt with.
+  const DRAFT = id('dd');
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, created_by, total_amount_cents, season) VALUES
+      ('${DRAFT}', 'PAR1-DRAFT', '${CUST}', 'chemical_sale', 'draft', '${USERS.admin}', 1500, 2026);
+    INSERT INTO public.invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, epa_registration) VALUES
+      ('${DRAFT}', '${S1}', '[PROVER] Atz draft line', 1, 1500, 1500, 1000, '${NEW}');
+    INSERT INTO public.epa_registrations (epa_registration, rup_status, created_by, updated_by)
+    VALUES ('524-477', 'yes', '${USERS.admin}', '${USERS.admin}');`);
+  refused(USERS.admin, correct('k-draft', version(), '524-477'), /PRODUCT_PARENT_EPA_RUP_DRAFT: invoice PAR1-DRAFT \(draft\)/);
+  refused(USERS.admin, `SELECT public.preview_product_parent_identity_correction('${PARENT}', '{"generic_epa_registration": "524-477"}'::jsonb);`,
+    /PRODUCT_PARENT_EPA_RUP_DRAFT/);
+  assert.equal(productEpa(S1), NEW, 'the refused correction changed nothing');
+  psql(`SET session_replication_role = replica; DELETE FROM public.invoice_items WHERE invoice_id = '${DRAFT}';
+    DELETE FROM public.invoices WHERE id = '${DRAFT}';`);
+  ok(USERS.admin, `SELECT public.preview_product_parent_identity_correction('${PARENT}', '{"generic_epa_registration": "524-477"}'::jsonb);`);
+  psql(`DELETE FROM public.epa_registrations WHERE epa_registration = '524-477';`);
+  console.log('[PAR1-ON] AFTER: a correction to a restricted-use number is refused while a draft line is saved under a number that is not (save and preview); allowed once the draft is gone');
+
   // A line saved with no copy for a size that has a number (e.g. a writer that bypassed the fill trigger) falls back to
   // the size's number in the year-end, and blocks the next correction until it is saved (PRODUCT_PARENT_EPA_RECORD_UNSAVED).
   psql(`SET session_replication_role = replica;

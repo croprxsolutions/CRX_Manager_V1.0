@@ -70,6 +70,9 @@ try {
     UPDATE public.profiles SET is_active = true, denied_pages = '{}' WHERE id IN ('${REP}', '${APPL}');
     UPDATE public.profiles SET is_active = true, denied_pages = ARRAY['inventory'] WHERE id IN ('${REP_NO_INV}', '${ADMIN}');
     UPDATE public.profiles SET is_active = true, denied_pages = ARRAY['reports', 'sales-reports'] WHERE id = '${REP_NO_REPORTS}';
+    -- smoke-page-access-locks-reports.sql needs one active customer and one order.
+    INSERT INTO public.customers (id, farm_name, is_active, assigned_sales_rep) VALUES ('${id('c9')}', '[PPIP] Farm', true, '${REP}');
+    INSERT INTO public.orders (id, order_number, customer_id) VALUES ('${id('c8')}', 'PPIP-O1', '${id('c9')}');
     SET session_replication_role = origin;`, { user: 'supabase_admin' });
   const seeded = scalar(`SELECT string_agg(id::text || '=' || role || ':' || is_active || ':' || array_to_string(denied_pages, '+'), ',' ORDER BY id)
       FROM public.profiles WHERE id IN ('${ADMIN}', '${REP}', '${APPL}', '${REP_NO_INV}', '${REP_NO_REPORTS}');`);

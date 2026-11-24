@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270228130000_purchasing_plan_requires_inventory_page.sql (release #2388 Sol HIGH 2).
+ * Real-schema proof for 20270228210000_purchasing_plan_requires_inventory_page.sql (release #2388 Sol HIGH 2).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), then:
@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, id, USERS, ROOT, NAME, docker, psql, scalar, claims } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270228130000_purchasing_plan_requires_inventory_page.sql';
+const CANDIDATE = '20270228210000_purchasing_plan_requires_inventory_page.sql';
 const lf = (file) => readFileSync(file, 'utf8').replaceAll('\r\n', '\n');
 const candidate = lf(path.join(ROOT, 'supabase', 'migrations', CANDIDATE));
 // psql -1 makes one transaction only with -f or -c, so stdin is read through -f -.

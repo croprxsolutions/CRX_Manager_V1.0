@@ -32,9 +32,9 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270216110000_purchasing_plan_booking_reservations.sql');
 const FOLLOW_UPS = [];
-// 20270228130000 (#2388 Sol HIGH 2) adds a page check to get_purchasing_plan after this candidate; this proof stops before it
+// 20270228210000 (#2388 Sol HIGH 2) adds a page check to get_purchasing_plan after this candidate; this proof stops before it
 // (prove-purchasing-plan-inventory-page-real-schema.mjs covers it).
-const LATER_READ_ONLY = new Set(['20270228130000_purchasing_plan_requires_inventory_page.sql']);
+const LATER_READ_ONLY = new Set(['20270228210000_purchasing_plan_requires_inventory_page.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

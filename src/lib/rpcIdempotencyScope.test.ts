@@ -529,7 +529,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // Same shape. Repair step 5 (20270113100000) re-emits both only to add the KI-139 / KI-141 refusals.
   _reconcile_negative_inventory_replay_impl_20261015: ['reconcile_negative_inventory'],
   _retire_inventory_item_replay_impl_20261015: ['retire_inventory_item'],
-  // Same shape. M9 (20270301120000) re-emits both only to refuse a balance edit / delete of a credit that has a
+  // Same shape. M9 (20270301180000) re-emits both only to refuse a balance edit / delete of a credit that has a
   // refund or returned check recorded on it (money_reversal_lines).
   _edit_prepay_credit_replay_impl_20261015: ['edit_prepay_credit'],
   _delete_prepay_credit_replay_impl_20261015: ['delete_prepay_credit'],

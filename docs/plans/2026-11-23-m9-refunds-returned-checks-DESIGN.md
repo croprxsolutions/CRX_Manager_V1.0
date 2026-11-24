@@ -1,6 +1,6 @@
 # M9 design: refunds paid outside CRX, prepay balance check, returned checks (stage 1)
 
-Migration: `supabase/migrations/20270301120000_m9_refunds_and_returned_checks.sql`. Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` (written first; 19 cases now).
+Migration: `supabase/migrations/20270301180000_m9_refunds_and_returned_checks.sql`. Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` (written first; 20 cases now).
 
 **Sections 1–6 are the stage-1 design. Sections 7–10 (Sol rounds) override them where they differ: for example a refund is dated today with an optional `p_paid_on`, not `p_refund_date`.**
 `B:` = baseline `supabase/baselines/20260727174805_public_schema.sql.br` (decompressed line). Other refs are `supabase/migrations/`.
@@ -93,5 +93,6 @@ A read-only live count found 1 customer with prepay, 1 credit, 1 payment set and
 10. Round 9 (Sol r8's HIGHs): an entry names a credit only as an element of an array of distinct ids (`CHECK_ENTRY_MALFORMED` for an entry of the customer that is not one); a refund locks every credit of the customer first, so a sibling edit or delete waits and then sees it. Accepted: two same-reference entries in one transaction, and credits edited before M9, block that customer (Mason's live reset clears prepay; new checks are written in the right shape).
 11. Round 10 (Sol r9; Taha: accept H1, fix H2): the A/R tripwire keeps its credit-timestamp test for returned credits (the exception for a returned credit with no surviving application is removed), so an application an invoice void deleted after the cutoff still flags that cutoff. H1 (a foreign `check` credit tied to a returned payment) is accepted: legacy data only, cleared by Mason's live reset.
 12. Round 11 (Sol r10; Taha: accept H1–H3, fix H4 option A): a Prepayment Manager check's amounts are locked; delete_prepay_credit deletes the whole check (every bucket, one audit row, refused if applied or reversed); the gate skips an entry deleted whole. The Prepayment Manager edit modal needs its balance field read-only for check credits (UI stage).
-13. Stamp moved to `20270301120000` (after staging's `20270301100000` and every open PR's stamp).
+13. Round 13 (Sol final; Taha: fix H1, H2 and MEDs, accept H3–H6): a whole-check delete needs the receipt month open (month lock) and an entry that passes the gate's whole-receipt rules; its audit keeps the before-image; a retry gets the same receipt; the confirmation shows the whole check's total and parts; the hint no longer points at the refund screen that does not exist yet. Accepted: four malformed-legacy-data cases (cleared by Mason's live reset).
+14. Stamp moved to `20270301180000` (after staging's `20270301100000` and every open PR's stamp, up to #2267's `20270301150000`).
 

@@ -62,7 +62,7 @@ describe('sanitizeError', () => {
   ])('explains the parent refusal %s by name', (raw, expected) => {
     expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
   });
-  // M9 (20270301120000): the RAISE text of _edit / _delete_prepay_credit_replay_impl_20261015.
+  // M9 (20270301180000): the RAISE text of _edit / _delete_prepay_credit_replay_impl_20261015.
   it('explains a locked prepayment check amount and an applied check without the raw token', () => {
     const locked = sanitizeError({ message: "PREPAY_CHECK_AMOUNT_LOCKED: a prepayment check's amount cannot be edited; delete the whole check and enter it again" });
     expect(locked).toContain('delete the whole check and enter it again');

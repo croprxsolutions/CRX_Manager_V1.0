@@ -47,13 +47,17 @@ interface PrepayCredit {
   notes: string | null;
   payment_method: string | null;
   source_type: string | null;
+  source_reference: string | null;
   allocation_set_id: string | null;
   created_at: string;
 }
 
 /** A Prepayment Manager check (not a payment's overpayment): its amounts are locked and it is deleted whole (M9). */
 const isPrepaymentCheck = (credit: PrepayCredit) => credit.source_type === 'check' && !credit.allocation_set_id;
-const CHECK_AMOUNT_LOCKED_HINT = 'Check amounts are locked. To correct a mistyped check, delete the whole check and enter it again; for money paid back use Refund paid outside CRX.';
+const CHECK_AMOUNT_LOCKED_HINT = 'Check amounts are locked. To correct a mistyped check, delete the whole check and enter it again.';
+/** The parts of one Prepayment Manager check: its buckets share the check's reference and entry time. */
+const checkParts = (credit: PrepayCredit, all: PrepayCredit[]) => all.filter((c) => isPrepaymentCheck(c)
+  && c.customer_id === credit.customer_id && c.source_reference === credit.source_reference && c.created_at === credit.created_at);
 
 interface BucketSplit {
   label: string;
@@ -205,7 +209,7 @@ export default function PrepaymentManagerPanel() {
     setCreditsFailed(false);
     const { data, error } = await supabase
       .from('prepay_credits')
-      .select('id, customer_id, original_amount_cents, balance_cents, reference_number, bucket_label, notes, payment_method, source_type, allocation_set_id, created_at')
+      .select('id, customer_id, original_amount_cents, balance_cents, reference_number, bucket_label, notes, payment_method, source_type, source_reference, allocation_set_id, created_at')
       .eq('customer_id', customerId)
       .order('created_at', { ascending: false });
     // Another customer was opened (or this one closed) while this loaded.
@@ -968,10 +972,23 @@ export default function PrepaymentManagerPanel() {
                 <span className="text-secondary">Bucket</span>
                 <span>{deleteCredit.bucket_label || '—'}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-secondary">{isPrepaymentCheck(deleteCredit) ? "This part's balance" : 'Balance to Remove'}</span>
-                <span className="font-medium text-red-600">{fmt(deleteCredit.balance_cents)}</span>
-              </div>
+              {isPrepaymentCheck(deleteCredit) ? (() => {
+                const parts = checkParts(deleteCredit, customerCredits);
+                const total = parts.reduce((sum, c) => sum + c.balance_cents, 0);
+                return (
+                  <div className="flex justify-between">
+                    <span className="text-secondary">Whole check to remove</span>
+                    <span className="font-medium text-red-600" data-testid="whole-check-total">
+                      {fmt(total)} ({parts.length} part{parts.length === 1 ? '' : 's'})
+                    </span>
+                  </div>
+                );
+              })() : (
+                <div className="flex justify-between">
+                  <span className="text-secondary">Balance to Remove</span>
+                  <span className="font-medium text-red-600">{fmt(deleteCredit.balance_cents)}</span>
+                </div>
+              )}
             </div>
             <Input
               label="Reason *"

@@ -1,5 +1,5 @@
 /**
- * PrepaymentManagerPanel.checkLock.test.tsx — M9 (20270301120000): a Prepayment Manager check's amount is locked
+ * PrepaymentManagerPanel.checkLock.test.tsx — M9 (20270301180000): a Prepayment Manager check's amount is locked
  * (shown read-only, sent unchanged so notes still save) and its delete removes the whole check.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,7 +35,7 @@ import PrepaymentManagerPanel from './PrepaymentManagerPanel';
 
 const credit = (id: string, ref: string, extra: Row = {}) => ({
   id, customer_id: 'c1', original_amount_cents: 30000, balance_cents: 30000, reference_number: ref,
-  bucket_label: null, notes: null, payment_method: 'check', source_type: 'check', allocation_set_id: null,
+  bucket_label: null, notes: null, payment_method: 'check', source_type: 'check', source_reference: ref, allocation_set_id: null,
   created_at: '2026-10-01', ...extra,
 });
 
@@ -52,7 +52,7 @@ afterEach(cleanup);
 async function openCredits() {
   render(<MemoryRouter><PrepaymentManagerPanel /></MemoryRouter>);
   fireEvent.click(await screen.findByRole('button', { name: /Alpha Farm/ }));
-  await screen.findByText('CHK-1001');
+  await screen.findAllByText('CHK-1001');
 }
 
 describe('Prepay Manager: Prepayment Manager check amounts (M9)', () => {
@@ -62,7 +62,8 @@ describe('Prepay Manager: Prepayment Manager check amounts (M9)', () => {
     fireEvent.click(screen.getByTitle('Edit credit'));
 
     expect(screen.getByTestId('locked-check-balance')).toHaveTextContent('$300.00');
-    expect(screen.getByText(/Check amounts are locked\. To correct a mistyped check, delete the whole check/)).toBeInTheDocument();
+    expect(screen.getByText('Check amounts are locked. To correct a mistyped check, delete the whole check and enter it again.')).toBeInTheDocument();
+    expect(screen.queryByText(/Refund paid outside CRX/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Balance ($)')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'call before Friday' } });
@@ -80,12 +81,15 @@ describe('Prepay Manager: Prepayment Manager check amounts (M9)', () => {
     expect(screen.queryByTestId('locked-check-balance')).not.toBeInTheDocument();
   });
 
-  it('deleting a check says the whole check goes, and the toast names all its parts', async () => {
+  it('deleting a check shows the whole check before it goes, and the toast names all its parts', async () => {
+    H.tables.prepay_credits = [credit('k1', 'CHK-1001'), credit('k2', 'CHK-1001', { balance_cents: 20000, original_amount_cents: 20000 }),
+      credit('k3', 'CHK-1001', { created_at: '2026-10-02', balance_cents: 40000, original_amount_cents: 40000 })];  // another check with the same number, entered later
     H.rpc.mockResolvedValue({ data: { success: true, credit_id: 'k1', credit_ids: ['k1', 'k2'], deleted_balance_cents: 50000 }, error: null });
     await openCredits();
-    fireEvent.click(screen.getByTitle('Delete credit'));
+    fireEvent.click(screen.getAllByTitle('Delete credit').find((b) => b.closest('tr')?.textContent?.includes('$300.00'))!);
 
     expect(screen.getByText(/This deletes the whole check: every part of it goes to \$0 together/)).toBeInTheDocument();
+    expect(screen.getByTestId('whole-check-total')).toHaveTextContent('$500.00 (2 parts)');
     fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'entered wrong' } });
     fireEvent.click(screen.getByRole('button', { name: /Delete Whole Check/ }));
 

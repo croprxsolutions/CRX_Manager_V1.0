@@ -1,5 +1,5 @@
 -- Written 2026-11-23. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270301120000_m9_refunds_and_returned_checks.md.
+-- docs/reference/migrations.d/20270301180000_m9_refunds_and_returned_checks.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (M9, billing plan 4 Nov / audit 1.3; design docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md):
@@ -855,6 +855,8 @@ BEGIN
       FROM idempotency_keys
       WHERE idempotency_key = p_idempotency_key AND operation = 'delete_prepay_credit';
     IF v_existing IS NOT NULL THEN
+      -- M9: a whole-check delete saved its full receipt; a retry answers with it.
+      IF v_existing ? 'credit_ids' THEN RETURN v_existing || jsonb_build_object('idempotent', true); END IF;
       RETURN jsonb_build_object('success', true, 'credit_id', p_credit_id, 'idempotent', true);
     END IF;
   END IF;
@@ -890,8 +892,10 @@ BEGIN
   -- stays; the gate skips an entry deleted whole).
   IF v_credit.source_type = 'check' AND v_credit.allocation_set_id IS NULL THEN
     DECLARE
-      v_ids   uuid[];
-      v_total bigint;
+      v_ids    uuid[];
+      v_total  bigint;
+      v_before jsonb;
+      v_result jsonb;
     BEGIN
       IF (SELECT count(*) FROM financial_audit_log fal
            WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
@@ -920,6 +924,16 @@ BEGIN
       END IF;
       SELECT COALESCE(sum(balance_cents), 0) INTO v_total FROM prepay_credits WHERE id = ANY (v_ids);
       IF v_total = 0 THEN RAISE EXCEPTION 'Prepay credit already has zero balance'; END IF;
+      -- The month the check was received in must be open (its Month-End receipt would move), under the month lock;
+      -- then the customer (lock order: credits, month, customer, as a refund).
+      PERFORM check_period_open((v_credit.created_at AT TIME ZONE 'America/Chicago')::date);
+      PERFORM 1 FROM customers WHERE id = v_credit.customer_id FOR UPDATE;
+      -- The entry must be one whole receipt of this customer, by the refund / return gate's own rules.
+      PERFORM public._m9_check_records_20270225(v_credit.customer_id, NULL, v_ids, v_ids, ARRAY[]::uuid[], 0);
+      -- The before-image, read before anything is zeroed.
+      SELECT jsonb_agg(jsonb_build_object('id', id, 'original_amount_cents', original_amount_cents,
+                                          'balance_cents', balance_cents, 'bucket_label', bucket_label) ORDER BY id)
+        INTO v_before FROM prepay_credits WHERE id = ANY (v_ids);
       IF (SELECT COALESCE(prepay_balance_cents, 0) FROM customers WHERE id = v_credit.customer_id) < v_total THEN
         RAISE EXCEPTION 'RECORD_NEEDS_HAND_CHECK: STORED_BALANCE_LOW (the customer''s stored prepay is below this check; delete it by hand)';
       END IF;
@@ -933,22 +947,21 @@ BEGIN
         operation_type, entity_type, entity_id, actor_user_id, old_values, new_values, total_impact_cents, description
       ) VALUES (
         'prepay_deleted', 'prepay', p_credit_id, v_actor,
-        jsonb_build_object('total_cents', v_total, 'reference_number', v_credit.source_reference,
-                           'buckets', (SELECT jsonb_agg(jsonb_build_object('id', id, 'original_amount_cents', original_amount_cents,
-                                                                          'bucket_label', bucket_label) ORDER BY id)
-                                         FROM prepay_credits WHERE id = ANY (v_ids))),
+        jsonb_build_object('total_cents', v_total, 'reference_number', v_credit.source_reference, 'buckets', v_before),
         jsonb_build_object('whole_check', true, 'credit_ids', to_jsonb(v_ids), 'balance_cents', 0, 'original_amount_cents', 0,
                            'reason', p_reason),
         -1 * v_total,
         'Deleted prepayment check ' || COALESCE(v_credit.source_reference, v_credit.id::text) || ' (' || cardinality(v_ids)
           || ' bucket(s)) — ' || p_reason
       );
+      v_result := jsonb_build_object('success', true, 'credit_id', p_credit_id, 'credit_ids', to_jsonb(v_ids),
+                                     'deleted_balance_cents', v_total);
       IF p_idempotency_key IS NOT NULL THEN
+        -- The whole receipt is kept, so a retry with the same key answers exactly as this call did.
         INSERT INTO idempotency_keys (idempotency_key, operation, result)
-        VALUES (p_idempotency_key, 'delete_prepay_credit', jsonb_build_object('credit_id', p_credit_id));
+        VALUES (p_idempotency_key, 'delete_prepay_credit', v_result);
       END IF;
-      RETURN jsonb_build_object('success', true, 'credit_id', p_credit_id, 'credit_ids', to_jsonb(v_ids),
-                                'deleted_balance_cents', v_total);
+      RETURN v_result;
     END;
   END IF;
 
@@ -2011,7 +2024,9 @@ $m9blk$]),
     p_new_balance_cents := NULL;
   END IF;
 $m9blk$] || ARRAY[$m9blk$, updated_at = now() /* M9: the cached balance changed */$m9blk$]),
-      ('public._delete_prepay_credit_replay_impl_20261015(uuid,text,uuid,text)', ARRAY[$m9blk$
+      ('public._delete_prepay_credit_replay_impl_20261015(uuid,text,uuid,text)', ARRAY[$m9blk$      -- M9: a whole-check delete saved its full receipt; a retry answers with it.
+      IF v_existing ? 'credit_ids' THEN RETURN v_existing || jsonb_build_object('idempotent', true); END IF;
+$m9blk$] || ARRAY[$m9blk$
   -- M9: a credit with a refund or a returned check recorded on it cannot be deleted (the delete would rewrite its
   -- original amount and erase them).
   IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
@@ -2022,8 +2037,10 @@ $m9blk$] || ARRAY[$m9blk$, updated_at = now() /* M9: the cached balance changed 
   -- stays; the gate skips an entry deleted whole).
   IF v_credit.source_type = 'check' AND v_credit.allocation_set_id IS NULL THEN
     DECLARE
-      v_ids   uuid[];
-      v_total bigint;
+      v_ids    uuid[];
+      v_total  bigint;
+      v_before jsonb;
+      v_result jsonb;
     BEGIN
       IF (SELECT count(*) FROM financial_audit_log fal
            WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
@@ -2052,6 +2069,16 @@ $m9blk$] || ARRAY[$m9blk$, updated_at = now() /* M9: the cached balance changed 
       END IF;
       SELECT COALESCE(sum(balance_cents), 0) INTO v_total FROM prepay_credits WHERE id = ANY (v_ids);
       IF v_total = 0 THEN RAISE EXCEPTION 'Prepay credit already has zero balance'; END IF;
+      -- The month the check was received in must be open (its Month-End receipt would move), under the month lock;
+      -- then the customer (lock order: credits, month, customer, as a refund).
+      PERFORM check_period_open((v_credit.created_at AT TIME ZONE 'America/Chicago')::date);
+      PERFORM 1 FROM customers WHERE id = v_credit.customer_id FOR UPDATE;
+      -- The entry must be one whole receipt of this customer, by the refund / return gate's own rules.
+      PERFORM public._m9_check_records_20270225(v_credit.customer_id, NULL, v_ids, v_ids, ARRAY[]::uuid[], 0);
+      -- The before-image, read before anything is zeroed.
+      SELECT jsonb_agg(jsonb_build_object('id', id, 'original_amount_cents', original_amount_cents,
+                                          'balance_cents', balance_cents, 'bucket_label', bucket_label) ORDER BY id)
+        INTO v_before FROM prepay_credits WHERE id = ANY (v_ids);
       IF (SELECT COALESCE(prepay_balance_cents, 0) FROM customers WHERE id = v_credit.customer_id) < v_total THEN
         RAISE EXCEPTION 'RECORD_NEEDS_HAND_CHECK: STORED_BALANCE_LOW (the customer''s stored prepay is below this check; delete it by hand)';
       END IF;
@@ -2065,22 +2092,21 @@ $m9blk$] || ARRAY[$m9blk$, updated_at = now() /* M9: the cached balance changed 
         operation_type, entity_type, entity_id, actor_user_id, old_values, new_values, total_impact_cents, description
       ) VALUES (
         'prepay_deleted', 'prepay', p_credit_id, v_actor,
-        jsonb_build_object('total_cents', v_total, 'reference_number', v_credit.source_reference,
-                           'buckets', (SELECT jsonb_agg(jsonb_build_object('id', id, 'original_amount_cents', original_amount_cents,
-                                                                          'bucket_label', bucket_label) ORDER BY id)
-                                         FROM prepay_credits WHERE id = ANY (v_ids))),
+        jsonb_build_object('total_cents', v_total, 'reference_number', v_credit.source_reference, 'buckets', v_before),
         jsonb_build_object('whole_check', true, 'credit_ids', to_jsonb(v_ids), 'balance_cents', 0, 'original_amount_cents', 0,
                            'reason', p_reason),
         -1 * v_total,
         'Deleted prepayment check ' || COALESCE(v_credit.source_reference, v_credit.id::text) || ' (' || cardinality(v_ids)
           || ' bucket(s)) — ' || p_reason
       );
+      v_result := jsonb_build_object('success', true, 'credit_id', p_credit_id, 'credit_ids', to_jsonb(v_ids),
+                                     'deleted_balance_cents', v_total);
       IF p_idempotency_key IS NOT NULL THEN
+        -- The whole receipt is kept, so a retry with the same key answers exactly as this call did.
         INSERT INTO idempotency_keys (idempotency_key, operation, result)
-        VALUES (p_idempotency_key, 'delete_prepay_credit', jsonb_build_object('credit_id', p_credit_id));
+        VALUES (p_idempotency_key, 'delete_prepay_credit', v_result);
       END IF;
-      RETURN jsonb_build_object('success', true, 'credit_id', p_credit_id, 'credit_ids', to_jsonb(v_ids),
-                                'deleted_balance_cents', v_total);
+      RETURN v_result;
     END;
   END IF;
 $m9blk$] || ARRAY[$m9blk$  -- M9: the customer's credits first, in id order (a refund's order), so a whole-check delete cannot deadlock with it.

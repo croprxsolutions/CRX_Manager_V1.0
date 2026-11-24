@@ -1,17 +1,14 @@
 -- KI-151 follow-up (Mason, 2026-11-23, answering Taha's #2266 review in Slack: "The 5% rule also applies when Edit PO
 -- lowers a quantity, and the exception covers bills that went over because a receipt was reversed").
 --
--- 1. Edit PO (save_purchase_order) could lower a PO's ordered total under its vendor bills with no check: lowering an
---    unreceived line's quantity, dropping a line, or an admin cutting an unreceived line's cost. A save that LOWERS the
---    ordered total and leaves the active (not deleted, not voided) vendor bills more than 5% over it is now refused
---    (PO_EDIT_BELOW_BILLED), the same ordered-total rule set_purchase_order_item_costs applies to a cost cut. A save
---    that keeps or raises the total is never refused, so a PO whose bill is already over can still be edited
---    otherwise. Edit PO cannot change a received line (RECEIVED_PO_LINE_IMMUTABLE), so it cannot lower what arrived;
---    once the total would fall below what arrived the limit IS the ordered total, so this one rule covers KI-143's
---    received-value limit too. That check and its amounts (in DETAIL) are admin-only. Sales reps can save a PO but PO
---    costs are admin-only, so (Mason, 2026-11-24) on a PO with any active bill a non-admin may not remove a line, lower
---    a quantity, or change a line's product or unit (PO_EDIT_NEEDS_ADMIN): the outcome never depends on a cost or bill
---    amount. A rep's cost keys are stripped, so a rep's edit cannot lower the total any other way.
+-- 1. Edit PO (save_purchase_order) could lower a PO's ordered total under its vendor bills with no check (lower an
+--    unreceived quantity, drop a line, or an admin's lower cost on an unreceived line). Mason, 2026-11-24, after three
+--    Sol rounds found leaks in a rep/admin split: one rule for everyone. Once a PO has an active (not deleted, not
+--    voided) vendor bill, an Edit PO save that changes its lines at all (adds or removes a line, or changes a line's
+--    quantity, product, unit or cost) is refused (PO_BILLED_LINES_LOCKED); header edits (notes, dates, status) still
+--    save. To change lines, void the bill, edit, then enter the bill again (create_vendor_bill applies its limits);
+--    a cost correction goes through set_purchase_order_item_costs, which keeps the 5% rule. The refusal depends only
+--    on the caller's own edit and whether a bill exists, never on a role, cost or bill amount, and names no amount.
 -- 2. Reversed receipts: no change. set_purchase_order_item_costs (20270223100000) refuses a cut on the received-value
 --    limit only when the bills were within it before the cut, whatever put them over: a prepaid bill or a reversed
 --    receipt (a receipt can be reversed only while no active bill is on the PO, so that bill is entered again after
@@ -20,11 +17,11 @@
 --
 -- Same signature, owner and grants; the body is the 20261021140000 wrapper (md5-pinned below) plus the check around
 -- the unchanged inner save. Lock order: the advisory lock first (as before); the inner save locks the lines and the PO;
--- only when an admin's total fell or a rep's edit cut a line, the PO row is locked again before bills are read, which serializes with
--- create_vendor_bill (it locks the PO). No data changes (live 2026-11-22: no vendor bill is linked to a PO).
+-- only when a billed PO's lines changed is the PO row locked again (already held then) before bills are re-read, which
+-- serializes with create_vendor_bill (it locks the PO). A replay changes no line, so it takes no extra lock. No data changes (live 2026-11-22: no vendor bill is linked to a PO).
 --
 -- idempotency-body-check: exempt -- the key, fingerprint and receipt stay in the unchanged inner save; a refused save
---   rolls back with its receipt, and a replay changes no total so it is never refused.
+--   rolls back with its receipt, and a replay changes no line so it is never refused.
 -- caller-analysis: save_purchase_order :: src/pages/PurchaseOrderDetail.tsx (Edit PO), NewPurchaseOrder.tsx and
 --   BulkPOImport.tsx (new POs: no bills, never checked); same arguments; new error code mapped in errorSanitizer.ts.
 --
@@ -67,69 +64,48 @@ CREATE OR REPLACE FUNCTION public.save_purchase_order(
 SET search_path = public, pg_temp AS $function$
 DECLARE
   v_items jsonb := p_items;
-  v_is_admin boolean := public.is_admin();
-  v_old_total bigint;
-  v_new_total bigint;
   v_old_lines jsonb;
-  v_billed numeric;
   v_result jsonb;
 BEGIN
   PERFORM pg_advisory_xact_lock(73492009);
-  IF NOT v_is_admin AND jsonb_typeof(p_items) = 'array' THEN
+  IF NOT public.is_admin() AND jsonb_typeof(p_items) = 'array' THEN
     SELECT COALESCE(jsonb_agg(CASE WHEN jsonb_typeof(t.e) = 'object' THEN t.e - 'unit_cost' - 'unit_cost_cents' ELSE t.e END
                               ORDER BY t.o), '[]'::jsonb)
       INTO v_items
       FROM jsonb_array_elements(p_items) WITH ORDINALITY AS t(e, o);
   END IF;
-  -- KI-151 follow-up: every other writer of the ordered total takes the advisory lock above, so this stays current.
-  IF p_po_id IS NOT NULL THEN
-    SELECT total_cost_cents INTO v_old_total FROM public.purchase_orders WHERE id = p_po_id;
-    IF NOT v_is_admin THEN
-      SELECT jsonb_object_agg(poi.id::text, jsonb_build_object('q', poi.quantity_ordered, 'p', poi.product_id, 'u', poi.unit_size))
-        INTO v_old_lines
-        FROM public.purchase_order_items poi WHERE poi.purchase_order_id = p_po_id;
-    END IF;
+  -- Mason, 2026-11-24: once a PO has an active vendor bill, Edit PO cannot change its lines, for anyone. Snapshot them
+  -- only for such a PO (one indexed EXISTS otherwise). Every other writer of a PO's lines takes the advisory lock above.
+  IF p_po_id IS NOT NULL AND EXISTS (
+       SELECT 1 FROM public.vendor_bills vb
+        WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided') THEN
+    SELECT COALESCE(jsonb_object_agg(poi.id::text, jsonb_build_object(
+             'q', poi.quantity_ordered, 'p', poi.product_id, 'u', poi.unit_size, 'c', poi.unit_cost)), '{}'::jsonb)
+      INTO v_old_lines
+      FROM public.purchase_order_items poi WHERE poi.purchase_order_id = p_po_id;
   END IF;
   v_result := public._section9_save_purchase_order_serialized(
     p_po_id, p_po_payload, v_items, p_performed_by, p_idempotency_key
   );
-  IF v_old_total IS NULL THEN
-    RETURN v_result;
-  END IF;
-  IF NOT v_is_admin THEN
-    -- Mason, 2026-11-24 (option A on Sol's review): on a PO with any active vendor bill, a non-admin may not remove a
-    -- line, lower a line's quantity, or change a line's product or unit. The refusal depends only on the rep's own edit
-    -- and whether a bill exists, never on a cost or bill amount, so it reveals neither; the 5% check below (with its
-    -- amounts) is admin-only. A replay or an edit with no such change takes no extra lock.
-    IF EXISTS (
-         SELECT 1 FROM jsonb_each(COALESCE(v_old_lines, '{}'::jsonb)) o
+  IF v_old_lines IS NOT NULL AND (
+       (SELECT count(*) FROM public.purchase_order_items poi WHERE poi.purchase_order_id = p_po_id)
+         <> (SELECT count(*) FROM jsonb_object_keys(v_old_lines))
+       OR EXISTS (
+         SELECT 1 FROM jsonb_each(v_old_lines) o
            LEFT JOIN public.purchase_order_items poi ON poi.id = o.key::uuid AND poi.purchase_order_id = p_po_id
           WHERE poi.id IS NULL
-             OR poi.quantity_ordered < (o.value->>'q')::numeric
+             -- shortcut: a change under 0.000001 is ignored, so a screen's float round-trip of a stored quantity never
+             -- refuses a notes edit.
+             OR abs(poi.quantity_ordered - (o.value->>'q')::numeric) > 0.000001
              OR poi.product_id IS DISTINCT FROM (o.value->>'p')::uuid
-             OR poi.unit_size IS DISTINCT FROM (o.value->>'u')) THEN
-      PERFORM 1 FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
-      IF EXISTS (SELECT 1 FROM public.vendor_bills vb
-                  WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided') THEN
-        RAISE EXCEPTION 'PO_EDIT_NEEDS_ADMIN: this purchase order has a vendor bill, so only an admin can lower a quantity, remove a line or change a line''s product or unit'
-          USING ERRCODE = '42501';
-      END IF;
-    END IF;
-    RETURN v_result;
-  END IF;
-  -- Mason, 2026-11-23: no admin edit that lowers the ordered total may leave the active vendor bills more than 5% over it
-  -- (set_purchase_order_item_costs' rule). Exact numeric, no overflow.
-  SELECT total_cost_cents INTO v_new_total FROM public.purchase_orders WHERE id = p_po_id;
-  IF v_new_total < v_old_total THEN
-    -- Lock only when the total fell (the save already holds this row then); a replay or unchanged total takes no new lock.
+             OR poi.unit_size IS DISTINCT FROM (o.value->>'u')
+             OR poi.unit_cost IS DISTINCT FROM (o.value->>'c')::numeric)) THEN
+    -- The bill may have been voided while the save waited: re-check it under the PO row lock create_vendor_bill takes.
     PERFORM 1 FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
-    SELECT COALESCE(SUM(vb.total_cents), 0) INTO v_billed
-      FROM public.vendor_bills vb
-     WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided';
-    IF v_billed > 0 AND v_billed * 100 > v_new_total::numeric * 105 THEN
-      RAISE EXCEPTION 'PO_EDIT_BELOW_BILLED: this edit would leave the active vendor bills more than 5%% over the purchase order''s ordered total; void or adjust the bill first'
-        USING ERRCODE = '22023',
-              DETAIL = jsonb_build_object('po_total_cents', v_new_total, 'active_billed_cents', v_billed)::text;
+    IF EXISTS (SELECT 1 FROM public.vendor_bills vb
+                WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided') THEN
+      RAISE EXCEPTION 'PO_BILLED_LINES_LOCKED: this purchase order has a vendor bill, so its lines cannot be changed here; void the bill first, or have an admin use Correct Unit Cost'
+        USING ERRCODE = '22023';
     END IF;
   END IF;
   RETURN v_result;
@@ -137,7 +113,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.save_purchase_order(uuid, jsonb, jsonb, uuid, text) IS
-  'Create or edit a purchase order and its lines (a non-admin''s line costs are stripped). An edit that lowers the ordered total and leaves active vendor bills more than 5% over it is refused (PO_EDIT_BELOW_BILLED); on a PO with an active vendor bill only an admin may remove a line, lower a quantity or change a line''s product or unit (PO_EDIT_NEEDS_ADMIN).';
+  'Create or edit a purchase order and its lines (a non-admin''s line costs are stripped). Once a PO has an active vendor bill its lines cannot be changed here, for anyone (PO_BILLED_LINES_LOCKED); header edits still save.';
 
 DO $postflight$
 DECLARE
@@ -150,7 +126,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = v_oid AND p.prosecdef
                    AND pg_get_userbyid(p.proowner) = 'postgres'
                    AND p.proconfig = ARRAY['search_path=public, pg_temp']
-                   AND p.prosrc LIKE '%unit_cost_cents%' AND p.prosrc LIKE '%PO_EDIT_BELOW_BILLED%' AND p.prosrc LIKE '%PO_EDIT_NEEDS_ADMIN%'
+                   AND p.prosrc LIKE '%unit_cost_cents%' AND p.prosrc LIKE '%PO_BILLED_LINES_LOCKED%'
                    AND p.prosrc LIKE '%_section9_save_purchase_order_serialized%') THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: security definer, owner, search_path or body is wrong';
   END IF;

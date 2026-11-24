@@ -53,6 +53,7 @@ import { brandDeliveryIds, brandPostWarningText, invoiceBrandWarnings, type Bran
 import { hasRepeatedBrandTrip, invoiceBrandNotes } from '../../supabase/functions/_shared/brandNotes.ts';
 import { loadDeliveryPicks } from '../lib/deliveryBrandPaper';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
+import NextDraftButton from '../components/invoices/NextDraftButton';
 import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
 import { dueDateFromTerms } from '../lib/paymentTerms';
 import WriteOffModal from '../components/invoices/WriteOffModal';
@@ -2172,6 +2173,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                 {thisPayerIndex >= 0 ? `Split invoice ${thisPayerIndex + 1} of ${billSplitPayers.length}` : 'Split invoice'}
               </span>
             )}
+            {!isNew && <NextDraftButton currentId={id} />}
           </div>
           {subtitle && <p className="mt-1 text-sm text-secondary">{subtitle}</p>}
         </div>

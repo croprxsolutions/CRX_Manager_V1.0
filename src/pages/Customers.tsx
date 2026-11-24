@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Upload, Download, FileText, ToggleLeft, UserPlus, UserX } from 'lucide-react';
+import { Plus, Upload, Download, FileText, ToggleLeft, UserPlus, UserX, Phone } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import DataTable, { type Column } from '../components/ui/DataTable';
@@ -22,12 +22,23 @@ import { Sentry } from '../lib/sentry';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import { filteredEmptyProps } from '../components/ui/filteredEmpty';
+import { listSortParam, oneOf, parseListSort, useUrlListState } from '../hooks/useUrlListState';
 import type { Customer } from '../types';
 
 /** Sentinel for the "no rep assigned" option — a real rep id is never this. */
 const UNASSIGNED_REP = '__unassigned__';
 type ProfileNeed = 'missing-rep' | 'missing-phone' | 'missing-email' | 'missing-crops';
 type ProfileNeedFilter = '' | ProfileNeed | 'ready';
+type StatusFilter = 'active' | 'inactive' | 'all';
+
+// Search, filters and sort live in the address, so Back from a customer brings the same view back.
+// Deactivated customers stay in the table forever; the list defaults to the active book so it stays a
+// worklist rather than an ever-growing archive.
+const LIST_DEFAULTS = { q: '', status: 'active', rep: '', tier: '', needs: '', sort: '' } as const;
+const STATUS_VALUES: readonly StatusFilter[] = ['active', 'inactive', 'all'];
+const TIER_VALUES = ['', '1', '2', '3'] as const;
+const NEEDS_VALUES: readonly ProfileNeedFilter[] = ['', 'missing-rep', 'missing-phone', 'missing-email', 'missing-crops', 'ready'];
+const SORTABLE_KEYS = ['farm_name', 'contact_name', 'assigned_sales_rep', 'assigned_tier', 'total_acres'];
 
 interface CustomerAssignmentResult {
   success: boolean;
@@ -58,13 +69,13 @@ export default function Customers() {
   const { profile } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tierFilter, setTierFilter] = useState('');
-  // Deactivated customers stay in the table forever; default the list to the
-  // active book so it stays a worklist rather than an ever-growing archive.
-  const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
-  const [repFilter, setRepFilter] = useState('');
-  const [needsFilter, setNeedsFilter] = useState<ProfileNeedFilter>('');
-  const [search, setSearch] = useState('');
+  const [list, setList] = useUrlListState(LIST_DEFAULTS);
+  const statusFilter = oneOf(list.status, STATUS_VALUES, 'active');
+  const tierFilter = oneOf(list.tier, TIER_VALUES, '');
+  const needsFilter = oneOf(list.needs, NEEDS_VALUES, '');
+  const repFilter = list.rep;
+  const search = list.q;
+  const sort = parseListSort(list.sort, SORTABLE_KEYS);
   const [repNames, setRepNames] = useState<Record<string, string>>({});
   const [assignableReps, setAssignableReps] = useState<Array<{ id: string; name: string }>>([]);
   const [assignableRepsLoading, setAssignableRepsLoading] = useState(true);
@@ -179,11 +190,7 @@ export default function Customers() {
 
   // Back to the default view: the active book, no search (every status when none is active, so Clear always shows someone).
   const clearFilters = () => {
-    setSearch('');
-    setStatusFilter(customers.some((c) => c.is_active) ? 'active' : 'all');
-    setRepFilter('');
-    setTierFilter('');
-    setNeedsFilter('');
+    setList({ q: '', status: customers.some((c) => c.is_active) ? 'active' : 'all', rep: '', tier: '', needs: '' });
   };
 
   // Only reps that actually hold accounts in the loaded book — an empty option
@@ -221,7 +228,11 @@ export default function Customers() {
       render: (row) => <span className="font-medium text-nav-dark">{row.farm_name}</span>,
     },
     { key: 'contact_name', header: 'Contact', sortable: true },
-    { key: 'phone', header: 'Phone' },
+    {
+      key: 'phone',
+      header: 'Phone',
+      render: (row) => (row.phone?.trim() ? <PhoneLink phone={row.phone} /> : '-'),
+    },
     {
       key: 'email',
       header: 'Email',
@@ -496,7 +507,7 @@ export default function Customers() {
             {unassignedCount} active customer{unassignedCount === 1 ? ' has' : 's have'} no assigned sales rep.{' '}
             <button
               type="button"
-              onClick={() => { setRepFilter(UNASSIGNED_REP); setStatusFilter('active'); }}
+              onClick={() => setList({ rep: UNASSIGNED_REP, status: 'active' })}
               className="font-medium text-crx-green hover:underline"
             >
               Show them
@@ -608,8 +619,19 @@ export default function Customers() {
             searchPlaceholder="Search customers..."
             searchKeys={['farm_name', 'contact_name', 'phone', 'email']}
             searchValue={search}
-            onSearchChange={setSearch}
+            onSearchChange={(q) => setList({ q })}
+            sortState={sort}
+            onSortChange={(next) => setList({ sort: listSortParam(next) })}
             onRowClick={(row) => navigate(`/customers/${row.id}`)}
+            mobileRow={(row) => (
+              <CustomerPhoneRow
+                row={row}
+                repName={row.assigned_sales_rep ? repNames[row.assigned_sales_rep] || 'Unknown rep' : null}
+                checkbox={canBulkAction && row.is_active ? checkboxCol.render?.(row) : null}
+                selected={selected.has(row.id)}
+                onOpen={() => navigate(`/customers/${row.id}`)}
+              />
+            )}
             // The whole book is loaded, so an empty list with customers on file means a search or filter hides them.
             {...(customers.length > 0 ? filteredEmptyProps('customers', clearFilters) : {
               emptyTitle: 'No customers yet',
@@ -627,7 +649,7 @@ export default function Customers() {
               <>
                 <select
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as 'active' | 'inactive' | 'all')}
+                  onChange={(e) => setList({ status: e.target.value })}
                   aria-label="Filter by status"
                   className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
@@ -637,7 +659,7 @@ export default function Customers() {
                 </select>
                 <select
                   value={repFilter}
-                  onChange={(e) => setRepFilter(e.target.value)}
+                  onChange={(e) => setList({ rep: e.target.value })}
                   aria-label="Filter by sales rep"
                   className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
@@ -649,7 +671,7 @@ export default function Customers() {
                 </select>
                 <select
                   value={tierFilter}
-                  onChange={(e) => setTierFilter(e.target.value)}
+                  onChange={(e) => setList({ tier: e.target.value })}
                   aria-label="Filter by tier"
                   className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
@@ -660,7 +682,7 @@ export default function Customers() {
                 </select>
                 <select
                   value={needsFilter}
-                  onChange={(e) => setNeedsFilter(e.target.value as ProfileNeedFilter)}
+                  onChange={(e) => setList({ needs: e.target.value })}
                   aria-label="Filter by profile needs"
                   className="min-h-11 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
@@ -684,6 +706,57 @@ export default function Customers() {
           />
         </div>
       </Card>
+    </div>
+  );
+}
+
+/** A phone number that dials when tapped. The row underneath opens the customer, so the tap stops here. */
+function PhoneLink({ phone }: { phone: string }) {
+  return (
+    <a
+      href={`tel:${phone.replace(/[^\d+]/g, '')}`}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      className="inline-flex min-h-11 items-center gap-1 whitespace-nowrap text-crx-green hover:underline md:min-h-0"
+    >
+      <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      {phone}
+    </a>
+  );
+}
+
+/** Phone layout of one customer (below 768px): name, contact, rep, tier and status, with the phone one tap away. */
+function CustomerPhoneRow({ row, repName, checkbox, selected, onOpen }: {
+  row: Customer;
+  repName: string | null;
+  checkbox: ReactNode;
+  selected: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <div className={`flex items-start gap-1 px-4 py-2 ${selected ? 'bg-crx-green-tint' : ''}`}>
+      {/* A 44px tap area around the small checkbox; a spacer keeps rows aligned without one. */}
+      {checkbox
+        ? <label className="-ml-3 flex h-11 w-11 shrink-0 items-center justify-center">{checkbox}</label>
+        : <span aria-hidden="true" className="-ml-3 w-11 shrink-0" />}
+      <div className="min-w-0 flex-1">
+        <button type="button" onClick={onOpen} className="flex min-h-11 w-full min-w-0 items-start gap-3 py-1.5 text-left">
+          <span className="min-w-0 flex-1 space-y-0.5">
+            <span className="block break-words font-semibold leading-snug text-nav-dark">{row.farm_name}</span>
+            {row.contact_name && <span className="block break-words text-sm text-secondary">{row.contact_name}</span>}
+            <span className="block text-xs text-secondary">
+              {repName ?? <span className="text-amber-600">Unassigned</span>}
+            </span>
+          </span>
+          <span className="flex shrink-0 flex-col items-end gap-1">
+            <Badge variant={row.assigned_tier === 1 ? 'success' : row.assigned_tier === 2 ? 'info' : 'warning'}>
+              Tier {row.assigned_tier}
+            </Badge>
+            <Badge variant={row.is_active ? 'success' : 'default'}>{row.is_active ? 'Active' : 'Inactive'}</Badge>
+          </span>
+        </button>
+        {row.phone?.trim() && <PhoneLink phone={row.phone} />}
+      </div>
     </div>
   );
 }

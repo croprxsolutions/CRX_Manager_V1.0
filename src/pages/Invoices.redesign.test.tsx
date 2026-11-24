@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { buildInMemoryQuery } from '../test-utils/inMemoryQuery';
 
 const H = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), toast: vi.fn(), role: 'admin' as string }));
@@ -293,6 +293,51 @@ describe('Invoices list redesign', () => {
       expect(screen.getByText('8 invoices')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Show invoices ready to post' }));
       expect(screen.getByText('4 invoices')).toBeInTheDocument();
+    });
+  });
+
+  describe('the list remembers its view and hands an opened invoice the drafts after it', () => {
+    function InvoicePage() {
+      const location = useLocation();
+      const navigate = useNavigate();
+      return (
+        <div>
+          <p data-testid="queue">{JSON.stringify(location.state)}</p>
+          <button type="button" onClick={() => navigate(-1)}>Back to invoices</button>
+        </div>
+      );
+    }
+    const renderWithInvoicePage = async () => {
+      render(
+        <MemoryRouter initialEntries={['/invoices']}>
+          <Routes>
+            <Route path="/invoices" element={<Invoices />} />
+            <Route path="/invoices/:id" element={<InvoicePage />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getAllByText('CS-DRAFT').length).toBeGreaterThan(0));
+    };
+
+    it('opening a row passes the unposted invoices after it, in the order on screen', async () => {
+      await renderWithInvoicePage();
+      fireEvent.click(screen.getByRole('button', { name: /Sort by Invoice/ }));
+      fireEvent.click(rowOf('CS-DRAFT'));
+      // Sorted by number: CS-DRAFT, CS-OVERDUE, CS-PAID, CS-POSTED, CS-SPLIT-1, CS-SPLIT-2, CS-UNPOSTED, CS-VOIDED.
+      expect(JSON.parse(screen.getByTestId('queue').textContent!)).toEqual({ nextDrafts: ['CS-SPLIT-1', 'CS-SPLIT-2', 'CS-UNPOSTED'] });
+    });
+
+    it('Back from an invoice brings back the filters and search', async () => {
+      await renderWithInvoicePage();
+      fireEvent.click(screen.getByRole('button', { name: 'Show invoices ready to post' }));
+      fireEvent.change(screen.getByLabelText('Search invoice, customer or salesperson'), { target: { value: 'SPLIT' } });
+      fireEvent.click(rowOf('CS-SPLIT-1'));
+      fireEvent.click(await screen.findByRole('button', { name: 'Back to invoices' }));
+
+      await waitFor(() => expect(screen.getAllByText('CS-SPLIT-2').length).toBeGreaterThan(0));
+      expect(screen.getByRole('button', { name: 'Show invoices ready to post' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByLabelText('Search invoice, customer or salesperson')).toHaveValue('SPLIT');
+      expect(screen.queryByText('CS-DRAFT')).not.toBeInTheDocument();
     });
   });
 });

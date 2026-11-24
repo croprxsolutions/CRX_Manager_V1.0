@@ -46,6 +46,8 @@ import { fingerprintIntentPayload, generateIdempotencyKey, getIdempotencyBinding
 import { buildInvoicePostTargets, describeInvoicePostScope } from '../lib/invoiceBatchPosting';
 import { postInvoiceTarget } from '../lib/invoicePostVersion';
 import { applyTableSearchSort } from '../lib/tableSearchSort';
+import { listSortParam, oneOf, parseListSort, useUrlListState } from '../hooks/useUrlListState';
+import { draftQueueState } from '../lib/invoiceDraftQueue';
 import PageHeader from '../components/ui/PageHeader';
 import Modal from '../components/ui/Modal';
 import { sendEmail, buildEmailHtml, invoiceEmailSnapshot } from '../lib/emailService';
@@ -85,6 +87,10 @@ const statusBadge = (status: InvoiceStatus) => {
   const s = invoiceStatusBadge(status);
   return <Badge variant={s.variant} normalCase>{s.label}</Badge>;
 };
+
+// Search, filters and sort live in the address, so Back from an invoice brings the same view back.
+const LIST_DEFAULTS = { q: '', status: '', type: '', quick: '', balance: '', sort: '' } as const;
+const SORTABLE_KEYS = ['invoice_number', 'customer_name', 'order_number', 'invoice_type', 'invoice_date', 'total_amount_cents', 'balance_cents', 'status'];
 
 const typeLabel = (t: string) => ({ chemical_sale: 'Chemical', field_application: 'Application', misc_charge: 'Misc' }[t] || t);
 
@@ -150,13 +156,16 @@ export default function Invoices() {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<InvoiceStatusFilter>('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [quickDeliveryOnly, setQuickDeliveryOnly] = useState(false);
-  const [balanceOnly, setBalanceOnly] = useState(false);
-  // The table's search box is lifted here so the page knows exactly which rows are
-  // on screen (a ticked row the search hides must not be acted on).
-  const [tableSearch, setTableSearch] = useState('');
+  const [list, setList] = useUrlListState(LIST_DEFAULTS);
+  const statusFilter = oneOf(list.status, STATUS_OPTIONS.map((o) => o.value), '');
+  const setStatusFilter = (status: InvoiceStatusFilter) => setList({ status });
+  const typeFilter = oneOf(list.type, TYPE_OPTIONS.map((o) => o.value), '');
+  const quickDeliveryOnly = list.quick === '1';
+  const balanceOnly = list.balance === '1';
+  // The table's search box and sort are lifted here so the page knows exactly which rows are
+  // on screen, and in which order (a ticked row the search hides must not be acted on).
+  const tableSearch = list.q;
+  const sort = parseListSort(list.sort, SORTABLE_KEYS);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [posting, setPosting] = useState(false);
   const [showPostModal, setShowPostModal] = useState(false);
@@ -313,6 +322,10 @@ export default function Invoices() {
   // status lost its checkbox is never posted, voided, printed, deleted or counted.
   const visibleRows = applyTableSearchSort(filtered, SEARCH_KEYS, tableSearch, null, 'asc');
   const visibleSelectable = visibleRows.filter((i) => SELECTABLE_STATUSES.includes(i.status));
+  // Opening an invoice hands it the drafts after it in the order on screen, for its Next draft button.
+  const openInvoice = (row: InvoiceRow) => navigate(`/invoices/${row.id}`, {
+    state: draftQueueState(applyTableSearchSort(filtered, SEARCH_KEYS, tableSearch, sort.key, sort.dir), row.id),
+  });
   const selectedInvoices = visibleSelectable.filter((i) => selected.has(i.id));
 
   // Drop ticked rows as soon as they leave the screen (a filter or search hides them,
@@ -762,7 +775,7 @@ export default function Invoices() {
         : <span aria-hidden="true" className="-ml-3 w-11 shrink-0" />}
       <button
         type="button"
-        onClick={() => navigate(`/invoices/${row.id}`)}
+        onClick={() => openInvoice(row)}
         className="flex min-h-11 min-w-0 flex-1 items-start gap-3 py-1.5 text-left"
       >
         <span className="min-w-0 flex-1 space-y-0.5">
@@ -1095,8 +1108,10 @@ export default function Invoices() {
             searchPlaceholder="Search invoice, customer or salesperson"
             searchKeys={SEARCH_KEYS}
             searchValue={tableSearch}
-            onSearchChange={setTableSearch}
-            onRowClick={(row) => navigate(`/invoices/${row.id}`)}
+            onSearchChange={(q) => setList({ q })}
+            sortState={sort}
+            onSortChange={(next) => setList({ sort: listSortParam(next) })}
+            onRowClick={openInvoice}
             emptyTitle="No invoices yet"
             emptyDescription="Invoices are created from orders or blend tickets — open one to bill."
             emptyAction={
@@ -1130,7 +1145,7 @@ export default function Invoices() {
                 </select>
                 <select
                   value={typeFilter}
-                  onChange={(e) => setTypeFilter(e.target.value)}
+                  onChange={(e) => setList({ type: e.target.value })}
                   aria-label="Filter by type"
                   className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
@@ -1140,14 +1155,14 @@ export default function Invoices() {
                     </option>
                   ))}
                 </select>
-                <button type="button" aria-pressed={quickDeliveryOnly} onClick={() => setQuickDeliveryOnly((v) => !v)} className={pill(quickDeliveryOnly)}>
+                <button type="button" aria-pressed={quickDeliveryOnly} onClick={() => setList({ quick: quickDeliveryOnly ? '' : '1' })} className={pill(quickDeliveryOnly)}>
                   <Zap className="w-3.5 h-3.5" aria-hidden="true" />
                   Quick deliveries
                 </button>
                 <button
                   type="button"
                   aria-pressed={balanceOnly}
-                  onClick={() => setBalanceOnly((v) => !v)}
+                  onClick={() => setList({ balance: balanceOnly ? '' : '1' })}
                   className={pill(balanceOnly)}
                   title="Show only invoices with money still owed"
                 >

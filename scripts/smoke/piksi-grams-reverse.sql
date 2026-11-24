@@ -1,4 +1,4 @@
--- Reverse of 20270228120000_piksi_mg_to_grams.sql (KI-114): puts every Piksi label back (g -> MG, and the 4 older Plus
+-- Reverse of 20270228180000_piksi_mg_to_grams.sql (KI-114): puts every Piksi label back (g -> MG, and the 4 older Plus
 -- delivery lines -> "Dry oz") with no number changed. Proven by scripts/smoke/prove-piksi-grams-real-schema.mjs.
 -- To use it live, copy it into a new migration through the gates. It refuses unless every pinned row still says g with
 -- the reviewed numbers, so it only works before new gram-era activity (a receipt, a new line, a rate cut-over); after

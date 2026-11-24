@@ -24,6 +24,8 @@ import { buildContainer, removeContainer, seedUsers, id, USERS, ROOT, NAME, dock
 const CANDIDATE = '20270228130000_purchasing_plan_requires_inventory_page.sql';
 const lf = (file) => readFileSync(file, 'utf8').replaceAll('\r\n', '\n');
 const candidate = lf(path.join(ROOT, 'supabase', 'migrations', CANDIDATE));
+// psql -1 makes one transaction only with -f or -c, so stdin is read through -f -.
+const ONE_TX = ['-1', '-f', '-'];
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 function run(sql, flags = []) {
   const r = docker([...PSQL, ...flags], { input: sql, allowFailure: true });
@@ -56,7 +58,7 @@ function refused(sql, pattern, uid, who) {
 }
 const CHAINS = ['smoke-purchasing-plan.sql', 'smoke-purchasing-plan-reservations.sql', 'smoke-booking-planning-fields.sql', 'smoke-page-access-locks-reports.sql'];
 function chain(file) {
-  const r = run(lf(path.join(ROOT, 'scripts', 'smoke', file)), ['-1']);
+  const r = run(lf(path.join(ROOT, 'scripts', 'smoke', file)), ONE_TX);
   return (r.output.split(/\r?\n/).find((l) => /ERROR:/.test(l)) ?? `(no error, status ${r.status})`).replace(/^.*?ERROR:\s*/, '');
 }
 
@@ -87,9 +89,9 @@ try {
   for (const c of CHAINS) console.log(`[case] BEFORE: ${c}: ${before[c].slice(0, 160)}`);
 
   // 2. Apply (as the apply path does: one transaction, stop on error), then a second apply is refused.
-  const first = run(candidate, ['-1']);
+  const first = run(candidate, ONE_TX);
   assert.equal(first.status, 0, first.output);
-  const second = run(candidate, ['-1']);
+  const second = run(candidate, ONE_TX);
   assert.notEqual(second.status, 0);
   assert.match(second.output, /PREFLIGHT_PLAN_DRIFT/);
   console.log('[case] the candidate applies; a second apply stops at its preflight');
@@ -117,6 +119,9 @@ try {
   }
   assert.match(before['smoke-page-access-locks-reports.sql'], /^SMOKE_PASS_ROLLBACK/, 'the page-access chain must pass');
   assert.match(before['smoke-purchasing-plan-reservations.sql'], /^SMOKE_PASS_ROLLBACK/, 'the reservations chain must pass');
+  assert.match(before['smoke-booking-planning-fields.sql'], /^SMOKE_PASS_ROLLBACK/, 'the planning-fields chain must pass');
+  // smoke-purchasing-plan.sql stops in its own P9b setup (#2393); its outcome must only stay the same.
+  assert.match(before['smoke-purchasing-plan.sql'], /^DELIVERY_OVER_ORDER: \[SMOKE\] P9b /, 'the plan chain must stop only at its known P9b setup (#2393)');
   for (const sig of ['public.get_purchasing_plan(integer)', 'public._require_page_access(text)']) {
     assert.equal(scalar(`SELECT p.prosecdef AND p.provolatile = 's' AND p.proconfig = ARRAY['search_path=public, pg_temp']
         AND NOT has_function_privilege('anon', p.oid, 'EXECUTE') AND has_function_privilege('authenticated', p.oid, 'EXECUTE')

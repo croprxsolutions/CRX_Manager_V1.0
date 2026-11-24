@@ -112,6 +112,8 @@ import {
   type FieldViewJobCard,
 } from '../lib/dispatchDisplay';
 import type { Field } from '../types';
+import { readTodaySnapshot, saveTodaySnapshot } from '../lib/todaySnapshot';
+import SavedCopyBanner from '../components/route/SavedCopyBanner';
 
 // The Supabase Data API caps a single response at ~1000 rows; page get_dispatched_list
 // via .range() until a short page ends the scan (same pattern as the DispatchBoard's
@@ -171,6 +173,8 @@ export default function FieldView() {
 
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
+  // When the job list failed to load and today's saved copy is shown instead (read-only): when it was loaded.
+  const [savedCopyAt, setSavedCopyAt] = useState<string | null>(null);
   const [cards, setCards] = useState<FieldViewJobCard[]>([]);
   const [search, setSearch] = useState('');
   const [view, setView] = useState<ViewMode>('list');
@@ -265,14 +269,27 @@ export default function FieldView() {
         grouped.sort((a, b) => a.job_number.localeCompare(b.job_number));
       }
 
+      // Today's read-only copy for a dead spot (src/lib/todaySnapshot.ts): the cards as shown, nothing more.
+      if (profile?.id) saveTodaySnapshot(MY_DAY_SNAPSHOT, profile.id, grouped);
+      setSavedCopyAt(null);
       setCards(grouped);
     } catch (err) {
       Sentry.captureException(err, { tags: { source: 'fetch', action: 'field_view_my_jobs' } });
-      // Honest error state: distinguish "couldn't load" from "genuinely no jobs" —
-      // the empty-state copy below only shows when fetchError is false.
-      setFetchError(true);
-      toast('error', 'Failed to load your jobs');
-      setCards([]);
+      const saved = readTodaySnapshot<FieldViewJobCard[]>(MY_DAY_SNAPSHOT, profile?.id);
+      if (saved && Array.isArray(saved.data)) {
+        // Shown read-only: Start and Complete stay off until a load succeeds (the banner says why), and an open
+        // Complete form closes, as it did when a failed load emptied the list.
+        setCompleteFormOpenFor(null);
+        setSavedCopyAt(saved.savedAt);
+        setCards(saved.data);
+      } else {
+        // Honest error state: distinguish "couldn't load" from "genuinely no jobs" —
+        // the empty-state copy below only shows when fetchError is false.
+        setSavedCopyAt(null);
+        setFetchError(true);
+        toast('error', 'Failed to load your jobs');
+        setCards([]);
+      }
     }
     setLoading(false);
   }, [toast, profile?.id]);
@@ -685,8 +702,8 @@ export default function FieldView() {
           </div>
         </button>
 
-        {/* Quick actions — visible on the card face, no expand required for Start. */}
-        {!isTerminal && (
+        {/* Quick actions — visible on the card face, no expand required for Start. Off on a saved copy. */}
+        {!isTerminal && !savedCopyAt && (
           <div className="px-4 pb-3 flex gap-2">
             {card.job_status === 'scheduled' && (
               <button
@@ -709,7 +726,7 @@ export default function FieldView() {
             )}
           </div>
         )}
-        {!isOnline && card.job_status === 'scheduled' && (
+        {!isOnline && !savedCopyAt && card.job_status === 'scheduled' && (
           <p className="px-4 pb-3 -mt-1 flex items-center gap-1.5 text-sm text-amber-800">
             <WifiOff className="w-4 h-4" aria-hidden="true" /> Connect to the internet to start this job.
           </p>
@@ -929,6 +946,15 @@ export default function FieldView() {
         )}
       </PhoneHeader>
 
+      <SavedCopyBanner
+        what="your jobs"
+        savedAt={savedCopyAt}
+        blocked="You can't start or complete jobs until signal returns."
+        onRetry={() => void fetchCards()}
+        retrying={loading}
+        className="m-3 sm:mx-4 mb-0"
+      />
+
       {/* CONTENT */}
       {loading ? (
         <div className="p-3 sm:p-4 space-y-3">
@@ -1032,6 +1058,7 @@ export default function FieldView() {
   );
 }
 
+const MY_DAY_SNAPSHOT = 'my-day';
 const JOB_LIST = 'bg-white rounded-xl border border-gray-200 overflow-hidden divide-y divide-gray-100';
 const ROW_ACTION = 'flex-1 inline-flex h-12 items-center justify-center gap-2 bg-crx-green text-white font-heading text-lg font-bold rounded-xl hover:bg-crx-green-hover active:scale-[0.99] disabled:opacity-50 disabled:active:scale-100';
 

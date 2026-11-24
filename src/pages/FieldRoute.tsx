@@ -23,6 +23,8 @@ import { Sentry } from '../lib/sentry';
 import { fetchDriverFarms } from '../lib/driverFarms';
 import { OPEN_STOP_STATUSES, ROUTE_NO_SIGNAL_MESSAGE, sortRouteStops } from '../lib/routeStops';
 import DoneTodayList from '../components/route/DoneTodayList';
+import SavedCopyBanner from '../components/route/SavedCopyBanner';
+import { readTodaySnapshot, saveTodaySnapshot } from '../lib/todaySnapshot';
 
 const EMPTY_QUEUE_SUMMARY: OfflineQueueSummary = {
   ownedTotal: 0,
@@ -47,6 +49,25 @@ interface StopRow {
   customer: { farm_name: string | null } | null;
 }
 
+// What My Route keeps on the phone for a dead spot: only what the list shows (src/lib/todaySnapshot.ts).
+const ROUTE_SNAPSHOT = 'route';
+type SavedStop = Omit<StopRow, 'priority' | 'customer_id'>;
+
+function toSavedStop(row: StopRow): SavedStop {
+  return {
+    id: row.id, delivery_number: row.delivery_number, status: row.status, scheduled_date: row.scheduled_date,
+    scheduled_time: row.scheduled_time, assigned_driver: row.assigned_driver, delivery_notes: row.delivery_notes,
+    customer: { farm_name: row.customer?.farm_name ?? null },
+  };
+}
+
+/** Today's saved route (read-only), or null when there is none. */
+function readSavedRoute(userId: string | null): { stops: StopRow[]; savedAt: string } | null {
+  const saved = readTodaySnapshot<SavedStop[]>(ROUTE_SNAPSHOT, userId);
+  if (!saved || !Array.isArray(saved.data)) return null;
+  return { stops: saved.data.map((row) => ({ ...row, priority: null, customer_id: null })), savedAt: saved.savedAt };
+}
+
 function formatStopDate(dateStr: string | null): string {
   if (!dateStr) return '';
   const d = parseLocalDate(dateStr);
@@ -59,10 +80,13 @@ export default function FieldRoute() {
   const isOnline = useOnlineStatus();
   const { profile } = useAuth();
   const isDriver = profile?.role === 'driver';
+  const userId = profile?.id ?? null;
 
   const [stops, setStops] = useState<StopRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  // When the last load failed and today's saved copy is shown instead: when that copy was loaded.
+  const [savedCopyAt, setSavedCopyAt] = useState<string | null>(null);
   const [queueSummary, setQueueSummary] = useState<OfflineQueueSummary>(EMPTY_QUEUE_SUMMARY);
   const stopRequestSequence = useRef(0);
 
@@ -83,11 +107,18 @@ export default function FieldRoute() {
 
     if (requestSequence !== stopRequestSequence.current) return;
 
+    // A failed load shows today's saved copy when there is one (read-only), else the error.
+    const showLoadFailure = () => {
+      const saved = readSavedRoute(userId);
+      setStops(saved?.stops ?? []);
+      setSavedCopyAt(saved?.savedAt ?? null);
+      setLoadError(!saved);
+      setLoading(false);
+    };
+
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'field-route' } });
-      setStops([]);
-      setLoadError(true);
-      setLoading(false);
+      showLoadFailure();
       return;
     }
 
@@ -101,15 +132,15 @@ export default function FieldRoute() {
       } catch (farmErr) {
         if (requestSequence !== stopRequestSequence.current) return;
         Sentry.captureException(farmErr, { tags: { source: 'fetch', page: 'field-route' } });
-        setStops([]);
-        setLoadError(true);
-        setLoading(false);
+        showLoadFailure();
         return;
       }
     }
+    if (userId) saveTodaySnapshot(ROUTE_SNAPSHOT, userId, rows.map(toSavedStop));
+    setSavedCopyAt(null);
     setStops(rows);
     setLoading(false);
-  }, [isDriver]);
+  }, [isDriver, userId]);
 
   useEffect(() => {
     void fetchStops();
@@ -180,6 +211,15 @@ export default function FieldRoute() {
           </span>
         )}
       </div>
+
+      <SavedCopyBanner
+        what="your route"
+        savedAt={savedCopyAt}
+        blocked="You can't complete stops until signal returns."
+        onRetry={() => void fetchStops()}
+        retrying={loading}
+        className="mb-3"
+      />
 
       {loading ? (
         <div className="space-y-2" aria-busy="true">

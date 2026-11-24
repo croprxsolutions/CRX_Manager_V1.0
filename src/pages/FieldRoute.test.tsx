@@ -58,6 +58,7 @@ vi.mock('../lib/db', () => {
 
 describe('FieldRoute — stops list renders (F1 regression guard)', () => {
   beforeEach(() => {
+    window.localStorage.clear();
     stopQueryMock.mockReset().mockResolvedValue({ data: [stopRow], error: null });
     captureExceptionMock.mockReset();
     getQueueSummaryMock.mockResolvedValue({
@@ -155,5 +156,41 @@ describe('FieldRoute — stops list renders (F1 regression guard)', () => {
     });
 
     expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it('shows today\'s saved route, read-only, when a later load fails in a dead spot', async () => {
+    const first = render(<MemoryRouter><FieldRoute /></MemoryRouter>);
+    expect(await screen.findByText('Wells Farm')).toBeInTheDocument();
+    first.unmount();
+
+    stopQueryMock.mockReset().mockResolvedValue({ data: null, error: new Error('Failed to fetch') });
+    render(<MemoryRouter><FieldRoute /></MemoryRouter>);
+    expect(await screen.findByText(/^No signal — showing your route as of /)).toBeInTheDocument();
+    expect(screen.getByText("You can't complete stops until signal returns.")).toBeInTheDocument();
+    expect(screen.getByText('Wells Farm')).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't load your stops")).not.toBeInTheDocument();
+
+    // Signal back: Try again loads the live route and the banner goes.
+    stopQueryMock.mockReset().mockResolvedValue({ data: [{ ...stopRow, customer: { farm_name: 'Live Farm' } }], error: null });
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
+    expect(await screen.findByText('Live Farm')).toBeInTheDocument();
+    expect(screen.queryByText(/^No signal — showing your route/)).not.toBeInTheDocument();
+  });
+
+  it('keeps only what the list shows on the phone', async () => {
+    render(<MemoryRouter><FieldRoute /></MemoryRouter>);
+    expect(await screen.findByText('Wells Farm')).toBeInTheDocument();
+    const saved = Object.keys(window.localStorage).filter((key) => key.startsWith('crx:today-snapshot:'));
+    expect(saved).toHaveLength(1);
+    const [stop] = JSON.parse(window.localStorage.getItem(saved[0])!).data;
+    expect(stop).not.toHaveProperty('priority');
+    expect(stop).not.toHaveProperty('customer_id');
+    expect(stop.customer).toEqual({ farm_name: 'Wells Farm' });
+  });
+
+  it('still says it could not load when there is no saved route for today', async () => {
+    stopQueryMock.mockReset().mockResolvedValue({ data: null, error: new Error('Failed to fetch') });
+    render(<MemoryRouter><FieldRoute /></MemoryRouter>);
+    expect(await screen.findByText("Couldn't load your stops")).toBeInTheDocument();
   });
 });

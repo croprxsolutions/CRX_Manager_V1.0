@@ -49,6 +49,8 @@ import { DeliveryBrandsPanel } from '../components/deliveries/DeliveryBrandPicke
 import { brandWarnings } from '../lib/deliveryBrands';
 import { fetchNextRouteStopId, ROUTE_NO_SIGNAL_MESSAGE } from '../lib/routeStops';
 import StopContactActions, { type StopCoords } from '../components/route/StopContactActions';
+import StopSavedCopy, { type SavedStopCopy } from '../components/route/StopSavedCopy';
+import { dropTodaySnapshot, readTodaySnapshot, saveTodaySnapshot } from '../lib/todaySnapshot';
 
 interface StopItem {
   id: string;
@@ -127,6 +129,18 @@ interface StopDelivery {
   } | null;
 }
 
+// Today's read-only copy of a stop, kept on the phone for a dead spot (src/lib/todaySnapshot.ts).
+const stopSnapshotKey = (stopId: string) => `stop:${stopId}`;
+
+function toSavedStopCopy(del: StopDelivery, items: StopItem[], addressLine: string, addressCoords: StopCoords | null): SavedStopCopy {
+  return {
+    id: del.id, delivery_number: del.delivery_number, status: del.status, delivery_notes: del.delivery_notes,
+    farm_name: del.customer?.farm_name ?? null, phone: del.customer?.phone ?? null,
+    address_line: addressLine, address_coords: addressCoords,
+    items: items.map((it) => ({ id: it.id, quantity: it.quantity, product_name: it.product?.product_name ?? null })),
+  };
+}
+
 type Step = 'arrive' | 'verify' | 'sign' | 'review' | 'done';
 const STEP_ORDER: Step[] = ['arrive', 'verify', 'sign', 'review', 'done'];
 
@@ -135,6 +149,7 @@ export default function FieldStop() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const isDriver = profile?.role === 'driver';
+  const userIdRef = useLatestRef(profile?.id ?? null);
   // The load shape is fixed at first render: a role refresh must not reload and reset entered quantities (Sol #2165 r4).
   const [loadAsDriver] = useState(isDriver);
   const { toast } = useToast();
@@ -161,6 +176,8 @@ export default function FieldStop() {
   const [addressCoords, setAddressCoords] = useState<StopCoords | null>(null);
   const [findingNextStop, setFindingNextStop] = useState(false);
   const [loading, setLoading] = useState(true);
+  // A failed load in a dead spot shows today's saved copy of this stop, read-only, instead of leaving the stop.
+  const [savedCopy, setSavedCopy] = useState<{ stop: SavedStopCopy; savedAt: string } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -181,6 +198,7 @@ export default function FieldStop() {
   // (fails closed) instead of letting the last stop's ticket photo pass the check. The receipt
   // box and the Done step's billing line start fresh, as on a stop opened from My Route.
   useEffect(() => {
+    setSavedCopy(null);
     setUsePaperTicket(false); setNoOnePresent(false); setSignedBy(''); setSignatureDataUrl(null);
     setPaperDeliveredOn(todayInBusinessTz()); setPhotos([]); setEmailOnComplete(true); setDoneBilling(null);
   }, [id]);
@@ -228,10 +246,21 @@ export default function FieldStop() {
       .maybeSingle();
 
     if (isStale()) return;
-    if (error || !data) {
-      if (error) Sentry.captureException(error, { tags: { source: 'fetch', page: 'field-stop' } });
+    // A read that failed (not a stop that is gone) shows today's saved copy when there is one; otherwise
+    // the driver goes back to My Route.
+    const showSavedCopyOrLeave = (readFailed: boolean) => {
+      const saved = readFailed ? readTodaySnapshot<SavedStopCopy>(stopSnapshotKey(id), userIdRef.current) : null;
+      if (saved?.data?.id === id) {
+        setSavedCopy({ stop: saved.data, savedAt: saved.savedAt });
+        setLoading(false);
+        return;
+      }
       toast('error', 'Could not load this stop');
       navigate('/my-route');
+    };
+    if (error || !data) {
+      if (error) Sentry.captureException(error, { tags: { source: 'fetch', page: 'field-stop' } });
+      showSavedCopyOrLeave(!!error);
       return;
     }
 
@@ -242,11 +271,11 @@ export default function FieldStop() {
     });
     if (isStale()) return;
     if (!stop) {
-      toast('error', 'Could not load this stop');
-      navigate('/my-route');
+      showSavedCopyOrLeave(true);
       return;
     }
     const { del, address: farmAddress } = stop;
+    setSavedCopy(null);
     setDelivery(del);
     // A stop with its own delivery address shows only that one (read below); otherwise the farm's address.
     setAddressLine(farmAddress);
@@ -260,6 +289,7 @@ export default function FieldStop() {
     if (del.status === 'scheduled') setStep('arrive');
     else if (del.status === 'in_progress') setStep('verify');
     else {
+      dropTodaySnapshot(stopSnapshotKey(id), userIdRef.current);
       toast('info', `This stop is ${del.status} — opening full detail`);
       navigate(`/deliveries/${del.id}`);
       return;
@@ -282,6 +312,7 @@ export default function FieldStop() {
     loaded.forEach((it) => { initQtys[it.id] = it.quantity; });
     setDeliveryQtys(initQtys);
 
+    let stopAddress = { line: farmAddress, coords: null as StopCoords | null, loaded: true };
     if (del.delivery_address_id) {
       const { line, coords, error: addrErr } = await readStopAddress(del.delivery_address_id);
       if (isStale()) return;
@@ -291,10 +322,15 @@ export default function FieldStop() {
       }
       setAddressLine(line);
       setAddressCoords(coords);
+      stopAddress = { line, coords, loaded: !addrErr };
+    }
+    // Only a complete load replaces the saved copy, so a dead spot never shows a half-loaded stop.
+    if (!itemErr && stopAddress.loaded) {
+      saveTodaySnapshot(stopSnapshotKey(id), userIdRef.current ?? '', toSavedStopCopy(del, loaded, stopAddress.line, stopAddress.coords));
     }
     await fetchPhotos();
     setLoading(false);
-  }, [id, navigate, toast, fetchPhotos, loadAsDriver]);
+  }, [id, navigate, toast, fetchPhotos, loadAsDriver, userIdRef]);
 
   useEffect(() => { activeStopIdRef.current = id; fetchStop(); }, [id, fetchStop]);
   // Leaving the screen ends this stop, so a slow reply (e.g. Next Stop) can no longer navigate the driver.
@@ -623,6 +659,8 @@ export default function FieldStop() {
 
       // KI-25: the receipt was recorded with the completion; the server emails it (or lists it for the office).
       if (emailOnComplete && !receiptEmail) toast('warning', RECEIPT_NO_EMAIL_ON_FILE_MESSAGE);
+      // A completed stop is no longer on today's route: its saved copy goes too.
+      dropTodaySnapshot(stopSnapshotKey(id), profile.id);
 
       if (stillOnStop) setStep('done');
     };
@@ -678,6 +716,17 @@ export default function FieldStop() {
     navigate(nextStopId ? `/my-route/${nextStopId}` : '/my-route');
   };
 
+  if (savedCopy) {
+    return (
+      <StopSavedCopy
+        stop={savedCopy.stop}
+        savedAt={savedCopy.savedAt}
+        retrying={loading}
+        onRetry={() => void fetchStop()}
+        onBack={() => navigate('/my-route')}
+      />
+    );
+  }
   if (loading) {
     return (
       <div className="max-w-2xl mx-auto">

@@ -1,0 +1,86 @@
+/**
+ * A read-only copy of what a field screen showed today, kept on the phone so a dead spot does not blank the
+ * screen (My Route, a stop, the applicator's day). Only what the screen displays is saved, never a sign-in
+ * token or anything to write back: a screen showing a saved copy keeps every save button off.
+ *
+ * One copy per screen, person and business day. Saving removes every other day's and every other person's
+ * copies, so at most today's copies of the person signed in on this phone stay. Every storage call is wrapped:
+ * a private window or full storage just means there is no saved copy.
+ */
+import { todayInBusinessTz } from './dateUtils';
+
+const PREFIX = 'crx:today-snapshot:v1:';
+
+export interface TodaySnapshot<T> {
+  /** When the screen last loaded this copy from the server (ISO time). */
+  savedAt: string;
+  data: T;
+}
+
+function storage(): Storage | null {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function ownerPrefix(userId: string, now: Date): string {
+  return `${PREFIX}${userId}:${todayInBusinessTz(now)}:`;
+}
+
+/** Saves today's copy of a screen for this person, and drops every copy that is not this person's today. */
+export function saveTodaySnapshot<T>(screen: string, userId: string, data: T, now: Date = new Date()): void {
+  const store = storage();
+  if (!store || !userId) return;
+  const keep = ownerPrefix(userId, now);
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i);
+      if (key?.startsWith(PREFIX) && !key.startsWith(keep)) stale.push(key);
+    }
+    stale.forEach((key) => store.removeItem(key));
+    const snapshot: TodaySnapshot<T> = { savedAt: now.toISOString(), data };
+    store.setItem(`${keep}${screen}`, JSON.stringify(snapshot));
+  } catch {
+    // Storage full or blocked: the screen works without a saved copy.
+  }
+}
+
+/** Today's saved copy of a screen for this person, or null (none, another day's, or unreadable). */
+export function readTodaySnapshot<T>(screen: string, userId: string | null | undefined, now: Date = new Date()): TodaySnapshot<T> | null {
+  const store = storage();
+  if (!store || !userId) return null;
+  try {
+    const raw = store.getItem(`${ownerPrefix(userId, now)}${screen}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<TodaySnapshot<T>>;
+    if (typeof parsed?.savedAt !== 'string' || parsed.data === undefined) return null;
+    return { savedAt: parsed.savedAt, data: parsed.data as T };
+  } catch {
+    return null;
+  }
+}
+
+/** Removes one screen's saved copy for this person (for example a stop that is no longer open). */
+export function dropTodaySnapshot(screen: string, userId: string | null | undefined, now: Date = new Date()): void {
+  const store = storage();
+  if (!store || !userId) return;
+  try {
+    store.removeItem(`${ownerPrefix(userId, now)}${screen}`);
+  } catch {
+    // Nothing to do: an unreadable store holds nothing this screen can show.
+  }
+}
+
+/** "8:14 AM": the time a saved copy was loaded, for the no-signal banner. */
+function snapshotTimeLabel(savedAt: string): string {
+  const d = new Date(savedAt);
+  return Number.isNaN(d.getTime()) ? 'earlier today' : d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+/** The banner a screen shows over a saved copy. */
+export function savedCopyMessage(what: string, savedAt: string): string {
+  return `No signal — showing ${what} as of ${snapshotTimeLabel(savedAt)}.`;
+}

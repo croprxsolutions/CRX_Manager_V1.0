@@ -401,6 +401,7 @@ The app-wide look Mason chose on 2026-11-02. It joins packed, label-left rows wi
 - **Quantities:** 48px − and + buttons on `crx-green-light` (#e8f5ee) with a green symbol, around a large bold Barlow number (about 1.75rem) that can also be typed.
 - **Main action:** one full-width 56px `crx-green` button pinned to the bottom of the screen, in bold Barlow text. It carries the › arrow only when it moves to the next step.
 - **Tap targets:** every control is at least 44px. Wrap phone-edited screens in `.phone-touch`.
+- **Dead spots:** My Route, the stop screen and the applicator's My Day keep a read-only copy of what they last showed today on the phone (`src/lib/todaySnapshot.ts`, keyed by person and business day; saving drops every other day's and person's copies). A failed load shows that copy under `SavedCopyBanner` (`src/components/route/`) with every start and complete button off. Save only what the screen displays, never an email, token or anything written back.
 
 ### Shared pieces
 - `SectionJumpBar` (`src/components/ui/SectionJumpBar.tsx`): the sticky jump pills. Pass `sections` (`id`, `label`, optional `count`). Give each section element the matching `id`. The bar marks the section in view as active.

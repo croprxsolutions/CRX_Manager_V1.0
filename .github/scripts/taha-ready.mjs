@@ -151,7 +151,7 @@ export async function haiku(prompt, maxTokens, { key = process.env.ANTHROPIC_API
     });
     if (!res.ok) return null;
     const out = await res.json();
-    return out.content?.find((c) => c.type === 'text')?.text?.trim() || null;
+    return out.content?.find((c) => c.type === 'text')?.text?.trim() ?? '';
   } catch { return null; }
 }
 // Only what the public PR page already shows: title, description (cut short) and changed file names.
@@ -168,9 +168,11 @@ export async function summarize(pr, files, opts) {
 // Up to 3 `topic:*` labels, only from TOPICS; anything else the model says is ignored.
 export const parseTopics = (text) => [...new Set(String(text ?? '').toLowerCase().split(/[^a-z-]+/).filter((t) => TOPICS.includes(t)))]
   .slice(0, 3).map((t) => `topic:${t}`);
+// null when Haiku could not be reached (retry next run), [] when it answered with nothing usable.
 export async function pickTopics(pr, files, opts) {
-  return parseTopics(await haiku(`Pick 1 to 3 topics for this pull request from this list only: ${TOPICS.join(', ')}. `
-    + 'Answer with the topics, comma-separated, nothing else.\n' + DATA_NOTE + prFacts(pr, files), 30, opts));
+  const text = await haiku(`Pick 1 to 3 topics for this pull request from this list only: ${TOPICS.join(', ')}. `
+    + 'Answer with the topics, comma-separated, nothing else.\n' + DATA_NOTE + prFacts(pr, files), 30, opts);
+  return text === null ? null : parseTopics(text);
 }
 export const hasTopic = (pr) => (pr.labels ?? []).some((l) => l.name.startsWith('topic:'));
 
@@ -212,6 +214,7 @@ async function handle(pr, mode, dry) {
   if (mode === 'topics') {
     if (pr.isDraft || isTahasPr(pr) || pr.isCrossRepository || hasTopic(pr)) return 0;
     const topics = await pickTopics(pr, fileNames(pr.number));
+    if (!topics) throw new Error('Haiku could not be reached; topics retried next run');
     console.log(`#${pr.number} topics: ${topics.join(', ') || 'none'}`);
     // topic:none when Haiku gave nothing usable, so the PR is not sent to it again every half hour.
     if (!dry) addLabels(pr.number, topics.length ? topics : ['topic:none']);
@@ -242,7 +245,8 @@ async function handle(pr, mode, dry) {
   const why = p.ping ? p.why : r.why;
   if (mode === 'label' || dry) return console.log(`#${pr.number} ${kind.toUpperCase()} due (${why}): ${p.ping ? pingText(pr) : remindText(pr)}`), 1;
   if (moved()) return console.log(`#${pr.number} head moved; next run decides`), 0;
-  const text = p.ping ? pingText(pr, await summarize(pr, fileNames(pr.number))) : remindText(pr);
+  // The summary is optional: a file-list read error must not stop the ping.
+  const text = p.ping ? pingText(pr, await summarize(pr, (() => { try { return fileNames(pr.number); } catch { return []; } })())) : remindText(pr);
   // Dedupe record first, so a re-run never double-posts. A failed Slack post deletes it so the next run
   // retries; a crash between the two loses that one ping (accepted: never double-post).
   const id = gh(['api', `repos/${REPO}/issues/${pr.number}/comments`, '-f',
@@ -252,7 +256,8 @@ async function handle(pr, mode, dry) {
     console.log(`#${pr.number} ${kind} sent (${why})`);
   } catch (e) {
     const deleted = tryGh(['api', '-X', 'DELETE', `repos/${REPO}/issues/comments/${id}`]) !== null;
-    console.log(`::warning::#${pr.number} Slack ping failed: ${e.message}${deleted ? '' : `; its dedupe comment ${id} could not be deleted, so delete it by hand to retry`}`);
+    // Thrown so main() marks the run red: a revoked token or missing channel invite must not pass silently.
+    throw new Error(`Slack ping failed: ${e.message}${deleted ? '' : `; its dedupe comment ${id} could not be deleted, so delete it by hand to retry`}`);
   }
   return 1;
 }

@@ -317,7 +317,7 @@ export function tahaApprovedOnGitHub({ repo, gh, pullRequest, headSha }) {
       '.[] | [(.user.id // "" | tostring), .state, (.commit_id // ""), (.submitted_at // "")] | @tsv'])).split(/\r?\n/).filter(Boolean)
       .map((line) => { const [id, state, commit, at] = line.split("\t"); return { id, state, commit, at }; });
     const baseChangedAt = String(gh(["api", "--paginate", `${repoPath}/issues/${pullRequest}/timeline?per_page=100`, "--jq",
-      '.[] | select(.event == "base_ref_changed") | .created_at'])).split(/\r?\n/).filter(Boolean).sort().at(-1) || "";
+      '.[] | select(.event == "base_ref_changed" or .event == "automatic_base_change_succeeded") | .created_at'])).split(/\r?\n/).filter(Boolean).sort().at(-1) || "";
     return tahaApprovedHead(rows, headSha, baseChangedAt);
   } catch { return false; }
 }
@@ -445,7 +445,9 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
   if (!problem) return null;
   // Taha's Approve on this exact head lets lane code through. Not an unreadable file list, a migration
   // whose SQL could not be read, or the block's own files.
-  if (problem.files.length && !problem.files.some((f) => BLOCK_FILES_RE.test(f) || f.endsWith("(its SQL could not be read)")) && tahaApproved()) {
+  // Unreadable SQL is checked on the raw entries: a lane-named migration is listed by name, never with the suffix (Astra, 2026-11-24).
+  const unreadableSql = !Array.isArray(files) || files.some((e) => e && "sql" in e && e.sql === null);
+  if (problem.files.length && !unreadableSql && !problem.files.some((f) => BLOCK_FILES_RE.test(f)) && tahaApproved()) {
     notice(`${prefix}: TAHA LANE: Taha approved #${pullRequest} at ${String(headSha).slice(0, 12)}; it may go on to the next gate.\n`);
     return null;
   }

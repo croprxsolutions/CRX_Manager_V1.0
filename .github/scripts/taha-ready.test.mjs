@@ -171,6 +171,15 @@ test('summary: only title, description and file names go out; the answer is esca
   assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: reply('https://only.a/link') }), null, 'nothing left means no summary');
 });
 
+test('topics: an outage is retried (null), only a real but unusable answer becomes topic:none ([])', async () => {
+  const { pickTopics } = await import('./taha-ready.mjs');
+  const reply = (text) => async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text }] }) });
+  assert.equal(await pickTopics(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false }) }), null, 'API error');
+  assert.equal(await pickTopics(pr(), [], { key: 'k', fetchImpl: async () => { throw new Error('timeout'); } }), null, 'timeout');
+  assert.deepEqual(await pickTopics(pr(), [], { key: 'k', fetchImpl: reply('nothing fits') }), [], 'answered, nothing usable');
+  assert.deepEqual(await pickTopics(pr(), [], { key: 'k', fetchImpl: reply('billing') }), ['topic:billing']);
+});
+
 test("strangers' fork PRs are never labelled or pinged", () => {
   const fork = pr({ isCrossRepository: true });
   assert.equal(decide(fork, { checks: green, lane: inLane, sol: noSol }).act, false);

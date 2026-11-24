@@ -352,6 +352,14 @@ ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha
 ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: f("src/pages/Quotes.tsx", ".claude/hooks/pr-merge-guard.mjs"), dirs, now: NOW, tahaApproved: approve })),
   "the block's own files still need Mason's code, even with Taha's Approve");
 ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: null, dirs, now: NOW, tahaApproved: approve })), "an unreadable file list still refuses");
+const laneNamedMig = "supabase/migrations/20270227000000_chemical_invoice_fix.sql";
+ok(isTahaLanePath(laneNamedMig), "fixture: the migration's name alone is in Taha's lane");
+ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: [mig(laneNamedMig, null)], dirs, now: NOW, tahaApproved: approve })),
+  "a lane-named migration whose SQL could not be read still needs Mason's code, even with Taha's Approve (Astra BLOCKER 1)");
+ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: [...f("src/pages/Quotes.tsx"), mig("supabase/migrations/20270227000000_x.sql", null)], dirs, now: NOW, tahaApproved: approve })),
+  "any unreadable migration beside lane code still needs Mason's code");
+eq(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: [mig(laneNamedMig, "update public.chemical_invoices set x = 1;")], dirs, now: NOW, tahaApproved: approve }), null,
+  "a readable lane migration goes through on Taha's Approve");
 askedTaha = 0;
 tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: f("src/pages/Deliveries.tsx"), dirs, now: NOW, tahaApproved: approve });
 eq(askedTaha, 0, "outside the lane, GitHub is not even asked");

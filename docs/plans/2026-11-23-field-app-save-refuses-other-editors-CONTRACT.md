@@ -131,3 +131,7 @@ Database only; no screen change. One PR into `staging`.
   field row has one); proof cases: a planted row stops the apply, an ordinary committed save does not. LOW (message said
   "job or blend ticket, or no longer active") reworded to "made another way, such as from a job or a blend ticket".
   LOW (snapshot compared counts) fixed: field-row shares, receipts, feed and audit rows compared in full.
+- Luna round 5: HIGH (a receipt from any save in the same transaction vouched for a planted row) fixed: the receipt must
+  also name the row's invoice (`invoice_ids`) or group (`invoice_group_id`); live 2026-11-23 both field rows match
+  their own receipt this way. A Data API request is its own transaction, so this was not reachable from the app; proof
+  case added (a planted row beside a real save in one transaction still stops the apply).

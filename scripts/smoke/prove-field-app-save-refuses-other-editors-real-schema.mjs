@@ -457,25 +457,27 @@ async function main() {
   assert.ok(lockAt > 0 && lockAt < text.indexOf('DO $preflight$') && text.indexOf('DO $preflight$') < text.indexOf('REVOKE INSERT'),
     'the field-row tables must be locked before the preflight check and the revoke');
   stageText('candidate.sql', text);
-  // A field row a sales rep wrote onto a job's invoices before the apply (committed) stops the apply for review.
+  // A field row a sales rep wrote onto a job's invoices before the apply (committed) stops the apply for review, even
+  // when a real field-app save of another invoice ran in the same transaction (its receipt shares the timestamp).
   psql(`BEGIN; ${asRep}CREATE TEMP TABLE j AS SELECT fwe.job() AS id;
     SELECT public.transfer_job_to_invoice((SELECT id FROM j), auth.uid(), ${key('t')});
     INSERT INTO public.field_app_locations (invoice_group_id, field_id, total_acres)
       SELECT i.invoice_group_id, '${GJ}', 100 FROM invoices i WHERE i.job_id = (SELECT id FROM j) AND i.customer_id = '${A}';
+    SELECT fwe.save(NULL, ARRAY['${GA}']::uuid[], ${key('n')}) IS NOT NULL;
     COMMIT;`);
   const stopped = apply('candidate.sql');
   assert.notEqual(stopped.status, 0);
   assert.match(stopped.output, /FIELD_APP_WRONG_EDITOR_PREFLIGHT: an editable invoice carries field rows the field-app save did not write/);
   assert.equal(body(), OLD_BODY, 'a stopped apply changes nothing');
-  raw(`DELETE FROM public.field_app_locations WHERE field_id = '${GJ}';
-    UPDATE public.invoices SET deleted_at = now() WHERE job_id IS NOT NULL AND deleted_at IS NULL;`);
-  console.log('[case] a field row written onto a job\'s invoices before the apply stops it at the preflight (nothing changed); removed');
+  raw(`DELETE FROM public.field_app_location_shares; DELETE FROM public.field_app_locations;
+    UPDATE public.invoices SET deleted_at = now() WHERE deleted_at IS NULL;`);
+  console.log('[case] a field row written onto a job\'s invoices before the apply stops it at the preflight, even beside a real save in the same transaction (nothing changed); removed');
   // A committed, ordinary field-app save before the apply (its rows carry its receipt) does not stop it.
   psql(`BEGIN; ${asAdmin}SELECT fwe.save(NULL, ARRAY['${GA}','${GB}']::uuid[], ${key('n')}) IS NOT NULL; COMMIT;`);
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
-  raw(`DELETE FROM public.field_app_locations WHERE invoice_group_id IS NOT NULL;
-    UPDATE public.invoices SET deleted_at = now() WHERE deleted_at IS NULL AND invoice_group_id IS NOT NULL;`);
+  raw(`DELETE FROM public.field_app_location_shares; DELETE FROM public.field_app_locations;
+    UPDATE public.invoices SET deleted_at = now() WHERE deleted_at IS NULL;`);
   console.log('[case] an ordinary committed field-app save before the apply does not stop it (test rows then removed)');
   assert.notEqual(body(), OLD_BODY);
   assert.equal(grants(WRAPPER), wrapperGrants, 'the wrapper grants must not change');

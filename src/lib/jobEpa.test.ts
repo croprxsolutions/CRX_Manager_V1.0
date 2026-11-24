@@ -42,6 +42,7 @@ describe('jobEpaText', () => {
   it('kept number, kept with no number, not recorded, else the catalog', () => {
     expect(jobEpaText({ epa_registration: '100-1', not_recorded: false }, '100-9')).toBe('100-1');
     expect(jobEpaText({ epa_registration: null, not_recorded: false }, '200-2')).toBe('—');
+    expect(jobEpaText({ epa_registration: '  ', not_recorded: false }, '200-2')).toBe('—');
     expect(jobEpaText({ epa_registration: null, not_recorded: true }, '300-9')).toBe('Not recorded');
     expect(jobEpaText({ epa_registration: '9-9', not_recorded: true }, '300-9')).toBe('Not recorded');
     expect(jobEpaText(undefined, '400-4')).toBe('400-4');

@@ -17,7 +17,7 @@ export interface KeptEpa {
 export function jobEpaText(kept: KeptEpa | undefined, catalog: string | null): string | null {
   if (!kept) return catalog;
   if (kept.not_recorded) return EPA_NOT_RECORDED;
-  return kept.epa_registration ?? EPA_NONE;
+  return kept.epa_registration?.trim() || EPA_NONE;
 }
 
 async function assertJobVisible(jobId: string): Promise<void> {

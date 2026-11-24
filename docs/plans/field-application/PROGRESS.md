@@ -51,7 +51,7 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 
 | Item | State | Proof / link | Note |
 |---|---|---|---|
-| FP-1 field splits + payer notes | IN PROGRESS | branch `feat/field-1.1-fp1-splits` | migration `20270303120000_field_split_versions`; Docker proof, Luna, Sol, then the PR. Field Setup screen PR follows |
+| FP-1 field splits + payer notes | IN PROGRESS | branch `feat/field-1.1-fp1-splits` | migration `20270303120000_field_split_versions`; Docker proof, Luna, Sol, then the PR. Field Setup screen PR: owned by the Field Setup screen lane (`feat/field-1.1-setup-screen`); merges only after FP-1 is VERIFIED on staging |
 | Chem Man field import | WAITING ON MASON | | needs Mason's export (private folder he names); trial on a local copy after FP-1; live after his yes |
 | FP-2 billable acres | PARKED | | until after 2026-12-15 (its quote-to-job change is in Taha's quotes area); then with Taha's review |
 

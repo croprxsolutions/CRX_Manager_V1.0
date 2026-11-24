@@ -1,7 +1,7 @@
 # Google Maps design for CRX (agreed by Mason 2026-11-24, pre-build)
 
 Background, options and the two earlier Sol reviews: `2026-11-24-map-provider-options.md`.
-Status: **design only, revision 2 (after Sol design review 1: NOT-READY, 5 blockers).** Nothing built.
+Status: **design only, revision 3 (after Sol design reviews 1 and 2).** Nothing built.
 Build starts after the field build's slice 1 lands.
 
 ## What Mason wants
@@ -23,9 +23,13 @@ Google's satellite picture is the default on every map and every printed sheet, 
    falls back to Mapbox (the existing print path), and failing that, to "no picture" with the reason.
    The print provider is a Vercel setting (`VITE_PRINT_MAP_PROVIDER`), so changing it is a settings
    change plus a redeploy, with no database or admin screen. USDA is a live-map picture only; it is not used for prints.
-4. **Every job field appears on the sheet**, map or not, in job order, with the picture used or the
-   reason for no picture. Obstacles are always listed as text on the sheet ("none recorded",
-   or "could not load" as a warning), independent of whether pins fit on the picture.
+4. **Every job field appears on the sheet**, map or not. The sheet is built **from the saved job's
+   ordered field list and treatment acres first**. Pictures, outlines and obstacles are then
+   attached to those rows by the job-field identity; they're never used to decide which fields
+   appear. Obstacles are always listed as text with their type and description. "None recorded"
+   appears only after a successful obstacle read for that field. A failed or partial read prints "Obstacles could not be
+   checked — confirm on site". An obstacle that could not be placed on the picture says so. If the
+   job's field list itself can't be loaded, show an error instead of a sheet that looks complete.
 5. Credits follow the picture actually shown: the Google logo plus the viewport's live credit text
    for Google; Mapbox's logo and credits; the USGS service credit for USDA. Prints keep the marks
    the provider bakes into the image. This replaces today's `attributionControl={false}`.
@@ -91,9 +95,10 @@ fields, jobs and sheets keep working. Offline phones (spring) are designed separ
 clean offline source.
 
 ## Costs (Google's list prices via Sol; confirm in the Google console)
-2D Map Tiles: 100,000 free a month, then $0.60 per 1,000. Default limits are 15,000 tile requests a
-day and 6,000 a minute per project, so a busy dispatch day could hit the daily limit before a
-budget alert fires. Measure real use in staging and raise the quota if needed. Sessions and
+2D Map Tiles: 100,000 free a month, then $0.60 per 1,000. Google's billing page lists a default daily limit of 15,000 requests;
+its May 2026 release notes say 100,000 a day. Record the real limit from the console. Separate keys
+in one Google Cloud project share its quota, so use separate projects for staging and production.
+Count a full fallback day too: Mapbox tiles, reprints and retries. Sessions and
 viewport metadata are not billed. Static Maps (prints): 10,000 free a month, then $2 per 1,000.
 
 ## Order of work
@@ -118,6 +123,48 @@ Taha's areas (quotes, bookings, holds, chemical billing): none touched.
 - Print a 10+ field job including a field with no boundary and one with obstacles: every field is
   listed, obstacles are listed as text, the time is acceptable, and the paper copy is readable.
 - Count real Google tile and image requests for a normal dispatch day against the quota.
+
+## Build checklist (Sol design review 2)
+Step 0 additions:
+- Prove **automatic** fallback and Retry, not just the manual switch, during a sketch and a drag, then
+  save and reopen. Provider failures never use the engine's remount path, and the camera doesn't jump.
+- Prove on the **oldest work phone, inside the installed app**, with the production build and real CSP.
+- Static Maps failure cases (bad key, quota, malformed outline): the app must tell a real picture from
+  Google's error/warning image. If it can't, prints stay on Mapbox until it can.
+- One deployed render per fallback (Mapbox token scope `styles:tiles`; USGS tiles and credits).
+Step 1:
+- The map starts with a blank local style. A missing provider key never stops the map, the other
+  pictures or the drawing tool loading. Non-map actions stay usable if the engine itself fails.
+- Inventory every caller after slice 1 and map the old Roads/Terrain/`printMode` options.
+- Fallback order for each choice: Google→USDA→Mapbox, USDA→Mapbox→Google, Mapbox→USDA→Google. The
+  chosen and the displayed picture are kept separate, and failed providers are retried on the next
+  map open, not in a loop.
+- One shared Google session refresh per app; refresh once on expiry before treating it as a failure.
+  Credits update after pan and zoom settle and are tied to the visible picture. The USGS credit names both USDA and USGS.
+- Each drawing bug gets a targeted reproduction: a multi-part drag, a mode switch with a committable
+  sketch, and a slow initial load.
+- Tile sizes, zoom limits and overzoom are set per source and checked against a known boundary.
+- The picture switch is accessible (labelled; fallback announced quietly). Check `geolocation=()` in
+  `vercel.json` against the phone location flows.
+Step 3:
+- The overview acre-label fix (paperwork lane) lands first. If the label position can't be verified
+  for a provider, acres go in the field table only.
+- The same outline-fidelity limit (in metres, holes and parts checked on the final encoded shape) applies to Google and
+  Mapbox. If a faithful outline can't fit, show "no picture: field too detailed".
+- One deadline covers obstacle reads, images and conversion; fallback gets a fixed share; at the
+  cutoff every row is finalised.
+- The overview follows Google → Mapbox → none and names the fields missing from it.
+- Provider requests carry only geometry and styling (no names or notes). Query strings are stripped from Sentry.
+- The "Open in Google Maps" link uses the saved field location; if there is none, it says unavailable.
+  Paper copies also print the coordinates.
+- Name the exact print entry points (job sheet, applicator sheet) and verify each.
+- If a proxy is ever needed: prove a fixed outbound IP from the host first.
+Installed-app rollback: test an already-open phone moving to the rollback build.
+
+## Sol design review 2 (2026-11-24): NOT-READY, 4 of 5 blockers resolved
+Resolved: draft loss, acre proof, browser key, USDA print. Remaining: the print data path (fixed in
+contract item 4, revision 3). Sol accepted all four omissions for a one-company tool: the list-only phone
+fallback is acceptable if the work phones pass Step 0.
 
 ## Sol design review 1 (gpt-6.2-sol, high, 2026-11-24): NOT-READY → handled
 Blockers and how revision 2 answers them: (11) browser key auth → step 0.1 prove-first; (1) fallback

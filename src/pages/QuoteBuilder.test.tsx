@@ -6716,6 +6716,7 @@ describe('QuoteBuilder', () => {
         fireEvent.change(screen.getByRole('spinbutton', { name: 'Quantity' }), { target: { value: '2' } });
         const dialog = await openPreview();
         expect(within(dialog).getByRole('button', { name: 'Email to grower' })).toBeDisabled();
+        const previewBuildsBeforeSave = mockGenerateQuotePdf.mock.calls.length;
 
         fireEvent.click(within(dialog).getByRole('button', { name: 'Save quote' }));
         await waitFor(() => expect(router.state.location.pathname).toBe(`/quotes/${fixture.quote.id}`));
@@ -6724,6 +6725,8 @@ describe('QuoteBuilder', () => {
         const reopened = await screen.findByRole('dialog', { name: 'Preview and send' });
         await waitFor(() => expect(within(reopened).getByRole('button', { name: 'Email to grower' })).toBeEnabled());
         expect(within(reopened).queryByRole('button', { name: 'Save quote' })).not.toBeInTheDocument();
+        // The preview is rebuilt from the saved quote, so it shows the prices the email will carry.
+        await waitFor(() => expect(mockGenerateQuotePdf.mock.calls.length).toBeGreaterThan(previewBuildsBeforeSave));
         expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote')).toHaveLength(1);
       } finally {
         view.unmount();

@@ -639,6 +639,8 @@ export default function QuoteBuilder() {
   // The saved quote whose snapshot is on screen. `quoteId` starts as the URL's id
   // before anything loads, so it cannot tell a loaded quote from a failed first load.
   const [installedQuoteId, setInstalledQuoteId] = useState<string | null>(null);
+  // Counts quotes loaded from the database: an open preview rebuilds from the loaded (saved) prices.
+  const [quoteLoadCount, setQuoteLoadCount] = useState(0);
   const [loadedQuoteOwner, setLoadedQuoteOwner] = useState<{ quoteId: string; createdBy: string | null } | null>(null);
   // Scoped by the quote this save actually TARGETS. F1 makes an ambiguous reply
   // RETAIN this key, and QuoteBuilder does not remount when only `:id` changes (no
@@ -1550,6 +1552,7 @@ export default function QuoteBuilder() {
     }
     setQuoteId(q.id);
     setInstalledQuoteId(q.id);
+    setQuoteLoadCount((n) => n + 1);
     setLoadedQuoteOwner({ quoteId: q.id, createdBy: q.created_by ?? null });
     setQuoteLoadFailedId(null);
     setQuoteNumber(q.quote_number);
@@ -3329,7 +3332,7 @@ export default function QuoteBuilder() {
         const run = ++previewRunRef.current;
         const doc = await generateQuotePdf(buildQuotePdfData(), columns);
         if (run !== previewRunRef.current) return;
-        previewColumnsKeyRef.current = columns.join(',');
+        previewColumnsKeyRef.current = `${columns.join(',')}|${quoteLoadCount}`;
         setPreviewPdfBlob(doc.output('blob'));
         setShowPreviewModal(true);
       },
@@ -3598,9 +3601,11 @@ export default function QuoteBuilder() {
   // The preview follows the chosen layout and columns (display only: nothing sends or saves this blob).
   const activePdfColumns = customColumns || getTemplateColumns(selectedTemplateId);
   const activePdfColumnsKey = activePdfColumns.join(',');
+  // Saving from the preview reloads the saved quote, whose prices can differ: that rebuilds it too.
+  const activePreviewKey = `${activePdfColumnsKey}|${quoteLoadCount}`;
   const buildQuotePdfDataRef = useLatestRef(buildQuotePdfData);
   useEffect(() => {
-    if (!showPreviewModal || previewColumnsKeyRef.current === activePdfColumnsKey) {
+    if (!showPreviewModal || previewColumnsKeyRef.current === activePreviewKey) {
       setPreviewRebuild('idle');
       return;
     }
@@ -3610,7 +3615,7 @@ export default function QuoteBuilder() {
       try {
         const doc = await generateQuotePdf(buildQuotePdfDataRef.current(), activePdfColumnsKey ? activePdfColumnsKey.split(',') : []);
         if (stale) return;
-        previewColumnsKeyRef.current = activePdfColumnsKey;
+        previewColumnsKeyRef.current = activePreviewKey;
         setPreviewPdfBlob(doc.output('blob'));
         setPreviewRebuild('idle');
       } catch (err) {
@@ -3620,7 +3625,7 @@ export default function QuoteBuilder() {
       }
     }, 200);
     return () => { stale = true; clearTimeout(timer); };
-  }, [showPreviewModal, activePdfColumnsKey, buildQuotePdfDataRef]);
+  }, [showPreviewModal, activePdfColumnsKey, activePreviewKey, buildQuotePdfDataRef]);
 
   const fetchVersions = useCallback(async () => {
     if (!quoteId) return;

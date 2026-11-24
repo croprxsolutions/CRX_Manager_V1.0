@@ -17,7 +17,7 @@
 //      "owner_accepted") bound to the new head, which the merge and apply gates accept.
 // Since 2026-11-21 (Mason: "I need to just be able to tell it I don't want that") step 2
 // builds ONE request for several findings and he answers in plain words, no code:
-// `skip` or `skip 1 3`, optionally a reason line (skipFromReply; exact replies only since 2026-11-24). The old per-finding
+// `skip` or `skip 1 3`, one line and nothing else (skipFromReply; exact replies only since 2026-11-24). The old per-finding
 // `accept <code> <reason>` reply still works for requests built before then.
 // The same trust boundary as Mason's migration approval (owner-approval-lib.mjs
 // header): it stops a mistaken or relayed acceptance, not an agent forging files.
@@ -189,28 +189,27 @@ export const solSkipFileName = (head, code) => `owner-approval-sol-skip-${head}-
 
 // Exact replies only (Mason, 2026-11-24, #2271): free-text "yes, <reason>" read "yes, skip 1" and
 // "yes, except 2" as skipping EVERY finding, and no word list could close that. The first line is
-// `skip` or `skip 1 3`; anything else skips nothing.
+// `skip` or `skip 1 3`; anything else skips nothing. No free-text reason line either (Taha, 2026-11-25:
+// Sol showed "skip" + "except finding 2" skipping both); the log keeps the fixed SKIP_REASON.
 const SKIP_LINE_RE = /^skip(?: (\d{1,2}(?:(?:, ?| | and |, and )\d{1,2})*))?$/;
 // Any line break, Windows' \r\n as one; vertical tab and form feed too, so they never join lines (Sol LOW).
+// A reply with a second non-blank line is refused.
 const LINE_SPLIT_RE = /\r\n|[\r\n\v\f\x85\p{Zl}\p{Zp}]/u;
 
 /**
- * Mason's skip reply, the WHOLE message: first line `skip` ({ all: true }) or `skip 1 3`
- * ({ numbers: [1, 3] }); an optional second line is his reason, kept word for word (trimmed) as
- * `reason`; it is only logged and never changes what is skipped. Blank lines are ignored. Case,
- * spacing and a trailing . or ! on the first line do not matter. A reply that starts
- * with skip or yes but is not exact (`yes, skip 1`, `skip them`, a third line) is { refused: true },
- * so the hook says out loud that nothing was skipped. Anything else is null (ordinary chat).
- * `accept <6 digits> ...` is the old form and never reads as a skip (two-digit numbers at most).
+ * Mason's skip reply, the WHOLE message, one line: `skip` ({ all: true }) or `skip 1 3`
+ * ({ numbers: [1, 3] }). Case, spacing, blank lines and a trailing . or ! do not matter. A reply
+ * that starts with skip or yes but is not exactly that (`yes, skip 1`, `skip them`, any second
+ * line) is { refused: true }, so the hook says out loud that nothing was skipped. Anything else is
+ * null (ordinary chat). `accept <6 digits> ...` is the old form and never reads as a skip.
  */
 export function skipFromReply(prompt) {
   const lines = String(prompt ?? "").split(LINE_SPLIT_RE).map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return null;
   const first = lines[0].toLowerCase().replace(/\s*[.!]+$/, "").replace(/\s+/g, " ");
-  const m = lines.length <= 2 ? SKIP_LINE_RE.exec(first) : null;
+  const m = lines.length === 1 ? SKIP_LINE_RE.exec(first) : null;
   if (!m) return /^(?:skip|yes)\b/.test(first) ? { refused: true } : null;
-  const skip = m[1] ? { numbers: m[1].split(/\D+/).filter(Boolean).map(Number) } : { all: true };
-  return lines[1] ? { ...skip, reason: lines[1] } : skip;
+  return m[1] ? { numbers: m[1].split(/\D+/).filter(Boolean).map(Number) } : { all: true };
 }
 
 /**
@@ -222,11 +221,7 @@ export function skipFromReply(prompt) {
 export function skipSelection(skip, shownFindings, alreadySkipped = []) {
   const shown = (shownFindings || []).map((f) => f.n);
   if (!skip) return { problem: "his reply is not a skip" };
-  if (skip.refused) return { problem: "only an exact reply skips: skip (all of them) or skip and the numbers (skip 1 3), with an optional reason on a second line" };
-  if (skip.reason !== undefined) {
-    const bad = reasonProblem(skip.reason);
-    if (bad) return { problem: `his reason line cannot be logged: ${bad}; ask him to reply again` };
-  }
+  if (skip.refused) return { problem: "only an exact one-line reply skips: skip (all of them) or skip and the numbers (skip 1 3)" };
   if (skip.all) return shown.length ? { numbers: shown } : { problem: "the request shows no findings" };
   const nums = skip.numbers || [];
   if (!nums.length) return { problem: "his reply names no finding" };
@@ -275,12 +270,12 @@ export function solSkipSummary(p) {
     `Pull request: ${String(p.pullRequestUrl ?? "").replace(/^https:\/\/github\.com\//i, "").replace(/\/pull\//, "#")} (version ${String(p.prHead).slice(0, 12)})`,
     ...(p.findings || []).map((f) => `Finding ${f.n} of ${p.findingCount} (${f.severity}): ${f.text}`),
     "",
-    `Each skipped finding's file and line, and your reason, go in ${DECISION_LOG_PATH}, which is public; the finding's wording stays private.`,
+    `Each skipped finding's file and line go in ${DECISION_LOG_PATH}, which is public, with a fixed sentence; the finding's wording stays private.`,
     "Every other finding and every other safety check still applies.",
     "",
     `To leave ${nums.length === 1 ? "it" : "them all"} unfixed, reply: skip`,
     ...(nums.length > 1 ? [`To skip only some, reply skip and their numbers (for example: skip ${nums[0]})`] : []),
-    `To give a reason, put it on a second line; it is logged word for word and never changes what is skipped. The log is public: one line of two words or more, no money amounts, emails, phone numbers, #numbers or markup, or nothing is skipped. Any other reply skips nothing, yes included. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
+    `Send it alone, on one line. Any other reply skips nothing, yes and a second line included. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
   ];
 }
 

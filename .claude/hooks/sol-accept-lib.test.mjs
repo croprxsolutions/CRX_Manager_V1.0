@@ -284,24 +284,20 @@ assert.equal("owner_accepted" in buildCarryForwardProof({ headSha: H2, baseSha: 
   "chain: an ordinary carry gains no acceptance");
 
 // ── Skipping: one request, one exact reply, no code (Mason, 2026-11-21; exact replies only since 2026-11-24, #2271) ──
-// The first line is `skip` (all shown) or `skip 1 3` (those); an optional second line is his reason,
-// logged word for word. Nothing else skips, "yes, <reason>" included.
+// The whole reply is ONE line: `skip` (all shown) or `skip 1 3` (those). Nothing else skips, "yes, <reason>"
+// included. No free-text reason line either (Taha, 2026-11-25, Sol r3: "skip" + "except finding 2" skipped both).
 const skips = (reply) => { const r = skipFromReply(reply); return Boolean(r) && !r.refused; };
 for (const yes of ["skip", "Skip.", "SKIP!", "  skip  "]) {
   assert.deepEqual(skipFromReply(yes), { all: true }, `skip: "${yes}" skips everything shown`);
 }
-assert.deepEqual(skipFromReply("skip\ntoo small to ever affect the business"), { all: true, reason: "too small to ever affect the business" }, "skip: a reason line is kept");
-assert.deepEqual(skipFromReply("Skip 1 3\r\n  We never sell before switch-on, Taha agrees.  "), { numbers: [1, 3], reason: "We never sell before switch-on, Taha agrees." },
-  "skip: the reason line is kept word for word (case and punctuation), only trimmed");
-assert.deepEqual(skipFromReply("skip 2\n\nnot worth it"), { numbers: [2], reason: "not worth it" }, "skip: a blank line before the reason does not matter");
-assert.deepEqual(skipSelection(skipFromReply("skip\ntoo small to matter"), [{ n: 1 }, { n: 3 }]), { numbers: [1, 3] }, "selection: skip with a reason = every finding shown");
-assert.match(skipSelection(skipFromReply("skip\ncosts $500"), [{ n: 1 }]).problem, /money/, "selection: a reason line the public log cannot hold skips nothing");
-assert.match(skipSelection(skipFromReply("skip\nsmall"), [{ n: 1 }]).problem, /two words/, "selection: a one-word reason line skips nothing");
 // #2271: "yes, skip 1" and "yes, except 2" skipped EVERY finding. Now no free-text reply skips anything;
 // one that starts like a skip or a yes comes back refused, so the hook says NOT SKIPPED out loud.
 for (const no of ["yes", "Yes.", "yes, skip 1", "yes, except 2", "Yes, too small to ever matter.", "yes - we never sell before switch-on",
   "yes, I object to waiving these", "yes, subject to Taha signing off", "skip all", "skip them", "skip it", "skip 1 but fix 3", "skip?",
-  "Skip I agree skip it", "skip\nreason one\nreason two"]) {
+  "Skip I agree skip it", "skip\nreason one\nreason two",
+  // Sol r1-r3 (2026-11-25): a second line never rides along, so it can never narrow or widen what is skipped.
+  "skip\ntoo small to ever affect the business", "skip\nexcept finding 2", "skip\n1 and 3", "Skip 1 3\r\nnot worth it", "skip 2\n\nnot worth it",
+  "skip\u000b2", "skip\f2 3", "skip\u20281"]) {
   const r = skipFromReply(no);
   assert.equal(r?.refused, true, `skip: "${no.replace(/\n/g, "\\n")}" is refused, not a skip`);
   assert.match(skipSelection(r, [{ n: 1 }, { n: 2 }]).problem, /skip \(all of them\) or skip and the numbers/, `selection: "${no.replace(/\n/g, "\\n")}" skips nothing and says the exact reply`);
@@ -335,8 +331,6 @@ for (const no of ["ok", "yesterday it worked", "I approve", "move on", "merge it
   "accept only if the totals reconcile", "accept all 1 3", "accept 123456", "accept 123456 fine by me", "I don't want that approach", "skipped", "", "\n\n"]) {
   assert.equal(skipFromReply(no), null, `skip: "${no}" is not a skip`);
 }
-// Vertical tab and form feed are line breaks, never spaces: "skip<VT>2" is skip-all with a one-word reason, refused (Sol LOW).
-for (const vt of ["skip\u000b2", "skip\f2"]) assert.match(skipSelection(skipFromReply(vt), [{ n: 1 }, { n: 2 }]).problem ?? "", /two words/, "skip: a vertical tab or form feed never joins lines");
 for (const no of ["skip 123", "skip the explanation and fix it", "skip\nand merge\nnow"]) {
   assert.equal(skipFromReply(no)?.refused, true, `skip: "${no.replace(/\n/g, "\\n")}" is refused`);
 }
@@ -369,7 +363,8 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   assert.equal(Date.parse(r1.payload.expiresAt), Date.parse(rec3.timestamp) + 24 * 60 * 60 * 1000, "request: deadline never past the Sol run's own 24 hours");
   assert.match(r1.payload.summary.join("\n"), /Finding 1 of 3 \(HIGH\).*\nFinding 3 of 3 \(HIGH\)/, "request: lists only the findings asked about");
   assert.match(r1.payload.summary.join("\n"), /To leave them all unfixed, reply: skip\nTo skip only some, reply skip and their numbers \(for example: skip 1\)/, "request: gives the two exact replies");
-  assert.match(r1.payload.summary.join("\n"), /second line.*word for word and never changes what is skipped\. The log is public: .*or nothing is skipped\. Any other reply skips nothing, yes included\./, "request: says the reason line is logged and nothing else skips");
+  assert.match(r1.payload.summary.join("\n"), /Send it alone, on one line\. Any other reply skips nothing, yes and a second line included\./, "request: says nothing else skips");
+  assert.doesNotMatch(r1.payload.summary.join("\n"), /your reason/, "request: never asks for a reason");
   assert.doesNotMatch(r1.payload.summary.join("\n"), /Reply yes/, "request: never invites a yes");
   assert.match(r1.payload.summary.join("\n"), /Pull request: croprxsolutions\/CRX_Manager_V1\.0#2200 /, "request: names the repository and PR");
   assert.doesNotMatch(r1.payload.summary.join("\n"), /accept \d{6}/, "request: no code to type");
@@ -463,19 +458,22 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const out = hook("skip", "other-session-99");
   assert.match(out, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 1, 2 of 3 on PR #2200/, `hook: one word skips both, from another conversation (${out})`);
   assert.equal(hook("skip"), "", "hook: the same reply again skips nothing more (nothing is waiting, so it is ordinary chat)");
-  // Exact reply plus a reason line (Mason, 2026-11-24, #2271): the reason is logged word for word.
+  // Exact one-line replies only (Mason 2026-11-24, #2271; no reason line, Taha 2026-11-25).
   const r5 = skipReq([3]);
   tx(r5.payload.summary.join("\n"));
   assert.match(hook("Yes, too small to ever affect the business"), /NOT SKIPPED/, "hook: 'yes, <reason>' no longer skips");
-  const outR = hook("skip 3\nToo small to ever affect the business.");
-  assert.match(outR, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 3 of 3/, `hook: skip with a reason line skips (${outR})`);
+  assert.match(hook("skip\nexcept finding 2"), /NOT SKIPPED/, "hook: a second line skips nothing, out loud");
+  const outR = hook("skip 3");
+  assert.match(outR, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 3 of 3/, `hook: skip 3 skips (${outR})`);
   {
     const r6 = skipReq([3]);
-    assert.equal(skipReply(r6.code, "skip 3\nToo small to ever affect the business.").ok, true, "reply: skip with a reason line records");
+    assert.equal(skipReply(r6.code, "skip 3").ok, true, "reply: skip 3 records");
     const rc = readSkipReceipts(stateDir, H3).find((r) => JSON.parse(r.payload).code === r6.code);
     const v = verifySolSkip({ approval: rc, record: rec3, checkReply: assertReplyAlone, checkShown: assertSkipShown });
-    assert.equal(v.ok, true, `verify: a two-line reply's receipt holds (${v.reason})`);
-    assert.equal(v.reason, "Too small to ever affect the business.", "verify: the reason line comes back word for word");
+    assert.equal(v.ok, true, `verify: the receipt holds (${v.reason})`);
+    assert.equal(v.reason, SKIP_REASON, "verify: the log gets the fixed sentence, never free text");
+    assert.match(verifySolSkip({ approval: { ...rc, reply: "skip 3\nexcept 3", replyMark: { ...rc.replyMark, words: "skip 3\nexcept 3" } }, record: rec3 }).reason, /does not hold/,
+      "verify: a receipt whose reply has a second line never holds");
   }
   // A skip request still waiting must not swallow a plain `yes` to the migration request he
   // was just shown (Codex P2, #2199).

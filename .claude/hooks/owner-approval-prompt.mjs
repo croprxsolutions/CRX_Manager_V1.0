@@ -99,7 +99,7 @@ if (accept || acceptAttemptIn(reply)) {
     "then node scripts/write-codex-push-proof.mjs --carry-owner-accepted.");
 }
 
-// `skip` / `skip 1 3`, optionally a reason line: Mason skips the Sol findings the agent's last
+// `skip` / `skip 1 3`, alone on one line: Mason skips the Sol findings the agent's last
 // message listed, with no code (Mason, 2026-11-21; exact replies only since 2026-11-24; sol-accept-lib.mjs).
 // With no skip request waiting in this session it is ordinary chat and stays silent.
 const skip = skipFromReply(reply);

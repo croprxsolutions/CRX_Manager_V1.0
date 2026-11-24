@@ -297,7 +297,9 @@ for (const no of ["yes", "Yes.", "yes, skip 1", "yes, except 2", "Yes, too small
   "Skip I agree skip it", "skip\nreason one\nreason two",
   // Sol r1-r3 (2026-11-25): a second line never rides along, so it can never narrow or widen what is skipped.
   "skip\ntoo small to ever affect the business", "skip\nexcept finding 2", "skip\n1 and 3", "Skip 1 3\r\nnot worth it", "skip 2\n\nnot worth it",
-  "skip\u000b2", "skip\f2 3", "skip\u20281"]) {
+  "skip\u000b2", "skip\f2 3", "skip\u20281",
+  // Sol r5: only ONE trailing mark is dropped, and a missing space still gets a loud refusal.
+  "skip...", "skip!!", "skip1", "skip 1 3..."]) {
   const r = skipFromReply(no);
   assert.equal(r?.refused, true, `skip: "${no.replace(/\n/g, "\\n")}" is refused, not a skip`);
   assert.match(skipSelection(r, [{ n: 1 }, { n: 2 }]).problem, /skip \(all of them\) or skip and the numbers/, `selection: "${no.replace(/\n/g, "\\n")}" skips nothing and says the exact reply`);

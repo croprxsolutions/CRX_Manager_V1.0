@@ -6,7 +6,7 @@ narrow or widen the skip; the log keeps its fixed sentence.
 
 - Fixes #2271: `yes, skip 1` and `yes, except 2` skipped every finding. `skipFromReply` now takes only
   the exact one-line reply; `yes, <reason>`, `I disagree`, `don't fix`, `accept`, the 2026-11-22 loose
-  forms and any second line skip nothing. A reply starting with skip or yes that is not exact comes back
+  forms and any second non-blank line skip nothing (blank lines are ignored). A reply starting with skip or yes that is not exact comes back
   refused, so the hook prints NOT SKIPPED instead of staying silent. Vertical tab and form feed count as
   line breaks.
 - The skip request's summary now gives the two exact replies and no longer invites a yes or a reason.

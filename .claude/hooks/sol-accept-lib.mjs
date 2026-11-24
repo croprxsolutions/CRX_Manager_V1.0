@@ -198,7 +198,7 @@ const LINE_SPLIT_RE = /\r\n|[\r\n\v\f\x85\p{Zl}\p{Zp}]/u;
 
 /**
  * Mason's skip reply, the WHOLE message, one line: `skip` ({ all: true }) or `skip 1 3`
- * ({ numbers: [1, 3] }). Case, spacing, blank lines and a trailing . or ! do not matter. A reply
+ * ({ numbers: [1, 3] }). Case, spacing, blank lines and one trailing . or ! do not matter. A reply
  * that starts with skip or yes but is not exactly that (`yes, skip 1`, `skip them`, any second
  * line) is { refused: true }, so the hook says out loud that nothing was skipped. Anything else is
  * null (ordinary chat). `accept <6 digits> ...` is the old form and never reads as a skip.
@@ -206,9 +206,9 @@ const LINE_SPLIT_RE = /\r\n|[\r\n\v\f\x85\p{Zl}\p{Zp}]/u;
 export function skipFromReply(prompt) {
   const lines = String(prompt ?? "").split(LINE_SPLIT_RE).map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return null;
-  const first = lines[0].toLowerCase().replace(/\s*[.!]+$/, "").replace(/\s+/g, " ");
+  const first = lines[0].toLowerCase().replace(/\s*[.!]$/, "").replace(/\s+/g, " ");
   const m = lines.length === 1 ? SKIP_LINE_RE.exec(first) : null;
-  if (!m) return /^(?:skip|yes)\b/.test(first) ? { refused: true } : null;
+  if (!m) return /^(?:skip|yes)(?:\b|\d)/.test(first) ? { refused: true } : null;
   return m[1] ? { numbers: m[1].split(/\D+/).filter(Boolean).map(Number) } : { all: true };
 }
 

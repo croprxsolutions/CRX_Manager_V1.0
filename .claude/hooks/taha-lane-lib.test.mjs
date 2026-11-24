@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
@@ -112,16 +112,89 @@ ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270226213000_refuse_impo
 eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270227000000_driver.sql", "UPDATE deliveries SET x = 1;")], now: NOW }), null, "a neutral migration on deliveries passes");
 // Mason, 2026-11-23: field billing stays his even when its SQL writes the shared invoice tables (#2260).
 eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270224130000_split_save_refuses_blend_billed_job.sql", "INSERT INTO invoices (id) VALUES (1);")], now: NOW }), null, "a field-billing migration writing invoices stays Mason's");
-eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270224130000_field_invoice_fix.sql", null)], now: NOW }), null, "a field-billing migration needs no SQL read");
+ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270224130000_field_invoice_fix.sql", null)], now: NOW }), "a field-billing migration whose SQL can't be read refuses (#2382 HIGH 1)");
 ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270224130000_release_hold_reject_job.sql", "SELECT 1;")], now: NOW }), "a hold word still wins over a job word");
 eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270227000000_driver.sql", null)], now: NOW })?.files, ["supabase/migrations/20270227000000_driver.sql (its SQL could not be read)"], "unreadable SQL refuses, and says why");
+
+// ── Taha's review of #2382 ──────────────────────────────────────────────────
+const MIGS = path.join(HERE, "..", "..", "supabase", "migrations");
+const sql2338 = readFileSync(path.join(MIGS, "20270227110000_delivery_driver_checks_need_a_driver.sql"), "utf8");
+const sql2260 = readFileSync(path.join(MIGS, "20270224130000_split_save_refuses_blend_billed_job.sql"), "utf8");
+// HIGH 1: a field word in the name exempts only the shared invoice tables, not the whole SQL.
+for (const name of ["20270227110000_delivery_and_job_driver_checks.sql", "20270227110000_driver_checks_application_rates.sql"]) {
+  ok(tahaLaneProblem({ files: [mig(`supabase/migrations/${name}`, sql2338)], now: NOW }), `#2338's real SQL under ${name} is refused`);
+}
+eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270224130000_split_save_refuses_blend_billed_job.sql", sql2260)], now: NOW }), null, "#2260's real SQL still passes");
+ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270301000000_month_end_close_job.sql", "UPDATE public.payments SET x = 1; UPDATE public.quotes SET y = 2;")], now: NOW }), "a job-named month-end migration writing payments and quotes is refused");
+for (const [sql, why] of [
+  ["INSERT INTO invoices (id) VALUES (1); UPDATE invoice_items SET x = 1; DELETE FROM invoice_shares; UPDATE invoice_line_shares SET y = 1;", "the shared invoice tables"],
+  ["DELETE FROM commissions WHERE invoice_id = 1;", "a field invoice's commissions (#2260)"],
+  ["SELECT * FROM invoices WHERE id = 1 FOR UPDATE;", "a row lock on a field invoice"],
+  ["CREATE OR REPLACE FUNCTION public._save_field_app_invoice_impl() RETURNS void AS $$ SELECT 1 $$;", "a field-billing function"],
+]) ok(!isTahaLaneSql(sql, { fieldBilling: true }), `field-billing file, Mason's: ${why}`);
+for (const [sql, why] of [
+  ["UPDATE orders SET x = 1;", "orders"], ["INSERT INTO credit_memo_applications (id) VALUES (1);", "credit-memo applications"],
+  ["UPDATE inventory_holds SET x = 1;", "holds"], ["INSERT INTO prepay_credits (id) VALUES (1);", "prepay"],
+  ["INSERT INTO split_invoice_provenance (id) VALUES (1);", "split-invoice tables"],
+  ["SELECT 1 FROM payments WHERE id = 1 FOR UPDATE;", "a row lock on payments"],
+  ["CREATE OR REPLACE FUNCTION public.post_invoice() RETURNS void AS $$ SELECT 1 $$;", "a lane-named function"],
+  ["CREATE OR REPLACE FUNCTION public._guard_credit_memo_application_immutable() RETURNS trigger AS $$ SELECT 1 $$;", "a listed lane function with a field word"],
+  [null, "unreadable SQL"],
+]) ok(isTahaLaneSql(sql, { fieldBilling: true }), `field-billing file, still Taha's: ${why}`);
+// HIGH 2: Taha's functions with no lane word, and the new AR and month-end words.
+const wrapper2324 = `CREATE OR REPLACE FUNCTION public._complete_delivery_authorized_impl(p_delivery_id uuid, p_idempotency_key text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+BEGIN
+  UPDATE public.deliveries SET checked = true WHERE id = p_delivery_id;
+  RETURN public._complete_delivery_authorized_impl_20270122(p_delivery_id, p_idempotency_key);
+END $function$;`;
+ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270227180000_f05b_delivery_line_checks.sql", wrapper2324)], now: NOW }), "#2324's wrapper is refused");
+for (const fn of ["complete_delivery", "_start_and_complete_delivery_impl", "start_and_complete_delivery", "void_delivery", "cancel_delivery", "void_order",
+  "cancel_order", "update_order_items", "price_order", "apply_write_off", "reverse_write_off", "close_accounting_period", "reopen_accounting_period",
+  "_lock_accounting_months", "get_ar_reminder_candidates", "get_customer_balance_listing", "get_monthly_summary", "prevent_order_shares_edit_after_post",
+  "apply_credit_memo", "ar_snapshot", "monthly_rollup", "write_off_small_balances", "receivables_sweep"]) {
+  ok(isTahaLaneSql(`CREATE OR REPLACE FUNCTION public.${fn}() RETURNS void AS $$ SELECT 1 $$;`), `redefining ${fn} is Taha's`);
+}
+for (const fn of ["completed_delivery_report", "save_job", "get_artifact", "monthly_job_application_report"]) {
+  ok(!isTahaLaneSql(`CREATE OR REPLACE FUNCTION public.${fn}() RETURNS void AS $$ SELECT 1 $$;`), `${fn} is not Taha's`);
+}
+// MED 3: AR and month-end tables.
+for (const t of ["accounting_periods", "write_offs", "ar_reminder_tracking", "credit_memo_sales_tax", "billing_m4_switch", "return_credit_customer_claims"]) {
+  ok(isTahaLaneSql(`UPDATE public.${t} SET x = 1;`), `writing ${t} is Taha's`);
+}
+// MED 4: grants, revokes and comments on his functions, and a rename to a lane name.
+ok(isTahaLaneSql("GRANT EXECUTE ON FUNCTION public.void_invoice(uuid) TO authenticated;"), "GRANT on void_invoice is Taha's");
+ok(isTahaLaneSql("REVOKE ALL ON FUNCTION public.helper(uuid), public.apply_write_off(uuid, numeric(10,2)) FROM PUBLIC;"), "REVOKE on a list naming his function is Taha's");
+ok(isTahaLaneSql("ALTER FUNCTION public.helper_x(uuid) RENAME TO post_invoice_v3;"), "RENAME TO post_invoice_v3 is Taha's");
+ok(!isTahaLaneSql("GRANT EXECUTE ON FUNCTION public.save_job(uuid) TO authenticated; ALTER FUNCTION public.a() RENAME TO b;"), "a grant or rename outside his lane passes");
+// LOW 5: lists.
+for (const sql of ["TRUNCATE public.deliveries, public.invoices;", "DROP TABLE a, invoices;", "DROP FUNCTION a(), post_invoice();", "DROP FUNCTION IF EXISTS public.a(uuid, text), public.void_order(uuid);"]) {
+  ok(isTahaLaneSql(sql), `a list naming his table or function: ${sql}`);
+}
+ok(!isTahaLaneSql("DROP FUNCTION a(), b(uuid); TRUNCATE deliveries, jobs;"), "lists with nothing of his pass");
+// LOW 6: a stray quote inside a dollar-quoted comment does not hide the next line.
+ok(isTahaLaneSql("COMMENT ON FUNCTION public.f() IS $c$Mason's note$c$;\nSELECT 'a -- b'; UPDATE public.invoices SET x = 1;"), "an apostrophe in $c$…$c$ does not flip the scanner");
+ok(!isTahaLaneSql("CREATE FUNCTION public.f() RETURNS void AS $$ BEGIN -- UPDATE invoices\n PERFORM 1; END $$;"), "a comment inside a $$ body is still a comment");
+ok(isTahaLaneSql("CREATE FUNCTION public.f() RETURNS void AS $$ BEGIN EXECUTE $q$UPDATE invoices SET x = 1$q$; END $$;"), "a nested $q$ string is still read");
+// LOW 9: the row lock must be in the same statement as the read.
+ok(!isTahaLaneSql("SELECT 1 FROM product_rate_lock FOR SHARE; SELECT count(*) FROM quote_items;"), "a lock on another table plus a separate read passes");
+ok(isTahaLaneSql("SELECT 1 FROM product_rate_lock p JOIN quote_items q ON q.id = p.id FOR SHARE;"), "a lock in the statement that reads his table counts");
+// Booking stock (Taha on #2382): inventory.quantity_prebooked.
+for (const [sql, why] of [
+  ["UPDATE public.inventory SET quantity_prebooked = quantity_prebooked + 1 WHERE id = 1;", "an update"],
+  ["UPDATE inventory SET quantity_available = 1, quantity_prebooked = 0;", "a second SET column"],
+  ["INSERT INTO public.inventory (product_id, quantity_prebooked) VALUES (1, 0);", "an insert"],
+  ["CREATE FUNCTION public.f() RETURNS trigger AS $$ BEGIN NEW.quantity_prebooked := 0; RETURN NEW; END $$;", "a function body"],
+  ["ALTER TABLE inventory ALTER COLUMN quantity_prebooked SET DEFAULT 0;", "a column change"],
+]) ok(isTahaLaneSql(sql), `quantity_prebooked: ${why}`);
+ok(!isTahaLaneSql("UPDATE inventory SET quantity_available = 1 WHERE quantity_prebooked = 0; SELECT quantity_prebooked FROM inventory;"), "reading quantity_prebooked is not a write");
 
 // Reading the SQL from GitHub at the PR's commit.
 const REF = "a".repeat(40);
 const ghFake = (answers) => { const calls = []; const fn = (args) => { calls.push(args); const a = answers(args); if (a instanceof Error) throw a; return a; }; fn.calls = calls; return fn; };
 const migTsv = `added\tsupabase/migrations/20270227_x.sql\t\t${REF}\nremoved\tsupabase/migrations/20270101_old.sql\t\t\nmodified\tsrc/a.ts\t\t${REF}\n`;
 let fake = ghFake((args) => args.includes("--paginate") ? migTsv : "UPDATE orders SET x = 1;");
-eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake }), [
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: REF }), [
   { filename: "supabase/migrations/20270227_x.sql", previous_filename: undefined, sql: "UPDATE orders SET x = 1;" },
   { filename: "supabase/migrations/20270101_old.sql", previous_filename: undefined, sql: null },
   { filename: "src/a.ts", previous_filename: undefined },
@@ -129,9 +202,21 @@ eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake }), [
 ok(fake.calls.some((a) => a.includes("Accept: application/vnd.github.raw") && a.some((x) => x === `repos/o/r/contents/supabase/migrations/20270227_x.sql?ref=${REF}`)), "the SQL is read at the PR's own commit");
 eq(fake.calls.length, 2, "only the one readable migration is fetched");
 fake = ghFake((args) => args.includes("--paginate") ? migTsv : new Error("404"));
-eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake })[0].sql, null, "a failed SQL read is unreadable, not empty");
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: REF })[0].sql, null, "a failed SQL read is unreadable, not empty");
 fake = ghFake((args) => args.includes("--paginate") ? `added\tsupabase/migrations/20270227_x.sql\t\t\n` : "UPDATE orders SET x = 1;");
-eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake })[0].sql, null, "no commit to read at is unreadable");
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: REF })[0].sql, null, "no commit to read at is unreadable");
+// #2382 LOW 8: the SQL must be read at the head the merge is pinned to.
+fake = ghFake((args) => args.includes("--paginate") ? migTsv : "SELECT 1;");
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: "b".repeat(40) })[0].sql, null, "GitHub listing another commit than the pinned head is unreadable");
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake })[0].sql, null, "no pinned head is unreadable");
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: REF.toUpperCase() })[0].sql, "SELECT 1;", "the head is compared without case");
+// #2382 LOW 7: baselines and hand-run undo scripts are read too; other scripts are not.
+fake = ghFake((args) => args.includes("--paginate")
+  ? ["supabase/baselines/cron_jobs.sql", "scripts/smoke/x-reverse.sql", "scripts/.staging-migrations/y.sql", "scripts/smoke/x.sql"].map((n) => `added\t${n}\t\t${REF}`).join("\n")
+  : "UPDATE payments SET x = 1;");
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: REF }).map((e) => "sql" in e), [true, true, true, false], "baselines, reverse scripts and staging-migration copies carry SQL");
+ok(tahaLaneProblem({ files: prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: REF }), now: NOW })?.files.includes("supabase/baselines/cron_jobs.sql"),
+  "a field-named baseline that writes payments is refused");
 
 eq(tahaLaneProblem({ files: f("src/pages/Quotes.tsx"), now: TAHA_LANE_UNTIL_MS }), null, "off after Dec 15");
 eq(tahaLaneProblem({ files: null, now: TAHA_LANE_UNTIL_MS + 1 }), null, "off after Dec 15 even when unreadable");

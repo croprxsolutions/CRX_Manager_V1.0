@@ -7,6 +7,7 @@ const H = vi.hoisted(() => ({
   error: null as unknown,
   reads: [] as { table: string; calls: string[] }[],
   toast: vi.fn(),
+  hold: null as null | Promise<void>,
 }));
 
 function query(table: string) {
@@ -16,9 +17,9 @@ function query(table: string) {
   for (const m of ['select', 'in', 'gte', 'or', 'order', 'limit']) {
     q[m] = (...args: unknown[]) => { read.calls.push(`${m} ${JSON.stringify(args)}`); return q; };
   }
-  q.then = (resolve: (v: unknown) => unknown) => Promise.resolve(
-    H.error ? { data: null, error: H.error } : { data: H.rows, error: null },
-  ).then(resolve);
+  q.then = (resolve: (v: unknown) => unknown) => Promise.resolve(H.hold).then(() => (
+    H.error ? { data: null, error: H.error } : { data: H.rows, error: null }
+  )).then(resolve);
   return q;
 }
 
@@ -49,6 +50,7 @@ describe('CompletionWeatherFields', () => {
     H.rows = [];
     H.error = null;
     H.reads = [];
+    H.hold = null;
     H.toast.mockReset();
   });
 
@@ -110,6 +112,20 @@ describe('CompletionWeatherFields', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use last weather' }));
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining("Couldn't load")));
     expect(saved().wind_speed).toBe('');
+  });
+
+  it('a reply that lands after the form closed fills nothing', async () => {
+    H.rows = [{ job_id: 'job-a', wind_speed: 7, wind_direction: 'SW', temperature: 68, humidity: 55, updated_at: '2026-11-24T15:00:00Z' }];
+    let release: () => void = () => {};
+    H.hold = new Promise<void>((r) => { release = r; });
+    const onChange = vi.fn();
+    const { unmount } = render(<CompletionWeatherFields value={{ wind_speed: '', wind_direction: '', temperature: '', humidity: '' }} onChange={onChange} otherJobs={OTHER_JOBS} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Use last weather' }));
+    unmount(); // the applicator closed this job's form or opened another job
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(H.toast).not.toHaveBeenCalled();
   });
 
   it('hides the button when there are no other jobs to copy from', () => {

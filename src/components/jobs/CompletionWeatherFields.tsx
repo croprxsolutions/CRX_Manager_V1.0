@@ -9,7 +9,7 @@
  * newest weather saved today on one of the applicator's own jobs; nothing is saved until they
  * press Complete Job, so they can check and change every value first.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { History, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
@@ -84,11 +84,15 @@ export default function CompletionWeatherFields({ value, onChange, otherJobs }: 
 }) {
   const { toast } = useToast();
   const [looking, setLooking] = useState(false);
+  // The form closes (or another job's opens) when this unmounts; a late reply must not fill that form.
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const fillFromLastWeather = async () => {
     setLooking(true);
     try {
       const row = await readLastWeatherToday(otherJobs.map((j) => j.job_id));
+      if (!mounted.current) return;
       if (!row) {
         toast('info', 'No weather saved on your jobs today yet.');
       } else {
@@ -99,6 +103,7 @@ export default function CompletionWeatherFields({ value, onChange, otherJobs }: 
       }
     } catch (err) {
       Sentry.captureException(err, { level: 'warning', extra: { context: 'Use last weather read failed' } });
+      if (!mounted.current) return;
       toast('error', "Couldn't load your last weather. Type it in instead.");
     }
     setLooking(false);

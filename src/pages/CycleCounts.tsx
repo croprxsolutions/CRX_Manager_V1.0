@@ -50,13 +50,6 @@ interface CycleCountDbRow {
   [key: string]: unknown;
 }
 
-interface InventoryDbRow {
-  id: string;
-  product_id: string;
-  quantity_available: number;
-  product?: { product_name: string } | null;
-}
-
 interface CountItemDbRow {
   product?: { product_name: string } | null;
   [key: string]: unknown;
@@ -74,6 +67,7 @@ export default function CycleCounts() {
   const updateCycleCountItemIdem = useIdempotencyKey('update_cycle_count_item', profile?.id || '');
   const reverseCycleCountIdem = useIdempotencyKey('reverse_cycle_count', profile?.id || '');
   const cancelCycleCountIdem = useIdempotencyKey('cancel_cycle_count', profile?.id || '');
+  const createCycleCountIdem = useIdempotencyKey('create_cycle_count', profile?.id || '');
   const [counts, setCounts] = useState<CountRow[]>([]);
   const [loading, setLoading] = useState(true);
   // A failed list read shows "could not be loaded", never "No cycle counts yet".
@@ -86,6 +80,9 @@ export default function CycleCounts() {
   // A count starts only from a location list that loaded; never while it loads or after it failed.
   const [locationsLoad, setLocationsLoad] = useState<'loading' | 'loaded' | 'failed'>('loading');
   const [newNotes, setNewNotes] = useState('');
+  // Each opening of the form is a new start; a retry inside it reuses the key (a lost reply replays, not repeats).
+  const [newAttempt, setNewAttempt] = useState(0);
+  const openNew = () => { setNewAttempt((a) => a + 1); setShowNew(true); };
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
 
@@ -276,63 +273,26 @@ export default function CycleCounts() {
 
     await runCriticalAction({
       action: async () => {
-        // Generate sequential count number via advisory-lock RPC
-        const { data: countNumData, error: countNumError } = await supabase.rpc('next_cycle_count_number');
-        if (countNumError) throw countNumError;
-        const countNum = assertRpcResult<string>(countNumData, 'next_cycle_count_number');
-
-        // Fetch inventory items for the selected warehouse: every one, page by page,
-        // since each becomes a count line (one request stopped at the server's row cap).
-        const { data: invData, error: invError } = await fetchAllRows((from, to) => supabase
-          .from('inventory')
-          .select('id, product_id, quantity_available, product:products(product_name)', { count: 'exact' })
-          .eq('location', newWarehouse)
-          .order('product_id')
-          .order('id')
-          .range(from, to));
-
-        if (invError) throw invError;
-        const invItems = (invData || []) as unknown as InventoryDbRow[];
-
-        if (invItems.length === 0) {
-          throw new Error('No inventory found at this location');
-        }
-
-        // Create the cycle count
-        const { data: cc, error: ccError } = await supabase
-          .from('cycle_counts')
-          .insert({
-            count_number: countNum,
-            warehouse: newWarehouse,
-            status: 'in_progress',
-            notes: newNotes || null,
-          })
-          .select()
-          .single();
-
-        if (ccError) throw ccError;
-
-        // Insert items
-        const items = invItems.map((inv) => ({
-          cycle_count_id: cc.id,
-          product_id: inv.product_id,
-          inventory_id: inv.id,
-          expected_qty: inv.quantity_available || 0,
-        }));
-
-        const { error: itemsError } = await supabase
-          .from('cycle_count_items')
-          .insert(items);
-
-        if (itemsError) {
-          // The empty count was saved; show it so it can be cancelled (KI-160: creation is not one request).
+        // One server step: number, count and a line per stock row, or nothing (KI-160).
+        // Keyed per form opening, location and notes so a retry after a lost reply replays the same start.
+        const scope = JSON.stringify([newAttempt, newWarehouse, newNotes.trim()]);
+        const { data, error } = await supabase.rpc('create_cycle_count', {
+          p_warehouse: newWarehouse,
+          p_notes: newNotes.trim() || undefined,
+          p_performed_by: profile.id,
+          p_idempotency_key: createCycleCountIdem.getKeyFor(scope),
+        });
+        if (error) {
+          // A count already open here (maybe this one, from a lost reply) shows in the refreshed list.
           void fetchCounts();
-          throw itemsError;
+          throw error;
         }
+        const created = assertRpcResult<{ cycle_count_id: string; count_number: string; line_count: number }>(data, 'create_cycle_count');
+        createCycleCountIdem.resetKeyFor(scope);
 
-        await logActivity({ event: 'cycle_count_started', description: `Cycle count ${countNum} started for ${newWarehouse} (${invItems.length} products)`, performedBy: profile.id, entityType: 'cycle_count', entityId: cc.id });
+        await logActivity({ event: 'cycle_count_started', description: `Cycle count ${created.count_number} started for ${newWarehouse} (${created.line_count} stock rows)`, performedBy: profile.id, entityType: 'cycle_count', entityId: created.cycle_count_id });
 
-        return `Cycle count ${countNum} created with ${invItems.length} products`;
+        return `Cycle count ${created.count_number} created with ${created.line_count} stock rows`;
       },
       toast,
       setLoading: setCreating,
@@ -1140,7 +1100,7 @@ export default function CycleCounts() {
           <HelpTip text="Verify physical inventory against system records. Create a count, enter actual quantities, then complete to auto-adjust inventory. Variances are logged in the transaction ledger for audit." className="ml-1" />
         </h2>
         {isAdmin && (
-          <Button icon={<Plus className="w-4 h-4" />} onClick={() => setShowNew(true)}>
+          <Button icon={<Plus className="w-4 h-4" />} onClick={openNew}>
             New Cycle Count
           </Button>
         )}
@@ -1159,7 +1119,7 @@ export default function CycleCounts() {
             emptyDescription="Start a cycle count to verify inventory quantities"
             emptyAction={
               isAdmin ? (
-                <Button icon={<Plus className="w-4 h-4" />} onClick={() => setShowNew(true)}>
+                <Button icon={<Plus className="w-4 h-4" />} onClick={openNew}>
                   New Cycle Count
                 </Button>
               ) : undefined
@@ -1206,6 +1166,7 @@ export default function CycleCounts() {
             label="Notes (Optional)"
             value={newNotes}
             onChange={(e) => setNewNotes(e.target.value)}
+            maxLength={2000}
             placeholder="e.g., Monthly count, end-of-season audit"
           />
           <p className="text-sm text-gray-500">

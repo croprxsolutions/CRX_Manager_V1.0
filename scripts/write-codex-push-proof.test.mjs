@@ -1701,7 +1701,7 @@ function collisionPromptSkipsWork(prompt) {
     mkdirSync(path.dirname(sqlPath(OLD)), { recursive: true });
     mkdirSync(path.dirname(recordPath(OLD)), { recursive: true });
     writeFileSync(sqlPath(OLD), "CREATE TABLE rate_lock (id bigint);\n");
-    writeFileSync(recordPath(OLD), `# ${OLD}\n\nCandidate; apply as ${OLD}.\n`);
+    writeFileSync(recordPath(OLD), `**LOCAL CANDIDATE — NOT APPLIED.** \`${OLD}.sql\`. Candidate; apply as ${OLD}.\n`);
     writeFileSync(path.join(repo, "src", "a.ts"), "export const a = 2;\n");
     const reviewedHead = commitAll("pr change");
     const proofPath = codexPushProofPath(repo, reviewedHead);
@@ -1743,8 +1743,12 @@ function collisionPromptSkipsWork(prompt) {
     }, /src\/a\.ts changed beyond the timestamp/);
     refused("a record edit beyond the stamp", () => {
       restamp();
-      writeFileSync(recordPath(NEW), `# ${NEW}\n\nApplied.\n`);
+      writeFileSync(recordPath(NEW), `**LOCAL CANDIDATE — NOT APPLIED.** \`${NEW}.sql\`. Edited.\n`);
     }, /changed beyond the timestamp/);
+    refused("an applied record (Taha, #2384 LOW 6)", () => {
+      restamp();
+      writeFileSync(recordPath(NEW), `**APPLIED LIVE 2026-11-23**, ledger version \`20261123000000\` carrying name \`${NEW}\`.\n`);
+    }, /not a LOCAL CANDIDATE record/);
     refused("a copy that keeps the old migration", () => {
       writeFileSync(sqlPath(NEW), readFileSync(sqlPath(OLD)));
     }, /does not rename exactly one migration/);
@@ -1759,6 +1763,11 @@ function collisionPromptSkipsWork(prompt) {
       restamp();
       writeFileSync(path.join(repo, "supabase", "config.toml"), "x = 1\n");
     }, /another database file/);
+    // A reviewed head whose proof is a post-apply carry is live under its stamp (Taha, #2384 LOW 6).
+    const cleanProof = readFileSync(proofPath, "utf8");
+    writeFileSync(proofPath, JSON.stringify({ ...JSON.parse(cleanProof), carried_forward: true, carry: { mode: "post_apply", from_head: reviewedHead, from_base: base } }));
+    refused("a post-apply source proof", () => { restamp(); }, /post-apply carry/);
+    writeFileSync(proofPath, cleanProof);
     // Only ONE commit on top of the reviewed head carries.
     git("reset", "-q", "--hard", reviewedHead);
     restamp();
@@ -2580,9 +2589,10 @@ not json
         return { result, state };
       };
 
-      const found = factsWith(() => [[mine(1167, { draft: true })]]);
+      const prUrl = "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1167";
+      const found = factsWith(() => [[mine(1167, { draft: true, html_url: prUrl, base: { ref: "staging", repo: { full_name: `${OWNER}/${NAME}` } } })]]);
       assert.equal(found.result.unreadable, undefined, "facts: a PR found through the list is readable");
-      assert.deepEqual(found.result.pr, { number: 1167, draft: true }, "facts: the head resolves to its PR");
+      assert.deepEqual(found.result.pr, { number: 1167, draft: true, url: prUrl, baseRef: "staging" }, "facts: the head resolves to its PR, its address and its base");
       assert.equal(found.state.lookups, 2, "facts: the same list lookup serves the first read and the final re-read");
 
       assert.equal(factsWith(() => [[]]).result.pr, null, "facts: no PR at this head is reported as none");
@@ -2772,11 +2782,11 @@ not json
     mkdirSync(stateDir, { recursive: true });
     // The shape saveBlockersRecord writes: the record plus the review kind (Sol round 2, 2026-11-22).
     writeFileSync(path.join(stateDir, blockersRecordName(reviewed)), JSON.stringify({ ...buildBlockersRecord({ headSha: reviewed, baseSha: base, findings }), review_ref: GUARDED_BASE, release_rules: false }));
-    const accept = (n, code, reason) => {
+    const accept = (n, code, reason, at = reviewed) => {
       const now = Date.now();
       writeApprovalRequest(stateDir, buildSolAcceptPayload({
-        record: JSON.parse(readFileSync(path.join(stateDir, blockersRecordName(reviewed)), "utf8")), n, pullRequest: 4242, pullRequestUrl: "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242",
-        issuedAt: new Date(now - 1000).toISOString(), expiresAt: new Date(now + 60 * 60 * 1000).toISOString(), nonce: `n${code}`, code, sessionId: SESSION,
+        record: JSON.parse(readFileSync(path.join(stateDir, blockersRecordName(at)), "utf8")), n, pullRequest: 4242, pullRequestUrl: "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242",
+        issuedAt: new Date(now - 1000).toISOString(), expiresAt: new Date(now + 60 * 60 * 1000).toISOString(), nonce: `${code}${code}`, code, sessionId: SESSION,
       }));
       const text = `accept ${code} ${reason}`;
       const transcript = path.join(transcripts, `t${code}.jsonl`);
@@ -2854,6 +2864,84 @@ not json
     const stale = run(scriptPath, "--carry-owner-accepted");
     assert.equal(stale.status, 1, "owner-accepted e2e: acceptances of an earlier Sol run are refused");
     assert.match(stale.stderr, /earlier Sol run/);
+
+    // A PR into staging (Mason, 2026-11-23): --log writes its own new decision-log.d/ file, never
+    // DECISION_LOG.md, so parallel PRs cannot conflict; the carry accepts exactly that one new file.
+    git("switch", "-q", "-c", "staging-pr", base);
+    write("src/sale.ts", "export const sell = () => 3;\n");
+    const reviewedS = commitAll("staging pr change");
+    writeFileSync(path.join(stateDir, blockersRecordName(reviewedS)), JSON.stringify({ ...buildBlockersRecord({ headSha: reviewedS, baseSha: base, findings }), review_ref: "origin/staging", release_rules: false }));
+    accept(1, "333333", "we never sell before switch-on", reviewedS);
+    accept(2, "444444", "not a live SaaS yet", reviewedS);
+    const logBefore = readFileSync(file(LOG), "utf8");
+    const loggedS = run(logScript, "--log");
+    assert.equal(loggedS.status, 0, `owner-accepted e2e (staging): --log writes the entry (${loggedS.stderr})`);
+    assert.equal(readFileSync(file(LOG), "utf8"), logBefore, "owner-accepted e2e (staging): DECISION_LOG.md is untouched");
+    const added = git("status", "--porcelain", "--untracked-files=all").split("\n").map((l) => l.slice(3)).filter(Boolean);
+    assert.equal(added.length, 1, `owner-accepted e2e (staging): one new file (${added})`);
+    const FRAG = added[0];
+    assert.match(FRAG, new RegExp(`^docs/manual/decision-log\\.d/\\d{4}-\\d{2}-\\d{2}-pr4242-sol-skip-${reviewedS.slice(0, 12)}\\.md$`), "owner-accepted e2e (staging): dated, PR-named fragment");
+    assert.match(loggedS.stdout, new RegExp(`Wrote the entry to ${FRAG.replace(/[.]/g, "\\.")}`));
+    assert.match(readFileSync(file(FRAG), "utf8"), /^## \d{4}-\d{2}-\d{2} — #4242: Mason owner-accepted 2 Sol finding\(s\)[\s\S]*not a live SaaS yet \(ref [^)]+\)\n$/,"owner-accepted e2e (staging): one entry, one trailing newline");
+    const fragHead = commitAll("docs: Mason skipped Sol findings");
+    const okS = run(scriptPath, "--carry-owner-accepted");
+    assert.equal(okS.status, 0, `owner-accepted e2e (staging): the proof is written (${okS.stderr})`);
+    const mintedS = JSON.parse(readFileSync(codexPushProofPath(repo, fragHead), "utf8"));
+    assert.equal(mintedS.carry.mode, "owner_accepted");
+    assert.equal(proofValid(mintedS, fragHead, Date.now(), base), true, "owner-accepted e2e (staging): the gates accept it for the logged head");
+    // The round-5 reader (decisionLogAt) sees the fragment entry like one in DECISION_LOG.md.
+    const { decisionLogAt } = await import("./write-codex-push-proof.mjs");
+    assert.ok(decisionLogAt(repo, fragHead).some((t) => t.includes("#4242: Mason owner-accepted 2")), "owner-accepted e2e (staging): the decision-log readers find the fragment");
+    const refusedS = (label, mutate, why) => {
+      git("reset", "-q", "--hard", fragHead);
+      mutate();
+      git("reset", "-q", "--soft", reviewedS);
+      const squashed = commitAll(`refused: ${label}`);
+      const result = run(scriptPath, "--carry-owner-accepted");
+      assert.equal(result.status, 1, `owner-accepted e2e (staging): ${label} is refused`);
+      assert.match(result.stderr, why, `owner-accepted e2e (staging): ${label} says why`);
+      assert.equal(existsSync(codexPushProofPath(repo, squashed)), false, `owner-accepted e2e (staging): nothing written for ${label}`);
+    };
+    refusedS("the entry also in DECISION_LOG.md", () => write(LOG, `${logBefore}x\n`), /must only add the new file docs\/manual\/decision-log\.d\//);
+    refusedS("an edited fragment", () => write(FRAG, readFileSync(file(FRAG), "utf8").replace("not a live SaaS yet", "approved by everyone")), /must hold exactly the entry/);
+    refusedS("the entry only in DECISION_LOG.md", () => { rmSync(file(FRAG)); write(LOG, `${logBefore}x\n`); }, /must only add the new file/);
+
+    // A carried skip (Taha LOW, #2383): a later head of the same staging PR, Sol marks the finding the same as
+    // the one Mason skipped, and the carried entry goes in its own new fragment. --log needs `gh pr view` for
+    // this path, which a throwaway repo has none of, so the test writes what --log writes through the same
+    // two functions (ownerAcceptLogTarget, decisionFragmentText) and runs the real carry check on it.
+    const { carriedDecisionLogEntry, carryForRecord, decisionFragmentText, ownerAcceptLogTarget, priorAcceptances } = await import("../.claude/hooks/sol-accept-lib.mjs");
+    const { readLocalProofs } = await import("./write-codex-push-proof.mjs");
+    git("reset", "-q", "--hard", fragHead);
+    write("docs/notes.md", "# Notes\n");
+    const laterS = commitAll("later staging pr change, sale.ts untouched");
+    const PR_URL = "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242";
+    const candidates = priorAcceptances(readLocalProofs(repo), { prNumber: 4242, prUrl: PR_URL });
+    assert.ok(["333333333333/1", "444444444444/2"].every((k) => candidates.some((x) => x.key === k)), `carried e2e: Mason's two skips are shown to Sol (${candidates.map((x) => x.key)})`);
+    const sameFindings = parseSolFindings("SOL_FINDING 1 HIGH: src/sale.ts:1 - a sale before switch-on is still not checked SAME_AS_ACCEPTED 333333333333/1\nSOL_FINDING_COUNT 1\n", { labels: true }).findings;
+    const carriedRecord = { ...buildBlockersRecord({ headSha: laterS, baseSha: base, findings: sameFindings, carryCandidates: candidates }), review_ref: "origin/staging", release_rules: false };
+    writeFileSync(path.join(stateDir, blockersRecordName(laterS)), JSON.stringify(carriedRecord));
+    const c = carryForRecord({ record: carriedRecord, proofs: readLocalProofs(repo), prNumber: 4242, prUrl: PR_URL, git: (args) => git(...args) });
+    assert.equal(c.problem, undefined, `carried e2e: the skip carries (${c.problem})`);
+    const carriedEntry = carriedDecisionLogEntry({ record: carriedRecord, accepted: c.accepted });
+    const carriedTarget = ownerAcceptLogTarget(carriedRecord, carriedEntry);
+    assert.match(carriedTarget.path, new RegExp(`^docs/manual/decision-log\\.d/\\d{4}-\\d{2}-\\d{2}-pr4242-sol-skip-${laterS.slice(0, 12)}\\.md$`), "carried e2e: its own dated, PR-named fragment");
+    assert.match(carriedEntry, /Mason's earlier skip carried to 1 repeat Sol finding/);
+    write(carriedTarget.path, decisionFragmentText(carriedEntry));
+    const carriedHead = commitAll("docs: carried Sol skip");
+    const okC = run(scriptPath, "--carry-owner-accepted");
+    assert.equal(okC.status, 0, `carried e2e: the carried proof is written (${okC.stderr})`);
+    const mintedC = JSON.parse(readFileSync(codexPushProofPath(repo, carriedHead), "utf8"));
+    assert.equal(mintedC.carry.mode, "owner_accepted_carried", "carried e2e: mode owner_accepted_carried");
+    assert.equal(proofValid(mintedC, carriedHead, Date.now(), base), true, "carried e2e: the gates accept it for the logged head");
+    // The same carry written to DECISION_LOG.md instead is refused.
+    git("reset", "-q", "--hard", laterS);
+    write(LOG, `${logBefore}x\n`);
+    const wrongC = commitAll("carried entry in the big log");
+    const refusedC = run(scriptPath, "--carry-owner-accepted");
+    assert.equal(refusedC.status, 1, "carried e2e: the big log is refused for a staging PR");
+    assert.match(refusedC.stderr, /must only add the new file docs\/manual\/decision-log\.d\//);
+    assert.equal(existsSync(codexPushProofPath(repo, wrongC)), false, "carried e2e: nothing written");
   } finally {
     rmSync(repo, { recursive: true, force: true, maxRetries: 5 });
     rmSync(transcripts, { recursive: true, force: true, maxRetries: 5 });

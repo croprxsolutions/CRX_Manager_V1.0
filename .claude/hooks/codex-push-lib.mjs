@@ -1753,16 +1753,18 @@ function reviewProofValid(data, headSha, nowMs, ranKey, expectedBaseSha, maxAgeM
 // commit only updated the records after a live migration apply.
 // An "owner_accepted" carry (Mason, 2026-11-10) keeps the same base: the reviewed
 // run found BLOCKER/HIGH findings, Mason accepted every one by `accept <code>`, and
-// the one new commit only adds that DECISION_LOG.md entry (sol-accept-lib.mjs).
+// the one new commit only adds that decision-log entry (sol-accept-lib.mjs ownerAcceptLogTarget).
 const CARRY_SHA_RE = /^[0-9a-f]{40}$/i;
 export function carriedSolProof(data) {
   const carry = data?.carry;
   return data?.codex_ran === false
     && data.carried_forward === true
     && !!carry && typeof carry === "object"
-    && (carry.mode === "restamp" || carry.mode === "post_apply" || carry.mode === "owner_accepted"
+    // "owner_accepted_carried" (Mason, 2026-11-22): the same, with each skip carried from an earlier
+    // version of the PR by Sol's own SAME label; the merge and apply gates trace each one to Mason.
+    && (carry.mode === "restamp" || carry.mode === "post_apply" || carry.mode === "owner_accepted" || carry.mode === "owner_accepted_carried"
       ? carry.from_base === data.base_sha
-        && (carry.mode !== "owner_accepted" || (Array.isArray(data.owner_accepted) && data.owner_accepted.length > 0))
+        && (!carry.mode.startsWith("owner_accepted") || (Array.isArray(data.owner_accepted) && data.owner_accepted.length > 0))
       // Owner-accepted findings never carry onto a newer base (Mason, 2026-11-22, #2226), whichever writer made the proof.
       : (carry.mode === "disjoint" || carry.mode === "collision_check") && carry.from_base !== data.base_sha
         && carry.root_review?.owner_accepted !== true && !("owner_accepted" in data)

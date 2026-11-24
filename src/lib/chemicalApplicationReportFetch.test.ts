@@ -68,9 +68,13 @@ const PRODUCT_LABEL_ROWS = [
  *  - jobs:     .select(...).eq('id', jobId).maybeSingle()  -> { data: jobRow }
  *  - products: .select(...).in('id', pids)                 -> { data: labelRows }
  *  - profile_public_view: only hit when applicator_id is set (not in these tests)
+ *  - job_product_epa: .select(...).eq('job_id').in('product_id') -> { data: keptRows } (KI-195)
  */
-function wireSupabase(jobRow: unknown, labelRows: unknown) {
+function wireSupabase(jobRow: unknown, labelRows: unknown, keptRows: unknown = []) {
   mockFrom.mockImplementation((table: string) => {
+    if (table === 'job_product_epa') {
+      return { select: () => ({ eq: () => ({ in: () => Promise.resolve({ data: keptRows, error: null }) }) }) };
+    }
     if (table === 'jobs') {
       return {
         select: () => ({
@@ -171,5 +175,38 @@ describe('fetchChemicalApplicationReportData — billed-customer resolution', ()
     const data = await fetchChemicalApplicationReportData('job-1');
     expect(data).toBeNull();
     expect(mockResolveBilledCustomers).not.toHaveBeenCalled();
+  });
+});
+
+describe('fetchChemicalApplicationReportData — the EPA number the job kept (KI-195)', () => {
+  const resolved = { complete: true, customers: [{ customer_name: 'Parity Test Farm', account_number: 'PTF-11' }] };
+  const epaOf = async () => (await fetchChemicalApplicationReportData('job-1'))!.products[0].epa_registration;
+
+  it('prints the kept number, not a corrected catalog number', async () => {
+    wireSupabase(JOB_ROW, PRODUCT_LABEL_ROWS, [{ product_id: 'p1', epa_registration: '999-1', not_recorded: false }]);
+    mockResolveBilledCustomers.mockResolvedValue(resolved);
+    expect(await epaOf()).toBe('999-1');
+  });
+
+  it('prints Unknown for a product kept with no number, and Not recorded for a backfilled job', async () => {
+    mockResolveBilledCustomers.mockResolvedValue(resolved);
+    wireSupabase(JOB_ROW, PRODUCT_LABEL_ROWS, [{ product_id: 'p1', epa_registration: null, not_recorded: false }]);
+    expect(await epaOf()).toBe('Unknown');
+    wireSupabase(JOB_ROW, PRODUCT_LABEL_ROWS, [{ product_id: 'p1', epa_registration: null, not_recorded: true }]);
+    expect(await epaOf()).toBe('Not recorded');
+  });
+
+  it('the batch summaries (keptEpa: false) never read the kept numbers and keep the catalog number', async () => {
+    wireSupabase(JOB_ROW, PRODUCT_LABEL_ROWS, [{ product_id: 'p1', epa_registration: '999-1', not_recorded: false }]);
+    mockResolveBilledCustomers.mockResolvedValue(resolved);
+    const data = await fetchChemicalApplicationReportData('job-1', { keptEpa: false });
+    expect(data!.products[0].epa_registration).toBe('123-45');
+    expect(mockFrom.mock.calls.map((c) => c[0])).not.toContain('job_product_epa');
+  });
+
+  it('prints the catalog number when the job kept none (not yet sprayed)', async () => {
+    wireSupabase(JOB_ROW, PRODUCT_LABEL_ROWS, []);
+    mockResolveBilledCustomers.mockResolvedValue(resolved);
+    expect(await epaOf()).toBe('123-45');
   });
 });

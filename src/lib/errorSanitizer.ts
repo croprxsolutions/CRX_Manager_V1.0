@@ -522,6 +522,9 @@ export function sanitizeError(error: unknown): string {
   if (/^DELIVERY_NOT_COMPLETED:.*receipt/s.test(message)) {
     return 'Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.';
   }
+  if (/^RECEIPT_HANDLED_ADMIN_ONLY(?::|$)/.test(message)) {
+    return 'Nothing was changed. Only an admin can mark a customer receipt handled.';
+  }
   if (/^DELIVERY_RECEIPT_CHANGED(?::|$)/.test(message)) {
     return 'Nothing was changed. This delivery\'s receipt was queued again since. Reload the page.';
   }

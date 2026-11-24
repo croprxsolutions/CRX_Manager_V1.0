@@ -10,7 +10,8 @@ Each lane writes only its own section; a slice 2 or 3 lane adds its own section 
 |---|---|---|
 | Master copies (SPEC, contracts, scenarios, build plan) | IN REVIEW | Draft PR #2415; Sol rounds 1 and 2 and the Opus buildability review resolved 2026-11-24 |
 | Mason's go-ahead to start slice 0 / 1 | GO (staging only) | Mason 2026-11-24: "Yes, all four" (slice 0–1 batch). Slices 2–3 need their own go; nothing goes live without his yes at that time |
-| Chem Man import | WAITING ON MASON | Export not made yet (2026-11-24). Mention once in the first captain digest, then again only when FP-1 is VERIFIED on staging and the import is next. Does not block slice 0 or FP-1 |
+| Chem Man import | DEFERRED until the field build is done (Mason, 2026-11-24) | Mason: not doing the export now; wait until the build is done. Do not ask for the export file until then |
+| Test data | 10 TEST fields on staging | Testing uses the 10 fake TEST fields set up on staging (2026-11-24), not a Chem Man import |
 
 ## Mason batches (one message per slice; Claude's recommendation first)
 
@@ -22,7 +23,7 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 | 0–1 | Date for Taha's live reset (#2407), and the yes to fill, re-stamp and apply it | A date before mid-December, agreed with Taha | **Done**: already applied live 2026-11-24 07:09 UTC (see Slice 0) |
 | 0–1 (added later) | Any staging-only migration that changes today's live billing (only if slice 0 finds one; asked before the release that carries it, not before the go) | Per slice 0 step 3, with the before-and-after customer effect | |
 | 0–1 | Drop the kit's extra `I approve` for non-destructive field migrations (FP-1, FP-3, FP-4, engine grants) | Yes | **Yes** (2026-11-24). Mason 2026-11-24 (slice 0–1 batch): no extra kit `I approve` for non-destructive field migrations; they apply under AGENTS.md › Autonomous landing (Taha's `Ready to merge`, the migration-apply proof gate). Mason's yes stays for anything the repo's guard classes as destructive (it asks him itself), Taha's reset, logins and roles, Edge Function deploys, production switches, `field_billing_start_date` and the live Chem Man import. |
-| 0–1 | Where the Chem Man export file lives (private, outside the repo), and the yes for the one live import after the reset | A private folder Mason names | **Later**: no export yet; asked again when FP-1 is VERIFIED (see Chem Man import above) |
+| 0–1 | Where the Chem Man export file lives (private, outside the repo), and the yes for the one live import after the reset | A private folder Mason names | **Deferred** until the field build is done (Mason, 2026-11-24; see Chem Man import above) |
 | 0–1 | Staging test login for any role missing from `docs/reference/qa-testing.md` | Create only what is missing | **Yes** (2026-11-24): missing roles only, staging only |
 | 2 | Go for slice 2; applicator extra-field permission; the mix-site account; `field_batch_stock_enabled` on in production at release; book the posting window with Taha | Yes to each | |
 | 3 | Go for slice 3; Edge Function deploy; at release, in order: the billing switch-on date and the pilot job (chosen from the open-job list), the pilot draft checked by hand, posting on for the pilot set only, then (after the pilot is checked on statements) posting on for everyone | Yes to each, in that order | |
@@ -52,7 +53,7 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 | Item | State | Proof / link | Note |
 |---|---|---|---|
 | FP-1 field splits + payer notes | IN PROGRESS | branch `feat/field-1.1-fp1-splits` | migration `20270303120000_field_split_versions`; Docker proof, Luna, Sol, then the PR. Field Setup screen PR: owned by the Field Setup screen lane (`feat/field-1.1-setup-screen`); merges only after FP-1 is VERIFIED on staging |
-| Chem Man field import | WAITING ON MASON | | needs Mason's export (private folder he names); trial on a local copy after FP-1; live after his yes |
+| Chem Man field import | DEFERRED | | until the field build is done (Mason, 2026-11-24); then his export (private folder he names), a trial on a local copy, live after his yes. Testing meanwhile uses the 10 TEST fields on staging |
 | FP-2 billable acres | PARKED | | until after 2026-12-15 (its quote-to-job change is in Taha's quotes area); then with Taha's review |
 
 ## Slice 1 · paperwork

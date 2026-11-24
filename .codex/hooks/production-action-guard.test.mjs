@@ -624,6 +624,20 @@ try {
   });
   assert.equal(laneMerge.blocked, true, "a staging merge in Taha's areas is refused");
   assert.match(laneMerge.reason, /TAHA LANE BLOCK — #5 is refused because it changes Taha's areas \(src\/pages\/QuoteBuilder\.tsx\)/, "and names the file");
+  // Taha's own Approve on the PR's head lifts the block in the Codex gate too; one on an older commit does not (#2406).
+  const tahaReview = (commitId) => (args) => (args[0] === "api" && /\/pulls\/5\/reviews\?/.test(String(args[2] ?? ""))
+    ? JSON.stringify({ user: { login: "TahaKhanAbdalli" }, state: "APPROVED", commit_id: commitId, submitted_at: "2026-11-24T05:00:00Z" })
+    : args[0] === "api" && /\/issues\/5\/comments\?/.test(String(args[2] ?? "")) ? "" : ordinaryPrJson);
+  const signedOff = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: laneNow, runGh: tahaReview(ordinary.sha), prFiles: quoteFiles,
+  });
+  assert.doesNotMatch(signedOff.reason ?? "", /TAHA LANE/, "Taha's Approve on the head lets the merge on to the next gate");
+  const staleSignOff = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: laneNow, runGh: tahaReview("0".repeat(40)), prFiles: quoteFiles,
+  });
+  assert.match(staleSignOff.reason ?? "", /TAHA LANE BLOCK/, "an Approve on an older commit does not");
   const laneCode = /taha override #5 (\d{6})/.exec(laneMerge.reason)?.[1];
   assert.ok(laneCode, "and gives Mason the exact line to send");
   assert.equal(recordTahaLaneOverride({ dirs: skipStateDirs([ordinary.repo]), pullRequest: 5, code: laneCode, now: laneNow }).ok, true, "Mason's line records the override");

@@ -294,7 +294,22 @@ eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "COMMENTED", co
 eq(tahaApprovedHead({ headSha: A, reviews: [{ user: mason, state: "APPROVED", commit_id: A }], comments: [] }), false, "Mason's account (shared with agents) does not count");
 const at = { created_at: "2026-11-24T06:00:00Z", updated_at: "2026-11-24T06:00:00Z" };
 eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ ...at, user: taha, body: `Ready to merge: ${A.slice(0, 12)}` }] }), true, "his Ready to merge line for this commit counts");
-eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ ...at, user: taha, body: `Ready to merge: \`${A.slice(0, 12)}\`.` }] }), true, "backticks and a period are fine");
+eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ ...at, user: taha, body: `Ready to merge: \`${A.slice(0, 12)}\`.` }] }), false, "one line for both gates: the apply gate's, so no backticks or period (Taha's review of #2406, LOW 1)");
+// Taha's review of #2406, LOW 3: look-alikes that must not count.
+for (const [row, why] of [
+  [{ ...at, user: taha, body: "**Technical review only; not an OK to merge (lane PR, needs Taha's OK).**" }, "his review header"],
+  [{ ...at, user: taha, body: `> Ready to merge: ${A.slice(0, 12)}` }, "a quoted Ready line"],
+  [{ ...at, user: taha, body: `Ready to merge: ${A.slice(0, 12)}\nOne more thing first.` }, "a Ready line with notes under it"],
+  [{ ...at, user: { login: "TahaKhanAbdalli2" }, body: `Ready to merge: ${A.slice(0, 12)}` }, "a look-alike login"],
+]) eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [row] }), false, `${why} is not a sign-off`);
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "COMMENTED", commit_id: A, body: `Ready to merge: ${A.slice(0, 12)}` }], comments: [] }), false, "a COMMENTED review whose body is a Ready line is not a sign-off");
+// LOW 2: his latest deciding review wins, and requesting changes takes a sign-off back.
+const rv = (state, commit_id, submitted_at) => ({ user: taha, state, commit_id, submitted_at });
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A, "2026-11-24T05:00:00Z"), rv("CHANGES_REQUESTED", A, "2026-11-24T05:30:00Z")], comments: [] }), false, "Approve then Request changes on the same head: held");
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A, "2026-11-24T05:00:00Z"), rv("COMMENTED", A, "2026-11-24T05:30:00Z")], comments: [] }), true, "Approve then a plain comment review: still approved, as on GitHub");
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A, "2026-11-24T05:00:00Z"), rv("DISMISSED", A, "2026-11-24T05:30:00Z")], comments: [] }), false, "a dismissed approval no longer counts");
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("CHANGES_REQUESTED", A, "2026-11-24T07:00:00Z")], comments: [{ ...at, user: taha, body: `Ready to merge: ${A.slice(0, 12)}` }] }), false, "a Ready line from before his Request changes is taken back");
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("CHANGES_REQUESTED", A, "2026-11-24T05:00:00Z")], comments: [{ ...at, user: taha, body: `Ready to merge: ${A.slice(0, 12)}` }] }), true, "a Ready line after his Request changes counts");
 eq(tahaApprovedHead({ headSha: B, reviews: [], comments: [{ ...at, user: taha, body: `Ready to merge: ${A.slice(0, 12)}` }] }), false, "a Ready line for an older commit does not");
 eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ ...at, user: taha, body: `Not yet. Ready to merge: ${A.slice(0, 12)} after the fix` }] }), false, "the line must be the whole comment");
 eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [{ ...at, user: mason, body: `Ready to merge: ${A.slice(0, 12)}` }] }), false, "Mason's account cannot post it for Taha");

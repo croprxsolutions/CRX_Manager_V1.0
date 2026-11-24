@@ -16,12 +16,14 @@
 // coderabbit-skip-lib.mjs: an agent that runs the prompt hook by hand with a forged
 // message gets through; this is an honest-mistake net, not a security boundary.
 //
-// The Codex production gate imports this at startup: Node built-ins and codex-push-lib only.
+// The Codex production gate imports this at startup: Node built-ins, codex-push-lib and teammate-comments-lib
+// (which imports nothing) only.
 
 import { randomInt } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ghApiRepoPath } from "./codex-push-lib.mjs";
+import { READY_TO_MERGE_LINE } from "./teammate-comments-lib.mjs";
 
 // End of Dec 15 in Central time (06:00 UTC on Dec 16). After it the block is off.
 export const TAHA_LANE_UNTIL_MS = Date.UTC(2026, 11, 16, 6, 0, 0);
@@ -388,25 +390,31 @@ export function tellTahaOnGitHub({ repo, gh, pullRequest, body }) {
 // Taha's own sign-off on the exact head lifts the block with no code (Mason, 2026-11-24: #2382 needed a code after
 // Taha had reviewed and accepted it). Only his account counts: agents post as Mason, never as Taha.
 const TAHA_LOGIN = "tahakhanabdalli";
-const READY_LINE_RE = /^\s*Ready to merge:\s*`?([0-9a-f]{12,40})`?\s*\.?\s*$/i;
+const DECISIVE_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 
 /**
- * True when Taha approved this PR at exactly `headSha`: a GitHub APPROVED review on that commit,
- * or a comment that is only `Ready to merge: <12+ chars of that commit>`. `reviews` / `comments`: GitHub's
- * REST rows ({user:{login}, state, commit_id} / {user:{login}, body}); anything unreadable is false.
+ * True when Taha approved this PR at exactly `headSha`: his latest deciding review (APPROVED, CHANGES_REQUESTED or
+ * DISMISSED) is APPROVED on that commit, or he commented only `Ready to merge: <12+ chars of that commit>` (the apply
+ * gate's own line, READY_TO_MERGE_LINE), unedited, after his latest CHANGES_REQUESTED. To take a sign-off back he
+ * deletes the line or requests changes (Taha's review of #2406, LOW 2). `reviews` / `comments`: GitHub's REST rows,
+ * oldest first ({user:{login}, state, commit_id, submitted_at} / {user:{login}, body, created_at, updated_at});
+ * anything unreadable is false.
  */
 export function tahaApprovedHead({ reviews, comments, headSha }) {
-  if (!usableHead(headSha)) return false;
+  if (!usableHead(headSha) || !Array.isArray(reviews) || !Array.isArray(comments)) return false;
   const head = headSha.toLowerCase();
   const isTaha = (row) => String(row?.user?.login ?? "").trim().toLowerCase() === TAHA_LOGIN;
-  const approved = Array.isArray(reviews) && reviews.some((r) => isTaha(r) && String(r?.state ?? "").toUpperCase() === "APPROVED" && String(r?.commit_id ?? "").toLowerCase() === head);
-  const ready = Array.isArray(comments) && comments.some((c) => {
+  const deciding = reviews.filter((r) => isTaha(r) && DECISIVE_REVIEW_STATES.has(String(r?.state ?? "").toUpperCase())).at(-1);
+  const state = String(deciding?.state ?? "").toUpperCase();
+  if (state === "APPROVED" && String(deciding?.commit_id ?? "").toLowerCase() === head) return true;
+  const heldSince = state === "CHANGES_REQUESTED" ? Date.parse(String(deciding?.submitted_at ?? "")) : -Infinity;
+  if (Number.isNaN(heldSince)) return false;
+  return comments.some((c) => {
     // An edited comment does not count: repo admins (Mason's account, which agents use) can edit Taha's comments.
     const unedited = typeof c?.created_at === "string" && c.created_at === c?.updated_at;
-    const m = isTaha(c) && unedited && READY_LINE_RE.exec(String(c?.body ?? ""));
+    const m = isTaha(c) && unedited && Date.parse(c.created_at) > heldSince && READY_TO_MERGE_LINE.exec(String(c?.body ?? ""));
     return Boolean(m) && head.startsWith(m[1].toLowerCase());
   });
-  return approved || ready;
 }
 
 /** Reads the PR's reviews and comments from GitHub and asks tahaApprovedHead; false when unreadable. */
@@ -417,7 +425,7 @@ export function tahaApprovedOnGitHub({ repo, gh, number, headSha }) {
   try {
     return tahaApprovedHead({
       headSha,
-      reviews: rows(`${repoPath}/pulls/${number}/reviews?per_page=100`, ".[] | {user: {login: .user.login}, state, commit_id} | tojson"),
+      reviews: rows(`${repoPath}/pulls/${number}/reviews?per_page=100`, ".[] | {user: {login: .user.login}, state, commit_id, submitted_at} | tojson"),
       comments: rows(`${repoPath}/issues/${number}/comments?per_page=100`, ".[] | {user: {login: .user.login}, body, created_at, updated_at} | tojson"),
     });
   } catch { return false; }
@@ -454,7 +462,7 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
   return `${prefix}: TAHA LANE BLOCK — #${pullRequest || "?"} is refused because ${problem.reason}. ` +
     "Until Dec 15 agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) " +
     "or change this block, whatever OK line the PR has (Mason to Taha, 2026-11-22). Leave it for Taha: post a PR comment or a KI. " +
-    `It merges once Taha approves this commit on GitHub or comments \`Ready to merge: ${String(headSha ?? "").slice(0, 12)}\` from his own account. ` +
+    `It merges once Taha approves this commit on GitHub or comments \`Ready to merge: ${String(headSha ?? "").slice(0, 12)}\` from his own account (he takes it back by deleting that line or requesting changes). ` +
     (code
       ? `Only if Mason wants it merged anyway: tell him why in one line and ask him to send, as a message of its own: taha override #${pullRequest} ${code} ` +
         "(it covers this PR at its current commit only; a new push needs a new code)"

@@ -28,6 +28,8 @@ describe('loaderWater', () => {
       .toMatchObject({ water_gal: null, unsized: ['Bad'], missing: ['NoAmount'] });
     expect(loaderWaterNotes(loaderWater(100, [p('X', 1, 'gal', null)]))).toEqual(['Water to add not shown: set liquid/dry on the product for X.']);
     expect(fmtLoaderWater({ water_gal: null })).toBe('—');
+    // Known liquids already over the tank still warn, even with water unknown (Terra HIGH).
+    expect(loaderWater(100, [p('L', 120, 'gal'), p('X', 1, 'gal', null)])).toMatchObject({ water_gal: null, over: true, unknown: ['X'] });
   });
 
   it('sizes every load in both tank modes and the batch', () => {

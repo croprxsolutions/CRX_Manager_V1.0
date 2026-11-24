@@ -54,11 +54,12 @@ export function loaderWater(finishedGal: number, products: readonly WaterProduct
     else if (gal === 'missing') missing.push(product.product_name);
     else liquid += gal;
   }
-  if (unknown.length + unsized.length + missing.length > 0) {
-    return { finished_gal: finishedGal, water_gal: null, over: false, unknown, unsized, missing };
-  }
   // Compare before rounding so a sliver over the finished gallons still warns; the epsilon absorbs float drift.
+  // The known liquids alone can already overfill, so this warns even when water itself is not known.
   const over = liquid - finishedGal > 1e-9;
+  if (unknown.length + unsized.length + missing.length > 0) {
+    return { finished_gal: finishedGal, water_gal: null, over, unknown, unsized, missing };
+  }
   return { finished_gal: finishedGal, water_gal: over ? 0 : Math.max(0, round4(finishedGal - liquid)), over, unknown, unsized, missing };
 }
 

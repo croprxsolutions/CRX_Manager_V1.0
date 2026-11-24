@@ -451,7 +451,7 @@ export default function ProductDetail() {
   const costHistoryRead = useLoad<CostHistory[]>(isAdmin && !isNew && id ? `cost-history:${id}` : null, async () => {
     // cost_history also logs price-only changes (cost unchanged) for Sell Price History. PostgREST cannot
     // compare two columns, so read every row and keep the newest 20 whose cost really changed.
-    const { data, error } = await fetchAllRows<CostHistory>((from, to) => pageWithList(supabase
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('cost_history')
       .select('*', { count: 'exact' })
       .eq('product_id', id!)
@@ -462,7 +462,7 @@ export default function ProductDetail() {
       .range(from, to)));
     if (error) throw error;
     if (!Array.isArray(data)) throw new Error('cost history read returned no list');
-    return data.filter((row) => row.old_cost !== row.new_cost).slice(0, 20);
+    return (data as CostHistory[]).filter((row) => row.old_cost !== row.new_cost).slice(0, 20);
   }, { report: { tags: { read: 'product_detail_cost_history' } } });
   const reloadCostHistory = costHistoryRead.reload;
   const costHistory = costHistoryRead.status === 'loaded' ? costHistoryRead.data : NO_ROWS;

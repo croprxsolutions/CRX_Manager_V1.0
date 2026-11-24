@@ -41,13 +41,13 @@ import {
   reviewVendorAlias,
   stageSupplierPriceImport,
   stageVendorAlias,
-  supplierUnitCostCents,
   uploadSupplierSourcePdf,
   upsertProductSupplierLink,
   type SupplierImportReview,
   type SupplierImportReviewRow,
   type SupplierPricingWorkspace,
 } from '../lib/supplierPricing';
+import { supplierUnitCostCents } from '../lib/supplierUnitCost';
 import {
   generateSupplierQuoteWorkbook,
   MAX_SUPPLIER_QUOTE_BYTES,

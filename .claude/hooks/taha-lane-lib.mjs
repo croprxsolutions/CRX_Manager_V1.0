@@ -101,6 +101,10 @@ const TAHA_LANE_FUNCTIONS_RE = new RegExp("^_?(?:complete_delivery|start_and_com
   "|assert_order_line_fits|create_return|receive_return|generate_finance_charges|create_delivery_with_items|create_quick_delivery" +
   "|edit_delivery|fix_delivery|correct_delivery_brands|batch_cancel_deliveries|delivery_line_matches_order_line" +
   "|enforce_delivery_items_parent_lock|prebook_quick_delivery_inventory" +
+  // Taha's review of #2408: read-only billing reports, the month lock, and NEW-setting triggers the write sweep missed.
+  "|get_customer_year_end_summary|get_batch_year_end_summaries|check_period_open|preview_finance_charges" +
+  "|get_sales_summary_report|get_sales_detail_report|get_gross_sales_report|get_profitability_report|financial_dashboard_summary" +
+  "|bump_order_edit_version|prevent_oifa_edit_after_post|guard_order_reopen_inactive_product" +
   ")(?=_|$)|^_?get_ar_|accounting_period|credit_memo", "i");
 const isLaneFunction = (name) => TAHA_LANE_FUNCTIONS_RE.test(name) || isLaneName(name);
 

@@ -1,6 +1,6 @@
 # Container unit fill (Product Master setup): tracking
 
-**Status, 2026-11-24 (Central): APPLIED. Mason approved in chat ("yes run the fill for the 572"); 572 rows filled live at 11:40:48 AM Central (17:40:48 UTC). 12 left out (section 4) wait on Mason.**
+**Status, 2026-11-24 (Central): APPLIED. Mason approved in chat ("yes run the fill for the 572"); 572 rows filled live at 11:40:48 AM Central (17:40:48 UTC). The 11 held rows were settled with Mason and written at 11:44:11 AM (section 4); only the [UI-TEST] row stays blank. Incomplete setup now 344.**
 
 ## 0. Before and after (live, read-only re-count)
 
@@ -50,6 +50,8 @@ The staging database has 0 fillable rows (fake data), so the exact UPDATE was ru
 | Water W/ D-Chlorinator | No container size |
 | Tempo SC Ultra - 8 oz | No container size; stocked as Ea though named 8 oz |
 | Accelerate Seed Treatment, CruiserMaxx APX, Ilevo Seed Treatment, Saltro, Trilex 2000, Vibrance Trio, Victrato (all "Per Unit") | No container size, so they stay "Incomplete setup" anyway; unit is not locked before the size is known |
+
+**Settled 2026-11-24 (Mason: "citric is 330g container size but we sell it by the gallon"; "all rest are correct").** All 11 written live at 11:44:11 AM Central by another agent session, verified read-only: Citric Acid 50% - 330G Tote container size 265 -> 330, unit Gal (stock unit Gal and full-tote-only off are unchanged, so it still sells by the gallon); Absolute Maxx - 270: 270 Gal; Water W/ D-Chlorinator: 1 Gal; Tempo SC Ultra - 8 oz: 1 Ea; the 7 "Per Unit" seed treatments: 1 Unit. [UI-TEST] Acuron GT left as is. Re-count after: 1 active product with a blank container unit (the test row), 0 units that differ from the stock unit, "Incomplete setup" 344.
 
 Also worth a look later (filled, because the unit is right): "Autumn Super 51 WDG" has container size 1 Dry oz; both "Gen Callisto ... - 1 or 2.5" rows are named for two sizes but set to 2.5 Gal.
 

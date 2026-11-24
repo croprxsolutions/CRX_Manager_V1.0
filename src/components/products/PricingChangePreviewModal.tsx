@@ -30,7 +30,7 @@ const ERROR_MESSAGES: Record<string, string> = {
     'Say where the new price or cost came from, such as a supplier quote (the price_source column on a price sheet).',
   // The database refuses these before saving anything; say which cell rule broke, not the code.
   PRICING_DOLLARS_INVALID:
-    'A price or cost on this row is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34: no $ sign, commas, letters or minus sign. A price-driven row needs all three tier prices; a margin-driven row needs the cost.',
+    'A price or cost on this row is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34: no $ sign, commas, letters or minus sign. Every row needs a cost; a price-driven row also needs all three tier prices.',
   PRICING_PRICE_INVALID:
     'A tier price must be 0 or more, with at most 2 decimals.',
   PRICING_COST_INVALID:

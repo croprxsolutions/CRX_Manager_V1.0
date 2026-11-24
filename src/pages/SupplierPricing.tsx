@@ -58,7 +58,7 @@ const today = () => localToday();
 
 // The staging RPC flags rows with codes; staff read the rule instead of the code.
 const ROW_ERROR_MESSAGES: Record<string, string> = {
-  PRICE_UNIT_MISMATCH: "The price unit is not the unit on this product's supplier link. Use the link's unit (Quick quote fills it in when you pick the product).",
+  PRICE_UNIT_MISMATCH: "The price unit is not the unit on this product's supplier link, so this cost cannot be compared. Do not just change the unit: either convert the cost to the link's unit (a $30-per-gallon quote on a 5-gallon case link is $150 per case), or link the product in the unit the supplier quoted.",
   PRICE_UNIT_REQUIRED: 'Enter the supplier price unit.',
   COST_INVALID: 'The cost is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34.',
   COST_MUST_BE_POSITIVE: 'The cost must be more than $0.',

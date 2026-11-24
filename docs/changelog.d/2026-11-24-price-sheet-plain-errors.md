@@ -10,6 +10,6 @@ Prices and costs saved exactly; this change is wording and layout only. Nothing 
 - Products: the "Pricing .xlsx" tooltip and toast say the search box does not narrow the file. The file name
   uses the Central business day.
 - Margin floor help text now says the price sheet warns about a below-floor price.
-- Supplier Pricing: each staged cost shows "per <unit>"; row errors are plain English.
+- Supplier Pricing: each staged cost shows "per <unit>", or "for N <unit>" when it is a package total; row errors are plain English, and a unit mismatch says to convert the cost, not just relabel it.
 - Partly addresses the KI-204 pricing workbook and supplier quote items. Still open: telling a used sheet apart
   from an expired one, and showing the converted per-unit cost before approval (both need database changes).

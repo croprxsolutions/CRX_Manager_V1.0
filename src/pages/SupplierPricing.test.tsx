@@ -240,7 +240,8 @@ describe('SupplierPricing page', () => {
     // A cost for a 2-unit package is that package's total, never "per" one unit (Sol HIGH).
     expect(screen.getByText('for 2 Gal')).toBeInTheDocument();
     expect(screen.queryByText('per Gal')).not.toBeInTheDocument();
-    expect(screen.getByText(/The price unit is not the unit on this product's supplier link/)).toBeInTheDocument();
+    // A unit mismatch must say to convert the cost, never to only relabel the unit (Sol HIGH).
+    expect(screen.getByText(/The price unit is not the unit on this product's supplier link.*Do not just change the unit: either convert the cost/)).toBeInTheDocument();
     expect(screen.queryByText(/PRICE_UNIT_MISMATCH/)).not.toBeInTheDocument();
 
     await waitFor(() => expect(mockGetBasisWorkspace).toHaveBeenCalledWith('product-1'));

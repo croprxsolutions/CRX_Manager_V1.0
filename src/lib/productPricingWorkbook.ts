@@ -301,13 +301,13 @@ export async function validatePricingWorkbookArchive(arrayBuffer: ArrayBuffer): 
     );
   }
   if (arrayBuffer.byteLength < ZIP_END_OF_CENTRAL_DIRECTORY_BYTES) {
-    throw new PricingWorkbookFormatError('This file could not be read as an Excel price sheet. Open it in Excel, save it as .xlsx, and upload it again.');
+    throw new PricingWorkbookFormatError('This file could not be read as an Excel workbook. Open it in Excel, save it as .xlsx, and upload it again.');
   }
 
   const view = new DataView(arrayBuffer);
   const endOffset = findZipEndOfCentralDirectory(view);
   if (endOffset < 0) {
-    throw new PricingWorkbookFormatError('This file could not be read as an Excel price sheet. Open it in Excel, save it as .xlsx, and upload it again.');
+    throw new PricingWorkbookFormatError('This file could not be read as an Excel workbook. Open it in Excel, save it as .xlsx, and upload it again.');
   }
 
   const commentLength = view.getUint16(endOffset + 20, true);

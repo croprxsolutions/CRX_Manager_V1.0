@@ -4,6 +4,9 @@
 // Field billing (field invoices, spray jobs, blend tickets) stays Mason's.
 // #1980 and #1989 merged after Taha asked; a written note did not stop them.
 //
+// Taha's own GitHub Approve on the PR's current commit lets it through with no code
+// (Mason, 2026-11-24; comments do not count, Taha 2026-11-24).
+//
 // Mason can still let ONE named PR through: the merge refusal issues a 6-digit
 // code for that PR at its current head, and his chat message `taha override #<PR> <code>`
 // (taha-lane-prompt.mjs) turns it into a 24-hour override for that PR at that head
@@ -93,7 +96,19 @@ function isLaneName(name) {
 // Every name may carry a leading "_": the impls and wrappers behind the public names (Taha, #2382 MED 1).
 const TAHA_LANE_FUNCTIONS_RE = new RegExp("^_?(?:complete_delivery|start_and_complete_delivery|void_delivery|cancel_delivery|void_order|cancel_order" +
   "|update_order_items|price_order|apply_write_off|reverse_write_off|lock_accounting_months|get_customer_balance|get_monthly_summary" +
-  "|prevent_order_shares)(?=_|$)|^_?get_ar_|accounting_period|credit_memo", "i");
+  "|prevent_order_shares" +
+  // A sweep of staging (2026-11-24, Taha's ask via Mason): functions whose bodies write his tables but whose names
+  // carry no lane word. Field-billing ones (field app, blend ticket, job, application) stay Mason's and are left out.
+  "|create_direct_order|create_rush_order|bulk_import_order|restore_cancelled_order|close_undelivered_order_remainder" +
+  "|bump_order_item_edit_version|check_unpriced_orders|trg_recalc_order_totals|guard_order_item_shares|validate_order_shares_total" +
+  "|assert_order_line_fits|create_return|receive_return|generate_finance_charges|create_delivery_with_items|create_quick_delivery" +
+  "|edit_delivery|fix_delivery|correct_delivery_brands|batch_cancel_deliveries|delivery_line_matches_order_line" +
+  "|enforce_delivery_items_parent_lock|prebook_quick_delivery_inventory" +
+  // Taha's review of #2408: read-only billing reports, the month lock, and NEW-setting triggers the write sweep missed.
+  "|get_customer_year_end_summary|get_batch_year_end_summaries|check_period_open|preview_finance_charges" +
+  "|get_sales_summary_report|get_sales_detail_report|get_gross_sales_report|get_profitability_report|financial_dashboard_summary" +
+  "|bump_order_edit_version|prevent_oifa_edit_after_post|guard_order_reopen_inactive_product" +
+  ")(?=_|$)|^_?get_ar_|accounting_period|credit_memo", "i");
 const isLaneFunction = (name) => TAHA_LANE_FUNCTIONS_RE.test(name) || isLaneName(name);
 
 // A migration is Taha's when its SQL writes to, locks or changes one of these tables, or creates,
@@ -132,6 +147,10 @@ const FIELD_RES = { write: writeRe(tableRe(FIELD_TABLES)), read: readRe(tableRe(
 const ROW_LOCK_RE = /\bfor\s+(?:no\s+key\s+)?update\b|\bfor\s+(?:key\s+)?share\b/i;
 // Booking stock (Taha on #2382): a write that sets inventory.quantity_prebooked, or a function body that does.
 const PREBOOKED_RE = /\bset\b(?:(?!\bwhere\b)[^;])*?\bquantity_prebooked"?\s*=|\bquantity_prebooked"?\s*:=|\binto\s+[\w".]*\binventory"?\s*\([^)]*\bquantity_prebooked\b|\bset\s*\([^)]*\bquantity_prebooked\b|\b(?:column|add|drop|alter|rename)\s+(?:column\s+)?(?:if\s+(?:not\s+)?exists\s+)?"?quantity_prebooked\b/i;
+// Taha's #2382 LOW 2: a PL/pgSQL `NEW.quantity_prebooked = 0;` at a statement start, and RENAME COLUMN x TO quantity_prebooked.
+const PREBOOKED_MORE_RE = /(?:^|;|\bbegin\b|\bthen\b|\belse\b|\bloop\b)\s*(?:"?[\w$]+"?\s*\.\s*)?"?quantity_prebooked"?\s*=(?!=)|\brename\s+(?:column\s+)?[^;]*?\bto\s+"?quantity_prebooked\b/i;
+// The SET branch stops at the first WHERE, so a subquery's WHERE is blanked out first (LOW 2).
+const withoutParens = (t) => { let prev; do { prev = t; t = t.replace(/\([^()]*\)/g, "()"); } while (t !== prev); return t; };
 const QNAME = String.raw`(?:"?public"?\s*\.\s*)?"?([\w$]+)`;
 const FUNCTION_RE = new RegExp(String.raw`\b(?:create(?:\s+or\s+replace)?|alter)\s+(?:function|procedure|routine)\s+` + QNAME, "gi");
 // ALTER FUNCTION … RENAME TO <new name> (MED 4).
@@ -202,7 +221,7 @@ export function isTahaLaneSql(sql, { fieldBilling = false } = {}) {
   const text = withoutComments(sql);
   // Second pass joins string pieces ('UPDATE ' || 'invoices …'), so dynamic SQL built in parts still counts.
   const joined = text.replace(/'\s*\|\|\s*'/g, "");
-  if ([text, joined].some((t) => write.test(t) || PREBOOKED_RE.test(t))) return true;
+  if ([text, joined].some((t) => write.test(t) || PREBOOKED_RE.test(t) || PREBOOKED_MORE_RE.test(t) || PREBOOKED_RE.test(withoutParens(t)))) return true;
   // A row lock in the same statement as a read of his tables counts (Taha's review of #2382, LOW 9).
   if (text.split(";").some((statement) => ROW_LOCK_RE.test(statement) && read.test(statement))) return true;
   return functionNames(text).some(isLaneFunction);
@@ -382,14 +401,49 @@ export function tellTahaOnGitHub({ repo, gh, pullRequest, body }) {
   } catch { return false; }
 }
 
+// Taha's own sign-off on the exact head lifts the block with no code (Mason, 2026-11-24: #2382 needed a code after
+// Taha had reviewed and accepted it). Only his account counts: agents post as Mason, never as Taha.
+const TAHA_LOGIN = "tahakhanabdalli";
+const DECISIVE_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
+
+/**
+ * True only when Taha's latest deciding review (APPROVED, CHANGES_REQUESTED or DISMISSED) is an APPROVED review on
+ * exactly `headSha`. A comment, `Ready to merge:` line included, is not a sign-off (Taha, Slack 2026-11-24: Approve
+ * is the one sign-off, as in pr-readiness and ship.md). A dismissed review is deciding, so dismissing his Request
+ * changes never revives an older Approve; he approves again. `reviews`: GitHub's REST rows, oldest first
+ * ({user:{login}, state, commit_id}); anything unreadable is false.
+ */
+export function tahaApprovedHead({ reviews, headSha }) {
+  if (!usableHead(headSha) || !Array.isArray(reviews)) return false;
+  const isTaha = (row) => String(row?.user?.login ?? "").trim().toLowerCase() === TAHA_LOGIN;
+  const deciding = reviews.filter((r) => isTaha(r) && DECISIVE_REVIEW_STATES.has(String(r?.state ?? "").toUpperCase())).at(-1);
+  return String(deciding?.state ?? "").toUpperCase() === "APPROVED" && String(deciding?.commit_id ?? "").toLowerCase() === headSha.toLowerCase();
+}
+
+/** Reads the PR's reviews from GitHub and asks tahaApprovedHead; false when unreadable. */
+export function tahaApprovedOnGitHub({ repo, gh, number, headSha }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath || !usablePr(number) || !usableHead(headSha)) return false;
+  try {
+    const reviews = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/reviews?per_page=100`, "--jq", ".[] | {user: {login: .user.login}, state, commit_id} | tojson"]))
+      .split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+    return tahaApprovedHead({ headSha, reviews });
+  } catch { return false; }
+}
+
 /**
  * The merge gates' single call: null when the merge may go on, otherwise the
- * refusal text. With Mason's override for this PR and head, `tellTaha(body)`
+ * refusal text. `tahaApproved()` true (Taha signed off on this head) lets it through.
+ * With Mason's override for this PR and head, `tellTaha(body)`
  * must post the PR comment first (once per override); if it can't, the merge is refused.
  */
-export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, notice = () => {} }) {
+export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, notice = () => {}, tahaApproved = () => false }) {
   const problem = tahaLaneProblem({ files, now });
   if (!problem) return null;
+  if (tahaApproved()) {
+    notice(`${prefix}: TAHA LANE — Taha signed off on #${pullRequest} at ${headSha}, so it may merge.\n`);
+    return null;
+  }
   const override = findTahaLaneOverride({ dirs, pullRequest, headSha, now });
   if (override) {
     if (!override.tahaToldAt) {
@@ -408,6 +462,7 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
   return `${prefix}: TAHA LANE BLOCK — #${pullRequest || "?"} is refused because ${problem.reason}. ` +
     "Until Dec 15 agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) " +
     "or change this block, whatever OK line the PR has (Mason to Taha, 2026-11-22). Leave it for Taha: post a PR comment or a KI. " +
+    `It merges once Taha presses Approve on GitHub on this commit (${String(headSha ?? "").slice(0, 12)}) from his own account; a comment does not count, and a later Request changes or dismissal takes it back. ` +
     (code
       ? `Only if Mason wants it merged anyway: tell him why in one line and ask him to send, as a message of its own: taha override #${pullRequest} ${code} ` +
         "(it covers this PR at its current commit only; a new push needs a new code)"

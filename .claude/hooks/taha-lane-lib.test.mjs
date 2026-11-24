@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
   TAHA_LANE_UNTIL_MS, findTahaLaneOverride, isTahaLanePath, isTahaLaneSql, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
-  tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
+  tahaApprovedHead, tahaApprovedOnGitHub, tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
 } from "./taha-lane-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -192,7 +192,39 @@ for (const [sql, why] of [
   // Advisory Sol on #2382.
   ["UPDATE inventory SET (quantity_available, quantity_prebooked) = (100, 0);", "a tuple assignment"],
   ["ALTER TABLE inventory DROP quantity_prebooked;", "a drop without COLUMN"],
+  // Taha's #2382 LOW 2: three forms staging does not use yet.
+  ["CREATE FUNCTION public.t() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.quantity_prebooked = 0; RETURN NEW; END $$;", "a PL/pgSQL `=` assignment"],
+  ["CREATE FUNCTION public.t() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF x THEN quantity_prebooked = 0; END IF; END $$;", "a bare `=` after THEN"],
+  ["UPDATE public.inventory i SET quantity_available = (SELECT 1 FROM x h WHERE h.product_id = i.product_id), quantity_prebooked = 0;", "a SET after a subquery's WHERE"],
+  ["ALTER TABLE public.inventory RENAME COLUMN x TO quantity_prebooked;", "a rename to it"],
+  // Taha's review of #2408, LOW 3: the other statement starts.
+  ["CREATE FUNCTION public.t() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN v := 1; NEW.quantity_prebooked = 0; RETURN NEW; END $$;", "a `=` after `;`"],
+  ["CREATE FUNCTION public.t() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF x THEN v := 1; ELSE NEW.quantity_prebooked = 0; END IF; END $$;", "a `=` after ELSE"],
+  ["CREATE FUNCTION public.t() RETURNS void LANGUAGE plpgsql AS $$ BEGIN LOOP r.quantity_prebooked = 0; EXIT; END LOOP; END $$;", "a `=` after LOOP"],
 ]) ok(isTahaLaneSql(sql), `quantity_prebooked: ${why}`);
+ok(!isTahaLaneSql("CREATE FUNCTION public.t() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.quantity_prebooked_released = 0; RETURN NEW; END $$;"), "quantity_prebooked_released is another column");
+ok(!isTahaLaneSql("UPDATE inventory SET quantity_available = 1 WHERE quantity_prebooked = 0 AND (quantity_on_hand > 0);"), "a WHERE comparing quantity_prebooked is still a read");
+// Gap 1 (Taha via Mason, 2026-11-24): a "job" or "application" file name does not skip the SQL read.
+for (const name of ["20990101000000_job_fix.sql", "20990101000000_application_fix.sql"]) {
+  ok(tahaLaneProblem({ files: [mig(`supabase/migrations/${name}`, "UPDATE public.orders SET status = 'x';")], now: NOW }), `${name} writing orders is refused`);
+  ok(tahaLaneProblem({ files: [mig(`supabase/migrations/${name}`, "CREATE FUNCTION public.apply_write_off() RETURNS void AS $$ SELECT 1 $$;")], now: NOW }), `${name} redefining apply_write_off is refused`);
+}
+// Gap 2: his functions with no lane word, from a sweep of staging (2026-11-24), "_"-prefixed impls included.
+for (const fn of ["create_direct_order", "_create_rush_order_below_cost_impl_20260810", "bulk_import_order", "restore_cancelled_order",
+  "_close_undelivered_order_remainder_20260718", "bump_order_item_edit_version", "check_unpriced_orders", "trg_recalc_order_totals",
+  "guard_order_item_shares", "_validate_order_shares_total", "_assert_order_line_fits", "create_return", "_receive_return_intent_impl_20260812",
+  "generate_finance_charges", "create_delivery_with_items", "_create_quick_delivery_intent_impl_20260802", "edit_delivery", "fix_delivery",
+  "correct_delivery_brands", "batch_cancel_deliveries", "_delivery_line_matches_order_line", "_enforce_delivery_items_parent_lock",
+  "_prebook_quick_delivery_inventory",
+  // Taha's review of #2408, LOW 1 and LOW 2.
+  "get_customer_year_end_summary", "get_batch_year_end_summaries", "check_period_open", "preview_finance_charges",
+  "get_sales_summary_report", "get_sales_detail_report", "get_gross_sales_report", "get_profitability_report",
+  "financial_dashboard_summary", "bump_order_edit_version", "prevent_oifa_edit_after_post", "guard_order_reopen_inactive_product"]) {
+  ok(isTahaLaneSql(`CREATE OR REPLACE FUNCTION public.${fn}() RETURNS void AS $$ SELECT 1 $$;`), `redefining ${fn} is Taha's`);
+}
+for (const fn of ["complete_job", "save_field_app_invoice", "create_order_from_blend_ticket", "receive_po_items", "edit_deliveryman_profile"]) {
+  ok(!isTahaLaneSql(`CREATE OR REPLACE FUNCTION public.${fn}() RETURNS void AS $$ SELECT 1 $$;`), `${fn} stays out of his list`);
+}
 // Advisory Sol on #2382: ONLY after a comma, and function prefixes end at a name boundary.
 ok(isTahaLaneSql("TRUNCATE TABLE ONLY deliveries, ONLY invoices;"), "ONLY on a later list item");
 ok(!isTahaLaneSql("CREATE FUNCTION public.void_ordering_cache() RETURNS void AS $$ SELECT 1 $$;"), "void_ordering_cache is not void_order");
@@ -286,6 +318,33 @@ ok(/taha override #2242 777777/.test(pushed), "after a new push the block is bac
 const refusal = tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: lane, dirs, now: NOW });
 ok(/TAHA LANE BLOCK/.test(refusal) && /taha override #2300 \d{6}/.test(refusal), "a refusal gives Mason the exact line, PR included");
 eq(tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: f("src/pages/Deliveries.tsx"), dirs, now: NOW }), null, "outside the lane, nothing to do");
+// Taha's own GitHub Approve on the exact head lifts the block with no code (Mason, 2026-11-24).
+const taha = { login: "TahaKhanAbdalli" }, mason = { login: "masonwells1" };
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "APPROVED", commit_id: A }] }), true, "Taha's Approve on this commit counts");
+eq(tahaApprovedHead({ headSha: B, reviews: [{ user: taha, state: "APPROVED", commit_id: A }] }), false, "his Approve on an older commit does not");
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "COMMENTED", commit_id: A }] }), false, "a plain review comment is not a sign-off");
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: mason, state: "APPROVED", commit_id: A }] }), false, "Mason's account (shared with agents) does not count");
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: { login: "TahaKhanAbdalli2" }, state: "APPROVED", commit_id: A }] }), false, "a look-alike login does not count");
+eq(tahaApprovedHead({ headSha: A, reviews: [{ user: taha, state: "COMMENTED", commit_id: A, body: `Ready to merge: ${A.slice(0, 12)}` }] }), false, "a COMMENTED review whose body is a Ready line is not a sign-off");
+// Taha, Slack 2026-11-24: Approve is the only sign-off; a Ready to merge comment no longer lifts the block.
+const ready = { created_at: "2026-11-24T06:00:00Z", updated_at: "2026-11-24T06:00:00Z", user: taha, body: `Ready to merge: ${A.slice(0, 12)}` };
+eq(tahaApprovedHead({ headSha: A, reviews: [], comments: [ready] }), false, "his Ready to merge comment alone is not a sign-off");
+// His latest deciding review wins; requesting changes or dismissing takes a sign-off back.
+const rv = (state, commit_id) => ({ user: taha, state, commit_id });
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A), rv("CHANGES_REQUESTED", A)] }), false, "Approve then Request changes on the same head: held");
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A), rv("COMMENTED", A)] }), true, "Approve then a plain comment review: still approved, as on GitHub");
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A), rv("DISMISSED", A)] }), false, "a dismissed approval no longer counts");
+// Taha, Slack 2026-11-24: GitHub shows a dismissed Request changes as DISMISSED; his older Approve must not count again.
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A), rv("DISMISSED", A)], comments: [ready] }), false, "Approve, then a Request changes that was dismissed: still held, Ready line or not");
+eq(tahaApprovedHead({ headSha: A, reviews: [rv("APPROVED", A), rv("DISMISSED", A), rv("APPROVED", A)] }), true, "a fresh Approve after the dismissal counts");
+eq(tahaApprovedHead({ headSha: A, reviews: null }), false, "unreadable is not a sign-off");
+const fakeGh = (reviews) => (args) => { if (!args[2].includes("/reviews")) throw new Error("only reviews are read"); return reviews.map((r) => JSON.stringify(r)).join("\n"); };
+eq(tahaApprovedOnGitHub({ repo: undefined, number: 7, headSha: A, gh: fakeGh([{ user: taha, state: "APPROVED", commit_id: A }]) }), true, "read from GitHub: approved");
+eq(tahaApprovedOnGitHub({ repo: undefined, number: 7, headSha: A, gh: fakeGh([{ user: taha, state: "APPROVED", commit_id: A }, { user: taha, state: "DISMISSED", commit_id: A }]) }), false, "read from GitHub: dismissed after the Approve");
+eq(tahaApprovedOnGitHub({ repo: undefined, number: 7, headSha: A, gh: () => { throw new Error("403"); } }), false, "GitHub error: not approved");
+eq(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: lane, dirs, now: NOW, tahaApproved: () => true }), null, "Taha signed off → through, no code");
+const waiting = tahaLaneGate({ prefix: "T", pullRequest: 2401, headSha: A, files: lane, dirs, now: NOW, tahaApproved: () => false });
+ok(/TAHA LANE BLOCK/.test(waiting) && /presses Approve on GitHub on this commit \(a{12}\)/.test(waiting) && !waiting.includes("Ready to merge"), "no sign-off → still blocked, and says Approve is how Taha clears it");
 eq(tellTahaOnGitHub({ repo: undefined, pullRequest: 5, body: "x", gh: () => "123" }), true, "GitHub took the comment");
 eq(tellTahaOnGitHub({ repo: undefined, pullRequest: 5, body: "x", gh: () => { throw new Error("403"); } }), false, "a failed post is false");
 

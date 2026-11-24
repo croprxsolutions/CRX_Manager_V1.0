@@ -97,7 +97,10 @@ stored values, left as its own issue).
 8. Fidelity: the replayed transfer and capture bodies have the md5s the preflight pins; a second apply stops at the
    preflight; owners, SECURITY DEFINER, search_path and grants unchanged; `_job_kept_epa` executable by no API role.
 
-## Open business decisions
+## Business decisions
+
+**D1 decided: (a), Mason 2026-11-24 ("Yes, use catalog").** Built as recommended.
+
 
 D1. When the job kept **no number** for a product (it had none when sprayed, or the job is "Not recorded" because it
 was sprayed before 2026-11-07 or had a spray record moved onto it), the invoice line and restricted-use record:

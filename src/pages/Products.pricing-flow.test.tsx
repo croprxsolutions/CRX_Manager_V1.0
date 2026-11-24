@@ -633,7 +633,7 @@ describe('Products governed inline pricing flow', () => {
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'error',
-      'Nothing was saved. This price sheet expired (sheets last 7 days). Download a fresh one',
+      'No prices were changed. This price sheet expired (sheets last 7 days). Download a fresh one',
     ));
     expect(mockPreviewPricing).not.toHaveBeenCalled();
   });
@@ -648,7 +648,7 @@ describe('Products governed inline pricing flow', () => {
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'error',
-      'Nothing was saved. This price sheet was already applied, or was downloaded by another user. Download a fresh one',
+      'No prices were changed. This price sheet was already applied, or was downloaded by another user. Download a fresh one',
     ));
   });
 

@@ -776,8 +776,8 @@ export async function parseProductPricingWorkbook(
 // The server refuses a used, expired or another user's price sheet with one combined code
 // (errorSanitizer keeps the combined wording as the fallback); the sheet's own expiry says which.
 const PRICE_SHEET_REFUSED = /^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/;
-const PRICE_SHEET_EXPIRED_TEXT = 'Nothing was saved. This price sheet expired (sheets last 7 days). Download a fresh one';
-const PRICE_SHEET_USED_TEXT = 'Nothing was saved. This price sheet was already applied, or was downloaded by another user. Download a fresh one';
+const PRICE_SHEET_EXPIRED_TEXT = 'No prices were changed. This price sheet expired (sheets last 7 days). Download a fresh one';
+const PRICE_SHEET_USED_TEXT = 'No prices were changed. This price sheet was already applied, or was downloaded by another user. Download a fresh one';
 
 /** The refusal for a price sheet already past its expires_at; null while it is current or unreadable. */
 export function priceSheetExpiredText(expiresAt: string, now = Date.now()): string | null {

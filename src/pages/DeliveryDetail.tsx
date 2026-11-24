@@ -585,12 +585,11 @@ export default function DeliveryDetail() {
             Sentry.captureException(remError ?? new Error('delivery_remainders read returned no list'), { extra: { context: 'load_delivery_remainders', deliveryId: del.id } });
             failLoad('Failed to load this delivery\'s remaining items');
             return;
-          } else {
-            setRemainders((remData as Array<DeliveryRemainder & { product?: { product_name: string } | null }>).map((r) => ({
-              ...r,
-              product_name: r.product?.product_name || 'Unknown',
-            })) as DeliveryRemainder[]);
           }
+          setRemainders((remData as Array<DeliveryRemainder & { product?: { product_name: string } | null }>).map((r) => ({
+            ...r,
+            product_name: r.product?.product_name || 'Unknown',
+          })) as DeliveryRemainder[]);
 
           // Generate signed URL for signature (privacy: no permanent public URLs)
           if (del.signature_url) {

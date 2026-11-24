@@ -3960,7 +3960,7 @@ describe('QuoteBuilder', () => {
       expect(screen.queryByText(/this quote uses Tier/)).not.toBeInTheDocument();
       expect(price).toHaveValue(12);
       fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' }));
-      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Save (draft|changes)$/ }));
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
       expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 12, use_todays_price: true });
     });
@@ -3976,7 +3976,7 @@ describe('QuoteBuilder', () => {
 
       expect(price).toHaveValue(10);
       fireEvent.click(screen.getByRole('checkbox', { name: 'Keep Tier 2' }));
-      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Save (draft|changes)$/ }));
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
       expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 10, use_todays_price: false });
     });
@@ -3989,7 +3989,7 @@ describe('QuoteBuilder', () => {
       await waitFor(() => expect(units).toBeEnabled());
       fireEvent.change(units, { target: { value: '3' } });
       expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toHaveValue(10);
-      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Save (draft|changes)$/ }));
 
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
       expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 10, price_override: null, use_todays_price: false });
@@ -4015,7 +4015,7 @@ describe('QuoteBuilder', () => {
       expect(screen.getByText('Sent at $10.00')).toBeInTheDocument();
       expect(screen.queryByText(/Prices or lines changed after version 1 was sent/)).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' }));
-      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Save (draft|changes)$/ }));
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
       expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 12, price_override: null, use_todays_price: true, grower_confirmed: true });
     });
@@ -4037,10 +4037,10 @@ describe('QuoteBuilder', () => {
       await waitFor(() => expect(price).toBeEnabled());
       fireEvent.change(price, { target: { value: '11' } });
       fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $11.00 (was $10.00)' }));
-      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Save (draft|changes)$/ }));
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
       // The save succeeded, so the quote is clean again and Save waits for the next change.
-      await waitFor(() => expect(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ })).toHaveAttribute('title', 'No changes to save'));
+      await waitFor(() => expect(screen.getByRole('button', { name: /^Save (draft|changes)$/ })).toHaveAttribute('title', 'No changes to save'));
 
       // Clearing the manual price returns the line to what the database now holds (11), not 10.
       fireEvent.click(screen.getByRole('button', { name: 'Reset the manual price' }));
@@ -4067,7 +4067,7 @@ describe('QuoteBuilder', () => {
       const units = await screen.findByRole('spinbutton', { name: 'Quantity' });
       await waitFor(() => expect(units).toBeEnabled());
       fireEvent.change(units, { target: { value: '3' } });
-      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Save (draft|changes)$/ }));
 
       await waitFor(() => expect(screen.queryByText('New since version 1')).not.toBeInTheDocument());
       expect(screen.queryByText(/Prices or lines changed after version 1 was sent/)).not.toBeInTheDocument();
@@ -4088,7 +4088,7 @@ describe('QuoteBuilder', () => {
       renderQuoteBuilder(quote.id);
       fireEvent.click(await screen.findByRole('button', { name: 'Use today $12.00' }));
       fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' }));
-      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Save (draft|changes)$/ }));
 
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Reload the quote to see the saved prices')));
       expect(await screen.findByRole('button', { name: 'Reload Quote' })).toBeInTheDocument();
@@ -4223,7 +4223,7 @@ describe('QuoteBuilder', () => {
         : { data: null, error: null }));
       renderQuoteBuilder(quote.id);
     }
-    const save = () => fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+    const save = () => fireEvent.click(screen.getByRole('button', { name: /^Save (draft|changes)$/ }));
     const saveCalls = () => mockRpc.mock.calls.filter(([name]) => name === 'save_quote');
 
     it('refuses Save at another tier until "Quote at Tier 2 anyway" is ticked', async () => {
@@ -5573,6 +5573,8 @@ describe('QuoteBuilder', () => {
       if (status === 'draft') names.push('Save draft');
       if (status === 'revised') names.push('Save changes'); // a revised quote saves as revised
       if (status === 'draft' || open) names.push('Preview & send');
+      // Added on purpose (Mason, 2026-11-24): saves, then emails the grower, wherever the quote can be saved.
+      if (status === 'draft' || status === 'revised') names.push('Save and email');
       if (status === 'draft') names.push('Book as order');
       if (open || status === 'accepted') names.push('Convert whole booking');
       if (open) names.push('Draw part of booking…', "Close short (grower won't take the rest)", 'Decline quote');
@@ -6768,6 +6770,175 @@ describe('QuoteBuilder', () => {
         if (enabled) expect(button).toBeEnabled();
         else expect(button).toBeDisabled();
         cleanup();
+      }
+    });
+  });
+
+  // Save and email (Mason, 2026-11-24): one button runs the page's Save, then, only when it went
+  // through, the same send as Email to grower (same recipient, template and version freeze).
+  describe('Save and email', () => {
+    // A draft whose row_version moves as the server would: save_quote, then the email's freeze.
+    function serveSaveAndEmail(customer: Record<string, unknown> = QUOTE_FIXTURE_CUSTOMER, saveError: unknown = null) {
+      const fixture = makeQuoteFixture('draft', 7);
+      const quote = { ...fixture.quote, customer };
+      let rowVersion = 7;
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes'
+          ? { ...quote, row_version: rowVersion }
+          : table === 'quote_sections'
+            ? [fixture.section]
+            : table === 'quote_items'
+              ? [fixture.item]
+              : table === 'customers'
+                ? [customer]
+                : table === 'products'
+                  ? [fixture.product]
+                  : [],
+        error: null,
+      }));
+      mockRpc.mockImplementation((name: string) => {
+        if (name === 'save_quote') {
+          if (saveError) return Promise.resolve({ data: null, error: saveError });
+          rowVersion = 8;
+          return Promise.resolve({ data: { status: 'saved', quote_id: quote.id, row_version: 8, item_ids: {} }, error: null });
+        }
+        if (name === 'create_quote_version') {
+          rowVersion += 1;
+          return Promise.resolve({ data: { version_number: 1, status: 'created', row_version: rowVersion }, error: null });
+        }
+        return Promise.resolve({ data: name === 'generate_quote_number' ? 'Q-2026-0042' : null, error: null });
+      });
+      renderQuoteBuilder(quote.id);
+      return quote;
+    }
+
+    async function loadedClean() {
+      await screen.findByRole('heading', { level: 1, name: 'Q-version-test' });
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+    }
+
+    const saveAndEmail = () => screen.getAllByRole('button', { name: 'Save and email' })[0];
+    const rpcNames = () => mockRpc.mock.calls.map(([name]) => name);
+
+    it('saves the edit, then emails the grower once, exactly as Email to grower does', async () => {
+      const quote = serveSaveAndEmail();
+      await loadedClean();
+      fireEvent.change(screen.getByPlaceholderText(/top of the quote/i), { target: { value: 'Changed' } });
+
+      fireEvent.click(saveAndEmail());
+
+      await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
+      // The page's own save first (as a draft, with the edit), then the email's version freeze.
+      const names = rpcNames();
+      expect(names.filter((n) => n === 'save_quote')).toHaveLength(1);
+      expect(names.indexOf('save_quote')).toBeLessThan(names.indexOf('create_quote_version'));
+      expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
+        p_quote_payload: expect.objectContaining({ status: 'draft', header_notes: 'Changed' }),
+      }));
+      expect(mockRpc).toHaveBeenCalledWith('create_quote_version', expect.objectContaining({
+        p_quote_id: quote.id, p_method: 'emailed', p_expected_row_version: 8,
+      }));
+      expect(mockSendEmail).toHaveBeenCalledWith(expect.objectContaining({
+        to: 'grower@example.com', subject: 'Quote Q-version-test from Crop Rx Solutions', email_type: 'quote', resource_id: quote.id,
+      }));
+      expect(mockToast).toHaveBeenCalledWith('success', 'Quote saved as draft');
+      expect(mockToast).toHaveBeenCalledWith('success', 'Quote emailed to grower@example.com');
+      // Nothing more goes out afterwards.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockSendEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends no email when the save fails, and shows the save error', async () => {
+      serveSaveAndEmail(QUOTE_FIXTURE_CUSTOMER, { message: 'Save went wrong' });
+      await loadedClean();
+      fireEvent.change(screen.getByPlaceholderText(/top of the quote/i), { target: { value: 'Changed' } });
+
+      fireEvent.click(saveAndEmail());
+
+      await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.anything()));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(rpcNames()).not.toContain('create_quote_version');
+      expect(mockSendEmail).not.toHaveBeenCalled();
+      expect(mockToast).not.toHaveBeenCalledWith('success', expect.stringContaining('Quote emailed'));
+    });
+
+    it('sends no email when the save stops at a check (no customer picked on a new quote)', async () => {
+      renderQuoteBuilder();
+      await waitFor(() => expect(rpcNames()).toContain('generate_quote_number'));
+      fireEvent.change(await screen.findByPlaceholderText(/top of the quote/i), { target: { value: 'Started' } });
+      await waitFor(() => expect(saveAndEmail()).toBeEnabled());
+
+      fireEvent.click(saveAndEmail());
+
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.anything()));
+      expect(rpcNames()).not.toContain('save_quote');
+      expect(mockSendEmail).not.toHaveBeenCalled();
+    });
+
+    it('is off, with the reason, when the customer has no email on file', async () => {
+      serveSaveAndEmail({ ...QUOTE_FIXTURE_CUSTOMER, email: null });
+      await loadedClean();
+      fireEvent.change(screen.getByPlaceholderText(/top of the quote/i), { target: { value: 'Changed' } });
+
+      expect(saveAndEmail()).toBeDisabled();
+      expect(saveAndEmail()).toHaveAccessibleDescription('No email on file for this customer');
+      expect(saveAndEmail()).toHaveAttribute('title', 'No email on file for this customer');
+      // The separate Save still works.
+      expect(screen.getAllByRole('button', { name: /Save draft/ })[0]).toBeEnabled();
+      expect(mockSendEmail).not.toHaveBeenCalled();
+    });
+
+    it('emails a saved quote with nothing unsaved straight away, without saving it again', async () => {
+      serveSaveAndEmail();
+      await loadedClean();
+
+      fireEvent.click(saveAndEmail());
+
+      await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
+      expect(rpcNames()).not.toContain('save_quote');
+      expect(mockRpc).toHaveBeenCalledWith('create_quote_version', expect.objectContaining({ p_expected_row_version: 7 }));
+    });
+
+    it('emails a new quote once its saved page has opened', { timeout: 20000 }, async () => {
+      const fixture = makeQuoteFixture('draft', 7);
+      let rowVersion = 7;
+      mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? { ...fixture.quote, row_version: rowVersion }
+        : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? [fixture.item]
+          : table === 'products' ? [fixture.product]
+            : table === 'customers' ? [{ ...QUOTE_FIXTURE_CUSTOMER, default_commission_split: { splits: [] } }] : [], error: null }));
+      mockRpc.mockImplementation((name: string) => {
+        if (name === 'create_quote_version') rowVersion += 1;
+        return Promise.resolve({ data: name === 'save_quote'
+          ? { quote_id: fixture.quote.id, row_version: 7, item_ids: {} }
+          : name === 'create_quote_version' ? { version_number: 1, status: 'created', row_version: rowVersion }
+            : name === 'generate_quote_number' ? 'Q-new-owner' : null, error: null });
+      });
+      const router = createMemoryRouter([{ path: '/quotes/new', element: <QuoteBuilder /> },
+        { path: '/quotes/:id', element: <QuoteBuilder /> }], { initialEntries: ['/quotes/new'] });
+      mockNavigate.mockImplementation((path: string) => { void router.navigate(path); });
+      const view = render(<RouterProvider router={router} />);
+      try {
+        fireEvent.change(await screen.findByRole('combobox', { name: 'Customer' }), { target: { value: 'Farm' } });
+        fireEvent.click(await screen.findByRole('option', { name: /Farm/ }));
+        fireEvent.click(screen.getByRole('button', { name: 'Add one' }));
+        fireEvent.click(screen.getByRole('button', { name: /Select product/i }));
+        const picker = await screen.findByPlaceholderText('Search by name, SKU, category, or vendor...');
+        fireEvent.click(within(picker.closest('[role="dialog"]') as HTMLElement).getAllByText(fixture.product.product_name).slice(-1)[0]);
+        fireEvent.change(screen.getByRole('spinbutton', { name: 'Quantity' }), { target: { value: '2' } });
+
+        fireEvent.click(saveAndEmail());
+
+        await waitFor(() => expect(router.state.location.pathname).toBe(`/quotes/${fixture.quote.id}`));
+        await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
+        const names = rpcNames();
+        expect(names.filter((n) => n === 'save_quote')).toHaveLength(1);
+        expect(names.indexOf('save_quote')).toBeLessThan(names.indexOf('create_quote_version'));
+        expect(mockSendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: 'grower@example.com', resource_id: fixture.quote.id }));
+      } finally {
+        view.unmount();
+        mockNavigate.mockReset();
+        router.dispose();
       }
     });
   });

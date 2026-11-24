@@ -805,6 +805,12 @@ export default function QuoteBuilder() {
   const [reverting, setReverting] = useState(false);
   // #3 Stage A: email the quote PDF to the grower via the send-email Edge Function.
   const [emailingGrower, setEmailingGrower] = useState(false);
+  // Save and email: the quote whose email waits for its save to show on the page. A new quote
+  // first opens its saved page, so it waits for that load (a load generation past afterLoad).
+  const [emailAfterSave, setEmailAfterSave] = useState<{ quoteId: string; afterLoad: number | null } | null>(null);
+  // Set when a NEW quote saved with lines the database priced at a changed catalog price: the
+  // rep is told to check them before sending, so Save and email must not send it.
+  const createRepricedRef = useRef(false);
   const [lastQuoteEmailAt, setLastQuoteEmailAt] = useState<string | null>(null);
   const [customerView, setCustomerView] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
@@ -2881,6 +2887,7 @@ export default function QuoteBuilder() {
         // reload dialog could never recover it and the next save would create a second quote.
         // Only Save Draft creates, and it opens the saved quote, which loads the stored prices.
         if (!quoteIdAtSend) {
+          createRepricedRef.current = true;
           toast('warning', `The quote was saved, but ${repricedCount} priced at today's catalog price, which changed since this page loaded. Check the saved prices before sending it.`);
           return savedQuoteId;
         }
@@ -2902,12 +2909,14 @@ export default function QuoteBuilder() {
     }
   };
 
-  const handleSaveDraft = async () => {
+  // Returns the saved quote's id, or null when the save did not go through (Save and email chains on it).
+  const handleSaveDraft = async (): Promise<string | null> => {
     setSaving(true);
+    let result: string | null = null;
     // Always unlock the form (it is locked while saving), whatever the steps below throw.
     try {
       // A revised quote is a live booking and the server refuses revised -> draft: its edits save as revised.
-      const result = await saveQuote(savesAsRevised ? 'revised' : 'draft');
+      result = await saveQuote(savesAsRevised ? 'revised' : 'draft');
       if (result) {
         setIsDirty(false);
         toast('success', savesAsRevised ? 'Changes saved. Send the quote again when it is ready.' : 'Quote saved as draft');
@@ -2965,6 +2974,7 @@ export default function QuoteBuilder() {
     } finally {
       setSaving(false);
     }
+    return result;
   };
 
   // Save as template handler
@@ -3506,6 +3516,21 @@ export default function QuoteBuilder() {
     } finally {
       setEmailingGrower(false);
     }
+  };
+
+  // Save and email (Mason, 2026-11-24): the page's own Save (all its checks), then, only when that
+  // save went through, the same Email to grower as the preview's button. A quote with nothing
+  // unsaved has nothing to save first, so it is emailed straight away.
+  const handleSaveAndEmail = async () => {
+    if (quoteId && !isDirty) {
+      await handleEmailToGrower();
+      return;
+    }
+    createRepricedRef.current = false;
+    const savedId = await handleSaveDraft();
+    // A new quote whose prices changed on save was saved, but the rep must check them before it is sent.
+    if (!savedId || createRepricedRef.current) return;
+    setEmailAfterSave({ quoteId: savedId, afterLoad: isEditing ? null : initialLoadGenerationRef.current });
   };
 
   const handleMarkPresented = async (): Promise<boolean> => {
@@ -4487,6 +4512,23 @@ export default function QuoteBuilder() {
   useSaveShortcut(handleSaveDraft, !loading && !(isEditing && id && installedQuoteId !== id && quoteLoadFailedId === id)
     && (!isEditing || canEdit) && !saveDraftDisabled && !saving);
 
+  // The email runs from the page as it stands after the save, exactly as a click on Email to grower
+  // would: an edited quote once its save has landed, a new quote once its saved page has loaded.
+  useEffect(() => {
+    if (!emailAfterSave) return;
+    const target = emailAfterSave.quoteId;
+    // The saved quote did not open (load failed, or the rep moved to another quote): nothing is sent.
+    if ((id && id !== target) || quoteLoadFailedId === target) {
+      setEmailAfterSave(null);
+      return;
+    }
+    if (saving || loading || id !== target || quoteId !== target || installedQuoteId !== target) return;
+    if (emailAfterSave.afterLoad !== null && installedLoadGeneration <= emailAfterSave.afterLoad) return;
+    setEmailAfterSave(null);
+    void handleEmailToGrower();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- handleEmailToGrower is read from this render on purpose
+  }, [emailAfterSave, id, saving, loading, quoteId, installedQuoteId, installedLoadGeneration, quoteLoadFailedId]);
+
   if (loading) {
     return (
       <div className="animate-pulse space-y-4">
@@ -4525,6 +4567,15 @@ export default function QuoteBuilder() {
   // conditions and handler; only where it sits changes.
   const primary = primaryAction({ isNew: !isEditing, status: currentStatus, unsentChange, canConvert, canDraw });
   const showSaveDraft = !isEditing || canEdit; // elsewhere Save draft was always disabled
+  const quoteUnsaved = !quoteId || isDirty;
+  // A new quote with no customer picked yet is told to save (which asks for the customer), not that an email is missing.
+  const noEmailOnFile = Boolean((selectedCustomer || !quoteUnsaved) && !selectedCustomer?.email);
+  // Save and email: wherever the quote can be saved and sent. Off when the customer has no email,
+  // or when there are changes Save draft could not save right now.
+  const showSaveAndEmail = showSaveDraft && canSend;
+  const saveAndEmailSending = emailingGrower || emailAfterSave !== null;
+  const saveAndEmailReason = noEmailOnFile ? 'No email on file for this customer' : null;
+  const saveAndEmailDisabled = noEmailOnFile || saving || (quoteUnsaved && saveDraftDisabled);
   const showCreateOrder = isEditing && (canConvert || canDraw);
   const showRevise = isEditing && currentStatus === 'sent';
   const pdfVisible = primary === null && !isPhone; // closed quotes: Download PDF is the visible action
@@ -4551,6 +4602,11 @@ export default function QuoteBuilder() {
     },
     ...(quoteId ? [{ id: 'template', label: 'Save as template', icon: <Copy className="w-4 h-4" />, onAction: () => setShowSaveTemplateModal(true) }] : []),
     ...(quoteId ? [{ id: 'rollover', label: 'Roll over to next season', icon: <RotateCcw className="w-4 h-4" />, onAction: () => setShowRolloverModal(true) }] : []),
+    // The phone's bottom bar has no room for a third button, so Save and email sits in the menu there.
+    ...(isPhone && showSaveAndEmail ? [{
+      id: 'save-email', label: saveAndEmailSending ? 'Sending…' : 'Save and email', icon: <Send className="w-4 h-4" />,
+      onAction: handleSaveAndEmail, disabled: saveAndEmailDisabled || saveAndEmailSending, disabledReason: saveAndEmailReason ?? undefined,
+    }] : []),
     ...(isEditing && !!quoteId && currentStatus === 'draft' && !draftEditLocked && !isDirty ? [{
       id: 'book', label: 'Book as order', icon: <ShoppingCart className="w-4 h-4" />,
       onAction: () => setConfirmBookAsOrderOpen(true), disabled: bookingAsOrder,
@@ -4599,12 +4655,27 @@ export default function QuoteBuilder() {
     </Button>
   );
   // The preview's send panel: an unsaved quote offers Save quote first, and Email says why it is off.
-  const quoteUnsaved = !quoteId || isDirty;
   const previewNeedsSave = quoteUnsaved && showSaveDraft;
-  // A new quote with no customer picked yet is told to save (which asks for the customer), not that an email is missing.
-  const emailBlockedReason = (selectedCustomer || !quoteUnsaved) && !selectedCustomer?.email
+  const emailBlockedReason = noEmailOnFile
     ? 'No email on file for this customer'
     : quoteUnsaved ? 'Save the quote before emailing it.' : null;
+  const saveAndEmailButton = (
+    <>
+      <Button
+        variant="secondary"
+        icon={<Send className="w-4 h-4" />}
+        onClick={handleSaveAndEmail}
+        loading={saveAndEmailSending}
+        disabled={saveAndEmailDisabled}
+        title={saveAndEmailReason ?? undefined}
+        aria-describedby={saveAndEmailReason ? 'quote-save-email-blocked-reason' : undefined}
+        className={tall}
+      >
+        {saveAndEmailSending ? 'Sending…' : 'Save and email'}
+      </Button>
+      {saveAndEmailReason && <span id="quote-save-email-blocked-reason" className="sr-only">{saveAndEmailReason}</span>}
+    </>
+  );
   const previewButton = (variant: 'primary' | 'secondary') => (
     <Button variant={variant} icon={<Eye className="w-4 h-4" />} onClick={handlePreviewQuote} className={tall}>
       Preview &amp; send
@@ -4769,6 +4840,7 @@ export default function QuoteBuilder() {
               )}
               {canSend && primary !== 'preview' && previewButton('secondary')}
               {showSaveDraft && saveDraftButton()}
+              {showSaveAndEmail && saveAndEmailButton}
               {showCreateOrder && primary !== 'createOrder' && createOrderMenu('secondary')}
               {pdfVisible && (
                 <Button variant="secondary" icon={<Download className="w-4 h-4" />} onClick={handleDownloadPdf} className={tall}>

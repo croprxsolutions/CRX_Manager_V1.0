@@ -19,7 +19,6 @@ import {
   Camera, CheckCircle2, ClipboardCheck, Receipt,
 } from 'lucide-react';
 import PhoneHeader from '../components/ui/PhoneHeader';
-import SignatureCanvas from '../components/ui/SignatureCanvas';
 import { billSplitCompletion, billSplitFailedMessage } from '../lib/billSplitCompletion';
 import { supabase, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
@@ -50,6 +49,7 @@ import { brandWarnings } from '../lib/deliveryBrands';
 import { fetchNextRouteStopId, ROUTE_NO_SIGNAL_MESSAGE } from '../lib/routeStops';
 import StopContactActions, { type StopCoords } from '../components/route/StopContactActions';
 import StopSavedCopy, { type SavedStopCopy } from '../components/route/StopSavedCopy';
+import CompletionProofFields, { EmailReceiptOption, ProofOption } from '../components/deliveries/CompletionProofFields';
 import { dropTodaySnapshot, readTodaySnapshot, saveTodaySnapshot } from '../lib/todaySnapshot';
 
 interface StopItem {
@@ -844,91 +844,51 @@ export default function FieldStop() {
       {step === 'sign' && (
         <>
           <div className="bg-white border border-gray-200 rounded-xl p-4">
-            <label className="flex items-center gap-3 text-base text-nav-dark mb-2">
-              <input
-                type="checkbox"
-                checked={noOnePresent}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setNoOnePresent(checked);
-                  setSignedBy(checked ? 'No one present — left at site' : '');
-                  if (checked) { setSignatureDataUrl(null); setUsePaperTicket(false); }
-                }}
-                className={CHECKBOX}
-              />
-              No one present — left at site
-            </label>
-            {!noOnePresent && (
-              <label className="flex items-center gap-3 text-base text-nav-dark mb-2">
-                <input
-                  type="checkbox"
-                  checked={usePaperTicket}
-                  onChange={(e) => {
-                    setUsePaperTicket(e.target.checked);
-                    if (e.target.checked) setSignatureDataUrl(null);
+            <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
+            <input ref={leftAtSiteInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, LEFT_AT_SITE_PHOTO_CAPTION)} className="hidden" />
+            <CompletionProofFields
+              idPrefix="stop"
+              signedBy={signedBy}
+              onSignedByChange={setSignedBy}
+              signerLocked={noOnePresent}
+              contactName={contactName}
+              usePaperTicket={usePaperTicket}
+              onUsePaperTicketChange={setUsePaperTicket}
+              showPaperTicketOption={!noOnePresent}
+              paperTicket={{
+                hasPhoto: hasPaperTicketPhoto(photos),
+                deliveredOn: paperDeliveredOn,
+                onDeliveredOnChange: setPaperDeliveredOn,
+                onTakePhoto: () => paperTicketInputRef.current?.click(),
+                takePhotoDisabled: uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS,
+                uploading: uploadingPhoto,
+              }}
+              onSignatureChange={setSignatureDataUrl}
+              extraOptions={(
+                <ProofOption
+                  checked={noOnePresent}
+                  onChange={(checked) => {
+                    setNoOnePresent(checked);
+                    setSignedBy(checked ? 'No one present — left at site' : '');
+                    if (checked) { setSignatureDataUrl(null); setUsePaperTicket(false); }
                   }}
-                  className={CHECKBOX}
-                />
-                Customer signed a paper ticket (no signal at the site)
-              </label>
-            )}
-            <label htmlFor="signed-by" className="block text-sm font-semibold text-nav-dark mt-2 mb-1">Signed by (name)</label>
-            {contactName && !noOnePresent && signedBy.trim() !== contactName && (
-              <button type="button" onClick={() => setSignedBy(contactName)} className="mb-2 inline-flex min-h-[44px] max-w-full items-center rounded-full border border-crx-green bg-crx-green-light px-4 text-base font-semibold text-crx-green-hover active:scale-[0.99]">
-                <span className="truncate">Use {contactName}</span>
-              </button>
-            )}
-            <input
-              id="signed-by"
-              type="text"
-              value={signedBy}
-              onChange={(e) => setSignedBy(e.target.value)}
-              placeholder="Who received the delivery?"
-              disabled={noOnePresent}
-              className={`${TEXT_INPUT} mb-4 ${noOnePresent ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
-              autoComplete="off"
-            />
-            {usePaperTicket && !noOnePresent ? (
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3">
-                <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
-                {hasPaperTicketPhoto(photos) ? (
-                  <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Photo of the signed ticket saved</p>
-                ) : (
-                  <p className="text-sm text-amber-800">Take a photo of the signed paper ticket. It replaces the on-screen signature.</p>
-                )}
-                <div>
-                  <label htmlFor="paper-delivered-on" className="block text-sm font-semibold text-nav-dark mb-1">Delivered on (date on the ticket)</label>
-                  <input
-                    id="paper-delivered-on"
-                    type="date"
-                    value={paperDeliveredOn}
-                    max={todayInBusinessTz()}
-                    onChange={(e) => setPaperDeliveredOn(e.target.value)}
-                    className={TEXT_INPUT}
-                  />
+                >
+                  No one present — left at site
+                </ProofOption>
+              )}
+              alternateProof={noOnePresent ? (
+                <div className="border border-gray-200 rounded-xl p-3 space-y-3">
+                  {hasLeftAtSitePhoto(photos) ? (
+                    <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Photo of the drop location saved</p>
+                  ) : (
+                    <p className="text-sm text-amber-800">Signature skipped because no one was present. Take a photo of where you left the delivery.</p>
+                  )}
+                  <button type="button" disabled={uploadingPhoto || !isOnline || countLeftAtSitePhotos(photos) >= MAX_LEFT_AT_SITE_PHOTOS} onClick={() => leftAtSiteInputRef.current?.click()} className={SECONDARY_BUTTON}>
+                    <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Drop Location'}
+                  </button>
                 </div>
-                <button type="button" disabled={uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS} onClick={() => paperTicketInputRef.current?.click()} className={SECONDARY_BUTTON}>
-                  <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Signed Ticket'}
-                </button>
-              </div>
-            ) : (
-              <div className={noOnePresent ? 'pointer-events-none opacity-50' : ''} aria-disabled={noOnePresent}>
-                <SignatureCanvas key={noOnePresent ? 'signature-skipped' : 'signature-capture'} onSignatureChange={setSignatureDataUrl} label="Customer signs with their finger" disabled={noOnePresent} />
-              </div>
-            )}
-            {noOnePresent && (
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3 mt-3">
-                <input ref={leftAtSiteInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, LEFT_AT_SITE_PHOTO_CAPTION)} className="hidden" />
-                {hasLeftAtSitePhoto(photos) ? (
-                  <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Photo of the drop location saved</p>
-                ) : (
-                  <p className="text-sm text-amber-800">Signature skipped because no one was present. Take a photo of where you left the delivery.</p>
-                )}
-                <button type="button" disabled={uploadingPhoto || !isOnline || countLeftAtSitePhotos(photos) >= MAX_LEFT_AT_SITE_PHOTOS} onClick={() => leftAtSiteInputRef.current?.click()} className={SECONDARY_BUTTON}>
-                  <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Drop Location'}
-                </button>
-              </div>
-            )}
+              ) : undefined}
+            />
           </div>
           <div className="mt-3 space-y-1 text-center text-sm text-amber-800 empty:hidden">
             {!signedBy.trim() && <p>Enter who signed or choose no one present to continue.</p>}
@@ -967,10 +927,9 @@ export default function FieldStop() {
               <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Photos</dt><dd className="text-nav-dark">{photos.length}</dd></div>
             </dl>
             {/* Always shown: a receipt is asked for unless unticked, even when this screen cannot see the email. */}
-            <label className="flex items-center gap-3 border-t border-gray-100 px-4 py-2.5 text-base text-nav-dark">
-              <input type="checkbox" checked={emailOnComplete} onChange={(e) => setEmailOnComplete(e.target.checked)} className={CHECKBOX} />
-              Email a receipt to the customer
-            </label>
+            <div className="border-t border-gray-100 px-4 py-1">
+              <EmailReceiptOption checked={emailOnComplete} onChange={setEmailOnComplete} />
+            </div>
           </div>
 
           <div className="mt-3 flex gap-2.5 rounded-xl border border-gray-200 bg-white px-3.5 py-3">
@@ -1031,8 +990,6 @@ export default function FieldStop() {
 
 const STEP_LABELS = ['Arrive', 'Items', 'Sign', 'Review', 'Done'];
 const STEPPER_BUTTON = 'flex h-12 w-12 items-center justify-center rounded-xl bg-crx-green-light text-crx-green active:scale-95';
-const CHECKBOX = 'h-5 w-5 shrink-0 rounded border-gray-300 text-crx-green';
-const TEXT_INPUT = 'h-12 w-full rounded-xl border border-gray-300 px-3 text-base text-nav-dark placeholder:text-gray-500';
 const SECONDARY_BUTTON = 'flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white font-semibold text-nav-dark active:scale-[0.99] disabled:opacity-50';
 
 interface DoneBillingResult { numbers: string[]; failed: boolean }

@@ -121,6 +121,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'This purchase order is cancelled, so its cost cannot change'],
   [/^PO_COST_BELOW_BILLED\b/i,
    'This would put the vendor bills more than 5% over what has arrived on the purchase order, or over its ordered total. Void or adjust the bill first'],
+  [/^PO_EDIT_BELOW_BILLED\b/i,
+   "This change would leave the vendor bills more than 5% over the purchase order's ordered total. Void or adjust the bill first"],
   [/^PREPAY_BALANCE_SERVER_ONLY\b/i,
    'A prepay balance changes only through prepayments and payments'],
   [/^RETURN_NOT_FOUND\b/i,

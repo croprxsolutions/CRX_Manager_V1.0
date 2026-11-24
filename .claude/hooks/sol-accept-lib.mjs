@@ -728,7 +728,8 @@ export function carriedAcceptances({ record, prNumber, prUrl, proofs, nowMs = Da
     accepted.push({
       ok: true, carried: true, reason: CARRIED_REASON, approvedAt: c.root.accepted_at,
       payload: { pullRequest: prNumber, pullRequestUrl: want, finding: f, nonce: c.root.ref },
-      carried_from: { head_sha: c.root.head_sha, ref: c.root.ref, n: c.root.n, accepted_at: c.root.accepted_at, severity: c.root.severity },
+      // original_base_sha: the base Mason first skipped it against, kept as a record when it carries onto a newer base.
+      carried_from: { head_sha: c.root.head_sha, ref: c.root.ref, n: c.root.n, accepted_at: c.root.accepted_at, severity: c.root.severity, original_base_sha: c.from_base },
     });
   }
   return { accepted };
@@ -779,7 +780,8 @@ export function carriedDecisionLogEntry({ record, accepted }) {
       `found ${record.findings.length} BLOCKER/HIGH finding(s); Sol marked each the same as one Mason skipped on this pull request.`,
     ...accepted.map((a) => `- Finding ${a.payload.finding.n} (${a.payload.finding.severity}) at ${findingLocation(a.payload.finding.text)}, ` +
       `text sha256 \`${textHash(a.payload.finding.text)}\`: carried from ref ${String(a.carried_from.ref).slice(0, 12)} at ` +
-      `\`${String(a.carried_from.head_sha).slice(0, 12)}\` to \`${head}\`; Sol marked it the same`),
+      `\`${String(a.carried_from.head_sha).slice(0, 12)}\` to \`${head}\`; Sol marked it the same; first skipped against base ` +
+      `\`${String(a.carried_from.original_base_sha).slice(0, 12)}\``),
     "",
     "",
   ].join("\n");

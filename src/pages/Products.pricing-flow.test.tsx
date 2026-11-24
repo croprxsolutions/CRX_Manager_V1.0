@@ -6,6 +6,7 @@ const {
   mockApplyPricing,
   mockApprovePricing,
   mockExportPricing,
+  mockGeneratePricing,
   mockParsePricing,
   mockPreviewPricing,
   mockProducts,
@@ -18,6 +19,7 @@ const {
   mockApplyPricing: vi.fn(),
   mockApprovePricing: vi.fn(),
   mockExportPricing: vi.fn(),
+  mockGeneratePricing: vi.fn(),
   mockParsePricing: vi.fn(),
   mockPreviewPricing: vi.fn(),
   mockProducts: [] as Array<Record<string, unknown>>,
@@ -88,8 +90,13 @@ vi.mock('../lib/productPricing', async (importOriginal) => {
   };
 });
 
+vi.mock('../lib/supplierPricing', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/supplierPricing')>(),
+  getSupplierMarketEvidence: vi.fn(async () => []),
+}));
+
 vi.mock('../lib/productPricingSupplierEvidenceWorkbook', () => ({
-  generateProductPricingWorkbookWithSupplierEvidence: vi.fn(),
+  generateProductPricingWorkbookWithSupplierEvidence: mockGeneratePricing,
   parseProductPricingWorkbookWithSupplierEvidence: mockParsePricing,
 }));
 
@@ -226,6 +233,7 @@ vi.mock('../lib/productSetup', async (importOriginal) => ({
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 
 import Products from './Products';
+import { todayInBusinessTz } from '../lib/dateUtils';
 
 /** The preview beforeEach installs, read back without counting as a call. */
 async function inlinePreview(): Promise<Record<string, unknown>> {
@@ -650,6 +658,33 @@ describe('Products governed inline pricing flow', () => {
     expect(retry.idempotencyKey).toBe(first.idempotencyKey);
     expect(other.productIds).toEqual([fungicideId]);
     expect(other.idempotencyKey).not.toBe(first.idempotencyKey);
+  });
+
+  it('says the search box does not narrow a filtered pricing export, and names the file by the business day', async () => {
+    mockExportPricing.mockResolvedValue({ rows: [] });
+    mockGeneratePricing.mockResolvedValue(new Blob(['xlsx']));
+    // jsdom has no object URLs; add them for this test only.
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:pricing'), revokeObjectURL: vi.fn() });
+    const clicked: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(this.download);
+    });
+    try {
+      render(<Products />);
+      const exportButton = await screen.findByRole('button', { name: 'Pricing .xlsx' });
+      await waitFor(() => expect(exportButton).toBeEnabled());
+      fireEvent.click(exportButton);
+
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+        'success',
+        'Exported 1 Product pricing row(s). The search box does not narrow this file: tick products to export only those.',
+      ));
+      expect(clicked).toEqual([`crx-product-pricing-${todayInBusinessTz()}.xlsx`]);
+    } finally {
+      click.mockRestore();
+      Reflect.deleteProperty(URL, 'createObjectURL');
+      Reflect.deleteProperty(URL, 'revokeObjectURL');
+    }
   });
 
   it('rejects an oversized pricing workbook before reading or parsing the file', async () => {

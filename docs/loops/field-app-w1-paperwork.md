@@ -6,6 +6,8 @@ You fix the printed applicator and loader sheets to match the field application 
 
 Claude, autonomous, in this session, after Mason's go (M7). Each group: build → render the real PDF and look at it → the `ship.md` Step 6 review route (ordinary code off the Sol list gets one Terra final review; Luna and Sol only if a file is on `docs/reference/sol-required-paths.md`) → PR into `staging`.
 
+When a PR into staging is ready, the lane never merges it; it messages the MERGE CAPTAIN session with the PR number, head SHA, and Sol need/proof, and the captain lands it under Autonomous landing (Mason, 2026-11-24).
+
 ## Existing data to print (do not add columns)
 
 Spray order: `job_fields.sort_order` (already printed as "Stop N" by `src/lib/applicatorSheetData.ts`). Tank-sized loads: `job_loader_worksheets.load_balance_mode` ('proportional' | 'full_loads_remainder'), `capacity_gal`, `per_load_acres`. Carrier rate: `jobs.carrier_rate_gpa` (finished gallons per acre: water plus product). Drag-and-drop ordering is slice 2 (office screens lane).

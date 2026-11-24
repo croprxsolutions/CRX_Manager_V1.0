@@ -342,6 +342,14 @@ describe('product pricing workbook', () => {
       .rejects.toThrow(`limited to ${MAX_PRICING_WORKBOOK_ROWS} rows`);
   });
 
+  it('explains a deleted row in plain words', async () => {
+    const { workbook } = await loadGeneratedWorkbook();
+    workbook.getWorksheet(PRICING_WORKBOOK_SHEET)!.spliceRows(3, 1);
+
+    await expect(parseProductPricingWorkbook(await writeWorkbook(workbook)))
+      .rejects.toThrow('Rows were added to or deleted from the Pricing Update sheet.');
+  });
+
   it('rejects an oversized upload before ExcelJS parses it', async () => {
     await expect(parseProductPricingWorkbook(new ArrayBuffer(MAX_PRICING_WORKBOOK_FILE_BYTES + 1)))
       .rejects.toThrow('10 MB or smaller');

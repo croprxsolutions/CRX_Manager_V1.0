@@ -81,6 +81,7 @@ describe('generateApplicatorSheetPdf map pages', () => {
         perField: [
           {
             fieldId: 'field-1',
+            sprayNumber: 1,
             fieldName: 'North 40',
             customerName: 'Smith Farm',
             acres: 40,
@@ -105,6 +106,8 @@ describe('generateApplicatorSheetPdf map pages', () => {
     expect(mockDoc.addImage).toHaveBeenCalledTimes(3);
     const renderedText = mockDoc.text.mock.calls.flat(Infinity).filter((value: unknown): value is string => typeof value === 'string');
     expect(renderedText).toContain('Job Field Map — Overview');
+    expect(renderedText).toContain('Job Field Map — Stop 1');
+    expect(renderedText).toContain('Job Field Map');
     expect(renderedText.some((value) => value.includes('North 40 · Smith Farm · 40 acres · Lat: 39.150000, Lng: -89.050000'))).toBe(true);
     expect(renderedText).toContain('South 80 · 80 acres');
     expect(renderedText.some((value) => value.includes('South 80 · Smith Farm'))).toBe(false);

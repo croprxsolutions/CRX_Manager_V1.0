@@ -533,7 +533,9 @@ function appendMapPages(doc: JsPDFWithAutoTable, data: ApplicatorSheetData): voi
       `${fmtNum(field.acres) || '—'} acres`,
       location,
     ].filter((part): part is string => part !== null).join(' · ');
-    appendMapPage(doc, data, 'Job Field Map', details, field.dataUrl);
+    // Spray order (job_fields.sort_order) restarts at 1 on every job's maps (Sol 86).
+    const title = field.sprayNumber ? `Job Field Map — Stop ${field.sprayNumber}` : 'Job Field Map';
+    appendMapPage(doc, data, title, details, field.dataUrl);
   });
 }
 

@@ -75,7 +75,12 @@ function displayValue(field: string | null, value: string | null): string {
   return value === null || value === '' ? 'blank' : value;
 }
 
-export default function ProductChangeHistory({ productId, reloadToken = 0 }: { productId: string; reloadToken?: number }) {
+export default function ProductChangeHistory({ productId, reloadToken = 0, showPriceHistoryNote = false }: {
+  productId: string;
+  reloadToken?: number;
+  /** Admins see price history, so they get a pointer to it; staff do not (prices stay out of this card). */
+  showPriceHistoryNote?: boolean;
+}) {
   const history = useLoad(`change-history:${productId}`, (isCurrent) => readHistory(productId, isCurrent), {
     refreshToken: reloadToken,
     report: { extra: { context: 'product_change_history' } },
@@ -86,6 +91,9 @@ export default function ProductChangeHistory({ productId, reloadToken = 0 }: { p
   return (
     <Card>
       <CardHeader title="Change" accent="History" />
+      {showPriceHistoryNote && (
+        <p className="mb-3 text-xs text-secondary">Price and cost changes are listed in Sell Price History and Cost History.</p>
+      )}
       {state.status === 'loading' && <p className="text-sm text-secondary" role="status">Loading change history…</p>}
       {state.status === 'failed' && <LoadFailedState title="Change history could not be loaded" onRetry={retry} />}
       {history.status === 'loaded' && history.stale && (

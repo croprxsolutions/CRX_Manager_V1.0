@@ -397,7 +397,7 @@ BEGIN
   END IF;
 
   IF p_payers IS NOT NULL THEN
-    IF p_effective_from IS NULL THEN
+    IF p_effective_from IS NULL OR NOT isfinite(p_effective_from) THEN
       RAISE EXCEPTION 'FIELD_SPLIT_DATE_REQUIRED: a split needs the date it starts' USING ERRCODE = '22023';
     END IF;
     IF jsonb_typeof(p_payers) <> 'array' OR jsonb_array_length(p_payers) = 0 THEN
@@ -887,7 +887,8 @@ BEGIN
      IS DISTINCT FROM 'FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE RESTRICT' THEN
     RAISE EXCEPTION 'FIELD_SPLIT_POSTFLIGHT: fields_customer_id_fkey is not RESTRICT';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'field-split-copy-refresh' AND schedule = '10 5,6 * * *') THEN
+  IF NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'field-split-copy-refresh' AND schedule = '10 5,6 * * *'
+                   AND username = 'postgres' AND database = 'postgres' AND active) THEN
     RAISE EXCEPTION 'FIELD_SPLIT_POSTFLIGHT: the nightly copy refresh is not scheduled';
   END IF;
   SET CONSTRAINTS public.field_billing_split_versions_totals, public.field_billing_split_payers_totals DEFERRED;

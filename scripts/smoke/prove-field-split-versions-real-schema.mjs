@@ -128,6 +128,7 @@ try {
     ['fractional share', payers([[A, 99999999.5], [B, 0.5]]), /FIELD_SPLIT_INVALID_SHARE/],
     ['no payers', `'[]'::jsonb`, /FIELD_SPLIT_NO_PAYERS/],
     ['no date', payers([[A, M]]), /FIELD_SPLIT_DATE_REQUIRED/, 'NULL'],
+    ['infinite date', payers([[A, M]]), /FIELD_SPLIT_DATE_REQUIRED/, "'-infinity'::date"],
   ];
   for (const [label, rows, re, date = 'CURRENT_DATE'] of bad) {
     r = attempt(USERS.admin, `${refuse(setSplit(F1, date, rows, `k-bad-${label}`))} v := t;`);

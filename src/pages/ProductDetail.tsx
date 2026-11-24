@@ -636,7 +636,7 @@ export default function ProductDetail() {
       throw new Error('Reload this Product before saving details.');
     }
     const payload = nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct), persistedProduct, parentOwned);
-    let query = supabaseUntyped
+    const query = supabaseUntyped
       .from('products')
       .update(payload)
       .eq('id', id!)

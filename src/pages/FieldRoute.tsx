@@ -21,6 +21,8 @@ import { getQueueSummary, type OfflineQueueSummary } from '../lib/offlineQueue';
 import { parseLocalDate } from '../lib/dateUtils';
 import { Sentry } from '../lib/sentry';
 import { fetchDriverFarms } from '../lib/driverFarms';
+import { OPEN_STOP_STATUSES, ROUTE_NO_SIGNAL_MESSAGE, sortRouteStops } from '../lib/routeStops';
+import DoneTodayList from '../components/route/DoneTodayList';
 
 const EMPTY_QUEUE_SUMMARY: OfflineQueueSummary = {
   ownedTotal: 0,
@@ -43,12 +45,6 @@ interface StopRow {
   delivery_notes: string | null;
   customer_id: string | null;
   customer: { farm_name: string | null } | null;
-}
-
-const OPEN_STATUSES = ['scheduled', 'in_progress'];
-
-function statusRank(status: string): number {
-  return status === 'in_progress' ? 0 : 1;
 }
 
 function formatStopDate(dateStr: string | null): string {
@@ -81,7 +77,7 @@ export default function FieldRoute() {
       // A driver's farm names come from the driver lookup below, never the customers table (#2018).
       .select(`id, delivery_number, status, scheduled_date, scheduled_time, priority, assigned_driver, delivery_notes, customer_id${isDriver ? '' : ', customer:customers(farm_name)'}`)
       .is('deleted_at', null)
-      .in('status', OPEN_STATUSES)
+      .in('status', OPEN_STOP_STATUSES)
       .order('scheduled_date', { ascending: true })
       .order('scheduled_time', { ascending: true, nullsFirst: false });
 
@@ -95,11 +91,7 @@ export default function FieldRoute() {
       return;
     }
 
-    let rows = ((data || []) as unknown as StopRow[]).slice().sort((a, b) => {
-      const r = statusRank(a.status) - statusRank(b.status);
-      if (r !== 0) return r;
-      return (a.scheduled_date || '').localeCompare(b.scheduled_date || '');
-    });
+    let rows = sortRouteStops((data || []) as unknown as StopRow[]);
     // A driver reads farm names through get_driver_customers (#2018), not the customers table.
     if (isDriver) {
       try {
@@ -158,7 +150,7 @@ export default function FieldRoute() {
         <button
           type="button"
           onClick={fetchStops}
-          className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 active:scale-95"
+          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-gray-700 hover:bg-gray-100 active:scale-95"
           aria-label="Refresh stops"
         >
           <RefreshCw className="w-5 h-5" />
@@ -167,12 +159,12 @@ export default function FieldRoute() {
 
       {/* Online / offline status */}
       <div
-        className={`flex items-center gap-2 rounded-lg px-3 py-2 mb-3 text-sm font-medium ${
+        className={`flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 mb-3 text-sm font-medium ${
           isOnline ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-800'
         }`}
       >
-        {isOnline ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
-        {isOnline ? 'Online' : 'Offline — changes save locally'}
+        {isOnline ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4 shrink-0" />}
+        <span className="min-w-0 flex-1">{isOnline ? 'Online' : ROUTE_NO_SIGNAL_MESSAGE}</span>
         {hasSavedOfflineWork && (
           <span className="ml-auto inline-flex items-center gap-1 text-amber-800">
             <PackageCheck className="w-4 h-4" />
@@ -202,7 +194,7 @@ export default function FieldRoute() {
           <button
             type="button"
             onClick={fetchStops}
-            className="mt-3 text-sm text-crx-green font-medium underline"
+            className="mt-3 inline-flex min-h-[44px] items-center px-3 text-base text-crx-green font-medium underline"
           >
             Try again
           </button>
@@ -214,7 +206,7 @@ export default function FieldRoute() {
           <button
             type="button"
             onClick={() => navigate('/deliveries')}
-            className="mt-3 text-sm text-crx-green font-medium underline"
+            className="mt-3 inline-flex min-h-[44px] items-center px-3 text-base text-crx-green font-medium underline"
           >
             Go to all deliveries
           </button>
@@ -246,7 +238,7 @@ export default function FieldRoute() {
                       {!stop.assigned_driver && <span className="text-amber-600">Unassigned</span>}
                     </div>
                     {stop.delivery_notes && (
-                      <p className="text-xs text-gray-400 mt-1 truncate">{stop.delivery_notes}</p>
+                      <p className="text-base text-gray-900 mt-1 whitespace-pre-wrap break-words">{stop.delivery_notes}</p>
                     )}
                   </div>
                   <ChevronRight className="w-5 h-5 text-gray-400 shrink-0" />
@@ -256,6 +248,8 @@ export default function FieldRoute() {
           })}
         </ul>
       )}
+
+      <DoneTodayList isDriver={isDriver} />
     </div>
   );
 }

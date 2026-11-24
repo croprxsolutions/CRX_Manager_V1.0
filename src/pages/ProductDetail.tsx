@@ -473,6 +473,12 @@ export default function ProductDetail() {
   const costBasisLoadFailed = costBasisRead.status === 'failed';
   // Refreshing or out of date: the options shown may be from before a pricing change, so no selection.
   const costBasisUnsure = costBasisRead.status === 'loaded' && (costBasisRead.refreshing || costBasisRead.stale);
+  // Which side cards show a settled, current read now; a late Reload Product warning skips a card that a
+  // Try again already recovered (#2308 LOW, Luna r1).
+  const sideCardsRecoveredRef = useLatestRef({
+    'Cost History': costHistoryRead.status === 'loaded' && !costHistoryRead.refreshing && !costHistoryRead.stale,
+    'Cost Basis': costBasisRead.status === 'loaded' && !costBasisRead.refreshing && !costBasisRead.stale,
+  });
   const [persistedLabelFields, setPersistedLabelFields] = useState<{
     signalWord: Product['signal_word'];
     epaRegistration: string | null;
@@ -1072,8 +1078,10 @@ export default function ProductDetail() {
     const current = () => reloadRequest === pricingReloadRequestRef.current;
     // Each failed card is reported as soon as it fails, so the warning never names a card that a
     // later Try again already recovered (#2308 LOW).
-    const reportFailure = (read: Promise<boolean>, card: string) => read.then((reloaded) => {
-      if (!reloaded && current()) toast('warning', `Product reloaded, but ${card} did not load. Use Try again on that card.`);
+    const reportFailure = (read: Promise<boolean>, card: 'Cost History' | 'Cost Basis') => read.then((reloaded) => {
+      if (!reloaded && current() && !sideCardsRecoveredRef.current[card]) {
+        toast('warning', `Product reloaded, but ${card} did not load. Use Try again on that card.`);
+      }
       return reloaded;
     });
     void Promise.all([reportFailure(historyRead, 'Cost History'), reportFailure(basisRead, 'Cost Basis')])

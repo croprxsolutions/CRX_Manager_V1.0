@@ -1278,6 +1278,28 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.queryByText(/Current governed cost baseline:/)).not.toBeInTheDocument();
   });
 
+  it('#2308: a card that fails and recovers before the Product reloads is not reported', async () => {
+    render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    let settleProduct: (value: unknown) => void = () => {};
+    productLoadResults.push(new Promise((resolve) => { settleProduct = resolve; }) as never);
+    costHistoryLoadResult = { data: null, error: { message: 'history unavailable' } };
+    mockToast.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    const stale = await screen.findByText('Could not refresh the cost history. It may be out of date.');
+    costHistoryLoadResult = { data: [], error: null };
+    fireEvent.click(within(stale.parentElement!).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.queryByText('Could not refresh the cost history. It may be out of date.')).toBeNull());
+    settleProduct({ data: product, error: null });
+    await waitFor(() => expect(screen.queryByText(/could not be refreshed, so what is shown may be out of date/i)).toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockToast.mock.calls.filter(([, message]) => String(message).includes('did not load'))).toEqual([]);
+  });
+
   it('#2308: a failed card is reported when it fails, not after another card recovers', async () => {
     render(<ProductDetail />);
     const quotingNotes = await screen.findByLabelText('Quoting Notes');

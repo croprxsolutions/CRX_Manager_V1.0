@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for KI-114 / #1958 (20270228230000_piksi_mg_to_grams.sql): Piksi Dust is relabelled MG -> g with
+ * Real-schema proof for KI-114 / #1958 (20270301150000_piksi_mg_to_grams.sql): Piksi Dust is relabelled MG -> g with
  * no number changed. Builds the production baseline plus every migration before the candidate in Docker (no network;
  * the image may be pulled once), seeds live's Piksi rows (ids, units and quantities as read 2026-11-22) and a control
  * product, then proves the contract's cases (docs/plans/2026-11-22-ki114-piksi-grams-CONTRACT.md):
@@ -20,7 +20,7 @@ import path from 'node:path';
 process.env.UNDO_PATHS_CONTAINER ||= `crx-piksi-g-${process.pid}-${Date.now().toString(36)}`;
 const { buildContainer, removeContainer, seedUsers, psql, scalar, attempt, asUser, refuse, USERS, ROOT } = await import('./undo-paths/harness.mjs');
 
-const CANDIDATE = '20270228230000_piksi_mg_to_grams.sql';
+const CANDIDATE = '20270301150000_piksi_mg_to_grams.sql';
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const lf = (f) => readFileSync(f, 'utf8').replaceAll('\r\n', '\n');
 // Both directions pin live's 13 Piksi stock movements by id; this fixture seeds none, so pin the empty set (md5 of '').

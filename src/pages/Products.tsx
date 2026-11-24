@@ -940,11 +940,15 @@ export default function Products() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `crx-product-pricing-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      anchor.download = `crx-product-pricing-${todayInBusinessTz()}.xlsx`;
       anchor.click();
       URL.revokeObjectURL(url);
       exportPricingIdem.resetKeyFor(exportIntent);
-      toast('success', `Exported ${productIds.length} Product pricing row(s).`);
+      // The table's search box lives inside the table, so a filtered export never sees it.
+      const scope = !fullSheet && selectedRows.length === 0
+        ? ' The search box does not narrow this file: tick products to export only those.'
+        : '';
+      toast('success', `Exported ${productIds.length} Product pricing row(s).${scope}`);
     } catch (error) {
       toast('error', sanitizeError(error));
     } finally {
@@ -1362,7 +1366,7 @@ export default function Products() {
                 onClick={() => void handleExportPricingWorkbook(false)}
                 loading={workbookBusy}
                 disabled={listBlocked || !parentsReady || filtered.length === 0}
-                title="The selected products, or every active product the filters show"
+                title="The selected products, or every active product the category, vendor and status filters show. The search box does not narrow this file."
               >
                 Pricing .xlsx
               </Button>

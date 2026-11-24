@@ -151,7 +151,55 @@ describe('PricingChangePreviewModal warnings (To-Do 0.1)', () => {
         onApprove={vi.fn()}
       />,
     );
-    expect(screen.getByText('Choose a source for the new price or cost.')).toBeTruthy();
+    expect(screen.getByText(/the price_source column on a price sheet/)).toBeTruthy();
+  });
+
+  it('lists problem rows on a price sheet first, folds unchanged rows, and says nothing was saved', () => {
+    render(
+      <PricingChangePreviewModal
+        open
+        preview={makePreview({
+          source: 'pricing_worksheet',
+          status: 'invalid',
+          apply_allowed: false,
+          submitted_row_count: 3,
+          ready_count: 1,
+          unchanged_count: 1,
+          conflict_count: 0,
+          invalid_count: 1,
+          rows: [
+            {
+              sequence: 1, product_id: 'product-u', submitted_row: { product_name: 'Untouched Product' },
+              row_status: 'unchanged', error_code: null, effect: null,
+            },
+            { ...makePreview().rows[1], sequence: 2 },
+            {
+              sequence: 3, product_id: 'product-x', submitted_row: { product_name: 'Bad Cell Product' },
+              row_status: 'invalid', error_code: 'PRICING_DOLLARS_INVALID', effect: null,
+            },
+          ],
+        })}
+        applying={false}
+        onClose={vi.fn()}
+        onApprove={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/^Nothing was saved\. 1 row needs attention and is listed first below\./))
+      .toHaveTextContent('Fix the Invalid rows in your Excel file, then upload it again.');
+    const list = screen.getByRole('list', { name: 'Pricing preview rows' });
+    let rows = within(list).getAllByRole('listitem');
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByText('Bad Cell Product')).toBeInTheDocument();
+    expect(within(rows[0]).getByText(/not a plain dollar amount.*at most 2 decimals, like 12\.34/)).toBeInTheDocument();
+    expect(within(rows[1]).getByText('First Product')).toBeInTheDocument();
+    expect(screen.queryByText('Untouched Product')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 unchanged row' }));
+    rows = within(list).getAllByRole('listitem');
+    expect(rows).toHaveLength(3);
+    expect(within(rows[2]).getByText('Untouched Product')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide 1 unchanged row' })).toHaveAttribute('aria-expanded', 'true');
   });
 });
 
@@ -201,19 +249,20 @@ describe('PricingChangePreviewModal', () => {
     expect(screen.getByText('Ready for approval')).toBeInTheDocument();
     expect(screen.getByText('2 submitted rows')).toBeInTheDocument();
 
+    // Problem rows come first, so the conflict sorts ahead of the ready row.
     const rows = within(screen.getByRole('list', { name: 'Pricing preview rows' })).getAllByRole('listitem');
-    expect(within(rows[0]).getByText('First Product')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('SKU SKU-1')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('$10.00')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('$12.00')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('$12.50')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('$5.75 / acre')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('Markup %: 25%')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('Warning: this price is below cost.')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('First Product')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('SKU SKU-1')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('$10.00')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('$12.00')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('$12.50')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('$5.75 / acre')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Markup %: 25%')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Warning: this price is below cost.')).toBeInTheDocument();
 
-    expect(within(rows[1]).getByText('Later Product')).toBeInTheDocument();
+    expect(within(rows[0]).getByText('Later Product')).toBeInTheDocument();
     expect(
-      within(rows[1]).getByText(/changed after the pricing data was loaded/i),
+      within(rows[0]).getByText(/changed after the pricing data was loaded/i),
     ).toBeInTheDocument();
   });
 

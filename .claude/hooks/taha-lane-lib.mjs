@@ -287,29 +287,38 @@ function migrationSql({ repoPath, gh, filename, ref }) {
 }
 
 export const TAHA_LOGIN = "tahakhanabdalli";
+// His GitHub account number: a login can be renamed and re-registered by someone else; this cannot.
+export const TAHA_ID = "50602678";
 
 /**
  * Taha's verdict on exactly `headSha`: his latest approve / changes-requested / dismissed review
  * on that commit decides, as GitHub does; comments and pending reviews do not count.
- * `rows`: [{ login, state, commit }] oldest first. True only for APPROVED.
+ * `rows`: [{ id, state, commit, at }] oldest first. True only for APPROVED, and only when that
+ * Approve came after the PR's last base-branch change (`baseChangedAt`, ISO time or ""): a retarget
+ * keeps the head but changes the code that merges.
  */
-export function tahaApprovedHead(rows, headSha) {
+export function tahaApprovedHead(rows, headSha, baseChangedAt = "") {
   if (!usableHead(headSha)) return false;
   const head = headSha.toLowerCase();
-  const verdict = (rows || []).filter((r) => String(r?.login || "").toLowerCase() === TAHA_LOGIN
+  const verdict = (rows || []).filter((r) => String(r?.id || "") === TAHA_ID
     && String(r?.commit || "").toLowerCase() === head && !["COMMENTED", "PENDING"].includes(r?.state)).at(-1);
-  return verdict?.state === "APPROVED";
+  if (verdict?.state !== "APPROVED") return false;
+  if (!baseChangedAt) return true;
+  const approvedAt = Date.parse(verdict.at);
+  return Number.isFinite(approvedAt) && approvedAt > Date.parse(baseChangedAt);
 }
 
-/** Taha's reviews of the PR read from GitHub, fed to tahaApprovedHead. Any read error → false (refuse). */
+/** Taha's reviews and the PR's base changes read from GitHub, fed to tahaApprovedHead. Any read error → false (refuse). */
 export function tahaApprovedOnGitHub({ repo, gh, pullRequest, headSha }) {
   const repoPath = ghApiRepoPath(repo);
   if (!repoPath || !usablePr(pullRequest)) return false;
   try {
     const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${pullRequest}/reviews?per_page=100`, "--jq",
-      '.[] | [.user.login, .state, (.commit_id // "")] | @tsv'])).split(/\r?\n/).filter(Boolean)
-      .map((line) => { const [login, state, commit] = line.split("\t"); return { login, state, commit }; });
-    return tahaApprovedHead(rows, headSha);
+      '.[] | [(.user.id // "" | tostring), .state, (.commit_id // ""), (.submitted_at // "")] | @tsv'])).split(/\r?\n/).filter(Boolean)
+      .map((line) => { const [id, state, commit, at] = line.split("\t"); return { id, state, commit, at }; });
+    const baseChangedAt = String(gh(["api", "--paginate", `${repoPath}/issues/${pullRequest}/timeline?per_page=100`, "--jq",
+      '.[] | select(.event == "base_ref_changed") | .created_at'])).split(/\r?\n/).filter(Boolean).sort().at(-1) || "";
+    return tahaApprovedHead(rows, headSha, baseChangedAt);
   } catch { return false; }
 }
 
@@ -433,8 +442,9 @@ export function tellTahaOnGitHub({ repo, gh, pullRequest, body }) {
 export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, tahaApproved = () => false, notice = () => {} }) {
   const problem = tahaLaneProblem({ files });
   if (!problem) return null;
-  // Taha's Approve on this exact head lets lane code through. Not an unreadable file list, and not the block's own files.
-  if (problem.files.length && !problem.files.some((f) => BLOCK_FILES_RE.test(f)) && tahaApproved()) {
+  // Taha's Approve on this exact head lets lane code through. Not an unreadable file list, a migration
+  // whose SQL could not be read, or the block's own files.
+  if (problem.files.length && !problem.files.some((f) => BLOCK_FILES_RE.test(f) || f.endsWith("(its SQL could not be read)")) && tahaApproved()) {
     notice(`${prefix}: TAHA LANE: Taha approved #${pullRequest} at ${String(headSha).slice(0, 12)}; it may go on to the next gate.\n`);
     return null;
   }

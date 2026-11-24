@@ -54,6 +54,7 @@ export function decide(pr, { checks, lane, sol }) {
   const skip = (why) => ({ act: false, why });
   if (pr.isDraft) return skip('draft');
   if (isTahasPr(pr)) return skip("Taha's own PR");
+  if (pr.isCrossRepository) return skip('from a fork (not our team)');
   if (hasLabel(pr) && tahaRequested(pr)) return skip('already labelled and waiting on Taha');
   if (tahaReviewedHead(pr)) return skip('Taha already reviewed this head');
   const checkProblem = requiredChecksProblem(checks());
@@ -104,7 +105,7 @@ export function askedAfterPush(pushTimes, askTimes) {
 // checks/sol/asked are thunks as in decide(); returns { ping, why }.
 export function needsPing(pr, comments, { checks, sol, asked }) {
   const no = (why) => ({ ping: false, why });
-  if (!hasLabel(pr) || pr.isDraft || isTahasPr(pr)) return no('not a labelled, ready PR of ours');
+  if (!hasLabel(pr) || pr.isDraft || isTahasPr(pr) || pr.isCrossRepository) return no('not a labelled, ready PR of ours');
   if (tahaReviewedHead(pr)) return no('Taha already reviewed this head');
   if (pinged(comments, pr.headRefOid).length) return no('already pinged for this head');
   if (!tahaRequested(pr)) return no('Taha is not requested');
@@ -119,7 +120,7 @@ export function needsPing(pr, comments, { checks, sol, asked }) {
 // (a comment alone still counts as waiting) and required checks are green. The clock is the ping comment's time.
 export function needsReminder(pr, comments, now, { checks }) {
   const no = (why) => ({ remind: false, why });
-  if (!hasLabel(pr) || pr.isDraft || isTahasPr(pr) || !tahaRequested(pr)) return no('not a labelled PR waiting on Taha');
+  if (!hasLabel(pr) || pr.isDraft || isTahasPr(pr) || pr.isCrossRepository || !tahaRequested(pr)) return no('not a labelled PR waiting on Taha');
   if (tahaVerdict(pr)) return no('Taha decided this head');
   const first = pinged(comments, pr.headRefOid)[0];
   if (!first) return no('not pinged for this head yet');
@@ -132,7 +133,7 @@ export function needsReminder(pr, comments, now, { checks }) {
 
 const headTag = (pr) => `(head ${String(pr.headRefOid).slice(0, 7)})`;
 export const pingText = (pr, summary) => `<@${TAHA_SLACK}> ${link(pr.url, `#${pr.number}`)} ${esc(pr.title)} is waiting on your Approve ${headTag(pr)}`
-  + (summary ? `\n> ${summary}` : '');
+  + (summary ? `\n> AI summary of the author's description, not checked: ${summary}` : '');
 export const remindText = (pr) => `<@${TAHA_SLACK}> reminder: ${link(pr.url, `#${pr.number}`)} ${esc(pr.title)} has waited over a day for your Approve ${headTag(pr)}`;
 
 // ── Haiku (Anthropic API). Optional: no key, an error or a timeout just means no summary / no topics. ──
@@ -160,7 +161,9 @@ export async function summarize(pr, files, opts) {
   const text = await haiku('In two short plain-English sentences, tell the reviewer what this pull request changes for people using '
     + 'a farm-supply business app, and what to check. Plain text only: no markdown, links or mentions.\n' + DATA_NOTE + prFacts(pr, files), 200, opts);
   // Escaped (no <@…> or links can form) and cut, so a model answer can't reshape the Slack message.
-  return text ? esc(text.replace(/\s+/g, ' ')).slice(0, 400) : null;
+  // No links or Slack formatting either: the description it read is the PR author's.
+  const plain = String(text ?? '').replace(/https?:\/\/\S+/gi, '').replace(/[*_~`]/g, '').replace(/\s+/g, ' ').trim();
+  return plain ? esc(plain).slice(0, 400) : null;
 }
 // Up to 3 `topic:*` labels, only from TOPICS; anything else the model says is ignored.
 export const parseTopics = (text) => [...new Set(String(text ?? '').toLowerCase().split(/[^a-z-]+/).filter((t) => TOPICS.includes(t)))]
@@ -178,7 +181,7 @@ function gh(args) {
 }
 const tryGh = (args) => { try { return gh(args); } catch { return null; } };
 
-const LIST_FIELDS = 'number,title,url,author,isDraft,headRefName,headRefOid,baseRefOid,labels,reviewRequests';
+const LIST_FIELDS = 'number,title,url,author,isDraft,isCrossRepository,headRefName,headRefOid,baseRefOid,labels,reviewRequests';
 // shortcut: reads at most 500 open PRs; raise the limit if the repository ever holds more.
 const listOpen = () => JSON.parse(gh(['pr', 'list', '--repo', REPO, '--state', 'open', '--limit', '500', '--json', LIST_FIELDS]));
 const viewMore = (n) => JSON.parse(gh(['pr', 'view', String(n), '--repo', REPO, '--json', 'reviews,comments,body']));
@@ -207,10 +210,11 @@ async function handle(pr, mode, dry) {
   // Everything above was read for one head; a push since then means this run judged the wrong commit.
   const moved = () => currentHead(pr.number) !== pr.headRefOid;
   if (mode === 'topics') {
-    if (pr.isDraft || isTahasPr(pr) || hasTopic(pr)) return 0;
+    if (pr.isDraft || isTahasPr(pr) || pr.isCrossRepository || hasTopic(pr)) return 0;
     const topics = await pickTopics(pr, fileNames(pr.number));
     console.log(`#${pr.number} topics: ${topics.join(', ') || 'none'}`);
-    if (topics.length && !dry) addLabels(pr.number, topics);
+    // topic:none when Haiku gave nothing usable, so the PR is not sent to it again every half hour.
+    if (!dry) addLabels(pr.number, topics.length ? topics : ['topic:none']);
     return 0;
   }
   if (mode === 'label') {

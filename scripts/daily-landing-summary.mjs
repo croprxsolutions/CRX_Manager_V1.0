@@ -191,7 +191,7 @@ export function buildSummary({ now, hours, merged, changes, landedMigrations, wa
   if (tahaCount) {
     const list = (label, prs) => (prs.length ? [`${label}:`, ...prs.map((pr) => `- #${pr.number} ${plainText(pr.title)}`)] : []);
     lines.push("", `**Taha reviews: ${tahaCount}**`,
-      ...list("Approved by Taha (the merge captain can land these)", taha.approved),
+      ...list("Taha approved (the merge gates still check his review on GitHub)", taha.approved),
       ...list("Sent back by Taha", taha.changes),
       ...list("Waiting on Taha", taha.waiting));
   }

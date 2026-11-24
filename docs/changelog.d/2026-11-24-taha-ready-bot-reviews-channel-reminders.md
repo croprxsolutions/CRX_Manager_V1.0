@@ -6,3 +6,4 @@
 - Scheduled runs add up to three `topic:` labels picked by Haiku from a fixed list; with no API key this step is skipped.
 - A missing Slack token now fails the ping job loudly instead of passing quietly.
 - The daily landing summary gains a "Taha reviews" section: approved, sent back, waiting.
+- Security review fixes: the merge gates match Taha by his GitHub account number, refuse an Approve that predates a base-branch change, and never let his Approve clear a migration whose SQL could not be read. The bot skips fork PRs, marks the Haiku line as an unchecked AI summary with links and formatting stripped, and labels `topic:none` instead of retrying forever.

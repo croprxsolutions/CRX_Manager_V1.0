@@ -319,18 +319,29 @@ const refusal = tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files
 ok(/TAHA LANE BLOCK/.test(refusal) && /taha override #2300 \d{6}/.test(refusal), "a refusal gives Mason the exact line, PR included");
 eq(tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: f("src/pages/Deliveries.tsx"), dirs, now: NOW }), null, "outside the lane, nothing to do");
 // Taha's Approve on the exact head (Mason, 2026-11-24).
-const rv = (state, commit, login = "TahaKhanAbdalli") => ({ login, state, commit });
+const rv = (state, commit, id = "50602678", at = "2026-11-24T15:00:00Z") => ({ id, state, commit, at });
 ok(tahaApprovedHead([rv("APPROVED", A)], A), "Taha approved this head");
 ok(tahaApprovedHead([rv("APPROVED", A.toUpperCase())], A), "commit compared without case");
 ok(!tahaApprovedHead([rv("APPROVED", B)], A), "an Approve of an older head does not count");
-ok(!tahaApprovedHead([rv("APPROVED", A, "masonwells1")], A), "someone else's Approve does not count");
+ok(!tahaApprovedHead([rv("APPROVED", A, "12345")], A), "someone else's Approve does not count");
+ok(!tahaApprovedHead([{ login: "TahaKhanAbdalli", state: "APPROVED", commit: A }], A), "his login alone (renamable) does not count; his account number does");
+ok(!tahaApprovedHead([rv("APPROVED", A)], A, "2026-11-24T16:00:00Z"), "the PR's base branch changed after his Approve: refused");
+ok(tahaApprovedHead([rv("APPROVED", A)], A, "2026-11-24T14:00:00Z"), "a base change before his Approve is fine");
+ok(!tahaApprovedHead([rv("APPROVED", A, "50602678", "")], A, "2026-11-24T14:00:00Z"), "an Approve with no time, after a base change, refuses");
 ok(!tahaApprovedHead([rv("APPROVED", A), rv("CHANGES_REQUESTED", A)], A), "changes requested after the Approve wins");
 ok(!tahaApprovedHead([rv("DISMISSED", A)], A), "a dismissed Approve does not count");
 ok(tahaApprovedHead([rv("APPROVED", A), rv("COMMENTED", A)], A), "a later comment does not undo the Approve");
 ok(tahaApprovedHead([rv("CHANGES_REQUESTED", A), rv("APPROVED", A)], A), "an Approve after changes requested counts");
 ok(!tahaApprovedHead([rv("APPROVED", A)], "short"), "an unusable head never counts");
-const revGh = (tsv) => (args) => { if (!args.some((a) => /\/pulls\/5\/reviews/.test(a))) throw new Error("wrong call"); return tsv; };
-ok(tahaApprovedOnGitHub({ repo: "o/r", gh: revGh(`TahaKhanAbdalli\tAPPROVED\t${A}\n`), pullRequest: 5, headSha: A }), "read from GitHub: approved");
+const revGh = (tsv, base = "") => (args) => {
+  if (args.some((a) => /\/pulls\/5\/reviews/.test(a))) return tsv;
+  if (args.some((a) => /\/issues\/5\/timeline/.test(a))) { if (base === null) throw new Error("502"); return base; }
+  throw new Error("wrong call");
+};
+const approvedTsv = `50602678\tAPPROVED\t${A}\t2026-11-24T15:00:00Z\n`;
+ok(tahaApprovedOnGitHub({ repo: "o/r", gh: revGh(approvedTsv), pullRequest: 5, headSha: A }), "read from GitHub: approved");
+ok(!tahaApprovedOnGitHub({ repo: "o/r", gh: revGh(approvedTsv, "2026-11-20T00:00:00Z\n2026-11-24T16:00:00Z\n"), pullRequest: 5, headSha: A }), "read from GitHub: retargeted after the Approve");
+ok(!tahaApprovedOnGitHub({ repo: "o/r", gh: revGh(approvedTsv, null), pullRequest: 5, headSha: A }), "an unreadable base history refuses");
 ok(!tahaApprovedOnGitHub({ repo: "o/r", gh: () => { throw new Error("502"); }, pullRequest: 5, headSha: A }), "a failed read refuses");
 let askedTaha = 0;
 const approve = () => { askedTaha++; return true; };

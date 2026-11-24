@@ -163,6 +163,16 @@ test('summary: only title, description and file names go out; the answer is esca
   assert.equal(await summarize(pr(), [], { key: '', fetchImpl: never }), null, 'no key, no call');
   assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false }) }), null, 'API error');
   assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: async () => { throw new Error('timeout'); } }), null, 'network error');
-  assert.match(pingText(pr(), s), /\n> Hi &lt;!channel&gt;/);
+  assert.match(pingText(pr(), s), /\n> AI summary of the author's description, not checked: Hi &lt;!channel&gt;/);
   assert.doesNotMatch(pingText(pr(), null), /\n/);
+  const reply = (text) => async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text }] }) });
+  assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: reply('Safe, *approve* now: https://evil.example/x ok') }), 'Safe, approve now: ok',
+    'links and Slack formatting are stripped');
+  assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: reply('https://only.a/link') }), null, 'nothing left means no summary');
+});
+
+test("strangers' fork PRs are never labelled or pinged", () => {
+  const fork = pr({ isCrossRepository: true });
+  assert.equal(decide(fork, { checks: green, lane: inLane, sol: noSol }).act, false);
+  assert.equal(needsPing({ ...fork, labels: [{ name: 'ready-for-taha' }] }, [], { checks: green, sol: noSol, asked: () => [] }).ping, false);
 });

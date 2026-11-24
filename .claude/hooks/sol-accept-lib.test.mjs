@@ -361,6 +361,11 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   assert.match(recordReplyApproval({ code: r1.code, dirs, reply: `approve ${r1.code}`, sessionId: SESSION, readMark: markFor("x") }).reason, /answer it with: skip/, "approve never skips");
   assert.match(recordReplyApproval({ code: r1.code, dirs, reply: `accept ${r1.code} fine by me`, sessionId: SESSION, readMark: markFor("x"), form: "accept", reason: "fine by me" }).reason,
     /answer it with: skip/, "the old accept form never answers a skip request");
+  {
+    const c = request(1, { sessionId: "other-session-99" });
+    assert.match(recordReplyApproval({ code: c, dirs, reply: `accept ${c} fine by me`, sessionId: SESSION, readMark: markFor("x"), form: "accept", reason: "fine by me", readShown: () => "anything" }).reason,
+      /accept it there/, "the old per-finding accept form stays in the session that built the request");
+  }
   assert.match(skipReply(r1.code, "skip 2").reason, /not in the list/, "reply: a number not shown skips nothing");
   assert.match(skipReply(r1.code, "skip", { now: NOW + 25 * 60 * 60 * 1000 }).reason, /expired/, "reply: a stale request skips nothing");
   const ok3 = skipReply(r1.code, "skip 3");

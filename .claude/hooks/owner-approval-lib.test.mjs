@@ -112,6 +112,22 @@ const check = (approval, over = {}) => verifyOwnerApproval({
   approval, expect, appliedNames: [], usedNonces: new Set(), now: NOW, checkReply: () => {}, ...over,
 });
 
+// ── 2026-11-23 carry: the apply re-checks where and how he replied.
+{
+  const at = (sid, words) => ({ transcript: path.join("x", `${sid}.jsonl`), from: 0, written: true, words });
+  const boom = () => { throw new Error("not shown"); };
+  ok(check(approve({}, { repliedIn: SID, replyMark: at(SID, `approve ${base.code}`) }), { checkShown: boom }).ok,
+    "a code reply in the conversation that built the request needs no shown check");
+  refuses(check(approve({}, { repliedIn: SID, replyMark: at(OTHER_SID, `approve ${base.code}`) })), "conversation the receipt names",
+    "a receipt whose reply mark points into another conversation is refused");
+  refuses(check(approve({}, { repliedIn: OTHER_SID, replyMark: at(OTHER_SID, `approve ${base.code}`) }), { checkShown: boom }), "could not be tied",
+    "a code reply in another conversation than the one that built it must have followed the shown summary (security review HIGH)");
+  ok(check(approve({}, { repliedIn: OTHER_SID, replyMark: at(OTHER_SID, `approve ${base.code}`) }), { checkShown: () => {} }).ok,
+    "...and verifies when it did");
+  refuses(check(approve({}, { reply: `approve ${base.code}`, repliedIn: SID, replyMark: at(SID, "yes") }), { checkShown: boom }), "could not be tied",
+    "his words are read from the reply mark, not the receipt's own reply field (security review LOW)");
+}
+
 // ── BASELINE: a genuine approval verifies, or every refusal below proves nothing.
 {
   const v = check(approve());
@@ -285,7 +301,7 @@ refuses(check(approve({ nonce: "../x" })), "no usable one-time code", "a nonce t
 
 // ── Request → reply → approval, on disk. `rec` is Mason replying in the session
 // that built the requests (SID) unless a case says otherwise.
-const MARK = { transcript: "transcript.jsonl", from: 0, written: false, words: "approve" };
+const MARK = { transcript: `${SID}.jsonl`, from: 0, written: false, words: `approve ${base.code}` };
 const rec = (args) => recordReplyApproval({ sessionId: SID, readMark: () => MARK, ...args });
 const tmp = tempDir("crx-owner-approval-");
 try {
@@ -374,7 +390,7 @@ try {
   // Mutation guard: the pre-fix signature took a worktree lister and added every
   // worktree it returned. Passing one must change nothing now.
   ok(ownerRequestDirs([path.join(tmp, "a")], () => [path.join(tmp, "a"), path.join(tmp, "b")]).length === 1,
-    "no worktree listing is ever consulted");
+    "ownerRequestDirs itself never lists worktrees (the hook adds repositoryCheckouts on purpose)");
   // Mason, 2026-11-23: the hook also looks in every checkout of the repository, so his reply in the
   // conversation he is talking to finds a request a merge captain built in its own worktree.
   const listed = repositoryCheckouts(path.join(tmp, "a"), () => `worktree ${path.join(tmp, "main")}
@@ -387,10 +403,22 @@ branch x
     "every checkout git lists is searched, after the session's own");
   ok(JSON.stringify(repositoryCheckouts(path.join(tmp, "a"), () => { throw new Error("no git"); })) === JSON.stringify([path.join(tmp, "a")]),
     "if git cannot list checkouts, only the session's own folder is searched (fewer, never wrong)");
-  writeApprovalRequest(other, buildApprovalPayload({ ...base, code: "888888", sessionId: OTHER_SID }));
-  const carried = rec({ code: "888888", dirs: ownerRequestDirs([path.join(tmp, "a"), path.join(tmp, "b")]), reply: "approve 888888", now: APPROVED });
+  const otherPayload = buildApprovalPayload({ ...base, code: "888888", sessionId: OTHER_SID });
+  writeApprovalRequest(other, otherPayload);
+  const bothDirs = ownerRequestDirs([path.join(tmp, "a"), path.join(tmp, "b")]);
+  const otherSummary = ownerApprovalSummary(JSON.parse(otherPayload)).join("\n");
+  // Security review HIGH: "approve <code>" in a chat that never showed that request counts for nothing.
+  refuses(rec({ code: "888888", dirs: bothDirs, reply: "approve 888888", now: APPROVED, readShown: () => "something else" }),
+    "built in another conversation", "a code reply to another session's request, in a chat that did not just show it, records nothing");
+  refuses(rec({ code: "888888", dirs: bothDirs, reply: "approve 888888", now: APPROVED }),
+    "built in another conversation", "with nothing to read what was shown, a code reply to another session's request records nothing");
+  refuses(rec({ code: "888888", dirs: bothDirs, reply: "approve 888888", now: APPROVED, readShown: () => { throw new Error("no transcript"); } }),
+    "could not be read", "when what was shown cannot be read, a code reply to another session's request records nothing");
+  ok(existsSync(path.join(other, requestFileName("888888"))) && !existsSync(path.join(other, usedCodeMarkerName("888888"))),
+    "those refusals leave the other session's request in place and its code unretired");
+  const carried = rec({ code: "888888", dirs: bothDirs, reply: "approve 888888", now: APPROVED, readShown: () => otherSummary });
   ok(carried.ok && carried.file.startsWith(other) && JSON.parse(readFileSync(carried.file, "utf8")).repliedIn === SID,
-    `his code reply here records the request another session built in another folder, beside it, naming where he replied: ${carried.reason}`);
+    `right after this chat showed it, his code reply here records the request another session built in another folder, beside it, naming where he replied: ${carried.reason}`);
 
   // A request that cannot be removed after the approval is saved still reports
   // success, because the approval file is what the apply gate accepts (Codex P2, PR #894).
@@ -792,6 +820,9 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       "another session's request he was not shown here leaves \"I approve\" as ordinary chat");
     ok(resolve("", { readShown: () => { throw new Error("EACCES"); } }).silent === true,
       "with only another session's request waiting, an unreadable transcript stays silent");
+    // Shown, but with other words: he meant that request, so it is refused out loud, not lost (security review MED).
+    refuses(resolve(`${show("424242")}\nShall I merge it after?`), "mentioned request 424242",
+      "another session's request shown with other words is refused out loud, not silently");
     rmSync(path.join(sdir, requestFileName("424242")));
     writeApprovalRequest(sdir, buildApprovalPayload({ ...base, code: "535353" }));
     ok(resolve(show("535353"), { now: Date.parse(base.expiresAt) + 1 }).silent === true, "an expired request is not waiting");
@@ -825,6 +856,23 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     writeFileSync(path.join(sdir, requestFileName("757575")), "not json");
     refuses(resolve("Reference 757575"), "could not be read", "a request file that cannot be read is reported, not skipped");
     rmSync(path.join(sdir, requestFileName("757575")));
+
+    // Other checkouts (2026-11-23): a bad entry there is skipped, never makes every "yes" loud (security review MED).
+    const sib = path.join(tdir, "sibling", ".claude", "session-state");
+    mkdirSync(sib, { recursive: true });
+    writeApprovalRequest(sdir, buildApprovalPayload({ ...base, migration: SECOND, code: "868686" }));
+    writeFileSync(path.join(sib, requestFileName("979797")), "not json");
+    const sibOk = resolve(show("868686", SECOND), { dirs: [sdir, sib, notADir], ownDirs: [sdir] });
+    ok(sibOk.ok && sibOk.code === "868686", `an unreadable file or folder in another checkout is skipped: ${sibOk.reason}`);
+    refuses(resolve(show("868686", SECOND), { dirs: [sdir, sib] }), "could not be read",
+      "the same unreadable file in this conversation's own folder is still reported");
+    rmSync(path.join(sib, requestFileName("979797")));
+    // Codes are unique per checkout only (Luna HIGH): two waiting with the shown code approve neither.
+    writeApprovalRequest(sib, buildApprovalPayload({ ...base, migration: SECOND, code: "868686", sessionId: OTHER_SID }));
+    refuses(resolve(show("868686", SECOND), { dirs: [sdir, sib], ownDirs: [sdir] }), "share the code",
+      "two waiting requests in different checkouts with the same code approve neither");
+    refuses(rec({ code: "868686", dirs: [sdir, sib], reply: "approve 868686", now: APPROVED }), "ambiguous",
+      "a code reply matching requests in two checkouts records neither");
   } finally {
     rmSync(tdir, { recursive: true, force: true });
   }
@@ -874,7 +922,8 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       "another session's code reply is no longer refused for the conversation, but still needs its transcript to record");
 
     // A transcript as Claude Code writes it; `later` is what it writes after the hook runs.
-    const transcript = path.join(root, "transcript.jsonl");
+    // Claude Code names a transcript by its session id; the apply checks the receipt against it.
+    const transcript = path.join(root, `${SID}.jsonl`);
     const tx = (lines) => { writeFileSync(transcript, `${lines.join("\n")}\n`); return { transcript_path: transcript }; };
     const later = (lines) => appendFileSync(transcript, `${lines.join("\n")}\n`);
     const shown1 = ownerApprovalSummary(JSON.parse(buildApprovalPayload(live))).join("\n");
@@ -1028,10 +1077,14 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       input: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: sessionId, cwd: proj, prompt: "what is left to do?" }),
     });
 
-    // Since 2026-11-23 the request is still built: his reply counts in whichever conversation shows it.
-    const before = runScript("--selftest");
+    // A reply HERE would be lost, so it refuses unless the agent will show it elsewhere (security review MED).
+    const refused = runScript("--selftest");
+    ok(refused.status !== 0 && refused.stderr.includes(promptHookSeenName(SID)) && refused.stderr.includes("--show-elsewhere") && requests().length === 0,
+      `with no message heard in this session, --selftest refuses and builds nothing: ${refused.stderr}`);
+    // Since 2026-11-23, with --show-elsewhere it warns and builds: his reply counts in whichever conversation shows it.
+    const before = runScript("--selftest", "--show-elsewhere");
     ok(before.status === 0 && before.stderr.includes("NOTE") && before.stderr.includes(promptHookSeenName(SID)) && requests().length === 1,
-      `with no message heard in this session, --selftest warns and still builds its request: ${before.stderr}`);
+      `with --show-elsewhere, --selftest warns and still builds its request: ${before.stderr}`);
     for (const n of requests()) rmSync(path.join(dir, n));
 
     const other = hook("prompt-router.mjs", OTHER_SID);

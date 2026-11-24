@@ -508,15 +508,23 @@ export function assertSkipShown(mark, p) {
  *   silent: nothing is waiting in this conversation, so the message is ordinary chat.
  */
 // `purposes`: the requests this reply may answer; a Sol skip reply (`skip`) passes [OWNER_SOL_SKIP_PURPOSE].
-export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now(), purposes = [OWNER_APPROVAL_PURPOSE, OWNER_SELFTEST_PURPOSE] }) {
+// `ownDirs`: this conversation's own folders. Since 2026-11-23 `dirs` also holds every other
+// checkout; an unreadable entry there is skipped, so one bad file in a sibling worktree never
+// makes every "yes" in every chat loud (security review, MED). Default: every dir is own (strict).
+export function resolvePlainReply({
+  dirs, ownDirs = dirs, sessionId, readShown, now = Date.now(), purposes = [OWNER_APPROVAL_PURPOSE, OWNER_SELFTEST_PURPOSE],
+}) {
   if (!usableSessionId(sessionId)) return { silent: true };
+  const own = new Set(ownDirs || []);
   const live = new Map();
+  const duplicated = new Set();
   // Silence must mean "nothing is waiting", never "could not tell" (Luna LOW, round 2).
   for (const dir of new Set(dirs || [])) {
+    const strict = own.has(dir);
     let names;
     try { names = readdirSync(dir); }
     catch (e) {
-      if (e?.code === "ENOENT") continue;
+      if (e?.code === "ENOENT" || !strict) continue;
       return { ok: false, reason: `the approval folder ${dir} could not be read (${errText(e)})` };
     }
     for (const name of names) {
@@ -524,14 +532,21 @@ export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now()
       if (!m || existsSync(path.join(dir, usedCodeMarkerName(m[1])))) continue;
       let p;
       try { p = JSON.parse(JSON.parse(readFileSync(path.join(dir, name), "utf8")).payload); }
-      catch (e) { return { ok: false, reason: `the request file ${name} could not be read (${errText(e)})` }; }
+      catch (e) {
+        if (!strict) continue;
+        return { ok: false, reason: `the request file ${name} could not be read (${errText(e)})` };
+      }
       // Each reply answers only its own kind of request: `I approve` a migration, `skip` a Sol skip
       // request, `accept <code> <reason>` an old per-finding Sol request (sol-accept-lib.mjs).
       if (!purposes.includes(p?.purpose)) continue;
       const deadline = Date.parse(p?.expiresAt);
       // Any session's request (Mason, 2026-11-23: his reply must carry to the merge captain);
       // what binds it is that THIS conversation's last message showed it word for word.
-      if (String(p?.code) === m[1] && Number.isFinite(deadline) && now <= deadline) live.set(m[1], p);
+      if (String(p?.code) === m[1] && Number.isFinite(deadline) && now <= deadline) {
+        // Codes are unique per checkout only: two waiting with one code are never told apart (Luna HIGH).
+        if (live.has(m[1])) duplicated.add(m[1]);
+        live.set(m[1], p);
+      }
     }
   }
   if (!live.size) return { silent: true };
@@ -544,20 +559,26 @@ export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now()
     return { ok: false, reason: `what the agent last showed him could not be read (${errText(e)})` };
   }
   const shown = [...live].filter(([, p]) => requestShownIn(shownText, p)).map(([c]) => c);
-  if (!shown.length && !ownWaiting) return { silent: true };
+  if (!shown.length && !ownWaiting) {
+    // A request's reference in the message, but not its summary alone: he meant it, so say it did
+    // not count instead of losing it without a word (security review MED; 2026-10-20 incident).
+    const cited = [...live.keys()].filter((c) => new RegExp(`Reference\\s+${c}(?![\\p{L}\\p{N}_/:-]|\\.[\\p{L}\\p{N}])`, "u").test(shownText));
+    if (!cited.length) return { silent: true };
+    return { ok: false, reason: `the agent's message just before it mentioned request ${cited.join(", ")} but did not show its summary alone (word for word, nothing else)` };
+  }
   if (!shown.length) {
     return { ok: false, reason: "the agent's message just before it did not show the approval request's summary alone (word for word, nothing else), so it may have been about something else" };
   }
   if (shown.length > 1) return { ok: false, reason: `the agent's last message showed ${shown.length} requests (${shown.join(", ")}), so it is ambiguous` };
+  if (duplicated.has(shown[0])) return { ok: false, reason: `two waiting requests share the code ${shown[0]}, so it is ambiguous; build a fresh request` };
   return { ok: true, code: shown[0] };
 }
 
 /**
- * The session-state directories a request may be in: ONLY the folders of the
- * session Mason is replying in. A request another session built in another
- * worktree is never found, so his reply in one conversation cannot approve an
- * apply that a different conversation runs (Codex P1, PR #894: AGENTS.md wants
- * his approval in the applying conversation).
+ * The session-state directories of the given folders, each once. The reply hook passes the
+ * replying session's own folders AND, since 2026-11-23, every checkout of the repository
+ * (repositoryCheckouts), so his reply carries to a request a merge captain built elsewhere; the
+ * hook-seen marker still uses the session's own folders only.
  */
 export function ownerRequestDirs(sessionFolders) {
   // The payload cwd, CLAUDE_PROJECT_DIR and the hook's cwd may name one checkout
@@ -657,7 +678,7 @@ export function repositoryCheckouts(cwd, run = (args) => execFileSync("git", arg
 // "skip" for his plain skip reply to a Sol skip request, `skip` being skipFromReply's result
 // (sol-accept-lib.mjs); each form answers only its own kind of request.
 export function recordReplyApproval({
-  code, dirs, reply, sessionId, readMark, form = "approve", reason = "", skip = null, now = Date.now(), removeRequest = (f) => rmSync(f, { force: true }),
+  code, dirs, reply, sessionId, readMark, readShown = null, form = "approve", reason = "", skip = null, now = Date.now(), removeRequest = (f) => rmSync(f, { force: true }),
 }) {
   const no = (reason) => ({ ok: false, reason });
   if (!usableSessionId(sessionId)) return no("the message carried no usable session id");
@@ -709,6 +730,18 @@ export function recordReplyApproval({
   // names the request outright. The receipt records where he replied.
   const deadline = Date.parse(p.expiresAt);
   if (!Number.isFinite(deadline) || now > deadline) return no(`the request for code ${code} expired at ${p.expiresAt}`);
+  // Another session's request: whatever the form, this conversation's last message must have shown
+  // it word for word, so "approve <code>" typed in a chat that never showed it counts for nothing
+  // (security review HIGH). The old per-finding `accept` form stays in its own session.
+  if (p.sessionId !== sessionId) {
+    if (form === "accept") return no(`the request for code ${code} was built in another conversation; accept it there`);
+    let shownText;
+    try { shownText = String(readShown?.() ?? ""); }
+    catch (e) { return no(`what the agent last showed him could not be read (${errText(e)})`); }
+    if (!requestShownIn(shownText, p)) {
+      return no(`the request for code ${code} was built in another conversation, and the agent's message just before his reply did not show its summary alone (word for word)`);
+    }
+  }
   // Where his reply is (replyMark), so the apply can check it was his words alone.
   let mark;
   try { mark = readMark?.(); }
@@ -896,7 +929,7 @@ export function findOwnerApprovals(dirs, safeName) {
  * @param {{payload: string, approvedAt: string, via: string}} args.approval
  * @param {object} args.expect  project, migration, queryHash, pullRequest, prHead,
  *   categories ([{category, reason}] exactly as parkedCategories returns them now),
- *   sessionId (the Claude Code session running the apply)
+ *   (sessionId is no longer checked: any session may apply, 2026-11-23)
  * @param {string[]|null} [args.appliedNames]  the live ledger snapshot; null skips that check
  * @param {Set<string>} [args.usedNonces]
  * @param {(mark: object) => void} [args.checkReply]  throws unless his reply was his words alone (assertReplyAlone)
@@ -955,9 +988,16 @@ export function verifyOwnerApproval({
   // His reply, read back now that it is written, was his words alone (Codex P1, PR #900).
   try { checkReply(approval.replyMark); }
   catch (e) { return no(`his reply could not be confirmed as the approval words alone (${errText(e)})`); }
-  // A plain `I approve` names no request, so the conversation he replied in must have shown
-  // this one just before it; re-read here now that any session may apply (2026-11-23).
-  if (approvalCodeFromReply(String(approval.reply ?? "")) !== String(p.code)) {
+  // The receipt names the conversation he replied in; the mark must point into that conversation.
+  const repliedIn = approval.repliedIn == null ? null : String(approval.repliedIn);
+  if (repliedIn !== null && path.basename(String(approval.replyMark?.transcript ?? ""), ".jsonl") !== repliedIn) {
+    return no("his reply is not in the conversation the receipt names");
+  }
+  // A plain `I approve` names no request, and a reply in another conversation than the one that
+  // built it may be about anything: either way the conversation he replied in must have shown this
+  // one just before it, re-read here (2026-11-23). His words come from the mark, not the receipt.
+  const words = String(approval.replyMark?.words ?? approval.reply ?? "");
+  if (approvalCodeFromReply(words) !== String(p.code) || (repliedIn !== null && repliedIn !== String(p.sessionId))) {
     try { checkShown(approval.replyMark, p); }
     catch (e) { return no(`his reply could not be tied to this request (${errText(e)})`); }
   }

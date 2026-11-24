@@ -109,7 +109,7 @@ function carryNow(pr) {
 }
 const NO_QUESTION = "Sol marked every finding a repeat of a skip Mason already gave on this pull request, so it carries: do not ask him. Run node scripts/owner-accept-sol-finding.mjs --log, commit the one file it writes alone, then node scripts/write-codex-push-proof.mjs --carry-owner-accepted";
 
-const argv = process.argv.slice(2);
+const argv = process.argv.slice(2).filter((a) => a !== "--show-elsewhere");
 
 if (argv.length === 1 && argv[0] === "--log") {
   const got = collectAcceptances({
@@ -145,7 +145,14 @@ numbers.sort((a, b) => a - b);
 
 const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
 if (!/^[0-9A-Za-z_-]{8,128}$/.test(String(sessionId || ""))) die("run this inside the Claude Code session Mason will reply in (CLAUDE_CODE_SESSION_ID is not set).");
-if (!promptHookSeen({ dirs: [stateDir], sessionId })) console.error(hooklessSessionRefusal({ checkout, sessionId }));
+// Hookless here: his reply in THIS chat would be lost, so refuse unless the agent says it will
+// show the summary in a conversation he does talk to (--show-elsewhere; security review MED).
+const showElsewhere = process.argv.includes("--show-elsewhere");
+if (!promptHookSeen({ dirs: [stateDir], sessionId })) {
+  if (!showElsewhere) die(`${hooklessSessionRefusal({ checkout, sessionId })}
+Then run this again with --show-elsewhere.`);
+  console.error(hooklessSessionRefusal({ checkout, sessionId }));
+}
 
 const pr = openPullRequest();
 if (carryNow(pr)) die(NO_QUESTION);

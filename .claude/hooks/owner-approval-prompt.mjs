@@ -4,8 +4,9 @@
 // 2026-10-13: a plain "I approve" is enough).
 //   - His WHOLE message is `yes` or `I approve` (or `approve`, `approved`, `yes I approve`)
 //     right after this conversation showed a pending request's summary, or
-//     `approve <6-digit code>`, in ANY conversation, whichever session built the
-//     request (Mason, 2026-11-23: it must carry to the merge captain)
+//     `approve <6-digit code>`; whichever session built the request (Mason, 2026-11-23:
+//     it must carry to the merge captain), but another session's request only right after
+//     this conversation showed its summary word for word, whatever the reply's form
 //     (scripts/owner-approve-migration.mjs) → the request becomes an approval
 //     good for 24 hours (2026-11-20), and the agent is told so.
 //   - A plain `I approve` when this conversation neither built nor showed a
@@ -39,17 +40,20 @@ let payload;
 try { payload = globalThis.__CRX_ROUTED_HOOK_PAYLOAD ?? JSON.parse(readFileSync(0, "utf8")); } catch { emit(); }
 // Every message, approval or not: proof for the request script that messages in
 // this session reach this hook (some sessions never run it, 2026-10-20).
-try { recordPromptHookSeen({ dirs: ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]), sessionId: payload?.session_id }); }
+const ownDirs = ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
+try { recordPromptHookSeen({ dirs: ownDirs, sessionId: payload?.session_id }); }
 catch { /* a missing marker only makes the request script refuse */ }
 
 // Where a request he answers may be: every checkout of this repository, so his reply in the
 // conversation he is talking to counts for a request a merge captain built elsewhere (Mason,
-// 2026-11-23). Only listed when a message looks like an answer.
-const replyDirs = () => ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd(),
-  ...repositoryCheckouts(payload?.cwd || process.cwd())]);
+// 2026-11-23). Only listed when a message looks like an answer, and once per message.
+let listed = null;
+const replyDirs = () => (listed ??= ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd(),
+  ...repositoryCheckouts(payload?.cwd || process.cwd())]));
 
 // The app's reminder block in front of his words is not part of his reply (2026-10-20).
 const reply = replyWithoutReminders(payload?.prompt);
+const readShown = () => lastAgentMessageText(payload?.transcript_path, reply);
 
 // `accept <code> <reason>`: Mason accepts ONE Sol finding (sol-accept-lib.mjs, 2026-11-10).
 const accept = acceptFromReply(reply);
@@ -85,12 +89,11 @@ if (skip) {
   try {
     const dirs = replyDirs();
     which = resolvePlainReply({
-      dirs, sessionId: payload?.session_id, purposes: [OWNER_SOL_SKIP_PURPOSE],
-      readShown: () => lastAgentMessageText(payload?.transcript_path, reply),
+      dirs, ownDirs, sessionId: payload?.session_id, purposes: [OWNER_SOL_SKIP_PURPOSE], readShown,
     });
     if (which.ok) {
       res = recordReplyApproval({
-        code: which.code, dirs, reply, sessionId: payload?.session_id, form: "skip", skip,
+        code: which.code, dirs, reply, sessionId: payload?.session_id, form: "skip", skip, readShown,
         readMark: () => replyMark(payload?.transcript_path, reply),
       });
     }
@@ -130,20 +133,16 @@ let result;
 let waiting = attempt?.kind === "code";
 try {
   const dirs = replyDirs();
-  if (attempt?.kind === "plain") waiting = !resolvePlainReply({ dirs, sessionId: payload?.session_id, readShown: () => "" }).silent;
+  if (attempt?.kind === "plain") waiting = !resolvePlainReply({ dirs, ownDirs, sessionId: payload?.session_id, readShown: () => "" }).silent;
   if (plain) {
-    which = resolvePlainReply({
-      dirs,
-      sessionId: payload?.session_id,
-      readShown: () => lastAgentMessageText(payload?.transcript_path, reply),
-    });
+    which = resolvePlainReply({ dirs, ownDirs, sessionId: payload?.session_id, readShown });
     if (which.ok) code = which.code;
   }
   // readMark: where his reply lands in the transcript. The apply reads it back there
   // and refuses if a picture or file came with it (Codex P1, PR #900).
   if (code) {
     result = recordReplyApproval({
-      code, dirs, reply, sessionId: payload?.session_id, readMark: () => replyMark(payload?.transcript_path, reply),
+      code, dirs, reply, sessionId: payload?.session_id, readShown, readMark: () => replyMark(payload?.transcript_path, reply),
     });
   }
 } catch (error) {
@@ -174,8 +173,8 @@ if (!result) {
 if (!result.ok) {
   emit([
     `OWNER APPROVAL NOT RECORDED — Mason replied "${said}", but ${result.reason}. Nothing was approved.`,
-    "Tell him in one line. If he still wants the change, run node scripts/owner-approve-migration.mjs again for a fresh request, " +
-      "from this session's own folder: a request is only found by the session it was built in.",
+    "Tell him in one line. If he still wants the change, run node scripts/owner-approve-migration.mjs again for a fresh request " +
+      "and make its summary, exactly as printed, the whole last message of your turn; his reply then counts in this conversation.",
   ].join("\n"));
 }
 
@@ -189,6 +188,8 @@ const p = result.payload;
 emit([
   `OWNER APPROVAL RECORDED — the reply "${said}" in this session approved ${p.migration} (pull request ` +
     `#${p.pullRequest}). It works once, for the next 24 hours, for that exact file (the PR head may move; the SQL may not).`,
-  `Apply it now: node scripts/apply-migration-file.mjs supabase/migrations/${p.migration}.sql (dry run), then again with --confirm.`,
+  p.sessionId === payload?.session_id
+    ? `Apply it now: node scripts/apply-migration-file.mjs supabase/migrations/${p.migration}.sql (dry run), then again with --confirm.`
+    : "Another session built this request: tell that session (or the merge captain) it is approved, with SendMessage if you can; any session may apply it.",
   ...(result.requestLeft ? ["(The used request file could not be removed; it is harmless and needs no action.)"] : []),
 ].join("\n"));

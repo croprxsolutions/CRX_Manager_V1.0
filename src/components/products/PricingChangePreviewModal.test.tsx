@@ -155,10 +155,7 @@ describe('PricingChangePreviewModal warnings (To-Do 0.1)', () => {
   });
 
   it('lists problem rows on a price sheet first, folds unchanged rows, and says nothing was saved', () => {
-    render(
-      <PricingChangePreviewModal
-        open
-        preview={makePreview({
+    const sheetPreview = makePreview({
           source: 'pricing_worksheet',
           status: 'invalid',
           apply_allowed: false,
@@ -178,12 +175,17 @@ describe('PricingChangePreviewModal warnings (To-Do 0.1)', () => {
               row_status: 'invalid', error_code: 'PRICING_DOLLARS_INVALID', effect: null,
             },
           ],
-        })}
+        });
+    const modal = (open: boolean) => (
+      <PricingChangePreviewModal
+        open={open}
+        preview={sheetPreview}
         applying={false}
         onClose={vi.fn()}
         onApprove={vi.fn()}
-      />,
+      />
     );
+    const { rerender } = render(modal(true));
 
     expect(screen.getByText(/^Nothing was saved\. 1 row needs attention and is listed first below\./))
       .toHaveTextContent('Fix the Invalid rows in your Excel file, then upload it again.');
@@ -200,6 +202,12 @@ describe('PricingChangePreviewModal warnings (To-Do 0.1)', () => {
     expect(rows).toHaveLength(3);
     expect(within(rows[2]).getByText('Untouched Product')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Hide 1 unchanged row' })).toHaveAttribute('aria-expanded', 'true');
+
+    // Closing and reopening the same preview folds the unchanged rows again.
+    rerender(modal(false));
+    rerender(modal(true));
+    expect(screen.getByRole('button', { name: 'Show 1 unchanged row' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Untouched Product')).not.toBeInTheDocument();
   });
 });
 

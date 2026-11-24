@@ -430,6 +430,8 @@ export default function PricingChangePreviewModal({
     .sort((a, b) => ROW_ORDER[a.row_status] - ROW_ORDER[b.row_status]);
   const foldedRows = orderedRows.filter(isFoldedRow);
   const [unchangedOpenFor, setUnchangedOpenFor] = useState<PricingPreviewResult | null>(null);
+  // Closing the modal folds the unchanged rows again, even if the same preview reopens.
+  if (!open && unchangedOpenFor !== null) setUnchangedOpenFor(null);
   const showUnchanged = preview !== null && unchangedOpenFor === preview;
 
   return (

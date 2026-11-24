@@ -72,13 +72,14 @@ BEGIN
   END IF;
 
   -- A function that runs as the caller and writes either table would break once the grants go. Dynamic SQL cannot
-  -- be read statically; the live read on 2026-11-22 found no caller-rights function that writes either table.
+  -- be read statically; the live reads on 2026-11-22 and 2026-11-24 found no caller-rights function that writes either
+  -- table. pg_get_function_sqlbody adds SQL-standard (BEGIN ATOMIC) bodies, which prosrc leaves empty.
   SELECT string_agg(p.oid::regprocedure::text, ', ')
     INTO v_writers
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND NOT p.prosecdef
-     AND p.prosrc ~* '(update|insert\s+into|delete\s+from|merge\s+into|truncate(\s+table)?)\s+(only\s+)?("?public"?\.)?"?(jobs|job_fields)\M';
+     AND (p.prosrc || ' ' || coalesce(pg_get_function_sqlbody(p.oid), '')) ~* '(update|insert\s+into|delete\s+from|merge\s+into|truncate(\s+table)?)\s+(only\s+)?("?public"?\.)?"?(jobs|job_fields)\M';
   IF v_writers IS NOT NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_DIRECT_JOB_WRITES_DRIFT: these caller-rights functions write jobs or job_fields: %', v_writers;
   END IF;

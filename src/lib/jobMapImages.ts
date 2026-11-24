@@ -637,10 +637,11 @@ async function fieldObstacleFeatures(fieldIds: string[]): Promise<BoundaryFeatur
 /**
  * Number one job's fields 1..n in spray order (sort_order, then the RPC's order),
  * counting every job field, mapped or not, so map numbers match the sheet's stops.
+ * An unset sort_order counts as 0, exactly as the sheet's fetch does (chemicalApplicationReportFetch).
  */
 export function sprayNumbersByFieldId(rows: Array<Pick<JobMapFieldRow, 'id' | 'sort_order'>>): Map<string, number> {
   return new Map(rows
-    .map((row, index) => ({ id: row.id, order: row.sort_order ?? Number.MAX_SAFE_INTEGER, index }))
+    .map((row, index) => ({ id: row.id, order: row.sort_order ?? 0, index }))
     .sort((first, second) => first.order - second.order || first.index - second.index)
     .map((row, rank) => [row.id, rank + 1] as const));
 }

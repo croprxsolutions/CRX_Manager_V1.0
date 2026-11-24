@@ -355,7 +355,8 @@ describe('sprayNumbersByFieldId', () => {
     ]);
     const jobB = sprayNumbersByFieldId([{ id: 'b-only', sort_order: 9 }, { id: 'b-unset', sort_order: null }]);
     expect([...jobA.entries()]).toEqual([['a-east', 1], ['a-north', 2], ['a-west', 3]]);
-    expect([...jobB.entries()]).toEqual([['b-only', 1], ['b-unset', 2]]);
+    // An unset order counts as 0, as on the sheet, so it is Stop 1 here too (Codex P2).
+    expect([...jobB.entries()]).toEqual([['b-unset', 1], ['b-only', 2]]);
   });
 
   it('keeps the database order for tied sort_order values', () => {

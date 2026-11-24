@@ -88,6 +88,7 @@ Paperwork follow-ups (logged, not fixed; none touches money, stock or data):
 | Item | State | Proof / link | Note |
 |---|---|---|---|
 | FP-1 screen half (split versions, history, payer notes, retry key) | BUILT, WAITING ON FP-1 | Luna clean of BLOCKER/HIGH at `8c46c5094` (round 7) | Branch `feat/field-1.1-setup-screen`, not pushed. Next: stack on the FP-1 branch once pushed, Sol, browser proof on staging. Merges only after FP-1 is VERIFIED on staging, rebased on fresh `origin/staging` and re-proved in the browser |
+| Set Primary removed; main payer is the database rule (owner if paying, else largest share) | DONE (Mason, 2026-11-24) | | PR body must say it reaches live in the SAME release as FP-1 |
 | Save locks the page and reloads fresh | DONE (Mason, 2026-11-24) | | Replaced keep-editing-and-merge after the save/reload logic drew a HIGH in Luna rounds 2, 4 and 5 |
 | Different product and application shares | DEFERRED to FP-4 | | Screen shows both columns but refuses unequal shares with the database's plain message until FP-4 |
 | Note edited on a payer then removed before save | FOLLOW-UP | | The note change is not sent; re-adding the payer shows the old note (visible, editable). Needs the notes RPC to accept removed payers |

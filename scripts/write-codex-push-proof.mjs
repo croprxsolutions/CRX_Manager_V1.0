@@ -2672,6 +2672,11 @@ function runFocusedSolCheck(root, options, { baseRef, baseSha, headSha, prompt, 
 // proof when HEAD is ONE commit on top of it that only renames exactly one
 // migration to a new stamp (identical LF-normalized SQL) and replaces the old
 // stamp with the new one in other files. Anything else refuses: full review.
+// 2026-11-23 (#2338): the SQL may also change its link to its own record,
+// `migrations.d/<stem>.md`, in the leading `--` comment header (outside every
+// statement), and that record's `SQL sha256` pin then moves to the new SQL's LF
+// hash. No other file's hash may change, and no other branch migration may sit
+// between the old and new stamps (that would flip the apply order).
 const RESTAMP_MIGRATION_RE = /^supabase\/migrations\/(\d{14})(_[^/]+\.sql)$/;
 const ABSENT_MODE = "000000";
 const RESTAMP_MODES = new Set(["100644", "100755", ABSENT_MODE]);
@@ -2679,7 +2684,9 @@ const RESTAMP_MODES = new Set(["100644", "100755", ABSENT_MODE]);
 // null when `entries` (gitChangedEntries of reviewed head → HEAD) is a pure
 // restamp, otherwise why not. `readFile(side, path)` returns the blob as a
 // latin1 string ("old" = reviewed head, "new" = HEAD), or null.
-export function restampProblem({ entries, readFile }) {
+// `branchAdded`: the migration paths the branch adds against its reviewed base.
+// `note`, when given, receives `sqlSha256: { from, to }` when the SQL bytes changed (the header self-link).
+export function restampProblem({ entries, readFile, branchAdded = [], note = {} }) {
   const deleted = entries.filter((entry) => entry.newMode === ABSENT_MODE);
   const added = entries.filter((entry) => entry.oldMode === ABSENT_MODE);
   const migFrom = deleted.map((entry) => RESTAMP_MIGRATION_RE.exec(entry.path)).filter(Boolean);
@@ -2688,8 +2695,23 @@ export function restampProblem({ entries, readFile }) {
   const [fromPath, oldStamp, fromRest] = migFrom[0];
   const [toPath, newStamp, toRest] = migTo[0];
   if (fromRest !== toRest || oldStamp === newStamp) return "the migration's name changed beyond its timestamp";
+  const [low, high] = [oldStamp, newStamp].sort();
+  const between = branchAdded.filter((p) => p !== fromPath).map((p) => RESTAMP_MIGRATION_RE.exec(p)?.[1]).find((s) => s && s >= low && s <= high);
+  if (between) return `the branch's migration ${between} sits between the old and new stamps, so the apply order would change`;
   const restamp = (text) => text.split(oldStamp).join(newStamp);
+  const lf = (text) => text.replace(/\r\n/g, "\n");
+  const [oldStem, newStem] = [fromPath, toPath].map((p) => p.slice("supabase/migrations/".length, -".sql".length));
+  const ownRecord = `docs/reference/migrations.d/${newStem}.md`;
+  const selfLink = (text) => text.split(`migrations.d/${oldStem}.md`).join(`migrations.d/${newStem}.md`);
+  const oldSql = readFile("old", fromPath);
+  const newSql = readFile("new", toPath);
+  if (oldSql === null || newSql === null) return "the migration could not be read";
+  // A record's `SQL sha256` pin is the hash of the LF bytes (docs/reference/migrations.d/README.md).
+  const sha = (text) => createHash("sha256").update(Buffer.from(lf(text), "latin1")).digest("hex");
+  const pin = (hash) => `SQL sha256: \`${hash}\``;
+  const [oldSha, newSha] = [sha(oldSql), sha(newSql)];
   const paths = new Map(entries.map((entry) => [entry.path, entry]));
+  let recordPins = null;
   for (const entry of entries) {
     const { path: file, oldMode, newMode } = entry;
     if (!RESTAMP_MODES.has(oldMode) || !RESTAMP_MODES.has(newMode) || (oldMode !== ABSENT_MODE && newMode !== ABSENT_MODE && oldMode !== newMode)) {
@@ -2711,12 +2733,33 @@ export function restampProblem({ entries, readFile }) {
     const after = readFile("new", file);
     if (before === null || after === null) return `${file} could not be read`;
     if (file === toPath) {
-      if (after.replace(/\r\n/g, "\n") !== before.replace(/\r\n/g, "\n")) return "the migration's SQL changed";
+      if (lf(after) !== lf(before) && !headerOnlyChange(lf(before), lf(after), selfLink)) return "the migration's SQL changed";
+    } else if (file === ownRecord) {
+      // An applied record names the live ledger's stamp; restamping it would make the record false (Taha, #2384 LOW 6).
+      if (![before, after].every((text) => text.trimStart().startsWith("**LOCAL CANDIDATE"))) return `${file} is not a LOCAL CANDIDATE record; an applied migration keeps its name`;
+      if (after !== restamp(before) && after !== restamp(before).split(pin(oldSha)).join(pin(newSha))) return `${file} changed beyond the timestamp and its SQL sha256 pin`;
+      recordPins = [...after.matchAll(/SQL sha256: `([0-9a-f]{64})`/g)].map((m) => m[1]);
+      if (recordPins.some((h) => h !== newSha)) return `${file}'s SQL sha256 pin is not the new SQL's hash`;
     } else if (after !== restamp(before)) {
       return `${file} changed beyond the timestamp`;
     }
   }
+  // A changed SQL must be bound by its renamed record's one pin; byte-identical SQL keeps the format's optional pin.
+  if (oldSha !== newSha && recordPins?.length !== 1) return `the SQL changed, so ${ownRecord} must be renamed and pin it with one SQL sha256`;
+  if (oldSha !== newSha) note.sqlSha256 = { from: oldSha, to: newSha };
   return null;
+}
+
+// True when `after` is `change(before)` and every changed line is in the leading
+// comment header: the lines before the first one that is neither blank nor `--`.
+// `change` applies to header lines only (as restamp-migration.mjs does; Taha, #2384 LOW 1).
+function headerOnlyChange(before, after, change) {
+  const lines = before.split("\n");
+  let bodyStart = lines.findIndex((line) => line.trim() !== "" && !line.trimStart().startsWith("--"));
+  if (bodyStart === -1) bodyStart = lines.length;
+  // A lone carriage return ends a `--` comment in Postgres, so text after one would be statement text.
+  if (lines.slice(0, bodyStart).some((line) => line.includes("\r"))) return false;
+  return after === lines.map((line, i) => (i < bodyStart ? change(line) : line)).join("\n");
 }
 
 function gitBlob(root, sha, file) {
@@ -2764,7 +2807,16 @@ function runCarryRestamp(root, options) {
     process.stderr.write("Restamp carry requires a clean worktree.\n");
     return 1;
   }
-  const facts = resolveSingleCommitCarry(root, Date.now(), restampProblem);
+  const note = {};
+  const facts = resolveSingleCommitCarry(root, Date.now(), (args) => {
+    // A post-apply carry means the migration is live under its stamp (Taha, #2384 LOW 6).
+    if (args.source?.carry?.mode === "post_apply") return "the reviewed head's proof is a post-apply carry, so the migration is live under its stamp";
+    const added = runTrustedGit(["diff", "--name-only", "--no-renames", "--diff-filter=A", args.source.base_sha, args.fromHead, "--", "supabase/migrations/"], {
+      cwd: root, encoding: "utf8", timeout: 60_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (added.error || added.status !== 0) return "could not list the branch's migrations";
+    return restampProblem({ ...args, note, branchAdded: String(added.stdout).split("\n").map((p) => p.trim()).filter(Boolean) });
+  });
   if (facts.problem) {
     process.stderr.write(
       `Restamp carry refused: ${facts.problem}. No proof written — run the full review instead: ` +
@@ -2774,9 +2826,12 @@ function runCarryRestamp(root, options) {
   }
   process.stdout.write(
     `Restamp carry: reviewed head ${facts.fromHead.slice(0, 12)} → head ${facts.headSha.slice(0, 12)} ` +
-    `(base ${facts.source.base_sha.slice(0, 12)}); ${facts.entries.length} file(s), only the migration's timestamp changed.\n`,
+    `(base ${facts.source.base_sha.slice(0, 12)}); ${facts.entries.length} file(s), ` +
+    (note.sqlSha256
+      ? `the stamp and the SQL header's link to its own record changed (SQL sha256 ${note.sqlSha256.from.slice(0, 12)} -> ${note.sqlSha256.to.slice(0, 12)}).\n`
+      : "only the migration's timestamp changed.\n"),
   );
-  return mintSingleCommitCarry(root, options, facts, "restamp");
+  return mintSingleCommitCarry(root, options, facts, "restamp", note.sqlSha256 ? { sql_sha256: note.sqlSha256 } : {});
 }
 
 // Write the carried proof for `facts` unless this is a dry run or anything moved

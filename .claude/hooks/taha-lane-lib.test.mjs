@@ -186,7 +186,14 @@ for (const [sql, why] of [
   ["INSERT INTO public.inventory (product_id, quantity_prebooked) VALUES (1, 0);", "an insert"],
   ["CREATE FUNCTION public.f() RETURNS trigger AS $$ BEGIN NEW.quantity_prebooked := 0; RETURN NEW; END $$;", "a function body"],
   ["ALTER TABLE inventory ALTER COLUMN quantity_prebooked SET DEFAULT 0;", "a column change"],
+  // Advisory Sol on #2382.
+  ["UPDATE inventory SET (quantity_available, quantity_prebooked) = (100, 0);", "a tuple assignment"],
+  ["ALTER TABLE inventory DROP quantity_prebooked;", "a drop without COLUMN"],
 ]) ok(isTahaLaneSql(sql), `quantity_prebooked: ${why}`);
+// Advisory Sol on #2382: ONLY after a comma, and function prefixes end at a name boundary.
+ok(isTahaLaneSql("TRUNCATE TABLE ONLY deliveries, ONLY invoices;"), "ONLY on a later list item");
+ok(!isTahaLaneSql("CREATE FUNCTION public.void_ordering_cache() RETURNS void AS $$ SELECT 1 $$;"), "void_ordering_cache is not void_order");
+ok(isTahaLaneSql("CREATE FUNCTION public.void_order_v2() RETURNS void AS $$ SELECT 1 $$;"), "void_order_v2 is void_order");
 ok(!isTahaLaneSql("UPDATE inventory SET quantity_available = 1 WHERE quantity_prebooked = 0; SELECT quantity_prebooked FROM inventory;"), "reading quantity_prebooked is not a write");
 
 // Reading the SQL from GitHub at the PR's commit.
@@ -207,8 +214,14 @@ fake = ghFake((args) => args.includes("--paginate") ? `added\tsupabase/migration
 eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: REF })[0].sql, null, "no commit to read at is unreadable");
 // #2382 LOW 8: the SQL must be read at the head the merge is pinned to.
 fake = ghFake((args) => args.includes("--paginate") ? migTsv : "SELECT 1;");
-eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: "b".repeat(40) })[0].sql, null, "GitHub listing another commit than the pinned head is unreadable");
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: "b".repeat(40) }), null, "GitHub listing another commit than the pinned head is unreadable");
 eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake })[0].sql, null, "no pinned head is unreadable");
+// Advisory Sol on #2382: a list GitHub built for another head is unreadable; a SQL file moved out of the read folders counts as removed.
+fake = ghFake((args) => args.includes("--paginate") ? `modified\tsrc/a.ts\t\t${"c".repeat(40)}\n` : "");
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: REF }), null, "a file list from another head is unreadable");
+fake = ghFake((args) => args.includes("--paginate") ? `renamed\tscripts/archive/fix.sql\tsupabase/migrations/20270227_fix.sql\t${REF}\n` : "SELECT 1;");
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: REF })[0].sql, null, "a migration moved out of supabase/migrations counts as removed");
+fake = ghFake((args) => args.includes("--paginate") ? migTsv : "SELECT 1;");
 eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: REF.toUpperCase() })[0].sql, "SELECT 1;", "the head is compared without case");
 // #2382 LOW 7: baselines and hand-run undo scripts are read too; other scripts are not.
 fake = ghFake((args) => args.includes("--paginate")

@@ -91,8 +91,8 @@ function isLaneName(name) {
 // last two pieces, which may sit anywhere in the name. They win over a field word
 // (_guard_credit_memo_application_immutable).
 const TAHA_LANE_FUNCTIONS_RE = new RegExp("^(?:_?complete_delivery|_?start_and_complete_delivery|void_delivery|cancel_delivery|void_order|cancel_order" +
-  "|update_order_items|price_order|apply_write_off|reverse_write_off|_lock_accounting_months|get_ar_|get_customer_balance|get_monthly_summary" +
-  "|prevent_order_shares)|accounting_period|credit_memo", "i");
+  "|update_order_items|price_order|apply_write_off|reverse_write_off|_lock_accounting_months|get_customer_balance|get_monthly_summary" +
+  "|prevent_order_shares)(?=_|$)|^get_ar_|accounting_period|credit_memo", "i");
 const isLaneFunction = (name) => TAHA_LANE_FUNCTIONS_RE.test(name) || isLaneName(name);
 
 // A migration is Taha's when its SQL writes to, locks or changes one of these tables, or creates,
@@ -123,14 +123,14 @@ const FIELD_BILLING_TABLES = new Set(["invoices", "invoice_items", "invoice_shar
 const tableRe = (tables) => String.raw`(?:"?public"?\s*\.\s*)?"?(?:${tables.join("|")})"?(?![\w$]|\s*\.)`;
 // "INTO" covers INSERT, MERGE and SELECT INTO; "ON" covers triggers, policies, indexes, grants and comments;
 // TABLE / ONLY / IF [NOT] EXISTS are optional fillers, and a list (TRUNCATE a, invoices) is read to its end (LOW 5).
-const writeRe = (table) => new RegExp(String.raw`\b(?:into|update|delete\s+from|truncate|alter|drop|lock|copy|create(?:\s+unlogged)?\s+table|on)(?:\s+(?:table|only|if\s+(?:not\s+)?exists))*\s+(?:[\w".]+\s*,\s*)*` + table, "i");
+const writeRe = (table) => new RegExp(String.raw`\b(?:into|update|delete\s+from|truncate|alter|drop|lock|copy|create(?:\s+unlogged)?\s+table|on)(?:\s+(?:table|only|if\s+(?:not\s+)?exists))*\s+(?:(?:only\s+)?[\w".]+\s*,\s*)*(?:only\s+)?` + table, "i");
 const readRe = (table) => new RegExp(String.raw`\b(?:from|join)(?:\s+only)?\s+` + table, "i");
 const LANE_RES = { write: writeRe(tableRe(TAHA_LANE_TABLES)), read: readRe(tableRe(TAHA_LANE_TABLES)) };
 const FIELD_TABLES = TAHA_LANE_TABLES.filter((t) => !FIELD_BILLING_TABLES.has(t));
 const FIELD_RES = { write: writeRe(tableRe(FIELD_TABLES)), read: readRe(tableRe(FIELD_TABLES)) };
 const ROW_LOCK_RE = /\bfor\s+(?:no\s+key\s+)?update\b|\bfor\s+(?:key\s+)?share\b/i;
 // Booking stock (Taha on #2382): a write that sets inventory.quantity_prebooked, or a function body that does.
-const PREBOOKED_RE = /\bset\b(?:(?!\bwhere\b)[^;])*?\bquantity_prebooked"?\s*=|\bquantity_prebooked"?\s*:=|\binto\s+[\w".]*\binventory"?\s*\([^)]*\bquantity_prebooked\b|\bcolumn\s+(?:if\s+(?:not\s+)?exists\s+)?"?quantity_prebooked\b/i;
+const PREBOOKED_RE = /\bset\b(?:(?!\bwhere\b)[^;])*?\bquantity_prebooked"?\s*=|\bquantity_prebooked"?\s*:=|\binto\s+[\w".]*\binventory"?\s*\([^)]*\bquantity_prebooked\b|\bset\s*\([^)]*\bquantity_prebooked\b|\b(?:column|add|drop|alter|rename)\s+(?:column\s+)?(?:if\s+(?:not\s+)?exists\s+)?"?quantity_prebooked\b/i;
 const QNAME = String.raw`(?:"?public"?\s*\.\s*)?"?([\w$]+)`;
 const FUNCTION_RE = new RegExp(String.raw`\b(?:create(?:\s+or\s+replace)?|alter)\s+(?:function|procedure|routine)\s+` + QNAME, "gi");
 // ALTER FUNCTION … RENAME TO <new name> (MED 4).
@@ -243,12 +243,15 @@ export function prFilesOnGitHub({ repo, gh, number, headSha }) {
       '.[] | [.status, .filename, (.previous_filename // ""), ((.contents_url // "") | ([capture("[?&]ref=(?<r>[0-9a-f]{40})").r][0] // ""))] | @tsv']))
       .split(/\r?\n/).filter(Boolean).map((line) => line.split("\t"));
     if (rows.some((r) => r.length < 2 || r.length > 4 || !r[1])) return null;
+    // The whole list must be GitHub's answer for the pinned head, not a later push (advisory Sol on #2382).
+    if (usableHead(headSha) && rows.some(([status, , , ref]) => status !== "removed" && ref && ref.toLowerCase() !== headSha.toLowerCase())) return null;
     return rows.map(([status, filename, previous, ref = ""]) => {
       const entry = { filename, previous_filename: previous || undefined };
       // Migrations, baselines and hand-run undo scripts are judged by their SQL at the head the merge is pinned to;
       // a removed or unreadable one, or one GitHub lists at another commit, counts as Taha's (Taha's review of #2382, LOW 7, LOW 8).
-      if (SQL_FILE_RE.test(filename)) {
-        entry.sql = status === "removed" || !usableHead(headSha) || ref.toLowerCase() !== headSha.toLowerCase() ? null : migrationSql({ repoPath, gh, filename, ref });
+      // A SQL file moved out of the read folders counts as removed there (advisory Sol on #2382).
+      if (SQL_FILE_RE.test(filename) || SQL_FILE_RE.test(previous)) {
+        entry.sql = status === "removed" || !SQL_FILE_RE.test(filename) || !usableHead(headSha) || ref.toLowerCase() !== headSha.toLowerCase() ? null : migrationSql({ repoPath, gh, filename, ref });
       }
       return entry;
     });

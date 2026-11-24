@@ -208,9 +208,13 @@ export function LoaderWorksheetsPanel({
     : null;
   const weightsShown = selectedWeights && 'weights' in selectedWeights ? selectedWeights : null;
   // The job page's lines carry no liquid/dry form; the weights read does (by product), when it has loaded.
-  const formById = new Map((weightsShown?.ws.loads[0]?.products ?? []).map((product) => [product.product_id ?? '', product.product_form ?? null]));
+  // Only a real product id is looked up: unlinked lines must never share (and borrow) one another's form.
+  const formById = new Map((weightsShown?.ws.loads[0]?.products ?? [])
+    .filter((product) => product.product_id).map((product) => [product.product_id as string, product.product_form ?? null]));
+  const formOf = (product: LoaderLoad['products'][number]) =>
+    product.product_form ?? (product.product_id ? formById.get(product.product_id) ?? null : null);
   const tankWater = (load: LoaderLoad): LoaderWater => loaderTankWater(load.volume,
-    load.products.map((product) => ({ ...product, product_form: product.product_form ?? formById.get(product.product_id ?? '') ?? null })), products);
+    load.products.map((product) => ({ ...product, product_form: formOf(product) })), products);
   const waterCell = (load: LoaderLoad, each = '') => {
     const water = tankWater(load);
     return <>{fmtLoaderGallons(water.water_gal)}{each}{water.over && <span className="block text-xs font-medium text-amber-700">Products exceed finished gallons</span>}</>;

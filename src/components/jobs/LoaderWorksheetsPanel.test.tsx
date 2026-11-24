@@ -294,7 +294,8 @@ describe('LoaderWorksheetsPanel', () => {
 
     expect(await screen.findByText('2 × Loads 1–2')).toBeInTheDocument();
     expect(screen.getByText('133.33 each')).toBeInTheDocument();
-    expect(screen.getByText('2,000 gal each')).toBeInTheDocument();
+    // No products: finished gallons and water to add are both the full tank.
+    expect(screen.getAllByText('2000 GL each')).toHaveLength(2);
   });
 
   it('makes the legacy-print fallback explicit when no saved worksheet is selected', async () => {

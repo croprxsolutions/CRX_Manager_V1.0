@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildLoaderWorksheetPdfPlan, type LoaderWorksheetPdfData } from './loaderWorksheetPdf';
+import { buildLoaderWorksheetPdfPlan, loaderPdfWaterRows, type LoaderWorksheetPdfData } from './loaderWorksheetPdf';
 
 const baseData: LoaderWorksheetPdfData = {
   job_number: 'JOB-100',
@@ -65,5 +65,34 @@ describe('buildLoaderWorksheetPdfPlan', () => {
 
     expect(plan.worksheet.loads_count).toBe(3);
     expect(plan.columns.map((column) => column.done)).toEqual([true, false, false]);
+  });
+});
+
+describe('loaderPdfWaterRows', () => {
+  const liquid = { ...baseData, total_acres: 100, carrier_rate_gpa: 10, tank_capacity: 300,
+    products: [{ product_name: 'TEST Liquid', total_quantity: 40.5, unit: 'gal', product_form: 'liquid' },
+      { product_name: 'TEST Dry', total_quantity: 100, unit: 'lb', product_form: 'dry' }] };
+
+  it('prints finished gallons and water to add per tank and for the whole batch', () => {
+    const { rows, warnings } = loaderPdfWaterRows(liquid, buildLoaderWorksheetPdfPlan(liquid));
+    expect(rows[0]).toEqual(['Finished gallons', '300 GL', '300 GL', '300 GL', '100 GL', '1000 GL']);
+    expect(rows[1][0]).toBe('Water to add');
+    expect(rows[1][1]).toBe('287 GL 108.8 FL OZ'); // 300 − 12.15 gal
+    expect(rows[1].at(-1)).toBe('959 GL 64 FL OZ'); // 1000 − 40.5
+    expect(warnings).toEqual([]);
+  });
+
+  it('prints 0 and a warning when the recipe is more than the finished gallons', () => {
+    const over = { ...liquid, products: [{ product_name: 'TEST Liquid', total_quantity: 1200, unit: 'gal', product_form: 'liquid' }] };
+    const { rows, warnings } = loaderPdfWaterRows(over, buildLoaderWorksheetPdfPlan(over));
+    expect(rows[1].slice(1)).toEqual(['0 GL (!)', '0 GL (!)', '0 GL (!)', '0 GL (!)', '0 GL (!)']);
+    expect(warnings[0]).toMatch(/more than the finished gallons on Load 1, Load 2, Load 3, Load 4/);
+  });
+
+  it('flags a line with no amount instead of counting it as no volume', () => {
+    const blank = { ...liquid, products: [{ product_name: 'TEST Blank', total_quantity: null, unit: 'gal', product_form: 'liquid' }] };
+    const { rows, warnings } = loaderPdfWaterRows(blank, buildLoaderWorksheetPdfPlan(blank));
+    expect(rows[1].at(-1)).toBe('1000 GL *');
+    expect(warnings[0]).toMatch(/does not count TEST Blank/);
   });
 });

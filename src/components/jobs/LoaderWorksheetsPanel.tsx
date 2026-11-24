@@ -6,9 +6,11 @@ import { useToast } from '../ui/Toast';
 import { checkMutationResult, supabaseUntyped } from '../../lib/db';
 import {
   computeLoaderWorksheet,
+  type LoaderLoad,
   type LoaderLoadBalanceMode,
   type LoaderProductInput,
 } from '../../lib/loaderWorksheet';
+import { fmtLoaderGallons, loaderTankWater, type LoaderWater } from '../../lib/loaderWorksheetWater';
 import {
   condensedLoaderLoadLabel,
   condenseLoaderLoads,
@@ -205,6 +207,15 @@ export function LoaderWorksheetsPanel({
     ? selectedLoaderWeights(weightsRead, selectedWorksheet, selectedComputed)
     : null;
   const weightsShown = selectedWeights && 'weights' in selectedWeights ? selectedWeights : null;
+  // The job page's lines carry no liquid/dry form; the weights read does (by product), when it has loaded.
+  const formById = new Map((weightsShown?.ws.loads[0]?.products ?? []).map((product) => [product.product_id ?? '', product.product_form ?? null]));
+  const tankWater = (load: LoaderLoad): LoaderWater => loaderTankWater(load.volume,
+    load.products.map((product) => ({ ...product, product_form: product.product_form ?? formById.get(product.product_id ?? '') ?? null })), products);
+  const waterCell = (load: LoaderLoad, each = '') => {
+    const water = tankWater(load);
+    return <>{fmtLoaderGallons(water.water_gal)}{each}{water.over && <span className="block text-xs font-medium text-amber-700">Products exceed finished gallons</span>}</>;
+  };
+  const waterUnsized = selectedComputed?.valid ? [...new Set(selectedComputed.loads.flatMap((load) => tankWater(load).unsized))] : [];
   const selectedLoadsDone = selectedComputed
     ? validLoaderLoadDone(selectedWorksheet?.loads_done ?? [], selectedComputed.loads_count)
     : [];
@@ -602,7 +613,7 @@ export function LoaderWorksheetsPanel({
               <div className="overflow-x-auto rounded-lg border border-gray-200">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-left text-xs font-medium text-secondary">
-                    <tr><th className="px-3 py-2">Load</th><th className="px-3 py-2 text-right">Acres</th><th className="px-3 py-2 text-right">Spray volume</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Product weight</th></tr>
+                    <tr><th className="px-3 py-2">Load</th><th className="px-3 py-2 text-right">Acres</th><th className="px-3 py-2 text-right">Finished gallons</th><th className="px-3 py-2 text-right">Water to add</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Product weight</th></tr>
                   </thead>
                   <tbody>
                     {displayMode === 'individual' ? selectedComputed.loads.map((load, index) => {
@@ -613,7 +624,8 @@ export function LoaderWorksheetsPanel({
                           <td className="px-3 py-2 text-right">
                             {canEdit ? <input aria-label={`Load ${load.load_number} acres`} type="number" min="0" step="0.01" value={perLoadAcres[index] ?? ''} onChange={(event) => setPerLoadAcres((current) => current.map((value, currentIndex) => currentIndex === index ? event.target.value : value))} className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-nav-dark" /> : formatNumber(load.volume / selectedComputed.carrier_rate_gpa)}
                           </td>
-                          <td className="px-3 py-2 text-right">{formatNumber(load.volume)} gal</td>
+                          <td className="px-3 py-2 text-right">{fmtLoaderGallons(load.volume)}</td>
+                          <td className="px-3 py-2 text-right">{waterCell(load)}</td>
                           <td className="px-3 py-2">
                             {canEdit ? <button type="button" disabled={busyId === selectedWorksheet.id} onClick={() => void toggleDone(index)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-crx-green hover:bg-crx-green-tint disabled:opacity-50"><Check className="h-3.5 w-3.5" />{done ? 'Done' : 'Mark done'}</button> : (done ? <span className="inline-flex items-center gap-1 text-crx-green"><Check className="h-4 w-4" />Done</span> : <span>&mdash;</span>)}
                           </td>
@@ -627,7 +639,8 @@ export function LoaderWorksheetsPanel({
                         <tr key={group.key} className={`border-t border-gray-100 ${group.done ? 'bg-gray-50 text-secondary line-through' : ''}`}>
                           <td className="px-3 py-2">{condensedLoaderLoadLabel(group)}{load.is_partial ? ' (remainder)' : ''}</td>
                           <td className="px-3 py-2 text-right">{formatNumber(load.volume / selectedComputed.carrier_rate_gpa)}{each}</td>
-                          <td className="px-3 py-2 text-right">{formatNumber(load.volume)} gal{each}</td>
+                          <td className="px-3 py-2 text-right">{fmtLoaderGallons(load.volume)}{each}</td>
+                          <td className="px-3 py-2 text-right">{waterCell(load, each)}</td>
                           <td className="px-3 py-2">{group.done ? <span className="inline-flex items-center gap-1 text-crx-green"><Check className="h-4 w-4" />Done</span> : <span>&mdash;</span>}</td>
                           <td className="px-3 py-2">{weightsShown ? <><LoaderLoadWeightsCell result={weightsShown} loadIndexes={group.loads.map((member) => selectedComputed.loads.indexOf(member))} />{each && <p className="text-xs text-secondary">each</p>}</> : <>&mdash;</>}</td>
                         </tr>
@@ -636,6 +649,9 @@ export function LoaderWorksheetsPanel({
                   </tbody>
                 </table>
               </div>
+              {waterUnsized.length > 0 && (
+                <p className="text-xs text-amber-700">Water to add does not count {waterUnsized.join(', ')}: liquid or dry is not known for this unit. Subtract its volume by hand.</p>
+              )}
               {selectedWeights && (
                 <p className="text-xs text-secondary" role="status">{'caption' in selectedWeights ? selectedWeights.caption : selectedWeights.reason}</p>
               )}

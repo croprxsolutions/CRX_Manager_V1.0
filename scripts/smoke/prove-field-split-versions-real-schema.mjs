@@ -243,7 +243,14 @@ try {
   r = attempt(USERS.rep, `${refuse(saveField(F2, A, 'Denied rename', 'NULL::jsonb', 'k-rep-denied-sf'))} v := t;`);
   assert.match(r, /PAGE_ACCESS_DENIED: fields/, `a rep without Fields & Maps cannot use save_field: ${r}`);
   assert.equal(versions(F2), vF2, 'and nothing is written');
+  // ... and cannot read split history, payers or notes, nor call the resolver (Sol r3 HIGH).
+  const repReads = `v := (SELECT count(*) FROM public.field_billing_split_versions) + (SELECT count(*) FROM public.field_billing_split_payers)
+    + (SELECT count(*) FROM public.field_payer_notes);`;
+  assert.equal(attempt(USERS.rep, asUser(repReads)), 'ok|0', 'a rep without Fields & Maps reads no split history');
+  r = attempt(USERS.rep, `${refuse(`v := (SELECT count(*) FROM public.field_split_as_of(ARRAY['${F2}']::uuid[], ${TODAY}));`)} v := t;`);
+  assert.match(r, /PAGE_ACCESS_DENIED: fields/, `a rep without Fields & Maps cannot call the resolver: ${r}`);
   psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = '{}' WHERE id = '${USERS.rep}'; SET session_replication_role = origin;`);
+  assert.notEqual(attempt(USERS.rep, asUser(repReads)), 'ok|0', 'with Fields & Maps back on, the rep reads split history again');
   // A note already on a field stays editable when its customer is no longer the owner or a payer (Sol r2 MED).
   scalar(`INSERT INTO public.field_payer_notes (field_id, customer_id, notes) VALUES ('${F4}', '${X}', 'former owner') RETURNING 1;`);
   commit(USERS.admin, asUser(`${setSplit(F4, TODAY, 'NULL', 'k-former-note', `'[{"customer_id":"${X}","notes":"corrected"}]'::jsonb`)} v := r::text;`));

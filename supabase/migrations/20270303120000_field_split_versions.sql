@@ -11,7 +11,7 @@
 --      the same transaction.
 --   2. field_payer_notes: plain editable notes per field and customer (not versioned).
 --   3. set_field_billing_split(...): the office writer (replay-safe), and field_split_as_of(...): the office resolver.
---      Both SECURITY DEFINER, admin or sales rep only; the writer and save_field also refuse a rep with
+--      Both SECURITY DEFINER, admin or sales rep only; the writer, the resolver, save_field and the three new tables' read rules also refuse a rep with
 --      Fields & Maps turned off in Settings > Page Access (PAGE_ACCESS_DENIED). save_field now writes through the same internal writer.
 --   4. field_billing_defaults becomes a read-only COPY of the version in force today (Central date, product shares
 --      above 0%; primary = the owner when paying, else the largest share), rewritten by the writer and by a pg_cron job just after Central midnight. Its
@@ -184,11 +184,17 @@ GRANT SELECT ON public.field_billing_split_versions, public.field_billing_split_
 GRANT SELECT ON public.field_billing_split_versions, public.field_billing_split_payers, public.field_payer_notes
   TO service_role;
 CREATE POLICY field_billing_split_versions_select ON public.field_billing_split_versions
-  FOR SELECT TO authenticated USING (public.is_admin() OR public.is_sales_rep());
+  FOR SELECT TO authenticated USING ((public.is_admin() OR public.is_sales_rep())
+    AND NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IS DISTINCT FROM 'admin'
+                    AND 'fields' = ANY (COALESCE(p.denied_pages, ARRAY[]::text[]))));
 CREATE POLICY field_billing_split_payers_select ON public.field_billing_split_payers
-  FOR SELECT TO authenticated USING (public.is_admin() OR public.is_sales_rep());
+  FOR SELECT TO authenticated USING ((public.is_admin() OR public.is_sales_rep())
+    AND NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IS DISTINCT FROM 'admin'
+                    AND 'fields' = ANY (COALESCE(p.denied_pages, ARRAY[]::text[]))));
 CREATE POLICY field_payer_notes_select ON public.field_payer_notes
-  FOR SELECT TO authenticated USING (public.is_admin() OR public.is_sales_rep());
+  FOR SELECT TO authenticated USING ((public.is_admin() OR public.is_sales_rep())
+    AND NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IS DISTINCT FROM 'admin'
+                    AND 'fields' = ANY (COALESCE(p.denied_pages, ARRAY[]::text[]))));
 
 CREATE TRIGGER set_field_payer_notes_updated_at BEFORE UPDATE ON public.field_payer_notes
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
@@ -606,6 +612,11 @@ DECLARE
   v_unknown text;
 BEGIN
   PERFORM public.require_admin_or_sales_rep();
+  -- Settings > Page Access: a sales rep with Fields & Maps turned off cannot read splits either (Sol r3 HIGH).
+  IF EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IS DISTINCT FROM 'admin'
+              AND 'fields' = ANY (COALESCE(p.denied_pages, ARRAY[]::text[]))) THEN
+    RAISE EXCEPTION 'PAGE_ACCESS_DENIED: fields' USING ERRCODE = '42501';
+  END IF;
   IF p_on_date IS NULL THEN
     RAISE EXCEPTION 'FIELD_SPLIT_DATE_REQUIRED: a date is required' USING ERRCODE = '22023';
   END IF;

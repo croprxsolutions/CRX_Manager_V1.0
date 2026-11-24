@@ -14,6 +14,10 @@
 --   F  Rep A's row in a payout batch, then the office raises the discount to 20%: rep A stays $180.00, rep B's pending
 --      row moves alone ($200.00 × 40% = $80.00)
 --   G  No discount: commission rows and the commission history ledger are exactly as today
+--   H  A 150-line sale: changing its discount settles at commit in under 4 s (the API's statement timeout is 8 s;
+--      attack run 2026-11-25 measured 21 s on the first draft), on the right base
+--   I  A discounted sale's split moved from 60/40 to 70/30 by hand: $210.00 / $90.00 on $300.00
+--   Every sale above: the commission base = total_profit + _order_standing_discount_20270109 (the P&L's figure)
 --
 -- CONTAINER / LOCAL ONLY: completing deliveries draws invoice numbers; the tax rate and discounts are set inside the
 -- rolled-back transaction.
@@ -36,6 +40,8 @@ DECLARE
   v_delivery uuid;
   v_got text;
   v_ledger_before bigint;
+  v_started timestamptz;
+  v_ms numeric;
   v_res jsonb;
   v_fails text := '';
 BEGIN
@@ -263,9 +269,55 @@ BEGIN
       || ((SELECT count(*) FROM commission_earned_state_ledger) - v_ledger_before) || ' rows;';
   END IF;
 
+  -- H: 150 lines of 10 gal at $10 / $6 ($15,000 sale, $6,000 profit), delivered at 10%, then 20% off: base $3,000.
+  UPDATE customers SET standing_discount_pct = 10, default_commission_split = jsonb_build_object('splits', jsonb_build_array(
+      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
+      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40)))
+   WHERE id = v_customer;
+  v_order := (create_direct_order(v_customer, CURRENT_DATE, '[SMOKE] CAD h-' || v_suffix, NULL,
+    (SELECT jsonb_agg(jsonb_build_object('product_id', v_product, 'product_name', '[SMOKE] Commission line ' || g,
+       'quantity', 10, 'price_per_unit', 10, 'unit_cost', 6, 'unit_size', 'Gal')) FROM generate_series(1, 150) g),
+    v_admin, 'smk-cad-order-h-' || v_suffix) ->> 'order_id')::uuid;
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 10, 'h-' || v_suffix);
+  SELECT id INTO v_inv FROM invoices WHERE order_id = v_order AND status = 'draft' AND invoice_type = 'chemical_sale';
+  PERFORM set_invoice_standing_discount(v_inv, 20, 'smk-cad-h-20-' || v_suffix);
+  v_started := clock_timestamp();
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  v_ms := extract(epoch FROM clock_timestamp() - v_started) * 1000;
+  IF v_ms > 4000 THEN
+    v_fails := v_fails || ' (H) a 150-line discount change took ' || round(v_ms) || ' ms at commit;';
+  END IF;
+  RAISE NOTICE 'SMOKE (H): a 150-line discount change settled in % ms', round(v_ms);
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '1800.00/1200.00|3000.00' THEN
+    v_fails := v_fails || ' (H) the 150-line sale is not 1800/1200 on $3,000: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  END IF;
+
+  -- I: the split moved on a discounted sale.
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false,
+    jsonb_build_object('splits', jsonb_build_array(
+      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
+      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40))), 'i-' || v_suffix);
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'i-' || v_suffix);
+  UPDATE commissions SET split_percentage = CASE WHEN recipient_user_id = v_rep1 THEN 70 ELSE 30 END
+   WHERE order_id = v_order AND status = 'pending';
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '210.00/90.00|300.00' THEN
+    v_fails := v_fails || ' (I) a changed split on a discounted sale did not move: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  END IF;
+
+  -- Every sale: the stored base is the P&L's profit after discount.
+  v_got := (SELECT string_agg(o.order_name || ' ' || c.order_profit || ' vs ' || (o.total_profit + _order_standing_discount_20270109(o.id)), '; ')
+              FROM orders o JOIN commissions c ON c.order_id = o.id AND c.status = 'pending' AND c.deleted_at IS NULL
+             WHERE o.order_name LIKE '[SMOKE] CAD %' AND o.order_name NOT LIKE '[SMOKE] CAD f-%'
+               AND c.order_profit IS DISTINCT FROM o.total_profit + _order_standing_discount_20270109(o.id));
+  IF v_got IS NOT NULL THEN
+    v_fails := v_fails || ' (base) a commission base differs from the P&L profit after discount: ' || v_got || ';';
+  END IF;
+
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: commission is on the profit after the standing discount, never on tax (A-G)';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: commission is on the profit after the standing discount, never on tax (A-I)';
 END
 $smoke$;

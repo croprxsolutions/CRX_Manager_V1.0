@@ -67,14 +67,37 @@ $preflight$;
 -- 1. The base ---------------------------------------------------------------------------------------------------
 CREATE FUNCTION public._order_commission_base_20270304(p_order_id uuid)
  RETURNS numeric
- LANGUAGE sql
+ LANGUAGE plpgsql
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-  -- The sale's profit after its standing discount (0 or negative dollars); never sales tax.
-  SELECT round(COALESCE(o.total_profit, 0) + public._order_standing_discount_20270109(o.id), 2)
-    FROM public.orders o
-   WHERE o.id = p_order_id;
+DECLARE
+  v_invoice uuid;
+  v_cents bigint := 0;
+BEGIN
+  -- The sale's profit after its standing discount; never sales tax. The discount is exactly
+  -- _order_standing_discount_20270109(sale) (each order line's share of its invoices' discount lines, summed), but each
+  -- discounted invoice is spread ONCE, in a plain loop, not once per order line: the per-line helper took a 150-line
+  -- sale past the 8 s statement timeout, and one set-based query flipped plans (attack run, 2026-11-25). The smoke
+  -- checks the two agree.
+  FOR v_invoice IN
+    SELECT DISTINCT b.invoice_id
+      FROM order_items oi
+      JOIN invoice_items b ON b.order_item_id = oi.id
+      JOIN invoices i ON i.id = b.invoice_id
+     WHERE oi.order_id = p_order_id
+       AND i.invoice_type = 'chemical_sale' AND i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled')
+       AND EXISTS (SELECT 1 FROM invoice_items d WHERE d.invoice_id = i.id AND d.charge_type = 'standing_discount')
+  LOOP
+    v_cents := v_cents + COALESCE((
+      SELECT sum(sh.net_cents - sh.tax_cents - b.extended_cents)
+        FROM public._invoice_line_tax_shares_20270109(v_invoice) sh
+        JOIN invoice_items b ON b.id = sh.item_id
+        JOIN order_items oi ON oi.id = b.order_item_id
+       WHERE oi.order_id = p_order_id AND b.product_id IS NOT NULL AND b.charge_type IS NULL), 0);
+  END LOOP;
+  RETURN round((SELECT COALESCE(total_profit, 0) FROM orders WHERE id = p_order_id) + v_cents / 100.0, 2);
+END
 $function$;
 REVOKE ALL ON FUNCTION public._order_commission_base_20270304(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
@@ -113,8 +136,11 @@ BEGIN
   END IF;
 
   v_base := public._order_commission_base_20270304(p_order_id);
-  -- Already on this base (every sale with no discount, and every quiet re-save): write nothing.
-  IF NOT EXISTS (SELECT 1 FROM commissions c WHERE c.id = ANY (v_ids) AND c.order_profit IS DISTINCT FROM v_base) THEN
+  -- Already on this base with each row its share (every sale with no discount, and every quiet re-save): write nothing.
+  -- A share may be off by the writers' own penny spread (up to a cent a row), never more: a changed split moves it.
+  IF NOT EXISTS (SELECT 1 FROM commissions c JOIN unnest(v_ids, v_pcts) AS r(id, pct) ON r.id = c.id
+                  WHERE c.order_profit IS DISTINCT FROM v_base
+                     OR abs(c.commission_amount - GREATEST(v_base, 0) * r.pct / 100) > 0.01 * v_eligible) THEN
     RETURN 0;
   END IF;
 
@@ -168,6 +194,10 @@ BEGIN
     IF NEW.order_id IS NOT NULL AND NEW.status = 'pending' AND NEW.deleted_at IS NULL THEN
       PERFORM public._recompute_order_commissions_20270304(NEW.order_id);
     END IF;
+    -- A row moved to another sale leaves its old sale's set changed too (Luna MED).
+    IF TG_OP = 'UPDATE' AND OLD.order_id IS NOT NULL AND OLD.order_id IS DISTINCT FROM NEW.order_id THEN
+      PERFORM public._recompute_order_commissions_20270304(OLD.order_id);
+    END IF;
     RETURN NULL;
   END IF;
 
@@ -178,6 +208,13 @@ BEGIN
     END IF;
     IF TG_OP <> 'INSERT' AND OLD.charge_type IS NOT DISTINCT FROM 'standing_discount' THEN
       v_invoices := array_append(v_invoices, OLD.invoice_id);
+    END IF;
+    -- A whole invoice deleted: its lines are gone by now, so the sale is found from the deleted product line itself
+    -- (an invoice with no order_id that bills a sale's lines; Luna MED).
+    IF TG_OP = 'DELETE' AND OLD.order_item_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM invoices WHERE id = OLD.invoice_id) THEN
+      PERFORM public._recompute_order_commissions_20270304(oi.order_id)
+         FROM order_items oi WHERE oi.id = OLD.order_item_id;
     END IF;
     IF v_invoices IS NULL THEN
       RETURN NULL;
@@ -213,7 +250,8 @@ END
 $function$;
 REVOKE ALL ON FUNCTION public._commission_after_discount_20270304() FROM PUBLIC, anon, authenticated, service_role;
 
--- ponytail: row-level, so a sale is recomputed once per changed row; each pass after the first writes nothing.
+-- ponytail: row-level, so a sale is recomputed once per changed row (about 7 times for one discount change); each pass
+-- after the first writes nothing, and the base spreads each invoice once. Per-sale dedupe if long sales ever get slow.
 CREATE CONSTRAINT TRIGGER invoice_items_commission_after_discount_20270304
   AFTER INSERT OR UPDATE OR DELETE ON public.invoice_items
   DEFERRABLE INITIALLY DEFERRED
@@ -227,7 +265,7 @@ CREATE CONSTRAINT TRIGGER invoices_delete_commission_after_discount_20270304
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION public._commission_after_discount_20270304();
 CREATE CONSTRAINT TRIGGER commissions_after_discount_20270304
-  AFTER INSERT OR UPDATE OF commission_amount, order_profit, status, deleted_at ON public.commissions
+  AFTER INSERT OR UPDATE OF commission_amount, order_profit, status, deleted_at, split_percentage, order_id ON public.commissions
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION public._commission_after_discount_20270304();
 

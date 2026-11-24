@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -49,7 +50,11 @@ const LEDGER_ONLY = new Set([
   // Need live's storage.objects policies, which this database does not have; neither touches units or stock.
   '20261217100000_job_access_ends_with_the_job.sql',
   '20261220100000_applicator_keeps_own_record_fields.sql',
+  // Its preflight pins stage_offline_action as 20261217100000 (ledger-only above) leaves it (as the M9 prover). Delivery
+  // driver checks only: no commission or discount code. Reviewed bytes pinned below.
+  '20270227110000_delivery_driver_checks_need_a_driver.sql',
 ]);
+const LEDGER_ONLY_REVIEWED = new Map([['20270227110000_delivery_driver_checks_need_a_driver.sql', '78a24c2bf56e5901b771575e2c818ef2dccbaf3781cbd2bb159a0d762724714e']]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate or its follow-up creates or relies on.
 const TOUCHED = /(commissions|_order_standing_discount_|_recompute_standing_discount_)/i;
@@ -168,6 +173,12 @@ function plan() {
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);
+  for (const [name, sha] of LEDGER_ONLY_REVIEWED) {
+    const file = before.find((f) => path.basename(f) === name);
+    assert.ok(file, `${name} must be in the replay plan`);
+    assert.equal(createHash('sha256').update(readFileSync(file)).digest('hex'), sha, `${name} changed since it was reviewed as ledger-only`);
+    assert.ok(!TOUCHED.test(lf(file)), `${name} now touches what this proof covers; replay it`);
+  }
   for (const name of PARKED) {
     const file = before.find((f) => path.basename(f) === name);
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);
@@ -329,13 +340,15 @@ async function main() {
   const before = chain(NEW_CHAIN);
   assert.ok(!before.pass, 'the new chain must fail before the candidate');
   for (const step of ['(A) commission is not 180/120', '(A) unticking tax', '(B) the 3-way rows', '(C) the Bill Split base',
-    '(D) half invoiced', '(D) after Cancel Remaining', '(F) batched row moved']) {
+    '(D) half invoiced', '(D) after Cancel Remaining', '(F) batched row moved', '(H) the 150-line sale', '(I) a changed split']) {
     assert.ok(before.fail.includes(step), `BEFORE: expected ${step} to fail, got: ${before.fail}`);
   }
   assert.ok(!/SMOKE_SETUP|\(E\)|\(G\)/.test(before.fail), `BEFORE: the fixture or a control failed: ${before.fail}`);
   console.log(`[case] 1 BEFORE: commission sits on the profit before the discount: ${before.fail}`);
   const passedBefore = covering('BEFORE');
-  for (const name of ['smoke-standing-grower-discount.sql', 'smoke-sales-tax.sql']) {
+  // These must pass before, so "still passes after" can't be vacuous. (The standing-discount and sales-tax chains stop
+  // at their return cases in this container, a unit fixture they need from live; they still run after, not required.)
+  for (const name of ['smoke-billing-m4-switch.sql', 'smoke-pending-commission-snapshot-reconcile.sql', 'smoke-commission-history-as-of.sql']) {
     assert.ok(passedBefore.has(name), `BEFORE: ${name} must pass in this database`);
   }
   // 2. AUTOCOMMIT
@@ -354,7 +367,7 @@ async function main() {
   const after = chain(NEW_CHAIN);
   assert.ok(after.pass, `AFTER: the new chain fails: ${after.fail}`);
   covering('AFTER', passedBefore);
-  console.log('[case] 4 AFTER: the new chain passes (A-G), and every covering chain that passed before still passes');
+  console.log('[case] 4 AFTER: the new chain passes (A-I), and every covering chain that passed before still passes');
   // 5. RE-APPLY
   const again = apply('cand.sql');
   assert.notEqual(again.status, 0); assert.match(again.output, /COMMISSION_AFTER_DISCOUNT_PREFLIGHT: already applied/);

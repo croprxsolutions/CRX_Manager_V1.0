@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** M4: commission after the standing discount, never on sales tax (Mason, 2026-11-09: "commission on the profit after discounts"). `20270304100000_commission_after_standing_discount.sql` (SQL sha256: `8e2993b83c14a5620d1d9ef62aa6ed230c84056269ad8eaa44783a42f00c05c6`).
+**LOCAL CANDIDATE — NOT APPLIED.** M4: commission after the standing discount, never on sales tax (Mason, 2026-11-09: "commission on the profit after discounts"). `20270304100000_commission_after_standing_discount.sql` (SQL sha256: `7284dd84efbbff03fe48b8fa67c15a41482809b1be6a3342801075bd56b39977`).
 
 **What it does.**
 - `_order_commission_base_20270304(sale)` = `orders.total_profit` + `_order_standing_discount_20270109(sale)`: the sale's profit after the standing-discount lines on its chemical-sale invoices that aren't voided or deleted (drafts included; every Bill Split payer). Sales tax is never in it.
@@ -10,6 +10,9 @@
 
 **Known limit:** a commission already paid or batched keeps its amount when a later invoice of the same sale brings more discount (taking it back goes with returns, KI-13).
 
-**Proof:** `scripts/smoke/smoke-commission-after-discount.sql` (A–G) and `scripts/smoke/prove-commission-after-discount-real-schema.mjs` (before fails, apply, after passes, re-apply refused, rollback restores). $1,000 sale, $600 cost, 10% off, 7% tax, 60/40 → $180.00 / $120.00 on $300.00 (was $240 / $160 on $400).
+**Proof:** `scripts/smoke/smoke-commission-after-discount.sql` (A–I) and `scripts/smoke/prove-commission-after-discount-real-schema.mjs` (before fails, apply, after passes, re-apply refused, rollback restores). $1,000 sale, $600 cost, 10% off, 7% tax, 60/40 → $180.00 / $120.00 on $300.00 (was $240 / $160 on $400).
 
 **Ordering:** after `20270117130000_standing_discount_in_order_profit`. Rollback: its own reviewed migration (drop the four triggers and three functions).
+
+**Review round 1 (2026-11-25).** Attack run (fresh Claude, local DB): HIGH, a 150-line sale's discount change took 21 s at commit (API statement timeout 8 s), because the base used the per-line helper (every invoice re-spread per order line) about 7 times per commit. Fixed: the base spreads each discounted invoice once, in a plain loop (a set-based query flipped plans once); the smoke checks it equals `_order_standing_discount_20270109` on every sale, and case H holds a 150-line flush under 4 s (local: 0.27–0.41 s; the attack repro 0.11 s). LOW accepted: a discount change and a payout in ONE transaction batch the old amount (each app RPC is its own transaction). Luna (gpt-6-luna, xhigh) on 768256bea: no HIGH. MED fixed: deleting a whole invoice with no `order_id` now finds the sale from its deleted product lines; a commission row's `split_percentage` or `order_id` change re-runs the recompute (case I), and the early exit also checks each row's share. MED refuted: "voiding a payout leaves a batched row stale". The attack run voided both posted and unposted batches after a discount change and saw the rows recomputed (120.00 / 80.00 on $200), because the void writes the commission rows. LOW fixed: Markdown in KNOWN_ISSUES.
+

@@ -3292,7 +3292,7 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
       .map(([rpc]) => rpc);
     expect(stale).toEqual([]);
     expect(vague).toEqual([]);
-  });
+  }, 60_000); // scans every migration; CI coverage pushed it past the 5s default (5.7s, run 45095465426)
 
   it('missing-idempotency backlog remains present and keyless in generated types', () => {
     const generatedNames = new Set(generatedRpcShapes().map(({ name }) => name));

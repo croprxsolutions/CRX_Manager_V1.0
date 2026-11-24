@@ -2837,7 +2837,7 @@ export default function JobDetail() {
     setSaving(true);
     try {
       const payload = {
-        // save_job refuses JOB_CHANGED_SINCE_LOADED when the job no longer matches this (20270227130000).
+        // save_job refuses JOB_CHANGED_SINCE_LOADED when the job no longer matches this (20270228110000).
         ...(versionAtSave ? { expected_version: versionAtSave } : {}),
         customer_id: customerId,
         job_date: jobDate,

@@ -2,7 +2,7 @@ import { assertRpcResult, supabase } from './db';
 import type { DispatchAssignmentPayload } from './dispatchWizard';
 
 /**
- * The job's edit version as the database computes it (`job_edit_version`, migration 20270227130000): a hash of the
+ * The job's edit version as the database computes it (`job_edit_version`, migration 20270228110000): a hash of the
  * job's edited columns and lines, plus one "job_field_id|applicator_id|crew_id|dispatch_status" string per field
  * dispatch. Save sends it back as `expected_version`; `save_job` refuses JOB_CHANGED_SINCE_LOADED under the job row
  * lock if the job no longer matches, and a lost-reply retry with the same key gets the stored result instead.

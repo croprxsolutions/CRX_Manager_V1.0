@@ -64,7 +64,7 @@ if (accept || acceptAttemptIn(reply)) {
   const p = res.payload;
   emit(`SOL FINDING ACCEPTED — Mason accepted finding ${p.finding.n} of ${p.findingCount} on PR #${p.pullRequest} ` +
     `(head ${String(p.prHead).slice(0, 12)}) with the reason "${accept.reason}". ` +
-    "Once every BLOCKER/HIGH of that Sol run is accepted: node scripts/owner-accept-sol-finding.mjs --log, commit only docs/manual/DECISION_LOG.md, " +
+    "Once every BLOCKER/HIGH of that Sol run is accepted: node scripts/owner-accept-sol-finding.mjs --log, commit only the one file it writes, " +
     "then node scripts/write-codex-push-proof.mjs --carry-owner-accepted.");
 }
 
@@ -102,7 +102,7 @@ if (skip) {
   const p = res.payload;
   emit(`SOL FINDINGS SKIPPED — Mason skipped finding(s) ${res.selected.join(", ")} of ${p.findingCount} on PR #${p.pullRequest} ` +
     `(head ${String(p.prHead).slice(0, 12)}). Acknowledge it in one line and carry on without asking again. ` +
-    "Once every BLOCKER/HIGH of that Sol run is skipped or fixed: node scripts/owner-accept-sol-finding.mjs --log, commit only docs/manual/DECISION_LOG.md, " +
+    "Once every BLOCKER/HIGH of that Sol run is skipped or fixed: node scripts/owner-accept-sol-finding.mjs --log, commit only the one file it writes, " +
     "then node scripts/write-codex-push-proof.mjs --carry-owner-accepted, then keep landing.");
   }
 }

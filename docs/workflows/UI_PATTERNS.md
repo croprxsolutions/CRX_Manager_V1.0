@@ -33,6 +33,9 @@ Follow `.claude/skills/new-page/SKILL.md` — it is the maintained step-by-step 
    (`officeNavigation`, `applicatorNavigation`, or `driverNavigation`). Its `path` must be a
    page address from `src/appPages.tsx` (a type error otherwise), and which roles see it comes
    from that page's `roles`.
+   Use a plain name with no parentheses; put a rarely used setup page in the `Setup` group.
+   Any office link can be pinned to the top by each person (saved in their browser only), and a
+   pin still passes the same role and deny-list check.
 5. **Re-record the route baseline** (`UPDATE_ROUTE_BASELINE=1 npx vitest run src/routeBaseline.test.tsx`)
    and check that the diff of `src/routeBaseline.json` shows only the new page's own rows (routes,
    sidebar link, permission entry), and nothing about any other page.

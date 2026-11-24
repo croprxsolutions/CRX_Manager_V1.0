@@ -182,7 +182,7 @@ export const APP_PAGES = [
     routes: [{ path: 'delivery-remainders', element: <DeliveryRemainders /> }],
   },
   {
-    key: 'invoices', label: 'Invoices — Chemical', category: 'Sell & Deliver', roles: ['admin', 'sales_rep'],
+    key: 'invoices', label: 'Chemical Invoices', category: 'Sell & Deliver', roles: ['admin', 'sales_rep'],
     routes: [
       { path: 'invoices', element: <Invoices /> },
       { path: 'invoices/:id', element: <InvoiceDetail routeArea="chemical" /> },
@@ -193,7 +193,7 @@ export const APP_PAGES = [
     routes: [{ path: 'returns', element: <Returns /> }],
   },
   {
-    key: 'to-ship', label: 'To-Ship (Load-Out Board)', category: 'Sell & Deliver', roles: ['admin', 'sales_rep'],
+    key: 'to-ship', label: 'Load-Out Board', category: 'Sell & Deliver', roles: ['admin', 'sales_rep'],
     routes: [{ path: 'to-ship', element: <ToShip /> }],
   },
 
@@ -238,7 +238,7 @@ export const APP_PAGES = [
     ],
   },
   {
-    key: 'application-records', label: 'Record Book (Applications)', category: 'Spray Fields', roles: ['admin', 'sales_rep', 'applicator'],
+    key: 'application-records', label: 'Record Book', category: 'Spray Fields', roles: ['admin', 'sales_rep', 'applicator'],
     routes: [{ path: 'application-records', element: <ApplicationRecords /> }],
   },
   {
@@ -251,7 +251,7 @@ export const APP_PAGES = [
   },
   {
     // Phone/mobile applicator field view (#38) — read-only "my jobs" cards.
-    key: 'field', label: 'Field View (phone preview)', category: 'Spray Fields', roles: ['admin', 'sales_rep', 'applicator'],
+    key: 'field', label: 'Field Crew View', category: 'Spray Fields', roles: ['admin', 'sales_rep', 'applicator'],
     routes: [{ path: 'field', element: <FieldView /> }],
   },
 
@@ -333,15 +333,15 @@ export const APP_PAGES = [
     routes: [{ path: 'payments', element: <PaymentAllocation /> }],
   },
   {
-    key: 'accounts-receivable', label: 'A/R Workspace', category: 'Money', roles: ['admin'],
+    key: 'accounts-receivable', label: 'Accounts Receivable', category: 'Money', roles: ['admin'],
     routes: [{ path: 'accounts-receivable', element: <AccountsReceivable /> }],
   },
   {
-    key: 'ar-aging', label: 'A/R Aging', category: 'Money', roles: ['admin'],
+    key: 'ar-aging', label: 'Aging & Statements', category: 'Money', roles: ['admin'],
     routes: [{ path: 'ar-aging', element: <ARaging /> }],
   },
   {
-    key: 'prepay', label: 'Prepay', category: 'Money', roles: ['admin'],
+    key: 'prepay', label: 'Prepayments', category: 'Money', roles: ['admin'],
     routes: [
       { path: 'prepay', element: <Prepay /> },
       // Kept for bookmarks; the former pages now live as query-addressable tabs.
@@ -354,7 +354,7 @@ export const APP_PAGES = [
     routes: [{ path: 'customer-transactions', element: <CustomerTransactionReview /> }],
   },
   {
-    key: 'accounts-payable', label: 'A/P & Vendor Bills', category: 'Money', roles: ['admin'],
+    key: 'accounts-payable', label: 'Vendor Bills', category: 'Money', roles: ['admin'],
     routes: [
       { path: 'accounts-payable', element: <AccountsPayable /> },
       { path: 'accounts-payable/bills', element: <VendorBills /> },
@@ -394,7 +394,7 @@ export const APP_PAGES = [
     routes: [{ path: 'compliance', element: <Compliance /> }],
   },
   {
-    key: 'lot-trace', label: 'Lot Trace (recall lookup)', category: 'Compliance & Records', roles: ['admin', 'sales_rep'],
+    key: 'lot-trace', label: 'Lot Trace & Recalls', category: 'Compliance & Records', roles: ['admin', 'sales_rep'],
     routes: [{ path: 'lot-trace', element: <LotTrace /> }],
   },
   {
@@ -422,7 +422,7 @@ export const APP_PAGES = [
     routes: [{ path: 'epa-lookups', element: <EpaLookups /> }],
   },
   {
-    key: 'blend-tickets', label: 'Blend Tickets (OCR)', category: 'Compliance & Records', roles: ['admin', 'sales_rep'],
+    key: 'blend-tickets', label: 'Blend Tickets', category: 'Compliance & Records', roles: ['admin', 'sales_rep'],
     routes: [
       { path: 'blend-tickets', element: <BlendTickets /> },
       { path: 'blend-tickets/:id', element: <BlendTicketDetail /> },
@@ -431,7 +431,7 @@ export const APP_PAGES = [
 
   // Insights
   {
-    key: 'dashboard', label: 'Overview (KPI Dashboard)', category: 'Insights', roles: ['admin', 'sales_rep'],
+    key: 'dashboard', label: 'KPI Overview', category: 'Insights', roles: ['admin', 'sales_rep'],
     routes: [{ path: 'dashboard', element: <Dashboard /> }],
   },
   {
@@ -464,7 +464,7 @@ export const APP_PAGES = [
     ],
   },
   {
-    key: 'application-services', label: 'Application Services (fees)', category: 'Setup & Admin', roles: ['admin'],
+    key: 'application-services', label: 'Application Fees', category: 'Setup & Admin', roles: ['admin'],
     routes: [
       { path: 'application-services', element: <ApplicationServices /> },
       { path: 'application-services/:id', element: <ApplicationServiceDetail /> },
@@ -475,7 +475,7 @@ export const APP_PAGES = [
     routes: [{ path: 'vendors', element: <Vendors /> }],
   },
   {
-    key: 'getting-started', label: 'Getting Started (help)', category: 'Setup & Admin', roles: ['admin', 'sales_rep', 'driver', 'applicator'],
+    key: 'getting-started', label: 'Getting Started', category: 'Setup & Admin', roles: ['admin', 'sales_rep', 'driver', 'applicator'],
     routes: [{ path: 'getting-started', element: <GettingStarted /> }],
   },
 

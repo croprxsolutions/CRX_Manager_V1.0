@@ -152,7 +152,8 @@ let result;
 let waiting = attempt?.kind === "code";
 try {
   const dirs = replyDirs();
-  if (attempt?.kind === "plain") waiting = !resolvePlainReply({ dirs, ownDirs, sessionId: payload?.session_id, readShown: () => "" }).silent;
+  // The real last message, so another session's request shown here counts as waiting (Codex P2, #2389).
+  if (attempt?.kind === "plain") waiting = !resolvePlainReply({ dirs, ownDirs, sessionId: payload?.session_id, readShown }).silent;
   if (plain) {
     which = resolvePlainReply({ dirs, ownDirs, sessionId: payload?.session_id, readShown });
     if (which.ok) code = which.code;

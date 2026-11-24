@@ -1043,6 +1043,11 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     const plainExtra = run("prompt-router.mjs", `${REMINDER}and merge it\nI approve`, SID, tx([masonSaid("fix it"), agentSaid(shown5)]));
     ok(plainExtra.includes("OWNER APPROVAL NOT RECORDED") && plainExtra.includes("other text came with it") &&
       existsSync(path.join(dir, requestFileName("646464"))), "\"I approve\" after other words, with a request waiting, is refused out loud");
+    // Codex P2, #2389: the same in a conversation that did not build the request but just showed it.
+    const otherExtra = run("prompt-router.mjs", "I approve\nPlease carry on.", OTHER_SID, tx([masonSaid("fix it"), agentSaid(shown5)]));
+    ok(otherExtra.includes("OWNER APPROVAL NOT RECORDED") && otherExtra.includes("other text came with it") &&
+      existsSync(path.join(dir, requestFileName("646464"))),
+      `"I approve" plus other words, in another conversation that showed the request, is refused out loud: ${otherExtra}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

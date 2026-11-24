@@ -7,11 +7,13 @@ function Harness({
   initial,
   onChange,
   minValue,
+  maxValue,
   presets,
 }: {
   initial: string | null;
   onChange: (v: string | null) => void;
   minValue?: string;
+  maxValue?: string;
   presets?: { label: string; value: string }[];
 }) {
   const [v, setV] = useState<string | null>(initial);
@@ -20,6 +22,7 @@ function Harness({
       label="Expires"
       value={v}
       minValue={minValue}
+      maxValue={maxValue}
       presets={presets}
       onChange={(n) => {
         setV(n);
@@ -78,6 +81,16 @@ describe('DatePicker', () => {
     const grid = screen.getByRole('grid');
     expect(within(grid).getByText('19').closest('[role="button"]')).toHaveAttribute('aria-disabled', 'true');
     expect(within(grid).getByText('20').closest('[role="button"]')).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('days and presets after maxValue are disabled', () => {
+    const onChange = vi.fn();
+    render(<Harness initial="2027-09-20" maxValue="2027-09-20" onChange={onChange} presets={[{ label: 'Too late', value: '2027-09-21' }]} />);
+    fireEvent.click(screen.getByRole('button', { name: /calendar/i }));
+    const grid = screen.getByRole('grid');
+    expect(within(grid).getByText('21').closest('[role="button"]')).toHaveAttribute('aria-disabled', 'true');
+    expect(within(grid).getByText('20').closest('[role="button"]')).not.toHaveAttribute('aria-disabled');
+    expect(screen.getByRole('button', { name: 'Too late' })).toBeDisabled();
   });
 
   it('a preset chip sets its value and shows its pill', () => {

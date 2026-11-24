@@ -24,6 +24,7 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import PageHeader from '../components/ui/PageHeader';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import CustomerSearchPicker, { CUSTOMER_SEARCH_SELECT, type CustomerSearchResult } from '../components/customers/CustomerSearchPicker';
+import DatePicker from '../components/ui/DatePicker';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -34,6 +35,15 @@ import {
   duplicatePaymentMessage,
   findDuplicatePayment,
 } from '../lib/paymentDuplicate';
+import {
+  closedPeriodMessage,
+  findClosedPeriod,
+  oldPaymentDateDays,
+  oldPaymentDateMessage,
+  paymentDateProblem,
+  paymentDateRefusal,
+} from '../lib/paymentDateCheck';
+import { daysSinceBusinessDate, todayInBusinessTz } from '../lib/dateUtils';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -89,13 +99,48 @@ interface PaymentEntry {
   customerId: string;
   cents: number;
   method: string;
+  // The one number box: a check's number goes to check_number, any other method's to reference_number.
+  checkNumber: string;
   reference: string;
+  paymentDate: string;
   notes: string;
   allocations: { invoice_id: string; amount_cents: number }[];
 }
 
+/** A validated payment waiting on one warning that names every question it raises (a duplicate, an old date, all prepay). */
+interface PaymentToConfirm {
+  payment: PaymentEntry;
+  match: DuplicatePayment | null;
+  oldDays: number | null;
+}
+
 const prepayMessage = (cents: number): string =>
   `No invoices allocated. ${fmt(cents)} will be added as prepay credit. Continue?`;
+
+function confirmTitle({ match, oldDays }: PaymentToConfirm): string {
+  if (match) return 'Possible Duplicate Payment';
+  return oldDays !== null ? `Record a payment dated ${oldDays} days ago?` : 'Full Prepay Credit';
+}
+
+function confirmMessage({ payment, match, oldDays }: PaymentToConfirm): string {
+  return [
+    ...(match ? [duplicatePaymentMessage(match, payment.cents)] : []),
+    ...(oldDays !== null ? [oldPaymentDateMessage(payment.paymentDate, oldDays)] : []),
+    ...(payment.allocations.length === 0 ? [prepayMessage(payment.cents)] : []),
+  ].join(' ');
+}
+
+function confirmLabel({ match, oldDays }: PaymentToConfirm): string {
+  if (match) return 'Record Anyway';
+  return oldDays !== null ? 'Record payment' : 'Continue';
+}
+
+/** The short line under the payment date: how far back it is, so a carried-over date is noticed. */
+function paymentDateHelper(day: string, today: string): string {
+  if (day === today) return 'The day the payment was received';
+  const days = daysSinceBusinessDate(day);
+  return days === 1 ? '1 day before today' : `${days} days before today`;
+}
 
 /* ─── Component ────────────────────────────────────────────────────────── */
 
@@ -117,8 +162,16 @@ export default function PaymentAllocation() {
   // Payment fields
   const [checkAmountInput, setCheckAmountInput] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('check');
+  // Check # when the method is Check, Reference # otherwise (one box; the method decides where it is saved).
   const [referenceNumber, setReferenceNumber] = useState('');
   const [notes, setNotes] = useState('');
+  // The day the payment was received (Central business day). undefined = not changed: it follows
+  // today, so a page left open past midnight still dates today; null = the field was emptied.
+  const [paymentDateInput, setPaymentDateInput] = useState<string | null | undefined>(undefined);
+  // The date this check started with. A date kept from the last check is not an unsaved change.
+  const [startingPaymentDate, setStartingPaymentDate] = useState<string | null | undefined>(undefined);
+  // Why the database (or the closed-month check) refused this date; cleared when the date changes.
+  const [paymentDateRefused, setPaymentDateRefused] = useState<string | null>(null);
 
   // Invoice list + allocations
   const [invoices, setInvoices] = useState<PaymentAllocationEntry[]>([]);
@@ -136,8 +189,7 @@ export default function PaymentAllocation() {
   const [retryRefused, setRetryRefused] = useState(false);
 
   // A payment waiting on the user's answer. Each holds what was validated, so the answer saves exactly that.
-  const [prepayPayment, setPrepayPayment] = useState<PaymentEntry | null>(null);
-  const [duplicatePayment, setDuplicatePayment] = useState<{ match: DuplicatePayment; payment: PaymentEntry } | null>(null);
+  const [paymentToConfirm, setPaymentToConfirm] = useState<PaymentToConfirm | null>(null);
 
   // Leaving the page during the duplicate check drops the save.
   const mountedRef = useRef(true);
@@ -311,9 +363,17 @@ export default function PaymentAllocation() {
     return invoices.some((inv) => inv.allocated_cents > inv.balance_cents);
   }, [invoices]);
 
+  const businessToday = todayInBusinessTz();
+  const paymentDate = paymentDateInput === undefined ? businessToday : paymentDateInput;
+  const paymentDateChanged = paymentDate !== (startingPaymentDate === undefined ? businessToday : startingPaymentDate);
+  // A date after today or an emptied field: shown under the field, and Apply Payment stays off.
+  const paymentDateError = paymentDateProblem(paymentDate, businessToday);
+  const isCheck = paymentMethod === 'check';
+
   // Typed payment details not yet saved: leaving the page (a link, Back, closing the tab) asks first.
   const hasUnsavedPayment = !lastResult
-    && (checkAmountInput.trim() !== '' || hasAllocations || referenceNumber.trim() !== '' || notes.trim() !== '');
+    && (checkAmountInput.trim() !== '' || hasAllocations || referenceNumber.trim() !== '' || notes.trim() !== ''
+      || paymentDateChanged);
   const leaveBlocker = useUnsavedChanges(hasUnsavedPayment);
   // Where this customer's prepay credit is applied to invoices (Prepay > Apply), for those who may open it.
   const canApplyPrepay = hasPageAccess(role, deniedPages ?? [], 'prepay');
@@ -324,33 +384,30 @@ export default function PaymentAllocation() {
   // prepay credit by default, so nothing is applied until they have loaded.
   const invoicesNotReady = loadingInvoices || invoicesFailed;
 
+  // Why Apply Payment cannot go ahead with what is on screen, or null.
+  const entryProblem = (): string | null => {
+    if (invoicesNotReady) return 'Wait for the open invoices to load before applying the check.';
+    if (checkAmountRefused) return MONEY_PRECISION_MESSAGE;
+    if (checkCents <= 0) return 'Enter a check amount';
+    if (totalAllocated > checkCents) return 'Allocations exceed check amount';
+    if (hasValidationError) return 'Some allocations exceed invoice balances';
+    return paymentDateError;
+  };
+
   const handleSubmit = async () => {
     if (!selectedCustomer || !profile) return;
-    if (invoicesNotReady) {
-      toast('error', 'Wait for the open invoices to load before applying the check.');
-      return;
-    }
-    if (checkAmountRefused) {
-      toast('error', MONEY_PRECISION_MESSAGE);
-      return;
-    }
-    if (checkCents <= 0) {
-      toast('error', 'Enter a check amount');
-      return;
-    }
-    if (totalAllocated > checkCents) {
-      toast('error', 'Allocations exceed check amount');
-      return;
-    }
-    if (hasValidationError) {
-      toast('error', 'Some allocations exceed invoice balances');
+    const problem = entryProblem();
+    if (problem || !paymentDate) {
+      toast('error', problem ?? 'Enter the payment date');
       return;
     }
     const payment: PaymentEntry = {
       customerId: selectedCustomer.id,
       cents: checkCents,
       method: paymentMethod,
-      reference: referenceNumber,
+      checkNumber: isCheck ? referenceNumber : '',
+      reference: isCheck ? '' : referenceNumber,
+      paymentDate,
       notes,
       allocations: invoices
         .filter((inv) => inv.allocated_cents > 0)
@@ -360,10 +417,15 @@ export default function PaymentAllocation() {
         })),
     };
     setRetryRefused(false);
+    setPaymentDateRefused(null);
     setSubmitting(true);
     let match: DuplicatePayment | null;
+    let closedPeriod: Awaited<ReturnType<typeof findClosedPeriod>>;
     try {
-      match = await findDuplicatePayment(payment.customerId, payment.cents, payment.reference);
+      [match, closedPeriod] = await Promise.all([
+        findDuplicatePayment(payment.customerId, payment.cents, payment.checkNumber || payment.reference),
+        findClosedPeriod(payment.paymentDate),
+      ]);
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'duplicate_payment_check' } });
       if (mountedRef.current) toast('error', DUPLICATE_CHECK_FAILED_MESSAGE);
@@ -372,23 +434,30 @@ export default function PaymentAllocation() {
     }
     if (!mountedRef.current) return;
     setSubmitting(false);
-    if (match) {
-      setDuplicatePayment({ match, payment });
+    // A closed month: say so plainly instead of letting allocate_payment refuse it.
+    if (closedPeriod) {
+      refuseDate(closedPeriodMessage(payment.paymentDate, closedPeriod));
       return;
     }
-    // Confirm if 100% of check goes to prepay (no invoice allocations)
-    if (payment.allocations.length === 0) {
-      setPrepayPayment(payment);
+    // Ask first for a likely duplicate, an old date, or a check going 100% to prepay (no invoice allocations).
+    const oldDays = oldPaymentDateDays(payment.paymentDate);
+    if (match || oldDays !== null || payment.allocations.length === 0) {
+      setPaymentToConfirm({ payment, match, oldDays });
       return;
     }
 
     void executeSubmit(payment);
   };
 
+  // Under the date field and as a toast: the field can be scrolled away above a long invoice list.
+  const refuseDate = (message: string) => {
+    setPaymentDateRefused(message);
+    toast('error', message);
+  };
+
   const executeSubmit = async (payment: PaymentEntry) => {
     if (!profile) return;
-    setPrepayPayment(null);
-    setDuplicatePayment(null);
+    setPaymentToConfirm(null);
     if (invoicesNotReady) {
       toast('error', 'Wait for the open invoices to load before applying the check.');
       return;
@@ -401,10 +470,13 @@ export default function PaymentAllocation() {
         p_allocations: payment.allocations,
         p_payment_method: payment.method,
         p_reference_number: payment.reference || undefined,
+        p_check_number: payment.checkNumber || undefined,
+        p_payment_date: payment.paymentDate,
         p_notes: payment.notes || undefined,
       };
       // One key for this check until it is confirmed: allocate_payment compares a retry's arguments with the
-      // first attempt's, so an edited retry after a lost reply is refused instead of saving a second payment.
+      // first attempt's (the payment date and check number included), so an edited retry after a lost reply
+      // is refused instead of saving a second payment. A new key per date would let that edit save twice.
       const { data, error } = await supabase.rpc('allocate_payment', {
         ...args,
         p_performed_by: profile.id,
@@ -423,7 +495,9 @@ export default function PaymentAllocation() {
       toast('success', parts.join('. '));
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'allocate_payment' } });
+      const dateRefusal = paymentDateRefusal(err, payment.paymentDate);
       if (hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_ARGUMENT_MISMATCH)) setRetryRefused(true);
+      else if (dateRefusal) refuseDate(dateRefusal);
       else toast('error', rpcAuthErrorMessage(err) ?? sanitizeError(err));
     }
     setSubmitting(false);
@@ -433,14 +507,21 @@ export default function PaymentAllocation() {
 
   const handleNextCheck = () => {
     // Keep customer, clear amounts
-    setCheckAmountInput('');
-    setReferenceNumber('');
-    setNotes('');
-    setLastResult(null);
+    startNextCheck();
     if (selectedCustomer) {
       fetchInvoices(selectedCustomer.id);
       void refreshPrepayBalance(selectedCustomer.id);
     }
+  };
+
+  // The payment date stays for the next check, so a stack received on one day is entered in a row.
+  const startNextCheck = () => {
+    setCheckAmountInput('');
+    setReferenceNumber('');
+    setNotes('');
+    setStartingPaymentDate(paymentDateInput);
+    setPaymentDateRefused(null);
+    setLastResult(null);
   };
 
   // The saved check may have added prepay credit: show the balance as it is now, or nothing.
@@ -454,6 +535,7 @@ export default function PaymentAllocation() {
 
   const handleNewCustomer = () => {
     clearCustomer();
+    startNextCheck();
     setPaymentMethod('check');
   };
 
@@ -577,13 +659,15 @@ export default function PaymentAllocation() {
                 </select>
               </div>
 
-              {/* Reference */}
+              {/* Check # for a check (saved as its check number), Reference # for any other method */}
               <div>
-                <label htmlFor="payment-reference" className="block text-sm font-medium text-nav-dark mb-1">Reference #</label>
+                <label htmlFor="payment-reference" className="block text-sm font-medium text-nav-dark mb-1">
+                  {isCheck ? 'Check #' : 'Reference #'}
+                </label>
                 <input
                   id="payment-reference"
                   type="text"
-                  placeholder="Check # or ref..."
+                  placeholder={isCheck ? 'Check number...' : 'Reference...'}
                   value={referenceNumber}
                   disabled={submitting}
                   onChange={(e) => setReferenceNumber(e.target.value)}
@@ -591,8 +675,25 @@ export default function PaymentAllocation() {
                 />
               </div>
 
+              {/* The day the payment was received: a check from the 30th entered on the 1st belongs to the 30th */}
+              <div>
+                <DatePicker
+                  label="Payment date"
+                  value={paymentDate}
+                  onChange={(day) => {
+                    setPaymentDateInput(day);
+                    setPaymentDateRefused(null);
+                  }}
+                  maxValue={businessToday}
+                  presets={[{ label: 'Today', value: businessToday }]}
+                  disabled={submitting}
+                  error={paymentDateError ?? paymentDateRefused ?? undefined}
+                  helper={paymentDate ? paymentDateHelper(paymentDate, businessToday) : undefined}
+                />
+              </div>
+
               {/* Notes, last in the form */}
-              <div className="md:col-span-2 lg:col-span-3">
+              <div className="md:col-span-2 lg:col-span-2">
                 <label htmlFor="payment-notes" className="block text-sm font-medium text-nav-dark mb-1">Notes</label>
                 <input
                   id="payment-notes"
@@ -789,6 +890,7 @@ export default function PaymentAllocation() {
                     loading={submitting}
                     disabled={
                       invoicesNotReady ||
+                      paymentDateError !== null ||
                       remaining < 0 ||
                       hasValidationError ||
                       checkCents <= 0 ||
@@ -811,29 +913,14 @@ export default function PaymentAllocation() {
         onLeave={() => leaveBlocker.proceed?.()}
       />
 
+      {/* One warning covers every question: a second modal in the same spot would catch a double tap. */}
       <ConfirmModal
-        open={prepayPayment !== null}
-        onClose={() => setPrepayPayment(null)}
-        onConfirm={() => { if (prepayPayment) void executeSubmit(prepayPayment); }}
-        title="Full Prepay Credit"
-        message={prepayPayment ? prepayMessage(prepayPayment.cents) : ''}
-        confirmLabel="Continue"
-        variant="warning"
-      />
-
-      {/* One warning covers both questions: a second modal in the same spot would catch a double tap. */}
-      <ConfirmModal
-        open={duplicatePayment !== null}
-        onClose={() => setDuplicatePayment(null)}
-        onConfirm={() => { if (duplicatePayment) void executeSubmit(duplicatePayment.payment); }}
-        title="Possible Duplicate Payment"
-        message={duplicatePayment
-          ? [
-              duplicatePaymentMessage(duplicatePayment.match, duplicatePayment.payment.cents),
-              ...(duplicatePayment.payment.allocations.length === 0 ? [prepayMessage(duplicatePayment.payment.cents)] : []),
-            ].join(' ')
-          : ''}
-        confirmLabel="Record Anyway"
+        open={paymentToConfirm !== null}
+        onClose={() => setPaymentToConfirm(null)}
+        onConfirm={() => { if (paymentToConfirm) void executeSubmit(paymentToConfirm.payment); }}
+        title={paymentToConfirm ? confirmTitle(paymentToConfirm) : ''}
+        message={paymentToConfirm ? confirmMessage(paymentToConfirm) : ''}
+        confirmLabel={paymentToConfirm ? confirmLabel(paymentToConfirm) : 'Continue'}
         variant="warning"
       />
     </div>

@@ -32,6 +32,7 @@ interface DatePickerProps {
   value: string | null; // 'YYYY-MM-DD'
   onChange: (value: string | null) => void;
   minValue?: string;
+  maxValue?: string;
   helper?: ReactNode;
   error?: string;
   disabled?: boolean;
@@ -60,6 +61,7 @@ export default function DatePicker({
   value,
   onChange,
   minValue,
+  maxValue,
   helper,
   error,
   disabled,
@@ -75,6 +77,7 @@ export default function DatePicker({
 
   const date = safeParse(value);
   const min = safeParse(minValue);
+  const max = safeParse(maxValue);
   const todayChicago = today(BUSINESS_TZ);
   const activePreset = presets?.find((p) => p.value === value);
 
@@ -84,6 +87,7 @@ export default function DatePicker({
       value={date}
       onChange={(d) => onChange(d ? d.toString() : null)}
       minValue={min ?? undefined}
+      maxValue={max ?? undefined}
       placeholderValue={todayChicago}
       granularity="day"
       isOpen={open}
@@ -136,7 +140,7 @@ export default function DatePicker({
             <div className="flex flex-wrap gap-1.5 mb-3">
               {presets.map((p) => {
                 const pd = safeParse(p.value);
-                const blocked = !pd || !!(min && pd.compare(min) < 0);
+                const blocked = !pd || !!(min && pd.compare(min) < 0) || !!(max && pd.compare(max) > 0);
                 return (
                 <button
                   key={p.value}

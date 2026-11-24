@@ -202,6 +202,10 @@ interface LocalItem {
   // neither, and a cleared field keeps its acres even when they equal the field's: the source
   // cannot be told apart, and guessing could delete typed acres.
   acres_source?: 'field' | 'typed';
+  // A new line's acres this page copied from the line above or the section's field, so the rep
+  // need not retype them (Mason, 2026-11-24). Shown as a hint by the Acres box until the rep types
+  // there; not saved. A prefilled line with nothing else in it still counts as untouched.
+  acres_prefill?: 'line_above' | 'field';
   total_units_needed: number | null;
   unit_size: string | null;
   profit: number;
@@ -257,6 +261,30 @@ const UNIT_SELECT = 'w-auto! shrink-0 max-w-[60%] border-l border-gray-200 bg-cr
 // ProductOptionDetails shows, without their labels. Missing ones are left out.
 function productMetaLine(p: ProductOptionPresentationModel): string {
   return [p.sku, p.product_family?.name, productPackageText(p)].filter(Boolean).join(' · ');
+}
+
+/** A line's Acres box. A new line's filled-in acres say where they came from until the rep types there. */
+function LineAcres({ item, onAcres }: { item: LocalItem; onAcres: (acres: number | null) => void }) {
+  const hintId = `line-acres-hint-${item._key}`;
+  return (
+    <>
+      <input
+        type="number"
+        value={item.acres ?? ''}
+        onChange={(e) => onAcres(e.target.value ? parseFloat(e.target.value) : null)}
+        aria-label="Acres"
+        aria-describedby={item.acres_prefill ? hintId : undefined}
+        className={`${LINE_INPUT} border-gray-300`}
+        step="any"
+        min={0}
+      />
+      {item.acres_prefill && (
+        <p id={hintId} className="mt-1 text-xs text-secondary">
+          {item.acres_prefill === 'line_above' ? 'Filled from line above' : 'Filled from field'}
+        </p>
+      )}
+    </>
+  );
 }
 
 // The quote's totals: line sums, then rounded to the cent. The page's one totals rule.
@@ -356,7 +384,7 @@ function hasUserEnteredItemValues(item: LocalItem): boolean {
     || item.price_override !== null
     || item.actual_rate !== null
     || item.rate_unit !== null
-    || item.acres !== null
+    || (item.acres !== null && !item.acres_prefill)
     || item.total_units_needed !== null
     || item.unit_size !== null
     || item.price_unit !== null
@@ -1889,7 +1917,7 @@ export default function QuoteBuilder() {
       field_id: null,
       items: sec.items.map((item) => {
         if (!filledByField(item)) return item;
-        const cleared: LocalItem = { ...item, acres: null, acres_source: undefined };
+        const cleared: LocalItem = { ...item, acres: null, acres_source: undefined, acres_prefill: undefined };
         return item.calc_mode === 'units_direct'
           ? { ...cleared, oz_per_acre: null, price_per_acre: null }
           : { ...cleared, total_units_needed: 0, total_price: 0, profit: 0, net_margin: 0 };
@@ -2264,10 +2292,27 @@ export default function QuoteBuilder() {
       prev.map((sec) => {
         if (sec._key !== sectionKey) return sec;
         newItem.sort_order = sec.items.length + 1;
-        return { ...sec, items: [...sec.items, newItem] };
+        return { ...sec, items: [...sec.items, { ...newItem, ...prefilledAcres(sec) }] };
       })
     );
     return newItem._key;
+  }
+
+  // A new line starts with the acres of the line above it in its section, or else its section's
+  // field's acres, so the rep need not retype them; the box stays editable. Only a new line is
+  // filled: existing lines and anything typed are never changed here.
+  function prefilledAcres(sec: LocalSection): Pick<LocalItem, 'acres' | 'acres_source' | 'acres_prefill'> | null {
+    const above = sec.items[sec.items.length - 1];
+    if (above?.acres != null && above.acres > 0) {
+      // Acres the field filled in stay tied to the field, so clearing the field drops this copy too.
+      return { acres: above.acres, acres_source: above.acres_source === 'field' ? 'field' : 'typed', acres_prefill: 'line_above' };
+    }
+    const field = sec.field_id ? fields[sec.field_id] : undefined;
+    const fieldAcres = field ? billableAcres(field.override_acres, field.measured_acres, field.total_acres) : null;
+    if (fieldAcres != null && fieldAcres > 0) {
+      return { acres: fieldAcres, acres_source: 'field', acres_prefill: 'field' };
+    }
+    return null;
   }
 
   const removeItem = (sectionKey: string, itemKey: string) => {
@@ -5345,24 +5390,18 @@ export default function QuoteBuilder() {
             </>
           );
           const acres = (
-            <input
-              type="number"
-              value={item.acres ?? ''}
-              onChange={(e) =>
+            <LineAcres
+              item={item}
+              onAcres={(value) =>
                 updateItem(sec._key, item._key, {
-                  acres: e.target.value
-                    ? parseFloat(e.target.value)
-                    : null,
+                  acres: value,
                   acres_source: 'typed',
+                  acres_prefill: undefined,
                   calc_mode: item.calc_mode === 'units_direct'
                     ? 'units_direct' // keep units_direct if typing acres alongside units
                     : 'rate_acres',
                 })
               }
-              aria-label="Acres"
-              className={`${LINE_INPUT} border-gray-300`}
-              step="any"
-              min={0}
             />
           );
           const quantity = (

@@ -3,6 +3,33 @@
 ## 2026-11-23 — Release #2388 Sol HIGH 1: drivers see farm contacts only for their own deliveries
 
 **Decision (Mason, in chat, 2026-11-23: fix all three release findings before release).** Replaces the 2026-11-21 "drivers may see name, phone, email and delivery address for every farm" part of the #2161 entry. `get_driver_customers` now answers only a driver who still has the Deliveries or My Route page, and only for farms on their own not-deleted, not cancelled or voided deliveries that are open, scheduled from yesterday on, or completed since yesterday (`20270228150000_driver_farm_lookup_scope.sql`). Never the financial fields, as before.
+## 2026-11-23 — #2364: Mason owner-accepted 7 Sol finding(s) at `67c24bf16161`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2364 at `67c24bf16161` (base `3dd8f9bbf7dc`) found 7 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/DeliveryDetail.tsx:842`, text sha256 `72da35a23d0ee1c6` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref b7629205c86f)
+- Finding 2 (HIGH) at `src/pages/DeliveryDetail.tsx:860`, text sha256 `cb63feb9add7d837` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d0a4fc3887a2)
+- Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:3332`, text sha256 `fdb4cf900b71e4d5` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d0a4fc3887a2)
+- Finding 4 (HIGH) at `src/pages/DeliveryDetail.tsx:857`, text sha256 `791249ddc2e34fb2` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d0a4fc3887a2)
+- Finding 5 (HIGH) at `src/pages/DeliveryDetail.tsx:694`, text sha256 `8bdd3375bb19c76b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref b7629205c86f)
+- Finding 6 (HIGH) at `src/pages/DeliveryDetail.tsx:847`, text sha256 `54747ba83878958b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d0a4fc3887a2)
+- Finding 7 (HIGH) at `src/pages/DeliveryDetail.tsx:3328`, text sha256 `ea8b822d5b28cd91` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref b7629205c86f)
+
+## 2026-11-23 — #2364: Mason owner-accepted 3 Sol finding(s) at `98c8c9897fec`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2364 at `98c8c9897fec` (base `5b549b9e4f2f`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/DeliveryDetail.tsx:839`, text sha256 `f5151f234f7425fa` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 55666ce4c535)
+- Finding 2 (HIGH) at `src/pages/DeliveryDetail.tsx:857`, text sha256 `039117bb703021ba` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 55666ce4c535)
+- Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:3327`, text sha256 `0f7b61b050aa1d57` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 55666ce4c535)
 
 ## 2026-11-23 — #2170: Mason owner-accepted 4 Sol finding(s) at `a939d02c9667`
 

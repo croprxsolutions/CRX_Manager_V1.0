@@ -14,5 +14,8 @@ Screen and file-layout changes only. No database change, and nothing that is sav
 - Price sheet (.xlsx): locked current margins show as numbers to 2 decimals and still read back as the exact
   server text; editable margins stay text. Cost and tier price headers carry the note
   "Dollars per inventory unit (see the inventory_unit column)".
+- Price-sheet preview: each row names its Excel row ("Excel row 802"), since problem rows are listed first. The
+  pricing_mode refusals now say to put the edited cells back as downloaded before switching mode (switching
+  alone was refused again). Rows revealed by "Show N unchanged rows" now come after the button for screen readers.
 - A price sheet with supplier evidence is read in one load instead of three: about 0.5 s to 0.13 s for 1,215 rows.
   This was not the cause of the slow preview, which is still unmeasured.

@@ -420,6 +420,8 @@ export default function ProductDetail() {
   const [nameRequired, setNameRequired] = useState(false);
   const [unitRequired, setUnitRequired] = useState(false);
   const [reiDraft, setReiDraft] = useState('');
+  // What the REI/PHI box held when its "not applicable" tick went on, so unticking puts it back.
+  const intervalDraftBeforeTick = useRef<{ rei?: string; phi?: string }>({});
   const [phiDraft, setPhiDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [costModal, setCostModal] = useState(false);
@@ -621,6 +623,7 @@ export default function ProductDetail() {
     setManualBasisCost('');
     setCostBasisPricingBehavior('keep_sell_prices');
     pricingPreviewIntentRef.current = null;
+    intervalDraftBeforeTick.current = {};
   }, [id, resetApplyPricingKey, resetPreviewPricingKey]);
 
   const saveExistingProductDetails = async () => {
@@ -1707,10 +1710,11 @@ export default function ProductDetail() {
                     onChange={(checked) => {
                       if (reloadRequired) return;
                       update('rei_not_applicable', checked);
-                      // Unticking puts back the saved number, so a mis-click never erases it.
-                      const restored = checked ? null : persistedProduct?.rei_hours ?? null;
-                      setReiDraft(restored == null ? '' : String(restored));
-                      update('rei_hours', restored);
+                      // Unticking puts back what the box held, so a mis-click never erases a number.
+                      if (checked) intervalDraftBeforeTick.current.rei = reiDraft;
+                      const draft = checked ? '' : intervalDraftBeforeTick.current.rei ?? String(persistedProduct?.rei_hours ?? '');
+                      setReiDraft(draft);
+                      update('rei_hours', /^\d+$/.test(draft) ? Number(draft) : null);
                     }}
                   />
                 )}
@@ -1738,10 +1742,11 @@ export default function ProductDetail() {
                     onChange={(checked) => {
                       if (reloadRequired) return;
                       update('phi_not_applicable', checked);
-                      // Unticking puts back the saved number, so a mis-click never erases it.
-                      const restored = checked ? null : persistedProduct?.phi_days ?? null;
-                      setPhiDraft(restored == null ? '' : String(restored));
-                      update('phi_days', restored);
+                      // Unticking puts back what the box held, so a mis-click never erases a number.
+                      if (checked) intervalDraftBeforeTick.current.phi = phiDraft;
+                      const draft = checked ? '' : intervalDraftBeforeTick.current.phi ?? String(persistedProduct?.phi_days ?? '');
+                      setPhiDraft(draft);
+                      update('phi_days', /^\d+$/.test(draft) ? Number(draft) : null);
                     }}
                   />
                 )}

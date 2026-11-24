@@ -28,7 +28,8 @@
 import { readFileSync, existsSync, statSync, lstatSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import path from "node:path";
-import { parseWorktreePorcelain, mergedPrHeadsFromCache } from "./worktree-awareness-lib.mjs";
+import { fileURLToPath } from "node:url";
+import { parseWorktreePorcelain, mergedPrHeadsFromCache, MERGED_PR_CACHE_FILE, MERGED_PR_CACHE_MAX_AGE_MS } from "./worktree-awareness-lib.mjs";
 import {
   planCleanup, meaningfulDirt, ledgerKeepsWorktree, preciousIgnored, classifyHusk, normPath, IGNORABLE_DIRT_PATH,
 } from "./worktree-cleanup-lib.mjs";
@@ -106,13 +107,22 @@ try {
   const commonDir = path.resolve(projectDir, (gitTry(["rev-parse", "--git-common-dir"]).out || ".git").trim());
   const mainRoot = path.dirname(commonDir);
 
-  // Merged-PR heads cached by worktree-awareness.mjs (it refreshes the file at
-  // session start). A squash merge lands a new commit, so `git cherry` calls a
+  // Merged-PR heads cached in the shared .git folder. This async hook refreshes a
+  // stale cache itself, through the same writer /fleet uses, since the
+  // session-start banner that used to refresh it was removed (2026-11-23). A squash merge lands a new commit, so `git cherry` calls a
   // multi-commit squash-merged branch unmerged; a head that IS a merged PR's
   // head is landed. The cache holds only PRs merged into main (`gh pr list
   // --base main`). Missing cache → cherry only (more conservative, never less).
+  const cacheFile = path.join(commonDir, MERGED_PR_CACHE_FILE);
+  let cacheAge = Infinity;
+  try { cacheAge = Math.abs(Date.now() - (Number(JSON.parse(readFileSync(cacheFile, "utf8")).fetchedAt) || 0)); } catch { /* not cached yet */ }
+  if (cacheAge > MERGED_PR_CACHE_MAX_AGE_MS) {
+    spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), "worktree-awareness.mjs"), "--refresh-merged-pr-heads"], {
+      cwd: projectDir, timeout: 100_000, stdio: "ignore", windowsHide: true,
+    });
+  }
   let mergedHeads = null;
-  try { mergedHeads = mergedPrHeadsFromCache(readFileSync(path.join(commonDir, "crx-merged-pr-heads.json"), "utf8")); } catch { /* not cached yet */ }
+  try { mergedHeads = mergedPrHeadsFromCache(readFileSync(cacheFile, "utf8")); } catch { /* not cached yet */ }
   const prOfSha = (sha) => (mergedHeads && sha ? mergedHeads.get(String(sha).toLowerCase()) : undefined);
 
   // A branch is "merged" iff its tip is a merged PR's head, or

@@ -47,6 +47,9 @@ const LATER_READ_ONLY = new Set([
   // This proof asserts the candidate's body (its plan chain runs a frozen pre-#1989 copy); the rebuilt body is
   // proven by scripts/smoke/prove-purchasing-plan-reservations-real-schema.mjs.
   '20270216110000_purchasing_plan_booking_reservations.sql',
+  // #2388 Sol HIGH 2: adds an Inventory page check to get_purchasing_plan; no planning change. Proven by
+  // scripts/smoke/prove-purchasing-plan-inventory-page-real-schema.mjs.
+  '20270228210000_purchasing_plan_requires_inventory_page.sql',
 ]);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

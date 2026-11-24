@@ -36,7 +36,6 @@ import {
   pushIsForced,
   pushUsesBulkMode,
   pullRequestChecksGreen as sharedPullRequestChecksGreen,
-  pushDestinationBranches,
   reviewProofPathMentioned,
   reviewStateDirectoryMentioned,
   riskyFiles,
@@ -67,7 +66,6 @@ import {
   teammateCommentsUnreadableDenial,
 } from "../../.claude/hooks/teammate-comments-lib.mjs";
 import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
-import { followUpsDenial, followUpsProblem } from "../../.claude/hooks/followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { prFilesOnGitHub, tahaLaneGate, tellTahaOnGitHub } from "../../.claude/hooks/taha-lane-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
@@ -779,9 +777,6 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh, claim = 
       "a genuine nitpick may be dismissed with a one-line reason in the thread. Merge only after that."
     );
   }
-  // Every PR names what it put off — mirror of pr-merge-guard.mjs (Mason, 2026-11-09).
-  const followUps = followUpsProblem(pullRequest);
-  if (followUps) return denied(followUpsDenial("CODEX PRODUCTION GATE", request.selector, followUps));
   // Mason's autonomous-landing rule (2026-09-26) — mirror of pr-merge-guard.mjs.
   // An agent merges into main only when the newest run of every check is green
   // and a fresh exact-SHA Sol proof exists (or the diff is documentation-only).
@@ -1570,20 +1565,8 @@ export function evaluateProductionAction({
       return denied("CODEX PRODUCTION GATE: pushes to master/production remain blocked.");
     }
 
-    // Landing claim (pr-claim-lib.mjs, fail open; #1948) — mirror of codex-push-guard.mjs:
-    // the first session to push a PR branch claims it. Checked here, recorded at the
-    // command's allow point, so a refused command claims nothing. A dry run claims nothing.
-    // shortcut: a ref-less push to a differently named upstream claims only the local branch
-    // name (fail open; Codex App P2 on #2041); resolve @{push} only when no refspec was given.
-    if (claim && !/(?:^|\s)(?:--dry-run|-n)(?=\s|$)/.test(segment)) {
-      let destinations = [];
-      try { destinations = pushDestinationBranches(segment, rawBranch); } catch { /* fail open */ }
-      for (const destination of destinations) {
-        const refusal = claim(destination, "push", false);
-        if (refusal) return denied(`CODEX PRODUCTION GATE: ${refusal}`);
-        claimBranches.push({ branch: destination, action: "push" });
-      }
-    }
+    // Ordinary pushes take no landing claim (Mason, 2026-11-23); mirror of
+    // codex-push-guard.mjs. Only merges claim a branch here.
 
     const sourceRef = mainPushSource(segment, currentBranch);
     if (sourceRef === "DELETE") {

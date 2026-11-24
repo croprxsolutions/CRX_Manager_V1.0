@@ -22,6 +22,8 @@
 --      is kept in the same order. INSUFFICIENT_ROLE now also refuses a sales rep denied the Job Schedule
 --      page, as edit_jobs (20270203110000) does (Sol round 2). With a version, the job's dispatch rows are
 --      held FOR SHARE before the compare, so a crew deletion cannot change them mid-save (Sol round 2).
+--      For an existing job the role check runs again after the lock waits, so a rep denied the page while
+--      the save waited is refused (Sol round 10).
 --
 -- idempotency-body-check: exempt -- save_job's p_idempotency_key is unchanged and passed through to the
 -- impl, whose replay is unchanged; the new compare is skipped exactly when that replay will answer.
@@ -182,6 +184,11 @@ BEGIN
                                               'customer_supplied', jc.customer_supplied)), '[]'::jsonb)
         INTO v_before FROM public.job_chemicals jc WHERE jc.job_id = p_job_id;
     END IF;
+    -- Again after the lock waits above (Sol round 10): a rep denied the Job Schedule page while this save waited is refused.
+    IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true
+                     AND (role = 'admin' OR (role = 'sales_rep' AND NOT coalesce('jobs' = ANY (denied_pages), false)))) THEN
+      RAISE EXCEPTION 'INSUFFICIENT_ROLE';
+    END IF;
   END IF;
   IF public.is_admin() THEN
     v_result := public._save_job_cost_step2_impl(p_job_id, p_job_payload, p_fields, v_chemicals, p_performed_by, p_idempotency_key);
@@ -228,7 +235,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = '88d4ff22c0deff5ef79fa4fae7ec2b21'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '029c24fcefff6656a09ef9d739c79052'
                     AND p.prosecdef AND p.proowner = 'postgres'::regrole
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]) THEN
     RAISE EXCEPTION 'JOB_VERSION_POSTFLIGHT: save_job is not the body, owner or settings this file installs';

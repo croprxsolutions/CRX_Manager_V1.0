@@ -18,6 +18,7 @@
  *   5. the page's own dispatch, carried into its version, saves; with someone else's dispatch change too, refused;
  *   6. printing, applied acres and a chemical's cost leave the version unchanged;
  *   7. a driver, or a rep denied the Job Schedule page, is refused job_edit_version; a sales rep gets one;
+ *      a rep denied the page while their save waits for the job lock is refused once it clears;
  *   8. a malformed expected_version is refused; a driver's save carrying one gets INSUFFICIENT_ROLE;
  *   9. 20270226150000's refusal still fires: a completed job's chemicals can't change, current version or not.
  *
@@ -189,6 +190,27 @@ try {
   assert.equal(show('7 rep denied the jobs page', attempt(REP, `${refuse(`r := public.job_edit_version(${JOB});`)} v := t;`)), 'ok|INSUFFICIENT_ROLE');
   assert.match(show('7 rep denied the jobs page, save', attempt(REP, `${refuse(`r := ${save('[JV] denied rep', null, null, REP)};`)} v := t;`)), /^ok\|INSUFFICIENT_ROLE/);
   psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_remove(denied_pages, 'jobs') WHERE id = '${REP}';`);
+  // Denied WHILE the save waits for the job lock: refused once the lock clears (Sol round 10).
+  const holder = holdingSave(null, 'jv-hold-denial');
+  waitForHolder();
+  const denier = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { stdio: ['pipe', 'ignore', 'ignore'] });
+  denier.stdin.end(`SELECT pg_sleep(2); SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_append(coalesce(denied_pages, '{}'), 'jobs') WHERE id = '${REP}';\n`);
+  for (let i = 0; scalar(`SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(2)%' AND state = 'active' AND pid <> pg_backend_pid();`) !== '1'; i += 1) {
+    if (i > 100) throw new Error('the denying session never started');
+    pause(50);
+  }
+  const deniedWaiting = show('7 rep denied while the save waits', attempt(REP, `${refuse(`r := ${save('[JV] denied while waiting', null, null, REP)};`)} v := t || '|notes=' || ${notes};`));
+  assert.equal((await holder).code, 0, 'the holding save failed');
+  await new Promise((resolve) => (denier.exitCode === null ? denier.on('close', resolve) : resolve()));
+  assert.match(deniedWaiting, /^ok\|INSUFFICIENT_ROLE/);
+  psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_remove(denied_pages, 'jobs') WHERE id = '${REP}';`);
+  // The same save from a rep who keeps access goes through, so the refusal above is the denial, not the role.
+  assert.equal(show('7 rep with access, save', attempt(REP, `${refuse(`r := ${save('[JV] rep save', null, null, REP)};`)} v := t;`)), 'ok|NOT REFUSED');
+  // The admin holding save above sent no chemicals and so cleared case 6's: put it back for case 9.
+  elsewhere(`SET session_replication_role = replica;
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, cost_per_unit_cents) SELECT ${JOB}, id, 1, 'Gal', 100 FROM public.products WHERE product_name = '[JV] Chem'
+      AND NOT EXISTS (SELECT 1 FROM public.job_chemicals WHERE job_id = ${JOB});
+    SET session_replication_role = origin`);
 
   // 8. A malformed version is refused.
   assert.match(show('8 malformed', attempt(ADMIN, `${refuse(`r := ${save('[JV] bad', `'"x"'::jsonb`)};`)} v := t;`)), /^ok\|EXPECTED_VERSION_INVALID/);
@@ -203,7 +225,7 @@ try {
     ${refuse(`r := ${save('[JV] completed', V('c9'), 'jv-completed', ADMIN, 'completed')};`)}
     v := t || '|unchanged=' || (f0 = public._job_edit_version(${JOB})::text);`)), /^ok\|JOB_COMPLETED_CHEMICALS_LOCKED.*\|unchanged=true$/);
   assert.equal(scalar("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure;"),
-    '88d4ff22c0deff5ef79fa4fae7ec2b21', 'the installed save_job must be the body the postflight pins');
+    '029c24fcefff6656a09ef9d739c79052', 'the installed save_job must be the body the postflight pins');
 
   console.log('\nJOB_SAVE_VERSION_PROOF_PASS');
 } finally {

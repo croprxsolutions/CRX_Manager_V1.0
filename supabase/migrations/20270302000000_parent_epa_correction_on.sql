@@ -294,7 +294,7 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM public.epa_registrations r
                         WHERE r.epa_registration = public._normalize_epa_registration(ii.epa_registration) AND r.rup_status = 'yes');
     IF v_unsaved IS NOT NULL THEN
-      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_RUP_DRAFT: invoice % has a line for this product saved under a number that is not restricted-use, so posting it after this correction would make no restricted-use record. Post or delete it first, or remove that line, then correct the number', v_unsaved;
+      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_RUP_DRAFT: invoice % has a line for this product saved under a number that is not restricted-use, so posting it, before or after this correction, would make no restricted-use record. Do not post it: delete that draft or remove that line, correct the number, then add the line again', v_unsaved;
     END IF;
   END IF;
   RETURN jsonb_build_object(
@@ -316,7 +316,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public._product_parent_identity_after(public.product_parents,jsonb)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = 'cf82e174cf421181d2d5c69004d1b31f'
+                    AND md5(replace(p.prosrc, chr(13), '')) = 'b97145311af25c6ac873f78aa44bf2ac'
                     AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef AND p.provolatile = 'v'
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')

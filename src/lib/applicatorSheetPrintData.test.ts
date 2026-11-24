@@ -66,9 +66,9 @@ describe('prepareApplicatorSheetPrintData safety sheet', () => {
 
   it('adds one safety row per product line with its signal word; a name with two words stays unknown', async () => {
     const rows = [
-      { product: { product_name: 'TEST A', signal_word: 'Warning' } },
-      { product: { product_name: 'TEST B', signal_word: 'Caution' } },
-      { product: { product_name: 'TEST B', signal_word: 'Danger' } },
+      { product_id: 'p-a', product: { product_name: 'TEST A', signal_word: 'Warning' } },
+      { product_id: 'p-b1', product: { product_name: 'TEST B', signal_word: 'Caution' } },
+      { product_id: 'p-b2', product: { product_name: 'TEST B', signal_word: 'Danger' } },
     ];
     mockFrom.mockReturnValue({ select: () => ({ eq: () => ({ not: async () => ({ data: rows, error: null }) }) }) });
     const result = await prepareApplicatorSheetPrintData('job-1', data, { ...options, includeSafetySheet: true });
@@ -76,5 +76,22 @@ describe('prepareApplicatorSheetPrintData safety sheet', () => {
       { product_name: 'TEST A', signal_word: 'Warning', rei_hours: 12, phi_days: 7 },
       { product_name: 'TEST B', signal_word: null, rei_hours: null, phi_days: null },
     ]);
+  });
+});
+
+describe('prepareApplicatorSheetPrintData safety sheet by product id', () => {
+  it('takes each line signal word from its own product when the line carries its id', async () => {
+    const line = (id: string) => ({ product_name: 'TEST Same', product_id: id, rate_per_acre: 1, rate_unit: 'pt', total_applied: 1,
+      total_unit: 'pt', total_gl_lb: null, product_form: null, rei_hours: 4, phi_days: 0, epa_registration: null });
+    mockFrom.mockReturnValue({ select: () => ({ eq: () => ({ not: async () => ({ data: [
+      { product_id: 'p-1', product: { product_name: 'TEST Same', signal_word: 'Caution' } },
+      { product_id: 'p-2', product: { product_name: 'TEST Same', signal_word: 'Danger' } },
+    ], error: null }) }) }) });
+    const result = await prepareApplicatorSheetPrintData('job-1', {
+      job_number: 'JOB-1', customers: [], scheduled_date: '2026-07-11', scheduled_time: null, applicator_name: null,
+      vehicle_name: null, fields: [], total_acres: 0, loader_comment: null, products: [line('p-1'), line('p-2'), line('p-gone')],
+    }, { mapPages: 'none', includePreviousApplications: false, previousApplicationsPerField: 3, blankSections: 0,
+      includeBillingSplits: false, showBanner: true, includeSafetySheet: true });
+    expect(result.safety!.map((s) => s.signal_word)).toEqual(['Caution', 'Danger', null]);
   });
 });

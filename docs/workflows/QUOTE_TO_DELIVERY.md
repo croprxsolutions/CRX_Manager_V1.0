@@ -197,7 +197,7 @@ You **CANNOT** skip from scheduled directly to completed. The in_progress step i
 - `financial_audit_log` — immutable audit trail for all financial changes
 
 ### Source files
-- `src/pages/Invoices.tsx` — invoice list (unposted/posted), batch print, batch void
+- `src/pages/Invoices.tsx` — invoice list (Drafts / Posted / By Customer / All Invoices tabs, as on Field Invoices), tick-and-post, batch print, batch void
 - `src/pages/InvoiceDetail.tsx` — post/unpost, print PDF, write-off
 
 ### Status values

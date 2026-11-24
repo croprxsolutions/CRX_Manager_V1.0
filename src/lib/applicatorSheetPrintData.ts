@@ -201,32 +201,46 @@ export async function fetchApplicatorSheetBillingSplits(
   }
 }
 
+interface ProductSafetyRow {
+  id: string;
+  signal_word: string | null;
+  rei_hours: number | null;
+  phi_days: number | null;
+}
+
 /**
  * Safety for the optional safety sheet: exactly the job order's product lines, in
- * order. Each line's signal word is read at print time from its own product record
- * (by product id, never by name); REI/PHI are the line's own values, as on the job
- * order. A failed read, or a line product the reader cannot see, returns null so the
- * sheet says safety could not be loaded. A line without a product id prints "See label".
+ * order. Each line's signal word and current label REI/PHI are read at print time
+ * from its own product record (by product id, never by name); the line's own REI/PHI
+ * stay as on the job order and the sheet flags any difference. A failed read, or a
+ * line product the reader cannot see, returns null so the sheet says safety could
+ * not be loaded. A line without a product id prints "See label" for the signal word.
  */
 async function sheetSafety(products: ApplicatorSheetData['products']): Promise<ApplicatorSheetSafety[] | null> {
   const ids = [...new Set(products.map((product) => product.product_id).filter((id): id is string => Boolean(id)))];
-  const words = new Map<string, string | null>();
+  const labels = new Map<string, ProductSafetyRow>();
   if (ids.length > 0) {
     try {
-      const { data, error } = await supabase.from('products').select('id, signal_word').in('id', ids);
+      const { data, error } = await supabase.from('products').select('id, signal_word, rei_hours, phi_days').in('id', ids);
       if (error || !data) return null;
-      (data as Array<{ id: string; signal_word: string | null }>).forEach((row) => words.set(row.id, row.signal_word?.trim() || null));
+      (data as ProductSafetyRow[]).forEach((row) => labels.set(row.id, row));
     } catch {
       return null;
     }
-    if (ids.some((id) => !words.has(id))) return null;
+    if (ids.some((id) => !labels.has(id))) return null;
   }
-  return products.map((product) => ({
-    product_name: product.product_name,
-    signal_word: product.product_id ? words.get(product.product_id) ?? null : null,
-    rei_hours: product.rei_hours,
-    phi_days: product.phi_days,
-  }));
+  return products.map((product) => {
+    const label = product.product_id ? labels.get(product.product_id) : undefined;
+    return {
+      product_name: product.product_name,
+      epa_registration: product.epa_registration?.trim() || null,
+      signal_word: label?.signal_word?.trim() || null,
+      rei_hours: product.rei_hours,
+      phi_days: product.phi_days,
+      label_rei_hours: label?.rei_hours ?? null,
+      label_phi_days: label?.phi_days ?? null,
+    };
+  });
 }
 
 /** Load maps/history/billing additions for every print entry point in one place. */

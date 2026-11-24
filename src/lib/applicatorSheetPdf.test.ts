@@ -236,7 +236,7 @@ describe('generateApplicatorSheetPdf safety sheet (Mason, 2026-11-24)', () => {
     const autoTable = (await import('jspdf-autotable')).default as unknown as ReturnType<typeof vi.fn>;
     return autoTable.mock.calls
       .map((c) => c[1] as { head: string[][]; body: string[][] })
-      .find((o) => o.head?.[0]?.[1] === 'Signal Word');
+      .find((o) => o.head?.[0]?.[2] === 'Signal Word');
   };
 
   it('prints no safety sheet unless it was chosen', async () => {
@@ -249,13 +249,14 @@ describe('generateApplicatorSheetPdf safety sheet (Mason, 2026-11-24)', () => {
     const products = Array.from({ length: 40 }, (_, i) => product(i + 1, i === 0 ? null : 12));
     await generateApplicatorSheetPdf(makeSheetData({
       products,
-      safety: products.map((p, i) => ({ product_name: p.product_name, signal_word: i === 1 ? 'warning' : null, rei_hours: p.rei_hours, phi_days: p.phi_days })),
+      safety: products.map((p, i) => ({ product_name: p.product_name, epa_registration: i === 1 ? '100-1' : null, signal_word: i === 1 ? 'warning' : null,
+        rei_hours: p.rei_hours, phi_days: p.phi_days, label_rei_hours: p.rei_hours, label_phi_days: p.phi_days })),
     }), 'original', null);
     const table = await safetyTable();
-    expect(table!.head[0]).toEqual(['Product', 'Signal Word', 'REI', 'PHI']);
+    expect(table!.head[0]).toEqual(['Product', 'EPA Reg. No.', 'Signal Word', 'REI', 'PHI']);
     expect(table!.body).toHaveLength(40);
-    expect(table!.body[0]).toEqual(['TEST Product 1', 'See label', 'See label', '30 d']);
-    expect(table!.body[1]).toEqual(['TEST Product 2', 'WARNING', '12 hr', '30 d']);
+    expect(table!.body[0]).toEqual(['TEST Product 1', '—', 'See label', 'See label', '30 d']);
+    expect(table!.body[1]).toEqual(['TEST Product 2', '100-1', 'WARNING', '12 hr', '30 d']);
     expect(mockDoc.addPage).toHaveBeenCalledTimes(1); // its own sheet; autotable flows any overflow onto more pages
   });
 
@@ -271,8 +272,19 @@ describe('generateApplicatorSheetPdf safety sheet (Mason, 2026-11-24)', () => {
       columns: { crop: false, pest: false, rei: false, phi: false, total_applied: false, gl_lb: false } };
     const p = product(1, 12);
     await generateApplicatorSheetPdf(makeSheetData({ products: [p],
-      safety: [{ product_name: p.product_name, signal_word: 'caution', rei_hours: 12, phi_days: 30 }] }),
+      safety: [{ product_name: p.product_name, epa_registration: null, signal_word: 'caution', rei_hours: 12, phi_days: 30, label_rei_hours: 12, label_phi_days: 30 }] }),
     'custom', custom as never);
-    expect((await safetyTable())!.body[0]).toEqual(['TEST Product 1', 'CAUTION', '12 hr', '30 d']);
+    expect((await safetyTable())!.body[0]).toEqual(['TEST Product 1', '—', 'CAUTION', '12 hr', '30 d']);
+  });
+
+  it('flags a job line whose REI/PHI differs from the current label, and treats negative values as not on file', async () => {
+    const p = product(1, 12);
+    await generateApplicatorSheetPdf(makeSheetData({ products: [p], safety: [
+      { product_name: 'TEST A', epa_registration: null, signal_word: null, rei_hours: 12, phi_days: 7, label_rei_hours: 48, label_phi_days: 7 },
+      { product_name: 'TEST B', epa_registration: null, signal_word: null, rei_hours: -1, phi_days: null, label_rei_hours: null, label_phi_days: 14 },
+    ] }), 'original', null);
+    const body = (await safetyTable())!.body;
+    expect(body[0]).toEqual(['TEST A', '—', 'See label', '12 hr (label now 48 hr: check label)', '7 d']);
+    expect(body[1]).toEqual(['TEST B', '—', 'See label', 'See label', '14 d']);
   });
 });

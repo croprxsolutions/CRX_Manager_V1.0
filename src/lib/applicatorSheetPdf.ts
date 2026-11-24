@@ -446,10 +446,24 @@ function appendMapPage(
  * The optional safety sheet: every product's signal word, REI and PHI on its own
  * page(s), never cut short (Mason, 2026-11-24: off by default, all of it on its own sheet).
  */
+/**
+ * One safety interval cell: the job line's value (as on the job order), with the
+ * label's current value beside it when they differ. A blank or negative value is not
+ * a real interval and prints "See label".
+ */
+function safetyInterval(line: number | null, label: number | null, unit: string): string {
+  const valid = (value: number | null): value is number => value != null && Number.isFinite(value) && value >= 0;
+  if (!valid(line)) return valid(label) ? `${fmtNum(label)} ${unit}` : 'See label';
+  if (valid(label) && label !== line) return `${fmtNum(line)} ${unit} (label now ${fmtNum(label)} ${unit}: check label)`;
+  return `${fmtNum(line)} ${unit}`;
+}
+
 function appendSafetySheet(doc: JsPDFWithAutoTable, autoTable: typeof import('jspdf-autotable').default, data: ApplicatorSheetData): void {
   if (data.safety === undefined) return;
   const items: ApplicatorSheetSafety[] = data.safety ?? [];
   const margin = 40;
+  const width = doc.internal.pageSize.getWidth() - 2 * margin;
+  const heading = `Job ${data.job_number} · ${customerLine(data)}`;
   doc.addPage();
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
@@ -458,29 +472,41 @@ function appendSafetySheet(doc: JsPDFWithAutoTable, autoTable: typeof import('js
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(...GRAY);
-  doc.text(`Job ${data.job_number} · ${customerLine(data)} · Always read and follow the product label.`, margin, margin + 26);
+  const intro = doc.splitTextToSize(`${heading} · Always read and follow the product label.`, width) as string[];
+  doc.text(intro, margin, margin + 26);
+  const startY = margin + 30 + intro.length * 11;
   if (items.length === 0) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(...CHARCOAL);
     doc.text(data.safety === null
       ? 'Safety could not be loaded from the product records. Read each product label before entering a treated field.'
-      : 'No products on this job.', margin, margin + 50, { maxWidth: doc.internal.pageSize.getWidth() - 2 * margin });
+      : 'No products on this job.', margin, startY + 14, { maxWidth: width });
     return;
   }
+  const firstPage = doc.getNumberOfPages();
   autoTable(doc, {
-    startY: margin + 36,
-    margin: { left: margin, right: margin, bottom: 60 },
-    head: [['Product', 'Signal Word', 'REI', 'PHI']],
+    startY,
+    margin: { left: margin, right: margin, top: margin + 20, bottom: 60 },
+    head: [['Product', 'EPA Reg. No.', 'Signal Word', 'REI', 'PHI']],
     body: items.map((item) => [
       item.product_name,
+      item.epa_registration || '—',
       item.signal_word ? item.signal_word.toUpperCase() : 'See label',
-      item.rei_hours != null ? `${fmtNum(item.rei_hours)} hr` : 'See label',
-      item.phi_days != null ? `${fmtNum(item.phi_days)} d` : 'See label',
+      safetyInterval(item.rei_hours, item.label_rei_hours, 'hr'),
+      safetyInterval(item.phi_days, item.label_phi_days, 'd'),
     ]),
     styles: { fontSize: 10, cellPadding: 5 },
     headStyles: { fillColor: CRX_GREEN, textColor: 255, fontStyle: 'bold' },
     alternateRowStyles: { fillColor: ALT_ROW_BG },
+    // A loose continuation page still names its job.
+    didDrawPage: () => {
+      if (doc.getNumberOfPages() === firstPage) return;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(...GRAY);
+      doc.text(`Safety (continued) · ${heading}`, margin, margin + 6, { maxWidth: width });
+    },
   });
 }
 

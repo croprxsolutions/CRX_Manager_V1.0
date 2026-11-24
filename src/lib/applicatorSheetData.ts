@@ -190,9 +190,15 @@ export interface ApplicatorSheetBillingSplit {
 /** One product's safety facts for the optional safety sheet. null = not on file (prints "see label"). */
 export interface ApplicatorSheetSafety {
   product_name: string;
+  /** Tells same-named products apart on the loose safety sheet. */
+  epa_registration: string | null;
   signal_word: string | null;
+  /** The job line's REI/PHI, as on the job order. */
   rei_hours: number | null;
   phi_days: number | null;
+  /** The product label's current REI/PHI at print time; printed beside a line value that differs. */
+  label_rei_hours: number | null;
+  label_phi_days: number | null;
 }
 
 /** The full, format-agnostic sheet payload. All three layouts read this. */

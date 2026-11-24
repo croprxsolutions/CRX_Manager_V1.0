@@ -20,9 +20,10 @@
 --    identical (they read every customer before too). A driver now also sees the name on their deliveries older
 --    than yesterday (before: "Unknown"); Mason decided drivers may see every farm's name (2026-11-21).
 --
--- Go-live order (Mason's two-step decision, 2026-11-21): apply only once the #2165 driver screens are live in
--- production. A driver on an older app copy reads customers directly and would see "Unknown customer" and no
--- phone or address. No row changes.
+-- Go-live: Mason lifted the "apply only after #2165 is live in production" hold on 2026-11-24, so this ships in the
+-- same release as the #2165 driver screens. A driver on an older app copy reads customers directly and would see
+-- "Unknown customer" and no phone or address until they fully close and reopen the app; both drivers do that
+-- before the production apply (Mason accepted the cached-app risk, 2026-11-22). No row changes.
 --
 -- Recovery: fix forward (repair the helper, the list or the screens); the drivers' whole-row read stays closed.
 -- Restoring it (the 20261013220000 customers_select) would reopen the credit, prepay, terms and notes exposure and
@@ -66,11 +67,11 @@ BEGIN
   IF to_regprocedure('public._delivery_list_customer_labels()') IS NOT NULL THEN
     RAISE EXCEPTION 'DRIVER_FARM_READ_BASELINE_DRIFT: _delivery_list_customer_labels already exists';
   END IF;
-  -- The driver screens read billing and shipping addresses from the 20270207120000 lookup; without it this file
-  -- would leave a driver's stop with no address.
+  -- The driver screens read billing and shipping addresses from the lookup (20270207120000 body, scoped to the
+  -- driver's own deliveries by 20270228150000); without it this file would leave a driver's stop with no address.
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
-       WHERE oid = to_regprocedure('public.get_driver_customers(uuid[])')) IS DISTINCT FROM 'f49caaf5f387375c92be94c52c74e4ed' THEN
-    RAISE EXCEPTION 'DRIVER_FARM_READ_BASELINE_DRIFT: get_driver_customers is not the 20270207120000 body';
+       WHERE oid = to_regprocedure('public.get_driver_customers(uuid[])')) IS DISTINCT FROM 'd0750901bc7ab9f9fed1897217b0084f' THEN
+    RAISE EXCEPTION 'DRIVER_FARM_READ_BASELINE_DRIFT: get_driver_customers is not the 20270228150000 body';
   END IF;
   IF NOT has_function_privilege('authenticated', 'public.get_driver_customers(uuid[])', 'EXECUTE')
      OR (SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure('public.get_driver_customers(uuid[])')) IS NOT TRUE THEN

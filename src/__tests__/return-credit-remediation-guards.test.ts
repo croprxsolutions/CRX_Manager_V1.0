@@ -44,9 +44,10 @@ function sha256(value: string) {
 
 function expectedHash(signature: string): string {
   const escaped = signature.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = predicate.match(new RegExp(`\\('${escaped}', '([0-9a-f]{64})'\\)`));
+  const match = predicate.match(new RegExp(`\\('${escaped}', '([0-9a-f]{64})'(?:, '([0-9a-f]{64})')?\\)`));
   if (!match) throw new Error(`predicate hash missing for ${signature}`);
-  return match[1];
+  // Until #1912 (20270228160000) lands, the bodies here are the pre-1912 ones (the predicate's third column).
+  return match[2] ?? match[1];
 }
 
 function assertFrontendGuards(returnsText: string, invoiceText: string) {

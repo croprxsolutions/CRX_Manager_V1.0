@@ -134,6 +134,7 @@ try {
       UPDATE public.vendor_bills SET status = 'voided' WHERE purchase_order_id = '${PO1}'; SET LOCAL session_replication_role = origin;
       ${asUser(`r := ${saveAs(uid, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])};`)} v := ${total(PO1)};`), 'ok|61000');
   }
+  assert.equal(refused(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 40, 0]]).replace('[POEB] Chem', '[POEB] Renamed'), PO1), `${LOCKED}|100000`);
   // Edit PO ignores a received quantity in its payload (receipts are the only writer), so it saves and stays 0.
   const RECEIVED_EDIT = 'ok|NOT REFUSED|0';
   // 4b. Luna: any change counts, however small; a received quantity sent in the edit cannot change a billed line.

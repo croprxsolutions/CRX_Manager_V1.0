@@ -5,7 +5,7 @@
 --    unreceived quantity, drop a line, or an admin's lower cost on an unreceived line). Mason, 2026-11-24, after three
 --    Sol rounds found leaks in a rep/admin split: one rule for everyone. Once a PO has an active (not deleted, not
 --    voided) vendor bill, an Edit PO save that changes its lines at all (adds or removes a line, or changes a line's
---    quantity, product, unit, cost or received quantity) is refused (PO_BILLED_LINES_LOCKED); header edits (notes, dates, status) still
+--    quantity, product or its name, unit, cost or received quantity) is refused (PO_BILLED_LINES_LOCKED); header edits (notes, dates, status) still
 --    save. To change lines, void the bill, edit, then enter the bill again (create_vendor_bill applies its limits);
 --    a cost correction goes through set_purchase_order_item_costs, which keeps the 5% rule. The refusal depends only
 --    on the caller's own edit and whether a bill exists, never on a role, cost or bill amount, and names no amount.
@@ -81,7 +81,7 @@ BEGIN
   -- the snapshot is never returned, and the inner save checks the caller before anything is compared or refused.
   IF p_po_id IS NOT NULL THEN
     SELECT COALESCE(jsonb_object_agg(poi.id::text, jsonb_build_object(
-             'q', poi.quantity_ordered, 'r', poi.quantity_received, 'p', poi.product_id, 'u', poi.unit_size,
+             'q', poi.quantity_ordered, 'r', poi.quantity_received, 'p', poi.product_id, 'n', poi.product_name, 'u', poi.unit_size,
              'c', poi.unit_cost)), '{}'::jsonb)
       INTO v_old_lines
       FROM public.purchase_order_items poi WHERE poi.purchase_order_id = p_po_id;
@@ -99,6 +99,7 @@ BEGIN
              OR poi.quantity_ordered IS DISTINCT FROM (o.value->>'q')::numeric
              OR poi.quantity_received IS DISTINCT FROM (o.value->>'r')::numeric
              OR poi.product_id IS DISTINCT FROM (o.value->>'p')::uuid
+             OR poi.product_name IS DISTINCT FROM (o.value->>'n')
              OR poi.unit_size IS DISTINCT FROM (o.value->>'u')
              OR poi.unit_cost IS DISTINCT FROM (o.value->>'c')::numeric)) THEN
     -- Read the bills under the PO row lock create_vendor_bill takes: one created or voided while the save waited counts.

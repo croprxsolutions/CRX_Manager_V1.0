@@ -2088,7 +2088,6 @@ export default function DeliveryDetail() {
                     <SignatureCanvas
                       onSignatureChange={setSignatureDataUrl}
                       label=""
-                      height={120}
                     />
                   </div>
                 </>
@@ -3015,7 +3014,6 @@ export default function DeliveryDetail() {
               <SignatureCanvas
                 onSignatureChange={setSignatureDataUrl}
                 label="Customer Signature"
-                height={120}
               />
             </div>
           )}

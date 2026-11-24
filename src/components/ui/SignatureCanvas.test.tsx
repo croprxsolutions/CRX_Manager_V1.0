@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 
 // ── Mock signature_pad ─────────────────────────────────────────────────────
 const mockClear = vi.fn();
@@ -70,20 +70,40 @@ describe('SignatureCanvas', () => {
     expect(defaultProps.onSignatureChange).toHaveBeenCalledWith(null);
   });
 
-  it('sets canvas dimensions from props', () => {
-    render(<SignatureCanvas {...defaultProps} width={300} height={100} />);
+  it('fills the width it is given at the height asked for', () => {
+    render(<SignatureCanvas {...defaultProps} height={180} />);
     const canvas = document.querySelector('canvas') as HTMLCanvasElement;
-    expect(canvas.style.width).toBe('300px');
-    // Shrinks to fit a narrow phone while keeping the 300:100 shape
-    expect(canvas.style.maxWidth).toBe('100%');
-    expect(canvas.style.aspectRatio).toBe('300 / 100');
+    expect(canvas.style.height).toBe('180px');
+    expect(canvas).toHaveClass('w-full');
+    expect(canvas.style.width).toBe('');
   });
 
-  it('uses default width/height when not specified', () => {
+  it('is a tall box by default, big enough to sign with a finger on a phone', () => {
     render(<SignatureCanvas {...defaultProps} />);
     const canvas = document.querySelector('canvas') as HTMLCanvasElement;
-    expect(canvas.style.width).toBe('400px');
-    expect(canvas.style.aspectRatio).toBe('400 / 150');
+    expect(parseInt(canvas.style.height, 10)).toBeGreaterThanOrEqual(200);
+    expect(parseInt(canvas.style.height, 10)).toBeLessThanOrEqual(240);
+    expect(canvas.parentElement).toHaveClass('border-2');
+  });
+
+  it('shows a Sign here line until the customer starts signing, and again after Clear', () => {
+    render(<SignatureCanvas {...defaultProps} />);
+    expect(screen.getByText('Sign here')).toBeInTheDocument();
+    const beginStroke = mockAddEventListener.mock.calls.find(([name]) => name === 'beginStroke')?.[1] as () => void;
+    act(() => beginStroke());
+    expect(screen.queryByText('Sign here')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(screen.getByText('Sign here')).toBeInTheDocument();
+  });
+
+  it('gives Clear a 44px tap target', () => {
+    render(<SignatureCanvas {...defaultProps} />);
+    expect(screen.getByRole('button', { name: 'Clear' })).toHaveClass('min-h-[44px]');
+  });
+
+  it('shows no Sign here hint when disabled', () => {
+    render(<SignatureCanvas {...defaultProps} disabled />);
+    expect(screen.queryByText('Sign here')).not.toBeInTheDocument();
   });
 
   it('rescales drawn strokes when the box resizes (phone rotation)', () => {

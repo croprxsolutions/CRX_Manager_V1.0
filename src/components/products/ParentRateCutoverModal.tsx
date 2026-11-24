@@ -18,6 +18,34 @@ type Eligible = Extract<RateCutoverPreview, { eligible: true }>;
 const refusalText = (error: unknown) => sanitizeError(error).replace(/^Nothing was saved\.\s*/, '');
 const ALREADY = [RpcErrorCodes.PRODUCT_PARENT_CUTOVER_ALREADY_APPROVED, RpcErrorCodes.PRODUCT_PARENT_CUTOVER_ALREADY_LEGACY];
 const alreadySwitched = (error: unknown) => ALREADY.some((code) => hasRpcCode(error, code));
+// 20270301200000 (#2379): an approved rate above today's label maximum switches only with a typed over-label reason.
+const OVER_LABEL = [RpcErrorCodes.PRODUCT_PARENT_CUTOVER_OVER_LABEL, RpcErrorCodes.PRODUCT_PARENT_CUTOVER_OVER_LABEL_REASON_TOO_LONG];
+const needsOverLabelReason = (preview: RateCutoverPreview | null) => (preview?.eligible === false
+  ? OVER_LABEL.some((code) => hasRpcCode({ message: preview.refusal }, code))
+  : preview?.label_check?.status === 'above');
+
+// An over-label preview counts only for the reason in the box now; after an edit, preview again.
+function switchablePlan(preview: RateCutoverPreview | null, overLabel: string): Eligible | null {
+  if (!preview?.eligible) return null;
+  return !needsOverLabelReason(preview) || (preview.over_label_reason ?? '') === overLabel.trim() ? preview : null;
+}
+const planKeyParts = (plan: Eligible | null) => [plan?.expected ?? null, plan?.over_label_reason ?? null];
+
+// The label maximums the over-label reason is given for, as the preview read them.
+function OverLabelMaximums({ plan }: { plan: Eligible }) {
+  return (
+    <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900" data-testid="rate-cutover-label-max">
+      {`Above the label maximum: ${(plan.label_check?.above ?? [])
+        .map((max) => `EPA ${max.epa_registration} allows ${max.max_label_rate} ${max.max_label_rate_unit}`).join('; ')}.`}
+    </p>
+  );
+}
+
+// Text that belongs to one scope (a group and direction); another scope starts empty.
+function useScopedText(scope: string): [string, (text: string) => void] {
+  const [held, setHeld] = useState({ scope: '', text: '' });
+  return [held.scope === scope ? held.text : '', (text) => setHeld({ scope, text })];
+}
 
 const isServerRefusal = (error: unknown) => {
   const message = error instanceof Error ? error.message
@@ -106,15 +134,17 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
   const [heldPreview, setPreview] = useState<RateCutoverPreview | null>(null);
   // A preview counts only for the group and direction on screen now; otherwise preview again.
   const preview = heldPreview?.parent_id === parent.id && heldPreview.direction === direction ? heldPreview : null;
-  const plan = preview?.eligible ? preview : null;
+  const [overLabel, setOverLabel] = useScopedText(`${parent.id}:${direction}`);
+  const needsOverLabel = needsOverLabelReason(preview);
+  const plan = switchablePlan(preview, overLabel);
   const warning = cutoverWarning(preview);
   const { getKey, resetKey } = useIdempotencyKey('commit_parent_rate_cutover', profileId,
-    JSON.stringify([parent.id, direction, plan?.expected ?? null, reason.trim()]));
+    JSON.stringify([parent.id, direction, ...planKeyParts(plan), reason.trim()]));
 
   const showPreview = async () => {
     setSaving(true);
     try {
-      const result = await previewParentRateCutover(parent.id, direction);
+      const result = await previewParentRateCutover(parent.id, direction, overLabel);
       // Switched under this page (another admin): reload so the panel shows the true rate in use.
       if (!result.eligible && alreadySwitched({ message: result.refusal })) {
         toast('info', `${refusalText({ message: result.refusal })}; page reloaded`);
@@ -178,6 +208,10 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
             ? `Switches ${parent.name} and all ${parent.sizes.length} size(s) from today's rate to the rate approved in the rate review, and reprices their per-acre prices. Saved quotes, orders and jobs keep their prices. You can switch back.`
             : `Puts back the rate, unit and suggested rate ${parent.name} had before the switch, on all ${parent.sizes.length} size(s), with per-acre prices at today's stock prices.`}
         </p>
+        {needsOverLabel && (
+          <ReasonField id="rate-cutover-over-label" label="Over-label reason (why use a rate above the label maximum)" value={overLabel} onChange={setOverLabel} maxLength={500} />
+        )}
+        {plan?.label_check?.status === 'above' && <OverLabelMaximums plan={plan} />}
         {warning && <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900" role="alert">{warning}</p>}
         {plan && <CutoverTable plan={plan} seedOrEach={seedOrEach} />}
         {plan && <ReasonField id="rate-cutover-reason" label="Reason" value={reason} onChange={setReason} />}

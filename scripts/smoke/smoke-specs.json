@@ -234,6 +234,22 @@
       "covers": ["_notify_driver_delivery_issue"],
       "area": ["lifecycle", "idempotency", "regression"]
     },
+    "idempotency_key_printable_only_1912": {
+      "chain": "smoke-adjust-inventory-intent-binding.sql",
+      "container_only": true,
+      "container_prover": "prove-adjust-inventory-key-real-schema.mjs",
+      "description": "CONTAINER ONLY - run via scripts/smoke/prove-adjust-inventory-key-real-schema.mjs, never through run-smoke.mjs against the live database. Covers 20270201140000 (adjust_inventory) and 20270228160000 (19 more functions), #1912: a retry key holding any character outside printable ASCII is refused with IDEMPOTENCY_KEY_REQUIRED and changes nothing, real app key shapes still adjust stock and replay, each of the 20 functions refuses a newline key, a second apply is refused, the registered full adjust_inventory chain (smoke-adjust-inventory-intent-binding.sql) ends in SMOKE_PASS_ROLLBACK on the new body, and a signed-in sales rep removes a customer document with a normal key (stamped deleted_by, same-key replay returns the same answer) while a newline key is refused and leaves the other document in place. The adjust_inventory and soft_delete_customer_document specs' own provers replay only up to older migrations (and the older document chain's cross-rep refusal predates 20261013220000, reps work any customer).",
+      "covers": [
+        "adjust_inventory",
+        "soft_delete_customer_document"
+      ],
+      "area": [
+        "inventory",
+        "security",
+        "idempotency",
+        "regression"
+      ]
+    },
     "adjust_inventory": {
       "chain": "smoke-adjust-inventory-intent-binding.sql",
       "container_only": true,

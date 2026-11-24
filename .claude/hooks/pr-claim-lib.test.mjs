@@ -129,35 +129,27 @@ function pushGuard(command, sessionId) {
   return reason;
 }
 
-ok(pushGuard("git push origin feat/land", "A") === "", "session A's push is allowed and claims the branch");
-ok(readClaims(claimsPath)["feat/land"]?.session === "A", "the push recorded A's claim in the main checkout's session-state");
-ok(/LANDING CLAIM/.test(pushGuard("git push origin feat/land", "B")), "session B's push to the same branch is refused");
+// Ordinary pushes take no claim (Mason, 2026-11-23); a Sol run does.
+ok(pushGuard("node scripts/write-codex-push-proof.mjs", "A") === "", "session A's Sol run is allowed and claims the branch");
+ok(readClaims(claimsPath)["feat/land"]?.session === "A", "the Sol run recorded A's claim in the main checkout's session-state");
+ok(pushGuard("git push origin feat/land", "B") === "", "session B may still push to the claimed branch");
+ok(readClaims(claimsPath)["feat/land"]?.session === "A", "B's push neither takes nor moves the claim");
 ok(/LANDING CLAIM/.test(pushGuard("node scripts/write-codex-push-proof.mjs", "B")), "session B's Sol run on that branch is refused");
 ok(/LANDING CLAIM/.test(pushGuard("node --no-warnings scripts/write-codex-push-proof.mjs", "B")), "a Sol run with node options is refused too");
 ok(/LANDING CLAIM/.test(pushGuard(`node "${path.join(ROOT, "scripts", "write-codex-push-proof.mjs")}"`, "B")), "a Sol run via another checkout's script path is judged by the folder it runs in");
 ok(pushGuard("node scripts/write-codex-push-proof.mjs --dry-run", "B") === "", "a dry run is never refused");
 ok(pushGuard("node scripts/write-codex-push-proof.mjs", "A") === "", "the holder's Sol run is allowed");
-ok(pushGuard("git push origin other-branch", "B") === "", "B may push a different branch");
-pushGuard("git push origin '>'", "Z");
-pushGuard("git push origin '2>'", "Z");
-ok(readClaims(claimsPath)[">"]?.session === "Z", "setup: another session holds claims on the names `>` and `2>`");
-ok(pushGuard("git push origin other-branch > out.txt", "B") === "", "a redirect after the push is not a branch, so no refusal");
-ok(pushGuard("git -C . push -q origin other-branch 2>&1", "B") === "", "`2>&1` is not a branch, so no refusal");
-ok(/LANDING CLAIM/.test(pushGuard("git push origin feat/land 2>&1", "B")), "a real claimed branch is still refused behind a redirect");
-ok(/LANDING CLAIM/.test(pushGuard("git push origin feat/land>out.txt", "B")), "a real claimed branch is still refused with a redirect glued on");
-ok(/LANDING CLAIM/.test(pushGuard("git push origin other-branch &>log feat/land", "B")), "a claimed branch after `&>` is still refused");
-ok(pushGuard("git push --dry-run origin dry-branch", "B") === "" && !("dry-branch" in readClaims(claimsPath)), "a dry-run push claims nothing");
+ok(pushGuard("git push origin other-branch", "B") === "" && !("other-branch" in readClaims(claimsPath)), "a push claims nothing");
 ok(pushGuard("git status && npm test", "B") === "", "ordinary commands are never refused");
-ok(pushGuard("git push origin feat/land") === "", "a call with no session id is never refused");
+ok(pushGuard("node scripts/write-codex-push-proof.mjs") === "", "a call with no session id is never refused");
 writeFileSync(claimsPath, "garbage");
-ok(pushGuard("git push origin feat/land", "B") === "", "a corrupt claim file never blocks");
-pushGuard("git push origin feat/land", "A");
+ok(pushGuard("node scripts/write-codex-push-proof.mjs", "B") === "", "a corrupt claim file never blocks");
 writeFileSync(claimsPath, JSON.stringify({ ...JSON.parse(readFileSync(claimsPath, "utf8")), broken: null }));
 const listed = spawnSync(process.execPath, [path.join(ROOT, "scripts", "pr-claim.mjs"), "list"], { cwd: repo, encoding: "utf8", env: scratchHookEnvironment(repo) });
 ok(listed.status === 0 && /feat\/land: held, session B/.test(listed.stdout), "list shows the claim and skips a malformed one");
 const cli = spawnSync(process.execPath, [path.join(ROOT, "scripts", "pr-claim.mjs"), "release", "feat/land"], { cwd: repo, encoding: "utf8", env: scratchHookEnvironment(repo) });
 ok(/Released/.test(cli.stdout), "the release command releases the claim");
-ok(pushGuard("git push origin feat/land", "B") === "", "after release, B takes over");
+ok(pushGuard("node scripts/write-codex-push-proof.mjs", "A") === "", "after release, A takes over");
 
 // Codex never runs the hooks that hold the claim check.
 const codexHooks = readFileSync(path.join(ROOT, ".codex", "hooks.json"), "utf8");

@@ -68,7 +68,6 @@ import {
   teammateCommentsUnreadableDenial,
 } from "./teammate-comments-lib.mjs";
 import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
-import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 import { ownerAcceptedForPr, trackedNamesIn, usesCarriedSkip } from "./sol-accept-lib.mjs";
@@ -576,9 +575,6 @@ function gateRequest(request) {
     );
   }
 
-  // Every PR names what it put off, so the close-out can tell Mason what remains (Mason, 2026-11-09).
-  const followUps = followUpsProblem(pr);
-  if (followUps) deny(followUpsDenial("PR MERGE GATE", request.selector, followUps));
 
   // The Codex GitHub App's review is read at the ALLOW point below, not here.
   // @speed-bump — advisory; deferring it protects the hard gates, it is not one.

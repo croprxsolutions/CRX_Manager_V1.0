@@ -26,3 +26,11 @@ Database-only, no screen change. Local commit only until release #1990 lands; th
 - When the migration is applied a second time, then the preflight refuses it.
 
 No open business decisions. Cold challenge skipped: one-condition tightening with no authority, lifecycle or data change; Sol reviews before delivery.
+
+## Follow-up (Mason, 2026-11-19: "fix the other 15 functions with the same check")
+
+- **Scope:** a database replayed from `origin/staging` plus `20270201140000` shows 19 more public functions whose current body holds the weak check (the "15" was a count of migration files). Migration `20270228160000_idempotency_keys_printable_only.sql` makes the same one-condition swap in each, generated from `pg_get_functiondef`. Each held the check exactly once, as `IF p_idempotency_key IS NULL OR ... OR p_idempotency_key COLLATE "C" !~ '[!-~]' THEN RAISE 'IDEMPOTENCY_KEY_REQUIRED ...'`.
+- **Callers:** every app key comes from `generateIdempotencyKey` (`<operation>:<user>:<uuid>`), the intent hooks (`<tab uuid>:<uuid>`) or those keys plus record ids; all printable ASCII without spaces. No app call changes.
+- **Money paths touched** (validation only, no amount, status or row logic): vendor bills/payments, commission payments, return credits. Taha has no open PRs (checked 2026-11-19); his billing/invoice ownership through 2026-12-15 should see this before the PR.
+- **Sweep allowlist:** `cost-exposure-review` keys hash each function and the helpers it reaches, so entries whose chain reaches a changed body are re-keyed from the replayed database (they show until the migration is applied).
+- **Proof cases:** no public function keeps the weak check; each of the 20 functions refuses a newline key with `IDEMPOTENCY_KEY_REQUIRED` and lets a normal key past the key check; a second apply is refused.

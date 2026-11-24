@@ -5,6 +5,10 @@
  */
 
 const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
+  // M9 (20270301180000): a Prepayment Manager check's amount is locked; a check with an application is not deleted.
+  [/^PREPAY_CHECK_AMOUNT_LOCKED\b/, "Nothing was saved. A prepayment check's amount cannot be edited. To correct a mistyped check, delete the whole check and enter it again"],
+  [/^PREPAY_OVERPAYMENT_LOCKED\b/, "Nothing was saved. An overpayment's amount comes from its payment, so it cannot be edited or deleted here. To undo it, void the payment"],
+  [/^PREPAY_CHECK_APPLIED\b/, 'Nothing was deleted. Part of this check was applied to an invoice, so the check cannot be deleted'],
   // KI-85: stock may be placed only at Main Warehouse until transfers exist; nothing was received or added.
   [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. Stock can go only into Main Warehouse until transfers between warehouses exist. Choose Main Warehouse and try again'],
   // #2000 (20270201120000): an inactive customer gets no new orders, deliveries, holds or spray jobs.
@@ -521,6 +525,9 @@ export function sanitizeError(error: unknown): string {
   // Customer receipt refusals (close_delivery_receipt, KI-25): plain words, no database code.
   if (/^DELIVERY_NOT_COMPLETED:.*receipt/s.test(message)) {
     return 'Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.';
+  }
+  if (/^RECEIPT_HANDLED_ADMIN_ONLY(?::|$)/.test(message)) {
+    return 'Nothing was changed. Only an admin can mark a customer receipt handled.';
   }
   if (/^DELIVERY_RECEIPT_CHANGED(?::|$)/.test(message)) {
     return 'Nothing was changed. This delivery\'s receipt was queued again since. Reload the page.';

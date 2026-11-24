@@ -1,19 +1,56 @@
-import { CalendarClock, LayoutGrid, MoreHorizontal, Receipt, Warehouse } from 'lucide-react';
+import {
+  CalendarClock, ClipboardCheck, FileText, LayoutGrid, MoreHorizontal, Navigation, Receipt, Sprout, Truck, Users, Warehouse,
+  type LucideIcon,
+} from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { hasPageAccess } from '../../lib/pagePermissions';
+import type { UserRole } from '../../types';
 
 interface MobileBottomNavProps {
   onMoreClick: () => void;
   moreOpen: boolean;
 }
 
-const PRIMARY_NAV_ITEMS = [
+interface BottomNavItem {
+  label: string;
+  path: string;
+  pageKey: string;
+  icon: LucideIcon;
+}
+
+// Each role gets the screens it opens all day; everything else stays one tap away under More.
+// Labels are the role's own side-menu names (Sidebar.tsx), shortened where a phone button is narrow.
+const OFFICE_NAV_ITEMS: BottomNavItem[] = [
   { label: 'Today', path: '/office-cockpit', pageKey: 'office-cockpit', icon: LayoutGrid },
   { label: 'Jobs', path: '/jobs', pageKey: 'jobs', icon: CalendarClock },
   { label: 'Inventory', path: '/inventory', pageKey: 'inventory', icon: Warehouse },
   { label: 'Field Invoices', path: '/field-invoices', pageKey: 'field-invoices', icon: Receipt },
-] as const;
+];
+
+const SALES_REP_NAV_ITEMS: BottomNavItem[] = [
+  { label: 'Today', path: '/office-cockpit', pageKey: 'office-cockpit', icon: LayoutGrid },
+  { label: 'Quotes', path: '/quotes', pageKey: 'quotes', icon: FileText },
+  { label: 'Customers', path: '/customers', pageKey: 'customers', icon: Users },
+];
+
+const APPLICATOR_NAV_ITEMS: BottomNavItem[] = [
+  { label: 'My Day', path: '/field', pageKey: 'field', icon: Sprout },
+  { label: 'My Jobs', path: '/jobs', pageKey: 'jobs', icon: CalendarClock },
+  { label: 'Record Book', path: '/application-records', pageKey: 'application-records', icon: ClipboardCheck },
+];
+
+const DRIVER_NAV_ITEMS: BottomNavItem[] = [
+  { label: 'My Route', path: '/my-route', pageKey: 'my-route', icon: Navigation },
+  { label: 'Deliveries', path: '/deliveries', pageKey: 'deliveries', icon: Truck },
+];
+
+function navItemsForRole(role: UserRole | null): BottomNavItem[] {
+  if (role === 'driver') return DRIVER_NAV_ITEMS;
+  if (role === 'applicator') return APPLICATOR_NAV_ITEMS;
+  if (role === 'sales_rep') return SALES_REP_NAV_ITEMS;
+  return OFFICE_NAV_ITEMS;
+}
 
 function isRouteActive(pathname: string, path: string, pageKey: string): boolean {
   if (pageKey === 'field-invoices' && pathname.startsWith('/invoices/field-app')) return true;
@@ -24,7 +61,7 @@ export default function MobileBottomNav({ onMoreClick, moreOpen }: MobileBottomN
   const { profile, deniedPages } = useAuth();
   const location = useLocation();
   const role = profile?.role ?? null;
-  const visibleItems = PRIMARY_NAV_ITEMS.filter((item) => hasPageAccess(role, deniedPages, item.pageKey));
+  const visibleItems = navItemsForRole(role).filter((item) => hasPageAccess(role, deniedPages, item.pageKey));
 
   return (
     <nav

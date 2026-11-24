@@ -13,7 +13,7 @@ Drive a coding job from "implement" to "reviewed, committed and landed", pausing
 
 **No timers.** Never start a polling loop or a command with `sleep`. Auto-fix wakes a session for failures, conflicts and comments; for a clean finish, hand the PR to the CI watcher, or, working alone, run `gh pr checks <n> --watch` in the background and act on its notice. A PR that must wait (the Taha hold) is handed to the watcher, or, with none running, reported as "ready to merge after HH:MM"; a Claude session then waits with the Monitor tool (an until-loop on the clock, never `sleep`) and lands it when the hold ends, so Mason never has to nudge. Never mark a PR ready while its checks run (that cancels them).
 
-**Landing claim.** Pushing to, running Sol on, or merging a PR branch claims it for 2 hours; another session doing any of the three is refused (`.claude/hooks/pr-claim-lib.mjs`). Whoever passes a PR on releases it first: `node scripts/pr-claim.mjs release <branch>`.
+**Landing claim.** Running Sol on, or merging, a PR branch claims it for 2 hours; another session doing either is refused. Ordinary pushes take and check no claim (Mason, 2026-11-23) (`.claude/hooks/pr-claim-lib.mjs`). Whoever passes a PR on releases it first: `node scripts/pr-claim.mjs release <branch>`.
 
 ## The numbers (each one is what the code enforces)
 
@@ -29,7 +29,7 @@ Drive a coding job from "implement" to "reviewed, committed and landed", pausing
 
 ## The review ladder
 
-Subagent reviewers (Step 3) → **Luna** (`gpt-6-luna`/xhigh, advisory, as many rounds as needed) → **Sol** (`gpt-6.2-sol`/high, once, the only proof the gates accept, Sol-list changes only) → the Codex GitHub App on the PR. **Astra** (`gpt-6.2-astra`) reviews plans and designs before code (`plan-contract`, `astra-delegation`); it is advisory, never replaces Luna or Sol, and its findings count toward the `AGENTS.md` round caps. Pins: `docs/reference/codex-model-tuning.md`.
+Subagent reviewers (Step 3) → **Luna** (`gpt-6-luna`/xhigh, advisory, as many rounds as needed) → **Sol** (`gpt-6.2-sol`/high, once, the only proof the gates accept, Sol-list changes only) → the Codex GitHub App on the PR. Ordinary code off the Sol list skips Luna and Sol and gets ONE **Terra** final review (`gpt-6.1-terra`/high, `node scripts/luna-review.mjs --terra`; Mason, 2026-11-23). **Astra** (`gpt-6.2-astra`) reviews plans and designs before code (`plan-contract`, `astra-delegation`); it is advisory, never replaces Luna or Sol, and its findings count toward the `AGENTS.md` round caps. Pins: `docs/reference/codex-model-tuning.md`.
 
 ## Step 0 — Branch
 
@@ -102,11 +102,14 @@ For each confirmed BLOCKER or HIGH (read the cited line first): fix, re-run Step
 
 ## Step 6 — Luna, then Sol
 
-Every change that touches money, inventory, auth, RLS/RPC security, a migration, permissions or an Edge Function gets Codex review; a pure CSS/copy/layout change does not (say so).
+Pick the review by what the change touches (Mason, 2026-11-23):
+- **Docs only (every file is `*.md` or under `docs/`):** no Codex review (say so). CI and the Codex GitHub App still run.
+- **Ordinary code off the Sol list** (`docs/reference/sol-required-paths.md`) **and off Taha's lanes**: ONE Terra final review, `node scripts/luna-review.mjs --terra`, on the committed head you will push. Fix any BLOCKER/HIGH, commit, and rerun Terra on the new head (it takes seconds) until none remains; the `AGENTS.md` stop rule applies. Fix, refute or name as a deferral in the PR every MED/LOW. Then open the PR. A model never gives the final review of code it helped build: Terra-built code gets Luna, code both Terra and Luna built gets Sol. Sol is not the default here (no gate needs it, ~20 minutes); choose it only for a large or unclear change (`--sol --reason`). `--terra` refuses a diff with a Sol-list, money (tests too) or `.sql` file, or a Taha-lane file until Dec 15: run Luna there.
+- **Sol-list changes** (money, inventory, database including migrations and Edge Functions, logins and permissions): Luna until clean, then Sol once, as below.
 
 - **Luna until clean** (`/codex-review` Step 3A, `node scripts/luna-review.mjs`): fix and re-run until no BLOCKER or HIGH remains. Write and commit the Step 7 docs before the clearing round, so it covers them. The round that clears the change is the default whole-branch round (base `origin/staging` for a feature branch, `origin/main` for hotfix/release) on the head you will push. A confirmed BLOCKER/HIGH in a screen that saves, uploads or imports needs a failing-then-passing test or observed behavior. Map the result: `CLEAN` → SHIP; any BLOCKER/HIGH → NEEDS-WORK; deferred MED/LOW only → SHIP-WITH-FOLLOWUPS. That is advisory, not permission to merge.
 - **Sol once, last** (`/codex-review` Step 3B), only for a Sol-list change, at the end of Step 7. Never route a Luna round through the Sol wrapper: it deletes the existing proof for that head.
-- **Every deferral gets a home** when decided: a GitHub issue (what changes, never how to exploit it), or an existing issue or known-issues entry. List them in the PR's `## Follow-ups` section (`- #1700 tighten the X check`, `- KI-104 ...`, or `- None`); both merge gates refuse a PR without it.
+- **Every deferral gets a home** when decided: a GitHub issue (what changes, never how to exploit it), or an existing issue or known-issues entry. List them in the PR's `## Follow-ups` section (`- #1700 tighten the X check`, `- KI-104 ...`, or `- None`). No gate checks it since 2026-11-23 (Mason); the Step 8 close-out reads it, so write it.
 - If you disagree with a Codex BLOCKER, show Mason both positions and stop. If the CLI is unavailable, use `/codex-cross-review` and stop for Mason; never self-certify.
 
 ## Step 7 — Docs, commit, Sol
@@ -165,6 +168,7 @@ Deferred: <items with homes>
 - **His items.** Taha's six items are his through 2026-12-15, the billing plan among them. Before starting anything that might be one, ask Taha. When Mason directs money or billing work, warn him in one line of any overlap and follow his call; his field application invoice work is his.
 - **He lands his own PRs**; his own clean Sol run on the final commit satisfies the Sol rule. No agent of Mason's monitors his PRs.
 - **We hold ours** (Step 8 item 4a).
+- **`ready-for-taha` label** (Mason, 2026-11-24) marks OUR PRs waiting on Taha: PRs in his lanes and fixes we built in his area. Never on his own PRs. Add it only once Sol is clean (where needed) and checks are green, with his review request: `gh pr edit <n> --add-label ready-for-taha --add-reviewer TahaKhanAbdalli`. Merge only after his Approve review on the current head (`pr-readiness` shows NOT READY until then); after any push, re-request his review. Remove the label at merge. The 4-hour hold, `taha override` and `needs-coderabbit` are unchanged.
 
 ## Staging
 

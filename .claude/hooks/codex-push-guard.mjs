@@ -30,7 +30,6 @@ import {
   environmentSelectsDifferentRepo,
   destinationLooksLikeUrl,
   pushDestinationToken,
-  pushDestinationBranches,
   repoIsGuardedApp,
   urlIsGuardedApp,
   riskyFiles,
@@ -169,21 +168,8 @@ for (const pushCmd of pushCommands) {
     deny(`CODEX GATE: could not determine the repository/branch selected by this push, so it is denied. ${error?.message || error}`);
   }
 
-  // Landing claim (pr-claim-lib.mjs, fail open): the first session to push a PR branch claims it.
-  let destinations = [];
-  // A dry run writes nothing, so it claims nothing.
-  if (!/(?:^|\s)(?:--dry-run|-n)(?=\s|$)/.test(pushCmd)) {
-    try { destinations = pushDestinationBranches(pushCmd, branch); } catch { /* fail open */ }
-  }
-  // A ref-less push may land on a differently named upstream (push.default=upstream): claim that too.
-  if (destinations.length === 1 && destinations[0] === branch) {
-    try { destinations.push(git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"], pushRepoDir).replace(/^[^/]+\//, "")); } catch { /* no upstream */ }
-  }
-  for (const destination of destinations) {
-    const refusal = claimOrRefuse({ file: claimsFileFor(pushRepoDir), branch: destination, sessionId: payload?.session_id, action: "push", cwd: pushRepoDir });
-    if (refusal) deny(refusal);
-  }
-
+  // Ordinary pushes take no landing claim (Mason, 2026-11-23): only a Sol run and
+  // a merge claim a branch, so a hand-off or a fix push never trips over it.
   const srcRef = mainPushSource(pushCmd, branch);
   if (!srcRef) continue;
   if (srcRef === "DELETE") {

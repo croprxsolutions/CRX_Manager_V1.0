@@ -192,7 +192,39 @@ for (const [sql, why] of [
   // Advisory Sol on #2382.
   ["UPDATE inventory SET (quantity_available, quantity_prebooked) = (100, 0);", "a tuple assignment"],
   ["ALTER TABLE inventory DROP quantity_prebooked;", "a drop without COLUMN"],
+  // Taha's #2382 LOW 2: three forms staging does not use yet.
+  ["CREATE FUNCTION public.t() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.quantity_prebooked = 0; RETURN NEW; END $$;", "a PL/pgSQL `=` assignment"],
+  ["CREATE FUNCTION public.t() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF x THEN quantity_prebooked = 0; END IF; END $$;", "a bare `=` after THEN"],
+  ["UPDATE public.inventory i SET quantity_available = (SELECT 1 FROM x h WHERE h.product_id = i.product_id), quantity_prebooked = 0;", "a SET after a subquery's WHERE"],
+  ["ALTER TABLE public.inventory RENAME COLUMN x TO quantity_prebooked;", "a rename to it"],
+  // Taha's review of #2408, LOW 3: the other statement starts.
+  ["CREATE FUNCTION public.t() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN v := 1; NEW.quantity_prebooked = 0; RETURN NEW; END $$;", "a `=` after `;`"],
+  ["CREATE FUNCTION public.t() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF x THEN v := 1; ELSE NEW.quantity_prebooked = 0; END IF; END $$;", "a `=` after ELSE"],
+  ["CREATE FUNCTION public.t() RETURNS void LANGUAGE plpgsql AS $$ BEGIN LOOP r.quantity_prebooked = 0; EXIT; END LOOP; END $$;", "a `=` after LOOP"],
 ]) ok(isTahaLaneSql(sql), `quantity_prebooked: ${why}`);
+ok(!isTahaLaneSql("CREATE FUNCTION public.t() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.quantity_prebooked_released = 0; RETURN NEW; END $$;"), "quantity_prebooked_released is another column");
+ok(!isTahaLaneSql("UPDATE inventory SET quantity_available = 1 WHERE quantity_prebooked = 0 AND (quantity_on_hand > 0);"), "a WHERE comparing quantity_prebooked is still a read");
+// Gap 1 (Taha via Mason, 2026-11-24): a "job" or "application" file name does not skip the SQL read.
+for (const name of ["20990101000000_job_fix.sql", "20990101000000_application_fix.sql"]) {
+  ok(tahaLaneProblem({ files: [mig(`supabase/migrations/${name}`, "UPDATE public.orders SET status = 'x';")], now: NOW }), `${name} writing orders is refused`);
+  ok(tahaLaneProblem({ files: [mig(`supabase/migrations/${name}`, "CREATE FUNCTION public.apply_write_off() RETURNS void AS $$ SELECT 1 $$;")], now: NOW }), `${name} redefining apply_write_off is refused`);
+}
+// Gap 2: his functions with no lane word, from a sweep of staging (2026-11-24), "_"-prefixed impls included.
+for (const fn of ["create_direct_order", "_create_rush_order_below_cost_impl_20260810", "bulk_import_order", "restore_cancelled_order",
+  "_close_undelivered_order_remainder_20260718", "bump_order_item_edit_version", "check_unpriced_orders", "trg_recalc_order_totals",
+  "guard_order_item_shares", "_validate_order_shares_total", "_assert_order_line_fits", "create_return", "_receive_return_intent_impl_20260812",
+  "generate_finance_charges", "create_delivery_with_items", "_create_quick_delivery_intent_impl_20260802", "edit_delivery", "fix_delivery",
+  "correct_delivery_brands", "batch_cancel_deliveries", "_delivery_line_matches_order_line", "_enforce_delivery_items_parent_lock",
+  "_prebook_quick_delivery_inventory",
+  // Taha's review of #2408, LOW 1 and LOW 2.
+  "get_customer_year_end_summary", "get_batch_year_end_summaries", "check_period_open", "preview_finance_charges",
+  "get_sales_summary_report", "get_sales_detail_report", "get_gross_sales_report", "get_profitability_report",
+  "financial_dashboard_summary", "bump_order_edit_version", "prevent_oifa_edit_after_post", "guard_order_reopen_inactive_product"]) {
+  ok(isTahaLaneSql(`CREATE OR REPLACE FUNCTION public.${fn}() RETURNS void AS $$ SELECT 1 $$;`), `redefining ${fn} is Taha's`);
+}
+for (const fn of ["complete_job", "save_field_app_invoice", "create_order_from_blend_ticket", "receive_po_items", "edit_deliveryman_profile"]) {
+  ok(!isTahaLaneSql(`CREATE OR REPLACE FUNCTION public.${fn}() RETURNS void AS $$ SELECT 1 $$;`), `${fn} stays out of his list`);
+}
 // Advisory Sol on #2382: ONLY after a comma, and function prefixes end at a name boundary.
 ok(isTahaLaneSql("TRUNCATE TABLE ONLY deliveries, ONLY invoices;"), "ONLY on a later list item");
 ok(!isTahaLaneSql("CREATE FUNCTION public.void_ordering_cache() RETURNS void AS $$ SELECT 1 $$;"), "void_ordering_cache is not void_order");

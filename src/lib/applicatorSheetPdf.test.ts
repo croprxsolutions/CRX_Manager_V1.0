@@ -259,6 +259,13 @@ describe('generateApplicatorSheetPdf safety sheet (Mason, 2026-11-24)', () => {
     expect(mockDoc.addPage).toHaveBeenCalledTimes(1); // its own sheet; autotable flows any overflow onto more pages
   });
 
+  it('says safety could not be loaded when the read failed, instead of an empty table', async () => {
+    await generateApplicatorSheetPdf(makeSheetData({ products: [product(1, 12)], safety: null }), 'original', null);
+    expect(await safetyTable()).toBeUndefined();
+    expect(mockDoc.addPage).toHaveBeenCalledTimes(1);
+    expect(mockDoc.text.mock.calls.some((c) => String(c[0]).startsWith('Safety could not be loaded'))).toBe(true);
+  });
+
   it('still prints REI and PHI on the safety sheet when a saved Custom layout hides those columns', async () => {
     const custom = { header: { company_name: '', phone: '', address: '', email: '' }, footer: '',
       columns: { crop: false, pest: false, rei: false, phi: false, total_applied: false, gl_lb: false } };

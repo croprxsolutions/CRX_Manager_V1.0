@@ -201,60 +201,36 @@ export async function fetchApplicatorSheetBillingSplits(
   }
 }
 
-interface SignalWordRow {
-  product_id: string | null;
-  product: { product_name: string | null; signal_word: string | null } | null;
-}
-
-interface SignalWords {
-  byId: Map<string, string | null>;
-  byName: Map<string, string | null>;
+interface SafetyRow {
+  rei_hours: number | null;
+  phi_days: number | null;
+  product: { product_name: string | null; signal_word: string | null; rei_hours: number | null; phi_days: number | null } | null;
 }
 
 /**
- * Read the signal word of each linked product on the saved job, keyed by product id
- * and by name. A name carrying two different signal words maps to null ("see label").
- * A failed read returns empty maps; the safety sheet then prints "see label".
+ * Safety for the optional safety sheet, read from the saved job's own product lines:
+ * each line's signal word comes from its own product record (never matched by name);
+ * REI/PHI are the line's override, else the product label, as on the sheet. A failed
+ * read returns null so the sheet says safety could not be loaded.
  */
-async function fetchSignalWords(jobId: string): Promise<SignalWords> {
-  const words: SignalWords = { byId: new Map(), byName: new Map() };
-  const conflicted = new Set<string>();
+async function fetchJobSafety(jobId: string): Promise<ApplicatorSheetSafety[] | null> {
   try {
     const { data, error } = await supabase
       .from('job_chemicals')
-      .select('product_id, product:products(product_name, signal_word)')
+      .select('rei_hours, phi_days, product:products(product_name, signal_word, rei_hours, phi_days)')
       .eq('job_id', jobId)
-      .not('product_id', 'is', null);
-    if (error || !data) return words;
-    (data as unknown as SignalWordRow[]).forEach((row) => {
-      const word = row.product?.signal_word?.trim() || null;
-      if (row.product_id) words.byId.set(row.product_id, word);
-      const name = row.product?.product_name?.trim();
-      if (!name) return;
-      // Once a name has two different signal words it stays unknown, whatever follows.
-      if (words.byName.has(name) && words.byName.get(name) !== word) conflicted.add(name);
-      words.byName.set(name, conflicted.has(name) ? null : word);
-    });
+      .not('product_id', 'is', null)
+      .order('sort_order');
+    if (error || !data) return null;
+    return (data as unknown as SafetyRow[]).map((row) => ({
+      product_name: row.product?.product_name?.trim() || 'Product',
+      signal_word: row.product?.signal_word?.trim() || null,
+      rei_hours: row.rei_hours ?? row.product?.rei_hours ?? null,
+      phi_days: row.phi_days ?? row.product?.phi_days ?? null,
+    }));
   } catch {
-    // Signal words are best effort; the sheet prints "see label" instead.
+    return null;
   }
-  return words;
-}
-
-/**
- * Safety for exactly the sheet's product lines: the sheet's REI/PHI plus the signal
- * word of that line's own product. A line without its product id (the Job Detail
- * builder omits it; every line there is a linked product) falls back to the name.
- */
-function sheetSafety(products: ApplicatorSheetData['products'], words: SignalWords): ApplicatorSheetSafety[] {
-  return products.map((product) => ({
-    product_name: product.product_name,
-    signal_word: (product.product_id
-      ? words.byId.get(product.product_id)
-      : words.byName.get(product.product_name.trim())) ?? null,
-    rei_hours: product.rei_hours,
-    phi_days: product.phi_days,
-  }));
 }
 
 /** Load maps/history/billing additions for every print entry point in one place. */
@@ -263,7 +239,7 @@ export async function prepareApplicatorSheetPrintData(
   data: ApplicatorSheetData,
   options: ApplicatorPrintOptions,
 ): Promise<ApplicatorSheetData> {
-  const [maps, previousApplications, billingSplits, signalWords] = await Promise.all([
+  const [maps, previousApplications, billingSplits, safety] = await Promise.all([
     options.mapPages === 'none'
       ? Promise.resolve(null)
       : fetchJobMapImages(jobId, mapImageOptions(options.mapPages)),
@@ -273,7 +249,7 @@ export async function prepareApplicatorSheetPrintData(
     options.includeBillingSplits
       ? fetchApplicatorSheetBillingSplits(jobId, data.total_acres)
       : Promise.resolve([]),
-    options.includeSafetySheet ? fetchSignalWords(jobId) : Promise.resolve(null),
+    options.includeSafetySheet ? fetchJobSafety(jobId) : Promise.resolve(undefined),
   ]);
   return {
     ...data,
@@ -281,6 +257,6 @@ export async function prepareApplicatorSheetPrintData(
     previousApplications,
     billingSplits,
     // Safety is off unless chosen; when chosen it prints on its own sheet (Mason, 2026-11-24).
-    ...(signalWords ? { safety: sheetSafety(data.products, signalWords) } : {}),
+    safety,
   };
 }

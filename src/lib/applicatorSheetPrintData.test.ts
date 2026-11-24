@@ -49,49 +49,36 @@ describe('prepareApplicatorSheetPrintData safety sheet', () => {
   beforeEach(() => vi.clearAllMocks());
   const data = {
     job_number: 'JOB-1', customers: [], scheduled_date: '2026-07-11', scheduled_time: null, applicator_name: null,
-    vehicle_name: null, fields: [], total_acres: 0, loader_comment: null,
-    products: [
-      { product_name: 'TEST A', rate_per_acre: 1, rate_unit: 'pt', total_applied: 1, total_unit: 'pt', total_gl_lb: null, product_form: null, rei_hours: 12, phi_days: 7, epa_registration: null },
-      { product_name: 'TEST B', rate_per_acre: 1, rate_unit: 'pt', total_applied: 1, total_unit: 'pt', total_gl_lb: null, product_form: null, rei_hours: null, phi_days: null, epa_registration: null },
-    ],
+    vehicle_name: null, fields: [], total_acres: 0, loader_comment: null, products: [],
+    safety: [{ product_name: 'TEST stale', signal_word: 'Danger', rei_hours: 1, phi_days: 1 }],
   };
   const options = { mapPages: 'none' as const, includePreviousApplications: false, previousApplicationsPerField: 3,
     blankSections: 0, includeBillingSplits: false, showBanner: true };
+  const reply = (result: unknown) => mockFrom.mockReturnValue({ select: () => ({ eq: () => ({ not: () => ({ order: async () => result }) }) }) });
 
-  it('leaves safety off and reads nothing extra when the sheet was not chosen', async () => {
+  it('leaves safety off, even if the input carried some, and reads nothing extra when not chosen', async () => {
     const result = await prepareApplicatorSheetPrintData('job-1', data, { ...options, includeSafetySheet: false });
     expect(result.safety).toBeUndefined();
     expect(mockFrom).not.toHaveBeenCalled();
   });
 
-  it('adds one safety row per product line with its signal word; a name with two words stays unknown', async () => {
-    const rows = [
-      { product_id: 'p-a', product: { product_name: 'TEST A', signal_word: 'Warning' } },
-      { product_id: 'p-b1', product: { product_name: 'TEST B', signal_word: 'Caution' } },
-      { product_id: 'p-b2', product: { product_name: 'TEST B', signal_word: 'Danger' } },
-    ];
-    mockFrom.mockReturnValue({ select: () => ({ eq: () => ({ not: async () => ({ data: rows, error: null }) }) }) });
+  it('reads one row per saved product line, each with its own product’s signal word, even when names repeat', async () => {
+    reply({ data: [
+      { rei_hours: null, phi_days: 7, product: { product_name: 'TEST Same', signal_word: 'Caution', rei_hours: 12, phi_days: 30 } },
+      { rei_hours: 48, phi_days: null, product: { product_name: 'TEST Same', signal_word: 'Danger', rei_hours: 24, phi_days: null } },
+      { rei_hours: null, phi_days: null, product: { product_name: 'TEST None', signal_word: null, rei_hours: null, phi_days: null } },
+    ], error: null });
     const result = await prepareApplicatorSheetPrintData('job-1', data, { ...options, includeSafetySheet: true });
     expect(result.safety).toEqual([
-      { product_name: 'TEST A', signal_word: 'Warning', rei_hours: 12, phi_days: 7 },
-      { product_name: 'TEST B', signal_word: null, rei_hours: null, phi_days: null },
+      { product_name: 'TEST Same', signal_word: 'Caution', rei_hours: 12, phi_days: 7 },
+      { product_name: 'TEST Same', signal_word: 'Danger', rei_hours: 48, phi_days: null },
+      { product_name: 'TEST None', signal_word: null, rei_hours: null, phi_days: null },
     ]);
   });
-});
 
-describe('prepareApplicatorSheetPrintData safety sheet by product id', () => {
-  it('takes each line signal word from its own product when the line carries its id', async () => {
-    const line = (id: string) => ({ product_name: 'TEST Same', product_id: id, rate_per_acre: 1, rate_unit: 'pt', total_applied: 1,
-      total_unit: 'pt', total_gl_lb: null, product_form: null, rei_hours: 4, phi_days: 0, epa_registration: null });
-    mockFrom.mockReturnValue({ select: () => ({ eq: () => ({ not: async () => ({ data: [
-      { product_id: 'p-1', product: { product_name: 'TEST Same', signal_word: 'Caution' } },
-      { product_id: 'p-2', product: { product_name: 'TEST Same', signal_word: 'Danger' } },
-    ], error: null }) }) }) });
-    const result = await prepareApplicatorSheetPrintData('job-1', {
-      job_number: 'JOB-1', customers: [], scheduled_date: '2026-07-11', scheduled_time: null, applicator_name: null,
-      vehicle_name: null, fields: [], total_acres: 0, loader_comment: null, products: [line('p-1'), line('p-2'), line('p-gone')],
-    }, { mapPages: 'none', includePreviousApplications: false, previousApplicationsPerField: 3, blankSections: 0,
-      includeBillingSplits: false, showBanner: true, includeSafetySheet: true });
-    expect(result.safety!.map((s) => s.signal_word)).toEqual(['Caution', 'Danger', null]);
+  it('marks safety as not loaded (null) when the read fails, instead of printing it as missing', async () => {
+    reply({ data: null, error: { message: 'permission denied' } });
+    const result = await prepareApplicatorSheetPrintData('job-1', data, { ...options, includeSafetySheet: true });
+    expect(result.safety).toBeNull();
   });
 });

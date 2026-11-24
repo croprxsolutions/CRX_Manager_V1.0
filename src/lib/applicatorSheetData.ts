@@ -214,8 +214,8 @@ export interface ApplicatorSheetData {
   previousApplications?: PreviousFieldApplications[];
   /** Optional billed-customer allocation rows for the operational packet. */
   billingSplits?: ApplicatorSheetBillingSplit[];
-  /** Present only when the safety sheet was chosen: one row per sheet product line. */
-  safety?: ApplicatorSheetSafety[];
+  /** Present only when the safety sheet was chosen: one row per saved product line; null = could not be read. */
+  safety?: ApplicatorSheetSafety[] | null;
 }
 
 // ── Raw input shapes (what JobDetail hands in) ───────────────────────────────

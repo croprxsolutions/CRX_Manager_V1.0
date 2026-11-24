@@ -190,20 +190,38 @@ try {
   assert.equal(show('7 rep denied the jobs page', attempt(REP, `${refuse(`r := public.job_edit_version(${JOB});`)} v := t;`)), 'ok|INSUFFICIENT_ROLE');
   assert.match(show('7 rep denied the jobs page, save', attempt(REP, `${refuse(`r := ${save('[JV] denied rep', null, null, REP)};`)} v := t;`)), /^ok\|INSUFFICIENT_ROLE/);
   psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_remove(denied_pages, 'jobs') WHERE id = '${REP}';`);
-  // Denied WHILE the save waits for the job lock: refused once the lock clears (Sol round 10).
-  const holder = holdingSave(null, 'jv-hold-denial');
-  waitForHolder();
-  const denier = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { stdio: ['pipe', 'ignore', 'ignore'] });
-  denier.stdin.end(`SELECT pg_sleep(2); SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_append(coalesce(denied_pages, '{}'), 'jobs') WHERE id = '${REP}';\n`);
-  for (let i = 0; scalar(`SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(2)%' AND state = 'active' AND pid <> pg_backend_pid();`) !== '1'; i += 1) {
-    if (i > 100) throw new Error('the denying session never started');
-    pause(50);
+  // Denied WHILE the save waits (the job lock, or a new job's key lock): refused once the wait ends (Sol rounds 10, 11).
+  // The denying session acts only after it sees the rep's save blocked on a lock, and fails if it never does (Sol round 11).
+  async function deniedWhileWaiting(label, holder, repSave) {
+    waitForHolder();
+    // As an argument, not stdin: the rep's save below blocks this process, so piped input would not be sent.
+    const denier = spawn('docker', ['exec', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-c',
+      `DO $d$ BEGIN
+        FOR i IN 1..200 LOOP
+          PERFORM pg_stat_clear_snapshot();  -- pg_stat_activity is otherwise frozen for the whole transaction
+          EXIT WHEN EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%${label}%' AND pid <> pg_backend_pid());
+          IF i = 200 THEN RAISE EXCEPTION 'the rep''s save never waited on a lock'; END IF;
+          PERFORM pg_sleep(0.05);
+        END LOOP; END $d$;
+        SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_append(coalesce(denied_pages, '{}'), 'jobs') WHERE id = '${REP}';`],
+      { stdio: ['ignore', 'ignore', 'ignore'] });
+    const denierDone = new Promise((resolve) => denier.on('close', resolve));
+    for (let i = 0; scalar(`SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%never waited on a lock%' AND state = 'active' AND pid <> pg_backend_pid();`) !== '1'; i += 1) {
+      if (i > 100) throw new Error('the denying session never started');
+      pause(50);
+    }
+    const got = show(`7 ${label}`, attempt(REP, `${refuse(`r := ${repSave};`)} v := t;`));
+    assert.equal((await holder).code, 0, 'the holding session failed');
+    assert.equal(await denierDone, 0, 'the denial did not land while the rep was waiting');
+    psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_remove(denied_pages, 'jobs') WHERE id = '${REP}';`);
+    return got;
   }
-  const deniedWaiting = show('7 rep denied while the save waits', attempt(REP, `${refuse(`r := ${save('[JV] denied while waiting', null, null, REP)};`)} v := t || '|notes=' || ${notes};`));
-  assert.equal((await holder).code, 0, 'the holding save failed');
-  await new Promise((resolve) => (denier.exitCode === null ? denier.on('close', resolve) : resolve()));
-  assert.match(deniedWaiting, /^ok\|INSUFFICIENT_ROLE/);
-  psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_remove(denied_pages, 'jobs') WHERE id = '${REP}';`);
+  assert.match(await deniedWhileWaiting('rep denied while the save waits', holdingSave(null, 'jv-hold-denial'),
+    save('[JV] rep denied while the save waits', null, null, REP)), /^ok\|INSUFFICIENT_ROLE/);
+  const keyHolder = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { stdio: ['pipe', 'ignore', 'pipe'] });
+  keyHolder.stdin.end(`BEGIN;\nSELECT pg_advisory_xact_lock(hashtextextended('crx:idempotency:jv-new-denial', 0));\nSELECT pg_sleep(8);\nROLLBACK;\n`);
+  assert.match(await deniedWhileWaiting('rep denied while a new job waits', new Promise((resolve) => keyHolder.on('close', (code) => resolve({ code }))),
+    save('[JV] rep denied while a new job waits', null, 'jv-new-denial', REP).replace(`public.save_job(${JOB},`, 'public.save_job(NULL,')), /^ok\|INSUFFICIENT_ROLE/);
   // The same save from a rep who keeps access goes through, so the refusal above is the denial, not the role.
   assert.equal(show('7 rep with access, save', attempt(REP, `${refuse(`r := ${save('[JV] rep save', null, null, REP)};`)} v := t;`)), 'ok|NOT REFUSED');
   // The admin holding save above sent no chemicals and so cleared case 6's: put it back for case 9.
@@ -225,7 +243,7 @@ try {
     ${refuse(`r := ${save('[JV] completed', V('c9'), 'jv-completed', ADMIN, 'completed')};`)}
     v := t || '|unchanged=' || (f0 = public._job_edit_version(${JOB})::text);`)), /^ok\|JOB_COMPLETED_CHEMICALS_LOCKED.*\|unchanged=true$/);
   assert.equal(scalar("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure;"),
-    '029c24fcefff6656a09ef9d739c79052', 'the installed save_job must be the body the postflight pins');
+    '2d45c5530c4210e25a15dc43b1e5e56a', 'the installed save_job must be the body the postflight pins');
 
   console.log('\nJOB_SAVE_VERSION_PROOF_PASS');
 } finally {

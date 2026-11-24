@@ -62,9 +62,11 @@ try {
   // Inside the apply transaction (what apply-migration-file.mjs transmits, rolled back here).
   const guard = prerequisiteGuardSql({ tag: 'crx_apply_proof', name: LOAD, sql: SQL });
   const inTx = (body) => psql(`BEGIN;\n${guard}${body}\nSELECT 'GUARD_PASSED';\nROLLBACK;`, { allowFailure: true });
-  const atThreshold = inTx(SQL);
+  const atThreshold = inTx(`${SQL}\nSELECT 'WROTE_' || count(*) FROM public.active_ingredient_modes_of_action WHERE source_note LIKE '%MOA-1 list v2%';`);
   assert.equal(atThreshold.status, 0, atThreshold.stderr);
   assert.match(atThreshold.stdout, /GUARD_PASSED/);
+  // The load really wrote groups under the guard, not just ran (#2230 LOW).
+  assert.match(atThreshold.stdout, /WROTE_[1-9]\d*/, 'the load wrote groups');
   console.log(`[2193] in the apply transaction at ${MOA_MIN_MATCHED}: ALLOWED, and the real load ran under the guard's locks (rolled back)`);
 
   // An ingredient retired AFTER the early check passed: the in-transaction count refuses.

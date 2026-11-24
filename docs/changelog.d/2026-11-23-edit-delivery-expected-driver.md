@@ -1,0 +1,5 @@
+## 2026-11-23 - Delivery edit: "Unassigned" only clears the driver the form showed (database part)
+
+- Migration `20270226163000_edit_delivery_expected_driver` (not applied): `edit_delivery` takes `p_expected_driver`, the driver the edit form showed. "Unassigned" must send it, and the save is refused whole (`DRIVER_CHANGED`) when the delivery's driver changed since the form opened, so a stale form never removes a driver its user did not see. The check runs under the delivery lock, which also stops a delivery starting mid-save (#2349). Mason chose the database check on 2026-11-23.
+- No screen sends `p_clear_driver` yet (the screen PR was held for this migration), so nothing in use changes when it applies. The screen change that sends both arguments follows in its own PR after this one.
+- Proof: `scripts/smoke/prove-edit-delivery-expected-driver-real-schema.mjs` shows a stale Unassigned removing a newer driver before the migration and every case after it. Record: `docs/reference/migrations.d/20270226163000_edit_delivery_expected_driver.md`.

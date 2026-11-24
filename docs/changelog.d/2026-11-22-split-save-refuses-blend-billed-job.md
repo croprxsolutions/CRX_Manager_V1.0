@@ -1,0 +1,8 @@
+## 2026-11-22 - #2063: a field-application split invoice can no longer bill a job a blend ticket already billed
+
+- Migration `20270224130000_split_save_refuses_blend_billed_job.sql`: the split save (`_save_field_app_split_invoice_impl`) now refuses a source job when an invoice that is not deleted, voided or cancelled belongs to any blend ticket of that job (`BLEND_TICKET_ALREADY_BILLED`, naming only the invoices the caller may already read, no ticket number, and saying to ask an admin to void or delete that invoice), and refuses a source-job save under REPEATABLE READ or SERIALIZABLE (`SPLIT_INVOICE_NEEDS_READ_COMMITTED`). The split-invoice screen keeps showing these refusals instead of mistaking them for a missing backend. Transfer to Invoice and the blend-ticket invoice already refused the matching cases. Voiding the blend invoice re-opens the job.
+- Unchanged: jobless splits, replays, the public wrapper, Transfer to Invoice, the blend-ticket invoice, owner, grants, definer mode and search_path. No data changes (live 2026-11-22: 0 blend tickets, 0 split sets).
+- Proof: `node scripts/smoke/prove-split-save-refuses-blend-billed-job-real-schema.mjs` (`SPLIT_SAVE_REFUSES_BLEND_BILLED_JOB_PROOF_PASS`, local Docker). Contract: `docs/plans/2026-11-22-job-double-bill-blend-CONTRACT.md`.
+- Deferred to a follow-up after the spray-invoice quote-price PR: Transfer to Invoice's matching hardening (#2061).
+- Seven existing blend-invoice and field-invoice smoke chains already fail in their own setup on today's schema (fixture drift); the prover checks they end the same before and after, and names them in the contract (proof case 10).
+- Not verified: the staging database (applied by the staging DB job after merge); the screen with a real blend ticket.

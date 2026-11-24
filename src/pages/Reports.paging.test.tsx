@@ -266,7 +266,7 @@ describe('Reports past the 1,000-row server cap', () => {
     await waitFor(() => expect(products).toHaveTextContent('2'));
     expect(JSON.parse(products.getAttribute('data-last') ?? 'null')).toMatchObject({ product_name: 'Product A', units_sold: 10 });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Revenue Summary' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Booked Sales Summary' }));
     const months = await screen.findByTestId('rows:No revenue data');
     await waitFor(() => expect(months).toHaveTextContent('2'));
     // Newest month first: the last row is August.

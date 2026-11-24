@@ -761,6 +761,8 @@ export default function Products() {
         throw new Error('Save margin floors on their own. Cancel, change only the floors, then save again.');
       }
       if (hasFloor) {
+        // A draft typed before the floors read failed must not save over floors this page cannot show (#2160).
+        if (marginFloorsLoadFailed) throw new Error('Margin floors have not loaded. Use Try again, then enter the floor changes again.');
         return await saveMarginFloors(changes);
       }
 
@@ -943,7 +945,12 @@ export default function Products() {
 
   const handlePricingWorkbookUpload = async (file: File) => {
     // The review refuses a grouped size's use timing, so it waits for the groups.
-    if (!profile || !parentsReady) return;
+    if (!profile || !parentsReady) {
+      // Clear the pick so the same file can be chosen again once the groups load (#2160).
+      if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
+      if (profile) toast('error', 'Product groups have not loaded. Use Try again, then choose the file again.');
+      return;
+    }
     if (file.size > MAX_PRICING_WORKBOOK_FILE_BYTES) {
       toast(
         'error',

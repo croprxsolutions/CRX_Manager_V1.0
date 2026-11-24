@@ -987,6 +987,72 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.getByRole('button', { name: 'Reload Product' })).toBeInTheDocument();
   });
 
+  it('#2308: the rate-correction window closes once the Product reloads, even while Cost Basis hangs', async () => {
+    mockLoadRateLock.mockResolvedValue({ ...ratesOpen, is_locked: true, changed_by_name: 'Other Admin', reason: 'season' });
+    render(<ProductDetail />);
+    const banner = await screen.findByTestId('product-rates-locked');
+    fireEvent.click(await within(banner).findByRole('button', { name: 'Correct rates' }));
+    mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Finish correction' })).toBeNull());
+    expect(screen.queryByText(/Editing is locked until the latest values load/i)).toBeNull();
+  });
+
+  it('#2308: an older Product read that is superseded does not release Reload Product while the newer read is out', async () => {
+    mockLoadRateLock.mockResolvedValue({ ...ratesOpen, is_locked: true, changed_by_name: 'Other Admin', reason: 'season' });
+    render(<ProductDetail />);
+    const banner = await screen.findByTestId('product-rates-locked');
+    // A failed reload after a correction leaves editing locked, with Reload Product offered.
+    fireEvent.click(await within(banner).findByRole('button', { name: 'Correct rates' }));
+    productLoadResults.push({ data: null, error: new Error('reload failed') });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+    expect(await screen.findByRole('button', { name: 'Reload Product' })).toBeEnabled();
+    // Two Finish clicks while the first Product read is still out: the second read supersedes the first.
+    fireEvent.click(within(banner).getByRole('button', { name: 'Correct rates' }));
+    let settleSecond: (value: unknown) => void = () => {};
+    productLoadResults.push(new Promise(() => {}) as never);
+    productLoadResults.push(new Promise((resolve) => { settleSecond = resolve; }) as never);
+    fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reload Product' })).toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole('button', { name: 'Reload Product' })).toBeDisabled();
+    settleSecond({ data: null, error: new Error('reload failed') });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reload Product' })).toBeEnabled());
+  });
+
+  it('#2308: leaving the Product during Reload Product shows no failure toast', async () => {
+    const { unmount } = render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    mockToast.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('could not be reloaded'));
+  });
+
+  it('#2308: a side read that settles after leaving the Product reports nothing', async () => {
+    const { unmount } = render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    let settleBasis: (value: unknown) => void = () => {};
+    mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise((resolve) => { settleBasis = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Reload Product' })).toBeNull());
+    mockToast.mockClear();
+    unmount();
+    settleBasis(await mockGetCostBasisWorkspace.getMockImplementation()?.());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockToast.mock.calls.filter(([, message]) => String(message).startsWith('Product reloaded'))).toEqual([]);
+  });
+
   it('opens the folded section that holds a refused field', async () => {
     render(<ProductDetail />);
     await screen.findByText('Grower Description');
@@ -1113,6 +1179,74 @@ describe('ProductDetail governed pricing flow', () => {
     await waitFor(() => expect(screen.queryByText(/could not be refreshed/i)).not.toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
     expect(screen.getByLabelText('Quoting Notes')).toBeEnabled();
+  });
+
+  it('#2200: Reload Product answers as soon as the Product read settles, even while a side read hangs', async () => {
+    render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error', 'This Product could not be reloaded. Try again before making another change.'));
+    expect(screen.getByRole('button', { name: 'Reload Product' })).toBeEnabled();
+  });
+
+  it('#2200: two Reload Product clicks report once, even when the first one\'s side read settles last', async () => {
+    render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    let settleFirstBasis: (value: unknown) => void = () => {};
+    mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise((resolve) => { settleFirstBasis = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Reload Product' })).not.toBeInTheDocument());
+    // While the first reload's Cost Basis read is still out, a second failed refresh offers Reload Product again.
+    fireEvent.change(screen.getByLabelText('Quoting Notes'), { target: { value: 'Newer guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Product reloaded.'));
+    settleFirstBasis(await mockGetCostBasisWorkspace.getMockImplementation()?.());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const reloadToasts = mockToast.mock.calls.filter(([, message]) => String(message).startsWith('Product reloaded'));
+    expect(reloadToasts).toEqual([['success', 'Product reloaded.']]);
+  });
+
+  it('#2200: an out-of-date cost-basis read is not shown as the current basis in Cost History', async () => {
+    mockGetCostBasisWorkspace.mockResolvedValueOnce({
+      enabled: true,
+      product: {
+        id: product.id, product_name: product.product_name, sku: product.sku, pricing_version: product.pricing_version,
+        current_cost_cents: 5_000n, tier1_margin_percent: '20', tier2_margin_percent: '15', tier3_margin_percent: '10',
+      },
+      current_basis: {
+        id: 'basis-current', basis_type: 'migration_baseline', cost_cents: 5_000n, supplier_price_observation_id: null,
+        purchase_order_item_id: null, selection_source: 'migration_baseline', reason: 'Current cost baseline',
+        selected_at: '2026-08-04T12:00:00Z',
+      },
+      supplier_candidates: [],
+      purchase_candidates: [],
+    });
+    render(<ProductDetail />);
+    expect(await screen.findByText(/Current governed cost baseline:/)).toBeInTheDocument();
+    const quotingNotes = screen.getByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    mockGetCostBasisWorkspace.mockRejectedValueOnce(new Error('workspace unavailable'));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    expect(await screen.findByText(/could not be refreshed, so the current basis is not shown/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Current governed cost baseline:/)).not.toBeInTheDocument();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'warning', 'Product reloaded, but Cost History or Cost Basis did not load. Use Try again on that card.'));
   });
 
   it('a failed cost history read offers Try again, which recovers', async () => {

@@ -348,7 +348,7 @@ describe('InventoryPage Product identity writers', () => {
     renderInventoryAt('/inventory?product=product-a&keep=yes');
 
     expect(await screen.findByText('Showing one product: Product A')).toBeInTheDocument();
-    for (const label of ['Total on Floor', 'Net Position', 'Planned', 'Committed', 'Delivered YTD', 'Inventory Value']) {
+    for (const label of ['Total on Floor', 'Net Position', 'Planned', 'Committed', 'Delivered YTD', 'Inventory Value (price-list cost)']) {
       expect(screen.queryByText(label, { selector: 'p' })).not.toBeInTheDocument();
     }
     expect(screen.queryByText(/ACTION REQUIRED.*Need Reordering/)).not.toBeInTheDocument();
@@ -365,7 +365,7 @@ describe('InventoryPage Product identity writers', () => {
     const totalOnFloorLabel = await screen.findByText('Total on Floor', { selector: 'p' });
     const summaryCards = totalOnFloorLabel.closest('div.grid');
     expect(summaryCards).not.toBeNull();
-    for (const label of ['On Order', 'Total on Floor', 'Net Position', 'Planned', 'Committed', 'Delivered YTD', 'Inventory Value']) {
+    for (const label of ['On Order', 'Total on Floor', 'Net Position', 'Planned', 'Committed', 'Delivered YTD', 'Inventory Value (price-list cost)']) {
       expect(within(summaryCards as HTMLElement).getByText(label, { selector: 'p' })).toBeInTheDocument();
     }
     expect(screen.getByText(/ACTION REQUIRED.*Need Reordering/)).toBeInTheDocument();

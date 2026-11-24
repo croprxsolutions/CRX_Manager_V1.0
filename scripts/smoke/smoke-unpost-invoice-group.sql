@@ -110,8 +110,8 @@ BEGIN
 
   -- ── ALL-OR-NOTHING: one member paid -> whole call RAISES, nothing changes ──
   -- Apply money to D so it cannot be unposted.
-  INSERT INTO allocation_sets (entity_type, entity_id, version, is_active, customer_id, total_payment_cents, total_allocated_cents)
-    VALUES ('payment', gen_random_uuid(), 1, true, v_cust_b, v_d_total, v_d_total) RETURNING id INTO v_aset;
+  INSERT INTO allocation_sets (entity_type, entity_id, version, is_active, customer_id, total_payment_cents, total_allocated_cents, payment_date)
+    VALUES ('payment', gen_random_uuid(), 1, true, v_cust_b, v_d_total, v_d_total, CURRENT_DATE) RETURNING id INTO v_aset;
   INSERT INTO invoice_line_allocations (allocation_set_id, bill_to_customer_id, split_percentage, amount_cents, invoice_id)
     VALUES (v_aset, v_cust_b, 100, v_d_total, v_inv_d);
   UPDATE invoices SET paid_amount_cents = v_d_total WHERE id=v_inv_d;

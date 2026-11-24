@@ -5,10 +5,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockFrom, mockRpc, mockToast } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, keyResets } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockRpc: vi.fn().mockImplementation(() => Promise.resolve({ data: null, error: null })),
   mockToast: vi.fn(),
+  keyResets: new Map<string, number>(),
 }));
 
 interface ChainResult {
@@ -31,6 +32,7 @@ interface SummaryFixture {
   applications: { count: number; total_acres: number };
   commissions: { earned_cents: number; paid_count: number; basis?: 'billed_share' };
   ar_balance_cents: number;
+  review_token?: string;
 }
 
 function buildChain(result: ChainResult): Record<string, unknown> {
@@ -64,6 +66,7 @@ function cleanSummary(): SummaryFixture {
     applications: { count: 0, total_acres: 0 },
     commissions: { earned_cents: 0, paid_count: 0 },
     ar_balance_cents: 0,
+    review_token: 'tok-june',
   };
 }
 
@@ -113,7 +116,13 @@ vi.mock('../components/ui/Toast', () => ({
 }));
 
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn() }),
+  // Each reset mints a new key per operation, so a test can see whether a key was retired.
+  useIdempotencyKey: (op: string) => ({
+    getKey: () => `test-idem-key-${op}-${keyResets.get(op) ?? 0}`,
+    resetKey: () => { keyResets.set(op, (keyResets.get(op) ?? 0) + 1); },
+    getKeyFor: (scope: string) => `test-idem-key-${op}-${scope}`,
+    resetKeyFor: () => {},
+  }),
 }));
 
 vi.mock('../lib/statementPdf', () => ({
@@ -462,6 +471,7 @@ describe('MonthEndClose', () => {
       applications: { count: 0, total_acres: 0 },
       commissions: { earned_cents: 0, paid_count: 0 },
       ar_balance_cents: 0,
+      review_token: 'tok-june',
     };
     mockRpc.mockImplementation((name: string) => {
       if (name === 'get_monthly_summary') return Promise.resolve({ data: validSummary, error: null });
@@ -489,5 +499,148 @@ describe('MonthEndClose', () => {
       expect(screen.getByLabelText('Month to review')).toBeDisabled();
       expect(screen.getByLabelText('Year to review')).toBeDisabled();
     });
+  });
+
+  // #2175: the database re-checks the figures this page showed; the page sends what it reviewed.
+  async function openCloseModal() {
+    renderMonthEnd();
+    await switchToMonth(5);
+    await screen.findByText('June 2026');
+    const rollBtn = await screen.findByRole('button', { name: /Roll the Month/i });
+    await waitFor(() => expect(rollBtn).not.toBeDisabled());
+    fireEvent.click(rollBtn);
+    fireEvent.click(await screen.findByRole('button', { name: /^Close Period$/i }));
+  }
+
+  it('sends the review token and both review ticks with the close (#2175)', async () => {
+    mockCleanCloseableSummary();
+    await openCloseModal();
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('close_accounting_period', expect.objectContaining({
+      p_period_end: '2026-06-30',
+      p_reviewed_token: 'tok-june',
+      p_payments_reviewed: false,
+      p_commissions_reviewed: false,
+    })));
+  });
+
+  it('sends true for the payments and commission ticks the admin ticked (#2175)', async () => {
+    const summary = cleanSummary();
+    summary.payments = { count: 2, total_cents: 2500 };
+    summary.commissions = { earned_cents: 300, paid_count: 0, basis: 'billed_share' };
+    mockRpc.mockImplementation((name: string) => Promise.resolve({ data: name === 'get_monthly_summary' ? summary : null, error: null }));
+    renderMonthEnd();
+    await switchToMonth(5);
+    await screen.findByText('June 2026');
+    const boxes = await screen.findAllByRole('checkbox', { name: /I have reviewed this and confirm it is correct/i });
+    expect(boxes).toHaveLength(2);
+    boxes.forEach((box) => fireEvent.click(box));
+    const rollBtn = screen.getByRole('button', { name: /Roll the Month/i });
+    await waitFor(() => expect(rollBtn).not.toBeDisabled());
+    fireEvent.click(rollBtn);
+    fireEvent.click(await screen.findByRole('button', { name: /^Close Period$/i }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('close_accounting_period', expect.objectContaining({
+      p_reviewed_token: 'tok-june',
+      p_payments_reviewed: true,
+      p_commissions_reviewed: true,
+    })));
+  });
+
+  it('keeps Close off and says to reload when the summary has no review token (#2175)', async () => {
+    const summary = cleanSummary();
+    delete summary.review_token;
+    mockRpc.mockImplementation((name: string) => Promise.resolve({ data: name === 'get_monthly_summary' ? summary : null, error: null }));
+    renderMonthEnd();
+    await switchToMonth(5);
+    await screen.findByText('Figures ready to close');
+    expect(screen.getByRole('button', { name: /Roll the Month/i })).toBeDisabled();
+  });
+
+  it('reloads the figures and says they changed when the close is refused as stale (#2175)', async () => {
+    let summaryCalls = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'get_monthly_summary') { summaryCalls += 1; return Promise.resolve({ data: cleanSummary(), error: null }); }
+      if (name === 'close_accounting_period') {
+        return Promise.resolve({ data: null, error: { message: "CLOSE_FIGURES_CHANGED: this month's figures changed since you reviewed them; review them again before closing" } });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    await openCloseModal();
+    const before = summaryCalls;
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/figures changed since you reviewed them/)));
+    await waitFor(() => expect(summaryCalls).toBeGreaterThan(before));
+  });
+
+  it('closes again with a fresh key after a lost close reply and a reopen (Sol r5)', async () => {
+    let juneStatus: 'open' | 'closed' = 'open';
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'orders') return buildChain({ data: [], count: 0, error: null });
+      if (table === 'accounting_periods') {
+        return buildChain({ data: juneStatus === 'open' ? [] : [{
+          id: 'period-june', period_start: '2026-06-01', period_end: '2026-06-30',
+          status: juneStatus, closed_at: '2026-07-10T12:00:00Z',
+        }], error: null });
+      }
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'get_monthly_summary') return Promise.resolve({ data: cleanSummary(), error: null });
+      if (name === 'close_accounting_period') {
+        // The close commits, but its reply is lost.
+        juneStatus = 'closed';
+        return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+      }
+      if (name === 'reopen_accounting_period') {
+        juneStatus = 'open';
+        return Promise.resolve({ data: { success: true }, error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    await openCloseModal();
+    const reopenBtn = await screen.findByRole('button', { name: /^Reopen$/i });
+    fireEvent.click(reopenBtn);
+    fireEvent.change(await screen.findByPlaceholderText(/Explain why this period needs to be reopened/i), { target: { value: 'fix a payment' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Reopen Period$/i }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Reopen$/i })).not.toBeInTheDocument());
+    const rollBtn = await screen.findByRole('button', { name: /Roll the Month/i });
+    await waitFor(() => expect(rollBtn).not.toBeDisabled());
+    fireEvent.click(rollBtn);
+    fireEvent.click(await screen.findByRole('button', { name: /^Close Period$/i }));
+    await waitFor(() => expect(mockRpc.mock.calls.filter(([n]) => n === 'close_accounting_period')).toHaveLength(2));
+    const [first, second] = mockRpc.mock.calls
+      .filter(([n]) => n === 'close_accounting_period')
+      .map(([, args]) => (args as { p_idempotency_key: string }).p_idempotency_key);
+    expect(second).not.toBe(first);
+  });
+
+  it('starts a fresh key and says to close again when the month was reopened elsewhere (Sol r6)', async () => {
+    let closeCalls = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'get_monthly_summary') return Promise.resolve({ data: cleanSummary(), error: null });
+      if (name === 'close_accounting_period') {
+        closeCalls += 1;
+        // 1: reply lost (another tab reopens before this tab refreshes); 2: the database refuses the old receipt.
+        if (closeCalls === 1) return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+        if (closeCalls === 2) return Promise.resolve({ data: null, error: { message: 'CLOSE_REOPENED_SINCE: this month was reopened after this close; review it and close again' } });
+        return Promise.resolve({ data: { success: true }, error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    const closeOnce = async () => {
+      const rollBtn = await screen.findByRole('button', { name: /Roll the Month/i });
+      await waitFor(() => expect(rollBtn).not.toBeDisabled());
+      fireEvent.click(rollBtn);
+      fireEvent.click(await screen.findByRole('button', { name: /^Close Period$/i }));
+    };
+    await openCloseModal();
+    await waitFor(() => expect(closeCalls).toBe(1));
+    await closeOnce();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/reopened since your last close attempt/)));
+    await closeOnce();
+    await waitFor(() => expect(closeCalls).toBe(3));
+    const keys = mockRpc.mock.calls
+      .filter(([n]) => n === 'close_accounting_period')
+      .map(([, args]) => (args as { p_idempotency_key: string }).p_idempotency_key);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[1]);
   });
 });

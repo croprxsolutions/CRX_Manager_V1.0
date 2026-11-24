@@ -367,6 +367,25 @@ export function sanitizeError(error: unknown): string {
     return detail ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`
       : 'This customer still has open work (orders, deliveries, holds, quotes, invoices, spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.';
   }
+  // 20270226150000 (Sol round 1 MED): Create Invoice on a job deleted since the screen opened.
+  if (/^JOB_DELETED(?::|$)/.test(message)) {
+    return "This job was deleted, so it can't be invoiced. Nothing was invoiced.";
+  }
+  // 20270226150000: Create Invoice on a spray job names the chemical it can't invoice and why (never the cost).
+  const jobLine = /^(JOB_LINE_(?:BELOW_COST|UNIT_UNCONVERTIBLE|COST_MISSING|ROUNDING|QUANTITY_INVALID|PRICE_NOT_WHOLE_CENTS)|JOB_FIELD_NO_BILLING_SPLIT|JOB_INVOICED_LOCKED|JOB_COMPLETED_CHEMICALS_LOCKED)(?::|$)/.exec(message)?.[1];
+  if (jobLine) {
+    // Product names and units are typed by users: fold line breaks and drop text-direction and invisible characters so they cannot split or reorder the sentence.
+    return message.slice(jobLine.length).replace(/^:\s*/, '')
+      .replace(/\p{Cc}+/gu, ' ').replace(/[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, '').replace(/\s+/g, ' ').trim()
+      || (jobLine === 'JOB_LINE_BELOW_COST'
+        ? 'A chemical on this job is priced below its cost. Nothing was invoiced; its price must be corrected before this job can be invoiced.'
+        : "A chemical on this job can't be invoiced as recorded. Nothing was invoiced; check its quantity, unit and cost.");
+  }
+  // #2063 (20270224130000): the server names only invoices the caller may read and what to do; keep it whole.
+  if (/^BLEND_TICKET_ALREADY_BILLED:/.test(message)) {
+    return message.slice('BLEND_TICKET_ALREADY_BILLED:'.length)
+      .replace(/[؜‎‏‪-‮⁦-⁩]/g, '').trim();
+  }
   // Rate lock (20261107060000), product parents (20261108120000), tote fill (20261117130000) and weights (20261207100000), chemistry (20261209100000), crop + timing choices (20261229120000): the server text after the token is the operator's answer.
   const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG|PRODUCT_PARENT_[A-Z_]+|WORKBOOK_(?:WEIGHTS|INGREDIENTS)_REFUSED|WORKBOOK_NOTHING_TO_SAVE|TOTE_FILL_[A-Z_]+|PRODUCT_WEIGHT_[A-Z_]+|CHEMISTRY_[A-Z_]+|INGREDIENT_[A-Z_]+|COST_REFERENCE_[A-Z_]+|USE_TIMING_[A-Z_]+|REASON_REQUIRED|EVIDENCE_REQUIRED|EVIDENCE_TOO_LONG):\s*(.+)$/s)?.[1];
   if (rateRefusal) {
@@ -477,11 +496,17 @@ export function sanitizeError(error: unknown): string {
   // Unit rules (20270121110000): the server sentence names the unit and what to do, so it is kept.
   const unitRule = message.match(/^(?:LINE_UNIT_NOT_STOCK_UNIT|PRODUCT_UNIT_HAS_OPEN_LINES|PRODUCT_UNIT_HAS_STOCK|PRODUCT_UNIT_HAS_HISTORY|STOCK_ROW_UNIT_NOT_STOCK_UNIT|PRODUCT_STOCK_UNIT_UNKNOWN|QUOTE_RATE_UNIT_UNKNOWN|QUOTE_STOCK_UNIT_UNKNOWN):\s*(.+)$/s);
   if (unitRule) return `Nothing was saved. ${unitRule[1].trim()}`;
-  // Delivery lines match their order lines (20270126110000, KI-161): the server sentence says what is wrong.
-  const deliveryLineRule = message.match(/^(?:DELIVERY_LINE_NOT_ON_ORDER|DELIVERY_LINE_PRODUCT_MISMATCH|DELIVERY_LINE_UNIT_MISMATCH|DELIVERY_LINE_DUPLICATE|DELIVERY_ORDER_LOCKED):\s*(.+)$/s);
+  // Delivery lines match their order lines (20270126110000, KI-161) and fit what was ordered (F05,
+  // 20270224100000): the server sentence says what is wrong.
+  const deliveryLineRule = message.match(/^(?:DELIVERY_LINE_NOT_ON_ORDER|DELIVERY_LINE_PRODUCT_MISMATCH|DELIVERY_LINE_UNIT_MISMATCH|DELIVERY_LINE_DUPLICATE|DELIVERY_ORDER_LOCKED|DELIVERY_OVER_ORDER|ORDER_LINE_BELOW_DELIVERIES|ORDER_LINE_QUANTITY_NOT_FINITE|ORDER_LINE_CHECK_ISOLATION):\s*(.+)$/s);
   if (deliveryLineRule) return `Nothing was saved. ${deliveryLineRule[1].trim()}`;
-  // Partial completion figures (20270203120000, #1942): stale or malformed figures; the server sentence says to reload.
-  const deliveryQuantities = message.match(/^DELIVERY_QUANTITIES_(?:STALE|INVALID):\s*(.+)$/s);
+  // New Delivery's older cross-load check (20260518010000): its text carries a raw line id, so say it in words.
+  const overActive = message.match(/^ITEM_OVER_REMAINING_INCL_ACTIVE:.*? has (\S+) units on other active deliveries; only (\S+) available/s);
+  if (overActive) {
+    return `Nothing was saved. Other open deliveries for this order already hold ${overActive[1]} of this product, so only ${overActive[2]} more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.`;
+  }
+  // Partial completion figures (20270203120000, #1942) and completing past the order (F05): the server sentence says what to do.
+  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER):\s*(.+)$/s);
   if (deliveryQuantities) return `The delivery was not completed. ${deliveryQuantities[1].trim()}`;
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.
   const countRule = message.match(/^(?:CYCLE_COUNT_ROW_ALREADY_OPEN|CYCLE_COUNT_ROW_WRONG_PLACE|CYCLE_COUNT_REOPEN_FORBIDDEN|CYCLE_COUNT_REVERSE_BLOCKED|CYCLE_COUNT_QTY_INVALID):\s*(.+)$/s);

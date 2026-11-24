@@ -195,8 +195,7 @@ assert.match(verifySolAcceptance({ approval: tampered, record, n: 1 }).reason, /
 
 // ── every BLOCKER/HIGH must be accepted before the log and the proof ────────
 const got1 = collectAcceptances({ record, readAcceptance: (n) => readAcceptance(H1, n), checkReply: assertReplyAlone });
-assert.match(got1.problem, /finding 2: Mason has not accepted it/, "collect: one accepted of two is not enough");
-const c2 = request(2);
+assert.match(got1.problem, /finding 2: Mason has not accepted it/, "collect: one accepted of two is not enough");const c2 = request(2);
 assert.equal(reply(`accept ${c2} the grant is added by the next PR`).ok, true, "finding 2 accepted by its own code");
 const got = collectAcceptances({ record, readAcceptance: (n) => readAcceptance(H1, n), checkReply: assertReplyAlone });
 assert.equal(got.problem, undefined, `collect: both accepted (${got.problem})`);

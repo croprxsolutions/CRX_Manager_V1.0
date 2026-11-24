@@ -25,7 +25,11 @@ export async function fetchDriverFarms(ids: (string | null | undefined)[]): Prom
   for (let i = 0; i < unique.length; i += 500) {
     const { data, error } = await supabase.rpc('get_driver_customers', { p_customer_ids: unique.slice(i, i + 500) });
     if (error) throw error;
-    for (const farm of assertRpcResult<{ rows: DriverFarm[] }>(data, 'get_driver_customers').rows ?? []) farms.set(farm.id, farm);
+    const rows = assertRpcResult<{ rows: unknown }>(data, 'get_driver_customers').rows;
+    // A malformed reply such as {} is a failure, not "no farms" (#2167).
+    if (!Array.isArray(rows)) throw new Error('get_driver_customers returned an unexpected result');
+    // An email of only spaces is no email, so screens still warn that none is on file (#2167).
+    for (const farm of rows as DriverFarm[]) farms.set(farm.id, { ...farm, email: farm.email?.trim() || null });
   }
   return farms;
 }

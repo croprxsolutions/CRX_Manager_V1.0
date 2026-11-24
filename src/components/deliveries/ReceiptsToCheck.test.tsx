@@ -51,7 +51,7 @@ describe('ReceiptsToCheck', () => {
     fireEvent.click(confirm);
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc.mock.calls[0][0]).toBe('close_delivery_receipt');
-    expect(rpc.mock.calls[0][1]).toMatchObject({ p_delivery_id: 'd1', p_reason: 'handled' });
+    expect(rpc.mock.calls[0][1]).toMatchObject({ p_delivery_id: 'd1', p_reason: 'handled', p_expected_queued_at: '2026-11-08T12:00:00Z' });
     await act(async () => {
       finishClose({ data: { delivery_id: 'd1', outcome: 'closed', previous_status: 'needs_check', sent_at: null, send_authorized_at: null }, error: null });
     });
@@ -69,6 +69,34 @@ describe('ReceiptsToCheck', () => {
     await waitFor(() => expect(toast).toHaveBeenCalledWith('warning', 'The server is emailing this receipt right now. Try again in a minute.'));
     expect(screen.getByText('D-1')).toBeInTheDocument();
     expect(ranges).toHaveLength(1);
+  });
+
+  it('when the receipt was queued again since the list loaded, closes nothing, says so and reloads (#2251)', async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { message: "DELIVERY_RECEIPT_CHANGED: this delivery's receipt was queued again since; reload the page" } });
+    answers.push({ data: [row(1)], error: null, count: 1 }, { data: [], error: null, count: 0 });
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark receipt for D-1 handled' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark handled' }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('warning', expect.stringMatching(/changed since the list loaded. Nothing was closed/)));
+    await waitFor(() => expect(ranges).toHaveLength(2));
+    expect(screen.queryByRole('button', { name: 'Mark handled' })).not.toBeInTheDocument();
+  });
+
+  it('forgets the refused try, so the next Mark handled is a new request (#2291)', async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { message: "DELIVERY_RECEIPT_CHANGED: this delivery's receipt was queued again since; reload the page" } })
+      .mockResolvedValueOnce({ data: { outcome: 'closed' }, error: null });
+    answers.push({ data: [row(1)], error: null, count: 1 }, { data: [row(1)], error: null, count: 1 }, { data: [], error: null, count: 0 });
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark receipt for D-1 handled' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark handled' }));
+    await waitFor(() => expect(ranges).toHaveLength(2));
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark receipt for D-1 handled' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark handled' }));
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(2));
+    const keys = rpc.mock.calls.map(([, args]) => (args as { p_idempotency_key: string }).p_idempotency_key);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBeTruthy();
+    expect(keys[1]).not.toBe(keys[0]);
   });
 
   it('says so when the list fails to load instead of showing nothing', async () => {

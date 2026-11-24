@@ -44,7 +44,7 @@ Every size takes the new number; old invoices, statements, sprayed jobs' printou
 delivery receipts and the year-end summary keep showing the number they were made with.
 
 Smallest change:
-- Migration `20270228220000_parent_epa_correction_on.sql` (one transaction, NOT APPLIED):
+- Migration `20270301170000_parent_epa_correction_on.sql` (one transaction, NOT APPLIED):
   1. `_product_parent_epa_correction_enabled()` returns true (same signature, owner, no grants).
   2. `get_customer_year_end_summary(uuid, integer)` re-emitted from the `20270201100000` body with one change: the
      product-usage rows select and group by `COALESCE(_epa_norm(ii.epa_registration), _epa_norm(p.epa_registration))`

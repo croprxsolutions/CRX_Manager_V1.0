@@ -55,6 +55,7 @@ import {
   clearSplitSaveKey,
   evenMicroShares,
   MICRO_100,
+  microToExactPct,
   microToPctText,
   pctTextToMicro,
   splitProblem,
@@ -820,6 +821,10 @@ function FieldSetupPage() {
             applySplitData(await loadFieldSplit(savedFieldId, today));
           } catch (reloadError) {
             Sentry.captureException(toSentryError(reloadError), { tags: { source: 'fetch', action: 'reload_field_split_versions' } });
+            // What was sent is saved (the editor was locked meanwhile): make it the clean state so a retry cannot resend it.
+            loadedSplitsRef.current = billingSplits;
+            loadedNotesRef.current = payerNotes;
+            setSplitFrom(today);
             toast('warning', 'The split was saved, but its history could not be reloaded. Reload the page to see it.');
           }
         }
@@ -1457,7 +1462,7 @@ function FieldSetupPage() {
                           total === MICRO_100 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
                         }`}>
                           <span>{side === 'product' ? 'Product total' : 'Application total'}</span>
-                          <span>{microToPctText(total)}%</span>
+                          <span>{total === MICRO_100 ? '100.00' : microToExactPct(total)}%</span>
                         </div>
                       );
                     })}

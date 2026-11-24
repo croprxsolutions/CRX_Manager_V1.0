@@ -192,6 +192,18 @@ describe('Field Setup — FP-1 split versions', () => {
     }
   });
 
+  it('if the history reload fails after a split save, a second Save sends nothing again', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('Notes for Owner Farm'), { target: { value: 'Call first' } });
+    mockFrom.mockImplementation((t: string) => (t === 'field_billing_split_versions'
+      ? { select: () => ({ eq: () => ({ order: () => Promise.resolve({ data: null, error: { message: 'down' } }) }) }) }
+      : tables(t)));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('could not be reloaded')));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+  });
+
   it('a retry of the same save reuses its key; the database refusal is shown plainly', async () => {
     mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'set_field_billing_split'
       ? { data: null, error: { message: 'FIELD_SPLIT_PAYER_NOT_ACTIVE: customer(s) x are not active customers' } }

@@ -7,7 +7,7 @@ export const MICRO_100 = 100_000_000;
 /** A typed percent ("33.33", "0", "40") as micro-percent; null when blank, not a number, or over 100. */
 export function pctTextToMicro(text: string): number | null {
   const t = text.trim();
-  if (!/^\d+(\.\d{1,6})?$/.test(t)) return null;
+  if (!/^(\d+(\.\d{1,6})?|\.\d{1,6})$/.test(t)) return null;
   const micro = Math.round(Number(t) * 1_000_000);
   return micro > MICRO_100 ? null : micro;
 }
@@ -18,7 +18,8 @@ export function microToPctText(micro: number): string {
 }
 
 /** Exact total for messages ("90", "99.99"), never rounded up to 100. */
-function microToExactPct(micro: number): string {
+/** Up to six decimals, so a total that is not exactly 100% never shows as 100.00. */
+export function microToExactPct(micro: number): string {
   return String(Number((micro / 1_000_000).toFixed(6)));
 }
 

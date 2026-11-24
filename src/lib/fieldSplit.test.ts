@@ -14,6 +14,7 @@ describe('field split shares (micro-percent)', () => {
     expect(pctTextToMicro('33.333334')).toBe(33_333_334);
     expect(pctTextToMicro('0')).toBe(0);
     expect(pctTextToMicro('100')).toBe(100_000_000);
+    expect(pctTextToMicro('.5')).toBe(500_000);
     for (const bad of ['', ' ', '-1', '100.01', 'abc', '1.1234567']) expect(pctTextToMicro(bad)).toBeNull();
   });
 

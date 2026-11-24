@@ -288,7 +288,12 @@ test.describe.serial('Job Lifecycle — Create to Invoice', () => {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ p_job_id: jid }),
+          // Same arguments Job Detail sends: start_job refuses a missing actor or idempotency key.
+          body: JSON.stringify({
+            p_job_id: jid,
+            p_performed_by: session.user?.id,
+            p_idempotency_key: crypto.randomUUID(),
+          }),
         });
         return res.ok ? 'ok' : `${res.status} ${await res.text()}`;
       }, { jid: jobId, supa: SUPA });

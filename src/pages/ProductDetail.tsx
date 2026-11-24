@@ -78,7 +78,7 @@ import {
 } from '../lib/productCostBasis';
 import { PRODUCT_COLUMNS, withAdminCost } from '../lib/costFields';
 import {
-  duplicateProductDraft, duplicateProductSource, listProductCategories, missingProductSetup, nearMatchNames, normalizedProductSetup,
+  duplicateProductDraft, matchReadIntervals, duplicateProductSource, listProductCategories, missingProductSetup, nearMatchNames, normalizedProductSetup,
   productSetupValidationMessage, visibleProductCategories, type DuplicateProductSource,
 } from '../lib/productSetup';
 import { listProductCropOptions, listProductUseTimingOptions } from '../lib/productUseTimings';
@@ -291,24 +291,6 @@ async function readVendorManufacturerChoices(): Promise<{ vendors: string[]; man
   if (!data) throw new Error('The vendor and manufacturer list came back empty.');
   const distinct = (values: Array<string | null>) => [...new Set(values.filter(Boolean) as string[])].sort();
   return { vendors: distinct(data.map((p) => p.vendor)), manufacturers: distinct(data.map((p) => p.manufacturer)) };
-}
-
-type IntervalFilterable<Q> = { is(column: string, value: null): Q; eq(column: string, value: unknown): Q };
-
-// REI/PHI do not move pricing_version, so an edited pair saves only over the pair this page read.
-function matchReadIntervals<Q extends IntervalFilterable<Q>>(query: Q, payload: object, read: Product): Q {
-  let filtered = query;
-  for (const [interval, flag] of [['rei_hours', 'rei_not_applicable'], ['phi_days', 'phi_not_applicable']] as const) {
-    if (!(interval in payload) && !(flag in payload)) continue;
-    const readValue = read[interval];
-    filtered = readValue == null ? filtered.is(interval, null) : filtered.eq(interval, readValue);
-    filtered = filtered.eq(flag, read[flag] ?? false);
-  }
-  // A tick is judged against the label the page showed, so a new EPA number saved meanwhile refuses it.
-  if ('rei_not_applicable' in payload || 'phi_not_applicable' in payload) {
-    filtered = read.epa_registration == null ? filtered.is('epa_registration', null) : filtered.eq('epa_registration', read.epa_registration);
-  }
-  return filtered;
 }
 
 export default function ProductDetail() {
@@ -1712,7 +1694,10 @@ export default function ProductDetail() {
                     onChange={(checked) => {
                       if (reloadRequired) return;
                       update('rei_not_applicable', checked);
-                      if (checked) { setReiDraft(''); update('rei_hours', null); }
+                      // Unticking puts back the saved number, so a mis-click never erases it.
+                      const restored = checked ? null : persistedProduct?.rei_hours ?? null;
+                      setReiDraft(restored == null ? '' : String(restored));
+                      update('rei_hours', restored);
                     }}
                   />
                 )}
@@ -1740,7 +1725,10 @@ export default function ProductDetail() {
                     onChange={(checked) => {
                       if (reloadRequired) return;
                       update('phi_not_applicable', checked);
-                      if (checked) { setPhiDraft(''); update('phi_days', null); }
+                      // Unticking puts back the saved number, so a mis-click never erases it.
+                      const restored = checked ? null : persistedProduct?.phi_days ?? null;
+                      setPhiDraft(restored == null ? '' : String(restored));
+                      update('phi_days', restored);
                     }}
                   />
                 )}

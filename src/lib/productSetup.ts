@@ -164,3 +164,21 @@ export type SetupFilter = '' | 'incomplete';
 export function isSetupIncomplete(product: Partial<ProductSetupFields>): boolean {
   return missingProductSetup(product).length > 0;
 }
+
+export type IntervalFilterable<Q> = { is(column: string, value: null): Q; eq(column: string, value: unknown): Q };
+
+// REI/PHI do not move pricing_version, so an edited pair saves only over the pair this page read.
+export function matchReadIntervals<Q extends IntervalFilterable<Q>>(query: Q, payload: object, read: Product): Q {
+  let filtered = query;
+  for (const [interval, flag] of [['rei_hours', 'rei_not_applicable'], ['phi_days', 'phi_not_applicable']] as const) {
+    if (!(interval in payload) && !(flag in payload)) continue;
+    const readValue = read[interval];
+    filtered = readValue == null ? filtered.is(interval, null) : filtered.eq(interval, readValue);
+    filtered = filtered.eq(flag, read[flag] ?? false);
+  }
+  // A tick is judged against the label the page showed, so a new EPA number saved meanwhile refuses it.
+  if ('rei_not_applicable' in payload || 'phi_not_applicable' in payload) {
+    filtered = read.epa_registration == null ? filtered.is('epa_registration', null) : filtered.eq('epa_registration', read.epa_registration);
+  }
+  return filtered;
+}

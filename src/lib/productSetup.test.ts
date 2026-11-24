@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Product } from '../types';
 import { hasRpcCode, RpcErrorCodes } from './db';
 import {
+  matchReadIntervals,
   isSetupIncomplete, missingProductSetup, nearMatchNames, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories,
 } from './productSetup';
 
@@ -104,5 +105,35 @@ describe('complete setup and near-match warnings', () => {
     expect(nearMatchNames('', makers)).toEqual([]);
     expect(nearMatchNames('Syn', makers)).toEqual([]);
     expect(nearMatchNames('Bayer Crop', makers)).toEqual([]);
+  });
+});
+
+describe('matchReadIntervals', () => {
+  const recorder = () => {
+    const calls: string[] = [];
+    const q = {
+      is(column: string, value: null) { calls.push(`${column} is ${value}`); return q; },
+      eq(column: string, value: unknown) { calls.push(`${column} = ${String(value)}`); return q; },
+    };
+    return { q, calls };
+  };
+  const read = { rei_hours: null, rei_not_applicable: false, phi_days: 30, epa_registration: '100-1234' } as Product;
+
+  it('adds no filter when neither interval nor flag is saved', () => {
+    const { q, calls } = recorder();
+    matchReadIntervals(q, { product_name: 'x' }, read);
+    expect(calls).toEqual([]);
+  });
+
+  it('saves a tick only over the blank interval, flag and EPA number the page read', () => {
+    const { q, calls } = recorder();
+    matchReadIntervals(q, { rei_not_applicable: true, rei_hours: null }, read);
+    expect(calls).toEqual(['rei_hours is null', 'rei_not_applicable = false', 'epa_registration = 100-1234']);
+  });
+
+  it('guards a changed PHI number on the number read, without an EPA filter', () => {
+    const { q, calls } = recorder();
+    matchReadIntervals(q, { phi_days: 14 }, read);
+    expect(calls).toEqual(['phi_days = 30', 'phi_not_applicable = false']);
   });
 });

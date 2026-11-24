@@ -74,9 +74,9 @@ describe('CommandPalette quotes and prices', () => {
   it('lists matching quotes, newest first, and opens the quote', async () => {
     renderAndSearch('q-1');
     expect(await screen.findByText('Quote Q-1042')).toBeInTheDocument();
-    expect(screen.getByText('Hill Farms · sent')).toBeInTheDocument();
+    expect(screen.getByText('Hill Farms · Booked')).toBeInTheDocument();
     expect(screen.getByText('Quote Q-0999')).toBeInTheDocument();
-    expect(screen.getByText('Q Ranch · closed short')).toBeInTheDocument();
+    expect(screen.getByText('Q Ranch · Closed short')).toBeInTheDocument();
     const options = screen.getAllByRole('option').map((o) => o.textContent ?? '');
     expect(options.findIndex((t) => t.includes('Q-1042'))).toBeLessThan(options.findIndex((t) => t.includes('Q-0999')));
 

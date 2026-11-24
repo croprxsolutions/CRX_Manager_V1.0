@@ -828,7 +828,7 @@ export default function NewOrder() {
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {openBookings.map((booking) => (
-                    // Opens the booking with its "Create order from booking" window already open.
+                    // Opens the booking with its "Draw from booking" window already open.
                     <Button
                       key={booking.id}
                       variant="secondary"
@@ -837,7 +837,7 @@ export default function NewOrder() {
                       onClick={() => navigate(`/quotes/${booking.id}?draw=1`)}
                       className="min-h-11 md:min-h-9"
                     >
-                      Draw from Quote {booking.quote_number}
+                      Draw from booking {booking.quote_number}
                     </Button>
                   ))}
                 </div>

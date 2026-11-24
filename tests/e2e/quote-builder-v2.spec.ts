@@ -604,14 +604,15 @@ test.describe.serial('Quote Builder V2 (12 Sprints)', () => {
     await nav(page, `/quotes/${S.quoteId}`);
     await waitStable(page);
 
-    // Click Convert to Order
-    const convertBtn = page.getByRole('button', { name: 'Convert to Order' });
+    // Draw from booking, Whole booking
+    const convertBtn = page.getByRole('button', { name: 'Draw from booking' });
     if (await convertBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await convertBtn.click();
+      await page.getByRole('menuitem', { name: 'Whole booking' }).click().catch(() => {});
       await waitStable(page, 1000);
 
-      // Confirm conversion
-      const confirmBtn = page.getByRole('button', { name: /Confirm|Yes|Convert/i }).first();
+      // Confirm the order
+      const confirmBtn = page.getByRole('dialog').getByRole('button', { name: /Create order/i }).first();
       if (await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
         await confirmBtn.click();
         await waitStable(page, 5000);

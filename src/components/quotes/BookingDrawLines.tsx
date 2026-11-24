@@ -33,7 +33,7 @@ const withUnit = (n: number, unit: string | null) => `${n}${unit ? ` ${unit}` : 
 const overBy = (row: DrawRow) => Math.round(((parseFloat(row.qty) || 0) - row.remaining) * 100) / 100;
 
 /**
- * The lines of the "Create order from booking" window: how much of each booked product to send now.
+ * The lines of the "Draw from booking" window: how much of each booked product to send now.
  * "Send all remaining" only fills the boxes; the rep still confirms with the window's own button.
  */
 export default function BookingDrawLines({ rows, onChange, drawing, stacked }: BookingDrawLinesProps) {

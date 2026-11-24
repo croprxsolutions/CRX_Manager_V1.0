@@ -66,12 +66,12 @@ interface QuoteRow extends Quote {
   product_names: string;
 }
 
-// Today's row actions and conditions: Convert to order only for sent and revised.
+// Today's row actions and conditions: Draw whole booking only for sent (Booked) and revised.
 // A component (not an inline items list) so the handlers stay event props, never render-time calls.
 function RowMenu({ row, onConvert, onDuplicate }: { row: QuoteRow; onConvert: (row: QuoteRow) => void; onDuplicate: (id: string) => void }) {
   const items: ActionMenuItem[] = [
     ...(row.status === 'sent' || row.status === 'revised'
-      ? [{ id: 'convert', label: 'Convert to order', icon: <PackageCheck className="w-4 h-4" />, onAction: () => onConvert(row) }]
+      ? [{ id: 'convert', label: 'Draw whole booking', icon: <PackageCheck className="w-4 h-4" />, onAction: () => onConvert(row) }]
       : []),
     { id: 'duplicate', label: 'Duplicate', icon: <Copy className="w-4 h-4" />, onAction: () => onDuplicate(row.id) },
   ];
@@ -269,7 +269,7 @@ export default function Quotes() {
       convertQuoteIdem.resetKey();
       const result = data;
       if (result.status === 'already_converted') {
-        toast('info', 'This booking was already converted. Opening the order.');
+        toast('info', 'The whole booking was already drawn. Opening the order.');
       } else {
         toast('success', `Order ${result.order_number || ''} created`);
       }
@@ -310,14 +310,14 @@ export default function Quotes() {
     } catch (err: unknown) {
       if (isBelowCostApprovalHandledError(err)) return;
       if (hasRpcCode(err, RpcErrorCodes.BOOKING_PARTIALLY_DRAWN)) {
-        toast('warning', 'This booking has partial draw-downs. Draw the remaining balance from the quote instead of converting.');
+        toast('warning', 'This booking has already been partly drawn. Open it and use Draw from booking for what is left instead of drawing the whole booking.');
       } else if (hasRpcCode(err, RpcErrorCodes.BOOKING_CLOSED)) {
-        toast('error', 'This booking is closed. Only sent or revised quotes can be converted.');
+        toast('error', 'This booking is closed. You can draw only from a booked or revised quote.');
       } else if (hasRpcCode(err, RpcErrorCodes.QUOTE_RESEND_REQUIRED)) {
         // The sent-price lock (20261027040000): an expected refusal with a plain-English instruction.
         toast('error', resendRequiredMessage(err));
       } else if (hasRpcCode(err, RpcErrorCodes.COST_BASIS_REQUIRED)) {
-        toast('error', 'A line on this quote has no recorded cost. Open the quote, revise and save it, then convert it again.');
+        toast('error', 'A line on this quote has no recorded cost. Open the quote, revise and save it, then draw the whole booking again.');
       } else if (hasRpcCode(err, RpcErrorCodes.QUOTE_STALE_WRITE)
         || hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_PAYLOAD_CONFLICT)) {
         convertQuoteIdem.resetKey();
@@ -826,7 +826,7 @@ export default function Quotes() {
                     {rolloverRows.length}
                   </span>
                 )}
-                <HelpTip text="Every open booking (a sent or revised quote) with what was booked, what has been drawn and what is left. Use it at season end to see what is still outstanding. A Prepaid left column shows when a booking has prepayment set aside." />
+                <HelpTip text="Every open booking (a booked or revised quote) with what was booked, what has been drawn and what is left. Use it at season end to see what is still outstanding. A Prepaid left column shows when a booking has prepayment set aside." />
               </div>
               <button
                 type="button"
@@ -983,7 +983,7 @@ export default function Quotes() {
             emptyTitle={filtersActive || search ? 'No matching quotes' : 'No quotes yet'}
             emptyDescription={filtersActive || search
               ? 'Try a different search or clear the filters.'
-              : 'Quotes are the first step. Build a quote, send it to your customer, then convert it to an order.'}
+              : 'Quotes are the first step. Build a quote and send it to your customer to book it, then draw orders from the booking.'}
             emptyAction={filtersActive ? (
               <Button variant="secondary" onClick={clearFilters}>Clear filters</Button>
             ) : search ? undefined : (
@@ -1017,7 +1017,7 @@ export default function Quotes() {
         open={!!convertTarget}
         onClose={closeConvert}
         onConfirm={handleConvertConfirm}
-        title="Convert to order?"
+        title="Draw the whole booking?"
         message={
           convertTarget
             ? [
@@ -1027,7 +1027,7 @@ export default function Quotes() {
               ].filter(Boolean).join('  ')
             : ''
         }
-        confirmLabel={convertChecking ? 'Checking…' : (convertStaleMsg || convertDupMsg ? 'Convert anyway' : 'Convert to order')}
+        confirmLabel={convertChecking ? 'Checking…' : (convertStaleMsg || convertDupMsg ? 'Create order anyway' : 'Create order')}
         variant={convertStaleMsg || convertDupMsg ? 'warning' : 'info'}
         icon={convertStaleMsg || convertDupMsg ? AlertTriangle : PackageCheck}
         loading={converting || convertChecking}

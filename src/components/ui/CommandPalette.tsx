@@ -45,6 +45,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import type { GlobalSearchResult, SearchEntityType } from '../../types';
 import { fetchProductListPrices, searchQuotesForPalette, type PaletteQuoteResult } from '../../lib/paletteSearch';
 import { formatUSD } from '../../lib/money';
+import { quoteStatusLabel } from '../../lib/quoteStatusLabel';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -351,7 +352,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
         id: `quote-${q.id}`,
         type: 'quote',
         label: `Quote ${q.quote_number}`,
-        subtitle: [q.customer?.farm_name, q.status.replace(/_/g, ' ')].filter(Boolean).join(' · '),
+        subtitle: [q.customer?.farm_name, quoteStatusLabel(q.status)].filter(Boolean).join(' · '),
         path: ENTITY_PATHS.quote + q.id,
       });
     }

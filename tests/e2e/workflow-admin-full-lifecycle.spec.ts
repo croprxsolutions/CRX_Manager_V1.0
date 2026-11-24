@@ -251,14 +251,14 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
     await waitForPage(page, 5000);
 
     // Verify status changed — the Send Quote button should disappear after send,
-    // or a "Sent" status badge should appear, or the "Convert to Order" button appears
+    // or a "Booked" status badge should appear, or the "Draw from booking" button appears
     const sendBtnGone = await page.locator('button:has-text("Send Quote")').isVisible({ timeout: 3000 }).catch(() => true);
-    const convertVisible = await page.locator('button:has-text("Convert to Order")').isVisible({ timeout: 3000 }).catch(() => false);
+    const convertVisible = await page.locator('button:has-text("Draw from booking")').isVisible({ timeout: 3000 }).catch(() => false);
     const bodyText = await page.textContent('body');
-    const hasSentIndicator = bodyText?.toLowerCase().includes('sent') || convertVisible || !sendBtnGone;
+    const hasSentIndicator = bodyText?.toLowerCase().includes('booked') || bodyText?.toLowerCase().includes('sent') || convertVisible || !sendBtnGone;
 
     // If save/send failed (e.g., validation error on item quantities), soft-skip
-    // so downstream tests still run (T3 Convert to Order handles this independently)
+    // so downstream tests still run (T3 Draw whole booking handles this independently)
     if (!hasSentIndicator) {
       console.warn('T2: Send quote may have failed validation — proceeding with soft pass');
     }
@@ -280,9 +280,10 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
 
     // Wait for quote data to finish loading before looking for Convert button
     // The button only renders after the quote detail loads (not during skeleton)
-    const convertBtn = page.locator('button:has-text("Convert to Order")');
+    const convertBtn = page.locator('button:has-text("Draw from booking")');
     await expect(convertBtn).toBeVisible({ timeout: 20000 });
     await convertBtn.click();
+    await page.getByRole('menuitem', { name: 'Whole booking' }).click();
     await waitForPage(page, 1000);
 
     // Confirm in modal — accept any window.confirm() that may fire

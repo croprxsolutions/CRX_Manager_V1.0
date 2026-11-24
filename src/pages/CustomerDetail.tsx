@@ -66,6 +66,7 @@ import { ORDER_COLUMNS, QUOTE_COLUMNS, withAdminCosts } from '../lib/costFields'
 import type { YearEndSummaryOptions } from '../lib/yearEndSummaryPdf';
 import type { YearEndSummaryData } from '../types';
 import { toSentryError } from '../lib/sentryError';
+import { quoteStatusLabel } from '../lib/quoteStatusLabel';
 
 // P3 perf: lazy-load the heavy Mapbox map components so CustomerDetail (a
 // high-traffic page) doesn't pull the ~1.68 MB vendor-mapbox chunk on initial
@@ -1585,7 +1586,7 @@ export default function CustomerDetail() {
                       <td data-label="Status" className="px-4 py-3">
                         <>
                           <Badge variant={statusToBadgeVariant[q.status] || 'default'}>
-                            {q.status === 'closed_by_application' ? 'Fulfilled (Applied)' : q.status === 'closed_short' ? 'Closed — Short' : q.status}
+                            {q.status === 'closed_by_application' ? 'Fulfilled (Applied)' : q.status === 'closed_short' ? 'Closed — Short' : quoteStatusLabel(q.status)}
                           </Badge>
                           {q.is_planned && (
                             <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 rounded">

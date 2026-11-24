@@ -403,6 +403,10 @@ branch x
     "every checkout git lists is searched, after the session's own");
   ok(JSON.stringify(repositoryCheckouts(path.join(tmp, "a"), () => { throw new Error("no git"); })) === JSON.stringify([path.join(tmp, "a")]),
     "if git cannot list checkouts, only the session's own folder is searched (fewer, never wrong)");
+  let failed = 0;
+  repositoryCheckouts(path.join(tmp, "a"), () => { throw new Error("timeout"); }, () => { failed++; });
+  repositoryCheckouts(path.join(tmp, "a"), () => "", () => { failed++; });
+  ok(failed === 1, "the hook is told when the checkout list failed, and only then");
   const otherPayload = buildApprovalPayload({ ...base, code: "888888", sessionId: OTHER_SID });
   writeApprovalRequest(other, otherPayload);
   const bothDirs = ownerRequestDirs([path.join(tmp, "a"), path.join(tmp, "b")]);
@@ -940,6 +944,14 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     const v = verifyHooks(file);
     ok(v.ok, `the hook's approval verifies at the apply, reading his reply back from the transcript: ${v.reason}`);
     ok(!readdirSync(dir).some((n) => n.startsWith("owner-approval-request-")), "no request is left pending");
+    // This temp folder is no git repository, so listing the other checkouts fails: a reply to a
+    // shown request that cannot be found is refused out loud, never lost (Luna MED, round 2).
+    const ghost = ownerApprovalSummary(JSON.parse(buildApprovalPayload({ ...base, code: "313131" }))).join("\n");
+    const lost = run("prompt-router.mjs", "I approve", SID, tx([masonSaid("ok"), agentSaid(ghost)]));
+    ok(lost.includes("OWNER REPLY NOT RECORDED") && lost.includes("could not be listed"),
+      `a reply to a shown request that the failed folder listing may have hidden is refused out loud: ${lost}`);
+    ok(run("prompt-router.mjs", "I approve", SID, tx([masonSaid("ok"), agentSaid("Merged #900.")])) === "",
+      "with no request shown, a plain \"I approve\" stays ordinary chat even when the listing failed");
 
     // Mason, 2026-11-23: a merge captain built the request; he answers "I approve" in the
     // conversation he is talking to, which showed it word for word. It records, and the

@@ -656,14 +656,15 @@ export function hooklessSessionRefusal({ checkout, sessionId }) {
  * a request another session built in its own worktree (Mason, 2026-11-23). On any failure only
  * `cwd` itself: fewer folders can only find fewer requests, never approve the wrong one.
  */
-export function repositoryCheckouts(cwd, run = (args) => execFileSync("git", args, { cwd, encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] })) {
+// `onFail` lets the hook say so out loud when a reply then finds nothing (Luna MED, round 2).
+export function repositoryCheckouts(cwd, run = (args) => execFileSync("git", args, { cwd, encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] }), onFail = () => {}) {
   const out = [cwd].filter(Boolean);
   try {
     for (const line of String(run(["worktree", "list", "--porcelain"])).split(/\r?\n/)) {
       const m = /^worktree\s+(.+)$/.exec(line.trim());
       if (m) out.push(m[1]);
     }
-  } catch { /* cwd alone */ }
+  } catch { onFail(); /* cwd alone */ }
   return out;
 }
 

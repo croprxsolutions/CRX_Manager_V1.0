@@ -22,10 +22,11 @@
 // agent running it by hand with a made-up message; that is the deliberate
 // forgery Mason accepted as the residual (owner-approval-lib.mjs header).
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import {
   approvalAttemptIn, approvalCodeFromReply, isPlainApprovalReply, lastAgentMessageText, ownerRequestDirs, recordPromptHookSeen, recordReplyApproval, replyMark,
-  replyWithoutReminders, repositoryCheckouts, resolvePlainReply,
+  replyWithoutReminders, repositoryCheckouts, resolvePlainReply, usedCodeMarkerName,
 } from "./owner-approval-lib.mjs";
 import { OWNER_SOL_SKIP_PURPOSE, acceptAttemptIn, acceptFromReply, skipFromReply } from "./sol-accept-lib.mjs";
 
@@ -48,12 +49,30 @@ catch { /* a missing marker only makes the request script refuse */ }
 // conversation he is talking to counts for a request a merge captain built elsewhere (Mason,
 // 2026-11-23). Only listed when a message looks like an answer, and once per message.
 let listed = null;
+let listFailed = false;
 const replyDirs = () => (listed ??= ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd(),
-  ...repositoryCheckouts(payload?.cwd || process.cwd())]));
+  ...repositoryCheckouts(payload?.cwd || process.cwd(), undefined, () => { listFailed = true; })]));
 
 // The app's reminder block in front of his words is not part of his reply (2026-10-20).
 const reply = replyWithoutReminders(payload?.prompt);
 const readShown = () => lastAgentMessageText(payload?.transcript_path, reply);
+
+// Nothing found to answer. If the other checkouts could not be listed and the agent's last message
+// showed a request, he meant it: say it did not count instead of losing it (Luna MED, round 2).
+function quiet() {
+  if (listFailed) {
+    let shown = "";
+    try { shown = String(readShown() ?? ""); } catch { /* nothing shown */ }
+    const ref = /\(Reference (\d{6})\. You don't need to type it\.\)/.exec(shown);
+    // A code already used here was found and answered: nothing was lost.
+    if (ref && !(listed || []).some((d) => existsSync(path.join(d, usedCodeMarkerName(ref[1]))))) {
+      emit(`OWNER REPLY NOT RECORDED — Mason replied "${reply.trim().slice(0, 40)}", but this project's other folders could not be listed ` +
+        "(git worktree list failed), so the request shown to him may not have been found. Nothing was approved or skipped. " +
+        "Tell him in one line, then show the summary again as the whole last message of your turn.");
+    }
+  }
+  emit();
+}
 
 // `accept <code> <reason>`: Mason accepts ONE Sol finding (sol-accept-lib.mjs, 2026-11-10).
 const accept = acceptFromReply(reply);
@@ -123,7 +142,7 @@ const plain = !code && isPlainApprovalReply(reply);
 // "I approve" with nothing waiting in this session stays ordinary chat.
 // The note's own lines are not his words, so they are never read as an attempt (CodeRabbit, PR #979).
 const attempt = !code && !plain ? approvalAttemptIn(reply) : null;
-if (!code && !plain && !attempt) emit();
+if (!code && !plain && !attempt) quiet();
 const said = (attempt ? attempt.line : reply.trim()).slice(0, 40);
 
 // Output happens only outside this try: under prompt-router.mjs process.exit
@@ -158,7 +177,7 @@ if (attempt && !result) {
   ].join("\n"));
 }
 
-if (!result && which?.silent) emit();
+if (!result && which?.silent) quiet();
 if (!result) {
   emit([
     `OWNER APPROVAL NOT RECORDED — Mason replied "${said}", but ${which?.reason || "no request was found"}. Nothing was approved.`,

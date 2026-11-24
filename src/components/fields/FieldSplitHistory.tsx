@@ -1,7 +1,7 @@
 import { microToPctText } from '../../lib/fieldSplit';
 import type { SplitVersion } from '../../lib/fieldSplitLoad';
 
-export default function FieldSplitHistory({ history, inForceId }: { history: SplitVersion[]; inForceId: string | null }) {
+export default function FieldSplitHistory({ history, inForceId, today }: { history: SplitVersion[]; inForceId: string | null; today: string }) {
   if (history.length === 0) return <p className="text-xs text-secondary">No split saved yet. Until one is, the owner pays 100%.</p>;
   return (
     <div className="overflow-x-auto">
@@ -22,6 +22,7 @@ export default function FieldSplitHistory({ history, inForceId }: { history: Spl
                 <td className="py-2 pr-3 whitespace-nowrap">
                   {v.version_number}
                   {v.id === inForceId && <span className="ml-2 text-xs text-emerald-700">in force</span>}
+                  {v.effective_from > today && <span className="ml-2 text-xs text-amber-700">scheduled</span>}
                 </td>
                 <td className="py-2 pr-3 whitespace-nowrap">{imported ? 'Imported' : v.effective_from}</td>
                 <td className="py-2 pr-3">

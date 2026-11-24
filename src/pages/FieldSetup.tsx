@@ -852,7 +852,9 @@ function FieldSetupPage() {
           // false "Unsaved Changes" prompt after every successful create.
           setPostSaveNavTarget(`/fields/${data}`);
         } else {
-          toast('success', 'Field updated');
+          toast('success', splitSaved && splitChanged && splitFrom > today
+            ? `Field updated. The new split starts ${splitFrom}; until then the history lists it as scheduled.`
+            : 'Field updated');
         }
       }
     } catch (err: unknown) {
@@ -1391,7 +1393,8 @@ function FieldSetupPage() {
               {billingOpen ? <ChevronUp className="w-4 h-4 text-secondary" /> : <ChevronDown className="w-4 h-4 text-secondary" />}
             </button>
             {billingOpen && (
-              <div className="mt-4">
+              // Locked while saving: the save reloads the split afterwards, which would drop an edit made meanwhile.
+              <fieldset disabled={saving} className="mt-4 min-w-0">
                 <p className="text-xs text-secondary mb-4">
                   Who pays for this field. Product shares and application shares must each total 100%; a payer can be 0%.
                   Each change is kept in the history below.
@@ -1487,10 +1490,10 @@ function FieldSetupPage() {
                 {!isNew && (
                   <div className="mt-6">
                     <h4 className="text-sm font-medium text-nav-dark mb-2">Split history</h4>
-                    <FieldSplitHistory history={splitHistory} inForceId={inForceSplit?.id ?? null} />
+                    <FieldSplitHistory history={splitHistory} inForceId={inForceSplit?.id ?? null} today={today} />
                   </div>
                 )}
-              </div>
+              </fieldset>
             )}
           </Card>
 

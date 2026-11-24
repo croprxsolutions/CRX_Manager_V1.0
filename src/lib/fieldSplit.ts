@@ -47,8 +47,13 @@ export function splitProblem(rows: SplitShareRow[]): string | null {
   const app = rows.reduce((s, r) => s + (r.appMicro ?? 0), 0);
   if (product !== MICRO_100) return `Product shares must total exactly 100% (now ${microToExactPct(product)}%). Try Split Evenly.`;
   if (app !== MICRO_100) return `Application shares must total exactly 100% (now ${microToExactPct(app)}%). Try Split Evenly.`;
+  // shortcut: the database refuses different shares per payer until FP-4 moves job billing to split history
+  // (FIELD_SPLIT_SHARES_MUST_MATCH_UNTIL_FP4); drop this check with that one.
+  if (rows.some((r) => r.productMicro !== r.appMicro)) return SHARES_MUST_MATCH;
   return null;
 }
+
+const SHARES_MUST_MATCH = 'For now each payer\'s product and application shares must be the same; different shares come with the next billing update.';
 
 const SERVER_MESSAGES: Array<[string, string]> = [
   ['FIELD_SPLIT_NOT_100', 'Product shares and application shares must each total exactly 100%.'],
@@ -56,7 +61,7 @@ const SERVER_MESSAGES: Array<[string, string]> = [
   ['FIELD_SPLIT_INVALID_SHARE', 'Each share must be from 0% to 100%, with at most 6 decimals.'],
   ['FIELD_SPLIT_NO_PAYERS', 'A split needs at least one payer.'],
   ['FIELD_SPLIT_PAYER_NOT_ACTIVE', 'A payer in this split is not an active customer.'],
-  ['FIELD_SPLIT_SHARES_MUST_MATCH_UNTIL_FP4', 'For now each payer\'s product and application shares must be the same; different shares come with the next billing update.'],
+  ['FIELD_SPLIT_SHARES_MUST_MATCH_UNTIL_FP4', SHARES_MUST_MATCH],
   ['FIELD_SPLIT_DATE_REQUIRED', 'Choose the date the split starts.'],
   ['FIELD_PAYER_NOTES_NOT_ON_FIELD', 'Notes can only be kept for customers on this field.'],
   ['IDEMPOTENCY_PAYLOAD_CONFLICT', 'An earlier save of this split is still being checked. Reload the page and try again.'],

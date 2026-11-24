@@ -24,7 +24,8 @@ describe('field split shares (micro-percent)', () => {
     expect(splitProblem([row('a', null, 100_000_000)])).toMatch(/0 is allowed/);
     expect(splitProblem([])).toMatch(/at least one payer/);
     expect(splitProblem([row('a', 100_000_000, 100_000_000), row('b', 0, 0)])).toBeNull();
-    expect(splitProblem([row('a', 60_000_000, 100_000_000), row('b', 40_000_000, 0)])).toBeNull();
+    // Until FP-4 each payer's two shares must match (the database refuses otherwise).
+    expect(splitProblem([row('a', 60_000_000, 100_000_000), row('b', 40_000_000, 0)])).toMatch(/must be the same/);
   });
 
   it('turns database refusals into plain messages', () => {

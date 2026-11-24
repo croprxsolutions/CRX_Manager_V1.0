@@ -151,16 +151,45 @@ describe('Field Setup — FP-1 split versions', () => {
     expect(mockToast).toHaveBeenCalledWith('error', 'This customer is already in the billing split');
   });
 
-  it('a 0% application payer is sent as 0, not dropped', async () => {
+  it('until FP-4, different product and application shares are refused on screen', async () => {
     await open();
     fireEvent.change(screen.getByLabelText('Product share for Owner Farm'), { target: { value: '60' } });
     fireEvent.change(screen.getByLabelText('Product share for Landlord Farm'), { target: { value: '40' } });
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('must be the same')));
+    expect(calls('set_field_billing_split')).toHaveLength(0);
+  });
+
+  it('a named 0% payer is sent as 0/0, not dropped, when another payer is added', async () => {
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Add customer to billing split' }));
+    for (const label of ['Product share for Owner Farm', 'Application share for Owner Farm', 'Product share for Farm customer-3', 'Application share for Farm customer-3']) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value: '50' } });
+    }
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
     await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
-    expect(calls('set_field_billing_split')[0].p_payers).toEqual([
-      { customer_id: 'customer-1', product_share_micro_pct: 60_000_000, application_share_micro_pct: 100_000_000 },
-      { customer_id: 'customer-2', product_share_micro_pct: 40_000_000, application_share_micro_pct: 0 },
-    ]);
+    expect(calls('set_field_billing_split')[0].p_payers).toContainEqual(
+      { customer_id: 'customer-2', product_share_micro_pct: 0, application_share_micro_pct: 0 },
+    );
+  });
+
+  it('locks the split while saving and marks a future-dated version as scheduled', async () => {
+    VERSIONS[0].effective_from = '2026-12-01';
+    let release: (v: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => name === 'set_field_billing_split'
+      ? new Promise((r) => { release = r; })
+      : Promise.resolve({ data: [], error: null }));
+    try {
+      await open();
+      expect(within(screen.getByRole('table')).getByText('scheduled')).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText('Notes for Owner Farm'), { target: { value: 'Call first' } });
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+      await waitFor(() => expect(screen.getByLabelText('Notes for Owner Farm')).toBeDisabled());
+      release({ data: { wrote_version: false }, error: null });
+      await waitFor(() => expect(screen.getByLabelText('Notes for Owner Farm')).not.toBeDisabled());
+    } finally {
+      VERSIONS[0].effective_from = '2026-11-20';
+    }
   });
 
   it('a retry of the same save reuses its key; the database refusal is shown plainly', async () => {

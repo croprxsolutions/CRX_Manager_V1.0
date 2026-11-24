@@ -447,6 +447,8 @@ recomputing margins from prices; consider failing closed instead of defaulting t
 Re-checked 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md)): 587 of 588 margins
 consistent, 1 outlier. Related catalog gaps found the same day, all for Mason (To-Do decision 27): 3 products have
 Tier 2 above Tier 3; 3 active products have no cost, 4 have no Tier 1 price, and 12 have no container size.
+Answered 2026-11-23 (Mason: "Intended, leave them"): those catalog gaps are intended and need no fix. The stale
+margins above are not part of that answer.
 
 ### KI-160 — Two stock counts open on the same product apply the same correction twice
 

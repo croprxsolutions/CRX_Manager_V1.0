@@ -11,6 +11,10 @@
   Mason chose to leave it unfixed (plain reply, ref c5b1b0090f3c)
 - Finding 4 (HIGH) at `supabase/migrations/20270227100000_parent_epa_correction_on.sql:278`, text sha256 `79d234fe026226c7` (the wording stays with the proof, not here)
   Mason chose to leave it unfixed (plain reply, ref c5b1b0090f3c)
+## 2026-11-23 — Terra is the final review for ordinary code; Sol stays on money, inventory, database and logins
+
+**Decision (Mason, in chat, 2026-11-23: "i want docs, simple edits etc to not spend 20 min waiting on sol … keep sol on money, database, and inventory … use terra where we can for final review", then chose A on each question and "Yes, build it").** Reverses part (3) of the 2026-11-06 entry ("Terra is not added as a second reviewer"). Docs and wording with no app code get no Codex review; ordinary code off `docs/reference/sol-required-paths.md` gets ONE `gpt-6.1-terra`/`high` final review (`node scripts/luna-review.mjs --terra`) instead of Luna rounds or Sol; Sol-list changes keep Luna then Sol. A large or unclear change may choose Sol; no size limit is enforced. Terra is advisory: no gate checks for it and it never counts as the Sol proof.
+**Why:** agents were running Sol (~20 minutes) on docs and simple edits that no gate requires, because the ladder named no lighter final review. Terra is faster and cheaper than Sol and stronger than Luna; the risky paths keep the same gates.
 
 ## 2026-11-23 — Release #2388 Sol HIGH 1: drivers see farm contacts only for their own deliveries
 

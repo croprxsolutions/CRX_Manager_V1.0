@@ -246,6 +246,11 @@ for (const counter of ["{\"feature\": 2", "null", "{\"feature\": \"bad\"}"]) {
   // Commit-scoped and Sol runs are not whole-branch rounds: never counted, never stopped.
   const sol = lunaRoundsOn("docs/a.md", seeded, ["sol"]);
   assert.deepEqual([sol.spawned, sol.counter["feature luna-rounds"]], [1, 6]);
+  // A Terra final review (Mason, 2026-11-23) runs on Terra and is not a Luna round either.
+  const terra = lunaRoundsOn("docs/a.md", seeded, [["--terra"]]);
+  assert.deepEqual([terra.spawned, terra.counter["feature luna-rounds"]], [1, 6]);
+  assert.match(terra.printed, /gpt-6.1-terra/);
+  assert.equal(lunaRoundsOn(".claude/hooks/x.mjs", undefined, ["luna", "luna", ["--terra"]]).spawned, 3);
   // A damaged whole-branch count fails closed too.
   for (const bad of [{ "feature luna-rounds": "six" }, { "feature luna-rounds": -100 }, { "feature luna-unlocks": [null, null] },
     { "feature luna-unlocks": [{ step: "simplify", reason: " " }] }, { "feature luna-unlocks": [{ step: "other", reason: "x" }] }]) {
@@ -400,6 +405,10 @@ assert.equal(nextStepHint("- BLOCKER: a.sql:3 — grants anon\n- MED: b.ts:2\nLU
   assert.equal(parseArgs(["--settled", "s.md"]).settled, "s.md");
   assert.throws(() => parseArgs(["--sol", "--reason", "r", "--settled", "s.md"]), /Sol never sees/);
   assert.throws(() => parseArgs(["--settled", "--sol"]), /needs a value/);
+  assert.equal(parseArgs(["--terra"]).terra, true);
+  assert.throws(() => parseArgs(["--terra", "--settled", "s.md"]), /independent final review/);
+  assert.throws(() => parseArgs(["--terra", "--after-simplify", "a"]), /independent final review/);
+  assert.throws(() => parseArgs(["--terra", "--sol", "--reason", "r"]), /one reviewer/);
 
   // End to end: the list reaches Luna's stdin; an oversized one stops the run before Codex.
   const repoDir = path.join(dir, "repo");

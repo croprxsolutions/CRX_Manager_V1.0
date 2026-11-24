@@ -12,6 +12,9 @@ Hands a frozen diff to a separate, pinned, isolated Codex reviewer and brings th
 | Every iterating round | `gpt-6-luna` / `xhigh` | Step 3A | No |
 | Final gate, Sol-list change only (`docs/reference/sol-required-paths.md`), once Luna is clean | `gpt-6.2-sol` / `high` | Step 3B | Yes |
 | Luna plainly out of its depth | `gpt-6.2-sol` / `high`, early | Step 3A with `--sol --reason` | No; Step 3B still runs later |
+| Final review, ordinary code OFF the Sol list | `gpt-6.1-terra` / `high`, once | `node scripts/luna-review.mjs --terra` | No |
+
+**Which review a change gets (Mason, 2026-11-23):** docs and wording only, no app code: no Codex review (CI and the Codex GitHub App still run). Ordinary code off the Sol list: ONE Terra final review on the committed head (`--terra`); fix any BLOCKER/HIGH, then open the PR. Never run Sol on these; it costs ~20 minutes and no gate needs it. Sol-list changes (money, inventory, database, logins): unchanged, Luna rounds then Sol once. A large or unclear change off the list: the agent may choose Sol (`--sol --reason`); nothing requires it.
 
 Sol runs **last**: Luna clean → freeze → Sol → push. The proof binds to that exact head; a later Sol-list commit voids it. The guards accept only `gpt-6.2-sol`/`high`; do not "fix" them to accept Luna. Luna also builds (`scripts/codex-build.mjs`), so a Luna round on Codex-built code is self-review; the independent Sol gate is what guards money.
 

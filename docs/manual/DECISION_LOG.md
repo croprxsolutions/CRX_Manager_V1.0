@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-23 — Terra is the final review for ordinary code; Sol stays on money, inventory, database and logins
+
+**Decision (Mason, in chat, 2026-11-23: "i want docs, simple edits etc to not spend 20 min waiting on sol … keep sol on money, database, and inventory … use terra where we can for final review", then chose A on each question and "Yes, build it").** Reverses part (3) of the 2026-11-06 entry ("Terra is not added as a second reviewer"). Docs and wording with no app code get no Codex review; ordinary code off `docs/reference/sol-required-paths.md` gets ONE `gpt-6.1-terra`/`high` final review (`node scripts/luna-review.mjs --terra`) instead of Luna rounds or Sol; Sol-list changes keep Luna then Sol. A large or unclear change may choose Sol; no size limit is enforced. Terra is advisory: no gate checks for it and it never counts as the Sol proof.
+**Why:** agents were running Sol (~20 minutes) on docs and simple edits that no gate requires, because the ladder named no lighter final review. Terra is faster and cheaper than Sol and stronger than Luna; the risky paths keep the same gates.
+
 ## 2026-11-23 — Release #2388 Sol HIGH 1: drivers see farm contacts only for their own deliveries
 
 **Decision (Mason, in chat, 2026-11-23: fix all three release findings before release).** Replaces the 2026-11-21 "drivers may see name, phone, email and delivery address for every farm" part of the #2161 entry. `get_driver_customers` now answers only a driver who still has the Deliveries or My Route page, and only for farms on their own not-deleted, not cancelled or voided deliveries that are open, scheduled from yesterday on, or completed since yesterday (`20270228150000_driver_farm_lookup_scope.sql`). Never the financial fields, as before.

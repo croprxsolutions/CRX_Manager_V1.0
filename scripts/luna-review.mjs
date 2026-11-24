@@ -7,6 +7,8 @@
 //   node scripts/luna-review.mjs --commit <sha>       one commit
 //   node scripts/luna-review.mjs --uncommitted        working tree, including untracked files
 //   node scripts/luna-review.mjs --sol --reason "..." advisory Sol escalation (never a gate pass)
+//   node scripts/luna-review.mjs --terra               one Terra final review of ordinary code (off
+//                                                     the Sol list; advisory, never a gate pass)
 //   node scripts/luna-review.mjs --settled <file>     findings already refuted or deferred (Luna only)
 //   node scripts/luna-review.mjs --after-simplify "..."   past the 6-round cap (also --after-rebase,
 //                                                         --after-new-approach); see "round caps"
@@ -52,6 +54,10 @@ import {
 // a one-line change here; see docs/reference/codex-model-tuning.md for how to probe a name.
 export const LUNA_MODEL = "gpt-6-luna";
 export const LUNA_EFFORT = "xhigh";
+// Final review for ordinary code off the Sol list (Mason, 2026-11-23). `gpt-6.2-terra` is refused
+// for this account like a bogus name (probed 2026-11-23), so Terra stays 6.1.
+export const TERRA_MODEL = "gpt-6.1-terra";
+export const TERRA_EFFORT = "high";
 export const EXIT_CLEAN = 0;
 export const EXIT_FINDINGS = 1;
 export const EXIT_DID_NOT_RUN = 2;
@@ -66,7 +72,7 @@ const OPAQUE_CHANGE_RE = /^(?:Binary files .* differ|GIT binary patch)$/m;
 export const SETTLED_MAX_BYTES = 8 * 1024;
 
 export function parseArgs(argv) {
-  const opts = { base: null, commit: null, uncommitted: false, sol: false, reason: "", settled: null, after: null };
+  const opts = { base: null, commit: null, uncommitted: false, sol: false, terra: false, reason: "", settled: null, after: null };
   const value = (flag, index) => {
     const next = argv[index];
     // A leading dash would reach git as an option, and an option is not a reason.
@@ -81,6 +87,7 @@ export function parseArgs(argv) {
     else if (arg === "--settled") opts.settled = value(arg, ++i);
     else if (arg === "--uncommitted") opts.uncommitted = true;
     else if (arg === "--sol") opts.sol = true;
+    else if (arg === "--terra") opts.terra = true;
     else if (AFTER_FLAGS[arg]) {
       if (opts.after) throw new Error("Give one --after-* flag per run: the one step you actually took.");
       opts.after = { step: AFTER_FLAGS[arg], reason: value(arg, ++i).trim() };
@@ -91,6 +98,9 @@ export function parseArgs(argv) {
   if ([opts.base, opts.commit, opts.uncommitted].filter(Boolean).length > 1) {
     throw new Error("Choose one scope: --base, --commit or --uncommitted.");
   }
+  if (opts.sol && opts.terra) throw new Error("Choose one reviewer: --sol or --terra.");
+  // Terra is the one independent final review: no settled list, no round cap to lift.
+  if (opts.terra && (opts.settled || opts.after)) throw new Error("--terra is one independent final review; drop --settled and --after-*.");
   if (opts.sol && !opts.reason) throw new Error('--sol requires --reason "<why Luna was not enough>".');
   if (opts.reason && !opts.sol) throw new Error("--reason only applies to --sol.");
   // Sol stays independent: it never sees what an earlier round decided (retro, Mason, 2026-11-09).
@@ -514,8 +524,9 @@ function report(run, { label, defaultBase, diffLines, files, model, effort, dirt
 export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth = codeHealthGate } = {}) {
   try {
     const opts = parseArgs(argv);
-    const model = opts.sol ? CODEX_REVIEW_MODEL : LUNA_MODEL;
-    const effort = opts.sol ? CODEX_REVIEW_EFFORT : LUNA_EFFORT;
+    const model = opts.sol ? CODEX_REVIEW_MODEL : opts.terra ? TERRA_MODEL : LUNA_MODEL;
+    const effort = opts.sol ? CODEX_REVIEW_EFFORT : opts.terra ? TERRA_EFFORT : LUNA_EFFORT;
+    const lunaRound = !opts.sol && !opts.terra;
     if (opts.sol) console.error(`[luna-review] advisory Sol escalation, reason: ${opts.reason}`);
 
     const root = spawnSync(fixedGitExecutable(), ["rev-parse", "--show-toplevel"], { encoding: "utf8", windowsHide: true });
@@ -545,8 +556,8 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
     }
 
     // Luna rounds only: the advisory Sol escalation is the documented way past the guard cap.
-    const guardChange = !opts.sol && GUARD_DIFF_RE.test(frozen.diff);
-    const wholeBranch = !opts.sol && Boolean(frozen.baseSha);
+    const guardChange = lunaRound && GUARD_DIFF_RE.test(frozen.diff);
+    const wholeBranch = lunaRound && Boolean(frozen.baseSha);
     const rounds = guardChange || wholeBranch ? branchRounds(git, rootDir) : null;
     if (guardChange && rounds.guard >= GUARD_ROUND_LIMIT) {
       console.log("STOP: third review round on a guard change — drop the carve-out or hand the decision to Mason (AGENTS.md stop rule).");

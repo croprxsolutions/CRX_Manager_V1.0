@@ -29,7 +29,7 @@ Drive a coding job from "implement" to "reviewed, committed and landed", pausing
 
 ## The review ladder
 
-Subagent reviewers (Step 3) → **Luna** (`gpt-6-luna`/xhigh, advisory, as many rounds as needed) → **Sol** (`gpt-6.2-sol`/high, once, the only proof the gates accept, Sol-list changes only) → the Codex GitHub App on the PR. **Astra** (`gpt-6.2-astra`) reviews plans and designs before code (`plan-contract`, `astra-delegation`); it is advisory, never replaces Luna or Sol, and its findings count toward the `AGENTS.md` round caps. Pins: `docs/reference/codex-model-tuning.md`.
+Subagent reviewers (Step 3) → **Luna** (`gpt-6-luna`/xhigh, advisory, as many rounds as needed) → **Sol** (`gpt-6.2-sol`/high, once, the only proof the gates accept, Sol-list changes only) → the Codex GitHub App on the PR. Ordinary code off the Sol list skips Luna and Sol and gets ONE **Terra** final review (`gpt-6.1-terra`/high, `node scripts/luna-review.mjs --terra`; Mason, 2026-11-23). **Astra** (`gpt-6.2-astra`) reviews plans and designs before code (`plan-contract`, `astra-delegation`); it is advisory, never replaces Luna or Sol, and its findings count toward the `AGENTS.md` round caps. Pins: `docs/reference/codex-model-tuning.md`.
 
 ## Step 0 — Branch
 
@@ -102,7 +102,10 @@ For each confirmed BLOCKER or HIGH (read the cited line first): fix, re-run Step
 
 ## Step 6 — Luna, then Sol
 
-Every change that touches money, inventory, auth, RLS/RPC security, a migration, permissions or an Edge Function gets Codex review; a pure CSS/copy/layout change does not (say so).
+Pick the review by what the change touches (Mason, 2026-11-23):
+- **Docs and wording only, no app code:** no Codex review (say so). CI and the Codex GitHub App still run.
+- **Ordinary code off the Sol list** (`docs/reference/sol-required-paths.md`): ONE Terra final review, `node scripts/luna-review.mjs --terra`, on the committed head you will push. Fix any BLOCKER/HIGH and rerun once; then open the PR. Do not run Sol: no gate needs it and it costs ~20 minutes. A large or unclear change may still choose Sol (`--sol --reason`).
+- **Sol-list changes** (money, inventory, database, logins), and anything touching auth, RLS/RPC security, a migration, permissions or an Edge Function: Luna until clean, then Sol once, as below.
 
 - **Luna until clean** (`/codex-review` Step 3A, `node scripts/luna-review.mjs`): fix and re-run until no BLOCKER or HIGH remains. Write and commit the Step 7 docs before the clearing round, so it covers them. The round that clears the change is the default whole-branch round (base `origin/staging` for a feature branch, `origin/main` for hotfix/release) on the head you will push. A confirmed BLOCKER/HIGH in a screen that saves, uploads or imports needs a failing-then-passing test or observed behavior. Map the result: `CLEAN` → SHIP; any BLOCKER/HIGH → NEEDS-WORK; deferred MED/LOW only → SHIP-WITH-FOLLOWUPS. That is advisory, not permission to merge.
 - **Sol once, last** (`/codex-review` Step 3B), only for a Sol-list change, at the end of Step 7. Never route a Luna round through the Sol wrapper: it deletes the existing proof for that head.

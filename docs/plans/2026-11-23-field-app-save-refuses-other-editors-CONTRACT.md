@@ -118,3 +118,10 @@ Database only; no screen change. One PR into `staging`.
   no invoice linked to a job or blend ticket carries field rows. The preflight now stops the apply, for review, if any
   editable (draft/unposted) job- or blend-ticket invoice carries field rows at apply time; proof case added (a committed
   forged row stops the apply with nothing changed).
+- Luna round 3 (stop rule reached: a new HIGH in three rounds on the field-row trust; Mason approved landing the fix
+  tonight, relayed by the merge captain 2026-11-23): HIGH 1 (a field row written between the preflight and the revoke)
+  fixed: the migration locks both field-row tables against writes first (SHARE ROW EXCLUSIVE, reads still run), so no
+  write lands until commit; the prover asserts the order. HIGH 2 (a save already running the old body when the migration
+  commits keeps the old behavior) accepted: every function replacement has this window; the lock makes an in-flight save
+  that reaches its field-row delete wait for the commit, and live has 0 job-made groups and no job or blend invoice with
+  field rows, and the screen never sends these saves.

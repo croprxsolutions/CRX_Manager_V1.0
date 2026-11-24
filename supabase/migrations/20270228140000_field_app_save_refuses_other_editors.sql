@@ -33,6 +33,9 @@
 
 SET LOCAL lock_timeout = '5s';
 
+-- Hold out every field-row write (reads still run) from the preflight's check through the revoke, until commit.
+LOCK TABLE public.field_app_locations, public.field_app_location_shares IN SHARE ROW EXCLUSIVE MODE;
+
 DO $preflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p

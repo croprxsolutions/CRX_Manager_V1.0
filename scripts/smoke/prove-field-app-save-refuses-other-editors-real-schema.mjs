@@ -449,7 +449,11 @@ async function main() {
   for (const [name, sql] of Object.entries(DIRECT)) okProbe(sql);
   console.log('[before] a sales rep may also update and delete field rows and insert, update and delete their shares directly');
 
-  stageText('candidate.sql', lf(CANDIDATE));
+  const text = lf(CANDIDATE);
+  const lockAt = text.indexOf('LOCK TABLE public.field_app_locations, public.field_app_location_shares IN SHARE ROW EXCLUSIVE MODE;');
+  assert.ok(lockAt > 0 && lockAt < text.indexOf('DO $preflight$') && text.indexOf('DO $preflight$') < text.indexOf('REVOKE INSERT'),
+    'the field-row tables must be locked before the preflight check and the revoke');
+  stageText('candidate.sql', text);
   // A field row a sales rep wrote onto a job's invoices before the apply (committed) stops the apply for review.
   psql(`BEGIN; ${asRep}CREATE TEMP TABLE j AS SELECT fwe.job() AS id;
     SELECT public.transfer_job_to_invoice((SELECT id FROM j), auth.uid(), ${key('t')});

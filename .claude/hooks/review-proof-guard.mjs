@@ -212,15 +212,17 @@ function shellCommandViews(cmd) {
 // "\|" or ">" is not read as shell syntax; $( and backticks run even inside quotes.
 // sed, awk, node, python and uniq-with-files can write, so they stay out.
 // sort may only take flags that cannot name an output file (no files, no -o).
-const READ_ONLY_STEP_RE = /^(?:[A-Za-z_]\w*=[^\s;&|<>`()]*|(?:cd|cat|head|tail|wc|jq|ls|grep|echo|cut|tr|date|find)(?:\s.*)?|sort(?:\s+-[bdfghinMrRsuVz]+|\s+-[kt]\s*[\w.,]+)*|uniq(?:\s+-\w+)*|git(?:\s+-C\s+\S+)?\s+(?:status|log|show|diff|rev-parse|fetch|merge-base|worktree\s+list|branch)(?:\s.*)?|gh\s+(?:pr|run|issue)\s+(?:view|checks|list)(?:\s.*)?)$/; // case-sensitive: `git -c core.pager=…` runs a command, `git -C` does not
+const READ_ONLY_STEP_RE = /^(?:[A-Za-z_]\w*=[^\s;&|<>`()]*|(?:cd|cat|head|tail|wc|jq|ls|grep|echo|cut|tr|date|find)(?:\s.*)?|sort(?:\s+-[bdfghinMrRsuVz]+|\s+-[kt]\s*[\w.,]+)*|uniq(?:\s+-\w+)*|git(?:\s+-C\s+\S+)?\s+(?:status|log|show|diff|rev-parse|merge-base|worktree\s+list|branch)(?:\s.*)?|gh\s+(?:pr|run|issue)\s+(?:view|checks|list)(?:\s.*)?)$/; // case-sensitive: `git -c core.pager=…` runs a command, `git -C` does not
 // git's --output (and its abbreviations) and find's writing actions, checked with
 // quotes and escapes REMOVED (not blanked), so "--output=x" or \-delete still count
 // (Codex GitHub review, PR #2396).
 const GIT_FIND_WRITER_RE = /(?:^|\s)(?:--ou\S*|-delete|-exec\S*|-ok\S*|-fprint\S*|-fls)/i;
 function plainProofRead(cmd) {
-  if (/`|\$\(/.test(cmd)) return false;
+  // ${X@P} re-expands a stored $(...), so braced expansions are out too.
+  if (/`|\$\(|\$\{/.test(cmd)) return false;
   const bare = cmd.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, "Q").replace(/\d?>&\d|\d>\s*\/dev\/null/g, " ");
-  if (/[<>]/.test(bare)) return false;
+  // A lone & (background) would hide a second command inside one step (Codex, PR #2396).
+  if (/[<>]/.test(bare) || /&/.test(bare.replace(/&&/g, ""))) return false;
   const steps = bare.split(/&&|\|\||[;|\r\n]/).map((s) => s.trim()).filter(Boolean);
   if (steps.some((s) => /^(?:git|find)\b/i.test(s)) && GIT_FIND_WRITER_RE.test(cmd.replace(/["'\\]/g, ""))) return false;
   return steps.length > 0 && steps.every((s) => READ_ONLY_STEP_RE.test(s));

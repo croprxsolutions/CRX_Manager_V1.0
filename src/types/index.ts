@@ -156,6 +156,8 @@ export type MobileProduct = Pick<
   | 'signal_word'
   | 'rei_hours'
   | 'phi_days'
+  | 'rei_not_applicable'
+  | 'phi_not_applicable'
 >;
 
 // ─── EPA PPLS Lookup ────────────────────────────────────────────────────────

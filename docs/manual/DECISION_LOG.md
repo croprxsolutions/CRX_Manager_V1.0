@@ -1,5 +1,8 @@
 # Decision Log
 
+## 2026-11-23 — Release #2388 Sol HIGH 1: drivers see farm contacts only for their own deliveries
+
+**Decision (Mason, in chat, 2026-11-23: fix all three release findings before release).** Replaces the 2026-11-21 "drivers may see name, phone, email and delivery address for every farm" part of the #2161 entry. `get_driver_customers` now answers only a driver who still has the Deliveries or My Route page, and only for farms on their own not-deleted, not cancelled or voided deliveries that are open, scheduled from yesterday on, or completed since yesterday (`20270228150000_driver_farm_lookup_scope.sql`). Never the financial fields, as before.
 ## 2026-11-23 — #2364: Mason owner-accepted 7 Sol finding(s) at `67c24bf16161`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2364 at `67c24bf16161` (base `3dd8f9bbf7dc`) found 7 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

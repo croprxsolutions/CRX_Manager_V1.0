@@ -26,7 +26,8 @@ DO $preflight$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.products'::regclass
               AND attname IN ('rei_not_applicable', 'phi_not_applicable') AND NOT attisdropped)
-     OR to_regprocedure('public.clear_product_interval_not_applicable()') IS NOT NULL THEN
+     OR to_regprocedure('public.clear_product_interval_not_applicable()') IS NOT NULL
+     OR to_regprocedure('public._normalize_epa_registration(text)') IS NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_INTERVAL_NA_ALREADY_EXISTS';
   END IF;
   IF to_regprocedure('public.write_product_change_history()') IS NULL
@@ -59,7 +60,8 @@ GRANT REFERENCES (rei_not_applicable, phi_not_applicable) ON public.products TO 
 CREATE FUNCTION public.clear_product_interval_not_applicable() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $function$
 BEGIN
-  IF TG_OP = 'UPDATE' AND NEW.epa_registration IS DISTINCT FROM OLD.epa_registration THEN
+  IF TG_OP = 'UPDATE' AND public._normalize_epa_registration(NEW.epa_registration)
+       IS DISTINCT FROM public._normalize_epa_registration(OLD.epa_registration) THEN
     IF NEW.rei_not_applicable IS NOT DISTINCT FROM OLD.rei_not_applicable THEN NEW.rei_not_applicable := false; END IF;
     IF NEW.phi_not_applicable IS NOT DISTINCT FROM OLD.phi_not_applicable THEN NEW.phi_not_applicable := false; END IF;
   END IF;

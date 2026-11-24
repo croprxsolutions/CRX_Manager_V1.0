@@ -635,6 +635,25 @@ async function fieldObstacleFeatures(fieldIds: string[]): Promise<BoundaryFeatur
 }
 
 /**
+ * Each job field's map pin (boundary centroid) for the sheet's directions links.
+ * Best effort: a failed read returns an empty map and the sheet prints without links.
+ */
+export async function fetchJobFieldLocations(jobId: string): Promise<Map<string, { lat: number; lng: number }>> {
+  const locations = new Map<string, { lat: number; lng: number }>();
+  try {
+    const { data, error } = await supabase.rpc('get_job_fields_with_geojson', { p_job_id: jobId });
+    if (error) return locations;
+    assertRpcResult<JobMapFieldRow[]>(data, 'get_job_fields_with_geojson').forEach((row) => {
+      const { lat, lng } = centroidFromGeoJson(row.centroid_geojson);
+      if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) locations.set(row.id, { lat, lng });
+    });
+  } catch {
+    // Directions are optional; the crew sheet still prints.
+  }
+  return locations;
+}
+
+/**
  * Number one job's fields 1..n in spray order (sort_order, then the RPC's order),
  * counting every job field, mapped or not, so map numbers match the sheet's stops.
  * An unset sort_order counts as 0, exactly as the sheet's fetch does (chemicalApplicationReportFetch).

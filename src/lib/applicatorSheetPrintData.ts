@@ -7,7 +7,7 @@
 import { assertRpcResult, supabase } from './db';
 import { fmtNum, type ApplicatorSheetBillingSplit, type ApplicatorSheetData, type ApplicatorSheetSafety, type PreviousFieldApplications } from './applicatorSheetData';
 import { type ApplicatorPrintOptions, mapImageOptions } from './applicatorPrintOptions';
-import { fetchJobMapImages } from './jobMapImages';
+import { fetchJobFieldLocations, fetchJobMapImages } from './jobMapImages';
 
 interface ApplicationRecordJoin {
   application_date: string;
@@ -248,7 +248,7 @@ export async function prepareApplicatorSheetPrintData(
   data: ApplicatorSheetData,
   options: ApplicatorPrintOptions,
 ): Promise<ApplicatorSheetData> {
-  const [maps, previousApplications, billingSplits, safety] = await Promise.all([
+  const [maps, previousApplications, billingSplits, locations, safety] = await Promise.all([
     options.mapPages === 'none'
       ? Promise.resolve(null)
       : fetchJobMapImages(jobId, mapImageOptions(options.mapPages)),
@@ -258,10 +258,13 @@ export async function prepareApplicatorSheetPrintData(
     options.includeBillingSplits
       ? fetchApplicatorSheetBillingSplits(jobId, data.total_acres)
       : Promise.resolve([]),
+    fetchJobFieldLocations(jobId),
     options.includeSafetySheet ? sheetSafety(data.products) : Promise.resolve(undefined),
   ]);
+  const fields = data.fields.map((field) => ({ ...field, location: field.field_id ? locations.get(field.field_id) ?? null : null }));
   return {
     ...data,
+    fields,
     maps,
     previousApplications,
     billingSplits,

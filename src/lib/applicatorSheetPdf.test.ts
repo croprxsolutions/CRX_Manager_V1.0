@@ -17,10 +17,11 @@ const mockDoc = {
   setFontSize: vi.fn(),
   setTextColor: vi.fn(),
   text: vi.fn(),
+  textWithLink: vi.fn(),
   setDrawColor: vi.fn(),
   line: vi.fn(),
   splitTextToSize: vi.fn((text: string) => [text]),
-  getTextWidth: vi.fn(() => 50),
+  getTextWidth: vi.fn((_text: string) => 50),
   getImageProperties: vi.fn(() => ({ width: 1000, height: 700 })),
   addImage: vi.fn(),
   addPage: vi.fn(() => { pageCount += 1; }),
@@ -287,5 +288,47 @@ describe('generateApplicatorSheetPdf safety sheet (Mason, 2026-11-24)', () => {
     ] }), 'original', null);
     expect((await safetyTable())!.body[0]).toEqual(['1', 'TEST B', 'See label', 'See label', 'See label', '14 d']);
     expect(mockDoc.splitTextToSize.mock.calls.some((c) => String(c[0]).includes(`From product records on ${new Date().toLocaleDateString()}`))).toBe(true);
+  });
+});
+
+describe('generateApplicatorSheetPdf directions links', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pageCount = 1;
+    mockDoc.lastAutoTable = { finalY: 300 };
+    mockDoc.splitTextToSize.mockImplementation((text: string) => [text]);
+  });
+
+  it('prints one directions link per mapped field in stop order and skips unmapped fields', async () => {
+    await generateApplicatorSheetPdf(makeSheetData({
+      fields: [
+        { stop: 1, field_name: 'North 40', county: null, state: null, acres: 40, crop: null, pest: null, location: { lat: 39.15, lng: -89.05 } },
+        { stop: 2, field_name: 'No Pin', county: null, state: null, acres: 10, crop: null, pest: null, location: null },
+        { stop: 3, field_name: 'South 80', county: null, state: null, acres: 80, crop: null, pest: null, location: { lat: 39.2, lng: -89.1 } },
+      ],
+    }), 'original', null);
+    expect(mockDoc.textWithLink.mock.calls.map((call) => (call[3] as { url: string }).url)).toEqual([
+      'https://www.google.com/maps/dir/?api=1&destination=39.150000,-89.050000',
+      'https://www.google.com/maps/dir/?api=1&destination=39.200000,-89.100000',
+    ]);
+    const text = mockDoc.text.mock.calls.map((call) => call[0]).filter((value): value is string => typeof value === 'string');
+    expect(text.some((value) => value.startsWith('Stop 3 · South 80'))).toBe(true);
+    expect(text.some((value) => value.includes('No Pin ·'))).toBe(false);
+  });
+
+  it('shortens a long field name so the link stays on the page', async () => {
+    mockDoc.getTextWidth.mockImplementation((text: string) => text.length * 5);
+    const longName = 'A'.repeat(200);
+    await generateApplicatorSheetPdf(makeSheetData({
+      fields: [{ stop: 1, field_name: longName, county: null, state: null, acres: 1, crop: null, pest: null, location: { lat: 1, lng: 2 } }],
+    }), 'original', null);
+    const [, linkX] = mockDoc.textWithLink.mock.calls[0] as [string, number];
+    expect(linkX + 'Open directions'.length * 5).toBeLessThanOrEqual(612 - 40);
+    mockDoc.getTextWidth.mockImplementation(() => 50);
+  });
+
+  it('prints no directions block when no field has a map pin', async () => {
+    await generateApplicatorSheetPdf(makeSheetData(), 'original', null);
+    expect(mockDoc.textWithLink).not.toHaveBeenCalled();
   });
 });

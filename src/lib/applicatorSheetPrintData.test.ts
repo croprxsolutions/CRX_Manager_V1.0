@@ -13,7 +13,7 @@ vi.mock('./db', () => ({
   },
 }));
 
-vi.mock('./jobMapImages', () => ({ fetchJobMapImages: vi.fn() }));
+vi.mock('./jobMapImages', () => ({ fetchJobMapImages: vi.fn(), fetchJobFieldLocations: vi.fn(async () => new Map()) }));
 
 import { fetchApplicatorSheetBillingSplits, prepareApplicatorSheetPrintData } from './applicatorSheetPrintData';
 

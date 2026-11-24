@@ -1191,6 +1191,8 @@ product 1,001 and beyond (2026-11-08; live only once the function is redeployed,
 ### KI-187 — A blend ticket's app record and its linked job's completion can each take the stock
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Mason (field-app billing) · plan W1-07 · #2178 (open).
+>
+> **2026-11-23:** PR #2366 (a trigger fix) was closed unmerged; Mason moved this fix into the chemical application rebuild. Its 15 known gaps and decisions: [decision entry](decision-log.d/2026-11-23-f06-ki187-paused-for-chem-app-rebuild.md); To-Do row 5.8.
 
 **HIGH (conditional) · OPEN (source-confirmed on main and staging; not reproduced) · inventory/field app · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 6) · unassigned · GitHub #2178**
 "Create App Record" on a blend ticket deducts stock (`20260713060200` ~L194-198, now wrapped as

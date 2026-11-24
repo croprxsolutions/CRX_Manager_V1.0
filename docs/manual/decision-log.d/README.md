@@ -40,9 +40,10 @@ entry; reverse a decision with a new file that names the old one.
   here counts as the record for a migration or a session's commits.
 - **People and agents** searching settled decisions: search this folder AND `DECISION_LOG.md`.
 
-**Exception:** `node scripts/owner-accept-sol-finding.mjs --log` still writes Mason's
-owner-accept entry into `DECISION_LOG.md`, because the owner-accepted carry and the release
-check (`.github/scripts/release-flow.mjs`) expect exactly that file. Moving it needs a
-separate `.github/` PR that Mason or Taha merges by hand.
+**Sol skips:** `node scripts/owner-accept-sol-finding.mjs --log` writes Mason's skip entry
+here for a PR into `staging`, as `<date>-pr<n>-sol-skip-<head>.md` (2026-11-23), and
+`--carry-owner-accepted` accepts exactly that one new file. A review against `main` (hotfix or
+release) still writes `DECISION_LOG.md`, because the release check
+(`.github/scripts/release-flow.mjs`) lets only that file ride on a release head.
 
 `README.md` is never read as an entry.

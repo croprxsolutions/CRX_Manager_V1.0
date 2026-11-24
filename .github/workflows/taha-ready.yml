@@ -1,0 +1,104 @@
+# Taha ready bot (Mason and Taha, 2026-11-24): labels our PRs that are ready for Taha's Approve, mirrors his
+# verdict as taha-approved / taha-changes, pings him once per PR head in #crx-reviews (reminder after 24 h),
+# and adds topic labels. Readiness is rules only; Haiku only writes summaries and picks topics.
+# Script: .github/scripts/taha-ready.mjs.
+# The Slack token lives in the release-bot environment, which only main may use, so the bot runs from
+# main (schedule, after CI, by hand) and only the ping job opens that environment.
+name: Taha ready bot
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_run:
+    workflows: ['CI -- Lint, Type Check, Test, Build']
+    types: [completed]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/scripts/taha-ready*.mjs
+      - .github/workflows/taha-ready.yml
+
+permissions: {}
+
+jobs:
+  test:
+    name: Taha ready bot tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: node --test .github/scripts/taha-ready.test.mjs
+
+  label:
+    name: Label PRs ready for Taha
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency: { group: taha-ready-label, cancel-in-progress: false }
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      statuses: read
+      issues: write
+      pull-requests: write
+    outputs:
+      pings: ${{ steps.run.outputs.pings }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/taha-ready.mjs label
+
+  ping:
+    name: Ping Taha in Slack
+    needs: label
+    # !cancelled(): one unreadable PR fails the label job but must not hold back the others' pings.
+    if: ${{ !cancelled() && needs.label.outputs.pings != '' && needs.label.outputs.pings != '0' }}
+    runs-on: ubuntu-latest
+    environment: release-bot
+    concurrency: { group: taha-ready-ping, cancel-in-progress: false }
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      statuses: read
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          SLACK_RELEASE_TOKEN: ${{ secrets.SLACK_RELEASE_TOKEN }}
+          SLACK_RELEASE_CHANNEL: ${{ secrets.SLACK_RELEASE_CHANNEL }}
+          # Optional: a two-line Haiku summary in each first ping. Without it the ping goes out plain.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node .github/scripts/taha-ready.mjs ping
+
+  topics:
+    name: Topic labels (Haiku)
+    # Scheduled runs only, from main: the API key lives in the main-only release-bot environment.
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release-bot
+    concurrency: { group: taha-ready-topics, cancel-in-progress: false }
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node .github/scripts/taha-ready.mjs topics

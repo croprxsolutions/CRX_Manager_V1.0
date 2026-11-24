@@ -255,7 +255,7 @@ describe('generateApplicatorSheetPdf safety sheet (Mason, 2026-11-24)', () => {
     const table = await safetyTable();
     expect(table!.head[0]).toEqual(['#', 'Product', 'EPA Reg. No.', 'Signal Word', 'REI', 'PHI']);
     expect(table!.body).toHaveLength(40);
-    expect(table!.body[0]).toEqual(['1', 'TEST Product 1', '—', 'See label', 'See label', '30 d']);
+    expect(table!.body[0]).toEqual(['1', 'TEST Product 1', 'See label', 'See label', 'See label', '30 d']);
     expect(table!.body[1]).toEqual(['2', 'TEST Product 2', '100-1', 'WARNING', '12 hr', '30 d']);
     expect(mockDoc.addPage).toHaveBeenCalledTimes(1); // its own sheet; autotable flows any overflow onto more pages
   });
@@ -265,6 +265,7 @@ describe('generateApplicatorSheetPdf safety sheet (Mason, 2026-11-24)', () => {
     expect(await safetyTable()).toBeUndefined();
     expect(mockDoc.addPage).toHaveBeenCalledTimes(1);
     expect(mockDoc.text.mock.calls.some((c) => String(c[0]).startsWith('Safety could not be loaded'))).toBe(true);
+    expect(mockDoc.splitTextToSize.mock.calls.some((c) => String(c[0]).includes('From product records'))).toBe(false);
   });
 
   it('still prints REI and PHI on the safety sheet when a saved Custom layout hides those columns', async () => {
@@ -274,14 +275,14 @@ describe('generateApplicatorSheetPdf safety sheet (Mason, 2026-11-24)', () => {
     await generateApplicatorSheetPdf(makeSheetData({ products: [p],
       safety: [{ product_name: p.product_name, epa_registration: null, signal_word: 'caution', rei_hours: 12, phi_days: 30 }] }),
     'custom', custom as never);
-    expect((await safetyTable())!.body[0]).toEqual(['1', 'TEST Product 1', '—', 'CAUTION', '12 hr', '30 d']);
+    expect((await safetyTable())!.body[0]).toEqual(['1', 'TEST Product 1', 'See label', 'CAUTION', '12 hr', '30 d']);
   });
 
   it('says the values come from product records on the print date, and a negative value is not on file', async () => {
     await generateApplicatorSheetPdf(makeSheetData({ products: [product(1, 12)], safety: [
       { product_name: 'TEST B', epa_registration: null, signal_word: null, rei_hours: -1, phi_days: 14 },
     ] }), 'original', null);
-    expect((await safetyTable())!.body[0]).toEqual(['1', 'TEST B', '—', 'See label', 'See label', '14 d']);
+    expect((await safetyTable())!.body[0]).toEqual(['1', 'TEST B', 'See label', 'See label', 'See label', '14 d']);
     expect(mockDoc.splitTextToSize.mock.calls.some((c) => String(c[0]).includes(`From product records on ${new Date().toLocaleDateString()}`))).toBe(true);
   });
 });

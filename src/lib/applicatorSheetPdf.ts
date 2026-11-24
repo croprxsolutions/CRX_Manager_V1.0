@@ -466,7 +466,9 @@ function appendSafetySheet(doc: JsPDFWithAutoTable, autoTable: typeof import('js
   doc.setFontSize(9);
   doc.setTextColor(...GRAY);
   const printed = new Date().toLocaleDateString();
-  const intro = doc.splitTextToSize(`${heading} · From product records on ${printed} · Always read and follow the product label.`, width) as string[];
+  // Name the source only when the records were actually read.
+  const source = data.safety === null ? '' : ` · From product records on ${printed}`;
+  const intro = doc.splitTextToSize(`${heading}${source} · Always read and follow the product label.`, width) as string[];
   doc.text(intro, margin, margin + 26);
   const startY = margin + 30 + intro.length * 11;
   if (items.length === 0) {
@@ -487,7 +489,8 @@ function appendSafetySheet(doc: JsPDFWithAutoTable, autoTable: typeof import('js
     body: items.map((item, index) => [
       String(index + 1),
       item.product_name,
-      item.epa_registration || '—',
+      // A blank number is not on file, not "unregistered" (that needs a registered flag, KI-206).
+      item.epa_registration || 'See label',
       item.signal_word ? item.signal_word.toUpperCase() : 'See label',
       safetyInterval(item.rei_hours, 'hr'),
       safetyInterval(item.phi_days, 'd'),

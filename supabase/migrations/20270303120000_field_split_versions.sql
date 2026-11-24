@@ -11,7 +11,8 @@
 --      the same transaction.
 --   2. field_payer_notes: plain editable notes per field and customer (not versioned).
 --   3. set_field_billing_split(...): the office writer (replay-safe), and field_split_as_of(...): the office resolver.
---      Both SECURITY DEFINER, admin or sales rep only. save_field now writes through the same internal writer.
+--      Both SECURITY DEFINER, admin or sales rep only; the writer and save_field also refuse a rep with
+--      Fields & Maps turned off in Settings > Page Access (PAGE_ACCESS_DENIED). save_field now writes through the same internal writer.
 --   4. field_billing_defaults becomes a read-only COPY of the version in force today (Central date, product shares
 --      above 0%; primary = the owner when paying, else the largest share), rewritten by the writer and by a pg_cron job just after Central midnight. Its
 --      browser and service_role writes (INSERT, UPDATE, DELETE, TRUNCATE) are revoked and the three write policies dropped (I approve: access
@@ -349,7 +350,11 @@ BEGIN
        AND public._field_billing_copy_expected_20270303(f.id) IS DISTINCT FROM public._field_billing_copy_actual_20270303(f.id)
      ORDER BY f.id
   LOOP
-    PERFORM 1 FROM public.fields WHERE id = v_field FOR UPDATE;
+    -- A field row someone holds (an invoice draft, a split save) is skipped, never waited on while this run holds
+    -- field_billing_defaults rows: waiting could deadlock with an order invoice that locks a field and then the table.
+    -- The next run (or that field's next save) refreshes it.
+    PERFORM 1 FROM public.fields WHERE id = v_field FOR UPDATE SKIP LOCKED;
+    CONTINUE WHEN NOT FOUND;
     IF public._refresh_field_billing_defaults_copy_20270303(v_field) THEN
       v_changed := v_changed + 1;
     END IF;
@@ -479,9 +484,12 @@ BEGIN
     IF (SELECT count(DISTINCT e->>'customer_id') FROM jsonb_array_elements(p_notes) e) <> jsonb_array_length(p_notes) THEN
       RAISE EXCEPTION 'FIELD_PAYER_NOTES_INVALID: a customer is listed twice' USING ERRCODE = '22023';
     END IF;
-    -- Notes belong to the field's owner or a customer on one of its split versions.
+    -- Notes belong to the field's owner, a customer on one of its split versions, or a customer who already has a
+    -- note here (a former owner's note stays editable after the field changes hands).
     SELECT string_agg(e->>'customer_id', ', ') INTO v_bad FROM jsonb_array_elements(p_notes) e
      WHERE (e->>'customer_id')::uuid IS DISTINCT FROM v_owner
+       AND NOT EXISTS (SELECT 1 FROM public.field_payer_notes n
+                        WHERE n.field_id = p_field_id AND n.customer_id = (e->>'customer_id')::uuid)
        AND NOT EXISTS (SELECT 1 FROM public.field_billing_split_payers p
                         JOIN public.field_billing_split_versions v ON v.id = p.version_id
                        WHERE v.field_id = p_field_id AND p.customer_id = (e->>'customer_id')::uuid);
@@ -546,6 +554,11 @@ DECLARE
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED' USING ERRCODE = '42501'; END IF;
   PERFORM public.require_admin_or_sales_rep();
+  -- Settings > Page Access: a sales rep with Fields & Maps turned off is refused (the _require_page_access rule).
+  IF EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = v_actor AND p.role IS DISTINCT FROM 'admin'
+              AND 'fields' = ANY (COALESCE(p.denied_pages, ARRAY[]::text[]))) THEN
+    RAISE EXCEPTION 'PAGE_ACCESS_DENIED: fields' USING ERRCODE = '42501';
+  END IF;
   IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' OR p_idempotency_key COLLATE "C" ~ '[^ -~]' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: set_field_billing_split requires a printable p_idempotency_key' USING ERRCODE = '22023';
   END IF;
@@ -650,6 +663,11 @@ BEGIN
     RAISE EXCEPTION 'ACTOR_MISMATCH';
   END IF;
   PERFORM require_admin_or_sales_rep();
+  -- Settings > Page Access: every save_field caller is on Fields & Maps; a rep with it turned off is refused.
+  IF EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = v_actor AND p.role IS DISTINCT FROM 'admin'
+              AND 'fields' = ANY (COALESCE(p.denied_pages, ARRAY[]::text[]))) THEN
+    RAISE EXCEPTION 'PAGE_ACCESS_DENIED: fields' USING ERRCODE = '42501';
+  END IF;
 
   IF p_idempotency_key IS NOT NULL THEN
     v_existing := check_idempotency(p_idempotency_key, 'save_field');

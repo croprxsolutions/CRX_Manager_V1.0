@@ -13,8 +13,9 @@
  *      version, UPDATE/DELETE of history, and (until FP-4) a payer whose product and application shares differ;
  *      a 0%/0% named payer saves;
  *   3. save_field: a name-only save writes no version and keeps notes; a notes-only save changes notes and writes no
- *      version; a named 0% payer survives two saves; a changed split writes a version; removing every payer puts the
- *      field back on its owner at 100%; a per-acre price is refused;
+ *      version; a named 0% payer survives two saves; a changed split writes a version; removing every payer from a
+ *      field with a split is refused and the split kept; a per-acre price is refused; a sales rep with Fields & Maps
+ *      turned off is refused by save_field and set_field_billing_split;
  *   4. retries: the same key resent writes nothing; the same key with different payers is refused; a missing or
  *      non-printable key is refused;
  *   5. access: a direct write to field_billing_defaults is refused; an applicator on a job still reads that field's
@@ -234,7 +235,21 @@ try {
     AND proname ~ '(field_split|field_billing_split|field_billing_cop)' AND proname NOT LIKE 'get\_field\_billing\_splits\_for\_%' -- older readers, unchanged
     AND has_function_privilege('authenticated', oid, 'EXECUTE');`),
     'field_split_as_of,set_field_billing_split', 'signed-in users run only the two entry points');
-  console.log('[access] direct writes refused; applicator keeps the copy only; other roles and anon refused');
+  // Settings > Page Access: a sales rep with Fields & Maps turned off cannot save a split or a field (Sol r2 HIGH).
+  psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = '{fields}' WHERE id = '${USERS.rep}'; SET session_replication_role = origin;`);
+  const vF2 = versions(F2);
+  r = attempt(USERS.rep, `${refuse(setSplit(F2, TODAY, payers([[A, M]]), 'k-rep-denied'))} v := t;`);
+  assert.match(r, /PAGE_ACCESS_DENIED: fields/, `a rep without Fields & Maps cannot save a split: ${r}`);
+  r = attempt(USERS.rep, `${refuse(saveField(F2, A, 'Denied rename', 'NULL::jsonb', 'k-rep-denied-sf'))} v := t;`);
+  assert.match(r, /PAGE_ACCESS_DENIED: fields/, `a rep without Fields & Maps cannot use save_field: ${r}`);
+  assert.equal(versions(F2), vF2, 'and nothing is written');
+  psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = '{}' WHERE id = '${USERS.rep}'; SET session_replication_role = origin;`);
+  // A note already on a field stays editable when its customer is no longer the owner or a payer (Sol r2 MED).
+  scalar(`INSERT INTO public.field_payer_notes (field_id, customer_id, notes) VALUES ('${F4}', '${X}', 'former owner') RETURNING 1;`);
+  commit(USERS.admin, asUser(`${setSplit(F4, TODAY, 'NULL', 'k-former-note', `'[{"customer_id":"${X}","notes":"corrected"}]'::jsonb`)} v := r::text;`));
+  assert.equal(note(F4, X), 'corrected', 'a former owner\'s note can be corrected');
+  psql(`DELETE FROM public.field_payer_notes WHERE field_id = '${F4}' AND customer_id = '${X}';`); // X must stay note-free for the customer-delete check below
+  console.log('[access] direct writes refused; applicator keeps the copy only; other roles and anon refused; Page Access honoured');
 
   // 6. Customers who own or pay on a field cannot be deleted.
   for (const [who, cust] of [['owner', E], ['payer only', D]]) {

@@ -1,5 +1,7 @@
 # Proposed change: cut guard friction (for Sol's opinion)
 
+> **Superseded by PR #2396 (2026-11-23).** What was built differs from this proposal: the Follow-ups check and ordinary-push landing claims were removed outright (no create-time check, no 30-minute auto-release); `cd` is allowed only when every push names an absolute `git -C` folder; and the shell proof-read exemption was tried and reverted after review found writes it let through, so proof files are read with the Read/Grep/Glob tools only. The record below is the packet as sent to Sol.
+
 **This is our proposed change, not yet built.** Owner's position: we are far too handicapped on shipping code. We need structure and a harness, but the current harness is over-engineered. We want your honest opinion, including "cut more" or "this is the wrong approach", and how YOU would go about it. Prefer the smallest change that removes the friction. Do not propose new machinery unless it deletes more than it adds.
 
 Repo: this checkout (branch from origin/staging). Hooks: `.claude/hooks/`. Claude and Codex both run them (`.codex/hooks.json` via an adapter).

@@ -621,7 +621,64 @@ function FieldSetupPage() {
     );
   };
 
+  // Saves the split and payer notes; true = saved, false = refused (already shown to the user).
+  const saveSplitAndNotes = async (
+    savedFieldId: string,
+    splitChanged: boolean,
+    notesChanges: Array<{ customer_id: string; notes: string | null }>,
+    isNew: boolean,
+    saveLoadSeq: number,
+  ): Promise<boolean> => {
+    const request = {
+      p_field_id: savedFieldId,
+      p_effective_from: splitFrom,
+      p_payers: splitChanged
+        ? billingSplits.map((r) => ({
+          customer_id: r.customer_id,
+          product_share_micro_pct: r.productMicro,
+          application_share_micro_pct: r.appMicro,
+        }))
+        : null,
+      p_notes: notesChanges.length > 0 ? notesChanges : null,
+      p_reason: 'Saved from Field Setup',
+    };
+    try {
+      const { data: sData, error: sErr } = await supabase.rpc('set_field_billing_split', {
+        ...request,
+        p_payers: request.p_payers as unknown as Json, // null = no split change (notes only)
+        p_notes: request.p_notes as unknown as Json,
+        // Same request, same key, across retries and reloads (contract rule 3).
+        p_idempotency_key: splitSaveKey(profile!.id, savedFieldId, fingerprintIntentPayload(request)),
+      });
+      if (sErr) throw sErr;
+      assertRpcResult(sData, 'set_field_billing_split');
+      clearSplitSaveKey(profile!.id, savedFieldId);
+    } catch (splitError) {
+      const message = splitSaveErrorMessage((splitError as { message?: string } | null)?.message ?? 'Failed to save the billing split.');
+      Sentry.captureException(toSentryError(splitError), { tags: { source: 'critical_action', action: 'set_field_billing_split' } });
+      toast('error', isNew ? `Field created, but its billing split was not saved: ${message} Enter it again and save.` : message);
+      return false;
+    }
+    if (!isNew && fieldLoadSeqRef.current === saveLoadSeq) {
+      try {
+        const reloaded = await loadFieldSplit(savedFieldId, today);
+        if (fieldLoadSeqRef.current === saveLoadSeq) applySplitData(reloaded);
+      } catch (reloadError) {
+        Sentry.captureException(toSentryError(reloadError), { tags: { source: 'fetch', action: 'reload_field_split_versions' } });
+        // What was sent is saved (the editor was locked meanwhile): make it the clean state so a retry cannot resend it.
+        if (fieldLoadSeqRef.current !== saveLoadSeq) return true;
+        loadedSplitsRef.current = billingSplits;
+        loadedNotesRef.current = payerNotes;
+        setSplitFrom(today);
+        toast('warning', 'The split was saved, but its history could not be reloaded. Reload the page to see it.');
+      }
+    }
+    return true;
+  };
+
   const handleSave = async () => {
+    // A save's reply must not fill in another field opened meanwhile.
+    const saveLoadSeq = fieldLoadSeqRef.current;
     if (!field.field_name) {
       toast('error', 'Field name is required');
       return;
@@ -782,52 +839,11 @@ function FieldSetupPage() {
         }
 
         // Split and payer notes: one dated version per split change; notes never make a version.
-        let splitSaved = false;
-        if (splitChanged || notesChanges.length > 0) {
-          const request = {
-            p_field_id: savedFieldId,
-            p_effective_from: splitFrom,
-            p_payers: splitChanged
-              ? billingSplits.map((r) => ({
-                customer_id: r.customer_id,
-                product_share_micro_pct: r.productMicro,
-                application_share_micro_pct: r.appMicro,
-              }))
-              : null,
-            p_notes: notesChanges.length > 0 ? notesChanges : null,
-            p_reason: 'Saved from Field Setup',
-          };
-          try {
-            const { data: sData, error: sErr } = await supabase.rpc('set_field_billing_split', {
-              ...request,
-              p_payers: request.p_payers as unknown as Json, // null = no split change (notes only)
-              p_notes: request.p_notes as unknown as Json,
-              // Same request, same key, across retries and reloads (contract rule 3).
-              p_idempotency_key: splitSaveKey(profile!.id, savedFieldId, fingerprintIntentPayload(request)),
-            });
-            if (sErr) throw sErr;
-            assertRpcResult(sData, 'set_field_billing_split');
-            clearSplitSaveKey(profile!.id, savedFieldId);
-            splitSaved = true;
-          } catch (splitError) {
-            const message = splitSaveErrorMessage((splitError as { message?: string } | null)?.message ?? 'Failed to save the billing split.');
-            Sentry.captureException(toSentryError(splitError), { tags: { source: 'critical_action', action: 'set_field_billing_split' } });
-            toast('error', isNew ? `Field created, but its billing split was not saved: ${message} Enter it again and save.` : message);
-            persistError = true;
-          }
-        }
-        if (splitSaved && !isNew) {
-          try {
-            applySplitData(await loadFieldSplit(savedFieldId, today));
-          } catch (reloadError) {
-            Sentry.captureException(toSentryError(reloadError), { tags: { source: 'fetch', action: 'reload_field_split_versions' } });
-            // What was sent is saved (the editor was locked meanwhile): make it the clean state so a retry cannot resend it.
-            loadedSplitsRef.current = billingSplits;
-            loadedNotesRef.current = payerNotes;
-            setSplitFrom(today);
-            toast('warning', 'The split was saved, but its history could not be reloaded. Reload the page to see it.');
-          }
-        }
+        const splitResult = splitChanged || notesChanges.length > 0
+          ? await saveSplitAndNotes(savedFieldId, splitChanged, notesChanges, isNew, saveLoadSeq)
+          : null;
+        const splitSaved = splitResult === true;
+        if (splitResult === false) persistError = true;
         if (detailsChanged) loadedFieldRef.current = field; // saved: a retry after a later failure skips save_field
 
         const savedAcres = acresPatch;

@@ -72,22 +72,24 @@ export function splitSaveErrorMessage(message: string): string {
   return SERVER_MESSAGES.find(([code]) => message.includes(code))?.[1] ?? message;
 }
 
-// Contract rule 3: one retry key per save action, kept across retries and page reloads. Only the latest attempt
-// for a field keeps its key; a different request gets a new one.
+// Contract rule 3: one retry key per save action, kept across retries and page reloads. Every unconfirmed
+// request for a field keeps its own key, so going back to an earlier unconfirmed request replays it.
 const KEY_PREFIX = 'crx:field-split-save:v1:';
 const memoryKeys = new Map<string, string>();
 
 export function splitSaveKey(userId: string, fieldId: string, requestFingerprint: string): string {
   const slot = `${KEY_PREFIX}${userId}:${fieldId}`;
-  let stored: { fp?: string; key?: string } = {};
+  let stored: Record<string, string> = {};
   try {
-    stored = JSON.parse(window.sessionStorage.getItem(slot) ?? memoryKeys.get(slot) ?? '{}');
+    const parsed: unknown = JSON.parse(window.sessionStorage.getItem(slot) ?? memoryKeys.get(slot) ?? '{}');
+    if (parsed && typeof parsed === 'object') stored = parsed as Record<string, string>;
   } catch { /* unreadable: start a new key */ }
-  if (stored.fp === requestFingerprint && stored.key) return stored.key;
-  const record = JSON.stringify({ fp: requestFingerprint, key: generateIdempotencyKey('set_field_billing_split', userId) });
+  if (typeof stored[requestFingerprint] === 'string') return stored[requestFingerprint];
+  const key = generateIdempotencyKey('set_field_billing_split', userId);
+  const record = JSON.stringify({ ...stored, [requestFingerprint]: key });
   memoryKeys.set(slot, record);
   try { window.sessionStorage.setItem(slot, record); } catch { /* the in-memory copy still covers retries */ }
-  return JSON.parse(record).key;
+  return key;
 }
 
 /** Only after the save is confirmed. */

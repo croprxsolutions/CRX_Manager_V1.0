@@ -32,6 +32,7 @@ describe('field split shares (micro-percent)', () => {
   it('turns database refusals into plain messages', () => {
     expect(splitSaveErrorMessage('FIELD_SPLIT_DUPLICATE_PAYER: a customer is listed twice')).toBe('A customer is listed twice in the split.');
     expect(splitSaveErrorMessage('FIELD_SPLIT_CLEAR_REFUSED: who pays is already set')).toMatch(/cannot be left blank/);
+    expect(splitSaveErrorMessage('PAGE_ACCESS_DENIED: fields')).toMatch(/Fields & Maps/);
     expect(splitSaveErrorMessage('something else')).toBe('something else');
   });
 });

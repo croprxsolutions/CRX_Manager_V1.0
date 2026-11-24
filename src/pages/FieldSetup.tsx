@@ -730,7 +730,7 @@ function FieldSetupPage() {
       }
 
       if (error) {
-        toast('error', rpcAuthErrorMessage(error as Parameters<typeof rpcAuthErrorMessage>[0]) ?? error.message);
+        toast('error', rpcAuthErrorMessage(error as Parameters<typeof rpcAuthErrorMessage>[0]) ?? splitSaveErrorMessage(error.message));
       } else {
         if (detailsChanged) {
           assertRpcResult(data, 'save_field');

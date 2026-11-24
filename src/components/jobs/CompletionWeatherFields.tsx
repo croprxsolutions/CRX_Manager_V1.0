@@ -87,7 +87,8 @@ export default function CompletionWeatherFields({ value, onChange, otherJobs }: 
   // The form closes (or another job's opens) when this unmounts; a late reply must not fill that form.
   const mounted = useRef(true);
   const latest = useRef(value);
-  latest.current = value;
+  // Kept current after each render so a slow reply can see what was typed meanwhile.
+  useEffect(() => { latest.current = value; }, [value]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const fillFromLastWeather = async () => {

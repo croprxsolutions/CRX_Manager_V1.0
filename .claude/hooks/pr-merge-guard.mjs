@@ -544,10 +544,10 @@ function gateRequest(request) {
     // Taha's lanes (taha-lane-lib.mjs, Mason 2026-11-22): Taha's Approve on this head, or Mason's `taha override #<PR> <code>`, lets one PR at one commit through.
     const lane = tahaLaneGate({
       prefix: "PR MERGE GATE",
-      tahaApproved: () => tahaApprovedOnGitHub({ repo: request.repo, gh: hardGateGh, pullRequest: Number(pr.number), headSha: pr.headRefOid }),
       pullRequest: Number(pr.number),
       headSha: pr.headRefOid,
       tellTaha: (body) => tellTahaOnGitHub({ repo: request.repo, gh: hardGateGh, pullRequest: Number(pr.number), body }),
+      tahaApproved: () => tahaApprovedOnGitHub({ repo: request.repo, gh: hardGateGh, pullRequest: Number(pr.number), headSha: pr.headRefOid }),
       files: prFilesOnGitHub({ repo: request.repo, gh: hardGateGh, number: Number(pr.number), headSha: pr.headRefOid }),
       dirs: skipStateDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]),
       notice: (text) => process.stderr.write(text),

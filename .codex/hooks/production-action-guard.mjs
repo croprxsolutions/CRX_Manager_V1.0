@@ -128,7 +128,7 @@ const NODE_REPL_TOOL = /(?:^|__)node[_-]?repl(?:__|$)/i;
 // `pr-claim-lib` and the `registry-freshness-lib` it imports joined 2026-11-19
 // (#1948): imported at startup, and the claim decides whether a push or merge is refused.
 // `taha-lane-lib` joined 2026-11-22: imported at startup, and it decides whether a
-// merge in Taha's areas is refused until Dec 15.
+// merge in Taha's areas is refused without Taha's Approve on the head (no end date).
 const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-risk-lib|coderabbit-skip-lib|sol-accept-lib|teammate-comments-lib|followups-lib|read-only-search-lib|app-repo-identity|session-context-reminder|pr-claim-lib|registry-freshness-lib|taha-lane-lib)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
 const PROTECTED_HARNESS_PATH_RE = new RegExp(String.raw`(?:^|[\\/])${PROTECTED_HARNESS_SOURCE}$`, "i");
 const PROTECTED_HARNESS_FRAGMENT_RE = new RegExp(`(?<![\\w.-])${PROTECTED_HARNESS_SOURCE}(?![\\w.-])`, "i");

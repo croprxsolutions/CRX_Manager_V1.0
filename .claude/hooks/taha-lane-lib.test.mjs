@@ -333,6 +333,8 @@ ok(!tahaApprovedHead([rv("DISMISSED", A)], A), "a dismissed Approve does not cou
 ok(tahaApprovedHead([rv("APPROVED", A), rv("COMMENTED", A)], A), "a later comment does not undo the Approve");
 ok(tahaApprovedHead([rv("CHANGES_REQUESTED", A), rv("APPROVED", A)], A), "an Approve after changes requested counts");
 ok(!tahaApprovedHead([rv("APPROVED", A)], "short"), "an unusable head never counts");
+ok(!tahaApprovedHead([rv("APPROVED", A), rv("DISMISSED", B)], A), "a dismissal after his Approve, on any commit, holds it (#2406)");
+ok(tahaApprovedHead([rv("APPROVED", A), rv("DISMISSED", A), rv("APPROVED", A)], A), "a fresh Approve after a dismissal counts");
 const revGh = (tsv, base = "") => (args) => {
   if (args.some((a) => /\/pulls\/5\/reviews/.test(a))) return tsv;
   if (args.some((a) => /\/issues\/5\/timeline/.test(a))) { if (base === null) throw new Error("502"); return base; }

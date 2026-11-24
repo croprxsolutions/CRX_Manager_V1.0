@@ -6,6 +6,8 @@ You build the foundation of the field application system: tooling, who pays for 
 
 Claude, autonomous, in this session, after Mason's go (M7). Each item: plan-contract (or the contract in this kit) → build → proof → the `ship.md` Step 6 review route → PR into `staging`. Merges into `staging` go in order; while one PR waits (review, the 4-hour Taha hold, a Mason answer), the next may be built on a stacked branch (`BUILD-PLAN.md` › Stacking). A gate or a disputed finding parks that PR only (`BUILD-PLAN.md` › Rules); keep going with the next unblocked item. Every ask for Mason goes in the slice batch in `PROGRESS.md` and in the session's closing message.
 
+When a PR into staging is ready, the lane never merges it; it messages the MERGE CAPTAIN session with the PR number, head SHA, and Sol need/proof, and the captain lands it under Autonomous landing (Mason, 2026-11-24).
+
 ## Items, in order (one PR each; a screen part is a second PR after its database PR)
 
 Before this session starts, the kit is already in `origin/staging` (`BUILD-PLAN.md` › pre-build checklist).

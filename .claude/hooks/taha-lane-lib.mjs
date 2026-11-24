@@ -6,6 +6,7 @@
 // wiring (BLOCK_FILES_RE) still need Mason's code, whatever Taha's review says.
 // Field billing (field invoices, spray jobs, blend tickets) stays Mason's.
 // #1980 and #1989 merged after Taha asked; a written note did not stop them.
+// Comments do not count (Taha, 2026-11-24).
 //
 // Mason can still let ONE named PR through: the merge refusal issues a 6-digit
 // code for that PR at its current head, and his chat message `taha override #<PR> <code>`
@@ -291,18 +292,17 @@ export const TAHA_LOGIN = "tahakhanabdalli";
 export const TAHA_ID = "50602678";
 
 /**
- * Taha's verdict on exactly `headSha`: his latest approve / changes-requested / dismissed review
- * on that commit decides, as GitHub does; comments and pending reviews do not count.
- * `rows`: [{ id, state, commit, at }] oldest first. True only for APPROVED, and only when that
- * Approve came after the PR's last base-branch change (`baseChangedAt`, ISO time or ""): a retarget
- * keeps the head but changes the code that merges.
+ * Taha's latest deciding review (approve / changes-requested / dismissed, on any commit) must be an
+ * Approve of exactly `headSha`; comments and pending reviews do not count. A dismissal is deciding, so
+ * dismissing his Request changes never revives an older Approve (#2406). `rows`: [{ id, state, commit, at }]
+ * oldest first. True only when that Approve also came after the PR's last base-branch change
+ * (`baseChangedAt`, ISO time or ""): a retarget keeps the head but changes the code that merges.
  */
 export function tahaApprovedHead(rows, headSha, baseChangedAt = "") {
   if (!usableHead(headSha)) return false;
-  const head = headSha.toLowerCase();
   const verdict = (rows || []).filter((r) => String(r?.id || "") === TAHA_ID
-    && String(r?.commit || "").toLowerCase() === head && !["COMMENTED", "PENDING"].includes(r?.state)).at(-1);
-  if (verdict?.state !== "APPROVED") return false;
+    && ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(r?.state)).at(-1);
+  if (verdict?.state !== "APPROVED" || String(verdict.commit || "").toLowerCase() !== headSha.toLowerCase()) return false;
   if (!baseChangedAt) return true;
   const approvedAt = Date.parse(verdict.at);
   return Number.isFinite(approvedAt) && approvedAt > Date.parse(baseChangedAt);
@@ -436,7 +436,8 @@ export function tellTahaOnGitHub({ repo, gh, pullRequest, body }) {
 
 /**
  * The merge gates' single call: null when the merge may go on, otherwise the
- * refusal text. With Mason's override for this PR and head, `tellTaha(body)`
+ * refusal text. `tahaApproved()` true (Taha signed off on this head) lets it through.
+ * With Mason's override for this PR and head, `tellTaha(body)`
  * must post the PR comment first (once per override); if it can't, the merge is refused.
  */
 export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, tahaApproved = () => false, notice = () => {} }) {

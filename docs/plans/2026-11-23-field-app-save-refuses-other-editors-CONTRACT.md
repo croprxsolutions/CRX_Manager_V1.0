@@ -35,7 +35,7 @@ Release #2388 Sol HIGH 3 (release head c2732b049). Read at origin/staging 0882a1
   invoice (standalone: by `invoice_id`; grouped: by `invoice_group_id`) carries no field rows.
   `FIELD_APP_WRONG_EDITOR: Nothing was saved. …` with one plain sentence (Split Billing / made from a job or blend ticket).
   The message states why, without promising a screen.
-- **Smallest change:** one new migration `20270228140000` re-emitting only the public wrapper with this check, placed
+- **Smallest change:** one new migration `20270228200000` re-emitting only the public wrapper with this check, placed
   after the replay lookup and taken only when the call is not a replay; before checking, it takes the lock layer's locks in
   the same order (group advisory lock, anchor member, all members; or the single row). Preflight pins the current wrapper
   body, postflight the new. The impl, lock layer, cost layer and grants are unchanged.

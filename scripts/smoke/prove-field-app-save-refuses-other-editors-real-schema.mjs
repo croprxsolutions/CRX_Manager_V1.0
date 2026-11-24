@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270228140000_field_app_save_refuses_other_editors (release #2388 Sol HIGH 3).
+ * Real-schema proof for 20270228200000_field_app_save_refuses_other_editors (release #2388 Sol HIGH 3).
  * Container setup and replay copied from prove-field-app-refuses-payer-change-real-schema.mjs. Each case rolled back:
  *   BEFORE: a completed job whose saved split bills Farms A and B (Field Setup lists Farm C at 100%) is invoiced through
  *           transfer_job_to_invoice; saving A's invoice through save_field_app_invoice with the job's field cancels A's
@@ -31,7 +31,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270228140000_field_app_save_refuses_other_editors.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270228200000_field_app_save_refuses_other_editors.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

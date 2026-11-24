@@ -1,5 +1,5 @@
 -- Written 2026-11-23. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270228140000_field_app_save_refuses_other_editors.md.
+-- docs/reference/migrations.d/20270228200000_field_app_save_refuses_other_editors.md.
 --
 -- WHY (release #2388 Sol HIGH 3): save_field_app_invoice rebuilds an invoice from the fields it is sent and the payers
 --   Field Setup lists for them: it deletes every group member's lines, cancels each member whose farm is not in that

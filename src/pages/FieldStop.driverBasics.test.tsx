@@ -4,7 +4,7 @@
  * next stop on today's route, and the one no-signal message.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { todayInBusinessTz } from '../lib/dateUtils';
 
@@ -202,6 +202,23 @@ describe('FieldStop: Next Stop', () => {
     tables.data.deliveries = [{ ...baseStop, id: 'del-tomorrow', scheduled_date: '2999-01-01' }];
     fireEvent.click(screen.getByRole('button', { name: /Next Stop/ }));
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/my-route'));
+  });
+
+  it('does not move a driver who already left the screen while Next Stop was still looking', async () => {
+    await completeStop();
+    let reply: (v: unknown) => void = () => {};
+    mockFrom.mockImplementation((table: string) => {
+      const chain = buildChain(table);
+      if (table === 'deliveries') chain.then = (ok: (v: unknown) => unknown) => new Promise((r) => { reply = r; }).then(ok);
+      return chain;
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Next Stop/ }));
+    mockNavigate.mockClear();
+    await new Promise((r) => setTimeout(r, 0));
+    cleanup(); // the driver tapped Back
+    reply({ data: [{ ...baseStop, id: 'del-2' }], error: null });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 });
 

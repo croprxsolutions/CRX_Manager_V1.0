@@ -297,6 +297,8 @@ export default function FieldStop() {
   }, [id, navigate, toast, fetchPhotos, loadAsDriver]);
 
   useEffect(() => { activeStopIdRef.current = id; fetchStop(); }, [id, fetchStop]);
+  // Leaving the screen ends this stop, so a slow reply (e.g. Next Stop) can no longer navigate the driver.
+  useEffect(() => () => { activeStopIdRef.current = undefined; }, []);
 
   // After a successful Arrive, re-read deliveries.updated_at so an offline
   // completion snapshots the POST-arrive value. confirm_delivery bumps

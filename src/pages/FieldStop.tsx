@@ -47,6 +47,8 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useDeliveryBrands } from '../components/deliveries/useDeliveryBrands';
 import { DeliveryBrandsPanel } from '../components/deliveries/DeliveryBrandPicker';
 import { brandWarnings } from '../lib/deliveryBrands';
+import { fetchNextRouteStopId, ROUTE_NO_SIGNAL_MESSAGE } from '../lib/routeStops';
+import StopContactActions, { type StopCoords } from '../components/route/StopContactActions';
 
 interface StopItem {
   id: string;
@@ -63,35 +65,49 @@ interface StopPhoto {
   uploaded_at?: string | null;
 }
 
-// The stop's own delivery address as one line ('' when missing or unreadable).
-async function readStopAddress(addressId: string): Promise<{ line: string; error: unknown }> {
+// The stop's own delivery address as one line ('' when missing or unreadable), with its map pin when it has one.
+async function readStopAddress(addressId: string): Promise<{ line: string; coords: StopCoords | null; error: unknown }> {
   const { data, error } = await supabase
     .from('customer_addresses')
-    .select('address_line, city, state, zip')
+    .select('address_line, city, state, zip, latitude, longitude')
     .eq('id', addressId)
     .maybeSingle();
-  const a = (data ?? {}) as { address_line?: string | null; city?: string | null; state?: string | null; zip?: string | null };
+  const a = (data ?? {}) as { address_line?: string | null; city?: string | null; state?: string | null; zip?: string | null; latitude?: number | null; longitude?: number | null };
+  // No pin from a failed read: Navigate then falls back to the address text.
+  const coords = !error && typeof a.latitude === 'number' && typeof a.longitude === 'number' ? { lat: a.latitude, lng: a.longitude } : null;
   // A missing site row is a failure too: the driver must not start a stop with no verified destination.
-  return { line: [a.address_line, a.city, a.state, a.zip].filter(Boolean).join(', '), error: error ?? (data ? null : new Error('stop address not found')) };
+  return { line: [a.address_line, a.city, a.state, a.zip].filter(Boolean).join(', '), coords, error: error ?? (data ? null : new Error('stop address not found')) };
 }
 
 // An email of only spaces is no email, so the missing-email warning still shows (#2167).
 const hasEmail = (email: string | null | undefined): boolean => !!email?.trim();
 
+// Only an open stop sends a receipt on completion, so only it reads the receipt recipient: when the email is
+// missing, or no contact name is loaded (a driver's farm lookup has none) so the Signed by step can offer it.
+function needsRecipientLookup(del: StopDelivery): boolean {
+  if (del.status !== 'scheduled' && del.status !== 'in_progress') return false;
+  return !hasEmail(del.customer?.email) || !del.customer?.contact_name;
+}
+
 // A driver's stop never asks the customers table for the farm: withStopFarm fills it from the driver lookup (#2018).
 function stopColumns(isDriver: boolean): string {
   const base = 'id, delivery_number, status, updated_at, customer_id, order_id, created_by, delivery_address_id, delivery_notes, assigned_driver';
-  return isDriver ? base : `${base}, customer:customers(farm_name, email, contact_name)`;
+  return isDriver ? base : `${base}, customer:customers(farm_name, email, contact_name, phone, shipping_address, billing_address)`;
+}
+
+// A stop with its own delivery address shows only that one, read later; otherwise the farm's shipping address,
+// else billing, like the printed load sheet (Mason, 2026-11-21).
+function farmAddressFor(del: StopDelivery, farm: { shipping_address?: string | null; billing_address?: string | null } | null | undefined): string {
+  if (del.delivery_address_id) return '';
+  return farm?.shipping_address?.trim() || farm?.billing_address?.trim() || '';
 }
 
 // The stop with a driver's view of its farm (#2018); throws when the lookup fails. Others keep the joined farm.
 async function withStopFarm(del: StopDelivery, isDriver: boolean): Promise<{ del: StopDelivery; address: string }> {
-  if (!isDriver) return { del, address: '' };
+  if (!isDriver) return { del, address: farmAddressFor(del, del.customer) };
   const farm = (await fetchDriverFarms([del.customer_id])).get(del.customer_id);
-  const customer = farm ? { farm_name: farm.farm_name, email: farm.email, contact_name: null } : null;
-  // A stop with its own delivery address shows only that one, read later; otherwise the farm's shipping address,
-  // else billing, like the printed load sheet (Mason, 2026-11-21).
-  return { del: { ...del, customer }, address: del.delivery_address_id ? '' : farm?.shipping_address?.trim() || farm?.billing_address?.trim() || '' };
+  const customer = farm ? { farm_name: farm.farm_name, email: farm.email, contact_name: null, phone: farm.phone } : null;
+  return { del: { ...del, customer }, address: farmAddressFor(del, farm) };
 }
 
 interface StopDelivery {
@@ -105,7 +121,10 @@ interface StopDelivery {
   delivery_address_id: string | null;
   delivery_notes: string | null;
   assigned_driver: string | null;
-  customer: { farm_name: string | null; email: string | null; contact_name: string | null } | null;
+  customer: {
+    farm_name: string | null; email: string | null; contact_name: string | null; phone?: string | null;
+    shipping_address?: string | null; billing_address?: string | null;
+  } | null;
 }
 
 type Step = 'arrive' | 'verify' | 'sign' | 'review' | 'done';
@@ -139,6 +158,8 @@ export default function FieldStop() {
   const [photos, setPhotos] = useState<StopPhoto[]>([]);
   const [deliveryQtys, setDeliveryQtys] = useState<Record<string, number>>({});
   const [addressLine, setAddressLine] = useState<string>('');
+  const [addressCoords, setAddressCoords] = useState<StopCoords | null>(null);
+  const [findingNextStop, setFindingNextStop] = useState(false);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -150,18 +171,19 @@ export default function FieldStop() {
   // Goal 5 paper fallback: a photo of the signed paper ticket replaces the on-screen signature.
   const [usePaperTicket, setUsePaperTicket] = useState(false);
   const [paperDeliveredOn, setPaperDeliveredOn] = useState(todayInBusinessTz());
-  // Stop-to-stop navigation reuses this page; never carry paper mode onto the next stop.
-  // Also drop the previous stop's photos, so a failed load for this stop shows none
-  // (fails closed) instead of letting the last stop's ticket photo pass the check.
-  useEffect(() => {
-    setUsePaperTicket(false); setNoOnePresent(false); setSignedBy(''); setSignatureDataUrl(null);
-    setPaperDeliveredOn(todayInBusinessTz()); setPhotos([]);
-  }, [id]);
   const [emailOnComplete, setEmailOnComplete] = useState(true);
   // The receipt address when the customer row is hidden from this driver (see fetchReceiptRecipient).
   const [receiptRecipient, setReceiptRecipient] = useState<ReceiptRecipient | null>(null);
   // What the completion response said about billing, for the Done step (the same data the toasts use).
   const [doneBilling, setDoneBilling] = useState<DoneBillingResult | null>(null);
+  // Stop-to-stop navigation (Next Stop) reuses this page; never carry paper mode onto the next stop.
+  // Also drop the previous stop's photos, so a failed load for this stop shows none
+  // (fails closed) instead of letting the last stop's ticket photo pass the check. The receipt
+  // box and the Done step's billing line start fresh, as on a stop opened from My Route.
+  useEffect(() => {
+    setUsePaperTicket(false); setNoOnePresent(false); setSignedBy(''); setSignatureDataUrl(null);
+    setPaperDeliveredOn(todayInBusinessTz()); setPhotos([]); setEmailOnComplete(true); setDoneBilling(null);
+  }, [id]);
   // Brand PR B (B-2): which brand went off the truck, saved before completion. Never blocks a completion.
   const brandState = useDeliveryBrands(id, !!delivery && delivery.id === id && (delivery.status === 'scheduled' || delivery.status === 'in_progress'));
   // Tied to the stop that raised it: on another stop it never shows, so its Complete anyway cannot act there.
@@ -228,10 +250,12 @@ export default function FieldStop() {
     setDelivery(del);
     // A stop with its own delivery address shows only that one (read below); otherwise the farm's address.
     setAddressLine(farmAddress);
+    setAddressCoords(null);
     setReceiptRecipient(null);
-    // Only an open stop sends a receipt on completion.
-    if (!hasEmail(del.customer?.email) && (del.status === 'scheduled' || del.status === 'in_progress')) {
-      void fetchReceiptRecipient(del.id).then((recipient) => { if (!isStale()) setReceiptRecipient(recipient); });
+    if (needsRecipientLookup(del)) {
+      void fetchReceiptRecipient(del.id)
+        .then((recipient) => { if (!isStale()) setReceiptRecipient(recipient); })
+        .catch((recipientErr: unknown) => Sentry.captureException(recipientErr, { level: 'warning', tags: { source: 'fetch', page: 'field-stop-recipient' } }));
     }
     if (del.status === 'scheduled') setStep('arrive');
     else if (del.status === 'in_progress') setStep('verify');
@@ -259,13 +283,14 @@ export default function FieldStop() {
     setDeliveryQtys(initQtys);
 
     if (del.delivery_address_id) {
-      const { line, error: addrErr } = await readStopAddress(del.delivery_address_id);
+      const { line, coords, error: addrErr } = await readStopAddress(del.delivery_address_id);
       if (isStale()) return;
       if (addrErr) {
         Sentry.captureException(addrErr, { tags: { source: 'fetch', page: 'field-stop-address' } });
         toast('error', 'Could not load the stop address. Check the delivery before driving.');
       }
       setAddressLine(line);
+      setAddressCoords(coords);
     }
     await fetchPhotos();
     setLoading(false);
@@ -636,6 +661,21 @@ export default function FieldStop() {
     await finishCompleted(result);
   };
 
+  // Next Stop opens the next open stop on today's route, in My Route's order; none left (or no signal) goes to My Route.
+  const goToNextStop = async () => {
+    if (!id) return;
+    setFindingNextStop(true);
+    let nextStopId: string | null = null;
+    try {
+      nextStopId = await fetchNextRouteStopId(id);
+    } catch (nextErr) {
+      Sentry.captureException(nextErr, { tags: { source: 'fetch', page: 'field-stop-next' } });
+    }
+    setFindingNextStop(false);
+    if (activeStopIdRef.current !== id) return; // the driver already left this stop
+    navigate(nextStopId ? `/my-route/${nextStopId}` : '/my-route');
+  };
+
   if (loading) {
     return (
       <div className="max-w-2xl mx-auto">
@@ -647,6 +687,8 @@ export default function FieldStop() {
   if (!delivery) return null;
 
   const farmName = delivery.customer?.farm_name || 'Unknown customer';
+  // The farm's contact on file, offered as a one-tap Signed by name (the driver can still type another).
+  const contactName = (delivery.customer?.contact_name || receiptRecipient?.contactName || '').trim();
   const shortCount = items.filter((it) => (deliveryQtys[it.id] ?? it.quantity) < it.quantity).length;
 
   return (
@@ -659,6 +701,16 @@ export default function FieldStop() {
         className="-mx-4 -mt-4 mb-4 md:mx-0 md:mt-0 md:rounded-xl"
       />
 
+      {!isOnline && step !== 'done' && (
+        <div role="status" className="mb-3 flex items-start gap-2 rounded-lg border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <WifiOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <p>
+            {ROUTE_NO_SIGNAL_MESSAGE}
+            {step !== 'arrive' && ' If the customer is signing now, use a paper ticket, then complete here once you have signal.'}
+          </p>
+        </div>
+      )}
+
       {step === 'arrive' && (
         <>
           <div className="bg-white border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
@@ -667,15 +719,11 @@ export default function FieldStop() {
                 <MapPin className="w-5 h-5 mt-0.5 text-crx-green shrink-0" aria-hidden="true" /> {addressLine}
               </p>
             )}
+            <StopContactActions phone={delivery.customer?.phone} address={addressLine} coords={addressCoords} />
             {delivery.delivery_notes && (
-              <p className="bg-amber-50 border-l-4 border-amber-500 px-4 py-3 text-sm text-amber-800">{delivery.delivery_notes}</p>
+              <p className="bg-amber-50 border-l-4 border-amber-500 px-4 py-3 text-base text-amber-900 whitespace-pre-wrap break-words">{delivery.delivery_notes}</p>
             )}
-            {!isOnline && (
-              <p className="flex items-center gap-2 px-4 py-3 text-sm text-amber-800">
-                <WifiOff className="w-4 h-4 shrink-0" aria-hidden="true" /> You're offline — connect to start this stop.
-              </p>
-            )}
-            {!addressLine && !delivery.delivery_notes && isOnline && (
+            {!addressLine && !delivery.delivery_notes && (
               <p className="px-4 py-3 text-sm text-secondary">Tap Start Delivery when you arrive.</p>
             )}
           </div>
@@ -774,6 +822,11 @@ export default function FieldStop() {
               </label>
             )}
             <label htmlFor="signed-by" className="block text-sm font-semibold text-nav-dark mt-2 mb-1">Signed by (name)</label>
+            {contactName && !noOnePresent && signedBy.trim() !== contactName && (
+              <button type="button" onClick={() => setSignedBy(contactName)} className="mb-2 inline-flex min-h-[44px] max-w-full items-center rounded-full border border-crx-green bg-crx-green-light px-4 text-base font-semibold text-crx-green-hover active:scale-[0.99]">
+                <span className="truncate">Use {contactName}</span>
+              </button>
+            )}
             <input
               id="signed-by"
               type="text"
@@ -852,13 +905,10 @@ export default function FieldStop() {
                   ))}
                 </div>
               )}
-              {isOnline ? (
-                <button type="button" disabled={uploadingPhoto || countOrdinaryPhotos(photos) >= MAX_ORDINARY_DELIVERY_PHOTOS} onClick={() => fileInputRef.current?.click()} className={SECONDARY_BUTTON}>
-                  <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo'}
-                </button>
-              ) : (
-                <p className="flex items-center gap-2 text-sm text-amber-800"><WifiOff className="w-4 h-4 shrink-0" aria-hidden="true" /> Photos can only be uploaded while online — reconnect to add photos.</p>
-              )}
+              {/* Like the ticket and drop-location photo buttons: off without signal (the banner above says why). */}
+              <button type="button" disabled={uploadingPhoto || !isOnline || countOrdinaryPhotos(photos) >= MAX_ORDINARY_DELIVERY_PHOTOS} onClick={() => fileInputRef.current?.click()} className={SECONDARY_BUTTON}>
+                <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo'}
+              </button>
             </section>
             <dl className="border-t border-gray-200 divide-y divide-gray-100 text-base">
               <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Delivery</dt><dd className={isPartial ? 'font-semibold text-amber-800' : 'text-nav-dark'}>{isPartial ? `Partial — ${shortCount} short` : 'Full delivery'}</dd></div>
@@ -871,12 +921,6 @@ export default function FieldStop() {
               Email a receipt to the customer
             </label>
           </div>
-
-          {!isOnline && (
-            <div className="bg-amber-50 border-l-4 border-amber-500 text-amber-800 text-sm rounded-lg px-3 py-2 mt-3">
-              No signal. A delivery can only be completed with signal; <strong>nothing is saved offline</strong>. If the customer is signing now, go back and use a paper ticket, then complete here once you have signal.
-            </div>
-          )}
 
           <div className="mt-3 flex gap-2.5 rounded-xl border border-gray-200 bg-white px-3.5 py-3">
             <Receipt className="mt-0.5 h-5 w-5 shrink-0 text-crx-green" aria-hidden="true" />
@@ -900,8 +944,8 @@ export default function FieldStop() {
             <p className="text-sm text-secondary mt-1">Signed by {signedBy}</p>
           </div>
           <DoneBilling billing={doneBilling} />
-          <MainAction onClick={() => navigate('/my-route')}>
-            Next Stop <ChevronRight className="w-6 h-6" aria-hidden="true" />
+          <MainAction onClick={() => void goToNextStop()} disabled={findingNextStop}>
+            {findingNextStop ? 'Finding next stop…' : 'Next Stop'} <ChevronRight className="w-6 h-6" aria-hidden="true" />
           </MainAction>
         </>
       )}

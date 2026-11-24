@@ -265,7 +265,7 @@ switch to the server receipt merged 2026-11-09 (PR #1649). The close action `clo
 to check" (Deliveries) has **Mark handled** (admin-only since `20270301120000`, Mason 2026-11-23; sales reps see the
 list without it), so a handled receipt leaves the list and the server never emails it, and
 Email Confirmation pauses any receipt still queued before its hand send, then marks it handled once the email goes
-out (a failed hand send leaves it on the list). Still open: provider bounce handling (no email bounces are tracked
+out when an admin sent it (a rep's hand send stays listed for an admin; a failed hand send leaves it on the list). Still open: provider bounce handling (no email bounces are tracked
 on any path). The three rare duplicates Mason accepted on 2026-11-09 (DECISION_LOG) stay accepted.
 
 ### KI-26 — Delivery completion-evidence leftovers

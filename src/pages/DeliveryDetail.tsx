@@ -1597,7 +1597,12 @@ export default function DeliveryDetail() {
       });
       heldNotSent = false;
       toast('success', `Confirmation email sent to ${customer.email}`);
-      await closeSentReceipt(delivery.id, paused.queued_at, delivery.delivery_number);
+      // Only an admin marks a receipt handled, a rep's own hand send included (Mason, 2026-11-24): the server refuses it.
+      if (!isAdmin && paused.outcome === 'paused') {
+        toast('info', `Delivery ${delivery.delivery_number}: its receipt stays on "Customer receipts to check" until an admin marks it handled.`);
+      } else {
+        await closeSentReceipt(delivery.id, paused.queued_at, delivery.delivery_number);
+      }
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
       // No answer came back: the email may have gone out, so never say it did not (Codex P2).

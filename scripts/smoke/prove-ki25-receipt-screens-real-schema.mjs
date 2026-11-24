@@ -4,8 +4,8 @@
  * It calls close_delivery_receipt with the exact named arguments src/lib/receiptsToCheck.ts sends, as an office
  * user, and reads "Customer receipts to check" with the screen's own filter under RLS. Shown:
  *  - Mark handled: a needs_check receipt leaves the list and the server worker never claims it;
- *  - Email Confirmation: 'manual_send' pauses an owed receipt (it stays listed, the worker skips it), then 'handled'
- *    takes it off the list once the hand send went out;
+ *  - Email Confirmation: 'manual_send' pauses an owed receipt (it stays listed, the worker skips it); only an admin's
+ *    'handled' takes it off the list (a sales rep is refused, their own hand send included);
  *  - a sent receipt answers 'sent' with sent_at, so the screen asks before a second copy;
  *  - every key the screen reads is in the answer; a driver is refused;
  *  - #2251 (20270223120000): a close that names the receipt it saw (p_expected_queued_at) acts on no other: a receipt
@@ -94,7 +94,8 @@ try {
   console.log('[KI-25] Mark handled: closed, off the list');
 
   // Email Confirmation (DeliveryDetail) by a sales rep: pause first; the worker then skips it and it stays listed
-  // until handled. The hand send is unchanged: the same rep closes the receipt they paused.
+  // until an admin marks it handled. The rep's own close is refused even after their email went out (Mason,
+  // 2026-11-24: no hand-send exception), so the screen does not try it.
   const paused = JSON.parse(close(USERS.rep, D(2), 'manual_send', 'ki25s-pause-2'));
   assert.equal(paused.outcome, 'paused');
   assert.equal(paused.sent_at, null); assert.equal(paused.send_authorized_at, null); // the screen goes straight to the send
@@ -103,40 +104,19 @@ try {
   assert.equal(status(D(4)), 'sending', 'control: the worker does claim an ordinary owed receipt');
   assert.equal(status(D(1)), 'cancelled', 'the worker never claims a handled receipt');
   assert.equal(status(D(2)), 'needs_check', 'the worker never claims a paused receipt');
-  assert.equal(listed(USERS.admin), D(2), 'a paused receipt stays listed until the hand send is marked handled');
-  // A pause alone is not proof of a send (Sol r1): the close needs send-email's own log of this rep's sent email.
-  const repClose = (key) => out(closeAt(USERS.rep, D(2), 'handled', key, paused.queued_at));
-  // A row as send-email writes it (service role): key scoped to type + delivery, created_by the caller.
-  const logSend = (tag, { by = USERS.rep, to = 'ki25-screens@example.invalid', st = 'sent', at = 'now()', delivery = D(2), type = 'delivery_completed' } = {}) =>
-    psql(`INSERT INTO public.email_log (customer_id, recipient_email, email_type, subject, status, idempotency_key, created_by, created_at)
-      VALUES ('${CUST}', '${to}', '${type}', 'Delivery confirmation', '${st}',
-              'delivery_completed:delivery:${delivery}:${tag}', '${by}', ${at});`);
-  assert.match(repClose('ki25s-h2-none'), /RECEIPT_HANDLED_ADMIN_ONLY/, 'paused but nothing sent: refused');
-  logSend('failed', { st: 'failed' });
-  logSend('elsewhere', { to: 'someone-else@example.invalid' });
-  logSend('other-type', { type: 'invoice' });
-  logSend('other-rep', { by: USERS.admin });
-  logSend('before-pause', { at: "now() - interval '10 minutes'" });
-  logSend('other-delivery', { delivery: D(4) });
-  assert.match(repClose('ki25s-h2-wrong'), /RECEIPT_HANDLED_ADMIN_ONLY/,
-    'a failed send, another address, another sender, another email type, a send before the pause or another delivery is no proof');
-  assert.equal(status(D(2)), 'needs_check', 'refused closes leave it listed');
-  // A send made before this receipt was queued is for an earlier receipt (L2), even if the pause is older still.
-  const pausedAt = `(SELECT hand_send_at FROM public.delivery_receipt_queue WHERE delivery_id = '${D(2)}')`;
-  // Only the queue time can refuse it here: drop the earlier decoy (it is after the queue time) and pause before queueing.
-  psql(`DELETE FROM public.email_log WHERE idempotency_key = 'delivery_completed:delivery:${D(2)}:before-pause';
-    UPDATE public.delivery_receipt_queue SET hand_send_at = created_at - interval '10 minutes' WHERE delivery_id = '${D(2)}';`);
-  logSend('before-queued', { at: "(SELECT created_at FROM public.delivery_receipt_queue WHERE delivery_id = '" + D(2) + "') - interval '1 second'" });
-  assert.match(repClose('ki25s-h2-old'), /RECEIPT_HANDLED_ADMIN_ONLY/, 'a send before the receipt was queued is no proof');
-  // A repeat pause by the same rep keeps the first pause time, so it never moves past a send already logged (Luna MED).
-  const firstPause = scalar(`SELECT ${pausedAt}::text;`);
-  assert.equal(JSON.parse(close(USERS.rep, D(2), 'manual_send', 'ki25s-pause-2b')).outcome, 'paused');
-  assert.equal(scalar(`SELECT ${pausedAt}::text;`), firstPause, 'a repeat pause keeps the first pause time');
-  logSend('real');
-  assert.equal(lastJson(closeAt(USERS.rep, D(2), 'handled', 'ki25s-handled-2', paused.queued_at)).outcome, 'closed',
-    'the rep who paused it closes it after their logged hand send, as DeliveryDetail does');
-  assert.equal(listed(USERS.admin), 'none', 'after the hand send it is off the list');
-  console.log('[KI-25] Email Confirmation by a sales rep: paused, not claimed, then handled by that rep');
+  assert.equal(listed(USERS.admin), D(2), 'a paused receipt stays listed until an admin marks it handled');
+  // A row as send-email writes it (service role) for the rep's hand send: it does not let the rep close it.
+  psql(`INSERT INTO public.email_log (customer_id, recipient_email, email_type, subject, status, idempotency_key, created_by, created_at)
+    VALUES ('${CUST}', 'ki25-screens@example.invalid', 'delivery_completed', 'Delivery confirmation', 'sent',
+            'delivery_completed:delivery:${D(2)}:real', '${USERS.rep}', now());`);
+  assert.match(out(closeAt(USERS.rep, D(2), 'handled', 'ki25s-h2-rep', paused.queued_at)), /RECEIPT_HANDLED_ADMIN_ONLY/,
+    'the rep who paused and sent it still cannot mark it handled');
+  assert.equal(status(D(2)), 'needs_check', 'refused: it stays listed');
+  assert.equal(savedKey('ki25s-h2-rep'), '0', 'a refused call saves nothing');
+  assert.equal(lastJson(closeAt(USERS.admin, D(2), 'handled', 'ki25s-handled-2', paused.queued_at)).outcome, 'closed',
+    'an admin marks the hand-sent receipt handled');
+  assert.equal(listed(USERS.admin), 'none', 'after the admin marks it handled it is off the list');
+  console.log('[KI-25] Email Confirmation by a sales rep: paused, not claimed, rep refused, admin marks it handled');
 
   // Already sent: the answer says so with sent_at, which opens "Receipt may already be sent".
   const sent = JSON.parse(close(USERS.admin, D(3), 'manual_send', 'ki25s-pause-3'));
@@ -219,26 +199,17 @@ try {
   assert.equal(scalar(`SELECT count(*) FROM pg_proc WHERE proname = 'close_delivery_receipt';`), '1', 'exactly one close_delivery_receipt');
   console.log('[#2251] R3-R5: generation kept, offsets match, old keys replay, used keys bound, missing row and driver refused');
 
-  // Admin-only, the hand-send exception is bound to its rep and its receipt: a rep cannot close a receipt someone
-  // else paused, nor an old pause of their own once the receipt was cancelled and queued again.
+  // A receipt an admin paused: a rep is refused too, and the admin closes it.
   psql(`SET session_replication_role = replica;
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status, scheduled_date, completed_at, signed_by) VALUES
-      ('${D(8)}', 'PROVER-KI25S-8', '${ORDER}', '${CUST}', '${USERS.admin}', 'completed', current_date, now(), 'Pat'),
-      ('${D(9)}', 'PROVER-KI25S-9', '${ORDER}', '${CUST}', '${USERS.admin}', 'completed', current_date, now(), 'Pat');
+      ('${D(8)}', 'PROVER-KI25S-8', '${ORDER}', '${CUST}', '${USERS.admin}', 'completed', current_date, now(), 'Pat');
     INSERT INTO public.delivery_receipt_queue (delivery_id, customer_id, requested_by, status, last_error, receipt, created_at, next_attempt_at) VALUES
-      ('${D(8)}', '${CUST}', '${USERS.admin}', 'pending', NULL, '{"lines":[]}', ${HOUR_AGO}, now()),
-      ('${D(9)}', '${CUST}', '${USERS.admin}', 'pending', NULL, '{"lines":[]}', ${HOUR_AGO}, now());`);
+      ('${D(8)}', '${CUST}', '${USERS.admin}', 'pending', NULL, '{"lines":[]}', ${HOUR_AGO}, now());`);
   assert.equal(JSON.parse(close(USERS.admin, D(8), 'manual_send', 'ki25s-a1-pause')).outcome, 'paused');
-  assert.match(out(closeAt(USERS.rep, D(8), 'handled', 'ki25s-a1-rep', queuedAt(D(8)))), /RECEIPT_HANDLED_ADMIN_ONLY/, 'another user\'s pause: refused');
+  assert.match(out(closeAt(USERS.rep, D(8), 'handled', 'ki25s-a1-rep', queuedAt(D(8)))), /RECEIPT_HANDLED_ADMIN_ONLY/, 'a receipt an admin paused: refused');
   assert.equal(status(D(8)), 'needs_check');
-  assert.equal(JSON.parse(close(USERS.rep, D(9), 'manual_send', 'ki25s-a2-pause')).outcome, 'paused');
-  assert.equal(JSON.parse(close(USERS.admin, D(9), 'handled', 'ki25s-a2-admin')).outcome, 'closed', 'an admin closes a rep\'s paused receipt');
-  psql(requeue(D(9))); // a second completion: a new receipt on the same row, still carrying the old pause's columns
-  psql(`UPDATE public.delivery_receipt_queue SET status = 'needs_check', last_error = 'provider said no' WHERE delivery_id = '${D(9)}';`);
-  assert.match(out(closeAt(USERS.rep, D(9), 'handled', 'ki25s-a2-rep', queuedAt(D(9)))), /RECEIPT_HANDLED_ADMIN_ONLY/, 'an old pause never covers a new receipt');
-  assert.equal(status(D(9)), 'needs_check');
-  assert.equal(lastJson(closeAt(USERS.admin, D(9), 'handled', 'ki25s-a2-admin2', queuedAt(D(9)))).outcome, 'closed', 'an admin can');
-  console.log('[admin-only] rep refused on another user\'s pause and on a re-queued receipt; admin closes both');
+  assert.equal(lastJson(closeAt(USERS.admin, D(8), 'handled', 'ki25s-a1-admin', queuedAt(D(8)))).outcome, 'closed', 'an admin can');
+  console.log('[admin-only] rep refused on a receipt an admin paused; the admin closes it');
 
   // The live smoke chain still passes on the four-argument function (its grant check finds the one signature).
   const chain = psql(readFileSync(new URL('./smoke-close-delivery-receipt-chain.sql', import.meta.url), 'utf8'), { allowFailure: true });

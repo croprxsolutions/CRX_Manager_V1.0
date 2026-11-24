@@ -1,20 +1,13 @@
--- KI-151 follow-up (Mason, 2026-11-23, answering Taha's #2266 review in Slack: "The 5% rule also applies when Edit PO
--- lowers a quantity, and the exception covers bills that went over because a receipt was reversed").
+-- KI-151 follow-up (Taha's #2266 review: Edit PO could lower a PO's ordered total under its vendor bills with no check:
+-- lower an unreceived quantity, drop a line, or an admin's lower cost on an unreceived line).
 --
--- 1. Edit PO (save_purchase_order) could lower a PO's ordered total under its vendor bills with no check (lower an
---    unreceived quantity, drop a line, or an admin's lower cost on an unreceived line). Mason, 2026-11-24, after three
---    Sol rounds found leaks in a rep/admin split: one rule for everyone. Once a PO has an active (not deleted, not
---    voided) vendor bill, an Edit PO save that changes its lines at all (adds or removes a line, or changes a line's
---    quantity, product, unit, line notes or cost) is refused (PO_BILLED_LINES_LOCKED) before anything is saved; header
---    edits (notes, dates) still save. To change lines, void the bill, edit, then enter the bill again (create_vendor_bill
---    applies its limits); a cost correction goes through set_purchase_order_item_costs, which keeps the 5% rule. The
---    refusal depends only on the caller's own edit and whether a bill exists, never on a role, cost or bill amount, and
---    names no amount. A billed PO's unchanged lines are saved without costs and with their stored product name.
--- 2. Reversed receipts: no change. set_purchase_order_item_costs (20270223100000) refuses a cut on the received-value
---    limit only when the bills were within it before the cut, whatever put them over: a prepaid bill or a reversed
---    receipt (a receipt can be reversed only while no active bill is on the PO, so that bill is entered again after
---    the reversal, with create_vendor_bill's confirmed reason). Proved, with real receipts and reversals, by
---    scripts/smoke/prove-po-edit-cannot-cut-under-bills-real-schema.mjs.
+-- Mason, 2026-11-24: one rule for everyone, and the extra cost-cut rules dropped. Once a PO has an active (not deleted,
+-- not voided) vendor bill, an Edit PO save that changes its lines at all (adds or removes a line, or changes a line's
+-- quantity, product, unit, line notes or cost) is refused (PO_BILLED_LINES_LOCKED) before anything is saved; header
+-- edits (notes, dates) still save. To change lines, void the bill, edit, then enter the bill again (create_vendor_bill
+-- applies its limits); an admin's cost correction stays on set_purchase_order_item_costs, unchanged. The refusal
+-- depends only on the caller's own edit and whether a bill exists, never on a role, cost or bill amount, and names no
+-- amount. A billed PO's unchanged lines are saved as stored, without costs.
 --
 -- Same signature, owner and grants; the body is the 20261021140000 wrapper (md5-pinned below) plus the check before
 -- the unchanged inner save. Lock order: the advisory lock first (as before), then the PO row (create_vendor_bill locks

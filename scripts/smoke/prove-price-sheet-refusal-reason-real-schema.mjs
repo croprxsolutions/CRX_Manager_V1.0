@@ -6,7 +6,7 @@
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), applies the candidate (autocommit refused,
  * POSTFLIGHT_OK, re-apply refused), then as the signed-in user checks:
- *   1. the caller's own usable v2 export returns NULL;
+ *   1. the caller's own usable v2 export returns NONE (never NULL);
  *   2. applied -> ALREADY_APPLIED; past expiry or status expired -> EXPIRED; older template -> OLD_TEMPLATE;
  *   3. another admin's export (even applied or old) -> DOWNLOADED_BY_OTHER_USER; applied wins over old and expired;
  *      unknown or null id -> EXPORT_NOT_FOUND;
@@ -67,7 +67,7 @@ try {
   console.log('[apply] autocommit refused, applied once with POSTFLIGHT_OK, re-apply refused');
 
   const expected = {
-    usable: 'ok|<null>',
+    usable: 'ok|NONE',
     applied: 'ok|ALREADY_APPLIED',
     pastExpiry: 'ok|EXPIRED',
     statusExpired: 'ok|EXPIRED',
@@ -83,8 +83,8 @@ try {
   }
   assert.equal(reason(id('e99')), 'ok|EXPORT_NOT_FOUND', 'unknown id');
   assert.equal(reason(null), 'ok|EXPORT_NOT_FOUND', 'null id');
-  assert.equal(reason(EXPORTS.otherUser[0], OTHER_ADMIN), 'ok|<null>', 'the other admin sees their own sheet as usable');
-  console.log('[reason] unknown/null id -> EXPORT_NOT_FOUND; owner of the other sheet -> NULL');
+  assert.equal(reason(EXPORTS.otherUser[0], OTHER_ADMIN), 'ok|NONE', 'the other admin sees their own sheet as usable');
+  console.log('[reason] unknown/null id -> EXPORT_NOT_FOUND; owner of the other sheet -> NONE');
 
   for (const [uid, who] of [[USERS.rep, 'sales rep'], [USERS.driver, 'driver'], [USERS.applicator, 'applicator'], [INACTIVE_ADMIN, 'inactive admin']]) {
     assert.equal(attempt(uid, `${refuse(`v := public.get_pricing_workbook_export_refusal_reason('${EXPORTS.usable[0]}');`)} v := t;`),

@@ -6,9 +6,10 @@
 --   WORKBOOK_EXPORT_INVALID_OR_EXPIRED, WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED), so the screen cannot say which cause
 --   applies: already applied, downloaded by another user, past its expiry, or an older template.
 -- WHAT (new read-only function only):
---   get_pricing_workbook_export_refusal_reason(uuid) returns one code, or NULL when the export passes the
+--   get_pricing_workbook_export_refusal_reason(uuid) returns one code; NONE when the export passes the
 --   export-level check (owned, active, v2, not past expiry; row-level refusals keep their own codes):
 --   EXPORT_NOT_FOUND, DOWNLOADED_BY_OTHER_USER, ALREADY_APPLIED, OLD_TEMPLATE, EXPIRED (checked in that order).
+--   Never NULL, so the screen can keep assertRpcResult() (a NULL answer reads as a silent denial there).
 --   "Not yours" is checked first, so another user's export reveals nothing else. Never returns names or prices.
 --   ALREADY_APPLIED means a change set from this export was applied, not that these exact edits went live.
 --   It describes the export now, so the screen asks only after one of the three combined codes above.
@@ -72,13 +73,14 @@ BEGIN
   IF v_export.created_by IS DISTINCT FROM v_actor THEN RETURN 'DOWNLOADED_BY_OTHER_USER'; END IF;
   IF v_export.status = 'consumed' THEN RETURN 'ALREADY_APPLIED'; END IF;
   IF v_export.format_version IS DISTINCT FROM 'crx-product-pricing-phase2-v2' THEN RETURN 'OLD_TEMPLATE'; END IF;
-  IF v_export.status IS DISTINCT FROM 'active' OR v_export.expires_at <= now() THEN RETURN 'EXPIRED'; END IF;
-  RETURN NULL;
+  -- Same predicate as the preview's "expires_at > now()", so a missing expiry also counts as expired.
+  IF v_export.status IS DISTINCT FROM 'active' OR NOT COALESCE(v_export.expires_at > now(), false) THEN RETURN 'EXPIRED'; END IF;
+  RETURN 'NONE';
 END;
 $function$;
 
 COMMENT ON FUNCTION public.get_pricing_workbook_export_refusal_reason(uuid) IS
-  'Admin-only, read-only: which single reason a price-sheet export is refused (EXPORT_NOT_FOUND, DOWNLOADED_BY_OTHER_USER, ALREADY_APPLIED, OLD_TEMPLATE, EXPIRED), or NULL when the export passes the export-level check. No idempotency key: it writes nothing.';
+  'Admin-only, read-only: which single reason a price-sheet export is refused (EXPORT_NOT_FOUND, DOWNLOADED_BY_OTHER_USER, ALREADY_APPLIED, OLD_TEMPLATE, EXPIRED), or NONE when the export passes the export-level check. No idempotency key: it writes nothing.';
 
 REVOKE ALL ON FUNCTION public.get_pricing_workbook_export_refusal_reason(uuid) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.get_pricing_workbook_export_refusal_reason(uuid) TO authenticated;

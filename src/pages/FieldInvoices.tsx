@@ -9,18 +9,7 @@ import FieldInvoicesUnpostedPanel from '../components/field-invoices/FieldInvoic
 import FieldInvoicesPostedPanel from '../components/field-invoices/FieldInvoicesPostedPanel';
 import CustomerInvoiceSummaryPanel from '../components/field-invoices/CustomerInvoiceSummaryPanel';
 import UnbilledApplicationsPanel from '../components/field-invoices/UnbilledApplicationsPanel';
-
-type FieldInvoiceTab = 'unbilled' | 'drafts' | 'posted' | 'customer' | 'all';
-
-const TAB_ALIASES: Record<string, FieldInvoiceTab> = {
-  unbilled: 'unbilled',
-  drafts: 'drafts',
-  unposted: 'drafts',
-  posted: 'posted',
-  customer: 'customer',
-  summary: 'customer',
-  all: 'all',
-};
+import { DRAFT_STATUSES, INVOICE_TAB_ALIASES, INVOICE_TAB_LABELS as LABELS, POSTED_STATUSES } from '../lib/invoiceListTabs';
 
 interface InvoiceCounts {
   drafts?: number;
@@ -35,7 +24,8 @@ interface InvoiceCounts {
 export default function FieldInvoices() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [counts, setCounts] = useState<InvoiceCounts>({});
-  const activeTab = TAB_ALIASES[searchParams.get('tab') ?? 'unbilled'] ?? 'unbilled';
+  // The same tab names and old ?tab= aliases as Chemical Invoices (src/lib/invoiceListTabs.ts).
+  const activeTab = INVOICE_TAB_ALIASES[searchParams.get('tab') ?? 'unbilled'] ?? 'unbilled';
 
   useEffect(() => {
     let cancelled = false;
@@ -56,8 +46,8 @@ export default function FieldInvoices() {
       // These are independent, read-only count queries. They intentionally do
       // not use RPCs, and a count failure only omits a nonessential badge.
       const [draftsResult, postedResult] = await Promise.all([
-        countInvoices(['draft', 'unposted']),
-        countInvoices(['posted', 'overdue', 'paid']),
+        countInvoices([...DRAFT_STATUSES]),
+        countInvoices([...POSTED_STATUSES]),
       ]);
 
       if (cancelled) return;
@@ -73,13 +63,13 @@ export default function FieldInvoices() {
   }, []);
 
   const tabs: TabItem[] = [
-    { key: 'unbilled', label: 'Unbilled', content: <UnbilledApplicationsPanel /> },
-    { key: 'drafts', label: 'Drafts', count: counts.drafts, content: <FieldInvoicesUnpostedPanel /> },
-    { key: 'posted', label: 'Posted', count: counts.posted, content: <FieldInvoicesPostedPanel /> },
-    { key: 'customer', label: 'By Customer', content: <CustomerInvoiceSummaryPanel /> },
+    { key: 'unbilled', label: LABELS.unbilled, content: <UnbilledApplicationsPanel /> },
+    { key: 'drafts', label: LABELS.drafts, count: counts.drafts, content: <FieldInvoicesUnpostedPanel /> },
+    { key: 'posted', label: LABELS.posted, count: counts.posted, content: <FieldInvoicesPostedPanel /> },
+    { key: 'customer', label: LABELS.customer, content: <CustomerInvoiceSummaryPanel /> },
     // Retains the original all-status list, including CSV/report actions and
     // its status/card filters. The first four tabs are the daily workflow.
-    { key: 'all', label: 'All Invoices', content: <FieldInvoicesListPanel /> },
+    { key: 'all', label: LABELS.all, content: <FieldInvoicesListPanel /> },
   ];
 
   const handleTabChange = (tab: string) => {

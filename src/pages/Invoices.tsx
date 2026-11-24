@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { invoiceRowPdfFields } from '../lib/invoiceRowPdfFields';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Check, Send, Ban, Printer, Mail, Zap, Trash2, PanelRightOpen, Users, X } from 'lucide-react';
+import { Plus, Check, Send, Ban, Printer, Mail, Zap, Trash2, PanelRightOpen, Users } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
@@ -21,6 +21,9 @@ import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
 import CustomerDrawer from '../components/customers/CustomerDrawer';
+import CustomerInvoiceSummaryPanel from '../components/field-invoices/CustomerInvoiceSummaryPanel';
+import InvoiceSelectionBar, { InvoiceRowCheckbox, SelectAllToggle } from '../components/invoices/InvoiceSelection';
+import Tabs, { type TabItem } from '../components/ui/Tabs';
 import { hasPageAccess } from '../lib/pagePermissions';
 import type { Invoice, InvoiceStatus, InvoicePrintOptions } from '../types';
 import {
@@ -37,7 +40,6 @@ import {
 } from '../lib/invoicePdf';
 import { formatCents, formatCentsMinus as fmt } from '../lib/money';
 import { invoiceStatusBadge } from '../lib/statusLabel';
-import { publishPageBarHeight } from '../lib/pageBar';
 import { INVOICE_COLUMNS, INVOICE_ITEM_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE } from '../lib/costFields';
 import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
 import { isCurrentSeason, openOrInSeasonFilter, otherSeasonLabels } from '../lib/invoiceSeasonWindow';
@@ -48,6 +50,8 @@ import { postInvoiceTarget } from '../lib/invoicePostVersion';
 import { applyTableSearchSort } from '../lib/tableSearchSort';
 import { listSortParam, oneOf, parseListSort, useUrlListState } from '../hooks/useUrlListState';
 import { draftQueueState } from '../lib/invoiceDraftQueue';
+import { chemicalInvoiceTab, INVOICE_TAB_LABELS, POSTED_STATUSES, tabStatuses, type ChemicalInvoiceTab } from '../lib/invoiceListTabs';
+import { parseLocalDate } from '../lib/dateUtils';
 import PageHeader from '../components/ui/PageHeader';
 import Modal from '../components/ui/Modal';
 import { sendEmail, buildEmailHtml, invoiceEmailSnapshot } from '../lib/emailService';
@@ -61,19 +65,34 @@ type InvoiceRow = Invoice & { customer_name: string; salesman_name: string | nul
 const SELECTABLE_STATUSES: readonly InvoiceStatus[] = ['draft', 'unposted', 'posted', 'overdue', 'voided'];
 const SEARCH_KEYS = ['invoice_number', 'customer_name', 'salesman_name'];
 
-type InvoiceStatusFilter = InvoiceStatus | '' | 'ready_to_post';
+type InvoiceStatusFilter = InvoiceStatus | '';
 
-const STATUS_OPTIONS: { value: InvoiceStatusFilter; label: string }[] = [
-  { value: '', label: 'All Statuses' },
-  { value: 'ready_to_post', label: 'Ready to Post (draft + unposted)' },
-  { value: 'draft', label: 'Draft' },
-  { value: 'unposted', label: 'Unposted' },
-  { value: 'posted', label: 'Posted' },
-  { value: 'paid', label: 'Paid' },
-  { value: 'overdue', label: 'Overdue' },
-  { value: 'voided', label: 'Voided' },
-  { value: 'cancelled', label: 'Cancelled' },
-];
+// The status filter narrows the tab's rows. The old "Ready to Post (draft + unposted)" choice
+// is the Drafts tab now; an old ?status=ready_to_post link opens that tab (invoiceListTabs.ts).
+const STATUS_OPTIONS_BY_TAB: Record<ChemicalInvoiceTab, { value: InvoiceStatusFilter; label: string }[]> = {
+  drafts: [
+    { value: '', label: 'All drafts' },
+    { value: 'draft', label: 'Draft' },
+    { value: 'unposted', label: 'Unposted' },
+  ],
+  posted: [
+    { value: '', label: 'All posted' },
+    { value: 'posted', label: 'Posted' },
+    { value: 'overdue', label: 'Overdue' },
+    { value: 'paid', label: 'Paid' },
+  ],
+  customer: [],
+  all: [
+    { value: '', label: 'All Statuses' },
+    { value: 'draft', label: 'Draft' },
+    { value: 'unposted', label: 'Unposted' },
+    { value: 'posted', label: 'Posted' },
+    { value: 'paid', label: 'Paid' },
+    { value: 'overdue', label: 'Overdue' },
+    { value: 'voided', label: 'Voided' },
+    { value: 'cancelled', label: 'Cancelled' },
+  ],
+};
 
 const TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'All Types' },
@@ -89,8 +108,9 @@ const statusBadge = (status: InvoiceStatus) => {
 };
 
 // Search, filters and sort live in the address, so Back from an invoice brings the same view back.
-const LIST_DEFAULTS = { q: '', status: '', type: '', quick: '', balance: '', sort: '' } as const;
-const SORTABLE_KEYS = ['invoice_number', 'customer_name', 'order_number', 'invoice_type', 'invoice_date', 'total_amount_cents', 'balance_cents', 'status'];
+// The tab is one more of these: ?tab=drafts|posted|customer|all.
+const LIST_DEFAULTS = { tab: '', q: '', status: '', type: '', quick: '', balance: '', sort: '' } as const;
+const SORTABLE_KEYS = ['invoice_number', 'customer_name', 'order_number', 'invoice_type', 'invoice_date', 'due_date', 'total_amount_cents', 'balance_cents', 'status'];
 
 const typeLabel = (t: string) => ({ chemical_sale: 'Chemical', field_application: 'Application', misc_charge: 'Misc' }[t] || t);
 
@@ -157,8 +177,12 @@ export default function Invoices() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [list, setList] = useUrlListState(LIST_DEFAULTS);
-  const statusFilter = oneOf(list.status, STATUS_OPTIONS.map((o) => o.value), '');
-  const setStatusFilter = (status: InvoiceStatusFilter) => setList({ status });
+  const activeTab = chemicalInvoiceTab(list.tab, list.status);
+  const statusOptions = STATUS_OPTIONS_BY_TAB[activeTab];
+  const statusFilter = oneOf(list.status, statusOptions.map((o) => o.value), '');
+  // The tab is written with the status, so a status picked on All Invoices never moves the list to another tab.
+  const setStatusFilter = (status: InvoiceStatusFilter) => setList({ status, tab: activeTab });
+  const setTab = (tab: ChemicalInvoiceTab) => setList({ tab, status: '' });
   const typeFilter = oneOf(list.type, TYPE_OPTIONS.map((o) => o.value), '');
   const quickDeliveryOnly = list.quick === '1';
   const balanceOnly = list.balance === '1';
@@ -295,9 +319,10 @@ export default function Invoices() {
     fetchInvoices();
   }, [fetchInvoices]);
 
+  const shownStatuses = tabStatuses(activeTab);
   const filtered = invoices.filter((inv) => {
-    if (statusFilter === 'ready_to_post' && !['draft', 'unposted'].includes(inv.status)) return false;
-    if (statusFilter && statusFilter !== 'ready_to_post' && inv.status !== statusFilter) return false;
+    if (shownStatuses && !shownStatuses.includes(inv.status)) return false;
+    if (statusFilter && inv.status !== statusFilter) return false;
     if (typeFilter && inv.invoice_type !== typeFilter) return false;
     if (quickDeliveryOnly && !inv.is_quick_delivery) return false;
     if (balanceOnly && !(inv.balance_cents > 0)) return false;
@@ -310,6 +335,7 @@ export default function Invoices() {
   // the cards).
   const unpostedCount = invoices.filter((i) => i.status === 'draft' || i.status === 'unposted').length;
   const postedLikeInvoices = invoices.filter((i) => i.status === 'posted' || i.status === 'overdue');
+  const postedTabCount = invoices.filter((i) => POSTED_STATUSES.includes(i.status)).length;
   const postedTotal = postedLikeInvoices.reduce((s, i) => s + i.total_amount_cents, 0);
   const outstandingBalance = postedLikeInvoices
     .filter((i) => i.balance_cents > 0)
@@ -320,7 +346,8 @@ export default function Invoices() {
   // filters and the search box — AND showing a checkbox. A ticked row that a filter
   // hides, that is no longer loaded (deleted elsewhere, or past the row cap), or whose
   // status lost its checkbox is never posted, voided, printed, deleted or counted.
-  const visibleRows = applyTableSearchSort(filtered, SEARCH_KEYS, tableSearch, null, 'asc');
+  // By Customer shows no rows, so nothing ticked on another tab can be acted on from it.
+  const visibleRows = activeTab === 'customer' ? [] : applyTableSearchSort(filtered, SEARCH_KEYS, tableSearch, null, 'asc');
   const visibleSelectable = visibleRows.filter((i) => SELECTABLE_STATUSES.includes(i.status));
   // Opening an invoice hands it the drafts after it in the order on screen, for its Next draft button.
   const openInvoice = (row: InvoiceRow) => navigate(`/invoices/${row.id}`, {
@@ -745,17 +772,7 @@ export default function Invoices() {
   };
 
   const selectBox = (row: InvoiceRow) => (
-    <input
-      type="checkbox"
-      checked={selected.has(row.id)}
-      onChange={(e) => {
-        e.stopPropagation();
-        toggleSelect(row.id);
-      }}
-      onClick={(e) => e.stopPropagation()}
-      aria-label={`Select invoice ${row.invoice_number}`}
-      className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-    />
+    <InvoiceRowCheckbox invoiceNumber={row.invoice_number} checked={selected.has(row.id)} onToggle={() => toggleSelect(row.id)} />
   );
 
   const splitMark = (row: InvoiceRow) =>
@@ -765,6 +782,8 @@ export default function Invoices() {
         Split invoice
       </span>
     ) : null;
+
+  const dueLabel = (row: InvoiceRow) => (row.due_date ? parseLocalDate(row.due_date).toLocaleDateString() : '—');
 
   // Phone layout of one invoice (the phone boards): the same values and formatting as the table's columns.
   const invoiceMobileRow = (row: InvoiceRow) => (
@@ -790,6 +809,7 @@ export default function Invoices() {
           {splitMark(row)}
           <span className="flex flex-wrap items-center gap-x-2 text-xs text-secondary">
             <span>{typeLabel(row.invoice_type)}</span>
+            {row.due_date && <span>Due {dueLabel(row)}</span>}
             <span className={row.balance_cents > 0 ? 'text-red-600 font-semibold' : 'text-crx-green'}>
               Balance {fmt(row.balance_cents)}
             </span>
@@ -803,7 +823,7 @@ export default function Invoices() {
     </div>
   );
 
-  // The customer link and peek: the Bill to column from xl, and inside the Invoice cell below it.
+  // The customer link and peek: the Customer column from xl, and inside the Invoice # cell below it.
   const billTo = (row: InvoiceRow) => (
     <div className="flex items-center gap-1.5">
       <button
@@ -842,6 +862,8 @@ export default function Invoices() {
     );
 
   const xlOnly = 'hidden xl:table-cell';
+  // The same leading columns as the Field Invoices lists (Invoice #, Customer, Date, Due, Total,
+  // Status); this list's own columns follow.
   const columns: Column<InvoiceRow>[] = [
     {
       key: 'id',
@@ -851,7 +873,7 @@ export default function Invoices() {
     },
     {
       key: 'invoice_number',
-      header: 'Invoice',
+      header: 'Invoice #',
       sortable: true,
       render: (row) => (
         <div className="space-y-0.5">
@@ -861,7 +883,7 @@ export default function Invoices() {
               <span title="Quick Delivery"><Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" /></span>
             )}
           </div>
-          {/* Below xl the Bill to and Sale columns are hidden, so their links show here. */}
+          {/* Below xl the Customer and Sale columns are hidden, so their links show here. */}
           <div className="xl:hidden">{billTo(row)}</div>
           {row.order_number && row.order_id && <div className="xl:hidden text-sm">Sale {saleLink(row)}</div>}
           {splitMark(row)}
@@ -870,10 +892,49 @@ export default function Invoices() {
     },
     {
       key: 'customer_name',
-      header: 'Bill to',
+      header: 'Customer',
       sortable: true,
       className: xlOnly,
       render: (row) => billTo(row),
+    },
+    {
+      key: 'invoice_date',
+      header: 'Date',
+      sortable: true,
+      render: (row) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="whitespace-nowrap">{new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}</span>
+          <SeasonTag season={row.season} />
+        </div>
+      ),
+    },
+    {
+      key: 'due_date',
+      header: 'Due',
+      sortable: true,
+      render: (row) => <span className="whitespace-nowrap">{dueLabel(row)}</span>,
+    },
+    {
+      key: 'total_amount_cents',
+      header: 'Total',
+      sortable: true,
+      render: (row) => <span className="whitespace-nowrap font-medium tabular-nums">{fmt(row.total_amount_cents)}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      render: (row) => statusBadge(row.status),
+    },
+    {
+      key: 'balance_cents',
+      header: 'Balance',
+      sortable: true,
+      render: (row) => (
+        <span className={`whitespace-nowrap tabular-nums ${row.balance_cents > 0 ? 'text-red-600 font-semibold' : 'text-crx-green'}`}>
+          {fmt(row.balance_cents)}
+        </span>
+      ),
     },
     {
       key: 'order_number',
@@ -888,39 +949,6 @@ export default function Invoices() {
       sortable: true,
       className: xlOnly,
       render: (row) => typeLabel(row.invoice_type),
-    },
-    {
-      key: 'invoice_date',
-      header: 'Date',
-      sortable: true,
-      render: (row) => (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="whitespace-nowrap">{new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}</span>
-          <SeasonTag season={row.season} />
-        </div>
-      ),
-    },
-    {
-      key: 'total_amount_cents',
-      header: 'Total',
-      sortable: true,
-      render: (row) => <span className="whitespace-nowrap font-medium tabular-nums">{fmt(row.total_amount_cents)}</span>,
-    },
-    {
-      key: 'balance_cents',
-      header: 'Balance',
-      sortable: true,
-      render: (row) => (
-        <span className={`whitespace-nowrap tabular-nums ${row.balance_cents > 0 ? 'text-red-600 font-semibold' : 'text-crx-green'}`}>
-          {fmt(row.balance_cents)}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      sortable: true,
-      render: (row) => statusBadge(row.status),
     },
     {
       key: 'salesman_name',
@@ -949,7 +977,7 @@ export default function Invoices() {
     );
   }
 
-  const readyOn = statusFilter === 'ready_to_post';
+  const readyOn = activeTab === 'drafts';
   const selectedCount = selectedInvoices.length;
   // Email, Void and Delete stay admin only, each counted as before; Post and Print stay admin or sales rep.
   const moreItems: ActionMenuItem[] = [];
@@ -967,25 +995,17 @@ export default function Invoices() {
       on ? 'border-crx-green/40 bg-crx-green-tint text-crx-green' : 'border-gray-300 bg-white text-nav-dark hover:border-gray-400'
     }`;
 
-  // One selection bar (the Quotes list's dark bar). Below md it sits above the bottom nav: Post first, then Print and More.
-  const selectionBar = selectedCount > 0 && (
-    <div
-      // Below md the bar is fixed above the bottom nav; the update notice sits above it.
-      ref={publishPageBarHeight}
-      role="toolbar"
-      aria-label={`${plural(selectedCount, 'invoice')} selected`}
-      className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-nav-dark px-3 py-2.5 text-white max-md:fixed max-md:inset-x-0 max-md:bottom-[calc(3.5rem+env(safe-area-inset-bottom))] max-md:z-20 max-md:mb-0 max-md:rounded-none max-md:border-t max-md:border-gray-200 max-md:bg-white max-md:p-3 max-md:text-nav-dark max-md:shadow-lg"
+  const selectedTotalCents = selectedInvoices.reduce((sum, i) => sum + i.total_amount_cents, 0);
+  // The selection bar both invoice lists share. Post shows with a draft or unposted invoice ticked.
+  const selectionBar = (
+    <InvoiceSelectionBar
+      selectedCount={selectedCount}
+      selectedTotalCents={selectedTotalCents}
+      onClear={() => setSelected(new Set())}
+      postCount={canPostInvoices && selectedPostable.length > 0 ? basePostConfirmation.count : 0}
+      onPost={() => setShowPostModal(true)}
+      posting={posting}
     >
-      <strong className="mr-auto font-semibold">{selectedCount} selected</strong>
-      <button
-        type="button"
-        aria-label="Clear selection"
-        onClick={() => setSelected(new Set())}
-        className="rounded-lg px-2 text-sm font-medium text-crx-green md:order-last md:p-1.5 md:text-white/80 md:hover:text-white"
-      >
-        <span className="md:hidden">Clear</span>
-        <X className="hidden h-5 w-5 md:block" aria-hidden="true" />
-      </button>
       {canPostInvoices && (
         <Button
           variant="secondary"
@@ -1002,18 +1022,104 @@ export default function Invoices() {
           <ActionMenu label="More" items={moreItems} trigger={{ text: 'More', variant: 'secondary' }} />
         </div>
       )}
-      {canPostInvoices && selectedPostable.length > 0 && (
-        <Button
-          className="max-md:order-1 max-md:min-h-11 max-md:w-full md:h-10"
-          icon={<Send className="w-4 h-4" />}
-          onClick={() => setShowPostModal(true)}
-          loading={posting}
-        >
-          Post {plural(basePostConfirmation.count, 'invoice')}…
-        </Button>
-      )}
-    </div>
+    </InvoiceSelectionBar>
   );
+
+  // The table, shown on every tab but By Customer.
+  const listCard = (
+    <Card padding={false}>
+      <div className="p-3 sm:p-5">
+        <DataTable<InvoiceRow>
+          data={filtered}
+          columns={columns}
+          mobileRow={invoiceMobileRow}
+          searchable
+          searchPlaceholder="Search invoice, customer or salesperson"
+          searchKeys={SEARCH_KEYS}
+          searchValue={tableSearch}
+          onSearchChange={(q) => setList({ q })}
+          sortState={sort}
+          onSortChange={(next) => setList({ sort: listSortParam(next) })}
+          onRowClick={openInvoice}
+          emptyTitle={activeTab === 'drafts' ? 'No invoices to post' : activeTab === 'posted' ? 'No posted invoices' : 'No invoices yet'}
+          emptyDescription="Invoices are created from orders or blend tickets — open one to bill."
+          emptyAction={
+            <Button variant="secondary" icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/orders')}>
+              Go to Orders
+            </Button>
+          }
+          loading={loading}
+          loadError={loadError}
+          onRetry={() => { void fetchInvoices(); }}
+          belowFilters={selectionBar}
+          filters={
+            <div className="flex flex-wrap gap-2 items-center">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as InvoiceStatusFilter)}
+                aria-label="Filter by status"
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              >
+                {statusOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={typeFilter}
+                onChange={(e) => setList({ type: e.target.value })}
+                aria-label="Filter by type"
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              >
+                {TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <button type="button" aria-pressed={quickDeliveryOnly} onClick={() => setList({ quick: quickDeliveryOnly ? '' : '1' })} className={pill(quickDeliveryOnly)}>
+                <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+                Quick deliveries
+              </button>
+              <button
+                type="button"
+                aria-pressed={balanceOnly}
+                onClick={() => setList({ balance: balanceOnly ? '' : '1' })}
+                className={pill(balanceOnly)}
+                title="Show only invoices with money still owed"
+              >
+                Has a balance
+              </button>
+              {visibleSelectable.length > 0 && (
+                <SelectAllToggle
+                  clears={toggleAllClears}
+                  disabled={toggleAllDisabled}
+                  onToggle={toggleAll}
+                  title={
+                    toggleAllClears
+                      ? 'Clears every selected invoice.'
+                      : toggleAllDisabled
+                        ? "No invoice from this season is in view. Tick an older-season invoice's own box to select it."
+                        : "Selects exactly this season's invoices in view, replacing any other selection. Tick an older-season invoice's own box afterwards to include it."
+                  }
+                />
+              )}
+              {!loadError && <span className="text-sm text-secondary">{plural(visibleRows.length, 'invoice')}</span>}
+            </div>
+          }
+        />
+      </div>
+    </Card>
+  );
+  // The same tabs as Field Invoices (src/lib/invoiceListTabs.ts), less Unbilled, which chemical sales do not have.
+  const listTabs: TabItem[] = [
+    { key: 'drafts', label: INVOICE_TAB_LABELS.drafts, count: loadError ? undefined : unpostedCount, content: listCard },
+    { key: 'posted', label: INVOICE_TAB_LABELS.posted, count: loadError ? undefined : postedTabCount, content: listCard },
+    // The same combined statement Field Invoices has: a customer's unposted chemical AND field invoices.
+    { key: 'customer', label: INVOICE_TAB_LABELS.customer, content: <CustomerInvoiceSummaryPanel backPath="/invoices" backLabel="Back to invoices" /> },
+    { key: 'all', label: INVOICE_TAB_LABELS.all, content: listCard },
+  ];
 
   return (
     <div className={`phone-touch space-y-4 ${selectedCount > 0 ? 'max-md:pb-48' : ''}`}>
@@ -1066,12 +1172,12 @@ export default function Invoices() {
             type="button"
             aria-pressed={readyOn}
             aria-label="Show invoices ready to post"
-            onClick={() => setStatusFilter(readyOn ? '' : 'ready_to_post')}
+            onClick={() => setTab(readyOn ? 'all' : 'drafts')}
             className={`flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left transition-colors ${readyOn ? 'bg-amber-50 ring-2 ring-inset ring-amber-400' : 'hover:bg-cream-dark/60'}`}
           >
             <span className="text-sm text-secondary">Ready to post</span>
             <span className="font-heading text-2xl font-bold leading-tight text-nav-dark">{loadError ? '—' : unpostedCount}</span>
-            <span className="text-xs text-secondary">Draft and unposted. Tap to show them.</span>
+            <span className="text-xs text-secondary">Draft and unposted. Tap to open the Drafts tab.</span>
             {readyOn && (
               <span className="flex items-center gap-1 text-xs font-semibold text-amber-800">
                 Showing these <Check className="h-3 w-3" aria-hidden="true" />
@@ -1097,100 +1203,12 @@ export default function Invoices() {
         </p>
       </div>
 
-      {/* Data Table */}
-      <Card padding={false}>
-        <div className="p-3 sm:p-5">
-          <DataTable<InvoiceRow>
-            data={filtered}
-            columns={columns}
-            mobileRow={invoiceMobileRow}
-            searchable
-            searchPlaceholder="Search invoice, customer or salesperson"
-            searchKeys={SEARCH_KEYS}
-            searchValue={tableSearch}
-            onSearchChange={(q) => setList({ q })}
-            sortState={sort}
-            onSortChange={(next) => setList({ sort: listSortParam(next) })}
-            onRowClick={openInvoice}
-            emptyTitle="No invoices yet"
-            emptyDescription="Invoices are created from orders or blend tickets — open one to bill."
-            emptyAction={
-              <Button variant="secondary" icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/orders')}>
-                Go to Orders
-              </Button>
-            }
-            loading={loading}
-            loadError={loadError}
-            onRetry={() => { void fetchInvoices(); }}
-            belowFilters={selectionBar}
-            filters={
-              <div className="flex flex-wrap gap-2 items-center">
-                {readyOn && (
-                  <button type="button" aria-label="Remove filter: Ready to post" onClick={() => setStatusFilter('')} className={pill(true)}>
-                    Ready to post
-                    <X className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                )}
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as InvoiceStatusFilter)}
-                  aria-label="Filter by status"
-                  className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                >
-                  {STATUS_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={typeFilter}
-                  onChange={(e) => setList({ type: e.target.value })}
-                  aria-label="Filter by type"
-                  className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                >
-                  {TYPE_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" aria-pressed={quickDeliveryOnly} onClick={() => setList({ quick: quickDeliveryOnly ? '' : '1' })} className={pill(quickDeliveryOnly)}>
-                  <Zap className="w-3.5 h-3.5" aria-hidden="true" />
-                  Quick deliveries
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={balanceOnly}
-                  onClick={() => setList({ balance: balanceOnly ? '' : '1' })}
-                  className={pill(balanceOnly)}
-                  title="Show only invoices with money still owed"
-                >
-                  Has a balance
-                </button>
-                {visibleSelectable.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={toggleAll}
-                    disabled={toggleAllDisabled}
-                    className="text-sm font-medium text-crx-green hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed"
-                    title={
-                      toggleAllClears
-                        ? 'Clears every selected invoice.'
-                        : toggleAllDisabled
-                          ? "No invoice from this season is in view. Tick an older-season invoice's own box to select it."
-                          : "Selects exactly this season's invoices in view, replacing any other selection. Tick an older-season invoice's own box afterwards to include it."
-                    }
-                  >
-                    {toggleAllClears ? 'Deselect All' : 'Select All'}
-                  </button>
-                )}
-                {!loadError && <span className="text-sm text-secondary">{plural(visibleRows.length, 'invoice')}</span>}
-              </div>
-            }
-          />
-        </div>
-      </Card>
+      <Tabs
+        tabs={listTabs}
+        activeKey={activeTab}
+        onChange={(key) => setTab(key as ChemicalInvoiceTab)}
+        ariaLabel="Chemical invoice lists"
+      />
 
       {/* Batch Void Modal */}
       <BatchVoidModal

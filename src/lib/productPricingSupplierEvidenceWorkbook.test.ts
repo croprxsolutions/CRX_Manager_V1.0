@@ -19,7 +19,7 @@ describe('pricing workbook supplier evidence', () => {
         container_size: '2.5', unit_size: 'gal', inventory_unit: 'gallon',
         identity_fingerprint: 'identity-1', row_token: 'token-1', row_version: 1,
         current_cost: '20.00', current_tier1_margin_percent: '10', current_tier1_price: '22.22',
-        current_tier2_margin_percent: '15', current_tier2_price: '23.53',
+        current_tier2_margin_percent: '33.33333333', current_tier2_price: '23.53',
         current_tier3_margin_percent: '20', current_tier3_price: '25.00',
       }],
     };
@@ -58,6 +58,14 @@ describe('pricing workbook supplier evidence', () => {
     expect(parsed.exportId).toBe('export-1');
     expect(parsed.rows).toHaveLength(1);
     expect(parsed.rows[0].product_id).toBe('product-1');
+    // The locked current margin is a 2-decimal number cell that still reads back as the exact server text.
+    const margin2 = pricingSheet.getCell(2, PRICING_WORKBOOK_HEADERS.indexOf('current_tier2_margin_percent') + 1);
+    expect(margin2.value).toBe(33.33333333);
+    expect(margin2.numFmt).toBe('0.00');
+    expect(parsed.rows[0].current_tier2_margin_percent).toBe('33.33333333');
+    expect(parsed.rows[0].tier2_margin_percent).toBe('33.33333333');
+    expect(pricingSheet.getCell(1, PRICING_WORKBOOK_HEADERS.indexOf('current_cost') + 1).note)
+      .toBe('Dollars per inventory unit (see the inventory_unit column)');
     // Same ExcelJS generate-and-reparse cost as the product and supplier
     // workbook tests, which already carry this timeout. ~350ms warm, but the
     // first ExcelJS load in a worker is multi-second on a cold module/FS cache

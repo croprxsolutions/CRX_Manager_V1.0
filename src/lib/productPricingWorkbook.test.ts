@@ -3,6 +3,7 @@ import { deflateRawSync } from 'node:zlib';
 import type { Workbook } from 'exceljs';
 import type { PricingPreviewResult, PricingWorkbookExport } from './productPricing';
 import {
+  DOLLAR_HEADER_NOTE,
   generateProductPricingWorkbook,
   groupedUseTimingRefusal,
   MAX_PRICING_WORKBOOK_FILE_BYTES,
@@ -297,6 +298,90 @@ describe('product pricing workbook', () => {
     expect(parsed.rows[0].new_cost).toBe(exactValue);
     expect(parsed.rows[0].tier1_price).toBe(exactValue);
   });
+
+  it('writes locked current margins as 2-decimal numbers that read back as the exact server text', async () => {
+    // The server's margin text: trim_scale(round(ratio * 100, 8))::text, so up to 8 decimals, no trailing zeros.
+    const baseline = [
+      '0', '1', '5', '10', '20', '25', '33', '50', '99', '100', '250', '-5', '-100',
+      '0.5', '12.5', '15.5', '10.125', '12.3456789', '33.33333333', '66.66666667', '99.99999999',
+      '0.00000001', '0.0000001', '0.000001', '0.00001', '-0.00000001', '-33.33333333', '0.1', '0.2', '0.3',
+      '12345678.12345678', '-98765432.87654321', '14.28571429', '28.57142857', '11.11111111', '9.09090909', '16.66666667', '1234567.12345678',
+      // Too many digits for a number to hold exactly: must stay text, and still read back exactly.
+      '-12345678901.12345678', '9876543210.98765432',
+    ];
+    // Plus a fixed pseudo-random spread of 0-999 with 0 to 8 decimals.
+    let seed = 20261124;
+    const next = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
+    for (let i = 0; i < 1500; i += 1) {
+      const decimals = next() % 9;
+      const integer = String(next() % 1000);
+      const fraction = String(next() % 10 ** decimals).padStart(decimals, '0').replace(/0+$/, '');
+      baseline.push(fraction ? `${integer}.${fraction}` : integer);
+    }
+    const rows = [];
+    for (let i = 0; i < baseline.length; i += 3) {
+      rows.push({
+        ...pricingExport.rows[0],
+        product_id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+        current_tier1_margin_percent: baseline[i],
+        current_tier2_margin_percent: baseline[i + 1] ?? '',
+        current_tier3_margin_percent: baseline[i + 2] ?? '',
+      });
+    }
+    const blob = await generateProductPricingWorkbook({ ...pricingExport, rows });
+    const buffer = await blobToArrayBuffer(blob);
+    const ExcelJS = await import('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const worksheet = workbook.getWorksheet(PRICING_WORKBOOK_SHEET)!;
+    const parsed = await parseProductPricingWorkbook(buffer);
+
+    const mismatches: string[] = [];
+    let numberCells = 0;
+    rows.forEach((row, index) => {
+      for (const tier of [1, 2, 3] as const) {
+        const header = `current_tier${tier}_margin_percent` as const;
+        const cell = worksheet.getCell(index + 2, PRICING_WORKBOOK_HEADERS.indexOf(header) + 1);
+        if (row[header] !== '') {
+          if (typeof cell.value === 'number') {
+            numberCells += 1;
+            expect(cell.numFmt).toBe('0.00');
+          } else {
+            expect(cell.value).toBe(row[header]);
+            expect(cell.numFmt).toBe('@');
+          }
+        }
+        if (parsed.rows[index][header] !== row[header]) mismatches.push(`${row[header]} -> ${parsed.rows[index][header]}`);
+        // The editable copy stays text, byte for byte.
+        const editable = worksheet.getCell(index + 2, PRICING_WORKBOOK_HEADERS.indexOf(`tier${tier}_margin_percent`) + 1);
+        if (row[header] !== '') expect(editable.value).toBe(row[header]);
+        expect(parsed.rows[index][`tier${tier}_margin_percent`]).toBe(row[header]);
+      }
+    });
+    expect(mismatches).toEqual([]);
+    expect(baseline.length).toBeGreaterThan(1500);
+    // Every value except the two over-long ones is written as a number.
+    expect(numberCells).toBe(baseline.length - 2);
+  }, 30000);
+
+  it('notes the dollar headers as per inventory unit, keeps the header text, and still parses', async () => {
+    const { workbook, buffer } = await loadGeneratedWorkbook();
+    const worksheet = workbook.getWorksheet(PRICING_WORKBOOK_SHEET)!;
+    const noted = PRICING_WORKBOOK_HEADERS.filter((_, index) => worksheet.getCell(1, index + 1).note);
+    expect(noted).toEqual([
+      'current_cost', 'current_tier1_price', 'current_tier2_price', 'current_tier3_price',
+      'new_cost', 'tier1_price', 'tier2_price', 'tier3_price',
+    ]);
+    expect(worksheet.getCell(1, PRICING_WORKBOOK_HEADERS.indexOf('new_cost') + 1).note).toBe(DOLLAR_HEADER_NOTE);
+    expect(DOLLAR_HEADER_NOTE).toBe('Dollars per inventory unit (see the inventory_unit column)');
+    expect(Array.from({ length: worksheet.getRow(1).cellCount }, (_, index) => worksheet.getCell(1, index + 1).value))
+      .toEqual([...PRICING_WORKBOOK_HEADERS]);
+    const parsed = await parseProductPricingWorkbook(buffer);
+    expect(parsed.rows[0].current_cost).toBe('125.40');
+    // A sheet saved again with the notes (as Excel would) still parses.
+    const reparsed = await parseProductPricingWorkbook(await writeWorkbook(workbook));
+    expect(reparsed.rows).toEqual(parsed.rows);
+  }, 30000);
 
   it('accepts the zero-row workbook emitted by the generator', async () => {
     const blob = await generateProductPricingWorkbook({ ...pricingExport, rows: [] });

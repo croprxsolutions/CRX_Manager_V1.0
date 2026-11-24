@@ -106,6 +106,16 @@ const MARGIN_HEADERS = new Set<PricingWorkbookHeader>([
   'tier3_margin_percent',
 ]);
 
+// Locked current margins are shown as numbers to 2 decimals. The parser reads the full number back,
+// so a cell is written as a number only when that reads back to the server's exact text.
+const LOCKED_MARGIN_HEADERS = [
+  'current_tier1_margin_percent',
+  'current_tier2_margin_percent',
+  'current_tier3_margin_percent',
+] as const satisfies readonly PricingWorkbookHeader[];
+
+export const DOLLAR_HEADER_NOTE = 'Dollars per inventory unit (see the inventory_unit column)';
+
 const COLUMN_WIDTHS: Record<PricingWorkbookHeader, number> = {
   product_id: 38,
   sku: 16,
@@ -549,6 +559,21 @@ export async function generateProductPricingWorkbook(
     worksheet.addRow(PRICING_WORKBOOK_HEADERS.map((header) => row[header]));
   }
   stylePricingWorksheet(worksheet, pricingExport.rows.length);
+  for (const header of DOLLAR_HEADERS) {
+    worksheet.getCell(1, PRICING_WORKBOOK_HEADERS.indexOf(header) + 1).note = DOLLAR_HEADER_NOTE;
+  }
+  for (const header of LOCKED_MARGIN_HEADERS) {
+    const column = PRICING_WORKBOOK_HEADERS.indexOf(header) + 1;
+    for (let row = 2; row <= pricingExport.rows.length + 1; row += 1) {
+      const cell = worksheet.getCell(row, column);
+      const text = cell.value;
+      if (typeof text !== 'string' || text === '') continue;
+      const number = Number(text);
+      if (!Number.isFinite(number) || numberToPlainDecimal(number, header) !== text) continue;
+      cell.value = number;
+      cell.numFmt = '0.00';
+    }
+  }
   const useTimingColumn = PRICING_WORKBOOK_HEADERS.indexOf('use_timing') + 1;
   for (let row = 2; row <= pricingExport.rows.length + 1; row += 1) {
     const cell = worksheet.getCell(row, useTimingColumn);

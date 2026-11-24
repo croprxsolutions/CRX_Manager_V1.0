@@ -38,6 +38,7 @@ const closeAt = (uid, delivery, reason, key, queuedAt) => docker(['exec', '-i', 
   `SELECT public.close_delivery_receipt(p_delivery_id => '${delivery}', p_reason => '${reason}', p_idempotency_key => '${key}', p_expected_queued_at => '${queuedAt}')::text;`),
   allowFailure: true });
 const out = (r) => `${r.stdout}${r.stderr}`;
+const lastJson = (r) => JSON.parse(out(r).trim().split(/\r?\n/).at(-1));
 // created_at exactly as PostgREST hands it to the screen (JSON text, microseconds).
 const queuedAt = (delivery) => scalar(`SELECT to_json(created_at) #>> '{}' FROM public.delivery_receipt_queue WHERE delivery_id = '${delivery}';`);
 const listed = (uid) => scalar(asOffice(uid,
@@ -103,8 +104,25 @@ try {
   assert.equal(status(D(1)), 'cancelled', 'the worker never claims a handled receipt');
   assert.equal(status(D(2)), 'needs_check', 'the worker never claims a paused receipt');
   assert.equal(listed(USERS.admin), D(2), 'a paused receipt stays listed until the hand send is marked handled');
-  assert.equal(JSON.parse(out(closeAt(USERS.rep, D(2), 'handled', 'ki25s-handled-2', paused.queued_at)).trim().split(/\r?\n/).at(-1)).outcome, 'closed',
-    'the rep who paused it closes it after their hand send, as DeliveryDetail does');
+  // A pause alone is not proof of a send (Sol r1): the close needs send-email's own log of this rep's sent email.
+  const repClose = (key) => out(closeAt(USERS.rep, D(2), 'handled', key, paused.queued_at));
+  // A row as send-email writes it (service role): key scoped to type + delivery, created_by the caller.
+  const logSend = (tag, { by = USERS.rep, to = 'ki25-screens@example.invalid', st = 'sent', at = 'now()', delivery = D(2) } = {}) =>
+    psql(`INSERT INTO public.email_log (customer_id, recipient_email, email_type, subject, status, idempotency_key, created_by, created_at)
+      VALUES ('${CUST}', '${to}', 'delivery_completed', 'Delivery confirmation', '${st}',
+              'delivery_completed:delivery:${delivery}:${tag}', '${by}', ${at});`);
+  assert.match(repClose('ki25s-h2-none'), /RECEIPT_HANDLED_ADMIN_ONLY/, 'paused but nothing sent: refused');
+  logSend('failed', { st: 'failed' });
+  logSend('elsewhere', { to: 'someone-else@example.invalid' });
+  logSend('other-rep', { by: USERS.admin });
+  logSend('before-pause', { at: "now() - interval '10 minutes'" });
+  logSend('other-delivery', { delivery: D(4) });
+  assert.match(repClose('ki25s-h2-wrong'), /RECEIPT_HANDLED_ADMIN_ONLY/,
+    'a failed send, another address, another sender, a send before the pause or another delivery is no proof');
+  assert.equal(status(D(2)), 'needs_check', 'refused closes leave it listed');
+  logSend('real');
+  assert.equal(lastJson(closeAt(USERS.rep, D(2), 'handled', 'ki25s-handled-2', paused.queued_at)).outcome, 'closed',
+    'the rep who paused it closes it after their logged hand send, as DeliveryDetail does');
   assert.equal(listed(USERS.admin), 'none', 'after the hand send it is off the list');
   console.log('[KI-25] Email Confirmation by a sales rep: paused, not claimed, then handled by that rep');
 
@@ -172,7 +190,6 @@ try {
   const sameInstant = scalar(`SELECT to_char(created_at AT TIME ZONE 'Etc/GMT+6', 'YYYY-MM-DD"T"HH24:MI:SS.US') || '-06:00'
     FROM public.delivery_receipt_queue WHERE delivery_id = '${D(7)}';`);
   assert.notEqual(sameInstant, a7, 'written differently');
-  const lastJson = (r) => JSON.parse(out(r).trim().split(/\r?\n/).at(-1));
   assert.equal(lastJson(closeAt(USERS.admin, D(7), 'manual_send', 'ki25s-r4', a7)).outcome, 'paused');
   assert.equal(lastJson(closeAt(USERS.admin, D(7), 'manual_send', 'ki25s-r4', sameInstant)).outcome, 'paused',
     'a retry naming the same instant in another offset is the same request');

@@ -4,14 +4,16 @@
 -- WHAT (Mason, Slack 2026-11-23, Taha's review item 6): "Mark handled" on a customer receipt is admin-only.
 --   close_delivery_receipt(..., 'handled') from a sales rep is refused with RECEIPT_HANDLED_ADMIN_ONLY (42501) when it
 --   would close a receipt, unless it is the receipt that same rep paused with 'manual_send' for their own Email
---   Confirmation (DeliveryDetail closes it after the hand send went out; the hand send itself is unchanged).
---   To bind that, 'manual_send' now records who paused the receipt and which receipt it was (its created_at; a
---   re-queue after a cancel gives a new one) in two new nullable columns on delivery_receipt_queue.
+--   Confirmation AND send-email logged that rep's send of it (DeliveryDetail closes it after the hand send went out;
+--   the hand send itself is unchanged). The proof of the send is an email_log row (written only by send-email with the
+--   service role) that is status 'sent', created_by the rep, type delivery_completed scoped to this delivery
+--   (send-email checks the delivery belongs to the customer), to the customer's email on file, logged after the pause.
+--   To bind it, 'manual_send' now records who paused the receipt, when, and which receipt it was (its created_at; a
+--   re-queue after a cancel gives a new one) in three new nullable columns on delivery_receipt_queue.
 --   A rep's 'handled' that would change nothing (none / sent) or hits the in-flight refusal answers as before.
 --   Admins, drivers, 'manual_send', the expected-receipt check and every other line of 20270223120000's body: unchanged.
---   LIMIT (accepted design, not a hole this closes): Email Confirmation is a hand send from the screen, so the server
---   cannot tell a real one from a rep who calls manual_send then handled by hand. The rule removes the button and every
---   rep close of a receipt they did not pause themselves; Mason kept the hand send unchanged (2026-11-23).
+--   A rep whose send was not logged as sent (provider failure, a lost post-send update) is refused: the receipt stays
+--   on "Customer receipts to check" for an admin (fails safe).
 --
 -- idempotency-body-check: exempt -- as 20270223120000: p_idempotency_key is required and checked with
 --   check_idempotency_intent, bound to caller and request; saved with save_idempotency and bound with
@@ -46,9 +48,12 @@ $preflight$;
 
 ALTER TABLE public.delivery_receipt_queue
   ADD COLUMN hand_send_by uuid,
-  ADD COLUMN hand_send_queued_at timestamptz;
+  ADD COLUMN hand_send_queued_at timestamptz,
+  ADD COLUMN hand_send_at timestamptz;
 COMMENT ON COLUMN public.delivery_receipt_queue.hand_send_by IS
   'Who last paused this receipt for Email Confirmation (close_delivery_receipt manual_send). With hand_send_queued_at, lets that sales rep close it after the hand send; otherwise Mark handled is admin-only.';
+COMMENT ON COLUMN public.delivery_receipt_queue.hand_send_at IS
+  'When hand_send_by paused it; only a send logged in email_log after this lets that sales rep close the receipt.';
 COMMENT ON COLUMN public.delivery_receipt_queue.hand_send_queued_at IS
   'The created_at of the receipt hand_send_by paused; a re-queue gives the row a new created_at, so an old pause never covers a new receipt.';
 
@@ -137,9 +142,18 @@ BEGIN
       USING ERRCODE = '55006';
   ELSIF p_reason = 'handled' AND v_role <> 'admin'
         AND (v_row.status <> 'needs_check' OR v_row.hand_send_by IS DISTINCT FROM v_actor
-             OR v_row.hand_send_queued_at IS DISTINCT FROM v_row.created_at) THEN
+             OR v_row.hand_send_queued_at IS DISTINCT FROM v_row.created_at
+             -- The send itself, as send-email logged it (service role only): this rep emailed this delivery's receipt
+             -- to the customer's address on file, and it went out, after the pause (Sol r1 BLOCKER: a pause alone
+             -- is not proof). A minute's grace covers the Edge clock against this one.
+             OR NOT EXISTS (
+               SELECT 1 FROM public.email_log e JOIN public.customers c ON c.id = v_row.customer_id
+                WHERE starts_with(e.idempotency_key, 'delivery_completed:delivery:' || p_delivery_id::text || ':')
+                  AND e.status = 'sent' AND e.created_by = v_actor AND e.customer_id = v_row.customer_id
+                  AND lower(btrim(e.recipient_email)) = lower(btrim(c.email))
+                  AND e.created_at >= v_row.hand_send_at - interval '1 minute')) THEN
     -- Mason, 2026-11-23: only an admin marks a receipt handled. A sales rep may close only the receipt they paused
-    -- for their own Email Confirmation (the screen's close after the hand send), bound to that receipt's generation.
+    -- for their own Email Confirmation and then emailed (the screen's close after the hand send).
     RAISE EXCEPTION 'RECEIPT_HANDLED_ADMIN_ONLY: only an admin can mark a customer receipt handled'
       USING ERRCODE = '42501';
   ELSE
@@ -150,6 +164,7 @@ BEGIN
            -- Who paused this receipt for a hand send, and which receipt (a re-queue gives a new created_at).
            hand_send_by = CASE WHEN p_reason = 'manual_send' THEN v_actor ELSE hand_send_by END,
            hand_send_queued_at = CASE WHEN p_reason = 'manual_send' THEN v_row.created_at ELSE hand_send_queued_at END,
+           hand_send_at = CASE WHEN p_reason = 'manual_send' THEN clock_timestamp() ELSE hand_send_at END,
            last_error = left(CASE WHEN p_reason = 'handled'
                                   THEN 'Marked handled by ' || left(COALESCE(v_name, 'staff'), 60) || '; the server will not send it.'
                                   ELSE 'Email Confirmation started by ' || left(COALESCE(v_name, 'staff'), 60)
@@ -195,7 +210,7 @@ BEGIN
      OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee = 0) THEN
     RAISE EXCEPTION 'POSTFLIGHT: close_delivery_receipt lost its owner, mode, search_path or grants';
   END IF;
-  IF md5(replace(p.prosrc, chr(13), '')) <> '7bdba0d9fc0558994204be4c3ee6867f' THEN
+  IF md5(replace(p.prosrc, chr(13), '')) <> '340cd88d9c3cc582c112fe4f1a3f43a6' THEN
     RAISE EXCEPTION 'POSTFLIGHT: close_delivery_receipt is not this migration''s body (admin-only rule)';
   END IF;
 END;

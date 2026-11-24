@@ -12,7 +12,7 @@ BEGIN
   -- The security settings too, so a later change to only those is not silently undone (Sol r5 LOW).
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-         AND md5(replace(p.prosrc, chr(13), '')) = '2a7d8883d3767f93e2571a429898d683'
+         AND md5(replace(p.prosrc, chr(13), '')) = '09c2a3efd16258c66bea74b7b7b86151'
          AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']) THEN
     RAISE EXCEPTION 'F05B_REVERSE: _complete_delivery_authorized_impl is not the F05b body; re-plan the rollback';
   END IF;

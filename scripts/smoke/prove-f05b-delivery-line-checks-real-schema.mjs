@@ -266,10 +266,10 @@ const id = (s) => `af05b000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), CUST = id('c1'), P = id('b1'), INV = id('d1'), ORD = id('e1'), OI = id('e11'), OI2 = id('e12');
 // D1 all-zero target; D2 mixed (two lines); D3 scheduled, for start-and-complete; D4 in progress with no lines;
 // DL legacy completed with no lines (the March 2026 shape); D5 offline target; D6 completes, then replays its key;
-// D7 scheduled, for the line-delete race; D8 completes while the migration is being applied.
+// D7 scheduled, for the line-delete race; D8 completes while the migration is being applied; D10 completes with 0.01.
 const D1 = id('f1'), D1A = id('f11'), D2 = id('f2'), D2A = id('f21'), D2B = id('f22'), D3 = id('f3'), D3A = id('f31');
 const D4 = id('f4'), DL = id('f9'), D5 = id('f5'), D5A = id('f51'), D6 = id('f6'), D6A = id('f61'), D7 = id('f7'), D7A = id('f71');
-const D8 = id('f8'), D8A = id('f81');
+const D8 = id('f8'), D8A = id('f81'), D10 = id('f10'), D10A = id('f101');
 const OFF = id('ab1'), OFF_KEY = 'f05b-offline-1';
 
 function seed() {
@@ -296,7 +296,8 @@ function seed() {
       ('${D5}', 'F05B-D5', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
       ('${D6}', 'F05B-D6', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
       ('${D7}', 'F05B-D7', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'scheduled', false),
-      ('${D8}', 'F05B-D8', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false);
+      ('${D8}', 'F05B-D8', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
+      ('${D10}', 'F05B-D10', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false);
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status, is_quick_delivery, completed_at, signed_by) VALUES
       ('${DL}', 'F05B-DL', '${ORD}', '${CUST}', '${ADMIN}', 'completed', false, '2026-03-20', 'Legacy');
     INSERT INTO public.delivery_items (id, delivery_id, order_item_id, product_id, quantity, unit_size) VALUES
@@ -306,8 +307,9 @@ function seed() {
       ('${D5A}', '${D5}', '${OI}', '${P}', 1, 'Gal'),
       ('${D6A}', '${D6}', '${OI}', '${P}', 1, 'Gal'),
       ('${D7A}', '${D7}', '${OI}', '${P}', 1, 'Gal'),
-      ('${D8A}', '${D8}', '${OI}', '${P}', 1, 'Gal');`);
-  console.log('[prover] seeded one order (10 and 5 units) with eight open loads and one line-less legacy completed load');
+      ('${D8A}', '${D8}', '${OI}', '${P}', 1, 'Gal'),
+      ('${D10A}', '${D10}', '${OI}', '${P}', 1, 'Gal');`);
+  console.log('[prover] seeded one order (10 and 5 units) with nine open loads and one line-less legacy completed load');
 }
 
 const AS_ADMIN = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true); SET LOCAL ROLE authenticated;`;
@@ -365,7 +367,7 @@ function afterCases() {
   const stock0 = stock(), line0 = orderLine();
   let r = committed(completeCall(D1, { [D1A]: 0 }, 'f05b-1'));
   assert.notEqual(r.status, 0, r.output);
-  assert.match(r.output, /DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero\. If nothing was delivered, call the office\./);
+  assert.match(r.output, /DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero \(anything under 0\.01 counts as zero\)\. If nothing was delivered, call the office\./);
   assert.equal(state(D1), 'in_progress|0|0');
   assert.equal(stock(), stock0);
   assert.equal(orderLine(), line0);
@@ -375,6 +377,16 @@ function afterCases() {
   assert.notEqual(r.status, 0, r.output);
   assert.match(r.output, /DELIVERY_NOTHING_DELIVERED/);
   assert.equal(state(D1), 'in_progress|0|0');
+  // Under 0.01 counts as nothing delivered (Mason 2026-11-23: it must not make an invoice).
+  for (const tiny of [0.009, 0.000000001]) {
+    r = committed(completeCall(D1, { [D1A]: tiny }, `f05b-1t-${tiny}`));
+    assert.notEqual(r.status, 0, r.output);
+    assert.match(r.output, /DELIVERY_NOTHING_DELIVERED/);
+    assert.equal(state(D1), 'in_progress|0|0');
+  }
+  assert.equal(stock(), stock0);
+  assert.equal(orderLine(), line0);
+  console.log('[case 1b] 0.009 and 0.000000001: refused DELIVERY_NOTHING_DELIVERED; load still in progress, nothing kept');
   console.log(`[case 1] all-zero (and negative) figures: refused DELIVERY_NOTHING_DELIVERED; load still in progress, no line delivered, no remainder; stock ${stock0} and order line ${line0} unchanged; no key saved`);
 
   // 2. One line 0, the other 1: completes as a partial delivery, and the order line moves by 1.
@@ -385,6 +397,14 @@ function afterCases() {
   assert.deepEqual(q2.split(',').sort(), ['0', '1']);
   assert.equal(orderLine().split('/')[0], String(Number(line0.split('/')[0]) + 1));
   console.log(`[case 2] mixed 0 and 1: completes; one line delivered; order line now ${orderLine()}`);
+
+  // 2b. Exactly 0.01 is a delivery: it completes, and the order line moves by 0.01.
+  const before2b = Number(orderLine().split('/')[0]);
+  r = committed(completeCall(D10, { [D10A]: 0.01 }, 'f05b-2b'));
+  assert.equal(r.status, 0, r.output);
+  assert.equal(state(D10).split('|').slice(0, 2).join('|'), 'completed|0.01');
+  assert.equal(Number(orderLine().split('/')[0]), before2b + 0.01);
+  console.log(`[case 2b] exactly 0.01: completes; line delivered 0.01; order line now ${orderLine()}`);
 
   // 3. Start-and-complete on a scheduled load: all zero is refused and the load stays scheduled; no figures sent
   //    (the full scheduled amounts) completes.

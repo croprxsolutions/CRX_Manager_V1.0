@@ -33,8 +33,8 @@ Read at `origin/staging` 728f700a3 (2026-11-22). Follow-up to F05 (#2264, `20270
 
 Before the migration: an all-zero completion completes (the gap is real). The migration takes no table lock (Sol r1 HIGH was about its old lock order); the proof applies it while a completion that has read its lines is still open, and both finish.
 
-1. When `complete_delivery` sends every figure 0 (or negative), then it is refused `DELIVERY_NOTHING_DELIVERED`; the load stays `in_progress`, no line delivered, no remainder; stock, order line and keys unchanged.
-2. When one line is 0 and another is 1, then it completes as a partial delivery.
+1. When `complete_delivery` sends every figure under 0.01 (0, negative, 0.009, 0.000000001), then it is refused `DELIVERY_NOTHING_DELIVERED`; the load stays `in_progress`, no line delivered, no remainder; stock, order line and keys unchanged.
+2. When one line is 0 and another is 1, then it completes as a partial delivery. When the only line is exactly 0.01, it completes (Mason, Slack 2026-11-23: under 0.01 is nothing delivered and makes no invoice).
 3. When `start_and_complete_delivery` sends all zero, then it is refused and the load stays `scheduled`; with full quantities it completes.
 4. When a delivery with no lines is completed, then it is refused.
 5. When a legacy completed load with no lines has its notes edited, then the edit succeeds.

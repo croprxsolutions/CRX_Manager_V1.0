@@ -86,7 +86,7 @@ describe('sanitizeError', () => {
   it.each([
     ['DELIVERY_QUANTITIES_STALE', "this delivery's lines changed since the screen loaded them; reload it and enter the quantities again."],
     ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
-    ['DELIVERY_NOTHING_DELIVERED', 'every product on it has a delivered quantity of zero. If nothing was delivered, call the office.'],
+    ['DELIVERY_NOTHING_DELIVERED', 'every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'],
   ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` }))
       .toBe(`The delivery was not completed. ${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}`);

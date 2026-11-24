@@ -1,0 +1,3 @@
+## 2026-11-24 — F05b: under 0.01 counts as nothing delivered
+
+- `20270228260000_f05b_delivery_line_checks.sql` (not applied anywhere yet; #2324): completing a delivery is now also refused (`DELIVERY_NOTHING_DELIVERED`) when every line is under 0.01, so a tiny figure such as 0.000000001 can no longer complete a load and make an invoice; exactly 0.01 still completes. Taha's ask before his OK, following Mason's Slack rule of 2026-11-23. Proof cases 1b (0.009 and 0.000000001 refused) and 2b (0.01 completes) in `scripts/smoke/prove-f05b-delivery-line-checks-real-schema.mjs`. The migration also carries the idempotency-body exemption marker: the completion body it calls checks and saves the key.

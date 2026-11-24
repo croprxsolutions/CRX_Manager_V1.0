@@ -1,6 +1,6 @@
 -- F05b (#2274): a delivery rule the screens already keep, now kept by the database.
 -- Contract: docs/plans/2026-11-22-f05b-delivery-line-checks-CONTRACT.md.
---   * #2274: completing a delivery with nothing delivered is refused (DELIVERY_NOTHING_DELIVERED, SQLSTATE 23514),
+--   * #2274: completing a delivery with nothing delivered (every line under 0.01) is refused (DELIVERY_NOTHING_DELIVERED, SQLSTATE 23514),
 --     inside the shared completion step every completion goes through (complete_delivery and start_and_complete_delivery
 --     via _complete_delivery_aggregate_impl; offline sync calls complete_delivery; a delivery can enter 'completed' only
 --     through complete_delivery, _require_delivery_completion_evidence). Only the new block below changes; the rest of
@@ -10,6 +10,8 @@
 -- on production) stay as they are: the rule is checked only when a delivery is being completed.
 -- actor-binding-check: exempt -- internal _impl, EXECUTE revoked from every client role; its only caller,
 -- _complete_delivery_aggregate_impl, binds p_performed_by to auth.uid() (ACTOR_MISMATCH) before calling it.
+-- idempotency-body-check: exempt -- this wrapper only reads the key to skip its checks on a replay; the body it calls,
+-- _complete_delivery_authorized_impl_20270122, checks and saves the key.
 
 -- No table lock: replacing the function needs none.
 DO $preflight$
@@ -77,7 +79,8 @@ BEGIN
 
   -- F05b #2274: nothing delivered is not a completion. The screens already refuse it (DeliveryDetail hasAnyQty,
   -- FieldStop); this is the server rule. Same figure per line as the body: the clamped figure sent for that line,
-  -- or the full scheduled quantity when no figures were sent. A delivery with no lines is refused too. Raised here,
+  -- or the full scheduled quantity when no figures were sent. Under 0.01 counts as nothing delivered (Mason, Slack
+  -- 2026-11-23: it must not make an invoice). A delivery with no lines is refused too. Raised here,
   -- after the delivery row lock and before this function's order-line and stock locks and any write (the caller may
   -- already hold its stock locks; the refusal rolls the whole call back). A replay (v_status 'replay') is never checked.
   -- The lines are locked too. Today a direct line write already locks the delivery row first (the parent-lock
@@ -90,8 +93,8 @@ BEGIN
                       WHERE di.delivery_id = p_delivery_id
                         AND CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
                                  THEN GREATEST(0, LEAST((p_quantities ->> di.id::text)::numeric, di.quantity))
-                                 ELSE di.quantity END > 0) THEN
-    RAISE EXCEPTION 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero. If nothing was delivered, call the office.'
+                                 ELSE di.quantity END >= 0.01) THEN
+    RAISE EXCEPTION 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'
       USING ERRCODE = 'check_violation';
   END IF;
 
@@ -138,7 +141,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = '2a7d8883d3767f93e2571a429898d683'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '09c2a3efd16258c66bea74b7b7b86151'
                     AND p.prosecdef
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')

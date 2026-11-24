@@ -61,6 +61,7 @@ const SERVER_MESSAGES: Array<[string, string]> = [
   ['FIELD_SPLIT_DUPLICATE_PAYER', 'A customer is listed twice in the split.'],
   ['FIELD_SPLIT_INVALID_SHARE', 'Each share must be from 0% to 100%, with at most 6 decimals.'],
   ['FIELD_SPLIT_NO_PAYERS', 'A split needs at least one payer.'],
+  ['FIELD_SPLIT_CLEAR_REFUSED', 'Who pays for this field is already set and has history, so it cannot be left blank. Enter who pays.'],
   ['FIELD_SPLIT_PAYER_NOT_ACTIVE', 'A payer in this split is not an active customer.'],
   ['FIELD_SPLIT_SHARES_MUST_MATCH_UNTIL_FP4', SHARES_MUST_MATCH],
   ['FIELD_SPLIT_DATE_REQUIRED', 'Choose the date the split starts.'],

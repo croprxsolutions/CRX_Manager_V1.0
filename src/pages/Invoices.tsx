@@ -23,6 +23,7 @@ import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
 import CustomerDrawer from '../components/customers/CustomerDrawer';
 import CustomerInvoiceSummaryPanel from '../components/field-invoices/CustomerInvoiceSummaryPanel';
 import InvoiceSelectionBar, { InvoiceRowCheckbox, SelectAllToggle } from '../components/invoices/InvoiceSelection';
+import { DueDate, InvoiceStatusBadge } from '../components/invoices/InvoiceListCells';
 import Tabs, { type TabItem } from '../components/ui/Tabs';
 import { hasPageAccess } from '../lib/pagePermissions';
 import type { Invoice, InvoiceStatus, InvoicePrintOptions } from '../types';
@@ -39,7 +40,6 @@ import {
   type InvoicePdfData,
 } from '../lib/invoicePdf';
 import { formatCents, formatCentsMinus as fmt } from '../lib/money';
-import { invoiceStatusBadge } from '../lib/statusLabel';
 import { INVOICE_COLUMNS, INVOICE_ITEM_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE } from '../lib/costFields';
 import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
 import { isCurrentSeason, openOrInSeasonFilter, otherSeasonLabels } from '../lib/invoiceSeasonWindow';
@@ -51,7 +51,6 @@ import { applyTableSearchSort } from '../lib/tableSearchSort';
 import { listSortParam, oneOf, parseListSort, useUrlListState } from '../hooks/useUrlListState';
 import { draftQueueState } from '../lib/invoiceDraftQueue';
 import { chemicalInvoiceTab, INVOICE_TAB_LABELS, POSTED_STATUSES, tabStatuses, type ChemicalInvoiceTab } from '../lib/invoiceListTabs';
-import { parseLocalDate } from '../lib/dateUtils';
 import PageHeader from '../components/ui/PageHeader';
 import Modal from '../components/ui/Modal';
 import { sendEmail, buildEmailHtml, invoiceEmailSnapshot } from '../lib/emailService';
@@ -102,10 +101,6 @@ const TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'misc_charge', label: 'Misc Charge' },
 ];
 
-const statusBadge = (status: InvoiceStatus) => {
-  const s = invoiceStatusBadge(status);
-  return <Badge variant={s.variant} normalCase>{s.label}</Badge>;
-};
 
 // Search, filters and sort live in the address, so Back from an invoice brings the same view back.
 // The tab is one more of these: ?tab=drafts|posted|customer|all.
@@ -783,8 +778,6 @@ export default function Invoices() {
       </span>
     ) : null;
 
-  const dueLabel = (row: InvoiceRow) => (row.due_date ? parseLocalDate(row.due_date).toLocaleDateString() : '—');
-
   // Phone layout of one invoice (the phone boards): the same values and formatting as the table's columns.
   const invoiceMobileRow = (row: InvoiceRow) => (
     <div className={`flex items-start gap-1 px-4 py-2 ${selected.has(row.id) ? 'bg-crx-green-tint' : ''}`}>
@@ -809,7 +802,7 @@ export default function Invoices() {
           {splitMark(row)}
           <span className="flex flex-wrap items-center gap-x-2 text-xs text-secondary">
             <span>{typeLabel(row.invoice_type)}</span>
-            {row.due_date && <span>Due {dueLabel(row)}</span>}
+            {row.due_date && <span>Due <DueDate date={row.due_date} /></span>}
             <span className={row.balance_cents > 0 ? 'text-red-600 font-semibold' : 'text-crx-green'}>
               Balance {fmt(row.balance_cents)}
             </span>
@@ -817,7 +810,7 @@ export default function Invoices() {
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1">
           <span className="font-semibold tabular-nums text-nav-dark">{fmt(row.total_amount_cents)}</span>
-          {statusBadge(row.status)}
+          <InvoiceStatusBadge status={row.status} />
         </span>
       </button>
     </div>
@@ -912,7 +905,7 @@ export default function Invoices() {
       key: 'due_date',
       header: 'Due',
       sortable: true,
-      render: (row) => <span className="whitespace-nowrap">{dueLabel(row)}</span>,
+      render: (row) => <DueDate date={row.due_date} />,
     },
     {
       key: 'total_amount_cents',
@@ -924,7 +917,7 @@ export default function Invoices() {
       key: 'status',
       header: 'Status',
       sortable: true,
-      render: (row) => statusBadge(row.status),
+      render: (row) => <InvoiceStatusBadge status={row.status} />,
     },
     {
       key: 'balance_cents',

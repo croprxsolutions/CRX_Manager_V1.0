@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { FileText, Printer, FileClock, Mail, Pencil, X, Search, ClipboardCheck, ArrowLeft, MoreHorizontal, Users } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
-import Badge from '../ui/Badge';
 import ConfirmModal from '../ui/ConfirmModal';
 import MobileCardList from '../ui/MobileCardList';
 import MultiSelectDropdown, { type MultiSelectOption } from '../jobs/MultiSelectDropdown';
@@ -28,8 +27,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { formatCents as fmt } from '../../lib/money';
 import SeasonTag from '../invoices/SeasonTag';
 import InvoiceSelectionBar, { InvoiceRowCheckbox, SelectAllToggle } from '../invoices/InvoiceSelection';
-import { invoiceStatusBadge } from '../../lib/statusLabel';
-import { parseLocalDate } from '../../lib/dateUtils';
+import { DueDate, InvoiceStatusBadge } from '../invoices/InvoiceListCells';
 import { isCurrentSeason, otherSeasonLabels } from '../../lib/invoiceSeasonWindow';
 import { SkeletonTable } from '../ui/Skeleton';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../../lib/pagedRead';
@@ -89,13 +87,6 @@ const chips = (values: string[]) => {
 };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-
-const dueLabel = (row: FieldInvoiceListRow) => (row.due_date ? parseLocalDate(row.due_date).toLocaleDateString() : '—');
-
-const statusBadge = (row: FieldInvoiceListRow) => {
-  const s = invoiceStatusBadge(row.status);
-  return <Badge variant={s.variant} normalCase>{s.label}</Badge>;
-};
 
 // A split invoice posts with its whole group, which this tab never does, so it has no tick box.
 const splitMark = (row: UnpostedFieldInvoiceRow) =>
@@ -722,9 +713,9 @@ export default function FieldInvoicesUnpostedPanel() {
                 </p>
                 <p className="mt-1 text-xs text-secondary">
                   {new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()} · {row.total_acres.toLocaleString()} ac
-                  {row.due_date ? ` · Due ${dueLabel(row)}` : ''}
+                  {row.due_date && <> · Due <DueDate date={row.due_date} /></>}
                 </p>
-                <div className="mt-1 flex flex-wrap items-center gap-1.5">{statusBadge(row)}<SeasonTag season={row.season} /></div>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5"><InvoiceStatusBadge status={row.status} /><SeasonTag season={row.season} /></div>
                 {splitMark(row)}
               </div>
               <div className="shrink-0 text-right">
@@ -783,9 +774,9 @@ export default function FieldInvoicesUnpostedPanel() {
                       {new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}
                       <div className="mt-0.5"><SeasonTag season={row.season} /></div>
                     </td>
-                    <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{dueLabel(row)}</td>
+                    <td className="px-3 py-2 text-gray-700"><DueDate date={row.due_date} /></td>
                     <td className="px-3 py-2 text-right tabular-nums font-medium">{fmt(row.total_amount_cents)}</td>
-                    <td className="px-3 py-2">{statusBadge(row)}</td>
+                    <td className="px-3 py-2"><InvoiceStatusBadge status={row.status} /></td>
                     <td className="px-3 py-2 text-gray-700">{row.job_number || '—'}</td>
                     <td className="px-3 py-2">{chips(row.locations)}</td>
                     <td className="px-3 py-2">{chips(row.crops)}</td>

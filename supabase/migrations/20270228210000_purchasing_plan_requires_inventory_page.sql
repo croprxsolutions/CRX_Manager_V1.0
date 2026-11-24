@@ -1,5 +1,5 @@
 -- ============================================================================
--- 20270228130000_purchasing_plan_requires_inventory_page
+-- 20270228210000_purchasing_plan_requires_inventory_page
 -- Release #2388 Sol HIGH 2 (Mason, 2026-11-23: fix before release).
 --
 -- WHY: get_purchasing_plan checked only the caller's role. A sales rep whose Inventory page is turned off in

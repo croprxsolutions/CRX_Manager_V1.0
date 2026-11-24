@@ -1,0 +1,177 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { mockPreview, mockCommit, mockToast } = vi.hoisted(() => ({ mockPreview: vi.fn(), mockCommit: vi.fn(), mockToast: vi.fn() }));
+vi.mock('../../lib/productParents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/productParents')>()),
+  previewParentRateCutover: mockPreview,
+  commitParentRateCutover: mockCommit,
+  loadOpenWork: vi.fn().mockResolvedValue([]),
+}));
+vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
+
+import ParentRateCutoverModal from './ParentRateCutoverModal';
+import type { ProductParent } from '../../lib/productParents';
+
+const parent = {
+  id: 'par1', name: 'Smart Test', product_form: 'dry', rate_per_acre: '1.8', rate_unit: 'Dry oz', suggested_rate: '1.8 oz',
+  parent_version: 4, is_active: true, sizes: [{ product_id: 's1', product_name: 'Smart Test 10 lb' }],
+} as unknown as ProductParent;
+const prices = (t1: number) => ({ tier1_price_per_acre: t1, tier2_price_per_acre: null, tier3_price_per_acre: null });
+const eligible = {
+  parent_id: 'par1', direction: 'promote', eligible: true, name: 'Smart Test', rate_source: 'legacy', changes: true,
+  current: { rate_per_acre: '1.8', rate_unit: 'Dry oz' },
+  target: { rate_per_acre: '1.8', rate_unit: 'Lb', suggested_rate: '1.8 Lb/acre' },
+  expected: { parent_version: 4, sizes: [{ product_id: 's1', product_name: 'Smart Test 10 lb', rate_per_acre: '1.8', rate_unit: 'Dry oz',
+    suggested_rate: '1.8 oz', prices: prices(35.37), before_prices: prices(2.21) }] },
+};
+const open = (rateSource: 'legacy' | 'approved' = 'legacy', onSaved = vi.fn()) => {
+  render(<ParentRateCutoverModal parent={parent} profileId="u1" rateSource={rateSource} onClose={vi.fn()} onSaved={onSaved} />);
+  return onSaved;
+};
+
+beforeEach(() => { mockPreview.mockReset(); mockCommit.mockReset(); mockToast.mockReset(); });
+
+describe('RT-4a rate cut-over modal', () => {
+  it('previews old and new per size, needs a reason, then commits the preview unchanged', async () => {
+    mockPreview.mockResolvedValue(eligible);
+    mockCommit.mockResolvedValue({ parent_id: 'par1', direction: 'promote', rate_source: 'approved' });
+    const onSaved = open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    await screen.findByTestId('rate-cutover-table');
+    expect(mockPreview).toHaveBeenCalledWith('par1', 'promote');
+    expect(screen.getByText('1.8 Lb')).toBeInTheDocument();
+    expect(screen.getByText('1.8 Lb/acre')).toBeInTheDocument();
+    expect(screen.getByText('$35.37')).toBeInTheDocument();
+    expect(screen.getByText(/\$2\.21/)).toBeInTheDocument();
+    const go = screen.getByRole('button', { name: 'Switch to approved rate' });
+    expect(go).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: ' pilot ' } });
+    fireEvent.click(go);
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(mockCommit).toHaveBeenCalledWith(eligible, 'pilot', expect.any(String));
+  });
+
+  it('shows a refusal in the server\'s words and offers no switch', async () => {
+    mockPreview.mockResolvedValue({ parent_id: 'par1', direction: 'promote', eligible: false,
+      refusal: 'PRODUCT_PARENT_CUTOVER_LOCK_OFF: turn the rate lock on first' });
+    open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent("Can't switch. Turn the rate lock on first");
+    expect(screen.queryByRole('button', { name: 'Switch to approved rate' })).toBeNull();
+  });
+
+  it('switches back with restore when the group is on its approved rate', async () => {
+    const restore = { ...eligible, direction: 'restore', rate_source: 'approved',
+      target: { rate_per_acre: null, rate_unit: 'Dry oz', suggested_rate: null } };
+    mockPreview.mockResolvedValue(restore);
+    mockCommit.mockResolvedValue({ parent_id: 'par1', direction: 'restore', rate_source: 'legacy' });
+    const onSaved = open('approved');
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    const back = await screen.findByRole('button', { name: 'Switch back to old rate' });
+    expect(mockPreview).toHaveBeenCalledWith('par1', 'restore');
+    expect(screen.getByText('none (Dry oz)')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'undo pilot' } });
+    fireEvent.click(back);
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(mockCommit).toHaveBeenCalledWith(restore, 'undo pilot', expect.any(String));
+  });
+
+  it('retries a lost reply with the same key, and a stale refusal asks for a new preview', async () => {
+    mockPreview.mockResolvedValue(eligible);
+    mockCommit.mockRejectedValueOnce(new Error('Failed to fetch'))
+      .mockRejectedValueOnce(new Error('PRODUCT_PARENT_CUTOVER_STALE: "Smart Test" changed since the preview; preview again'));
+    const onSaved = open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.change(await screen.findByLabelText('Reason (required)'), { target: { value: 'pilot' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to approved rate' }));
+    await waitFor(() => expect(mockCommit).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole('button', { name: 'Switch to approved rate' }));
+    await waitFor(() => expect(mockCommit).toHaveBeenCalledTimes(2));
+    expect(mockCommit.mock.calls[1][2]).toBe(mockCommit.mock.calls[0][2]);
+    expect(await screen.findByRole('button', { name: 'Preview' })).toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('a switch that changes no rate shows the saved prices staying, not a recomputed price', async () => {
+    mockPreview.mockResolvedValue({ ...eligible, direction: 'restore', changes: false,
+      target: { rate_per_acre: '1.8', rate_unit: 'Dry oz', suggested_rate: '1.8 oz' } });
+    open('approved');
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    await screen.findByTestId('rate-cutover-table');
+    expect(screen.queryByText('$35.37')).toBeNull();
+    expect(screen.getByTestId('rate-cutover-table').querySelectorAll('tbody td')[3]).toHaveTextContent('$2.21 → $2.21');
+  });
+
+  it('a database refusal on Switch retires the preview', async () => {
+    mockPreview.mockResolvedValue(eligible);
+    mockCommit.mockRejectedValue(new Error('PRODUCT_PARENT_CUTOVER_LOCK_OFF: turn the rate lock on first'));
+    open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.change(await screen.findByLabelText('Reason (required)'), { target: { value: 'pilot' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to approved rate' }));
+    expect(await screen.findByRole('button', { name: 'Preview' })).toBeInTheDocument();
+    expect(mockToast).toHaveBeenCalledWith('error', 'Nothing was saved. Turn the rate lock on first');
+  });
+
+  it('reloads when another admin already switched the group', async () => {
+    mockPreview.mockResolvedValue(eligible);
+    mockCommit.mockRejectedValue(new Error('PRODUCT_PARENT_CUTOVER_ALREADY_APPROVED: "Smart Test" already uses its approved rate'));
+    const onSaved = open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.change(await screen.findByLabelText('Reason (required)'), { target: { value: 'pilot' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to approved rate' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(mockToast).toHaveBeenCalledWith('info', '"Smart Test" already uses its approved rate; page reloaded');
+    expect(mockToast).not.toHaveBeenCalledWith('error', expect.anything());
+  });
+
+  it('keeps Switch off when an old price shown is not an exact amount', async () => {
+    mockPreview.mockResolvedValue({ ...eligible, expected: { ...eligible.expected,
+      sizes: [{ ...eligible.expected.sizes[0], before_prices: prices(2.215) }] } });
+    open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.change(await screen.findByLabelText('Reason (required)'), { target: { value: 'pilot' } });
+    expect(screen.getByRole('button', { name: 'Switch to approved rate' })).toBeDisabled();
+  });
+
+  it('shows the database refusing old values that could not be switched back', async () => {
+    mockPreview.mockResolvedValue({ parent_id: 'par1', direction: 'promote', eligible: false,
+      refusal: 'PRODUCT_PARENT_CUTOVER_NOT_RESTORABLE: "Smart Test" cannot switch: its old unit "fl oz" would not be accepted back on Smart Test 10 lb, so it could not be switched back; correct its rates first' });
+    open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('its old unit "fl oz" would not be accepted back');
+    expect(screen.queryByRole('button', { name: 'Switch to approved rate' })).toBeNull();
+  });
+
+  it('a preview held for one group is not sent for another', async () => {
+    mockPreview.mockResolvedValue(eligible);
+    const { rerender } = render(<ParentRateCutoverModal parent={parent} profileId="u1" rateSource="legacy" onClose={vi.fn()} onSaved={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    await screen.findByTestId('rate-cutover-table');
+    rerender(<ParentRateCutoverModal parent={{ ...parent, id: 'par2' }} profileId="u1" rateSource="legacy" onClose={vi.fn()} onSaved={vi.fn()} />);
+    expect(screen.queryByTestId('rate-cutover-table')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeInTheDocument();
+    rerender(<ParentRateCutoverModal parent={parent} profileId="u1" rateSource="approved" onClose={vi.fn()} onSaved={vi.fn()} />);
+    expect(screen.queryByTestId('rate-cutover-table')).toBeNull();
+    expect(mockCommit).not.toHaveBeenCalled();
+  });
+
+  it('a preview refused because the group was already switched reloads the page', async () => {
+    mockPreview.mockResolvedValue({ parent_id: 'par1', direction: 'promote', eligible: false,
+      refusal: 'PRODUCT_PARENT_CUTOVER_ALREADY_APPROVED: "Smart Test" already uses its approved rate' });
+    const onSaved = open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  });
+
+  it('a switch that changes no rate says so in the success message', async () => {
+    mockPreview.mockResolvedValue({ ...eligible, changes: false });
+    mockCommit.mockResolvedValue({ parent_id: 'par1', direction: 'promote', rate_source: 'approved' });
+    open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.change(await screen.findByLabelText('Reason (required)'), { target: { value: 'pilot' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to approved rate' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Smart Test now uses its approved rate on all 1 size(s); rate and prices unchanged'));
+  });
+});

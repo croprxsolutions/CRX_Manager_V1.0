@@ -7,7 +7,7 @@
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), applies the candidate (autocommit refused,
  * POSTFLIGHT_OK, re-apply refused), then as the signed-in user checks:
  *   1. the caller's own usable v2 export returns NONE (never NULL);
- *   2. applied -> ALREADY_APPLIED; past expiry or status expired -> EXPIRED; older template -> OLD_TEMPLATE;
+ *   2. applied -> ALREADY_APPLIED; past expiry or status expired -> EXPIRED; older template (expired or not) -> OLD_TEMPLATE;
  *   3. another admin's export (even applied or old) -> DOWNLOADED_BY_OTHER_USER; applied wins over old and expired;
  *      unknown or null id -> EXPORT_NOT_FOUND;
  *   4. sales rep, driver, applicator and an inactive admin get ADMIN_REQUIRED; anon gets permission denied.
@@ -34,6 +34,7 @@ const EXPORTS = {
   pastExpiry: [id('e3'), USERS.admin, 'active', "now() - interval '1 minute'", V2],
   statusExpired: [id('e4'), USERS.admin, 'expired', "now() + interval '6 days'", V2],
   oldTemplate: [id('e5'), USERS.admin, 'active', "now() - interval '90 days'", 'crx-product-pricing-phase1a-v1'],
+  oldTemplateUnexpired: [id('ea'), USERS.admin, 'active', "now() + interval '6 days'", 'crx-product-pricing-phase1a-v1'],
   otherUser: [id('e6'), OTHER_ADMIN, 'active', "now() + interval '6 days'", V2],
   otherUserApplied: [id('e7'), OTHER_ADMIN, 'consumed', "now() + interval '6 days'", V2],
   appliedOldExpired: [id('e8'), USERS.admin, 'consumed', "now() - interval '90 days'", 'crx-product-pricing-phase1a-v1'],
@@ -72,6 +73,7 @@ try {
     pastExpiry: 'ok|EXPIRED',
     statusExpired: 'ok|EXPIRED',
     oldTemplate: 'ok|OLD_TEMPLATE',
+    oldTemplateUnexpired: 'ok|OLD_TEMPLATE',
     otherUser: 'ok|DOWNLOADED_BY_OTHER_USER',
     otherUserApplied: 'ok|DOWNLOADED_BY_OTHER_USER',
     appliedOldExpired: 'ok|ALREADY_APPLIED',

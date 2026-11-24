@@ -9,7 +9,8 @@ optional reason on a second line, logged word for word.
   prints NOT SKIPPED instead of staying silent.
 - The reason line passes `reasonProblem` (public log) and is recorded word for word, trimmed.
 - The skip request's summary now gives the two exact replies and no longer invites a yes. Requests and
-  receipts built with the old summary or an old reply no longer verify; he answers again with `skip`.
+  receipts built with the old summary or an old reply no longer verify: run
+  `owner-accept-sol-finding.mjs` again, show him the fresh summary, and he answers with `skip`.
 - Unchanged: carry-forward of skips, decision-log files, the reply counting in any conversation that
   showed the summary, the migration `yes`.
 - Tests: `.claude/hooks/sol-accept-lib.test.mjs` (exact replies, reason line verbatim, #2271 cases,

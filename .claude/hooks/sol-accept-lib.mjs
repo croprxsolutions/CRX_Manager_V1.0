@@ -280,7 +280,7 @@ export function solSkipSummary(p) {
     "",
     `To leave ${nums.length === 1 ? "it" : "them all"} unfixed, reply: skip`,
     ...(nums.length > 1 ? [`To skip only some, reply skip and their numbers (for example: skip ${nums[0]})`] : []),
-    `To give a reason, put it on a second line; it is logged word for word and never changes what is skipped. Any other reply skips nothing, yes included. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
+    `To give a reason, put it on a second line; it is logged word for word and never changes what is skipped. The log is public: one line of two words or more, no money amounts, emails, phone numbers, #numbers or markup, or nothing is skipped. Any other reply skips nothing, yes included. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
   ];
 }
 

@@ -142,8 +142,8 @@
 > `accept`, `skip them`, `Skip I agree skip it`, a third non-blank line, `ok`, `move on`, `merge it` and questions. A reply that starts with skip or
 > yes but is not exact is refused out loud (NOT SKIPPED), never silently. A number he names that was not shown is ignored only when he already skipped
 > that finding in the same Sol run (the receipt records it as `ignored`, and `collectAcceptances` counts it only if an earlier receipt covers it).
-> The reply hook records it only when a skip request built in this session is waiting and the agent's last message is exactly
-> its summary (`resolvePlainReply` with `purposes`, the same check as the migration `I approve`), into one receipt per reply
+> The reply hook records it only when a skip request is waiting and the agent's last message in the conversation he replies in is exactly
+> its summary (since 2026-11-23 any conversation that shows it word for word, not only the one that built it; `resolvePlainReply` with `purposes`, the same check as the migration `I approve`), into one receipt per reply
 > (`owner-approval-sol-skip-<head>-<code>.json`, `selected` numbers), which `verifySolSkip` re-checks against the Sol run, the
 > findings shown, his reply read back from the transcript, and the agent's last message before it being this request's
 > summary (`assertSkipShown`). The log records a fixed sentence, or his reason line word for word. The older flow

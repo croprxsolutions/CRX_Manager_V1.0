@@ -364,3 +364,21 @@ Sol numbers without a row here are reviewer finding ids kept for traceability; t
 | 2026-11-24 p | The applicator always sees tank contents on the job order; the "hide tank contents" print option is dropped |
 | 2026-11-24 o | Waste bills by default (it went in the tank); the office lowers a load's quantity with a reason if it should not bill (Sol round 2 #47) |
 | KI-206 | No EPA registration prints a dash |
+
+## 11. Review findings Mason ruled too strict (2026-11-24; do not re-raise)
+
+Mason's field rule (flags and notes, not blocks; no extra crew or office steps; no over-engineering) decided these. A reviewer may re-raise one only with a concrete real money, stock, data-access or data-loss failure the kit does not already flag.
+
+| Review | Finding (topic) | Ruling |
+|---|---|---|
+| Sol round 1 #51 | A mixer on a personal fallback login picks another mixer's name | Too strict |
+| Sol round 1 #53 | Two applicators spraying different parts of one field on one day trip the look-alike warning | Too strict (it is a warning, not a block) |
+| Sol round 1 #60 | Office moves a job to another rig after a load is mixed | Too strict |
+| Sol round 1 #64 | Job close retried, or a job-done email sent to one payer and not another | Too strict |
+| Sol round 1 #66, #82 | Payer-note history; repeat-safe Chem Man re-import matching | Replaced by decisions 2026-11-24 g and l |
+| Sol round 1 #43 | Exact carried mix after water top-ups | [SPRING]; whole-tank estimate for now |
+| Sol round 2 #38–45 | Multi-load leftover carry chains, carry races, two tablets on one carry, corrections after a carry is used, per-revision water volume, strength after a mid-tank add | Too strict |
+| Sol round 2 #51 | Locking for the duplicate-load repair | Too strict |
+| Sol round 2 #60 | Product use per revision inside one field | Too strict |
+| Sol round 2 #67 | A recipient model for job-done emails | Too strict |
+| Sol round 2 #84 | Tracking reopened shared loads that were already settled | Too strict; the one-line rule "any edit marks drafts stale" covers it |

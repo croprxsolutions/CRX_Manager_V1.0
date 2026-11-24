@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270228190000_rate_switch_recheck (#2379, #1813; contract
- * docs/plans/2026-11-23-product-RT4a-cutover-button-CONTRACT.md, amendment "Re-check at the switch", cases R1 to R8).
+ * Real-schema proof for 20270301200000_rate_switch_recheck (#2379, #1813; contract
+ * docs/plans/2026-11-23-product-RT4a-cutover-button-CONTRACT.md, amendment "Re-check at the switch", cases R1 to R9).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container, replays
  * every post-baseline migration before the candidate (the shared undo-paths harness, so the RT-4a switch and its
@@ -14,6 +14,7 @@
  * Prints RATE_SWITCH_RECHECK_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -21,7 +22,7 @@ process.env.UNDO_PATHS_CONTAINER ||= `crx-rsr-${process.pid}-${Date.now().toStri
 const { buildContainer, removeContainer, seedUsers, scalar, psql, attempt, asUser, claims, USERS, ROOT, NAME, docker } =
   await import('./undo-paths/harness.mjs');
 
-const CANDIDATE = '20270228190000_rate_switch_recheck.sql';
+const CANDIDATE = '20270301200000_rate_switch_recheck.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const ADMIN = USERS.admin;
@@ -39,6 +40,7 @@ const GROUPS = [
   ['Lowered', '100-3', 64],   // lowered to 32 between preview and commit
   ['FormChanged', null, null], // a second approved row in lb no longer fits a liquid group
   ['Unconfirmed', null, null], // a second approved row whose basis is no longer confirmed
+  ['UnconfDefault', null, null], // the approved default itself is no longer confirmed
 ];
 
 const MK = `
@@ -84,6 +86,19 @@ const cutover = (parent, dir, key, { uid = ADMIN, reason = 'RSR test', over, pre
    ${asUser(`r2 := public.commit_parent_rate_cutover('${parent}', ${sq(dir)}, r->'expected', ${sq(reason)}, ${sq(key)}${overArg(over)});`)}
    v := jsonb_build_object('preview', r, 'receipt', r2)::text;`, { commit });
 const go = (...args) => okJson(cutover(...args));
+// A psql session left running in the background (for the two-session lock proof).
+function background(sql) {
+  const child = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q'], { cwd: ROOT });
+  let out = '';
+  child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { out += d; });
+  child.stdin.end(sql);
+  return new Promise((resolve) => child.on('close', (code) => resolve({ code, out })));
+}
+const pause = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+async function until(what, sql) {
+  for (let i = 0; i < 50; i += 1) { if (row(sql) === 't') return; await pause(200); }
+  throw new Error(`timed out waiting for ${what}`);
+}
 
 function seedFixtures() {
   seedUsers();
@@ -100,7 +115,7 @@ function seedFixtures() {
   for (const [name] of GROUPS) ok(attempt(ADMIN, `PERFORM rsr_proof.rates(${sq(name)});`, { commit: true }));
   const rates = []; const regs = [];
   for (const [name, epa, max] of GROUPS) {
-    rates.push(`('${P[name]}', 'per_acre', 'house_standard', 40, 'fl_oz', true, true)`);
+    rates.push(`('${P[name]}', 'per_acre', 'house_standard', 40, 'fl_oz', true, ${name !== 'UnconfDefault'})`);
     if (epa) regs.push(`('${epa}', ${max}, 'fl oz/acre', '${ADMIN}', '${ADMIN}')`);
   }
   // Rows an approval would have refused, as they look after the group's form changed (lb on a liquid group) or the
@@ -119,7 +134,7 @@ function seedFixtures() {
   assert.equal(row('SELECT count(*) FROM public.epa_registration_seed_run;'), '1');
 }
 
-function main() {
+async function main() {
   buildContainer({ stopBefore: CANDIDATE });
   seedFixtures();
 
@@ -164,6 +179,11 @@ function main() {
   assert.equal(plan.over_label_reason, 'Mason OK for this field trial');
   // The preview names the maximum the reason is given for; `expected` binds it by a text fingerprint (Sol MED 3).
   assert.deepEqual(plan.label_check.above.map((m) => `${m.epa_registration} ${m.max_label_rate} ${m.max_label_rate_unit}`), ['100-1 32 fl oz/acre']);
+  // Each maximum is text, so many digits reach the screen unrounded (Sol r2 MED).
+  assert.equal(typeof plan.label_check.above[0].max_label_rate, 'string');
+  const exact = okJson(attempt(ADMIN, `UPDATE public.epa_registrations SET max_label_rate = 39.999999999999999999 WHERE epa_registration = '100-1';
+    ${asUser(`r := public.preview_parent_rate_cutover('${P.Over}', 'promote', p_over_label_reason => 'x');`)} v := r::text;`));
+  assert.equal(exact.label_check.above[0].max_label_rate, '39.999999999999999999');
   assert.equal(typeof plan.expected.label_check_md5, 'string'); assert.equal(plan.expected.label_check, undefined);
   // Sol MED 4: a switch in a repeatable read transaction (an older snapshot of the maximum) is refused.
   const rr = psql(`BEGIN ISOLATION LEVEL REPEATABLE READ; ${claims(ADMIN)}
@@ -175,8 +195,15 @@ function main() {
   assert.equal(over.receipt.rate_source, 'approved'); assert.equal(over.receipt.rate_per_acre, '40');
   assert.equal(over.receipt.over_label_reason, 'Mason OK for this field trial');
   assert.equal(over.receipt.label_check.status, 'above');
-  assert.equal(row(`SELECT (after_values->>'over_label_reason') || '|' || (after_values->'label_check'->>'status') || '|' || (after_values->'legacy'->>'rate_per_acre')
-    FROM public.product_parent_events WHERE id = ${over.receipt.event_id} AND event_type = 'rates_promoted';`), 'Mason OK for this field trial|above|48');
+  // The event (every active user can read it) says only that a reason was given; the text is admins-only (Sol r2 MED).
+  assert.equal(row(`SELECT (after_values->>'over_label_reason_given') || '|' || coalesce(after_values->>'over_label_reason', 'none') || '|'
+    || (after_values->'label_check'->>'status') || '|' || (after_values->'legacy'->>'rate_per_acre')
+    FROM public.product_parent_events WHERE id = ${over.receipt.event_id} AND event_type = 'rates_promoted';`), 'true|none|above|48');
+  const reasonRead = (uid) => okJson(attempt(uid, `${asUser(`SELECT jsonb_agg(over_label_reason) INTO r FROM public.product_rate_cutover_label_reasons
+    WHERE event_id = ${over.receipt.event_id};`)} v := coalesce(r, '[]'::jsonb)::text;`));
+  assert.deepEqual(reasonRead(ADMIN), ['Mason OK for this field trial']);
+  assert.deepEqual(reasonRead(REP), []);
+  refused(attempt(ADMIN, asUser(`UPDATE public.product_rate_cutover_label_reasons SET over_label_reason = 'x';`)), /permission denied/);
   // R3: the same key and reason replay the receipt; the same key with another over-label reason is another request.
   const sent = `${sq(JSON.stringify(over.preview.expected))}::jsonb`;
   const replayed = okJson(attempt(ADMIN, `${asUser(`r := public.commit_parent_rate_cutover('${P.Over}', 'promote', ${sent}, 'RSR test', 'rsr-over-1', p_over_label_reason => 'Mason OK for this field trial');`)} v := r::text;`));
@@ -192,6 +219,8 @@ function main() {
   assert.equal(within.preview.label_check.status, 'within'); assert.equal(within.preview.over_label_reason, null);
   assert.equal(row(`SELECT coalesce(after_values->>'over_label_reason', 'none') || '|' || (after_values->'label_check'->>'status')
     FROM public.product_parent_events WHERE id = ${within.receipt.event_id};`), 'none|within');
+  assert.equal(row(`SELECT (after_values->>'over_label_reason_given') || '|' || (SELECT count(*) FROM public.product_rate_cutover_label_reasons
+    WHERE event_id = ${within.receipt.event_id}) FROM public.product_parent_events WHERE id = ${within.receipt.event_id};`), 'false|0');
   go(P.Within, 'restore', 'rsr-within-2', { commit: true });
   const positional = okJson(attempt(ADMIN, `${asUser(`r := public.preview_parent_rate_cutover('${P.Within}', 'promote');
     r2 := public.commit_parent_rate_cutover('${P.Within}', 'promote', r->'expected', 'positional', 'rsr-within-3');`)} v := r2::text;`));
@@ -209,8 +238,28 @@ function main() {
   refused(cutover(P.FormChanged, 'promote', 'rsr-form-1', { previewOver: undefined }), reapprove);
   ineligible(P.Unconfirmed, 'promote', reapprove);
   assert.match(previewJson(P.Unconfirmed, 'promote').refusal, /label per_100_gal: basis not confirmed/);
+  // Sol r2 LOW: an approved default no longer confirmed is told to re-approve, not refused as an invalid default.
+  const reapproveDefault = /PRODUCT_PARENT_CUTOVER_REAPPROVE: the form or rate basis of "\[RSR\] UnconfDefault" changed .*house_standard per_acre: basis not confirmed/;
+  ineligible(P.UnconfDefault, 'promote', reapproveDefault);
+  refused(attempt(ADMIN, asUser(`r := public.commit_parent_rate_cutover('${P.UnconfDefault}', 'promote', '{}'::jsonb, 'x', 'rsr-unconf-1');`)), reapproveDefault);
+
+  // R9 (Sol r2 MED): in separate sessions, a switch waiting behind an EPA label edit's registry lock holds no lock on
+  // the group's rows yet, so the two cannot deadlock; it finishes once the edit commits.
+  const editor = background(`BEGIN; SELECT pg_advisory_xact_lock(20261210, hashtext('crx_epa_registration')); SELECT pg_sleep(6); COMMIT;`);
+  await until('the label edit to hold the registry lock', `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND mode = 'ExclusiveLock' AND granted);`);
+  const switching = background(`BEGIN; ${claims(ADMIN)} SET LOCAL ROLE authenticated;
+    SELECT public.commit_parent_rate_cutover('${P.Lowered}', 'promote', '{}'::jsonb, 'x', 'rsr-lock-1'); COMMIT;`);
+  await until('the switch to wait on the registry lock', `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock'
+    AND wait_event = 'advisory' AND query LIKE '%commit_parent_rate_cutover%');`);
+  ok(attempt(ADMIN, `PERFORM 1 FROM public.product_parents WHERE id = '${P.Lowered}' FOR UPDATE NOWAIT;
+    PERFORM 1 FROM public.products WHERE id = '${P.LoweredSize}' FOR UPDATE NOWAIT;
+    PERFORM 1 FROM public.product_rates WHERE parent_id = '${P.Lowered}' FOR UPDATE NOWAIT; v := 'x';`));
+  assert.equal((await editor).code, 0);
+  const switched = await switching;
+  assert.match(switched.out, /PRODUCT_PARENT_CUTOVER_STALE/, switched.out); // it ran on, to the stale '{}' check
+  assert.doesNotMatch(switched.out, /deadlock/i);
 
   console.log('RATE_SWITCH_RECHECK_PROOF_PASS');
 }
 
-try { main(); } finally { if (!KEEP) removeContainer(); else console.log(`[rsr] kept ${NAME}`); }
+try { await main(); } finally { if (!KEEP) removeContainer(); else console.log(`[rsr] kept ${NAME}`); }

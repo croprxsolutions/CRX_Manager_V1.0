@@ -18,7 +18,7 @@ type Eligible = Extract<RateCutoverPreview, { eligible: true }>;
 const refusalText = (error: unknown) => sanitizeError(error).replace(/^Nothing was saved\.\s*/, '');
 const ALREADY = [RpcErrorCodes.PRODUCT_PARENT_CUTOVER_ALREADY_APPROVED, RpcErrorCodes.PRODUCT_PARENT_CUTOVER_ALREADY_LEGACY];
 const alreadySwitched = (error: unknown) => ALREADY.some((code) => hasRpcCode(error, code));
-// 20270228190000 (#2379): an approved rate above today's label maximum switches only with a typed over-label reason.
+// 20270301200000 (#2379): an approved rate above today's label maximum switches only with a typed over-label reason.
 const OVER_LABEL = [RpcErrorCodes.PRODUCT_PARENT_CUTOVER_OVER_LABEL, RpcErrorCodes.PRODUCT_PARENT_CUTOVER_OVER_LABEL_REASON_TOO_LONG];
 const needsOverLabelReason = (preview: RateCutoverPreview | null) => (preview?.eligible === false
   ? OVER_LABEL.some((code) => hasRpcCode({ message: preview.refusal }, code))

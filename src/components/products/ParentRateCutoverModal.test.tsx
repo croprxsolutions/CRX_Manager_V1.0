@@ -63,7 +63,7 @@ describe('RT-4a rate cut-over modal', () => {
 
   it('over the label maximum: asks for an over-label reason, previews with it, and switches with it (#2379)', async () => {
     const above = { ...eligible, over_label_reason: 'trial plot', label_check: { status: 'above',
-      above: [{ epa_registration: '100-1', max_label_rate: 32, max_label_rate_unit: 'fl oz/acre' }] } };
+      above: [{ epa_registration: '100-1', max_label_rate: '32', max_label_rate_unit: 'fl oz/acre' }] } };
     mockPreview
       .mockResolvedValueOnce({ parent_id: 'par1', direction: 'promote', eligible: false,
         refusal: 'PRODUCT_PARENT_CUTOVER_OVER_LABEL: the approved rate is above the current label maximum; type an over-label reason to switch' })
@@ -88,6 +88,20 @@ describe('RT-4a rate cut-over modal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Switch to approved rate' }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(mockCommit).toHaveBeenCalledWith(above, 'pilot', expect.any(String));
+  });
+
+  it('shows the label maximum exactly as the server sent it, unrounded (Sol r2 MED)', async () => {
+    mockPreview
+      .mockResolvedValueOnce({ parent_id: 'par1', direction: 'promote', eligible: false,
+        refusal: 'PRODUCT_PARENT_CUTOVER_OVER_LABEL: the approved rate is above the current label maximum; type an over-label reason to switch' })
+      .mockResolvedValueOnce({ ...eligible, over_label_reason: 'trial', label_check: { status: 'above',
+        above: [{ epa_registration: '100-1', max_label_rate: '39.999999999999999999', max_label_rate_unit: 'fl oz/acre' }] } });
+    open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.change(await screen.findByLabelText(/Over-label reason/), { target: { value: 'trial' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(await screen.findByTestId('rate-cutover-label-max'))
+      .toHaveTextContent('Above the label maximum: EPA 100-1 allows 39.999999999999999999 fl oz/acre.');
   });
 
   it('a rate to re-approve is shown as the refusal, with no reason box (#1813)', async () => {

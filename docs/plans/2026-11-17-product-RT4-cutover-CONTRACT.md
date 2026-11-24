@@ -51,7 +51,7 @@ Unknown keys, missing keys, duplicates or any mismatch refuse.
 4. All eligibility checks, after the locks.
 5. Write.
 
-No advisory locks. A refusal anywhere rolls back everything.
+No advisory locks here; since 20270301200000 a switch to the approved rate first takes the EPA registry lock shared (RT-4a contract, "Re-check at the switch"), so it can wait behind an EPA label edit. A refusal anywhere rolls back everything.
 
 **Rules that always hold.**
 1. **Promote eligibility.** All of these must hold:

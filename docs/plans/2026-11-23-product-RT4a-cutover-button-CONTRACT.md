@@ -116,7 +116,7 @@ None. Authority, refusals, undo and the freeze were settled in the RT-4a contrac
 
 ## Amendment (2026-11-24, "Re-check at the switch": #2379, #1813; Mason's night-run decisions D1-D3)
 
-Migration `20270228190000_rate_switch_recheck.sql` adds `_rate_cutover_recheck`, run on every promote by both
+Migration `20270301200000_rate_switch_recheck.sql` adds `_rate_cutover_recheck`, run on every promote by both
 `preview_parent_rate_cutover` and `commit_parent_rate_cutover` after the existing planner. Restores are never refused by it.
 
 - **D2, re-approve (#1813).** If any approved rate row of the group no longer passes Rate Review's own outcome checks for
@@ -126,8 +126,10 @@ Migration `20270228190000_rate_switch_recheck.sql` adds `_rate_cutover_recheck`,
   function Rate Review uses (`_product_rate_check_values`) against today's label maximum. Status `above` with no
   over-label reason refuses (`PRODUCT_PARENT_CUTOVER_OVER_LABEL`) in preview and commit. A reason (trimmed, at most 500
   characters, the `product_rates.over_label_reason` limit) lets it through, and is recorded with the label check in the
-  `rates_promoted` event's `after_values` and in the receipt. A reason sent when the rate is not above is not recorded.
-  `not_checked` (no label maximum on file) passes, as it does in Rate Review.
+  receipt; the `rates_promoted` event's `after_values` records the label check and `over_label_reason_given`, and the
+  reason's text goes to the admin-only `product_rate_cutover_label_reasons` (Sol r2). A reason sent when the rate is
+  not above is not recorded. `not_checked` (no label maximum on file, or one whose unit or basis cannot be compared)
+  passes, as it does in Rate Review: **Mason, 2026-11-24, "No, keep as is"** (asked after Sol r2's HIGH).
 - **Commit re-checks.** A label check whose result changed after the preview refuses the commit as stale: a rate that
   went from within to above its maximum, or, for a rate already above, a different maximum or registration. A
   maximum lowered but still above the rate is not a change (the rate stays within). The screen shows the maximums an
@@ -176,4 +178,16 @@ many digits cannot fail as stale on its way through the browser; (4 MED) the com
 so it cannot read an older maximum; (5 MED) the rollback keeps these signatures and the fingerprint; (6 LOW) this
 contract's stale-preview wording; (8 LOW) the reason box stops at 500 characters. Deferred: (7 LOW) an approved
 default whose basis is no longer confirmed is refused by the planner's `PRODUCT_PARENT_CUTOVER_DEFAULT_INVALID` before
-the re-approve check, so its message does not say "re-approve in Rate Review" (it is still refused).
+the re-approve check, so its message does not say "re-approve in Rate Review" (it is still refused). Fixed in round 2.
+
+### Sol round 2 (2026-11-24): 1 HIGH, 3 MED, 3 LOW
+
+- **(1 HIGH) answered by Mason.** A maximum whose unit cannot be compared ('not_checked') lets the approved rate switch
+  with no over-label reason, as Rate Review's approval does. Asked whether the switch should require a reason then,
+  Mason answered on 2026-11-24: "No, keep as is". The code keeps that rule and says so beside the check.
+- **Fixed:** (2 MED) the over-label reason's text is stored in the admin-only `product_rate_cutover_label_reasons`;
+  the event, which every active user can read, records only that one was given. (3 MED) the label check returns each
+  maximum as text, and the screen shows it unrounded. (4 MED) the prover holds the EPA registry lock in a second
+  session and proves a waiting switch holds no lock on the group's rows yet, then finishes without a deadlock.
+  (5 LOW) the re-approve check also runs before the planner, so an unconfirmed default is told to re-approve.
+  (6 LOW) the commit receipt's type carries `label_check`. (7 LOW) the RT-4 contract names the new registry lock.

@@ -4,7 +4,7 @@
 -- actor-binding-check: exempt — both public functions take the actor from _product_parent_require_admin() (auth.uid()).
 --
 -- Written 2026-11-24. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270228190000_rate_switch_recheck.md.
+-- docs/reference/migrations.d/20270301200000_rate_switch_recheck.md.
 --
 -- WHY (#2379, #1813; Mason's decisions D1 and D2, 2026-11-23): the rate switch publishes the rate approved in Rate
 --   Review as the group's catalog rate, trusting the stored approval. Two things can change after approval:
@@ -20,13 +20,22 @@
 --   * D1: the approved quoting default's recommended rate is checked against the current label maximum with
 --     _product_rate_check_values (Rate Review's own check). When it is above, the switch needs a typed over-label
 --     reason (trimmed, at most 500 characters, as Rate Review stores it); without one, preview and commit refuse
---     PRODUCT_PARENT_CUTOVER_OVER_LABEL. The reason and the label check are recorded in the rates_promoted event.
+--     PRODUCT_PARENT_CUTOVER_OVER_LABEL. The label check, and whether a reason was given, are recorded in the
+--     rates_promoted event, which every active user can read; the reason's text goes to the new admin-only
+--     product_rate_cutover_label_reasons (Rate Review keeps its over-label reasons admin-only too; Sol r2 MED).
+--     A maximum whose unit or basis cannot be compared ('not_checked') needs no reason, as in Rate Review's own
+--     approval: Mason, 2026-11-24, "No, keep as is" (Sol r2 HIGH, answered by the owner).
+--   * The D2 check also runs once before the planner, so a stored default whose basis is no longer confirmed is
+--     told to re-approve in Rate Review rather than refused as an invalid default (Sol r2 LOW).
+--   * The label check returns each maximum as text, so the screen shows the exact maximum (Sol r2 MED).
 --   preview_parent_rate_cutover and commit_parent_rate_cutover gain p_over_label_reason text DEFAULT NULL as their
 --   last argument, so existing calls keep their meaning (the old signatures are dropped, so a call without the new
 --   argument still resolves to exactly one function). Their bodies
 --   are the 20270125100000 bodies plus the re-check; commit's retry fingerprint also covers the over-label reason.
 --
--- NOT CHANGED: every table, row and policy; _rate_cutover_plan and every other function. No parent switches.
+-- NEW TABLE: product_rate_cutover_label_reasons (event_id, parent_id, over_label_reason, created_by, created_at):
+--   append-only, RLS on, SELECT for admins only, no write grant; only commit_parent_rate_cutover writes it.
+-- NOT CHANGED: every existing table, row and policy; _rate_cutover_plan and every other function. No parent switches.
 --   Live read 2026-11-24: 413 active groups have a promotable outcome; 0 have an approved row failing the form or
 --   basis check; 0 approved defaults carry an over-label reason.
 --
@@ -34,7 +43,8 @@
 --   20270125100000 bodies (md5 a923a78b5329538c1d7e7d76902349a6 and 1d199caeea7f94b0b7b1f94d99768694) but KEEP these
 --   signatures and this fingerprint (the trailing p_over_label_reason, ignored except in the fingerprint), so a switch
 --   committed with a reason whose answer was lost still replays its receipt on retry. Events already written keep
---   their extra keys, which nothing reads.
+--   their extra keys, which nothing reads. Keep product_rate_cutover_label_reasons and its rows (the record of
+--   over-label switches); drop only _rate_cutover_reapprove_check.
 --
 -- ORDERING: after 20270227160000. Not re-runnable (preflight refuses).
 
@@ -43,6 +53,8 @@ SET LOCAL lock_timeout = '10s';
 DO $preflight$
 BEGIN
   IF to_regprocedure('public._rate_cutover_recheck(uuid,jsonb,text)') IS NOT NULL
+     OR to_regprocedure('public._rate_cutover_reapprove_check(uuid)') IS NOT NULL
+     OR to_regclass('public.product_rate_cutover_label_reasons') IS NOT NULL
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
           WHERE p.oid = to_regprocedure('public._rate_cutover_plan(uuid,text)')) IS DISTINCT FROM '61322113ae88a29b0a1d4986f161cd3d'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
@@ -60,12 +72,61 @@ BEGIN
 END;
 $preflight$;
 
+-- The text of each over-label reason given at a switch, beside its rates_promoted event. Admins only, like
+-- product_rates.over_label_reason; the event itself (readable by every active user) records only that one was given.
+CREATE TABLE public.product_rate_cutover_label_reasons (
+  event_id bigint PRIMARY KEY REFERENCES public.product_parent_events(id) ON DELETE RESTRICT,
+  parent_id uuid NOT NULL REFERENCES public.product_parents(id) ON DELETE RESTRICT,
+  over_label_reason text NOT NULL CHECK (over_label_reason ~ '[[:alnum:]]' AND length(over_label_reason) <= 500),
+  created_by uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.product_rate_cutover_label_reasons OWNER TO postgres;
+COMMENT ON TABLE public.product_rate_cutover_label_reasons IS
+  'The over-label reason typed at a rate switch, one row per rates_promoted event that needed one. Admins only; only commit_parent_rate_cutover writes it.';
+ALTER TABLE public.product_rate_cutover_label_reasons ENABLE ROW LEVEL SECURITY;
+CREATE POLICY product_rate_cutover_label_reasons_admin_select ON public.product_rate_cutover_label_reasons
+  FOR SELECT TO authenticated USING ((SELECT public.is_admin()));
+REVOKE ALL ON TABLE public.product_rate_cutover_label_reasons FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+GRANT SELECT ON TABLE public.product_rate_cutover_label_reasons TO authenticated;
+CREATE TRIGGER product_rate_cutover_label_reasons_append_only
+  BEFORE UPDATE OR DELETE ON public.product_rate_cutover_label_reasons
+  FOR EACH ROW EXECUTE FUNCTION public.refuse_product_parent_event_mutation();
+CREATE TRIGGER product_rate_cutover_label_reasons_no_truncate
+  BEFORE TRUNCATE ON public.product_rate_cutover_label_reasons
+  FOR EACH STATEMENT EXECUTE FUNCTION public.refuse_product_parent_event_mutation();
+
+-- D2: every approved RT-3 row of a group still on its old rate must have a confirmed basis and a unit that fits the
+-- group's form as it is now (_product_rate_unit_fits, the rule approval and Rate Review's outcome check use).
+CREATE FUNCTION public._rate_cutover_reapprove_check(p_parent_id uuid) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_name text;
+  v_form text;
+  v_bad text;
+BEGIN
+  SELECT name, product_form INTO v_name, v_form FROM public.product_parents
+   WHERE id = p_parent_id AND rate_source = 'legacy';
+  IF NOT FOUND THEN RETURN; END IF; -- the planner gives the refusal for a missing or already switched group
+  SELECT string_agg(r.source || ' ' || r.basis || ': ' || CASE WHEN NOT r.basis_confirmed THEN 'basis not confirmed'
+                      ELSE r.unit || ' does not fit a ' || v_form || ' product' END, '; ' ORDER BY r.id)
+    INTO v_bad
+    FROM public.product_rates r LEFT JOIN public.product_rate_units u ON u.code = r.unit
+   WHERE r.parent_id = p_parent_id AND r.status = 'approved'
+     AND (NOT r.basis_confirmed OR NOT COALESCE(public._product_rate_unit_fits(v_form, r.basis, u.kind), false));
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_CUTOVER_REAPPROVE: the form or rate basis of "%" changed since its rate was approved (%); re-approve this rate in Rate Review',
+      v_name, v_bad;
+  END IF;
+END;
+$function$;
+ALTER FUNCTION public._rate_cutover_reapprove_check(uuid) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._rate_cutover_reapprove_check(uuid) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+
 -- Re-checks a promote plan as the group is now. Returns the plan plus label_check and over_label_reason, or raises.
 CREATE FUNCTION public._rate_cutover_recheck(p_parent_id uuid, p_plan jsonb, p_over_label_reason text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE
-  v_form text;
-  v_bad text;
   v_rate public.product_rates%ROWTYPE;
   v_check jsonb;
   -- Trimmed like product_rates.over_label_reason (space, tab, CR, LF, no-break space); a reason needs a letter or digit.
@@ -75,20 +136,8 @@ BEGIN
     RETURN p_plan;
   END IF;
   IF v_reason !~ '[[:alnum:]]' THEN v_reason := NULL; END IF;
-  -- The plan holds the parent, size and RT-3 row locks to commit, so the form and rows read here stay as read.
-  SELECT product_form INTO v_form FROM public.product_parents WHERE id = p_parent_id;
-
-  -- D2: the approval's checks on every approved row, against the form as it is now.
-  SELECT string_agg(r.source || ' ' || r.basis || ': ' || CASE WHEN NOT r.basis_confirmed THEN 'basis not confirmed'
-                      ELSE r.unit || ' does not fit a ' || v_form || ' product' END, '; ' ORDER BY r.id)
-    INTO v_bad
-    FROM public.product_rates r LEFT JOIN public.product_rate_units u ON u.code = r.unit
-   WHERE r.parent_id = p_parent_id AND r.status = 'approved'
-     AND (NOT r.basis_confirmed OR NOT COALESCE(public._product_rate_unit_fits(v_form, r.basis, u.kind), false));
-  IF v_bad IS NOT NULL THEN
-    RAISE EXCEPTION 'PRODUCT_PARENT_CUTOVER_REAPPROVE: the form or rate basis of "%" changed since its rate was approved (%); re-approve this rate in Rate Review',
-      p_plan->>'name', v_bad;
-  END IF;
+  -- D2 again, under the plan's parent, size and RT-3 row locks (held to commit), so the form and rows stay as read.
+  PERFORM public._rate_cutover_reapprove_check(p_parent_id);
 
   -- D1: the rate being published (the quoting default's recommended rate) against the label maximum as it is now.
   IF p_plan->>'outcome' = 'approved_default' THEN
@@ -99,6 +148,11 @@ BEGIN
     END IF;
     v_check := public._product_rate_check_values(p_parent_id, v_rate.source, v_rate.basis, v_rate.unit, NULL,
       v_rate.recommended, NULL, v_rate.basis_confirmed, v_reason);
+    -- Each maximum as text, so the screen shows the exact maximum the reason covers (a JSON number may be rounded).
+    v_check := v_check || jsonb_build_object('above', (SELECT COALESCE(jsonb_agg(a || jsonb_build_object('max_label_rate',
+        a->>'max_label_rate') ORDER BY o), '[]'::jsonb) FROM jsonb_array_elements(COALESCE(v_check->'above', '[]'::jsonb)) WITH ORDINALITY x(a, o)));
+    -- Only 'above' needs a reason. 'not_checked' (a maximum whose unit or basis cannot be compared) passes without
+    -- one, as Rate Review's approval does: Mason, 2026-11-24, "No, keep as is".
     IF v_check->>'status' = 'above' AND v_reason IS NULL THEN
       RAISE EXCEPTION 'PRODUCT_PARENT_CUTOVER_OVER_LABEL: the approved rate of "%" (% %/acre) is above the current label maximum on EPA % (% %); type an over-label reason to switch',
         p_plan->>'name', trim_scale(v_rate.recommended), p_plan->'target'->>'rate_unit',
@@ -136,6 +190,7 @@ BEGIN
     PERFORM pg_advisory_xact_lock_shared(20261210, hashtext('crx_epa_registration'));
   END IF;
   BEGIN
+    IF p_direction = 'promote' THEN PERFORM public._rate_cutover_reapprove_check(p_parent_id); END IF;
     v_plan := public._rate_cutover_recheck(p_parent_id, public._rate_cutover_plan(p_parent_id, p_direction), p_over_label_reason);
   EXCEPTION WHEN raise_exception OR check_violation THEN
     RETURN jsonb_build_object('parent_id', p_parent_id, 'direction', p_direction, 'eligible', false, 'refusal', SQLERRM);
@@ -178,6 +233,8 @@ BEGIN
     END IF;
     -- The EPA registry lock first, then the group's rows (the order the label editors take them in).
     PERFORM pg_advisory_xact_lock_shared(20261210, hashtext('crx_epa_registration'));
+    -- Before the planner, so a no-longer-confirmed default is told to re-approve, not refused as invalid.
+    PERFORM public._rate_cutover_reapprove_check(p_parent_id);
   END IF;
   v_plan := public._rate_cutover_recheck(p_parent_id, public._rate_cutover_plan(p_parent_id, p_direction), p_over_label_reason);
   -- Strict: the whole expected object (versions, RT-3 rows, every size's snapshot and prices) must equal today's.
@@ -193,11 +250,17 @@ BEGIN
       v_plan->'expected'->'sizes', true, v_reason);
   END IF;
   IF p_direction = 'promote' THEN
-    -- The snapshot (v 1) keeps its keys; the label check and any over-label reason ride beside them.
+    -- The snapshot (v 1) keeps its keys; the label check and whether an over-label reason was given ride beside
+    -- them. The reason's text goes to the admin-only table.
     v_event := public._product_parent_event(NULL, p_parent_id, 'rates_promoted', v_reason, NULL,
       public._product_parent_values(v_before),
-      v_plan->'snapshot' || jsonb_build_object('label_check', v_plan->'label_check', 'over_label_reason', v_plan->'over_label_reason'),
+      v_plan->'snapshot' || jsonb_build_object('label_check', v_plan->'label_check',
+        'over_label_reason_given', v_plan->>'over_label_reason' IS NOT NULL),
       COALESCE(v_apply->'sizes', '[]'::jsonb));
+    IF v_plan->>'over_label_reason' IS NOT NULL THEN
+      INSERT INTO public.product_rate_cutover_label_reasons (event_id, parent_id, over_label_reason, created_by)
+      VALUES (v_event, p_parent_id, v_plan->>'over_label_reason', v_actor);
+    END IF;
     UPDATE public.product_parents SET rate_source = 'approved', rate_source_event_id = v_event,
       parent_version = parent_version + 1, updated_by = v_actor, updated_at = now()
     WHERE id = p_parent_id RETURNING * INTO v_parent;
@@ -231,12 +294,20 @@ BEGIN
   IF EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'service_role', 'metabase_ro']) r(role)
               CROSS JOIN unnest(ARRAY['public.preview_parent_rate_cutover(uuid,text,text)',
                                       'public.commit_parent_rate_cutover(uuid,text,jsonb,text,text,text)',
-                                      'public._rate_cutover_recheck(uuid,jsonb,text)']) f(sig)
+                                      'public._rate_cutover_recheck(uuid,jsonb,text)',
+                                      'public._rate_cutover_reapprove_check(uuid)']) f(sig)
               WHERE has_function_privilege(r.role, f.sig, 'EXECUTE'))
      OR has_function_privilege('authenticated', 'public._rate_cutover_recheck(uuid,jsonb,text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._rate_cutover_reapprove_check(uuid)', 'EXECUTE')
+     OR has_table_privilege('authenticated', 'public.product_rate_cutover_label_reasons', 'INSERT,UPDATE,DELETE,TRUNCATE')
+     OR NOT has_table_privilege('authenticated', 'public.product_rate_cutover_label_reasons', 'SELECT')
+     OR EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'service_role', 'metabase_ro']) r(role)
+                 WHERE has_table_privilege(r.role, 'public.product_rate_cutover_label_reasons', 'SELECT,INSERT,UPDATE,DELETE'))
+     OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.product_rate_cutover_label_reasons'::regclass)
      OR NOT has_function_privilege('authenticated', 'public.preview_parent_rate_cutover(uuid,text,text)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.commit_parent_rate_cutover(uuid,text,jsonb,text,text,text)', 'EXECUTE')
      OR EXISTS (SELECT 1 FROM pg_proc WHERE oid IN ('public._rate_cutover_recheck(uuid,jsonb,text)'::regprocedure,
+                  'public._rate_cutover_reapprove_check(uuid)'::regprocedure,
                   'public.preview_parent_rate_cutover(uuid,text,text)'::regprocedure,
                   'public.commit_parent_rate_cutover(uuid,text,jsonb,text,text,text)'::regprocedure)
                 AND NOT (prosecdef AND proconfig = ARRAY['search_path=public, pg_temp']))

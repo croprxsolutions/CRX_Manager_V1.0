@@ -245,13 +245,16 @@ export type RateCutoverPreview =
     current: { rate_per_acre: string | null; rate_unit: string | null };
     target: RateValues;
     expected: Record<string, unknown> & { sizes: ParentRatePreviewSize[] };
-    // 20270228190000: a promote's label check (Rate Review's statuses) and the over-label reason it will record.
-    label_check?: {
-      status: string;
-      above?: { epa_registration: string; max_label_rate: number | string; max_label_rate_unit: string }[] | null;
-    } | null;
+    // 20270301200000: a promote's label check (Rate Review's statuses) and the over-label reason it will record.
+    label_check?: CutoverLabelCheck | null;
     over_label_reason?: string | null;
   };
+
+// Each maximum comes as exact text (the server sends it so; a JSON number could be rounded).
+export interface CutoverLabelCheck {
+  status: string;
+  above?: { epa_registration: string; max_label_rate: string; max_label_rate_unit: string }[] | null;
+}
 
 export interface RateCutoverReceipt {
   parent_id: string;
@@ -260,6 +263,7 @@ export interface RateCutoverReceipt {
   parent_version: number;
   event_id: number;
   changed: boolean;
+  label_check?: CutoverLabelCheck | null;
   over_label_reason?: string | null;
 }
 
@@ -271,7 +275,7 @@ export async function getParentRateSource(parentId: string): Promise<RateSource>
   return data.rate_source;
 }
 
-// The over-label reason is sent only when typed, so the call also matches the database before 20270228190000.
+// The over-label reason is sent only when typed, so the call also matches the database before 20270301200000.
 const overLabelArg = (overLabelReason?: string | null) => (overLabelReason?.trim() ? { p_over_label_reason: overLabelReason.trim() } : {});
 
 export const previewParentRateCutover = async (parentId: string, direction: CutoverDirection, overLabelReason?: string | null) => {

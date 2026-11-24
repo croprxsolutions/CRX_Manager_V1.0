@@ -48,6 +48,7 @@ let typesUrl;
 const typesFetch = (status, body) => async (url) => { typesUrl = url; return reply(status, body); };
 assert.equal(await fetchTypes({ token: 't', projectRef: PROJECTS.staging, fetchImpl: typesFetch(200, JSON.stringify({ types: 'export type Database = { public: {} }' })) }), 'export type Database = { public: {} }');
 assert.equal(typesUrl, 'https://api.supabase.com/v1/projects/fsnjredpmakbmhwowjjt/types/typescript?included_schemas=public');
+await assert.rejects(() => fetchTypes({ token: 't', fetchImpl: typesFetch(200, JSON.stringify({ types: 'public: unavailable' })) }), /types: HTTP 200/);
 await assert.rejects(() => fetchTypes({ token: 't', fetchImpl: typesFetch(401, '{"message":"no"}') }), /HTTP 401/);
 await assert.rejects(() => fetchTypes({ token: 't', fetchImpl: typesFetch(200, '{"types":""}') }), /types: HTTP 200/);
 await assert.rejects(() => fetchTypes({ token: 't', fetchImpl: typesFetch(200, 'oops') }), /not JSON/);

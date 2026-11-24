@@ -132,7 +132,7 @@ export async function fetchTypes({ fetchImpl = fetch, token = readCredentialToke
   const text = await res.text();
   let body;
   try { body = JSON.parse(text); } catch { throw new Error(`types: HTTP ${res.status}, response is not JSON`); }
-  if (!res.ok || typeof body?.types !== "string" || !body.types.includes("public:")) throw new Error(`types: HTTP ${res.status}: ${text.slice(0, 300)}`);
+  if (!res.ok || typeof body?.types !== "string" || !/export type Database\b/.test(body.types) || !body.types.includes("public:")) throw new Error(`types: HTTP ${res.status}: ${text.slice(0, 300)}`);
   return body.types;
 }
 
@@ -280,7 +280,9 @@ function rebuildFromIntrospection(data, projectRef = PROJECTS.live) {
       registry_version: 2,
       generated_at: today,
       generated_from: `Supabase project ${projectRef}${projectRef === PROJECTS.staging ? " (STAGING)" : ""} — public schema introspection`,
-      regenerate_with: "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
+      regenerate_with: projectRef === PROJECTS.staging
+        ? "node scripts/regenerate-schema-registry.mjs --live --staging (or --from-introspection <queries.json> --staging)"
+        : "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
       purpose: "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
       note: "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
       migrations_high_water: highWater,

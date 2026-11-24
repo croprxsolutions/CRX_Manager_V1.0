@@ -84,6 +84,14 @@ describe('CommandPalette', () => {
     });
   });
 
+  it('still finds a renamed page by its former name', async () => {
+    renderPalette(true);
+    fireEvent.change(screen.getByPlaceholderText(/search pages/i), { target: { value: 'recall lookup' } });
+    await waitFor(() => {
+      expect(screen.getByText('Lot Trace & Recalls')).toBeInTheDocument();
+    });
+  });
+
   it('surfaces Sell & Deliver Now when searching sell', async () => {
     renderPalette(true);
     const input = screen.getByPlaceholderText(/search pages/i);

@@ -582,6 +582,8 @@ export default function QuoteBuilder() {
   const tierInputsRef = useRef('');
   // The id a new quote's first save opens: its tick carries over; opening any other quote clears it.
   const keepTierChoiceForRef = useRef<string | null>(null);
+  // The id a new quote's first save opens: the PDF layout picked in the preview carries over too.
+  const keepPdfLayoutForRef = useRef<string | null>(null);
   useEffect(() => { tierInputsRef.current = `${customerId}|${tier}|${tierChoice}`; }, [customerId, tier, tierChoice]);
   // The expiry date the rep picked; null = season end (Mason 2026-10-26/27). The database
   // applies it at each send (20261029100000).
@@ -1721,13 +1723,20 @@ export default function QuoteBuilder() {
 
   useEffect(() => {
     fetchReferenceData();
+    // Saving a new quote from the preview opens its saved page; the layout the rep picked stays.
+    const keepPdfLayout = !!id && keepPdfLayoutForRef.current === id;
+    keepPdfLayoutForRef.current = null;
     // Fetch PDF templates (non-critical, inline to avoid TDZ issue with useCallback ordering)
     supabase.from('quote_pdf_templates').select('*').order('is_default', { ascending: false })
       .then(({ data }) => {
         if (data) {
-          setPdfTemplates(data as QuotePdfTemplate[]);
-          const defaultTemplate = (data as QuotePdfTemplate[]).find((t) => t.is_default);
-          if (defaultTemplate) setSelectedTemplateId(defaultTemplate.id);
+          const templates = data as QuotePdfTemplate[];
+          setPdfTemplates(templates);
+          const defaultTemplate = templates.find((t) => t.is_default);
+          if (defaultTemplate) {
+            setSelectedTemplateId((current) => (keepPdfLayout && current && templates.some((t) => t.id === current)
+              ? current : defaultTemplate.id));
+          }
         }
       });
     // Fetch quote templates for new quotes
@@ -2962,6 +2971,7 @@ export default function QuoteBuilder() {
           // The new quote's tier tick (KI-105) stays with it once it has an id.
           setTierChoice((choice) => (choice.startsWith('new:') ? `${result}${choice.slice(3)}` : choice));
       keepTierChoiceForRef.current = result;
+          keepPdfLayoutForRef.current = result;
           navigate(`/quotes/${result}`, { replace: true });
         }
       }

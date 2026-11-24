@@ -6735,6 +6735,53 @@ describe('QuoteBuilder', () => {
       }
     });
 
+    it('a new quote saved from the preview keeps the PDF layout picked there', async () => {
+      const fixture = makeQuoteFixture('draft', 7);
+      const tpl = (id: string, name: string, columns: string[], isDefault: boolean) => ({
+        id, template_name: name, columns, is_default: isDefault, is_system: true, created_by: null,
+        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+      });
+      const templates = [tpl('tpl-default', 'Standard', ['product', 'qty', 'price_unit', 'total_price'], true),
+        tpl('tpl-no-prices', 'No prices', ['product', 'qty'], false)];
+      mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? { ...fixture.quote, customer: QUOTE_FIXTURE_CUSTOMER }
+        : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? [fixture.item]
+          : table === 'quote_pdf_templates' ? templates
+            : table === 'products' ? [fixture.product] : table === 'customers' ? [{ ...QUOTE_FIXTURE_CUSTOMER, default_commission_split: { splits: [] } }] : [], error: null }));
+      mockRpc.mockImplementation((name: string) => Promise.resolve({ data: name === 'save_quote'
+        ? { quote_id: fixture.quote.id, row_version: 7, item_ids: {} }
+        : name === 'generate_quote_number' ? 'Q-new-layout' : null, error: null }));
+      const router = createMemoryRouter([{ path: '/quotes/new', element: <QuoteBuilder /> },
+        { path: '/quotes/:id', element: <QuoteBuilder /> }], { initialEntries: ['/quotes/new'] });
+      mockNavigate.mockImplementation((path: string) => { void router.navigate(path); });
+      const view = render(<RouterProvider router={router} />);
+      try {
+        fireEvent.change(await screen.findByRole('combobox', { name: 'Customer' }), { target: { value: 'Farm' } });
+        fireEvent.click(await screen.findByRole('option', { name: /Farm/ }));
+        fireEvent.click(screen.getByRole('button', { name: 'Add one' }));
+        fireEvent.click(screen.getByRole('button', { name: /Select product/i }));
+        const picker = await screen.findByPlaceholderText('Search by name, SKU, category, or vendor...');
+        fireEvent.click(within(picker.closest('[role="dialog"]') as HTMLElement).getAllByText(fixture.product.product_name).slice(-1)[0]);
+        fireEvent.change(screen.getByRole('spinbutton', { name: 'Quantity' }), { target: { value: '2' } });
+        const dialog = await openPreview();
+        fireEvent.click(within(dialog).getByRole('button', { name: /PDF layout/ }));
+        fireEvent.click(await screen.findByRole('option', { name: 'No prices' }));
+        await waitFor(() => expect(within(dialog).getByRole('button', { name: /PDF layout/ })).toHaveTextContent('No prices'));
+
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Save quote' }));
+        await waitFor(() => expect(router.state.location.pathname).toBe(`/quotes/${fixture.quote.id}`));
+        await screen.findByRole('heading', { level: 1, name: fixture.quote.quote_number });
+        const reopened = await screen.findByRole('dialog', { name: 'Preview and send' });
+        await waitFor(() => expect(within(reopened).getByRole('button', { name: 'Email to grower' })).toBeEnabled());
+        // The saved page reloads the layouts but keeps the one picked, so the preview and the email leave prices off.
+        expect(within(reopened).getByRole('button', { name: /PDF layout/ })).toHaveTextContent('No prices');
+        await waitFor(() => expect(mockGenerateQuotePdf).toHaveBeenLastCalledWith(expect.anything(), ['product', 'qty']));
+      } finally {
+        view.unmount();
+        mockNavigate.mockReset();
+        router.dispose();
+      }
+    });
+
     it('Ctrl+S saves the quote like Save draft, and does nothing with no changes or while a dialog is open', async () => {
       serveAt('draft');
       await screen.findByRole('heading', { level: 1, name: 'Q-version-test' });

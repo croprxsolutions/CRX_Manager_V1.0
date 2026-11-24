@@ -59,7 +59,9 @@ const today = () => localToday();
 
 // The staging RPC flags rows with codes; staff read the rule instead of the code.
 const ROW_ERROR_MESSAGES: Record<string, string> = {
-  PRICE_UNIT_MISMATCH: "The price unit is not the unit on this product's supplier link, so this cost cannot be compared. Do not just change the unit: either convert the cost to the link's unit (a $30-per-gallon quote on a 5-gallon case link is $150 per case), or link the product in the unit the supplier quoted.",
+  // No fix-it advice or example amount: every version Sol reviewed could mislead (the cost is a package
+  // total, and a second link for the same supplier SKU is refused).
+  PRICE_UNIT_MISMATCH: "The price unit does not match this product's supplier link, so this row cannot be compared or approved. Check the quote's unit and package size.",
   PRICE_UNIT_REQUIRED: 'Enter the supplier price unit.',
   COST_INVALID: 'The cost is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34.',
   COST_MUST_BE_POSITIVE: 'The cost must be more than $0.',

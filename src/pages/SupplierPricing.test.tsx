@@ -271,8 +271,11 @@ describe('SupplierPricing page', () => {
       + ' Atrazine: $500.00 per tote, cannot compare to inventory units. Atrazine: $250.01 for 2 case = $25.00 per gallon.',
     )).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    // A unit mismatch must say to convert the cost, never to only relabel the unit (Sol HIGH).
-    expect(screen.getByText(/The price unit is not the unit on this product's supplier link.*Do not just change the unit: either convert the cost/)).toBeInTheDocument();
+    // A unit mismatch states the rule only: no conversion advice or example amount (Sol HIGH x3).
+    expect(screen.getByText(
+      "The price unit does not match this product's supplier link, so this row cannot be compared or approved. Check the quote's unit and package size.",
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/convert|\$150/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/PRICE_UNIT_MISMATCH/)).not.toBeInTheDocument();
 
     await waitFor(() => expect(mockGetBasisWorkspace).toHaveBeenCalledWith('product-1'));
@@ -281,6 +284,68 @@ describe('SupplierPricing page', () => {
     await waitFor(() => {
       expect(mockGetWorkspace).toHaveBeenCalledTimes(workspaceLoads + 1);
     });
+  });
+
+  it('the converted cost exposes each unit mistake Sol found before approval', async () => {
+    // Link: 1 case = 5 gal. cost_cents is the total for package_quantity cases.
+    const link = {
+      id: 'link-1', product_id: 'product-1', product_name: 'Atrazine',
+      vendor_id: 'vendor-1', vendor_name: 'The Andersons', supplier_sku: 'AND-1',
+      supplier_product_name: 'Atrazine 2x2.5', supplier_uom: 'case',
+      supplier_pack_description: '2 x 2.5 gal', inventory_units_per_supplier_unit: 5,
+      conversion_unit: 'gal', comparison_status: 'comparable', comparison_note: null,
+      link_status: 'confirmed', is_reusable: true, is_preferred: true, is_active: true,
+    };
+    const row = (id: string, costCents: bigint, packageQuantity: number) => ({
+      id, row_number: Number(id.slice(-1)), product_id: 'product-1', product_name: 'Atrazine',
+      product_supplier_link_id: 'link-1', supplier_sku: 'AND-1', supplier_product_name: 'Atrazine 2x2.5',
+      cost_cents: costCents, price_unit: 'case', package_quantity: packageQuantity,
+      effective_from: '2026-07-18', effective_to: null, price_kind: 'quote', row_status: 'new',
+      validation_errors: [], observation_id: null,
+    });
+    mockGetWorkspace.mockResolvedValue({
+      vendors: [{ id: 'vendor-1', name: 'The Andersons' }],
+      products: [{ id: 'product-1', product_name: 'Atrazine', sku: 'A-1', inventory_unit: 'gal' }],
+      links: [link],
+      imports: [{
+        id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
+        document_date: '2026-07-18', ingestion_method: 'quick_quote', status: 'needs_review',
+        row_count: 3, eligible_row_count: 3, approved_observation_count: 0,
+        source_document_name: null, created_at: '2026-07-18T12:00:00Z',
+      }],
+      aliases: [],
+      evidence: [],
+    });
+    mockGetImport.mockResolvedValue({
+      id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
+      document_date: '2026-07-18', ingestion_method: 'quick_quote',
+      format_version: 'crx-supplier-quick-quote-phase1b-v1', status: 'needs_review',
+      source_document_name: null, row_count: 3, eligible_row_count: 3,
+      approved_observation_count: 0, created_at: '2026-07-18T12:00:00Z',
+      rows: [
+        // $30 typed for 2 cases: a package total, so $30 / 2 / 5 = $3.00 per gal, not "per case".
+        row('row-1', 3_000n, 2),
+        // A $30-per-gal quote relabelled as one case: $30 / 1 / 5 = $6.00 per gal, visibly not $30.
+        row('row-2', 3_000n, 1),
+        // "$150 per case" entered for 2 cases: $150 / 2 / 5 = $15.00 per gal, visibly not $30.
+        row('row-3', 15_000n, 2),
+      ],
+    });
+
+    renderSupplierPricing();
+    fireEvent.click(await screen.findByRole('button', { name: /The Andersons/ }));
+
+    expect(await screen.findByText('= $3.00 per gal')).toBeInTheDocument();
+    expect(screen.getByText('= $6.00 per gal')).toBeInTheDocument();
+    expect(screen.getByText('= $15.00 per gal')).toBeInTheDocument();
+    expect(screen.getAllByText('for 2 case')).toHaveLength(2);
+    expect(screen.getAllByText('per case')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve selected observations' }));
+    expect(await screen.findByText(
+      'You are adding 3 supplier observations. You are changing ZERO sell prices.'
+      + ' Atrazine: $30.00 for 2 case = $3.00 per gal. Atrazine: $30.00 per case = $6.00 per gal.'
+      + ' Atrazine: $150.00 for 2 case = $15.00 per gal.',
+    )).toBeInTheDocument();
   });
 
   it('keeps the workbook supplier selected through its immediate workspace refresh', async () => {

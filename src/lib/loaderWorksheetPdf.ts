@@ -210,9 +210,14 @@ export function loaderPdfWaterRows(data: LoaderWorksheetPdfData, plan: ReturnTyp
   const batch = loaderTankWater(ws.spray_volume, batchProducts, data.products);
   const each = (column: LoaderWorksheetPdfLoadColumn) => (column.loads.length > 1 ? ' each' : '');
   const marks = (water: LoaderWater) => `${water.over ? ' (!)' : ''}${water.unsized.length + water.missing.length > 0 ? ' *' : ''}`;
+  // The row itself says what its marks mean, so a page break can never part the numbers from the reason.
+  const left = [...new Set([...batch.missing, ...batch.unsized])];
+  const label = ['Water to add',
+    ...(tanks.some(({ water }) => water.over) || batch.over ? ['(!) products exceed finished gallons: check recipe'] : []),
+    ...(left.length > 0 ? [`* leaves out ${left.join(', ')}: subtract by hand`] : [])].join('\n');
   const rows = [
     ['Finished gallons', ...tanks.map(({ column, water }) => `${fmtLoaderGallons(water.finished_gal)}${each(column)}`), fmtLoaderGallons(batch.finished_gal)],
-    ['Water to add', ...tanks.map(({ column, water }) => `${fmtLoaderGallons(water.water_gal)}${marks(water)}${each(column)}`),
+    [label, ...tanks.map(({ column, water }) => `${fmtLoaderGallons(water.water_gal)}${marks(water)}${each(column)}`),
       `${fmtLoaderGallons(batch.water_gal)}${marks(batch)}`],
   ];
   const warnings: string[] = [];
@@ -409,6 +414,7 @@ function drawLoaderWorksheet(
       headStyles: { fillColor: CRX_GREEN, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 8 },
       alternateRowStyles: { fillColor: ALT_ROW_BG },
       columnStyles: { 0: { halign: 'left', fontStyle: 'bold', textColor: CHARCOAL } },
+      rowPageBreak: 'avoid',
       didParseCell: (cell) => {
         if (cell.section === 'body' && cell.row.index >= body.length) cell.cell.styles.fontStyle = 'bold';
       },

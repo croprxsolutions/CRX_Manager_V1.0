@@ -87,6 +87,7 @@ describe('loaderPdfWaterRows', () => {
     const { rows, warnings } = loaderPdfWaterRows(over, buildLoaderWorksheetPdfPlan(over));
     expect(rows[1].slice(1)).toEqual(['0 GL (!)', '0 GL (!)', '0 GL (!)', '0 GL (!)', '0 GL (!)']);
     expect(warnings[0]).toMatch(/more than the finished gallons on Load 1, Load 2, Load 3, Load 4/);
+    expect(rows[1][0]).toBe('Water to add\n(!) products exceed finished gallons: check recipe');
   });
 
   it('flags a line with no amount instead of counting it as no volume', () => {
@@ -94,5 +95,7 @@ describe('loaderPdfWaterRows', () => {
     const { rows, warnings } = loaderPdfWaterRows(blank, buildLoaderWorksheetPdfPlan(blank));
     expect(rows[1].at(-1)).toBe('1000 GL *');
     expect(warnings[0]).toMatch(/does not count TEST Blank: the amount is missing/);
+    // The reason rides on the same row as the starred numbers (Terra HIGH: a page break could part them).
+    expect(rows[1][0]).toBe('Water to add\n* leaves out TEST Blank: subtract by hand');
   });
 });

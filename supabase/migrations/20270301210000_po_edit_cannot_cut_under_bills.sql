@@ -8,7 +8,9 @@
 --    that keeps or raises the total is never refused, so a PO whose bill is already over can still be edited
 --    otherwise. Edit PO cannot change a received line (RECEIVED_PO_LINE_IMMUTABLE), so it cannot lower what arrived;
 --    once the total would fall below what arrived the limit IS the ordered total, so this one rule covers KI-143's
---    received-value limit too. No amounts in the error: sales reps can save a PO and PO costs are admin-only.
+--    received-value limit too. Sales reps can save a PO but PO costs are admin-only, so (Mason, 2026-11-24) a non-admin
+--    may not lower the total of a PO with any active bill at all (PO_EDIT_NEEDS_ADMIN); the amounts go in DETAIL to
+--    admins only.
 -- 2. Reversed receipts: no change. set_purchase_order_item_costs (20270223100000) refuses a cut on the received-value
 --    limit only when the bills were within it before the cut, whatever put them over: a prepaid bill or a reversed
 --    receipt (a receipt can be reversed only while no active bill is on the PO, so that bill is entered again after
@@ -17,7 +19,7 @@
 --
 -- Same signature, owner and grants; the body is the 20261021140000 wrapper (md5-pinned below) plus the check around
 -- the unchanged inner save. Lock order: the advisory lock first (as before); the inner save locks the lines and the PO;
--- the PO row is locked again (already held when the save changed it) before bills are read, which serializes with
+-- only when the total fell, the PO row is locked again (already held then) before bills are read, which serializes with
 -- create_vendor_bill (it locks the PO). No data changes (live 2026-11-22: no vendor bill is linked to a PO).
 --
 -- idempotency-body-check: exempt -- the key, fingerprint and receipt stay in the unchanged inner save; a refused save
@@ -86,21 +88,23 @@ BEGIN
   -- Mason, 2026-11-23: no edit that lowers the ordered total may leave the active vendor bills more than 5% over it
   -- (set_purchase_order_item_costs' rule). Exact numeric, no overflow.
   IF v_old_total IS NOT NULL THEN
-    SELECT total_cost_cents INTO v_new_total FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
+    SELECT total_cost_cents INTO v_new_total FROM public.purchase_orders WHERE id = p_po_id;
     IF v_new_total < v_old_total THEN
+      -- Lock only when the total fell (the save already holds this row then); a replay or unchanged total takes no new lock.
+      PERFORM 1 FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
       SELECT COALESCE(SUM(vb.total_cents), 0) INTO v_billed
         FROM public.vendor_bills vb
        WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided';
+      -- Mason, 2026-11-24 (Sol HIGH): a non-admin may not lower the total of a PO with any active bill, whatever the
+      -- amounts, so which cuts save can never reveal the bill's size.
+      IF v_billed > 0 AND NOT public.is_admin() THEN
+        RAISE EXCEPTION 'PO_EDIT_NEEDS_ADMIN: this purchase order has a vendor bill, so only an admin can lower its total'
+          USING ERRCODE = '42501';
+      END IF;
       IF v_billed > 0 AND v_billed * 100 > v_new_total::numeric * 105 THEN
-        -- Amounts go in DETAIL for admins only; reps never see cost figures.
-        IF public.is_admin() THEN
-          RAISE EXCEPTION 'PO_EDIT_BELOW_BILLED: this edit would leave the active vendor bills more than 5%% over the purchase order''s ordered total; void or adjust the bill first'
-            USING ERRCODE = '22023',
-                  DETAIL = jsonb_build_object('po_total_cents', v_new_total, 'active_billed_cents', v_billed)::text;
-        ELSE
-          RAISE EXCEPTION 'PO_EDIT_BELOW_BILLED: this edit would leave the active vendor bills more than 5%% over the purchase order''s ordered total; void or adjust the bill first'
-            USING ERRCODE = '22023';
-        END IF;
+        RAISE EXCEPTION 'PO_EDIT_BELOW_BILLED: this edit would leave the active vendor bills more than 5%% over the purchase order''s ordered total; void or adjust the bill first'
+          USING ERRCODE = '22023',
+                DETAIL = jsonb_build_object('po_total_cents', v_new_total, 'active_billed_cents', v_billed)::text;
       END IF;
     END IF;
   END IF;
@@ -109,7 +113,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.save_purchase_order(uuid, jsonb, jsonb, uuid, text) IS
-  'Create or edit a purchase order and its lines (a non-admin''s line costs are stripped). An edit that lowers the ordered total and leaves active vendor bills more than 5% over it is refused (PO_EDIT_BELOW_BILLED).';
+  'Create or edit a purchase order and its lines (a non-admin''s line costs are stripped). An edit that lowers the ordered total and leaves active vendor bills more than 5% over it is refused (PO_EDIT_BELOW_BILLED); only an admin may lower the total of a PO with an active vendor bill (PO_EDIT_NEEDS_ADMIN).';
 
 DO $postflight$
 DECLARE
@@ -122,7 +126,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = v_oid AND p.prosecdef
                    AND pg_get_userbyid(p.proowner) = 'postgres'
                    AND p.proconfig = ARRAY['search_path=public, pg_temp']
-                   AND p.prosrc LIKE '%unit_cost_cents%' AND p.prosrc LIKE '%PO_EDIT_BELOW_BILLED%'
+                   AND p.prosrc LIKE '%unit_cost_cents%' AND p.prosrc LIKE '%PO_EDIT_BELOW_BILLED%' AND p.prosrc LIKE '%PO_EDIT_NEEDS_ADMIN%'
                    AND p.prosrc LIKE '%_section9_save_purchase_order_serialized%') THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: security definer, owner, search_path or body is wrong';
   END IF;

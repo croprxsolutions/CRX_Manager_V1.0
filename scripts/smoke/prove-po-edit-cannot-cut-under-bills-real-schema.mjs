@@ -104,17 +104,24 @@ try {
   assert.equal(refused(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 35, 0]]), PO1), 'ok|PO_EDIT_BELOW_BILLED|100000');
   // 3. Leaving the unreceived line out of the edit deletes it: same rule.
   assert.equal(refused(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60]]), PO1), 'ok|PO_EDIT_BELOW_BILLED|100000');
-  // 4. A sales rep making the same edit is refused too, and the message carries no amounts.
-  const repMsg = attempt(USERS.rep, `${refuse(`r := ${saveAs(USERS.rep, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])};`)} v := t;`);
-  assert.match(repMsg, /^ok\|PO_EDIT_BELOW_BILLED: /);
-  assert.doesNotMatch(repMsg.replace('5%', ''), /\d|\$/, 'no amounts to a rep');
-  // 4b. Amounts travel in DETAIL to an admin only.
+  // 4. A sales rep may not lower the total of a PO with an active bill at all (Mason, 2026-11-24, Sol HIGH): the same
+  //    refusal for a cut the 5% rule would refuse (40 -> 1) and one it would allow (40 -> 36), with no amounts anywhere.
+  const repTry = (lines) => attempt(USERS.rep, `BEGIN ${asUser(`r := ${saveAs(USERS.rep, PO1, 'partially_received', lines)};`)} t := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS t2 = PG_EXCEPTION_DETAIL; t := SQLSTATE || '|' || SQLERRM || '|' || COALESCE(NULLIF(t2, ''), '<none>'); END; v := t;`);
+  const repBig = repTry([[L1A, 60, 60], [L1B, 1, 0]]);
+  const repSmall = repTry([[L1A, 60, 60], [L1B, 36, 0]]);
+  assert.match(repBig, /^ok\|42501\|PO_EDIT_NEEDS_ADMIN: [^|]*\|<none>$/);
+  assert.equal(repSmall, repBig, 'a rep cannot tell a small cut from a large one');
+  assert.doesNotMatch(repBig.split('|').slice(2).join('|'), /\d|\$/, 'no amounts to a rep');
+  assert.equal(scalar(`SELECT quantity_ordered FROM public.purchase_order_items WHERE id = '${L1B}';`), '40');
+  // 4a. A rep may still raise it, and may cut a PO with no bills.
+  assert.equal(saved(USERS.rep, saveAs(USERS.rep, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 50, 0]]), PO1), 'ok|110000');
+  assert.equal(saved(USERS.rep, saveAs(USERS.rep, PO4, 'submitted', [[L4A, 1, 0]]), PO4), 'ok|1000');
+  // 4b. An admin's refusal carries the amounts in DETAIL.
   const detailOf = (uid, call) => attempt(uid, `BEGIN ${asUser(`r := ${call};`)} t := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS t2 = PG_EXCEPTION_DETAIL; t := COALESCE(NULLIF(t2, ''), '<none>'); END; v := t;`);
   assert.equal(detailOf(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])), 'ok|{"po_total_cents": 61000, "active_billed_cents": 100000}');
-  assert.equal(detailOf(USERS.rep, saveAs(USERS.rep, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])), 'ok|<none>');
   // 5. Raising a quantity is never refused.
   assert.equal(saved(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 50, 0]]), PO1), 'ok|110000');
-  console.log('[edit PO] 40 -> 1 refused; 36 allowed, 35 refused (5% to the cent); dropped line refused; rep refused, no amounts (amounts in DETAIL to admins only); raise allowed');
+  console.log('[edit PO] 40 -> 1 refused; 36 allowed, 35 refused (5% to the cent); dropped line refused; rep cannot lower a billed PO at all (same refusal, no amounts), can raise it or cut an unbilled PO; admin DETAIL has amounts; raise allowed');
 
   // 6. A bill already over the whole order ($110 on $100): an edit that keeps the total (notes) still saves, a cut does not.
   assert.equal(saved(USERS.admin, save(PO2, 'submitted', [[L2A, 10, 0]], 'call vendor'), PO2), 'ok|10000');
@@ -124,41 +131,56 @@ try {
   assert.equal(attempt(USERS.admin, `SET LOCAL session_replication_role = replica;
     UPDATE public.vendor_bills SET status = 'voided' WHERE purchase_order_id = '${PO1}'; SET LOCAL session_replication_role = origin;
     ${asUser(`r := ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])};`)} v := ${total(PO1)};`), 'ok|61000');
+  // 7b. Exactly 5% over is allowed, a cent past it is not: PO4 (10 gal, $100) with a $21 bill cut to 2 gal = $20 x 1.05 = $21.
+  psql(`BEGIN; SET LOCAL session_replication_role = replica;
+    INSERT INTO public.vendor_bills (vendor_id, purchase_order_id, bill_number, bill_date, due_date, subtotal_cents, total_cents)
+      VALUES ('${VENDOR}', '${PO4}', 'POEB-B4', CURRENT_DATE, CURRENT_DATE + 30, 2100, 2100); COMMIT;`);
+  assert.equal(saved(USERS.admin, save(PO4, 'submitted', [[L4A, 2, 0]]), PO4), 'ok|2000');
+  psql(`BEGIN; SET LOCAL session_replication_role = replica; UPDATE public.vendor_bills SET subtotal_cents = 2101, total_cents = 2101 WHERE bill_number = 'POEB-B4'; COMMIT;`);
+  assert.equal(refused(USERS.admin, save(PO4, 'submitted', [[L4A, 2, 0]]), PO4), 'ok|PO_EDIT_BELOW_BILLED|10000');
   // 8. A replay of a saved edit returns the receipt and is not refused.
   const k = key();
   assert.equal(attempt(USERS.admin, `${asUser(`r := ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 36, 0]]).replace(/'po-edit-bills-\d+'\)$/, `'${k}')`)}; r2 := ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 36, 0]]).replace(/'po-edit-bills-\d+'\)$/, `'${k}')`)};`)} v := (r = r2)::text || '|' || ${total(PO1)};`), 'ok|true|96000');
-  console.log('[edit PO] over-billed PO: notes edit saves, cut refused; no bills / voided bill: cut saves; replay not refused');
+  console.log('[edit PO] over-billed PO: notes edit saves, cut refused; no bills / voided bill: cut saves; exactly 5% over saves, a cent more refused; replay not refused');
 
   // Rule 2: a bill that went over because a receipt was reversed does not block a cost correction. A receipt cannot
   // be reversed while an active bill is on the PO (RECEIVING_REVERSAL_BLOCKED_BY_VENDOR_BILL), so the real path is:
   // void the bill, reverse, enter the bill again (create_vendor_bill asks for a confirmed reason when it is over what
-  // arrived). Here the bill is set voided and back directly.
+  // arrived). Here the bill is voided directly and entered again through create_vendor_bill.
   // PO3: two real receipts of 5 on L3A (arrived $100 = the $100 bill).
   for (const qty of [5, 5]) assert.match(receive(L3A, qty), /^ok\|/);
   assert.equal(received(L3A), '10');
   const records = scalar(`SELECT string_agg(id::text, ',' ORDER BY received_at, id) FROM public.receiving_records WHERE po_item_id = '${L3A}';`).split(',');
   assert.equal(records.length, 2);
-  const billStatus = scalar(`SELECT status FROM public.vendor_bills WHERE bill_number = 'POEB-B3';`);
-  const setBill = (status) => psql(`BEGIN; SET LOCAL session_replication_role = replica;
-    UPDATE public.vendor_bills SET status = '${status}' WHERE bill_number = 'POEB-B3'; COMMIT;`);
+  // Void the active bill, then (after the reversal) enter it again through the real create_vendor_bill RPC.
+  let billNo = 'POEB-B3';
+  const voidBill = () => psql(`BEGIN; SET LOCAL session_replication_role = replica;
+    UPDATE public.vendor_bills SET status = 'voided' WHERE bill_number = '${billNo}'; COMMIT;`);
+  const reenterBill = (confirm) => {
+    billNo = `${billNo}x`;
+    return attempt(USERS.admin, `${asUser(`u := public.create_vendor_bill('${VENDOR}'::uuid, '${PO3}'::uuid, '${billNo}', CURRENT_DATE, CURRENT_DATE + 30, NULL, 10000, 0, NULL, '${key()}', ${confirm}, ${confirm ? "'receipt reversed, bill stands'" : 'NULL'});`)} v := u::text;`, { commit: true });
+  };
   const reverse = (rec) => attempt(USERS.admin, `${asUser(`r := public.reverse_receiving_record('${rec}'::uuid, 'counted wrong', NULL, '${key()}');`)} v := r::text;`, { commit: true });
   // 9. Control: bill within what arrived, cutting L3A to $9 puts it over ($90 x 1.05 = $94.50 < $100): refused.
   assert.equal(costRefused(PO3, [{ id: L3A, unit_cost_cents: 900 }], 'vendor credit'), 'ok|PO_COST_BELOW_BILLED');
   assert.match(reverse(records[1]), /^P0001\|RECEIVING_REVERSAL_BLOCKED_BY_VENDOR_BILL/);
   // Reverse one receipt for real with the bill voided, then the bill is active again: 5 arrived ($50) under $100.
-  setBill('voided');
+  voidBill();
   assert.match(reverse(records[1]), /^ok\|/);
-  setBill(billStatus);
   assert.equal(received(L3A), '5');
+  // The $100 bill is now over what arrived ($50): re-entry needs a confirmed reason, and then saves.
+  assert.match(reenterBill(false), /^22023\|PO_CUMULATIVE_BILLING_CONFIRMATION_REQUIRED/);
+  assert.match(reenterBill(true), /^ok\|[0-9a-f-]{36}$/);
   // 10. The same cut is now allowed: the bill was already over what arrived because of the reversal.
   assert.equal(costSaved(PO3, [{ id: L3A, unit_cost_cents: 900 }], 'vendor credit'), 'ok|1');
   // 11. The ordered-total rule still holds: L3A to $9 and L3B to $0 leaves a $90 order ($94.50 with 5%) under the bill.
   assert.equal(costRefused(PO3, [{ id: L3A, unit_cost_cents: 900 }, { id: L3B, unit_cost_cents: 0 }], 'vendor credit'), 'ok|PO_COST_BELOW_BILLED');
   // 12. Reverse the other receipt too: nothing arrived, judged on the ordered total ($150 x 1.05 covers $100): allowed.
-  setBill('voided');
+  voidBill();
   assert.match(reverse(records[0]), /^ok\|/);
-  setBill(billStatus);
   assert.equal(received(L3A), '0');
+  // Nothing arrived: judged on the ordered total ($190), so the $100 bill re-enters with no confirmation.
+  assert.match(reenterBill(false), /^ok\|[0-9a-f-]{36}$/);
   assert.equal(costSaved(PO3, [{ id: L3A, unit_cost_cents: 500 }], 'vendor credit'), 'ok|1');
   console.log('[reversed receipt] within: cut refused; after a reversal put the bill over: same cut allowed; ordered-total rule still refuses; all reversed: judged on the order');
 

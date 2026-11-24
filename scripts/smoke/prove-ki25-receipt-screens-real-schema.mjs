@@ -107,18 +107,19 @@ try {
   // A pause alone is not proof of a send (Sol r1): the close needs send-email's own log of this rep's sent email.
   const repClose = (key) => out(closeAt(USERS.rep, D(2), 'handled', key, paused.queued_at));
   // A row as send-email writes it (service role): key scoped to type + delivery, created_by the caller.
-  const logSend = (tag, { by = USERS.rep, to = 'ki25-screens@example.invalid', st = 'sent', at = 'now()', delivery = D(2) } = {}) =>
+  const logSend = (tag, { by = USERS.rep, to = 'ki25-screens@example.invalid', st = 'sent', at = 'now()', delivery = D(2), type = 'delivery_completed' } = {}) =>
     psql(`INSERT INTO public.email_log (customer_id, recipient_email, email_type, subject, status, idempotency_key, created_by, created_at)
-      VALUES ('${CUST}', '${to}', 'delivery_completed', 'Delivery confirmation', '${st}',
+      VALUES ('${CUST}', '${to}', '${type}', 'Delivery confirmation', '${st}',
               'delivery_completed:delivery:${delivery}:${tag}', '${by}', ${at});`);
   assert.match(repClose('ki25s-h2-none'), /RECEIPT_HANDLED_ADMIN_ONLY/, 'paused but nothing sent: refused');
   logSend('failed', { st: 'failed' });
   logSend('elsewhere', { to: 'someone-else@example.invalid' });
+  logSend('other-type', { type: 'invoice' });
   logSend('other-rep', { by: USERS.admin });
   logSend('before-pause', { at: "now() - interval '10 minutes'" });
   logSend('other-delivery', { delivery: D(4) });
   assert.match(repClose('ki25s-h2-wrong'), /RECEIPT_HANDLED_ADMIN_ONLY/,
-    'a failed send, another address, another sender, a send before the pause or another delivery is no proof');
+    'a failed send, another address, another sender, another email type, a send before the pause or another delivery is no proof');
   assert.equal(status(D(2)), 'needs_check', 'refused closes leave it listed');
   // A send made before this receipt was queued is for an earlier receipt (L2), even if the pause is older still.
   const pausedAt = `(SELECT hand_send_at FROM public.delivery_receipt_queue WHERE delivery_id = '${D(2)}')`;

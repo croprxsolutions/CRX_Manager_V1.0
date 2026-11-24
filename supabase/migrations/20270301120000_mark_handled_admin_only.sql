@@ -152,7 +152,7 @@ BEGIN
              OR NOT EXISTS (
                SELECT 1 FROM public.email_log e JOIN public.customers c ON c.id = v_row.customer_id
                 WHERE starts_with(e.idempotency_key, 'delivery_completed:delivery:' || p_delivery_id::text || ':')
-                  AND e.status = 'sent' AND e.created_by = v_actor AND e.customer_id = v_row.customer_id
+                  AND e.email_type = 'delivery_completed' AND e.status = 'sent' AND e.created_by = v_actor AND e.customer_id = v_row.customer_id
                   AND lower(btrim(e.recipient_email)) = lower(btrim(c.email))
                   AND e.created_at >= v_row.hand_send_at - interval '1 minute'
                   AND e.created_at >= v_row.created_at)) THEN  -- never a send made for an earlier receipt
@@ -219,7 +219,7 @@ BEGIN
      OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee = 0) THEN
     RAISE EXCEPTION 'POSTFLIGHT: close_delivery_receipt lost its owner, mode, search_path or grants';
   END IF;
-  IF md5(replace(p.prosrc, chr(13), '')) <> '87de5a691187908d12ba14497b73b42d' THEN
+  IF md5(replace(p.prosrc, chr(13), '')) <> '96fcbb48486ca1770b76acfd579484ab' THEN
     RAISE EXCEPTION 'POSTFLIGHT: close_delivery_receipt is not this migration''s body (admin-only rule)';
   END IF;
 END;

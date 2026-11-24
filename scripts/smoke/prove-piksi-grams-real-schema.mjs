@@ -186,6 +186,47 @@ function beforeCases() {
   console.log('[case] P1 a moved pinned line, a pinned order line carrying a rate unit, or a changed PO conversion snapshot refuses (PIKSI_G_ROW_MOVED), an unlisted receipt refuses (PIKSI_G_UNLISTED_ROW); P2 an open count, an unlocked rate lock or a recorded jar net weight refuses; P3 another Piksi-named or MG product refuses; nothing changed');
 }
 
+// The live test-data reset (#2407) deletes every Piksi order, delivery, PO and receipt line, stock movement and
+// cycle-count line and sets stock to 0. The forward accepts exactly that state (all or nothing); each case rolls back.
+const RESET = `SET session_replication_role = replica;
+  DELETE FROM public.receiving_records WHERE product_id IN (${PRODUCTS});
+  DELETE FROM public.delivery_items WHERE product_id IN (${PRODUCTS});
+  DELETE FROM public.purchase_order_items WHERE product_id IN (${PRODUCTS});
+  DELETE FROM public.order_items WHERE product_id IN (${PRODUCTS});
+  DELETE FROM public.inventory_transactions WHERE product_id IN (${PRODUCTS});
+  DELETE FROM public.cycle_count_items WHERE product_id IN (${PRODUCTS});
+  UPDATE public.inventory SET quantity_available = 0, quantity_prebooked = 0, quantity_on_order = 0, last_counted_at = NULL;
+  SET session_replication_role = origin;`;
+function resetCases() {
+  const n0 = numbers(), l0 = labels();
+  const ok = tx(`${RESET}
+${FORWARD}
+    DO $c$ BEGIN
+      IF (SELECT count(*) FROM public.products WHERE id IN (${PRODUCTS}) AND (inventory_unit, unit_size, rate_unit, container_unit) = ('g', 'g', 'g', 'g')) <> 3
+         OR (SELECT count(*) FROM public.product_parents WHERE id IN ('${P_PLUS}', '${P_INF}') AND rate_unit = 'g' AND parent_version = 2) <> 2
+         OR (SELECT count(*) FROM public.inventory WHERE id IN ('${INV.plus}', '${INV.inf}') AND unit_size = 'g' AND quantity_available = 0) <> 2
+         OR (SELECT count(*) FROM public.product_cost_basis WHERE product_id IN (${PRODUCTS}) AND effective_to IS NULL) <> 3 THEN
+        RAISE EXCEPTION 'RESET_APPLY_WRONG';
+      END IF;
+    END $c$;`, false);
+  assert.equal(ok.status, 0, ok.output);
+  const partial = tx(`SET session_replication_role = replica; DELETE FROM public.receiving_records WHERE product_id IN (${PRODUCTS});
+      SET session_replication_role = origin;
+${FORWARD}`, false);
+  assert.notEqual(partial.status, 0); assert.match(partial.output, /PIKSI_G_ROW_MOVED/);
+  const stock = tx(`${RESET}
+UPDATE public.inventory SET quantity_available = 1 WHERE id = '${INV.inf}';
+${FORWARD}`, false);
+  assert.notEqual(stock.status, 0); assert.match(stock.output, /PIKSI_G_ROW_MOVED/);
+  const movement = tx(`${RESET}
+SET session_replication_role = replica; INSERT INTO public.inventory_transactions (product_id, transaction_type, quantity, performed_by)
+      VALUES ('${PLUS}', 'adjusted', 0, '${ADMIN}'); SET session_replication_role = origin;
+${FORWARD}`, false);
+  assert.notEqual(movement.status, 0); assert.match(movement.output, /PIKSI_G_ROW_MOVED/);
+  assert.equal(numbers(), n0); assert.equal(labels(), l0);
+  console.log('[case] Z1 after the live test-data reset (no Piksi lines, movements or count lines, stock 0) the forward relabels the 3 products, 2 groups and 2 stock rows to g with one open cost basis each; a half-reset (only receipts gone), a stock row not at 0, or a new movement after the reset refuses (PIKSI_G_ROW_MOVED)');
+}
+
 let numbers0, control0;
 function applyCases() {
   numbers0 = numbers(); control0 = control();
@@ -273,6 +314,7 @@ try {
   assert.deepEqual(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql') && f > CANDIDATE), [], 'no migration after the candidate on this branch');
   if (process.env.PIKSI_DEV_REUSE !== '1') { buildContainer({ stopBefore: CANDIDATE }); seedUsers(); seed(); }
   beforeCases();
+  resetCases();
   applyCases();
   reverseCases();
   console.log('PIKSI_GRAMS_PROOF_PASS');

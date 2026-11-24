@@ -13,7 +13,9 @@
 --   (parent_version 1 -> 2); 2 stock rows (relabelled by the product's own trigger); 4 order lines; 8 delivery lines
 --   (4 say MG, 4 older Plus lines say "Dry oz"; all are grams); 3 PO lines and the 2 PO cost-unit snapshots that say MG;
 --   3 receiving records. The stock-unit change closes each open cost basis; a new one opens at the same cents, starting
---   the instant the old one ends. Not changed: unit_conversions, product_rates (already g), stock movements (they carry
+--   the instant the old one ends. After the one-time live test-data reset (#2407) those lines, movements and count
+--   lines are gone and stock is 0: that state is accepted too (all or nothing), and only products, groups, stock rows
+--   and cost bases change. Not changed: unit_conversions, product_rates (already g), stock movements (they carry
 --   no unit), frozen pricing-workbook exports, and the cut-over hold list (Piksi stays on legacy pricing).
 --
 -- GUARDS, each for its one statement and checked on before and after: the stock-unit locks (a1/a2: they stop a REAL unit
@@ -34,6 +36,7 @@ DO $piksi_g$
 DECLARE
   v_bad  text;
   v_done integer;
+  v_reset boolean;
   v_override text := current_setting('app.admin_override', true);
   c_plus constant uuid := '36732b8d-b4ed-4643-8a13-d793975d13c7';
   c_inf  constant uuid := 'c22ce37d-cb11-4145-be9a-5469e453bca1';
@@ -72,14 +75,6 @@ BEGIN
   IF public._supplier_cost_basis_enabled_for_product(c_plus) OR public._supplier_cost_basis_enabled_for_product(c_inf)
      OR public._supplier_cost_basis_enabled_for_product(c_old) THEN
     RAISE EXCEPTION 'PIKSI_G_COST_BASIS_FLAG_ON: supplier cost basis is on for a Piksi product. Nothing was changed.';
-  END IF;
-  IF (SELECT md5(COALESCE(string_agg(t.id::text, ',' ORDER BY t.id), '')) FROM public.inventory_transactions t
-       WHERE t.product_id IN (c_plus, c_inf, c_old)) <> c_movements_md5 THEN
-    RAISE EXCEPTION 'PIKSI_G_ROW_MOVED: the set of Piksi stock movements is not the reviewed one. Nothing was changed.';
-  END IF;
-  IF (SELECT md5(COALESCE(string_agg(c.id::text, ',' ORDER BY c.id), '')) FROM public.cycle_count_items c
-       WHERE c.product_id IN (c_plus, c_inf, c_old)) <> c_counts_md5 THEN
-    RAISE EXCEPTION 'PIKSI_G_ROW_MOVED: the set of Piksi cycle-count lines is not the reviewed one';
   END IF;
   -- A saved quote template would restore its old rate and unit verbatim into a new quote (none live).
   IF EXISTS (SELECT 1 FROM public.quote_templates q WHERE strpos(lower(q.sections::text), c_plus::text) > 0
@@ -143,6 +138,26 @@ BEGIN
     ('rr', 'b79cca8f-6c7e-4f8b-a590-d4906cd13c6e', c_plus, 'MG', 40500, NULL, NULL, NULL, '74b7f457-b4ef-462a-a3a2-0a125a98392f', '88126b10-cf90-483f-aedc-46b59603ee07', NULL, NULL),
     ('rr', 'e2575bc7-88d4-4a05-8637-4ec96de53238', c_plus, 'MG', 4500, NULL, NULL, NULL, '74b7f457-b4ef-462a-a3a2-0a125a98392f', '88126b10-cf90-483f-aedc-46b59603ee07', NULL, NULL),
     ('rr', '253d018e-e0a8-4999-a3fc-428b52ea993f', c_inf, 'MG', 11250, NULL, NULL, NULL, 'd76d553c-4a29-490a-9a61-0382eb46941a', '88126b10-cf90-483f-aedc-46b59603ee07', NULL, NULL);
+
+  -- After the one-time live test-data reset (#2407, Mason 2026-11-24) every pinned order, delivery, PO and receipt
+  -- line, every Piksi stock movement and cycle-count line is gone and both stock rows hold 0. That state is accepted
+  -- too, all or nothing: then only the products, groups, stock rows and cost bases change. Any mix still refuses.
+  v_reset := NOT EXISTS (SELECT 1 FROM piksi_rows r WHERE r.kind = 'oi' AND EXISTS (SELECT 1 FROM public.order_items x WHERE x.id = r.id))
+         AND NOT EXISTS (SELECT 1 FROM piksi_rows r WHERE r.kind = 'di' AND EXISTS (SELECT 1 FROM public.delivery_items x WHERE x.id = r.id))
+         AND NOT EXISTS (SELECT 1 FROM piksi_rows r WHERE r.kind = 'poi' AND EXISTS (SELECT 1 FROM public.purchase_order_items x WHERE x.id = r.id))
+         AND NOT EXISTS (SELECT 1 FROM piksi_rows r WHERE r.kind = 'rr' AND EXISTS (SELECT 1 FROM public.receiving_records x WHERE x.id = r.id));
+  IF v_reset THEN
+    DELETE FROM piksi_rows WHERE kind IN ('oi', 'di', 'poi', 'rr');
+    UPDATE piksi_rows SET qty = 0, done_qty = 0, extra = 0 WHERE kind = 'inv';
+  END IF;
+  IF (SELECT md5(COALESCE(string_agg(t.id::text, ',' ORDER BY t.id), '')) FROM public.inventory_transactions t
+       WHERE t.product_id IN (c_plus, c_inf, c_old)) <> (CASE WHEN v_reset THEN md5('') ELSE c_movements_md5 END) THEN
+    RAISE EXCEPTION 'PIKSI_G_ROW_MOVED: the set of Piksi stock movements is not the reviewed one. Nothing was changed.';
+  END IF;
+  IF (SELECT md5(COALESCE(string_agg(c.id::text, ',' ORDER BY c.id), '')) FROM public.cycle_count_items c
+       WHERE c.product_id IN (c_plus, c_inf, c_old)) <> (CASE WHEN v_reset THEN md5('') ELSE c_counts_md5 END) THEN
+    RAISE EXCEPTION 'PIKSI_G_ROW_MOVED: the set of Piksi cycle-count lines is not the reviewed one';
+  END IF;
 
   SELECT string_agg(m.product_name, ', ' ORDER BY m.product_name) INTO v_bad
     FROM piksi_prod m LEFT JOIN public.products p ON p.id = m.id
@@ -289,14 +304,18 @@ BEGIN
   UPDATE public.order_items x SET unit_size = 'g'
     FROM piksi_rows r WHERE r.kind = 'oi' AND x.id = r.id AND x.unit_size = r.old_unit;
   GET DIAGNOSTICS v_done = ROW_COUNT;
-  IF v_done <> 4 THEN RAISE EXCEPTION 'PIKSI_G_UPDATE_COUNT: relabelled % of 4 order lines', v_done; END IF;
+  IF v_done <> (SELECT count(*) FROM piksi_rows WHERE kind = 'oi') THEN
+    RAISE EXCEPTION 'PIKSI_G_UPDATE_COUNT: relabelled % order lines, not every listed one', v_done;
+  END IF;
 
   PERFORM set_config('app.admin_override', 'true', true);
   UPDATE public.delivery_items x SET unit_size = 'g'
     FROM piksi_rows r WHERE r.kind = 'di' AND x.id = r.id AND x.unit_size = r.old_unit;
   GET DIAGNOSTICS v_done = ROW_COUNT;
   PERFORM set_config('app.admin_override', COALESCE(v_override, ''), true);
-  IF v_done <> 8 THEN RAISE EXCEPTION 'PIKSI_G_UPDATE_COUNT: relabelled % of 8 delivery lines', v_done; END IF;
+  IF v_done <> (SELECT count(*) FROM piksi_rows WHERE kind = 'di') THEN
+    RAISE EXCEPTION 'PIKSI_G_UPDATE_COUNT: relabelled % delivery lines, not every listed one', v_done;
+  END IF;
 
   ALTER TABLE public.purchase_order_items DISABLE TRIGGER trigger_0_guard_closed_po_item;
   ALTER TABLE public.purchase_order_items DISABLE TRIGGER trigger_capture_purchase_order_item_cost_snapshot;
@@ -306,12 +325,16 @@ BEGIN
   GET DIAGNOSTICS v_done = ROW_COUNT;
   ALTER TABLE public.purchase_order_items ENABLE TRIGGER trigger_capture_purchase_order_item_cost_snapshot;
   ALTER TABLE public.purchase_order_items ENABLE TRIGGER trigger_0_guard_closed_po_item;
-  IF v_done <> 3 THEN RAISE EXCEPTION 'PIKSI_G_UPDATE_COUNT: relabelled % of 3 PO lines', v_done; END IF;
+  IF v_done <> (SELECT count(*) FROM piksi_rows WHERE kind = 'poi') THEN
+    RAISE EXCEPTION 'PIKSI_G_UPDATE_COUNT: relabelled % PO lines, not every listed one', v_done;
+  END IF;
 
   UPDATE public.receiving_records x SET unit_size = 'g'
     FROM piksi_rows r WHERE r.kind = 'rr' AND x.id = r.id AND x.unit_size = r.old_unit;
   GET DIAGNOSTICS v_done = ROW_COUNT;
-  IF v_done <> 3 THEN RAISE EXCEPTION 'PIKSI_G_UPDATE_COUNT: relabelled % of 3 receipts', v_done; END IF;
+  IF v_done <> (SELECT count(*) FROM piksi_rows WHERE kind = 'rr') THEN
+    RAISE EXCEPTION 'PIKSI_G_UPDATE_COUNT: relabelled % receipts, not every listed one', v_done;
+  END IF;
 
   -- Postflight.
   IF (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.products'::regclass AND tgname = ANY (c_guards) AND tgenabled = 'O') <> 4

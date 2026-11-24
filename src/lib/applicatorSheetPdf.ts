@@ -35,6 +35,7 @@ import {
   type ApplicatorSheetColumns,
   DEFAULT_SHEET_COLUMNS,
   SHEET_FORMAT_LABELS,
+  fieldDirectionsUrl,
   fmtNum,
 } from './applicatorSheetData';
 
@@ -202,6 +203,7 @@ function drawSheet(
     alternateRowStyles: { fillColor: ALT_ROW_BG },
   });
   y = doc.lastAutoTable.finalY + 18;
+  y = drawDirections(doc, data, y);
 
   // ── Billing splits ─────────────────────────────────────────────────────────
   if (options.includeBillingSplits && data.billingSplits && data.billingSplits.length > 0) {
@@ -349,6 +351,37 @@ function drawSheet(
   }
 }
 
+/** One tappable directions line per mapped field, in stop order. Returns the new y. */
+function drawDirections(doc: JsPDFWithAutoTable, data: ApplicatorSheetData, startY: number): number {
+  const margin = 40;
+  const located = data.fields.filter((field) => field.location);
+  if (located.length === 0) return startY;
+  let y = ensureRoom(doc, startY, 30, margin);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(...CHARCOAL);
+  doc.text('Directions to each field (tap on a phone or tablet)', margin, y);
+  y += 13;
+  doc.setFontSize(8.5);
+  located.forEach((field) => {
+    const location = field.location as { lat: number; lng: number };
+    y = ensureRoom(doc, y, 12, margin);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...GRAY);
+    const coordinates = `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`;
+    // A long field name is shortened so the tappable link always stays on the page.
+    const room = doc.internal.pageSize.getWidth() - margin * 2 - doc.getTextWidth(`Stop ${field.stop} ·  · ${coordinates}  Open directions`);
+    let name = field.field_name;
+    while (name.length > 1 && doc.getTextWidth(name) > room) name = `${name.slice(0, -2)}…`;
+    const label = `Stop ${field.stop} · ${name} · ${coordinates}  `;
+    doc.text(label, margin, y);
+    doc.setTextColor(...CRX_GREEN);
+    doc.textWithLink('Open directions', margin + doc.getTextWidth(label), y, { url: fieldDirectionsUrl(location) });
+    y += 12;
+  });
+  return y + 6;
+}
+
 /** Build the per-format theme. */
 function themeFor(format: ApplicatorSheetFormat, custom: ApplicatorSheetCustomConfig | null, company: CompanyInfo): SheetTheme {
   const title = SHEET_FORMAT_LABELS[format];
@@ -464,7 +497,9 @@ function appendMapPages(doc: JsPDFWithAutoTable, data: ApplicatorSheetData): voi
       `${fmtNum(field.acres) || '—'} acres`,
       location,
     ].filter((part): part is string => part !== null).join(' · ');
-    appendMapPage(doc, data, 'Job Field Map', details, field.dataUrl);
+    // Spray order (job_fields.sort_order) restarts at 1 on every job's maps (Sol 86).
+    const title = field.sprayNumber ? `Job Field Map — Stop ${field.sprayNumber}` : 'Job Field Map';
+    appendMapPage(doc, data, title, details, field.dataUrl);
   });
 }
 

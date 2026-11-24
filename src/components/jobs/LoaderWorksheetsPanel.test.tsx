@@ -294,7 +294,9 @@ describe('LoaderWorksheetsPanel', () => {
 
     expect(await screen.findByText('2 × Loads 1–2')).toBeInTheDocument();
     expect(screen.getByText('133.33 each')).toBeInTheDocument();
-    expect(screen.getByText('2,000 gal each')).toBeInTheDocument();
+    // Finished gallons show; water waits for the product details (an unlinked line may be on the job).
+    expect(screen.getAllByText('2000 GL each')).toHaveLength(1);
+    expect(screen.getByText('Water to add shows once the product details load.')).toBeInTheDocument();
   });
 
   it('makes the legacy-print fallback explicit when no saved worksheet is selected', async () => {

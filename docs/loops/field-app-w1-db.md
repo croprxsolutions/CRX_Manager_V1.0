@@ -1,28 +1,32 @@
-# MISSION: field application, slice 1 database lane (plus loads and stock for slice 2)
+# MISSION: field application, slices 0–1 database lane (plus loads and stock for slice 2)
 
-You build the foundation of the field application system: who pays for each field, billable acres, and batches that take stock at mixing. Read `docs/plans/field-application/BUILD-PLAN.md` (rules every session follows) before anything else.
+You build the foundation of the field application system: tooling, who pays for each field, the Chem Man field import, billable acres, and loads that take stock at mixing. Read `docs/plans/field-application/BUILD-PLAN.md` (rules every session follows) before anything else.
 
 ## Driver
 
-Claude, autonomous, in this session. Each item: plan-contract (or the contract in this kit) → build → proof → Luna until clean → Sol → PR into `staging`. The next item starts when the current one is **verified** on staging (merged, applied, scenarios re-run, registry regenerated). Order 1.1 → 1.2 → 1.3. If 1.1 or 1.2 is parked or blocked, 1.3 may start anyway (it does not depend on them); 1.2 never starts before 1.1 is verified. Mason's questions and approvals go in `PROGRESS.md` and in the session's closing message.
+Claude, autonomous, in this session, after Mason's go (M7). Each item: plan-contract (or the contract in this kit) → build → proof → the `ship.md` Step 6 review route → PR into `staging`. Merges into `staging` go in order; while one PR waits (review, the 4-hour Taha hold, a Mason answer), the next may be built on a stacked branch (`BUILD-PLAN.md` › Stacking). A gate or a disputed finding parks that PR only (`BUILD-PLAN.md` › Rules); keep going with the next unblocked item. Every ask for Mason goes in the slice batch in `PROGRESS.md` and in the session's closing message.
 
-## Granularity
+## Items, in order (one PR each; a screen part is a second PR after its database PR)
 
-One item = one PR (split into a database PR and a screen PR when the item has screens, database first). Items in order:
+0.1 **Merge the kit into `staging`** (docs-only PR from #2415).
+0.2 **Tooling:** registry and type generation from staging (`BUILD-PLAN.md` › Slice 0 step 2). No field migration merges before it.
+0.3 **Staging-only migrations and read-only facts** (`BUILD-PLAN.md` › Slice 0 steps 3–4), recorded in `PROGRESS.md`. A conflicting migration gets a replacement migration as its own PR here.
+1.1 **FP-1** field splits with history and payer notes (`CONTRACT-who-pays.md` FP-1), then its Field Setup screen PR.
+1.2 **Chem Man field import** (`CONTRACT-who-pays.md` › Chem Man field import): trial on a local test copy (not staging); the live run once, only after Taha's reset, with Mason's yes from the batch.
+1.3 **Loads and stock** (`CONTRACT-batch-stock.md`); may start while FP-2 waits for 2026-12-15. Must not change `inventory_holds` or `_sync_job_holds`.
+1.4 **FP-2** billable acres (`CONTRACT-who-pays.md` FP-2), after 2026-12-15 with Taha's review; its Job Detail and `SelectLocationsModal` change is a second PR under the `JobDetail.tsx` lease.
+1.5 **Write the slice 2 briefs** (`docs/loops/field-app-s2-*.md`) from `BUILD-PLAN.md` › Brief outlines and what was really built; then wait for Mason's go.
 
-1. **1.1 FP-1** field splits with history, per `docs/plans/field-application/CONTRACT-who-pays.md` FP-1 (product and application shares). Its `I approve` gates (the customer foreign-key change from cascade to restrict, revoked grants) wait for Mason's yes; build and prove everything else first.
-2. **1.2 FP-2** billable acres, per `CONTRACT-who-pays.md` FP-2. Not before 2026-12-15 (its quote-to-job change is in Taha's quotes area; Taha reviews it).
-3. **1.3 Batches and stock**, per `docs/plans/field-application/CONTRACT-batch-stock.md`. Partial hold release, leftover claims and the duplicate-load flag are spring. First confirm read-only the facts the contract lists under "Check read-only before building".
-4. **1.4 Chem Man field import**: Mason's export file imported on staging through the FP-1 writer, spot-checked by the office, then live once, only with Mason's yes and only after Taha's live reset (#2407) has run; a count of fields imported vs fields in the file, and the office checks the list by hand (Mason 2026-11-24: one-time import, no re-run matching).
+No field-application migration is applied live before Taha's reset has run.
 
 ## Worktree
 
-`C:\CRX_wt\field-w1-db`, branch per item `feat/field-w1-<item>` from current `origin/staging`. Owns: new files under `supabase/migrations/`, `src/types/index.ts`, the schema registry, `src/pages/FieldSetup.tsx` (1.1), `docs/changelog.d/` records for its migrations, tests for these items, and the "Slice 1 · DB" section of `docs/plans/field-application/PROGRESS.md`. Must not edit `src/pages/JobDetail.tsx` or any applicator-sheet, loader or print file (owned by the paperwork lane).
+`C:\CRX_wt\field-db`, branch per item `feat/field-<item>` from current `origin/staging` (which holds the kit after 0.1). Owns: new files under `supabase/migrations/`, `src/types/index.ts`, `.claude/schema-registry.json`, the registry and type scripts and skill (0.2), `src/pages/FieldSetup.tsx` (1.1), the `JobDetail.tsx` lease and `src/components/field-app/SelectLocationsModal.tsx` (1.4), `docs/changelog.d/` and `docs/reference/migrations.d/` records for its migrations, tests for these items, the import script, and the "Slice 0" and "Slice 1 · DB" sections of `PROGRESS.md`. Must not edit any applicator-sheet, loader or print file (paperwork lane).
 
 ## Definition of done
 
-Each item is **verified** on staging (`BUILD-PLAN.md` › Rules 5): merged, applied, its scenarios run as the real roles with expected vs observed in the PR. An item that cannot get there is parked or blocked in `PROGRESS.md` with the reason and both positions, and the lane reports PARTIAL, not done. `PROGRESS.md` shows every item's state and a one-line plain-English summary for Mason.
+Each item is **verified** on staging (`BUILD-PLAN.md` › Rules): merged, applied, its scenarios run as the real roles with expected vs observed in the PR. Live applies, post-apply checks and the live import belong to the release (`BUILD-PLAN.md` › Release evidence), not to this lane. An item that cannot get there is parked or blocked in `PROGRESS.md` with the reason and both positions, and the lane reports PARTIAL. `PROGRESS.md` shows every item's state and a one-line plain-English summary for Mason.
 
 ## Delivery gate
 
-`BUILD-PLAN.md` › Delivery gate applies in full. Landing in `staging` only under AGENTS.md › Autonomous landing with every `ship.md` gate on the current head. Mason's explicit yes in his own conversation for: the contracts' `I approve` gates, any permission change, anything into `main` or production, any live data change.
+`BUILD-PLAN.md` › Delivery gate applies in full.

@@ -79,40 +79,55 @@ SVC = 875                        # made-up cents per acre; no fuel charge (Mason
 
 
 def job(work, loads, prod_shares=FIELDS, app_shares=None, order=None, service=True):
-    """work: list of (field, load_id, acres) sprayed segments (one pass can take several products).
+    """work: list of (field, load_id, acres[, split]) sprayed segments (one pass can take several products).
+    split: which field split was in force on the spray day (S7): one line per split, the larger line taking the rest.
     loads: {load_id: {product: billed gallons}} = put in, minus carried out or to a tote.
-    order: saved spray order (defaults to first appearance in work); it, not entry order, picks the cent taker."""
+    order: saved spray order (defaults to first appearance in work); it, not entry order, picks the cent taker.
+    Shares are looked up by field, or by (field, split) when a field has more than one split."""
+    work = [tuple(w) if len(w) == 4 else tuple(w) + (None,) for w in work]
+    if sum(F(w[2]) for w in work) == 0:
+        return []   # nothing sprayed: no lines, never planned acres (Sol 100)
     fields = order or list(dict.fromkeys(w[0] for w in work))
+    tags = {f: list(dict.fromkeys(w[3] for w in work if w[0] == f)) for f in fields}
     load_acres = {}
-    for f, l, a in work:
+    for f, l, a, t in work:
         load_acres[l] = load_acres.get(l, F(0)) + F(a)
-    qty = {}   # product -> {field: gallons}, fields in spray order
-    acres = {f: F(0) for f in fields}
-    for f, l, a in work:
-        acres[f] += F(a)
+    qty = {}   # product -> {field: {split: gallons}}, fields in spray order
+    acres = {f: {t: F(0) for t in tags[f]} for f in fields}
+    for f, l, a, t in work:
+        acres[f][t] += F(a)
     for f in fields:
-        for fw, l, a in work:
+        for fw, l, a, t in work:
             if fw != f:
                 continue
             for p, g in loads[l].items():
-                qty.setdefault(p, {})
-                qty[p][f] = qty[p].get(f, F(0)) + F(g) * F(a) / load_acres[l]
-    line = {}  # (field, line name) -> (qty text, cents)
+                q = qty.setdefault(p, {}).setdefault(f, {tt: F(0) for tt in tags[f]})
+                q[t] += F(g) * F(a) / load_acres[l]
+
+    def spread(total, per_field):   # rule 2: across fields, then across one field's split lines
+        c = by_field(total, {f: sum(v.values()) for f, v in per_field.items()})
+        return {(f, t): ct for f, v in per_field.items() for t, ct in by_field(c[f], v).items()}
+    line = {}  # (field, split, line name) -> (qty text, cents)
     for p, per_field in qty.items():
-        c = by_field(cents(sum(per_field.values()) * PRICE[p]), per_field)
-        for f in per_field:
-            line[(f, p)] = (f'{show(per_field[f])} gal', c[f])
+        c = spread(cents(sum(sum(v.values()) for v in per_field.values()) * PRICE[p]), per_field)
+        for (f, t), ct in c.items():
+            line[(f, t, p)] = (f'{show(per_field[f][t])} gal', ct)
     if service:
-        c = by_field(cents(sum(acres.values()) * SVC), acres)
-        for f in fields:
-            line[(f, 'Service')] = (f'{show(acres[f])} ac', c[f])
+        c = spread(cents(sum(sum(v.values()) for v in acres.values()) * SVC), acres)
+        for (f, t), ct in c.items():
+            line[(f, t, 'Service')] = (f'{show(acres[f][t])} ac', ct)
+
+    def shares(table, f, t):
+        return table[(f, t)] if len(tags[f]) > 1 else table[f]
     rows = []
     for f in fields:
-        for p in qty:
-            if f in qty[p]:
-                rows.append((f, p) + line[(f, p)] + (prod_shares[f],))
-        if service:
-            rows.append((f, 'Service') + line[(f, 'Service')] + ((app_shares or prod_shares)[f],))
+        for t in tags[f]:
+            label = f if len(tags[f]) == 1 else f'{f} ({t})'
+            for p in qty:
+                if (f, t, p) in line:
+                    rows.append((label, p) + line[(f, t, p)] + (shares(prod_shares, f, t),))
+            if service:
+                rows.append((label, 'Service') + line[(f, t, 'Service')] + (shares(app_shares or prod_shares, f, t),))
     return rows
 
 
@@ -138,6 +153,7 @@ s6[2] = s6[2][:4] + (pct(('P1', 100), ('P2', 0)),)
 S4L = {'L1': {'X': F('12.25')}, 'L2': {'Y': F('33.5625')}}
 S4BL = {'L1': {'X': F('22.25')}, 'L2': {'Y': F('26.0625')}}
 S4B = [('A', 'L1', 49), ('B', 'L1', 40), ('B', 'L2', 70), ('C', 'L2', 69)]
+S7W = [('A', 'L1', 49), ('B', 'L1', 60, 'Tue'), ('B', 'L1', 50, 'Thu'), ('C', 'L1', 69)]
 TABLES = {
     'S1': table(job(STD, L58)),
     'S2': table(job([('A', 'L1', 49), ('B', 'L1', 110), ('C', 'L1', '68.7')], L58)),
@@ -146,7 +162,9 @@ TABLES = {
     'S4b': table(job(S4B, S4BL)),
     'S6': table(s6),
     'S9': table(job(STD, L58, prod_shares={'A': pct(('P1', 100)), 'B': pct(('P1', 50), ('P2', 50)), 'C': pct(('P1', 50), ('P2', 50), ('P3', 0))})),
+    'S7': table(job(S7W, L58, prod_shares={**FIELDS, ('B', 'Tue'): pct(('P1', 50), ('P2', 50)), ('B', 'Thu'): pct(('P1', 100))})),
     'S24': table(job([('A', 'L1', 49), ('B', 'L1', 100), ('C', 'L1', 69)], L58)),
+    'S26': table(job([('A', 'L1', 110), ('B', 'L1', 110), ('C', 'L1', 69)], L58)),
     'S32': table(job(STD, {'L1': {'X': 58, 'Y': F('42.75')}}, service=False)),
 }
 
@@ -168,6 +186,38 @@ assert by_field(cents(F(1001)), {'A': F(1, 2), 'B': F(1, 2)}) == {'A': 501, 'B':
 assert TABLES['S1'][2] == cents(58 * F(4137)) + cents(228 * F(SVC))
 assert TABLES['S4b'][2] == cents(F('22.25') * 4137) + cents(F('26.0625') * 2319) + cents(228 * F(SVC))
 assert TABLES['S32'][2] == cents(58 * F(4137)) + cents(F('42.75') * 2319), 'custom applicator: products only, no service line'
+# S7: field B's part of the job total is the same as in S1; only its two split lines share it (Sol 103).
+assert sum(r[3] for r in job(S7W, L58, prod_shares={**FIELDS, ('B', 'Tue'): FIELDS['B'], ('B', 'Thu'): FIELDS['B']})
+           if r[0].startswith('B')) == sum(r[3] for r in job(STD, L58) if r[0] == 'B')
+# S26: correcting field A's acres moves money for every payer, not only A's (Sol 97): billed gallons spread by acres.
+assert all(TABLES['S26'][1][p] != TABLES['S1'][1][p] for p in ('P1', 'P2', 'P3'))
+# Nothing sprayed: no lines, no invoice (Sol 100).
+assert job([('A', 'L1', 0)], L58) == [] and table([])[2] == 0
+
+
+def live_split(amount, units, shares, main, ids):
+    """Line-for-line copy of live _bill_split_line_shares (20261215110000), explicit customer ids (Sol 13, 102).
+    units are 1/10000 of a unit (an invoice line's 4 decimals). Returns {payer: (cents, units)}."""
+    sh = {p: s for p, s in shares if s > 0}
+    rank = sorted(sh, key=lambda p: (p != main, -sh[p], ids[p]))
+    out = {}
+    for p in rank[1:]:
+        hund = math.floor(F(units) * sh[p] / MICRO / 100)
+        out[p] = (math.floor(F(amount) * sh[p] / MICRO), hund * 100 if hund > 0 else math.floor(F(units) * sh[p] / MICRO))
+    out[rank[0]] = (amount - sum(c for c, _ in out.values()), units - sum(u for _, u in out.values()))
+    return out
+
+
+IDS = {'P1': 3, 'P2': 1, 'P3': 2}   # made-up customer ids: P2 sorts lowest, so ties do not follow payer order
+assert live_split(-1, -310, pct(('P1', 50), ('P2', 50)), 'P1', IDS) == {'P2': (-1, -155), 'P1': (0, -155)}, 'signed quantity: 4-place branch'
+assert live_split(1, 10000, THIRDS, 'P1', IDS) == {'P2': (0, 3300), 'P3': (0, 3300), 'P1': (1, 3400)}, '1 unit over thirds: hundredths'
+assert live_split(1, 1, pct(('P1', 0), ('P2', 50), ('P3', 50)), 'P1', IDS)['P2'] == (1, 1), 'main at 0%, tie: lowest customer id'
+assert live_split(1, 100, pct(('P1', 50), ('P2', 50)), 'P1', IDS) == {'P2': (0, 50), 'P1': (1, 50)}, 'quantity with no cents (Sol 15)'
+# Cents parity with the live helper on every table line (rule 3 = live, main customer = P1).
+for _rows in (job(STD, L58), s6, job(S4B, S4BL)):
+    for _f, _n, _q, _amt, _sh in _rows:
+        _live = {p: c for p, (c, _) in live_split(_amt, 0, _sh, 'P1', IDS).items()}
+        assert all(_live.get(p, 0) == c for p, c in split(_amt, _sh).items()), (_f, _n)
 # One pass with two products counts its acres once (Sol 99).
 _two = job([('A', 'L1', 10)], {'L1': {'X': 1, 'Y': 1}})
 assert [r[2] for r in _two if r[1] == 'Service'] == ['10 ac']

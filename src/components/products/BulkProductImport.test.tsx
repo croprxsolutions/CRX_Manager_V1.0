@@ -112,6 +112,12 @@ describe('template and columns', () => {
     expect(m.conflicts).toEqual(['"product_name" and "product" both mean product_name']);
     expect(m.ignored).toEqual(['colour']);
   });
+  it('still reads "Brand" as Manufacturer, but warns about it (audit L2)', () => {
+    const m = mapProductImportHeaders(['product_name', ' Brand ']);
+    expect(Object.values(m.byIndex)).toEqual(['product_name', 'manufacturer']);
+    expect(m.warnings).toEqual([expect.stringMatching(/^The "Brand" column is saved as Manufacturer/)]);
+    expect(mapProductImportHeaders(['product_name', 'manufacturer', 'mfg_x']).warnings).toEqual([]);
+  });
   it('refuses the old ambiguous "unit" and "type" headers instead of dropping them', () => {
     const m = mapProductImportHeaders(['product_name', 'Unit', 'type']);
     expect(m.ambiguous).toEqual(['"Unit" (rename it to unit_size or rate_unit)', '"type" (rename it to category, product_form or container_type)']);
@@ -236,6 +242,14 @@ describe('BulkProductImport screen', () => {
     await upload('"product_name"!,notes\nChemical,note\n');
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/header row has text after a closing quote/)));
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('shows the Brand-is-Manufacturer warning in the preview and still sends the value as manufacturer', async () => {
+    rpc.mockImplementation(async () => ({ data: { rates_locked: false, rows: [okRow()] }, error: null }));
+    render(<BulkProductImport {...props} />);
+    await upload('inventory_unit,product_name,Brand\nGal,Chem,Syngenta\n');
+    expect(await screen.findByText(/The "Brand" column is saved as Manufacturer/)).toBeInTheDocument();
+    expect(rpc).toHaveBeenCalledWith('preview_product_import', { p_rows: [{ insert: { inventory_unit: 'Gal', product_name: 'Chem', manufacturer: 'Syngenta' } }] });
   });
 
   it('refuses two columns that mean the same thing', async () => {

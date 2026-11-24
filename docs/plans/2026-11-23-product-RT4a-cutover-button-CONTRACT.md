@@ -130,8 +130,11 @@ Migration `20270301200000_rate_switch_recheck.sql` adds `_rate_cutover_recheck`,
   reason's text goes to the admin-only `product_rate_cutover_label_reasons` (Sol r2). A reason sent when the rate is
   not above is not recorded. `not_checked` (no label maximum on file, or one whose unit or basis cannot be compared)
   passes, as it does in Rate Review: **Mason, 2026-11-24, "No, keep as is"** (asked after Sol r2's HIGH).
-- **Commit re-checks.** A label check whose result changed after the preview refuses the commit as stale: a rate that
-  went from within to above its maximum, or, for a rate already above, a different maximum or registration. A
+- **Commit re-checks.** A label check whose result changed after the preview refuses the commit: a rate that went
+  from within to above its maximum with no reason refuses `PRODUCT_PARENT_CUTOVER_OVER_LABEL` (the recheck runs before
+  the stale comparison); otherwise, as stale, a rate that went from within to above its maximum with a reason, or, for
+  a rate already above, a different maximum or registration. Either refusal clears the preview, so the admin previews
+  again and sees the reason box (Luna r3 LOW, wording only). A
   maximum lowered but still above the rate is not a change (the rate stays within). The screen shows the maximums an
   over-label reason overrides before the switch. The over-label reason is part of the idempotency fingerprint: the
   same key with another reason is `IDEMPOTENCY_PAYLOAD_MISMATCH`.

@@ -10,7 +10,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { buildInMemoryQuery } from '../test-utils/inMemoryQuery';
 
-const H = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), toast: vi.fn() }));
+const H = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), toast: vi.fn(), deniedPages: [] as string[] }));
 
 vi.mock('../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
@@ -18,7 +18,7 @@ vi.mock('../lib/db', async () => {
 });
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ profile: { id: 'user-1', role: 'admin' }, role: 'admin', deniedPages: [] }),
+  useAuth: () => ({ profile: { id: 'user-1', role: 'sales_rep' }, role: 'sales_rep', deniedPages: H.deniedPages }),
 }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) }));
 
@@ -76,6 +76,7 @@ const rowOf = (number: string) => screen.getAllByText(number).map((el) => el.clo
 describe('Chemical Invoices tabs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    H.deniedPages = [];
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-09T12:00:00'));
     H.from.mockImplementation((table: string) => buildInMemoryQuery(table === 'invoices' ? ROWS : []));
@@ -148,6 +149,14 @@ describe('Chemical Invoices tabs', () => {
       await renderAt('/invoices?tab=unposted');
       expect(selectedTab()).toMatch(/^Drafts/);
     });
+  });
+
+  it('a user denied Field Invoices gets no By Customer tab (it shows field invoices too)', async () => {
+    H.deniedPages = ['field-invoices'];
+    await renderAt('/invoices?tab=customer');
+    expect(screen.queryByRole('tab', { name: 'By Customer' })).not.toBeInTheDocument();
+    expect(selectedTab()).toBe('All Invoices');
+    expect(screen.queryByText('Customer Invoice Summary')).not.toBeInTheDocument();
   });
 
   it('a status picked on All Invoices keeps the All Invoices tab', async () => {

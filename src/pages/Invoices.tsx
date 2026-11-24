@@ -159,6 +159,9 @@ export default function Invoices() {
   // Customer 360 peek exposes AR balance + credit tier — gate with the canonical
   // customers-page permission (blocks a rep denied /customers — Codex P2).
   const canPeekCustomer = hasPageAccess(role, deniedPages, 'customers');
+  // By Customer is the Field Invoices statement and shows field invoices too, so it follows
+  // that page's permission: a user denied Field Invoices does not get the tab here.
+  const canSeeCustomerSummary = hasPageAccess(role, deniedPages, 'field-invoices');
   const { toast } = useToast();
   const batchVoidIdem = useIdempotencyKey('batch_void_invoices', profile?.id || '');
   const batchDeleteIdem = useIdempotencyKey('delete_invoices', profile?.id || '');
@@ -172,7 +175,8 @@ export default function Invoices() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [list, setList] = useUrlListState(LIST_DEFAULTS);
-  const activeTab = chemicalInvoiceTab(list.tab, list.status);
+  const requestedTab = chemicalInvoiceTab(list.tab, list.status);
+  const activeTab: ChemicalInvoiceTab = requestedTab === 'customer' && !canSeeCustomerSummary ? 'all' : requestedTab;
   const statusOptions = STATUS_OPTIONS_BY_TAB[activeTab];
   const statusFilter = oneOf(list.status, statusOptions.map((o) => o.value), '');
   // The tab is written with the status, so a status picked on All Invoices never moves the list to another tab.
@@ -1110,7 +1114,9 @@ export default function Invoices() {
     { key: 'drafts', label: INVOICE_TAB_LABELS.drafts, count: loadError ? undefined : unpostedCount, content: listCard },
     { key: 'posted', label: INVOICE_TAB_LABELS.posted, count: loadError ? undefined : postedTabCount, content: listCard },
     // The same combined statement Field Invoices has: a customer's unposted chemical AND field invoices.
-    { key: 'customer', label: INVOICE_TAB_LABELS.customer, content: <CustomerInvoiceSummaryPanel backPath="/invoices" backLabel="Back to invoices" /> },
+    ...(canSeeCustomerSummary
+      ? [{ key: 'customer', label: INVOICE_TAB_LABELS.customer, content: <CustomerInvoiceSummaryPanel backPath="/invoices" backLabel="Back to invoices" /> }]
+      : []),
     { key: 'all', label: INVOICE_TAB_LABELS.all, content: listCard },
   ];
 

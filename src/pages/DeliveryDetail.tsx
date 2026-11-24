@@ -1510,7 +1510,12 @@ export default function DeliveryDetail() {
   };
 
   // After the hand send: mark the paused receipt handled. A failure only leaves it on the office list.
-  const closeSentReceipt = async (deliveryId: string, queuedAt: string | null, deliveryNumber: string) => {
+  const closeSentReceipt = async (deliveryId: string, queuedAt: string | null, deliveryNumber: string, pausedNow: boolean) => {
+    // Only an admin marks a receipt handled, a rep's own hand send included (Mason, 2026-11-24): the server refuses it.
+    if (!isAdmin && pausedNow) {
+      toast('info', `Delivery ${deliveryNumber}: its receipt stays on "Customer receipts to check" until an admin marks it handled.`);
+      return;
+    }
     if (!queuedAt) {
       // None was queued when the send started, so none is closed; one queued meanwhile may still be emailed (Sol LOW).
       // A failed read says so rather than staying silent; each warning names its delivery, as the page may have moved on (#2291).
@@ -1597,12 +1602,7 @@ export default function DeliveryDetail() {
       });
       heldNotSent = false;
       toast('success', `Confirmation email sent to ${customer.email}`);
-      // Only an admin marks a receipt handled, a rep's own hand send included (Mason, 2026-11-24): the server refuses it.
-      if (!isAdmin && paused.outcome === 'paused') {
-        toast('info', `Delivery ${delivery.delivery_number}: its receipt stays on "Customer receipts to check" until an admin marks it handled.`);
-      } else {
-        await closeSentReceipt(delivery.id, paused.queued_at, delivery.delivery_number);
-      }
+      await closeSentReceipt(delivery.id, paused.queued_at, delivery.delivery_number, paused.outcome === 'paused');
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
       // No answer came back: the email may have gone out, so never say it did not (Codex P2).

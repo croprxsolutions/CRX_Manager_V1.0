@@ -35,7 +35,7 @@ import {
   readUsedNonces,
   verifyOwnerApproval,
 } from "./owner-approval-lib.mjs";
-import { sessionProofDirs, sessionCheckoutRoots, resolveSessionWorktree } from "./codex-push-lib.mjs";
+import { proofSearchDirs, sessionProofDirs, sessionCheckoutRoots, resolveSessionWorktree } from "./codex-push-lib.mjs";
 import { checkMigrationOrdering } from "./migration-ordering-lib.mjs";
 import { checkPendingMigrations } from "./migration-pending-lib.mjs";
 import { evaluateLandingGate } from "./migration-landing-gate-lib.mjs";
@@ -916,6 +916,7 @@ export function evaluateMigrationApply({
   // reviewer proofs, Sol proof and landing gate as every other migration, and the
   // approval itself is checked last, against the landing gate's PR and head.
   let ownerApprovalCandidates = null;
+  let ownerApprovalDirs = [];
   let parked = [];
   if (migQuery) {
     // The migration files that sort before this one: the history the rewrite and
@@ -973,7 +974,10 @@ export function evaluateMigrationApply({
     if (needsOwner.length) {
       const refusal = refusals[needsOwner[0].category](needsOwner[0]) + OWNER_ROUTE;
       if (!ownerApprovalDoor) return block(refusal);
-      ownerApprovalCandidates = findOwnerApprovals(proofDirs, safeName);
+      // Mason's approval may sit in any checkout (2026-11-23: a merge captain carries his yes); it is
+      // bound to the exact file, PR and findings, so a sibling's copy can only authorize this apply.
+      ownerApprovalDirs = [...new Set([...proofDirs, ...proofSearchDirs(projectDir, listWorktrees)])];
+      ownerApprovalCandidates = findOwnerApprovals(ownerApprovalDirs, safeName);
       if (!ownerApprovalCandidates.length) {
         return block(`${refusal}\n\nNo approval from Mason was found for it (${approvalFileName(safeName)}).`);
       }
@@ -1198,7 +1202,7 @@ export function evaluateMigrationApply({
         sessionId: ownerSessionId,
       };
       let usedNonces;
-      try { usedNonces = readUsedNonces(proofDirs); }
+      try { usedNonces = readUsedNonces(ownerApprovalDirs); }
       catch (error) {
         return block(`OWNER APPROVAL GUARD: could not read which approvals were already used (${error?.message || error}). Refusing "${migName}" (fail closed).`);
       }

@@ -316,7 +316,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public._product_parent_identity_after(public.product_parents,jsonb)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = '11f49a97cdd895c723b42e600c6248f7'
+                    AND md5(replace(p.prosrc, chr(13), '')) = 'cf82e174cf421181d2d5c69004d1b31f'
                     AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef AND p.provolatile = 'v'
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')

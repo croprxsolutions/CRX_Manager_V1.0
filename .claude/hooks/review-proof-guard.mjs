@@ -211,14 +211,19 @@ function shellCommandViews(cmd) {
 // 108 refused reads in a week). Quoted text is blanked first so a grep pattern's
 // "\|" or ">" is not read as shell syntax; $( and backticks run even inside quotes.
 // sed, awk, node, python and uniq-with-files can write, so they stay out.
-const READ_ONLY_STEP_RE = /^(?:[A-Za-z_]\w*=[^\s;&|<>`()]*|(?:cd|cat|head|tail|wc|jq|ls|grep|echo|cut|tr|date|sort|find)(?:\s.*)?|uniq(?:\s+-\w+)*|git(?:\s+-C\s+\S+)?\s+(?:status|log|show|diff|rev-parse|fetch|merge-base|worktree\s+list|branch)(?:\s.*)?|gh\s+(?:pr|run|issue)\s+(?:view|checks|list)(?:\s.*)?)$/i;
-const WRITER_FLAG_RE = /(?:^|\s)(?:-o|--output\S*|-delete|-exec\S*|-ok\S*|-fprint\S*|-fls|-[A-Za-z]*D|--delete|-[dmMcC]\b)(?:\s|=|$)/;
+// sort may only take flags that cannot name an output file (no files, no -o).
+const READ_ONLY_STEP_RE = /^(?:[A-Za-z_]\w*=[^\s;&|<>`()]*|(?:cd|cat|head|tail|wc|jq|ls|grep|echo|cut|tr|date|find)(?:\s.*)?|sort(?:\s+-[bdfghinMrRsuVz]+|\s+-[kt]\s*[\w.,]+)*|uniq(?:\s+-\w+)*|git(?:\s+-C\s+\S+)?\s+(?:status|log|show|diff|rev-parse|fetch|merge-base|worktree\s+list|branch)(?:\s.*)?|gh\s+(?:pr|run|issue)\s+(?:view|checks|list)(?:\s.*)?)$/; // case-sensitive: `git -c core.pager=…` runs a command, `git -C` does not
+// git's --output (and its abbreviations) and find's writing actions, checked with
+// quotes and escapes REMOVED (not blanked), so "--output=x" or \-delete still count
+// (Codex GitHub review, PR #2396).
+const GIT_FIND_WRITER_RE = /(?:^|\s)(?:--ou\S*|-delete|-exec\S*|-ok\S*|-fprint\S*|-fls)/i;
 function plainProofRead(cmd) {
   if (/`|\$\(/.test(cmd)) return false;
   const bare = cmd.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, "Q").replace(/\d?>&\d|\d>\s*\/dev\/null/g, " ");
   if (/[<>]/.test(bare)) return false;
   const steps = bare.split(/&&|\|\||[;|\r\n]/).map((s) => s.trim()).filter(Boolean);
-  return steps.length > 0 && steps.every((s) => READ_ONLY_STEP_RE.test(s) && !(/^(?:sort|find|git)\b/i.test(s) && WRITER_FLAG_RE.test(s.replace(/^git\s+-C\s+\S+/i, "git"))));
+  if (steps.some((s) => /^(?:git|find)\b/i.test(s)) && GIT_FIND_WRITER_RE.test(cmd.replace(/["'\\]/g, ""))) return false;
+  return steps.length > 0 && steps.every((s) => READ_ONLY_STEP_RE.test(s));
 }
 if (!plainProofRead(rawCommand) && shellCommandViews(command).some((v) => reviewProofPathMentioned(v))) {
   deny("REVIEW PROOF GUARD: direct shell access to Claude/Codex review proof JSON is blocked. Run the real review wrapper instead.");

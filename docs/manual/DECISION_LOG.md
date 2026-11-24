@@ -1,5 +1,28 @@
 # Decision Log
 
+## 2026-11-24 — Field billing rounds like chemical sales; field app goes live in slices
+
+**Decision (Mason, in chat, 2026-11-24: "billing logic and rounding etc matches chemical sales"; "my newest answers beat old answer so remove conflicting older answers").** Field invoices use the chemical-sale split rule (others rounded down, the job's customer takes the rest; largest share if the customer has 0%), and each product is priced once per job, so a job never bills more than gallons × price (1 gal at 10.01 over two fields = 5.01 + 5.00). Replaces the 2026-11-24 morning "closest to exact" answer. Go-live in slices: who pays and paperwork, then crew on CRX, then billing on a switch-on date Mason picks; Chem Man bills until then. Partial hold release, leftover claims, one-click bill actual used and the duplicate-load flag move to spring.
+**Why:** one rounding rule customers see on every invoice; the extra-cent bug is gone; less to build before February.
+**What this forbids/implies:** the field kit (`docs/plans/field-application/`) is now master copies only; the 2026-11-08 build sheet and backlog were removed (git history) and their still-valid rules live in `CONTRACT-who-pays.md` and `CONTRACT-field-billing.md`, so older entries' links to them point at history. On an even split the grower can carry up to one cent more per other payer on each line. Per-payer prices on one field also wait for spring; if the mixer tablet account is late, mixers use their own logins.
+
+## 2026-11-22 — #2217: Mason owner-accepted 1 Sol finding(s) at `e197b9d15d20`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2217 at `e197b9d15d20` (base `6e77a9e7a5e2`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md:189`, text sha256 `f9bb6a325e5e9451` (the wording stays with the proof, not here)
+  Mason's reason: drivers will reopen the app before go live (ref dfc1fa09484a)
+
+## 2026-11-22 — #2217: Mason owner-accepted 1 Sol finding(s) at `1781bf249fd2`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2217 at `1781bf249fd2` (base `ab0f6cdfc7ae`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md:189`, text sha256 `5b2dacfd3fce03b9` (the wording stays with the proof, not here)
+  Mason's reason: drivers will reopen the app before go live (ref 1cec6671310f)
+
+## 2026-11-22 — #2217: Mason owner-accepted 1 Sol finding(s) at `15153d2a666e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-22).** Sol's review of PR #2217 at `15153d2a666e` (base `17a72d0ee032`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md:189`, text sha256 `e2e592cbe2a95507` (the wording stays with the proof, not here)
+  Mason's reason: drivers will reopen the app before go-live (ref b7022addabd2)
 ## 2026-11-24 — Rate switch: a label maximum whose unit cannot be compared needs no over-label reason
 
 **Decision:** switching a product group to its approved rate asks for a typed over-label reason only when the rate is above a label maximum the app can compare; a maximum whose unit or basis it cannot compare ("not checked") lets the switch through with no reason, as Rate Review's own approval does. Mason, 2026-11-24, answering P1's Sol round 2 HIGH: "No, keep as is".

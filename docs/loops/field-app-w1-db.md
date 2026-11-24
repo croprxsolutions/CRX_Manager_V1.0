@@ -1,6 +1,6 @@
-# MISSION: field application, slices 0–1 database lane (plus loads and stock for slice 2)
+# MISSION: field application, slices 0–1 database lane
 
-You build the foundation of the field application system: tooling, who pays for each field, the Chem Man field import, billable acres, and loads that take stock at mixing. Read `docs/plans/field-application/BUILD-PLAN.md` (rules every session follows) before anything else.
+You build the foundation of the field application system: tooling, who pays for each field, the Chem Man field import and billable acres. Loads and stock is slice 2 (`BUILD-PLAN.md`), under Mason's slice 2 go. Read `docs/plans/field-application/BUILD-PLAN.md` (rules every session follows) before anything else.
 
 ## Driver
 
@@ -8,20 +8,20 @@ Claude, autonomous, in this session, after Mason's go (M7). Each item: plan-cont
 
 ## Items, in order (one PR each; a screen part is a second PR after its database PR)
 
-0.1 **Merge the kit into `staging`** (docs-only PR from #2415).
+Before this session starts, the kit is already in `origin/staging` (`BUILD-PLAN.md` › pre-build checklist).
+
 0.2 **Tooling:** registry and type generation from staging (`BUILD-PLAN.md` › Slice 0 step 2). No field migration merges before it.
 0.3 **Staging-only migrations and read-only facts** (`BUILD-PLAN.md` › Slice 0 steps 3–4), recorded in `PROGRESS.md`. A conflicting migration gets a replacement migration as its own PR here.
 1.1 **FP-1** field splits with history and payer notes (`CONTRACT-who-pays.md` FP-1), then its Field Setup screen PR.
 1.2 **Chem Man field import** (`CONTRACT-who-pays.md` › Chem Man field import): trial on a local test copy (not staging); the live run once, only after Taha's reset, with Mason's yes from the batch.
-1.3 **Loads and stock** (`CONTRACT-batch-stock.md`); may start while FP-2 waits for 2026-12-15. Must not change `inventory_holds` or `_sync_job_holds`.
-1.4 **FP-2** billable acres (`CONTRACT-who-pays.md` FP-2), after 2026-12-15 with Taha's review; its Job Detail and `SelectLocationsModal` change is a second PR under the `JobDetail.tsx` lease.
-1.5 **Write the slice 2 briefs** (`docs/loops/field-app-s2-*.md`) from `BUILD-PLAN.md` › Brief outlines and what was really built; then wait for Mason's go.
+1.3 **FP-2** billable acres (`CONTRACT-who-pays.md` FP-2), after 2026-12-15 with Taha's review; its Job Detail and `SelectLocationsModal` change is a second PR under the `JobDetail.tsx` lease.
+1.4 **Write the slice 2 briefs** (`docs/loops/field-app-s2-*.md`) from `BUILD-PLAN.md` › Brief outlines and what was really built; then wait for Mason's go.
 
 No field-application migration is applied live before Taha's reset has run.
 
 ## Worktree
 
-`C:\CRX_wt\field-db`, branch per item `feat/field-<item>` from current `origin/staging` (which holds the kit after 0.1). Owns: new files under `supabase/migrations/`, `src/types/index.ts`, `.claude/schema-registry.json`, the registry and type scripts and skill (0.2), `src/pages/FieldSetup.tsx` (1.1), the `JobDetail.tsx` lease and `src/components/field-app/SelectLocationsModal.tsx` (1.4), `docs/changelog.d/` and `docs/reference/migrations.d/` records for its migrations, tests for these items, the import script, and the "Slice 0" and "Slice 1 · DB" sections of `PROGRESS.md`. Must not edit any applicator-sheet, loader or print file (paperwork lane).
+`C:\CRX_wt\field-db`, branch per item `feat/field-<item>` from current `origin/staging` (which holds the kit). Owns: new files under `supabase/migrations/`, `src/types/index.ts`, `.claude/schema-registry.json`, the registry and type scripts and skill (0.2), `src/pages/FieldSetup.tsx` (1.1), the `JobDetail.tsx` lease and `src/components/field-app/SelectLocationsModal.tsx` (1.3), the slice 2 briefs `docs/loops/field-app-s2-*.md` (1.4), `docs/changelog.d/` and `docs/reference/migrations.d/` records for its migrations, tests for these items, the import script, and the "Slice 0" and "Slice 1 · DB" sections of `PROGRESS.md` and its shared lines (lease, Mason batches, release state). Must not edit any applicator-sheet, loader or print file (paperwork lane).
 
 ## Definition of done
 

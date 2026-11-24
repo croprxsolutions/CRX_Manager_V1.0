@@ -13,8 +13,8 @@
 #      earlier field in spray order) gets the rest.
 #   3. Each field line is shared across its payers with the chemical-sale rule (_bill_split_line_shares, live since
 #      2026-11-09): every payer but the main customer gets their exact share rounded down; the main customer (the job's
-#      customer) gets the rest; if the main customer has 0% on that line, the largest share gets it (live ties: lowest
-#      customer id; payer order stands in for it here). Credits, as live: every other share floors away from zero.
+#      customer) gets the rest; if the main customer has 0% on that line, the largest share gets it (ties: lowest
+#      customer id, IDS below, as live). Credits, as live: every other share floors away from zero.
 import io
 import re
 import sys
@@ -24,6 +24,8 @@ import math
 
 MICRO = 100_000_000
 MAIN = 'P1'   # the job's customer (the grower)
+IDS = {'P1': 3, 'P2': 1, 'P3': 2}   # made-up customer ids: P2 sorts lowest, so ties do not follow payer order
+DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']   # split tags that are spray days sort by date (Sol r2 109)
 
 
 def cents(x):
@@ -48,18 +50,18 @@ def split(total, shares, main=MAIN):
     assert sum(s for _, s in shares) == MICRO, shares
     assert len({p for p, _ in shares}) == len(shares), shares
     sh = dict(shares)
-    order = [p for p, _ in shares]
-    taker = main if sh.get(main, 0) > 0 else max(order, key=lambda p: (sh[p], -order.index(p)))
+    taker = main if sh.get(main, 0) > 0 else max(sh, key=lambda p: (sh[p], -IDS[p]))   # ties: lowest customer id
     out = take_rest(total, sh, taker)
     assert sum(out.values()) == total
     return out
 
 
 def by_field(total, weights):
-    """Rule 2: weights in spray order; the taker is the biggest, ties to the earlier field."""
-    keys = list(weights)
+    """Rule 2: weights in spray order; the taker is the biggest, ties to the earlier field. Zero weights get 0."""
+    keys = [k for k in weights if weights[k] > 0]
     taker = max(keys, key=lambda k: (weights[k], -keys.index(k)))
-    return take_rest(total, weights, taker)
+    out = take_rest(total, {k: weights[k] for k in keys}, taker)
+    return {k: out.get(k, 0) for k in weights}
 
 
 def pct(*ps):
@@ -68,8 +70,13 @@ def pct(*ps):
     return [(p, int(m)) for p, m in out]
 
 
+def units(q):
+    """Exact quantity -> stored 1/10000 units, half up (contract B3), never Decimal's default half-even."""
+    return cents(F(q) * 10000)
+
+
 def show(q):
-    return format((D(q.numerator) / D(q.denominator)).quantize(D('0.0001')).normalize(), 'f')
+    return format((D(units(q)) / 10000).normalize(), 'f')
 
 
 THIRDS = [('P1', 33_333_334), ('P2', 33_333_333), ('P3', 33_333_333)]
@@ -87,8 +94,10 @@ def job(work, loads, prod_shares=FIELDS, app_shares=None, order=None, service=Tr
     work = [tuple(w) if len(w) == 4 else tuple(w) + (None,) for w in work]
     if sum(F(w[2]) for w in work) == 0:
         return []   # nothing sprayed: no lines, never planned acres (Sol 100)
-    fields = order or list(dict.fromkeys(w[0] for w in work))
-    tags = {f: list(dict.fromkeys(w[3] for w in work if w[0] == f)) for f in fields}
+    fields = [f for f in (order or dict.fromkeys(w[0] for w in work)) if any(w[0] == f for w in work)]
+    # split buckets sort by spray date, not entry order (ties go to the earlier date)
+    tags = {f: sorted(dict.fromkeys(w[3] for w in work if w[0] == f), key=lambda t: DAYS.index(t) if t in DAYS else -1)
+            for f in fields}
     load_acres = {}
     for f, l, a, t in work:
         load_acres[l] = load_acres.get(l, F(0)) + F(a)
@@ -98,15 +107,19 @@ def job(work, loads, prod_shares=FIELDS, app_shares=None, order=None, service=Tr
         acres[f][t] += F(a)
     for f in fields:
         for fw, l, a, t in work:
-            if fw != f:
+            if fw != f or load_acres[l] == 0:   # a load with no sprayed acres spreads nothing
                 continue
             for p, g in loads[l].items():
                 q = qty.setdefault(p, {}).setdefault(f, {tt: F(0) for tt in tags[f]})
                 q[t] += F(g) * F(a) / load_acres[l]
+    # zero-use products and zero-acre fields get no line (a recorded 0 stays on the work entry, not the bill)
+    qty = {p: {f: v for f, v in pf.items() if sum(v.values()) > 0} for p, pf in qty.items()}
+    qty = {p: pf for p, pf in qty.items() if pf}
 
-    def spread(total, per_field):   # rule 2: across fields, then across one field's split lines
+    def spread(total, per_field):   # rule 2: across fields, then across one field's split lines (positive weights only)
         c = by_field(total, {f: sum(v.values()) for f, v in per_field.items()})
-        return {(f, t): ct for f, v in per_field.items() for t, ct in by_field(c[f], v).items()}
+        return {(f, t): ct for f, v in per_field.items() if c[f] or sum(v.values())
+                for t, ct in by_field(c[f], v).items() if v[t] > 0}
     line = {}  # (field, split, line name) -> (qty text, cents)
     for p, per_field in qty.items():
         c = spread(cents(sum(sum(v.values()) for v in per_field.values()) * PRICE[p]), per_field)
@@ -126,7 +139,7 @@ def job(work, loads, prod_shares=FIELDS, app_shares=None, order=None, service=Tr
             for p in qty:
                 if (f, t, p) in line:
                     rows.append((label, p) + line[(f, t, p)] + (shares(prod_shares, f, t),))
-            if service:
+            if service and (f, t, 'Service') in line:
                 rows.append((label, 'Service') + line[(f, t, 'Service')] + (shares(app_shares or prod_shares, f, t),))
     return rows
 
@@ -154,19 +167,20 @@ S4L = {'L1': {'X': F('12.25')}, 'L2': {'Y': F('33.5625')}}
 S4BL = {'L1': {'X': F('22.25')}, 'L2': {'Y': F('26.0625')}}
 S4B = [('A', 'L1', 49), ('B', 'L1', 40), ('B', 'L2', 70), ('C', 'L2', 69)]
 S7W = [('A', 'L1', 49), ('B', 'L1', 60, 'Tue'), ('B', 'L1', 50, 'Thu'), ('C', 'L1', 69)]
-TABLES = {
-    'S1': table(job(STD, L58)),
-    'S2': table(job([('A', 'L1', 49), ('B', 'L1', 110), ('C', 'L1', '68.7')], L58)),
-    'S3': table(job(STD, L58, app_shares={'A': pct(('P1', 100)), 'B': pct(('P1', 100), ('P2', 0)), 'C': pct(('P1', 50), ('P2', 50), ('P3', 0))})),
-    'S4': table(job([('A', 'L1', 49), ('B', 'L2', 110), ('C', 'L2', 69)], S4L)),
-    'S4b': table(job(S4B, S4BL)),
-    'S6': table(s6),
-    'S9': table(job(STD, L58, prod_shares={'A': pct(('P1', 100)), 'B': pct(('P1', 50), ('P2', 50)), 'C': pct(('P1', 50), ('P2', 50), ('P3', 0))})),
-    'S7': table(job(S7W, L58, prod_shares={**FIELDS, ('B', 'Tue'): pct(('P1', 50), ('P2', 50)), ('B', 'Thu'): pct(('P1', 100))})),
-    'S24': table(job([('A', 'L1', 49), ('B', 'L1', 100), ('C', 'L1', 69)], L58)),
-    'S26': table(job([('A', 'L1', 110), ('B', 'L1', 110), ('C', 'L1', 69)], L58)),
-    'S32': table(job(STD, {'L1': {'X': 58, 'Y': F('42.75')}}, service=False)),
+ROWS = {
+    'S1': job(STD, L58),
+    'S2': job([('A', 'L1', 49), ('B', 'L1', 110), ('C', 'L1', '68.7')], L58),
+    'S3': job(STD, L58, app_shares={'A': pct(('P1', 100)), 'B': pct(('P1', 100), ('P2', 0)), 'C': pct(('P1', 50), ('P2', 50), ('P3', 0))}),
+    'S4': job([('A', 'L1', 49), ('B', 'L2', 110), ('C', 'L2', 69)], S4L),
+    'S4b': job(S4B, S4BL),
+    'S6': s6,
+    'S9': job(STD, L58, prod_shares={'A': pct(('P1', 100)), 'B': pct(('P1', 50), ('P2', 50)), 'C': pct(('P1', 50), ('P2', 50), ('P3', 0))}),
+    'S7': job(S7W, L58, prod_shares={**FIELDS, ('B', 'Tue'): pct(('P1', 50), ('P2', 50)), ('B', 'Thu'): pct(('P1', 100))}),
+    'S24': job([('A', 'L1', 49), ('B', 'L1', 100), ('C', 'L1', 69)], L58),
+    'S26': job([('A', 'L1', 110), ('B', 'L1', 110), ('C', 'L1', 69)], L58),
+    'S32': job(STD, {'L1': {'X': 58, 'Y': F('42.75')}}, service=False),
 }
+TABLES = {k: table(v) for k, v in ROWS.items()}
 
 # Pins: any change here is a rule change and needs SCENARIOS.md and SPEC.md updated.
 assert split(3, pct(('P1', 70), ('P2', 30))) == {'P1': 3, 'P2': 0}, 'others round down, the main customer takes the rest'
@@ -208,22 +222,58 @@ def live_split(amount, units, shares, main, ids):
     return out
 
 
-IDS = {'P1': 3, 'P2': 1, 'P3': 2}   # made-up customer ids: P2 sorts lowest, so ties do not follow payer order
 assert live_split(-1, -310, pct(('P1', 50), ('P2', 50)), 'P1', IDS) == {'P2': (-1, -155), 'P1': (0, -155)}, 'signed quantity: 4-place branch'
 assert live_split(1, 10000, THIRDS, 'P1', IDS) == {'P2': (0, 3300), 'P3': (0, 3300), 'P1': (1, 3400)}, '1 unit over thirds: hundredths'
 assert live_split(1, 1, pct(('P1', 0), ('P2', 50), ('P3', 50)), 'P1', IDS)['P2'] == (1, 1), 'main at 0%, tie: lowest customer id'
 assert live_split(1, 100, pct(('P1', 50), ('P2', 50)), 'P1', IDS) == {'P2': (0, 50), 'P1': (1, 50)}, 'quantity with no cents (Sol 15)'
-# Cents parity with the live helper on every table line (rule 3 = live, main customer = P1).
-for _rows in (job(STD, L58), s6, job(S4B, S4BL)):
+# Cents parity with the live helper on every line of every table, with the line's real stored units
+# (rule 3 = live, main customer = P1); every payer's units add up to the line (Sol r2 111).
+for _k, _rows in ROWS.items():
     for _f, _n, _q, _amt, _sh in _rows:
-        _live = {p: c for p, (c, _) in live_split(_amt, 0, _sh, 'P1', IDS).items()}
-        assert all(_live.get(p, 0) == c for p, c in split(_amt, _sh).items()), (_f, _n)
+        _u = units(F(_q.split()[0]))
+        _lv = live_split(_amt, _u, _sh, 'P1', IDS)
+        assert all(_lv.get(p, (0, 0))[0] == c for p, c in split(_amt, _sh).items()), (_k, _f, _n)
+        assert sum(u for _, u in _lv.values()) == _u, (_k, _f, _n)
 # One pass with two products counts its acres once (Sol 99).
 _two = job([('A', 'L1', 10)], {'L1': {'X': 1, 'Y': 1}})
 assert [r[2] for r in _two if r[1] == 'Service'] == ['10 ac']
 # Spray order, not entry order, picks the cent taker (Sol 101): B entered first, A first in spray order, equal acres.
 _ord = job([('B', 'L1', 1), ('A', 'L1', 1)], {'L1': {'X': F(1001, 4137)}}, prod_shares={'A': pct(('P1', 100)), 'B': pct(('P1', 100))}, order=['A', 'B'], service=False)
 assert {r[0]: r[3] for r in _ord} == {'A': 501, 'B': 500}
+
+# Sol round 2 pins.
+# 105: main at 0% with a tie goes to the lowest customer id, whatever the payer order.
+assert split(1, [('P1', 0), ('P3', 50_000_000), ('P2', 50_000_000)]) == {'P1': 0, 'P3': 0, 'P2': 1}
+# 106: stored quantity rounds half up: 0.0001 gal over two equal fields shows 0.0001 each, not 0.
+assert show(F(1, 20000)) == '0.0001'
+# 107/108: a zero-acre field, a load with no sprayed acres and a zeroed product make no line and no crash.
+_z = job([('A', 'L1', 10), ('B', 'L2', 0)], {'L1': {'X': 1, 'Y': 0}, 'L2': {'X': 5}}, order=['A', 'B', 'C'])
+assert [(r[0], r[1]) for r in _z] == [('A', 'X'), ('A', 'Service')]
+# 109: split lines tie to the earlier spray date even when the later entry is supplied first.
+_t = job([('B', 'L1', 1, 'Thu'), ('B', 'L1', 1, 'Tue')], {'L1': {'X': F(1001, 4137)}},
+         prod_shares={('B', 'Tue'): pct(('P1', 100)), ('B', 'Thu'): pct(('P1', 100))}, service=False)
+assert {r[0]: r[3] for r in _t} == {'B (Tue)': 501, 'B (Thu)': 500}
+assert table(job(list(reversed(S7W)), L58, order=['A', 'B', 'C'], prod_shares={**FIELDS, ('B', 'Tue'): pct(('P1', 50), ('P2', 50)), ('B', 'Thu'): pct(('P1', 100))}))[0] == TABLES['S7'][0]
+# 110: one entry over two load segments bills its acres once (S4b field B: 40 + 70 = 110 ac);
+# a kept second pass on the same field and day bills again (M8).
+assert [r[2] for r in ROWS['S4b'] if r[0] == 'B' and r[1] == 'Service'] == ['110 ac']
+assert [r[2] for r in job([('A', 'L1', 10), ('A', 'L1', 10)], {'L1': {'X': 1}}) if r[1] == 'Service'] == ['20 ac']
+# 112: a load shared by two jobs splits its used gallons by acres and conserves them; a vendor-sourced
+# product (price 0) keeps its quantity at $0.
+_L4 = F(50)
+_j1, _j2 = _L4 * 60 / 100, _L4 * 40 / 100
+assert _j1 + _j2 == _L4
+PRICE['Z'] = 0   # vendor-sourced
+_v = job([('A', 'L4', 60)], {'L4': {'X': _j1, 'Z': 10}}, service=False)
+assert [(r[1], r[2], r[3]) for r in _v] == [('X', '30 gal', cents(30 * F(4137))), ('Z', '10 gal', 0)]
+# 113: S25 credit and rebill (P2 paid 100,000 of 150,335). Payment unapplied, credit 150,335, new invoice
+# 144,223 (S24), payment reapplied: new balance 44,223. If P3 had paid 44,328 in full and dropped to $0:
+# credit 44,328 and the payment stays as P3's account credit.
+assert TABLES['S1'][1]['P2'] == 150335 and TABLES['S24'][1]['P2'] == 144223 and TABLES['S24'][1]['P2'] - 100000 == 44223
+assert TABLES['S1'][1]['P3'] == 44328
+# 114: S26's A takes two residual cents over B.
+assert [r[3] for r in ROWS['S26'] if r[1] == 'X'][:2] == [91330, 91328]
+
 
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')

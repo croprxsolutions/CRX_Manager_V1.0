@@ -16,8 +16,8 @@ Spray order: `job_fields.sort_order` (already printed as "Stop N" by `src/lib/ap
 2. "Hide tank contents" (hides amounts and rates; product names and safety still print) and "map pages only" print options.
 3. Spray-order numbers 1, 2, 3 on printed maps from `sort_order`; numbers restart per job (Sol 86).
 4. Directions link per field on the sheet.
-5. Loader sheet shows water to add (finished gallons − liquid product gallons) and finished gallons, in the loader's units (Sol 62); dry products add no volume.
-6. EPA number: a dash for a product with no EPA registration, "Unknown" for a registered product whose number is missing (KI-206); loader views (one big batch or loads sized to the tank) using the existing modes.
+5. Loader sheet shows water to add (finished gallons − liquid product gallons) and finished gallons, in the loader's units (Sol 62); dry products add no volume; water to add never prints below 0 (a recipe over the finished gallons prints 0 and a warning).
+6. EPA number: a dash for a product with no EPA registration, "Unknown" for a registered product whose number is missing (KI-206). First check read-only which product value says a product is registered (today `products.epa_registration` is a text number only); if nothing distinguishes the two, print the dash for any blank number, park the "Unknown" part and ask the database lane in `PROGRESS.md` › Needs another lane; loader views (one big batch or loads sized to the tank) using the existing modes.
 
 ## Worktree
 
@@ -25,7 +25,7 @@ Spray order: `job_fields.sort_order` (already printed as "Stop N" by `src/lib/ap
 
 ## Definition of done
 
-All six groups merged into `staging` and checked there, each PR showing rendered pages for a one-field and a multi-field job (first and later pages, map-only and full prints, with and without hidden tank contents), directions links opened, the printed safety values matched against the product records, a registered product with no number ("Unknown") and an unregistered one (dash), a saved print preference that used to hide safety, and a two-job bulk print with spray numbers restarting per job. Anything parked is in `PROGRESS.md` with the reason, and the lane reports PARTIAL.
+All six groups merged into `staging` and checked there, each PR showing rendered pages for a one-field and a multi-field job (first and later pages, map-only and full prints, with and without hidden tank contents), directions links opened, the printed safety values matched against the product records, a registered product with no number ("Unknown") and an unregistered one (dash), a saved print preference that used to hide safety, and the print libraries given two jobs at once with spray numbers restarting per job (a test; the DispatchBoard tick-several-jobs wiring is the slice 2 office lane's). Anything parked is in `PROGRESS.md` with the reason, and the lane reports PARTIAL.
 
 ## Delivery gate
 

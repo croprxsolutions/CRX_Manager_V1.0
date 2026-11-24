@@ -1,6 +1,6 @@
 # Field application: progress
 
-Each lane writes only its own section. States (`BUILD-PLAN.md` › Rules 5): NOT STARTED, IN PROGRESS, IN REVIEW (PR open), MERGED (in staging), VERIFIED (applied on staging, scenarios re-run there), READY FOR RELEASE, LIVE, PARKED (reason), BLOCKED (on what), WAITING ON MASON.
+Each lane writes only its own section; a slice 2 or 3 lane adds its own section when it starts. The shared lines (lease, Mason batches, release state) are written by the database lane. States (`BUILD-PLAN.md` › Rules 5): NOT STARTED, IN PROGRESS, IN REVIEW (PR open), MERGED (in staging), VERIFIED (applied on staging, scenarios re-run there), READY FOR RELEASE, LIVE, PARKED (reason), BLOCKED (on what), WAITING ON MASON.
 
 `JobDetail.tsx` lease: none.
 
@@ -13,22 +13,24 @@ Each lane writes only its own section. States (`BUILD-PLAN.md` › Rules 5): NOT
 
 ## Mason batches (one message per slice; Claude's recommendation first)
 
+Every slice batch also asks, for its release: the merge into `main` (Taha or Mason), each live migration apply, any production smoke write, and who watches errors the first day (`BUILD-PLAN.md` › Release owner).
+
 | Slice | Ask | Recommendation | Answer |
 |---|---|---|---|
 | 0–1 | Go for slices 0 and 1 (M7) | Yes, once the kit is merged into staging | |
 | 0–1 | Date for Taha's live reset (#2407), and the yes to fill, re-stamp and apply it | A date before mid-December, agreed with Taha | |
-| 0–1 | Any staging-only migration that changes today's live billing (only if slice 0 finds one) | Per slice 0 step 3 | |
+| 0–1 (added later) | Any staging-only migration that changes today's live billing (only if slice 0 finds one; asked before the release that carries it, not before the go) | Per slice 0 step 3, with the before-and-after customer effect | |
 | 0–1 | FP-1 `I approve` (customer foreign key to restrict; revoked writes on `field_billing_defaults`) before its live apply | Yes | |
 | 0–1 | Where the Chem Man export file lives (private, outside the repo), and the yes for the one live import after the reset | A private folder Mason names | |
 | 0–1 | Staging test login for any role missing from `docs/reference/qa-testing.md` | Create only what is missing | |
 | 2 | Go for slice 2; FP-3 and FP-4 `I approve`; applicator extra-field permission; the mix-site account; `field_batch_stock_enabled` on in production at release; book the posting window with Taha | Yes to each | |
-| 3 | Go for slice 3; engine grants `I approve`; Edge Function deploy; at release: posting switch on for the pilot, then the billing switch-on date | Yes to each, in that order | |
+| 3 | Go for slice 3; engine grants `I approve`; Edge Function deploy; at release, in order: the billing switch-on date and the pilot job (chosen from the open-job list), the pilot draft checked by hand, posting on for the pilot set only, then (after the pilot is checked on statements) posting on for everyone | Yes to each, in that order | |
 
 ## Slice 0
 
 | Item | State | Note |
 |---|---|---|
-| Kit merged into staging | NOT STARTED | docs-only PR |
+| Kit merged into staging (pre-build checklist, before any session) | NOT STARTED | docs-only PR from #2415 |
 | Tooling: registry and types from staging | NOT STARTED | before any field migration merges |
 | Taha's live reset (#2407) | WAITING ON MASON | merged into staging; live apply needs the batch yes |
 | Read-only facts in the contracts | NOT STARTED | |

@@ -84,12 +84,12 @@ Every record keeps who changed it and when, and **never overwrites history**: co
 ### Stage 1: Create the job (office)
 
 1. Start a job directly or from a sent quote or booking; locked prices carry forward [Q1].
-2. **Pick fields by payer:** search a grower and see every field they pay any share of; add several growers' fields; earlier picks stay. Pickers show grower name and acres beside each field.
+2. **Pick fields by payer:** search a grower and see every field they pay any share of (product or application share above 0); add several growers' fields; earlier picks stay. Pickers show grower name and acres beside each field.
 3. The map colours fields by crop with a legend. [SPRING: neighbour toggle]
 4. Each chosen field shows its billing split. A field with no split yet starts **100% to the grower it was added under**, so the crew can spray right away; the office can change it before posting [GR5].
 5. Planned acres fill in from the field and can be edited before mixing.
 6. **Products:** pick from a list; rate, unit and warehouse fill in and can be changed. **Every rate is per acre** (per-100-gal and %-of-tank products are converted by the office) [GR8]; stock and invoice amounts convert through the product's unit and the existing `unit_conversions`. Over the normal or label rate **warns, never blocks** [Sol 1]. Each line has **sourced from**: CRX stock (default) or a vendor. The office sets up a vendor for a grower, another company or the owner's farm company when that party supplied the product; a vendor-sourced line takes no CRX stock and bills $0 [2026-11-24 h]. Credit hold makes no difference to field jobs [GR9].
-7. **Rig and carrier rate:** the rig's normal finished gallons per acre (water plus product) fills in and can be changed for this job; every printout and calculation uses the job's value, labelled when changed. Water to add = finished gallons − liquid product gallons; dry products add no volume.
+7. **Rig and carrier rate:** the rig's normal finished gallons per acre (water plus product) fills in and can be changed for this job; every printout and calculation uses the job's value, labelled when changed. Water to add = finished gallons − liquid product gallons; dry products add no volume. If the liquid products alone exceed the finished gallons, water to add prints as 0 with a warning, never a negative number.
 8. **Application service** [2026-11-24 f]: the office picks how the job is applied from the existing `application_services` list (our sprayers, side-dress bars, tractors, Terragators, a named custom applicator…), prefilled from the customer's default service. Each service says whether CRX bills the customer for it and, for a custom applicator, which outside company (an existing vendor) did the work; both are copied onto the job when picked. Acres are always logged, billed or not. One service and one rate per job: the job customer's season rate for that service (`customer_application_rates`) if set, else the service's default rate [2026-11-24 i]. **No flat fees and no fuel charge on field jobs** [Sol 67, 2026-11-24 c]. Two rigs billed on one job is later; the design must not rule it out [D7].
 9. Tags and job date. Save → **Scheduled**.
 
@@ -128,13 +128,13 @@ Tender and sprayer balances, fill to full / partial fill / correct balance, any-
 ### Stage 6: Spraying and logging (applicator, phone)
 
 1. Open the job and field. **Now** buttons for start and finish times. Weather fills in for the start time and can be edited [Sol 52]. Directions link to the field.
-2. **One work entry per field per day** (unless the office keeps a real second pass): acres sprayed (planned acres pre-filled; saving the entry confirms them; an unsaved field is missing, never planned), rig, crew, comments, and the load segment(s) that sprayed it [Sol 2]. One tankful over several fields: acres per field. Two loads on one field in a day: one entry, two segments. The spray date is the Central date of the start time.
+2. **One work entry per field per day** (unless the office keeps a real second pass): acres sprayed (planned acres pre-filled; saving the entry confirms them; an unsaved field is missing, never planned), rig, crew, comments, and the load segment(s) that sprayed it [Sol 2]. An entry with segments has one acre number: the sum of its segment acres. An entry typed from paper before its load is entered saves with "no load linked", shown on the review list; the office links it before closing. One tankful over several fields: acres per field. Two loads on one field in a day: one entry, two segments. The spray date is the Central date of the start time.
 3. **Extra acres** (more than planned) are logged and bill like any sprayed acre; shown to the office for information [Sol 37].
-4. **Two entries that look the same** (same job, field and day, for example phone plus paper) warn; the office removes one or keeps it as a real second pass [Sol 28]. **A real second pass bills its own service acres** [M8].
+4. **Two entries that look the same** (same job, field and day, for example phone plus paper) warn; the office removes one or keeps it as a real second pass [Sol 28]. **A real second pass bills its own service acres** [M8]. Until the office acts, both entries count (the warning stays on the review list); "remove" marks the entry removed with who and why, it is never deleted.
 5. **When a load finishes or the sprayer empties:** gauge reading, "ran dry" or "X gal left" [Q11]; leftover is carried to the rig's next load or a tote [GR2, M4].
 6. Anything unusual (drift, wrong field, water-only top-up) is a **note** [Sol 20, 63].
-7. Restricted-use products ask for the extra fields staff set per state (the field's state), and the values are saved on the entry as entered [D6, Sol 15]. **The spray record prints per field any time** [Sol 18].
-8. **Extra field** asked for by the grower: the applicator picks it from fields any payer on the job pays on (or types a note when it is not there) and logs acres; its payers come from that field's own split; flagged for the office to confirm [GR6].
+7. Restricted-use products ask for the extra fields staff set per state (the field's state), and the values are saved on the entry as entered [D6, Sol 15]. **The spray record prints per field any time** [Sol 18]: before close it is built from the work entries and load revisions, the same data the close writes.
+8. **Extra field** asked for by the grower: the applicator picks it from fields any payer on the job pays on (any payer share above 0) or types a note when it is not there, and logs acres; its payers come from that field's own split; flagged for the office to confirm [GR6]. A note-only entry keeps its acres and note with no field; the office links it to a real field (adding the field first) before closing.
 9. **Job done:** any applicator on the job taps it; the job goes to Ready for review, and entries saved later simply show on the review screen. The office can also mark it [GR3].
 10. An applicator can fix their own entry until the office closes the job; after that only the office, with a reason [ENGINEERING].
 11. Phones work without signal and sync later [Q7] [SPRING].
@@ -142,7 +142,7 @@ Tender and sprayer balances, fill to full / partial fill / correct balance, any-
 ### Stage 7: Pause and resume
 
 1. An unfinished field: acres done + resume note [ops S12]. **The job stays open across days**; every day adds entries [G1].
-2. The job shows planned, sprayed and remaining acres per field and solution still to mix; the next load includes "X acres to finish on field Y" [G1].
+2. The job shows planned, sprayed and remaining acres per field and solution still to mix; the next load includes "X acres to finish on field Y" [G1], using the applicator's reported acres left when given (planned minus sprayed otherwise, shown beside it); billing always uses logged acres.
 3. **Never sprayed** (rain, grower stops partway): the office **closes the remaining acres with a reason**; they are not billed [D1b, Sol 11]. **Cancel is only for a job with zero acres sprayed and no confirmed load** [Sol 11].
 4. **Rained out after mixing:** the office ends the job with nothing billed; the load stays recorded (its stock really left), its leftover can still be recorded as carried or to a tote; a note is optional [M4].
 
@@ -153,16 +153,17 @@ The job reaches **Ready for review** when Job done is tapped [D8, GR3]. **A clea
 | Check | Kind | Rule |
 |---|---|---|
 | **Every field answered** | Needed to close | A field with no record is **missing**. A recorded **0** is a real answer. Closed remaining acres are a third state. Missing never becomes planned acres. |
-| **Leftover recorded** | Needed to close | Each load ran dry, or its leftover is carried or to a tote. Gauges are rough: **a gap up to 5% (office-adjustable) passes with no office step** [Sol 25]. |
+| **Leftover recorded** | Needed to close | Each load ran dry, or its leftover is carried or to a tote (`none` only for a load with no water). Gauges are rough: **a gap up to and including 5% (office-adjustable) passes with no office step** [Sol 25]. Gap = (expected leftover − gauge leftover) ÷ the load's finished gallons plus carried in, either way; expected leftover = finished gallons + carried in − acres sprayed from the load × the job's carrier rate. |
+| **Every entry linked** | Needed to close | An entry with acres has a load segment or a field (the office links "no load linked" and note-only entries). |
 | **Label maximum** [G6] | Note needed to close | Checked per field with the load's actual rate on it [Sol 3]. The office writes what happened; the legal record keeps the actual rate. |
-| **Shared load** | Needed to invoice, not to close | A job sharing a load with a job still spraying closes; its invoices wait until that load is settled. The office can settle the load by hand with a reason [Sol 6]. |
-| **Rate check per load** [G4, Q11] | Flag | Billed vs planned per load and product; more than **5% (office-adjustable)** either way puts the job on the review list with planned vs billed and the dollar difference. A load shared by jobs gives them one rate. The office can edit a quantity with a reason. Zero-acre jobs skip it. |
+| **Shared load** | Needed to invoice, not to close | A job sharing a load with a job still spraying closes; its invoices wait until that load is settled: its leftover recorded and every job on it Ready for review or closed. The office can settle the load by hand with a reason [Sol 6]. |
+| **Rate check per load** [G4, Q11] | Flag | Billed vs planned per load and product (planned = each job's own recipe rate × that job's acres from the load, added up); more than **5% (office-adjustable)** of planned either way puts the job on the review list with planned vs billed and the dollar difference. A load shared by jobs gives them one rate. The office can edit a load's used quantity with a reason (measured usage, shown beside the raw amount). Zero-acre jobs skip it. |
 | **Mix differed from recipe** [Q2], stock short [Sol 32], possible duplicate entry, extra field, extra acres, unpriced substitute [M9] | Flag | Shown on the review list; the office acts only if it wants to (pricing a substitute is needed before posting, not closing). |
 | **Waste** [D11, Q6] | Flag | Approved by any office role with a reason. Not billed unless the office adds it with a reason. |
 
 The office closes the job → **Applied**; the legal spray record is written then. A save, duplicate decision or close all take the job row lock, and close re-reads the job, so a save in flight lands before or after, never half. An optional "job done" email (off by default) goes to every payer, each seeing only their own fields [Q8, D5].
 
-**Office views** [Sol 77, 80]: per job, planned vs mixed vs billed per load and product, differences highlighted; a "sprayed, not billed" list (jobs whose first spray day is before the switch-on date count as billed in Chem Man and are left off).
+**Office views** [Sol 77, 80]: per job, planned vs mixed vs billed per load and product, differences highlighted; a "sprayed, not billed" list (jobs whose first spray day is before the switch-on date, and jobs marked billed in Chem Man, count as billed and are left off, counts included).
 
 ### Stage 9: Unposted invoices (CRX builds, office reviews)
 
@@ -182,7 +183,7 @@ flowchart LR
 1. **Made only when the job is closed** and every load it shares with another job is settled [G2, Sol 6], and only for a job whose first spray day is on or after the billing switch-on date [M5]. One unposted invoice per payer, listing every field that payer shares on the job [D4].
 2. **How each line is worked out** (exact numbers: `SCENARIOS.md`):
    - **Quantity: bill what actually went in the tank** [2026-11-24 b]: a load's billed amount of each product = what was put in it (confirmed mix, adds, corrections, plus anything carried in) minus what was carried out or sent to a tote, spread over the fields the load sprayed by the acres logged on each. The recipe is the plan and the 5% check only. Service = the field's sprayed acres, only when the job's application service bills the customer [Sol 68]. Each real pass counts [M8].
-   - **Price:** locked quote or booking prices carry forward. Otherwise **one price per product for the whole job**: the product's price copied onto the job's line on the first spray day. No single-field price and no per-payer price in February [M2]. The service rate is chosen once per job (stage 1 step 8). A substitute with no price holds the whole payer set until the office prices it [M9]. Line by line, never a flat price per acre.
+   - **Price:** locked quote or booking prices carry forward. Otherwise **one price per product for the whole job**: the product's price copied onto the job's line on the first spray day. No single-field price and no per-payer price in February [M2]. The service rate (stage 1 step 8) is copied the same first spray day, one rate per job; a logged price refresh moves it like product prices. A substitute with no price holds the whole payer set until the office prices it [M9]. Line by line, never a flat price per acre.
    - **Money, the chemical-sale way** [2026-11-24 a]: each product is priced **once per job** (total quantity × price, rounded to the cent once), and all lines add up to that once-rounded amount (1 gal at $10.01 over two equal fields bills $5.01 + $5.00). That total is shared across the fields; then each field line is shared across its payers **exactly as chemical-sale split invoices do**: every payer except the main customer gets their share rounded down, and **the main customer (the job's grower) gets the rest**; if the main customer has no share of that line, the largest share gets it.
    - **Shares:** products use each field's **product shares**; service uses its **application shares** [A1, Q6]. The split is the one **in force on the day that field was sprayed** [Sol 41].
    - **No flat fees, no fuel charge, no sales tax on field work** [Sol 67, Sol 48, 2026-11-24 c]. Vendor-sourced lines print at $0, never touch company stock, and still show line by line on the load, spray record, invoice and blend report [2026-11-24 h].
@@ -205,16 +206,16 @@ flowchart LR
    - **Unposted:** edit with a reason.
    - **Posted, no money applied, month open:** unpost the **whole payer set**, fix, repost, with a reason. "No money" = no payment, prepay, credit or write-off on any invoice in the set [Sol 45]. Any invoice whose printed amount changes is marked **"Corrected"**; the office chooses whether to re-send [M3].
    - **After money or month close:** as chemical sales do today: credit what is left on each invoice whose dollars changed, rebill it; a payment stays with that customer and is applied to the new invoice. A payer who drops to $0 gets only the credit; a payer who newly owes gets a new invoice in the set [M3, 2026-11-24 e].
-   - Correcting a posted job's spray record flags its invoices; it changes nothing by itself [Sol 47].
+   - Correcting a posted job's spray record flags its invoices; it changes nothing by itself [Sol 47]. The legal record gets a corrected version; the original stays readable.
    - Stock is corrected only by a new reversing entry. Field invoices take no product returns.
-4. **First real multi-payer job:** drafted, checked by hand with the checklist in `SCENARIOS.md`, posted; then billing is on for everyone [D12].
+4. **First real multi-payer job:** drafted and checked by hand with the checklist in `SCENARIOS.md`; with Mason's yes posting is switched on for that one set only; posted and checked on statements; then, with Mason's second yes, posting is on for everyone [D12].
 
 ### Going live [2026-11-24 k]
 
-1. **Order:** Taha's one-time live reset → slice 1 → slice 2 (Taha's areas only after 2026-12-15, with his review) → slice 3 → first real multi-payer job drafted, checked by hand, posted → billing on for everyone. No field-app migration is applied live before the reset has run.
+1. **Order:** Taha's one-time live reset → slice 1 → slice 2 (Taha's areas only after 2026-12-15, with his review) → slice 3 → switch-on date set → first real multi-payer job drafted, checked by hand, posted alone → billing on for everyone. No field-app migration is applied live before the reset has run.
 2. **Chem Man keeps billing field work until the whole field app is live; then Mason sets the billing switch-on date.** No job straddles it; a job whose first spray day is before it is billed in Chem Man and never in CRX; the date is absolute, with no exception [M5, GR11]. CRX never bills planned acres.
 3. **Fields from Chem Man:** imported **once**, from Mason's export file. Fields already in CRX (same customer and field name) are skipped and listed for the office. Trial run on a local test copy of the database, not staging; then imported live once, after Taha's reset, with Mason's yes, and checked by hand [GR10, 2026-11-24 l].
-4. **Open Chem Man jobs:** sprayed work is billed in Chem Man; unsprayed acres become new CRX jobs by hand [GR11].
+4. **Open jobs at the switch-on:** Mason picks the date from the open-job list so no job is mid-work. Any job open at the switch is finished and billed in Chem Man; a Chem Man job not yet sprayed is re-created as a CRX job by hand [GR11].
 5. Old test jobs were deleted by Taha's reset; real jobs are archived [D12].
 
 ---

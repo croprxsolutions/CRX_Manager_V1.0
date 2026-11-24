@@ -1246,7 +1246,57 @@ describe('ProductDetail governed pricing flow', () => {
     expect(await screen.findByText(/could not be refreshed, so the current basis is not shown/i)).toBeInTheDocument();
     expect(screen.queryByText(/Current governed cost baseline:/)).not.toBeInTheDocument();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
-      'warning', 'Product reloaded, but Cost History or Cost Basis did not load. Use Try again on that card.'));
+      'warning', 'Product reloaded, but Cost Basis did not load. Use Try again on that card.'));
+  });
+
+  it('#2308: Cost History does not call the cached basis current while Cost Basis is still refreshing', async () => {
+    mockGetCostBasisWorkspace.mockResolvedValueOnce({
+      enabled: true,
+      product: {
+        id: product.id, product_name: product.product_name, sku: product.sku, pricing_version: product.pricing_version,
+        current_cost_cents: 5_000n, tier1_margin_percent: '20', tier2_margin_percent: '15', tier3_margin_percent: '10',
+      },
+      current_basis: {
+        id: 'basis-current', basis_type: 'migration_baseline', cost_cents: 5_000n, supplier_price_observation_id: null,
+        purchase_order_item_id: null, selection_source: 'migration_baseline', reason: 'Current cost baseline',
+        selected_at: '2026-08-04T12:00:00Z',
+      },
+      supplier_candidates: [],
+      purchase_candidates: [],
+    });
+    render(<ProductDetail />);
+    expect(await screen.findByText(/Current governed cost baseline:/)).toBeInTheDocument();
+    const quotingNotes = screen.getByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Reload Product' })).toBeNull());
+    expect(await screen.findByText(/details are refreshing, so the current basis is not shown yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Current governed cost baseline:/)).not.toBeInTheDocument();
+  });
+
+  it('#2308: a failed card is reported when it fails, not after another card recovers', async () => {
+    render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    let settleBasis: (value: unknown) => void = () => {};
+    mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise((resolve) => { settleBasis = resolve; }));
+    costHistoryLoadResult = { data: null, error: { message: 'history unavailable' } };
+    mockToast.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'warning', 'Product reloaded, but Cost History did not load. Use Try again on that card.'));
+    settleBasis(await mockGetCostBasisWorkspace.getMockImplementation()?.());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockToast.mock.calls.filter(([, message]) => String(message).startsWith('Product reloaded'))).toEqual([
+      ['warning', 'Product reloaded, but Cost History did not load. Use Try again on that card.'],
+    ]);
   });
 
   it('a failed cost history read offers Try again, which recovers', async () => {

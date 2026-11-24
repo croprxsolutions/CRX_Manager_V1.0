@@ -57,6 +57,11 @@ Read at `origin/staging` ef21134fc, 2026-11-24. Related: KNOWN_ISSUES "Pricing w
 - **Not a business decision:** existence disclosure (#23). Only active admins can call it, they already control every price, ids are random UUIDs, and another admin's export reveals only "not yours". Precedence (#18) and copy (#9, #10) are technical/copy choices for the client half. Recovery (#38, #40): the function is new and nothing calls it; a later screen must fall back to today's message if it is missing.
 - **Staging proof (#41):** states are produced on staging test data only; an applied state is produced by applying an unchanged sheet (no price moves).
 
+## Code review settlement
+
+- Luna r1 MED (missing expiry returned NULL): fixed, `COALESCE(expires_at > now(), false)`.
+- Luna r2 LOW (file dated 2027-03-03 while the change is 2026-11-24): refuted. The repo's migration names already run ahead of the calendar (staging high-water `20270302180000`); the house rule is that a new migration sorts after the newest one, which `20270303140000` does. The apply script re-checks the live ledger order.
+
 ## Open business decisions
 
 None. (Order and wording of codes are technical; the screen sentences come with the client half.)

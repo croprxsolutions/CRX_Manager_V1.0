@@ -20,8 +20,22 @@ const ALREADY = [RpcErrorCodes.PRODUCT_PARENT_CUTOVER_ALREADY_APPROVED, RpcError
 const alreadySwitched = (error: unknown) => ALREADY.some((code) => hasRpcCode(error, code));
 // 20270228190000 (#2379): an approved rate above today's label maximum switches only with a typed over-label reason.
 const OVER_LABEL = [RpcErrorCodes.PRODUCT_PARENT_CUTOVER_OVER_LABEL, RpcErrorCodes.PRODUCT_PARENT_CUTOVER_OVER_LABEL_REASON_TOO_LONG];
-const overLabelRefusal = (preview: RateCutoverPreview | null) =>
-  preview?.eligible === false && OVER_LABEL.some((code) => hasRpcCode({ message: preview.refusal }, code));
+const needsOverLabelReason = (preview: RateCutoverPreview | null) => (preview?.eligible === false
+  ? OVER_LABEL.some((code) => hasRpcCode({ message: preview.refusal }, code))
+  : preview?.label_check?.status === 'above');
+
+// An over-label preview counts only for the reason in the box now; after an edit, preview again.
+function switchablePlan(preview: RateCutoverPreview | null, overLabel: string): Eligible | null {
+  if (!preview?.eligible) return null;
+  return !needsOverLabelReason(preview) || (preview.over_label_reason ?? '') === overLabel.trim() ? preview : null;
+}
+const planKeyParts = (plan: Eligible | null) => [plan?.expected ?? null, plan?.over_label_reason ?? null];
+
+// Text that belongs to one scope (a group and direction); another scope starts empty.
+function useScopedText(scope: string): [string, (text: string) => void] {
+  const [held, setHeld] = useState({ scope: '', text: '' });
+  return [held.scope === scope ? held.text : '', (text) => setHeld({ scope, text })];
+}
 
 const isServerRefusal = (error: unknown) => {
   const message = error instanceof Error ? error.message
@@ -110,17 +124,12 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
   const [heldPreview, setPreview] = useState<RateCutoverPreview | null>(null);
   // A preview counts only for the group and direction on screen now; otherwise preview again.
   const preview = heldPreview?.parent_id === parent.id && heldPreview.direction === direction ? heldPreview : null;
-  // The over-label reason belongs to this group and direction; another group starts with an empty box.
-  const [heldOverLabel, setHeldOverLabel] = useState({ scope: '', text: '' });
-  const scope = `${parent.id}:${direction}`;
-  const overLabel = heldOverLabel.scope === scope ? heldOverLabel.text : '';
-  const setOverLabel = (text: string) => setHeldOverLabel({ scope, text });
-  const needsOverLabel = overLabelRefusal(preview) || (preview?.eligible === true && preview.label_check?.status === 'above');
-  // An over-label preview counts only for the reason in the box now; after an edit, preview again.
-  const plan = preview?.eligible && (!needsOverLabel || (preview.over_label_reason ?? '') === overLabel.trim()) ? preview : null;
+  const [overLabel, setOverLabel] = useScopedText(`${parent.id}:${direction}`);
+  const needsOverLabel = needsOverLabelReason(preview);
+  const plan = switchablePlan(preview, overLabel);
   const warning = cutoverWarning(preview);
   const { getKey, resetKey } = useIdempotencyKey('commit_parent_rate_cutover', profileId,
-    JSON.stringify([parent.id, direction, plan?.expected ?? null, reason.trim(), plan?.over_label_reason ?? null]));
+    JSON.stringify([parent.id, direction, ...planKeyParts(plan), reason.trim()]));
 
   const showPreview = async () => {
     setSaving(true);

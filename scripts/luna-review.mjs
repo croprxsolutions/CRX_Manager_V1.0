@@ -556,7 +556,8 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
     }
 
     // Luna rounds only: the advisory Sol escalation is the documented way past the guard cap.
-    const guardChange = lunaRound && GUARD_DIFF_RE.test(frozen.diff);
+    // Terra counts toward the guard-change cap (a guard change is off the Sol list, so Terra is its reviewer).
+    const guardChange = !opts.sol && GUARD_DIFF_RE.test(frozen.diff);
     const wholeBranch = lunaRound && Boolean(frozen.baseSha);
     const rounds = guardChange || wholeBranch ? branchRounds(git, rootDir) : null;
     if (guardChange && rounds.guard >= GUARD_ROUND_LIMIT) {

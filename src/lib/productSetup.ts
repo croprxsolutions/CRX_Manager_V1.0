@@ -124,20 +124,28 @@ function isRegisteredPesticide(product: Partial<Pick<Product, 'category' | 'epa_
   return Boolean(product.epa_registration?.trim()) || PESTICIDE_CATEGORIES.has(product.category?.trim() ?? '');
 }
 
-/** Setup fields still blank. A blank REI/PHI is unknown unless marked not applicable; a saved 0 is a real 0 and counts as set. RUP is a yes/no that always has a value. */
-export function missingProductSetup(product: Partial<ProductSetupFields>): string[] {
+/**
+ * Setup fields still blank. A blank REI/PHI is unknown unless marked not applicable; a saved 0 is a real 0 and counts as set. RUP is a yes/no that always has a value.
+ * `groupHasEpa`: a generic keeps its EPA numbers on its group (see `epaCoveredProductIds`), so its own blank number is not missing.
+ */
+export function missingProductSetup(product: Partial<ProductSetupFields>, groupHasEpa = false): string[] {
   const missing: string[] = [];
   if (!product.category?.trim()) missing.push('Category');
   if (!product.product_form) missing.push('Form');
   if (!product.inventory_unit?.trim()) missing.push('Inventory unit');
   if (product.container_size == null || !(product.container_size > 0)) missing.push('Container size');
   if (!product.container_unit?.trim()) missing.push('Container unit');
-  if (isRegisteredPesticide(product)) {
-    if (!product.epa_registration?.trim()) missing.push('EPA number');
-    if (!product.signal_word) missing.push('Signal word');
-    if (product.rei_hours == null && !product.rei_not_applicable) missing.push('REI');
-    if (product.phi_days == null && !product.phi_not_applicable) missing.push('PHI');
-  }
+  // An EPA number on the group makes it a registered pesticide too, so its label fields still count.
+  if (groupHasEpa || isRegisteredPesticide(product)) missing.push(...missingLabelFields(product, groupHasEpa));
+  return missing;
+}
+
+function missingLabelFields(product: Partial<ProductSetupFields>, groupHasEpa: boolean): string[] {
+  const missing: string[] = [];
+  if (!product.epa_registration?.trim() && !groupHasEpa) missing.push('EPA number');
+  if (!product.signal_word) missing.push('Signal word');
+  if (product.rei_hours == null && !product.rei_not_applicable) missing.push('REI');
+  if (product.phi_days == null && !product.phi_not_applicable) missing.push('PHI');
   return missing;
 }
 
@@ -161,8 +169,30 @@ export function nearMatchNames(value: string | null | undefined, existing: reado
 
 export type SetupFilter = '' | 'incomplete';
 
-export function isSetupIncomplete(product: Partial<ProductSetupFields>): boolean {
-  return missingProductSetup(product).length > 0;
+export function isSetupIncomplete(product: Partial<ProductSetupFields> & { id?: string }, epaCovered?: ReadonlySet<string>): boolean {
+  return missingProductSetup(product, Boolean(product.id && epaCovered?.has(product.id))).length > 0;
+}
+
+/**
+ * Products whose group carries an EPA number, in the same four places fetchParentEpaNumbers reads: the parent's
+ * generic number, any size's own number, an active parent brand, or a legacy brand. Ungrouped products count their own legacy brands.
+ */
+export function epaCoveredProductIds(
+  parents: ReadonlyArray<{ id: string; generic_epa_registration: string | null; sizes: ReadonlyArray<{ product_id: string }> }>,
+  products: ReadonlyArray<{ id: string; epa_registration?: string | null }>,
+  numberedParentIds: ReadonlySet<string>,
+  numberedProductIds: ReadonlySet<string>,
+): Set<string> {
+  const covered = new Set(numberedProductIds);
+  for (const product of products) if (product.epa_registration?.trim()) covered.add(product.id);
+  const numbered = new Set(covered);
+  for (const parent of parents) {
+    const ids = parent.sizes.map((size) => size.product_id);
+    if (parent.generic_epa_registration?.trim() || numberedParentIds.has(parent.id) || ids.some((id) => numbered.has(id))) {
+      for (const id of ids) covered.add(id);
+    }
+  }
+  return covered;
 }
 
 export type IntervalFilterable<Q> = { is(column: string, value: null): Q; eq(column: string, value: unknown): Q };

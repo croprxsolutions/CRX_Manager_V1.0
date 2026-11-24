@@ -1,0 +1,6 @@
+## 2026-11-24 - KI-151 follow-up: a billed PO's lines are locked in Edit PO
+
+- Migration `20270302180000_po_edit_cannot_cut_under_bills.sql` (Mason, 2026-11-24; the extra cost-cut rules were dropped): once a purchase order has an active vendor bill (any amount, $0 included), `save_purchase_order` (Edit PO) refuses, before saving anything, any save that adds, removes or changes a line's quantity, product, unit, line notes or cost, for admins and sales reps alike (`PO_BILLED_LINES_LOCKED`; no amounts in the message). The check holds the PO lock that bill entry also needs, so a bill cannot appear mid-save. Notes, dates and other header edits still save. To change lines: void the bill, edit, enter the bill again. Admins correct costs with Correct Unit Cost (`set_purchase_order_item_costs`, unchanged). A PO with no active bill edits as before.
+- No data changes. Error text mapped in `src/lib/errorSanitizer.ts`. Sweep allowlist: actor-forgery contract re-keyed; the cost-exposure key for `save_purchase_order` must be re-keyed with `rekey-allowlist.mjs` after the apply.
+- Proof: `node scripts/smoke/prove-po-edit-cannot-cut-under-bills-real-schema.mjs` (`PO_EDIT_BILLS_PROOF_PASS`, local Docker).
+- Not verified: the staging database (applied by the staging DB job after merge); the Edit PO screen showing the new message.

@@ -17,7 +17,8 @@ import PricingSourceReasonModal, { type PricingSourceReason } from '../component
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, sanitizeError, checkMutationResult, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
-import { isSetupIncomplete, listProductCategories, type SetupFilter } from '../lib/productSetup';
+import { epaCoveredProductIds, isSetupIncomplete, listProductCategories, type SetupFilter } from '../lib/productSetup';
+import { fetchBrandEpaOwners } from '../lib/epaBatchFill';
 import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
@@ -208,6 +209,8 @@ export default function Products() {
   const [parentsReload, setParentsReload] = useState(0);
   const parentsRead = useLoad('product-parents', readProductParents,
     { refreshToken: parentsReload, report: { extra: { context: 'get_product_parents' } } });
+  // Generics keep their EPA numbers on their brands; until this loads, the badge checks the product's own number only.
+  const brandEpaRead = useLoad('product-brand-epa-owners', fetchBrandEpaOwners, { report: { extra: { context: 'brand_epa_owners' } } });
 
   const loadError = productsRead.status === 'failed';
   // A failed refresh keeps the old rows on screen; actions on them wait for a fresh list.
@@ -221,6 +224,11 @@ export default function Products() {
   const loadedFloors = floorsRead.status === 'loaded' && !floorsRead.stale ? floorsRead.data : null;
   const categoryChoices = categoriesRead.status === 'loaded' ? categoriesRead.data : NO_ROWS;
   const parents = parentsRead.status === 'loaded' ? parentsRead.data : NO_ROWS;
+
+  const epaCovered = useMemo(() => epaCoveredProductIds(parents, loadedProducts,
+    brandEpaRead.status === 'loaded' ? brandEpaRead.data.parentIds : new Set(),
+    brandEpaRead.status === 'loaded' ? brandEpaRead.data.productIds : new Set()), [parents, loadedProducts, brandEpaRead]);
+  const setupIncomplete = useCallback((row: Product) => isSetupIncomplete(row, epaCovered), [epaCovered]);
 
   const { parentByProduct, parentIndex } = useMemo(() => {
     const byProduct = new Map<string, ProductParent>();
@@ -326,8 +334,8 @@ export default function Products() {
     if (statusFilter === 'inactive' && p.is_active) return false;
     return true;
   });
-  const incompleteCount = listFiltered.filter(isSetupIncomplete).length;
-  const filtered = setupFilter === 'incomplete' ? listFiltered.filter(isSetupIncomplete) : listFiltered;
+  const incompleteCount = listFiltered.filter(setupIncomplete).length;
+  const filtered = setupFilter === 'incomplete' ? listFiltered.filter(setupIncomplete) : listFiltered;
 
   const { selected, toggleSelect, toggleAll, clearSelection, selectedCount, selectedRows, allSelected } =
     useRowSelection({
@@ -940,11 +948,15 @@ export default function Products() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `crx-product-pricing-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      anchor.download = `crx-product-pricing-${todayInBusinessTz()}.xlsx`;
       anchor.click();
       URL.revokeObjectURL(url);
       exportPricingIdem.resetKeyFor(exportIntent);
-      toast('success', `Exported ${productIds.length} Product pricing row(s).`);
+      // The table's search box lives inside the table, so a filtered export never sees it.
+      const scope = !fullSheet && selectedRows.length === 0
+        ? ' The search box does not narrow this file: tick products to export only those.'
+        : '';
+      toast('success', `Exported ${productIds.length} Product pricing row(s).${scope}`);
     } catch (error) {
       toast('error', sanitizeError(error));
     } finally {
@@ -1051,7 +1063,7 @@ export default function Products() {
         <div className="max-w-xs">
           <p className="font-medium text-nav-dark truncate">{row.product_name}</p>
           {row.sku && <p className="text-xs text-gray-400">{row.sku}</p>}
-          {isSetupIncomplete(row) && <Badge variant="warning" className="mt-1">Incomplete setup</Badge>}
+          {setupIncomplete(row) && <Badge variant="warning" className="mt-1">Incomplete setup</Badge>}
         </div>
       ),
     },
@@ -1362,7 +1374,7 @@ export default function Products() {
                 onClick={() => void handleExportPricingWorkbook(false)}
                 loading={workbookBusy}
                 disabled={listBlocked || !parentsReady || filtered.length === 0}
-                title="The selected products, or every active product the filters show"
+                title="The selected products, or every active product the filters show. The search box does not narrow this file."
               >
                 Pricing .xlsx
               </Button>
@@ -1448,6 +1460,7 @@ export default function Products() {
             loadError={loadError}
             onRetry={retryProducts}
             parentIndex={parentIndex}
+            epaCovered={epaCovered}
           />
         </div>
         <div

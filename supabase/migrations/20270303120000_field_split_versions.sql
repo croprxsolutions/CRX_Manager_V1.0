@@ -517,6 +517,8 @@ BEGIN
 
   PERFORM public._refresh_field_billing_defaults_copy_20270303(p_field_id);
 
+  -- A notes-only save still reports the split in force on that date.
+  v_in_force := COALESCE(v_in_force, public._field_split_in_force_20270303(p_field_id, COALESCE(p_effective_from, public._field_split_today_20270303())));
   RETURN jsonb_build_object(
     'field_id', p_field_id,
     'wrote_version', v_version IS NOT NULL,

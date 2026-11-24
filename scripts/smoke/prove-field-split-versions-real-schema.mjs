@@ -156,6 +156,8 @@ try {
   r = commit(USERS.admin, asUser(`${setSplit(F1, 'CURRENT_DATE', payers([[A, M], [D, 0]]), 'k-named0')} v := r::text;`));
   assert.match(r, /^ok\|.*"wrote_version": true/, `0%/0% named payer saves: ${r}`);
   assert.equal(copy(F1), `${A}:100.000000:true:-`, 'the copy leaves out a 0% product payer');
+  r = commit(USERS.admin, asUser(`${setSplit(F6, 'CURRENT_DATE', 'NULL', 'k-notes-only', `'[{"customer_id":"${B}","notes":"rpc note"}]'::jsonb`)} v := r::text;`));
+  assert.match(r, /^ok\|.*"version_number": 1.*"wrote_version": false|^ok\|.*"wrote_version": false.*"version_number": 1/, `a notes-only RPC save reports the in-force version: ${r}`);
   console.log('[writer] thirds exact; RPC and direct refusals; 0% payers save');
 
   // 3. save_field (the old Field Setup screen).

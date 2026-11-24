@@ -1,6 +1,9 @@
-// TAHA'S LANES (Mason to Taha in Slack, 2026-11-22): until Dec 15 our agents
-// never merge into staging a PR that changes Taha's areas (quotes, bookings,
-// purchasing holds, chemical invoices and billing), whatever OK line the PR has.
+// TAHA'S LANES (Mason to Taha in Slack, 2026-11-22): our agents never merge into
+// staging a PR that changes Taha's areas (quotes, bookings, purchasing holds,
+// chemical invoices and billing), whatever OK line the PR has, unless Taha's own
+// GitHub Approve is on the exact head being merged (Mason, 2026-11-24). No end
+// date: Mason kept the block past Dec 15 (2026-11-24). Edits to the block's own
+// wiring (BLOCK_FILES_RE) still need Mason's code, whatever Taha's review says.
 // Field billing (field invoices, spray jobs, blend tickets) stays Mason's.
 // #1980 and #1989 merged after Taha asked; a written note did not stop them.
 //
@@ -20,8 +23,6 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, wr
 import path from "node:path";
 import { ghApiRepoPath } from "./codex-push-lib.mjs";
 
-// End of Dec 15 in Central time (06:00 UTC on Dec 16). After it the block is off.
-export const TAHA_LANE_UNTIL_MS = Date.UTC(2026, 11, 16, 6, 0, 0);
 export const TAHA_LANE_CODE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const TAHA_LANE_OVERRIDE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_FILES = 250; // GitHub's compare can stop short silently; at this size, fail closed.
@@ -229,8 +230,7 @@ export function isTahaLaneSql(sql, { fieldBilling = false } = {}) {
  * ({filename, previous_filename, sql?}) or null when they could not be read (refuses).
  * An entry carrying `sql` (a migration's text, or null when unreadable) is also judged by its SQL.
  */
-export function tahaLaneProblem({ files, now = Date.now() }) {
-  if (now >= TAHA_LANE_UNTIL_MS) return null;
+export function tahaLaneProblem({ files }) {
   if (!Array.isArray(files)) return { files: [], reason: "its changed files could not be read, so it can't be shown to stay out of Taha's areas" };
   if (files.length >= MAX_FILES) return { files: [], reason: `${files.length} changed files may be a cut-short list` };
   const hits = [];
@@ -284,6 +284,33 @@ function migrationSql({ repoPath, gh, filename, ref }) {
     const sql = String(gh(["api", "-H", "Accept: application/vnd.github.raw", `${repoPath}/contents/${filePath}?ref=${ref}`]));
     return sql.trim() ? sql : null;
   } catch { return null; }
+}
+
+export const TAHA_LOGIN = "tahakhanabdalli";
+
+/**
+ * Taha's verdict on exactly `headSha`: his latest approve / changes-requested / dismissed review
+ * on that commit decides, as GitHub does; comments and pending reviews do not count.
+ * `rows`: [{ login, state, commit }] oldest first. True only for APPROVED.
+ */
+export function tahaApprovedHead(rows, headSha) {
+  if (!usableHead(headSha)) return false;
+  const head = headSha.toLowerCase();
+  const verdict = (rows || []).filter((r) => String(r?.login || "").toLowerCase() === TAHA_LOGIN
+    && String(r?.commit || "").toLowerCase() === head && !["COMMENTED", "PENDING"].includes(r?.state)).at(-1);
+  return verdict?.state === "APPROVED";
+}
+
+/** Taha's reviews of the PR read from GitHub, fed to tahaApprovedHead. Any read error → false (refuse). */
+export function tahaApprovedOnGitHub({ repo, gh, pullRequest, headSha }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath || !usablePr(pullRequest)) return false;
+  try {
+    const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${pullRequest}/reviews?per_page=100`, "--jq",
+      '.[] | [.user.login, .state, (.commit_id // "")] | @tsv'])).split(/\r?\n/).filter(Boolean)
+      .map((line) => { const [login, state, commit] = line.split("\t"); return { login, state, commit }; });
+    return tahaApprovedHead(rows, headSha);
+  } catch { return false; }
 }
 
 const usablePr = (n) => Number.isInteger(n) && n > 0;
@@ -403,9 +430,14 @@ export function tellTahaOnGitHub({ repo, gh, pullRequest, body }) {
  * refusal text. With Mason's override for this PR and head, `tellTaha(body)`
  * must post the PR comment first (once per override); if it can't, the merge is refused.
  */
-export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, notice = () => {} }) {
-  const problem = tahaLaneProblem({ files, now });
+export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, tahaApproved = () => false, notice = () => {} }) {
+  const problem = tahaLaneProblem({ files });
   if (!problem) return null;
+  // Taha's Approve on this exact head lets lane code through. Not an unreadable file list, and not the block's own files.
+  if (problem.files.length && !problem.files.some((f) => BLOCK_FILES_RE.test(f)) && tahaApproved()) {
+    notice(`${prefix}: TAHA LANE: Taha approved #${pullRequest} at ${String(headSha).slice(0, 12)}; it may go on to the next gate.\n`);
+    return null;
+  }
   const override = findTahaLaneOverride({ dirs, pullRequest, headSha, now });
   if (override) {
     if (!override.tahaToldAt) {
@@ -422,8 +454,9 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
   }
   const code = issueTahaLaneCode({ dirs, pullRequest, headSha, now });
   return `${prefix}: TAHA LANE BLOCK — #${pullRequest || "?"} is refused because ${problem.reason}. ` +
-    "Until Dec 15 agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) " +
-    "or change this block, whatever OK line the PR has (Mason to Taha, 2026-11-22). Leave it for Taha: post a PR comment or a KI. " +
+    "Agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) without Taha's " +
+    "GitHub Approve on this exact commit, and never change this block without Mason's code (Mason, 2026-11-22 and 2026-11-24). " +
+    `Request his review (gh pr edit ${pullRequest || "<n>"} --add-reviewer TahaKhanAbdalli) and wait for his Approve. ` +
     (code
       ? `Only if Mason wants it merged anyway: tell him why in one line and ask him to send, as a message of its own: taha override #${pullRequest} ${code} ` +
         "(it covers this PR at its current commit only; a new push needs a new code)"

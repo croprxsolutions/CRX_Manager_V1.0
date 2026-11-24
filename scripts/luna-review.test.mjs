@@ -260,7 +260,8 @@ for (const counter of ["{\"feature\": 2", "null", "{\"feature\": \"bad\"}"]) {
   for (const name of ["src/pages/OrderDetail.tsx", "src/components/reports/ReportShell.tsx", "src/lib/purchasingHolds.ts"]) {
     assert.match(terraRefusal(diffOf(name), before) ?? "", /Taha's lanes|Sol/, name);
   }
-  assert.equal(terraRefusal(diffOf("src/components/reports/ReportShell.tsx"), after), null);
+  // No end date for Taha's lanes (Mason, 2026-11-24): still refused after Dec 15.
+  assert.match(terraRefusal(diffOf("src/components/reports/ReportShell.tsx"), after) ?? "", /Taha's lanes/);
   assert.equal(terraRefusal(diffOf("docs/a.md", "scripts/luna-review.mjs"), before), null);
   assert.match(terraRefusal('diff --git "a/sp ace.ts" "b/sp ace.ts"\n', before), /could not be read/);
   assert.equal(lunaRoundsOn("docs/a.md", seeded, [["--terra"]]).spawned, 0);

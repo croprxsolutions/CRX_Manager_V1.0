@@ -377,7 +377,7 @@ Mason's field rule (flags and notes, not blocks; no extra crew or office steps; 
 | Sol round 1 #64 | Job close retried, or a job-done email sent to one payer and not another | Too strict |
 | Sol round 1 #66, #82 | Payer-note history; repeat-safe Chem Man re-import matching | Replaced by decisions 2026-11-24 g and l |
 | Sol round 1 #43 | Exact carried mix after water top-ups | [SPRING]; whole-tank estimate for now |
-| Sol round 2 #38–45 | Multi-load leftover carry chains, carry races, two tablets on one carry, corrections after a carry is used, per-revision water volume, strength after a mid-tank add | Too strict |
+| Sol round 2 #38–45 | Multi-load leftover carry chains, carry races, two tablets on one carry, corrections after a carry is used, per-revision water volume, strength after a mid-tank add | Too strict; only the carry formula itself was fixed (it counts the whole source tank, so a carried product reaches the next load; Codex review on #2415) |
 | Sol round 2 #51 | Locking for the duplicate-load repair | Too strict |
 | Sol round 2 #60 | Product use per revision inside one field | Too strict |
 | Sol round 2 #67 | A recipient model for job-done emails | Too strict |

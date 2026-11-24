@@ -2,7 +2,7 @@ import { microToPctText } from '../../lib/fieldSplit';
 import type { SplitVersion } from '../../lib/fieldSplitLoad';
 
 export default function FieldSplitHistory({ history, inForceId, today }: { history: SplitVersion[]; inForceId: string | null; today: string }) {
-  if (history.length === 0) return <p className="text-xs text-secondary">No split saved yet. Until one is, the owner pays 100%.</p>;
+  if (history.length === 0) return <p className="text-xs text-secondary">No split saved yet. Add who pays before jobs on this field are billed.</p>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">

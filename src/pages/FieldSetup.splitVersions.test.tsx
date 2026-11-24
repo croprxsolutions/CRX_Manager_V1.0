@@ -204,6 +204,18 @@ describe('Field Setup — FP-1 split versions', () => {
     expect(screen.queryByLabelText('Notes for Owner Farm')).not.toBeInTheDocument();
   });
 
+  it('a first note for a payer on a saved version is kept when that payer is removed before saving', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('Notes for Owner Farm'), { target: { value: 'Sold the farm' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Owner Farm from the split' }));
+    for (const label of ['Product share for Landlord Farm', 'Application share for Landlord Farm']) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value: '100' } });
+    }
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+    expect(calls('set_field_billing_split')[0].p_notes).toEqual([{ customer_id: 'customer-1', notes: 'Sold the farm' }]);
+  });
+
   it('a retry of the same save reuses its key; the database refusal is shown plainly', async () => {
     mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'set_field_billing_split'
       ? { data: null, error: { message: 'FIELD_SPLIT_PAYER_NOT_ACTIVE: customer(s) x are not active customers' } }

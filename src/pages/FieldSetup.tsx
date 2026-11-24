@@ -192,6 +192,11 @@ function FieldSetupPage() {
   const [splitFrom, setSplitFrom] = useState(today);
   const [payerNotes, setPayerNotes] = useState<Record<string, string>>({});
   const [splitHistory, setSplitHistory] = useState<SplitVersion[]>([]);
+  // Notes can be kept for current payers and anyone on a saved version (the database accepts both).
+  const notePayerIds = useMemo(
+    () => [...billingSplits.map((r) => r.customer_id), ...splitHistory.flatMap((v) => v.payers.map((p) => p.customer_id))],
+    [billingSplits, splitHistory],
+  );
   const [inForceSplit, setInForceSplit] = useState<SplitVersion | null>(null);
   const loadedNotesRef = useRef<Record<string, string>>({});
   const [loading, setLoading] = useState(!isNew);
@@ -344,10 +349,10 @@ function FieldSetupPage() {
       if (editedMidSave) setIsDirty(true);
       return;
     }
-    const notesSame = payerNoteChanges(billingSplits.map((r) => r.customer_id), payerNotes, loadedNotesRef.current).length === 0;
+    const notesSame = payerNoteChanges(notePayerIds, payerNotes, loadedNotesRef.current).length === 0;
     if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current && notesSame && splitFrom === today) return;
     setIsDirty(true);
-  }, [field, billingSplits, payerNotes, splitFrom, today]);
+  }, [field, billingSplits, payerNotes, splitFrom, today, notePayerIds]);
 
   // Shows the split saved in the FP-1 tables and makes it the clean state.
   const applySplitData = useCallback((data: Awaited<ReturnType<typeof loadFieldSplit>>) => {
@@ -638,7 +643,8 @@ function FieldSetupPage() {
   ): Promise<boolean> => {
     const request = {
       p_field_id: savedFieldId,
-      p_effective_from: splitFrom,
+      // The default start date is today when Save is pressed, not when the page was opened (a tab left open overnight).
+      p_effective_from: splitFrom === today ? localToday() : splitFrom,
       p_payers: splitChanged
         ? billingSplits.map((r) => ({
           customer_id: r.customer_id,
@@ -688,7 +694,7 @@ function FieldSetupPage() {
         return;
       }
     }
-    const notesChanges = payerNoteChanges(billingSplits.map((r) => r.customer_id), payerNotes, loadedNotesRef.current);
+    const notesChanges = payerNoteChanges(notePayerIds, payerNotes, loadedNotesRef.current);
 
     // Same 0.1–5000 band the import + the measured-boundary path enforce — so a typed override
     // (e.g. "what the monitor showed", with no map drawn) goes through the same safety gate.
@@ -828,7 +834,9 @@ function FieldSetupPage() {
         }
 
         // Split and payer notes: one dated version per split change; notes never make a version.
-        const splitResult = splitChanged || notesChanges.length > 0
+        // On an existing field a failed earlier step stops here: the split waits for the retry, so the form keeps every
+        // unsaved edit. A new field still saves it, because the page moves to the created field either way.
+        const splitResult = (isNew || !persistError) && (splitChanged || notesChanges.length > 0)
           ? await saveSplitAndNotes(savedFieldId, splitChanged, notesChanges, isNew)
           : null;
         const splitSaved = splitResult === true;
@@ -844,8 +852,6 @@ function FieldSetupPage() {
           if (isNew && savedFieldId) {
             skipUnsavedPromptRef.current = true;
             navigate(`/fields/${savedFieldId}`, { replace: true });
-          } else if (splitSaved) {
-            await fetchField(); // the split did save: show it fresh from the database (redo the step that failed)
           }
           setSaving(false);
           return;

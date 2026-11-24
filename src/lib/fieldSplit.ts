@@ -55,8 +55,8 @@ export function splitProblem(rows: SplitShareRow[]): string | null {
 }
 
 /**
- * Payer-note edits to send: for payers in the split, plus anyone with a saved note on this field (the database keeps
- * those editable), so an edit to a payer removed before saving is not silently dropped.
+ * Payer-note edits to send: for payers in the split or on a saved version, plus anyone with a saved note on this field
+ * (the database keeps all of those editable), so an edit to a payer removed before saving is not silently dropped.
  */
 export function payerNoteChanges(
   payerIds: string[], notes: Record<string, string>, saved: Record<string, string>,

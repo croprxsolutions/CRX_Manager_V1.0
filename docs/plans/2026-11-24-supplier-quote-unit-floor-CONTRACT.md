@@ -46,7 +46,7 @@ No new function, grant or policy.
 3. CHECKs `supplier_price_observations_package_quantity_floor` (>= 0.001) and
    `supplier_price_observations_cost_ceiling` (<= 1e9 cents) - backstop for approve and correction.
 4. Each CHECK is added validated. The preflight first counts stored links, observations and approvable (`new`/
-   `changed`) import rows outside a bound and refuses the whole apply with `SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS`
+   `changed`/`cannot_compare`) import rows outside a bound and refuses the whole apply with `SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS`
    and the counts; a row saved after the count makes the ADD CONSTRAINT itself fail. Either way nothing is applied.
    Production had 0 such rows on 2026-11-24. The tables hold tens of rows, so the exclusive lock lasts milliseconds,
    and the apply gives up after 5 seconds of waiting for it.
@@ -201,3 +201,9 @@ column checks. Production read-only count 2026-11-24: 0 such rows. Unchanged.
   rows that differ only by quantity keeps the first and marks the second duplicate. Before this change the first
   (tiny-quantity) row was approvable; now neither is. The workbook screen already refuses repeated links.
 - LOW fixed: the prover checks the quantity floor and the cost ceiling on separate rows.
+
+## Sol round 2 (2026-11-25, head 1adb40afc): clean
+
+Repeats round 1 MED #2-#5 (settled above). LOW #6 fixed here (the enforcement summary now lists `cannot_compare`).
+LOW #5 accepted: the correction proof stops at the pending-row check before the observation cost ceiling; the
+postflight confirms that check exists and is validated, and the stage and link proofs exercise the other bounds.

@@ -290,3 +290,27 @@ it.each([false, true])('keeps offline job completion available after a map reche
     onlineState.mockRestore();
   }
 });
+
+it('ignores an older map assignment response after a newer job reload removes its field', async () => {
+  render(fieldView());
+  const map = await openMap();
+  await map.findByRole('heading', { name: 'My dispatched field' });
+
+  let finishOld = () => {};
+  fixtures.jobGate = new Promise<void>((resolve) => { finishOld = resolve; });
+  fireEvent.click(screen.getByRole('button', { name: 'List' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Map' }));
+  await waitFor(() => expect(fixtures.jobReads).toHaveBeenCalledTimes(2));
+
+  fixtures.jobGate = null;
+  fixtures.movedField = true;
+  fireEvent.click(screen.getByRole('button', { name: 'List' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Reload my jobs' }));
+  await waitFor(() => expect(fixtures.mapReads).toHaveBeenCalledWith('id', ['other-location']));
+  fireEvent.click(screen.getByRole('button', { name: 'Map' }));
+  await map.findByRole('heading', { name: 'Other crew field' });
+
+  await act(async () => finishOld());
+  expect(map.queryByRole('heading', { name: 'My dispatched field' })).not.toBeInTheDocument();
+  expect(map.getByRole('heading', { name: 'Other crew field' })).toBeInTheDocument();
+});

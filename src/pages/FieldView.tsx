@@ -252,9 +252,14 @@ export default function FieldView() {
   });
   const mapRef = useRef<MapRef | null>(null);
   const [jobsByField, setJobsByField] = useState<Map<string, string[]>>(() => new Map());
+  const jobLoadSequence = useRef(0);
 
   // --- Load "my jobs" (the dispatched-location rows for the caller) -----------------
   const fetchCards = useCallback(async (forMap = false) => {
+    const sequence = ++jobLoadSequence.current;
+    const applyLatest = (update: () => void) => {
+      if (sequence === jobLoadSequence.current) update();
+    };
     setLoading(true);
     setFetchError(false);
     try {
@@ -322,39 +327,46 @@ export default function FieldView() {
         grouped.sort((a, b) => a.job_number.localeCompare(b.job_number));
       }
 
-      // Today's read-only copy for a dead spot (src/lib/todaySnapshot.ts): the cards as shown, nothing more.
-      if (profile?.id) saveTodaySnapshot(MY_DAY_SNAPSHOT, profile.id, grouped);
-      setSavedCopyAt(null);
-      setMapAssignmentFailed(false);
-      setCards(grouped);
-    } catch (err) {
-      Sentry.captureException(err, { tags: { source: 'fetch', action: 'field_view_my_jobs' } });
-      const fallback = jobLoadFallback(err, profile?.id, forMap);
-      if (fallback.kind === 'keep-current') {
-        // Checking pins must not turn an already loaded job into a read-only copy.
-        setMapAssignmentFailed(true);
-        return;
-      }
-      if (fallback.kind === 'saved') {
-        // Shown read-only: Start and Complete stay off until a load succeeds (the banner says why), and an open
-        // Complete form closes, as it did when a failed load emptied the list.
-        setCompleteFormOpenFor(null);
-        setSavedCopyAt(fallback.saved.savedAt);
-        setCards(fallback.saved.data);
-      } else {
-        // Honest error state: distinguish "couldn't load" from "genuinely no jobs" —
-        // the empty-state copy below only shows when fetchError is false.
+      applyLatest(() => {
+        // Today's read-only copy for a dead spot (src/lib/todaySnapshot.ts): the cards as shown, nothing more.
+        if (profile?.id) saveTodaySnapshot(MY_DAY_SNAPSHOT, profile.id, grouped);
         setSavedCopyAt(null);
-        setFetchError(true);
-        toast('error', 'Failed to load your jobs');
-        setCards([]);
-      }
+        setMapAssignmentFailed(false);
+        setCards(grouped);
+      });
+    } catch (err) {
+      applyLatest(() => {
+        Sentry.captureException(err, { tags: { source: 'fetch', action: 'field_view_my_jobs' } });
+        const fallback = jobLoadFallback(err, profile?.id, forMap);
+        if (fallback.kind === 'keep-current') {
+          // Checking pins must not turn an already loaded job into a read-only copy.
+          setMapAssignmentFailed(true);
+          return;
+        }
+        if (fallback.kind === 'saved') {
+          // Shown read-only: Start and Complete stay off until a load succeeds (the banner says why), and an open
+          // Complete form closes, as it did when a failed load emptied the list.
+          setCompleteFormOpenFor(null);
+          setSavedCopyAt(fallback.saved.savedAt);
+          setCards(fallback.saved.data);
+        } else {
+          // Honest error state: distinguish "couldn't load" from "genuinely no jobs" —
+          // the empty-state copy below only shows when fetchError is false.
+          setSavedCopyAt(null);
+          setFetchError(true);
+          toast('error', 'Failed to load your jobs');
+          setCards([]);
+        }
+      });
     } finally {
-      setLoading(false);
+      applyLatest(() => setLoading(false));
     }
   }, [toast, profile?.id]);
 
-  useEffect(() => { fetchCards(); }, [fetchCards]);
+  useEffect(() => {
+    void fetchCards();
+    return () => { jobLoadSequence.current += 1; };
+  }, [fetchCards]);
 
   useEffect(() => {
     if (view !== 'map' || mapChecking) return;

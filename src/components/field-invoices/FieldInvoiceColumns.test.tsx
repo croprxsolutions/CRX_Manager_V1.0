@@ -10,7 +10,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { buildInMemoryQuery } from '../../test-utils/inMemoryQuery';
 
-const H = vi.hoisted(() => ({ from: vi.fn() }));
+const H = vi.hoisted(() => ({ from: vi.fn(), toast: vi.fn() }));
 
 vi.mock('../../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../../lib/db')>('../../lib/db');
@@ -20,7 +20,8 @@ vi.mock('../../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ profile: { id: 'user-1', role: 'admin' }, role: 'admin', deniedPages: [] }),
 }));
-vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
+// One toast function for every render, so the panels' fetch effect does not restart each render.
+vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) }));
 
 import FieldInvoicesUnpostedPanel from './FieldInvoicesUnpostedPanel';
 import FieldInvoicesPostedPanel from './FieldInvoicesPostedPanel';

@@ -7,7 +7,7 @@ import { readDraftQueue } from '../../lib/invoiceDraftQueue';
  * so a run of drafts can be posted without going back to the list each time. It only navigates (Back
  * still returns to the list) and shows nothing when no draft follows or the invoice was opened another way.
  */
-export default function NextDraftButton({ currentId }: { currentId: string | undefined }) {
+export default function NextDraftButton({ currentId, disabled = false }: { currentId: string | undefined; disabled?: boolean }) {
   const location = useLocation();
   const navigate = useNavigate();
   const queue = readDraftQueue(location.state, currentId);
@@ -17,6 +17,7 @@ export default function NextDraftButton({ currentId }: { currentId: string | und
       variant="secondary"
       size="sm"
       showChevron
+      disabled={disabled}
       className="min-h-11 md:min-h-0"
       title={`${queue.length} more unposted ${queue.length === 1 ? 'invoice' : 'invoices'} after this one in your list`}
       onClick={() => navigate(`/invoices/${queue[0]}`, { replace: true, state: { nextDrafts: queue.slice(1) } })}

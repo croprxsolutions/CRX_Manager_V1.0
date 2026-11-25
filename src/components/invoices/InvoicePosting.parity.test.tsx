@@ -244,4 +244,29 @@ describe('field Drafts: the same rows post with the same RPC arguments', () => {
     expect(screen.getByRole('button', { name: 'Select All' })).toBeDisabled();
     expect(within(screen.getByRole('toolbar')).getByRole('button', { name: 'Clear selection' })).toBeDisabled();
   });
+
+  it('a failed refresh after a partial post keeps the failed draft ticked for the retry', async () => {
+    H.rpc.mockImplementation((_name: string, args: { p_invoice_id: string }) => {
+      if (args.p_invoice_id === 'FA-2') {
+        const failed = Promise.resolve({ data: null, error: { message: 'network' } });
+        return Object.assign(failed, { throwOnError: () => Promise.reject(new Error('network')) });
+      }
+      return rpcSucceeds();
+    });
+    await renderDrafts();
+    fireEvent.click(within(rowOf('FA-1')).getByRole('checkbox'));
+    fireEvent.click(within(rowOf('FA-2')).getByRole('checkbox'));
+    const failedRead: unknown = new Proxy({}, {
+      get: (_t, prop) => (prop === 'then'
+        ? (resolve: (v: unknown) => void) => resolve({ data: null, error: { message: 'connection reset' }, count: null })
+        : () => failedRead),
+    });
+    H.from.mockImplementation(() => failedRead);
+    await confirmPost('Post 2 invoices');
+    expect(await screen.findByText('Unposted field invoices could not be loaded')).toBeInTheDocument();
+
+    H.from.mockImplementation((table: string) => buildInMemoryQuery(table === 'invoices' ? ROWS : []));
+    fireEvent.click(screen.getByRole('button', { name: /try again/i }));
+    await waitFor(() => expect(within(rowOf('FA-2')).getByRole('checkbox')).toBeChecked());
+  });
 });

@@ -43,6 +43,15 @@ describe('NextDraftButton', () => {
     expect(screen.getByRole('button', { name: /Next draft/ })).toHaveTextContent('2 left');
   });
 
+  it('cannot be pressed while the page is checking or posting this invoice', () => {
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/invoices/a', state: { nextDrafts: ['c'] } }]}>
+        <NextDraftButton currentId="a" disabled />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('button', { name: /Next draft/ })).toBeDisabled();
+  });
+
   it('shows nothing when the invoice was not opened from the list', () => {
     renderFromList(null);
     expect(screen.queryByRole('button', { name: /Next draft/ })).not.toBeInTheDocument();

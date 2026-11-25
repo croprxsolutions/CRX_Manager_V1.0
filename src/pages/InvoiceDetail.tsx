@@ -426,6 +426,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('error', 'This invoice has not finished loading. Wait a moment, then post again.');
       return;
     }
+    const checkedFor = activeInvoiceIdRef.current;
     postIdem.resetKey();
     let warning: string | null = null;
     // Brand PR B-3: the saved lines' delivered brands. With no unsaved edits (checked above) `items` is the saved copy.
@@ -528,6 +529,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('error', 'The delivered brands could not be checked, so the invoice was not posted. Try again.');
       return;
     }
+    // The page moved to another invoice while this one was checked: its warnings are not that invoice's.
+    if (activeInvoiceIdRef.current !== checkedFor) return;
     setRupPostWarning(warning);
     setBrandPostWarning(brandWarning);
     setShowPostConfirm(true);
@@ -2173,7 +2176,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                 {thisPayerIndex >= 0 ? `Split invoice ${thisPayerIndex + 1} of ${billSplitPayers.length}` : 'Split invoice'}
               </span>
             )}
-            {!isNew && <NextDraftButton currentId={id} />}
+            {!isNew && <NextDraftButton currentId={id} disabled={postFlowBusy} />}
           </div>
           {subtitle && <p className="mt-1 text-sm text-secondary">{subtitle}</p>}
         </div>

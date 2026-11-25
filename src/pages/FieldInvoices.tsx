@@ -9,7 +9,7 @@ import FieldInvoicesUnpostedPanel from '../components/field-invoices/FieldInvoic
 import FieldInvoicesPostedPanel from '../components/field-invoices/FieldInvoicesPostedPanel';
 import CustomerInvoiceSummaryPanel from '../components/field-invoices/CustomerInvoiceSummaryPanel';
 import UnbilledApplicationsPanel from '../components/field-invoices/UnbilledApplicationsPanel';
-import { DRAFT_STATUSES, INVOICE_TAB_ALIASES, INVOICE_TAB_LABELS as LABELS, POSTED_STATUSES } from '../lib/invoiceListTabs';
+import { DRAFT_STATUSES, invoiceTabAlias, INVOICE_TAB_LABELS as LABELS, POSTED_STATUSES } from '../lib/invoiceListTabs';
 
 interface InvoiceCounts {
   drafts?: number;
@@ -25,7 +25,7 @@ export default function FieldInvoices() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [counts, setCounts] = useState<InvoiceCounts>({});
   // The same tab names and old ?tab= aliases as Chemical Invoices (src/lib/invoiceListTabs.ts).
-  const activeTab = INVOICE_TAB_ALIASES[searchParams.get('tab') ?? 'unbilled'] ?? 'unbilled';
+  const activeTab = invoiceTabAlias(searchParams.get('tab') ?? 'unbilled') ?? 'unbilled';
 
   useEffect(() => {
     let cancelled = false;

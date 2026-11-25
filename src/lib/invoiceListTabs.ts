@@ -31,6 +31,11 @@ export const INVOICE_TAB_ALIASES: Record<string, InvoiceListTab> = {
   all: 'all',
 };
 
+/** The tab a ?tab= value names, or undefined. Own keys only, so ?tab=toString is not a tab. */
+export function invoiceTabAlias(tabParam: string): InvoiceListTab | undefined {
+  return Object.prototype.hasOwnProperty.call(INVOICE_TAB_ALIASES, tabParam) ? INVOICE_TAB_ALIASES[tabParam] : undefined;
+}
+
 /** Not posted yet: the Drafts tab on both lists. */
 export const DRAFT_STATUSES: ReadonlyArray<InvoiceStatus> = ['draft', 'unposted'];
 /** Committed to AR (an overdue or paid invoice was posted first): the Posted tab on both lists. */
@@ -43,7 +48,7 @@ export const POSTED_STATUSES: ReadonlyArray<InvoiceStatus> = STATUS_POSTED;
  * Anything else, including no filter at all, is All Invoices, as the plain address always was.
  */
 export function chemicalInvoiceTab(tabParam: string, statusParam: string): ChemicalInvoiceTab {
-  const fromTab = INVOICE_TAB_ALIASES[tabParam];
+  const fromTab = invoiceTabAlias(tabParam);
   if (fromTab && fromTab !== 'unbilled') return fromTab;
   if (statusParam === 'ready_to_post' || (DRAFT_STATUSES as readonly string[]).includes(statusParam)) return 'drafts';
   if ((POSTED_STATUSES as readonly string[]).includes(statusParam)) return 'posted';

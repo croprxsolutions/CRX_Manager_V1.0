@@ -4502,7 +4502,7 @@ export default function QuoteBuilder() {
   const saveDraftDisabled = (!canEdit && isEditing) || (!isEditing && quoteNumberLoading) || (!isDirty && !saving);
   // Ctrl+S / Cmd+S presses Save draft, only while that button is on screen and can be clicked.
   useSaveShortcut(handleSaveDraft, !loading && !(isEditing && id && installedQuoteId !== id && quoteLoadFailedId === id)
-    && (!isEditing || canEdit) && !saveDraftDisabled && !saving);
+    && (!isEditing || canEdit) && !saveDraftDisabled && !saving && !converting);
 
   if (loading) {
     return (
@@ -4621,7 +4621,11 @@ export default function QuoteBuilder() {
   // A new quote with no customer picked yet is told to save (which asks for the customer), not that an email is missing.
   const emailBlockedReason = (selectedCustomer || !quoteUnsaved) && !selectedCustomer?.email
     ? 'No email on file for this customer'
-    : quoteUnsaved ? 'Save the quote before emailing it.' : null;
+    : quoteUnsaved ? 'Save the quote before emailing it.'
+      // After a save the preview rebuilds with the saved prices; Email waits so it never sits beside old ones.
+      // A failed rebuild keeps the old preview with its warning, and Email builds its own PDF.
+      : showPreviewModal && previewRebuild !== 'failed' && previewColumnsKeyRef.current !== activePreviewKey ? 'Updating the preview…'
+        : null;
   const previewButton = (variant: 'primary' | 'secondary') => (
     <Button variant={variant} icon={<Eye className="w-4 h-4" />} onClick={handlePreviewQuote} className={tall}>
       Preview &amp; send

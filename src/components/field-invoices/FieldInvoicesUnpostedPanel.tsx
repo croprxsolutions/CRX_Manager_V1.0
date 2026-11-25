@@ -446,13 +446,15 @@ export default function FieldInvoicesUnpostedPanel() {
   const postTargetCount = selectedTargets.length;
   // A tick on a row that a filter hides, that a reload no longer returns, or that stopped
   // being postable here is dropped at once, so it can never be posted later by surprise.
+  // A read that is still loading or failed proves nothing, so ticks wait for the next good read.
   useEffect(() => {
+    if (loading || loadFailed) return;
     const postable = new Set(postableIds.split(','));
     setSelected((prev) => {
       const kept = [...prev].filter((id) => postable.has(id));
       return kept.length === prev.size ? prev : new Set(kept);
     });
-  }, [postableIds, selected]);
+  }, [postableIds, selected, loading, loadFailed]);
   const toggleRow = (id: string) => setSelected((prev) => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id);

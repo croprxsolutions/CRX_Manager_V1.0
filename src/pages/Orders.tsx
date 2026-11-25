@@ -932,6 +932,7 @@ function OrderPhoneRow({ row, checkbox, selected, onOpen }: {
           <span className="font-semibold tabular-nums text-nav-dark">{fmt(row.total_price)}</span>
           <Badge variant={statusToBadgeVariant[row.status] || 'default'}>{row.status.replace(/_/g, ' ')}</Badge>
           {row.is_planned && <Badge variant="warning">Planned</Badge>}
+          {row.needs_split_billing && <Badge variant="warning">Needs Split Billing</Badge>}
         </span>
       </button>
     </div>

@@ -159,7 +159,7 @@ require_packages
 # miss; CI caught that twice (PR #1459, PR #2438; 2026-11-25 retro). About 30-40 seconds. They read this
 # folder, so they run only when it matches every pushed commit on what they read; otherwise they are
 # skipped and left to CI (a pass on different code would prove nothing). Add a new whole-app scan test here.
-LIST_INPUTS="src supabase docs/reference .claude/schema-registry.json"
+LIST_INPUTS="src supabase docs/reference .claude/schema-registry.json package.json package-lock.json vite.config.ts tsconfig.json"
 LIST_MATCHES=yes
 for LIST_SHA in $(printf '%s\n' "$PUSH_REFS" | awk 'NF >= 2 && $2 !~ /^0+$/ { print $2 }'); do
   # shellcheck disable=SC2086

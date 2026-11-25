@@ -1912,7 +1912,7 @@ export type ProductWeightSource = 'measured' | 'sds' | 'label' | 'supplier';
 export type ProductWeightReviewState = 'draft' | 'approved' | 'superseded';
 export type ProductWeightKind = 'density' | 'net_weight' | 'unit_weight' | 'none';
 export type ProductWeightNoneReason = 'no_parent' | 'no_approved_weight' | 'seed_or_each' | 'unit_not_convertible' | 'unknown_form';
-export type ProductWeightEventType = 'draft_saved' | 'draft_replaced' | 'approved' | 'corrected' | 'returned_to_draft';
+export type ProductWeightEventType = 'draft_saved' | 'draft_replaced' | 'approved' | 'corrected' | 'returned_to_draft' | 'draft_rejected';
 
 /** lower(trim(unit)) -> pounds (weight), gallons (volume) or count per unit; names that collide are listed in `ambiguous`. */
 export interface WeightUnitFactors {

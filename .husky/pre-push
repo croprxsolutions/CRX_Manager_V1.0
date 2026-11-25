@@ -157,13 +157,12 @@ fi
 require_packages
 # Whole-app list tests (call-site lists, import rules) fail when a NEW file is added, which subset runs
 # miss; CI caught that twice (PR #1459, PR #2438; 2026-11-25 retro). About 30-40 seconds. They read this
-# folder, so they run only when it matches every pushed commit on what they read; otherwise they are
-# skipped and left to CI (a pass on different code would prove nothing). Add a new whole-app scan test here.
-LIST_INPUTS="src supabase docs/reference .claude/schema-registry.json package.json package-lock.json vite.config.ts tsconfig.json"
+# folder (src/, supabase/, tests/e2e/, scripts/smoke/, config...), so they run only when the whole checkout
+# matches every pushed commit; otherwise they are skipped and left to CI (a pass on different code would
+# prove nothing). Add a new whole-app scan test here.
 LIST_MATCHES=yes
 for LIST_SHA in $(printf '%s\n' "$PUSH_REFS" | awk 'NF >= 2 && $2 !~ /^0+$/ { print $2 }'); do
-  # shellcheck disable=SC2086
-  if ! git diff --quiet "$LIST_SHA" -- $LIST_INPUTS || [ -n "$(git ls-files --others --exclude-standard -- $LIST_INPUTS)" ]; then
+  if ! git diff --quiet "$LIST_SHA" || [ -n "$(git ls-files --others --exclude-standard)" ]; then
     LIST_MATCHES=no
   fi
 done

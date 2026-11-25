@@ -673,7 +673,13 @@ function FieldSetupPage() {
         p_payers: request.p_payers as unknown as Json, // null = no split change (notes only)
         p_notes: request.p_notes as unknown as Json,
         // Same request, same key, across retries and reloads (contract rule 3).
-        p_idempotency_key: splitSaveKey(profile!.id, savedFieldId, fingerprintIntentPayload(request)),
+        // The key also covers the state the edit started from: the same edit over a newer version or newer notes
+        // is a new change, not a replay of an old lost reply.
+        p_idempotency_key: splitSaveKey(profile!.id, savedFieldId, fingerprintIntentPayload({
+          ...request,
+          base: inForceSplit?.id ?? null,
+          baseNotes: Object.entries(loadedNotesRef.current).sort(([a], [b]) => a.localeCompare(b)),
+        })),
       });
       if (sErr) throw sErr;
       assertRpcResult(sData, 'set_field_billing_split');

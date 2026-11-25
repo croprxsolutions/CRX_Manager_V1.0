@@ -232,4 +232,32 @@ describe('Field Setup — FP-1 split versions', () => {
     const [first, second] = calls('set_field_billing_split');
     expect(second.p_idempotency_key).toBe(first.p_idempotency_key);
   });
+
+  it('the same edit made again over a newer saved version gets a new key, not the lost reply of the old one', async () => {
+    let fail = true;
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'set_field_billing_split' && fail
+      ? { data: null, error: { message: 'Failed to fetch' } }
+      : { data: name === 'set_field_billing_split' ? { wrote_version: true } : [], error: null }));
+    const { unmount } = render(<RouterProvider router={createMemoryRouter([{ path: '/fields/:id', element: <FieldSetup /> }], { initialEntries: ['/fields/field-1'] })} />);
+    await screen.findByText('Split history');
+    fireEvent.change(screen.getByLabelText('Notes for Owner Farm'), { target: { value: 'Call first' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+    unmount();
+    // Someone else saved version 3 meanwhile; this tab reloads and makes the same edit again.
+    const newer = { ...VERSIONS[0], id: 'version-3', version_number: 3, effective_from: '2026-11-24' };
+    VERSIONS.unshift(newer);
+    fail = false;
+    try {
+      await open();
+      fireEvent.change(screen.getByLabelText('Notes for Owner Farm'), { target: { value: 'Call first' } });
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+      await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(2));
+      const [first, second] = calls('set_field_billing_split');
+      expect(second.p_notes).toEqual(first.p_notes);
+      expect(second.p_idempotency_key).not.toBe(first.p_idempotency_key);
+    } finally {
+      VERSIONS.shift();
+    }
+  });
 });

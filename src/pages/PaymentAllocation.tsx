@@ -521,8 +521,8 @@ export default function PaymentAllocation() {
               <div
                 className="lg:col-span-2"
                 onChange={(e) => setCustomerBoxText((e.target as HTMLInputElement).value)}
-                // The shared box puts the chosen name back on blur and Escape.
-                onBlur={() => setCustomerBoxText(null)}
+                // Escape keeps the chosen customer. Leaving the box mid-search does not: posting
+                // stays blocked until a customer is picked or "Keep" is pressed.
                 onKeyDown={(e) => { if (e.key === 'Escape') setCustomerBoxText(null); }}
               >
                 <label htmlFor="payment-customer" className="block text-sm font-medium text-nav-dark mb-1">Customer</label>
@@ -541,7 +541,11 @@ export default function PaymentAllocation() {
                 />
                 {customerBeingChanged && (
                   <p className="mt-1 text-xs text-amber-600">
-                    Pick a customer from the list to switch, or press Esc to keep {selectedCustomer.farm_name}.
+                    You started a new customer search. Pick a customer from the list to switch, or{' '}
+                    <button type="button" className="underline font-medium" onClick={() => setCustomerBoxText(null)}>
+                      keep {selectedCustomer.farm_name}
+                    </button>
+                    .
                   </p>
                 )}
                 {selectedCustomer && prepayBalanceCents !== null && prepayBalanceCents > 0 && (

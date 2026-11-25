@@ -9,7 +9,7 @@ import { buildInMemoryQuery } from '../../test-utils/inMemoryQuery';
 
 type Row = Record<string, unknown>;
 
-const H = vi.hoisted(() => ({ tables: {} as Record<string, Row[]>, toast: vi.fn() }));
+const H = vi.hoisted(() => ({ tables: {} as Record<string, Row[]>, toast: vi.fn(), exportToCSV: vi.fn() }));
 
 vi.mock('../../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../../lib/db')>('../../lib/db');
@@ -29,6 +29,10 @@ vi.mock('../../lib/db', async () => {
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ role: 'admin', profile: { id: 'user-1', role: 'admin' } }) }));
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) }));
 vi.mock('../../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
+vi.mock('../../lib/csvExport', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('../../lib/csvExport');
+  return { ...actual, exportToCSV: H.exportToCSV };
+});
 vi.mock('../../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../../hooks/useIdempotencyKey', () => ({ useIdempotencyKey: () => ({ getKey: () => 'idem', resetKey: vi.fn() }) }));
 
@@ -68,5 +72,14 @@ describe('Prepay Credits: customer box and the open credits panel', () => {
     expect(screen.queryByText('CHK-ALPHA')).not.toBeInTheDocument();
     expect(screen.queryByTitle('Edit credit')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Beta Farm/ })).toBeInTheDocument();
+  });
+
+  it('Export CSV with one customer picked exports only that customer', async () => {
+    render(<MemoryRouter initialEntries={['/prepay?customer=c2']}><PrepaymentManagerPanel /></MemoryRouter>);
+    await screen.findByRole('button', { name: /Beta Farm/ });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Export CSV/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
+    const rows = H.exportToCSV.mock.calls[0][0] as Row[];
+    expect(rows.map((r) => r.farm_name)).toEqual(['Beta Farm']);
   });
 });

@@ -384,14 +384,25 @@ describe('Record Payments: faster entry', () => {
     expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
   });
 
-  it('blur after a stray keystroke also puts the chosen customer back', async () => {
+  it('leaving the box mid-search keeps posting blocked until a pick or "keep"', async () => {
     renderPayments();
     await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
     const box = screen.getByRole('combobox', { name: 'Customer' });
-    fireEvent.change(box, { target: { value: 'Big Farmx' } });
+    fireEvent.change(box, { target: { value: 'Small' } });
     fireEvent.blur(box);
+    // The box shows the old name again, but the unfinished search still blocks posting.
     expect(box).toHaveValue('Big Farm');
     expect(screen.getByText('INV-OLD')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Auto-Allocate/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
+    expect(mockRpc).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'keep Big Farm' }));
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled();
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
   });
 
   it('Pay full balance is admin-only: a sales rep sees only their own invoices, so the total could be short', async () => {

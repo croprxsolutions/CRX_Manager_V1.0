@@ -433,7 +433,8 @@ export default function PaymentHistory() {
             onClick={() =>
               exportToCSV(
                 [
-                  ...shownPayments.map((p) => ({ ...p, source: 'Record Payments' })),
+                  // Same Check # as the table: a typed reference when there is no check number.
+                  ...shownPayments.map((p) => ({ ...p, check_number: p.check_number || p.reference_number, source: 'Record Payments' })),
                   ...shownPrepayChecks.map((c) => ({
                     payment_date: c.day, farm_name: c.farm_name, payment_method: 'check', check_number: c.reference,
                     total_payment_cents: c.cents, total_allocated_cents: 0, is_active: true, source: 'Prepay Credits',

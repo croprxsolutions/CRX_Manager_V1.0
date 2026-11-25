@@ -767,7 +767,8 @@ export default function PrepaymentManagerPanel() {
             disabled={loadFailed || loading}
             onClick={() =>
               exportToCSV(
-                customers as unknown as Record<string, unknown>[],
+                // Only the rows on screen: a one-customer view must not export other farms.
+                shownCustomers as unknown as Record<string, unknown>[],
                 [
                   { key: 'farm_name', header: 'Customer' },
                   { key: 'prepay_balance_cents', header: 'Prepay Balance ($)', format: (v: unknown) => fmtCSV((Number(v) || 0) / 100) },

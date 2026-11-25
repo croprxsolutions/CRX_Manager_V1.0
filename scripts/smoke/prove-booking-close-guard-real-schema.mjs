@@ -22,6 +22,7 @@
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, attempt, asUser, refuse, id, psql, scalar, claims, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
@@ -49,6 +50,31 @@ let key = 0;
 const closeApplied = (q, uid) => refuse(`r := public.close_quote_as_applied('${q}', '${uid}', 'bcg-prover-${(key += 1)}');`);
 const closeShort = (q, uid) => refuse(`r := public.close_quote_as_short('${q}', '${uid}', 'bcg-prover-${(key += 1)}');`);
 const probe = (uid, call) => attempt(uid, `${call} v := t;`);
+/** Runs `sql` in its own psql session after `delayMs`; resolves to { status, out }. */
+const session = (sql, delayMs = 0) => new Promise((resolve) => setTimeout(() => {
+  const child = spawn('docker', PSQL, { cwd: ROOT });
+  let out = '';
+  child.stdout.on('data', (d) => { out += d; });
+  child.stderr.on('data', (d) => { out += d; });
+  child.on('close', (status) => resolve({ status, out }));
+  child.stdin.end(sql);
+}, delayMs));
+const JOB_RACE = id('e2');
+const insertJobHeld = `BEGIN;
+INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id)
+  VALUES ('${JOB_RACE}', 'PRV-BCG-RACE', '${CUSTOMER}', (now() AT TIME ZONE 'America/Chicago')::date + 7, '${Q_FREE}');
+SELECT pg_sleep(3);
+COMMIT;`;
+const closeAppliedAsRepA = (hold) => `BEGIN;
+${claims(REP_A)}
+SET LOCAL ROLE authenticated;
+SELECT public.close_quote_as_applied('${Q_FREE}', '${REP_A}', 'bcg-race-${Date.now()}-${hold}');
+${hold ? 'SELECT pg_sleep(3);' : ''}
+COMMIT;`;
+const resetRace = () => psql(`SET session_replication_role = replica;
+  DELETE FROM public.jobs WHERE id = '${JOB_RACE}';
+  UPDATE public.quotes SET status = 'sent' WHERE id = '${Q_FREE}';`);
+
 /** A direct close as applied by rep A at the given isolation level; returns the error text, or 'ok'. */
 const directApplied = (level) => {
   const r = run(`BEGIN ISOLATION LEVEL ${level};
@@ -130,6 +156,20 @@ ROLLBACK;`);
   assert.match(directApplied('SERIALIZABLE'), /BOOKING_NEEDS_READ_COMMITTED/);
   assert.equal(directApplied('READ COMMITTED'), 'ok');
   assert.equal(scalar(`SELECT string_agg(status, ',' ORDER BY quote_number) FROM public.quotes WHERE id IN ('${Q_JOB}', '${Q_FREE}');`), 'sent,sent', 'every probe rolled back');
+  // Two sessions at READ COMMITTED (Luna r1): a job scheduled on the booking holds it FOR SHARE until commit
+  // (_enforce_job_live_on_open_booking), so a close as applied started meanwhile waits, then sees the job; and a
+  // close holding the booking makes a job insert wait, then see the closed booking.
+  let [first, second] = await Promise.all([session(insertJobHeld), session(closeAppliedAsRepA(false), 1000)]);
+  assert.equal(first.status, 0, `the job insert must commit:\n${first.out}`);
+  assert.match(second.out, /BOOKING_HAS_JOB: spray job PRV-BCG-RACE .*cannot be closed as applied/, `the close must wait for the job and refuse:\n${second.out}`);
+  assert.equal(scalar(`SELECT status FROM public.quotes WHERE id = '${Q_FREE}';`), 'sent');
+  resetRace();
+  [first, second] = await Promise.all([session(closeAppliedAsRepA(true)), session(insertJobHeld, 1000)]);
+  assert.equal(first.status, 0, `the close must commit:\n${first.out}`);
+  assert.match(second.out, /BOOKING_CLOSED: booking \[PROVER\] BCG-FREE is closed_by_application, so a spray job cannot be scheduled from it\./, `the job insert must wait for the close and refuse:\n${second.out}`);
+  assert.equal(scalar(`SELECT count(*) FROM public.jobs WHERE id = '${JOB_RACE}';`), '0');
+  resetRace();
+  console.log('[race] job insert then close: the close waits and is refused; close then job insert: the insert waits and is refused');
   const chains = ['smoke-booking-close-guard.sql', 'smoke-booking-guard-rep-and-delete.sql'];
   for (const chain of chains) assert.match(smoke(chain), /SMOKE_PASS_ROLLBACK/, `${chain} must pass after the candidate`);
   for (const chain of SAME) assert.equal(smoke(chain), before[chain], `${chain} must end exactly as before`);

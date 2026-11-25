@@ -27,6 +27,10 @@
 --      is refused BOOKING_NOT_YOURS. System sessions (no auth.uid()) stay exempt.
 --   Both closes run through this trigger whether they come from the RPC or a direct update, and the RPC's whole call
 --   rolls back on a refusal (nothing released, no activity row).
+--   Concurrency (READ COMMITTED): a job scheduled, linked or reopened on a booking locks that booking FOR SHARE and
+--   refuses a closed one, closed_by_application included (_enforce_job_live_on_open_booking, 20270129150000), so it
+--   and a close serialize on the booking row: whichever commits first, the other waits, then sees it and is refused.
+--   The prover runs both orders in two sessions.
 --
 -- NOT CHANGED: close_quote_as_applied, close_quote_as_short, the jobs trigger, the trigger definition
 --   (BEFORE UPDATE OF status, customer_id, deleted_at), grants, row policies and every row.

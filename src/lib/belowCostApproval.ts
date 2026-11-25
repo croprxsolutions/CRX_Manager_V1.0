@@ -38,6 +38,25 @@ function parseDetail(raw: string): BelowCostApprovalDetail | null {
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const detail = value as Record<string, unknown>;
+    const rawLines: unknown[] = Array.isArray(detail.lines) ? detail.lines : [];
+    const lines = rawLines.flatMap((line: unknown): BelowCostLine[] => {
+      if (!line || typeof line !== 'object') return [];
+      const row = line as Record<string, unknown>;
+      const price = nullableInteger(row.unit_price_cents);
+      const cost = nullableInteger(row.locked_unit_cost_cents);
+      const shortfall = nullableInteger(row.line_shortfall_cents);
+      const quantity = typeof row.quantity === 'number' && Number.isFinite(row.quantity) ? row.quantity : null;
+      return price !== null && cost !== null && shortfall !== null && quantity !== null
+        ? [{
+            product_name: nullableString(row.product_name),
+            unit_price_cents: price,
+            locked_unit_cost_cents: cost,
+            quantity,
+            line_shortfall_cents: shortfall,
+            per: row.per === 'line' ? 'line' : 'unit',
+          }]
+        : [];
+    });
     return {
       operation: nullableString(detail.operation),
       entity_type: nullableString(detail.entity_type),
@@ -72,27 +91,9 @@ function parseDetail(raw: string): BelowCostApprovalDetail | null {
               : [];
           })
         : [],
-      lines: Array.isArray(detail.lines)
-        ? detail.lines.flatMap((line: unknown): BelowCostLine[] => {
-            if (!line || typeof line !== 'object') return [];
-            const row = line as Record<string, unknown>;
-            const price = nullableInteger(row.unit_price_cents);
-            const cost = nullableInteger(row.locked_unit_cost_cents);
-            const shortfall = nullableInteger(row.line_shortfall_cents);
-            const quantity = typeof row.quantity === 'number' && Number.isFinite(row.quantity) ? row.quantity : null;
-            return price !== null && cost !== null && shortfall !== null && quantity !== null
-              ? [{
-                  product_name: nullableString(row.product_name),
-                  unit_price_cents: price,
-                  locked_unit_cost_cents: cost,
-                  quantity,
-                  line_shortfall_cents: shortfall,
-                  per: row.per === 'line' ? 'line' : 'unit',
-                }]
-              : [];
-          })
-        : [],
-      more_count: nullableInteger(detail.more_count) ?? 0,
+      lines,
+      // A line the screen cannot show exactly (bad shape, or cents beyond JavaScript's safe range) still counts.
+      more_count: (nullableInteger(detail.more_count) ?? 0) + rawLines.length - lines.length,
       total_shortfall_cents: nullableInteger(detail.total_shortfall_cents),
     };
   } catch {

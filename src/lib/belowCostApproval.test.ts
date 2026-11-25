@@ -68,6 +68,7 @@ describe('parseBelowCostApprovalError', () => {
         { ...detail, quantity: 10, line_shortfall_cents: 1750, per: 'unit' },
         { product_name: 'Fee', unit_price_cents: 4000, locked_unit_cost_cents: 4500, quantity: 1, line_shortfall_cents: 500, per: 'line' },
         { product_name: 'No cost', unit_price_cents: 100, quantity: 1, line_shortfall_cents: 5 },
+        { product_name: 'Huge', unit_price_cents: 100, locked_unit_cost_cents: 2 ** 53, quantity: 1, line_shortfall_cents: 2 ** 53 },
         null,
       ],
       line_count: 7,
@@ -79,7 +80,7 @@ describe('parseBelowCostApprovalError', () => {
       { product_name: 'Atrazine 4L', unit_price_cents: 1050, locked_unit_cost_cents: 1225, quantity: 10, line_shortfall_cents: 1750, per: 'unit' },
       { product_name: 'Fee', unit_price_cents: 4000, locked_unit_cost_cents: 4500, quantity: 1, line_shortfall_cents: 500, per: 'line' },
     ]);
-    expect(result?.more_count).toBe(5);
+    expect(result?.more_count).toBe(8); // 5 beyond the list + 3 entries the screen cannot show exactly
     expect(result?.total_shortfall_cents).toBe(9999);
   });
 

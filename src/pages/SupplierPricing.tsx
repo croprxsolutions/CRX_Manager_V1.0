@@ -184,7 +184,7 @@ function priceJumpText(
   // reproduces the approved per-unit price, compare the exact package prices (same link, same conversion).
   // shortcut: evidence does not return the approved package quantity, so it is inferred. Under a few cents per unit a
   // different package size can pass this check and warn wrongly (warning only), or fall back to rounded cents;
-  // return package_quantity from get_supplier_market_evidence if that case matters.
+  // return package_quantity from get_supplier_market_evidence (#2561).
   const samePackage = supplierUnitCostCents(last.quoted_package_cost_cents, row.package_quantity, cost.factor) === lastCents;
   const direction = samePackage
     ? jumpDirection(row.cost_cents, last.quoted_package_cost_cents)

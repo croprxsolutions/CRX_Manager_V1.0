@@ -36,6 +36,8 @@
 --      or leaving the posted chemical-sale set (status, deleted_at, invoice_type) or moving to another sale while in it. It covers post (single and group), unpost, void
 --      (including Fix Delivery's) and the deleted-delivery recovery post without re-emitting those functions; each
 --      locks its invoice row first and then waits for the sale, the order zz_cap_order_invoice_header already takes.
+--      invoice_items_settle_commission_20270306: a statement trigger on lines inserted into an invoice that already
+--      counts, settling each sale they touch once (none today: posted invoices refuse new lines; ready for M6).
 --   4. Re-emitted with one call each (bodies pinned below): _insert_commissions_for_order (the 7 sale creators),
 --      fix_delivery (its re-inserted rows), cancel_order (Cancel Remaining), void_commission_payment (locks the
 --      payout's sales first, then settles them). update_order_items is not: a sale can be edited only before any
@@ -50,7 +52,7 @@
 -- (taking it back goes with returns, KI-13, and payout eligibility, Sol r6 H6: follow-up). A direct SQL change to
 -- orders.total_profit / total_price or a commission row outside these app paths waits for the sale's next posting.
 --
--- ROLLBACK (its own reviewed migration): drop the two triggers, the four new functions and
+-- ROLLBACK (its own reviewed migration): drop the three triggers, the five new functions and
 --   commissions.discount_settled_at, and re-emit the four pinned
 -- functions from their source migrations (20260914100500, 20261106150000, 20260721145936, 20270228160000). Amounts
 -- already settled stay until the sale's next re-split.
@@ -82,6 +84,7 @@ BEGIN
   IF to_regprocedure('public._settle_order_commission_20270306(uuid)') IS NOT NULL
      OR to_regprocedure('public._order_commission_base_20270306(uuid)') IS NOT NULL
      OR to_regprocedure('public._invoice_settles_commission_20270306()') IS NOT NULL
+     OR to_regprocedure('public._invoice_lines_settle_commission_20270306()') IS NOT NULL
      OR to_regprocedure('public._order_commission_lines_20270306(uuid)') IS NOT NULL
      OR EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.commissions'::regclass
                    AND attname = 'discount_settled_at' AND NOT attisdropped) THEN
@@ -166,6 +169,14 @@ BEGIN
    WHERE i.order_id = p_order_id
      AND i.invoice_type IN ('chemical_sale', 'misc_charge') AND i.status IN ('posted', 'overdue', 'paid')
      AND i.deleted_at IS NULL;
+  IF COALESCE(v_billed, 0) <= 0 THEN
+    -- No posted invoice is headed by the sale: its discount came only through legacy invoices with no order on the
+    -- header, which the P&L doesn't count as billed. Scale by those lines' own product cents, so the rows sit on the
+    -- rule's base and never take the whole discount on a part-billed sale (Sol posting r5 HIGH 3).
+    SELECT sum(l.extended_cents) INTO v_billed
+      FROM public._order_commission_lines_20270306(p_order_id) l
+      JOIN invoice_items b ON b.id = l.item_id AND b.is_application_fee IS NOT TRUE;
+  END IF;
   IF v_billed > 0 AND v_booked > v_billed THEN
     -- Part-billed: the posted invoices' discount rate across the whole sale, rounded toward the smaller base, so the
     -- P&L's billed share stays within its own per-row rounding of the posted profit after its discount.
@@ -366,6 +377,37 @@ CREATE TRIGGER invoices_delete_settle_commission_20270306
   FOR EACH ROW
   WHEN (OLD.invoice_type IN ('chemical_sale', 'misc_charge') AND OLD.status IN ('posted', 'overdue', 'paid') AND OLD.deleted_at IS NULL)
   EXECUTE FUNCTION public._invoice_settles_commission_20270306();
+
+-- Lines added to an invoice that already counts settle every sale they touch, once per statement (Sol posting r5 HIGH 4).
+-- None can be today: an invoice can't be inserted posted (trg_invoice_draft_insert; credit memos, which don't count,
+-- aside) and a posted invoice refuses new lines (trg_refuse_posted_invoice_child_write). This keeps commission right
+-- if a later writer (M6, edit a posted invoice) lifts that lock for inserts.
+CREATE FUNCTION public._invoice_lines_settle_commission_20270306()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  PERFORM public._settle_order_commission_20270306(s.order_id)
+     FROM (SELECT i.order_id FROM new_lines n JOIN invoices i ON i.id = n.invoice_id
+            WHERE i.order_id IS NOT NULL AND i.invoice_type IN ('chemical_sale', 'misc_charge')
+              AND i.status IN ('posted', 'overdue', 'paid') AND i.deleted_at IS NULL
+           UNION
+           SELECT oi.order_id FROM new_lines n JOIN invoices i ON i.id = n.invoice_id
+             JOIN order_items oi ON oi.id = n.order_item_id
+            WHERE i.invoice_type IN ('chemical_sale', 'misc_charge')
+              AND i.status IN ('posted', 'overdue', 'paid') AND i.deleted_at IS NULL
+           ORDER BY 1) s;
+  RETURN NULL;
+END
+$function$;
+REVOKE ALL ON FUNCTION public._invoice_lines_settle_commission_20270306() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER invoice_items_settle_commission_20270306
+  AFTER INSERT ON public.invoice_items
+  REFERENCING NEW TABLE AS new_lines
+  FOR EACH STATEMENT
+  EXECUTE FUNCTION public._invoice_lines_settle_commission_20270306();
 
 -- 4. The writers that put rows back on total_profit (bodies as pinned above, one call added each) ----------------
 CREATE OR REPLACE FUNCTION public._insert_commissions_for_order(p_order_id uuid, p_customer_id uuid, p_order_profit numeric, p_commission_split jsonb, p_order_date date DEFAULT ((now() AT TIME ZONE 'America/Chicago'::text))::date)
@@ -734,10 +776,15 @@ BEGIN
          AND tgname IN ('invoices_settle_commission_20270306', 'invoices_delete_settle_commission_20270306')
          AND tgfoid = 'public._invoice_settles_commission_20270306()'::regprocedure
          AND NOT tgdeferrable AND tgenabled = 'O') <> 2
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.invoice_items'::regclass
+                     AND tgname = 'invoice_items_settle_commission_20270306'
+                     AND tgfoid = 'public._invoice_lines_settle_commission_20270306()'::regprocedure
+                     AND NOT tgdeferrable AND tgenabled = 'O')
      OR EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid IN ('public._order_commission_base_20270306(uuid)'::regprocedure,
                     'public._order_commission_lines_20270306(uuid)'::regprocedure,
                     'public._settle_order_commission_20270306(uuid)'::regprocedure,
-                    'public._invoice_settles_commission_20270306()'::regprocedure)
+                    'public._invoice_settles_commission_20270306()'::regprocedure,
+                    'public._invoice_lines_settle_commission_20270306()'::regprocedure)
                   AND p.proacl IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[])
      OR EXISTS (SELECT 1 FROM pg_temp.commission_settles_on_posting_acl a JOIN pg_proc p ON p.oid = a.oid
                  WHERE p.proacl IS DISTINCT FROM a.proacl

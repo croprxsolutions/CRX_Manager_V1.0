@@ -30,6 +30,10 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 // Iterating: CRX_PROVER_REUSE=<kept container> CRX_PROVER_DB=<a copy of its replayed database> skips the replay.
 const REUSE = process.env.CRX_PROVER_REUSE;
+// Only a container this prover made (and kept) can be reused: the run commits fixtures and the migration (Sol posting r5 HIGH 6).
+if (REUSE && !/^crx-commission-discount-[A-Za-z0-9-]+$/.test(REUSE)) {
+  throw new Error(`CRX_PROVER_REUSE must name a kept crx-commission-discount-* container, got ${JSON.stringify(REUSE)}`);
+}
 const NAME = REUSE || `crx-commission-discount-${process.pid}-${Date.now().toString(36)}`;
 const DB = process.env.CRX_PROVER_DB || 'postgres';
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
@@ -346,7 +350,9 @@ async function main() {
   for (const step of ['(A) posting did not put', '(A) with the tax box off', '(B) the 3-way rows', '(C) both payers posted',
     '(D) half posted: not 180/120', '(D) half posted: the P&L earns', '(D) after Cancel Remaining', '(F) batched row moved',
     '(H) the 150-line sale', '(K1) the 40% row', '(K2) the 40% row', '(K3) the 40% row', '(M) $330.93 did not split',
-    '(S) after the payout void', '(V) two payouts voided in turn', '(W) one payout voided', '(X) the settled rows are not marked', '(Z) unpost and repost']) {
+    '(S) after the payout void', '(V) two payouts voided in turn', '(W) one payout voided', '(X) the settled rows are not marked', '(Z) unpost and repost',
+    '(L) legacy rows already on $300', '(Q) a frozen row and a pending one', '(N) no settle helper',
+    '(I) lines added to a posted invoice', '(P) a NULL-header invoice']) {
     assert.ok(before.fail.includes(step), `BEFORE: expected ${step} to fail, got: ${before.fail}`);
   }
   assert.ok(!/SMOKE_SETUP|\(E\)|\(G\)|\(O\)|\(T\)/.test(before.fail), `BEFORE: the fixture or a control failed: ${before.fail}`);
@@ -388,6 +394,8 @@ async function main() {
     DROP TRIGGER invoices_settle_commission_20270306 ON public.invoices;
     DROP TRIGGER invoices_delete_settle_commission_20270306 ON public.invoices;
     DROP FUNCTION public._invoice_settles_commission_20270306();
+    DROP TRIGGER invoice_items_settle_commission_20270306 ON public.invoice_items;
+    DROP FUNCTION public._invoice_lines_settle_commission_20270306();
     ${ORIGINALS.join(';\n')};
     DROP FUNCTION public._settle_order_commission_20270306(uuid);
     DROP FUNCTION public._order_commission_base_20270306(uuid);

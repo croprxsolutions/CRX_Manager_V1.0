@@ -17,6 +17,8 @@
 --      40% of $250.00 = $100.00
 --   G  No discount: rows as minted, no extra history (the posting writes nothing)
 --   H  A 150-line invoice at 20% posts in under 4 s (API statement timeout 8 s): $1,800.00 / $1,200.00 on $3,000.00
+--   I  An invoice inserted straight into posted is refused, and so is a line added to a posted one; with that lock
+--      lifted (a later M6 writer), the added lines settle: $180.00 / $120.00 on $300.00 (Sol posting r5 HIGH 4)
 --   K  The 60% row cancelled, soft-deleted or moved away, then the invoice posted: the 40% row is 40% of $300.00
 --      (Sol HIGH 2)
 --   L  Legacy rows already on $300 (unmarked), posted then unposted: back on $400 (Sol posting r4 MED 5)
@@ -24,6 +26,8 @@
 --      moves (Sol MED 10)
 --   N  A NaN total_price on a half-posted sale: the settle leaves the rows as they are (Sol posting r4 MED 7)
 --   O  A posted invoice unposted: back to $400.00
+--   P  Half posted, then the invoice's header order cleared (a legacy NULL-header invoice): the rows stay on the
+--      rule's $300.00, never the whole-discount $350.00 (Sol posting r5 HIGH 3)
 --   Q  50/25/25 on $300.90, a frozen row and a pending one tie after a payout void: never over $300.90 (r4 MED 6)
 --   S  Both rows batched (one payout each), the second half posted at 20%, the payouts voided: the rows come back on
 --      $250.00
@@ -64,6 +68,8 @@ DECLARE
   v_pay uuid;
   v_pay2 uuid;
   v_ok boolean;
+  v_new uuid;
+  v_cols text;
 BEGIN
   IF to_regclass('public.billing_m4_switch') IS NULL THEN
     RAISE EXCEPTION 'SMOKE_SETUP: needs the M4 switch (20270117140000)';
@@ -612,6 +618,73 @@ BEGIN
     END IF;
   END IF;
 
+  -- I: a counted invoice can't gain lines today: an invoice inserted straight into posted is refused
+  -- (trg_invoice_draft_insert, credit memos aside) and so is a line added to a posted one (INVOICE_POSTED_LOCKED). With
+  -- that lock lifted, as a later edit-a-posted-invoice writer (M6) might, the added lines settle the sale: $180 / $120
+  -- on $300 (Sol posting r5 HIGH 4). Built as a copy of a draft the app made, the draft removed first so the copy's
+  -- lines stay within the delivered amount.
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 'i-' || v_suffix);
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'i-' || v_suffix);
+  v_inv := pg_temp.smk_draft(v_order);
+  v_new := gen_random_uuid();
+  CREATE TEMP TABLE smk_cad_i_hdr ON COMMIT DROP AS SELECT * FROM invoices WHERE id = v_inv;
+  CREATE TEMP TABLE smk_cad_i_lines ON COMMIT DROP AS SELECT * FROM invoice_items WHERE invoice_id = v_inv;
+  DELETE FROM invoice_items WHERE invoice_id = v_inv;
+  DELETE FROM invoices WHERE id = v_inv;
+  SELECT string_agg(quote_ident(column_name), ', ' ORDER BY ordinal_position) INTO v_cols
+    FROM information_schema.columns
+   WHERE table_schema = 'public' AND table_name = 'invoices' AND is_generated = 'NEVER'
+     AND column_name NOT IN ('id', 'status', 'invoice_number');
+  BEGIN
+    EXECUTE format('INSERT INTO invoices (id, status, invoice_number, %1$s) SELECT $1, %2$L, %3$L, %1$s FROM smk_cad_i_hdr',
+                   v_cols, 'posted', 'SMK-CAD-I-' || v_suffix) USING v_new;
+    v_fails := v_fails || ' (I) a chemical-sale invoice was inserted already posted;';
+  EXCEPTION WHEN raise_exception THEN
+    NULL;  -- refused, as expected
+  END;
+  EXECUTE format('INSERT INTO invoices (id, status, invoice_number, %1$s) SELECT $1, %2$L, %3$L, %1$s FROM smk_cad_i_hdr',
+                 v_cols, 'draft', 'SMK-CAD-I-' || v_suffix) USING v_new;
+  UPDATE invoices SET status = 'posted', posted_at = now() WHERE id = v_new;
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  SELECT string_agg(quote_ident(column_name), ', ' ORDER BY ordinal_position) INTO v_cols
+    FROM information_schema.columns
+   WHERE table_schema = 'public' AND table_name = 'invoice_items' AND is_generated = 'NEVER'
+     AND column_name NOT IN ('id', 'invoice_id');
+  BEGIN
+    EXECUTE format('INSERT INTO invoice_items (invoice_id, %1$s) SELECT $1, %1$s FROM smk_cad_i_lines', v_cols) USING v_new;
+    v_fails := v_fails || ' (I) lines were added to a posted invoice with its lock on;';
+  EXCEPTION WHEN check_violation THEN
+    NULL;  -- INVOICE_POSTED_LOCKED, as expected
+  END;
+  ALTER TABLE invoice_items DISABLE TRIGGER trg_refuse_posted_invoice_child_write;
+  EXECUTE format('INSERT INTO invoice_items (invoice_id, %1$s) SELECT $1, %1$s FROM smk_cad_i_lines', v_cols) USING v_new;
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  ALTER TABLE invoice_items ENABLE TRIGGER trg_refuse_posted_invoice_child_write;
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '180.00/120.00|300.00' THEN
+    v_fails := v_fails || ' (I) lines added to a posted invoice did not settle on $300: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  END IF;
+
+  -- P: half posted ($180 / $120 on $300), then the invoice's header order cleared, as a legacy invoice has it: billed by
+  -- header counts 0, and the rows stay on the rule's $300, never the whole-discount $350 (Sol posting r5 HIGH 3).
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 'p-' || v_suffix);
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 50, 'p-' || v_suffix);
+  v_inv := pg_temp.smk_draft(v_order);
+  PERFORM pg_temp.smk_post(v_inv, 'p-' || v_suffix);
+  -- Only a legacy invoice can have no order on its header today (INVOICE_ORDER_IMMUTABLE and lineage guards), so the
+  -- header is cleared with the invoice triggers off in this rolled-back step, then the sale settled directly.
+  ALTER TABLE invoices DISABLE TRIGGER USER;
+  UPDATE invoices SET order_id = NULL WHERE id = v_inv;
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  ALTER TABLE invoices ENABLE TRIGGER USER;
+  IF to_regprocedure('public._settle_order_commission_20270306(uuid)') IS NULL THEN
+    v_fails := v_fails || ' (P) a NULL-header invoice: no settle helper;';
+  ELSE
+    PERFORM public._settle_order_commission_20270306(v_order);
+    IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '180.00/120.00|300.00' THEN
+      v_fails := v_fails || ' (P) a NULL-header invoice put the rows off the rule''s $300: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+    END IF;
+  END IF;
+
   -- T: a chemical-sale invoice can't be born posted through save_invoice.
   v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 't-' || v_suffix);
   BEGIN
@@ -632,7 +705,7 @@ BEGIN
   v_got := (SELECT string_agg(o.order_name || ' ' || c.order_profit || ' vs ' || (o.total_profit + _order_standing_discount_20270109(o.id)), '; ')
               FROM orders o JOIN commissions c ON c.order_id = o.id AND c.status = 'pending' AND c.deleted_at IS NULL
              WHERE o.order_name LIKE '[SMOKE] CAD %-' || v_suffix
-               AND o.order_name !~ '\[SMOKE\] CAD (d|f|s|c|e|o|t|g|k2|v|w|x|y|z|l|q|n)-'  -- part-posted, unposted or none; k2 holds k3's moved row
+               AND o.order_name !~ '\[SMOKE\] CAD (d|f|s|c|e|o|t|g|k2|v|w|x|y|z|l|q|n|p)-'  -- part-posted, unposted or none; k2 holds k3's moved row
                AND c.order_profit IS DISTINCT FROM o.total_profit + _order_standing_discount_20270109(o.id));
   IF v_got IS NOT NULL THEN
     v_fails := v_fails || ' (base) a commission base differs from the P&L profit after discount: ' || v_got || ';';

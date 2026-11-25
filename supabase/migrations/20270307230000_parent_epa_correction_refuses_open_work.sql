@@ -134,7 +134,8 @@ BEGIN
         FROM public.jobs j JOIN public.job_chemicals jc ON jc.job_id = j.id JOIN sizes s ON s.product_id = jc.product_id
        WHERE j.deleted_at IS NULL
          AND (j.status IN ('scheduled', 'in_progress') OR (j.status = 'completed'
-              AND NOT EXISTS (SELECT 1 FROM public.invoices ji WHERE ji.id = j.invoice_id AND ji.deleted_at IS NULL)
+              AND NOT EXISTS (SELECT 1 FROM public.invoices ji WHERE ji.id = j.invoice_id AND ji.deleted_at IS NULL
+                                AND ji.status NOT IN ('voided', 'cancelled'))
               -- Billed through its blend ticket instead (Sol r1): job invoicing then refuses (BLEND_TICKET_ALREADY_BILLED).
               AND NOT EXISTS (SELECT 1 FROM public.blend_tickets jb JOIN public.invoices jbi ON jbi.blend_ticket_id = jb.id
                                WHERE jb.job_id = j.id AND jbi.deleted_at IS NULL AND jbi.status NOT IN ('voided', 'cancelled'))))
@@ -172,7 +173,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public._product_parent_identity_after(public.product_parents,jsonb)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = '92f22cebe57c7ce47513a8bf6c4d38bd'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '61d76303832274b0664a127835d78595'
                     AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef AND p.provolatile = 'v'
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]) THEN

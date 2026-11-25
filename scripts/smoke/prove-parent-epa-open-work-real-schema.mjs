@@ -110,6 +110,9 @@ try {
   seed(`UPDATE public.invoices SET deleted_at = now() WHERE id = '${POSTED}';`);
   blocked('completed job whose invoice was deleted', /job WRK-JOB \(completed, not invoiced\)/);
   seed(`UPDATE public.invoices SET deleted_at = NULL WHERE id = '${POSTED}';`);
+  seed(`UPDATE public.invoices SET status = 'voided' WHERE id = '${POSTED}';`);
+  blocked('completed job whose invoice was voided', /job WRK-JOB \(completed, not invoiced\)/);
+  seed(`UPDATE public.invoices SET status = 'posted' WHERE id = '${POSTED}';`);
   seed(`UPDATE public.jobs SET status = 'cancelled', invoice_id = NULL WHERE id = '${JOB}';`);
   allowed('cancelled job');
   seed(`UPDATE public.jobs SET status = 'scheduled', deleted_at = now() WHERE id = '${JOB}';`);

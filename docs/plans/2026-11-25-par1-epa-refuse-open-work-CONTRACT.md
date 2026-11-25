@@ -23,7 +23,7 @@ size, so open work on any size blocks the parent):
 | # | Record | Counts while | Source of the definition |
 |---|---|---|---|
 | W1 | `jobs` with a `job_chemicals` line for a size | not deleted, `status IN ('scheduled','in_progress')` | `jobs.status` enum |
-| W2 | same | not deleted, `status = 'completed'`, no live (not deleted) invoice linked (Luna r2), and not billed through a blend ticket tied to it (a live, not voided or cancelled, invoice on that ticket; Sol r1) | Unbilled Applications panel (`src/components/field-invoices/UnbilledApplicationsPanel.tsx:186`) |
+| W2 | same | not deleted, `status = 'completed'`, no live (not deleted, not voided or cancelled) invoice linked (Luna r2, r4), and not billed through a blend ticket tied to it (a live, not voided or cancelled, invoice on that ticket; Sol r1) | Unbilled Applications panel (`src/components/field-invoices/UnbilledApplicationsPanel.tsx:186`) |
 | W3 | `blend_tickets` with a `blend_ticket_products` line for a size | not deleted, `review_status` not `rejected`, not tied to a live, not-cancelled job (that job counts it; making the ticket's own application record would deduct the job's stock twice, Sol r1), and either `payment_status = 'unbilled'` or no `application_records` row (`source_type = 'blend_ticket'`) yet | Unbilled panel (approved + unbilled), widened to not-yet-reviewed tickets; an application record can be made from an approved ticket at any time, billed or not (`20260713060200`) |
 | W4 | `invoices` with an `invoice_items` line for a size | not deleted, `status IN ('draft','unposted')` (chemical-sale and field invoices alike) | `invoices.status` enum |
 

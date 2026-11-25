@@ -295,7 +295,12 @@ async function pushPostBaselineMigrations(state) {
     if (version !== SUPABASE_CLI) throw new Error(`The push steps are proven on Supabase CLI ${SUPABASE_CLI}, not ${version}.`);
     const launcher = process.platform === 'win32' ? text(run('where.exe', ['supabase'])).split(/\r?\n/)[0] : null;
     companion = process.env.SUPABASE_GO_BINARY ?? (launcher ? path.join(path.dirname(launcher), 'supabase-go.exe') : 'supabase-go');
-    if (text(run(companion, ['--version'])) !== SUPABASE_CLI) throw new Error(`Use the matching Supabase ${SUPABASE_CLI} companion executable.`);
+    const companionVersion = text(run(companion, ['--version']));
+    if (companionVersion !== SUPABASE_CLI) {
+      const source = process.env.SUPABASE_GO_BINARY ? 'the SUPABASE_GO_BINARY setting' : 'the folder of the supabase on PATH';
+      throw new Error(`Supabase companion ${companion} (from ${source}) reports ${companionVersion || 'no version'}, not ${SUPABASE_CLI}. `
+        + `Set SUPABASE_GO_BINARY to the supabase-go beside your ${SUPABASE_CLI} supabase (scripts/local-app/README.md).`);
+    }
   }
   const files = approvedMigrations();
   const workdir = mkdtempSync(path.join(STATE_DIR, 'push-'));

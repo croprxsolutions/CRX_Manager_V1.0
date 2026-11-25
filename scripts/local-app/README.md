@@ -58,7 +58,8 @@ this isolated copy sends no actual email. Stop the task-owned copy afterwards wi
 The Supabase 2.109.1 installation needs both release executables, `supabase` and `supabase-go`.
 A shim reporting 2.109.1 beside an older Go executable is insufficient. Put the complete official
 release folder first on this task's PATH, or set `SUPABASE_GO_BINARY` to its matching companion;
-the runner rejects a mismatched override. On Mason's Windows host, the verified pair is in
+the runner rejects a mismatched override. A `SUPABASE_GO_BINARY` already set in your shell wins over
+PATH, so point it at the matching companion too (Mason's shell sets it to an older one). On Mason's Windows host, the verified pair is in
 `C:\Codex\sales-tools`; other hosts must use their own matching 2.109.1 pair. Before the invoice-brand migration, rebuild initializes
 the empty registration catalog through the real generated-admin seed workflow. No numbered business
 product is present at that point; business fixtures are seeded after all migrations finish.

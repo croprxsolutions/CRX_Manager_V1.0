@@ -2941,6 +2941,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // (20270126110000 renamed it, so no generated type carries it yet); keyed by complete_delivery's p_idempotency_key.
   // Prune once the generated types carry it.
   '_complete_delivery_authorized_impl_20270122',
+  // 20270301180000 (M9, local candidate): refund paid outside CRX and returned (bounced) check; each requires its key
+  // and saves and binds its receipt. The screen PR adds the generated types and prunes these entries.
+  'record_outside_refund',
+  'record_returned_check',
 ]);
 
 /**
@@ -3029,11 +3033,14 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // 20270109100400 (#1868 sales tax not revenue, local candidate): private helper and trigger function. Prune once applied.
   _freeze_credit_sales_tax_20270109: 'internal #1868 helper (20270109100400): called only by its deferred trigger and the one-time backfill; writes one row per credited line pool of a posted return credit (skips one already frozen) or clears them when the credit leaves posted; every API-role EXECUTE is revoked',
   trg_freeze_credit_sales_tax_20270109: '#1868 trigger function (20270109100400): deferred constraint trigger and immediate clear trigger on invoices for credit memos, both call _freeze_credit_sales_tax_20270109; never an RPC, every API-role EXECUTE is revoked',
+  // REI/PHI not applicable (local candidate 20270303130000): re-issued trigger function, never an RPC. Prune once applied.
+  write_product_change_history: 'product history trigger function (re-issued in 20270303130000 to watch the REI/PHI not-applicable flags): AFTER INSERT/UPDATE row trigger on products, appends one history row per changed watched field inside the writing statement; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   _relabel_empty_stock_rows: 'units-batch trigger function (20270121110000): AFTER UPDATE trigger on products, relabels the product\'s stock rows (already proven empty by the BEFORE trigger) to the new stock unit; runs only as a trigger, every API-role EXECUTE is revoked',
   // Brand PR B part B-1b private helpers, applied live 2026-11-12; these remain internal to the recopy workflow.
   _invoice_brand_recopy: 'internal B-1b helper (20270106110000): called only by the recopy trigger and the one-time backfill; rewrites only the derived brand snapshot on open drafts; every API-role EXECUTE is revoked',
   _invoice_brand_recopy_invoice: 'internal B-1b helper (20270106110000): called only by _invoice_brand_recopy and the backfill; rewrites only the derived brand snapshot on one open draft; every API-role EXECUTE is revoked',
   _sync_invoice_line_brand_captures: 'internal B-1b helper (20270106110000): called only by the _capture_invoice_line_rup trigger to keep one RUP capture per brand on a line; every API-role EXECUTE is revoked',
+  _capture_invoice_line_rup: '#2341 re-emit (local candidate 20270303100000): AFTER INSERT OR UPDATE row trigger function on invoice_items; writes the line\'s RUP capture only for the line being written (the line\'s writer owns idempotency); Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked. Prune once the candidate is in the generated snapshot',
   // DM-2 private helpers: the keyed weight writers own replay protection and trigger functions are not callable.
   _write_parent_density: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',
   _write_size_net_weight: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',
@@ -3101,6 +3108,12 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   //     the moment its migration stopped being newer than the high-water. It is
   //     not exempt from anything now; it is simply no longer discovered, and a
   //     dead entry would silently pre-suppress any future RPC reusing the name.
+  // M9 (local candidate 20270301180000): the statement-level trigger on money_reversal_lines; never an RPC.
+  _recompute_prepay_credits_from_lines_20270225:
+    'AFTER INSERT FOR EACH STATEMENT trigger on money_reversal_lines: sets each credit its new lines name to the balance its own rows give (convergent, so a replay writes the same value); the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked. Prune once the candidate is in the generated snapshot',
+  // M9 (local candidate 20270301180000): re-emitted with the reversal-line terms; a trigger function, never an RPC.
+  _recompute_prepay_credit_balance:
+    'AFTER INSERT/DELETE trigger on prepay_applications: recomputes one credit balance from its rows, now including M9 reversal lines (convergent, so a replay writes the same value); the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function and M9 revokes API-role EXECUTE. Prune once the candidate is in the generated snapshot',
   _recompute_po_on_order_for_products:
     'internal convergent PO-cache recomputation helper; trigger parents own the transaction and direct browser EXECUTE is revoked',
   // Trigger-only helpers whose migrations are now at or below the live registry

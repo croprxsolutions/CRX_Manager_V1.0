@@ -19,6 +19,35 @@
 ## 2026-11-22 — KI-114 (#1958): Piksi Dust is grams everywhere, same prices
 
 **Decision (Mason, 2026-11-22, in the bug-captain session: "Yes, grams (Recommended)"; and in the Lane C session: "piksi dust is in grams we billed like mg but it is grams and all mg need changed to gram price is same as grams etc").** This supersedes the 2026-11-13 "MG means milligrams" decision. Every Piksi `MG` label (products, groups, stock, order, delivery and PO lines, receipts) becomes `g` with no quantity or price changed; the four older Plus delivery lines that still say "Dry oz" become `g` too ("all"). This replaces the 2026-11-13 reading ("MG means milligrams") used by `20270121100000` and the 2026-11-17 "keep both on today's values" choice. Migration `20270301150000_piksi_mg_to_grams`; contract `docs/plans/2026-11-22-ki114-piksi-grams-CONTRACT.md`. Releasing Piksi from the rate cut-over hold list stays a separate step.
+## 2026-11-24 — Field billing rounds like chemical sales; field app goes live in slices
+
+**Decision (Mason, in chat, 2026-11-24: "billing logic and rounding etc matches chemical sales"; "my newest answers beat old answer so remove conflicting older answers").** Field invoices use the chemical-sale split rule (others rounded down, the job's customer takes the rest; largest share if the customer has 0%), and each product is priced once per job, so a job never bills more than gallons × price (1 gal at 10.01 over two fields = 5.01 + 5.00). Replaces the 2026-11-24 morning "closest to exact" answer. Go-live in slices: who pays and paperwork, then crew on CRX, then billing on a switch-on date Mason picks; Chem Man bills until then. Partial hold release, leftover claims, one-click bill actual used and the duplicate-load flag move to spring.
+**Why:** one rounding rule customers see on every invoice; the extra-cent bug is gone; less to build before February.
+**What this forbids/implies:** the field kit (`docs/plans/field-application/`) is now master copies only; the 2026-11-08 build sheet and backlog were removed (git history) and their still-valid rules live in `CONTRACT-who-pays.md` and `CONTRACT-field-billing.md`, so older entries' links to them point at history. On an even split the grower can carry up to one cent more per other payer on each line. Per-payer prices on one field also wait for spring; if the mixer tablet account is late, mixers use their own logins.
+
+## 2026-11-22 — #2217: Mason owner-accepted 1 Sol finding(s) at `e197b9d15d20`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2217 at `e197b9d15d20` (base `6e77a9e7a5e2`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md:189`, text sha256 `f9bb6a325e5e9451` (the wording stays with the proof, not here)
+  Mason's reason: drivers will reopen the app before go live (ref dfc1fa09484a)
+
+## 2026-11-22 — #2217: Mason owner-accepted 1 Sol finding(s) at `1781bf249fd2`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2217 at `1781bf249fd2` (base `ab0f6cdfc7ae`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md:189`, text sha256 `5b2dacfd3fce03b9` (the wording stays with the proof, not here)
+  Mason's reason: drivers will reopen the app before go live (ref 1cec6671310f)
+
+## 2026-11-22 — #2217: Mason owner-accepted 1 Sol finding(s) at `15153d2a666e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-22).** Sol's review of PR #2217 at `15153d2a666e` (base `17a72d0ee032`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md:189`, text sha256 `e2e592cbe2a95507` (the wording stays with the proof, not here)
+  Mason's reason: drivers will reopen the app before go-live (ref b7022addabd2)
+## 2026-11-24 — Rate switch: a label maximum whose unit cannot be compared needs no over-label reason
+
+**Decision:** switching a product group to its approved rate asks for a typed over-label reason only when the rate is above a label maximum the app can compare; a maximum whose unit or basis it cannot compare ("not checked") lets the switch through with no reason, as Rate Review's own approval does. Mason, 2026-11-24, answering P1's Sol round 2 HIGH: "No, keep as is".
+**Why:** one rule in both places; the switch publishes a rate Rate Review already approved under that rule.
+**What this forbids/implies:** do not add a reason requirement for "not checked" to the switch alone (`20270301200000_rate_switch_recheck.sql`); a change to this rule changes Rate Review too and needs Mason's new decision.
+
 ## 2026-11-23 — Terra is the final review for ordinary code; Sol stays on money, inventory, database and logins
 
 **Decision (Mason, in chat, 2026-11-23: "i want docs, simple edits etc to not spend 20 min waiting on sol … keep sol on money, database, and inventory … use terra where we can for final review", then chose A on each question and "Yes, build it").** Reverses part (3) of the 2026-11-06 entry ("Terra is not added as a second reviewer"). Docs and wording with no app code get no Codex review; ordinary code off `docs/reference/sol-required-paths.md` gets ONE `gpt-6.1-terra`/`high` final review (`node scripts/luna-review.mjs --terra`) instead of Luna rounds or Sol; Sol-list changes keep Luna then Sol. A large or unclear change may choose Sol; no size limit is enforced. Terra is advisory: no gate checks for it and it never counts as the Sol proof.

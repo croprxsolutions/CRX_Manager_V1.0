@@ -151,7 +151,71 @@ describe('PricingChangePreviewModal warnings (To-Do 0.1)', () => {
         onApprove={vi.fn()}
       />,
     );
-    expect(screen.getByText('Choose a source for the new price or cost.')).toBeTruthy();
+    expect(screen.getByText(/the price_source column on a price sheet/)).toBeTruthy();
+  });
+
+  it('lists problem rows on a price sheet first, folds unchanged rows, and says nothing was saved', () => {
+    const sheetPreview = makePreview({
+          source: 'pricing_worksheet',
+          status: 'invalid',
+          apply_allowed: false,
+          submitted_row_count: 3,
+          ready_count: 1,
+          unchanged_count: 1,
+          conflict_count: 0,
+          invalid_count: 1,
+          rows: [
+            {
+              sequence: 1, product_id: 'product-u', submitted_row: { product_name: 'Untouched Product' },
+              row_status: 'unchanged', error_code: null, effect: null,
+            },
+            { ...makePreview().rows[1], sequence: 2 },
+            {
+              sequence: 3, product_id: 'product-x', submitted_row: { product_name: 'Bad Cell Product' },
+              row_status: 'invalid', error_code: 'PRICING_DOLLARS_INVALID', effect: null,
+            },
+          ],
+        });
+    const modal = (open: boolean) => (
+      <PricingChangePreviewModal
+        open={open}
+        preview={sheetPreview}
+        applying={false}
+        onClose={vi.fn()}
+        onApprove={vi.fn()}
+      />
+    );
+    const { rerender } = render(modal(true));
+
+    expect(screen.getByText(/^Nothing was saved\. 1 row needs attention and is listed first below\./))
+      .toHaveTextContent('Fix the Invalid rows in your Excel file, then upload it again.');
+    const list = screen.getByRole('list', { name: 'Pricing preview rows' });
+    let rows = within(list).getAllByRole('listitem');
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByText('Bad Cell Product')).toBeInTheDocument();
+    expect(within(rows[0]).getByText(/not a plain dollar amount.*at most 2 decimals, like 12\.34/)).toBeInTheDocument();
+    // Sorting moves problem rows up, so each names its sheet row (sequence 3 -> row 4; the header is row 1).
+    expect(within(rows[0]).getByText('Excel row 4')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('First Product')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Excel row 3')).toBeInTheDocument();
+    expect(screen.queryByText('Untouched Product')).not.toBeInTheDocument();
+
+    const showButton = screen.getByRole('button', { name: 'Show 1 unchanged row' });
+    fireEvent.click(showButton);
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2);
+    rows = within(screen.getByRole('list', { name: 'Unchanged pricing preview rows' })).getAllByRole('listitem');
+    expect(rows).toHaveLength(1);
+    expect(within(rows[0]).getByText('Untouched Product')).toBeInTheDocument();
+    expect(within(rows[0]).getByText('Excel row 2')).toBeInTheDocument();
+    // Reading order: the revealed rows come after the button, so moving forward from it reaches them.
+    expect(showButton.compareDocumentPosition(rows[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Hide 1 unchanged row' })).toHaveAttribute('aria-expanded', 'true');
+
+    // Closing and reopening the same preview folds the unchanged rows again.
+    rerender(modal(false));
+    rerender(modal(true));
+    expect(screen.getByRole('button', { name: 'Show 1 unchanged row' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Untouched Product')).not.toBeInTheDocument();
   });
 });
 
@@ -187,33 +251,71 @@ describe('PricingChangePreviewModal', () => {
     expect(screen.queryByText('Cost')).not.toBeInTheDocument();
   });
 
-  it('renders summary, ordered rows, effects, warnings, and plain-English errors', () => {
+  it('tells a mode-companion refusal to restore the edited cells before switching mode', () => {
+    const invalidRow = (sequence: number, errorCode: string) => ({
+      sequence, product_id: `product-${sequence}`, submitted_row: { product_name: `Product ${sequence}` },
+      row_status: 'invalid' as const, error_code: errorCode, effect: null,
+    });
     render(
       <PricingChangePreviewModal
         open
-        preview={makePreview()}
+        preview={makePreview({
+          source: 'pricing_worksheet', status: 'invalid', apply_allowed: false,
+          ready_count: 0, conflict_count: 0, invalid_count: 2,
+          rows: [
+            invalidRow(1, 'PRICE_DRIVEN_COMPANION_FIELDS_CHANGED'),
+            invalidRow(2, 'MARGIN_DRIVEN_COMPANION_FIELDS_CHANGED'),
+          ],
+        })}
+        applying={false}
+        onClose={vi.fn()}
+        onApprove={vi.fn()}
+      />,
+    );
+    // The server allows each companion cell only blank or as downloaded, so switching mode alone
+    // would refuse the edited cells again.
+    expect(screen.getByText(
+      'This row is price-driven, so its margin % cells must stay as downloaded. To change margins instead, first put all three tier price cells back as downloaded, then set pricing_mode to margin_driven.',
+    )).toBeInTheDocument();
+    expect(screen.getByText(
+      'This row is margin-driven, so its tier price cells must stay as downloaded. To change prices instead, first put all three margin % cells back as downloaded, then set pricing_mode to price_driven.',
+    )).toBeInTheDocument();
+  });
+
+  it('renders summary, ordered rows, effects, warnings, and plain-English errors', () => {
+    // As the server returns it: any conflict makes the whole preview invalid and not applyable.
+    render(
+      <PricingChangePreviewModal
+        open
+        preview={makePreview({ source: 'pricing_worksheet', status: 'invalid', apply_allowed: false })}
         applying={false}
         onClose={vi.fn()}
         onApprove={vi.fn()}
       />,
     );
 
-    expect(screen.getByText('Ready for approval')).toBeInTheDocument();
+    expect(screen.getByText('Some rows need attention')).toBeInTheDocument();
     expect(screen.getByText('2 submitted rows')).toBeInTheDocument();
+    // A sheet with only conflicts still says nothing was saved, and how to fix a conflict.
+    const notice = screen.getByText(/^Nothing was saved\. 1 row needs attention and is listed first below\./);
+    expect(notice).toHaveTextContent('A Conflict row changed in CRX after you downloaded the sheet');
+    expect(notice).not.toHaveTextContent('Fix the Invalid rows');
+    expect(screen.queryByRole('button', { name: 'Apply approved changes' })).not.toBeInTheDocument();
 
+    // Problem rows come first, so the conflict sorts ahead of the ready row.
     const rows = within(screen.getByRole('list', { name: 'Pricing preview rows' })).getAllByRole('listitem');
-    expect(within(rows[0]).getByText('First Product')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('SKU SKU-1')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('$10.00')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('$12.00')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('$12.50')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('$5.75 / acre')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('Markup %: 25%')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('Warning: this price is below cost.')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('First Product')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('SKU SKU-1')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('$10.00')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('$12.00')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('$12.50')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('$5.75 / acre')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Markup %: 25%')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Warning: this price is below cost.')).toBeInTheDocument();
 
-    expect(within(rows[1]).getByText('Later Product')).toBeInTheDocument();
+    expect(within(rows[0]).getByText('Later Product')).toBeInTheDocument();
     expect(
-      within(rows[1]).getByText(/changed after the pricing data was loaded/i),
+      within(rows[0]).getByText(/changed after the pricing data was loaded/i),
     ).toBeInTheDocument();
   });
 

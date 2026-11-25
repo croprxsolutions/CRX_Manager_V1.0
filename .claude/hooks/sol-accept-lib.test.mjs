@@ -262,6 +262,16 @@ assert.equal(proofValid({ ...proof, carry: { ...proof.carry, from_base: "d".repe
   // A staging merge never carries, even a proof minted before that rule (Mason, 2026-11-22, Sol r7 HIGH 1).
   assert.equal(carriedSolProof({ ...clean, review_ref: "origin/staging" }), false, "gate: a staging-carried proof is not a proof");
   assert.equal(carriedSolProof({ ...clean, carry: { ...clean.carry, mode: "disjoint" }, review_ref: "origin/staging" }), false, "gate: nor a free staging carry");
+  // A same-base restamp or post_apply on top of that base move does not launder it (Sol r8, #2226).
+  for (const mode of ["restamp", "post_apply"]) {
+    const relaundered = buildCarryForwardProof({ headSha: "f".repeat(40), baseSha: moved, source: later, mode, timestamp: iso(NOW) });
+    assert.equal(relaundered.carry.from_base, relaundered.base_sha, `gate: the ${mode} itself keeps its source's base`);
+    assert.equal(carriedSolProof(relaundered), false, `gate: a ${mode} cannot carry an acceptance past the base it was given on`);
+    const { owner_accepted: _gone, ...unlistedRe } = relaundered;
+    assert.equal(carriedSolProof(unlistedRe), false, `gate: nor a ${mode} that dropped the acceptance list`);
+    assert.equal(carriedSolProof({ ...relaundered, carry: { ...relaundered.carry, root_review: { ...relaundered.carry.root_review, owner_accepted: false } } }), false,
+      `gate: nor a ${mode} whose root lost its mark but kept the list`);
+  }
 }
 assert.equal(proofValid(proof, H2, NOW + 24 * 60 * 60 * 1000, BASE), false, "gate: expires with the Sol run it came from");
 
@@ -269,6 +279,7 @@ assert.equal(proofValid(proof, H2, NOW + 24 * 60 * 60 * 1000, BASE), false, "gat
 const chained = buildCarryForwardProof({ headSha: "e".repeat(40), baseSha: BASE, source: proof, mode: "post_apply", timestamp: iso(NOW) });
 assert.equal(chained.carry.root_review.owner_accepted, true, "chain: the root review stays marked owner-accepted");
 assert.deepEqual(chained.owner_accepted, proof.owner_accepted, "chain: the acceptances travel with the proof");
+assert.equal(carriedSolProof(chained), true, "chain: a same-base post_apply of an owner-accepted proof still counts");
 assert.equal("owner_accepted" in buildCarryForwardProof({ headSha: H2, baseSha: BASE, source: { head_sha: H1, base_sha: BASE, timestamp: iso(NOW) }, mode: "restamp" }), false,
   "chain: an ordinary carry gains no acceptance");
 

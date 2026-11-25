@@ -17,10 +17,11 @@ const mockDoc = {
   setFontSize: vi.fn(),
   setTextColor: vi.fn(),
   text: vi.fn(),
+  textWithLink: vi.fn(),
   setDrawColor: vi.fn(),
   line: vi.fn(),
   splitTextToSize: vi.fn((text: string) => [text]),
-  getTextWidth: vi.fn(() => 50),
+  getTextWidth: vi.fn((_text: string) => 50),
   getImageProperties: vi.fn(() => ({ width: 1000, height: 700 })),
   addImage: vi.fn(),
   addPage: vi.fn(() => { pageCount += 1; }),
@@ -42,7 +43,7 @@ vi.mock('jspdf-autotable', () => ({
   }),
 }));
 
-import { generateApplicatorSheetPdf } from './applicatorSheetPdf';
+import { generateApplicatorSheetPdf, NO_MAP_PAGES_MESSAGE } from './applicatorSheetPdf';
 
 function makeSheetData(overrides: Partial<ApplicatorSheetData> = {}): ApplicatorSheetData {
   return {
@@ -81,6 +82,7 @@ describe('generateApplicatorSheetPdf map pages', () => {
         perField: [
           {
             fieldId: 'field-1',
+            sprayNumber: 1,
             fieldName: 'North 40',
             customerName: 'Smith Farm',
             acres: 40,
@@ -105,6 +107,8 @@ describe('generateApplicatorSheetPdf map pages', () => {
     expect(mockDoc.addImage).toHaveBeenCalledTimes(3);
     const renderedText = mockDoc.text.mock.calls.flat(Infinity).filter((value: unknown): value is string => typeof value === 'string');
     expect(renderedText).toContain('Job Field Map — Overview');
+    expect(renderedText).toContain('Job Field Map — Stop 1');
+    expect(renderedText).toContain('Job Field Map');
     expect(renderedText.some((value) => value.includes('North 40 · Smith Farm · 40 acres · Lat: 39.150000, Lng: -89.050000'))).toBe(true);
     expect(renderedText).toContain('South 80 · 80 acres');
     expect(renderedText.some((value) => value.includes('South 80 · Smith Farm'))).toBe(false);
@@ -209,15 +213,160 @@ describe('generateApplicatorSheetPdf EPA column (KI-195)', () => {
     for (const format of ['original', 'enhanced', 'custom'] as const) {
       autoTable.mockClear();
       await generateApplicatorSheetPdf(makeSheetData({ products: [
-        product('Kept', '100-1'), product('NoNumber', 'Unknown'), product('Old', 'Not recorded'), product('Blank', null),
+        product('Kept', '100-1'), product('NoNumber', '—'), product('Old', 'Not recorded'), product('Blank', null),
       ] }), format, null);
       const chem = autoTable.mock.calls
         .map((c) => c[1] as { head: string[][]; body: string[][] })
         .find((o) => o.head?.[0]?.includes('Rate / Acre'));
       expect(chem).toBeDefined();
       expect(chem!.head[0].slice(0, 3)).toEqual(['Product', 'EPA Reg. No.', 'Rate / Acre']);
-      expect(chem!.body.map((r) => r[1])).toEqual(['100-1', 'Unknown', 'Not recorded', '—']);
+      expect(chem!.body.map((r) => r[1])).toEqual(['100-1', '—', 'Not recorded', '—']);
       expect(chem!.body.every((r) => r.length === chem!.head[0].length)).toBe(true);
     }
+  });
+});
+
+describe('generateApplicatorSheetPdf safety sheet (Mason, 2026-11-24)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pageCount = 1;
+    mockDoc.lastAutoTable = { finalY: 300 };
+  });
+  const product = (n: number, rei: number | null) => ({
+    product_name: `TEST Product ${n}`, rate_per_acre: 1, rate_unit: 'pt', total_applied: 40, total_unit: 'pt', total_gl_lb: '5 gal',
+    product_form: null, rei_hours: rei, phi_days: 30, epa_registration: null,
+  });
+  const safetyTable = async () => {
+    const autoTable = (await import('jspdf-autotable')).default as unknown as ReturnType<typeof vi.fn>;
+    return autoTable.mock.calls
+      .map((c) => c[1] as { head: string[][]; body: string[][] })
+      .find((o) => o.head?.[0]?.[3] === 'Signal Word');
+  };
+
+  it('prints no safety sheet unless it was chosen', async () => {
+    await generateApplicatorSheetPdf(makeSheetData({ products: [product(1, 12)] }), 'enhanced', null);
+    expect(await safetyTable()).toBeUndefined();
+    expect(pageCount).toBe(1);
+  });
+
+  it('prints every product of a 40-product mix on its own sheet, "See label" where a value is not on file', async () => {
+    const products = Array.from({ length: 40 }, (_, i) => product(i + 1, i === 0 ? null : 12));
+    await generateApplicatorSheetPdf(makeSheetData({
+      products,
+      safety: products.map((p, i) => ({ product_name: p.product_name, epa_registration: i === 1 ? '100-1' : null, signal_word: i === 1 ? 'warning' : null,
+        rei_hours: p.rei_hours, phi_days: p.phi_days })),
+    }), 'original', null);
+    const table = await safetyTable();
+    expect(table!.head[0]).toEqual(['#', 'Product', 'EPA Reg. No.', 'Signal Word', 'REI', 'PHI']);
+    expect(table!.body).toHaveLength(40);
+    expect(table!.body[0]).toEqual(['1', 'TEST Product 1', 'See label', 'See label', 'See label', '30 d']);
+    expect(table!.body[1]).toEqual(['2', 'TEST Product 2', '100-1', 'WARNING', '12 hr', '30 d']);
+    expect(mockDoc.addPage).toHaveBeenCalledTimes(1); // its own sheet; autotable flows any overflow onto more pages
+  });
+
+  it('says safety could not be loaded when the read failed, instead of an empty table', async () => {
+    await generateApplicatorSheetPdf(makeSheetData({ products: [product(1, 12)], safety: null }), 'original', null);
+    expect(await safetyTable()).toBeUndefined();
+    expect(mockDoc.addPage).toHaveBeenCalledTimes(1);
+    expect(mockDoc.text.mock.calls.some((c) => String(c[0]).startsWith('Safety could not be loaded'))).toBe(true);
+    expect(mockDoc.splitTextToSize.mock.calls.some((c) => String(c[0]).includes('From product records'))).toBe(false);
+  });
+
+  it('still prints REI and PHI on the safety sheet when a saved Custom layout hides those columns', async () => {
+    const custom = { header: { company_name: '', phone: '', address: '', email: '' }, footer: '',
+      columns: { crop: false, pest: false, rei: false, phi: false, total_applied: false, gl_lb: false } };
+    const p = product(1, 12);
+    await generateApplicatorSheetPdf(makeSheetData({ products: [p],
+      safety: [{ product_name: p.product_name, epa_registration: null, signal_word: 'caution', rei_hours: 12, phi_days: 30 }] }),
+    'custom', custom as never);
+    expect((await safetyTable())!.body[0]).toEqual(['1', 'TEST Product 1', 'See label', 'CAUTION', '12 hr', '30 d']);
+  });
+
+  it('says the values come from product records on the print date, and a negative value is not on file', async () => {
+    await generateApplicatorSheetPdf(makeSheetData({ products: [product(1, 12)], safety: [
+      { product_name: 'TEST B', epa_registration: null, signal_word: null, rei_hours: -1, phi_days: 14 },
+    ] }), 'original', null);
+    expect((await safetyTable())!.body[0]).toEqual(['1', 'TEST B', 'See label', 'See label', 'See label', '14 d']);
+    expect(mockDoc.splitTextToSize.mock.calls.some((c) => String(c[0]).includes(`From product records on ${new Date().toLocaleDateString()}`))).toBe(true);
+  });
+});
+
+describe('generateApplicatorSheetPdf directions links', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pageCount = 1;
+    mockDoc.lastAutoTable = { finalY: 300 };
+    mockDoc.splitTextToSize.mockImplementation((text: string) => [text]);
+  });
+
+  it('prints one directions link per mapped field in stop order and skips unmapped fields', async () => {
+    await generateApplicatorSheetPdf(makeSheetData({
+      fields: [
+        { stop: 1, field_name: 'North 40', county: null, state: null, acres: 40, crop: null, pest: null, location: { lat: 39.15, lng: -89.05 } },
+        { stop: 2, field_name: 'No Pin', county: null, state: null, acres: 10, crop: null, pest: null, location: null },
+        { stop: 3, field_name: 'South 80', county: null, state: null, acres: 80, crop: null, pest: null, location: { lat: 39.2, lng: -89.1 } },
+      ],
+    }), 'original', null);
+    expect(mockDoc.textWithLink.mock.calls.map((call) => (call[3] as { url: string }).url)).toEqual([
+      'https://www.google.com/maps/dir/?api=1&destination=39.150000,-89.050000',
+      'https://www.google.com/maps/dir/?api=1&destination=39.200000,-89.100000',
+    ]);
+    const text = mockDoc.text.mock.calls.map((call) => call[0]).filter((value): value is string => typeof value === 'string');
+    expect(text.some((value) => value.startsWith('Stop 3 · South 80'))).toBe(true);
+    expect(text.some((value) => value.includes('No Pin ·'))).toBe(false);
+  });
+
+  it('shortens a long field name so the link stays on the page', async () => {
+    mockDoc.getTextWidth.mockImplementation((text: string) => text.length * 5);
+    const longName = 'A'.repeat(200);
+    await generateApplicatorSheetPdf(makeSheetData({
+      fields: [{ stop: 1, field_name: longName, county: null, state: null, acres: 1, crop: null, pest: null, location: { lat: 1, lng: 2 } }],
+    }), 'original', null);
+    const [, linkX] = mockDoc.textWithLink.mock.calls[0] as [string, number];
+    expect(linkX + 'Open directions'.length * 5).toBeLessThanOrEqual(612 - 40);
+    mockDoc.getTextWidth.mockImplementation(() => 50);
+  });
+
+  it('prints no directions block when no field has a map pin', async () => {
+    await generateApplicatorSheetPdf(makeSheetData(), 'original', null);
+    expect(mockDoc.textWithLink).not.toHaveBeenCalled();
+  });
+});
+
+describe('map pages only print', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pageCount = 1;
+    mockDoc.lastAutoTable = { finalY: 300 };
+    mockDoc.splitTextToSize.mockImplementation((text: string) => [text]);
+  });
+  const maps = {
+    overview: 'data:image/png;base64,b3ZlcnZpZXc=',
+    perField: [{ fieldId: 'field-1', sprayNumber: 1, fieldName: 'North 40', customerName: null, acres: 40,
+      centroidLat: null, centroidLng: null, dataUrl: 'data:image/png;base64,ZmllbGQtMQ==' }],
+  };
+
+  it('prints only the map pages, no job order, and drops the blank first page', async () => {
+    const { default: autoTable } = await import('jspdf-autotable');
+    await generateApplicatorSheetPdf(makeSheetData({ maps }),
+      'enhanced', null, { mapsOnly: true });
+    expect(autoTable).not.toHaveBeenCalled(); // no sheet tables on a maps-only print
+    expect(mockDoc.deletePage).toHaveBeenCalledWith(1);
+    expect(pageCount).toBe(2);
+    expect(mockDoc.save).toHaveBeenCalledWith(expect.stringMatching(/^field-maps-/));
+  });
+
+  it('refuses a maps-only print with no maps instead of saving a blank page', async () => {
+    await expect(generateApplicatorSheetPdf(makeSheetData({ maps: null }), 'original', null, { mapsOnly: true }))
+      .rejects.toThrow(NO_MAP_PAGES_MESSAGE);
+    expect(mockDoc.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps the full sheet (tank contents) when maps-only is not asked for', async () => {
+    const { default: autoTable } = await import('jspdf-autotable');
+    await generateApplicatorSheetPdf(makeSheetData({ maps }), 'enhanced', null, {});
+    expect(autoTable).toHaveBeenCalled();
+    expect(mockDoc.deletePage).not.toHaveBeenCalled();
+    expect(pageCount).toBe(3);
   });
 });

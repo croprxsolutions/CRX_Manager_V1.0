@@ -74,7 +74,7 @@ payload replays the same stored response (including a pre-migration response, wh
 
 ## Undo
 
-Rollback is a new forward migration: drop the three constraints and re-emit the prior stage body. No data to restore.
+Rollback is a new forward migration: drop the four constraints and re-emit the prior stage body. No data to restore.
 
 ## Proof cases (real-schema container, `scripts/smoke/prove-supplier-quote-unit-floor-real-schema.mjs`)
 
@@ -160,3 +160,12 @@ included: 0.
   serialized `NaN`; a text `NaN` is refused.
 - LOW refuted: `convertedCostText` returns nothing for a row that is not eligible or approved, so an invalid
   tiny-quantity row shows no converted cost.
+
+## Luna round 4 (2026-11-24)
+
+MED fixed by a check, not another lock: an older stage call already running during the apply keeps its old body, so
+it could save an out-of-bound row as `new` after the apply committed. New CHECK
+`supplier_price_import_rows_pending_bounds` keeps every row awaiting approval (`new`, `changed`, `cannot_compare`)
+within the bounds, so that late save fails instead (plain message mapped). This ends the timing/lock line of findings
+(rounds 2-4). Correction also writes an import row, so a correction above the ceiling is now refused by this check
+first. Prover: an out-of-bound pending row is refused; all four checks validated.

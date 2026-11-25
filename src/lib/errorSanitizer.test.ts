@@ -430,6 +430,8 @@ describe('sanitizeError', () => {
       .toBe('Nothing was saved. Package quantity must be 0.001 or more');
     expect(sanitizeError({ message: 'new row for relation "supplier_price_observations" violates check constraint "supplier_price_observations_cost_ceiling"' }))
       .toBe('Nothing was saved. A supplier cost cannot be more than $10,000,000 for one line. Check the amount');
+    expect(sanitizeError({ message: 'new row for relation "supplier_price_import_rows" violates check constraint "supplier_price_import_rows_pending_bounds"' }))
+      .toBe('Nothing was saved. A quote line needs a package quantity of 0.001 or more and a cost of $10,000,000 or less. Check the line and try again');
     // The hold-rule name inside some other message is not mistaken for the rule.
     expect(sanitizeError({ message: 'Product inventory_holds_source_needs_customer not found' }))
       .not.toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');

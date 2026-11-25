@@ -13,13 +13,16 @@
 --      factor; any UPDATE of a link row is re-checked, so a staging legacy row must be fixed before it can change).
 --   3. CHECKs supplier_price_observations_package_quantity_floor (>= 0.001) and supplier_price_observations_cost_ceiling
 --      (<= 1e9 cents): backstop for approve and correction (observations are insert-only).
+--   4. CHECK supplier_price_import_rows_pending_bounds: a row still awaiting approval (new, changed, cannot_compare) is
+--      within the same bounds, so a quote saved by an older call already running during the apply fails instead of
+--      leaving a row that looks approvable but cannot be approved.
 --   The checks are added validated: the preflight refuses the whole apply (SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS, with
 --   counts) if any stored link, observation or approvable import row is outside a bound, so no row can slip past them.
 --   NaN is refused too: it sorts above every number.
 -- LIVE EVIDENCE (read-only, production, 2026-11-24): every factor and package quantity in use is exactly 1 (10 links,
 --   20 import rows, 10 observations); 0 below 0.001; largest cost 46,743 cents; stage body md5(prosrc) a927dd96feb00564a3e3e96b012e66e9.
 -- NOT CHANGED: grants, policies, idempotency, other functions and their reads.
--- ROLLBACK: a NEW forward migration: drop the three constraints and re-emit stage_supplier_price_import from 20260720230000.
+-- ROLLBACK: a NEW forward migration: drop the four constraints and re-emit stage_supplier_price_import from 20260720230000.
 -- ============================================================================
 
 CREATE TEMP TABLE supplier_quote_unit_floor_tx ON COMMIT DROP AS SELECT pg_current_xact_id()::text AS transaction_id;
@@ -48,7 +51,8 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conname IN (
       'product_supplier_links_conversion_floor',
       'supplier_price_observations_package_quantity_floor',
-      'supplier_price_observations_cost_ceiling')) THEN
+      'supplier_price_observations_cost_ceiling',
+      'supplier_price_import_rows_pending_bounds')) THEN
     RAISE EXCEPTION 'SUPPLIER_QUOTE_UNIT_FLOOR_BASELINE_DRIFT: a constraint already exists';
   END IF;
   -- Block writes (reads continue) to the three tables until commit, so no row saved by an older in-flight call can land
@@ -84,6 +88,12 @@ ALTER TABLE public.supplier_price_observations
 ALTER TABLE public.supplier_price_observations
   ADD CONSTRAINT supplier_price_observations_cost_ceiling
   CHECK (cost_cents <= 1000000000);
+
+ALTER TABLE public.supplier_price_import_rows
+  ADD CONSTRAINT supplier_price_import_rows_pending_bounds
+  CHECK (row_status NOT IN ('new', 'changed', 'cannot_compare')
+         OR ((package_quantity IS NULL OR (package_quantity >= 0.001 AND package_quantity <> 'NaN'))
+             AND (cost_cents IS NULL OR cost_cents <= 1000000000)));
 
 -- Unchanged from 20260720230000 except the COST_TOO_LARGE branch and the 0.001 package-quantity floor.
 CREATE OR REPLACE FUNCTION public.stage_supplier_price_import(
@@ -400,13 +410,15 @@ BEGIN
   IF (SELECT count(*) FROM pg_constraint c WHERE c.contype = 'c' AND c.conname IN (
         'product_supplier_links_conversion_floor',
         'supplier_price_observations_package_quantity_floor',
-        'supplier_price_observations_cost_ceiling')) <> 3 THEN
-    RAISE EXCEPTION 'POSTFLIGHT_CONSTRAINTS: expected the three checks';
+        'supplier_price_observations_cost_ceiling',
+        'supplier_price_import_rows_pending_bounds')) <> 4 THEN
+    RAISE EXCEPTION 'POSTFLIGHT_CONSTRAINTS: expected the four checks';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_constraint c WHERE NOT c.convalidated AND c.conname IN (
         'product_supplier_links_conversion_floor',
         'supplier_price_observations_package_quantity_floor',
-        'supplier_price_observations_cost_ceiling')) THEN
+        'supplier_price_observations_cost_ceiling',
+        'supplier_price_import_rows_pending_bounds')) THEN
     RAISE EXCEPTION 'POSTFLIGHT_CONSTRAINTS: every check must be validated';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK';

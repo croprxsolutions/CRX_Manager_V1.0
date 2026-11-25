@@ -11,7 +11,8 @@
  *      cost $10,000,000.01 -> invalid COST_TOO_LARGE, $10,000,000.00 -> new;
  *   3. a row at every bound approves and the market-evidence and workspace reads return 1e15 cents without error;
  *      a normal quote ($45.00 for 2 cases, 2.5 gal per case) still converts to 900 cents;
- *   4. correcting an observation to $10,000,000.01 is refused by supplier_price_observations_cost_ceiling.
+ *   2b. an out-of-bound row awaiting approval (as an older call could save) is refused by supplier_price_import_rows_pending_bounds;
+ *   4. correcting an observation to $10,000,000.01 is refused (its import row hits supplier_price_import_rows_pending_bounds).
  *
  * Run: node scripts/smoke/prove-supplier-quote-unit-floor-real-schema.mjs   (needs Docker; never touches live)
  * Prints SUPPLIER_QUOTE_UNIT_FLOOR_PROOF_PASS on success.
@@ -76,9 +77,10 @@ try {
   assert.match(`${again.stdout}${again.stderr}`, /SUPPLIER_QUOTE_UNIT_FLOOR_BASELINE_DRIFT/, 're-apply must refuse');
   assert.equal(scalar(`SELECT string_agg(conname || '=' || convalidated, ',' ORDER BY conname) FROM pg_constraint
     WHERE conname IN ('product_supplier_links_conversion_floor', 'supplier_price_observations_package_quantity_floor',
-      'supplier_price_observations_cost_ceiling')`),
-    'product_supplier_links_conversion_floor=true,supplier_price_observations_cost_ceiling=true,supplier_price_observations_package_quantity_floor=true');
-  console.log('[apply] autocommit refused, applied once with POSTFLIGHT_OK and all three checks validated, re-apply refused');
+      'supplier_price_observations_cost_ceiling', 'supplier_price_import_rows_pending_bounds')`),
+    'product_supplier_links_conversion_floor=true,supplier_price_import_rows_pending_bounds=true,'
+    + 'supplier_price_observations_cost_ceiling=true,supplier_price_observations_package_quantity_floor=true');
+  console.log('[apply] autocommit refused, applied once with POSTFLIGHT_OK and all four checks validated, re-apply refused');
 
   // 1. Link factor floor.
   assert.match(attempt(ADMIN, `${refuse(`r := ${upsertLink('TINY-1', '0.0001', true)};`)} v := t;`),
@@ -103,10 +105,17 @@ try {
     quoteRow(BOUND, '10000000.00', '1', '2026-11-04'),
     quoteRow(BOUND, '10', 'NaN', '2026-11-05'),
     quoteRow(BOUND, '10', '0.000999999', '2026-11-06'),
-  ])};`) + ` v := ${rowStatuses};`);
-  assert.equal(staged, 'ok|invalid:PACKAGE_QUANTITY_INVALID;new:;invalid:COST_TOO_LARGE;new:;invalid:PACKAGE_QUANTITY_INVALID;new:');
+  ])};`) + ` v := ${rowStatuses};
+    -- A row saved by an older call (out of bound yet awaiting approval) is refused by the pending-row check.
+    BEGIN
+      UPDATE public.supplier_price_import_rows SET row_status = 'new', validation_errors = '{}'
+        WHERE import_id = (r->>'id')::uuid AND row_number IN (1, 3);
+      t := 'NOT REFUSED';
+    EXCEPTION WHEN OTHERS THEN t := SQLERRM; END;
+    v := v || '|' || (t LIKE '%supplier_price_import_rows_pending_bounds%')::text;`);
+  assert.equal(staged, 'ok|invalid:PACKAGE_QUANTITY_INVALID;new:;invalid:COST_TOO_LARGE;new:;invalid:PACKAGE_QUANTITY_INVALID;new:|true');
   console.log('[stage] qty 0.0001 and NaN -> PACKAGE_QUANTITY_INVALID; qty 0.001 (and 0.000999999, stored as 0.001) -> new;'
-    + ' $10,000,000.01 -> COST_TOO_LARGE; $10,000,000.00 -> new');
+    + ' $10,000,000.01 -> COST_TOO_LARGE; $10,000,000.00 -> new; an out-of-bound row awaiting approval is refused');
 
   // 3. Bounds and a normal quote approve, and both reads still work.
   const approved = attempt(ADMIN, asUser(`r := ${stage([
@@ -129,10 +138,11 @@ try {
   // 4. Correction ceiling.
   const OBS = scalar(`SELECT id FROM public.supplier_price_observations WHERE product_supplier_link_id = '${NORMAL}';`);
   assert.match(attempt(ADMIN, `${refuse(`r := public.correct_supplier_price_observation('${OBS}', '10000000.01', 'typo', '${ADMIN}', '${key('fix')}');`)} v := t;`),
-    /^ok\|.*violates check constraint "supplier_price_observations_cost_ceiling"/, 'correction above the ceiling refused');
+    // The correction writes its import row before the observation, so the pending-row check refuses it first.
+    /^ok\|.*violates check constraint "supplier_price_import_rows_pending_bounds"/, 'correction above the ceiling refused');
   assert.match(attempt(ADMIN, asUser(`r := public.correct_supplier_price_observation('${OBS}', '50.00', 'typo', '${ADMIN}', '${key('fix')}');`) + ` v := 'saved';`),
     /^ok\|saved$/, 'a normal correction saves');
-  console.log('[correct] $10,000,000.01 refused by the cost ceiling; $50.00 saves');
+  console.log('[correct] $10,000,000.01 refused by the pending-row check; $50.00 saves');
 
   console.log('\nSUPPLIER_QUOTE_UNIT_FLOOR_PROOF_PASS');
 } finally {

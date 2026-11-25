@@ -25,6 +25,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Nothing was saved. Package quantity must be 0.001 or more'],
   [/violates check constraint "supplier_price_observations_cost_ceiling"/,
    'Nothing was saved. A supplier cost cannot be more than $10,000,000 for one line. Check the amount'],
+  [/violates check constraint "supplier_price_import_rows_pending_bounds"/,
+   'Nothing was saved. A quote line needs a package quantity of 0.001 or more and a cost of $10,000,000 or less. Check the line and try again'],
   [/^PRICING_DUPLICATE_PRODUCT_ID\b/, 'No prices were changed. The same product appears on more than one row of the price sheet. Download a fresh price sheet and make your changes in it, without copying or pasting product rows'],
   [/^PRODUCT_CATEGORY_RETIRED\b/, 'This category is retired. Choose an active category'],
   [/^PRODUCT_CATEGORY_NAME_REQUIRED\b/, 'Enter a category name'],

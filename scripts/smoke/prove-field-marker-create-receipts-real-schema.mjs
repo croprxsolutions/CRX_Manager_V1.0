@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { USERS, buildContainer, claims, id, psql, removeContainer, scalar, seedUsers } from './undo-paths/harness.mjs';
 
-const migration = '20270306140000_field_marker_create_receipts.sql';
+const migration = '20270306220000_field_marker_create_receipts.sql';
 const { admin, rep, driver, applicator } = USERS;
 const farm = id(3400);
 const field = id(3401);

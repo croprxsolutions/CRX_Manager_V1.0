@@ -610,12 +610,25 @@ export async function approvePricingChangeSet(input: ApprovePricingChangeSetInpu
   assertRpcResult<{ status: 'approved' }>(data, 'approve_pricing_change_set');
 }
 
+/** How long the screen waits for a price sheet's refusal reason before keeping the general message. */
+export const REFUSAL_REASON_TIMEOUT_MS = 5000;
+
 /** Why the database refused a price sheet: one reason code, or NONE (read-only, active admins only). */
 export async function getPricingWorkbookExportRefusalReason(exportId: string): Promise<string> {
-  // Not in the generated types yet (20270303140000).
-  const { data, error } = await supabaseUntyped.rpc('get_pricing_workbook_export_refusal_reason', {
-    p_export_id: exportId,
+  const timeLimit = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // The abort stops the read itself. The race also ends a stall in the sign-in step before it.
+  const stalled = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timeLimit.abort();
+      reject(new Error('get_pricing_workbook_export_refusal_reason timed out'));
+    }, REFUSAL_REASON_TIMEOUT_MS);
   });
+  // Not in the generated types yet (20270303140000).
+  const read = supabaseUntyped
+    .rpc('get_pricing_workbook_export_refusal_reason', { p_export_id: exportId })
+    .abortSignal(timeLimit.signal);
+  const { data, error } = await Promise.race([read, stalled]).finally(() => clearTimeout(timer));
   if (error) throw error;
   return assertRpcResult<string>(data, 'get_pricing_workbook_export_refusal_reason');
 }

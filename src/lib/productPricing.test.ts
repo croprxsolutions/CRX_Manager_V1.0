@@ -23,6 +23,7 @@ import {
   defaultPricingMode,
   formatPricingMarginPercent,
   getPricingWorkbookExportRefusalReason,
+  REFUSAL_REASON_TIMEOUT_MS,
   pricingDollarInputToCents,
   pricingMarginTextIsValid,
   previewProductPricingChanges,
@@ -229,19 +230,37 @@ describe('assertPricingPreviewRowsSafe', () => {
 });
 
 describe('getPricingWorkbookExportRefusalReason', () => {
+  const answers = (response: Promise<unknown>) => {
+    const abortSignal = vi.fn(() => response);
+    mockRpc.mockReturnValueOnce({ abortSignal });
+    return abortSignal;
+  };
   beforeEach(() => mockRpc.mockReset());
 
-  it('asks for one export by id and returns the code', async () => {
-    mockRpc.mockResolvedValue({ data: 'ALREADY_APPLIED', error: null });
+  it('asks for one export by id, with a time limit, and returns the code', async () => {
+    const abortSignal = answers(Promise.resolve({ data: 'ALREADY_APPLIED', error: null }));
     await expect(getPricingWorkbookExportRefusalReason('export-1')).resolves.toBe('ALREADY_APPLIED');
     expect(mockRpc).toHaveBeenCalledWith('get_pricing_workbook_export_refusal_reason', { p_export_id: 'export-1' });
+    expect(abortSignal).toHaveBeenCalledWith(expect.any(AbortSignal));
   });
 
   it('throws on an error or on no data (a silent denial)', async () => {
-    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'ADMIN_REQUIRED' } });
+    answers(Promise.resolve({ data: null, error: { message: 'ADMIN_REQUIRED' } }));
     await expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toMatchObject({ message: 'ADMIN_REQUIRED' });
-    mockRpc.mockResolvedValueOnce({ data: null, error: null });
+    answers(Promise.resolve({ data: null, error: null }));
     await expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toThrow(/returned no data/);
+  });
+
+  it('gives up when the database never answers, so the screen keeps the general message', async () => {
+    vi.useFakeTimers();
+    try {
+      answers(new Promise(() => undefined));
+      const lookup = expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toBeDefined();
+      await vi.advanceTimersByTimeAsync(REFUSAL_REASON_TIMEOUT_MS + 1);
+      await lookup;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

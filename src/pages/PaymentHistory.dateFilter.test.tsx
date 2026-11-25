@@ -112,6 +112,15 @@ describe('Payment History counts checks entered on Prepay Credits (KI-207)', () 
     expect(activeTotal()).toHaveTextContent('3 payment(s) today');
     expect(screen.getByText(/include 1 check\(s\) entered on Prepay Credits \(\$300\.00\)/)).toHaveTextContent('Export CSV lists each one');
   });
+
+  it('counts a check entered after 6 PM Chicago on the Chicago day, not the UTC one', async () => {
+    // 8 PM Chicago on Nov 24 is Nov 25 in UTC.
+    H.tables.prepay_credits = [credit('p1', 4000, { created_at: '2026-11-25T02:00:00Z' })];
+    render(<MemoryRouter><PaymentHistory /></MemoryRouter>);
+    expect(await screen.findByText('CHK-october')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Today' }));
+    expect(activeTotal()).toHaveTextContent('$190.00');
+  });
 });
 
 describe('Payment History date filter and the opened payment', () => {

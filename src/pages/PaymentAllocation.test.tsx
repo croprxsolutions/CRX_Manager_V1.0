@@ -360,7 +360,7 @@ describe('Record Payments: faster entry', () => {
     expect(screen.queryByText('Somewhere else')).not.toBeInTheDocument();
   });
 
-  it('typing over the chosen customer lets go of it, so Apply Payment cannot post to that customer', async () => {
+  it('a stray keystroke keeps the customer and the typed allocations; Apply waits until the name is back', async () => {
     renderPayments();
     await chooseByKeyboard();
     fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
@@ -369,13 +369,29 @@ describe('Record Payments: faster entry', () => {
 
     const box = screen.getByRole('combobox', { name: 'Customer' });
     fireEvent.change(box, { target: { value: 'Small' } });
-    fireEvent.blur(box);
-
-    expect(screen.queryByText('INV-OLD')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Apply Payment/ })).not.toBeInTheDocument();
+    // While the box shows other text, nothing can post or refill allocations.
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Pay full balance/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Auto-Allocate/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
     expect(mockRpc).not.toHaveBeenCalled();
-    // The typed check amount stays, as before.
+
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(box).toHaveValue('Big Farm');
+    expect(screen.getByText('INV-OLD')).toBeInTheDocument();
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled();
     expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
+  });
+
+  it('blur after a stray keystroke also puts the chosen customer back', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(box, { target: { value: 'Big Farmx' } });
+    fireEvent.blur(box);
+    expect(box).toHaveValue('Big Farm');
+    expect(screen.getByText('INV-OLD')).toBeInTheDocument();
   });
 
   it('Pay full balance is admin-only: a sales rep sees only their own invoices, so the total could be short', async () => {

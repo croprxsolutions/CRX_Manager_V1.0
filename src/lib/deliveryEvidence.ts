@@ -162,7 +162,7 @@ export async function uploadEvidencePhoto(
     file_size: file.size,
     sort_order: count ?? 0,
     caption,
-    // A signed-ticket photo carries the lines the screen showed when it was taken (20270307030000).
+    // A signed-ticket photo carries the lines the screen showed when it was taken (20270307160000).
     ...(linesSeen ? { lines_seen: linesSeen } : {}),
   }).select('id, storage_path, image_url, caption, uploaded_at, lines_seen');
   checkMutationResult(result, 'Insert delivery photo');
@@ -260,7 +260,7 @@ export async function storedNoProofReason(deliveryId: string, typedReason: strin
 }
 
 /**
- * Proof bound to the load (migration 20270307030000). One delivery line as the screen showed it when
+ * Proof bound to the load (migration 20270307160000). One delivery line as the screen showed it when
  * the customer signed or the ticket photo was taken: its order line, product, scheduled quantity and
  * the delivered amount on screen (the scheduled quantity for a full delivery).
  */

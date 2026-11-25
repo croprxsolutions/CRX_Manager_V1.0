@@ -17,7 +17,7 @@ describe('Brand Links workbook tab', () => {
   it('does not create link changes for old workbooks, untouched files or blanked links', async () => {
     const old = new Workbook();
     expect(parseBrandDocumentSheet(old)).toBeNull();
-    addBrandDocumentSheet(old, [entry]);
+    addBrandDocumentSheet(old, [{ ...entry, owner_name: ' Example group ' }]);
     const roundTrip = new Workbook();
     await roundTrip.xlsx.load(await old.xlsx.writeBuffer());
     expect(parseBrandDocumentSheet(roundTrip)).toEqual({ rows: [], issues: [] });

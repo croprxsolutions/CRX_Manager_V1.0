@@ -37,6 +37,8 @@ export type BrandDocumentChange = SaveBrandDocument | {
   reason?: string;
 };
 
+type DocumentEventValue = Partial<Pick<BrandDocumentLink, 'url' | 'state_code' | 'expires_on'>>;
+
 export interface BrandDocumentEvent {
   id: string;
   link_id: string;
@@ -44,8 +46,8 @@ export interface BrandDocumentEvent {
   changed_by: string;
   created_at: string;
   reason: string | null;
-  before_value: { url?: string } | null;
-  after_value: { url?: string };
+  before_value: DocumentEventValue | null;
+  after_value: DocumentEventValue;
 }
 
 const DOCUMENT_HISTORY_PAGE_SIZE = 50;

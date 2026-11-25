@@ -22,7 +22,8 @@ describe('Brand documents on Product Detail', () => {
   it('shows who changed a link and lets admins open older history', async () => {
     const event = {
       id: 'recent', link_id: label.id, action: 'saved', changed_by: 'editor',
-      created_at: '2026-11-24T14:00:00Z', before_value: null, after_value: { url: label.url },
+      created_at: '2026-11-24T14:00:00Z', before_value: { url: label.url, expires_on: '2027-01-01' },
+      after_value: { url: label.url, expires_on: '2027-12-31' },
     };
     hooks.history.mockResolvedValueOnce({ events: [event], hasOlder: true, names: new Map([['editor', 'Pat Editor']]) })
       .mockResolvedValueOnce({ events: [{ ...event, id: 'older', reason: 'Old report was verified' }], hasOlder: false, names: new Map() });
@@ -31,6 +32,7 @@ describe('Brand documents on Product Detail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Manage documents for Dual II Magnum' }));
     fireEvent.click(screen.getByRole('button', { name: 'Show history' }));
     expect(await screen.findByText(/Pat Editor/)).toBeVisible();
+    expect(screen.getByText('Expires · 2027-01-01 → 2027-12-31')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Older changes' }));
     expect(await screen.findByText('Old report was verified')).toBeVisible();
     expect(hooks.history).toHaveBeenCalledWith(target, 0);

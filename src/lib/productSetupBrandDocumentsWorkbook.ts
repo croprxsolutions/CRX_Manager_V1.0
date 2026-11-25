@@ -89,7 +89,8 @@ function downloaded(sheet: Worksheet, row: number): DownloadRow {
   const state = raw as Partial<DownloadRow>;
   if (typeof state.id !== 'string' || typeof state.parent_brand !== 'boolean'
       || !Number.isInteger(state.brand_version) || typeof state.primary !== 'boolean'
-      || state.brand_name !== cell(sheet, row, 2) || state.owner_name !== cell(sheet, row, 1)) {
+      || typeof state.brand_name !== 'string' || state.brand_name.trim() !== cell(sheet, row, 2)
+      || typeof state.owner_name !== 'string' || state.owner_name.trim() !== cell(sheet, row, 1)) {
     throw new Error('Brand or product details changed. Download a fresh workbook.');
   }
   for (const link of [state.specimen, state.sds, state.supplemental]) {

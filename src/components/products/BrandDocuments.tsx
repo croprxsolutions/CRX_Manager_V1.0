@@ -243,6 +243,11 @@ function DocumentHistory({ history, page, onPage }: {
             })}</time>
             {event.before_value?.url && event.before_value.url !== event.after_value?.url && <span className="block">{event.before_value.url}</span>}
             {event.after_value?.url && <span className="block">{event.after_value.url}</span>}
+            {([['state_code', 'State'], ['expires_on', 'Expires']] as const).map(([key, label]) => {
+              const before = event.before_value?.[key] ?? null;
+              const after = event.after_value?.[key] ?? null;
+              return before !== after && <span key={key} className="block">{label} · {before ?? '—'} → {after ?? '—'}</span>;
+            })}
             {event.reason && <span className="block">{event.reason}</span>}
           </li>
         ))}

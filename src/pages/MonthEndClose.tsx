@@ -529,7 +529,7 @@ export default function MonthEndClose() {
         title="Month-End Close"
         subtitle="Review and close accounting periods"
         actions={(
-          <div className="flex gap-2 items-center">
+          <div className="flex flex-wrap gap-2 items-center">
           {/* A9 month/year picker — view/close any month. STRUCTURAL race guard (Codex R6):
               the selects are disabled while a fetch (loading) OR a close (closing) is in
               flight, so at most ONE is ever in play — no stale response / post-close refresh

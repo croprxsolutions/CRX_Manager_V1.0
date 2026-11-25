@@ -33,6 +33,7 @@ import {
   type ApplicatorSheetFormat,
   type ApplicatorSheetCustomConfig,
   type ApplicatorSheetColumns,
+  type ApplicatorSheetSafety,
   DEFAULT_SHEET_COLUMNS,
   SHEET_FORMAT_LABELS,
   fieldDirectionsUrl,
@@ -97,7 +98,15 @@ export interface ApplicatorSheetPdfOptions {
   blankSections?: number;
   includePreviousApplications?: boolean;
   showBanner?: boolean;
+  /**
+   * Print only the map pages (an extra maps print for the crew); no job order.
+   * Tank contents always print on the full sheet; there is no option to hide them (Mason, 2026-11-24).
+   */
+  mapsOnly?: boolean;
 }
+
+/** Thrown when a map-only print has no map page to print. */
+export const NO_MAP_PAGES_MESSAGE = 'This job has no field maps to print. Draw or import field boundaries first.';
 
 /**
  * Draw one applicator sheet with the given theme. Shared by all three formats so
@@ -474,6 +483,74 @@ function appendMapPage(
   }
 }
 
+/**
+ * The optional safety sheet: every product's signal word, REI and PHI on its own
+ * page(s), never cut short (Mason, 2026-11-24: off by default, all of it on its own sheet).
+ */
+/** One safety interval cell; a blank or negative value is not a real interval. */
+function safetyInterval(value: number | null, unit: string): string {
+  return value != null && Number.isFinite(value) && value >= 0 ? `${fmtNum(value)} ${unit}` : 'See label';
+}
+
+function appendSafetySheet(doc: JsPDFWithAutoTable, autoTable: typeof import('jspdf-autotable').default, data: ApplicatorSheetData): void {
+  if (data.safety === undefined) return;
+  const items: ApplicatorSheetSafety[] = data.safety ?? [];
+  const margin = 40;
+  const width = doc.internal.pageSize.getWidth() - 2 * margin;
+  const heading = `Job ${data.job_number} · ${customerLine(data)}`;
+  doc.addPage();
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(...CHARCOAL);
+  doc.text('Safety — Signal Word, REI, PHI', margin, margin + 10);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(...GRAY);
+  const printed = new Date().toLocaleDateString();
+  // Name the source only when the records were actually read.
+  const source = data.safety === null ? '' : ` · From product records on ${printed}`;
+  const intro = doc.splitTextToSize(`${heading}${source} · Always read and follow the product label.`, width) as string[];
+  doc.text(intro, margin, margin + 26);
+  const startY = margin + 30 + intro.length * 11;
+  if (items.length === 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(...CHARCOAL);
+    doc.text(data.safety === null
+      ? 'Safety could not be loaded from the product records. Read each product label before entering a treated field.'
+      : 'No products on this job.', margin, startY + 14, { maxWidth: width });
+    return;
+  }
+  const firstPage = doc.getNumberOfPages();
+  autoTable(doc, {
+    startY,
+    margin: { left: margin, right: margin, top: margin + 20, bottom: 60 },
+    // "#" is the line's place on the job order: it tells same-named lines apart.
+    head: [['#', 'Product', 'EPA Reg. No.', 'Signal Word', 'REI', 'PHI']],
+    body: items.map((item, index) => [
+      String(index + 1),
+      item.product_name,
+      // A blank number is not on file, not "unregistered" (that needs a registered flag, KI-206).
+      item.epa_registration || 'See label',
+      item.signal_word ? item.signal_word.toUpperCase() : 'See label',
+      safetyInterval(item.rei_hours, 'hr'),
+      safetyInterval(item.phi_days, 'd'),
+    ]),
+    styles: { fontSize: 10, cellPadding: 5 },
+    headStyles: { fillColor: CRX_GREEN, textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: ALT_ROW_BG },
+    // A loose continuation page still names its job.
+    didDrawPage: () => {
+      if (doc.getNumberOfPages() === firstPage) return;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(...GRAY);
+      // One line only, so it never runs into the repeated table header.
+      doc.text((doc.splitTextToSize(`Safety (continued) · ${heading}`, width) as string[])[0], margin, margin + 6);
+    },
+  });
+}
+
 /** Append optional overview and per-field satellite map pages after the crew sheet. */
 function appendMapPages(doc: JsPDFWithAutoTable, data: ApplicatorSheetData): void {
   if (!data.maps) return;
@@ -530,10 +607,20 @@ export async function generateApplicatorSheetPdf(
     blankSections: options.blankSections ?? 0,
     includePreviousApplications: options.includePreviousApplications !== false,
     showBanner: options.showBanner !== false,
+    mapsOnly: options.mapsOnly === true,
   };
 
-  drawSheet(doc, autoTable, data, theme, resolvedOptions);
-  appendMapPages(doc, data);
+  if (resolvedOptions.mapsOnly) {
+    appendMapPages(doc, data);
+    // jsPDF opens on a blank first page; with no map page added there is nothing to print.
+    if (doc.getNumberOfPages() === 1) throw new Error(NO_MAP_PAGES_MESSAGE);
+    doc.deletePage(1);
+  } else {
+    drawSheet(doc, autoTable, data, theme, resolvedOptions);
+    // The optional safety sheet goes with the job order, not with a map-pages-only print.
+    appendSafetySheet(doc, autoTable, data);
+    appendMapPages(doc, data);
+  }
 
   // Footer on every page (drawn last so page count is final).
   const pageCount = doc.getNumberOfPages();
@@ -542,5 +629,5 @@ export async function generateApplicatorSheetPdf(
     drawFooter(doc, 40, theme.footerText, company);
   }
 
-  doc.save(filename || `applicator-sheet-${format}-${data.job_number}.pdf`);
+  doc.save(filename || (resolvedOptions.mapsOnly ? `field-maps-${data.job_number}.pdf` : `applicator-sheet-${format}-${data.job_number}.pdf`));
 }

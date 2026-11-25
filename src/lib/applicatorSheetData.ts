@@ -194,6 +194,19 @@ export interface ApplicatorSheetBillingSplit {
   phone: string | null;
 }
 
+/**
+ * One job order line's safety facts for the optional safety sheet, ALL read from the
+ * product's record at print time (Mason, 2026-11-24: "Yes, today's records"). The job
+ * order itself keeps its own saved REI/PHI. null = not on file (prints "See label").
+ */
+export interface ApplicatorSheetSafety {
+  product_name: string;
+  epa_registration: string | null;
+  signal_word: string | null;
+  rei_hours: number | null;
+  phi_days: number | null;
+}
+
 /** The full, format-agnostic sheet payload. All three layouts read this. */
 export interface ApplicatorSheetData {
   job_number: string;
@@ -213,6 +226,8 @@ export interface ApplicatorSheetData {
   previousApplications?: PreviousFieldApplications[];
   /** Optional billed-customer allocation rows for the operational packet. */
   billingSplits?: ApplicatorSheetBillingSplit[];
+  /** Present only when the safety sheet was chosen: one row per saved product line; null = could not be read. */
+  safety?: ApplicatorSheetSafety[] | null;
 }
 
 // ── Raw input shapes (what JobDetail hands in) ───────────────────────────────

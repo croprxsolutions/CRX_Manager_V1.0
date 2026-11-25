@@ -541,13 +541,13 @@ function gateRequest(request) {
     if (frozen) deny(`PR MERGE GATE: this merge into staging is refused: ${frozen}.`);
     const destructive = stagingDestructiveProblem({ repo: request.repo, gh: hardGateGh, number: pr.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pr.headRefOid, baseSha: pr.baseRefOid });
     if (destructive) deny(`PR MERGE GATE: this merge into staging is refused: ${destructive}.`);
-    // Taha's lanes until Dec 15 (taha-lane-lib.mjs, Mason 2026-11-22); Taha's sign-off on the head, or Mason's `taha override #<PR> <code>`, lets one PR at one commit through.
+    // Taha's lanes (taha-lane-lib.mjs, Mason 2026-11-22): Taha's Approve on this head, or Mason's `taha override #<PR> <code>`, lets one PR at one commit through.
     const lane = tahaLaneGate({
       prefix: "PR MERGE GATE",
       pullRequest: Number(pr.number),
       headSha: pr.headRefOid,
       tellTaha: (body) => tellTahaOnGitHub({ repo: request.repo, gh: hardGateGh, pullRequest: Number(pr.number), body }),
-      tahaApproved: () => tahaApprovedOnGitHub({ repo: request.repo, gh: hardGateGh, number: Number(pr.number), headSha: pr.headRefOid }),
+      tahaApproved: () => tahaApprovedOnGitHub({ repo: request.repo, gh: hardGateGh, pullRequest: Number(pr.number), headSha: pr.headRefOid }),
       files: prFilesOnGitHub({ repo: request.repo, gh: hardGateGh, number: Number(pr.number), headSha: pr.headRefOid }),
       dirs: skipStateDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]),
       notice: (text) => process.stderr.write(text),

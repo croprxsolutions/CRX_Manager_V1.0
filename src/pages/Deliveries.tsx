@@ -2331,7 +2331,6 @@ export default function Deliveries() {
                 key={completeTarget?.id ?? 'none'}
                 onSignatureChange={setCompleteSignature}
                 label="Customer Signature"
-                height={120}
               />
             </div>
           )}

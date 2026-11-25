@@ -42,7 +42,7 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
 import { sanitizeError, assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, supabase, supabaseUntyped } from '../lib/db';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
-import { localToday } from '../lib/dateUtils';
+import { BUSINESS_TIMEZONE, localToday } from '../lib/dateUtils';
 import { formatExactUSD } from '../lib/money';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
 import { Sentry } from '../lib/sentry';
@@ -79,7 +79,7 @@ import {
 } from '../lib/productCostBasis';
 import { PRODUCT_COLUMNS, withAdminCost } from '../lib/costFields';
 import {
-  duplicateProductDraft, duplicateProductSource, listProductCategories, missingProductSetup, nearMatchNames, normalizedProductSetup,
+  duplicateProductDraft, matchReadIntervals, duplicateProductSource, listProductCategories, missingProductSetup, nearMatchNames, normalizedProductSetup,
   productSetupValidationMessage, visibleProductCategories, type DuplicateProductSource,
 } from '../lib/productSetup';
 import { listProductCropOptions, listProductUseTimingOptions } from '../lib/productUseTimings';
@@ -94,12 +94,14 @@ const PRODUCT_NONPRICING_FIELDS = [
   'notes', 'epa_registration', 'product_form', 'inventory_unit',
   'container_unit', 'container_type', 'is_rup', 'signal_word', 'internal_notes',
   'quoting_notes',
-  'rei_hours', 'phi_days', 'max_label_rate', 'max_label_rate_unit', 'use_timings',
+  'rei_hours', 'phi_days', 'rei_not_applicable', 'phi_not_applicable', 'max_label_rate', 'max_label_rate_unit', 'use_timings',
 ] as const satisfies ReadonlyArray<keyof Product>;
 
 // Other screens write these (commit_label_draft writes the six label fields).
 const PRODUCT_FIELDS_WRITTEN_ELSEWHERE = [
   'vendor', 'signal_word', 'rei_hours', 'phi_days', 'epa_registration', 'max_label_rate', 'max_label_rate_unit',
+  // A real label number written elsewhere clears these in the database, so an open page must not re-send them.
+  'rei_not_applicable', 'phi_not_applicable',
 ] as const satisfies ReadonlyArray<(typeof PRODUCT_NONPRICING_FIELDS)[number]>;
 
 const PRODUCT_PRICING_FIELDS = [
@@ -115,6 +117,27 @@ type ProductPricingMarginDrafts = Partial<Record<ProductPricingMarginField, stri
 // PAR-1: a grouped size's parent owns these; the page never sends them for one.
 const PARENT_OWNED_FIELDS = ['category', 'use_timings', 'epa_registration', ...PRODUCT_RATE_KEYS] as const;
 
+/** The "label gives no interval" tick under REI or PHI. Ticking clears the number: never a fake 0. */
+function IntervalNotApplicable({ label, checked, disabled, epaPending, onChange }: {
+  label: string; checked: boolean; disabled: boolean; epaPending: boolean; onChange: (checked: boolean) => void;
+}) {
+  return (
+    <>
+    <label className="mt-2 flex items-center gap-2 cursor-pointer">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        disabled={disabled}
+        className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+      />
+      <span className="text-sm text-secondary">{label}</span>
+    </label>
+    {epaPending && <p className="mt-1 text-xs text-secondary">Save the new EPA number first, then tick for its label.</p>}
+    </>
+  );
+}
+
 function nonpricingProductPayload(product: Partial<Product>, persisted?: Product, parentOwned = false): Record<string, unknown> {
   const payload: Record<string, unknown> = Object.fromEntries([
     ...PRODUCT_NONPRICING_FIELDS.map((field) => [field, product[field]] as const),
@@ -128,6 +151,11 @@ function nonpricingProductPayload(product: Partial<Product>, persisted?: Product
   if (persisted) {
     for (const field of PRODUCT_FIELDS_WRITTEN_ELSEWHERE) {
       if (payload[field] === (persisted[field] ?? null)) delete payload[field];
+    }
+    // A new EPA number clears the ticks in the database (a new label needs a fresh review), so none ride along.
+    if ('epa_registration' in payload) {
+      delete payload.rei_not_applicable;
+      delete payload.phi_not_applicable;
     }
   }
   return payload;
@@ -400,6 +428,8 @@ export default function ProductDetail() {
   const [nameRequired, setNameRequired] = useState(false);
   const [unitRequired, setUnitRequired] = useState(false);
   const [reiDraft, setReiDraft] = useState('');
+  // What the REI/PHI box held when its "not applicable" tick went on, so unticking puts it back.
+  const intervalDraftBeforeTick = useRef<{ read?: Product | null; rei?: string; phi?: string }>({});
   const [phiDraft, setPhiDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [costModal, setCostModal] = useState(false);
@@ -449,17 +479,20 @@ export default function ProductDetail() {
   const reloadRequired = pricingReloadRequired || productStale;
   // cost_history is admin-only under RLS (the panel only renders for admins).
   const costHistoryRead = useLoad<CostHistory[]>(isAdmin && !isNew && id ? `cost-history:${id}` : null, async () => {
-    const { data, error } = await supabase
+    // cost_history also logs price-only changes (cost unchanged) for Sell Price History. PostgREST cannot
+    // compare two columns, so read every row and keep the newest 20 whose cost really changed.
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('cost_history')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('product_id', id!)
       // The starting snapshot (20261026140000) records no change; the Sell Price History card shows it.
       .neq('change_source', 'starting_snapshot')
       .order('changed_at', { ascending: false })
-      .limit(20);
+      .order('id', { ascending: false })
+      .range(from, to)));
     if (error) throw error;
     if (!Array.isArray(data)) throw new Error('cost history read returned no list');
-    return data as CostHistory[];
+    return (data as CostHistory[]).filter((row) => row.old_cost !== row.new_cost).slice(0, 20);
   }, { report: { tags: { read: 'product_detail_cost_history' } } });
   const reloadCostHistory = costHistoryRead.reload;
   const costHistory = costHistoryRead.status === 'loaded' ? costHistoryRead.data : NO_ROWS;
@@ -601,7 +634,13 @@ export default function ProductDetail() {
     setManualBasisCost('');
     setCostBasisPricingBehavior('keep_sell_prices');
     pricingPreviewIntentRef.current = null;
+    intervalDraftBeforeTick.current = {};
   }, [id, resetApplyPricingKey, resetPreviewPricingKey]);
+
+  // Ticks belong to the saved EPA number; while a new one is unsaved they show off and stay locked (the save drops them).
+  const epaPending = Boolean(persistedProduct) && (product.epa_registration?.trim() || null) !== (persistedProduct?.epa_registration?.trim() || null);
+  const reiNotApplicable = Boolean(product.rei_not_applicable) && !epaPending;
+  const phiNotApplicable = Boolean(product.phi_not_applicable) && !epaPending;
 
   const saveExistingProductDetails = async () => {
     const validation = productSetupValidationMessage(product, reiDraft, phiDraft, persistedProduct);
@@ -614,12 +653,13 @@ export default function ProductDetail() {
     if (!persistedProduct || persistedProduct.id !== id || !Number.isInteger(persistedProduct.pricing_version)) {
       throw new Error('Reload this Product before saving details.');
     }
-    const result = await supabaseUntyped
+    const payload = nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct), persistedProduct, parentOwned);
+    const query = supabaseUntyped
       .from('products')
-      .update(nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct), persistedProduct, parentOwned))
+      .update(payload)
       .eq('id', id!)
-      .eq('pricing_version', persistedProduct.pricing_version)
-      .select('id');
+      .eq('pricing_version', persistedProduct.pricing_version);
+    const result = await matchReadIntervals(query, payload, persistedProduct).select('id');
     if (!result.error && Array.isArray(result.data) && result.data.length === 0) {
       throw new Error('Product details changed after this page loaded. Reload before saving.');
     }
@@ -1663,34 +1703,74 @@ export default function ProductDetail() {
                   <option value="Caution">Caution</option>
                 </select>
               </div>
-              <Input
-                label="REI (hours)"
-                type="number"
-                min={0}
-                step={1}
-                value={reiDraft}
-                onChange={(e) => {
-                  if (reloadRequired) return;
-                  setReiDraft(e.target.value);
-                  update('rei_hours', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
-                }}
-                disabled={!isAdmin}
-                placeholder="From label, e.g. 12"
-              />
-              <Input
-                label="PHI (days)"
-                type="number"
-                min={0}
-                step={1}
-                value={phiDraft}
-                onChange={(e) => {
-                  if (reloadRequired) return;
-                  setPhiDraft(e.target.value);
-                  update('phi_days', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
-                }}
-                disabled={!isAdmin}
-                placeholder="From label, e.g. 30"
-              />
+              <div>
+                <Input
+                  label="REI (hours)"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={reiDraft}
+                  onChange={(e) => {
+                    if (reloadRequired) return;
+                    setReiDraft(e.target.value);
+                    update('rei_hours', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
+                  }}
+                  disabled={!isAdmin || saving || reloadRequired || reiNotApplicable}
+                  placeholder={reiNotApplicable ? 'Not applicable' : 'From label, e.g. 12'}
+                />
+                {!isNew && (
+                  <IntervalNotApplicable
+                    label="Label gives no REI"
+                    checked={reiNotApplicable}
+                    disabled={!isAdmin || saving || reloadRequired || epaPending}
+                    epaPending={epaPending}
+                    onChange={(checked) => {
+                      if (reloadRequired || epaPending) return;
+                      update('rei_not_applicable', checked);
+                      // Unticking puts back what the box held before this read's tick, so a mis-click never erases a number.
+                      if (intervalDraftBeforeTick.current.read !== persistedProduct) intervalDraftBeforeTick.current = { read: persistedProduct };
+                      if (checked) intervalDraftBeforeTick.current.rei = reiDraft;
+                      const draft = checked ? '' : intervalDraftBeforeTick.current.rei ?? String(persistedProduct?.rei_hours ?? '');
+                      setReiDraft(draft);
+                      update('rei_hours', /^\d+$/.test(draft) ? Number(draft) : null);
+                    }}
+                  />
+                )}
+              </div>
+              <div>
+                <Input
+                  label="PHI (days)"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={phiDraft}
+                  onChange={(e) => {
+                    if (reloadRequired) return;
+                    setPhiDraft(e.target.value);
+                    update('phi_days', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
+                  }}
+                  disabled={!isAdmin || saving || reloadRequired || phiNotApplicable}
+                  placeholder={phiNotApplicable ? 'Not applicable' : 'From label, e.g. 30'}
+                />
+                {!isNew && (
+                  <IntervalNotApplicable
+                    label="Label gives no PHI"
+                    checked={phiNotApplicable}
+                    disabled={!isAdmin || saving || reloadRequired || epaPending}
+                    epaPending={epaPending}
+                    onChange={(checked) => {
+                      if (reloadRequired || epaPending) return;
+                      update('phi_not_applicable', checked);
+                      // Unticking puts back what the box held before this read's tick, so a mis-click never erases a number.
+                      if (intervalDraftBeforeTick.current.read !== persistedProduct) intervalDraftBeforeTick.current = { read: persistedProduct };
+                      if (checked) intervalDraftBeforeTick.current.phi = phiDraft;
+                      const draft = checked ? '' : intervalDraftBeforeTick.current.phi ?? String(persistedProduct?.phi_days ?? '');
+                      setPhiDraft(draft);
+                      update('phi_days', /^\d+$/.test(draft) ? Number(draft) : null);
+                    }}
+                  />
+                )}
+              </div>
             </div>
 
             {epaLookupResult && (
@@ -2443,11 +2523,11 @@ export default function ProductDetail() {
                     {costHistory.map((ch) => (
                       <div key={ch.id} className="border-b border-gray-50 pb-3 last:border-0">
                         <div className="flex justify-between text-sm">
-                          <span className="text-red-500 line-through">${ch.old_cost?.toFixed(2)}</span>
-                          <span className="text-crx-green font-medium">${ch.new_cost?.toFixed(2)}</span>
+                          <span className="text-red-500 line-through">{ch.old_cost == null ? 'No cost' : formatExactUSD(ch.old_cost)}</span>
+                          <span className="text-crx-green font-medium">{ch.new_cost == null ? 'No cost' : formatExactUSD(ch.new_cost)}</span>
                         </div>
                         {ch.change_note && <p className="text-xs text-secondary mt-1">{ch.change_note}</p>}
-                        <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString()}</p>
+                        <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString('en-US', { timeZone: BUSINESS_TIMEZONE })}</p>
                       </div>
                     ))}
                   </div>
@@ -2498,7 +2578,7 @@ export default function ProductDetail() {
               </Card>
               </PhoneSection>
             )}
-            <ProductChangeHistory productId={id} reloadToken={priceHistoryReloadToken} />
+            <ProductChangeHistory productId={id} reloadToken={priceHistoryReloadToken} showPriceHistoryNote={isAdmin} />
           </div>
         )}
       </div>

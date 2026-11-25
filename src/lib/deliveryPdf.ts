@@ -45,6 +45,21 @@ export interface PdfDeliveryData {
 
 const fmt = (n: number) => n.toLocaleString();
 
+/** The most room the signature takes on the receipt, in points (the old fixed box was 200 x 60). */
+const SIGNATURE_MAX_WIDTH = 220;
+const SIGNATURE_MAX_HEIGHT = 80;
+
+/**
+ * The signature's printed size: as large as fits the signature area while keeping the image's own
+ * proportions. Signing boxes differ in shape by screen (a tall phone box, a wide desktop one), so a fixed
+ * box would squash or stretch the signature.
+ */
+export function fitSignature(image: { width: number; height: number }): { width: number; height: number } {
+  if (!(image.width > 0) || !(image.height > 0)) return { width: SIGNATURE_MAX_WIDTH, height: SIGNATURE_MAX_HEIGHT };
+  const scale = Math.min(SIGNATURE_MAX_WIDTH / image.width, SIGNATURE_MAX_HEIGHT / image.height);
+  return { width: image.width * scale, height: image.height * scale };
+}
+
 function renderDeliveryPage(
   doc: JsPDFWithAutoTable,
   company: CompanyInfo,
@@ -209,8 +224,16 @@ function renderDeliveryPage(
   if (data.signature_image_data_url) {
     // Embed captured signature image
     try {
-      const sigWidth = 200;
-      const sigHeight = 60;
+      const { width: sigWidth, height: sigHeight } = fitSignature(doc.getImageProperties(data.signature_image_data_url));
+      // Signature, its "Signed by" line and the footer must all fit; otherwise start it on a new page.
+      if (y + sigHeight + 25 > doc.internal.pageSize.getHeight() - 45) {
+        doc.addPage();
+        // A separated second sheet still names its receipt.
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 100);
+        doc.text(`${data.delivery_number} (continued)`, margin, margin);
+        y = margin + 20;
+      }
       doc.addImage(data.signature_image_data_url, 'PNG', margin, y, sigWidth, sigHeight);
       y += sigHeight + 5;
     } catch {
@@ -288,7 +311,7 @@ export async function generateBatchDeliveryPdf(dataList: PdfDeliveryData[]) {
     return;
   }
 
-  // Multiple deliveries — one page each
+  // Multiple deliveries — each starts on a new page (a long one may take two)
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
 
   for (let i = 0; i < dataList.length; i++) {

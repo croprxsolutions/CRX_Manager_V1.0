@@ -21,6 +21,14 @@ export const FIELD_OBSTACLE_KIND_LABELS: Record<FieldObstacleKind, string> = {
   other: 'Other',
 };
 
+export function isFieldObstacleKind(kind: string): kind is FieldObstacleKind {
+  return Object.prototype.hasOwnProperty.call(FIELD_OBSTACLE_KIND_LABELS, kind);
+}
+
+export function fieldObstacleKindLabel(kind: string): string {
+  return isFieldObstacleKind(kind) ? FIELD_OBSTACLE_KIND_LABELS[kind] : 'Field marker';
+}
+
 /** An in-progress boundary must be finished or cancelled before obstacle placement can begin. */
 export function canEnterObstacleMode(isDrawingBoundary: boolean): boolean {
   return !isDrawingBoundary;
@@ -29,7 +37,7 @@ export function canEnterObstacleMode(isDrawingBoundary: boolean): boolean {
 export interface FieldObstacleFeatureProperties {
   id: string;
   field_id: string;
-  kind: FieldObstacleKind;
+  kind: string;
   label: string;
   title: string;
   'marker-color': string;
@@ -58,7 +66,7 @@ export function fieldObstacleToGeoJsonFeature(
   obstacle: FieldObstacle,
 ): Feature<Point, FieldObstacleFeatureProperties> | null {
   if (!isFieldObstaclePoint(obstacle.point_geojson)) return null;
-  const kindLabel = FIELD_OBSTACLE_KIND_LABELS[obstacle.kind];
+  const kindLabel = fieldObstacleKindLabel(obstacle.kind);
   const label = obstacle.label?.trim() || kindLabel;
   return {
     type: 'Feature',

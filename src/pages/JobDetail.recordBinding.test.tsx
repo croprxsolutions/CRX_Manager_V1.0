@@ -68,7 +68,7 @@ function buildGatedChain(
 // The page reads the job's edit version before Save (save_job checks it); these tests are about other things.
 vi.mock('../lib/jobStaleEdit', async (orig) => ({
   ...(await (orig() as Promise<Record<string, unknown>>)),
-  readJobEditVersion: async () => ({ core: 'v', dispatches: [] }),
+  readJobEditVersion: async () => ({ core: 'v', dispatches: [], rev: 'r' }),
 }));
 vi.mock('../lib/db', async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);

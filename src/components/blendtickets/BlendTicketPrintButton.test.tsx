@@ -65,6 +65,30 @@ describe('BlendTicketPrintButton', () => {
     })));
   });
 
+  it('prints the captured linked product name when OCR text differs', async () => {
+    fetchWeights.mockResolvedValue(ticketWith({ ...snapshot, captured_name: 'Linked catalog product' }));
+    render(<BlendTicketPrintButton ticketId={header.id} pageRead={pageRead} disabled={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Download ticket PDF' }));
+    await waitFor(() => expect(downloadPdf).toHaveBeenCalledWith(expect.objectContaining({
+      data: [{ product: 'Linked catalog product', amount: '2 Gal', weight: expect.stringContaining('16.00 lb') }],
+    })));
+  });
+
+  it('does not download an empty ticket or one whose saved date changed', async () => {
+    fetchWeights.mockResolvedValueOnce({ ...ticketWith(snapshot), lines: [] });
+    const view = render(<BlendTicketPrintButton ticketId={header.id} pageRead={{ header, lines: [] }} disabled={false} />);
+    const button = screen.getByRole('button', { name: 'Download ticket PDF' });
+    fireEvent.click(button);
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('error', expect.stringContaining('no saved product lines')));
+    expect(downloadPdf).not.toHaveBeenCalled();
+
+    fetchWeights.mockResolvedValueOnce({ ...ticketWith(snapshot), ticket: { ...header, ticket_date: '2026-11-25' } });
+    view.rerender(<BlendTicketPrintButton ticketId={header.id} pageRead={pageRead} disabled={false} />);
+    fireEvent.click(button);
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('error', expect.stringContaining('Reopen the ticket')));
+    expect(downloadPdf).not.toHaveBeenCalled();
+  });
+
   it('cannot print while edits are unsaved and refuses a changed server snapshot', async () => {
     fetchWeights.mockResolvedValue(ticketWith(snapshot));
     const view = render(<BlendTicketPrintButton ticketId={header.id} pageRead={pageRead} disabled />);

@@ -23,25 +23,34 @@ export function BlendTicketPrintButton({ ticketId, pageRead, disabled }: BlendTi
     try {
       const saved = await fetchBlendTicketWeights(ticketId);
       const number = saved.ticket?.ticket_number;
+      const date = saved.ticket?.ticket_date;
       if (saved.ticket?.id !== ticketId || typeof number !== 'string' ||
+          number !== pageRead.header.ticket_number || date !== pageRead.header.ticket_date ||
           !matchesPageRead(saved, pageRead.header, pageRead.lines)) {
         toast('error', 'The saved ticket could not be matched to this page. Reopen the ticket before downloading.');
         return;
       }
+      if (saved.lines.length === 0) {
+        toast('error', 'This ticket has no saved product lines to print.');
+        return;
+      }
 
-      const lines = resolveTicketLines(saved.lines.map(({ line_id, product_id, line }) => ({
-        id: line_id,
-        product_id,
-        product_name: typeof line.product_name === 'string' ? line.product_name : '',
-        quantity: line.quantity,
-        unit: typeof line.unit === 'string' ? line.unit : null,
-        catalogForm: null,
-      })), { saved, current: null });
+      const lines = resolveTicketLines(saved.lines.map(({ line_id, product_id, line, weight }) => {
+        const ticketName = typeof line.product_name === 'string' ? line.product_name : '';
+        return {
+          id: line_id,
+          product_id,
+          product_name: 'captured_name' in weight ? weight.captured_name : ticketName,
+          quantity: line.quantity,
+          unit: typeof line.unit === 'string' ? line.unit : null,
+          catalogForm: null,
+        };
+      }), { saved, current: null });
 
       await downloadReportPdf({
         title: 'Blend Ticket',
         fileName: `Blend Ticket ${number}`,
-        subtitle: [number, saved.ticket.ticket_date].filter(Boolean).join(' · '),
+        subtitle: [number, date].filter(Boolean).join(' · '),
         orientation: 'portrait',
         columns: [
           { key: 'product', header: 'Product' },

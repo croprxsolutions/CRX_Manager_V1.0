@@ -65,8 +65,11 @@ SELECT p.oid, p.proacl FROM pg_proc p
 
 DO $preflight$
 BEGIN
-  IF to_regclass('pg_temp.commission_settles_on_posting_tx') IS NULL
-     OR (SELECT transaction_id FROM pg_temp.commission_settles_on_posting_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
+  -- Two checks, not one OR: the second can only be planned once the table exists.
+  IF to_regclass('pg_temp.commission_settles_on_posting_tx') IS NULL THEN
+    RAISE EXCEPTION 'COMMISSION_SETTLES_ON_POSTING_NOT_IN_TRANSACTION: apply this file as one transaction';
+  END IF;
+  IF (SELECT transaction_id FROM pg_temp.commission_settles_on_posting_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'COMMISSION_SETTLES_ON_POSTING_NOT_IN_TRANSACTION: apply this file as one transaction';
   END IF;
   IF to_regprocedure('public._settle_order_commission_20270306(uuid)') IS NOT NULL

@@ -340,7 +340,9 @@ async function main() {
   const before = chain(NEW_CHAIN);
   assert.ok(!before.pass, 'the new chain must fail before the candidate');
   for (const step of ['(A) commission is not 180/120', '(A) unticking tax', '(B) the 3-way rows', '(C) the Bill Split base',
-    '(D) half invoiced', '(D) after Cancel Remaining', '(F) batched row moved', '(H) the 150-line sale', '(I) a changed split', '(J) a changed split']) {
+    '(D) half invoiced', '(D) after Cancel Remaining', '(F) batched row moved', '(H) the 150-line sale', '(I) a changed split', '(J) a changed split',
+    '(K1) after the discount changed', '(K2) after the discount changed', '(K3) after the discount changed',
+    '(L) sale 1 is not on', '(M) $330.93 did not split', '(N) a 50.06/49.94']) {
     assert.ok(before.fail.includes(step), `BEFORE: expected ${step} to fail, got: ${before.fail}`);
   }
   assert.ok(!/SMOKE_SETUP|\(E\)|\(G\)/.test(before.fail), `BEFORE: the fixture or a control failed: ${before.fail}`);
@@ -367,7 +369,7 @@ async function main() {
   const after = chain(NEW_CHAIN);
   assert.ok(after.pass, `AFTER: the new chain fails: ${after.fail}`);
   covering('AFTER', passedBefore);
-  console.log('[case] 4 AFTER: the new chain passes (A-J), and every covering chain that passed before still passes');
+  console.log('[case] 4 AFTER: the new chain passes (A-N), and every covering chain that passed before still passes');
   // 5. RE-APPLY
   const again = apply('cand.sql');
   assert.notEqual(again.status, 0); assert.match(again.output, /COMMISSION_AFTER_DISCOUNT_PREFLIGHT: already applied/);
@@ -376,9 +378,12 @@ async function main() {
   psql(`BEGIN;
     DROP TRIGGER invoice_items_commission_after_discount_20270304 ON public.invoice_items;
     DROP TRIGGER invoices_commission_after_discount_20270304 ON public.invoices;
-    DROP TRIGGER invoices_delete_commission_after_discount_20270304 ON public.invoices;
     DROP TRIGGER commissions_after_discount_20270304 ON public.commissions;
+    DROP TRIGGER invoice_items_commission_mark_20270304 ON public.invoice_items;
+    DROP TRIGGER invoices_commission_mark_20270304 ON public.invoices;
+    DROP TRIGGER commissions_mark_20270304 ON public.commissions;
     DROP FUNCTION public._commission_after_discount_20270304();
+    DROP FUNCTION public._commission_mark_sale_20270304();
     DROP FUNCTION public._recompute_order_commissions_20270304(uuid);
     DROP FUNCTION public._order_commission_base_20270304(uuid);
     COMMIT;`);

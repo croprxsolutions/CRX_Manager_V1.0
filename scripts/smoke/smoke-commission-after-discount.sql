@@ -390,7 +390,7 @@ BEGIN
       jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40))), 'l2-' || v_suffix);
   PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'l1-' || v_suffix);
   IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '180.00/120.00|300.00' THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: (L) sale 1 is not on $300 before the relink: %', pg_temp.smk_rows(v_order);
+    v_fails := v_fails || ' (L) sale 1 is not on $300 before the relink: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
   SELECT id INTO v_inv FROM invoices WHERE order_id = v_order AND status = 'draft' AND invoice_type = 'chemical_sale';
   -- The app can't relink today (zz_cap_delivery_invoice_items and zz_cap_order_invoice_items refuse a line its delivery
@@ -419,18 +419,19 @@ BEGIN
   v_got := (SELECT string_agg(to_char(commission_amount, 'FM999990.00'), '/' ORDER BY commission_amount DESC)
               FROM commissions WHERE order_id = v_order AND deleted_at IS NULL AND status <> 'cancelled');
   IF v_got IS DISTINCT FROM '165.47/165.46' THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: (M) $330.93 did not split 165.47/165.46: %', v_got;
-  END IF;
-  PERFORM create_commission_payment(
-    ARRAY(SELECT id FROM commissions WHERE order_id = v_order AND commission_amount = 165.47 AND status = 'pending'),
-    'check', 'SMK-CAD-M', (now() AT TIME ZONE 'America/Chicago')::date, 'Rolled-back smoke', v_admin, 'smk-cad-m-pay-' || v_suffix);
-  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  UPDATE commissions SET split_percentage = split_percentage WHERE order_id = v_order AND commission_amount = 165.46;
-  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  v_got := (SELECT string_agg(to_char(commission_amount, 'FM999990.00'), '/' ORDER BY commission_amount DESC)
-              FROM commissions WHERE order_id = v_order AND deleted_at IS NULL AND status <> 'cancelled');
-  IF v_got IS DISTINCT FROM '165.47/165.46' THEN
-    v_fails := v_fails || ' (M) a recompute on an unchanged base after a batch moved a cent: ' || COALESCE(v_got, 'none') || ';';
+    v_fails := v_fails || ' (M) $330.93 did not split 165.47/165.46: ' || COALESCE(v_got, 'none') || ';';
+  ELSE
+    PERFORM create_commission_payment(
+      ARRAY(SELECT id FROM commissions WHERE order_id = v_order AND commission_amount = 165.47 AND status = 'pending'),
+      'check', 'SMK-CAD-M', (now() AT TIME ZONE 'America/Chicago')::date, 'Rolled-back smoke', v_admin, 'smk-cad-m-pay-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    UPDATE commissions SET split_percentage = split_percentage WHERE order_id = v_order AND commission_amount = 165.46;
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    v_got := (SELECT string_agg(to_char(commission_amount, 'FM999990.00'), '/' ORDER BY commission_amount DESC)
+                FROM commissions WHERE order_id = v_order AND deleted_at IS NULL AND status <> 'cancelled');
+    IF v_got IS DISTINCT FROM '165.47/165.46' THEN
+      v_fails := v_fails || ' (M) a recompute on an unchanged base after a batch moved a cent: ' || COALESCE(v_got, 'none') || ';';
+    END IF;
   END IF;
 
   -- N: $10.00 of undiscounted profit, 50/50 → 50.06/49.94.

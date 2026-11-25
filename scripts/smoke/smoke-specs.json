@@ -141,6 +141,13 @@
         "security"
       ]
     },
+    "reject_liquid_density_draft": {
+      "chain": "smoke-reject-liquid-density-draft.sql",
+      "container_prover": "prove-reject-liquid-density-draft-real-schema.mjs",
+      "description": "A different active admin rejects the pinned liquid draft with a reason. Rejecting leaves the approval and audit trail in place and permits a new draft. The receipt replays once per actor and request.",
+      "covers": ["reject_liquid_density_draft"],
+      "area": ["inventory", "security", "idempotency"]
+    },
     "fill_tote_from_bulk": {
       "chain": "smoke-tote_fill_from_bulk.sql",
       "container_prover": "prove-tote-fill-real-schema.mjs",

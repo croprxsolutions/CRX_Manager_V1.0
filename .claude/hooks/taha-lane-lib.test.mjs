@@ -52,6 +52,12 @@ for (const p of [
   "supabase/migrations/20261022021000_order_invoice_refuses_field_split.sql",
 ]) ok(!isTahaLanePath(p), `${p} is not Taha's`);
 
+// Supplier quotes are Mason's purchasing lane (Taha, 2026-11-25, after #2524's supplier_quote_unit_floor).
+for (const p of ["supabase/migrations/20270305200000_supplier_quote_unit_floor.sql", "src/pages/SupplierQuotes.tsx"]) ok(!isTahaLanePath(p), `${p} is not Taha's`);
+for (const p of ["supabase/migrations/20270101000000_quote_items_x.sql", "src/pages/QuoteBuilder.tsx"]) ok(isTahaLanePath(p), `${p} stays Taha's`);
+eq(isTahaLaneSql("CREATE OR REPLACE FUNCTION public.supplier_quote_unit_floor() RETURNS int AS $$ SELECT 1 $$;"), false, "a supplier-quote function is not Taha's");
+eq(isTahaLaneSql("CREATE OR REPLACE FUNCTION public.create_quote() RETURNS int AS $$ SELECT 1 $$;"), true, "create_quote stays Taha's");
+
 // ── the problem ─────────────────────────────────────────────────────────────
 eq(tahaLaneProblem({ files: f("src/pages/Deliveries.tsx"), now: NOW }), null, "no lane file → no problem");
 ok(tahaLaneProblem({ files: f("src/pages/Quotes.tsx"), now: NOW })?.reason.includes("Quotes.tsx"), "a lane file is named");

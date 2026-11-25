@@ -3439,6 +3439,8 @@ export interface FieldBillingDefault {
   notes: string | null;
   price_override_cents: number | null;
   pricing_note: string | null;
+  /** FP-1: the split version this read-only copy row came from. */
+  source_split_version_id: string | null;
   created_at: string;
   updated_at: string;
   customer?: Customer;

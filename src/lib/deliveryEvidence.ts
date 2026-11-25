@@ -285,11 +285,13 @@ export function buildLinesSeen<T extends { id: string; order_item_id?: string | 
   }));
 }
 
-// One entry as the server compares it: ids lower-cased, delivered kept between 0 and the quantity, amounts to
-// 6 decimal places (the server's round(…, 6); this is a screen hint, the server decides).
+// One entry as the server compares it: ids lower-cased, delivered kept between 0 and the quantity, an amount under
+// 0.01 counted as 0 (20270308010000, as #2562 records it), amounts to 6 decimal places (the server's round(…, 6);
+// this is a screen hint, the server decides).
 function lineSeenKey(line: LineSeen): string {
   const quantity = Number(line.quantity);
-  const delivered = Math.max(0, Math.min(Number(line.delivered), quantity));
+  const kept = Math.max(0, Math.min(Number(line.delivered), quantity));
+  const delivered = kept < 0.01 ? 0 : kept;
   return `${String(line.order_item_id).toLowerCase()}|${String(line.product_id).toLowerCase()}|${quantity.toFixed(6)}|${delivered.toFixed(6)}`;
 }
 

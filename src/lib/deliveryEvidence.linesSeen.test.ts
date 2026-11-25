@@ -68,6 +68,14 @@ describe('proof bound to the load', () => {
     expect(sameLinesSeen([{ ...a[0], delivered: -1 }], [{ ...a[0], delivered: 0 }])).toBe(true);
   });
 
+  it('counts a delivered amount under 0.01 as 0 on both sides (20270308010000)', () => {
+    const a = buildLinesSeen(items);
+    expect(sameLinesSeen([{ ...a[0], delivered: 0 }], [{ ...a[0], delivered: 0.005 }])).toBe(true);
+    expect(sameLinesSeen([{ ...a[0], delivered: 0.004 }], [{ ...a[0], delivered: 0.009 }])).toBe(true);
+    expect(sameLinesSeen([{ ...a[0], delivered: 0.005 }], [{ ...a[0], delivered: 0.05 }])).toBe(false);
+    expect(sameLinesSeen([{ ...a[0], delivered: 0 }], [{ ...a[0], delivered: 0.01 }])).toBe(false);
+  });
+
   it('never matches a missing list (a photo saved without one)', () => {
     expect(sameLinesSeen(null, buildLinesSeen(items))).toBe(false);
     expect(sameLinesSeen(buildLinesSeen(items), undefined)).toBe(false);

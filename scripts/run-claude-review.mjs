@@ -692,8 +692,9 @@ function getClaudeCliVersion(claudeBin) {
 }
 
 // VERIFIED only means the reviewer ran; base-staging also needs a clean verdict.
-export function baseStagingReviewDecision({ executionState, status, stdout } = {}) {
-  const clean = executionState === "VERIFIED" && claudeReviewProofVerdict({ status, stdout }) === "clean";
+export function baseStagingReviewDecision({ executionState, status, stdout, resolvedModels = [] } = {}) {
+  const opus = resolvedModels.some((model) => /opus/i.test(model));
+  const clean = executionState === "VERIFIED" && opus && claudeReviewProofVerdict({ status, stdout }) === "clean";
   return { clean, label: clean ? "CLEAN" : "NOT CLEAN" };
 }
 
@@ -881,7 +882,7 @@ export function runClaudeReview(options) {
     return { status: 1, output, archiveOutput, prompt, executionState: "BLOCKED" };
   }
   if (options.scope === "base-staging") {
-    const decision = baseStagingReviewDecision({ executionState, status: result.status, stdout: parsed.result });
+    const decision = baseStagingReviewDecision({ executionState, status: result.status, stdout: parsed.result, resolvedModels: parsed.resolvedModels });
     process.stdout.write(`Base-staging review decision: ${decision.label}\n`);
     return { status: decision.clean ? 0 : 1, output, archiveOutput, prompt, executionState };
   }

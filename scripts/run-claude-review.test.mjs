@@ -436,9 +436,12 @@ assert.equal(claudeReviewProofVerdict({ status: 0, stdout: "No explicit verdict"
 assert.equal(claudeReviewProofVerdict({ status: 0, stdout: "Verdict: SHIP\nFINAL_VERDICT: NEEDS-WORK" }), null);
 assert.equal(claudeReviewProofVerdict({ status: 0, stdout: "FINAL_VERDICT: SHIP\nMore prose" }), null);
 assert.equal(claudeReviewProofVerdict({ status: 0, stdout: "FINAL_VERDICT: SHIP\nFINAL_VERDICT: SHIP" }), null);
-assert.equal(baseStagingReviewDecision({ executionState: "VERIFIED", status: 0, stdout: "Clean.\nFINAL_VERDICT: SHIP" }).clean, true);
-assert.equal(baseStagingReviewDecision({ executionState: "VERIFIED", status: 0, stdout: "One blocker.\nFINAL_VERDICT: NEEDS-WORK" }).clean, false);
-assert.equal(baseStagingReviewDecision({ executionState: "BLOCKED", status: 0, stdout: "FINAL_VERDICT: SHIP" }).clean, false);
+const opusModels = ["claude-opus-4-7"];
+assert.equal(baseStagingReviewDecision({ executionState: "VERIFIED", status: 0, stdout: "Clean.\nFINAL_VERDICT: SHIP", resolvedModels: opusModels }).clean, true);
+assert.equal(baseStagingReviewDecision({ executionState: "VERIFIED", status: 0, stdout: "One blocker.\nFINAL_VERDICT: NEEDS-WORK", resolvedModels: opusModels }).clean, false);
+assert.equal(baseStagingReviewDecision({ executionState: "BLOCKED", status: 0, stdout: "FINAL_VERDICT: SHIP", resolvedModels: opusModels }).clean, false);
+assert.equal(baseStagingReviewDecision({ executionState: "VERIFIED", status: 0, stdout: "FINAL_VERDICT: SHIP", resolvedModels: ["claude-sonnet-5-5"] }).clean, false);
+assert.equal(baseStagingReviewDecision({ executionState: "VERIFIED", status: 0, stdout: "FINAL_VERDICT: SHIP" }).clean, false);
 assert.match(
   claudeReviewProofWithholdReason({
     executionState: "VERIFIED",

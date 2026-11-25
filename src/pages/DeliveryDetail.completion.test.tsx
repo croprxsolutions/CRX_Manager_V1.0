@@ -208,6 +208,58 @@ describe('Record without proof is admin-only on screen', () => {
   });
 });
 
+describe('one completion step for drivers and the office', () => {
+  it('the driver view completes through the shared step and sends the same signature completion', async () => {
+    setRole('driver');
+    mockRpc.mockResolvedValue({ data: COMPLETE_RESULT, error: null });
+    await renderPage();
+    expect(await screen.findByLabelText(/Report an issue/)).toBeInTheDocument();
+    await signAndFillSigner();
+    await completeAndConfirm();
+    await waitFor(() => expect(completeRpcCalls()).toHaveLength(1));
+    const params = completeRpcCalls()[0][1];
+    expect(params.p_signed_by).toBe('Pat Farmer');
+    expect(params.p_evidence).toBe('signature');
+    expect(params.p_evidence_ref).toBe(await signatureImagePathFor('del-1', params.p_idempotency_key));
+  });
+
+  it('the driver view reports an issue in the shared step and sends it with the completion', async () => {
+    setRole('driver');
+    mockRpc.mockResolvedValue({ data: COMPLETE_RESULT, error: null });
+    await renderPage();
+    await signAndFillSigner();
+    fireEvent.change(await screen.findByLabelText(/Report an issue/), { target: { value: 'other' } });
+    fireEvent.change(screen.getByLabelText('Describe the issue'), { target: { value: '  one jug cracked  ' } });
+    await completeAndConfirm();
+    await waitFor(() => expect(completeRpcCalls()).toHaveLength(1));
+    expect(completeRpcCalls()[0][1]).toEqual(expect.objectContaining({ p_issue_type: 'other', p_issue_notes: 'one jug cracked' }));
+  });
+
+  it('the office view still reports an issue, now in the same shared step', async () => {
+    mockRpc.mockResolvedValue({ data: COMPLETE_RESULT, error: null });
+    await renderPage();
+    expect(await screen.findByLabelText('Signed by (name)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Customer signed a paper ticket')).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/Report an issue/)).toHaveLength(1);
+    await signAndFillSigner();
+    fireEvent.change(screen.getByLabelText(/Report an issue/), { target: { value: 'refused' } });
+    fireEvent.change(screen.getByLabelText('Describe the issue'), { target: { value: 'Refused one drum' } });
+    await completeAndConfirm();
+    await waitFor(() => expect(completeRpcCalls()).toHaveLength(1));
+    expect(completeRpcCalls()[0][1]).toEqual(expect.objectContaining({ p_issue_type: 'refused', p_issue_notes: 'Refused one drum' }));
+  });
+
+  it('sends no issue fields when none is reported', async () => {
+    mockRpc.mockResolvedValue({ data: COMPLETE_RESULT, error: null });
+    await renderPage();
+    await signAndFillSigner();
+    await completeAndConfirm();
+    await waitFor(() => expect(completeRpcCalls()).toHaveLength(1));
+    expect(completeRpcCalls()[0][1]).not.toHaveProperty('p_issue_type');
+    expect(completeRpcCalls()[0][1]).not.toHaveProperty('p_issue_notes');
+  });
+});
+
 describe('completion paths', () => {
   it('completes as brands not confirmed when the brand list never finishes loading (brands never block)', async () => {
     brandsLoad = () => new Promise(() => undefined);

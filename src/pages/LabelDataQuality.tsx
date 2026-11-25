@@ -1094,8 +1094,8 @@ export default function LabelDataQuality() {
             <CoverageStat label="Active products" value={coverage.total_active_products} total={coverage.total_active_products} />
             <CoverageStat label="EPA registration" value={coverage.epa_registration} total={coverage.total_active_products} />
             <CoverageStat label="Signal word" value={coverage.signal_word} total={coverage.total_active_products} />
-            <CoverageStat label="REI hours" value={coverage.rei_hours} total={coverage.total_active_products} />
-            <CoverageStat label="PHI days" value={coverage.phi_days} total={coverage.total_active_products} />
+            <CoverageStat label="REI (number or none)" value={coverage.rei_hours} total={coverage.total_active_products} />
+            <CoverageStat label="PHI (number or none)" value={coverage.phi_days} total={coverage.total_active_products} />
             <CoverageStat label="Max label rate" value={coverage.max_label_rate} total={coverage.total_active_products} />
           </div>
         ) : (

@@ -44,6 +44,7 @@ import {
   canEnterObstacleMode,
   FIELD_OBSTACLE_KINDS,
   FIELD_OBSTACLE_KIND_LABELS,
+  fieldObstacleKindLabel,
 } from '../lib/fieldObstacles';
 import type { Feature, MultiPolygon, Polygon } from 'geojson';
 import type { Field, FieldObstacle, FieldObstacleKind } from '../types';
@@ -1611,7 +1612,7 @@ function FieldSetupPage() {
               ) : (
                 <ul className="mt-3 space-y-2">
                   {obstacles.map((obstacle) => {
-                    const kindLabel = FIELD_OBSTACLE_KIND_LABELS[obstacle.kind];
+                    const kindLabel = fieldObstacleKindLabel(obstacle.kind);
                     const displayLabel = obstacle.label?.trim() || kindLabel;
                     return (
                       <li key={obstacle.id} className="flex items-center gap-2 rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2">

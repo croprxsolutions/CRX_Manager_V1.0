@@ -5,7 +5,7 @@ import {
 } from './deliveryEvidence';
 import { LEFT_AT_SITE_PHOTO_CAPTION, PAPER_TICKET_PHOTO_CAPTION } from './paperTicket';
 
-// Mirrors the server's _delivery_lines_match (migration 20270307160000): a multiset of
+// Mirrors the server's _delivery_lines_match (migration 20270308000000): a multiset of
 // (order line, product, quantity, delivered), delivered kept between 0 and the quantity.
 describe('proof bound to the load', () => {
   const items = [

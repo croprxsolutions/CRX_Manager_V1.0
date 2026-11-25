@@ -689,7 +689,7 @@ export default function DeliveryDetail() {
   // Under 0.01 counts as nothing delivered, as on the server (DELIVERY_NOTHING_DELIVERED).
   const hasAnyQty = items.some((item) => (deliveryQtys[item.id] ?? item.quantity) >= 0.01);
   // The lines on screen with their delivered amounts: the signature and the ticket photo are bound to
-  // them (20270307160000). Null until the delivery's lines are loaded.
+  // them (20270308000000). Null until the delivery's lines are loaded.
   const currentLinesSeen = useMemo(
     () => (items.length ? buildLinesSeen(items, (item) => deliveryQtys[item.id] ?? item.quantity) : null),
     [items, deliveryQtys],
@@ -1043,7 +1043,7 @@ export default function DeliveryDetail() {
 
     setUploadingPhoto(true);
     let uploadCount = 0;
-    // A signed-ticket photo is saved with the lines and amounts on screen when it was taken (20270307160000).
+    // A signed-ticket photo is saved with the lines and amounts on screen when it was taken (20270308000000).
     const linesAtPhoto = caption === PAPER_TICKET_PHOTO_CAPTION ? currentLinesSeen : null;
 
     for (const rawFile of Array.from(files)) {

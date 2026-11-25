@@ -6,6 +6,7 @@ const {
   mockApplyPricing,
   mockApprovePricing,
   mockExportPricing,
+  mockGeneratePricing,
   mockParsePricing,
   mockPreviewPricing,
   mockProducts,
@@ -18,6 +19,7 @@ const {
   mockApplyPricing: vi.fn(),
   mockApprovePricing: vi.fn(),
   mockExportPricing: vi.fn(),
+  mockGeneratePricing: vi.fn(),
   mockParsePricing: vi.fn(),
   mockPreviewPricing: vi.fn(),
   mockProducts: [] as Array<Record<string, unknown>>,
@@ -88,22 +90,34 @@ vi.mock('../lib/productPricing', async (importOriginal) => {
   };
 });
 
+vi.mock('../lib/supplierPricing', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/supplierPricing')>(),
+  getSupplierMarketEvidence: vi.fn(async () => []),
+}));
+
 vi.mock('../lib/productPricingSupplierEvidenceWorkbook', () => ({
-  generateProductPricingWorkbookWithSupplierEvidence: vi.fn(),
+  generateProductPricingWorkbookWithSupplierEvidence: mockGeneratePricing,
   parseProductPricingWorkbookWithSupplierEvidence: mockParsePricing,
 }));
 
-vi.mock('../lib/productPricingWorkbook', () => ({
-  generateProductPricingWorkbook: vi.fn(),
-  MAX_PRICING_WORKBOOK_FILE_BYTES: pricingWorkbookFileLimit,
-  MAX_PRICING_WORKBOOK_ROWS: pricingWorkbookRowLimit,
-  parseProductPricingWorkbook: mockParsePricing,
-  groupedUseTimingRefusal: () => null,
-}));
+vi.mock('../lib/productPricingWorkbook', async () => {
+  const actual = await vi.importActual<typeof import('../lib/productPricingWorkbook')>('../lib/productPricingWorkbook');
+  return {
+    generateProductPricingWorkbook: vi.fn(),
+    MAX_PRICING_WORKBOOK_FILE_BYTES: pricingWorkbookFileLimit,
+    MAX_PRICING_WORKBOOK_ROWS: pricingWorkbookRowLimit,
+    parseProductPricingWorkbook: mockParsePricing,
+    groupedUseTimingRefusal: () => null,
+    priceSheetExpiredText: actual.priceSheetExpiredText,
+    priceSheetRefusalText: actual.priceSheetRefusalText,
+  };
+});
 
 vi.mock('../components/ui/EditableDataTable', () => ({
-  default: function MockEditableDataTable({ data, onSave, filters, columns }: {
+  default: function MockEditableDataTable({ data, onSave, filters, columns, searchPlaceholder, searchMatcher }: {
     data: typeof product[];
+    searchPlaceholder?: string;
+    searchMatcher?: (row: typeof product, search: string) => boolean;
     onSave: (changes: Map<string, Record<string, unknown>>) => Promise<void | boolean>;
     filters?: ReactNode;
     columns: Array<{
@@ -116,11 +130,16 @@ vi.mock('../components/ui/EditableDataTable', () => ({
     }>;
   }) {
     const [dirty, setDirty] = useState<Record<string, unknown>>({});
+    // Like the real table, the search box is the table's own state: the page never sees it.
+    const [search, setSearch] = useState('');
+    const shown = data.filter((item) => !search || searchMatcher?.(item, search)).length;
     const row = data[0];
     const getCellValue = (key: string): unknown => key in dirty ? dirty[key] : row[key as keyof typeof product];
     const setCellValue = (key: string, value: unknown) => setDirty((current) => ({ ...current, [key]: value }));
     return <>
       {filters}
+      <input placeholder={searchPlaceholder} value={search} onChange={(event) => setSearch(event.target.value)} />
+      <p>Table shows {shown} rows</p>
       {row && columns.filter((column) => ['pricing_mode', 'tier1_price', 'tier2_price', 'tier3_price'].includes(column.key))
         .map((column) => <div key={column.key}>{column.editRender?.(row, getCellValue, setCellValue)}</div>)}
       <button
@@ -611,6 +630,36 @@ describe('Products governed inline pricing flow', () => {
     })));
   });
 
+  it('lets the server refuse an expired price sheet, then says it expired', async () => {
+    mockParsePricing.mockResolvedValue({ exportId: 'export-1', expiresAt: '2020-01-01T00:00:00+00:00', rows: [] });
+    mockPreviewPricing.mockRejectedValue({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+    const { container } = render(<Products />);
+    await screen.findByRole('button', { name: 'Review Pricing File' });
+    const input = container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!;
+    fireEvent.change(input, { target: { files: [new File(['abc'], 'old.xlsx')] } });
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error',
+      'No prices were changed. This price sheet expired (sheets last 7 days). Download a fresh one',
+    ));
+    // The browser clock only picks the wording; the server decides whether the sheet is refused.
+    expect(mockPreviewPricing).toHaveBeenCalledTimes(1);
+  });
+
+  it('says a current price sheet the server refuses was already applied or belongs to another user', async () => {
+    mockParsePricing.mockResolvedValue({ exportId: 'export-1', expiresAt: '2999-01-01T00:00:00+00:00', rows: [] });
+    mockPreviewPricing.mockRejectedValue({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+    const { container } = render(<Products />);
+    await screen.findByRole('button', { name: 'Review Pricing File' });
+    const input = container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!;
+    fireEvent.change(input, { target: { files: [new File(['abc'], 'used.xlsx')] } });
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error',
+      'No prices were changed. This price sheet was already applied, was downloaded by another user, or came from an older template. Download a fresh one',
+    ));
+  });
+
   it('exports the full price sheet: every active product, never an inactive one', async () => {
     mockExportPricing.mockRejectedValue(new Error('stop after the request'));
     mockProducts.push({ ...product, id: '44444444-4444-4444-8444-444444444444', product_name: 'Retired', is_active: false });
@@ -650,6 +699,41 @@ describe('Products governed inline pricing flow', () => {
     expect(retry.idempotencyKey).toBe(first.idempotencyKey);
     expect(other.productIds).toEqual([fungicideId]);
     expect(other.idempotencyKey).not.toBe(first.idempotencyKey);
+  });
+
+  it('says the search box does not narrow a filtered pricing export, and names the file by the business day', async () => {
+    mockExportPricing.mockResolvedValue({ rows: [] });
+    mockGeneratePricing.mockResolvedValue(new Blob(['xlsx']));
+    // jsdom has no object URLs; add them for this test only.
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:pricing'), revokeObjectURL: vi.fn() });
+    const clicked: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(this.download);
+    });
+    // 03:00 UTC on Nov 25 is still Nov 24 in Chicago, so a UTC file name would be a day ahead.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-25T03:00:00Z'));
+    try {
+      render(<Products />);
+      const exportButton = await screen.findByRole('button', { name: 'Pricing .xlsx' });
+      await waitFor(() => expect(exportButton).toBeEnabled());
+      // A search that hides every row still exports the filtered list, as the toast says.
+      fireEvent.change(screen.getByPlaceholderText('Search products...'), { target: { value: 'no such product' } });
+      expect(screen.getByText('Table shows 0 rows')).toBeInTheDocument();
+      fireEvent.click(exportButton);
+
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+        'success',
+        'Exported 1 Product pricing row(s). The search box does not narrow this file: tick products to export only those.',
+      ));
+      expect(mockExportPricing).toHaveBeenCalledWith(expect.objectContaining({ productIds: [product.id] }));
+      expect(clicked).toEqual(['crx-product-pricing-2026-11-24.xlsx']);
+    } finally {
+      vi.useRealTimers();
+      click.mockRestore();
+      Reflect.deleteProperty(URL, 'createObjectURL');
+      Reflect.deleteProperty(URL, 'revokeObjectURL');
+    }
   });
 
   it('rejects an oversized pricing workbook before reading or parsing the file', async () => {

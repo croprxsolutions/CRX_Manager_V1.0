@@ -5,6 +5,10 @@
  */
 
 const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
+  // M9 (20270301180000): a Prepayment Manager check's amount is locked; a check with an application is not deleted.
+  [/^PREPAY_CHECK_AMOUNT_LOCKED\b/, "Nothing was saved. A prepayment check's amount cannot be edited. To correct a mistyped check, delete the whole check and enter it again"],
+  [/^PREPAY_OVERPAYMENT_LOCKED\b/, "Nothing was saved. An overpayment's amount comes from its payment, so it cannot be edited or deleted here. To undo it, void the payment"],
+  [/^PREPAY_CHECK_APPLIED\b/, 'Nothing was deleted. Part of this check was applied to an invoice, so the check cannot be deleted'],
   // KI-85: stock may be placed only at Main Warehouse until transfers exist; nothing was received or added.
   [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. Stock can go only into Main Warehouse until transfers between warehouses exist. Choose Main Warehouse and try again'],
   // #2000 (20270201120000): an inactive customer gets no new orders, deliveries, holds or spray jobs.
@@ -13,6 +17,10 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/violates check constraint "delivery_items_quantity(_delivered)?_finite_chk"/, 'Nothing was saved. Delivery quantities must be ordinary numbers. Reload the delivery and enter them again'],
   [/violates check constraint "inventory_holds_source_needs_customer"/, 'Nothing was saved. A stock hold for a spray job or quote must name its customer'],
   [/^WORK_CUSTOMER_MOVE_NOT_ALLOWED\b/, 'Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery'],
+  // Product price sheet: the server refuses a used, expired or someone else's sheet, or a sheet listing a product twice.
+  [/^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/,
+   'No prices were changed. This price sheet can no longer be used: it was already applied, is more than 7 days old, came from an older template, or was downloaded by another user. Download a fresh price sheet and make your changes in it'],
+  [/^PRICING_DUPLICATE_PRODUCT_ID\b/, 'No prices were changed. The same product appears on more than one row of the price sheet. Download a fresh price sheet and make your changes in it, without copying or pasting product rows'],
   [/^PRODUCT_CATEGORY_RETIRED\b/, 'This category is retired. Choose an active category'],
   [/^PRODUCT_CATEGORY_NAME_REQUIRED\b/, 'Enter a category name'],
   [/^PRODUCT_CATEGORY_FIELDS_REQUIRED\b/, 'Choose a category status and sort order'],
@@ -119,6 +127,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'This purchase order is cancelled, so its cost cannot change'],
   [/^PO_COST_BELOW_BILLED\b/i,
    'This would put the vendor bills more than 5% over what has arrived on the purchase order, or over its ordered total. Void or adjust the bill first'],
+  [/^PO_BILLED_LINES_LOCKED\b/,
+   "This purchase order has a vendor bill, so its lines can't be changed here. To change lines, void the bill (if it has a payment, void that first), edit, then enter the bill again. To fix only a cost, an admin can use Correct Unit Cost"],
   [/^PREPAY_BALANCE_SERVER_ONLY\b/i,
    'A prepay balance changes only through prepayments and payments'],
   [/^RETURN_NOT_FOUND\b/i,
@@ -529,6 +539,9 @@ export function sanitizeError(error: unknown): string {
   // Customer receipt refusals (close_delivery_receipt, KI-25): plain words, no database code.
   if (/^DELIVERY_NOT_COMPLETED:.*receipt/s.test(message)) {
     return 'Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.';
+  }
+  if (/^RECEIPT_HANDLED_ADMIN_ONLY(?::|$)/.test(message)) {
+    return 'Nothing was changed. Only an admin can mark a customer receipt handled.';
   }
   if (/^DELIVERY_RECEIPT_CHANGED(?::|$)/.test(message)) {
     return 'Nothing was changed. This delivery\'s receipt was queued again since. Reload the page.';

@@ -23,8 +23,8 @@ export default function Prepay() {
   const activeTab = TAB_ALIASES[searchParams.get('tab') ?? 'workspace'] ?? 'workspace';
 
   const tabs: TabItem[] = [
-    { key: 'workspace', label: 'Workspace', content: <PrepayWorkspacePanel /> },
-    { key: 'manager', label: 'Manager', content: <PrepaymentManagerPanel /> },
+    { key: 'workspace', label: 'Apply to Invoices', content: <PrepayWorkspacePanel /> },
+    { key: 'manager', label: 'Prepay Credits', content: <PrepaymentManagerPanel /> },
   ];
 
   const handleTabChange = (tab: string) => {
@@ -36,7 +36,7 @@ export default function Prepay() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Prepay"
+        title="Prepayments"
         subtitle="Allocate customer prepay buckets and manage available prepayment credits."
       />
 

@@ -11,7 +11,8 @@
  *      'corrected' chemistry event per product are written, the EPA product row is untouched;
  *   2. reason and evidence are still required; an invalid or taken CAS is still refused;
  *   3. a CAS plus another field, or the acid flag alone, is still refused on an EPA product;
- *   4. a CAS set on an EPA product can be corrected (a mistyped one is not locked in; Mason, 2026-11-25);
+ *   4. a CAS an admin typed can be corrected on an EPA product (a mistyped one is not locked in; Mason, 2026-11-25);
+ *      a CAS the ingredient was created with (as an EPA commit creates it) stays gated (Sol, 2026-11-25);
  *   5. a sales rep is refused (ADMIN_REQUIRED).
  *
  * Run: node scripts/smoke/prove-ingredient-cas-fill-epa-gate-real-schema.mjs   (needs Docker; never touches live)
@@ -30,7 +31,7 @@ const ADMIN = USERS.admin;
 const P_EPA = id('b1');
 const P_TYPED = id('b2');
 const ZETA = id('c1'); // no CAS, used by the EPA product (EPA row) and the typed product
-const OTHER = id('c2'); // CAS already set, used by the EPA product
+const OTHER = id('c2'); // created with its CAS (as an EPA commit creates it), used by the EPA product
 const TYPED_ING = id('c3'); // no CAS, typed on the EPA product
 const ZETA_CAS = '52315-07-8';
 const OTHER_CAS = '1912-24-9'; // atrazine
@@ -61,6 +62,8 @@ try {
       ('${P_EPA}', '${OTHER}', 10, 'pct_ww', 'active_ingredient', 'epa_lookup', 'EPA lookup of 91234-259', '${ADMIN}', '${ADMIN}'),
       ('${P_EPA}', '${TYPED_ING}', 1, 'pct_ww', 'active_ingredient', 'label', NULL, '${ADMIN}', '${ADMIN}'),
       ('${P_TYPED}', '${ZETA}', 1.5, 'lb_per_gal', 'active_ingredient', 'label', NULL, '${ADMIN}', '${ADMIN}');
+    INSERT INTO public.active_ingredient_events (ingredient_id, event_type, before_values, after_values, changed_by)
+      VALUES ('${OTHER}', 'created', NULL, jsonb_build_object('cas', '${OTHER_CAS}'), '${ADMIN}');
     INSERT INTO public.product_parent_chemistry_state (parent_id, chemistry_version, updated_by) VALUES
       ('${P_EPA}', 1, '${ADMIN}'), ('${P_TYPED}', 1, '${ADMIN}');`);
   assert.match(scalar(`SELECT public._parent_chemistry_epa_refusal('${P_EPA}');`), /CHEMISTRY_FROM_EPA_ONLY.*91234-259/, 'fixture product is EPA-gated');
@@ -86,11 +89,13 @@ try {
   assert.match(previewThenSave(ZETA, { cas: ZETA_CAS }, 'EPA gave no CAS', null), /EVIDENCE_REQUIRED/, 'evidence still required');
   assert.match(previewThenSave(ZETA, { cas: '52315-07-9' }), /INGREDIENT_CAS_INVALID/, 'bad check digit');
   assert.match(previewThenSave(ZETA, { cas: OTHER_CAS }), /INGREDIENT_CAS_TAKEN/, 'CAS of another ingredient');
+  assert.match(previewThenSave(OTHER, { cas: '50-00-0' }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'a CAS the ingredient was created with stays gated');
+  assert.match(previewThenSave(OTHER, { cas: null }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'clearing it stays gated');
   assert.match(previewThenSave(ZETA, { cas: ZETA_CAS, is_parent_form: true }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'CAS plus another field stays gated');
   assert.match(previewThenSave(ZETA, { is_parent_form: true }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'acid flag stays gated');
   assert.match(attempt(USERS.rep, `${refuse(`r := public.preview_active_ingredient_change('${ZETA}', ${J({ cas: ZETA_CAS })});`)} v := t;`), /ADMIN_REQUIRED/);
   assert.match(attempt(USERS.rep, `${refuse(`r := public.save_active_ingredient('${ZETA}', 1, 'x', ${J({ cas: ZETA_CAS })}, 'r', 'e', 'k');`)} v := t;`), /ADMIN_REQUIRED/);
-  console.log('[refuse] no reason, no evidence, bad check digit, taken CAS, CAS+acid, acid alone, sales rep -> all refused');
+  console.log('[refuse] no reason, no evidence, bad check digit, taken CAS, changing/clearing a created-with CAS, CAS+acid, acid alone, sales rep -> all refused');
 
   // The fix.
   const epaRowBefore = scalar(`SELECT row_version || ':' || strength_value || ':' || source FROM public.product_parent_ingredients WHERE parent_id = '${P_EPA}' AND ingredient_id = '${ZETA}';`);

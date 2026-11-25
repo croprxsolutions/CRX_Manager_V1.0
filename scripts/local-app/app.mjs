@@ -438,11 +438,12 @@ async function rebuild({ firstStart = false } = {}) {
   compose(['stop', 'gateway']);
   await startServices(state);
   await seed(state);
-  if (IS_SCREEN_WALK && schemaFingerprint(migrations) !== fingerprintBefore) throw new Refused('This checkout changed while the database was being built. Nothing was marked finished. Run the rebuild again.');
+  // Re-list migrations so one added mid-build also refuses; record the fingerprint that passed, not a fresh read.
+  if (IS_SCREEN_WALK && schemaFingerprint(approvedMigrations()) !== fingerprintBefore) throw new Refused('This checkout changed while the database was being built. Nothing was marked finished. Run the rebuild again.');
   const ledgerRows = scalar('SELECT count(*) FROM supabase_migrations.schema_migrations;');
   const uncommittedChanges = text(run('git', ['status', '--porcelain'])) !== '';
   const build = { commit: text(run('git', ['rev-parse', 'HEAD'])), uncommittedChanges, builtAt: new Date().toISOString(), ledgerRows, migrations,
-    ...(IS_SCREEN_WALK ? { schemaFingerprint: schemaFingerprint(migrations) } : {}), };
+    ...(IS_SCREEN_WALK ? { schemaFingerprint: fingerprintBefore } : {}), };
   writeFileSync(BUILD_FILE, JSON.stringify(build, null, 2));
   console.log(`Rebuilt from ${describeBuild(build)}.`);
 }

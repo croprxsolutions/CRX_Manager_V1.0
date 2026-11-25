@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Runs the private test copy of the app. Usage and rules: scripts/local-app/README.md
 import { spawn, spawnSync } from 'node:child_process';
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { connect } from 'node:net';
@@ -9,8 +9,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, PROJECT, Refused, TEST_EMAIL,
-  IS_SALES_GAUNTLET, IS_DOC_BYTES, PROFILE_NAME, STATE_FOLDER, REP_EMAIL, OTHER_REP_EMAIL,
-  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, portIsOpen,
+  IS_SALES_GAUNTLET, IS_DOC_BYTES, IS_SCREEN_WALK, PROFILE_NAME, STATE_FOLDER, REP_EMAIL, OTHER_REP_EMAIL,
+  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFinishedBuild, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, assertWalkthroughLaneResourcesAreEmpty, portIsOpen,
 } from './target.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -20,15 +20,17 @@ const ROOT = path.resolve(HERE, '..', '..');
 const STATE_DIR = process.env.CRX_LOCAL_APP_STATE_DIR || path.join(HERE, STATE_FOLDER);
 const STATE_FILE = path.join(STATE_DIR, 'local.env');
 const BUILD_FILE = path.join(STATE_DIR, 'build.json');
+const FIRST_START_LOCK = path.join(STATE_DIR, 'first-start.lock');
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const SERVICES = ['auth', 'rest', 'storage', 'gateway'];
 const SUPABASE_CLI = '2.109.1';
 
 // Children get only what they need to run, never the caller's whole environment.
-const PASSTHROUGH = /^(path|pathext|systemroot|systemdrive|windir|comspec|temp|tmp|home|homedrive|homepath|userprofile|username|appdata|localappdata|programdata|programfiles|programfiles\(x86\)|supabase_go_binary|ms_playwright_browsers_path)$/i;
+const PASSTHROUGH = /^(path|pathext|systemroot|systemdrive|windir|comspec|temp|tmp|home|homedrive|homepath|userprofile|username|appdata|localappdata|programdata|programfiles|programfiles\(x86\)|supabase_go_binary|ms_playwright_browsers_path|crx_local_app_lane)$/i;
 function childEnv(extra = {}) {
   return { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => PASSTHROUGH.test(k))),
-    ...(PROFILE_NAME ? { CRX_LOCAL_APP_PROFILE: PROFILE_NAME } : {}), ...extra };
+    ...(PROFILE_NAME ? { CRX_LOCAL_APP_PROFILE: PROFILE_NAME } : {}),
+    ...(IS_SCREEN_WALK ? { CRX_LOCAL_APP_LANE: process.env.CRX_LOCAL_APP_LANE } : {}), ...extra };
 }
 
 function run(command, args, { input, allowFailure, env, stdio } = {}) {
@@ -78,7 +80,7 @@ function createState() {
     } : {}),
   };
   mkdirSync(STATE_DIR, { recursive: true });
-  if (IS_SALES_GAUNTLET) {
+  if (IS_SALES_GAUNTLET || IS_SCREEN_WALK) {
     const gateway = readFileSync(path.join(HERE, 'kong.yml'), 'utf8');
     if (gateway.split('http://127.0.0.1:5199').length !== 4) throw new Refused('The gateway origin template changed.');
     writeFileSync(path.join(STATE_DIR, 'kong.yml'), gateway.replaceAll('http://127.0.0.1:5199', APP_URL));
@@ -90,7 +92,7 @@ function createState() {
 function compose(args, options) {
   return run('docker', ['compose', '-p', PROJECT, '-f', path.join(HERE, 'compose.yaml'), '--env-file', STATE_FILE, ...args], {
     ...options,
-    env: childEnv(IS_SALES_GAUNTLET ? { LOCAL_KONG_CONFIG: path.join(STATE_DIR, 'kong.yml') } : {}),
+    env: childEnv(IS_SALES_GAUNTLET || IS_SCREEN_WALK ? { LOCAL_KONG_CONFIG: path.join(STATE_DIR, 'kong.yml') } : {}),
   });
 }
 
@@ -102,11 +104,23 @@ function assertExistingStackIsOurs() {
     if (!/scripts[\\/]local-app[\\/]compose\.yaml$/.test(container.Config.Labels['com.docker.compose.project.config_files'] ?? '')) {
       throw new Refused(`Another stack is using the name ${PROJECT}. Nothing was changed.`);
     }
-    if ((IS_SALES_GAUNTLET || IS_DOC_BYTES) && path.resolve(container.Config.Labels['com.docker.compose.project.config_files']) !== path.join(HERE, 'compose.yaml')) {
-      throw new Refused(`The ${IS_DOC_BYTES ? 'document-proof' : 'sales'} test stack belongs to another checkout. Nothing was changed.`);
+    if ((IS_SALES_GAUNTLET || IS_DOC_BYTES || IS_SCREEN_WALK) && path.resolve(container.Config.Labels['com.docker.compose.project.config_files']) !== path.join(HERE, 'compose.yaml')) {
+      const owner = IS_DOC_BYTES ? 'document-proof' : IS_SALES_GAUNTLET ? 'sales' : 'screen-walk';
+      throw new Refused(`The ${owner} test stack belongs to another checkout. Nothing was changed.`);
     }
   }
   assertLoopbackBindings(inspected.flatMap((c) => Object.values(c.HostConfig.PortBindings ?? {}).flat()));
+}
+
+function assertNewScreenWalkLaneIsEmpty() {
+  if (!IS_SCREEN_WALK) return;
+  const list = (args) => text(run('docker', args));
+  assertWalkthroughLaneResourcesAreEmpty({
+    containers: list(['ps', '-aq', '--filter', `label=com.docker.compose.project=${PROJECT}`]),
+    volumes: list(['volume', 'ls', '-q', '--filter', `label=com.docker.compose.project=${PROJECT}`]),
+    networks: list(['network', 'ls', '-q', '--filter', `label=com.docker.compose.project=${PROJECT}`]),
+    netstat: text(run('netstat', ['-ano', '-p', 'tcp'])),
+  });
 }
 
 /** Runs before anything changes. A missing state file is fine only for a first rebuild. */
@@ -122,9 +136,10 @@ async function preflight({ needState = true } = {}) {
   }
   if (state) assertLocalState(state);
   assertLocalDockerEndpoint(text(run('docker', ['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'])));
-  assertAppPortIsLoopback(text(run('netstat', ['-ano', '-p', 'tcp'])));
+  assertAppPortIsLoopback(text(run('netstat', ['-ano', '-p', 'tcp'])), APP_PORT);
   await assertFrontendIsOurs(state?.LOCAL_ANON_KEY);
   assertExistingStackIsOurs();
+  if (!state) assertNewScreenWalkLaneIsEmpty();
   // A Docker restart can hand the gateway its route back, so every command takes it away again.
   if (state && text(compose(['ps', '-q', 'gateway']))) sealGateway();
   return state;
@@ -381,12 +396,14 @@ async function seed(state) {
   psql(readFileSync(path.join(HERE, 'seed.sql')));
 }
 
-async function rebuild() {
+async function rebuild({ firstStart = false } = {}) {
+  if (IS_SCREEN_WALK && existsSync(FIRST_START_LOCK) && !firstStart) throw new Refused('A first-time walkthrough setup is already running.');
   await preflight({ needState: false });
-  stopFrontend();
+  if (firstStart) assertNewScreenWalkLaneIsEmpty();
+  if (!firstStart) stopFrontend();
   const state = readState() ?? createState();
   rmSync(BUILD_FILE, { force: true });
-  compose(['down', '-v', '--remove-orphans']);
+  if (!firstStart) compose(['down', '-v', '--remove-orphans']);
   await startDatabase(state);
   await startServices(state);
   assertSealed();
@@ -403,7 +420,8 @@ async function rebuild() {
   await seed(state);
   const ledgerRows = scalar('SELECT count(*) FROM supabase_migrations.schema_migrations;');
   const uncommittedChanges = text(run('git', ['status', '--porcelain'])) !== '';
-  const build = { commit: text(run('git', ['rev-parse', 'HEAD'])), uncommittedChanges, builtAt: new Date().toISOString(), ledgerRows, migrations };
+  const build = { commit: text(run('git', ['rev-parse', 'HEAD'])), uncommittedChanges, builtAt: new Date().toISOString(), ledgerRows, migrations,
+    ...(IS_SCREEN_WALK ? { schemaFingerprint: schemaFingerprint(migrations) } : {}), };
   writeFileSync(BUILD_FILE, JSON.stringify(build, null, 2));
   console.log(`Rebuilt from ${describeBuild(build)}.`);
 }
@@ -411,6 +429,27 @@ async function rebuild() {
 function describeBuild(build) {
   const source = build.uncommittedChanges ? `${build.commit} plus uncommitted changes` : build.commit;
   return `${source}: ${build.migrations.length} migrations, ${build.ledgerRows} ledger rows`;
+}
+
+function schemaFingerprint(migrations) {
+  const baseline = JSON.parse(readFileSync(path.join(BASELINE, 'manifest.json'), 'utf8'));
+  const files = [
+    ...migrations.map((name) => path.join('supabase', 'migrations', name)),
+    ...baseline.restore_order.map((name) => path.join('supabase', 'baselines', name)),
+    'supabase/baselines/manifest.json',
+    'supabase/baselines/one-shot-migrations.json',
+    'scripts/decompress-schema-baseline.mjs',
+    'scripts/verify-schema-baseline.mjs',
+    'scripts/list-post-baseline-migrations.mjs',
+    'scripts/local-app/app.mjs',
+    'scripts/local-app/target.mjs',
+    'scripts/local-app/compose.yaml',
+    'scripts/local-app/kong.yml',
+    'scripts/local-app/seed.sql',
+  ];
+  const hash = createHash('sha256');
+  for (const file of files) hash.update(file).update('\0').update(readFileSync(path.join(ROOT, file))).update('\0');
+  return hash.digest('hex');
 }
 
 // The sealed services, the database among them, must have no way out, or a stray job could reach
@@ -444,11 +483,27 @@ const vite = (port) => ['node_modules/vite/bin/vite.js', '--config', 'scripts/lo
 // A test on another branch's database would prove nothing about this one.
 function requireFinishedBuild() {
   if (!existsSync(BUILD_FILE)) throw new Refused('The last rebuild did not finish. Run: node scripts/local-app/app.mjs rebuild');
-  const built = JSON.parse(readFileSync(BUILD_FILE, 'utf8')).migrations.join();
-  if (built !== approvedMigrations().join()) throw new Refused('This checkout has different migrations from the test database. Run: node scripts/local-app/app.mjs rebuild');
+  const migrations = approvedMigrations();
+  return assertFinishedBuild(JSON.parse(readFileSync(BUILD_FILE, 'utf8')), migrations, IS_SCREEN_WALK ? schemaFingerprint(migrations) : undefined);
 }
 
 async function start() {
+  if (IS_SCREEN_WALK && existsSync(FIRST_START_LOCK)) throw new Refused(`Another first-time walkthrough setup is running, or ${FIRST_START_LOCK} needs recovery.`);
+  if (!readState() && IS_SCREEN_WALK) {
+    mkdirSync(STATE_DIR, { recursive: true });
+    try {
+      writeFileSync(FIRST_START_LOCK, String(process.pid), { flag: 'wx', mode: 0o600 });
+    } catch {
+      throw new Refused(`Another first-time walkthrough setup is running, or ${FIRST_START_LOCK} needs recovery.`);
+    }
+    try {
+      await preflight({ needState: false });
+      assertNewScreenWalkLaneIsEmpty();
+      await rebuild({ firstStart: true });
+    } finally {
+      rmSync(FIRST_START_LOCK, { force: true });
+    }
+  }
   const state = await preflight();
   requireFinishedBuild();
   await startDatabase(state);
@@ -467,18 +522,23 @@ async function frontend() {
   const flag = process.argv.indexOf('--port');
   const port = flag < 0 ? APP_PORT : assertExtraAppPort(process.argv[flag + 1]);
   const state = await preflight();
-  if (IS_SALES_GAUNTLET) requireFinishedBuild();
+  if (IS_SALES_GAUNTLET || IS_SCREEN_WALK) requireFinishedBuild();
   const supabaseUrl = port === APP_PORT ? API_URL : `http://127.0.0.1:${port}/_sb`;
   run(process.execPath, vite(port), { env: frontendEnv(state, supabaseUrl), stdio: 'inherit' });
 }
 
 async function test() {
+  const spec = process.argv[3];
+  if (IS_SCREEN_WALK && !spec) throw new Refused('Choose one feature proof, for example: walkthrough.mjs test product-unit.spec.ts');
+  if (spec && (!/^[\w-]+\.spec\.ts$/.test(spec) || !existsSync(path.join(HERE, 'e2e', spec)) || (IS_SCREEN_WALK && spec === 'chemical-sales.spec.ts'))) {
+    throw new Refused('Choose an existing, non-sales spec file from scripts/local-app/e2e.');
+  }
   const state = await preflight();
   requireFinishedBuild();
   await startDatabase(state);
   await startServices(state);
   if (IS_SALES_GAUNTLET) run(process.execPath, ['scripts/local-app/sales-checks.mjs'], { stdio: 'inherit' });
-  run(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '--config', 'scripts/local-app/playwright.config.ts'], { stdio: 'inherit' });
+  run(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '--config', 'scripts/local-app/playwright.config.ts', ...(spec ? [`scripts/local-app/e2e/${spec}`] : [])], { stdio: 'inherit' });
 }
 
 async function status() {
@@ -512,7 +572,9 @@ const COMMANDS = {
 };
 
 const extra = process.argv.slice(3);
-const validArguments = extra.length === 0 || (process.argv[2] === 'frontend' && extra.length === 2 && extra[0] === '--port');
+const validArguments = extra.length === 0
+  || (process.argv[2] === 'frontend' && extra.length === 2 && extra[0] === '--port')
+  || (process.argv[2] === 'test' && extra.length === 1 && /^[\w-]+\.spec\.ts$/.test(extra[0]));
 (async () => {
   if (!validArguments) throw new Refused('Unsupported test-app arguments. Use sales.mjs for the sales gauntlet.');
   const command = COMMANDS[process.argv[2]];

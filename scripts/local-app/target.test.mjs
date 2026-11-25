@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, Refused,
   IS_SALES_GAUNTLET, PROJECT,
-  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings,
+  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFinishedBuild, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, assertWalkthroughLaneResourcesAreEmpty,
   denyInsideCheckout,
 } from './target.mjs';
 import { isFileLoadingAllowed, resolveConfig } from 'vite';
@@ -64,6 +64,28 @@ describe('isolated sales profile', () => {
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), ['crx-sales-gauntlet', 5209, 54821, 54822, 'crx-sales-gauntlet', '.state/sales-gauntlet']);
   });
+  it('selects a deterministic, separate walkthrough stack for a feature checkout', () => {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import * as target from ${JSON.stringify(new URL('./target.mjs', import.meta.url).href)};
+      console.log(JSON.stringify([target.PROJECT, target.APP_PORT, target.API_PORT, target.DB_PORT, target.ISSUER, target.STATE_FOLDER]));
+    `], { encoding: 'utf8', env: { ...process.env, CRX_LOCAL_APP_PROFILE: 'screen-walk', CRX_LOCAL_APP_LANE: '89abcdef' } });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), ['crx-screen-89abcdef', 6196, 24967, 34967, 'crx-screen-89abcdef', '.state/screen-walk']);
+  });
+  it('refuses a walkthrough profile with no checkout identity', () => {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `import './scripts/local-app/target.mjs'`], {
+      cwd: path.resolve(HERE, '..', '..'), encoding: 'utf8', env: { ...process.env, CRX_LOCAL_APP_PROFILE: 'screen-walk', CRX_LOCAL_APP_LANE: '' },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Invalid screen-walk lane/);
+  });
+  it('allows a new walkthrough lane only when its project resources and ports are unused', () => {
+    assert.doesNotThrow(() => assertWalkthroughLaneResourcesAreEmpty({ containers: '', volumes: '', networks: '', netstat: '' }));
+    assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: 'container-id', volumes: '', networks: '', netstat: '' }), /container exists/);
+    assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: '', volumes: 'volume-id', networks: '', netstat: '' }), /volume exists/);
+    assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: '', volumes: '', networks: 'network-id', netstat: '' }), /network exists/);
+    assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: '', volumes: '', networks: '', netstat: `TCP 127.0.0.1:${APP_PORT} 0.0.0.0:0 LISTENING 123` }), /already in use/);
+  });
   it('refuses a state file from the other profile', () => {
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
       import assert from 'node:assert/strict';
@@ -83,8 +105,29 @@ describe('isolated sales profile', () => {
     assert.equal(result.status, 3);
     assert.match(result.stderr, /Unsupported test-app arguments/);
   });
-  it('reserves every port in both profiles', () => {
-    for (const port of [5199, 54721, 54722, 5209, 54821, 54822]) assert.throws(() => assertExtraAppPort(String(port)), Refused);
+  it('reserves every fixed port and the current checkout ports', () => {
+    for (const port of [5199, 54721, 54722, 5209, 54821, 54822, 5219, 54831, 54832, APP_PORT, API_PORT, DB_PORT]) assert.throws(() => assertExtraAppPort(String(port)), Refused);
+  });
+});
+
+describe('walkthrough build manifest', () => {
+  it('refuses a missing or incomplete build manifest', () => {
+    assert.throws(() => assertFinishedBuild(null, ['one.sql']), /last rebuild did not finish/);
+    assert.throws(() => assertFinishedBuild({ migrations: [] }, ['one.sql']), /different migrations/);
+  });
+  it('refuses same-named migrations with changed contents', () => {
+    assert.throws(() => assertFinishedBuild({ migrations: ['one.sql'], schemaFingerprint: 'old' }, ['one.sql'], 'new'), /contents changed/);
+    assert.doesNotThrow(() => assertFinishedBuild({ migrations: ['one.sql'], schemaFingerprint: 'new' }, ['one.sql'], 'new'));
+  });
+  it('rejects a missing spec selection before it asks Docker to start', () => {
+    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'test', 'missing.spec.ts'], { encoding: 'utf8', timeout: 30000 });
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /existing, non-sales spec/);
+  });
+  it('requires a feature spec on the walkthrough lane', () => {
+    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'test'], { encoding: 'utf8', timeout: 30000 });
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /Choose one feature proof/);
   });
 });
 

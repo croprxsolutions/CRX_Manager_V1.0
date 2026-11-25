@@ -23,6 +23,7 @@
 .claude/commands/** text eol=lf
 .husky/**           text eol=lf
 .github/workflows/** text eol=lf
+AGENTS.md text eol=lf
 *.sh                 text eol=lf
 
 # These migrations are already applied live and contain content-bound

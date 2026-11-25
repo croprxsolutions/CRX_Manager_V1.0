@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PROJECT, STATE_FOLDER, IS_SALES_GAUNTLET, Refused, assertLocalDockerEndpoint } from '../target.mjs';
+import { PROJECT, STATE_FOLDER, IS_SALES_GAUNTLET, IS_SCREEN_WALK, Refused, assertLocalDockerEndpoint } from '../target.mjs';
 
 const here = fileURLToPath(new URL('..', import.meta.url));
 
@@ -18,8 +18,8 @@ function localDockerHost(): string {
     if (!/scripts[\\/]local-app[\\/]compose\.yaml$/.test(container.Config.Labels['com.docker.compose.project.config_files'] ?? '')) {
       throw new Refused(`Another stack is using the name ${PROJECT}. Nothing was changed.`);
     }
-    if (IS_SALES_GAUNTLET && resolve(container.Config.Labels['com.docker.compose.project.config_files']) !== resolve(here, 'compose.yaml')) {
-      throw new Refused('The sales test stack belongs to another checkout. Nothing was changed.');
+    if ((IS_SALES_GAUNTLET || IS_SCREEN_WALK) && resolve(container.Config.Labels['com.docker.compose.project.config_files']) !== resolve(here, 'compose.yaml')) {
+      throw new Refused(`The ${IS_SCREEN_WALK ? 'screen-walk' : 'sales'} test stack belongs to another checkout. Nothing was changed.`);
     }
   }
   return host;

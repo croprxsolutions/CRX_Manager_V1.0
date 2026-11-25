@@ -7,6 +7,25 @@ production, and nothing outside this computer can reach it. The rules are in the
 
 ## Commands
 
+### Feature-screen walkthroughs
+
+Run `node scripts/local-app/walkthrough.mjs start` from any feature checkout. On first use it creates that
+worktree's isolated Docker database, login and storage, and opens the app at the URL it prints. Later starts
+reuse that checkout's saved database. Each worktree gets a stable Docker project and three loopback ports derived
+from its path, so different feature branches can walk through screens side by side. If those ports are already
+busy, the launcher refuses before changing anything. If its saved credentials are missing, it also refuses to
+replace the database. `rebuild` explicitly resets only that checkout's verified walkthrough database.
+
+Run the focused localhost-only feature proof with, for example,
+`node scripts/local-app/walkthrough.mjs test product-unit.spec.ts`. The command accepts one existing
+`*.spec.ts` file from `scripts/local-app/e2e/` and checks the checkout's recorded migrations match its test DB.
+It refuses the sales-only scenario. The product unit proof signs in, creates a liquid product with a gallon
+inventory unit, and verifies those choices after reloading it. Close the app with
+`node scripts/local-app/walkthrough.mjs stop`, or use `status` to see its build commit and migration count.
+The shared `app.mjs` copy, sales gauntlet and document-proof stack retain their existing names, ports, volumes and state.
+Each walkthrough's generated login, local keys and browser evidence stay under its ignored
+`scripts/local-app/.state/screen-walk/` folder. Do not put those credentials in a handoff.
+
 ### Customer-document byte proof (separate test copy, KI-113)
 
 `node scripts/local-app/doc-bytes.mjs rebuild` (about 15 minutes), then

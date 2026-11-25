@@ -4,13 +4,10 @@
 const HOLD_MARKER = /\[HOLD FOR MASON\]/i;
 
 // Returns a plain-English refusal reason, or null when the owner hold does not block.
-// GitHub always returns a title, so an absent one on a staging PR is unreadable state: fail closed.
-export function ownerHoldProblem({ title, baseRefName } = {}) {
+// GitHub always returns a title, so an absent one is unreadable state: fail closed on every base.
+export function ownerHoldProblem({ title } = {}) {
   if (typeof title !== "string") {
-    if (String(baseRefName ?? "").trim().toLowerCase() === "staging") {
-      return "GitHub did not return this pull request's title, so the owner-hold marker could not be checked (fail closed).";
-    }
-    return null;
+    return "GitHub did not return this pull request's title, so the owner-hold marker could not be checked (fail closed).";
   }
   if (HOLD_MARKER.test(title)) {
     return "this PR's title carries [HOLD FOR MASON], so it is held for Mason. Verify his approval in this conversation " +

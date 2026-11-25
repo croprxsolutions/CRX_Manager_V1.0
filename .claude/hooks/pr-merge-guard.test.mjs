@@ -355,7 +355,7 @@ for (const title of ["[HOLD FOR MASON] fix thing", "fix thing [hold for mason]"]
   ok(typeof p === "string" && /HOLD FOR MASON/.test(p) && /CURRENT exact head/.test(p), `held title refused: ${title}`);
 }
 ok(/title/.test(ownerHoldProblem({ baseRefName: "staging" }) ?? ""), "absent title on a staging PR fails closed");
-ok(ownerHoldProblem({ baseRefName: "main" }) === null, "absent title off staging does not block");
+ok(/title/.test(ownerHoldProblem({ baseRefName: "main" }) ?? ""), "absent title fails closed on every base");
 ok(ownerHoldProblem({ title: "fix thing", baseRefName: "staging" }) === null, "an ordinary title is not held");
 r = runHook({ tool_name: "mcp__github__create_pull_request_review", tool_input: { owner: "o", repo: "r", pull_number: 5, event: "COMMENT", body: "Do not APPROVE until the proof passes" } });
 ok(r.status === 0 && r.decision === null, "a COMMENT review that mentions APPROVE in its body passes");

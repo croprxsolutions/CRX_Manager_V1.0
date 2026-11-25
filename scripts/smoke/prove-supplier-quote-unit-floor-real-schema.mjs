@@ -154,6 +154,18 @@ try {
     /^ok\|saved$/, 'a normal correction saves');
   console.log('[correct] $10,000,000.01 refused by the pending-row check; $50.00 saves');
 
+  // 5. Each observation check on its own: a copy of a real observation with one bound broken (triggers off).
+  const obsCopy = (patch) => docker(PSQL, { input: `BEGIN;
+    SET LOCAL session_replication_role = replica;
+    INSERT INTO public.supplier_price_observations
+      SELECT (jsonb_populate_record(NULL::public.supplier_price_observations,
+        to_jsonb(o) || jsonb_build_object('id', gen_random_uuid()) || '${JSON.stringify(patch)}'::jsonb)).*
+      FROM public.supplier_price_observations o WHERE o.id = '${OBS}';
+    ROLLBACK;`, allowFailure: true }).stderr;
+  assert.match(obsCopy({ package_quantity: 0.0001 }), /supplier_price_observations_package_quantity_floor/, 'observation quantity floor');
+  assert.match(obsCopy({ cost_cents: 1000000001 }), /supplier_price_observations_cost_ceiling/, 'observation cost ceiling');
+  console.log('[observation] package quantity 0.0001 and cost 1,000,000,001 cents each refused by their own check');
+
   console.log('\nSUPPLIER_QUOTE_UNIT_FLOOR_PROOF_PASS');
 } finally {
   if (process.env.KEEP_CONTAINER !== '1') removeContainer();

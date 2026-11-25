@@ -42,6 +42,7 @@ No new function, grant or policy.
 1. `stage_supplier_price_import` (re-emitted, body otherwise byte-identical): a row with package quantity below
    0.001 gets the existing `PACKAGE_QUANTITY_INVALID` code; a cost above $10,000,000 gets new `COST_TOO_LARGE`.
    Both make the row `invalid` (not approvable), as every other row error does; the rest of the sheet still stages.
+   (Unchanged: a quantity of 0 or less still fails the whole sheet on the table's existing positive-quantity check.)
 2. CHECK `product_supplier_links_conversion_floor` (factor NULL or >= 0.001) - the link save is refused.
 3. CHECKs `supplier_price_observations_package_quantity_floor` (>= 0.001) and
    `supplier_price_observations_cost_ceiling` (<= 1e9 cents) - backstop for approve and correction.
@@ -207,3 +208,13 @@ column checks. Production read-only count 2026-11-24: 0 such rows. Unchanged.
 Repeats round 1 MED #2-#5 (settled above). LOW #6 fixed here (the enforcement summary now lists `cannot_compare`).
 LOW #5 accepted: the correction proof stops at the pending-row check before the observation cost ceiling; the
 postflight confirms that check exists and is validated, and the stage and link proofs exercise the other bounds.
+
+## Sol round 3 (2026-11-25, PR #2524 head 8a0494d27, after the staging merge and restamp to 20270305200000): clean
+
+- MED (a superseded historical observation outside a bound blocks the apply) and MED (an older invalid import row
+  with cents past JavaScript's exact integers stays unreadable): both need stored legacy data. Production read-only
+  counts: 0 links / 0 observations / 0 approvable rows outside a bound; largest stored cost 46,743 cents. Accepted;
+  a staging test row would stop the job with nothing applied and get a reviewed repair.
+- MED deadlock, duplicate suppression, stale archived warning: repeats, settled in Sol round 1.
+- LOW fixed: the prover now inserts an observation copy breaking each bound and sees its own check refuse it.
+- LOW fixed: item 1 now says a quantity of 0 or less still fails the whole sheet (existing column check, unchanged).

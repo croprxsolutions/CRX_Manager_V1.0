@@ -29,8 +29,18 @@ DECLARE
   v_before jsonb;
   v_event bigint;
 BEGIN
-  v_receipt := public._product_parent_replay(p_idempotency_key, 'reject_liquid_density_draft', v_fingerprint);
-  IF v_receipt IS NOT NULL THEN RETURN v_receipt; END IF;
+  IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('crx.product_parent:reject_liquid_density_draft:' || p_idempotency_key));
+  v_receipt := public.check_idempotency(p_idempotency_key, 'reject_liquid_density_draft');
+  IF v_receipt IS NOT NULL THEN
+    IF v_receipt->>'actor_id' IS DISTINCT FROM v_actor::text
+       OR v_receipt->>'request_fingerprint' IS DISTINCT FROM v_fingerprint THEN
+      RAISE EXCEPTION 'IDEMPOTENCY_PAYLOAD_MISMATCH';
+    END IF;
+    RETURN v_receipt->'response';
+  END IF;
 
   -- Use the same parent then state lock order as the existing writers and approval batch.
   PERFORM 1 FROM public.product_parents

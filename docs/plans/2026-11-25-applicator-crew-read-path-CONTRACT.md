@@ -103,6 +103,17 @@ Mason, 2026-11-25 (relayed verbatim by the parent session): "Yes, second step". 
 - **LOW 5 (`metabase_ro`):** refuted, same as Sol round 1 LOW 3.
 - **LOW 6 (the applicator delete case removes zero rows both times):** deferred. Delete permission is unchanged by this migration (only its `jobs` lookup moved to `jobs_crew`), and before = after is proven for that call; an own-upload delete case belongs to the step-3 proof, where delete rules may change.
 
+## Gate settlement (Sol round 3 on dab876b3c: verdict clean, 0 blocking findings)
+
+- **MED (views outlive a later tightening):** deferred by design, same as round 2 MED 2.
+- **MED (an allowed policy name could change to another command with the same text):** deferred. Only a migration landing ahead of this one could do that; the staging-first order puts every such migration through this preflight's review, and no open PR touches these policies (Taha's #2525, #2526, #2537, #2556 checked 2026-11-25).
+- **MED (the function check hashes bodies, not execution settings):** deferred on the same grounds. Since round 1, none of the five functions has had a settings-only change (each is recreated with its current settings).
+- **MED (the reverse does not check current definitions):** deferred, same as round 1 MED 2.
+- **MED (job-tag probe selects a missing `id`):** refuted. The probe reads `t.job_id` (proof line 146) and returns real rows: the applicator sees jobs A and E only; admin sees A, B, C and E. These match before and after.
+- **LOW (`metabase_ro`):** refuted, same as round 1 LOW 3.
+- **LOW (own-upload delete case):** deferred to the step-3 proof, same as round 2 LOW 6.
+- **LOW (reuse trusts a name prefix):** accepted as is. Reuse is a developer shortcut, and the gate run always builds a fresh database.
+
 ## Appendix A: policies that read `jobs` inline (local copy, `pg_policies`)
 
 customers: `customers_select`, `customers_select_location_dispatchee` · job_applied_info: insert, update · job_applied_records: insert, update, delete · job_applied_record_fields: insert, update, delete · job_applied_record_crew: insert, update, delete · job_attachments: insert, delete · job_chemicals_select · job_fields_select · job_loader_worksheets_select · job_location_dispatches_select · job_product_epa_select · job_tag_assignments_select · storage.objects: `job_attachments_objects_select/insert/delete`.

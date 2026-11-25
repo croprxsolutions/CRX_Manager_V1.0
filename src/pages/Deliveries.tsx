@@ -300,7 +300,7 @@ export default function Deliveries() {
     setCompleteLines(null);
   };
   // The delivery's lines (full delivery: delivered = scheduled quantity), read when the dialog opens and
-  // after a refusal. The customer signs, or the ticket photo is taken, only once they are loaded (20270304120000).
+  // after a refusal. The customer signs, or the ticket photo is taken, only once they are loaded (20270305110000).
   const [completeLines, setCompleteLines] = useState<{ deliveryId: string; lines: LineSeen[] } | null>(null);
   const loadCompleteLines = async (deliveryId: string, dialogGen: number) => {
     const { data, error } = await supabase.from('delivery_items')
@@ -711,7 +711,7 @@ export default function Deliveries() {
     }
   };
 
-  // The ticket-photo and proof-binding checks (20270304120000), run before anything (the signature image)
+  // The ticket-photo and proof-binding checks (20270305110000), run before anything (the signature image)
   // is uploaded. Returns the p_lines_seen part of the call, or null after showing why it cannot be sent.
   const completeProofParams = (evidence: DeliveryCompletionEvidence): { p_lines_seen?: LineSeen[] } | null => {
     if (evidence === 'paper_ticket' && !currentTicketPhoto) {
@@ -2327,7 +2327,7 @@ export default function Deliveries() {
                   e.target.value = '';
                   const target = completeTargetRef.current;
                   const dialogGen = completeDialogGenRef.current;
-                  // The lines on screen at the shutter, saved with the photo (20270304120000).
+                  // The lines on screen at the shutter, saved with the photo (20270305110000).
                   const linesAtPhoto = currentCompleteLinesRef.current;
                   if (!file || !target || !profile || !linesAtPhoto) return;
                   if (currentTicketPhotos.length >= MAX_PAPER_TICKET_PHOTOS) {

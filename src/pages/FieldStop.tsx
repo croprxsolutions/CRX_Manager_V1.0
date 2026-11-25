@@ -366,7 +366,7 @@ export default function FieldStop() {
   // An email of only spaces is no email, so the missing-email warning still shows (#2167).
   const receiptEmail = delivery?.customer?.email?.trim() || receiptRecipient?.email?.trim() || null;
   // The lines on screen with their delivered amounts: the signature and the ticket photo are bound to
-  // them (20270304120000). Null until the stop's lines are loaded.
+  // them (20270305110000). Null until the stop's lines are loaded.
   const currentLinesSeen = useMemo(
     () => (items.length ? buildLinesSeen(items, (it) => deliveryQtys[it.id] ?? it.quantity) : null),
     [items, deliveryQtys],
@@ -406,7 +406,7 @@ export default function FieldStop() {
     }
     setUploadingPhoto(true);
     let uploadCount = 0;
-    // A signed-ticket photo is saved with the lines and amounts on screen when it was taken (20270304120000).
+    // A signed-ticket photo is saved with the lines and amounts on screen when it was taken (20270305110000).
     const linesAtPhoto = caption === PAPER_TICKET_PHOTO_CAPTION ? currentLinesSeen : null;
     for (const rawFile of Array.from(files)) {
       try {

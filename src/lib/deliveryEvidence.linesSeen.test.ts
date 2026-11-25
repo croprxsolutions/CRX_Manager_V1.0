@@ -4,7 +4,7 @@ import {
   sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE,
 } from './deliveryEvidence';
 
-// Mirrors the server's _delivery_lines_match (migration 20270304120000): a multiset of
+// Mirrors the server's _delivery_lines_match (migration 20270305110000): a multiset of
 // (order line, product, quantity, delivered), delivered kept between 0 and the quantity.
 describe('proof bound to the load', () => {
   const items = [

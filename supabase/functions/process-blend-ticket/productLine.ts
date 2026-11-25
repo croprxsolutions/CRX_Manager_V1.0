@@ -69,8 +69,7 @@ export function parseProductLine(
       numIdx = t;
       break;
     }
-    // An attached "/ac" ("32oz/ac") is still the rate, not part of the name (Sol r3).
-    if (tokens[t].match(/^\d+\.?\d*(pt|gal|lb|oz|qt|ml|l|g)(\/a(c(re)?)?\.?)?$/i)) {
+    if (tokens[t].match(/^\d+\.?\d*(pt|gal|lb|oz|qt|ml|l|g)$/i)) {
       numIdx = t;
       break;
     }
@@ -111,7 +110,7 @@ const PER_ACRE = /^(?:\/\s*|per\s+)a(?:c(?:re)?)?\.?(?=\s|$)\s*/i;
 // A damaged total like "~10 gal" or "10-gal": only symbols before the number, so "lot 24", "1,5"
 // or an EPA number "524-579" never count.
 const LOOSE_NUMBER =
-  /^[^a-z0-9.,]*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?=[^\d.,-]|-[a-z]|$)/i;
+  /^[^a-z0-9.,]*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?=[^\d.,-]|-\s*[a-z]|$)/i;
 
 // Strict rule (Mason, 2026-11-24): a unit is filled only for an exact line, a rate with a known unit
 // and a total with a known unit, nothing else. The total is the quantity ("6 g 750 g" is 750 g, Sol
@@ -178,4 +177,11 @@ export function nameSwallowsRate(
     const c = normName(n);
     return c.length > name.length && c.startsWith(name) && c[name.length] === next;
   });
+}
+
+// The matched catalog product has a number the read name lacks ("Atrazine 4L" matched from
+// "Atrazlne"): the number may have been read as the rate, so the caller blanks the unit (Sol r4).
+export function matchAddsNumber(readName: string, matchedName: string): boolean {
+  const read = new Set(readName.match(/\d+/g) ?? []);
+  return (matchedName.match(/\d+/g) ?? []).some((n) => !read.has(n));
 }

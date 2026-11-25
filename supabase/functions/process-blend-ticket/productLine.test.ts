@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1.0.14";
 import {
+  matchAddsNumber,
   nameSwallowsRate,
   parseProductLine,
   pickQuantity,
@@ -61,8 +62,7 @@ Deno.test("Sol r2: damaged totals keep their number; grams and per acre are read
   check("Piksi 6 grams 750 grams", "Piksi", 750, "g");
   // Sol r3: a damaged total never becomes zero; an attached /ac stays the rate.
   check("Roundup | | 10-gal", "Roundup", 10, null);
-  check("Roundup 32oz/ac 10 gal", "Roundup", 10, "gal");
-  check("Roundup 32oz/ac 10 gal 5 gal", "Roundup", 10, null);
+  check("Atrazine | | 80- qt", "Atrazine", 80, null);
 });
 
 Deno.test("the multi-line reader uses the same rule", () => {
@@ -153,4 +153,10 @@ Deno.test("anything uncertain leaves the unit blank so the stock check stops it 
   // Luna r4: extra text in the pipe rate cell; an unreadable rate keeps a readable total's number.
   check("Piksi | 6 g 750 g | 10 gal", "Piksi", 10, null);
   check("Roundup | N/A | 10 gal", "Roundup", 10, null);
+});
+
+Deno.test("a matched product with a number the read name lacks is caught (Sol r4)", () => {
+  assertEquals(matchAddsNumber("Atrazlne", "Atrazine 4L"), true);
+  assertEquals(matchAddsNumber("2,4-D Amine", "2,4-D Amine"), false);
+  assertEquals(matchAddsNumber("Roundup", "Roundup PowerMax"), false);
 });

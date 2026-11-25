@@ -87,7 +87,11 @@ function checklistLinks(period: { start: string; end: string }): Record<string, 
       { to: '/invoices', label: 'Open chemical invoices' },
       { to: '/field-invoices?tab=drafts', label: 'Open field invoice drafts' },
     ],
-    payments: [{ to: `/payment-history?from=${period.start}&to=${period.end}`, label: 'Open payment history' }],
+    payments: [
+      { to: `/payment-history?from=${period.start}&to=${period.end}`, label: 'Open payment history' },
+      // The count above also includes Prepayment Manager checks, which Payment History does not list.
+      { to: '/prepay?tab=manager', label: 'Open Prepayment Manager checks' },
+    ],
     deliveries: [{ to: '/deliveries', label: 'Open deliveries' }],
     commissions: [{ to: '/commission-payments', label: 'Open commission payments' }],
     rushOrders: [{ to: '/orders', label: 'Open orders' }],

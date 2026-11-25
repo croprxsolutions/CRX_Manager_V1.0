@@ -454,7 +454,7 @@ export default function PaymentHistory() {
             <span className="text-sm text-secondary">Voided Payments</span>
           </div>
           <p className="text-2xl font-semibold font-heading text-red-600">{voidedCount}</p>
-          <p className="text-xs text-secondary mt-1">reversed {rangeCaption}</p>
+          <p className="text-xs text-secondary mt-1">payments dated {rangeCaption}</p>
         </Card>
       </div>
       )}

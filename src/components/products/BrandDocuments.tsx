@@ -105,7 +105,7 @@ interface BrandDocumentsProps {
   links: BrandDocumentLink[];
   canEdit: boolean;
   userId: string;
-  onReload: () => void;
+  onReload: (includeBrand?: boolean) => void;
 }
 
 export default function BrandDocuments({ target, brandName, links, canEdit, userId, onReload }: BrandDocumentsProps) {
@@ -132,6 +132,10 @@ export default function BrandDocuments({ target, brandName, links, canEdit, user
       setEdit(null);
       toast('success', change.action === 'report' ? 'Broken link reported' : 'Document links updated');
       onReload();
+    } catch (error) {
+      if (error && typeof error === 'object' && 'message' in error
+          && /^BRAND_(?:DOCUMENT_)?CHANGED:/.test(String(error.message))) onReload(true);
+      throw error;
     } finally {
       locked.current = false;
       setBusy(false);

@@ -552,7 +552,10 @@ export default function ProductBrandsSection({
                       <BrandDocuments target={{ id: brand.id, parent_brand: parent !== null, brand_version: brand.row_version }}
                         brandName={brand.brand_name} userId={userId ?? ''} canEdit={isAdmin}
                         links={documents.data.filter((link) => (link.parent_brand_id ?? link.legacy_brand_id) === brand.id)}
-                        onReload={() => void documents.reload()} />
+                        onReload={(includeBrand) => {
+                          if (includeBrand) setReloadToken((token) => token + 1);
+                          else void documents.reload();
+                        }} />
                     ) : documents.status === 'failed' || documents.status === 'loaded' ? (
                       <Button variant="secondary" size="sm" onClick={() => void documents.reload()}>Retry links</Button>
                     ) : <span className="text-secondary">Loading links…</span>}

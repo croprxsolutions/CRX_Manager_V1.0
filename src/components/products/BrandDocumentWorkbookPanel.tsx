@@ -18,7 +18,7 @@ async function previewRow(row: BrandDocumentImport, brand: BrandDocumentWorkspac
   } catch (err) {
     if (typeof err !== 'object' || err === null || !('message' in err)) throw err;
     const message = String(err.message);
-    if (message.startsWith('BRAND_CHANGED:')) return changed;
+    if (/^BRAND_(?:DOCUMENT_)?CHANGED:/.test(message)) return changed;
     if (message.startsWith('BRAND_DOCUMENT_')) return row.brandName + ' · ' + sanitizeError(err);
     throw err;
   }

@@ -62,4 +62,14 @@ describe('Brand documents on Product Detail', () => {
     await waitFor(() => expect(reload).toHaveBeenCalledOnce());
     expect(hooks.mutate).toHaveBeenCalledWith(target, [{ action: 'report', id: label.id, version: label.row_version }], expect.any(String));
   });
+
+  it.each(['BRAND_CHANGED', 'BRAND_DOCUMENT_CHANGED'])('refreshes the brand and links after %s', async (code) => {
+    hooks.mutate.mockRejectedValueOnce({ message: code + ': reload before changing' });
+    const reload = vi.fn();
+    render(<BrandDocuments target={target} brandName="Dual II Magnum" links={[label]}
+      canEdit={false} userId="staff" onReload={reload} />);
+    fireEvent.click(screen.getByRole('button', { name: /Report broken link for Dual II Magnum/ }));
+    await waitFor(() => expect(reload).toHaveBeenCalledWith(true));
+    expect(hooks.toast).toHaveBeenCalledWith('error', 'This brand or link changed. Review it and try again.');
+  });
 });

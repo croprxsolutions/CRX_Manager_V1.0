@@ -438,6 +438,8 @@ describe('sanitizeError', () => {
     // Supplier Pricing bounds (20270305200000): the database refusal reads as the rule, never the constraint name.
     expect(sanitizeError({ message: 'new row for relation "product_supplier_links" violates check constraint "product_supplier_links_conversion_floor"' }))
       .toBe('Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals');
+    expect(sanitizeError({ message: 'SUPPLIER_LINK_REUSE_FIELDS_REQUIRED' }))
+      .toBe('Nothing was saved. Fill in Supplier SKU, Supplier price unit and Supplier pack description, then save the link again');
     expect(sanitizeError('SUPPLIER_CONVERSION_INVALID'))
       .toBe('Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals');
     expect(sanitizeError({ message: 'new row for relation "supplier_price_observations" violates check constraint "supplier_price_observations_package_quantity_floor"' }))

@@ -15,7 +15,7 @@ wrong; items 3 to 5 are a stale warning, a dropped duplicate and a raw error cod
   review screen loaded, its quotes show no warning until Refresh. Approving is allowed either way.
 - **Duplicate detection ignores package size, price unit and end date.** Two quote rows sent straight to the
   database that differ only in those keep only the first.
-- **Saving a product link with blank fields shows a raw code.** Leaving the supplier SKU, unit or
-  pack description blank shows `SUPPLIER_LINK_REUSE_FIELDS_REQUIRED` instead of a plain message.
+- **FIXED (#PRNUM): Saving a product link with blank fields shows a raw code.** Leaving the supplier SKU, unit or
+  pack description blank showed `SUPPLIER_LINK_REUSE_FIELDS_REQUIRED`; it now asks the user to fill in those three fields.
 
 The price-jump warning for quotes far from the current approved price shipped separately in #2546.

@@ -12,22 +12,25 @@
 -- DESIGN (re-planned 2026-11-25, Taha: "Yes, re-plan" / "Yes, OK with check"; plan in the M4 re-plan note): commission
 -- settles when a chemical-sale invoice enters or leaves the posted set, never at a draft, never from a commit-time
 -- queue. A first design recomputed at commit from deferred triggers and drew HIGHs in five review rounds.
---   1. _order_commission_base_20270306(sale) = total_profit + D × booked ÷ billed, over the sale's chemical-sale
---      invoices that are posted, overdue or paid and not deleted: D their standing-discount cents (each product line's
+--   1. _order_commission_base_20270306(sale) = total_profit + D × booked ÷ billed, over the sale's counted lines
+--      (_order_commission_lines_20270306: a product line whose order line is the sale's, or one with no order line on
+--      an invoice whose header is the sale; one rule for both) on invoices that are posted, overdue or paid and not
+--      deleted: D their standing-discount cents (each product line's
 --      share, never tax: _invoice_line_tax_shares_20270109), billed the product cents the P&L counts as billed (the
 --      sale's posted chemical-sale and misc-charge invoices, no application fees), booked orders.total_price.
 --      Fully billed: total_profit + D. Nothing posted: total_profit. The P&L earns commission by the share billed over
 --      the same invoices (_report_commission_cents_20270203), so it earns exactly total_profit × share + D: the posted
 --      profit after its discount (Taha, rule "b"). Lines with different margins are prorated by revenue, as the P&L
 --      already does (accepted, Sol r6 H5).
---   2. _settle_order_commission_20270306(sale): when something must move, takes the sale lock (orders row, FOR NO KEY
---      UPDATE, waited for as zz_cap_order_invoice_header waits for it from the same invoice update) and reads
---      everything again under it; a sale with nothing to move takes no lock. It moves the
+--   2. _settle_order_commission_20270306(sale): takes the sale lock first (orders row, FOR NO KEY UPDATE, waited for,
+--      as zz_cap_order_invoice_header waits for it from the same invoice update) and reads everything under it. It
+--      moves the
 --      pending rows in no live payout batch whose stored base differs from the new base: each row its own percentage
 --      of the base (never a share of what is left), exact to the cent by largest remainder when they are the sale's
 --      whole live set, otherwise each its own rounded share. Rows already on the base never move (no cent after a
---      batch). A sale with no posted discount that never carried a standing-discount line is left exactly as its
---      writers made it (legacy rows included); one that did has its rows put back on the plain profit.
+--      batch). Rows it moves onto a discount are marked (new column commissions.discount_settled_at); with no posted
+--      discount only marked rows go back to the plain profit, so rows it never moved (legacy rows; every sale on live
+--      while the M4 switch is off) are left exactly as their writers made them.
 --      It locks only the rows it moves, reads them again under the lock, and writes only those.
 --   3. invoices_settle_commission_20270306 (+ its DELETE twin): a plain (not deferred) row trigger on invoices entering
 --      or leaving the posted chemical-sale set (status, deleted_at, invoice_type) or moving to another sale while in it. It covers post (single and group), unpost, void
@@ -47,7 +50,8 @@
 -- (taking it back goes with returns, KI-13, and payout eligibility, Sol r6 H6: follow-up). A direct SQL change to
 -- orders.total_profit / total_price or a commission row outside these app paths waits for the sale's next posting.
 --
--- ROLLBACK (its own reviewed migration): drop the two triggers and the three new functions, and re-emit the four pinned
+-- ROLLBACK (its own reviewed migration): drop the two triggers, the four new functions and
+--   commissions.discount_settled_at, and re-emit the four pinned
 -- functions from their source migrations (20260914100500, 20261106150000, 20260721145936, 20270228160000). Amounts
 -- already settled stay until the sale's next re-split.
 --
@@ -77,7 +81,10 @@ BEGIN
   END IF;
   IF to_regprocedure('public._settle_order_commission_20270306(uuid)') IS NOT NULL
      OR to_regprocedure('public._order_commission_base_20270306(uuid)') IS NOT NULL
-     OR to_regprocedure('public._invoice_settles_commission_20270306()') IS NOT NULL THEN
+     OR to_regprocedure('public._invoice_settles_commission_20270306()') IS NOT NULL
+     OR to_regprocedure('public._order_commission_lines_20270306(uuid)') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.commissions'::regclass
+                   AND attname = 'discount_settled_at' AND NOT attisdropped) THEN
     RAISE EXCEPTION 'COMMISSION_SETTLES_ON_POSTING_PREFLIGHT: already applied';
   END IF;
   IF to_regprocedure('public._invoice_line_tax_shares_20270109(uuid)') IS NULL
@@ -86,21 +93,43 @@ BEGIN
      OR to_regprocedure('public._void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)') IS NULL THEN
     RAISE EXCEPTION 'COMMISSION_SETTLES_ON_POSTING_PREFLIGHT: a helper this needs is missing';
   END IF;
-  -- The four functions re-emitted below must be exactly the bodies they were written from; anything else is a
-  -- concurrent change to merge first.
-  IF (SELECT string_agg(md5(prosrc), ',' ORDER BY oid::regprocedure::text) FROM pg_proc
+  -- The four functions re-emitted below must be exactly the bodies they were written from, with the same settings,
+  -- security and volatility; anything else is a concurrent change to merge first.
+  IF (SELECT string_agg(md5(prosrc || '|' || COALESCE(proconfig::text, '') || '|' || prosecdef::text || '|' || provolatile::text),
+                        ',' ORDER BY oid::regprocedure::text) FROM pg_proc
        WHERE oid IN (SELECT oid FROM pg_temp.commission_settles_on_posting_acl))
      IS DISTINCT FROM (SELECT string_agg(m, ',' ORDER BY f) FROM (VALUES
-       ('_insert_commissions_for_order(uuid,uuid,numeric,jsonb,date)', '3dd9c370d2aa7088db2cb4d20059ea45'),
-       ('cancel_order(uuid,uuid,text)', '501473a43b505df72bc803a7354b0e60'),
-       ('fix_delivery(uuid,text,text,text)', '2fb61be677985b989e9146bab4de9c2a'),
-       ('void_commission_payment(uuid,text,uuid,text)', '36efe2f2f8c314cffa03ef6417f5da91')) AS v(f, m)) THEN
+       ('_insert_commissions_for_order(uuid,uuid,numeric,jsonb,date)', '33cfc02bb473d257af955a14e78820b3'),
+       ('cancel_order(uuid,uuid,text)', '7672dd2407f20ddf1378f26587646ad3'),
+       ('fix_delivery(uuid,text,text,text)', '21cb2591ef973ac794a8167272050cee'),
+       ('void_commission_payment(uuid,text,uuid,text)', 'eb09e41a2af709c20562f44724f3c42b')) AS v(f, m)) THEN
     RAISE EXCEPTION 'COMMISSION_SETTLES_ON_POSTING_PREFLIGHT: a re-emitted function changed since this was written';
   END IF;
 END
 $preflight$;
 
 -- 1. The base ---------------------------------------------------------------------------------------------------
+-- The sale's counted product lines, one rule for the discount and for billed alike (Sol posting r2 H2): a product line
+-- whose order line belongs to the sale, or one with no order line on an invoice whose header is the sale; on invoices
+-- that are posted, overdue or paid and not deleted (chemical sales carry the discount; billed also counts misc charges,
+-- as the P&L does; no application fees).
+CREATE FUNCTION public._order_commission_lines_20270306(p_order_id uuid)
+ RETURNS TABLE(invoice_id uuid, item_id uuid, invoice_type text, extended_cents bigint)
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT i.id, b.id, i.invoice_type, b.extended_cents
+    FROM invoices i
+    JOIN invoice_items b ON b.invoice_id = i.id AND b.product_id IS NOT NULL AND b.charge_type IS NULL
+                        AND b.is_application_fee IS NOT TRUE
+    LEFT JOIN order_items oi ON oi.id = b.order_item_id
+   WHERE i.invoice_type IN ('chemical_sale', 'misc_charge') AND i.status IN ('posted', 'overdue', 'paid')
+     AND i.deleted_at IS NULL
+     AND (oi.order_id = p_order_id OR (b.order_item_id IS NULL AND i.order_id = p_order_id))
+$function$;
+REVOKE ALL ON FUNCTION public._order_commission_lines_20270306(uuid) FROM PUBLIC, anon, authenticated, service_role;
+
 CREATE FUNCTION public._order_commission_base_20270306(p_order_id uuid)
  RETURNS numeric
  LANGUAGE plpgsql
@@ -115,40 +144,26 @@ DECLARE
   v_profit numeric;
 BEGIN
   SELECT COALESCE(total_profit, 0), round(total_price * 100) INTO v_profit, v_booked FROM orders WHERE id = p_order_id;
-  -- Each posted discounted invoice is spread once (a per-line helper per order line took a 150-line sale past the
-  -- statement timeout in the first design).
+  -- Each counted discounted chemical sale is spread once (a per-line helper per order line took a 150-line sale past
+  -- the statement timeout in the first design).
   FOR v_invoice IN
-    SELECT DISTINCT b.invoice_id
-      FROM order_items oi
-      JOIN invoice_items b ON b.order_item_id = oi.id
-      JOIN invoices i ON i.id = b.invoice_id
-     WHERE oi.order_id = p_order_id
-       AND i.invoice_type = 'chemical_sale' AND i.status IN ('posted', 'overdue', 'paid') AND i.deleted_at IS NULL
-       AND EXISTS (SELECT 1 FROM invoice_items d WHERE d.invoice_id = i.id AND d.charge_type = 'standing_discount')
+    SELECT DISTINCT l.invoice_id FROM public._order_commission_lines_20270306(p_order_id) l
+     WHERE l.invoice_type = 'chemical_sale'
+       AND EXISTS (SELECT 1 FROM invoice_items d WHERE d.invoice_id = l.invoice_id AND d.charge_type = 'standing_discount')
   LOOP
     v_discount := v_discount + COALESCE((
-      SELECT sum(sh.net_cents - sh.tax_cents - b.extended_cents)
+      SELECT sum(sh.net_cents - sh.tax_cents - l.extended_cents)
         FROM public._invoice_line_tax_shares_20270109(v_invoice) sh
-        JOIN invoice_items b ON b.id = sh.item_id
-        JOIN order_items oi ON oi.id = b.order_item_id
-       WHERE oi.order_id = p_order_id AND b.product_id IS NOT NULL AND b.charge_type IS NULL), 0);
+        JOIN public._order_commission_lines_20270306(p_order_id) l ON l.item_id = sh.item_id), 0);
   END LOOP;
   IF v_discount = 0 THEN
     RETURN round(v_profit, 2);
   END IF;
-  -- Billed exactly as the P&L counts it (_report_commission_cents_20270203: product lines on the sale's posted
-  -- chemical-sale and misc-charge invoices, no application fees), so the two shares agree.
-  SELECT sum(b.extended_cents) INTO v_billed
-    FROM invoices i
-    JOIN invoice_items b ON b.invoice_id = i.id AND b.charge_type IS NULL AND b.is_application_fee IS NOT TRUE
-                        AND b.product_id IS NOT NULL
-   WHERE i.order_id = p_order_id
-     AND i.invoice_type IN ('chemical_sale', 'misc_charge') AND i.status IN ('posted', 'overdue', 'paid')
-     AND i.deleted_at IS NULL;
+  SELECT sum(l.extended_cents) INTO v_billed FROM public._order_commission_lines_20270306(p_order_id) l;
   IF v_billed > 0 AND v_booked > v_billed THEN
-    -- Part-billed: the posted invoices' discount rate across the whole sale, rounded toward the smaller base so the
-    -- P&L's billed share never earns above the posted profit after its discount (Sol r1 H2; it can be a cent under).
-    RETURN round(v_profit + floor(v_discount * v_booked / v_billed) / 100.0, 2);
+    -- Part-billed: the posted invoices' discount rate across the whole sale, rounded toward the smaller base, so the
+    -- P&L's billed share stays within its own per-row rounding of the posted profit after its discount.
+    RETURN round(v_profit + floor(v_discount::numeric * v_booked / v_billed) / 100.0, 2);
   END IF;
   RETURN round(v_profit + v_discount / 100.0, 2);
 END
@@ -156,6 +171,16 @@ $function$;
 REVOKE ALL ON FUNCTION public._order_commission_base_20270306(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
 -- 2. The settle -------------------------------------------------------------------------------------------------
+-- Rows this file moves onto a discounted base are marked, so it can put them back on the plain profit when the sale's
+-- posted discount goes away (unposted, voided, deleted, or cleared on a draft), and so rows it never moved (legacy rows,
+-- every sale on live while the M4 switch is off) are never touched (Sol posting r2 H3).
+ALTER TABLE public.commissions ADD COLUMN discount_settled_at timestamptz;
+-- Readable where the row's other non-cost columns are (commissions is column-carved).
+GRANT SELECT (discount_settled_at) ON public.commissions TO authenticated;
+GRANT REFERENCES (discount_settled_at) ON public.commissions TO authenticated;
+COMMENT ON COLUMN public.commissions.discount_settled_at IS
+  'M4 (20270306100000): when _settle_order_commission_20270306 last put this row on its sale''s profit after the posted standing discount; NULL when it never did or put it back on the plain profit.';
+
 CREATE FUNCTION public._settle_order_commission_20270306(p_order_id uuid)
  RETURNS integer
  LANGUAGE plpgsql
@@ -166,27 +191,30 @@ DECLARE
   v_profit numeric;
   v_base numeric;
   v_base_cents bigint;
+  v_discounted boolean;
   v_whole boolean;
   v_ids uuid[];
   v_pcts numeric[];
   v_new numeric[];
   v_moving uuid[];
   v_locked uuid[] := '{}';
-  v_sale_locked boolean := false;
   v_count int;
 BEGIN
   IF p_order_id IS NULL THEN
     RETURN 0;
   END IF;
+  -- The sale lock first, waited for (the same invoice -> sale order zz_cap_order_invoice_header already takes from the
+  -- same invoice update), then everything is read under it, so two posts of one sale settle one after the other on what
+  -- the first committed (Sol posting r2 H1).
+  SELECT COALESCE(total_profit, 0) INTO v_profit FROM orders WHERE id = p_order_id FOR NO KEY UPDATE;
+  IF NOT FOUND THEN
+    RETURN 0;
+  END IF;
+  v_base := public._order_commission_base_20270306(p_order_id);
+  v_base_cents := round(GREATEST(v_base, 0) * 100)::bigint;
+  v_discounted := v_base IS DISTINCT FROM round(v_profit, 2);
+
   LOOP
-    -- First pass without the sale lock: a sale with nothing to move (most posts) is left alone and never blocks a
-    -- concurrent save of it. Once something must move, the sale lock is taken and everything is read again under it.
-    SELECT COALESCE(total_profit, 0) INTO v_profit FROM orders WHERE id = p_order_id;
-    IF NOT FOUND THEN
-      RETURN 0;
-    END IF;
-    v_base := public._order_commission_base_20270306(p_order_id);
-    v_base_cents := round(GREATEST(v_base, 0) * 100)::bigint;
     -- The rows this may move: pending, in no live payout batch.
     SELECT array_agg(c.id ORDER BY c.id), array_agg(c.split_percentage ORDER BY c.id)
       INTO v_ids, v_pcts
@@ -198,24 +226,18 @@ BEGIN
     IF v_ids IS NULL THEN
       RETURN 0;
     END IF;
-    -- No posted discount: a sale that never carried a standing-discount line (every sale on live while the M4 switch
-    -- is off; legacy rows, fixtures) belongs to its writers, whatever base its rows sit on, and is never touched. One
-    -- that did (its discounted invoice unposted, voided or deleted, a payout of it voided afterwards) has rows put back
-    -- on the plain profit (attack run F1).
-    IF v_base = round(v_profit, 2)
-       AND (NOT EXISTS (SELECT 1 FROM commissions WHERE id = ANY (v_ids) AND order_profit IS DISTINCT FROM v_base)
-            OR NOT EXISTS (SELECT 1 FROM invoices i JOIN invoice_items d ON d.invoice_id = i.id
-                            WHERE d.charge_type = 'standing_discount'
-                              AND (i.order_id = p_order_id
-                                   OR EXISTS (SELECT 1 FROM invoice_items b JOIN order_items oi ON oi.id = b.order_item_id
-                                               WHERE b.invoice_id = i.id AND oi.order_id = p_order_id)))) THEN
+    -- No posted discount: only rows this file once moved onto a discount go back to the plain profit; a sale with none
+    -- belongs to its writers, whatever base its rows sit on.
+    IF NOT v_discounted
+       AND NOT EXISTS (SELECT 1 FROM commissions WHERE id = ANY (v_ids) AND discount_settled_at IS NOT NULL) THEN
       RETURN 0;
     END IF;
     v_whole := NOT EXISTS (SELECT 1 FROM commissions c
                             WHERE c.order_id = p_order_id AND c.deleted_at IS NULL AND c.status <> 'cancelled'
                               AND c.id <> ALL (v_ids));
     IF v_whole THEN
-      -- Exact to the cent: each row its own percentage of the base, the set's share by largest remainder.
+      -- The whole live set is pending: every row exactly its share of the base, the set by largest remainder, so rows
+      -- settled one at a time (payouts voided in turn) always add up (Sol posting r1 H1, r2 MED).
       SELECT array_agg((floor(r.raw) + CASE WHEN r.remainder_rank <= r.share - r.floored THEN 1 ELSE 0 END) / 100.0
                        ORDER BY r.id)
         INTO v_new
@@ -224,12 +246,9 @@ BEGIN
                      sum(floor(u.raw)) OVER () AS floored,
                      round(sum(u.raw) OVER ()) AS share
                 FROM (SELECT x.id, v_base_cents * x.pct / 100 AS raw FROM unnest(v_ids, v_pcts) AS x(id, pct)) u) r;
-      -- Once any row is off the base, every row goes to its exact share, so rows settled one at a time (two payouts
-      -- voided in turn) still add up (Sol r1 H1).
       SELECT array_agg(c.id ORDER BY c.id) INTO v_moving
         FROM commissions c JOIN unnest(v_ids, v_new) AS r(id, amount) ON r.id = c.id
-       WHERE EXISTS (SELECT 1 FROM commissions o WHERE o.id = ANY (v_ids) AND o.order_profit IS DISTINCT FROM v_base)
-         AND (c.order_profit IS DISTINCT FROM v_base OR c.commission_amount IS DISTINCT FROM r.amount);
+       WHERE c.order_profit IS DISTINCT FROM v_base OR c.commission_amount IS DISTINCT FROM r.amount;
     ELSE
       -- Some rows are paid or batched: each pending row is its own share (the edit paths' rule), and only rows whose
       -- stored base differs move, so an unchanged base never moves a cent.
@@ -242,13 +261,6 @@ BEGIN
     IF v_moving IS NULL THEN
       RETURN 0;
     END IF;
-    IF NOT v_sale_locked THEN
-      -- Waited for, as zz_cap_order_invoice_header already waits for the sale from the same invoice update (attack
-      -- run F2: NOWAIT failed ordinary posts that met a payout void or a delivery of the same sale).
-      PERFORM 1 FROM orders WHERE id = p_order_id FOR NO KEY UPDATE;
-      v_sale_locked := true;
-      CONTINUE;
-    END IF;
     EXIT WHEN v_moving <@ v_locked;
     -- Lock only the rows that move, then decide again: a row a payout took meanwhile drops out, and only locked rows
     -- are written.
@@ -257,7 +269,8 @@ BEGIN
   END LOOP;
 
   UPDATE commissions c
-     SET order_profit = v_base, commission_amount = r.amount
+     SET order_profit = v_base, commission_amount = r.amount,
+         discount_settled_at = CASE WHEN v_discounted THEN now() END
     FROM unnest(v_ids, v_new) AS r(id, amount)
    WHERE c.id = r.id AND c.id = ANY (v_moving);
   GET DIAGNOSTICS v_count = ROW_COUNT;
@@ -657,13 +670,14 @@ DECLARE
   v_moved int := 0;
 BEGIN
   FOR v_order IN
-    SELECT DISTINCT oi.order_id
+    SELECT DISTINCT COALESCE(oi.order_id, CASE WHEN b.order_item_id IS NULL THEN i.order_id END)
       FROM public.invoice_items d
       JOIN public.invoices i ON i.id = d.invoice_id
-      JOIN public.invoice_items b ON b.invoice_id = i.id
-      JOIN public.order_items oi ON oi.id = b.order_item_id
+      JOIN public.invoice_items b ON b.invoice_id = i.id AND b.product_id IS NOT NULL AND b.charge_type IS NULL
+      LEFT JOIN public.order_items oi ON oi.id = b.order_item_id
      WHERE d.charge_type = 'standing_discount' AND i.invoice_type = 'chemical_sale'
        AND i.status IN ('posted', 'overdue', 'paid') AND i.deleted_at IS NULL
+       AND COALESCE(oi.order_id, CASE WHEN b.order_item_id IS NULL THEN i.order_id END) IS NOT NULL
      ORDER BY 1
   LOOP
     v_moved := v_moved + public._settle_order_commission_20270306(v_order);
@@ -680,6 +694,7 @@ BEGIN
          AND tgfoid = 'public._invoice_settles_commission_20270306()'::regprocedure
          AND NOT tgdeferrable AND tgenabled = 'O') <> 2
      OR EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid IN ('public._order_commission_base_20270306(uuid)'::regprocedure,
+                    'public._order_commission_lines_20270306(uuid)'::regprocedure,
                     'public._settle_order_commission_20270306(uuid)'::regprocedure,
                     'public._invoice_settles_commission_20270306()'::regprocedure)
                   AND p.proacl IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[])

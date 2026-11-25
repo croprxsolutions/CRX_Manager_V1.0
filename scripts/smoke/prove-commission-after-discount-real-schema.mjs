@@ -59,7 +59,7 @@ const LEDGER_ONLY = new Set([
 const LEDGER_ONLY_REVIEWED = new Map([['20270227110000_delivery_driver_checks_need_a_driver.sql', '78a24c2bf56e5901b771575e2c818ef2dccbaf3781cbd2bb159a0d762724714e']]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate or its follow-up creates or relies on.
-const TOUCHED = /(commissions|commission_payment|_order_standing_discount_|_recompute_standing_discount_|_invoice_line_tax_shares_|compute_commission_amount|fix_delivery|cancel_order|_insert_commissions_for_order|_cancel_order_idem_impl_|_void_commission_payment_intent_impl_)/i;
+const TOUCHED = /(commissions|commission_payment|_order_standing_discount_|_recompute_standing_discount_|_invoice_line_tax_shares_|compute_commission_amount|fix_delivery|cancel_order|_insert_commissions_for_order|_cancel_order_idem_impl_|_void_commission_payment_intent_impl_|_20270306|discount_settled_at)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -378,7 +378,7 @@ async function main() {
   const after = chain(NEW_CHAIN);
   assert.ok(after.pass, `AFTER: the new chain fails: ${after.fail}`);
   covering('AFTER', passedBefore);
-  console.log('[case] 4 AFTER: the new chain passes (A-T), and every covering chain that passed before still passes');
+  console.log('[case] 4 AFTER: the new chain passes (A-X), and every covering chain that passed before still passes');
   // 5. RE-APPLY
   const again = apply('cand.sql');
   assert.notEqual(again.status, 0); assert.match(again.output, /COMMISSION_SETTLES_ON_POSTING_PREFLIGHT: already applied/);
@@ -391,6 +391,8 @@ async function main() {
     ${ORIGINALS.join(';\n')};
     DROP FUNCTION public._settle_order_commission_20270306(uuid);
     DROP FUNCTION public._order_commission_base_20270306(uuid);
+    DROP FUNCTION public._order_commission_lines_20270306(uuid);
+    ALTER TABLE public.commissions DROP COLUMN discount_settled_at;
     COMMIT;`);
   const rolled = chain(NEW_CHAIN);
   assert.ok(!rolled.pass && rolled.fail.includes('(A) posting did not put'), `ROLLBACK: ${rolled.fail}`);

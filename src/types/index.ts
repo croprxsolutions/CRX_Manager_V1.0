@@ -1914,6 +1914,20 @@ export type ProductWeightKind = 'density' | 'net_weight' | 'unit_weight' | 'none
 export type ProductWeightNoneReason = 'no_parent' | 'no_approved_weight' | 'seed_or_each' | 'unit_not_convertible' | 'unknown_form';
 export type ProductWeightEventType = 'draft_saved' | 'draft_replaced' | 'approved' | 'corrected' | 'returned_to_draft' | 'draft_rejected';
 
+export interface LiquidDensityBrand {
+  brand_id: string;
+  brand_name: string;
+  epa_registration: string | null;
+  manufacturer: string | null;
+  sds_link_id: string | null;
+  sds_url: string | null;
+}
+
+export interface LiquidDensityReview {
+  review_open: boolean;
+  brands: LiquidDensityBrand[];
+}
+
 /** lower(trim(unit)) -> pounds (weight), gallons (volume) or count per unit; names that collide are listed in `ambiguous`. */
 export interface WeightUnitFactors {
   factors: Record<string, { kind: 'weight' | 'volume' | 'count'; factor: number }>;

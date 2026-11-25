@@ -481,7 +481,7 @@ These RPCs are called from `src/` but had no entry in this file. Each purpose wa
 | `dismiss_watchdog_flag` | `20260629220000` | `(p_flag_id, p_resolution, p_note, p_performed_by, p_idempotency_key)` → jsonb. Admin/sales_rep, strict actor; resolution is `looks_fine` or `needs_fix`. |
 | `create_label_draft` | `20260629210000` | Admin-only. Stages a product label-data draft for review. |
 | `commit_label_draft` | `20260629210000` | Admin-only. Accepts, edits, or rejects a pending label draft; accepted values fill only empty product fields unless the caller passes an explicit force-overwrite. |
-| `get_label_coverage_report` | `20260629210000` | Read-only label-field coverage across products. |
+| `get_label_coverage_report` | `20260629210000`, `20270304110000` (candidate) | Read-only label-field coverage across products. REI/PHI count as covered with a number or the "label gives no REI/PHI" tick (#2500). |
 
 ### Customer relationship management
 

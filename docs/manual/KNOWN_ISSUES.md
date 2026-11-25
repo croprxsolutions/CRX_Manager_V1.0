@@ -1539,7 +1539,8 @@ improvement candidates" table. To-Do section 17; decisions 34 and 35.
 - Purchasing: show ordered cost, receipt snapshot, corrected PO cost and current product cost distinctly, and the
   effect of a correction before it is applied.
 - Pricing workbook: point at the invalid row when Apply is disabled. (A refused upload now names its one reason, already used,
-  another user's, expired or not on record: `docs/plans/2026-11-24-price-sheet-refusal-reason-CONTRACT.md`. A real
+  another user's, expired or not on record, when the reason lookup answers within 5 seconds; otherwise it keeps the
+  general message: `docs/plans/2026-11-24-price-sheet-refusal-reason-CONTRACT.md`. A real
   v1 sheet still stops at the parser's "format is not supported" before any lookup.)
 - Pricing history: label current tier, last charged and quoted amounts with their scope, date and source.
 - Office exceptions and documents: an end-to-end dashboard-to-fix check by role, and one quote-to-statement trail

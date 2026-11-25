@@ -35,6 +35,8 @@ const ZETA = id('c1'); // no CAS, used by the EPA product (EPA row) and the type
 const OTHER = id('c2'); // CAS already set (EPA gives it), used by the EPA product
 const TYPED_ING = id('c3'); // no CAS, typed on the EPA product, EPA does not list it
 const LOOKUP = id('d1');
+const LOOKUP_OLD = id('d0'); // an older committed proposal that gave zeta another CAS: the newest one wins
+const BIFENTHRIN_CAS = '82657-04-3'; // EPA lists it (as an addition) on the EPA product; no ingredient holds it
 const ZETA_CAS = '52315-07-8';
 const OTHER_CAS = '1912-24-9'; // atrazine
 const q = (s) => (s === null || s === undefined ? 'NULL' : `'${String(s).replaceAll("'", "''")}'`);
@@ -76,7 +78,14 @@ try {
       SELECT '${LOOKUP}', '${P_EPA}', '91234-259', 'parent', '${P_EPA}', 1, 1, x.inp, public._epa_proposal_items('${P_EPA}', '91234-259', x.inp), '{}'::jsonb, '${ADMIN}'
         FROM (SELECT ${J({ ingredients: [
           { key: '1', name: 'prover zeta-cypermethrin', cas: ZETA_CAS, strength: 9.15 },
-          { key: '2', name: 'prover atrazine', cas: OTHER_CAS, strength: 10 }], label: {} })} AS inp) x;`);
+          { key: '2', name: 'prover atrazine', cas: OTHER_CAS, strength: 10 },
+          { key: '3', name: 'prover bifenthrin', cas: BIFENTHRIN_CAS, strength: 2 }], label: {} })} AS inp) x;
+    INSERT INTO public.epa_lookups (id, parent_id, epa_registration, link_kind, link_id, registration_version, chemistry_version, status, requested_by, requested_at, recorded_at)
+      VALUES ('${LOOKUP_OLD}', '${P_EPA}', '91234-259', 'parent', '${P_EPA}', 1, 1, 'recorded', '${ADMIN}', now() - interval '1 day', now() - interval '1 day');
+    INSERT INTO public.epa_chemistry_proposals (lookup_id, parent_id, epa_registration, link_kind, link_id, registration_version, chemistry_version, status, decided_by, decided_at, epa_input, items, epa_summary, created_by, created_at)
+      SELECT '${LOOKUP_OLD}', '${P_EPA}', '91234-259', 'parent', '${P_EPA}', 1, 1, 'committed', '${ADMIN}', now() - interval '1 day', x.inp,
+             public._epa_proposal_items('${P_EPA}', '91234-259', x.inp), '{}'::jsonb, '${ADMIN}', now() - interval '1 day'
+        FROM (SELECT ${J({ ingredients: [{ key: '1', name: 'prover zeta-cypermethrin', cas: '67375-30-8', strength: 9.15 }], label: {} })} AS inp) x;`);
   assert.equal(scalar(`SELECT string_agg((i->>'class') || ':' || coalesce(i->'current'->>'ingredient_id', '-'), ',' ORDER BY i->>'item_id')
     FROM public.epa_chemistry_proposals p, jsonb_array_elements(p.items) i WHERE p.lookup_id = '${LOOKUP}' AND i->>'kind' = 'ingredient';`).split(',')[0],
     `differs_identity:${ZETA}`, 'the proposal names zeta (no CAS) as differs_identity with its row');
@@ -104,13 +113,14 @@ try {
   assert.match(previewThenSave(ZETA, { cas: '52315-07-9' }), /INGREDIENT_CAS_INVALID/, 'bad check digit');
   assert.match(previewThenSave(ZETA, { cas: OTHER_CAS }), /INGREDIENT_CAS_TAKEN/, 'CAS of another ingredient');
   assert.match(previewThenSave(ZETA, { cas: '50-00-0' }), /PREVIEW_REFUSED INGREDIENT_CAS_NOT_EPA: EPA gives 52315-07-8/, 'a fill contradicting EPA');
+  assert.match(previewThenSave(TYPED_ING, { cas: BIFENTHRIN_CAS }), /PREVIEW_REFUSED INGREDIENT_CAS_NOT_EPA: EPA lists 82657-04-3 as prover bifenthrin/, 'a CAS EPA lists under another name');
   assert.match(previewThenSave(OTHER, { cas: '50-00-0' }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'changing an EPA-given CAS stays gated');
   assert.match(previewThenSave(OTHER, { cas: null }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'clearing an EPA-given CAS stays gated');
   assert.match(previewThenSave(ZETA, { cas: ZETA_CAS, is_parent_form: true }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'CAS plus another field stays gated');
   assert.match(previewThenSave(ZETA, { is_parent_form: true }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'acid flag stays gated');
   assert.match(attempt(USERS.rep, `${refuse(`r := public.preview_active_ingredient_change('${ZETA}', ${J({ cas: ZETA_CAS })});`)} v := t;`), /ADMIN_REQUIRED/);
   assert.match(attempt(USERS.rep, `${refuse(`r := public.save_active_ingredient('${ZETA}', 1, 'x', ${J({ cas: ZETA_CAS })}, 'r', 'e', 'k');`)} v := t;`), /ADMIN_REQUIRED/);
-  console.log('[refuse] no reason, no evidence, bad check digit, taken CAS, CAS contradicting EPA, changing/clearing an EPA-given CAS, CAS+acid, acid alone, sales rep -> all refused');
+  console.log('[refuse] no reason, no evidence, bad check digit, taken CAS, CAS contradicting EPA, CAS EPA lists under another name, changing/clearing an EPA-given CAS, CAS+acid, acid alone, sales rep -> all refused');
 
   // The fix.
   const epaRowBefore = scalar(`SELECT row_version || ':' || strength_value || ':' || source FROM public.product_parent_ingredients WHERE parent_id = '${P_EPA}' AND ingredient_id = '${ZETA}';`);
@@ -124,7 +134,8 @@ try {
   assert.equal(scalar(`SELECT count(*) FROM public.product_chemistry_events WHERE event_type = 'corrected' AND after_values->>'source_path' = 'ingredient_edit' AND after_values->>'ingredient_id' = '${ZETA}';`), '2', 'one chemistry event per product');
   assert.equal(scalar(`SELECT string_agg(chemistry_version::text, ',' ORDER BY parent_id) FROM public.product_parent_chemistry_state WHERE parent_id IN ('${P_EPA}', '${P_TYPED}');`), '2,2', 'chemistry versions bumped');
   assert.equal(scalar(`SELECT row_version || ':' || strength_value || ':' || source FROM public.product_parent_ingredients WHERE parent_id = '${P_EPA}' AND ingredient_id = '${ZETA}';`), epaRowBefore, 'EPA row untouched');
-  console.log(`[fill] admin filled CAS ${ZETA_CAS} on an EPA-sourced ingredient; events written; EPA product row unchanged`);
+  // (the older committed proposal said 67375-30-8; the newest one wins, so the fill above passed)
+  console.log(`[fill] admin filled CAS ${ZETA_CAS} (newest EPA proposal wins over an older committed one) on an EPA-sourced ingredient; events written; EPA product row unchanged`);
 
   // A typed CAS EPA does not give: a mistyped fill can be corrected.
   assert.match(previewThenSave(TYPED_ING, { cas: '50-00-0' }, 'typed', 'SDS', ADMIN, true), /^ok\|/, 'typed fill');

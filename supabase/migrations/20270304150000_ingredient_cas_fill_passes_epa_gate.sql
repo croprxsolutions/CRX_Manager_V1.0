@@ -10,16 +10,17 @@
 -- WHAT: re-issues public._edit_active_ingredient (same signature, owner postgres, SECURITY DEFINER, search_path, no
 --   grants). One change: an edit of the CAS alone (fill, correct or clear) skips the per-product EPA gate. It changes
 --   no product row (strengths, sources, modes of action stay as EPA wrote them). Limits (Sol, 2026-11-24): a CAS that
---   an EPA proposal (proposed, held or committed) gives stays gated; and when an EPA proposal for a product using the
---   ingredient gives it a CAS, the new value must be that CAS (INGREDIENT_CAS_NOT_EPA), so a typed CAS never
---   contradicts EPA and a mistyped one can be corrected with the same screen.
+--   an EPA proposal (proposed, held or committed) gives stays gated; and, by the newest proposal per product and
+--   number, the new value must be the CAS EPA gives the ingredient and must not be a CAS EPA lists under another name
+--   (INGREDIENT_CAS_NOT_EPA). So a typed CAS never contradicts EPA and a mistyped one can be corrected.
 -- NOT CHANGED: an EPA-given CAS, the acid fields, or any mix of fields still refuse on an EPA product. Admin only
 --   (preview_active_ingredient_change and save_active_ingredient keep _product_parent_require_admin), reason and
 --   evidence still required when products use it, CAS format/check digit and CAS-taken checks, the ingredient event and
 --   one 'corrected' chemistry event per affected product, row_version/usage-fingerprint staleness checks.
 --   EPA matching: _epa_proposal_items matches a CAS-less EPA entry by name whatever the stored CAS, and an EPA entry
 --   with a CAS now finds this row by CAS instead of reporting it as differs_identity.
--- PREFLIGHT: refuses autocommit, and unless the live body is the 20261209100000 one (md5 pinned); a second run refuses.
+-- PREFLIGHT: refuses autocommit, and unless the live body is the 20261209100000 one (md5 pinned, carriage returns
+--   ignored so a CRLF rebuild matches); a second run refuses.
 -- ROLLBACK: a NEW forward migration re-issuing the 20261209100000 body (lines 1773-1958). CAS values filled meanwhile
 --   stay (valid data; correct or clear one with the same screen only on a product without an EPA number).
 -- Proof: node scripts/smoke/prove-ingredient-cas-fill-epa-gate-real-schema.mjs (INGREDIENT_CAS_FILL_PROOF_PASS).
@@ -38,7 +39,7 @@ BEGIN
   IF (SELECT transaction_id FROM pg_temp.ingredient_cas_fill_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: run this file as one transaction (psql -1 or the apply script)';
   END IF;
-  SELECT md5(prosrc) INTO v_md5 FROM pg_proc WHERE oid = to_regprocedure('public._edit_active_ingredient(uuid,jsonb,text,text,boolean)');
+  SELECT md5(replace(prosrc, E'\r', '')) INTO v_md5 FROM pg_proc WHERE oid = to_regprocedure('public._edit_active_ingredient(uuid,jsonb,text,text,boolean)');
   IF to_regclass('public.epa_chemistry_proposals') IS NULL THEN
     RAISE EXCEPTION 'INGREDIENT_CAS_FILL_BASELINE_DRIFT: public.epa_chemistry_proposals (20270105110000) is missing';
   END IF;
@@ -69,6 +70,7 @@ DECLARE
   v_gate text;
   v_cas_edit boolean;
   v_epa_cas text;
+  v_epa_name text;
   v_parent uuid;
   v_before jsonb := '{}'::jsonb;
   v_version bigint;
@@ -208,13 +210,26 @@ BEGIN
       SELECT 1 FROM public.epa_chemistry_proposals p, jsonb_array_elements(p.items) i
        WHERE p.status IN ('proposed', 'held', 'committed') AND i->'epa'->>'cas' = v_old.cas));
   IF v_cas_edit AND cardinality(v_parents) > 0 THEN
-    SELECT string_agg(DISTINCT i->'epa'->>'cas', ', ') INTO v_epa_cas
-      FROM public.epa_chemistry_proposals p, jsonb_array_elements(p.items) i
-     WHERE p.status IN ('proposed', 'held', 'committed') AND p.parent_id = ANY(v_parents)
-       AND i->'current'->>'ingredient_id' = p_ingredient_id::text
-       AND i->'epa'->>'cas' IS NOT NULL AND i->'epa'->>'cas' IS DISTINCT FROM v_new.cas;
+    -- EPA's current word (the newest proposal per product and number, not rejected or superseded) wins both ways:
+    -- the CAS EPA gives this ingredient, and the name EPA gives the new CAS (Sol, 2026-11-24).
+    WITH cur AS (
+      SELECT DISTINCT ON (p.parent_id, p.epa_registration) p.parent_id, p.items
+        FROM public.epa_chemistry_proposals p
+       WHERE p.status IN ('proposed', 'held', 'committed')
+       ORDER BY p.parent_id, p.epa_registration, p.created_at DESC, p.id DESC),
+    epa AS (
+      SELECT c.parent_id, i FROM cur c, jsonb_array_elements(c.items) i
+       WHERE i->>'kind' = 'ingredient' AND i->'epa'->>'cas' IS NOT NULL)
+    SELECT string_agg(DISTINCT i->'epa'->>'cas', ', ') FILTER (WHERE parent_id = ANY(v_parents)
+             AND i->'current'->>'ingredient_id' = p_ingredient_id::text AND i->'epa'->>'cas' IS DISTINCT FROM v_new.cas),
+           string_agg(DISTINCT i->'epa'->>'name', ', ') FILTER (WHERE i->'epa'->>'cas' = v_new.cas
+             AND lower(regexp_replace(btrim(i->'epa'->>'name'), '\s+', ' ', 'g')) <> lower(regexp_replace(btrim(v_old.name), '\s+', ' ', 'g')))
+      INTO v_epa_cas, v_epa_name FROM epa;
     IF v_epa_cas IS NOT NULL THEN
       RAISE EXCEPTION 'INGREDIENT_CAS_NOT_EPA: EPA gives % for %; enter EPA''s number', v_epa_cas, v_old.name;
+    END IF;
+    IF v_epa_name IS NOT NULL THEN
+      RAISE EXCEPTION 'INGREDIENT_CAS_NOT_EPA: EPA lists % as %, not %', v_new.cas, v_epa_name, v_old.name;
     END IF;
   END IF;
   FOREACH v_parent IN ARRAY v_parents LOOP

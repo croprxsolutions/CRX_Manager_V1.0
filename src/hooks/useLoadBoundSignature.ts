@@ -5,7 +5,7 @@ import { sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, type LineSeen } from '..
 
 /**
  * Binds the on-screen signature to the delivery lines the screen showed when it was drawn
- * (migration 20270306190000). `signedLines` is sent as p_lines_seen. When the lines on screen stop
+ * (migration 20270307030000). `signedLines` is sent as p_lines_seen. When the lines on screen stop
  * matching (a delivered amount edited, a reload with other lines), the signature is cleared, the
  * drawn canvas too (render SignatureCanvas with `canvasKey` in its key), and the driver is told why.
  */

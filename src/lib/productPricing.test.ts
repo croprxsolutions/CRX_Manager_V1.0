@@ -251,6 +251,17 @@ describe('getPricingWorkbookExportRefusalReason', () => {
     await expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toThrow(/returned no data/);
   });
 
+  it('arms no timer when the request cannot even be built', async () => {
+    vi.useFakeTimers();
+    try {
+      mockRpc.mockImplementationOnce(() => { throw new Error('client not ready'); });
+      await expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toThrow('client not ready');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('gives up when the database never answers, so the screen keeps the general message', async () => {
     vi.useFakeTimers();
     try {

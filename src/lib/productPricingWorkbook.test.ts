@@ -540,7 +540,7 @@ describe('price sheet refusal reason wording', () => {
     const expected: Record<string, RegExp> = {
       EXPORT_NOT_FOUND: /no record of this price sheet/,
       DOWNLOADED_BY_OTHER_USER: /Another user downloaded this price sheet/,
-      ALREADY_APPLIED: /already used for a price change; a product's Sell Price History shows what changed/,
+      ALREADY_APPLIED: /already used; each product's Sell Price History or Change History shows what it changed/,
       OLD_TEMPLATE: /came from an older template/,
       EXPIRED: /expired \(sheets last 7 days\)/,
     };

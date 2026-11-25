@@ -331,6 +331,8 @@ export default function Products() {
   const pricingWorkbookInputRef = useRef<HTMLInputElement>(null);
   // Each price sheet upload's number: only the latest chosen file may show a review or a message.
   const pricingUploadSeq = useRef(0);
+  // Leaving the page retires any upload still waiting, so its late message never shows on a later visit.
+  useEffect(() => () => { pricingUploadSeq.current += 1; }, []);
 
   const previewPricingIdem = useIdempotencyKey('preview_product_pricing_changes', profile?.id || '');
   const approvePricingIdem = useIdempotencyKey('approve_pricing_change_set', profile?.id || '');

@@ -67,8 +67,9 @@ Read at `origin/staging` ef21134fc, 2026-11-24. Related: KNOWN_ISSUES "Pricing w
 
 - `src/pages/Products.tsx` asks the function only when the upload's preview is refused with one of the three combined codes and the parsed sheet has an export id. `NONE`, an unknown code or a failed lookup keeps the earlier message (`priceSheetRefusalText` / `sanitizeError`). Only the latest chosen file may show a review or a message: every pick, even one refused before it is read, bumps an upload counter, and an earlier file's late review, error or reason is dropped (#20; Luna r1 MED, r2 HIGH, each with a failing-then-passing page test).
 - The apply step is unchanged: a refusal there keeps `sanitizeError`, and a lost apply response is checked in pricing history (#17).
-- Sentences (`priceSheetReasonText` in `src/lib/productPricingWorkbook.ts`) each start "No prices were changed." and end with "download a fresh one". `ALREADY_APPLIED` says the sheet "was already used for a price change" and points at a product's Sell Price History, not "these edits went live" (#1, #44). `EXPIRED` reuses the existing expired sentence.
-- `DOWNLOADED_BY_OTHER_USER`, `EXPIRED` and `OLD_TEMPLATE` cannot be produced on staging (one admin, 7-day sheets, v2-only downloads); unit and page tests cover them.
+- Sentences (`priceSheetReasonText` in `src/lib/productPricingWorkbook.ts`) each start "No prices were changed." and end with "download a fresh one". `ALREADY_APPLIED` says the sheet "was already used" and points at each product's Sell Price History or Change History (an information-only sheet changes no price), not "these edits went live" (#1, #44; Sol r1 LOW). `EXPIRED` reuses the existing expired sentence.
+- `DOWNLOADED_BY_OTHER_USER` and `OLD_TEMPLATE` cannot be produced on staging (one admin, v2-only downloads), and `EXPIRED` only by keeping a sheet past its 7 days; unit and page tests cover them. A real v1 sheet stops at the parser ("format is not supported") before any lookup, so `OLD_TEMPLATE` reaches the screen only for an export whose manifest still parses (Sol r1 LOW, accepted per #6 and #11).
+- Leaving the Products page retires any upload still waiting, so its late message never shows on a later visit (Sol r1 MED). The lookup gives up after 5 seconds and keeps the earlier message (Luna r4 MED).
 
 ## Open business decisions
 

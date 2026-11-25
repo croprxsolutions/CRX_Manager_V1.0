@@ -680,7 +680,7 @@ describe('Products governed inline pricing flow', () => {
     });
 
     it.each([
-      ['WORKBOOK_V2_EXPORT_REQUIRED', 'ALREADY_APPLIED', /already used for a price change; a product's Sell Price History shows what changed/],
+      ['WORKBOOK_V2_EXPORT_REQUIRED', 'ALREADY_APPLIED', /already used; each product's Sell Price History or Change History shows what it changed/],
       ['WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'DOWNLOADED_BY_OTHER_USER', /Another user downloaded this price sheet/],
       ['WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED', 'OLD_TEMPLATE', /older template/],
       ['WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED', 'EXPIRED', /expired \(sheets last 7 days\)/],
@@ -808,6 +808,20 @@ describe('Products governed inline pricing flow', () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(mockPreviewPricing).not.toHaveBeenCalled();
       expect(mockToast).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows no late message after the admin leaves the page', async () => {
+      let answerFirst: (reason: string) => void = () => undefined;
+      mockPreviewPricing.mockRejectedValueOnce({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+      mockRefusalReason.mockReturnValueOnce(new Promise<string>((resolve) => { answerFirst = resolve; }));
+      const { container, unmount } = render(<Products />);
+      await upload(container, 'first.xlsx');
+      await waitFor(() => expect(mockRefusalReason).toHaveBeenCalledTimes(1));
+
+      unmount();
+      answerFirst('ALREADY_APPLIED');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockToast).not.toHaveBeenCalled();
     });
 
     it('drops a late reason after a newer file is refused before it is read, and frees the button', async () => {

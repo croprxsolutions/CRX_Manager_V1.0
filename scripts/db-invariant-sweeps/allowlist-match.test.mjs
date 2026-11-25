@@ -42,14 +42,19 @@ try {
   //    (page access guard added first; prune the live one after the apply).
   // 48 after 2026-11-24: +2 for the two blend invoice predicates and +1 for the live PO variant.
   equal(actorEntries.length, 48, '48 reviewed actor contract sets');
+  check(!allowlist.entries.some((entry) => entry.predicate === 'audit-log-completeness' &&
+    entry.violation_key === 'financial_audit_log:actor-contract'), 'audit actor configuration drift must stay unallowlisted');
   const blendEntries = actorEntries.filter((entry) => entry.violation_key.startsWith('create_invoice_from_blend_ticket('));
   equal(blendEntries.map((entry) => entry.predicate).sort(), ['actor-forgery', 'actor-forgery-fin-audit'], 'blend invoice is independently reviewed for both predicates');
   for (const entry of blendEntries) {
     const row = { violation_key: entry.violation_key, suspect_param: 'p_created_by' };
     const catalog = Object.entries(entry.reviewed_contracts).map(([function_key, contract_md5]) => ({ function_key, contract_md5 }));
     const withoutAuditTrigger = catalog.filter((item) => item.function_key !== 'public._fill_audit_actor()');
+    const changedAuditTrigger = catalog.map((item) => item.function_key === 'public._fill_audit_actor()'
+      ? { ...item, contract_md5: '0'.repeat(32) } : item);
     equal(subtractAllowlist(entry.predicate, [row], [entry], catalog), [], 'reviewed blend invoice contracts clear their flag');
     equal(subtractAllowlist(entry.predicate, [row], [entry], withoutAuditTrigger), [row], 'a missing audit trigger function leaves the blend invoice flag visible');
+    equal(subtractAllowlist(entry.predicate, [row], [entry], changedAuditTrigger), [row], 'a changed audit trigger function leaves the blend invoice flag visible');
   }
   const convertEntries = actorEntries.filter((entry) => entry.violation_key.startsWith('convert_quote_to_order('));
   equal(convertEntries.length, 2, 'convert_quote_to_order has exactly one current-live and one candidate contract set');

@@ -2,8 +2,8 @@
 /**
  * Disposable PostgreSQL 17 regression for audit-log-completeness's actor
  * contract row: financial_audit_log.actor_user_id DEFAULT auth.uid() and the
- * trg_fill_audit_actor BEFORE INSERT trigger. The healthy shape must be quiet;
- * every drift must raise the single financial_audit_log:actor-contract row.
+ * trg_fill_audit_actor BEFORE INSERT trigger. The healthy shape must be quiet.
+ * Any drift or unexpected insert handler must raise one actor-contract row.
  */
 
 import assert from 'node:assert/strict';
@@ -19,6 +19,7 @@ const PREDICATE = readFileSync(
 );
 const CONTAINER = `crx-audit-log-completeness-${process.pid}-${Date.now().toString(36)}`.toLowerCase();
 const KEY = 'financial_audit_log:actor-contract';
+const ACTOR = '00000000-0000-4000-8000-000000000001';
 
 function docker(args, options = {}) {
   const result = spawnSync('docker', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024, ...options });
@@ -42,38 +43,44 @@ function keysAfter(drift) {
   return out ? out.split(/\r?\n/).map((row) => row.split('|')[0]) : [];
 }
 
+let containerId;
 try {
-  docker([
+  containerId = docker([
     'run', '--detach', '--name', CONTAINER, '--network', 'none',
     '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=128m',
     '--env', 'POSTGRES_PASSWORD=disposable-only', 'postgres:17-alpine',
-  ]);
+  ]).stdout.trim();
   let ready = false;
   for (let attempt = 0; attempt < 120 && !ready; attempt += 1) {
-    ready = docker(['exec', CONTAINER, 'pg_isready', '-U', 'postgres', '-d', 'postgres'], { allowFailure: true }).status === 0;
+    ready = docker(['exec', CONTAINER, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres'], { allowFailure: true }).status === 0;
     if (!ready) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
   }
   assert.ok(ready, 'disposable PostgreSQL container did not become ready');
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
 
   psql(`
 CREATE SCHEMA auth;
-CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS 'SELECT NULL::uuid';
+CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT '${ACTOR}'::uuid $$;
+CREATE FUNCTION public.uid() RETURNS uuid LANGUAGE sql STABLE AS 'SELECT NULL::uuid';
 CREATE FUNCTION auth.other_uid() RETURNS uuid LANGUAGE sql STABLE AS 'SELECT NULL::uuid';
 CREATE TABLE public.financial_audit_log (id bigserial, actor_user_id uuid NOT NULL DEFAULT auth.uid());
-CREATE FUNCTION public._fill_audit_actor() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';
+CREATE FUNCTION public._fill_audit_actor() RETURNS trigger LANGUAGE plpgsql AS
+  'BEGIN IF NEW.actor_user_id IS NULL THEN NEW.actor_user_id := auth.uid(); END IF; RETURN NEW; END';
 CREATE FUNCTION public._other_trigger() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';
 CREATE TRIGGER trg_fill_audit_actor BEFORE INSERT ON public.financial_audit_log
   FOR EACH ROW EXECUTE FUNCTION public._fill_audit_actor();
 `);
 
   assert.deepEqual(keysAfter(''), [], 'healthy configuration must produce no rows');
+  assert.equal(psql('INSERT INTO public.financial_audit_log DEFAULT VALUES RETURNING actor_user_id;'), ACTOR,
+    'the default records the signed-in actor when the caller omits it');
+  assert.deepEqual(keysAfter('SET LOCAL search_path = auth, public;'), [], 'a visible auth schema leaves the same binding valid');
   assert.deepEqual(keysAfter('ALTER TABLE public.financial_audit_log ENABLE ALWAYS TRIGGER trg_fill_audit_actor;'), [],
     'ENABLE ALWAYS is still enforced');
 
   const drifts = {
     'default dropped': 'ALTER TABLE public.financial_audit_log ALTER COLUMN actor_user_id DROP DEFAULT;',
     'default changed': 'ALTER TABLE public.financial_audit_log ALTER COLUMN actor_user_id SET DEFAULT auth.other_uid();',
+    'same function name in the wrong schema': 'ALTER TABLE public.financial_audit_log ALTER COLUMN actor_user_id SET DEFAULT uid();',
     'default wrapped': "ALTER TABLE public.financial_audit_log ALTER COLUMN actor_user_id SET DEFAULT coalesce(auth.uid(), '00000000-0000-0000-0000-000000000000');",
     'nullable': 'ALTER TABLE public.financial_audit_log ALTER COLUMN actor_user_id DROP NOT NULL;',
     'type changed': 'ALTER TABLE public.financial_audit_log ALTER COLUMN actor_user_id DROP DEFAULT, ALTER COLUMN actor_user_id TYPE text, ALTER COLUMN actor_user_id SET DEFAULT auth.uid();',
@@ -88,6 +95,9 @@ CREATE TRIGGER trg_fill_audit_actor BEFORE INSERT ON public.financial_audit_log
     'trigger other function': 'DROP TRIGGER trg_fill_audit_actor ON public.financial_audit_log; CREATE TRIGGER trg_fill_audit_actor BEFORE INSERT ON public.financial_audit_log FOR EACH ROW EXECUTE FUNCTION public._other_trigger();',
     'trigger renamed': 'ALTER TRIGGER trg_fill_audit_actor ON public.financial_audit_log RENAME TO trg_other;',
     'trigger on other table': 'DROP TRIGGER trg_fill_audit_actor ON public.financial_audit_log; CREATE TABLE public.decoy (actor_user_id uuid); CREATE TRIGGER trg_fill_audit_actor BEFORE INSERT ON public.decoy FOR EACH ROW EXECUTE FUNCTION public._fill_audit_actor();',
+    'additional insert trigger': 'CREATE TRIGGER trg_extra BEFORE INSERT ON public.financial_audit_log FOR EACH ROW EXECUTE FUNCTION public._other_trigger();',
+    'additional after insert trigger': 'CREATE TRIGGER trg_extra AFTER INSERT ON public.financial_audit_log FOR EACH ROW EXECUTE FUNCTION public._other_trigger();',
+    'insert rewrite rule': 'CREATE RULE audit_extra AS ON INSERT TO public.financial_audit_log DO INSTEAD NOTHING;',
     'table missing': 'DROP TABLE public.financial_audit_log;',
   };
   for (const [name, sql] of Object.entries(drifts)) {
@@ -95,5 +105,5 @@ CREATE TRIGGER trg_fill_audit_actor BEFORE INSERT ON public.financial_audit_log
   }
   console.log(`audit-log-completeness actor contract: healthy quiet, ${Object.keys(drifts).length} drifts flagged`);
 } finally {
-  docker(['rm', '--force', CONTAINER], { allowFailure: true });
+  if (containerId) docker(['rm', '--force', containerId]);
 }

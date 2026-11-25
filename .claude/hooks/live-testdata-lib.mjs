@@ -949,7 +949,7 @@ export const KNOWN_SWEEP_PREDICATES = new Map([
   ["2ad3ccf677742b436ce793ea7c1fc56b4531500ad6841d38a87b4475224660df", "actor-forgery-fin-audit.sql"],
   ["ec304e4e2f10d420220a5df36982fe90a19f3f8230a8a3d0cbbe488eb36abc72", "actor-forgery.sql"],
   ["2e8bdab505e2e9b858462f0cdaae6c5a701c3c2ea362c1133a782a4234b30376", "anon-exec-secdef.sql"],
-  ["47eba4ae03215686e918a0903c1ea42a05fe81025ff692a950e80ddc3a9a741b", "audit-log-completeness.sql"],
+  ["ff11000c8d1b9555b83d0efec54208a199652aed554c5733e0cb1bdbd1c7a4c1", "audit-log-completeness.sql"],
   ["5c49a1f5d8afca87439cf87fc1a74ffebaa38de68cb5eb1790109fc0a8dce1e6", "auth-bound-role-ungated.sql"],
   ["cf7d26579eb94ed66ede19cd97d6c7143676c16687cc69c1adb1615870f115ed", "browser-table-maintenance.sql"],
   ["c9a03c9a022912fdbf263251f3ec48155cf49259cf097f23a3daf28d445d4a54", "commission-admin-active.sql"],

@@ -16,6 +16,8 @@ DECLARE
   v_key text;
   v_expected text;
   v_version bigint;
+  v_draft_version bigint;
+  v_review_open boolean := false;
 BEGIN
   IF has_function_privilege('anon', 'public.reject_liquid_density_draft(uuid,uuid,bigint,text,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: anonymous caller can execute rejection';
@@ -33,17 +35,33 @@ BEGIN
     'smoke-density-product-' || v_tag);
   v_group := (v_result->>'parent_id')::uuid;
   v_size := (v_result->>'product_id')::uuid;
-  PERFORM public.set_parent_density(v_group, 0, 9.5, 'lb_per_gal', 'sds', NULL, 'smoke-density-set-' || v_tag);
-  EXECUTE 'RESET ROLE';
-  v_result := public._save_parent_density_draft(v_group, 1, 10, 'lb_per_gal', 'sds', NULL, NULL, NULL);
+  IF to_regprocedure('public.liquid_density_review_open()') IS NOT NULL THEN
+    v_review_open := public.liquid_density_review_open();
+  END IF;
+  IF v_review_open THEN
+    v_result := public.submit_liquid_density_draft(v_group, 0, 9.5, 'lb_per_gal', 'sds', NULL, NULL, NULL,
+      'smoke-density-first-' || v_tag);
+    PERFORM set_config('request.jwt.claim.sub', v_reviewer::text, true);
+    PERFORM public.approve_liquid_density_draft(v_group, (v_result->>'value_id')::uuid, 1,
+      public.get_liquid_density_review(v_group)->'brands', true, 'smoke-density-approve-' || v_tag);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    v_result := public.submit_liquid_density_draft(v_group, 2, 10, 'lb_per_gal', 'sds', NULL, NULL, NULL,
+      'smoke-density-draft-' || v_tag);
+    EXECUTE 'RESET ROLE';
+  ELSE
+    PERFORM public.set_parent_density(v_group, 0, 9.5, 'lb_per_gal', 'sds', NULL, 'smoke-density-set-' || v_tag);
+    EXECUTE 'RESET ROLE';
+    v_result := public._save_parent_density_draft(v_group, 1, 10, 'lb_per_gal', 'sds', NULL, NULL, NULL);
+  END IF;
+  v_draft_version := (v_result->>'version')::bigint;
   v_draft := (v_result->>'value_id')::uuid;
 
   FOR v_actor, v_reason, v_key, v_version, v_expected IN VALUES
-    (v_rep, 'Different SDS', 'rep', 2, 'ADMIN_REQUIRED%'),
-    (v_admin, 'Different SDS', 'self', 2, 'PRODUCT_WEIGHT_SECOND_ADMIN_REQUIRED%'),
-    (v_reviewer, '', 'blank', 2, 'REASON_REQUIRED%'),
-    (v_reviewer, 'Different SDS', NULL::text, 2, 'IDEMPOTENCY_KEY_REQUIRED%'),
-    (v_reviewer, 'Different SDS', 'stale-version', 1, 'PRODUCT_WEIGHT_STALE%')
+    (v_rep, 'Different SDS', 'rep', v_draft_version, 'ADMIN_REQUIRED%'),
+    (v_admin, 'Different SDS', 'self', v_draft_version, 'PRODUCT_WEIGHT_SECOND_ADMIN_REQUIRED%'),
+    (v_reviewer, '', 'blank', v_draft_version, 'REASON_REQUIRED%'),
+    (v_reviewer, 'Different SDS', NULL::text, v_draft_version, 'IDEMPOTENCY_KEY_REQUIRED%'),
+    (v_reviewer, 'Different SDS', 'stale-version', v_draft_version - 1, 'PRODUCT_WEIGHT_STALE%')
   LOOP
     PERFORM set_config('request.jwt.claim.sub', v_actor::text, true);
     BEGIN
@@ -58,20 +76,20 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_reviewer::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
   v_key := 'smoke-density-reject-' || v_tag;
-  v_receipt := public.reject_liquid_density_draft(v_group, v_draft, 2, 'Different SDS', v_key);
-  IF (v_receipt->>'version')::bigint IS DISTINCT FROM 3::bigint OR
-     public.reject_liquid_density_draft(v_group, v_draft, 2, 'Different SDS', v_key) IS DISTINCT FROM v_receipt THEN
+  v_receipt := public.reject_liquid_density_draft(v_group, v_draft, v_draft_version, 'Different SDS', v_key);
+  IF (v_receipt->>'version')::bigint IS DISTINCT FROM (v_draft_version + 1) OR
+     public.reject_liquid_density_draft(v_group, v_draft, v_draft_version, 'Different SDS', v_key) IS DISTINCT FROM v_receipt THEN
     RAISE EXCEPTION 'SMOKE_FAIL: rejection must advance the version once and replay the same receipt';
   END IF;
   BEGIN
-    PERFORM public.reject_liquid_density_draft(v_group, v_draft, 2, 'Different reason', v_key);
+    PERFORM public.reject_liquid_density_draft(v_group, v_draft, v_draft_version, 'Different reason', v_key);
     RAISE EXCEPTION 'SMOKE_FAIL: changed reason must not replay';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM <> 'IDEMPOTENCY_PAYLOAD_MISMATCH' THEN RAISE; END IF;
   END;
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   BEGIN
-    PERFORM public.reject_liquid_density_draft(v_group, v_draft, 2, 'Different SDS', v_key);
+    PERFORM public.reject_liquid_density_draft(v_group, v_draft, v_draft_version, 'Different SDS', v_key);
     RAISE EXCEPTION 'SMOKE_FAIL: another admin cannot redeem the reviewer receipt';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM <> 'IDEMPOTENCY_PAYLOAD_MISMATCH' THEN RAISE; END IF;
@@ -90,15 +108,24 @@ BEGIN
   END IF;
 
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-  v_result := public._save_parent_density_draft(v_group, 3, 9.6, 'lb_per_gal', 'sds', NULL, NULL, NULL);
-  IF (v_result->>'version')::bigint IS DISTINCT FROM 4::bigint OR (v_result->>'value_id')::uuid = v_draft THEN
+  IF v_review_open THEN
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    v_result := public.submit_liquid_density_draft(v_group, v_draft_version + 1, 9.6, 'lb_per_gal', 'sds',
+      NULL, NULL, NULL, 'smoke-density-replacement-' || v_tag);
+    EXECUTE 'RESET ROLE';
+  ELSE
+    v_result := public._save_parent_density_draft(v_group, v_draft_version + 1, 9.6, 'lb_per_gal', 'sds',
+      NULL, NULL, NULL);
+  END IF;
+  IF (v_result->>'version')::bigint IS DISTINCT FROM (v_draft_version + 2) OR
+     (v_result->>'value_id')::uuid = v_draft THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a new proposal should get a new draft';
   END IF;
 
   PERFORM set_config('request.jwt.claim.sub', v_reviewer::text, true);
   BEGIN
     EXECUTE 'SET LOCAL ROLE authenticated';
-    PERFORM public.reject_liquid_density_draft(v_group, v_draft, 4, 'Old draft', 'smoke-old-' || v_tag);
+    PERFORM public.reject_liquid_density_draft(v_group, v_draft, v_draft_version + 2, 'Old draft', 'smoke-old-' || v_tag);
     RAISE EXCEPTION 'SMOKE_FAIL: cannot reject the new draft using the previous draft ID';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_STALE%' THEN RAISE; END IF;

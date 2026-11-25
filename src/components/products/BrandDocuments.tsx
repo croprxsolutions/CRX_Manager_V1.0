@@ -135,6 +135,7 @@ export default function BrandDocuments({ target, brandName, links, canEdit, user
     } catch (error) {
       if (!isBrandDocumentConflict(error)) throw error;
       toast('error', sanitizeError(error));
+      setEdit(null);
       onReload(true);
     } finally {
       locked.current = false;

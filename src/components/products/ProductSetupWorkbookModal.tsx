@@ -408,9 +408,11 @@ async function downloadSetupWorkbook(
     ]);
     if (!isCurrent()) return;
     assertChemistryWorkbookFitsParserLimit(chemistry);
+    const activeSizes = new Set(exported.rows.filter((product) => product.is_active).map((product) => product.product_id));
     const brandDocuments = await readBrandDocumentWorkspace(false).then((documents) => {
-      assertBrandWorkbookFitsParserLimit(documents);
-      return documents;
+      const editable = documents.filter((brand) => brand.parent_brand || activeSizes.has(brand.product_id));
+      assertBrandWorkbookFitsParserLimit(editable);
+      return editable;
     }).catch((error: unknown) => {
       if (isCurrent()) toast('warning', 'Downloaded without Brand Links. ' + sanitizeError(error));
       return undefined;

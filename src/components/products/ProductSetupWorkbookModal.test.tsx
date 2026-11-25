@@ -143,8 +143,20 @@ describe('ProductSetupWorkbookModal parent rates', () => {
     expect(supabase.rpc).not.toHaveBeenCalled();
   });
 
-  it('downloads Setup and Rates when Brand Links cannot load', async () => {
-    H.rpc.mockResolvedValueOnce({ data: null, error: { message: 'Brand Links unavailable' } });
+  it.each(['unavailable links', 'same-name archived product'])('downloads a safe workbook with %s', async (scenario) => {
+    const unavailable = scenario === 'unavailable links';
+    if (unavailable) H.rpc.mockResolvedValueOnce({ data: null, error: { message: 'Brand Links unavailable' } });
+    else {
+      const product = { product_name: 'Atrazine 4L', use_timings: [] };
+      H.loadExport.mockResolvedValue({ rates_locked: false, rows: [
+        { ...product, product_id: SIZE, is_active: true },
+        { ...product, product_id: 'archived-size', is_active: false },
+      ] });
+      H.rpc.mockResolvedValueOnce({ error: null, data: [SIZE, 'archived-size'].map((id) => ({
+        id, product_id: id, parent_brand: false, brand_version: 1,
+        brand_name: 'Same brand', owner_name: product.product_name, links: [],
+      })) });
+    }
     const downloadUrl = vi.fn((_blob: Blob) => 'blob:setup-test');
     vi.stubGlobal('URL', Object.assign(class extends URL {}, {
       createObjectURL: downloadUrl, revokeObjectURL: vi.fn(),
@@ -154,7 +166,6 @@ describe('ProductSetupWorkbookModal parent rates', () => {
       render(<ProductSetupWorkbookModal open profileId="u1" onClose={vi.fn()} onSaved={vi.fn()} />);
       fireEvent.click(screen.getByRole('button', { name: 'Download setup workbook' }));
       await waitFor(() => expect(click).toHaveBeenCalledOnce());
-      expect(H.toast).toHaveBeenCalledWith('warning', expect.stringContaining('Downloaded without Brand Links.'));
       const workbook = new Workbook();
       await workbook.xlsx.load(await new Promise<ArrayBuffer>((resolve, reject) => {
         const reader = new FileReader();
@@ -164,7 +175,14 @@ describe('ProductSetupWorkbookModal parent rates', () => {
       }));
       expect(workbook.getWorksheet('Setup')).toBeDefined();
       expect(workbook.getWorksheet('Rates')).toBeDefined();
-      expect(workbook.getWorksheet('Brand Links')).toBeUndefined();
+      const brandSheet = workbook.getWorksheet('Brand Links');
+      if (unavailable) {
+        expect(H.toast).toHaveBeenCalledWith('warning', expect.stringContaining('Downloaded without Brand Links.'));
+        expect(brandSheet).toBeUndefined();
+      } else {
+        expect(brandSheet?.rowCount).toBe(2);
+        expect(brandSheet?.getCell('H2').value).toContain(SIZE);
+      }
     } finally {
       click.mockRestore();
       vi.unstubAllGlobals();

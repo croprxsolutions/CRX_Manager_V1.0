@@ -110,7 +110,10 @@ export default function BrandDocumentWorkbookPanel({ parsed, profileId, parentBu
               {row.brandName} · {row.ownerName}
               <ul className="pl-4 text-secondary">
                 {row.changes.map((change, index) => change.action === 'save' && (
-                  <li key={index} className="break-all">{BRAND_DOCUMENT_TITLES[change.kind]} · {change.url}</li>
+                  <li key={index} className="break-all">
+                    {BRAND_DOCUMENT_TITLES[change.kind]} · {change.url}
+                    {change.kind === 'supplemental' && ` · State ${change.state} · Expires ${change.expires_on}`}
+                  </li>
                 ))}
               </ul>
             </li>

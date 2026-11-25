@@ -30,7 +30,8 @@ it('blocks workbook saving until the server approves the link changes', async ()
 });
 
 it.each([false, true])('keeps confirmed brands saved after a partial failure (workbook stale: %s)', async (stale) => {
-  const changes = [{ action: 'save', kind: 'sds', url: 'https://manufacturer.example/sds' }] as const;
+  const changes = [{ action: 'save', kind: 'supplemental', url: 'https://manufacturer.example/supplement',
+    state: 'IA', expires_on: '2027-12-31' }] as const;
   const rows: ParsedBrandDocuments['rows'] = ['brand-1', 'brand-2'].map((id) => ({
     target: { id, parent_brand: true, brand_version: 2 }, ownerName: 'Product group', brandName: id,
     changes: [...changes],
@@ -44,6 +45,7 @@ it.each([false, true])('keeps confirmed brands saved after a partial failure (wo
 
   const save = screen.getByRole('button', { name: 'Save brand links' });
   await waitFor(() => expect(save).toBeEnabled());
+  expect(screen.getAllByText(/State IA · Expires 2027-12-31/)).toHaveLength(2);
   fireEvent.click(save);
   expect(await screen.findByText(/Earlier confirmed brands remain saved/)).toBeVisible();
   expect(screen.getByText('Saved links for 1 brand.')).toBeVisible();

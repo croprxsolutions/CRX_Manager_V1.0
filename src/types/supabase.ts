@@ -11446,6 +11446,7 @@ export type Database = {
           notes: string | null
           packaging_variant: string | null
           phi_days: number | null
+          phi_not_applicable: boolean
           pricing_version: number
           product_family_id: string | null
           product_form: string
@@ -11454,6 +11455,7 @@ export type Database = {
           rate_per_acre: number | null
           rate_unit: string | null
           rei_hours: number | null
+          rei_not_applicable: boolean
           return_policy: string
           signal_word: string | null
           sku: string | null
@@ -11497,6 +11499,7 @@ export type Database = {
           notes?: string | null
           packaging_variant?: string | null
           phi_days?: number | null
+          phi_not_applicable?: boolean
           pricing_version?: number
           product_family_id?: string | null
           product_form: string
@@ -11505,6 +11508,7 @@ export type Database = {
           rate_per_acre?: number | null
           rate_unit?: string | null
           rei_hours?: number | null
+          rei_not_applicable?: boolean
           return_policy?: string
           signal_word?: string | null
           sku?: string | null
@@ -11548,6 +11552,7 @@ export type Database = {
           notes?: string | null
           packaging_variant?: string | null
           phi_days?: number | null
+          phi_not_applicable?: boolean
           pricing_version?: number
           product_family_id?: string | null
           product_form?: string
@@ -11556,6 +11561,7 @@ export type Database = {
           rate_per_acre?: number | null
           rate_unit?: string | null
           rei_hours?: number | null
+          rei_not_applicable?: boolean
           return_policy?: string
           signal_word?: string | null
           sku?: string | null

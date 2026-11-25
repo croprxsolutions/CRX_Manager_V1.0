@@ -53,7 +53,11 @@ export function rateUnitOptionsForProduct(
   form: string | null | undefined,
   inventoryUnit: string | null | undefined,
 ): UnitConversion[] {
-  if (form !== 'seed' && form !== 'each') return unitOptionsForForm(conversions, form);
+  if (form !== 'seed' && form !== 'each') {
+    const options = unitOptionsForForm(conversions, form);
+    // A gram-stocked product never takes MG: picking it saved 1/1000 of the amount (KI-114, Taha 2026-11-24).
+    return inventoryUnit?.trim().toLowerCase() === 'g' ? options.filter((uc) => uc.unit.toLowerCase() !== 'mg') : options;
+  }
   if (!inventoryUnit?.trim()) return [];
   const exact = conversions.find((uc) => uc.unit === inventoryUnit);
   if (exact) return [exact];

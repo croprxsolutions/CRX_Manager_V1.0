@@ -57,7 +57,7 @@ BEGIN
   SELECT count(*) INTO v_observations FROM public.supplier_price_observations
     WHERE package_quantity < 0.001 OR package_quantity = 'NaN' OR cost_cents > 1000000000;
   SELECT count(*) INTO v_rows FROM public.supplier_price_import_rows
-    WHERE row_status IN ('new', 'changed')
+    WHERE row_status IN ('new', 'changed', 'cannot_compare')
       AND (package_quantity < 0.001 OR package_quantity = 'NaN' OR cost_cents > 1000000000);
   IF v_links + v_observations + v_rows > 0 THEN
     RAISE EXCEPTION 'SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS: links=%, observations=%, approvable import rows=%',

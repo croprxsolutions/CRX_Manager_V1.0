@@ -143,3 +143,9 @@ Luna HIGH (the same mechanism as Astra re-check #1 and drift review M4: a row ou
 with a check unvalidated) and MED (stage did not check a legacy link's factor) are closed by removing that leniency:
 the apply now refuses while any stored row is outside a bound. Staging-only legacy consequences (Astra re-check #2-#6,
 #15, #16; drift M2, M3) no longer exist.
+
+## Luna round 2 (2026-11-24)
+
+MED fixed: the preflight's import-row count now includes `cannot_compare`, which approval also accepts, so a pending
+non-comparable row outside a bound stops the apply instead of failing a later approval. Production count with it
+included: 0.

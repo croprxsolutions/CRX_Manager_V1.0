@@ -177,3 +177,11 @@ first. Prover: an out-of-bound pending row is refused; all four checks validated
   order (import rows, observations, links), so nothing is upgraded later. A deadlock or a wait over 5s still cancels
   one side with nothing saved; that is safe, and the staff call or the apply is simply retried.
 - LOW fixed: the constraint-name checks in the preflight and postflight are scoped to the three tables.
+
+## Luna round 6 (2026-11-24)
+
+MED refuted (NULL quantity or cost on a row awaiting approval): no writer makes one. The stage step defaults a blank
+quantity to 1 and marks a missing or bad cost invalid (`COST_MUST_BE_POSITIVE` / `COST_INVALID`); the correction copies
+the original observation's quantity, which is `NOT NULL`. Approval would write an observation, whose quantity and cost
+are `NOT NULL`, so such a row could only fail with nothing saved. The NULL allowance matches the table's existing
+column checks. Production read-only count 2026-11-24: 0 such rows. Unchanged.

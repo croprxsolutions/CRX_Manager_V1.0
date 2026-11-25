@@ -44,7 +44,7 @@ const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDA
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });
 // FP-1 follow-up (Sol r6 MED): an owner change refreshes the copy. Applied right after the candidate.
-const FOLLOW_UP = '20270305210000_field_owner_change_refreshes_copy.sql';
+const FOLLOW_UP = '20270306180000_field_owner_change_refreshes_copy.sql';
 const followUp = readFileSync(path.join(ROOT, 'supabase', 'migrations', FOLLOW_UP), 'utf8').replaceAll('\r\n', '\n');
 
 const [A, B, C, D, E, X] = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'].map(id);
@@ -475,7 +475,7 @@ try {
   assert.equal(copy(F2), `${B}:100.000000:true:-`, 'and the copy equals the second save');
   console.log('[locks] the nightly refresh repairs a stale copy; writer and FOR SHARE reader run one after the other; two writers queue');
 
-  // Sol r6 MED (follow-up 20270305210000): an owner change by a direct UPDATE moves the main payer at once.
+  // Sol r6 MED (follow-up 20270306180000): an owner change by a direct UPDATE moves the main payer at once.
   const primary = (field) => scalar(`SELECT coalesce(string_agg(customer_id::text, ','), '-') FROM public.field_billing_defaults WHERE field_id = '${field}' AND is_primary;`);
   const shares = (field) => scalar(`SELECT string_agg(customer_id::text || ':' || split_pct, ',' ORDER BY customer_id) FROM public.field_billing_defaults WHERE field_id = '${field}';`);
   const f5Shares = shares(F5);

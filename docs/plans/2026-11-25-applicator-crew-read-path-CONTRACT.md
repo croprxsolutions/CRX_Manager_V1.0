@@ -32,7 +32,7 @@ Status: settled after one cold challenge (Astra gpt-6.2-astra high, 62 findings,
 
 **Who may act:** read paths only; the write policies keep today's meaning (text swap). The screens send locators (job IDs, worksheet IDs, applicator ID for the board); every view and policy derives the actor from `auth.uid()` and the existing role helpers.
 
-**Expected files.** PR 1: one migration + ledger record, `.claude/schema-registry.json`, `src/types/supabase.ts` (views). PR 2 (#2574): `src/lib/costFields.ts`, `src/pages/JobDetail.tsx`, `src/pages/Jobs.tsx`, `src/pages/DispatchBoard.tsx`, `src/pages/FieldView.tsx`, `src/lib/applicatorSheetPrintData.ts`, `src/lib/applicatorSheetData.ts`, `src/lib/dispatchDisplay.ts`, report/print helpers that read `jobs`/`job_chemicals` for crew, tests. PR 3: one migration + ledger record.
+**Expected files.** PR 1: one migration, its record, ledger entry, real-schema proof and reverse script. The schema registry is regenerated from the live database after the apply (`regen-schema-registry`); generated types for the views ship with PR 2, which is their first caller. PR 2 (#2574): `src/lib/costFields.ts`, `src/pages/JobDetail.tsx`, `src/pages/Jobs.tsx`, `src/pages/DispatchBoard.tsx`, `src/pages/FieldView.tsx`, `src/lib/applicatorSheetPrintData.ts`, `src/lib/applicatorSheetData.ts`, `src/lib/dispatchDisplay.ts`, report/print helpers that read `jobs`/`job_chemicals` for crew, tests. PR 3: one migration + ledger record.
 
 ## 2. State and failure
 
@@ -82,6 +82,17 @@ Mason, 2026-11-25 (relayed verbatim by the parent session): "Yes, second step". 
 
 - **Corrected:** 1 (bypass clause is `rolbypassrls`, not a role-name test), 2 (`service_role` granted), 7, 8 (probe adds child-row writes on the invoiced job and attachment/storage writes), 9 (`read_at` timestamp excluded from payload comparison), 12 (protected keys scanned at any depth), 13 (K's board is expected empty, A's and D's non-empty), 14–18, 20 (crew print uses `get_job_billed_customers` job-level), 19 (print fails closed), 21, 22 (recovery is a reviewed corrective migration; PR 1 rollback only before PR 2 deploys).
 - **Checked, no change:** 3 (no restrictive policies; every base policy is `TO authenticated`), 4 (views carry SELECT only), 5 (policy alias preserved; applied cleanly locally), 6 (`job-attachments` storage policies are `TO authenticated`; `anon` reads none), 10, 11 (`_total_count` carried; payload keyed by the board's authorized id).
+
+## Gate settlement (Luna round 1, Sol round 1 on 589855216: verdict clean)
+
+- **Luna MED (stamp order):** refuted. Every migration here uses the 2027 stamp sequence (the three before it are `20270307140000`–`180000`); the step-3 lockdown takes a later stamp, and its preflight requires the crew views.
+- **Sol MED 1 (a restrictive or extra read policy would be bypassed by the owner-run views):** fixed. The preflight refuses if any restrictive policy, or any SELECT/ALL policy other than the six copied ones (all `TO authenticated`), exists on the four tables.
+- **Sol MED 2 (the reverse could overwrite a later tightening):** deferred to the rollback itself. The reverse script is the body of a future reviewed migration, which must pin the then-current definitions in its own preflight (as this one does) before it may run.
+- **Sol LOW 3 (`metabase_ro` keeps the default SELECT on the views):** refuted. `metabase_ro` already holds SELECT on all four base tables, does not bypass row security, and is not in any policy's role list, so the view filter (`auth.uid()`-based) returns it nothing more than the base tables do.
+- **Sol LOW 4 (board proof compared keys only):** fixed. The proof compares every board row minus the protected keys, before and after.
+- **Sol LOW 5 (no saved weight in the fixture):** fixed. Each worksheet has a saved, current weight, and the proof asserts it is in A's payload.
+- **Sol LOW 6 (reuse mode after a failed run):** deferred. Reuse is a developer shortcut; the gate run builds a fresh database every time.
+- **Sol LOW 7 (types and registry):** fixed in this contract's expected-files line (registry after the live apply; types with PR 2).
 
 ## Appendix A: policies that read `jobs` inline (local copy, `pg_policies`)
 

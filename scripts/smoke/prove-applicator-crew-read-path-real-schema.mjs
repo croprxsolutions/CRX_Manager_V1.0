@@ -20,7 +20,8 @@
  * Expected (contract §4): after the candidate every result is identical except the dispatch board rows for A and D,
  * which lose total_price_cents, internal_memo and commission_split (admin and rep keep them); each crew view returns,
  * per user, exactly the rows its base table returns and none of the protected columns; anon reads no view.
- * Autocommit is refused by the preflight; apply prints POSTFLIGHT_OK; re-apply is refused; the reverse
+ * A restrictive read policy on jobs, and autocommit, are refused by the preflight; apply prints POSTFLIGHT_OK;
+ * re-apply is refused; the reverse
  * (scripts/smoke/applicator-crew-read-path-reverse.sql) returns every result to the before state.
  *
  * Run: node scripts/smoke/prove-applicator-crew-read-path-real-schema.mjs   (needs Docker; never touches live)
@@ -85,6 +86,11 @@ function seed() {
         INSERT INTO public.job_attachments (id, job_id, storage_path, file_name) VALUES (md5('crp-att-'||k)::uuid, jid, jid::text || '/crp.txt', 'crp.txt');
         INSERT INTO storage.objects (bucket_id, name) VALUES ('job-attachments', jid::text || '/crp.txt');
         INSERT INTO public.job_loader_worksheets (id, job_id, capacity_gal) VALUES (md5('crp-lw-'||k)::uuid, jid, 500);
+        -- A saved, current weight (pack generation 0 = no newer pack), so the validity check reads the crew views.
+        INSERT INTO public.job_loader_worksheet_weights (worksheet_id, product_id, job_id, product_name, product_form, weight_kind,
+            value_id, value_reviewed_at, value_reviewed_by, lb_per_unit, per_unit, unit_factors, source, value_basis, pack_generation, captured_at)
+          VALUES (md5('crp-lw-'||k)::uuid, '${PRODUCT}', jid, '[CRP] product', 'liquid', 'net_weight', md5('crp-val')::uuid, now(),
+                  '${USERS.admin}', 8.5, 'gal', '{"gal":1}'::jsonb, 'label', '{}'::jsonb, 0, now());
         INSERT INTO public.job_product_epa (job_id, product_id) VALUES (jid, '${PRODUCT}');
         INSERT INTO public.job_tag_assignments (job_id, tag_id) VALUES (jid, md5('crp-tag')::uuid);
         INSERT INTO public.team_notes (id, title, content, created_by, linked_entity_type, linked_entity_id)
@@ -144,6 +150,8 @@ for (const k of JOBS) READS[`billed_customers_${k}`] = `(SELECT coalesce(json_ag
 for (const [who, uid] of [['A', A], ['D', D], ['K', K]]) {
   READS[`board_${who}_jobs`] = `(SELECT coalesce(json_agg(b ->> 'job_number' ORDER BY b ->> 'job_number')::text, '[]') FROM ${board(uid)} b WHERE b ->> 'job_number' LIKE 'CRP-%')`;
   READS[`board_${who}_protected_keys`] = boardKeys(uid);
+  // Every board row with the protected keys removed: the rest of the payload must not change.
+  READS[`board_${who}_rows`] = `(SELECT coalesce(json_agg(b - ARRAY['total_price_cents','total_cost_cents','internal_memo','commission_split'] ORDER BY b ->> 'job_number')::text, '[]') FROM ${board(uid)} b WHERE b ->> 'job_number' LIKE 'CRP-%')`;
   READS[`board_${who}_total_count`] = `(SELECT coalesce(bool_and(b ? '_total_count'), true)::text FROM ${board(uid)} b WHERE b ->> 'job_number' LIKE 'CRP-%')`;
 }
 const VIEW_READS = {
@@ -208,6 +216,8 @@ try {
   assert.deepEqual(JSON.parse(before.D.board_D_protected_keys), ['commission_split', 'internal_memo', 'total_price_cents']);
   assert.match(before.A.job_chemicals_price, /2500/);
   assert.match(before.A.job_field_shares_split, /70/);
+  assert.match(before.A.loader_by_worksheets, /8\.5/, "A's saved loader weight is in the payload");
+  assert.match(before.A.board_A_rows, /CRP-A/);
   // Writes behave as the contract states today.
   assert.equal(before.A.update_applied_info_A, '1');
   assert.equal(before.A.insert_attachment_A, '1');
@@ -217,6 +227,15 @@ try {
   for (const w of ['update_record_E_invoiced', 'delete_record_E_invoiced', 'update_record_field_E_invoiced', 'delete_record_crew_E_invoiced']) {
     assert.match(before.A[w], /billed history/, `${w} must be refused by the billed-history trigger`);
   }
+
+  // A restrictive read policy on a base table would be bypassed by the owner-run views: the preflight refuses.
+  psql('CREATE POLICY crp_probe_restrictive ON public.jobs AS RESTRICTIVE FOR SELECT TO authenticated USING (true);');
+  const restricted = run(['-1']);
+  psql('DROP POLICY crp_probe_restrictive ON public.jobs;');
+  assert.notEqual(restricted.status, 0);
+  assert.match(restricted.stderr, /PREFLIGHT_FAIL: a restrictive or extra read policy exists/);
+  assert.equal(scalar("SELECT to_regclass('public.jobs_crew') IS NULL;"), 't');
+  console.log('RESTRICTIVE POLICY: refused by the preflight, nothing changed');
 
   const auto = run([]);
   assert.notEqual(auto.status, 0, 'an autocommit run must fail');

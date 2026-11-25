@@ -75,6 +75,17 @@ BEGIN
   IF v_count <> 6 OR v_hash IS DISTINCT FROM 'f8bd0f3e46e4d869449a5c23f145b9fa' THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: a SELECT policy copied into a crew view changed; regenerate';
   END IF;
+  -- The views reproduce the base tables' row rules only if those rules are exactly the six permissive SELECT policies
+  -- above, for signed-in users, plus the office-only write policies: refuse if any restrictive policy, or any other
+  -- policy that grants SELECT, exists on the four tables (it would be bypassed by the owner-run views).
+  IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public'
+       AND tablename IN ('jobs','job_chemicals','job_field_shares','field_billing_defaults')
+       AND (permissive <> 'PERMISSIVE'
+            OR (cmd IN ('SELECT','ALL') AND (policyname NOT IN ('jobs_select','jobs_select_location_dispatchee','job_chemicals_select',
+                  'job_chemicals_select_location_dispatchee','job_field_shares_select','fbd_select') OR roles <> '{authenticated}'::name[]))))
+  THEN
+    RAISE EXCEPTION 'PREFLIGHT_FAIL: a restrictive or extra read policy exists on jobs, job_chemicals, job_field_shares or field_billing_defaults; the crew views would bypass it';
+  END IF;
 END
 $preflight$;
 

@@ -292,9 +292,10 @@ describe('Record Payments: faster entry', () => {
     expect(notes).not.toHaveAttribute('tabindex');
   });
 
-  it('Pay full balance fills every open invoice with its balance and an empty check amount with the total, saving nothing', async () => {
+  it('Pay full balance fills every open invoice with its balance from a typed check, saving nothing', async () => {
     renderPayments();
     await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
     fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
 
     expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
@@ -389,15 +390,20 @@ describe('Record Payments: faster entry', () => {
     }
   });
 
-  it('Pay full balance fills only an empty check amount: text that reads as $0 is left alone', async () => {
+  it('Pay full balance never fills in the check amount: it waits for the amount on the paper check', async () => {
+    // A filled-in balance could re-book a check already posted for a different amount (Sol, #2438).
     renderPayments();
     await chooseByKeyboard();
+    const payFull = screen.getByRole('button', { name: /Pay full balance/ });
+    expect(payFull).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '1e2' } });
-    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+    expect(payFull).toBeDisabled();
+    fireEvent.click(payFull);
 
-    expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('not a dollar amount'));
     expect(screen.getByLabelText('Check Amount')).toHaveValue('1e2');
     expect(screen.getAllByPlaceholderText('0.00').slice(1).map((el) => (el as HTMLInputElement).value)).not.toContain('50.00');
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '' } });
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('');
   });
 
   it('hides the Apply prepay link from a user without the Prepay Credits page (admin-only)', async () => {
@@ -445,17 +451,14 @@ describe('Record Payments: faster entry', () => {
       await screen.findByText('INV-OLD');
     }
 
-    it('starts the second customer with nothing allocated and no amount filled from the first, and Apply posts to it', async () => {
+    it('starts the second customer with nothing allocated, and Apply posts to that customer', async () => {
       renderPayments();
       await chooseByKeyboard();
+      fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
       fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
-      expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
       expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
 
       await switchToSmallFarm();
-      // $80.00 was Big Farm's balance, filled in by Pay full balance: it must not become Small Farm's check.
-      expect(screen.getByLabelText('Check Amount')).toHaveValue('');
-      fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
       expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$0.00');
       fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
       fireEvent.click(await screen.findByRole('button', { name: /^Continue/ }));
@@ -469,6 +472,7 @@ describe('Record Payments: faster entry', () => {
     it('ignores a late prepay balance for the first customer once the second is chosen', async () => {
       renderPayments();
       await chooseByKeyboard();
+      fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
       fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
       fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
       fireEvent.click(await screen.findByRole('button', { name: /Next Check/ }));

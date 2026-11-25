@@ -1,4 +1,4 @@
--- Rollback text for 20270306120000_booking_expiry_draw_recheck_and_posting_customer_lock.sql (#2097, #2089).
+-- Rollback text for 20270307040000_booking_expiry_draw_recheck_and_posting_customer_lock.sql (#2097, #2089).
 -- Proven by scripts/smoke/prove-2097-2089-real-schema.mjs: after this runs, auto_expire_quotes(text) is the
 -- 20270129160000 body again (md5 f677101398caef2eb0b195a42af5e38f), guard_customer_deactivation_open_work_20270128()
 -- is the 20270129210000 body again (md5 77141ca2b586a22418d08c15108b3c7e) and the posting guard is gone.

@@ -1,5 +1,5 @@
 -- Written 2026-11-25. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270306120000_booking_expiry_draw_recheck_and_posting_customer_lock.md.
+-- docs/reference/migrations.d/20270307040000_booking_expiry_draw_recheck_and_posting_customer_lock.md.
 --
 -- Two release #1990 follow-ups (v0.2.1, Taha's bookings and billing lane):
 --

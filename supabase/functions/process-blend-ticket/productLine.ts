@@ -40,10 +40,14 @@ export function parseProductLine(
       const ratePerAcre = parts[1] || null;
       const totalProduct = parts.length >= 3 ? parts[2] : null;
 
-      // Same strict amount cell as the plain reader: unreadable text gives 0 and a blank unit for the rep.
-      const cell = readAmountCell(totalProduct || ratePerAcre || "");
-      const quantity = cell?.amount ?? 0;
-      const unit = cell?.unit ?? null;
+      // Same strict amount cells and rules as the plain reader below.
+      const rate = readAmountCell(ratePerAcre || "");
+      const total = readAmountCell(totalProduct || "");
+      const quantity = total?.amount ?? rate?.amount ?? 0;
+      const unit = total
+        ? total.unit ??
+          (total.word === null && total.rest === "" ? rate?.unit ?? null : null)
+        : rate?.unit ?? null;
 
       return {
         productName,

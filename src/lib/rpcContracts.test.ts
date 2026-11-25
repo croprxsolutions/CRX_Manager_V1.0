@@ -2759,11 +2759,11 @@ function registryMigrationHighWater(): string {
 // the staging-only M4 candidates below the applied-name high-water; production
 // has not applied these definitions, so their staging overlay stays explicit.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
-  '20270307210000', // Whole-group liquid weight review.
   '20270109100100',
   '20270109100200',
   '20270109100300',
   '20270109100400',
+  '20270307210000', // Whole-group liquid weight review.
   '20270110110000', // Inactive rate-history cleanup: optional read argument, pending apply/type regeneration.
 ]);
 
@@ -2933,14 +2933,14 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 // explicitly retained in the staging schema overlay.
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'change_brand_document_links', // 20270306170000. Prune once generated types cover this RPC.
-  'approve_liquid_density_draft', // 20270307210000. Prune once generated types cover this RPC.
-  'submit_liquid_density_draft',
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
   'set_registration_adjuvants',
   // 20270130100000 (#1976, local candidate): the EPA batch fill's save; replays through _product_parent_replay and
   // commit_epa_proposal saves the receipt. Prune once the generated types carry it.
   'commit_epa_proposal_batch',
+  'approve_liquid_density_draft', // 20270307210000. Prune once generated types cover this RPC.
+  'submit_liquid_density_draft',
   // 20270203120000 (#1942, local candidate): re-emits the private completion body under its current name
   // (20270126110000 renamed it, so no generated type carries it yet); keyed by complete_delivery's p_idempotency_key.
   // Prune once the generated types carry it.

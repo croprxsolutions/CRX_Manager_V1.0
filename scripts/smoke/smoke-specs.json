@@ -141,13 +141,6 @@
         "security"
       ]
     },
-    "approve_liquid_density_draft": {
-      "chain": "smoke-liquid-density-review.sql",
-      "container_prover": "prove-liquid-density-review-real-schema.mjs",
-      "description": "REQUIRES 20270307210000. With the switch closed, the new actions refuse while legacy approval remains usable. After cutover, liquid review confirms current brands and SDS links, enforces a different admin, keeps a waiting draft, and rechecks on brand joins. The disposable prover exercises both states.",
-      "covers": ["approve_liquid_density_draft", "submit_liquid_density_draft", "get_liquid_density_review", "approve_weights", "_write_parent_density", "liquid_density_review_open"],
-      "area": ["inventory", "security", "idempotency"]
-    },
     "fill_tote_from_bulk": {
       "chain": "smoke-tote_fill_from_bulk.sql",
       "container_prover": "prove-tote-fill-real-schema.mjs",
@@ -163,6 +156,13 @@
         "inventory",
         "security"
       ]
+    },
+    "approve_liquid_density_draft": {
+      "chain": "smoke-liquid-density-review.sql",
+      "container_prover": "prove-liquid-density-review-real-schema.mjs",
+      "description": "REQUIRES 20270307210000. With the switch closed, the new actions refuse while legacy approval remains usable. After cutover, liquid review confirms current brands and SDS links, enforces a different admin, keeps a waiting draft, and rechecks on brand joins. The disposable prover exercises both states.",
+      "covers": ["approve_liquid_density_draft", "submit_liquid_density_draft", "get_liquid_density_review", "approve_weights", "_write_parent_density", "liquid_density_review_open"],
+      "area": ["inventory", "security", "idempotency"]
     },
     "apply_product_setup": {
       "chain": "smoke-product_setup_workbook.sql",

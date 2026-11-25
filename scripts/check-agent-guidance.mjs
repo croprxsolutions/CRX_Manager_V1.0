@@ -52,8 +52,10 @@ const norm = (text) => String(text).replace(/[‘’]/g, "'").replace(/[“”]/
 const fold = (text) => norm(text).toLowerCase();
 const hasAll = (text, terms) => terms.every((term) => fold(text).includes(fold(term)));
 // A section runs from its own heading to the next `## ` heading, in any order.
+// Fenced code is an example, never policy: drop it before finding headings.
+const unfenced = (text) => String(text).replace(/\r\n/g, "\n").replace(/^[ \t]*(```|~~~)[^\n]*\n[\s\S]*?^[ \t]*\1[^\n]*$/gm, "");
 const section = (text, heading) => {
-  const part = text.replace(/\r\n/g, "\n").split(/^(?=## )/m).find((p) => p.split("\n")[0].trim() === `## ${heading}`);
+  const part = unfenced(text).split(/^(?=## )/m).find((p) => p.split("\n")[0].trim() === `## ${heading}`);
   return part ? part.slice(part.indexOf("\n") + 1) : "";
 };
 // Paragraphs, bullets, numbered items, headings and table rows, folded; code
@@ -63,7 +65,8 @@ function units(text) {
   let fence = false;
   let open = false;
   for (const line of String(text).replace(/\r\n/g, "\n").split("\n")) {
-    const body = line.replace(/^\s*(?:>\s*)*/, "");
+    // Block-quote markers stay, so a quoted copy of a locked rule is not the rule.
+    const body = line.replace(/^\s*/, "");
     // shortcut: a fence closes on either marker, not only its opener; fine for these docs.
     if (/^(?:```|~~~)/.test(body)) { fence = !fence; open = false; continue; }
     if (fence || !body.trim()) { open = false; continue; }
@@ -161,13 +164,13 @@ record(!/\b\d{2,5}\s+(?:tables|migrations|pages|tests?|edge functions?)\b/i.test
 record(claude.trimStart().startsWith("@AGENTS.md"), "CLAUDE.md imports AGENTS.md first");
 const ownerCommunication = section(agents, "Owner Communication");
 record(ownerCommunication.trim().length > 0, "AGENTS.md defines the owner communication contract");
-record(hasAll(ownerCommunication, ["cannot safely review code or diffs"]), "AGENTS.md acknowledges Mason cannot review code or diffs");
-record(hasAll(ownerCommunication, ["never have to nudge", "keep moving"]), "owner communication keeps authorized work moving without nudges");
-record(hasAll(ownerCommunication, ["what failed", "what it means", "trying next"]), "owner communication makes failures explicit");
+record(unitWith(ownerCommunication, ["cannot safely review code or diffs"]), "AGENTS.md acknowledges Mason cannot review code or diffs");
+record(unitWith(ownerCommunication, ["never have to nudge", "keep moving"]), "owner communication keeps authorized work moving without nudges");
+record(unitWith(ownerCommunication, ["what failed", "what it means", "trying next"]), "owner communication makes failures explicit");
 // These two markers are literal tokens agents print, so they stay exact.
 record(/NEEDS MASON - ACTION REQUIRED[\s\S]*NEEDS MASON - DECISION REQUIRED/.test(ownerCommunication), "owner communication makes genuine stops unmistakable");
 // Mason, 2026-10-03: Claude dropped its pre-code approval pause and plans-then-proceeds like Codex.
-record(hasAll(agents, ["Codex and Claude", "short plan", "without waiting for approval"]), "plan authority stays explicit for both agents");
+record(unitWith(agents, ["Codex and Claude", "short plan", "without waiting for approval"]), "plan authority stays explicit for both agents");
 // The bans stay in AGENTS.md (standalone PR-comment tasks may never open ship.md);
 // ship.md Step 8 carries the full rule, money PRs included.
 const coderabbitBullet = unitWith(protectedDelivery, ["CodeRabbit is optional"]);
@@ -196,17 +199,17 @@ record(
     && !/Claude's checkpoint/i.test(shipWorkflow),
   "ship workflow plans then proceeds for Claude and Codex alike",
 );
-record(hasAll(agents, ["Deliver what was asked", "scope intended", "narrowing, widening, or transforming"]), "shared contract prevents silent scope changes");
-record(hasAll(agents, ["Before presenting findings as current", "not behind `origin/main`"]), "reviews and audits require a current checkout");
-record(hasAll(agents, ["simplest complete implementation"]), "AGENTS.md requires simple, complete implementations");
-record(hasAll(agents, ["clarity, not cleverness"]), "AGENTS.md favors readable code over clever compression");
+record(unitWith(agents, ["Deliver what was asked", "scope intended", "narrowing, widening, or transforming"]), "shared contract prevents silent scope changes");
+record(unitWith(agents, ["Before presenting findings as current", "not behind `origin/main`"]), "reviews and audits require a current checkout");
+record(unitWith(agents, ["simplest complete implementation"]), "AGENTS.md requires simple, complete implementations");
+record(unitWith(agents, ["clarity, not cleverness"]), "AGENTS.md favors readable code over clever compression");
 const hardRules = section(agents, "CRX Hard Rules");
 record(hardRules.trim().length > 0, "AGENTS.md retains the CRX hard-rule section");
-record(hasAll(hardRules, ["New tables", "Row Level Security", "policies in the same migration"]), "AGENTS.md retains new-table RLS requirements");
-record(hasAll(hardRules, ["Mutating RPCs", "`p_idempotency_key text DEFAULT NULL`"]), "AGENTS.md retains mutating-RPC idempotency requirements");
-record(hasAll(hardRules, ["Money", "exact whole cents"]), "AGENTS.md retains exact-money requirements");
-record(hasAll(hardRules, ["`src/lib/db.ts`", "only Supabase client", "assertRpcResult()", "checkMutationResult()"]), "AGENTS.md retains Supabase client and result-check requirements");
-record(hasAll(protectedDelivery, ["never use `--no-verify`", "never push directly to `main`"]), "AGENTS.md retains protected-delivery bans");
+record(unitWith(hardRules, ["New tables", "Row Level Security", "policies in the same migration"]), "AGENTS.md retains new-table RLS requirements");
+record(unitWith(hardRules, ["Mutating RPCs", "`p_idempotency_key text DEFAULT NULL`"]), "AGENTS.md retains mutating-RPC idempotency requirements");
+record(unitWith(hardRules, ["Money", "exact whole cents"]), "AGENTS.md retains exact-money requirements");
+record(unitWith(hardRules, ["`src/lib/db.ts`", "only Supabase client", "assertRpcResult()", "checkMutationResult()"]), "AGENTS.md retains Supabase client and result-check requirements");
+record(unitWith(protectedDelivery, ["never use `--no-verify`", "never push directly to `main`"]), "AGENTS.md retains protected-delivery bans");
 const autonomousLandingChecks = [
   ["a clean Sol proof covering the PR", ["clean Sol proof covers the PR"]],
   ["no review asking for changes", ["no review asks for changes"]],
@@ -226,7 +229,7 @@ record(
   hasAll(unitWith(protectedDelivery, ["Autonomous landing"]), ["Codex never merges", "live apply", "to Claude", "into `staging`", "merge gate", "owner hold", "NON-destructive migration", "apply gate", "ship.md` Step 8"]),
   "AGENTS.md keeps the autonomous-landing summary: roles, both gates, the owner hold, and the ship.md Step 8 pointer",
 );
-record(hasAll(protectedDelivery, [".claude/commands/ship.md"]), "AGENTS.md routes volatile delivery mechanics to the ship workflow");
+record(unitWith(protectedDelivery, [".claude/commands/ship.md"]), "AGENTS.md routes volatile delivery mechanics to the ship workflow");
 // Pinned after a 2026-10-03 slimming pass dropped these and a Luna round caught it.
 const reviewChainChecks = [
   ["never disabling a gate", ["never bypass, disable, or weaken hooks"]],
@@ -237,7 +240,7 @@ const reviewChainChecks = [
   ["review fixes staying on the same PR", ["fixes stay on the same PR"]],
 ];
 for (const [name, terms] of reviewChainChecks) {
-  record(hasAll(protectedDelivery, terms), `AGENTS.md delivery rules keep ${name}`);
+  record(unitWith(protectedDelivery, terms),`AGENTS.md delivery rules keep ${name}`);
 }
 record(
   hasAll(unitWith(protectedDelivery, ["Guard-cleanup exception"]), ["naming what still enforces it", "Always kept", "secret protection", "no force-push", "no direct push to `main`", "no `--admin` merges", "CI and status checks", "destructive-migration approval", "migration-apply proof gate", "money and inventory database rules"]),
@@ -264,9 +267,13 @@ try {
 } catch (error) {
   record(false, `${LOCK_FILE} is valid JSON`, error.message);
 }
+// A JSON null, array or string fails the declaration checks below instead of crashing.
+const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+if (!isObject(locks)) locks = {};
 const lockedAgentsUnits = new Set();
 for (const [file, required] of Object.entries(REQUIRED_LOCKS)) {
-  const entry = locks[file] || {};
+  const entry = isObject(locks[file]) ? locks[file] : {};
+  for (const kind of ["units", "passages"]) if (!isObject(entry[kind])) entry[kind] = {};
   // Each required name must sit under its own kind: an AGENTS.md rule moved to
   // "passages" would stop being a whole-bullet match.
   const undeclared = ["units", "passages"].flatMap((kind) =>

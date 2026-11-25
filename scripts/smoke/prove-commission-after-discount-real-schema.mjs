@@ -75,6 +75,8 @@ function docker(args, options = {}) {
 function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U', user, '-d', DB, '-X', '-q', '-v', 'ON_ERROR_STOP=1']; }
 function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
+// The whole output, for multi-line values such as pg_get_functiondef (Sol r1 H6).
+function full(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim(); }
 function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
 function stageText(name, text) {
   const staged = path.join(tmpdir(), `${NAME}-${name}`);
@@ -365,7 +367,8 @@ async function main() {
   // The four re-emitted functions as they are before the candidate: the documented rollback re-emits them.
   const ORIGINALS = ['_insert_commissions_for_order(uuid,uuid,numeric,jsonb,date)', 'fix_delivery(uuid,text,text,text)',
     'cancel_order(uuid,uuid,text)', 'void_commission_payment(uuid,text,uuid,text)']
-    .map((sig) => scalar(`SELECT pg_get_functiondef('public.${sig}'::regprocedure);`));
+    .map((sig) => full(`SELECT pg_get_functiondef('public.${sig}'::regprocedure);`));
+  for (const def of ORIGINALS) assert.match(def, /^CREATE OR REPLACE FUNCTION [\s\S]+\$function\$$/);
   // 3. APPLY
   const applied = apply('cand.sql');
   assert.equal(applied.status, 0, applied.output);
@@ -383,9 +386,10 @@ async function main() {
   // 6. ROLLBACK (the header's)
   psql(`BEGIN;
     DROP TRIGGER invoices_settle_commission_20270306 ON public.invoices;
+    DROP TRIGGER invoices_delete_settle_commission_20270306 ON public.invoices;
     DROP FUNCTION public._invoice_settles_commission_20270306();
     ${ORIGINALS.join(';\n')};
-    DROP FUNCTION public._settle_order_commission_20270306(uuid);
+    DROP FUNCTION public._settle_order_commission_20270306(uuid,boolean);
     DROP FUNCTION public._order_commission_base_20270306(uuid);
     COMMIT;`);
   const rolled = chain(NEW_CHAIN);

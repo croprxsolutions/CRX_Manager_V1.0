@@ -526,9 +526,11 @@ export function sanitizeError(error: unknown): string {
   const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER|DELIVERY_NOTHING_DELIVERED|DELIVERY_LOAD_CHANGED|PAPER_TICKET_LOAD_CHANGED):\s*(.+)$/s);
   if (deliveryQuantities) {
     // The server sentences start lowercase (they follow the token); start the second sentence with a capital,
-    // unless it starts with a mixed-case product name such as "pH Plus" (Sol r5 LOW).
+    // unless it starts with a mixed-case product name such as "pH Plus" (Sol r5 LOW). DELIVERY_EXCEEDS_ORDER always
+    // starts with the product name, kept exactly as written ("acme Plus": Sol r11 LOW on #2324).
     const sentence = deliveryQuantities[1].trim();
-    const capital = /^[a-z](?![A-Z])/.test(sentence) ? sentence.charAt(0).toUpperCase() : sentence.charAt(0);
+    const keepName = message.startsWith('DELIVERY_EXCEEDS_ORDER:');
+    const capital = !keepName && /^[a-z](?![A-Z])/.test(sentence) ? sentence.charAt(0).toUpperCase() : sentence.charAt(0);
     return `The delivery was not completed. ${capital}${sentence.slice(1)}`;
   }
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.

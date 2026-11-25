@@ -389,17 +389,23 @@ function beforeCases() {
 
 async function applyCandidate() {
   stageText('candidate.sql', lf(CANDIDATE));
-  // Applied beside a half-done completion, as on live: both finish, nothing lost.
+  // Applied while a ticket completion is mid-transaction, as on live: the completion has already run (it holds its
+  // locks, delivery_photos included) when the apply starts, so the apply's ADD COLUMN must wait for it, then finish.
+  // Sol r11 LOW on #2324: an overlap the timestamps prove, not a read that may end before the apply starts.
   const D = delivery(A(), 'in_progress');
+  const ph = photo(D, undefined);
   const mark = (name) => `SELECT '${name}=' || extract(epoch FROM clock_timestamp());`;
-  const completer = session(`BEGIN;\n${AS(ADMIN)}\nSELECT count(*) FROM public.delivery_items WHERE delivery_id = '${D}';\n${mark('read')}\n`
-    + `SELECT pg_sleep(3);\n${completeNoProof(D, 'pbl-apply-load', undefined)};\nCOMMIT;\n${mark('committed')}\n`);
-  const applier = session(`${mark('applying')}\nBEGIN;\n\\i /tmp/candidate.sql\nCOMMIT;\n${mark('applied')}\n`, 1000);
+  const completer = session(`BEGIN;\n${AS(ADMIN)}\n${completeTicket(D, 'pbl-apply-load', ph)};\n${mark('completed')}\n`
+    + `SELECT pg_sleep(4);\n${mark('committing')}\nCOMMIT;\n`);
+  const applier = session(`${mark('applying')}\nBEGIN;\n\\i /tmp/candidate.sql\nCOMMIT;\n${mark('applied')}\n`, 1500);
   const [c, a] = await Promise.all([completer, applier]);
   assert.equal(c.code, 0, `the completion must not be lost to the apply:\n${c.out}`);
   assert.equal(a.code, 0, `the apply must not fail beside a live completion:\n${a.out}`);
+  const t = (out, name) => Number(new RegExp(`${name}=([0-9.]+)`).exec(out)?.[1]);
+  assert.ok(t(c.out, 'completed') < t(a.out, 'applying'), `the completion must have run before the apply started:\n${c.out}\n${a.out}`);
+  assert.ok(t(a.out, 'applied') >= t(c.out, 'committing'), `the apply must wait for the open completion:\n${c.out}\n${a.out}`);
   assert.equal(status(D), 'completed');
-  console.log('[apply] the migration applies (pre- and postflight pass) beside a half-done completion: both finish');
+  console.log('[apply] the migration applies (pre- and postflight pass) while a ticket completion is open: it waits for that commit, then finishes; both succeed');
 }
 
 function afterCases() {

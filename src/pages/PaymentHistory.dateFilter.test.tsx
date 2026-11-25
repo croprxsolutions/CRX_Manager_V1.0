@@ -85,6 +85,36 @@ describe('Payment History date filter', () => {
   });
 });
 
+describe('Payment History counts checks entered on Prepay Credits (KI-207)', () => {
+  const credit = (id: string, cents: number, extra: Partial<Row>): Row => ({
+    id, customer_id: 'c1', source_type: 'check', allocation_set_id: null, original_amount_cents: cents,
+    source_reference: 'PRE-1', created_at: '2026-11-24T18:00:00Z', customers: { farm_name: 'Big Farm' }, ...extra,
+  });
+
+  it('adds them to the totals as one check per entry, like Month-End Close', async () => {
+    H.tables.prepay_credits = [
+      // One $300 check split across two buckets: same customer, time and reference.
+      credit('p1', 20000, {}),
+      credit('p2', 10000, {}),
+      // Left over from a Record Payments overpayment: already in allocation_sets, never counted twice.
+      credit('p3', 7000, { allocation_set_id: 'today' }),
+      // Not a check.
+      credit('p4', 4000, { source_type: 'manual_adjustment', source_reference: 'ADJ' }),
+      // Last month.
+      credit('p5', 9900, { created_at: '2026-10-15T18:00:00Z', source_reference: 'PRE-OCT' }),
+    ];
+    render(<MemoryRouter><PaymentHistory /></MemoryRouter>);
+    expect(await screen.findByText('CHK-october')).toBeInTheDocument();
+    expect(activeTotal()).toHaveTextContent('$1,574.00');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Today' }));
+    expect(activeTotal()).toHaveTextContent('$450.00');
+    expect(activeTotal()).toHaveTextContent('3 payment(s) today');
+    expect(screen.getByText(/include 1 check\(s\) entered on Prepay Credits \(\$300\.00\)/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'See them on Prepay Credits' })).toHaveAttribute('href', '/prepay?tab=manager');
+  });
+});
+
 describe('payment date range helpers', () => {
   it('uses the payment date, else the Chicago day it was entered', () => {
     expect(paymentBusinessDate('2026-11-24', '2026-11-30T12:00:00Z')).toBe('2026-11-24');

@@ -868,13 +868,12 @@ click, correct focus and Escape, exactly one approval, Approved after reload.
 
 ### KI-207 — Payment History's day and month totals leave out checks entered on Prepay Credits
 
-**MED · OPEN · money/reporting · Taha (payments lane) · found 2026-11-25 (Sol review of PR #2438)**
-Payment History reads Record Payments only (`allocation_sets`). A check entered through Prepay Credits > New
-Check (`prepay_credits`) is not in its list or its Today / date-range total, and Month-End Close's payment link
-opens this same list while its own close figure (`get_monthly_summary`) does count those checks. A day with a
-$600 Record Payments check and a $400 prepay check shows $600. Fix options: show prepay checks in Payment
-History, or label the total "Record Payments only" and link Prepay Credits from Month-End Close. Mason chose to
-log it rather than block #2438 (2026-11-25).
+**MED · FIXED ON BRANCH (PR #2438) · money/reporting · found 2026-11-25 (Sol review of PR #2438)**
+Payment History read Record Payments only (`allocation_sets`), so a check entered through Prepay Credits > New
+Check (`prepay_credits`) was missing from its Today / date-range total while Month-End Close counted it. Fixed:
+the totals, count and CSV export now include those checks, grouped one per check the way Month-End Close's
+`_month_payments_received` groups them; a line under the cards says how many and links to Prepay Credits.
+Mason asked to fix it rather than log it (2026-11-25).
 
 ### KI-120 — Any rep can change a customer's payment terms and finance-charge settings
 

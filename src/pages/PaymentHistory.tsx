@@ -4,7 +4,7 @@
  * Sprint 11: Financial Workflows
  */
 import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { DollarSign, XCircle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -51,6 +51,61 @@ interface AllocationSet {
   is_active: boolean;
   notes: string | null;
   created_at: string;
+}
+
+/** A check entered on Prepay Credits > New Check, not through Record Payments. */
+interface PrepayCheck {
+  customer_id: string;
+  farm_name: string;
+  /** The Chicago business day it was entered. */
+  day: string;
+  reference: string | null;
+  cents: number;
+}
+
+/**
+ * Prepay Credits checks, one per check: the bucket splits of one check share its customer, entry time
+ * and reference. The same rows Month-End Close counts as payments received (`_month_payments_received`).
+ * shortcut: Month-End also splits two checks entered at the same instant with the same reference (by audit
+ * row); here they count once. That changes the count only, never the dollars.
+ */
+function groupPrepayChecks(rows: ReadonlyArray<{
+  customer_id: string; created_at: string; source_reference: string | null; original_amount_cents: number | null;
+  customers?: { farm_name: string } | null;
+}>): PrepayCheck[] {
+  const byCheck = new Map<string, PrepayCheck>();
+  for (const r of rows) {
+    const key = `${r.customer_id}|${r.created_at}|${r.source_reference ?? ''}`;
+    const check = byCheck.get(key) ?? {
+      customer_id: r.customer_id,
+      farm_name: r.customers?.farm_name || 'Unknown',
+      day: paymentBusinessDate(null, r.created_at),
+      reference: r.source_reference,
+      cents: 0,
+    };
+    check.cents += Number(r.original_amount_cents) || 0;
+    byCheck.set(key, check);
+  }
+  return [...byCheck.values()];
+}
+
+/** The Prepay Credits checks for the chosen customer and dates; none for a backwards range. */
+function prepayChecksShown(checks: PrepayCheck[], customerId: string, from: string | null, to: string | null) {
+  if (isRangeBackwards(from, to)) return [];
+  return checks.filter((c) => (!customerId || c.customer_id === customerId) && isDayInRange(c.day, from, to));
+}
+
+/** Says the totals include Prepay Credits checks, which the list below does not show. */
+function PrepayChecksNote({ count, cents, customerId }: { count: number; cents: number; customerId: string }) {
+  if (count === 0) return null;
+  return (
+    <p className="text-sm text-secondary">
+      Totals and export include {count} check(s) entered on Prepay Credits ({fmt(cents)}), not listed below.{' '}
+      <Link to={customerId ? `/prepay?tab=manager&customer=${customerId}` : '/prepay?tab=manager'} className="font-medium text-crx-green hover:underline">
+        See them on Prepay Credits
+      </Link>
+    </p>
+  );
 }
 
 interface InvoiceAllocation {
@@ -140,6 +195,8 @@ export default function PaymentHistory() {
   const voidPaymentIdem = useIdempotencyKey('void_payment', profile?.id || '');
 
   const [payments, setPayments] = useState<AllocationSet[]>([]);
+  // Payments received also include checks entered on Prepay Credits; they count in the totals and export.
+  const [prepayChecks, setPrepayChecks] = useState<PrepayCheck[]>([]);
   const [loading, setLoading] = useState(true);
   // The last list read failed: no rows or totals, so it never reads as "No payments yet".
   const [loadFailed, setLoadFailed] = useState(false);
@@ -171,6 +228,18 @@ export default function PaymentHistory() {
   const fetchPayments = useCallback(async () => {
     const seq = ++fetchSeq.current;
     setLoading(true);
+    const prepayRead = fetchAllRows<{
+      customer_id: string; created_at: string; source_reference: string | null; original_amount_cents: number | null;
+      customers: { farm_name: string } | null;
+    }>((from, to) => pageWithList(supabase
+      .from('prepay_credits')
+      .select('id, customer_id, created_at, source_reference, original_amount_cents, customers!prepay_credits_customer_id_fkey ( farm_name )', { count: 'exact' })
+      .eq('source_type', 'check')
+      .is('allocation_set_id', null)
+      .gt('original_amount_cents', 0)
+      .order('created_at', { ascending: false })
+      .order('id')
+      .range(from, to)));
     const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('allocation_sets')
       .select(`
@@ -182,12 +251,15 @@ export default function PaymentHistory() {
       .order('created_at', { ascending: false })
       .order('id')
       .range(from, to)));
+    const { data: prepayRows, error: prepayError } = await prepayRead;
     if (seq !== fetchSeq.current) return;
 
-    if (error || !data) {
+    // Either read failing leaves totals short, so both fail together.
+    if (error || !data || prepayError || !prepayRows) {
       toast('error', 'Failed to load payment history');
       // An older list, or none, would look current under zero totals.
       setPayments([]);
+      setPrepayChecks([]);
       setLoadFailed(true);
       // Close the open payment too: its allocations may have changed (a void) and it is no longer listed.
       allocSeq.current += 1;
@@ -208,6 +280,7 @@ export default function PaymentHistory() {
     }));
 
     setPayments(mapped);
+    setPrepayChecks(groupPrepayChecks(prepayRows));
     setLoading(false);
   }, [toast]);
 
@@ -326,8 +399,12 @@ export default function PaymentHistory() {
   const rangeCaption = dateRangeCaption(fromDate, toDate) + customerCaption;
   const emptyText = emptyListText(!!customerId, isFiltered);
 
-  const totalPayments = shownPayments.filter((p) => p.is_active).reduce((s, p) => s + (p.total_payment_cents || 0), 0);
-  const activeCount = shownPayments.filter((p) => p.is_active).length;
+  const shownPrepayChecks = prepayChecksShown(prepayChecks, customerId, fromDate, toDate);
+  const prepayCheckCents = shownPrepayChecks.reduce((s, c) => s + c.cents, 0);
+  // Money received in the range: Record Payments plus Prepay Credits checks, as Month-End Close counts it.
+  const totalPayments = shownPayments.filter((p) => p.is_active).reduce((s, p) => s + (p.total_payment_cents || 0), 0)
+    + prepayCheckCents;
+  const activeCount = shownPayments.filter((p) => p.is_active).length + shownPrepayChecks.length;
   const voidedCount = shownPayments.filter((p) => !p.is_active).length;
 
   const columns: Column<AllocationSet>[] = [
@@ -413,8 +490,15 @@ export default function PaymentHistory() {
             disabled={loadFailed || loading}
             onClick={() =>
               exportToCSV(
-                shownPayments as unknown as Record<string, unknown>[],
                 [
+                  ...shownPayments.map((p) => ({ ...p, source: 'Record Payments' })),
+                  ...shownPrepayChecks.map((c) => ({
+                    payment_date: c.day, farm_name: c.farm_name, payment_method: 'check', check_number: c.reference,
+                    total_payment_cents: c.cents, total_allocated_cents: 0, is_active: true, source: 'Prepay Credits',
+                  })),
+                ] as unknown as Record<string, unknown>[],
+                [
+                  { key: 'source', header: 'Entered On' },
                   { key: 'payment_date', header: 'Date' },
                   { key: 'farm_name', header: 'Customer' },
                   { key: 'payment_method', header: 'Method' },
@@ -456,6 +540,7 @@ export default function PaymentHistory() {
 
       {/* Summary Cards: hidden while loading, after a failed load, and for an impossible range, where $0 would read as "no payments". */}
       {!loadFailed && !loading && !rangeInvalid && (
+      <>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <div className="flex items-center gap-3 mb-2">
@@ -474,7 +559,7 @@ export default function PaymentHistory() {
             </div>
             <span className="text-sm text-secondary">Total Payments</span>
           </div>
-          <p className="text-2xl font-semibold font-heading text-blue-600">{shownPayments.length}</p>
+          <p className="text-2xl font-semibold font-heading text-blue-600">{shownPayments.length + shownPrepayChecks.length}</p>
           <p className="text-xs text-secondary mt-1">{rangeCaption}</p>
         </Card>
         <Card>
@@ -488,6 +573,8 @@ export default function PaymentHistory() {
           <p className="text-xs text-secondary mt-1">reversed {rangeCaption}</p>
         </Card>
       </div>
+      <PrepayChecksNote count={shownPrepayChecks.length} cents={prepayCheckCents} customerId={customerId} />
+      </>
       )}
 
       {/* Data Table */}

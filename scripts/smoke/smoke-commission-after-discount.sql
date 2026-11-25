@@ -2,7 +2,7 @@
 -- ROLLED-BACK smoke: a sale's commission settles on its profit AFTER the standing discount when its chemical-sale
 -- invoices are posted, voided or unposted; never on sales tax; drafts never move it
 -- ----------------------------------------------------------------------------
--- Migration 20270307000000_commission_settles_on_posting (M4; Mason 2026-11-09: "commission on the profit after
+-- Migration 20270307030000_commission_settles_on_posting (M4; Mason 2026-11-09: "commission on the profit after
 -- discounts"; re-planned 2026-11-25 after the commit-time design drew HIGHs in five review rounds). Base =
 -- total_profit + D × booked ÷ billed over the sale's POSTED chemical-sale invoices (D their standing-discount cents,
 -- billed their product cents, booked orders.total_price); when billed ≥ booked, total_profit + D (Taha, rule "b").

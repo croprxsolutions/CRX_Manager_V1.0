@@ -22,7 +22,7 @@ Read at FP-1 head `451afc8a3` (#2487, `20270305190000_field_split_versions.sql`)
   UPDATE through the fields policies or SQL. No other trigger assigns `NEW.customer_id`; no RPC, merge or bulk path
   rewrites it. Nothing references `field_billing_defaults` rows by id (no foreign key), so the refresh's
   delete-and-insert is safe.
-- Files: new migration `20270307050000_field_owner_change_refreshes_copy.sql`, its record and ledger note, the FP-1
+- Files: new migration `20270307150000_field_owner_change_refreshes_copy.sql`, its record and ledger note, the FP-1
   record's rollback text, `scripts/smoke/prove-field-split-versions-real-schema.mjs`.
 
 ## State and failure

@@ -168,6 +168,16 @@ function listChain(data: unknown, error: unknown = null): Record<string, unknown
   return chain;
 }
 
+// One imported (version 1) split, as the FP-1 tables return it.
+const leftoverSplit = [{
+  id: 'version-1', version_number: 1, effective_from: '1900-01-01', history_known: false, created_by: null,
+  created_at: '2026-11-24T00:00:00Z',
+  field_billing_split_payers: [{
+    customer_id: 'customer-9', product_share_micro_pct: 100_000_000, application_share_micro_pct: 100_000_000,
+    customer: { farm_name: 'Leftover Split Farm' },
+  }],
+}];
+
 // Every customers query the page builds (only the owner/split search pickers read customers).
 const customerChains: Array<Record<string, unknown>> = [];
 
@@ -218,7 +228,7 @@ function configureSupabase(obstacleReadError: unknown = null, measuredAcres: num
       customerChains.push(chain);
       return chain;
     }
-    if (table === 'field_billing_defaults') {
+    if (table === 'field_billing_split_versions' || table === 'field_payer_notes') {
       return listChain([]);
     }
     if (table === 'field_obstacles') {
@@ -391,10 +401,10 @@ describe('FieldSetup load failure (To-Do 10.5)', () => {
     configureSupabase();
   });
 
-  it('a failed billing-split read shows the load error, not a form whose Save would drop the splits', async () => {
+  it('a failed split-history read shows the load error, not a form whose Save could overwrite the split', async () => {
     const base = mockFrom.getMockImplementation()!;
     mockFrom.mockImplementation((table: string) => (
-      table === 'field_billing_defaults' ? listChain(null, { message: 'unavailable' }) : base(table)
+      table === 'field_billing_split_versions' ? listChain(null, { message: 'unavailable' }) : base(table)
     ));
     render(<FieldSetup />);
     expect(await screen.findByText('This field could not be loaded')).toBeInTheDocument();
@@ -404,12 +414,12 @@ describe('FieldSetup load failure (To-Do 10.5)', () => {
 
   it('moving to a field with no billing splits clears the previous field\'s splits (Save sends the whole list)', async () => {
     const base = mockFrom.getMockImplementation()!;
-    let splits: unknown[] = [{ customer_id: 'customer-9', customer: { farm_name: 'Leftover Split Farm' }, split_pct: 100, is_primary: true }];
+    let splits: unknown[] = leftoverSplit;
     mockFrom.mockImplementation((table: string) => (
-      table === 'field_billing_defaults' ? listChain(splits) : base(table)
+      table === 'field_billing_split_versions' ? listChain(splits) : base(table)
     ));
     const { rerender } = render(<FieldSetup />);
-    expect(await screen.findByText('Leftover Split Farm')).toBeInTheDocument();
+    expect((await screen.findAllByText('Leftover Split Farm')).length).toBeGreaterThan(0);
 
     splits = [];
     mockUseParams.mockReturnValue({ id: 'field-2' });
@@ -422,12 +432,10 @@ describe('FieldSetup load failure (To-Do 10.5)', () => {
   it('opening New Field after a field with billing splits starts an empty form', async () => {
     const base = mockFrom.getMockImplementation()!;
     mockFrom.mockImplementation((table: string) => (
-      table === 'field_billing_defaults'
-        ? listChain([{ customer_id: 'customer-9', customer: { farm_name: 'Leftover Split Farm' }, split_pct: 100, is_primary: true }])
-        : base(table)
+      table === 'field_billing_split_versions' ? listChain(leftoverSplit) : base(table)
     ));
     const { rerender } = render(<FieldSetup />);
-    expect(await screen.findByText('Leftover Split Farm')).toBeInTheDocument();
+    expect((await screen.findAllByText('Leftover Split Farm')).length).toBeGreaterThan(0);
 
     mockUseParams.mockReturnValue({ id: 'new' });
     rerender(<FieldSetup />);

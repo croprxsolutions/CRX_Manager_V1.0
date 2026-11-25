@@ -1,6 +1,19 @@
 -- Better Product Labels Step 2. Prepare the brand-aware liquid weight workflow.
 -- The switch remains closed until the new screens and legacy writer guards are ready.
 
+DO $preflight$
+BEGIN
+  IF to_regclass('public.brand_document_links') IS NULL
+     OR to_regprocedure('public.change_brand_document_links(uuid,boolean,integer,jsonb,text)') IS NULL
+     OR (SELECT count(*) FROM pg_attribute
+         WHERE attrelid = to_regclass('public.brand_document_links')
+           AND attnum > 0 AND NOT attisdropped
+           AND attname IN ('id', 'parent_brand_id', 'document_kind', 'hidden_at', 'url')) <> 5 THEN
+    RAISE EXCEPTION 'PREFLIGHT_LIQUID_DENSITY_DOCUMENTS: apply the manufacturer brand document migration first';
+  END IF;
+END;
+$preflight$;
+
 CREATE FUNCTION public.liquid_density_review_open() RETURNS boolean
 LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $function$
   SELECT false;
@@ -304,6 +317,9 @@ BEGIN
   IF p_mode = 'correct' THEN
     v_reason := public._product_parent_reason(p_reason, 'reason', true);
     v_evidence := public._product_parent_reason(p_evidence, 'evidence', true);
+  ELSIF p_mode = 'draft' AND public.liquid_density_review_open() THEN
+    v_reason := public._product_parent_reason(p_reason, 'reason', false);
+    v_evidence := public._product_parent_reason(p_evidence, 'evidence', false);
   END IF;
 
   SELECT * INTO v_parent FROM public.product_parents WHERE id = p_parent_id FOR NO KEY UPDATE;

@@ -3,6 +3,8 @@ DO $$
 DECLARE
   v_admin uuid;
   v_reviewer uuid;
+  v_rep uuid;
+  v_first_receipt jsonb;
   v_group uuid;
   v_size uuid;
   v_brand uuid;
@@ -21,6 +23,7 @@ BEGIN
   END IF;
   SELECT id INTO STRICT v_admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY id LIMIT 1;
   SELECT id INTO STRICT v_reviewer FROM public.profiles WHERE role = 'admin' AND is_active AND id <> v_admin ORDER BY id LIMIT 1;
+  SELECT id INTO STRICT v_rep FROM public.profiles WHERE role = 'sales_rep' AND is_active ORDER BY id LIMIT 1;
   SELECT name INTO STRICT v_category FROM public.product_categories WHERE is_active ORDER BY name LIMIT 1;
 
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -48,7 +51,27 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_REVIEW_RELOAD%' THEN RAISE; END IF;
   END;
-  v_result := public.submit_liquid_density_draft(v_group, 0, 1.15, 'specific_gravity', 'sds', NULL, NULL, NULL, 'core-draft-' || v_tag);
+  PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
+  BEGIN
+    PERFORM public.submit_liquid_density_draft(v_group, 0, 1.15, 'specific_gravity', 'sds', NULL, NULL, NULL, 'core-rep-' || v_tag);
+    RAISE EXCEPTION 'SMOKE_FAIL: a sales rep cannot submit a liquid weight draft';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'ADMIN_REQUIRED%' THEN RAISE; END IF;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  v_result := public.submit_liquid_density_draft(v_group, 0, 1.15, 'specific_gravity', 'sds', NULL,
+    'Manufacturer correction', 'SDS Section 9', 'core-draft-' || v_tag);
+  IF public.submit_liquid_density_draft(v_group, 0, 1.15, 'specific_gravity', 'sds', NULL,
+      'Manufacturer correction', 'SDS Section 9', 'core-draft-' || v_tag) IS DISTINCT FROM v_result THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a retry must return the original draft receipt';
+  END IF;
+  BEGIN
+    PERFORM public.submit_liquid_density_draft(v_group, 0, 1.16, 'specific_gravity', 'sds', NULL,
+      'Manufacturer correction', 'SDS Section 9', 'core-draft-' || v_tag);
+    RAISE EXCEPTION 'SMOKE_FAIL: a changed draft cannot reuse the same key';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'IDEMPOTENCY_PAYLOAD_MISMATCH' THEN RAISE; END IF;
+  END;
   v_draft := (v_result->>'value_id')::uuid;
   IF (v_result->>'lb_per_gal')::numeric IS DISTINCT FROM 9.5972::numeric THEN
     RAISE EXCEPTION 'SMOKE_FAIL: specific gravity must use the existing stored conversion';
@@ -116,13 +139,18 @@ BEGIN
     (v_result->>'lb_per_unit')::numeric IS DISTINCT FROM 5::numeric THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the dry-only approval path must keep working';
   END IF;
-  v_result := public.approve_liquid_density_draft(v_group, v_draft, 1, v_brands, true, 'core-approve-' || v_tag);
-  IF (v_result->>'version')::bigint IS DISTINCT FROM 2::bigint THEN
+  v_first_receipt := public.approve_liquid_density_draft(v_group, v_draft, 1, v_brands, true, 'core-approve-' || v_tag);
+  IF public.approve_liquid_density_draft(v_group, v_draft, 1, v_brands, true, 'core-approve-' || v_tag)
+     IS DISTINCT FROM v_first_receipt THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a retry must return the original approval receipt';
+  END IF;
+  IF (v_first_receipt->>'version')::bigint IS DISTINCT FROM 2::bigint THEN
     RAISE EXCEPTION 'SMOKE_FAIL: complete review must approve a draft';
   END IF;
   EXECUTE 'RESET ROLE';
-  IF NOT EXISTS (SELECT 1 FROM public.product_weight_events WHERE id = (v_result->>'event_id')::bigint
-    AND after_value->0->'reviewed_brands' = v_brands AND changed_by = v_reviewer) THEN
+  IF NOT EXISTS (SELECT 1 FROM public.product_weight_events WHERE id = (v_first_receipt->>'event_id')::bigint
+    AND after_value->0->'reviewed_brands' = v_brands AND changed_by = v_reviewer
+    AND reason = 'Manufacturer correction' AND evidence = 'SDS Section 9') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the review must keep the exact confirmed brands and reviewer in history';
   END IF;
 

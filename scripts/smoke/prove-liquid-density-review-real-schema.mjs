@@ -9,11 +9,19 @@ const read = (...parts) => readFileSync(path.join(ROOT, ...parts), 'utf8').repla
 try {
   buildContainer({ stopBefore: migration });
   assert.equal(scalar("SELECT to_regclass('public.brand_document_links')::text;"), 'brand_document_links');
-  psql(`BEGIN;\n${read('supabase', 'migrations', migration)}\nCOMMIT;`);
+  const candidate = read('supabase', 'migrations', migration);
+  const missingDocs = psql(`BEGIN; ALTER TABLE public.brand_document_links RENAME TO proof_hidden_brand_document_links;
+    ${candidate} COMMIT;`, { allowFailure: true });
+  assert.equal(missingDocs.status, 3, missingDocs.stderr + missingDocs.stdout);
+  assert.match(missingDocs.stderr, /PREFLIGHT_LIQUID_DENSITY_DOCUMENTS/);
+  psql(`BEGIN;\n${candidate}\nCOMMIT;`);
   assert.equal(scalar('SELECT public.liquid_density_review_open();'), 'f', 'initial migration must leave the legacy behavior active');
   seedUsers();
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data)
         VALUES (gen_random_uuid(), 'density-reviewer@example.invalid', '{"full_name":"Density Reviewer","role":"admin"}');`);
+  const legacy = psql(read('scripts', 'smoke', 'smoke-product_weights.sql'), { allowFailure: true });
+  assert.equal(legacy.status, 3, legacy.stderr + legacy.stdout);
+  assert.match(legacy.stderr, /^ERROR:\s+SMOKE_PASS_ROLLBACK\r?$/m, legacy.stderr + legacy.stdout);
   psql(`CREATE OR REPLACE FUNCTION public.liquid_density_review_open() RETURNS boolean
         LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$ SELECT true; $$;`);
   const result = psql(read('scripts', 'smoke', 'smoke-liquid-density-review.sql'), { allowFailure: true });

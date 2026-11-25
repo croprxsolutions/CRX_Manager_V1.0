@@ -35,6 +35,9 @@ import { buildContainer, removeContainer, seedUsers, scalar, psql, attempt, id, 
 
 const CANDIDATE = '20270307190000_applicator_crew_read_path.sql';
 const reuse = process.env.CREW_READ_PROOF_REUSE === '1';
+if (reuse && !/^crx-(undo-paths|crp)-/.test(process.env.UNDO_PATHS_CONTAINER || '')) {
+  throw new Error('CREW_READ_PROOF_REUSE needs UNDO_PATHS_CONTAINER naming a throwaway proof container (crx-undo-paths-* or crx-crp-*)');
+}
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const run = (flags) => docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', ...flags], { input: candidate, allowFailure: true });
 
@@ -236,6 +239,16 @@ try {
   assert.match(restricted.stderr, /PREFLIGHT_FAIL: a restrictive or extra read policy exists/);
   assert.equal(scalar("SELECT to_regclass('public.jobs_crew') IS NULL;"), 't');
   console.log('RESTRICTIVE POLICY: refused by the preflight, nothing changed');
+
+  // A role-only change to a policy the migration recreates must also be refused (Sol r2 MED 1).
+  const roles = scalar("SELECT array_to_string(roles, ', ') FROM pg_policies WHERE schemaname = 'storage' AND policyname = 'job_attachments_objects_select';");
+  psql('ALTER POLICY job_attachments_objects_select ON storage.objects TO service_role;');
+  const narrowed = run(['-1']);
+  psql(`ALTER POLICY job_attachments_objects_select ON storage.objects TO ${roles};`);
+  assert.notEqual(narrowed.status, 0);
+  assert.match(narrowed.stderr, /PREFLIGHT_FAIL: the 24 policies that read jobs inline differ/);
+  assert.equal(scalar("SELECT to_regclass('public.jobs_crew') IS NULL;"), 't');
+  console.log('ROLE CHANGE ON A RECREATED POLICY: refused by the preflight, nothing changed');
 
   const auto = run([]);
   assert.notEqual(auto.status, 0, 'an autocommit run must fail');

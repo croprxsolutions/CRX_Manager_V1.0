@@ -59,10 +59,10 @@ BEGIN
   END IF;
   -- Policies are compared as deparsed with fully qualified names.
   PERFORM set_config('search_path', 'pg_catalog', true);
-  SELECT md5(string_agg(schemaname||'.'||tablename||'.'||policyname||'|'||coalesce(qual,'')||'|'||coalesce(with_check,''), E'\n' ORDER BY schemaname COLLATE "C", tablename COLLATE "C", policyname COLLATE "C")), count(*)
+  SELECT md5(string_agg(schemaname||'.'||tablename||'.'||policyname||'|'||permissive||'|'||cmd||'|'||roles::text||'|'||coalesce(qual,'')||'|'||coalesce(with_check,''), E'\n' ORDER BY schemaname COLLATE "C", tablename COLLATE "C", policyname COLLATE "C")), count(*)
     INTO v_hash, v_count
     FROM pg_policies WHERE (coalesce(qual,'')||coalesce(with_check,'')) ~ '(FROM|JOIN) (public\.)?jobs\M';
-  IF v_count <> 24 OR v_hash IS DISTINCT FROM '736f967dc9975625287dbc5a1f9e03e6' THEN
+  IF v_count <> 24 OR v_hash IS DISTINCT FROM 'de3fac591551509564a520d5f8149d0f' THEN
     PERFORM set_config('search_path', v_sp, true);
     RAISE EXCEPTION 'PREFLIGHT_FAIL: the % policies that read jobs inline differ from the generated set; regenerate', v_count;
   END IF;

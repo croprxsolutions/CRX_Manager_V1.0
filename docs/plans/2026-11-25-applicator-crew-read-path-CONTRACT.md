@@ -94,6 +94,15 @@ Mason, 2026-11-25 (relayed verbatim by the parent session): "Yes, second step". 
 - **Sol LOW 6 (reuse mode after a failed run):** deferred. Reuse is a developer shortcut; the gate run builds a fresh database every time.
 - **Sol LOW 7 (types and registry):** fixed in this contract's expected-files line (registry after the live apply; types with PR 2).
 
+## Gate settlement (Sol round 2 on d5e03608e: verdict clean)
+
+- **MED 1 (the policy hash ignored roles, command and permissive/restrictive):** fixed. The 24-policy hash now covers each policy's roles, command and mode, so a role-only change to a recreated policy is refused; the proof shows it on `job_attachments_objects_select`.
+- **MED 2 (the views copy the read rules once; a later restrictive policy on `jobs` would not reach them):** deferred by design to step 3 and every later migration on these four tables: the views are the crew read path, so any later tightening must be made on the view filter too. The install-time preflight already refuses if one exists now.
+- **MED 3 (proof reuse mode could seed into a non-throwaway container):** fixed. Reuse now refuses unless the container is named `crx-undo-paths-*` or `crx-crp-*`.
+- **MED 4 (the reverse does not pin current definitions):** deferred, same as Sol round 1 MED 2.
+- **LOW 5 (`metabase_ro`):** refuted, same as Sol round 1 LOW 3.
+- **LOW 6 (the applicator delete case removes zero rows both times):** deferred. Delete permission is unchanged by this migration (only its `jobs` lookup moved to `jobs_crew`), and before = after is proven for that call; an own-upload delete case belongs to the step-3 proof, where delete rules may change.
+
 ## Appendix A: policies that read `jobs` inline (local copy, `pg_policies`)
 
 customers: `customers_select`, `customers_select_location_dispatchee` · job_applied_info: insert, update · job_applied_records: insert, update, delete · job_applied_record_fields: insert, update, delete · job_applied_record_crew: insert, update, delete · job_attachments: insert, delete · job_chemicals_select · job_fields_select · job_loader_worksheets_select · job_location_dispatches_select · job_product_epa_select · job_tag_assignments_select · storage.objects: `job_attachments_objects_select/insert/delete`.

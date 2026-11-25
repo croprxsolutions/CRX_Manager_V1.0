@@ -69,6 +69,7 @@ import {
 } from "./teammate-comments-lib.mjs";
 import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
+import { ownerHoldProblem } from "./pr-owner-hold-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 import { ownerAcceptedForPr, trackedNamesIn, usesCarriedSkip } from "./sol-accept-lib.mjs";
 import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneGate, tellTahaOnGitHub } from "./taha-lane-lib.mjs";
@@ -509,7 +510,7 @@ function gateRequest(request) {
     // merge actually lands on. The proof must be bound to THAT, not to the local
     // origin/main, which can be stale (Codex round-6: a proof reviewed against an
     // old local base validated while GitHub merged onto newer main content).
-    viewArgs.push("--json", "number,url,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
+    viewArgs.push("--json", "number,url,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author,title");
     if (request.repo) viewArgs.push("--repo", request.repo);
     pr = JSON.parse(hardGateGh(viewArgs));
     if (!pr?.baseRefName || !pr?.headRefOid || !pr?.baseRefOid) {
@@ -518,6 +519,10 @@ function gateRequest(request) {
   } catch (error) {
     deny(`PR MERGE GATE: could not resolve this pull request's base branch and exact SHAs, so the merge is denied (fail closed). ${error?.message || error}`);
   }
+
+  // Owner hold: a "[HOLD FOR MASON]" title refuses before any landing claim or follow-up is recorded.
+  const holdProblem = ownerHoldProblem(pr);
+  if (holdProblem) deny("PR MERGE GATE: " + holdProblem);
 
   // Landing claim (pr-claim-lib.mjs, fail open): refuse when another session is landing this PR.
   // Only checked here; recorded at the allow point, so a merge denied later claims nothing.

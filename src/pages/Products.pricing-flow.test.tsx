@@ -777,6 +777,39 @@ describe('Products governed inline pricing flow', () => {
       expect(mockToast).toHaveBeenCalledTimes(1);
     });
 
+    it("closes an earlier file's review when a newer file is chosen, even one refused before it is read", async () => {
+      mockPreviewPricing.mockResolvedValueOnce({ ...(await inlinePreview()), source: 'pricing_worksheet' });
+      const { container } = render(<Products />);
+      await upload(container, 'first.xlsx');
+      await screen.findByRole('button', { name: 'Apply approved changes' });
+
+      const tooBig = new File(['abc'], 'huge.xlsx');
+      Object.defineProperty(tooBig, 'size', { value: pricingWorkbookFileLimit + 1 });
+      fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!, { target: { files: [tooBig] } });
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/MB or smaller/)));
+      expect(screen.queryByRole('button', { name: 'Apply approved changes' })).toBeNull();
+    });
+
+    it('never asks for a review of an earlier file still being read when a newer file is chosen', async () => {
+      let finishParse: () => void = () => undefined;
+      mockParsePricing.mockReturnValueOnce(new Promise((resolve) => {
+        finishParse = () => resolve({ exportId: 'export-1', expiresAt: '2999-01-01T00:00:00+00:00', rows: [] });
+      }));
+      const { container } = render(<Products />);
+      await upload(container, 'first.xlsx');
+      await waitFor(() => expect(mockParsePricing).toHaveBeenCalledTimes(1));
+
+      const tooBig = new File(['abc'], 'huge.xlsx');
+      Object.defineProperty(tooBig, 'size', { value: pricingWorkbookFileLimit + 1 });
+      fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!, { target: { files: [tooBig] } });
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/MB or smaller/)));
+
+      finishParse();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(mockPreviewPricing).not.toHaveBeenCalled();
+      expect(mockToast).toHaveBeenCalledTimes(1);
+    });
+
     it('drops a late reason after a newer file is refused before it is read, and frees the button', async () => {
       let answerFirst: (reason: string) => void = () => undefined;
       mockPreviewPricing.mockRejectedValueOnce({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });

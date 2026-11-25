@@ -973,6 +973,9 @@ export default function Products() {
   const handlePricingWorkbookUpload = async (file: File) => {
     // Every chosen file is a new upload, even one refused below, so an earlier file's late answer is dropped.
     const upload = ++pricingUploadSeq.current;
+    // An earlier file's review closes, so it cannot be applied after another file was chosen.
+    setPricingPreview(null);
+    setPricingSourceFile(null);
     // The review refuses a grouped size's use timing, so it waits for the groups.
     if (!profile || !parentsReady) {
       // Clear the pick so the same file can be chosen again once the groups load (#2160).
@@ -1000,6 +1003,7 @@ export default function Products() {
       const sourceFile: PricingSourceFile = { name: file.name, sha256: await sha256Hex(file) };
       // One key per exact request (the file's bytes decide the rows), as for the inline preview.
       const intent = JSON.stringify(['workbook', sourceFile.sha256]);
+      if (upload !== pricingUploadSeq.current) return;
       const preview = await previewProductPricingChanges({
         source: 'pricing_worksheet',
         exportId: parsed.exportId,

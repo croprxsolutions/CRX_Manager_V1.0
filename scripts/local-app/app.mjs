@@ -599,13 +599,15 @@ async function status() {
   const state = await preflight();
   console.log(`Test app is ${(await portIsOpen(APP_PORT)) ? 'running' : 'stopped'} at ${state.LOCAL_APP_URL}`);
   console.log(text(compose(['ps', '--format', '{{.Service}} {{.Status}}'])) || 'The back end is stopped.');
-  if (existsSync(BUILD_FILE)) {
-    const build = JSON.parse(readFileSync(BUILD_FILE, 'utf8'));
+  const build = existsSync(BUILD_FILE) ? JSON.parse(readFileSync(BUILD_FILE, 'utf8')) : null;
+  if (build) {
     console.log(`Built ${build.builtAt} from ${describeBuild(build)}`);
   }
   if (IS_SCREEN_WALK && existsSync(TEST_RECORD_FILE)) {
     const proof = JSON.parse(readFileSync(TEST_RECORD_FILE, 'utf8'));
-    console.log(`Last browser test: ${proof.result}, ${proof.spec}, ${proof.commit}${proof.uncommittedChanges ? ' plus uncommitted changes' : ''}, started ${proof.startedAt}. Evidence: ${proof.artifacts}`);
+    const result = proof.result === 'running' ? 'incomplete (interrupted)' : proof.result;
+    const database = build?.builtAt === proof.databaseBuiltAt ? 'current database build' : `previous database build ${proof.databaseCommit} from ${proof.databaseBuiltAt}`;
+    console.log(`Last browser test: ${result}, ${proof.spec}, ${proof.commit}${proof.uncommittedChanges ? ' plus uncommitted changes' : ''}, started ${proof.startedAt}, on ${database}. Evidence: ${proof.artifacts}`);
   }
 }
 

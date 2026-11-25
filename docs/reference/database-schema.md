@@ -12,6 +12,7 @@
 - `fields` - Farm fields (customer_id, field_name, county, acres, FSA numbers, Mapbox polygon geometry)
 - `field_obstacles` - Point markers pinned to fields (kind, optional label, GeoJSON Point, author, dates). Migration `20270305130000` is pending. It adds the optional entrance number and lets applicators add pins on fields in their marker read scope and edit or remove the pins they created. Admins and sales reps retain office access.
 - `field_entrance_counters` (pending migration `20270305130000`) - Internal per-field entrance sequence (field_id, last_number, created_at, updated_at), written by the marker trigger. The sequence advances when a pin becomes an entrance and does not reuse retired numbers.
+- `field_marker_create_receipts` (pending migration `20270307060000`) - One create receipt per marker ID (id, field_id, created_by, created_at, updated_at). The receipt keeps the ID reserved after a pin is deleted and follows the field-delete cascade. The original author can read it only while authorized for the field. The receipt holds no note or location.
 - `job_loader_worksheets` - Saved loader/tank scenarios per job (capacity, balancing mode, per-load acres, loads-done, one selected per job). Reads follow job visibility; office-only writes.
 - `field_billing_defaults` - Per-field billing splits (field_id, customer_id, split_pct)
 - `field_polygons` - Multi-polygon support per field (field_id, polygon_geojson jsonb, label, acres, sort_order). Sibling to `fields.parent_field_id` grouping; migration 20260334900000 (Field Management V3)

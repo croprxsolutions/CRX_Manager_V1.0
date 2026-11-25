@@ -2601,12 +2601,6 @@ function latestMigrationFunctions(): Map<string, MigrationFunctionDefinition> {
   return latest;
 }
 
-function latestMigrationFunctionBodies(): Map<string, string> {
-  return new Map(
-    [...latestMigrationFunctions()].map(([name, value]) => [name, value.body]),
-  );
-}
-
 function stripSqlComments(body: string): string {
   let sql = '';
 
@@ -2700,13 +2694,12 @@ function transitiveMutatingFunctionNames(bodies: Map<string, string>): Set<strin
   let changed = true;
   while (changed) {
     changed = false;
+    if (mutators.size === 0) break;
+    const mutatorNames = [...mutators].map(escapeRegExp).join('|');
+    const callPattern = new RegExp(`\\b(?:${mutatorNames})\\s*\\(`, 'i');
     for (const [name, body] of bodies) {
       if (mutators.has(name)) continue;
-      const sql = stripSqlComments(body);
-      const callsKnownMutator = [...mutators].some((mutator) =>
-        new RegExp(`\\b${escapeRegExp(mutator)}\\s*\\(`, 'i').test(sql),
-      );
-      if (callsKnownMutator) {
+      if (callPattern.test(stripSqlComments(body))) {
         mutators.add(name);
         changed = true;
       }
@@ -2860,7 +2853,8 @@ function migrationsAwaitingTypeRegeneration(): Set<string> {
 function generatedMutatingRpcInventory(): Set<string> {
   const generatedNames = new Set(generatedRpcShapes().map(({ name }) => name));
   const functions = latestMigrationFunctions();
-  const mutators = transitiveMutatingFunctionNames(latestMigrationFunctionBodies());
+  const bodies = new Map([...functions].map(([name, definition]) => [name, definition.body]));
+  const mutators = transitiveMutatingFunctionNames(bodies);
   const highWater = registryMigrationHighWater();
   const pendingTimestamps = migrationsAwaitingTypeRegeneration();
   const migrationDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'supabase', 'migrations');
@@ -3141,6 +3135,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _lock_job_stock_rows_in_order:
     'AFTER row trigger on jobs (20270227170000): locks existing Main Warehouse stock rows in product order; creates and locks a missing one only when complete_job marked this job (crx.complete_job_rpc), after complete_job checked its idempotency key and took the number lock. Postgres refuses a direct call of a trigger function and every API-role EXECUTE is revoked',
   recompute_job_applied_acres: 'trigger-only derived-total recomputation; direct client EXECUTE is revoked',
+  record_field_marker_create_receipt:
+    'AFTER INSERT trigger on field_obstacles; direct API execution is revoked. Its unique receipt reserves the pin ID in the INSERT transaction, even after a user deletes the pin.',
   // Pruned 2026-10-19: _enforce_below_cost_line, re-emitted by the cost-admin-only
   //   candidate 20261019010000, which is now in the applied-name snapshot (ledger
   //   20261019182757), so the trigger left the discovered inventory.
@@ -3257,15 +3253,17 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
     `)).toBe(false);
   });
 
-  it('classifies wrappers that mutate only by calling another function', () => {
+  it('classifies chains of wrappers that mutate only by calling another function', () => {
     const syntheticBodies = new Map([
+      ['client_wrapper', 'BEGIN PERFORM public.NESTED_WRAPPER (); END'],
+      ['nested_wrapper', 'BEGIN PERFORM internal_writer(); END'],
       ['internal_writer', 'BEGIN INSERT INTO public.example(id) VALUES (1); END'],
-      ['client_wrapper', 'BEGIN PERFORM internal_writer(); END'],
-      ['pure_reader', 'BEGIN RETURN QUERY SELECT 1; END'],
+      ['pure_reader', 'BEGIN PERFORM other_internal_writer(); END'],
     ]);
     expect([...transitiveMutatingFunctionNames(syntheticBodies)].sort()).toEqual([
       'client_wrapper',
       'internal_writer',
+      'nested_wrapper',
     ]);
   });
 

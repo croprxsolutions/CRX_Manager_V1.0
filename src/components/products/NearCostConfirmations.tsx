@@ -1,6 +1,6 @@
 import { AlertTriangle } from 'lucide-react';
 import { formatExactCents } from '../../lib/money';
-import type { NearCostProduct } from '../../lib/productPricing';
+import type { NearCostProduct } from '../../lib/nearCostPricing';
 
 /** "0.35" -> "35"; toFixed keeps float noise (0.29 * 100) out of the hint. */
 function wholePercent(text: string): string {

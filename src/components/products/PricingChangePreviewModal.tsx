@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import {
-  nearCostProducts,
   pricingAcknowledgements,
   type PricingAcknowledgement,
   type PricingEffect,
   type PricingPreviewResult,
   type PricingPreviewRow,
 } from '../../lib/productPricing';
+import { nearCostProducts } from '../../lib/nearCostPricing';
 import type { ProductCostBasisType } from '../../types';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';

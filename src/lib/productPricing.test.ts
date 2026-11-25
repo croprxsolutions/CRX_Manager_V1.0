@@ -24,12 +24,12 @@ import {
   formatPricingMarginPercent,
   getPricingWorkbookExportRefusalReason,
   REFUSAL_REASON_TIMEOUT_MS,
-  nearCostProducts,
   pricingDollarInputToCents,
   pricingMarginTextIsValid,
   previewProductPricingChanges,
   sha256Hex,
 } from './productPricing';
+import { nearCostProducts } from './nearCostPricing';
 
 describe('defaultPricingMode', () => {
   const prices = { tier1_price: 100, tier2_price: 90, tier3_price: 80 };

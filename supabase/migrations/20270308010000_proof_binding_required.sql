@@ -18,9 +18,11 @@
 --                                read, or one taken for another load (Mason, 2026-11-25: bound like a ticket photo;
 --                                Taha's review of #2557, #2527 HIGH 4).
 --   The screens treat these refusals as "clear the proof, reload the lines, get new proof".
+--   _delivery_lines_match counts a delivered amount above 0 and under 0.01 as 0 on both sides (Taha's review of #2562,
+--   LOW 1), so a proof taken while the screen showed 0.005 is the same load as one showing 0, as #2562 records it.
 --
 -- NOT CHANGED: no-proof records (never checked); replays of a completed call (never reach the
---   check); completed deliveries and saved receipts; every other body, the wrappers, the column, the helper, the grants.
+--   check); completed deliveries and saved receipts; every other body, the wrappers, the column, the grants.
 --   No rows change.
 -- actor-binding-check: exempt -- the shared step takes p_performed_by from the renamed bodies, which bind it to
 -- auth.uid() exactly as before; nothing here reads or writes an actor.
@@ -31,6 +33,10 @@ BEGIN
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
      IS DISTINCT FROM '92e373301409583f2f7fec1f0cb207ee' THEN
     RAISE EXCEPTION 'PROOF_REQUIRED_PREFLIGHT: _complete_delivery_authorized_impl is not the reviewed 20270308000000 body';
+  END IF;
+  IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._delivery_lines_match(uuid,jsonb,jsonb)'))
+     IS DISTINCT FROM 'd622480ec89eb193526533db0475a643' THEN
+    RAISE EXCEPTION 'PROOF_REQUIRED_PREFLIGHT: _delivery_lines_match is not the reviewed 20270308000000 body';
   END IF;
 END
 $preflight$;
@@ -188,6 +194,49 @@ END;
 $function$;
 REVOKE ALL ON FUNCTION public._complete_delivery_authorized_impl(uuid, text, uuid, jsonb, text, text, text, timestamp with time zone) FROM PUBLIC, anon, authenticated, service_role;
 
+-- The same comparison, with amounts under 0.01 counted as 0 (Taha's review of #2562, LOW 1).
+CREATE OR REPLACE FUNCTION public._delivery_lines_match(p_delivery_id uuid, p_lines jsonb, p_quantities jsonb)
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF p_lines IS NULL OR jsonb_typeof(p_lines) IS DISTINCT FROM 'array' THEN
+    RETURN false;  -- checked on its own: jsonb_array_elements errors on anything but an array
+  END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_lines) e
+              WHERE jsonb_typeof(e) IS DISTINCT FROM 'object'
+                 OR jsonb_typeof(e -> 'order_item_id') IS DISTINCT FROM 'string'
+                 OR jsonb_typeof(e -> 'product_id') IS DISTINCT FROM 'string'
+                 OR jsonb_typeof(e -> 'quantity') IS DISTINCT FROM 'number'
+                 OR jsonb_typeof(e -> 'delivered') IS DISTINCT FROM 'number') THEN
+    RETURN false;
+  END IF;
+  -- Each side's delivered amount is kept between 0 and the scheduled quantity, then an amount above 0 and under 0.01
+  -- counts as 0 (20270308010000; the rule #2562 records a delivery by, and #2324's under-0.01 "nothing delivered").
+  RETURN NOT EXISTS (
+    WITH seen AS (
+      SELECT lower(e ->> 'order_item_id') AS oi, lower(e ->> 'product_id') AS pr, round((e ->> 'quantity')::numeric, 6) AS q,
+             GREATEST(0, LEAST((e ->> 'delivered')::numeric, (e ->> 'quantity')::numeric)) AS d
+        FROM jsonb_array_elements(p_lines) e),
+    current_load AS (
+      SELECT di.order_item_id::text AS oi, di.product_id::text AS pr, round(di.quantity, 6) AS q,
+             CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
+                  THEN GREATEST(0, LEAST((p_quantities ->> di.id::text)::numeric, di.quantity))
+                  ELSE di.quantity END AS d
+        FROM public.delivery_items di WHERE di.delivery_id = p_delivery_id),
+    a AS (SELECT oi, pr, q, round(CASE WHEN d > 0 AND d < 0.01 THEN 0 ELSE d END, 6) AS d FROM seen),
+    b AS (SELECT oi, pr, q, round(CASE WHEN d > 0 AND d < 0.01 THEN 0 ELSE d END, 6) AS d FROM current_load)
+    (SELECT oi, pr, q, d FROM a EXCEPT ALL SELECT oi, pr, q, d FROM b)
+    UNION ALL
+    (SELECT oi, pr, q, d FROM b EXCEPT ALL SELECT oi, pr, q, d FROM a));
+END;
+$function$;
+ALTER FUNCTION public._delivery_lines_match(uuid, jsonb, jsonb) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._delivery_lines_match(uuid, jsonb, jsonb) FROM PUBLIC, anon, authenticated, service_role;
+
 DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
@@ -198,6 +247,15 @@ BEGIN
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
                     AND NOT has_function_privilege('service_role', p.oid, 'EXECUTE')) THEN
     RAISE EXCEPTION 'PROOF_REQUIRED_POSTFLIGHT: the shared step, its security or its grants are not as reviewed';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_proc p
+                  WHERE p.oid = to_regprocedure('public._delivery_lines_match(uuid,jsonb,jsonb)')
+                    AND md5(replace(p.prosrc, chr(13), '')) = '196fa2f0edc9360123791c1799e9626a'
+                    AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']
+                    AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
+                    AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
+                    AND NOT has_function_privilege('service_role', p.oid, 'EXECUTE')) THEN
+    RAISE EXCEPTION 'PROOF_REQUIRED_POSTFLIGHT: _delivery_lines_match, its security or its grants are not as reviewed';
   END IF;
 END
 $postflight$;

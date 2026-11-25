@@ -1,11 +1,15 @@
 -- Reverse of 20270308010000_proof_binding_required: puts back 20270308000000's shared completion step (proof
--- checked only when it carries a list). Run as postgres in one transaction. Undo this before the 20270308000000 reverse.
+-- checked only when it carries a list) and its _delivery_lines_match (no under-0.01 rule). Run as postgres in one transaction. Undo this before the 20270308000000 reverse.
 DO $preflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
      IS DISTINCT FROM 'b542beff97b76eea519e6f067a5b7c8d' THEN
     RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _complete_delivery_authorized_impl is not the 20270308010000 body';
+  END IF;
+  IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._delivery_lines_match(uuid,jsonb,jsonb)'))
+     IS DISTINCT FROM '196fa2f0edc9360123791c1799e9626a' THEN
+    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _delivery_lines_match is not the 20270308010000 body';
   END IF;
 END
 $preflight$;
@@ -151,12 +155,60 @@ END;
 $function$;
 REVOKE ALL ON FUNCTION public._complete_delivery_authorized_impl(uuid, text, uuid, jsonb, text, text, text, timestamp with time zone) FROM PUBLIC, anon, authenticated, service_role;
 
+CREATE OR REPLACE FUNCTION public._delivery_lines_match(p_delivery_id uuid, p_lines jsonb, p_quantities jsonb)
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF p_lines IS NULL OR jsonb_typeof(p_lines) IS DISTINCT FROM 'array' THEN
+    RETURN false;  -- checked on its own: jsonb_array_elements errors on anything but an array
+  END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_lines) e
+              WHERE jsonb_typeof(e) IS DISTINCT FROM 'object'
+                 OR jsonb_typeof(e -> 'order_item_id') IS DISTINCT FROM 'string'
+                 OR jsonb_typeof(e -> 'product_id') IS DISTINCT FROM 'string'
+                 OR jsonb_typeof(e -> 'quantity') IS DISTINCT FROM 'number'
+                 OR jsonb_typeof(e -> 'delivered') IS DISTINCT FROM 'number') THEN
+    RETURN false;
+  END IF;
+  RETURN NOT EXISTS (
+    (SELECT lower(e ->> 'order_item_id'), lower(e ->> 'product_id'), round((e ->> 'quantity')::numeric, 6),
+            round(GREATEST(0, LEAST((e ->> 'delivered')::numeric, (e ->> 'quantity')::numeric)), 6)
+       FROM jsonb_array_elements(p_lines) e
+     EXCEPT ALL
+     SELECT di.order_item_id::text, di.product_id::text, round(di.quantity, 6),
+            round(CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
+                 THEN GREATEST(0, LEAST((p_quantities ->> di.id::text)::numeric, di.quantity))
+                 ELSE di.quantity END, 6)
+       FROM public.delivery_items di WHERE di.delivery_id = p_delivery_id)
+    UNION ALL
+    (SELECT di.order_item_id::text, di.product_id::text, round(di.quantity, 6),
+            round(CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
+                 THEN GREATEST(0, LEAST((p_quantities ->> di.id::text)::numeric, di.quantity))
+                 ELSE di.quantity END, 6)
+       FROM public.delivery_items di WHERE di.delivery_id = p_delivery_id
+     EXCEPT ALL
+     SELECT lower(e ->> 'order_item_id'), lower(e ->> 'product_id'), round((e ->> 'quantity')::numeric, 6),
+            round(GREATEST(0, LEAST((e ->> 'delivered')::numeric, (e ->> 'quantity')::numeric)), 6)
+       FROM jsonb_array_elements(p_lines) e));
+END;
+$function$;
+ALTER FUNCTION public._delivery_lines_match(uuid, jsonb, jsonb) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._delivery_lines_match(uuid, jsonb, jsonb) FROM PUBLIC, anon, authenticated, service_role;
+
 DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
      IS DISTINCT FROM '92e373301409583f2f7fec1f0cb207ee' THEN
     RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: the 20270308000000 step was not restored';
+  END IF;
+  IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._delivery_lines_match(uuid,jsonb,jsonb)'))
+     IS DISTINCT FROM 'd622480ec89eb193526533db0475a643' THEN
+    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: the 20270308000000 _delivery_lines_match was not restored';
   END IF;
 END
 $postflight$;

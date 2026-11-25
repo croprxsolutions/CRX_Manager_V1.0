@@ -32,7 +32,9 @@ const CANDIDATE = path.join(MIGRATIONS, '20270308000000_proof_bound_to_load.sql'
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-bound-to-load-reverse.sql');
 const REQUIRED_REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-binding-required-reverse.sql');
 const FOLLOW_UPS = [path.join(MIGRATIONS, '20270308010000_proof_binding_required.sql')];  // step 4: the binding is required
-const LATER_READ_ONLY = new Set([]);
+// #2562 (Taha's review, LOW 3): it wraps _complete_delivery_authorized_impl_20270122, the body this proof's step calls
+// by name, and leaves the step, the wrappers and the helper alone.
+const LATER_READ_ONLY = new Set(['20270307200000_tiny_line_counts_as_zero.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -613,12 +615,27 @@ function afterCases() {
 }
 
 // Step 4 (20270308010000): proof with no list is refused like proof for another load; nothing else changes.
+const MATCH_MD5 = "SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._delivery_lines_match(uuid,jsonb,jsonb)'::regprocedure;";
 const STEP_MD5 = "SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure;";
 function requiredCases() {
   stageText('required.sql', lf(FOLLOW_UPS[0]));
   let r = apply('required.sql');
   assert.equal(r.status, 0, r.output);
   assert.equal(scalar(STEP_MD5), 'b542beff97b76eea519e6f067a5b7c8d');
+  assert.equal(scalar(MATCH_MD5), '196fa2f0edc9360123791c1799e9626a');
+  // Taha's review of #2562 (LOW 1): a delivered amount above 0 and under 0.01 counts as 0 on both sides.
+  const TWO = (d2) => [A(2)[0], B(2, d2)[0]];
+  let tiny = (key, seen, figure) => {
+    const t = delivery(TWO(2), 'in_progress');
+    const [l1, l2] = scalar(`SELECT string_agg(id::text, ',' ORDER BY order_item_id = '${OI}' DESC) FROM public.delivery_items WHERE delivery_id = '${t}';`).split(',');
+    return [t, completeSig(t, key, seen).replace(', p_lines_seen', `, p_quantities => ${J({ [l1]: 2, [l2]: figure })}, p_lines_seen`)];
+  };
+  let [t, sql] = tiny('pbl-qt1', TWO(0), 0.005); ok(sql); assert.equal(status(t), 'completed');
+  [t, sql] = tiny('pbl-qt2', TWO(0.004), 0.009); ok(sql); assert.equal(status(t), 'completed');
+  [t, sql] = tiny('pbl-qt3', TWO(0.005), 0); ok(sql); assert.equal(status(t), 'completed');
+  [t, sql] = tiny('pbl-qt4', TWO(0.005), 0.05); refused(sql, LOAD); assert.equal(status(t), 'in_progress');
+  [t, sql] = tiny('pbl-qt5', TWO(0), 0.01); refused(sql, LOAD); assert.equal(status(t), 'in_progress');
+  console.log('[required tiny] an amount above 0 and under 0.01 counts as 0 on both sides: signed 0 / sent 0.005, signed 0.004 / sent 0.009 and signed 0.005 / sent 0 complete; signed 0.005 / sent 0.05 and signed 0 / sent 0.01 are refused');
   let d = delivery(A(), 'in_progress');
   refused(completeSig(d, 'pbl-q1', undefined), LOAD);
   assert.equal(status(d), 'in_progress');
@@ -663,10 +680,12 @@ function requiredCases() {
   r = apply('required-reverse.sql');
   assert.equal(r.status, 0, r.output);
   assert.equal(scalar(STEP_MD5), '92e373301409583f2f7fec1f0cb207ee');
+  assert.equal(scalar(MATCH_MD5), 'd622480ec89eb193526533db0475a643');
+  [t, sql] = tiny('pbl-qt6', TWO(0), 0.005); refused(sql, LOAD);
   d = delivery(A(), 'in_progress'); ok(completeSig(d, 'pbl-q7', undefined)); assert.equal(status(d), 'completed');
   d = delivery(A(), 'in_progress'); ok(completeTicket(d, 'pbl-q8', photo(d, undefined))); assert.equal(status(d), 'completed');
   d = delivery(A(), 'in_progress'); ok(completeLeft(d, 'pbl-q9', photo(d, B(), 'Left at site — drop location'))); assert.equal(status(d), 'completed');
-  console.log('[required rollback] its reverse script restores 20270308000000\'s step: proof with no list completes again');
+  console.log('[required rollback] its reverse script restores 20270308000000\'s step and comparison: proof with no list completes again, signed 0 / sent 0.005 is refused again');
 }
 
 function rollbackCases() {

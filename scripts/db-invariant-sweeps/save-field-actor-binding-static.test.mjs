@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,8 +43,10 @@ assert.equal(fingerprints.length, 3, 'predicate must embed the reviewed body, th
 
 // Field application FP-1 replaces the impl body behind the same wrapper; the predicate accepts it too.
 // This pin lands before the FP-1 migration, so the body check runs once that migration file exists.
-const FP1 = path.join(ROOT, 'supabase', 'migrations', '20270303120000_field_split_versions.sql');
-if (existsSync(FP1)) {
+// Found by name, not stamp: the FP-1 migration is re-dated (restamped) when staging gets a newer one first.
+const FP1_NAME = readdirSync(path.join(ROOT, 'supabase', 'migrations')).find((f) => /^\d{14}_field_split_versions\.sql$/.test(f));
+const FP1 = FP1_NAME ? path.join(ROOT, 'supabase', 'migrations', FP1_NAME) : '';
+if (FP1 && existsSync(FP1)) {
   const fp1 = readFileSync(FP1, 'utf8').replace(/\r\n/g, '\n');
   const fp1Start = fp1.indexOf('CREATE OR REPLACE FUNCTION public._save_field_replay_impl_20261015(');
   assert.notEqual(fp1Start, -1, 'FP-1 save_field impl is missing from its migration');

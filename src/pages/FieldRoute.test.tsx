@@ -188,6 +188,37 @@ describe('FieldRoute — stops list renders (F1 regression guard)', () => {
     expect(stop.customer).toEqual({ farm_name: 'Wells Farm' });
   });
 
+  it("removes the saved route when the server refuses access, instead of showing it as no signal", async () => {
+    const first = render(<MemoryRouter><FieldRoute /></MemoryRouter>);
+    expect(await screen.findByText('Wells Farm')).toBeInTheDocument();
+    first.unmount();
+
+    stopQueryMock.mockReset().mockResolvedValue({ data: null, error: { code: '42501', message: 'permission denied for table deliveries' } });
+    render(<MemoryRouter><FieldRoute /></MemoryRouter>);
+    expect(await screen.findByText("Couldn't load your stops")).toBeInTheDocument();
+    expect(screen.queryByText('Wells Farm')).not.toBeInTheDocument();
+    expect(Object.keys(window.localStorage).filter((key) => key.startsWith('crx:today-snapshot:'))).toHaveLength(0);
+  });
+
+  it("drops a stop's saved copy once a refresh shows it left the route", async () => {
+    const stopKey = 'crx:today-snapshot:v1:u1:';
+    const first = render(<MemoryRouter><FieldRoute /></MemoryRouter>);
+    expect(await screen.findByText('Wells Farm')).toBeInTheDocument();
+    first.unmount();
+    // FieldStop saved d1 and d9; only d1 was on the route, and now d1 has left it.
+    const routeKey = Object.keys(window.localStorage).find((key) => key.startsWith(stopKey))!;
+    const day = routeKey.slice(stopKey.length).split(':')[0];
+    window.localStorage.setItem(`${stopKey}${day}:stop:d1`, JSON.stringify({ savedAt: new Date().toISOString(), data: { id: 'd1' } }));
+    window.localStorage.setItem(`${stopKey}${day}:stop:d9`, JSON.stringify({ savedAt: new Date().toISOString(), data: { id: 'd9' } }));
+
+    stopQueryMock.mockReset().mockResolvedValue({ data: [{ ...stopRow, id: 'd2', customer: { farm_name: 'Live Farm' } }], error: null });
+    render(<MemoryRouter><FieldRoute /></MemoryRouter>);
+    expect(await screen.findByText('Live Farm')).toBeInTheDocument();
+    expect(window.localStorage.getItem(`${stopKey}${day}:stop:d1`)).toBeNull();
+    // A stop the route never listed is not this refresh's to judge.
+    expect(window.localStorage.getItem(`${stopKey}${day}:stop:d9`)).not.toBeNull();
+  });
+
   it('still says it could not load when there is no saved route for today', async () => {
     stopQueryMock.mockReset().mockResolvedValue({ data: null, error: new Error('Failed to fetch') });
     render(<MemoryRouter><FieldRoute /></MemoryRouter>);

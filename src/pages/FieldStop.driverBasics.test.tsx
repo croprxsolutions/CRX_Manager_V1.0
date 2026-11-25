@@ -308,6 +308,23 @@ describe('FieldStop: saved copy in a dead spot', () => {
     expect(screen.queryByText('Gate code 4471.')).not.toBeInTheDocument();
   });
 
+  it("removes the saved copy when the server refuses access, instead of showing it as no signal", async () => {
+    tables.data.deliveries = [{ ...baseStop, delivery_notes: 'Gate code 4471.' }];
+    const first = render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    expect(await screen.findByText('Gate code 4471.')).toBeInTheDocument();
+    first.unmount();
+
+    mockFrom.mockImplementation((table: string) => {
+      const chain = buildChain(table);
+      if (table === 'deliveries') chain.maybeSingle = () => Promise.resolve({ data: null, error: { code: '42501', message: 'permission denied' } });
+      return chain;
+    });
+    render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/my-route'));
+    expect(screen.queryByText('Gate code 4471.')).not.toBeInTheDocument();
+    expect(Object.values(window.localStorage).join('')).not.toContain('Gate code 4471.');
+  });
+
   it('still goes back to My Route when there is no saved copy', async () => {
     failStopRead();
     render(<MemoryRouter><FieldStop /></MemoryRouter>);

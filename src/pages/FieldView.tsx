@@ -112,7 +112,8 @@ import {
   type FieldViewJobCard,
 } from '../lib/dispatchDisplay';
 import type { Field } from '../types';
-import { readTodaySnapshot, saveTodaySnapshot } from '../lib/todaySnapshot';
+import { saveTodaySnapshot, savedCopyAfterFailure } from '../lib/todaySnapshot';
+import { isNetworkFailure } from '../lib/deliveryEvidence';
 import SavedCopyBanner from '../components/route/SavedCopyBanner';
 
 // The Supabase Data API caps a single response at ~1000 rows; page get_dispatched_list
@@ -275,7 +276,7 @@ export default function FieldView() {
       setCards(grouped);
     } catch (err) {
       Sentry.captureException(err, { tags: { source: 'fetch', action: 'field_view_my_jobs' } });
-      const saved = readTodaySnapshot<FieldViewJobCard[]>(MY_DAY_SNAPSHOT, profile?.id);
+      const saved = savedCopyAfterFailure<FieldViewJobCard[]>(MY_DAY_SNAPSHOT, profile?.id, isNetworkFailure(err));
       if (saved && Array.isArray(saved.data)) {
         // Shown read-only: Start and Complete stay off until a load succeeds (the banner says why), and an open
         // Complete form closes, as it did when a failed load emptied the list.

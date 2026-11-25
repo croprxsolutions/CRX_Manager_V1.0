@@ -11,6 +11,9 @@ import { todayInBusinessTz } from './dateUtils';
 
 const PREFIX = 'crx:today-snapshot:v1:';
 
+/** The saved copy of one delivery stop (My Route links to it, so a route refresh can drop stops that left). */
+export const stopSnapshotKey = (stopId: string) => `stop:${stopId}`;
+
 export interface TodaySnapshot<T> {
   /** When the screen last loaded this copy from the server (ISO time). */
   savedAt: string;
@@ -72,6 +75,16 @@ export function dropTodaySnapshot(screen: string, userId: string | null | undefi
   } catch {
     // Nothing to do: an unreadable store holds nothing this screen can show.
   }
+}
+
+/**
+ * After a failed read: only a lost connection may show the saved copy. Any answer from the server (no row, access
+ * denied) means the copy is no longer the person's to see, so it is removed and null returned.
+ */
+export function savedCopyAfterFailure<T>(screen: string, userId: string | null | undefined, signalLost: boolean): TodaySnapshot<T> | null {
+  if (signalLost) return readTodaySnapshot<T>(screen, userId);
+  dropTodaySnapshot(screen, userId);
+  return null;
 }
 
 /** Removes every saved copy on this device (sign-out): gate codes and phone numbers must not outlive the session. */

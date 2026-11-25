@@ -24,7 +24,8 @@ import { fetchDriverFarms } from '../lib/driverFarms';
 import { OPEN_STOP_STATUSES, ROUTE_NO_SIGNAL_MESSAGE, sortRouteStops } from '../lib/routeStops';
 import DoneTodayList from '../components/route/DoneTodayList';
 import SavedCopyBanner from '../components/route/SavedCopyBanner';
-import { readTodaySnapshot, saveTodaySnapshot } from '../lib/todaySnapshot';
+import { dropTodaySnapshot, saveTodaySnapshot, savedCopyAfterFailure, stopSnapshotKey } from '../lib/todaySnapshot';
+import { isNetworkFailure } from '../lib/deliveryEvidence';
 
 const EMPTY_QUEUE_SUMMARY: OfflineQueueSummary = {
   ownedTotal: 0,
@@ -61,11 +62,20 @@ function toSavedStop(row: StopRow): SavedStop {
   };
 }
 
-/** Today's saved route (read-only), or null when there is none. */
-function readSavedRoute(userId: string | null): { stops: StopRow[]; savedAt: string } | null {
-  const saved = readTodaySnapshot<SavedStop[]>(ROUTE_SNAPSHOT, userId);
+/** Today's saved route (read-only), or null when there is none or the server answered the failed read (see savedCopyAfterFailure). */
+function readSavedRoute(userId: string | null, signalLost = true): { stops: StopRow[]; savedAt: string } | null {
+  const saved = savedCopyAfterFailure<SavedStop[]>(ROUTE_SNAPSHOT, userId, signalLost);
   if (!saved || !Array.isArray(saved.data)) return null;
   return { stops: saved.data.map((row) => ({ ...row, priority: null, customer_id: null })), savedAt: saved.savedAt };
+}
+
+/** Saves today's route; a stop that left it (reassigned, done, cancelled) loses its own saved copy too. */
+function saveRoute(userId: string, rows: StopRow[]): void {
+  const onRoute = new Set(rows.map((row) => row.id));
+  for (const stop of readSavedRoute(userId)?.stops ?? []) {
+    if (!onRoute.has(stop.id)) dropTodaySnapshot(stopSnapshotKey(stop.id), userId);
+  }
+  saveTodaySnapshot(ROUTE_SNAPSHOT, userId, rows.map(toSavedStop));
 }
 
 function formatStopDate(dateStr: string | null): string {
@@ -107,9 +117,9 @@ export default function FieldRoute() {
 
     if (requestSequence !== stopRequestSequence.current) return;
 
-    // A failed load shows today's saved copy when there is one (read-only), else the error.
-    const showLoadFailure = () => {
-      const saved = readSavedRoute(userId);
+    // A lost connection shows today's saved copy when there is one (read-only), else the error.
+    const showLoadFailure = (failure: unknown) => {
+      const saved = readSavedRoute(userId, isNetworkFailure(failure));
       setStops(saved?.stops ?? []);
       setSavedCopyAt(saved?.savedAt ?? null);
       setLoadError(!saved);
@@ -118,7 +128,7 @@ export default function FieldRoute() {
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'field-route' } });
-      showLoadFailure();
+      showLoadFailure(error);
       return;
     }
 
@@ -132,11 +142,11 @@ export default function FieldRoute() {
       } catch (farmErr) {
         if (requestSequence !== stopRequestSequence.current) return;
         Sentry.captureException(farmErr, { tags: { source: 'fetch', page: 'field-route' } });
-        showLoadFailure();
+        showLoadFailure(farmErr);
         return;
       }
     }
-    if (userId) saveTodaySnapshot(ROUTE_SNAPSHOT, userId, rows.map(toSavedStop));
+    if (userId) saveRoute(userId, rows);
     setSavedCopyAt(null);
     setStops(rows);
     setLoading(false);

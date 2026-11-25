@@ -50,7 +50,7 @@ import { fetchNextRouteStopId, ROUTE_NO_SIGNAL_MESSAGE } from '../lib/routeStops
 import StopContactActions, { type StopCoords } from '../components/route/StopContactActions';
 import StopSavedCopy, { type SavedStopCopy } from '../components/route/StopSavedCopy';
 import CompletionProofFields, { EmailReceiptOption, ProofOption } from '../components/deliveries/CompletionProofFields';
-import { dropTodaySnapshot, readTodaySnapshot, saveTodaySnapshot } from '../lib/todaySnapshot';
+import { dropTodaySnapshot, saveTodaySnapshot, savedCopyAfterFailure, stopSnapshotKey } from '../lib/todaySnapshot';
 
 interface StopItem {
   id: string;
@@ -128,9 +128,6 @@ interface StopDelivery {
     shipping_address?: string | null; billing_address?: string | null;
   } | null;
 }
-
-// Today's read-only copy of a stop, kept on the phone for a dead spot (src/lib/todaySnapshot.ts).
-const stopSnapshotKey = (stopId: string) => `stop:${stopId}`;
 
 function toSavedStopCopy(del: StopDelivery, items: StopItem[], addressLine: string, addressCoords: StopCoords | null): SavedStopCopy {
   return {
@@ -246,10 +243,10 @@ export default function FieldStop() {
       .maybeSingle();
 
     if (isStale()) return;
-    // A read that failed (not a stop that is gone) shows today's saved copy when there is one; otherwise
-    // the driver goes back to My Route.
-    const showSavedCopyOrLeave = (readFailed: boolean) => {
-      const saved = readFailed ? readTodaySnapshot<SavedStopCopy>(stopSnapshotKey(id), userIdRef.current) : null;
+    // Only a lost connection shows today's saved copy. Any answer from the server (no row: reassigned or gone;
+    // access denied) removes the copy, and the driver goes back to My Route.
+    const showSavedCopyOrLeave = (failure: unknown) => {
+      const saved = savedCopyAfterFailure<SavedStopCopy>(stopSnapshotKey(id), userIdRef.current, isNetworkFailure(failure));
       if (saved?.data?.id === id) {
         setSavedCopy({ stop: saved.data, savedAt: saved.savedAt });
         setLoading(false);
@@ -260,20 +257,20 @@ export default function FieldStop() {
     };
     if (error || !data) {
       if (error) Sentry.captureException(error, { tags: { source: 'fetch', page: 'field-stop' } });
-      // The server answered: this stop is not the driver's (reassigned or gone), so its saved copy goes too.
-      else dropTodaySnapshot(stopSnapshotKey(id), userIdRef.current);
-      showSavedCopyOrLeave(!!error);
+      showSavedCopyOrLeave(error);
       return;
     }
 
     // A driver reads the farm through get_driver_customers (#2018), not the customers table.
+    let farmFailure: unknown = null;
     const stop = await withStopFarm(data as unknown as StopDelivery, loadAsDriver).catch((farmErr: unknown) => {
       Sentry.captureException(farmErr, { tags: { source: 'fetch', page: 'field-stop' } });
+      farmFailure = farmErr;
       return null;
     });
     if (isStale()) return;
     if (!stop) {
-      showSavedCopyOrLeave(true);
+      showSavedCopyOrLeave(farmFailure);
       return;
     }
     const { del, address: farmAddress } = stop;

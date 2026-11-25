@@ -208,6 +208,9 @@ describe('Field Setup — FP-1 split versions', () => {
     await open();
     fireEvent.change(screen.getByLabelText('Notes for Owner Farm'), { target: { value: 'Sold the farm' } });
     fireEvent.click(screen.getByRole('button', { name: 'Remove Owner Farm from the split' }));
+    // The removed payer's note stays on screen under earlier payers, still editable.
+    expect(screen.getByRole('heading', { name: 'Notes for earlier payers' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Notes for Owner Farm')).toHaveValue('Sold the farm');
     for (const label of ['Product share for Landlord Farm', 'Application share for Landlord Farm']) {
       fireEvent.change(screen.getByLabelText(label), { target: { value: '100' } });
     }

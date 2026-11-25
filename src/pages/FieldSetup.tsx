@@ -188,7 +188,8 @@ function FieldSetupPage() {
 
   const [billingSplits, setBillingSplits] = useState<BillingSplit[]>([]);
   // FP-1: the split is saved as a dated version; notes are per payer and never make a version.
-  const today = useMemo(() => localToday(), []);
+  // Refreshed on every load, so a tab left open overnight labels a version saved today correctly.
+  const [today, setToday] = useState(localToday);
   const [payerNotes, setPayerNotes] = useState<Record<string, string>>({});
   const [splitHistory, setSplitHistory] = useState<SplitVersion[]>([]);
   // Notes can be kept for current payers and anyone on a saved version (the database accepts both).
@@ -196,6 +197,15 @@ function FieldSetupPage() {
     () => [...billingSplits.map((r) => r.customer_id), ...splitHistory.flatMap((v) => v.payers.map((p) => p.customer_id))],
     [billingSplits, splitHistory],
   );
+  // Earlier payers no longer in the split: their notes stay viewable and editable (office only).
+  const pastPayers = useMemo(() => {
+    const current = new Set(billingSplits.map((r) => r.customer_id));
+    const seen = new Map<string, string>();
+    for (const v of splitHistory) for (const p of v.payers) {
+      if (!current.has(p.customer_id) && !seen.has(p.customer_id)) seen.set(p.customer_id, p.customer_name);
+    }
+    return [...seen].map(([customer_id, customer_name]) => ({ customer_id, customer_name }));
+  }, [billingSplits, splitHistory]);
   const [inForceSplit, setInForceSplit] = useState<SplitVersion | null>(null);
   const loadedNotesRef = useRef<Record<string, string>>({});
   const [loading, setLoading] = useState(!isNew);
@@ -470,7 +480,9 @@ function FieldSetupPage() {
       // Split history and payer notes (FP-1 tables). A form shown without the saved split could save over it.
       let splitData: Awaited<ReturnType<typeof loadFieldSplit>>;
       try {
-        splitData = await loadFieldSplit(id, today);
+        const day = localToday();
+        setToday(day);
+        splitData = await loadFieldSplit(id, day);
       } catch (splitError) {
         if (superseded()) return;
         Sentry.captureException(toSentryError(splitError), { tags: { source: 'fetch', action: 'load_field_split_versions' } });
@@ -491,7 +503,7 @@ function FieldSetupPage() {
     setLoadError(false);
     setLoading(false);
     setTimeout(() => { initialLoadDone.current = true; }, 0);
-  }, [id, toast, today, applySplitData]);
+  }, [id, toast, applySplitData]);
 
   useEffect(() => {
     if (!isNew && id) {
@@ -1496,6 +1508,26 @@ function FieldSetupPage() {
                   placeholder="Search customer to add to billing split..."
                   ariaLabel="Add customer to billing split"
                 />
+
+                {!isNew && pastPayers.length > 0 && (
+                  <div className="mt-6 space-y-2">
+                    <h4 className="text-sm font-medium text-nav-dark">Notes for earlier payers</h4>
+                    {pastPayers.map((p) => (
+                      <label key={p.customer_id} className="block text-xs text-secondary">
+                        {p.customer_name}
+                        <input
+                          type="text"
+                          aria-label={`Notes for ${p.customer_name}`}
+                          value={payerNotes[p.customer_id] ?? ''}
+                          onChange={(e) => setPayerNotes((prev) => ({ ...prev, [p.customer_id]: e.target.value }))}
+                          maxLength={2000}
+                          placeholder="Notes for this payer (optional)"
+                          className="mt-1 w-full px-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                )}
 
                 {!isNew && (
                   <div className="mt-6">

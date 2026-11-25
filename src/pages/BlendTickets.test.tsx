@@ -246,3 +246,20 @@ describe('BlendTickets list reads every row', () => {
     expect(mockToast).not.toHaveBeenCalled();
   }, 30000);
 });
+
+describe('BlendTickets scanned-ticket upload is hidden', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('offers Create Manual and no Upload Tickets, also on the empty list', async () => {
+    mockFrom.mockImplementation(() => buildChain({ data: [], error: null }));
+
+    renderPage();
+
+    expect(await screen.findByText('No blend tickets found')).toBeInTheDocument();
+    expect(screen.getByText('Create your first blend ticket to get started')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Upload Tickets/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Create Manual/ })).toHaveLength(2);
+  });
+});

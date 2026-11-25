@@ -23,6 +23,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Supplier Pricing (phase 1b upsert_product_supplier_link): a link needs SKU, price unit and pack description.
   [/^SUPPLIER_LINK_REUSE_FIELDS_REQUIRED\b/,
    'Nothing was saved. Fill in Supplier SKU, Supplier price unit and Supplier pack description, then save the link again'],
+  [/^SUPPLIER_PRODUCT_NAME_REQUIRED\b/, 'Nothing was saved. Fill in Supplier Product name, then save the link again'],
   // Supplier Pricing (20270305200000): bounds that keep the converted cost per inventory unit a sane number.
   [/^SUPPLIER_CONVERSION_INVALID\b|violates check constraint "product_supplier_links_conversion_floor"/,
    'Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals'],

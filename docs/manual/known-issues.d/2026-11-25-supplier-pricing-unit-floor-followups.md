@@ -17,5 +17,6 @@ wrong; items 3 to 5 are a stale warning, a dropped duplicate and a raw error cod
   database that differ only in those keep only the first.
 - **FIXED (#2571): Saving a product link with blank fields shows a raw code.** Leaving the supplier SKU, unit or
   pack description blank showed `SUPPLIER_LINK_REUSE_FIELDS_REQUIRED`; it now asks the user to fill in those three fields.
+  A blank Supplier Product name (`SUPPLIER_PRODUCT_NAME_REQUIRED`) now gets a plain message too.
 
 The price-jump warning for quotes far from the current approved price shipped separately in #2546.

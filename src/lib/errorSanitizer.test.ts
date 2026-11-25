@@ -440,6 +440,8 @@ describe('sanitizeError', () => {
       .toBe('Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals');
     expect(sanitizeError({ message: 'SUPPLIER_LINK_REUSE_FIELDS_REQUIRED' }))
       .toBe('Nothing was saved. Fill in Supplier SKU, Supplier price unit and Supplier pack description, then save the link again');
+    expect(sanitizeError({ message: 'SUPPLIER_PRODUCT_NAME_REQUIRED' }))
+      .toBe('Nothing was saved. Fill in Supplier Product name, then save the link again');
     expect(sanitizeError('SUPPLIER_CONVERSION_INVALID'))
       .toBe('Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals');
     expect(sanitizeError({ message: 'new row for relation "supplier_price_observations" violates check constraint "supplier_price_observations_package_quantity_floor"' }))

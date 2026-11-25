@@ -72,7 +72,8 @@ per checkout; `CRX_LOCAL_APP_STATE_DIR` cannot move it, and `walkthrough.mjs` re
 `status` is locked too, because it re-seals a running gateway. The other three profiles take no lock.
 
 If a command is interrupted (for example a build killed partway), the next command checks the recorded lock owner. It
-waits for a live owner and refuses a lock whose process has exited; it never removes containers or volumes, or changes
+refuses immediately while the owner is still running (rerun it when that command finishes) and also refuses a lock
+whose process has exited; it never removes containers or volumes, or changes
 a lock, to recover automatically. After confirming no walkthrough command is active, rename only `first-start.lock`
 to a dated `.stale` name, then run `rebuild`. A malformed lock is left intact for inspection. A brand-new checkout is
 safe only in a new, uniquely named folder: its lane (and Docker project) is derived from the folder path, so it has

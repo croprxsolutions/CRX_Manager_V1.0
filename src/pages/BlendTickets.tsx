@@ -61,7 +61,8 @@ export function BlendTickets() {
   const batchRejectIdem = useIdempotencyKey('batch_reject_blend_tickets', profile?.id || '');
 
   const canBulkAction = role === 'admin' || role === 'sales_rep';
-  const { isProcessing, processedCount } = useOCRProcessor(true);
+  // With upload hidden, stop the 30s queue poll that sends scans to OCR; Re-process OCR calls the function directly.
+  const { isProcessing, processedCount } = useOCRProcessor(SCAN_UPLOAD_ENABLED);
 
   // Each OCR completion and every refresh re-reads both lists page by page; an
   // older, slower load must not overwrite a newer one, so only the latest may set state.

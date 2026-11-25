@@ -7,9 +7,11 @@ const {
   mockFrom,
   mockToast,
   mockCheckMutationResult,
+  mockOcrEnabled,
   selectedTicket,
 } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
+  mockOcrEnabled: vi.fn(),
   mockToast: vi.fn(),
   mockCheckMutationResult: vi.fn(),
   selectedTicket: {
@@ -84,7 +86,10 @@ vi.mock('../components/ui/Toast', () => ({
 }));
 
 vi.mock('../hooks/useOCRProcessor', () => ({
-  useOCRProcessor: () => ({ isProcessing: false, processedCount: 0 }),
+  useOCRProcessor: (enabled: boolean) => {
+    mockOcrEnabled(enabled);
+    return { isProcessing: false, processedCount: 0 };
+  },
 }));
 
 vi.mock('../hooks/useOCRThresholds', () => ({
@@ -260,6 +265,12 @@ describe('BlendTickets scanned-ticket upload is hidden', () => {
     expect(await screen.findByText('No blend tickets found')).toBeInTheDocument();
     expect(screen.getByText('Create your first blend ticket to get started')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Upload Tickets/ })).not.toBeInTheDocument();
+    // The OCR queue poll is off while upload is hidden (Taha, #2543).
+    expect(mockOcrEnabled).toHaveBeenCalledWith(false);
+    expect(mockOcrEnabled).not.toHaveBeenCalledWith(true);
     expect(screen.getAllByRole('button', { name: /Create Manual/ })).toHaveLength(2);
+    // The empty-state button opens the manual form.
+    fireEvent.click(screen.getAllByRole('button', { name: /Create Manual/ })[1]);
+    expect(await screen.findByText(/manual create:/)).toBeInTheDocument();
   });
 });

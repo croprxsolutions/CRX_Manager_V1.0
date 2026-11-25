@@ -212,6 +212,21 @@ describe('FieldStop: reporting an issue in the completion step', () => {
     expect(params).not.toHaveProperty('p_issue_type');
     expect(params).not.toHaveProperty('p_issue_notes');
   });
+
+  it('drops a typed note when the driver switches the issue back to None', async () => {
+    await reachSign();
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use J. Hollow' }));
+    fireEvent.change(screen.getByLabelText(/Report an issue/), { target: { value: 'other' } });
+    fireEvent.change(screen.getByLabelText('Describe the issue'), { target: { value: 'one jug cracked' } });
+    fireEvent.change(screen.getByLabelText(/Report an issue/), { target: { value: 'none' } });
+    fireEvent.click(screen.getByRole('button', { name: /Continue to Review/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Complete Delivery/ }));
+    await screen.findByText('Delivery complete');
+    const params = mockRpc.mock.calls.find(([name]) => name === 'complete_delivery')![1];
+    expect(params).not.toHaveProperty('p_issue_type');
+    expect(params).not.toHaveProperty('p_issue_notes');
+  });
 });
 
 describe('FieldStop: Next Stop', () => {

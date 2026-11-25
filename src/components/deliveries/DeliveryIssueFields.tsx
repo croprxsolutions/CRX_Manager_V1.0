@@ -35,7 +35,12 @@ export default function DeliveryIssueFields({ idPrefix, issue }: { idPrefix: str
         <select
           id={typeId}
           value={issue.type}
-          onChange={(e) => issue.onTypeChange(e.target.value as DeliveryIssueType)}
+          onChange={(e) => {
+            const type = e.target.value as DeliveryIssueType;
+            issue.onTypeChange(type);
+            // The note box hides on None, so drop its text too or it would still be saved.
+            if (type === 'none') issue.onNotesChange('');
+          }}
           className={`${FIELD} h-12`}
         >
           {Object.entries(ISSUE_TYPE_LABELS).map(([key, label]) => (

@@ -4,7 +4,7 @@
   quote's package quantity must be at least 0.001 (and not NaN), and one quote line can cost at most $10,000,000.
   The quote staging step marks such a row invalid (`PACKAGE_QUANTITY_INVALID`, new `COST_TOO_LARGE`); new checks on
   `product_supplier_links` and `supplier_price_observations` refuse a link save, approval or correction outside the
-  bounds. Each check is validated against stored rows (production has none outside the bounds). Together the bounds
+  bounds. The apply refuses if any stored row is already outside a bound (production has none). Together the bounds
   keep the converted cost per inventory unit at or below 1e15 cents, so it can no longer overflow.
 - Supplier Pricing screen and error messages say the rule in plain English.
 - Closes (deletes) known issues `2026-11-24-supplier-quote-tiny-conversion-factor` and `2026-11-24-supplier-quote-test-duplicate-rows`

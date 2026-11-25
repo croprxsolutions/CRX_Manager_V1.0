@@ -56,16 +56,16 @@ try {
     /^ok\|0?\.0001/, 'before the fix a 0.0001 factor saves');
   console.log('[before] a link with factor 0.0001 saves (the bug)');
 
-  // A stored row outside a bound (a staging test row) leaves only that check unvalidated; the apply still succeeds.
+  // A stored row outside a bound (a staging test row) stops the whole apply, naming the count; nothing changes.
   const legacy = docker(PSQL, { input: `BEGIN;
     INSERT INTO public.product_supplier_links (product_id, vendor_id, supplier_product_name, inventory_units_per_supplier_unit, created_by)
       VALUES ('${PRODUCT}', '${VENDOR}', 'Legacy tiny', 0.0001, '${ADMIN}');
     ${candidate}
     ROLLBACK;`, allowFailure: true });
-  assert.equal(legacy.status, 0, `legacy apply failed: ${legacy.stderr}`);
-  assert.match(legacy.stderr, /SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS: product_supplier_links has rows outside the bound/);
-  assert.match(legacy.stderr, /POSTFLIGHT_OK validated: product_supplier_links_conversion_floor=false, supplier_price_observations_cost_ceiling=true, supplier_price_observations_package_quantity_floor=true/);
-  console.log('[legacy] a stored 0.0001 link leaves only the link check unvalidated, with a notice; rolled back');
+  assert.notEqual(legacy.status, 0, 'a stored tiny-factor link must stop the apply');
+  assert.match(legacy.stderr, /SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS: links=1, observations=0, approvable import rows=0/);
+  assert.equal(scalar(`SELECT count(*) FROM pg_constraint WHERE conname = 'product_supplier_links_conversion_floor'`), '0');
+  console.log('[legacy] a stored 0.0001 link stops the apply with SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS; nothing applied');
 
   const auto = apply();
   assert.match(`${auto.stdout}${auto.stderr}`, /PREFLIGHT_FAIL: run this file as one transaction/, 'autocommit apply must refuse');
@@ -74,7 +74,10 @@ try {
   assert.match(once.stderr, /POSTFLIGHT_OK/);
   const again = apply(['-1']);
   assert.match(`${again.stdout}${again.stderr}`, /SUPPLIER_QUOTE_UNIT_FLOOR_BASELINE_DRIFT/, 're-apply must refuse');
-  assert.match(once.stderr, /POSTFLIGHT_OK validated: product_supplier_links_conversion_floor=true, supplier_price_observations_cost_ceiling=true, supplier_price_observations_package_quantity_floor=true/);
+  assert.equal(scalar(`SELECT string_agg(conname || '=' || convalidated, ',' ORDER BY conname) FROM pg_constraint
+    WHERE conname IN ('product_supplier_links_conversion_floor', 'supplier_price_observations_package_quantity_floor',
+      'supplier_price_observations_cost_ceiling')`),
+    'product_supplier_links_conversion_floor=true,supplier_price_observations_cost_ceiling=true,supplier_price_observations_package_quantity_floor=true');
   console.log('[apply] autocommit refused, applied once with POSTFLIGHT_OK and all three checks validated, re-apply refused');
 
   // 1. Link factor floor.
@@ -109,10 +112,10 @@ try {
   const approved = attempt(ADMIN, asUser(`r := ${stage([
     quoteRow(BOUND, '10000000.00', '0.001', '2026-11-10'),
     quoteRow(NORMAL, '45.00', '2', '2026-11-10'),
-  ])};`) + ` u := (r->>'id')::uuid;`
+  ])};`) + ` u := (r->>'id')::uuid;
+    r3 := (SELECT jsonb_agg(id ORDER BY row_number) FROM public.supplier_price_import_rows WHERE import_id = u);`
     + asUser(`r2 := public.approve_supplier_price_import(u,
-      (SELECT array_agg(id ORDER BY row_number) FROM public.supplier_price_import_rows WHERE import_id = u),
-      '${ADMIN}', '${key('approve')}');`)
+      ARRAY(SELECT jsonb_array_elements_text(r3)::uuid), '${ADMIN}', '${key('approve')}');`)
     + ` v := ${rowStatuses};`, { commit: true });
   assert.equal(approved, 'ok|approved:;approved:', `approve: ${approved}`);
   const costs = attempt(ADMIN, asUser(`r := public.get_supplier_market_evidence(ARRAY['${PRODUCT}'::uuid]);`) + `

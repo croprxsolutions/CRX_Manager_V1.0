@@ -45,10 +45,11 @@ No new function, grant or policy.
 2. CHECK `product_supplier_links_conversion_floor` (factor NULL or >= 0.001) - the link save is refused.
 3. CHECKs `supplier_price_observations_package_quantity_floor` (>= 0.001) and
    `supplier_price_observations_cost_ceiling` (<= 1e9 cents) - backstop for approve and correction.
-4. Each CHECK is added `NOT VALID`, then validated against stored rows in the same transaction (the tables hold
-   tens of rows, so the exclusive lock lasts milliseconds, and the apply gives up after 5 seconds of waiting for it). Production has no row outside the bounds, so all three validate there.
-   If a staging test row is outside a bound, that one check stays binding new writes only and the apply prints
-   `SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS` instead of failing the staging Database job.
+4. Each CHECK is added validated. The preflight first counts stored links, observations and approvable (`new`/
+   `changed`) import rows outside a bound and refuses the whole apply with `SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS`
+   and the counts; a row saved after the count makes the ADD CONSTRAINT itself fail. Either way nothing is applied.
+   Production had 0 such rows on 2026-11-24. The tables hold tens of rows, so the exclusive lock lasts milliseconds,
+   and the apply gives up after 5 seconds of waiting for it.
 5. NaN (which PostgreSQL numeric accepts and sorts above every number) is refused by the stage row check and both
    floors. The floor applies to the stored `numeric(20,8)` value, so 0.000999999 is stored as 0.001 and accepted.
 6. Screen: `PACKAGE_QUANTITY_INVALID` reads "Package quantity must be 0.001 or more."; `COST_TOO_LARGE` reads
@@ -57,16 +58,11 @@ No new function, grant or policy.
 
 ## Existing rows
 
-- With the checks validated, no stored link or observation can be outside the bounds, so every reader (workspace,
-  market evidence, preferred-vendor list) is safe for all rows, old and new.
-
-- Production: none outside the bounds (query above), so nothing changes for real data.
-- Staging may hold audit test rows below the floor (UNVERIFIED). With NOT VALID they stay readable exactly as
-  today (the overflow read failure, if any, is unchanged for that row). Writing such a row again is refused:
-  a tiny-factor link cannot be updated (including the automatic `is_preferred` clear when another link for the
-  same product is made preferred) until its factor is fixed; an import row staged before the migration with a tiny
-  package quantity cannot be approved (approve fails as a whole, nothing saved) but can still be rejected
-  (import rows carry no new CHECK).
+- After the apply no stored link, observation or approvable import row can be outside the bounds, so every reader
+  (workspace, market evidence, preferred-vendor list) is safe for all rows, old and new.
+- Production: none outside the bounds (query above). Staging is unverified; if it holds a test row outside a bound,
+  its Database job stops with `SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS` and nothing applies until that row is fixed or
+  removed. Checked in the staging browser before merge.
 - Already-deployed app during rollout: it sends the same arguments; it shows the new row code through its existing
   fallback text ("cost too large.") and the constraint refusals through the generic sanitizer message until the
   screen half deploys. No screen depends on the migration, so one PR is safe.
@@ -140,3 +136,10 @@ changing any bound means re-checking that cost / quantity / factor stays at or b
   behaviour with no overflow path; no change.
 - #14: the production counts are in the migration header; staging validation state is read from the staging Database
   job's `POSTFLIGHT_OK` line after merge.
+
+## Luna round 1 (2026-11-24): strict apply
+
+Luna HIGH (the same mechanism as Astra re-check #1 and drift review M4: a row outside a bound let the apply commit
+with a check unvalidated) and MED (stage did not check a legacy link's factor) are closed by removing that leniency:
+the apply now refuses while any stored row is outside a bound. Staging-only legacy consequences (Astra re-check #2-#6,
+#15, #16; drift M2, M3) no longer exist.

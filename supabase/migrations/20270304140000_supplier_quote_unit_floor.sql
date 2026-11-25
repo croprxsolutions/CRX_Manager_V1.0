@@ -13,8 +13,9 @@
 --      factor; any UPDATE of a link row is re-checked, so a staging legacy row must be fixed before it can change).
 --   3. CHECKs supplier_price_observations_package_quantity_floor (>= 0.001) and supplier_price_observations_cost_ceiling
 --      (<= 1e9 cents): backstop for approve and correction (observations are insert-only).
---   Each CHECK is then validated against stored rows; a staging row outside a bound leaves that one binding new writes
---   only (notice SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS). NaN is refused too: it sorts above every number.
+--   The checks are added validated: the preflight refuses the whole apply (SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS, with
+--   counts) if any stored link, observation or approvable import row is outside a bound, so no row can slip past them.
+--   NaN is refused too: it sorts above every number.
 -- LIVE EVIDENCE (read-only, production, 2026-11-24): every factor and package quantity in use is exactly 1 (10 links,
 --   20 import rows, 10 observations); 0 below 0.001; largest cost 46,743 cents; stage body md5(prosrc) a927dd96feb00564a3e3e96b012e66e9.
 -- NOT CHANGED: grants, policies, idempotency, other functions and their reads.
@@ -24,10 +25,16 @@
 CREATE TEMP TABLE supplier_quote_unit_floor_tx ON COMMIT DROP AS SELECT pg_current_xact_id()::text AS transaction_id;
 
 DO $preflight$
+DECLARE
+  v_links bigint;
+  v_observations bigint;
+  v_rows bigint;
 BEGIN
   -- Under autocommit the ON COMMIT DROP marker is already gone here: refuse before any change.
-  IF to_regclass('pg_temp.supplier_quote_unit_floor_tx') IS NULL
-     OR (SELECT transaction_id FROM pg_temp.supplier_quote_unit_floor_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
+  IF to_regclass('pg_temp.supplier_quote_unit_floor_tx') IS NULL THEN
+    RAISE EXCEPTION 'PREFLIGHT_FAIL: run this file as one transaction (psql -1 or the apply script)';
+  END IF;
+  IF (SELECT transaction_id FROM pg_temp.supplier_quote_unit_floor_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: run this file as one transaction (psql -1 or the apply script)';
   END IF;
   IF (SELECT md5(p.prosrc) FROM pg_proc p
@@ -44,45 +51,37 @@ BEGIN
       'supplier_price_observations_cost_ceiling')) THEN
     RAISE EXCEPTION 'SUPPLIER_QUOTE_UNIT_FLOOR_BASELINE_DRIFT: a constraint already exists';
   END IF;
+  -- Any stored row outside a bound stops the apply: fix or remove it first (production had none on 2026-11-24).
+  SELECT count(*) INTO v_links FROM public.product_supplier_links
+    WHERE inventory_units_per_supplier_unit < 0.001 OR inventory_units_per_supplier_unit = 'NaN';
+  SELECT count(*) INTO v_observations FROM public.supplier_price_observations
+    WHERE package_quantity < 0.001 OR package_quantity = 'NaN' OR cost_cents > 1000000000;
+  SELECT count(*) INTO v_rows FROM public.supplier_price_import_rows
+    WHERE row_status IN ('new', 'changed')
+      AND (package_quantity < 0.001 OR package_quantity = 'NaN' OR cost_cents > 1000000000);
+  IF v_links + v_observations + v_rows > 0 THEN
+    RAISE EXCEPTION 'SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS: links=%, observations=%, approvable import rows=%',
+      v_links, v_observations, v_rows;
+  END IF;
 END;
 $preflight$;
 
--- ADD CONSTRAINT takes an exclusive lock held to commit: give up quickly rather than queue staff reads behind it.
+-- ADD CONSTRAINT takes an exclusive lock held to commit (it also validates every stored row, so a row saved after the
+-- preflight count still fails the apply): give up quickly rather than queue staff reads behind the lock.
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE public.product_supplier_links
   ADD CONSTRAINT product_supplier_links_conversion_floor
   CHECK (inventory_units_per_supplier_unit IS NULL
-         OR (inventory_units_per_supplier_unit >= 0.001 AND inventory_units_per_supplier_unit <> 'NaN')) NOT VALID;
+         OR (inventory_units_per_supplier_unit >= 0.001 AND inventory_units_per_supplier_unit <> 'NaN'));
 
 ALTER TABLE public.supplier_price_observations
   ADD CONSTRAINT supplier_price_observations_package_quantity_floor
-  CHECK (package_quantity >= 0.001 AND package_quantity <> 'NaN') NOT VALID;
+  CHECK (package_quantity >= 0.001 AND package_quantity <> 'NaN');
 
 ALTER TABLE public.supplier_price_observations
   ADD CONSTRAINT supplier_price_observations_cost_ceiling
-  CHECK (cost_cents <= 1000000000) NOT VALID;
-
--- Validate each check against the rows already stored. Production has none outside the bounds (header), so all three
--- validate there. A staging test row outside them leaves that one check binding new writes only, named in a notice,
--- instead of failing the apply.
-DO $validate$
-DECLARE
-  v_pair text[];
-BEGIN
-  FOREACH v_pair SLICE 1 IN ARRAY ARRAY[
-    ['product_supplier_links', 'product_supplier_links_conversion_floor'],
-    ['supplier_price_observations', 'supplier_price_observations_package_quantity_floor'],
-    ['supplier_price_observations', 'supplier_price_observations_cost_ceiling']]
-  LOOP
-    BEGIN
-      EXECUTE format('ALTER TABLE public.%I VALIDATE CONSTRAINT %I', v_pair[1], v_pair[2]);
-    EXCEPTION WHEN check_violation THEN
-      RAISE NOTICE 'SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS: % has rows outside the bound; % binds new writes only', v_pair[1], v_pair[2];
-    END;
-  END LOOP;
-END;
-$validate$;
+  CHECK (cost_cents <= 1000000000);
 
 -- Unchanged from 20260720230000 except the COST_TOO_LARGE branch and the 0.001 package-quantity floor.
 CREATE OR REPLACE FUNCTION public.stage_supplier_price_import(
@@ -402,8 +401,12 @@ BEGIN
         'supplier_price_observations_cost_ceiling')) <> 3 THEN
     RAISE EXCEPTION 'POSTFLIGHT_CONSTRAINTS: expected the three checks';
   END IF;
-  RAISE NOTICE 'POSTFLIGHT_OK validated: %', (SELECT string_agg(c.conname || '=' || c.convalidated, ', ' ORDER BY c.conname)
-    FROM pg_constraint c WHERE c.conname IN ('product_supplier_links_conversion_floor',
-      'supplier_price_observations_package_quantity_floor', 'supplier_price_observations_cost_ceiling'));
+  IF EXISTS (SELECT 1 FROM pg_constraint c WHERE NOT c.convalidated AND c.conname IN (
+        'product_supplier_links_conversion_floor',
+        'supplier_price_observations_package_quantity_floor',
+        'supplier_price_observations_cost_ceiling')) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_CONSTRAINTS: every check must be validated';
+  END IF;
+  RAISE NOTICE 'POSTFLIGHT_OK';
 END;
 $postflight$;

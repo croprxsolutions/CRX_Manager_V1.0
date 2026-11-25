@@ -88,6 +88,19 @@ describe('Brand Links workbook tab', () => {
     });
   });
 
+  it('rejects a swapped download record even when the group and product have the same name and brand', () => {
+    const workbook = new Workbook();
+    addBrandDocumentSheet(workbook, [entry, { ...entry, id: 'standalone-brand', parent_brand: false, links: [] }]);
+    const sheet = workbook.getWorksheet('Brand Links')!;
+    const groupRecord = sheet.getCell('H2').value;
+    sheet.getCell('H2').value = sheet.getCell('H3').value;
+    sheet.getCell('H3').value = groupRecord;
+    expect(parseBrandDocumentSheet(workbook)).toEqual({ rows: [], issues: [
+      'Brand Links row 2 · Brand or product details changed. Download a fresh workbook.',
+      'Brand Links row 3 · Brand or product details changed. Download a fresh workbook.',
+    ] });
+  });
+
   it('refuses blocked hosts and accepts manufacturer URLs', () => {
     expect(() => checkedDocumentUrl('http://manufacturer.example/sds')).toThrow(/HTTPS/);
     expect(() => checkedDocumentUrl('https://docs.CDMS.net./example')).toThrow(/CDMS/);

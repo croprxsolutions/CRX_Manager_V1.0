@@ -11,19 +11,23 @@ vi.mock('../../lib/brandDocuments', async (actual) => ({
   changeBrandDocumentLinks: api.save,
 }));
 
-it('blocks workbook saving until the server approves the link changes', async () => {
+it.each([
+  ['BRAND_CHANGED: reload this brand before changing its document links', 'Trade brand changed. Download a fresh workbook.'],
+  ['BRAND_DOCUMENT_CHANGED: a matching document link already exists; reload this brand',
+    'A matching link already exists for Trade brand. Review it on Product Detail or clear the duplicate in the workbook.'],
+])('blocks workbook saving and explains the server refusal (%s)', async (error, message) => {
   const target = { id: 'brand-1', parent_brand: true, brand_version: 2 };
   const parsed: ParsedBrandDocuments = { issues: [], rows: [{
     target, ownerName: 'Product group', brandName: 'Trade brand',
     changes: [{ action: 'save', kind: 'sds', url: 'https://manufacturer.example/sds' }],
   }] };
   api.workspace.mockResolvedValue([{ ...target, owner_name: 'Product group', brand_name: 'Trade brand' }]);
-  api.preview.mockRejectedValue({ message: 'BRAND_CHANGED: reload this brand before changing its document links' });
+  api.preview.mockRejectedValue({ message: error });
   render(<BrandDocumentWorkbookPanel parsed={parsed} profileId="admin" parentBusy={false} onBusyChange={vi.fn()} />);
 
   const save = screen.getByRole('button', { name: 'Save brand links' });
   expect(save).toBeDisabled();
-  expect(await screen.findByText('Trade brand changed. Download a fresh workbook.')).toBeVisible();
+  expect(await screen.findByText(message)).toBeVisible();
   expect(api.preview).toHaveBeenCalledWith(target, parsed.rows[0].changes);
   expect(save).toBeDisabled();
   expect(api.save).not.toHaveBeenCalled();

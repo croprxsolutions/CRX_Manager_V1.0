@@ -36,8 +36,12 @@ function linkState(link: BrandDocumentLink): LinkState {
   return { id, row_version, url };
 }
 
+export function brandWorkbookOwnerLabel(name: string, parentBrand: boolean): string {
+  return `${name.trim()} (${parentBrand ? 'group' : 'product'})`;
+}
+
 function rowCells(state: DownloadRow): string[] {
-  return [state.owner_name, state.brand_name, state.specimen?.url ?? '', state.sds?.url ?? '',
+  return [brandWorkbookOwnerLabel(state.owner_name, state.parent_brand), state.brand_name, state.specimen?.url ?? '', state.sds?.url ?? '',
     '', '', '', JSON.stringify(state)];
 }
 
@@ -91,7 +95,7 @@ function downloaded(sheet: Worksheet, row: number): DownloadRow {
   if (typeof state.id !== 'string' || typeof state.parent_brand !== 'boolean'
       || !Number.isInteger(state.brand_version)
       || typeof state.brand_name !== 'string' || state.brand_name.trim() !== cell(sheet, row, 2)
-      || typeof state.owner_name !== 'string' || state.owner_name.trim() !== cell(sheet, row, 1)) {
+      || typeof state.owner_name !== 'string' || brandWorkbookOwnerLabel(state.owner_name, state.parent_brand) !== cell(sheet, row, 1)) {
     throw new Error('Brand or product details changed. Download a fresh workbook.');
   }
   for (const link of [state.specimen, state.sds]) {

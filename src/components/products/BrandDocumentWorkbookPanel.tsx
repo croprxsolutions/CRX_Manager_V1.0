@@ -6,8 +6,17 @@ import {
   type BrandDocumentWorkspaceRow,
 } from '../../lib/brandDocuments';
 import { sanitizeError } from '../../lib/errorSanitizer';
-import type { BrandDocumentImport, ParsedBrandDocuments } from '../../lib/productSetupBrandDocumentsWorkbook';
+import { brandWorkbookOwnerLabel, type BrandDocumentImport, type ParsedBrandDocuments } from '../../lib/productSetupBrandDocumentsWorkbook';
 import Button from '../ui/Button';
+
+function workbookConflictMessage(brand: string, error: unknown): string | null {
+  if (!isBrandDocumentConflict(error)) return null;
+  if (typeof error === 'object' && error !== null && 'message' in error
+      && String(error.message).startsWith('BRAND_DOCUMENT_CHANGED: a matching document link already exists')) {
+    return `A matching link already exists for ${brand}. Review it on Product Detail or clear the duplicate in the workbook.`;
+  }
+  return `${brand} changed. Download a fresh workbook.`;
+}
 
 async function previewRow(row: BrandDocumentImport, brand: BrandDocumentWorkspaceRow | undefined): Promise<string> {
   const changed = row.brandName + ' changed. Download a fresh workbook.';
@@ -16,9 +25,10 @@ async function previewRow(row: BrandDocumentImport, brand: BrandDocumentWorkspac
     await previewBrandDocumentLinks(row.target, row.changes);
     return '';
   } catch (err) {
+    const conflict = workbookConflictMessage(row.brandName, err);
+    if (conflict) return conflict;
     if (typeof err !== 'object' || err === null || !('message' in err)) throw err;
     const message = String(err.message);
-    if (isBrandDocumentConflict(err)) return changed;
     if (message.startsWith('BRAND_DOCUMENT_')) return row.brandName + ' · ' + sanitizeError(err);
     throw err;
   }
@@ -77,10 +87,8 @@ export default function BrandDocumentWorkbookPanel({ parsed, profileId, parentBu
           await changeBrandDocumentLinks(row.target, row.changes, getKeyFor(intent));
         } catch (err) {
           if (active.current) {
-            const stale = isBrandDocumentConflict(err);
-            const message = stale ? row.brandName + ' changed. Download a fresh workbook'
-              : row.brandName + ' · ' + sanitizeError(err);
-            setSaveError({ message, stale });
+            const conflict = workbookConflictMessage(row.brandName, err);
+            setSaveError({ message: conflict ?? `${row.brandName} · ${sanitizeError(err)}`, stale: conflict !== null });
           }
           return;
         }
@@ -107,7 +115,7 @@ export default function BrandDocumentWorkbookPanel({ parsed, profileId, parentBu
         <ul className="max-h-48 space-y-1 overflow-auto">
           {remaining.map((row) => (
             <li key={JSON.stringify([row.target.parent_brand, row.target.id])} className="text-sm">
-              {row.brandName} · {row.ownerName}
+              {row.brandName} · {brandWorkbookOwnerLabel(row.ownerName, row.target.parent_brand)}
               <ul className="pl-4 text-secondary">
                 {row.changes.map((change, index) => change.action === 'save' && (
                   <li key={index} className="break-all">
@@ -121,7 +129,7 @@ export default function BrandDocumentWorkbookPanel({ parsed, profileId, parentBu
         </ul>
       )}
       {issues.length > 0 && <ul className="text-red-700" role="alert">{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
-      {saveError && <p role="alert" className="text-red-700">{saveError.message}. Earlier confirmed brands remain saved.</p>}
+      {saveError && <p role="alert" className="text-red-700">{saveError.message} Earlier confirmed brands remain saved.</p>}
       <PreviewStatus preview={preview} disabled={parentBusy} />
       {remaining.length > 0 && (
         <Button disabled={parentBusy || !canSave} loading={saving}

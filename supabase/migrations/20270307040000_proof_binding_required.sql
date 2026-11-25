@@ -1,15 +1,15 @@
 -- idempotency-body-check: exempt -- _complete_delivery_authorized_impl only reads check_idempotency to skip a replay
 -- (#2324's body, unchanged); the key is saved by _complete_delivery_authorized_impl_20270122 and the evidence step.
 -- Written 2026-11-25. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270306210000_proof_binding_required.md.
+-- docs/reference/migrations.d/20270307040000_proof_binding_required.md.
 --
--- WHY: 20270306190000 checks the customer's proof against the load only when the proof carries a list of the lines
+-- WHY: 20270307030000 checks the customer's proof against the load only when the proof carries a list of the lines
 --   the screen showed. An old app copy (or a call queued before the screen fix) sends a signature with no list, and a
 --   ticket photo saved before the screen fix has none: both are still accepted, so Sol round 11 findings 1 and 2 on
 --   #2324 stay open for them. Mason (2026-11-24, contract Q2): make the binding required in the same release as the
 --   screen fix. Contract: docs/plans/2026-11-23-proof-bound-to-load-CONTRACT.md (step 4).
 --
--- WHAT: _complete_delivery_authorized_impl (20270306190000's body) changes two conditions, nothing else: a fresh
+-- WHAT: _complete_delivery_authorized_impl (20270307030000's body) changes two conditions, nothing else: a fresh
 --   completion is refused
 --     DELIVERY_LOAD_CHANGED      for a signature sent with no p_lines_seen (as for one that is not the same load);
 --     PAPER_TICKET_LOAD_CHANGED  for a ticket photo saved with no lines_seen, or one it cannot read (as for one that
@@ -26,8 +26,8 @@ DO $preflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
-     IS DISTINCT FROM 'f8cb36a8a97fe35abeade37ace956cfc' THEN
-    RAISE EXCEPTION 'PROOF_REQUIRED_PREFLIGHT: _complete_delivery_authorized_impl is not the reviewed 20270306190000 body';
+     IS DISTINCT FROM '92e373301409583f2f7fec1f0cb207ee' THEN
+    RAISE EXCEPTION 'PROOF_REQUIRED_PREFLIGHT: _complete_delivery_authorized_impl is not the reviewed 20270307030000 body';
   END IF;
 END
 $preflight$;
@@ -51,8 +51,8 @@ DECLARE
   v_status text;
   v_bad_figures boolean;
   v_product record;
-  v_binding jsonb;  -- 20270306190000
-  v_ticket_lines jsonb;  -- 20270306190000
+  v_binding jsonb;  -- 20270307030000
+  v_ticket_lines jsonb;  -- 20270307030000
 BEGIN
   -- KI-150: the delivery first (as the body does), then every stock row its lines can move, in product order, so two
   -- completions sharing products wait for each other instead of deadlocking. The body re-takes these locks.
@@ -107,7 +107,7 @@ BEGIN
     RAISE EXCEPTION 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'
       USING ERRCODE = 'check_violation';
   END IF;
-  -- 20270306190000: the customer's proof covers the load the screen showed when it was taken. Here, after the delivery
+  -- 20270307030000: the customer's proof covers the load the screen showed when it was taken. Here, after the delivery
   -- and line locks and every earlier rule (who may complete it, the replay decision, the evidence checks, nothing delivered), so
   -- the lines cannot change under it and every existing message comes first. Only the public wrappers set the binding,
   -- for this delivery; left at site and no proof are not checked.
@@ -116,7 +116,7 @@ BEGIN
     IF v_binding ->> 'delivery_id' IS DISTINCT FROM p_delivery_id::text THEN
       v_binding := NULL;
     END IF;
-    -- 20270306210000: required. A signature sent with no list (an old app copy, a queued call) is not proof of
+    -- 20270307040000: required. A signature sent with no list (an old app copy, a queued call) is not proof of
     -- this load either.
     IF v_binding ->> 'evidence' = 'signature'
        AND (NOT v_binding ? 'lines_seen'
@@ -131,7 +131,7 @@ BEGIN
           FROM public.delivery_photos ph
          WHERE ph.id = (v_binding ->> 'evidence_ref')::uuid AND ph.delivery_id = p_delivery_id;
       END IF;
-      -- 20270306210000: required. A photo saved with no list (before the screen fix), or one this step cannot
+      -- 20270307040000: required. A photo saved with no list (before the screen fix), or one this step cannot
       -- read, is not proof of this load (Luna).
       IF v_ticket_lines IS NULL OR NOT public._delivery_lines_match(p_delivery_id, v_ticket_lines, p_quantities) THEN
         RAISE EXCEPTION 'PAPER_TICKET_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the ticket photo was taken. Get the ticket signed for the current products and amounts and add a new photo of it. If the customer already has the goods, call the office.'
@@ -183,7 +183,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = 'a4f83e0ecc6849a226be620cef403cb6'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '3954d68e774e9bfc2955b1ea7753327a'
                     AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')

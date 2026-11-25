@@ -62,7 +62,7 @@ export default function NearCostConfirmations({ products, ticked, disabled, onTi
                   disabled={disabled}
                   onChange={(event) => onTickChange(product.product_id, event.target.checked)}
                 />
-                Yes, {product.tiers.length === 1 ? 'this price is' : `all ${product.tiers.length} prices above are`} meant to be this close to cost
+                Yes, {product.tiers.length === 1 ? 'this price and margin are' : `all ${product.tiers.length} prices and margins above are`} what I meant
               </label>
             </li>
           );

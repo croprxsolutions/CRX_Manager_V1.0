@@ -18,7 +18,7 @@ describe('NearCostConfirmations', () => {
     );
     expect(screen.getByText(/margin 0.35%: did you mean 35 for 35%\?/)).toBeInTheDocument();
     expect(screen.getByText(/Tier 3 \$6.52 on a cost of \$6.40/)).not.toHaveTextContent('did you mean');
-    const box = screen.getByRole('checkbox', { name: /all 2 prices above are meant/ });
+    const box = screen.getByRole('checkbox', { name: /all 2 prices and margins above are what I meant/ });
     expect(box).toHaveAccessibleDescription(/Roundup/);
     fireEvent.click(box);
     expect(onTickChange).toHaveBeenCalledWith('p1', true);

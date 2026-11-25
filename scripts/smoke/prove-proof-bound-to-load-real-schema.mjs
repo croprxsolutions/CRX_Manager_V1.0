@@ -31,7 +31,7 @@ const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270307160000_proof_bound_to_load.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-bound-to-load-reverse.sql');
 const REQUIRED_REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-binding-required-reverse.sql');
-const FOLLOW_UPS = [path.join(MIGRATIONS, '20270307040000_proof_binding_required.sql')];  // step 4: the binding is required
+const FOLLOW_UPS = [path.join(MIGRATIONS, '20270307190000_proof_binding_required.sql')];  // step 4: the binding is required
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -346,6 +346,8 @@ const completeTicket = (d, key, ph, lines) => `SELECT public.complete_delivery(p
     p_performed_by => '${ADMIN}', p_idempotency_key => '${key}', p_evidence => 'paper_ticket', p_evidence_ref => '${ph}'${lit(lines)})`;
 const startTicket = (d, key, ph) => `SELECT public.start_and_complete_delivery(p_delivery_id => '${d}', p_signed_by => '[PROVER] Customer',
     p_delivered_on => ${today}, p_performed_by => '${ADMIN}', p_idempotency_key => '${key}', p_evidence => 'paper_ticket', p_evidence_ref => '${ph}')`;
+const startLeft = (d, key, ph) => `SELECT public.start_and_complete_delivery(p_delivery_id => '${d}', p_signed_by => 'No one present — left at site',
+    p_delivered_on => ${today}, p_performed_by => '${ADMIN}', p_idempotency_key => '${key}', p_evidence => 'left_at_site', p_evidence_ref => '${ph}')`;
 const completeLeft = (d, key, ph, lines) => `SELECT public.complete_delivery(p_delivery_id => '${d}', p_signed_by => 'No one present — left at site',
     p_performed_by => '${ADMIN}', p_idempotency_key => '${key}', p_evidence => 'left_at_site', p_evidence_ref => '${ph}'${lit(lines)})`;
 const completeNoProof = (d, key, lines, actor = ADMIN) => `SELECT public.complete_delivery(p_delivery_id => '${d}', p_signed_by => 'No proof — recorded by office',
@@ -372,6 +374,7 @@ const money = () => scalar(`SELECT (SELECT quantity_available || '/' || quantity
     (SELECT string_agg(quantity_delivered || '/' || quantity_remaining, ',' ORDER BY id) FROM public.order_items WHERE order_id = '${ORD}') || ' ' ||
     (SELECT count(*) FROM public.invoice_items);`);
 const keySaved = (key) => scalar(`SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key = '${key}';`);
+const LEFT = /LEFT_AT_SITE_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the drop-location photo was taken\. Take a new photo of where the delivery was left, for the current products and amounts\./;
 const LOAD = /DELIVERY_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the customer signed\. Reload the delivery, check the products and amounts with the customer and get a new signature\. If the customer already has the goods, call the office\./;
 const TICKET = /PAPER_TICKET_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the ticket photo was taken\. Get the ticket signed for the current products and amounts and add a new photo of it\. If the customer already has the goods, call the office\./;
 
@@ -609,13 +612,13 @@ function afterCases() {
   console.log('[case 9] anon cannot call either completion; no client role can call the renamed bodies, the helper or the trigger function');
 }
 
-// Step 4 (20270307040000): proof with no list is refused like proof for another load; nothing else changes.
+// Step 4 (20270307190000): proof with no list is refused like proof for another load; nothing else changes.
 const STEP_MD5 = "SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure;";
 function requiredCases() {
   stageText('required.sql', lf(FOLLOW_UPS[0]));
   let r = apply('required.sql');
   assert.equal(r.status, 0, r.output);
-  assert.equal(scalar(STEP_MD5), '3954d68e774e9bfc2955b1ea7753327a');
+  assert.equal(scalar(STEP_MD5), '76f4276163b8d2183d3475887fbf67c3');
   let d = delivery(A(), 'in_progress');
   refused(completeSig(d, 'pbl-q1', undefined), LOAD);
   assert.equal(status(d), 'in_progress');
@@ -640,16 +643,30 @@ function requiredCases() {
   d = delivery(A());
   refused(startTicket(d, 'pbl-q4', photo(d, undefined)), TICKET);
   assert.equal(status(d), 'scheduled');
-  d = delivery(A(), 'in_progress'); ok(completeLeft(d, 'pbl-q5', photo(d, null, 'Left at site — drop location'))); assert.equal(status(d), 'completed');
+  // Mason 2026-11-25: the drop-location photo of a no-one-present stop is bound to the load like a ticket photo.
+  d = delivery(A(), 'in_progress');
+  refused(completeLeft(d, 'pbl-q5', photo(d, undefined, 'Left at site — drop location')), LEFT);
+  refused(completeLeft(d, 'pbl-q5n', photo(d, null, 'Left at site — drop location')), LEFT);
+  refused(completeLeft(d, 'pbl-q5b', photo(d, B(), 'Left at site — drop location')), LEFT);
+  refused(completeLeft(d, 'pbl-q5s', photo(d, null, 'Left at site — drop location'), A()), LEFT);
+  assert.equal(status(d), 'in_progress');
+  ok(completeLeft(d, 'pbl-q5a', photo(d, A(), 'Left at site — drop location')));
+  assert.equal(status(d), 'completed');
+  d = delivery(A());
+  refused(startLeft(d, 'pbl-q5m', photo(d, B(), 'Left at site — drop location')), LEFT);
+  assert.equal(status(d), 'scheduled');
+  ok(startLeft(d, 'pbl-q5ma', photo(d, A(), 'Left at site — drop location')));
+  assert.equal(status(d), 'completed');
   d = delivery(A(), 'in_progress'); ok(completeNoProof(d, 'pbl-q6')); assert.equal(status(d), 'completed');
-  console.log('[required] a signature with no list and a ticket photo saved with no list are refused (complete and Mark Delivered; the photo id in capitals too), nothing changes; with the list they complete; a replay with no list returns its receipt; left at site and no proof still complete');
+  console.log('[required] a signature with no list and a ticket photo saved with no list are refused (complete and Mark Delivered; the photo id in capitals too), nothing changes; with the list they complete; a replay with no list returns its receipt; a drop-location photo saved with no list or for another load is refused LEFT_AT_SITE_LOAD_CHANGED (complete and Mark Delivered, even when the call sends the right list), one for this load completes; no proof still completes');
   stageText('required-reverse.sql', lf(REQUIRED_REVERSE));
   r = apply('required-reverse.sql');
   assert.equal(r.status, 0, r.output);
   assert.equal(scalar(STEP_MD5), '92e373301409583f2f7fec1f0cb207ee');
   d = delivery(A(), 'in_progress'); ok(completeSig(d, 'pbl-q7', undefined)); assert.equal(status(d), 'completed');
   d = delivery(A(), 'in_progress'); ok(completeTicket(d, 'pbl-q8', photo(d, undefined))); assert.equal(status(d), 'completed');
-  console.log('[required rollback] its reverse script restores 20270307030000\'s step: proof with no list completes again');
+  d = delivery(A(), 'in_progress'); ok(completeLeft(d, 'pbl-q9', photo(d, B(), 'Left at site — drop location'))); assert.equal(status(d), 'completed');
+  console.log('[required rollback] its reverse script restores 20270307160000\'s step: proof with no list completes again');
 }
 
 function rollbackCases() {

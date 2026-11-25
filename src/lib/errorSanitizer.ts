@@ -532,7 +532,7 @@ export function sanitizeError(error: unknown): string {
   }
   // Partial completion figures (20270203120000, #1942), completing past the order (F05) and proof taken for another
   // load (20270307160000): the server sentence says what to do.
-  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER|DELIVERY_NOTHING_DELIVERED|DELIVERY_LOAD_CHANGED|PAPER_TICKET_LOAD_CHANGED):\s*(.+)$/s);
+  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER|DELIVERY_NOTHING_DELIVERED|DELIVERY_LOAD_CHANGED|PAPER_TICKET_LOAD_CHANGED|LEFT_AT_SITE_LOAD_CHANGED):\s*(.+)$/s);
   if (deliveryQuantities) {
     // The server sentences start lowercase (they follow the token); start the second sentence with a capital,
     // unless it starts with a mixed-case product name such as "pH Plus" (Sol r5 LOW). DELIVERY_EXCEEDS_ORDER always

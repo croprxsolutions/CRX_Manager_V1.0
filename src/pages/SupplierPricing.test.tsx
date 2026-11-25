@@ -382,11 +382,11 @@ describe('SupplierPricing page', () => {
       comparison_status: 'comparable', is_best_comparable: linkId === 'link-1',
     });
     // Each row is one case (5 gal), so cost_cents / 5 is the cost per gallon.
-    const row = (n: number, linkId: string, caseCents: bigint) => ({
+    const row = (n: number, linkId: string, caseCents: bigint, rowStatus = 'new') => ({
       id: `row-${n}`, row_number: n, product_id: 'product-1', product_name: 'Atrazine',
       product_supplier_link_id: linkId, supplier_sku: linkId, supplier_product_name: 'Atrazine 2x2.5',
       cost_cents: caseCents, price_unit: 'case', package_quantity: 1,
-      effective_from: `2026-07-${10 + n}`, effective_to: null, price_kind: 'quote', row_status: 'new',
+      effective_from: `2026-07-${10 + n}`, effective_to: null, price_kind: 'quote', row_status: rowStatus,
       validation_errors: [], observation_id: null,
     });
     mockGetWorkspace.mockResolvedValue({
@@ -417,7 +417,7 @@ describe('SupplierPricing page', () => {
       approved_observation_count: 0, created_at: '2026-07-18T12:00:00Z',
       rows: [
         row(1, 'link-1', 6_300n), // $12.60 per gal: exactly 40% above, no warning.
-        row(2, 'link-1', 6_305n), // $12.61 per gal: just over 40% above.
+        row(2, 'link-1', 6_305n, 'changed'), // $12.61 per gal: just over 40% above; a routine price update.
         row(3, 'link-1', 2_700n), // $5.40 per gal: exactly 40% below, no warning.
         row(4, 'link-1', 2_695n), // $5.39 per gal: just over 40% below.
         row(5, 'link-1', 450_000n), // $900.00 per gal: a 100x typo on link-1.

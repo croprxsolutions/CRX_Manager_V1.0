@@ -49,15 +49,16 @@ Follow-up to `2026-11-24-supplier-quote-unit-floor-CONTRACT.md` (Astra #4, plaus
   not pending (`new`, `changed`, `cannot_compare`), or the import is no longer `needs_review`. A staged cost is
   always above $0 (`COST_MUST_BE_POSITIVE`).
 - The text names the row's cost per unit, the current approved cost per unit and its effective date, and says the
-  warning does not block approval. The approve confirmation adds "Check first: N selected row(s) are far from the
-  current approved price." so a warned row cannot be approved unseen in a bulk approval.
+  warning does not block approval. The approve confirmation adds "Check first: N selected row(s) are more than 40%
+  away from the current approved price." so a warned row cannot be approved unseen in a bulk approval.
 
 ## Proof cases
 
 - Page test, one product with two links (link-1 $9.00/gal, link-2 $900.00/gal) and a third with no approved price:
   $12.60 (exactly +40%) and $5.40 (exactly -40%) are silent; $12.61 warns "more than 40% above", $5.39 "more than 40%
-  below", $900.00 on link-1 "more than 40% above"; $900.00 on link-2 (its own price) and on link-3 (no price) are silent. Approve stays
-  enabled and its confirmation says "Check first: 3 selected row(s) are more than 40% away…".
+  below", $900.00 on link-1 "more than 40% above"; $900.00 on link-2 (its own price) and on link-3 (no price) are
+  silent. The $12.61 row is a `changed` row (a routine price update), the rest `new`. Approve stays enabled; after
+  one warned row is deselected, its confirmation says "Check first: 2 selected row(s) are more than 40% away…".
 - When the warning line is removed from the screen, the page test fails. (run once by hand)
 - On staging, link UF-ARCH-1 (Atrazine 4L, 5 gal per case; workspace evidence on 2026-11-25: approved $40.00/case =
   $8.00/gal, effective 2026-11-25): a $40.00/case quick quote shows no warning; a $4,000.00/case quick quote shows
@@ -97,3 +98,9 @@ Follow-up to `2026-11-24-supplier-quote-unit-floor-CONTRACT.md` (Astra #4, plaus
 
 1. How far off triggers the warning. Recommended 3x; **Mason, 2026-11-25: more than a 40% swing either way, every
    product, no warning without a prior approved price, warning only.** Built that way.
+
+## Sol round 2 (gpt-6.2-sol high, head 3b3f347a3, CLEAN with 2 MED / 2 LOW), settled
+
+- MED rounding and MED stale workspace: the same two deferrals accepted under Sol round 1 above.
+- Fixed (test and contract only): the page test now includes a `changed` row that warns; this proof-case line now
+  matches the test's count of 2.

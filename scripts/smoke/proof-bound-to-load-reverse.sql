@@ -1,6 +1,6 @@
--- Rollback for 20270228100000_proof_bound_to_load.sql, proven by
+-- Rollback for 20270304120000_proof_bound_to_load.sql, proven by
 -- scripts/smoke/prove-proof-bound-to-load-real-schema.mjs.
--- Switches the check off: restores #2324's completion step (20270227180000) and nothing else. The wrappers' optional
+-- Switches the check off: restores #2324's completion step (20270303190000) and nothing else. The wrappers' optional
 -- p_lines_seen, delivery_photos.lines_seen and its trigger stay, so screens already open and queued calls that send
 -- them keep working, and the saved photo lists survive for a re-apply. If the later "binding required" migration is
 -- live, reverse that one first. To use it live, copy it into a new migration through the gates (without BEGIN /
@@ -12,9 +12,9 @@ BEGIN
   -- Restore only over the reviewed body, so a later change is never silently undone.
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-         AND md5(replace(p.prosrc, chr(13), '')) = '2edbb9a8e6f6a0e8923c0c6624006b9c'
+         AND md5(replace(p.prosrc, chr(13), '')) = '8f7a410f6bb7e627667a57d108e0cde9'
          AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']) THEN
-    RAISE EXCEPTION 'PROOF_LOAD_REVERSE: the completion step is not the 20270228100000 one; re-plan the rollback';
+    RAISE EXCEPTION 'PROOF_LOAD_REVERSE: the completion step is not the 20270304120000 one; re-plan the rollback';
   END IF;
 END
 $installed$;
@@ -74,7 +74,8 @@ BEGIN
 
   -- F05b #2274: nothing delivered is not a completion. The screens already refuse it (DeliveryDetail hasAnyQty,
   -- FieldStop); this is the server rule. Same figure per line as the body: the clamped figure sent for that line,
-  -- or the full scheduled quantity when no figures were sent. A delivery with no lines is refused too. Raised here,
+  -- or the full scheduled quantity when no figures were sent. Under 0.01 counts as nothing delivered (Mason, Slack
+  -- 2026-11-23: it must not make an invoice). A delivery with no lines is refused too. Raised here,
   -- after the delivery row lock and before this function's order-line and stock locks and any write (the caller may
   -- already hold its stock locks; the refusal rolls the whole call back). A replay (v_status 'replay') is never checked.
   -- The lines are locked too. Today a direct line write already locks the delivery row first (the parent-lock
@@ -87,8 +88,8 @@ BEGIN
                       WHERE di.delivery_id = p_delivery_id
                         AND CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
                                  THEN GREATEST(0, LEAST((p_quantities ->> di.id::text)::numeric, di.quantity))
-                                 ELSE di.quantity END > 0) THEN
-    RAISE EXCEPTION 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero. If nothing was delivered, call the office.'
+                                 ELSE di.quantity END >= 0.01) THEN
+    RAISE EXCEPTION 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'
       USING ERRCODE = 'check_violation';
   END IF;
 
@@ -135,7 +136,7 @@ DO $restored$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-         AND md5(replace(p.prosrc, chr(13), '')) = '2a7d8883d3767f93e2571a429898d683'
+         AND md5(replace(p.prosrc, chr(13), '')) = '09c2a3efd16258c66bea74b7b7b86151'
          AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']
          AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
          AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')

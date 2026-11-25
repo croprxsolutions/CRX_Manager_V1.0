@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270228100000_proof_bound_to_load.sql (contract
+ * Real-schema proof for 20270304120000_proof_bound_to_load.sql (contract
  * docs/plans/2026-11-23-proof-bound-to-load-CONTRACT.md): a customer's signature or ticket photo completes a delivery
  * only for the load the screen showed when it was taken.
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container, replays
- * every post-baseline migration before the candidate (#2324's 20270227180000 included; harness from the F05b prover),
+ * every post-baseline migration before the candidate (#2324's 20270303190000 included; harness from the F05b prover),
  * shows the gap, applies the candidate beside a half-done completion, then runs every case as real committed calls
  * by the signed-in admin or driver, reading state back from a new connection. Ends with the reverse script.
  *
@@ -28,7 +28,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270228100000_proof_bound_to_load.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270304120000_proof_bound_to_load.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-bound-to-load-reverse.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
@@ -271,9 +271,9 @@ const ORD = id('e1'), OI = id('e11'), OI2 = id('e12'), OI3 = id('e13');
 const today = "(now() AT TIME ZONE 'America/Chicago')::date";
 const sha32 = (s) => createHash('sha256').update(s, 'utf8').digest('hex').slice(0, 32);
 const sigPath = (d, key) => `signatures/${d}/${sha32(key)}.png`;
-const A = (q = 2) => [{ order_item_id: OI, product_id: P, quantity: q }];  // the load the customer saw
-const B = (q = 2) => [{ order_item_id: OI3, product_id: P2, quantity: q }];  // the load dispatch swapped in
-const editItems = (lines) => lines.map((l) => ({ ...l, unit_size: 'Gal' }));
+const A = (q = 2, dl = q) => [{ order_item_id: OI, product_id: P, quantity: q, delivered: dl }];  // the load the customer saw
+const B = (q = 2, dl = q) => [{ order_item_id: OI3, product_id: P2, quantity: q, delivered: dl }];  // the load dispatch swapped in
+const editItems = (lines) => lines.map(({ delivered, ...l }) => ({ ...l, unit_size: 'Gal' }));
 const lit = (v) => (v === undefined ? '' : `, p_lines_seen => ${v === null ? 'NULL' : J(v)}`);
 const AS = (uid) => `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true); SET LOCAL ROLE authenticated;`;
 
@@ -371,8 +371,8 @@ const money = () => scalar(`SELECT (SELECT quantity_available || '/' || quantity
     (SELECT string_agg(quantity_delivered || '/' || quantity_remaining, ',' ORDER BY id) FROM public.order_items WHERE order_id = '${ORD}') || ' ' ||
     (SELECT count(*) FROM public.invoice_items);`);
 const keySaved = (key) => scalar(`SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key = '${key}';`);
-const LOAD = /DELIVERY_LOAD_CHANGED: the products on this delivery changed after the customer signed\. Reload the delivery, check the products with the customer and get a new signature\. If the customer already has the goods, call the office\./;
-const TICKET = /PAPER_TICKET_LOAD_CHANGED: the products on this delivery changed after the ticket photo was taken\. Get the current ticket signed and add a new photo of it\. If the customer already has the goods, call the office\./;
+const LOAD = /DELIVERY_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the customer signed\. Reload the delivery, check the products and amounts with the customer and get a new signature\. If the customer already has the goods, call the office\./;
+const TICKET = /PAPER_TICKET_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the ticket photo was taken\. Get the ticket signed for the current products and amounts and add a new photo of it\. If the customer already has the goods, call the office\./;
 
 let GAP;
 function beforeCases() {
@@ -446,27 +446,59 @@ function afterCases() {
   assert.equal(status(d), 'scheduled');
   console.log('[case 3] ticket photo taken for A, load swapped to B: refused PAPER_TICKET_LOAD_CHANGED through complete and Mark Delivered; a photo taken for B completes');
 
+  // 3q. Sol round 11 on #2324: the delivered amounts are part of the proof. Delivery Detail: the driver enters 0.005,
+  //     the customer signs, nothing-delivered refuses it; the driver changes it to 0.05 and sends the old signature.
+  d = delivery(A(), 'in_progress');
+  const qLine = scalar(`SELECT id FROM public.delivery_items WHERE delivery_id = '${d}';`);
+  const partial = (key, lines, figure) => completeSig(d, key, lines).replace(', p_lines_seen', `, p_quantities => ${J({ [qLine]: figure })}, p_lines_seen`);
+  refused(partial('pbl-3q-a', A(2, 0.005), 0.005), /DELIVERY_NOTHING_DELIVERED/);
+  before = money();
+  refused(partial('pbl-3q-b', A(2, 0.005), 0.05), LOAD);
+  refused(partial('pbl-3q-c', A(2, 2), 0.05), LOAD);  // signed for the full load, partial sent
+  assert.equal(status(d), 'in_progress');
+  assert.equal(money(), before);
+  ok(partial('pbl-3q-d', A(2, 0.05), 0.05));
+  assert.equal(status(d), 'completed');
+  // Full delivery after signing for a partial one, and a figure over the scheduled amount (kept to it on both sides).
+  d = delivery(A(), 'in_progress');
+  refused(completeSig(d, 'pbl-3q-e', A(2, 1)), LOAD);
+  const oLine = scalar(`SELECT id FROM public.delivery_items WHERE delivery_id = '${d}';`);
+  ok(completeSig(d, 'pbl-3q-f', A(2, 7)).replace(', p_lines_seen', `, p_quantities => ${J({ [oLine]: 9 })}, p_lines_seen`));
+  assert.equal(status(d), 'completed');
+  // A ticket photo taken with one amount, completed with another: refused; through Mark Delivered too.
+  d = delivery(A(), 'in_progress');
+  const tLine = scalar(`SELECT id FROM public.delivery_items WHERE delivery_id = '${d}';`);
+  ph = photo(d, A(2, 1));
+  refused(completeTicket(d, 'pbl-3q-g', ph), TICKET);
+  ok(`${completeTicket(d, 'pbl-3q-h', ph).slice(0, -1)}, p_quantities => ${J({ [tLine]: 1 })})`);
+  assert.equal(status(d), 'completed');
+  d = delivery(A());
+  refused(startTicket(d, 'pbl-3q-i', photo(d, A(2, 1))), TICKET);
+  assert.equal(status(d), 'scheduled');
+  console.log('[case 3q] amounts: a signature taken at 0.005 cannot complete 0.05 (nor full-load proof a partial, nor partial proof a full load); a ticket photo taken at another amount is refused (complete and Mark Delivered); the matching amount completes, and figures over the scheduled amount are kept to it on both sides');
+
   // 4. What counts as the same load.
   d = delivery([{ order_item_id: OI, product_id: P, quantity: 2 }, { order_item_id: OI2, product_id: P, quantity: 1 }], 'in_progress');
-  const both = [{ order_item_id: OI, product_id: P, quantity: 2 }, { order_item_id: OI2, product_id: P, quantity: 1 }];
+  const both = [{ order_item_id: OI, product_id: P, quantity: 2, delivered: 2 }, { order_item_id: OI2, product_id: P, quantity: 1, delivered: 1 }];
   refused(completeSig(d, 'pbl-4q', [both[0], { ...both[1], quantity: 3 }]), LOAD);  // quantity changed
   refused(completeSig(d, 'pbl-4m', [both[0]]), LOAD);  // a line added since
-  refused(completeSig(d, 'pbl-4x', [...both, { order_item_id: OI3, product_id: P2, quantity: 1 }]), LOAD);  // a line removed since
+  refused(completeSig(d, 'pbl-4x', [...both, { order_item_id: OI3, product_id: P2, quantity: 1, delivered: 1 }]), LOAD);  // a line removed since
   refused(completeSig(d, 'pbl-4d', [both[0], both[0]]), LOAD);  // same count, wrong entries
   refused(completeSig(d, 'pbl-4dd', [both[0], both[0], both[1]]), LOAD);  // one entry twice (a multiset, not a set)
   refused(`${completeSig(d, 'pbl-4j', undefined).slice(0, -1)}, p_lines_seen => 'null'::jsonb)`, LOAD);  // a JSON null is sent, not absent
   for (const [k, bad] of [['o', { order_item_id: OI, product_id: P, quantity: 2 }], ['f', [{ product_id: P, quantity: 2 }, both[1]]],
-    ['s', [{ ...both[0], quantity: '2' }, both[1]]], ['n', [{ ...both[0], order_item_id: null }, both[1]]], ['e', []]]) {
+    ['s', [{ ...both[0], quantity: '2' }, both[1]]], ['ds', [{ ...both[0], delivered: '2' }, both[1]]],
+    ['dm', [{ order_item_id: OI, product_id: P, quantity: 2 }, both[1]]], ['n', [{ ...both[0], order_item_id: null }, both[1]]], ['e', []]]) {
     refused(completeSig(d, `pbl-4${k}`, bad), LOAD);  // malformed: object, missing field, string quantity, null id, empty
   }
   assert.equal(status(d), 'in_progress');
   // Reordered, upper-case ids and 2.0 for 2 are the same load.
-  ok(completeSig(d, 'pbl-4ok', [{ ...both[1], order_item_id: OI2.toUpperCase() }, { ...both[0], quantity: 2.0 }]));
+  ok(completeSig(d, 'pbl-4ok', [{ ...both[1], order_item_id: OI2.toUpperCase() }, { ...both[0], quantity: 2.0, delivered: 2.00 }]));
   assert.equal(status(d), 'completed');
   // Dispatch re-saves an identical list (every line re-created with a new id): the proof still counts.
   d = delivery(A());
   const oldIds = scalar(`SELECT string_agg(id::text, ',') FROM public.delivery_items WHERE delivery_id = '${d}';`);
-  swap(d, [{ order_item_id: OI, product_id: P, quantity: 2 }], 'pbl-4r-edit');
+  swap(d, A(), 'pbl-4r-edit');
   assert.notEqual(scalar(`SELECT string_agg(id::text, ',') FROM public.delivery_items WHERE delivery_id = '${d}';`), oldIds, 'the re-save must re-create the lines');
   start(d, 'pbl-4r-start');
   ok(completeSig(d, 'pbl-4r', A()));
@@ -550,10 +582,10 @@ function afterCases() {
     assert.equal(scalar(`SELECT has_function_privilege('anon', '${sig}', 'EXECUTE');`), 'f', sig);
     assert.equal(scalar(`SELECT has_function_privilege('authenticated', '${sig}', 'EXECUTE');`), 't', sig);
   }
-  for (const sig of ['public._delivery_lines_match(uuid,jsonb)', 'public._delivery_photo_lines_seen_kept()',
+  for (const sig of ['public._delivery_lines_match(uuid,jsonb,jsonb)', 'public._delivery_photo_lines_seen_kept()',
     'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)',
-    'public._complete_delivery_brands_impl_20270228(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone,text,text,boolean,bigint)',
-    'public._start_and_complete_delivery_brands_impl_20270228(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint)']) {
+    'public._complete_delivery_brands_impl_20270304(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone,text,text,boolean,bigint)',
+    'public._start_and_complete_delivery_brands_impl_20270304(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint)']) {
     for (const role of ['anon', 'authenticated', 'service_role']) {
       assert.equal(scalar(`SELECT has_function_privilege('${role}', '${sig}', 'EXECUTE');`), 'f', `${role} ${sig}`);
     }
@@ -566,7 +598,7 @@ function rollbackCases() {
   const r = apply('reverse.sql');
   assert.equal(r.status, 0, r.output);
   assert.equal(scalar("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure;"),
-    '2a7d8883d3767f93e2571a429898d683');
+    '09c2a3efd16258c66bea74b7b7b86151');
   // The new inputs stay: a screen that sends the list, or saved a photo with one, keeps working; the check is off.
   let d = delivery(A());
   swap(d, B(), 'pbl-r-edit');

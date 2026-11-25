@@ -1,15 +1,16 @@
 -- idempotency-body-check: exempt -- _complete_delivery_authorized_impl only reads check_idempotency to skip a replay
 -- (#2324's body, unchanged); the key is saved by _complete_delivery_authorized_impl_20270122 and the evidence step.
--- Written 2026-11-23. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270228100000_proof_bound_to_load.md.
+-- Written 2026-11-23, extended 2026-11-24 (delivered amounts). STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
+-- docs/reference/migrations.d/20270304120000_proof_bound_to_load.md.
 --
 -- WHY: a customer's proof (an on-screen signature, or a photo of the signed paper ticket) must complete a delivery only
---   for the products the screen showed when the proof was taken (Sol round 7 on #2324, findings 1 and 2).
---   Contract: docs/plans/2026-11-23-proof-bound-to-load-CONTRACT.md. Needs #2324 (20270227180000) applied first.
+--   for the products the screen showed when the proof was taken (Sol round 7 on #2324, findings 1 and 2),
+--   and for the delivered amounts the screen showed then (Sol round 11 on #2324: 0.005 signed, 0.05 sent).
+--   Contract: docs/plans/2026-11-23-proof-bound-to-load-CONTRACT.md. Needs #2324 (20270303190000) applied first.
 --
 -- WHAT:
 --   * delivery_photos.lines_seen: the lines the screen showed when the photo was taken ([{order_item_id, product_id,
---     quantity}]), written by the app with the photo row; an update never changes it (trigger).
+--     quantity, delivered}]), written by the app with the photo row; an update never changes it (trigger).
 --   * complete_delivery and start_and_complete_delivery gain a last optional p_lines_seen (same shape: the lines the
 --     screen showed when the customer signed). Today's functions are renamed unchanged behind thin wrappers that keep
 --     the names, earlier parameters, defaults and grants (the 20270104120000 pattern) and pass the proof down in the
@@ -18,15 +19,17 @@
 --     and line locks and every earlier rule: a fresh completion is refused
 --       DELIVERY_LOAD_CHANGED      for a signature sent with p_lines_seen that is not the same load;
 --       PAPER_TICKET_LOAD_CHANGED  for a ticket photo whose lines_seen is not the same load.
---     "The same load": the same (order line, product, quantity) entries, counted as a multiset, quantity compared as a
---     number; line ids are not compared, so re-saving an identical list keeps the proof good.
+--     "The same load": the same (order line, product, scheduled quantity, delivered amount) entries, counted as a
+--     multiset, amounts compared as numbers; the delivered amount is this call's figure for the line (kept between 0 and
+--     the scheduled quantity) or the scheduled quantity when none is sent. Line ids are not compared, so re-saving an
+--     identical list keeps the proof good.
 --
 -- NOT CHANGED: every other body; a call with no binding (today's app, offline sync), left-at-site photos and no-proof
 --   records; existing photos (lines_seen NULL, accepted as today); completed deliveries and saved receipts (a replay
 --   never reaches the check). Making the binding required is a later migration (contract step 4).
 --
--- caller-analysis: complete_delivery :: renamed to _complete_delivery_brands_impl_20270228 (no client EXECUTE); a new public.complete_delivery with the same earlier parameters plus optional p_lines_seen keeps today's grants (authenticated, service_role), so Deliveries.tsx, DeliveryDetail.tsx, FieldStop.tsx, offline sync and _start_and_complete_delivery_impl_20270104 keep calling it unchanged
--- caller-analysis: start_and_complete_delivery :: renamed to _start_and_complete_delivery_brands_impl_20270228 (no client EXECUTE); a new public.start_and_complete_delivery with the same earlier parameters plus optional p_lines_seen keeps today's grant (authenticated only), so Deliveries.tsx keeps calling it unchanged
+-- caller-analysis: complete_delivery :: renamed to _complete_delivery_brands_impl_20270304 (no client EXECUTE); a new public.complete_delivery with the same earlier parameters plus optional p_lines_seen keeps today's grants (authenticated, service_role), so Deliveries.tsx, DeliveryDetail.tsx, FieldStop.tsx, offline sync and _start_and_complete_delivery_impl_20270104 keep calling it unchanged
+-- caller-analysis: start_and_complete_delivery :: renamed to _start_and_complete_delivery_brands_impl_20270304 (no client EXECUTE); a new public.start_and_complete_delivery with the same earlier parameters plus optional p_lines_seen keeps today's grant (authenticated only), so Deliveries.tsx keeps calling it unchanged
 -- actor-binding-check: exempt -- the wrappers take no actor of their own and write nothing; the renamed bodies bind
 -- p_performed_by to auth.uid() exactly as before.
 
@@ -38,8 +41,8 @@ DO $preflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
-     IS DISTINCT FROM '2a7d8883d3767f93e2571a429898d683' THEN
-    RAISE EXCEPTION 'PROOF_LOAD_PREFLIGHT: _complete_delivery_authorized_impl is not the reviewed 20270227180000 (#2324) body';
+     IS DISTINCT FROM '09c2a3efd16258c66bea74b7b7b86151' THEN
+    RAISE EXCEPTION 'PROOF_LOAD_PREFLIGHT: _complete_delivery_authorized_impl is not the reviewed 20270303190000 (#2324) body';
   END IF;
   IF to_regprocedure('public.complete_delivery(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone,text,text,boolean,bigint)') IS NULL
      OR (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'complete_delivery') <> 1
@@ -57,7 +60,7 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM information_schema.columns
               WHERE table_schema = 'public' AND table_name = 'delivery_photos' AND column_name = 'lines_seen')
-     OR to_regprocedure('public._delivery_lines_match(uuid,jsonb)') IS NOT NULL THEN
+     OR to_regprocedure('public._delivery_lines_match(uuid,jsonb,jsonb)') IS NOT NULL THEN
     RAISE EXCEPTION 'PROOF_LOAD_PREFLIGHT: already applied';
   END IF;
 END
@@ -68,7 +71,7 @@ $preflight$;
 ALTER TABLE public.delivery_photos ADD COLUMN lines_seen jsonb
   CONSTRAINT delivery_photos_lines_seen_is_list CHECK (lines_seen IS NULL OR jsonb_typeof(lines_seen) = 'array');
 COMMENT ON COLUMN public.delivery_photos.lines_seen IS
-  'The lines the app showed when this photo was taken ([{order_item_id, product_id, quantity}]), written by the app with the row; never changed after (trigger trigger_delivery_photo_lines_seen_kept). A paper-ticket completion is refused PAPER_TICKET_LOAD_CHANGED unless it is the same load (20270228100000). NULL: not checked.';
+  'The lines the app showed when this photo was taken ([{order_item_id, product_id, quantity, delivered}]), written by the app with the row; never changed after (trigger trigger_delivery_photo_lines_seen_kept). A paper-ticket completion is refused PAPER_TICKET_LOAD_CHANGED unless it is the same load (20270304120000). NULL: not checked.';
 
 CREATE FUNCTION public._delivery_photo_lines_seen_kept()
 RETURNS trigger
@@ -89,11 +92,14 @@ CREATE TRIGGER trigger_delivery_photo_lines_seen_kept
   BEFORE UPDATE ON public.delivery_photos
   FOR EACH ROW EXECUTE FUNCTION public._delivery_photo_lines_seen_kept();
 
--- 2. True only when p_lines is the delivery's current load: an array of objects, each with a string order_item_id and
---    product_id and a JSON-number quantity, holding exactly the current (order line, product, quantity) entries, each
---    as many times as on the delivery. Ids are compared as the database writes them (hyphenated, any case), the form
---    the screens read and send. Anything malformed is "not the same load".
-CREATE FUNCTION public._delivery_lines_match(p_delivery_id uuid, p_lines jsonb)
+-- 2. True only when p_lines is the delivery's current load with this call's delivered amounts: an array of objects,
+--    each with a string order_item_id and product_id and JSON-number quantity and delivered, holding exactly the
+--    current (order line, product, scheduled quantity, delivered amount) entries, each as many times as on the delivery.
+--    The delivered amount is the one the body delivers: the figure sent for the line (p_quantities), kept between 0 and
+--    the scheduled quantity, or the scheduled quantity when no figures were sent; the screen's figure is kept the same
+--    way. Ids are compared as the database writes them (hyphenated, any case). Anything malformed is "not the same".
+--    Sol round 11 on #2324: a signature taken with 0.005 must not complete a delivery of 0.05.
+CREATE FUNCTION public._delivery_lines_match(p_delivery_id uuid, p_lines jsonb, p_quantities jsonb)
 RETURNS boolean
 LANGUAGE plpgsql
 STABLE
@@ -108,27 +114,36 @@ BEGIN
               WHERE jsonb_typeof(e) IS DISTINCT FROM 'object'
                  OR jsonb_typeof(e -> 'order_item_id') IS DISTINCT FROM 'string'
                  OR jsonb_typeof(e -> 'product_id') IS DISTINCT FROM 'string'
-                 OR jsonb_typeof(e -> 'quantity') IS DISTINCT FROM 'number') THEN
+                 OR jsonb_typeof(e -> 'quantity') IS DISTINCT FROM 'number'
+                 OR jsonb_typeof(e -> 'delivered') IS DISTINCT FROM 'number') THEN
     RETURN false;
   END IF;
   RETURN NOT EXISTS (
-    (SELECT lower(e ->> 'order_item_id'), lower(e ->> 'product_id'), (e ->> 'quantity')::numeric
+    (SELECT lower(e ->> 'order_item_id'), lower(e ->> 'product_id'), (e ->> 'quantity')::numeric,
+            GREATEST(0, LEAST((e ->> 'delivered')::numeric, (e ->> 'quantity')::numeric))
        FROM jsonb_array_elements(p_lines) e
      EXCEPT ALL
-     SELECT di.order_item_id::text, di.product_id::text, di.quantity
+     SELECT di.order_item_id::text, di.product_id::text, di.quantity,
+            CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
+                 THEN GREATEST(0, LEAST((p_quantities ->> di.id::text)::numeric, di.quantity))
+                 ELSE di.quantity END
        FROM public.delivery_items di WHERE di.delivery_id = p_delivery_id)
     UNION ALL
-    (SELECT di.order_item_id::text, di.product_id::text, di.quantity
+    (SELECT di.order_item_id::text, di.product_id::text, di.quantity,
+            CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
+                 THEN GREATEST(0, LEAST((p_quantities ->> di.id::text)::numeric, di.quantity))
+                 ELSE di.quantity END
        FROM public.delivery_items di WHERE di.delivery_id = p_delivery_id
      EXCEPT ALL
-     SELECT lower(e ->> 'order_item_id'), lower(e ->> 'product_id'), (e ->> 'quantity')::numeric
+     SELECT lower(e ->> 'order_item_id'), lower(e ->> 'product_id'), (e ->> 'quantity')::numeric,
+            GREATEST(0, LEAST((e ->> 'delivered')::numeric, (e ->> 'quantity')::numeric))
        FROM jsonb_array_elements(p_lines) e));
 END;
 $function$;
-ALTER FUNCTION public._delivery_lines_match(uuid, jsonb) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public._delivery_lines_match(uuid, jsonb) FROM PUBLIC, anon, authenticated, service_role;
+ALTER FUNCTION public._delivery_lines_match(uuid, jsonb, jsonb) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._delivery_lines_match(uuid, jsonb, jsonb) FROM PUBLIC, anon, authenticated, service_role;
 
--- 3. The shared completion step: #2324's body with one added block (marked 20270228100000).
+-- 3. The shared completion step: #2324's body with one added block (marked 20270304120000).
 CREATE OR REPLACE FUNCTION public._complete_delivery_authorized_impl(
   p_delivery_id uuid,
   p_signed_by text,
@@ -148,8 +163,8 @@ DECLARE
   v_status text;
   v_bad_figures boolean;
   v_product record;
-  v_binding jsonb;  -- 20270228100000
-  v_ticket_lines jsonb;  -- 20270228100000
+  v_binding jsonb;  -- 20270304120000
+  v_ticket_lines jsonb;  -- 20270304120000
 BEGIN
   -- KI-150: the delivery first (as the body does), then every stock row its lines can move, in product order, so two
   -- completions sharing products wait for each other instead of deadlocking. The body re-takes these locks.
@@ -186,7 +201,8 @@ BEGIN
 
   -- F05b #2274: nothing delivered is not a completion. The screens already refuse it (DeliveryDetail hasAnyQty,
   -- FieldStop); this is the server rule. Same figure per line as the body: the clamped figure sent for that line,
-  -- or the full scheduled quantity when no figures were sent. A delivery with no lines is refused too. Raised here,
+  -- or the full scheduled quantity when no figures were sent. Under 0.01 counts as nothing delivered (Mason, Slack
+  -- 2026-11-23: it must not make an invoice). A delivery with no lines is refused too. Raised here,
   -- after the delivery row lock and before this function's order-line and stock locks and any write (the caller may
   -- already hold its stock locks; the refusal rolls the whole call back). A replay (v_status 'replay') is never checked.
   -- The lines are locked too. Today a direct line write already locks the delivery row first (the parent-lock
@@ -199,11 +215,11 @@ BEGIN
                       WHERE di.delivery_id = p_delivery_id
                         AND CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
                                  THEN GREATEST(0, LEAST((p_quantities ->> di.id::text)::numeric, di.quantity))
-                                 ELSE di.quantity END > 0) THEN
-    RAISE EXCEPTION 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero. If nothing was delivered, call the office.'
+                                 ELSE di.quantity END >= 0.01) THEN
+    RAISE EXCEPTION 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'
       USING ERRCODE = 'check_violation';
   END IF;
-  -- 20270228100000: the customer's proof covers the load the screen showed when it was taken. Here, after the delivery
+  -- 20270304120000: the customer's proof covers the load the screen showed when it was taken. Here, after the delivery
   -- and line locks and every earlier rule (who may complete it, the replay decision, the evidence checks, nothing delivered), so
   -- the lines cannot change under it and every existing message comes first. Only the public wrappers set the binding,
   -- for this delivery; a call with none (today's app, offline sync, left at site, no proof) is not checked.
@@ -213,8 +229,8 @@ BEGIN
       v_binding := NULL;
     END IF;
     IF v_binding ->> 'evidence' = 'signature' AND v_binding ? 'lines_seen'
-       AND NOT public._delivery_lines_match(p_delivery_id, v_binding -> 'lines_seen') THEN
-      RAISE EXCEPTION 'DELIVERY_LOAD_CHANGED: the products on this delivery changed after the customer signed. Reload the delivery, check the products with the customer and get a new signature. If the customer already has the goods, call the office.'
+       AND NOT public._delivery_lines_match(p_delivery_id, v_binding -> 'lines_seen', p_quantities) THEN
+      RAISE EXCEPTION 'DELIVERY_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the customer signed. Reload the delivery, check the products and amounts with the customer and get a new signature. If the customer already has the goods, call the office.'
         USING ERRCODE = 'check_violation';
     END IF;
     IF v_binding ->> 'evidence' = 'paper_ticket'
@@ -223,8 +239,8 @@ BEGIN
       SELECT ph.lines_seen INTO v_ticket_lines
         FROM public.delivery_photos ph
        WHERE ph.id = (v_binding ->> 'evidence_ref')::uuid AND ph.delivery_id = p_delivery_id;
-      IF v_ticket_lines IS NOT NULL AND NOT public._delivery_lines_match(p_delivery_id, v_ticket_lines) THEN
-        RAISE EXCEPTION 'PAPER_TICKET_LOAD_CHANGED: the products on this delivery changed after the ticket photo was taken. Get the current ticket signed and add a new photo of it. If the customer already has the goods, call the office.'
+      IF v_ticket_lines IS NOT NULL AND NOT public._delivery_lines_match(p_delivery_id, v_ticket_lines, p_quantities) THEN
+        RAISE EXCEPTION 'PAPER_TICKET_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the ticket photo was taken. Get the ticket signed for the current products and amounts and add a new photo of it. If the customer already has the goods, call the office.'
           USING ERRCODE = 'check_violation';
       END IF;
     END IF;
@@ -273,8 +289,8 @@ REVOKE ALL ON FUNCTION public._complete_delivery_authorized_impl(uuid, text, uui
 --    nested complete_delivery call inside start_and_complete_delivery (which passes no p_lines_seen) keeps the outer
 --    binding, and nothing is left after the outer call. A refusal rolls the setting back with everything else.
 ALTER FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text, boolean, bigint)
-  RENAME TO _complete_delivery_brands_impl_20270228;
-REVOKE ALL ON FUNCTION public._complete_delivery_brands_impl_20270228(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text, boolean, bigint)
+  RENAME TO _complete_delivery_brands_impl_20270304;
+REVOKE ALL ON FUNCTION public._complete_delivery_brands_impl_20270304(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text, boolean, bigint)
   FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE FUNCTION public.complete_delivery(
@@ -290,7 +306,7 @@ CREATE FUNCTION public.complete_delivery(
   p_evidence_ref text DEFAULT NULL::text,
   p_email_receipt boolean DEFAULT NULL::boolean,
   p_brand_base_seq bigint DEFAULT NULL::bigint,
-  p_lines_seen jsonb DEFAULT NULL::jsonb  -- 20270228100000
+  p_lines_seen jsonb DEFAULT NULL::jsonb  -- 20270304120000
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -312,7 +328,7 @@ BEGIN
     v_binding := v_binding || jsonb_build_object('lines_seen', NULLIF(v_prior, '')::jsonb -> 'lines_seen');
   END IF;
   PERFORM set_config('crx.proof_binding', v_binding::text, true);
-  v_result := public._complete_delivery_brands_impl_20270228(p_delivery_id, p_signed_by, p_performed_by, p_quantities,
+  v_result := public._complete_delivery_brands_impl_20270304(p_delivery_id, p_signed_by, p_performed_by, p_quantities,
     p_issue_type, p_issue_notes, p_idempotency_key, p_completed_at, p_evidence, p_evidence_ref, p_email_receipt,
     p_brand_base_seq);
   PERFORM set_config('crx.proof_binding', COALESCE(v_prior, ''), true);
@@ -323,11 +339,11 @@ ALTER FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, tex
 REVOKE ALL ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text, boolean, bigint, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text, boolean, bigint, jsonb) TO authenticated, service_role;
 COMMENT ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text, boolean, bigint, jsonb) IS
-  'Completes a delivery (body: _complete_delivery_brands_impl_20270228). p_brand_base_seq as before (20270104120000). p_lines_seen (20270228100000): the lines the screen showed when the customer signed ([{order_item_id, product_id, quantity}]); a fresh signature completion is refused DELIVERY_LOAD_CHANGED unless it is the same load. A paper-ticket photo whose lines_seen is not the same load is refused PAPER_TICKET_LOAD_CHANGED.';
+  'Completes a delivery (body: _complete_delivery_brands_impl_20270304). p_brand_base_seq as before (20270104120000). p_lines_seen (20270304120000): the lines the screen showed when the customer signed ([{order_item_id, product_id, quantity, delivered}]); a fresh signature completion is refused DELIVERY_LOAD_CHANGED unless it is the same load. A paper-ticket photo whose lines_seen is not the same load is refused PAPER_TICKET_LOAD_CHANGED.';
 
 ALTER FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text, text, text, text, text, bigint)
-  RENAME TO _start_and_complete_delivery_brands_impl_20270228;
-REVOKE ALL ON FUNCTION public._start_and_complete_delivery_brands_impl_20270228(uuid, text, date, uuid, jsonb, text, text, text, text, text, bigint)
+  RENAME TO _start_and_complete_delivery_brands_impl_20270304;
+REVOKE ALL ON FUNCTION public._start_and_complete_delivery_brands_impl_20270304(uuid, text, date, uuid, jsonb, text, text, text, text, text, bigint)
   FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE FUNCTION public.start_and_complete_delivery(
@@ -342,7 +358,7 @@ CREATE FUNCTION public.start_and_complete_delivery(
   p_evidence text DEFAULT NULL,
   p_evidence_ref text DEFAULT NULL,
   p_brand_base_seq bigint DEFAULT NULL,
-  p_lines_seen jsonb DEFAULT NULL  -- 20270228100000
+  p_lines_seen jsonb DEFAULT NULL  -- 20270304120000
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -356,7 +372,7 @@ BEGIN
   PERFORM set_config('crx.proof_binding', (jsonb_build_object('delivery_id', p_delivery_id, 'evidence', p_evidence,
     'evidence_ref', p_evidence_ref) || CASE WHEN p_lines_seen IS NULL THEN '{}'::jsonb
                                        ELSE jsonb_build_object('lines_seen', p_lines_seen) END)::text, true);
-  v_result := public._start_and_complete_delivery_brands_impl_20270228(p_delivery_id, p_signed_by, p_delivered_on,
+  v_result := public._start_and_complete_delivery_brands_impl_20270304(p_delivery_id, p_signed_by, p_delivered_on,
     p_performed_by, p_quantities, p_issue_type, p_issue_notes, p_idempotency_key, p_evidence, p_evidence_ref,
     p_brand_base_seq);
   PERFORM set_config('crx.proof_binding', COALESCE(v_prior, ''), true);
@@ -367,17 +383,17 @@ ALTER FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb,
 REVOKE ALL ON FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text, text, text, text, text, bigint, jsonb) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text, text, text, text, text, bigint, jsonb) TO authenticated;
 COMMENT ON FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text, text, text, text, text, bigint, jsonb) IS
-  'Starts and completes a delivery in one call (body: _start_and_complete_delivery_brands_impl_20270228). p_brand_base_seq and p_lines_seen as on complete_delivery.';
+  'Starts and completes a delivery in one call (body: _start_and_complete_delivery_brands_impl_20270304). p_brand_base_seq and p_lines_seen as on complete_delivery.';
 
 DO $postflight$
 DECLARE
   v_fn text;
 BEGIN
   FOREACH v_fn IN ARRAY ARRAY[
-    'public._delivery_lines_match(uuid,jsonb)', 'public._delivery_photo_lines_seen_kept()',
+    'public._delivery_lines_match(uuid,jsonb,jsonb)', 'public._delivery_photo_lines_seen_kept()',
     'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)',
-    'public._complete_delivery_brands_impl_20270228(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone,text,text,boolean,bigint)',
-    'public._start_and_complete_delivery_brands_impl_20270228(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint)'
+    'public._complete_delivery_brands_impl_20270304(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone,text,text,boolean,bigint)',
+    'public._start_and_complete_delivery_brands_impl_20270304(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint)'
   ] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = to_regprocedure(v_fn)
                     AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']
@@ -389,7 +405,7 @@ BEGIN
   END LOOP;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
-     IS DISTINCT FROM '2edbb9a8e6f6a0e8923c0c6624006b9c'
+     IS DISTINCT FROM '8f7a410f6bb7e627667a57d108e0cde9'
      OR (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'complete_delivery') <> 1
      OR (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'start_and_complete_delivery') <> 1
      OR has_function_privilege('anon', 'public.complete_delivery(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone,text,text,boolean,bigint,jsonb)', 'EXECUTE')

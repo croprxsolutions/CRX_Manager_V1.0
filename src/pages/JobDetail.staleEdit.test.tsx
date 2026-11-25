@@ -176,14 +176,17 @@ describe('JobDetail edit-version load and replay (Sol round 12)', () => {
     expect(savePayloads()).toHaveLength(0);
   });
 
-  it('a replayed save skips the follow-ups and reloads the job', async () => {
+  it('a replayed save logs, skips the follow-ups and reloads the job', async () => {
     saveResult = { data: { job_id: 'job-a', replayed: true }, error: null };
     await openJob();
     const jobReads = order.filter((o) => o === 'jobs').length;
     await clickSave();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringMatching(/reloaded it: check the crew, loader and applicator/)));
     await waitFor(() => expect(order.filter((o) => o === 'jobs').length).toBe(jobReads + 1));
-    expect(mockLog).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'job_updated' }));
+    // Logged once: the first attempt's reply was lost before its own log.
+    expect(mockLog).toHaveBeenCalledTimes(1);
+    expect(mockLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'job_updated' }));
+    expect(mockToast).not.toHaveBeenCalledWith('success', expect.anything());
   });
 
   it('a normal save still runs to the end', async () => {

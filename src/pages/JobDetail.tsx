@@ -3018,6 +3018,8 @@ export default function JobDetail() {
       // and override-applicator follow-ups below are not version-checked and could overwrite a newer change, so they
       // are skipped and the job is reloaded instead (Sol round 12, 20270302160000).
       if (result.replayed) {
+        // The first attempt's lost reply never reached the logger below.
+        if (profile) logActivity({ event: isNew ? 'job_created' : 'job_updated', description: isNew ? `Job created for ${customers.find(c => c.id === customerId)?.farm_name}` : `Job ${jobNumber} updated`, performedBy: profile.id });
         if (overrideReasonForAudit) {
           await writeOverrideAudit(overrideReasonForAudit, isNew ? result.job_id : (id || null));
         }
@@ -5567,8 +5569,9 @@ export default function JobDetail() {
         onDispatched={(sent) => {
           setDispatchWizardOpen(false);
           // Our own dispatch is not someone else's change: move just those locations' dispatch strings forward.
+          // A late reply after the user moved to another job must not touch that job's version.
           const v = loadedJobVersionRef.current;
-          if (v) loadedJobVersionRef.current = withOwnDispatches(v, sent);
+          if (v && routeIdRef.current === id) loadedJobVersionRef.current = withOwnDispatches(v, sent);
         }}
       />
     </div>

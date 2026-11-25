@@ -124,8 +124,11 @@ describe('Field Setup — FP-1 split versions', () => {
   it('thirds save as exact micro-percents and show 33.33% each', async () => {
     await open();
     fireEvent.click(screen.getByRole('button', { name: 'Add customer to billing split' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Split Evenly' }));
+    const evenly = screen.getByRole('button', { name: 'Split Evenly' });
+    expect(evenly.parentElement?.closest('button')).toBeNull(); // not nested in the open/close button (known issue 2026-11-25)
+    fireEvent.click(evenly);
     expect(screen.getAllByDisplayValue('33.33')).toHaveLength(6);
+    expect(screen.getByRole('button', { name: /Default Billing/ })).toHaveAttribute('aria-expanded', 'true'); // still open
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
     await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
     const sent = calls('set_field_billing_split')[0];
@@ -236,6 +239,51 @@ describe('Field Setup — FP-1 split versions', () => {
     } finally {
       VERSIONS.shift();
     }
+  });
+
+  it('warns, without blocking, when someone else changed the same payer note after the page opened', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('Notes for Landlord Farm'), { target: { value: 'Old tab note' } });
+    notes = [{ customer_id: 'customer-2', notes: 'Newer note from tab 1' }];
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    expect(await screen.findByText('Note changed since you opened this field')).toBeInTheDocument();
+    expect(screen.getByText(/note for Landlord Farm to "Newer note from tab 1"/)).toBeInTheDocument();
+    expect(calls('set_field_billing_split')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Save mine anyway' }));
+    await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+    expect(calls('set_field_billing_split')[0]).toMatchObject({ p_notes: [{ customer_id: 'customer-2', notes: 'Old tab note' }] });
+  });
+
+  it('a different, even newer note after "Save mine anyway" warns again', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('Notes for Landlord Farm'), { target: { value: 'Old tab note' } });
+    notes = [{ customer_id: 'customer-2', notes: 'Newer note' }];
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await screen.findByText('Note changed since you opened this field');
+    notes = [{ customer_id: 'customer-2', notes: 'Newest note' }];
+    fireEvent.click(screen.getByRole('button', { name: 'Save mine anyway' }));
+    expect(await screen.findByText(/note for Landlord Farm to "Newest note"/)).toBeInTheDocument();
+    expect(calls('set_field_billing_split')).toHaveLength(0);
+  });
+
+  it('a failed re-read never stops a notes save', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('Notes for Landlord Farm'), { target: { value: 'Call first' } });
+    mockFrom.mockImplementation((t: string) => (t === 'field_payer_notes'
+      ? { select: () => ({ eq: () => Promise.resolve({ data: null, error: { message: 'down' } }) }) }
+      : tables(t)));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+    expect(screen.queryByText('Note changed since you opened this field')).not.toBeInTheDocument();
+  });
+
+  it('no note warning when another payer note changed, or the newer note already matches', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('Notes for Owner Farm'), { target: { value: 'Gate code 42' } });
+    notes = [{ customer_id: 'customer-1', notes: 'Gate code 42' }, { customer_id: 'customer-2', notes: 'Changed elsewhere' }];
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+    expect(screen.queryByText('Note changed since you opened this field')).not.toBeInTheDocument();
   });
 
   it('after a failed notes save, what the user did not touch takes what others saved meanwhile', async () => {

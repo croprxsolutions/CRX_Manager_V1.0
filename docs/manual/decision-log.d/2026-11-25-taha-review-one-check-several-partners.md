@@ -5,4 +5,4 @@
 **What this forbids/implies:**
 - Payments and returns are Taha's lane until Dec 15. He offered to design one-check-several-partners together with the split-returns work (one "split return" entry pre-filled per partner by billed share); that design is his.
 - Until it is built, the separate-deposit-per-partner workaround stays the way staff record such a check. Do not build a parallel version outside Taha's design.
-- Timing and scope of the build are not decided here.
+- Timing (Taha, reply in #crx-work, 2026-11-25): Taha builds it in late December together with split returns. The separate-deposits workaround is fine for the trial until then.

@@ -2931,7 +2931,7 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 // names are present in the full snapshot, and the pending M4 functions are
 // explicitly retained in the staging schema overlay.
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
-  'change_brand_document_links', // 20270303160000. Prune once generated types cover this RPC.
+  'change_brand_document_links', // 20270305140000. Prune once generated types cover this RPC.
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
   'set_registration_adjuvants',
@@ -2956,13 +2956,13 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   carry_last_size_document_reports:
-    'membership update trigger (20270303160000): transfers reports inside the keyed move only, with API-role EXECUTE revoked',
+    'membership update trigger (20270305140000): transfers reports inside the keyed move only, with API-role EXECUTE revoked',
   _process_brand_document_links:
-    'private helper (20270303160000): API-role EXECUTE is revoked and writes run only within the keyed save',
+    'private helper (20270305140000): API-role EXECUTE is revoked and writes run only within the keyed save',
   preview_brand_document_links:
-    'read-only workbook validation (20270303160000): invokes the private helper with the preview flag fixed to true, skipping every lock and write',
+    'read-only workbook validation (20270305140000): invokes the private helper with the preview flag fixed to true, skipping every lock and write',
   carry_grouped_brand_document_links:
-    'constraint trigger only (20270303160000): it runs on the protected mapping writes of the keyed grouping approval, with API-role EXECUTE revoked',
+    'constraint trigger only (20270305140000): it runs on the protected mapping writes of the keyed grouping approval, with API-role EXECUTE revoked',
   // Generated public-schema functions are not necessarily app-callable RPCs.
   _delivery_brand_event:
     "private SECURITY DEFINER delivery-brand history writer called within keyed brand workflows; live catalog denies EXECUTE to anon, authenticated, and service_role",

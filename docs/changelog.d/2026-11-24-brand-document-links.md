@@ -2,4 +2,4 @@
 
 - The database can store a specimen label, a safety data sheet, and supplemental links with state and expiration for each brand. Admins enter and correct links. Staff can report a broken link. Reports and admin resolutions leave an append-only history.
 - Agreeing links carry into new groups. Conflicting links stop the grouping or size move and identify the brand and document to reconcile.
-- Migration `20270303160000_brand_document_links.sql`. The product screens and workbook are a separate change.
+- Migration `20270305140000_brand_document_links.sql`. The product screens and workbook are a separate change.

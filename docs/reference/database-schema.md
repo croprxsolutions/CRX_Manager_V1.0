@@ -164,7 +164,7 @@ Columns below are from `.claude/schema-registry.json`; read the named migrations
 
 `product_brands`: the real brands that may fill a (usually generic) product, one row per brand. Columns: `product_id` (RESTRICT), `brand_name` (trimmed, ≤200, unique per product ignoring case), `epa_registration` (nullable; `524-475` / `100-1234-5905` shape), `manufacturer`, `is_currently_sourced`, `is_rup` (nullable = not yet confirmed; restricted use belongs to the registration, so brands of one generic can differ), `signal_word` (`Danger`/`Warning`/`Caution`/NULL), `row_version`, `created_by`/`updated_by` (profiles, RESTRICT), `created_at`/`updated_at` (trigger). `UNIQUE (product_id, id)` lets a later table bind a brand to its own product. RLS: SELECT for active profiles only; no API role can write (writes go through `upsert_product_brand`, admin only); service_role and metabase_ro have no access. Rows are retired, never deleted. Quotes, prices and cost stay on the product; delivery capture comes in PR B (`docs/plans/2026-10-22-product-brands-step1-PLAN.md`).
 
-### Brand documents (`20270303160000_brand_document_links.sql`, local candidate)
+### Brand documents (`20270305140000_brand_document_links.sql`, local candidate)
 
 `brand_document_links` belongs to one standalone or parent brand. It stores the document kind, HTTPS address, optional state and expiry for supplemental links, version, hidden date, report and timestamps. Active staff can read visible links for current brands. Active admins can also read past records and report metadata. Only the database workflows write links and reports.
 

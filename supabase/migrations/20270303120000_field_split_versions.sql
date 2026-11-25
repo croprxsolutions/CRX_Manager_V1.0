@@ -493,7 +493,7 @@ BEGIN
              OR (e ? 'pricing_note' AND jsonb_typeof(e->'pricing_note') NOT IN ('string', 'null'))) THEN
       RAISE EXCEPTION 'FIELD_PAYER_NOTES_INVALID: notes are a list of {customer_id, notes, pricing_note}' USING ERRCODE = '22023';
     END IF;
-    IF (SELECT count(DISTINCT e->>'customer_id') FROM jsonb_array_elements(p_notes) e) <> jsonb_array_length(p_notes) THEN
+    IF (SELECT count(DISTINCT (e->>'customer_id')::uuid) FROM jsonb_array_elements(p_notes) e) <> jsonb_array_length(p_notes) THEN
       RAISE EXCEPTION 'FIELD_PAYER_NOTES_INVALID: a customer is listed twice' USING ERRCODE = '22023';
     END IF;
     -- Notes belong to the field's owner, a customer on one of its split versions, or a customer who already has a
@@ -580,12 +580,6 @@ BEGIN
   IF p_payers IS NULL AND p_notes IS NULL THEN
     RAISE EXCEPTION 'FIELD_SPLIT_NOTHING_TO_SAVE: send a split, notes, or both' USING ERRCODE = '22023';
   END IF;
-  -- Until FP-4 (job billing reads split history), a split change starts Central today only (Mason, 2026-11-24).
-  IF p_payers IS NOT NULL AND p_effective_from IS NOT NULL AND isfinite(p_effective_from)
-     AND p_effective_from <> public._field_split_today_20270303() THEN
-    RAISE EXCEPTION 'FIELD_SPLIT_STARTS_TODAY_UNTIL_FP4: until billing reads split history, a split change starts today (%)',
-      public._field_split_today_20270303() USING ERRCODE = '22023';
-  END IF;
 
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor, 'p_field_id', p_field_id, 'p_effective_from', p_effective_from, 'p_payers', p_payers,
@@ -593,6 +587,13 @@ BEGIN
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'set_field_billing_split', v_actor, v_fingerprint);
   IF v_replay IS NOT NULL THEN
     RETURN v_replay -> 'result';
+  END IF;
+  -- Until FP-4 (job billing reads split history), a split change starts Central today only (Mason, 2026-11-24);
+  -- checked after the replay lookup so a save made just before midnight can still be retried after it.
+  IF p_payers IS NOT NULL AND p_effective_from IS NOT NULL AND isfinite(p_effective_from)
+     AND p_effective_from <> public._field_split_today_20270303() THEN
+    RAISE EXCEPTION 'FIELD_SPLIT_STARTS_TODAY_UNTIL_FP4: until billing reads split history, a split change starts today (%)',
+      public._field_split_today_20270303() USING ERRCODE = '22023';
   END IF;
 
   v_result := public._set_field_billing_split_20270303(p_field_id, p_effective_from, p_payers, p_notes, p_reason, v_actor, true);

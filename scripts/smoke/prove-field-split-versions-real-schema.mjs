@@ -162,6 +162,8 @@ try {
   assert.equal(copy(F1), `${A}:100.000000:true:-`, 'the copy leaves out a 0% product payer');
   r = commit(USERS.admin, asUser(`${setSplit(F6, TODAY, 'NULL', 'k-notes-only', `'[{"customer_id":"${B}","notes":"rpc note"}]'::jsonb`)} v := r::text;`));
   assert.match(r, /^ok\|.*"version_number": 1.*"wrote_version": false|^ok\|.*"wrote_version": false.*"version_number": 1/, `a notes-only RPC save reports the in-force version: ${r}`);
+  r = attempt(USERS.admin, `${refuse(setSplit(F6, TODAY, 'NULL', 'k-notes-dup', `'[{"customer_id":"${B}","notes":"a"},{"customer_id":"${B.toUpperCase()}","notes":"b"}]'::jsonb`))} v := t;`);
+  assert.match(r, /a customer is listed twice/, `the same customer in two spellings is refused by name: ${r}`);
   console.log('[writer] thirds exact; RPC and direct refusals; 0% payers save');
 
   // 3. save_field (the old Field Setup screen).

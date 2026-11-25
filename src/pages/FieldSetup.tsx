@@ -378,8 +378,10 @@ function FieldSetupPage() {
   // Only the newest field read may set the page: moving to another field (or Try again) can
   // start one while an older read is still in flight.
   const fieldLoadSeqRef = useRef(0);
-  const fetchField = useCallback(async () => {
-    if (!id) return;
+  // Returns true when the page shows this field's saved state. afterSave: the save already went through, so a failed
+  // read says that instead of "Failed to load field" (one message, not a success plus a load error).
+  const fetchField = useCallback(async (afterSave = false): Promise<boolean> => {
+    if (!id) return false;
     const seq = ++fieldLoadSeqRef.current;
     const superseded = () => seq !== fieldLoadSeqRef.current;
     // Moving to another field must not leave the previous field's form usable while this one loads.
@@ -393,14 +395,14 @@ function FieldSetupPage() {
       .select('*, customer:customers!fields_customer_id_fkey(farm_name)')
       .eq('id', id)
       .maybeSingle();
-    if (superseded()) return;
+    if (superseded()) return false;
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_field' } });
-      toast('error', 'Failed to load field');
+      toast('error', afterSave ? 'Field updated, but it could not be reloaded.' : 'Failed to load field');
       setLoadError(true);
       setLoading(false);
-      return;
+      return false;
     }
     if (data) {
       const { customer: _customer, ...fieldRow } = data;
@@ -416,10 +418,14 @@ function FieldSetupPage() {
       // Fetch GeoJSON for map display
       let loadedBoundary: Feature<Polygon | MultiPolygon> | null = null;
       const { data: geoData, error: geoError } = await supabase.rpc('get_field_geojson', { p_field_id: id });
-      if (superseded()) return;
-      if (geoError) {
-        Sentry.captureException(geoError, { tags: { source: 'fetch', action: 'load_field_geometry' } });
-        toast('warning', 'Could not load field boundary');
+      if (superseded()) return false;
+      if (geoError || geoData == null) {
+        // Show the retry screen, not an endless loading screen (and never a form missing its saved boundary).
+        Sentry.captureException(toSentryError(geoError ?? new Error('get_field_geojson returned no data')), { tags: { source: 'fetch', action: 'load_field_geometry' } });
+        toast('error', afterSave ? 'Field updated, but it could not be reloaded.' : 'Failed to load field');
+        setLoadError(true);
+        setLoading(false);
+        return false;
       }
       const geoRows = assertRpcResult<Array<{ boundary_geojson?: string; centroid_geojson?: string }>>(geoData, 'get_field_geojson');
       if (geoRows && geoRows.length > 0) {
@@ -453,7 +459,7 @@ function FieldSetupPage() {
       // Load multi-polygon data if available. Older boundaries without field_polygons are
       // converted into the same DrawnPolygon state so adding a second part is additive too.
       const { data: polyData, error: polyError } = await supabase.rpc('get_field_polygons', { p_field_id: id });
-      if (superseded()) return;
+      if (superseded()) return false;
       let loadedPolygons: DrawnPolygon[] = [];
       if (!polyError && polyData) {
         const polyRows = assertRpcResult<Array<{ id: string; polygon_geojson: object; label: string | null; acres: number | null; sort_order: number }>>(polyData, 'get_field_polygons');
@@ -485,14 +491,14 @@ function FieldSetupPage() {
         setToday(day);
         splitData = await loadFieldSplit(id, day);
       } catch (splitError) {
-        if (superseded()) return;
+        if (superseded()) return false;
         Sentry.captureException(toSentryError(splitError), { tags: { source: 'fetch', action: 'load_field_split_versions' } });
-        toast('error', 'Failed to load field');
+        toast('error', afterSave ? 'Field updated, but it could not be reloaded.' : 'Failed to load field');
         setLoadError(true);
         setLoading(false);
-        return;
+        return false;
       }
-      if (superseded()) return;
+      if (superseded()) return false;
       if (splitData.history.length > 0) setBillingOpen(true);
       applySplitData(splitData);
     } else {
@@ -504,6 +510,7 @@ function FieldSetupPage() {
     setLoadError(false);
     setLoading(false);
     setTimeout(() => { initialLoadDone.current = true; }, 0);
+    return true;
   }, [id, toast, applySplitData]);
 
   useEffect(() => {
@@ -693,7 +700,26 @@ function FieldSetupPage() {
     return true;
   };
 
-  const handleSave = async () => {
+  // After a failed split save, compare the user's edit against what is really saved now: a lost reply may have saved
+  // it. The edit on screen stays; only the clean state, history and version the next save starts from are refreshed.
+  const refreshSplitBaseline = async (fieldId: string) => {
+    try {
+      const data = await loadFieldSplit(fieldId, localToday());
+      if (fieldId !== id) return; // moved to another field meanwhile
+      loadedSplitsRef.current = splitRowsFrom(data.inForce);
+      loadedNotesRef.current = data.notes;
+      setSplitHistory(data.history);
+      setInForceSplit(data.inForce);
+    } catch (refreshError) {
+      // The save error is already on screen; the next save still compares against the last known split.
+      Sentry.captureException(toSentryError(refreshError), { tags: { source: 'fetch', action: 'refresh_field_split_after_failed_save' } });
+    }
+  };
+
+  // Low-friction field rule (Mason, 2026-11-25): someone else's newer split is a warning, never a block.
+  const [staleSplit, setStaleSplit] = useState<SplitVersion | null>(null);
+
+  const handleSave = async (staleChecked = false) => {
     if (!field.field_name) {
       toast('error', 'Field name is required');
       return;
@@ -722,6 +748,19 @@ function FieldSetupPage() {
     }
 
     setSaving(true);
+    if (splitChanged && !isNew && id && !staleChecked) {
+      try {
+        const latest = (await loadFieldSplit(id, localToday())).history[0] ?? null;
+        if (latest && latest.id !== (splitHistory[0]?.id ?? null)) {
+          setStaleSplit(latest);
+          setSaving(false);
+          return;
+        }
+      } catch (checkError) {
+        // Only a warning: a failed check must not stop the save.
+        Sentry.captureException(toSentryError(checkError), { tags: { source: 'fetch', action: 'check_field_split_changed' } });
+      }
+    }
     try {
       const fieldPayload = fieldPayloadOf(field);
       const detailsChanged = isNew || JSON.stringify(fieldPayload) !== JSON.stringify(fieldPayloadOf(loadedFieldRef.current ?? {}));
@@ -858,7 +897,10 @@ function FieldSetupPage() {
           ? await saveSplitAndNotes(savedFieldId, splitChanged, notesChanges, isNew)
           : null;
         const splitSaved = splitResult === true;
-        if (splitResult === false) persistError = true;
+        if (splitResult === false) {
+          persistError = true;
+          if (!isNew) await refreshSplitBaseline(savedFieldId);
+        }
         if (detailsChanged) loadedFieldRef.current = field; // saved: a retry after a later failure skips save_field
 
         const savedAcres = acresPatch;
@@ -877,7 +919,10 @@ function FieldSetupPage() {
 
         if (splitSaved && !isNew) {
           // Mason 2026-11-24: after a split save the page reloads fresh instead of merging the reply (it is locked meanwhile).
-          await fetchField();
+          if (!(await fetchField(true))) {
+            setSaving(false);
+            return;
+          }
         } else if (savedAcres) {
           // the synced acres are saved, not an edit
           adoptSavedBaselineRef.current = isNew ? null : { field, splits: billingSplits };
@@ -1580,7 +1625,7 @@ function FieldSetupPage() {
           )}
 
           <div className="flex justify-end">
-            <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>
+            <Button icon={<Save className="w-4 h-4" />} onClick={() => void handleSave()} loading={saving} disabled={legalLookupLoading} title={legalLookupLoading ? 'Wait for the legal lookup to finish' : undefined}>
               {isNew ? 'Create Field' : 'Save Changes'}
             </Button>
           </div>
@@ -1823,6 +1868,21 @@ function FieldSetupPage() {
         message="This removes only this section from the field boundary. Save the field to apply the updated boundary."
         confirmLabel="Delete section"
         variant="danger"
+      />
+
+      <ConfirmModal
+        open={staleSplit !== null}
+        onClose={() => setStaleSplit(null)}
+        onConfirm={() => {
+          setStaleSplit(null);
+          void handleSave(true);
+        }}
+        title="Split changed by someone else"
+        message={staleSplit
+          ? `${staleSplit.created_by_name ?? 'Someone'} saved a new billing split (version ${staleSplit.version_number}) on ${new Date(staleSplit.created_at).toLocaleString()} after you opened this field. Saving replaces it with yours. To see theirs first, cancel and reload the page.`
+          : ''}
+        confirmLabel="Save mine anyway"
+        variant="warning"
       />
 
       <ConfirmModal

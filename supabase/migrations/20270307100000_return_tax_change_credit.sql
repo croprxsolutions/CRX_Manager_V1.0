@@ -485,7 +485,7 @@ BEGIN
                        - s.other_returned_cents)
                   OR ol.unit_price_cents IS DISTINCT FROM round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint)
         ) THEN
-          RAISE EXCEPTION 'RETURN_REPRICE_OTHER_RETURN_PENDING: another open return of this product for this customer still has its old price; cancel it and create it again, then retry';
+          RAISE EXCEPTION 'RETURN_REPRICE_OTHER_RETURN_PENDING: another open return of this product for this customer still has its old price; cancel that return, finish this one, then create the other again';
         END IF;
         WITH fresh AS (
           SELECT ri.id, ri.order_item_id, ri.quantity, ri.unit_price_cents AS old_unit_price_cents,
@@ -882,7 +882,7 @@ BEGIN
                      - s.other_returned_cents)
                 OR ol.unit_price_cents IS DISTINCT FROM round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint)
       ) THEN
-        RAISE EXCEPTION 'RETURN_REPRICE_OTHER_RETURN_PENDING: another open return of this product for this customer still has its old price; cancel it and create it again, then retry';
+        RAISE EXCEPTION 'RETURN_REPRICE_OTHER_RETURN_PENDING: another open return of this product for this customer still has its old price; cancel that return, finish this one, then create the other again';
       END IF;
       WITH fresh AS (
         SELECT ri.id, ri.order_item_id, ri.quantity, ri.unit_price_cents AS old_unit_price_cents,

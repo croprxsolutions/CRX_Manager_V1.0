@@ -281,7 +281,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^RETURN_OLDER_RETURN_AT_ORDER_PRICE\b/i,
    "An older return of this product for this customer was priced before the sale's tax or discount and has not been credited yet. Credit or cancel that return first, then create this one. No changes were saved"],
   [/^RETURN_REPRICE_OTHER_RETURN_PENDING\b/i,
-   "Another open return of this product for this customer still has the price from before the sale's tax or discount changed. Cancel that return and create it again, then try this one again. No changes were saved"],
+   "Another open return of this product for this customer still has the price from before the sale's tax or discount changed. Cancel that return, finish this one, then create the other return again. No changes were saved"],
   [/^RETURN_SPLIT_SHARE_REPRICED\b/i,
    "An earlier return of this product was cancelled or rejected after this one was made, so this return's credit is out of date. Cancel this return and create it again to price it correctly. No changes were saved"],
   [/^RETURN_SPLIT_CREDIT_UNBACKED\b/i,

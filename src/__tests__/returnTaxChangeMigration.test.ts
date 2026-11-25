@@ -51,7 +51,9 @@ describe('20270307100000 return credit after a tax change, and the tax ledger ti
     const refusal = b.indexOf("RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'");
     expect(refusal).toBeGreaterThan(0);
     expect(refusal).toBeLessThan(b.indexOf('UPDATE public.return_items ri'));
-    expect(b.indexOf("RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'")).toBeLessThan(b.indexOf('UPDATE public.return_items ri'));
+    const unit = b.indexOf("RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'");
+    expect(unit).toBeGreaterThan(0);
+    expect(unit).toBeLessThan(b.indexOf('UPDATE public.return_items ri'));
   });
 
   it('create_return records how it priced each line', () => {

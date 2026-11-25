@@ -65,7 +65,7 @@ Read at `origin/staging` ef21134fc, 2026-11-24. Related: KNOWN_ISSUES "Pricing w
 
 ## Screen half (2026-11-24)
 
-- `src/pages/Products.tsx` asks the function only when the upload's preview is refused with one of the three combined codes and the parsed sheet has an export id. `NONE`, an unknown code or a failed lookup keeps the earlier message (`priceSheetRefusalText` / `sanitizeError`). An answer that arrives after another file was chosen is dropped (an upload counter).
+- `src/pages/Products.tsx` asks the function only when the upload's preview is refused with one of the three combined codes and the parsed sheet has an export id. `NONE`, an unknown code or a failed lookup keeps the earlier message (`priceSheetRefusalText` / `sanitizeError`). Only the latest chosen file may show a review or a message: every pick, even one refused before it is read, bumps an upload counter, and an earlier file's late review, error or reason is dropped (#20; Luna r1 MED, r2 HIGH, each with a failing-then-passing page test).
 - The apply step is unchanged: a refusal there keeps `sanitizeError`, and a lost apply response is checked in pricing history (#17).
 - Sentences (`priceSheetReasonText` in `src/lib/productPricingWorkbook.ts`) each start "No prices were changed." and end with "download a fresh one". `ALREADY_APPLIED` says the sheet "was already used for a price change" and points at a product's Sell Price History, not "these edits went live" (#1, #44). `EXPIRED` reuses the existing expired sentence.
 - `DOWNLOADED_BY_OTHER_USER`, `EXPIRED` and `OLD_TEMPLATE` cannot be produced on staging (one admin, 7-day sheets, v2-only downloads); unit and page tests cover them.

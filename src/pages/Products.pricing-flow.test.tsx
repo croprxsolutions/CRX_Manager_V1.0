@@ -753,6 +753,30 @@ describe('Products governed inline pricing flow', () => {
       expect(mockToast).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+      ['a review', true],
+      ['an error', false],
+    ])('drops %s for an earlier file once a newer file is chosen', async (_label, succeeds) => {
+      const preview = { ...(await inlinePreview()), source: 'pricing_worksheet' };
+      let settleFirst: () => void = () => undefined;
+      mockPreviewPricing.mockReturnValueOnce(new Promise((resolve, reject) => {
+        settleFirst = () => (succeeds ? resolve(preview) : reject(new Error('PRICING_DUPLICATE_PRODUCT_ID')));
+      }));
+      const { container } = render(<Products />);
+      await upload(container, 'first.xlsx');
+      await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledTimes(1));
+
+      const tooBig = new File(['abc'], 'huge.xlsx');
+      Object.defineProperty(tooBig, 'size', { value: pricingWorkbookFileLimit + 1 });
+      fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!, { target: { files: [tooBig] } });
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/MB or smaller/)));
+
+      settleFirst();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(screen.queryByRole('button', { name: 'Apply approved changes' })).toBeNull();
+      expect(mockToast).toHaveBeenCalledTimes(1);
+    });
+
     it('drops a late reason after a newer file is refused before it is read, and frees the button', async () => {
       let answerFirst: (reason: string) => void = () => undefined;
       mockPreviewPricing.mockRejectedValueOnce({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });

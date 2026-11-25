@@ -311,7 +311,7 @@ export default function Products() {
     if (!editing) setFloorDraftsVoid(false);
   };
   const pricingWorkbookInputRef = useRef<HTMLInputElement>(null);
-  // Each price sheet upload's number, so a late refusal reason for an earlier upload is dropped.
+  // Each price sheet upload's number: only the latest chosen file may show a review or a message.
   const pricingUploadSeq = useRef(0);
 
   const previewPricingIdem = useIdempotencyKey('preview_product_pricing_changes', profile?.id || '');
@@ -971,7 +971,7 @@ export default function Products() {
   };
 
   const handlePricingWorkbookUpload = async (file: File) => {
-    // Every chosen file is a new upload, even one refused below, so an earlier upload's late answer is dropped.
+    // Every chosen file is a new upload, even one refused below, so an earlier file's late answer is dropped.
     const upload = ++pricingUploadSeq.current;
     // The review refuses a grouped size's use timing, so it waits for the groups.
     if (!profile || !parentsReady) {
@@ -1008,6 +1008,7 @@ export default function Products() {
         idempotencyKey: previewPricingIdem.getKeyFor(intent),
       });
       previewPricingIdem.resetKeyFor(intent);
+      if (upload !== pricingUploadSeq.current) return;
       // A grouped size's use timing is set on its parent; the database refuses it too.
       const groupedRefusal = groupedUseTimingRefusal(preview, groupedParentNames);
       if (groupedRefusal) {
@@ -1017,6 +1018,7 @@ export default function Products() {
       setPricingSourceFile(sourceFile);
       setPricingPreview(preview);
     } catch (error) {
+      if (upload !== pricingUploadSeq.current) return;
       let message = (expiresAt && priceSheetRefusalText(error, expiresAt)) || sanitizeError(error);
       if (exportId && isPriceSheetRefusal(error)) {
         // The database names the one reason; NONE, an unknown code or a failed lookup keeps the message above.

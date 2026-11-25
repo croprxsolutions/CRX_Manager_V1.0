@@ -384,6 +384,11 @@ export function sanitizeError(error: unknown): string {
     return message.slice('PRODUCT_INACTIVE'.length).replace(/^:\s*/, '').trim()
       || 'This product is turned off. Ask an admin to reactivate it.';
   }
+  if (/^BRAND_(?:DOCUMENT_)?CHANGED:/.test(message)) return 'This brand or link changed. Review it and try again.';
+  if (/^BRAND_DOCUMENT_(?:URL_INVALID|URL_BLOCKED|REASON_REQUIRED|GROUP_CONFLICT|MOVE_CONFLICT|IDENTITY_CHANGED):/.test(message)) {
+    return message.slice(message.indexOf(':') + 1).replace(/\p{Cc}+/gu, ' ').trim();
+  }
+  if (message === 'BRAND_DOCUMENT_INVALID') return 'Check the document link, state and expiration date, then try again.';
   if (/^PRODUCT_DEACTIVATION_BLOCKED(?::|$)/.test(message)) {
     return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
       || 'This product cannot be turned off while required work is open. Review its blockers.';

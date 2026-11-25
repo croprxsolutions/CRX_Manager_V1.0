@@ -471,6 +471,21 @@ export interface ProductBrand {
   updated_at: string;
 }
 
+export type BrandDocumentKind = 'specimen' | 'sds' | 'supplemental';
+
+export interface BrandDocumentLink {
+  id: string;
+  legacy_brand_id: string | null;
+  parent_brand_id: string | null;
+  document_kind: BrandDocumentKind;
+  url: string;
+  state_code: string | null;
+  expires_on: string | null;
+  row_version: number;
+  hidden_at: string | null;
+  reported_at: string | null;
+}
+
 /** One row of get_product_vendors (20261105180000): a vendor linked to a product. */
 export interface ProductVendor {
   link_id: string;

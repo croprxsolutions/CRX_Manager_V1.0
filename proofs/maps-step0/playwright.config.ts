@@ -6,7 +6,6 @@ const environmentPort = process.env.CRX_MAPS_STEP0_PORT;
 const portOutput = environmentPort
   ? environmentPort
   : execFileSync(process.execPath, ['-e', portScript], { encoding: 'utf8' })
-      .replace(/\u001b\[[0-9;]*m/g, '')
       .trim();
 const port = Number(portOutput);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Unable to choose a free proof port');

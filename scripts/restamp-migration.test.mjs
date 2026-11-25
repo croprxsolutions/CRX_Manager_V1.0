@@ -8,7 +8,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildCodexPushProof, codexPushProofPath, restampProblem } from "./write-codex-push-proof.mjs";
+import { buildCodexPushProof, codexPushProofPath, ONE_SHOT_LIST, restampProblem } from "./write-codex-push-proof.mjs";
 import { proofValid } from "../.claude/hooks/codex-push-lib.mjs";
 import { gitLocalEnvironmentNames } from "../.claude/hooks/git-test-env.mjs";
 import { tempDir } from "./lib/test-temp-dir.mjs";
@@ -69,6 +69,17 @@ const latin1 = (text) => Buffer.from(text, "utf8").toString("latin1");
   assert.match(judgeSql(withBody(OLD), header(NEW) + linkBody.split(`${OLD}_`).join(`${NEW}_`)), /the migration's SQL changed/, "restamp rule: the body's self-link swapped is refused");
   const crHeader = (stamp) => `-- note\rSELECT 1; -- docs/reference/migrations.d/${stamp}_${STEM}.md\n\n`;
   assert.match(judgeSql(crHeader(OLD) + body, crHeader(NEW) + body), /the migration's SQL changed/, "restamp rule: a lone carriage return in the header is refused");
+  // The one-shot list: exactly its key renamed old stamp -> new stamp, nothing else (2026-11-24, #2267).
+  const oneShot = (key, why = "why") => `{\n  "_comment": ["x"],\n  "one_shot": {\n    "20260101000000_a": "a",\n    "${key}": "${why}"\n  }\n}\n`;
+  const withList = [...entries, { path: ONE_SHOT_LIST, oldMode: "100644", newMode: "100644" }];
+  const judgeList = (before, after, list = withList) => restampProblem({ entries: list, branchAdded: [], readFile: (side, file) => latin1(file === ONE_SHOT_LIST ? (side === "old" ? before : after)
+    : file.endsWith(".sql") ? (side === "old" ? oldSql : goodSql) : file.endsWith(".md") ? (side === "old" ? record(OLD, oldSql) : record(NEW, goodSql)) : (side === "old" ? `run ${OLD}_${STEM}.sql\n` : `run ${NEW}_${STEM}.sql\n`)) });
+  assert.equal(judgeList(oneShot(`${OLD}_${STEM}`), oneShot(`${NEW}_${STEM}`)), null, "restamp rule: the one-shot key rename carries");
+  assert.match(judgeList(oneShot(`${OLD}_${STEM}`), oneShot(`${NEW}_${STEM}`, "edited")), /changed beyond renaming the key/, "restamp rule: a one-shot value edit is refused");
+  assert.match(judgeList(oneShot(`${OLD}_${STEM}`), oneShot(`${NEW}_other`)), /changed beyond renaming the key/, "restamp rule: a one-shot key renamed to another name is refused");
+  assert.match(judgeList(oneShot("20260202000000_b"), oneShot("20260202000000_c")), /changed beyond renaming the key/, "restamp rule: another one-shot key change is refused");
+  assert.match(judgeList(oneShot(`${OLD}_${STEM}`), oneShot(`${OLD}_${STEM}`), entries), /still lists/, "restamp rule: a one-shot key left on the old stamp is refused");
+  assert.match(judgeList("", "", [...entries, { path: "supabase/baselines/other.json", oldMode: "100644", newMode: "100644" }]), /another database file/, "restamp rule: any other supabase file still refuses");
 }
 
 // The command, end to end.
@@ -106,6 +117,7 @@ try {
   write(`supabase/migrations/${OLD}_${STEM}.sql`, sql);
   write(`docs/reference/migrations.d/${OLD}_${STEM}.md`, record(OLD, sql));
   write("docs/changelog.d/mine.md", `Adds ${OLD}_${STEM}.\n`);
+  write(ONE_SHOT_LIST, `{\n  "one_shot": {\n    "${OLD}_${STEM}": "one-shot data fix"\n  }\n}\n`);
   reviewed = commit("pr");
   mkdirSync(path.dirname(codexPushProofPath(repo, reviewed)), { recursive: true });
   writeFileSync(codexPushProofPath(repo, reviewed), JSON.stringify(buildCodexPushProof({ headSha: reviewed, baseSha: base, verdict: "clean" })));
@@ -118,6 +130,7 @@ try {
   assert.equal(newSql, header(NEW) + body, "restamp command: only the header's self-link changed; the body keeps its bytes");
   assert.equal(read(`docs/reference/migrations.d/${NEW}_${STEM}.md`), record(NEW, newSql), "restamp command: record renamed, new name and pin");
   assert.equal(read("docs/changelog.d/mine.md"), `Adds ${NEW}_${STEM}.\n`, "restamp command: the branch's own note follows");
+  assert.equal(read(ONE_SHOT_LIST), `{\n  "one_shot": {\n    "${NEW}_${STEM}": "one-shot data fix"\n  }\n}\n`, "restamp command: the one-shot list's key follows");
   assert.equal(read("docs/changelog.d/other.md"), `Unrelated history naming ${OLD}.\n`, "restamp command: files the branch does not change are left alone");
   const proof = JSON.parse(readFileSync(codexPushProofPath(repo, head), "utf8"));
   assert.equal(proof.carry.mode, "restamp", "restamp command: the Sol proof carried");

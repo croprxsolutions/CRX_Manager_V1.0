@@ -80,7 +80,15 @@ describe('CommandPalette', () => {
     const input = screen.getByPlaceholderText(/search pages/i);
     fireEvent.change(input, { target: { value: 'Invo' } });
     await waitFor(() => {
-      expect(screen.getByText('Invoices — Chemical')).toBeInTheDocument();
+      expect(screen.getByText('Chemical Invoices')).toBeInTheDocument();
+    });
+  });
+
+  it('still finds a renamed page by its former name', async () => {
+    renderPalette(true);
+    fireEvent.change(screen.getByPlaceholderText(/search pages/i), { target: { value: 'recall lookup' } });
+    await waitFor(() => {
+      expect(screen.getByText('Lot Trace & Recalls')).toBeInTheDocument();
     });
   });
 

@@ -46,6 +46,7 @@ import {
   type DispatchLocation,
   type DispatchAssignee,
   type AssignmentMap,
+  type DispatchAssignmentPayload,
 } from '../../lib/dispatchWizard';
 
 export interface WizardApplicator {
@@ -68,7 +69,8 @@ interface DispatchWizardProps {
   /** Admins may override an expired-license dispatch (mirrors assign flow). */
   isAdmin: boolean;
   /** Called after a successful commit so the board can refetch. */
-  onDispatched: () => void;
+  /** Called with the assignments just dispatched. */
+  onDispatched: (sent: DispatchAssignmentPayload[]) => void;
   /**
    * U13 (#15-21/#111): job-field-ids to pre-select in Step 1 when the wizard
    * opens (e.g. JobDetail's "Dispatch Locations" button pre-selects the whole
@@ -237,7 +239,7 @@ export default function DispatchWizard({
         void notifyApplicatorDispatched(assignee.id, loc.jobNumber, loc.customerName, null, loc.jobId);
       }
 
-      onDispatched();
+      onDispatched(payload);
       handleClose();
     } catch (err) {
       // An assignee's licenses are all expired: an admin can override; others are blocked.

@@ -43,10 +43,11 @@ const ERROR_MESSAGES: Record<string, string> = {
     'A price-driven change needs all three tier prices filled in, and no margin % changes.',
   MARGIN_DRIVEN_FIELDS_INVALID:
     'A margin-driven change needs all three tier margin % values filled in, and no price changes.',
+  // The database allows each companion cell only blank or exactly as downloaded, in either mode.
   PRICE_DRIVEN_COMPANION_FIELDS_CHANGED:
-    'This row is price-driven, so its margin % cells must stay as downloaded. Change the prices, or set pricing_mode to margin_driven to change margins.',
+    'This row is price-driven, so its margin % cells must stay as downloaded. To change margins instead, first put all three tier price cells back as downloaded, then set pricing_mode to margin_driven.',
   MARGIN_DRIVEN_COMPANION_FIELDS_CHANGED:
-    'This row is margin-driven, so its price cells must stay as downloaded. Change the margins, or set pricing_mode to price_driven to change prices.',
+    'This row is margin-driven, so its tier price cells must stay as downloaded. To change prices instead, first put all three margin % cells back as downloaded, then set pricing_mode to price_driven.',
   PRICING_MODE_INVALID:
     'Choose price_driven or margin_driven in the pricing_mode column.',
   PRICING_ZERO_PRICE_BELOW_COST:
@@ -348,7 +349,7 @@ function isFoldedRow(row: PricingPreviewRow): boolean {
   return row.row_status === 'unchanged' && row.submitted_row.basis_selection !== true;
 }
 
-function PreviewRow({ row }: { row: PricingPreviewRow }) {
+function PreviewRow({ row, sheet }: { row: PricingPreviewRow; sheet: boolean }) {
   const product = productLabel(row);
   const errorMessage = readableError(row.error_code);
   const hasNegativeMargin = Boolean(
@@ -365,6 +366,8 @@ function PreviewRow({ row }: { row: PricingPreviewRow }) {
         <div>
           <div className="text-sm font-semibold text-nav-dark">{product.name}</div>
           {product.detail && <div className="mt-0.5 text-xs text-secondary">{product.detail}</div>}
+          {/* sequence is the row's 1-based place in the upload; row 1 of the sheet is the header. */}
+          {sheet && <div className="mt-0.5 text-xs text-secondary">Excel row {row.sequence + 1}</div>}
         </div>
         <span
           className={`rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_CLASSES[row.row_status]}`}
@@ -433,6 +436,7 @@ export default function PricingChangePreviewModal({
   // Closing the modal folds the unchanged rows again, even if the same preview reopens.
   if (!open && unchangedOpenFor !== null) setUnchangedOpenFor(null);
   const showUnchanged = preview !== null && unchangedOpenFor === preview;
+  const sheet = preview?.source === 'pricing_worksheet';
 
   return (
     <Modal
@@ -516,10 +520,7 @@ export default function PricingChangePreviewModal({
           {preview.status === 'invalid' && <NothingSavedNotice preview={preview} />}
 
           <ol className="space-y-3" aria-label="Pricing preview rows">
-            {shownRows.map((row) => <PreviewRow key={`${row.sequence}-${row.product_id ?? 'unknown'}`} row={row} />)}
-            {showUnchanged && foldedRows.map((row) => (
-              <PreviewRow key={`${row.sequence}-${row.product_id ?? 'unknown'}`} row={row} />
-            ))}
+            {shownRows.map((row) => <PreviewRow key={`${row.sequence}-${row.product_id ?? 'unknown'}`} row={row} sheet={sheet} />)}
           </ol>
           {foldedRows.length > 0 && (
             <Button
@@ -529,6 +530,14 @@ export default function PricingChangePreviewModal({
             >
               {showUnchanged ? 'Hide' : 'Show'} {foldedRows.length.toLocaleString()} unchanged row{foldedRows.length === 1 ? '' : 's'}
             </Button>
+          )}
+          {/* After the button, so moving forward from it reaches the rows it reveals. */}
+          {showUnchanged && (
+            <ol className="space-y-3" aria-label="Unchanged pricing preview rows">
+              {foldedRows.map((row) => (
+                <PreviewRow key={`${row.sequence}-${row.product_id ?? 'unknown'}`} row={row} sheet={sheet} />
+              ))}
+            </ol>
           )}
         </div>
       )}

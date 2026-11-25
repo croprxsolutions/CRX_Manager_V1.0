@@ -2,7 +2,7 @@
 
 Each lane writes only its own section; a slice 2 or 3 lane adds its own section when it starts. The shared lines (lease, Mason batches, release state) are written by the database lane. States (`BUILD-PLAN.md` › Rules 5): NOT STARTED, IN PROGRESS, IN REVIEW (PR open), MERGED (in staging), VERIFIED (applied on staging, scenarios re-run there), READY FOR RELEASE, LIVE, PARKED (reason), BLOCKED (on what), WAITING ON MASON.
 
-`JobDetail.tsx` lease: paperwork lane (field-paper-2), granted 2026-11-24; released when its PR merges into staging.
+`JobDetail.tsx` lease: free. The paperwork lane released it 2026-11-24 when #2458 merged into staging.
 
 ## Kit
 
@@ -60,20 +60,34 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 
 | Item | State | Proof / link | Note |
 |---|---|---|---|
-| 1 Safety on every page | PARKED | `feat/field-paper-1` (not pushed) | Strip on every page (map pages too); Custom config can no longer hide REI/PHI. Parked: Terra HIGH (a 35+ product mix cannot fit the strip on every page) survived 2 fix rounds; asked Mason 2026-11-24 to allow 'see the safety table on page 1' past that size |
-| 2 Map pages only print | PARKED (menu entry) | `feat/field-paper-2` (stacked on 1): print library `mapsOnly` option, rendered one-field and multi-field, Terra CLEAN | Maps only, safety on every page, no blank first page; a job with no maps refuses plainly. The one `JobDetail.tsx` print-menu entry waits for the lease (asked below) and needs Sol (JobDetail is on the Sol list) |
-| 3 Spray-order numbers on maps | PARKED (stacked on 1) | `feat/field-paper-3`; Terra CLEAN on its own diff | Overview labels `N · acres`; per-field page title `Stop N`; numbers restart per job (test) |
-| 4 Directions link per field | PARKED (stacked on 3) | `feat/field-paper-4`; Terra 2 MED + 1 LOW, fixed or refuted | Tappable Google Maps link per mapped field, in stop order, under the field table |
-| 5 Loader water to add + finished gallons | IN REVIEW | `feat/field-paper-5`; rendered: tank loads, condensed, one batch, overfill, and a dash with its note for a form not on file, a liquid sold by weight, and a missing amount | **Mason 2026-11-24: "Yes, only when known".** Water to add shows only when every product record says liquid or dry and every liquid sizes to gallons; otherwise a dash and "set liquid/dry on the product" (or the amount/unit reason). No guessing from the unit |
+| 1 Safety sheet (off by default) | MERGED | #2468 (fd3206e53); rendered: off (no safety page), on with 3 products, on with 38 products (all 38 rows, flowing onto a second safety page) | **Mason decision 2026-11-24:** "were not going to print safety info by defualt it will normally be off but if selected it all print on its own sheet". Replaces "safety on every page". New print option "Print safety sheet" (off); a saved preference from before reads as off. Lists exactly the job order's product lines; every safety value (EPA no., signal word, REI, PHI) read at print time from that line's own product record (by id; Job Detail now passes the line's product id, orchestrator 2026-11-24). **Mason 2026-11-24, "Yes, today's records":** the safety sheet shows today's product records and says "From product records on <print date>"; the job order itself keeps its own saved REI/PHI; a # column gives each row's job order line; a missing value prints "See label"; a failed read prints "could not be loaded". Touches `JobDetail.tsx` (Sol). The Enhanced/Custom tank-mix table keeps its existing REI/PHI columns. **Mason 2026-11-24, "Today's only, no flag":** no flag when a job's saved interval is longer than today's record (Sol finding skipped by Mason; `docs/manual/decision-log.d/2026-11-24-pr2468-*`) |
+| 2 Map pages only print | MERGED | #2458 (652da1d25) | Maps only; a job with no maps refuses plainly. `JobDetail.tsx` lease released on merge |
+| 3 Spray-order numbers on maps | MERGED | #2455 (5f375e8be) | Overview labels `N · acres`; per-field page title `Stop N`; numbers restart per job (test) |
+| 4 Directions link per field | MERGED | #2456 (66061d332) | Tappable Google Maps link per mapped field, in stop order, under the field table |
+| 5 Loader water to add + finished gallons | MERGED | #2466 (b634db721); rendered: tank loads, condensed, one batch, overfill, and a dash with its note for a form not on file, a liquid sold by weight, and a missing amount | **Mason 2026-11-24: "Yes, only when known".** Water to add shows only when every product record says liquid or dry and every liquid sizes to gallons; otherwise a dash and "set liquid/dry on the product" (or the amount/unit reason). No guessing from the unit |
 | 6 EPA dash / Unknown | PARKED ("Unknown" half) | dash: already prints for any blank number (`applicatorSheetPdf.test.ts`, blank and null rows) | No product value says a product is EPA-registered (`products.epa_registration` is the number only; `epa_registrations` is keyed by the number). "Unknown" needs that flag: asked below |
+
+Staging check 2026-11-24 (staging.croprxsolutions.app, test job JOB-2026-0016 on two TEST fields; downloads approved by Mason):
+
+- PASS 1 safety sheet: the option is off by default. Turned on, page 2 reads "Safety — Signal Word, REI, PHI · From product records on 11/24/2026", with "See label" for blank values. Turned off, there is no safety page.
+- PASS 4 directions: "Directions to each field", Stop 1 and Stop 2 with "Open directions", in route order.
+- PASS 5 loader panel: 300 gal finished and 295 gal water to add per tank (2,4-D at 640 fl oz = 5 gal), plus "Dry products are not counted as volume in water to add."
+- PASS 2 refusal: on a job with no maps, Map pages only says "This job has no field maps to print."
+- NOT SEEN 2 and 3 map pages: staging has no `VITE_MAPBOX_TOKEN` (the console says it skips maps), so no map page renders on staging. Proven by local renders before merge. Needs the staging map token (environment setting, Mason's call).
+
+Paperwork follow-ups (logged, not fixed; none touches money, stock or data):
+
+- Map pages only is hidden on a saved job that has mapped fields but no chemical lines yet (the button sits in the chemical-gated print group). Codex P2 on #2458.
+- #2468 MED: a tab left open across the deploy can save print options without the safety choice (reads as off, the safe default).
+- #2468 MED: in a batch print, a failed safety read shows only inside that job's PDF, not as a toast.
+- #2468 LOW: safety continuation pages don't repeat the record date.
+- #2468 LOW: the 40-row test checks table rows, not a rendered page 2 (covered by a render before merge).
 
 ## Needs another lane
 
 | Asked by | Owning lane | What | Done? |
 |---|---|---|---|
 | Paperwork (group 6) | Database | A product value that says "this product is EPA-registered" (so a registered product with no number prints "Unknown" and an unregistered one prints a dash, KI-206). Today nothing tells the two apart | |
-| Paperwork (group 1) | Office screens (SettingsPage) | The Custom applicator sheet REI/PHI checkboxes no longer hide anything (safety always prints): remove or relabel them | |
-| Paperwork (group 2) | Database (lease holder) | The `JobDetail.tsx` lease, for one print-menu entry: "Map pages only" | |
 
 ## Disputed review findings (for the slice batch)
 

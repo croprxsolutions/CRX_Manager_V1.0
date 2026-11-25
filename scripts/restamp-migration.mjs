@@ -4,6 +4,7 @@
 // (2026-11-23: four PRs re-dated by hand in one day). It renames the .sql and its migrations.d record
 // to a new stamp (npm run next-migration-stamp unless --to), swaps the old stamp in the files this
 // branch already changes, updates the SQL header's link to its record and the record's SQL sha256 pin,
+// renames its key in supabase/baselines/one-shot-migrations.json when it is a one-shot data migration,
 // commits, then runs `write-codex-push-proof.mjs --carry-restamp` so a clean Sol proof carries with no
 // model run. The SQL body is never touched. Pushing stays with the caller. Hotfix/release branches
 // are refused: their stamps follow next-migration-stamp --hotfix and the live high-water.
@@ -12,7 +13,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { codexPushProofPath } from "./write-codex-push-proof.mjs";
+import { codexPushProofPath, ONE_SHOT_LIST } from "./write-codex-push-proof.mjs";
 
 const BASE = "origin/staging";
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -88,6 +89,10 @@ if (!regular(oldRecord)) fail(`${oldRecord} is missing; every migration needs it
 // An applied migration's record names the live ledger's stamp; it keeps its name (Taha, #2384 LOW 6).
 if (!readFileSync(oldRecord, "latin1").trimStart().startsWith("**LOCAL CANDIDATE")) fail(`${oldRecord} is not a LOCAL CANDIDATE record; an applied migration keeps its name`);
 for (const dest of [newSql, newRecord]) if (existsSync(dest)) fail(`${dest} already exists`);
+// A one-shot data migration's key in the one-shot list follows the new stamp; the carry accepts only that rename.
+const oneShotParts = regular(ONE_SHOT_LIST) ? readFileSync(ONE_SHOT_LIST, "latin1").split(`"${oldStem}"`) : [];
+if (oneShotParts.length > 2) fail(`${ONE_SHOT_LIST} names ${oldStem} more than once`);
+if (oneShotParts.length === 2 && oneShotParts.join("").includes(`"${newStem}"`)) fail(`${ONE_SHOT_LIST} already lists ${newStem}`);
 const reviewed = git("rev-parse", "HEAD");
 if (!existsSync(codexPushProofPath(process.cwd(), reviewed))) console.error(`note: no Sol proof for ${reviewed.slice(0, 12)} in this worktree; the restamp commits, but nothing will carry.`);
 
@@ -108,6 +113,10 @@ const edits = [newSql];
 git("mv", oldRecord, newRecord);
 writeFileSync(newRecord, swap(readFileSync(newRecord, "latin1")).split(oldPin).join(newPin), "latin1");
 edits.push(newRecord);
+if (oneShotParts.length === 2) {
+  writeFileSync(ONE_SHOT_LIST, oneShotParts.join(`"${newStem}"`), "latin1");
+  edits.push(ONE_SHOT_LIST);
+}
 for (const file of owned) {
   // Other database files are not this command's to change; the carry would refuse them anyway.
   if (file.startsWith("supabase/") || file === oldRecord || !regular(file)) continue;

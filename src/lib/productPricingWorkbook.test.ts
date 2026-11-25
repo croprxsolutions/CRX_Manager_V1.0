@@ -3,12 +3,17 @@ import { deflateRawSync } from 'node:zlib';
 import type { Workbook } from 'exceljs';
 import type { PricingPreviewResult, PricingWorkbookExport } from './productPricing';
 import {
+  DOLLAR_HEADER_NOTE,
   generateProductPricingWorkbook,
   groupedUseTimingRefusal,
   MAX_PRICING_WORKBOOK_FILE_BYTES,
   MAX_PRICING_WORKBOOK_ROWS,
   MAX_PRICING_WORKBOOK_UNCOMPRESSED_BYTES,
   parseProductPricingWorkbook,
+  isPriceSheetRefusal,
+  priceSheetExpiredText,
+  priceSheetReasonText,
+  priceSheetRefusalText,
   PRICING_WORKBOOK_FORMAT_VERSION,
   PRICING_WORKBOOK_HEADERS,
   PRICING_WORKBOOK_MANIFEST_SHEET,
@@ -296,6 +301,90 @@ describe('product pricing workbook', () => {
     expect(parsed.rows[0].tier1_price).toBe(exactValue);
   });
 
+  it('writes locked current margins as 2-decimal numbers that read back as the exact server text', async () => {
+    // The server's margin text: trim_scale(round(ratio * 100, 8))::text, so up to 8 decimals, no trailing zeros.
+    const baseline = [
+      '0', '1', '5', '10', '20', '25', '33', '50', '99', '100', '250', '-5', '-100',
+      '0.5', '12.5', '15.5', '10.125', '12.3456789', '33.33333333', '66.66666667', '99.99999999',
+      '0.00000001', '0.0000001', '0.000001', '0.00001', '-0.00000001', '-33.33333333', '0.1', '0.2', '0.3',
+      '12345678.12345678', '-98765432.87654321', '14.28571429', '28.57142857', '11.11111111', '9.09090909', '16.66666667', '1234567.12345678',
+      // Too many digits for a number to hold exactly: must stay text, and still read back exactly.
+      '-12345678901.12345678', '9876543210.98765432',
+    ];
+    // Plus a fixed pseudo-random spread of 0-999 with 0 to 8 decimals.
+    let seed = 20261124;
+    const next = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
+    for (let i = 0; i < 1500; i += 1) {
+      const decimals = next() % 9;
+      const integer = String(next() % 1000);
+      const fraction = String(next() % 10 ** decimals).padStart(decimals, '0').replace(/0+$/, '');
+      baseline.push(fraction ? `${integer}.${fraction}` : integer);
+    }
+    const rows = [];
+    for (let i = 0; i < baseline.length; i += 3) {
+      rows.push({
+        ...pricingExport.rows[0],
+        product_id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+        current_tier1_margin_percent: baseline[i],
+        current_tier2_margin_percent: baseline[i + 1] ?? '',
+        current_tier3_margin_percent: baseline[i + 2] ?? '',
+      });
+    }
+    const blob = await generateProductPricingWorkbook({ ...pricingExport, rows });
+    const buffer = await blobToArrayBuffer(blob);
+    const ExcelJS = await import('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const worksheet = workbook.getWorksheet(PRICING_WORKBOOK_SHEET)!;
+    const parsed = await parseProductPricingWorkbook(buffer);
+
+    const mismatches: string[] = [];
+    let numberCells = 0;
+    rows.forEach((row, index) => {
+      for (const tier of [1, 2, 3] as const) {
+        const header = `current_tier${tier}_margin_percent` as const;
+        const cell = worksheet.getCell(index + 2, PRICING_WORKBOOK_HEADERS.indexOf(header) + 1);
+        if (row[header] !== '') {
+          if (typeof cell.value === 'number') {
+            numberCells += 1;
+            expect(cell.numFmt).toBe('0.00');
+          } else {
+            expect(cell.value).toBe(row[header]);
+            expect(cell.numFmt).toBe('@');
+          }
+        }
+        if (parsed.rows[index][header] !== row[header]) mismatches.push(`${row[header]} -> ${parsed.rows[index][header]}`);
+        // The editable copy stays text, byte for byte.
+        const editable = worksheet.getCell(index + 2, PRICING_WORKBOOK_HEADERS.indexOf(`tier${tier}_margin_percent`) + 1);
+        if (row[header] !== '') expect(editable.value).toBe(row[header]);
+        expect(parsed.rows[index][`tier${tier}_margin_percent`]).toBe(row[header]);
+      }
+    });
+    expect(mismatches).toEqual([]);
+    expect(baseline.length).toBeGreaterThan(1500);
+    // Every value except the two over-long ones is written as a number.
+    expect(numberCells).toBe(baseline.length - 2);
+  }, 30000);
+
+  it('notes the dollar headers as per inventory unit, keeps the header text, and still parses', async () => {
+    const { workbook, buffer } = await loadGeneratedWorkbook();
+    const worksheet = workbook.getWorksheet(PRICING_WORKBOOK_SHEET)!;
+    const noted = PRICING_WORKBOOK_HEADERS.filter((_, index) => worksheet.getCell(1, index + 1).note);
+    expect(noted).toEqual([
+      'current_cost', 'current_tier1_price', 'current_tier2_price', 'current_tier3_price',
+      'new_cost', 'tier1_price', 'tier2_price', 'tier3_price',
+    ]);
+    expect(worksheet.getCell(1, PRICING_WORKBOOK_HEADERS.indexOf('new_cost') + 1).note).toBe(DOLLAR_HEADER_NOTE);
+    expect(DOLLAR_HEADER_NOTE).toBe('Dollars per inventory unit (see the inventory_unit column)');
+    expect(Array.from({ length: worksheet.getRow(1).cellCount }, (_, index) => worksheet.getCell(1, index + 1).value))
+      .toEqual([...PRICING_WORKBOOK_HEADERS]);
+    const parsed = await parseProductPricingWorkbook(buffer);
+    expect(parsed.rows[0].current_cost).toBe('125.40');
+    // A sheet saved again with the notes (as Excel would) still parses.
+    const reparsed = await parseProductPricingWorkbook(await writeWorkbook(workbook));
+    expect(reparsed.rows).toEqual(parsed.rows);
+  }, 30000);
+
   it('accepts the zero-row workbook emitted by the generator', async () => {
     const blob = await generateProductPricingWorkbook({ ...pricingExport, rows: [] });
     const parsed = await parseProductPricingWorkbook(await blobToArrayBuffer(blob));
@@ -407,5 +496,64 @@ describe('product pricing workbook', () => {
     expect(groupedUseTimingRefusal(preview, grouped)).toBe('Nothing was saved. Use Timing is set on the parent: '
       + 'Atrazine 1 gal (parent "Atrazine 4L"). Change it on the product page\'s Parent panel, then download a new workbook.');
     expect(groupedUseTimingRefusal(preview, new Map())).toBeNull();
+  });
+});
+
+describe('price sheet refusal wording', () => {
+  const expiresAt = '2026-11-24T18:00:00+00:00';
+  const before = Date.parse('2026-11-24T17:59:59Z');
+  const after = Date.parse('2026-11-24T18:00:00Z');
+
+  it('says expired only once expires_at has passed', () => {
+    expect(priceSheetExpiredText(expiresAt, before)).toBeNull();
+    expect(priceSheetExpiredText(expiresAt, after)).toBe('No prices were changed. This price sheet expired (sheets last 7 days). Download a fresh one');
+    expect(priceSheetExpiredText('not a date', after)).toBeNull();
+  });
+
+  it('tells an expired sheet from a used sheet or another user sheet for each combined server code', () => {
+    for (const code of ['WORKBOOK_V2_EXPORT_REQUIRED', 'WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED']) {
+      expect(priceSheetRefusalText({ message: code }, expiresAt, after)).toMatch(/This price sheet expired \(sheets last 7 days\)/);
+      expect(priceSheetRefusalText(new Error(code), expiresAt, before))
+        .toBe('No prices were changed. This price sheet was already applied, was downloaded by another user, or came from an older template. Download a fresh one');
+    }
+  });
+
+  it('leaves other errors, and an unreadable expiry, to the general wording', () => {
+    expect(priceSheetRefusalText({ message: 'PRICING_DUPLICATE_PRODUCT_ID' }, expiresAt, before)).toBeNull();
+    expect(priceSheetRefusalText({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' }, '', before)).toBeNull();
+    expect(priceSheetRefusalText(null, expiresAt, before)).toBeNull();
+  });
+});
+
+describe('price sheet refusal reason wording', () => {
+  it('looks a reason up only for the three combined refusal codes', () => {
+    for (const code of ['WORKBOOK_V2_EXPORT_REQUIRED', 'WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED']) {
+      expect(isPriceSheetRefusal(new Error(code))).toBe(true);
+      expect(isPriceSheetRefusal({ message: `${code}: detail` })).toBe(true);
+    }
+    for (const other of [new Error('PRICING_DUPLICATE_PRODUCT_ID'), new Error('ADMIN_REQUIRED'), { message: 'x WORKBOOK_V2_EXPORT_REQUIRED' }, null, 'WORKBOOK_V2_EXPORT_REQUIRED']) {
+      expect(isPriceSheetRefusal(other)).toBe(false);
+    }
+  });
+
+  it('gives one sentence per reason, each saying nothing changed and how to fix it', () => {
+    const expected: Record<string, RegExp> = {
+      EXPORT_NOT_FOUND: /no record of this price sheet/,
+      DOWNLOADED_BY_OTHER_USER: /Another user downloaded this price sheet/,
+      ALREADY_APPLIED: /already used; each product's Sell Price History, Cost History or Change History shows what it changed/,
+      OLD_TEMPLATE: /came from an older template/,
+      EXPIRED: /expired \(sheets last 7 days\)/,
+    };
+    for (const [reason, pattern] of Object.entries(expected)) {
+      const text = priceSheetReasonText(reason);
+      expect(text).toMatch(pattern);
+      expect(text).toMatch(/^No prices were changed\. .*[Dd]ownload a fresh one( yourself)?$/);
+    }
+  });
+
+  it('has no sentence for NONE or an unknown code, so the original message stays', () => {
+    for (const reason of ['NONE', 'SOMETHING_NEW', '', 'constructor', '__proto__', 'expired']) {
+      expect(priceSheetReasonText(reason)).toBeNull();
+    }
   });
 });

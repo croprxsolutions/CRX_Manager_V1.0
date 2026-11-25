@@ -18,12 +18,12 @@ describe('Prepay', () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole('heading', { name: 'Prepay' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Workspace' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: 'Manager' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Prepayments' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Apply to Invoices' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Prepay Credits' })).toBeInTheDocument();
     expect(screen.getByRole('tabpanel')).toHaveTextContent('Prepay workspace panel');
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Manager' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Prepay Credits' }));
     expect(screen.getByRole('tabpanel')).toHaveTextContent('Prepayment manager panel');
   });
 
@@ -34,7 +34,7 @@ describe('Prepay', () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole('tab', { name: 'Manager' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Prepay Credits' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tabpanel')).toHaveTextContent('Prepayment manager panel');
   });
 
@@ -45,6 +45,6 @@ describe('Prepay', () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole('tab', { name: 'Workspace' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Apply to Invoices' })).toHaveAttribute('aria-selected', 'true');
   });
 });

@@ -3033,11 +3033,14 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // 20270109100400 (#1868 sales tax not revenue, local candidate): private helper and trigger function. Prune once applied.
   _freeze_credit_sales_tax_20270109: 'internal #1868 helper (20270109100400): called only by its deferred trigger and the one-time backfill; writes one row per credited line pool of a posted return credit (skips one already frozen) or clears them when the credit leaves posted; every API-role EXECUTE is revoked',
   trg_freeze_credit_sales_tax_20270109: '#1868 trigger function (20270109100400): deferred constraint trigger and immediate clear trigger on invoices for credit memos, both call _freeze_credit_sales_tax_20270109; never an RPC, every API-role EXECUTE is revoked',
+  // REI/PHI not applicable (local candidate 20270303130000): re-issued trigger function, never an RPC. Prune once applied.
+  write_product_change_history: 'product history trigger function (re-issued in 20270303130000 to watch the REI/PHI not-applicable flags): AFTER INSERT/UPDATE row trigger on products, appends one history row per changed watched field inside the writing statement; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   _relabel_empty_stock_rows: 'units-batch trigger function (20270121110000): AFTER UPDATE trigger on products, relabels the product\'s stock rows (already proven empty by the BEFORE trigger) to the new stock unit; runs only as a trigger, every API-role EXECUTE is revoked',
   // Brand PR B part B-1b private helpers, applied live 2026-11-12; these remain internal to the recopy workflow.
   _invoice_brand_recopy: 'internal B-1b helper (20270106110000): called only by the recopy trigger and the one-time backfill; rewrites only the derived brand snapshot on open drafts; every API-role EXECUTE is revoked',
   _invoice_brand_recopy_invoice: 'internal B-1b helper (20270106110000): called only by _invoice_brand_recopy and the backfill; rewrites only the derived brand snapshot on one open draft; every API-role EXECUTE is revoked',
   _sync_invoice_line_brand_captures: 'internal B-1b helper (20270106110000): called only by the _capture_invoice_line_rup trigger to keep one RUP capture per brand on a line; every API-role EXECUTE is revoked',
+  _capture_invoice_line_rup: '#2341 re-emit (local candidate 20270303100000): AFTER INSERT OR UPDATE row trigger function on invoice_items; writes the line\'s RUP capture only for the line being written (the line\'s writer owns idempotency); Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked. Prune once the candidate is in the generated snapshot',
   // DM-2 private helpers: the keyed weight writers own replay protection and trigger functions are not callable.
   _write_parent_density: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',
   _write_size_net_weight: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',
@@ -3148,6 +3151,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   run_weekly_db_backup: 'cron-only maintenance with authenticated and anonymous EXECUTE revoked; each dated snapshot is independently retained and pruned',
   save_idempotency: 'idempotency infrastructure helper that stores the parent operation result',
   set_primary_customer_contact: 'convergent primary-contact promotion; replays settle to the same single-primary state; SECURITY INVOKER under customer RLS',
+  set_field_marker_write_metadata:
+    'BEFORE INSERT/UPDATE trigger on field_obstacles; PostgreSQL rejects direct calls and API-role EXECUTE is revoked. Creates use the client marker primary key and a duplicate INSERT rolls back its counter increment.',
   settle_applied_record_acres: 'trigger-only derived-acre recomputation; direct client EXECUTE is revoked',
   // trg_recalc_order_totals was listed here only for the pre-apply window: the
   // inventory admits a discovered mutator whose defining migration is still

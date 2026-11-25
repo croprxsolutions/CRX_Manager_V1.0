@@ -12,8 +12,8 @@ It is not. When anyone saves an order edit, the app re-reads today's catalog cos
 
 ## What this changes
 
-- Decision 6 itself stands as the business rule: an unchanged line keeps its booked cost.
-- The "already how the app works" note in the #2304 material is wrong; read decision 6 as **not built** for unchanged lines.
+- Decision 6 stands, reaffirmed by Mason 2026-11-25: an existing line keeps its booked cost even when edited; only a new product line or a product swap takes today's cost (`docs/manual/decision-log.d/2026-11-25-taha-review-a1-edit-keeps-booked-cost.md`).
+- The "already how the app works" note in the #2304 material is wrong; read decision 6 as **not built** for existing lines.
 - The fix is Taha's A1 (orders are Taha's lane until Dec 15), one of his four proven fixes planned before Dec 15.
 
-Other answers from the same review are recorded in `docs/manual/decision-log.d/2026-11-25-taha-review-*.md`. Questions from that review still open (early-pay discount commission, order of work, v0.2.1 timing, the Ship / Spray mark) are not decided here.
+Mason's answers to the same review, including the order of work, are in `docs/manual/decision-log.d/2026-11-25-taha-review-*.md` and `2026-11-25-pr2526-pr2537-*.md`. The Ship / Spray mark is still Mason's to decide later.

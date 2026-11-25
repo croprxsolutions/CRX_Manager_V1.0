@@ -182,16 +182,16 @@ function priceJumpText(
   const lastCents = last.normalized_cost_cents;
   // Per-unit cents are rounded, so a few-cents-per-unit price can hide a real swing. When this row's package size
   // reproduces the approved per-unit price, compare the exact package prices (same link, same conversion).
+  // The exact check can only add a warning: the inferred package size is never trusted to clear one.
   // shortcut: evidence does not return the approved package quantity, so it is inferred. Under a few cents per unit a
-  // different package size can pass this check and warn wrongly (warning only), or fall back to rounded cents;
-  // return package_quantity from get_supplier_market_evidence (#2561).
+  // different package size can pass this check and warn wrongly (warning only), and rounded cents can still hide a
+  // swing; return package_quantity from get_supplier_market_evidence (#2561).
   const samePackage = supplierUnitCostCents(last.quoted_package_cost_cents, row.package_quantity, cost.factor) === lastCents;
-  const direction = samePackage
-    ? jumpDirection(row.cost_cents, last.quoted_package_cost_cents)
-    : jumpDirection(cost.cents, lastCents);
+  const rounded = jumpDirection(cost.cents, lastCents);
+  const direction = (samePackage ? jumpDirection(row.cost_cents, last.quoted_package_cost_cents) : null) ?? rounded;
   if (!direction) return null;
   // Name the package prices when the rounded per-unit prices alone do not show the swing.
-  const packages = direction === jumpDirection(cost.cents, lastCents) ? ''
+  const packages = direction === rounded ? ''
     : `${formatSupplierCents(row.cost_cents)} vs ${formatSupplierCents(last.quoted_package_cost_cents)}${packageUnitText(row)}; `;
   return `Check this price: ${unitCentsText(cost.cents)} per ${cost.unit} is ${direction} the current approved `
     + `${unitCentsText(lastCents)} per ${cost.unit} (${packages}effective ${last.effective_from}). This warning does not block approval.`;

@@ -717,7 +717,9 @@ describe('SupplierPricing page', () => {
       rows: [
         row(1, 'link-1', 8_500n), // 4.25 cents/lb, shown as 4: 41.7% above 3.0. Rounded cents (4 vs 3) missed it.
         row(2, 'link-1', 8_300n), // 4.15 cents/lb: 38.3% above, no warning.
-        row(3, 'link-2', 9_200n), // 4.6 cents/lb, shown as 5: 35.3% above 3.4. Rounded cents (5 vs 3) warned.
+        // 4.6 cents/lb, shown as 5: 35.3% above 3.4, but rounded cents (5 vs 3) still warn, because the inferred
+        // package size is never trusted to clear a warning.
+        row(3, 'link-2', 9_200n),
         row(4, 'link-3', 2_000n), // 1.0 cent/lb: 150% above 0.4 cents. Rounded cents (1 vs 0) could not compare.
         row(5, 'link-1', 800n), // 0.4 cents/lb: not free.
       ],
@@ -734,12 +736,16 @@ describe('SupplierPricing page', () => {
       'Check this price: $0.01 per lb is more than 40% above the current approved less than $0.01 per lb'
       + ' ($20.00 vs $8.00 per ton; effective 2026-07-01). This warning does not block approval.',
     )).toBeInTheDocument();
-    // Row 5 (0.4 cents vs 3.0) is far below link-1's price, so it warns too; rows 2 and 3 do not.
+    expect(screen.getByText(
+      'Check this price: $0.05 per lb is more than 40% above the current approved $0.03 per lb'
+      + ' (effective 2026-07-01). This warning does not block approval.',
+    )).toBeInTheDocument();
+    // Row 5 (0.4 cents vs 3.0) is far below link-1's price, so it warns too; row 2 does not.
     expect(screen.getByText(
       'Check this price: less than $0.01 per lb is more than 40% below the current approved $0.03 per lb'
       + ' (effective 2026-07-01). This warning does not block approval.',
     )).toBeInTheDocument();
-    expect(screen.getAllByText(/^Check this price/)).toHaveLength(3);
+    expect(screen.getAllByText(/^Check this price/)).toHaveLength(4);
     expect(screen.getAllByText('= less than $0.01 per lb')).toHaveLength(1);
     expect(screen.queryByText(/\$0\.00/)).not.toBeInTheDocument();
   });

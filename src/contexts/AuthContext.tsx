@@ -94,7 +94,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    let initialSessionSuperseded = false;
     supabase.auth.getSession().then(({ data: { session: s } }) => {
+      if (initialSessionSuperseded || signedOutLocallyRef.current) return;
       // A null session at startup can mean offline refresh. Null cleanup belongs to sign-out.
       if (s) void syncPendingMarkerSession(s);
       activeUserIdRef.current = s?.user.id ?? null;
@@ -106,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }).catch(() => {
       // Network error during initial session check — show login
-      setLoading(false);
+      if (!initialSessionSuperseded && !signedOutLocallyRef.current) setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
@@ -118,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // only an explicit signIn call clears this local sign-out intent.
       if (signedOutLocallyRef.current && event !== 'SIGNED_OUT') return;
 
+      initialSessionSuperseded = true;
       if (s || event === 'SIGNED_OUT') void syncPendingMarkerSession(s);
       const nextUserId = s?.user.id ?? null;
       const isSameUser = nextUserId !== null && activeUserIdRef.current === nextUserId;
@@ -153,7 +156,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      initialSessionSuperseded = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {

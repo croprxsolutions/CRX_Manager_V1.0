@@ -604,6 +604,35 @@ describe('AuthContext', () => {
       }
     });
 
+    it('does not let an older startup answer erase the pending marker for a newer sign-in', async () => {
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      const token = (id: string) => `header.${btoa(JSON.stringify({ session_id: id }))}.signature`;
+      const recent = makeSession({ access_token: token('44444444-4444-4444-8444-444444444444') });
+      const old = makeSession({
+        user: { id: 'older-actor' }, access_token: token('33333333-3333-4333-8333-333333333333'),
+      });
+      const placement: MarkerPlacement = {
+        id: '11111111-1111-4111-8111-111111111111', field_id: 'field-a', kind: 'gate', label: 'Use the gate',
+        point_geojson: { type: 'Point', coordinates: [-89, 40] },
+      };
+      let finishStartup = () => {};
+      mockGetSession.mockImplementationOnce(() => new Promise((resolve) => {
+        finishStartup = () => resolve({ data: { session: old }, error: null });
+      }));
+      try {
+        const { result } = renderHook(() => useAuth(), { wrapper });
+        await act(async () => triggerAuthChange('SIGNED_IN', recent));
+        await reservePendingMarker('user-123', placement);
+        await act(async () => finishStartup());
+
+        expect(result.current.session?.user.id).toBe('user-123');
+        expect(await readPendingMarker('user-123', placement.field_id)).toEqual(placement);
+      } finally {
+        await syncPendingMarkerSession(null);
+        vi.unstubAllGlobals();
+      }
+    });
+
     it('clears pending marker data from the device even if remote sign-out fails', async () => {
       const device = new IDBFactory();
       vi.stubGlobal('indexedDB', device);

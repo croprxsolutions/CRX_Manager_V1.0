@@ -2274,6 +2274,14 @@
       "description": "REQUIRES 20270201100000 (KI-119). As real active profiles under RLS: an admin (even with a stale hidden list) and a rep with nothing hidden run every Reports Library and Sales Reports function; a rep with reports hidden is refused PAGE_ACCESS_DENIED: reports on the balance listing, chemical history, batch year-end and the four logbooks but keeps Sales Reports and the one-customer year-end summary, which is refused (PAGE_ACCESS_DENIED: reports, customers) only when Customers is hidden too; sales-reports hidden refuses both sales reports only; drivers, applicators and a signed-in user with no profile are refused (the container prover checks a seeded inactive rep); a rep's own commission rows disappear while reports is hidden (not for sales-reports) and the admin still sees them; clearing the list lets the next call through; anon and PUBLIC cannot execute the helper or the logbooks. Fails before the migration. Terminal rollback.",
       "covers": ["_require_page_access", "get_customer_balance_listing", "get_chemical_history", "get_batch_year_end_summaries", "get_customer_year_end_summary", "get_logbook_faa", "get_logbook_by_field", "get_logbook_by_customer", "get_logbook_by_applicator", "get_sales_summary_report", "get_sales_detail_report"],
       "area": ["regression"]
+    },
+    "booking_close_guard": {
+      "chain": "smoke-booking-close-guard.sql",
+      "container_only": true,
+      "container_prover": "prove-booking-close-guard-real-schema.mjs",
+      "description": "CONTAINER ONLY - run via scripts/smoke/prove-booking-close-guard-real-schema.mjs. Migration 20270307120000 (release #1990 Sol r54 HIGH 2, #2065): close_quote_as_applied is refused BOOKING_HAS_JOB while a spray job from the booking (by quote_id or section) is scheduled or in progress, for a rep and an admin, and closes once the job is completed or cancelled or there is none; close_quote_as_short and close_quote_as_applied by a rep who does not own the booking are refused BOOKING_NOT_YOURS while the owner, an admin and a system session close it; close short with a scheduled job and a decline with a scheduled job are refused as before. Fails before the migration (C1). Terminal rollback.",
+      "covers": ["close_quote_as_applied", "close_quote_as_short", "_enforce_booking_live_job_rules"],
+      "area": ["lifecycle"]
     }
   }
 }

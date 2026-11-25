@@ -20,7 +20,7 @@ Read at `origin/staging` 015566676 and PR #2324 head bd06a4d1a (2026-11-23). Fol
   3. **Screen PR (merges after the database is live):** each screen freezes the lines it shows with the signature or photo; a reload that changes them clears that proof with a message; the photo row is saved with them; Mark Delivered loads the delivery's lines before it lets the customer sign; `errorSanitizer` maps both codes; a refusal clears the stale proof and reloads the delivery (no automatic retry).
   4. **Required (Mason decision 2, timing per Q2):** `20270307190000_proof_binding_required.sql` refuses a fresh signature with no list (`DELIVERY_LOAD_CHANGED`) or a paper-ticket photo saved with no list (`PAPER_TICKET_LOAD_CHANGED`), reusing the two refusals the screens already handle. Merged right after the screen PR, same release. **Added (Mason, 2026-11-25, Taha's review of #2557):** a drop-location (left at site) photo saved with no list, or for another load, is refused `LEFT_AT_SITE_LOAD_CHANGED`; the screen PR saves the list with that photo and handles the refusal like the ticket one.
 - **Who may act:** unchanged. The wrappers do no checks of their own; EXECUTE grants copy today's (`complete_delivery`: authenticated, service_role; `start_and_complete_delivery`: authenticated). The renamed bodies and the trigger function have no client EXECUTE. `lines_seen` is readable by whoever may read the photo row (the same people who may read the delivery's lines).
-- **Files:** `supabase/migrations/20270307160000_proof_bound_to_load.sql`, `docs/reference/migrations.d/` record, `docs/changelog.d/` note, `scripts/smoke/prove-proof-bound-to-load-real-schema.mjs`, reverse script, `src/lib/errorSanitizer.ts` (+test, both codes; harmless before the screens send anything).
+- **Files:** `supabase/migrations/20270308000000_proof_bound_to_load.sql`, `docs/reference/migrations.d/` record, `docs/changelog.d/` note, `scripts/smoke/prove-proof-bound-to-load-real-schema.mjs`, reverse script, `src/lib/errorSanitizer.ts` (+test, both codes; harmless before the screens send anything).
 
 ## State and failure
 
@@ -67,7 +67,7 @@ Read at `origin/staging` 015566676 and PR #2324 head bd06a4d1a (2026-11-23). Fol
 
 ## Round 3: delivered amounts and the round-11 findings (2026-11-24)
 
-Sol round 11 on #2324 (Mason chose to fix them here, not in #2324). Branch `claude/proof-bound-to-load-r2`, on top of #2324 head c397782fd (its migration is now `20270306230000`, with the under-0.01 rule); this migration is restamped `20270307160000`.
+Sol round 11 on #2324 (Mason chose to fix them here, not in #2324). Branch `claude/proof-bound-to-load-r2`, on top of #2324 head c397782fd (its migration is now `20270306230000`, with the under-0.01 rule); this migration is restamped `20270308000000`.
 
 | Sol r11 | What closes it |
 |---|---|

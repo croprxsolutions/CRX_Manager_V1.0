@@ -14,6 +14,8 @@ export interface ApplicatorPrintOptions {
   blankSections: number;
   includeBillingSplits: boolean;
   showBanner: boolean;
+  /** Safety (signal word, REI, PHI) for every product on its own sheet. Off unless chosen (Mason, 2026-11-24). */
+  includeSafetySheet: boolean;
 }
 
 export const APPLICATOR_PRINT_OPTIONS_KEY = 'applicator_print_options';
@@ -25,6 +27,7 @@ export const DEFAULT_APPLICATOR_PRINT_OPTIONS: ApplicatorPrintOptions = {
   blankSections: 0,
   includeBillingSplits: true,
   showBanner: true,
+  includeSafetySheet: false,
 };
 
 function boundedInteger(value: unknown, fallback: number, minimum: number, maximum: number): number {
@@ -58,6 +61,7 @@ function parseApplicatorPrintOptions(raw: string | null | undefined): Applicator
     blankSections: boundedInteger(value.blankSections, DEFAULT_APPLICATOR_PRINT_OPTIONS.blankSections, 0, 5),
     includeBillingSplits: value.includeBillingSplits !== false,
     showBanner: value.showBanner !== false,
+    includeSafetySheet: value.includeSafetySheet === true,
   };
 }
 
@@ -69,6 +73,7 @@ export function serializeApplicatorPrintOptions(options: ApplicatorPrintOptions)
     blankSections: boundedInteger(options.blankSections, 0, 0, 5),
     includeBillingSplits: options.includeBillingSplits,
     showBanner: options.showBanner,
+    includeSafetySheet: options.includeSafetySheet,
   });
 }
 

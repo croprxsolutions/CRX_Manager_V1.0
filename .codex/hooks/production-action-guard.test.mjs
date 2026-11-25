@@ -11,7 +11,7 @@ import { buildSweepQuery } from "../../scripts/db-invariant-sweeps/allowlist-mat
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import { claimOrRefuse } from "../../.claude/hooks/pr-claim-lib.mjs";
 import { skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
-import { recordTahaLaneOverride, TAHA_LANE_UNTIL_MS } from "../../.claude/hooks/taha-lane-lib.mjs";
+import { recordTahaLaneOverride } from "../../.claude/hooks/taha-lane-lib.mjs";
 
 // Since 2026-10-19 (Luna round 3) the merge gate FAILS CLOSED when it cannot
 // read the PR's review threads, because unresolved CodeRabbit threads block a
@@ -612,18 +612,61 @@ try {
   // Taha lane block (#2303): the same staging merge, but the PR changes a quote screen.
   const quoteFiles = "modified\tsrc/pages/QuoteBuilder.tsx\t";
   mkdirSync(path.join(ordinary.repo, ".claude"), { recursive: true }); // the code is saved under .claude, as in a real checkout
-  const laneNow = TAHA_LANE_UNTIL_MS - 24 * 3600e3; // frozen before the cutoff so this test still runs after Dec 15
-  const afterCutoff = evaluateProductionAction({
+  const laneNow = Date.now();
+  const afterDec15 = evaluateProductionAction({
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
-    nowMs: TAHA_LANE_UNTIL_MS + 1, runGh: () => ordinaryPrJson, prFiles: quoteFiles,
+    nowMs: Date.UTC(2027, 5, 1), runGh: () => ordinaryPrJson, prFiles: quoteFiles,
   });
-  assert.doesNotMatch(afterCutoff.reason ?? "", /TAHA LANE/, "after Dec 15 the lane block is off");
+  assert.match(afterDec15.reason ?? "", /TAHA LANE BLOCK/, "the lane block has no end date (Mason, 2026-11-24)");
+  // Taha's Approve on this exact head lets it on to the next gate, with no code (Mason, 2026-11-24).
+  // Reviews come back as "account id, state, commit, time"; the timeline read lists base-branch changes.
+  const tahaGh = (commit, baseChanges = "") => (args) => {
+    if (args.some((a) => /\/reviews/.test(a))) return `50602678\tAPPROVED\t${commit}\t2026-11-24T15:00:00Z\n`;
+    if (args.some((a) => /\/timeline/.test(a))) return baseChanges;
+    return ordinaryPrJson;
+  };
+  const ordinaryHead = JSON.parse(ordinaryPrJson).headRefOid;
+  const tahaApprovedMerge = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo, nowMs: laneNow, prFiles: quoteFiles,
+    runGh: tahaGh(ordinaryHead),
+  });
+  assert.doesNotMatch(tahaApprovedMerge.reason ?? "", /TAHA LANE/, "Taha's Approve on the head clears the lane block");
+  const tahaApprovedRetargeted = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo, nowMs: laneNow, prFiles: quoteFiles,
+    runGh: tahaGh(ordinaryHead, "2026-11-24T16:00:00Z\n"),
+  });
+  assert.match(tahaApprovedRetargeted.reason ?? "", /TAHA LANE BLOCK/, "a base-branch change after his Approve refuses");
+  const tahaApprovedOld = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo, nowMs: laneNow, prFiles: quoteFiles,
+    runGh: tahaGh("0".repeat(40)),
+  });
+  assert.match(tahaApprovedOld.reason ?? "", /TAHA LANE BLOCK/, "an Approve of an older head does not");
   const laneMerge = evaluateProductionAction({
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
     nowMs: laneNow, runGh: () => ordinaryPrJson, prFiles: quoteFiles,
   });
   assert.equal(laneMerge.blocked, true, "a staging merge in Taha's areas is refused");
   assert.match(laneMerge.reason, /TAHA LANE BLOCK — #5 is refused because it changes Taha's areas \(src\/pages\/QuoteBuilder\.tsx\)/, "and names the file");
+  // Taha's own Approve on the PR's head lifts the block in the Codex gate too; one on an older commit does not (#2406).
+  const tahaReview = (commitId, ...later) => (args) => (args[0] === "api" && /\/pulls\/5\/reviews\?/.test(String(args[2] ?? ""))
+    ? [{ state: "APPROVED", commit_id: commitId }, ...later].map((r) => ["50602678", r.state, r.commit_id, "2026-11-24T15:00:00Z"].join("\t")).join("\n")
+    : args.some((a) => /\/timeline/.test(a)) ? "" : ordinaryPrJson);
+  const signedOff = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: laneNow, runGh: tahaReview(ordinary.sha), prFiles: quoteFiles,
+  });
+  assert.doesNotMatch(signedOff.reason ?? "", /TAHA LANE/, "Taha's Approve on the head lets the merge on to the next gate");
+  const staleSignOff = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: laneNow, runGh: tahaReview("0".repeat(40)), prFiles: quoteFiles,
+  });
+  assert.match(staleSignOff.reason ?? "", /TAHA LANE BLOCK/, "an Approve on an older commit does not");
+  // Taha, 2026-11-24: a dismissed Request changes after his Approve leaves the PR held until he approves again.
+  const dismissedSignOff = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: laneNow, runGh: tahaReview(ordinary.sha, { user: { login: "TahaKhanAbdalli" }, state: "DISMISSED", commit_id: ordinary.sha }), prFiles: quoteFiles,
+  });
+  assert.match(dismissedSignOff.reason ?? "", /TAHA LANE BLOCK/, "an Approve followed by a dismissed review does not");
   const laneCode = /taha override #5 (\d{6})/.exec(laneMerge.reason)?.[1];
   assert.ok(laneCode, "and gives Mason the exact line to send");
   assert.equal(recordTahaLaneOverride({ dirs: skipStateDirs([ordinary.repo]), pullRequest: 5, code: laneCode, now: laneNow }).ok, true, "Mason's line records the override");

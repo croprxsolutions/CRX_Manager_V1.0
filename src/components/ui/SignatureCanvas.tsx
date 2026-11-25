@@ -25,6 +25,8 @@ export default function SignatureCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const padRef = useRef<SignaturePad | null>(null);
   const [hasInk, setHasInk] = useState(false);
+  // New ink since the strokes were last captured: the next resize re-captures them at their drawn size.
+  const inkChangedRef = useRef(true);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -36,18 +38,31 @@ export default function SignatureCanvas({
     });
 
     // Match the drawing surface to the box (high-DPI aware). The box resizes when a phone
-    // rotates, so redo it then and rescale any strokes already drawn to keep the pen under the finger.
+    // rotates, so redo it then. Strokes already drawn keep their shape: a bigger box leaves them
+    // where they are, a smaller one shrinks them evenly so the whole signature stays inside.
+    // Each resize scales from the size the strokes were drawn at, so rotating back and forth never
+    // shrinks them further.
     let sizedWidth = 0;
+    let sizedHeight = 0;
+    let drawn: { strokes: ReturnType<SignaturePad['toData']>; width: number; height: number } = { strokes: [], width: 0, height: 0 };
     const fitToBox = () => {
       const boxWidth = canvas.offsetWidth;
-      if (!boxWidth || boxWidth === sizedWidth) return;
-      const scale = sizedWidth ? boxWidth / sizedWidth : 1;
-      const strokes = pad.toData();
+      const boxHeight = canvas.offsetHeight;
+      if (!boxWidth || (boxWidth === sizedWidth && boxHeight === sizedHeight)) return;
+      if (inkChangedRef.current && sizedWidth) {
+        drawn = { strokes: pad.toData(), width: sizedWidth, height: sizedHeight };
+        inkChangedRef.current = false;
+      }
+      const { strokes } = drawn;
+      const scale = drawn.width && drawn.height
+        ? Math.min(1, boxWidth / drawn.width, boxHeight / drawn.height)
+        : 1;
       const ratio = Math.max(window.devicePixelRatio || 1, 1);
       canvas.width = boxWidth * ratio;
-      canvas.height = canvas.offsetHeight * ratio;
+      canvas.height = boxHeight * ratio;
       canvas.getContext('2d')?.scale(ratio, ratio);
       sizedWidth = boxWidth;
+      sizedHeight = boxHeight;
       pad.clear();
       if (strokes.length) {
         pad.fromData(strokes.map((g) => ({ ...g, points: g.points.map((p) => ({ ...p, x: p.x * scale, y: p.y * scale })) })));
@@ -60,6 +75,7 @@ export default function SignatureCanvas({
 
     pad.addEventListener('beginStroke', () => setHasInk(true));
     pad.addEventListener('endStroke', () => {
+      inkChangedRef.current = true;
       if (!pad.isEmpty()) {
         onSignatureChange(pad.toDataURL('image/png'));
       }
@@ -79,6 +95,7 @@ export default function SignatureCanvas({
 
   const handleClear = useCallback(() => {
     padRef.current?.clear();
+    inkChangedRef.current = true;
     setHasInk(false);
     onSignatureChange(null);
   }, [onSignatureChange]);

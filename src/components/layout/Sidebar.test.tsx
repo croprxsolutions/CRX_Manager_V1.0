@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const mockProfile = vi.fn();
@@ -44,11 +44,20 @@ describe('Sidebar', () => {
     expect(screen.getAllByText('Sell & Deliver').length).toBeGreaterThan(0);
   });
 
-  it('renders Today and To-Ship as the office standalones', () => {
+  it('renders Today and the Load-Out Board as the office standalones', () => {
     mockProfile.mockReturnValue({ id: '1', role: 'admin', full_name: 'Admin User' });
     renderSidebar();
     expect(screen.getAllByText('Today').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('To-Ship (Load-Out Board)').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Load-Out Board').length).toBeGreaterThan(0);
+  });
+
+  it('uses plain menu names with no parentheses', () => {
+    mockProfile.mockReturnValue({ id: '1', role: 'admin', full_name: 'Admin User' });
+    renderSidebar(true);
+    const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
+    for (const link of within(drawer).getAllByRole('link')) {
+      expect(link.textContent).not.toMatch(/[()]/);
+    }
   });
 
   it('renders Team Board for all roles', () => {
@@ -75,10 +84,47 @@ describe('Sidebar', () => {
     expect(screen.getAllByText('Sign Out').length).toBeGreaterThan(0);
   });
 
-  it('renders Money category for admin', () => {
+  it('lists the Billing group in the order of the bookkeeper\'s day, Prepayments once', () => {
     mockProfile.mockReturnValue({ id: '1', role: 'admin', full_name: 'Admin User' });
-    renderSidebar();
-    expect(screen.getAllByText('Money').length).toBeGreaterThan(0);
+    renderSidebar(true);
+    const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
+    const billing = within(drawer).getByText('Billing').closest('div')?.parentElement as HTMLElement;
+    expect(within(billing).getAllByRole('link').map((a) => a.textContent)).toEqual([
+      'Chemical Invoices',
+      'Field Invoices',
+      'Record Payments',
+      'Prepayments',
+      'Accounts Receivable',
+      'Aging & Statements',
+      'Payment History',
+      'Commissions',
+      'Month-End Close',
+    ]);
+    expect(within(drawer).getAllByText('Prepayments')).toHaveLength(1);
+    expect(screen.queryAllByText('Money')).toHaveLength(0);
+  });
+
+  it('shows a sales rep only the Billing pages that role can open', () => {
+    mockProfile.mockReturnValue({ id: '1', role: 'sales_rep', full_name: 'Sales Rep' });
+    renderSidebar(true);
+    const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
+    const billing = within(drawer).getByText('Billing').closest('div')?.parentElement as HTMLElement;
+    expect(within(billing).getAllByRole('link').map((a) => a.textContent)).toEqual([
+      'Chemical Invoices',
+      'Field Invoices',
+      'Record Payments',
+    ]);
+  });
+
+  it('keeps Setup folded on the phone drawer until tapped', () => {
+    mockProfile.mockReturnValue({ id: '1', role: 'admin', full_name: 'Admin User' });
+    renderSidebar(true);
+    const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
+    const setup = within(drawer).getByText('Setup').closest('details') as HTMLDetailsElement;
+    expect(setup).not.toBeNull();
+    expect(setup.open).toBe(false);
+    // Its links are still in the menu, behind the fold.
+    expect(within(setup).getByText('Data Integrity').closest('a')).toHaveAttribute('href', '/integrity');
   });
 
   it('renders Customers & Fields category for sales_rep', () => {
@@ -194,5 +240,72 @@ describe('Sidebar', () => {
     fireEvent.keyDown(document, { key: 'Tab' });
 
     expect(closeButton).toHaveFocus();
+  });
+
+  describe('pinning links to the top', () => {
+    function expandSidebar() {
+      // The desktop rail starts collapsed; opening a group expands it.
+      fireEvent.click(screen.getByRole('button', { name: 'Expand Sell & Deliver navigation' }));
+    }
+
+    it('pins a link into a Pinned section and saves it for that user only', () => {
+      mockProfile.mockReturnValue({ id: 'user-a', role: 'admin', full_name: 'Admin User' });
+      renderSidebar();
+      expandSidebar();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Pin Orders to top' }));
+
+      const pinnedHeading = screen.getAllByText('Pinned')[0];
+      const pinnedSection = pinnedHeading.closest('div')?.parentElement as HTMLElement;
+      expect(within(pinnedSection).getByText('Orders').closest('a')).toHaveAttribute('href', '/orders');
+      expect(JSON.parse(localStorage.getItem('crx-sidebar-pins:user-a') ?? '[]')).toEqual(['/orders']);
+      expect(localStorage.getItem('crx-sidebar-pins:user-b')).toBeNull();
+    });
+
+    it('unpins from the Pinned section', () => {
+      localStorage.setItem('crx-sidebar-pins:user-a', JSON.stringify(['/orders']));
+      mockProfile.mockReturnValue({ id: 'user-a', role: 'admin', full_name: 'Admin User' });
+      renderSidebar();
+      expandSidebar();
+
+      fireEvent.click(screen.getAllByRole('button', { name: 'Unpin Orders' })[0]);
+
+      expect(screen.queryAllByText('Pinned')).toHaveLength(0);
+      expect(JSON.parse(localStorage.getItem('crx-sidebar-pins:user-a') ?? '[]')).toEqual([]);
+    });
+
+    it('never shows a pinned page the role cannot open', () => {
+      // A shared computer: these pins were saved for an id that is now a sales rep.
+      localStorage.setItem('crx-sidebar-pins:user-a', JSON.stringify(['/settings', '/month-end', '/orders']));
+      mockProfile.mockReturnValue({ id: 'user-a', role: 'sales_rep', full_name: 'Sales Rep' });
+      renderSidebar();
+      expandSidebar();
+
+      const pinnedSection = screen.getAllByText('Pinned')[0].closest('div')?.parentElement as HTMLElement;
+      expect(Array.from(pinnedSection.querySelectorAll('a'), (a) => a.textContent)).toEqual(['Orders']);
+    });
+
+    it('drops a pinned page that is on the person\'s deny list', () => {
+      localStorage.setItem('crx-sidebar-pins:user-a', JSON.stringify(['/orders']));
+      mockProfile.mockReturnValue({ id: 'user-a', role: 'sales_rep', full_name: 'Sales Rep' });
+      vi.mocked(hasPageAccess).mockImplementation((_role, _denied, pageKey) => pageKey !== 'orders');
+      renderSidebar();
+      expandSidebar();
+
+      expect(screen.queryAllByText('Pinned')).toHaveLength(0);
+    });
+
+    it('ignores unreadable saved pins', () => {
+      localStorage.setItem('crx-sidebar-pins:user-a', '{not json');
+      mockProfile.mockReturnValue({ id: 'user-a', role: 'admin', full_name: 'Admin User' });
+      renderSidebar();
+      expect(screen.queryAllByText('Pinned')).toHaveLength(0);
+    });
+
+    it('offers no pin control on the driver menu', () => {
+      mockProfile.mockReturnValue({ id: '1', role: 'driver', full_name: 'Driver User' });
+      renderSidebar();
+      expect(screen.queryAllByRole('button', { name: /^Pin / })).toHaveLength(0);
+    });
   });
 });

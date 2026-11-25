@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Product } from '../types';
 import { hasRpcCode, RpcErrorCodes } from './db';
 import {
-  missingProductSetup, nearMatchNames, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories,
+  epaCoveredProductIds, isSetupIncomplete, missingProductSetup, nearMatchNames, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories,
 } from './productSetup';
 
 describe('product setup validation and options', () => {
@@ -84,6 +84,28 @@ describe('complete setup and near-match warnings', () => {
     expect(missingProductSetup({ ...base, category: 'Fungicide' })).toEqual(['EPA number', 'Signal word', 'REI', 'PHI']);
     expect(missingProductSetup({ ...base, category: 'Adjuvant', epa_registration: '100-1234' })).toEqual(['Signal word', 'REI', 'PHI']);
     expect(missingProductSetup({ ...base, category: 'Adjuvant' })).toEqual([]);
+  });
+
+  it('counts a generic as having an EPA number when its group carries one', () => {
+    const generic = { ...pesticide, id: 'gen', epa_registration: null };
+    expect(missingProductSetup(generic, true)).toEqual([]);
+    expect(isSetupIncomplete(generic)).toBe(true);
+    expect(isSetupIncomplete(generic, new Set(['gen']))).toBe(false);
+    // Other label fields still count.
+    expect(missingProductSetup({ ...base, category: 'Adjuvant' }, true)).toEqual(['Signal word', 'REI', 'PHI']);
+    expect(isSetupIncomplete({ ...generic, signal_word: null }, new Set(['gen']))).toBe(true);
+
+    const size = (id: string) => ({ product_id: id });
+    const parents = [
+      { id: 'p-brand', generic_epa_registration: null, sizes: [size('a1'), size('a2')] },
+      { id: 'p-generic', generic_epa_registration: '524-475', sizes: [size('b1')] },
+      { id: 'p-sibling', generic_epa_registration: null, sizes: [size('c1'), size('c2')] },
+      { id: 'p-legacy', generic_epa_registration: null, sizes: [size('d1'), size('d2')] },
+      { id: 'p-none', generic_epa_registration: ' ', sizes: [size('e1')] },
+    ];
+    const products = [{ id: 'c2', epa_registration: '100-1' }, { id: 'e1', epa_registration: null }];
+    expect([...epaCoveredProductIds(parents, products, new Set(['p-brand']), new Set(['d2', 'solo']))].sort())
+      .toEqual(['a1', 'a2', 'b1', 'c1', 'c2', 'd1', 'd2', 'solo']);
   });
 
   it('suggests close spellings of an existing name and stays quiet on an exact one', () => {

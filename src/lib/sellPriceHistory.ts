@@ -14,14 +14,18 @@ import type { CostHistory } from '../types';
 export type SellPriceHistoryRow = Pick<CostHistory,
   'id' | 'changed_at' | 'change_reason' | 'change_note'
   | 'old_tier1_price' | 'new_tier1_price' | 'old_tier2_price' | 'new_tier2_price'
-  | 'old_tier3_price' | 'new_tier3_price'> & { change_source: string };
+  | 'old_tier3_price' | 'new_tier3_price'> & {
+    change_source: string;
+    // Who made the change (null on a starting snapshot, which records no person).
+    changer?: { full_name: string | null } | null;
+  };
 
 /** Every history row for the product, oldest first. */
 export async function fetchSellPriceHistory(productId: string): Promise<SellPriceHistoryRow[]> {
   const { data, error } = await fetchAllRows<SellPriceHistoryRow>((from, to) =>
     pageWithList(supabase
       .from('cost_history')
-      .select('id, changed_at, change_source, change_reason, change_note, old_tier1_price, new_tier1_price, old_tier2_price, new_tier2_price, old_tier3_price, new_tier3_price', { count: 'exact' })
+      .select('id, changed_at, change_source, change_reason, change_note, old_tier1_price, new_tier1_price, old_tier2_price, new_tier2_price, old_tier3_price, new_tier3_price, changer:profiles!cost_history_changed_by_fkey(full_name)', { count: 'exact' })
       .eq('product_id', productId)
       .order('changed_at', { ascending: true })
       .order('id', { ascending: true })
@@ -59,6 +63,8 @@ export interface SellPricePoint {
   isStartingPoint: boolean;
   source: SellPriceHistoryRow['change_source'];
   reason: string | null;
+  /** The name of the person who made the change, when it is known. */
+  changedBy: string | null;
 }
 
 /**
@@ -97,6 +103,7 @@ export function sellPricePoints(rows: SellPriceHistoryRow[]): SellPricePoint[] {
       isStartingPoint,
       source: row.change_source,
       reason: row.change_reason ?? row.change_note,
+      changedBy: row.changer?.full_name?.trim() || null,
     });
   }
   return points;

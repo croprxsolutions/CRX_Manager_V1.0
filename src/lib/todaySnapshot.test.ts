@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { dropTodaySnapshot, readTodaySnapshot, saveTodaySnapshot, savedCopyMessage } from './todaySnapshot';
+import { dropAllSnapshots, dropTodaySnapshot, readTodaySnapshot, saveTodaySnapshot, savedCopyMessage } from './todaySnapshot';
 
 const MORNING = new Date('2026-11-24T14:14:00Z'); // 8:14 AM in the business time zone (America/Chicago)
 const NEXT_DAY = new Date('2026-11-25T14:00:00Z');
@@ -35,6 +35,16 @@ describe('todaySnapshot', () => {
     window.localStorage.setItem('sb-auth-token', 'keep');
     saveTodaySnapshot('route', 'u1', ['a'], MORNING);
     expect(window.localStorage.getItem('sb-auth-token')).toBe('keep');
+  });
+
+  it('sign-out drops every saved copy and leaves other app storage alone', () => {
+    saveTodaySnapshot('route', 'user-1', { gate: '1234' });
+    saveTodaySnapshot('stop:s1', 'user-1', { phone: '555' });
+    localStorage.setItem('other-app-key', 'keep');
+    dropAllSnapshots();
+    expect(readTodaySnapshot('route', 'user-1')).toBeNull();
+    expect(readTodaySnapshot('stop:s1', 'user-1')).toBeNull();
+    expect(localStorage.getItem('other-app-key')).toBe('keep');
   });
 
   it('drops one screen’s copy', () => {

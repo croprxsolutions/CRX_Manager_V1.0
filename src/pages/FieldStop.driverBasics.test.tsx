@@ -327,6 +327,43 @@ describe('FieldStop: saved copy in a dead spot', () => {
     expect(screen.queryByText(/^No signal — showing this stop/)).not.toBeInTheDocument();
   });
 
+  it("forgets the saved copy once the server says the stop is no longer this driver's", async () => {
+    tables.data.deliveries = [{ ...baseStop, delivery_notes: 'Gate code 4471.' }];
+    const first = render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    expect(await screen.findByText('Gate code 4471.')).toBeInTheDocument();
+    first.unmount();
+
+    // Reassigned: online, the read answers with no row.
+    tables.data.deliveries = [];
+    const second = render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/my-route'));
+    second.unmount();
+    expect(Object.values(window.localStorage).join('')).not.toContain('Gate code 4471.');
+
+    // Later, in a dead spot, nothing of it is left to show.
+    failStopRead();
+    render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Could not load this stop'));
+    expect(screen.queryByText('Gate code 4471.')).not.toBeInTheDocument();
+  });
+
+  it("removes the saved copy when the server refuses access, instead of showing it as no signal", async () => {
+    tables.data.deliveries = [{ ...baseStop, delivery_notes: 'Gate code 4471.' }];
+    const first = render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    expect(await screen.findByText('Gate code 4471.')).toBeInTheDocument();
+    first.unmount();
+
+    mockFrom.mockImplementation((table: string) => {
+      const chain = buildChain(table);
+      if (table === 'deliveries') chain.maybeSingle = () => Promise.resolve({ data: null, error: { code: '42501', message: 'permission denied' } });
+      return chain;
+    });
+    render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/my-route'));
+    expect(screen.queryByText('Gate code 4471.')).not.toBeInTheDocument();
+    expect(Object.values(window.localStorage).join('')).not.toContain('Gate code 4471.');
+  });
+
   it('still goes back to My Route when there is no saved copy', async () => {
     failStopRead();
     render(<MemoryRouter><FieldStop /></MemoryRouter>);

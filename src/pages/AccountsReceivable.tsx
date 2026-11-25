@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import { supabase, assertRpcResult } from '../lib/db';
 import { agingCents, isPricedAgingRow } from '../lib/arAging';
 import type { ARAgingRow } from '../types';
@@ -11,12 +11,10 @@ import PageHeader from '../components/ui/PageHeader';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import ARaging from './ARaging';
 import PaymentHistory from './PaymentHistory';
-import PrepaymentManagerPanel from '../components/prepay/PrepaymentManagerPanel';
 import CustomerTransactionReview from './CustomerTransactionReview';
 
-// F4: one Accounts Receivable workspace that gathers the four previously-separate
-// admin-only money screens (Aging / Payment History / Prepayments / Ledger) under
-// one tabbed page, with a "Net Money Position" summary strip on top. This v1
+// F4: one Accounts Receivable workspace that gathers the previously-separate
+// admin-only money screens (Aging / Payment History / Ledger) under one tabbed page, with a "Net Money Position" summary strip on top. This v1
 // renders each existing page as-is in a tab (only the active tab mounts) — it does
 // NOT change any page's logic or roles. The old routes still work; converting them
 // to redirects and sharing a single customer picker across tabs are follow-ups.
@@ -26,7 +24,6 @@ import CustomerTransactionReview from './CustomerTransactionReview';
 const TABS = [
   { key: 'aging', label: 'AR Aging' },
   { key: 'payments', label: 'Payment History' },
-  { key: 'prepayments', label: 'Prepayments' },
   { key: 'ledger', label: 'Transactions' },
 ] as const;
 
@@ -109,6 +106,10 @@ export default function AccountsReceivable() {
     };
   }, [summaryAttempt]);
 
+  // Prepayments has one home, the Prepayments page (/prepay); its old tab here,
+  // which showed the same screen, now sends old links and bookmarks there.
+  if (raw === 'prepayments') return <Navigate to="/prepay?tab=manager" replace />;
+
   // A Total Owed that leaves customers out cannot give a true net position (KI-95).
   const net = owed !== null && owedExcluded === 0 ? owed - prepay - openCredit : null;
 
@@ -117,7 +118,7 @@ export default function AccountsReceivable() {
       <PageHeader
         title="Accounts"
         accent="Receivable"
-        subtitle="Aging, payments, prepayments, and the customer ledger — in one place."
+        subtitle="Aging, payment history, and the customer ledger — in one place."
       />
 
       {owed === null && !summaryFailed && (
@@ -192,7 +193,6 @@ export default function AccountsReceivable() {
       <div>
         {tab === 'aging' && <ARaging />}
         {tab === 'payments' && <PaymentHistory />}
-        {tab === 'prepayments' && <PrepaymentManagerPanel />}
         {tab === 'ledger' && <CustomerTransactionReview />}
       </div>
     </div>

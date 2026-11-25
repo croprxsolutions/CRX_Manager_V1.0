@@ -225,6 +225,15 @@ function renderDeliveryPage(
     // Embed captured signature image
     try {
       const { width: sigWidth, height: sigHeight } = fitSignature(doc.getImageProperties(data.signature_image_data_url));
+      // Signature, its "Signed by" line and the footer must all fit; otherwise start it on a new page.
+      if (y + sigHeight + 25 > doc.internal.pageSize.getHeight() - 45) {
+        doc.addPage();
+        // A separated second sheet still names its receipt.
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 100);
+        doc.text(`${data.delivery_number} (continued)`, margin, margin);
+        y = margin + 20;
+      }
       doc.addImage(data.signature_image_data_url, 'PNG', margin, y, sigWidth, sigHeight);
       y += sigHeight + 5;
     } catch {
@@ -302,7 +311,7 @@ export async function generateBatchDeliveryPdf(dataList: PdfDeliveryData[]) {
     return;
   }
 
-  // Multiple deliveries — one page each
+  // Multiple deliveries — each starts on a new page (a long one may take two)
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
 
   for (let i = 0; i < dataList.length; i++) {

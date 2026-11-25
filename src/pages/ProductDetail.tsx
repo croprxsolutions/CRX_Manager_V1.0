@@ -17,6 +17,7 @@ import ProductSellPriceHistory from '../components/products/ProductSellPriceHist
 import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 import CancelledRegistrationBanner from '../components/products/CancelledRegistrationBanner';
+import { fetchParentEpaNumbers } from '../lib/epaProposals';
 import {
   CHECK_TIMEOUT_MS, normalizeEpaRegistration, registrationCheck, useCancelledRegistrations, useStickyCancellations,
 } from '../lib/epaRegistrationStatus';
@@ -41,7 +42,7 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
 import { sanitizeError, assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, supabase, supabaseUntyped } from '../lib/db';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
-import { localToday } from '../lib/dateUtils';
+import { BUSINESS_TIMEZONE, localToday } from '../lib/dateUtils';
 import { formatExactUSD } from '../lib/money';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
 import { Sentry } from '../lib/sentry';
@@ -448,17 +449,20 @@ export default function ProductDetail() {
   const reloadRequired = pricingReloadRequired || productStale;
   // cost_history is admin-only under RLS (the panel only renders for admins).
   const costHistoryRead = useLoad<CostHistory[]>(isAdmin && !isNew && id ? `cost-history:${id}` : null, async () => {
-    const { data, error } = await supabase
+    // cost_history also logs price-only changes (cost unchanged) for Sell Price History. PostgREST cannot
+    // compare two columns, so read every row and keep the newest 20 whose cost really changed.
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('cost_history')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('product_id', id!)
       // The starting snapshot (20261026140000) records no change; the Sell Price History card shows it.
       .neq('change_source', 'starting_snapshot')
       .order('changed_at', { ascending: false })
-      .limit(20);
+      .order('id', { ascending: false })
+      .range(from, to)));
     if (error) throw error;
     if (!Array.isArray(data)) throw new Error('cost history read returned no list');
-    return data as CostHistory[];
+    return (data as CostHistory[]).filter((row) => row.old_cost !== row.new_cost).slice(0, 20);
   }, { report: { tags: { read: 'product_detail_cost_history' } } });
   const reloadCostHistory = costHistoryRead.reload;
   const costHistory = costHistoryRead.status === 'loaded' ? costHistoryRead.data : NO_ROWS;
@@ -546,6 +550,18 @@ export default function ProductDetail() {
   }, [productIdRef]);
   // Another product's brands never sit under this product's number.
   useEffect(() => { setBrandRegistrations([]); setBrandsRead('loading'); }, [id]);
+  // Generics keep their EPA numbers on the group's brands (the four places fetchParentEpaNumbers reads), for the setup badge.
+  const [groupHasEpa, setGroupHasEpa] = useState(false);
+  useEffect(() => { setGroupHasEpa(false); }, [parent]);
+  // Re-read after every brand list change too, so clearing a brand's last number brings the badge back without a reload.
+  useEffect(() => {
+    if (!parent) return undefined;
+    let cancelled = false;
+    fetchParentEpaNumbers(parent.id)
+      .then((numbers) => { if (!cancelled) setGroupHasEpa(numbers.length > 0); })
+      .catch((error: unknown) => Sentry.captureException(error, { extra: { context: 'product_detail_group_epa' } }));
+    return () => { cancelled = true; };
+  }, [parent, brandRegistrations]);
   const productLoaded = persistedProduct?.id === id;
   // The brand list's clock starts once the product (and so the Brands section) has loaded.
   const [brandsReadSlow, setBrandsReadSlow] = useState(false);
@@ -1333,7 +1349,7 @@ export default function ProductDetail() {
     ? persistedLabelFields.epaRegistration.trim()
     : null;
 
-  const missingSetup = missingProductSetup(product);
+  const missingSetup = missingProductSetup(product, groupHasEpa || brandRegistrations.some((b) => b.epaRegistration?.trim()));
   // What a new quote line will show once this edit saves; existing quote lines keep their copied note.
   const quoteLine = !isNew && persistedProduct && persistedProduct.id === product.id ? quoteLineChange(persistedProduct, product) : null;
 
@@ -2430,11 +2446,11 @@ export default function ProductDetail() {
                     {costHistory.map((ch) => (
                       <div key={ch.id} className="border-b border-gray-50 pb-3 last:border-0">
                         <div className="flex justify-between text-sm">
-                          <span className="text-red-500 line-through">${ch.old_cost?.toFixed(2)}</span>
-                          <span className="text-crx-green font-medium">${ch.new_cost?.toFixed(2)}</span>
+                          <span className="text-red-500 line-through">{ch.old_cost == null ? 'No cost' : formatExactUSD(ch.old_cost)}</span>
+                          <span className="text-crx-green font-medium">{ch.new_cost == null ? 'No cost' : formatExactUSD(ch.new_cost)}</span>
                         </div>
                         {ch.change_note && <p className="text-xs text-secondary mt-1">{ch.change_note}</p>}
-                        <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString()}</p>
+                        <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString('en-US', { timeZone: BUSINESS_TIMEZONE })}</p>
                       </div>
                     ))}
                   </div>
@@ -2485,7 +2501,7 @@ export default function ProductDetail() {
               </Card>
               </PhoneSection>
             )}
-            <ProductChangeHistory productId={id} reloadToken={priceHistoryReloadToken} />
+            <ProductChangeHistory productId={id} reloadToken={priceHistoryReloadToken} showPriceHistoryNote={isAdmin} />
           </div>
         )}
       </div>

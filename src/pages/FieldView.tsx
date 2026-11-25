@@ -77,6 +77,7 @@ import {
   ShieldAlert,
   WifiOff,
   AlertCircle,
+  CloudUpload,
 } from 'lucide-react';
 import type { MapRef } from 'react-map-gl/mapbox';
 import type { Json } from '../types/supabase';
@@ -91,6 +92,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useQueuedJobCompletions } from '../hooks/useQueuedJobCompletions';
 import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { getOfflineStorageErrorMessage, queueAction } from '../lib/offlineQueue';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
@@ -112,7 +114,8 @@ import {
   type FieldViewJobCard,
 } from '../lib/dispatchDisplay';
 import type { Field } from '../types';
-import { readTodaySnapshot, saveTodaySnapshot } from '../lib/todaySnapshot';
+import { saveTodaySnapshot, savedCopyAfterFailure } from '../lib/todaySnapshot';
+import { isNetworkFailure } from '../lib/deliveryEvidence';
 import SavedCopyBanner from '../components/route/SavedCopyBanner';
 
 // The Supabase Data API caps a single response at ~1000 rows; page get_dispatched_list
@@ -194,6 +197,9 @@ export default function FieldView() {
   const [completeForm, setCompleteForm] = useState<CompleteForm>(emptyCompleteForm());
   const [completeConfirmFor, setCompleteConfirmFor] = useState<FieldViewJobCard | null>(null);
   const [completing, setCompleting] = useState(false);
+  // Jobs whose completion is saved on this phone and still waiting to send: no second
+  // Complete for them until it sends, needs attention, or is discarded.
+  const { queuedJobIds, markQueued } = useQueuedJobCompletions(profile);
 
   // Map geometry (best-effort; the list view never depends on it).
   const [mapFields, setMapFields] = useState<Field[]>([]);
@@ -275,7 +281,7 @@ export default function FieldView() {
       setCards(grouped);
     } catch (err) {
       Sentry.captureException(err, { tags: { source: 'fetch', action: 'field_view_my_jobs' } });
-      const saved = readTodaySnapshot<FieldViewJobCard[]>(MY_DAY_SNAPSHOT, profile?.id);
+      const saved = savedCopyAfterFailure<FieldViewJobCard[]>(MY_DAY_SNAPSHOT, profile?.id, isNetworkFailure(err));
       if (saved && Array.isArray(saved.data)) {
         // Shown read-only: Start and Complete stay off until a load succeeds (the banner says why), and an open
         // Complete form closes, as it did when a failed load emptied the list.
@@ -295,6 +301,20 @@ export default function FieldView() {
   }, [toast, profile?.id]);
 
   useEffect(() => { fetchCards(); }, [fetchCards]);
+
+  // A saved completion left the queue (sent, needs attention, or discarded): reload so a
+  // sent one shows the job as done instead of offering Complete again. Wait for signal:
+  // a reload that fails offline would blank the whole job list.
+  const prevQueuedJobIds = useRef(queuedJobIds);
+  const reloadAfterSend = useRef(false);
+  useEffect(() => {
+    if ([...prevQueuedJobIds.current].some((id) => !queuedJobIds.has(id))) reloadAfterSend.current = true;
+    prevQueuedJobIds.current = queuedJobIds;
+    if (reloadAfterSend.current && isOnline) {
+      reloadAfterSend.current = false;
+      void fetchCards();
+    }
+  }, [queuedJobIds, fetchCards, isOnline]);
 
   // --- Map geometry for the visible job locations (best-effort) ---------------------
   useEffect(() => {
@@ -524,6 +544,7 @@ export default function FieldView() {
 
   // --- Complete Job (queues offline) --------------------------------------------------
   const openCompleteForm = (card: FieldViewJobCard) => {
+    if (queuedJobIds.has(card.job_id)) return;
     setExpandedId(card.job_id); // Complete lives in the expanded panel (needs detail loaded)
     // U12 Codex R4 #2: completeForm is ONE shared state — without a reset, values
     // typed for job A (wind/notes/gallons) silently submit for job B after
@@ -541,6 +562,7 @@ export default function FieldView() {
   };
 
   const requestComplete = (card: FieldViewJobCard) => {
+    if (queuedJobIds.has(card.job_id)) return;
     setCompleteConfirmFor(card);
   };
 
@@ -549,6 +571,8 @@ export default function FieldView() {
     if (!card || !profile) return;
     const detail = details[cardDetailCacheKey(card)];
     setCompleteConfirmFor(null); // close confirm immediately
+    // A completion for this job is already saved on this phone: a second one is never queued or sent.
+    if (queuedJobIds.has(card.job_id)) return;
     setCompleting(true);
 
     // field_id comes from get_dispatched_list (U12 Codex P1 — the RPC now returns
@@ -596,6 +620,7 @@ export default function FieldView() {
           snapshotAt: detail?.jobUpdatedAt ?? undefined,
         });
         completeIdem.resetKey();
+        markQueued(card.job_id);
         toast('success', `Job ${card.job_number} saved offline — it will retry when connected and remain saved if it needs attention`);
         setCompleteFormOpenFor(null);
         setCompleteForm(emptyCompleteForm());
@@ -657,7 +682,8 @@ export default function FieldView() {
       ? (card.job_date === today ? 'Today' : parseLocalDate(card.job_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
       : null;
     const reiPhi = detail ? maxLabelReiPhi(detail.chemicals) : { reiHours: null, phiDays: null };
-    const showingCompleteForm = completeFormOpenFor === card.job_id;
+    const completionQueued = queuedJobIds.has(card.job_id);
+    const showingCompleteForm = completeFormOpenFor === card.job_id && !completionQueued;
 
     return (
       <div
@@ -715,7 +741,12 @@ export default function FieldView() {
                 <PlayCircle className="w-5 h-5" aria-hidden="true" /> Start Job
               </button>
             )}
-            {card.job_status === 'in_progress' && (
+            {card.job_status === 'in_progress' && (completionQueued ? (
+              <p role="status" className="flex-1 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-base font-semibold text-amber-900">
+                <CloudUpload className="w-5 h-5 shrink-0" aria-hidden="true" />
+                Completion saved on this phone — will send when signal returns
+              </p>
+            ) : (
               <button
                 type="button"
                 onClick={() => openCompleteForm(card)}
@@ -723,7 +754,7 @@ export default function FieldView() {
               >
                 <CheckCircle2 className="w-5 h-5" aria-hidden="true" /> Complete Job
               </button>
-            )}
+            ))}
           </div>
         )}
         {!isOnline && !savedCopyAt && card.job_status === 'scheduled' && (

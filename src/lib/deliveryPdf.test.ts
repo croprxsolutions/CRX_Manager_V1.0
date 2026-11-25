@@ -303,6 +303,21 @@ describe('generateDeliveryPdf', () => {
     expect(mockDoc.text).toHaveBeenCalledWith('Signed by: Pat Farmer', expect.any(Number), expect.any(Number));
   });
 
+  it('starts the signature on a new page when it would run into the bottom of the page', async () => {
+    const notes = 'Long delivery notes';
+    mockDoc.splitTextToSize.mockImplementation((text: string) => (text === notes ? Array(30).fill('note line') : [text]));
+    try {
+      await generateDeliveryPdf(makeDeliveryData({ delivery_notes: notes, signature_image_data_url: 'data:image/png;base64,iVBORw0KGgo' }));
+      expect(mockDoc.addPage).toHaveBeenCalledTimes(1);
+      const [, , , y, , h] = mockDoc.addImage.mock.calls[0];
+      expect(y).toBe(60);
+      expect(mockDoc.text).toHaveBeenCalledWith(`${makeDeliveryData().delivery_number} (continued)`, 40, 40);
+      expect(y + h).toBeLessThan(792 - 45);
+    } finally {
+      mockDoc.splitTextToSize.mockImplementation((text: string) => [text]);
+    }
+  });
+
   it('still prints older, wider signatures across the signature area', async () => {
     mockDoc.getImageProperties.mockReturnValueOnce({ width: 800, height: 240 });
     await generateDeliveryPdf(makeDeliveryData({ signature_image_data_url: 'data:image/png;base64,iVBORw0KGgo' }));

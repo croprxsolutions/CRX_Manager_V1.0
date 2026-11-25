@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Taha lane block (taha-lane-lib.mjs, Mason 2026-11-22): which files count, the
-// Dec 15 end, the one-PR override by code, and the real prompt hook end to end.
+// no end date, Taha's Approve on the head, the one-PR override by code, and the real prompt hook end to end.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -9,8 +9,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
-  TAHA_LANE_UNTIL_MS, findTahaLaneOverride, isTahaLanePath, isTahaLaneSql, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
-  tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
+  findTahaLaneOverride, isTahaLanePath, isTahaLaneSql, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
+  tahaApprovedHead, tahaApprovedOnGitHub, tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
 } from "./taha-lane-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -266,9 +266,9 @@ eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: REF }).map((e) =
 ok(tahaLaneProblem({ files: prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake, headSha: REF }), now: NOW })?.files.includes("supabase/baselines/cron_jobs.sql"),
   "a field-named baseline that writes payments is refused");
 
-eq(tahaLaneProblem({ files: f("src/pages/Quotes.tsx"), now: TAHA_LANE_UNTIL_MS }), null, "off after Dec 15");
-eq(tahaLaneProblem({ files: null, now: TAHA_LANE_UNTIL_MS + 1 }), null, "off after Dec 15 even when unreadable");
-ok(tahaLaneProblem({ files: f("src/pages/Quotes.tsx"), now: TAHA_LANE_UNTIL_MS - 1 }), "still on at the last moment of Dec 15");
+// Mason, 2026-11-24: no end date. A date long after Dec 15 changes nothing.
+ok(tahaLaneProblem({ files: f("src/pages/Quotes.tsx"), now: Date.UTC(2027, 5, 1) }), "still on after Dec 15");
+ok(tahaLaneProblem({ files: null, now: Date.UTC(2027, 5, 1) }), "unreadable files still refuse after Dec 15");
 
 // ── the command names the PR ────────────────────────────────────────────────
 eq(tahaOverrideCommand("taha override #2242 123456"), { pullRequest: 2242, code: "123456" }, "plain command");
@@ -318,6 +318,51 @@ ok(/taha override #2242 777777/.test(pushed), "after a new push the block is bac
 const refusal = tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: lane, dirs, now: NOW });
 ok(/TAHA LANE BLOCK/.test(refusal) && /taha override #2300 \d{6}/.test(refusal), "a refusal gives Mason the exact line, PR included");
 eq(tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: f("src/pages/Deliveries.tsx"), dirs, now: NOW }), null, "outside the lane, nothing to do");
+// Taha's Approve on the exact head (Mason, 2026-11-24).
+const rv = (state, commit, id = "50602678", at = "2026-11-24T15:00:00Z") => ({ id, state, commit, at });
+ok(tahaApprovedHead([rv("APPROVED", A)], A), "Taha approved this head");
+ok(tahaApprovedHead([rv("APPROVED", A.toUpperCase())], A), "commit compared without case");
+ok(!tahaApprovedHead([rv("APPROVED", B)], A), "an Approve of an older head does not count");
+ok(!tahaApprovedHead([rv("APPROVED", A, "12345")], A), "someone else's Approve does not count");
+ok(!tahaApprovedHead([{ login: "TahaKhanAbdalli", state: "APPROVED", commit: A }], A), "his login alone (renamable) does not count; his account number does");
+ok(!tahaApprovedHead([rv("APPROVED", A)], A, "2026-11-24T16:00:00Z"), "the PR's base branch changed after his Approve: refused");
+ok(tahaApprovedHead([rv("APPROVED", A)], A, "2026-11-24T14:00:00Z"), "a base change before his Approve is fine");
+ok(!tahaApprovedHead([rv("APPROVED", A, "50602678", "")], A, "2026-11-24T14:00:00Z"), "an Approve with no time, after a base change, refuses");
+ok(!tahaApprovedHead([rv("APPROVED", A), rv("CHANGES_REQUESTED", A)], A), "changes requested after the Approve wins");
+ok(!tahaApprovedHead([rv("DISMISSED", A)], A), "a dismissed Approve does not count");
+ok(tahaApprovedHead([rv("APPROVED", A), rv("COMMENTED", A)], A), "a later comment does not undo the Approve");
+ok(tahaApprovedHead([rv("CHANGES_REQUESTED", A), rv("APPROVED", A)], A), "an Approve after changes requested counts");
+ok(!tahaApprovedHead([rv("APPROVED", A)], "short"), "an unusable head never counts");
+ok(!tahaApprovedHead([rv("APPROVED", A), rv("DISMISSED", B)], A), "a dismissal after his Approve, on any commit, holds it (#2406)");
+ok(tahaApprovedHead([rv("APPROVED", A), rv("DISMISSED", A), rv("APPROVED", A)], A), "a fresh Approve after a dismissal counts");
+const revGh = (tsv, base = "") => (args) => {
+  if (args.some((a) => /\/pulls\/5\/reviews/.test(a))) return tsv;
+  if (args.some((a) => /\/issues\/5\/timeline/.test(a))) { if (base === null) throw new Error("502"); return base; }
+  throw new Error("wrong call");
+};
+const approvedTsv = `50602678\tAPPROVED\t${A}\t2026-11-24T15:00:00Z\n`;
+ok(tahaApprovedOnGitHub({ repo: "o/r", gh: revGh(approvedTsv), pullRequest: 5, headSha: A }), "read from GitHub: approved");
+ok(!tahaApprovedOnGitHub({ repo: "o/r", gh: revGh(approvedTsv, "2026-11-20T00:00:00Z\n2026-11-24T16:00:00Z\n"), pullRequest: 5, headSha: A }), "read from GitHub: retargeted after the Approve");
+ok(!tahaApprovedOnGitHub({ repo: "o/r", gh: revGh(approvedTsv, null), pullRequest: 5, headSha: A }), "an unreadable base history refuses");
+ok(!tahaApprovedOnGitHub({ repo: "o/r", gh: () => { throw new Error("502"); }, pullRequest: 5, headSha: A }), "a failed read refuses");
+let askedTaha = 0;
+const approve = () => { askedTaha++; return true; };
+eq(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: lane, dirs, now: NOW, tahaApproved: approve }), null, "Taha's Approve lets lane code through, no code needed");
+ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: lane, dirs, now: NOW, tahaApproved: () => false })), "without it, refused");
+ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: f("src/pages/Quotes.tsx", ".claude/hooks/pr-merge-guard.mjs"), dirs, now: NOW, tahaApproved: approve })),
+  "the block's own files still need Mason's code, even with Taha's Approve");
+ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: null, dirs, now: NOW, tahaApproved: approve })), "an unreadable file list still refuses");
+const laneNamedMig = "supabase/migrations/20270227000000_chemical_invoice_fix.sql";
+ok(isTahaLanePath(laneNamedMig), "fixture: the migration's name alone is in Taha's lane");
+ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: [mig(laneNamedMig, null)], dirs, now: NOW, tahaApproved: approve })),
+  "a lane-named migration whose SQL could not be read still needs Mason's code, even with Taha's Approve (Astra BLOCKER 1)");
+ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: [...f("src/pages/Quotes.tsx"), mig("supabase/migrations/20270227000000_x.sql", null)], dirs, now: NOW, tahaApproved: approve })),
+  "any unreadable migration beside lane code still needs Mason's code");
+eq(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: [mig(laneNamedMig, "update public.chemical_invoices set x = 1;")], dirs, now: NOW, tahaApproved: approve }), null,
+  "a readable lane migration goes through on Taha's Approve");
+askedTaha = 0;
+tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: f("src/pages/Deliveries.tsx"), dirs, now: NOW, tahaApproved: approve });
+eq(askedTaha, 0, "outside the lane, GitHub is not even asked");
 eq(tellTahaOnGitHub({ repo: undefined, pullRequest: 5, body: "x", gh: () => "123" }), true, "GitHub took the comment");
 eq(tellTahaOnGitHub({ repo: undefined, pullRequest: 5, body: "x", gh: () => { throw new Error("403"); } }), false, "a failed post is false");
 

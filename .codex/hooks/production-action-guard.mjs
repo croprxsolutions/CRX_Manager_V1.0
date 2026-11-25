@@ -67,7 +67,7 @@ import {
 } from "../../.claude/hooks/teammate-comments-lib.mjs";
 import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
-import { prFilesOnGitHub, tahaLaneGate, tellTahaOnGitHub } from "../../.claude/hooks/taha-lane-lib.mjs";
+import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneGate, tellTahaOnGitHub } from "../../.claude/hooks/taha-lane-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "../../.claude/hooks/pr-claim-lib.mjs";
 import { ownerAcceptedForPr, usesCarriedSkip } from "../../.claude/hooks/sol-accept-lib.mjs";
@@ -128,7 +128,7 @@ const NODE_REPL_TOOL = /(?:^|__)node[_-]?repl(?:__|$)/i;
 // `pr-claim-lib` and the `registry-freshness-lib` it imports joined 2026-11-19
 // (#1948): imported at startup, and the claim decides whether a push or merge is refused.
 // `taha-lane-lib` joined 2026-11-22: imported at startup, and it decides whether a
-// merge in Taha's areas is refused until Dec 15.
+// merge in Taha's areas is refused without Taha's Approve on the head (no end date).
 const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-risk-lib|coderabbit-skip-lib|sol-accept-lib|teammate-comments-lib|followups-lib|read-only-search-lib|app-repo-identity|session-context-reminder|pr-claim-lib|registry-freshness-lib|taha-lane-lib)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
 const PROTECTED_HARNESS_PATH_RE = new RegExp(String.raw`(?:^|[\\/])${PROTECTED_HARNESS_SOURCE}$`, "i");
 const PROTECTED_HARNESS_FRAGMENT_RE = new RegExp(`(?<![\\w.-])${PROTECTED_HARNESS_SOURCE}(?![\\w.-])`, "i");
@@ -751,11 +751,12 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh, claim = 
     if (frozen) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${frozen}.`);
     const destructive = stagingDestructiveProblem({ repo: request.repo, gh: (args) => runGh(args, repoDir), number: pullRequest.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pullRequest.headRefOid, baseSha: pullRequest.baseRefOid });
     if (destructive) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${destructive}.`);
-    // Taha's lanes until Dec 15 (taha-lane-lib.mjs, Mason 2026-11-22); Mason's `taha override #<PR> <code>` lets one PR at one commit through.
+    // Taha's lanes (taha-lane-lib.mjs, Mason 2026-11-22): Taha's Approve on this head, or Mason's `taha override #<PR> <code>`, lets one PR at one commit through.
     const lanePr = Number(pullRequest.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? request.selector : NaN));
     const lane = tahaLaneGate({
       prefix: "CODEX PRODUCTION GATE",
       pullRequest: lanePr,
+      tahaApproved: () => tahaApprovedOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), pullRequest: lanePr, headSha: pullRequest.headRefOid }),
       headSha: pullRequest.headRefOid,
       tellTaha: (body) => tellTahaOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), pullRequest: lanePr, body }),
       files: prFilesOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), number: lanePr, headSha: pullRequest.headRefOid }),

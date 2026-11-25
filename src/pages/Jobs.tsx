@@ -1027,7 +1027,7 @@ export default function Jobs() {
   const handlePrintList = async () => {
     setPrintingList(true);
     try {
-      const visibleIds = orderedVisibleColumnIds(listSettings);
+      const visibleIds = orderedVisibleColumnIds(listSettings, role);
       if (visibleIds.length === 0) {
         toast('error', 'Turn on at least one column in List Settings before printing.');
         setPrintingList(false);
@@ -1793,7 +1793,7 @@ export default function Jobs() {
   // REGISTRY ORDER (orderedVisibleColumnIds), so toggling visibility never
   // reorders the table. The checkbox column is presentation-fixed and always
   // leads when bulk actions are allowed.
-  const orderedVisibleIds = orderedVisibleColumnIds(listSettings);
+  const orderedVisibleIds = orderedVisibleColumnIds(listSettings, role);
   const columnByKey = new Map(dataColumns.map((c) => [c.key, c]));
   const visibleDataColumns = orderedVisibleIds
     .map((id) => columnByKey.get(id))
@@ -2272,6 +2272,7 @@ export default function Jobs() {
         open={listSettingsOpen}
         onClose={() => setListSettingsOpen(false)}
         settings={listSettings}
+        role={role}
         onChange={updateListSettings}
         saving={savingSettings}
       />

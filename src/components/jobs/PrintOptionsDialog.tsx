@@ -127,8 +127,8 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
       footer={(
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-          {/* Shared defaults are admin-only in the database; an applicator's view (split table forced off) must not become them. */}
-          {!isApplicator && (
+          {/* Shared defaults are admin-only in the database (is_admin()); others would only get an error. */}
+          {role === 'admin' && (
             <Button variant="secondary" onClick={handleSaveDefault} loading={savingDefault} disabled={loadingDefaults || printing}>
               <Save className="h-4 w-4" /> Save as default
             </Button>
@@ -141,7 +141,7 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
     >
       <div className="space-y-5">
         <p className="text-sm text-secondary">
-          Choose the packet contents for this print.{!isApplicator && ' Save as default remembers these options for future sheets; the sheet format stays a per-print choice.'}
+          Choose the packet contents for this print.{role === 'admin' && ' Save as default remembers these options for future sheets; the sheet format stays a per-print choice.'}
         </p>
 
         <div>

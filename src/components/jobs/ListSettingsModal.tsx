@@ -2,7 +2,7 @@ import { Check, RotateCcw, Eye, EyeOff, Link2 } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import {
-  JOB_COLUMN_REGISTRY,
+  jobColumnsForRole,
   defaultJobListSettings,
   toggleColumn,
   type JobListSettings,
@@ -17,6 +17,8 @@ interface ListSettingsModalProps {
   /** Called with a NEW settings object whenever the user changes something.
    *  The parent applies it immediately (criterion #2) and persists it. */
   onChange: (next: JobListSettings) => void;
+  /** Signed-in role: applicators get no Price column to turn on. */
+  role?: string | null;
   /** True while a save round-trip is in flight (disables controls subtly). */
   saving?: boolean;
 }
@@ -34,9 +36,11 @@ export default function ListSettingsModal({
   settings,
   onChange,
   saving = false,
+  role,
 }: ListSettingsModalProps) {
+  const registry = jobColumnsForRole(role);
   const visible = new Set<JobColumnId>(settings.visibleColumns);
-  const visibleCount = JOB_COLUMN_REGISTRY.filter((c) => visible.has(c.id)).length;
+  const visibleCount = registry.filter((c) => visible.has(c.id)).length;
 
   const handleToggle = (id: JobColumnId) => {
     onChange(toggleColumn(settings, id));
@@ -88,10 +92,10 @@ export default function ListSettingsModal({
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-secondary">Columns</span>
-            <span className="text-xs text-secondary">{visibleCount} of {JOB_COLUMN_REGISTRY.length} shown</span>
+            <span className="text-xs text-secondary">{visibleCount} of {registry.length} shown</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-80 overflow-y-auto pr-1">
-            {JOB_COLUMN_REGISTRY.map((col) => {
+            {registry.map((col) => {
               const on = visible.has(col.id);
               return (
                 <button

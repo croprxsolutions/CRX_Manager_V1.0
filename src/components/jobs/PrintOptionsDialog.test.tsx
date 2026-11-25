@@ -77,6 +77,8 @@ describe('PrintOptionsDialog', () => {
     try {
       render(<PrintOptionsDialog open onClose={vi.fn()} onPrint={vi.fn()} />);
       expect(await screen.findByText('Show billing-split table')).toBeInTheDocument();
+      // Shared defaults are admin-only in the database, so only admins get the button.
+      expect(screen.queryAllByRole('button', { name: /save as default/i })).toHaveLength(role === 'admin' ? 1 : 0);
     } finally {
       authRole.current = 'admin';
     }

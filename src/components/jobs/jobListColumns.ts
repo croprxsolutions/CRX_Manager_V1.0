@@ -146,9 +146,14 @@ export function mergeJobListSettings(raw: unknown): JobListSettings {
  * The Jobs page uses this to filter + order its rendered columns so the on/off
  * choice never changes column order unexpectedly.
  */
-export function orderedVisibleColumnIds(settings: JobListSettings): JobColumnId[] {
+// Mason 2026-11-25 ("Yes, hide them"): applicators never see selling prices, on screen or printed.
+export function jobColumnsForRole(role?: string | null) {
+  return role === 'applicator' ? JOB_COLUMN_REGISTRY.filter((c) => c.id !== 'total_price_cents') : JOB_COLUMN_REGISTRY;
+}
+
+export function orderedVisibleColumnIds(settings: JobListSettings, role?: string | null): JobColumnId[] {
   const want = new Set(settings.visibleColumns);
-  return JOB_COLUMN_REGISTRY.filter((c) => want.has(c.id)).map((c) => c.id);
+  return jobColumnsForRole(role).filter((c) => want.has(c.id)).map((c) => c.id);
 }
 
 /**

@@ -4532,9 +4532,11 @@ export default function JobDetail() {
                         <div className="bg-gray-50 rounded-lg p-2.5">
                           <div className="flex items-center justify-between mb-1.5">
                             <span className="text-xs font-semibold text-nav-dark">Customer Shares</span>
-                            <span className={`text-xs font-medium ${shareOk ? 'text-secondary' : 'text-red-600'}`}>
-                              Total: {shareSum.toFixed(1)}%{!shareOk && ' — must equal 100%'}
-                            </span>
+                            {!isApplicatorRole && (
+                              <span className={`text-xs font-medium ${shareOk ? 'text-secondary' : 'text-red-600'}`}>
+                                Total: {shareSum.toFixed(1)}%{!shareOk && ' — must equal 100%'}
+                              </span>
+                            )}
                           </div>
                           <div className="space-y-1.5">
                             {fieldShares.map((s) => (
@@ -4546,13 +4548,15 @@ export default function JobDetail() {
                                   disabled={!canEdit}
                                   placeholder="Select customer..."
                                 />
-                                <input
-                                  type="number" min={0} max={100} step="0.01"
-                                  value={s.split_pct}
-                                  onChange={(e) => updateShareRow(s.idx, 'split_pct', e.target.value)}
-                                  disabled={!canEdit} placeholder="%"
-                                  className="w-20 px-2 py-1 text-sm border border-gray-200 rounded text-right disabled:bg-gray-50"
-                                />
+                                {!isApplicatorRole && (
+                                  <input
+                                    type="number" min={0} max={100} step="0.01"
+                                    value={s.split_pct}
+                                    onChange={(e) => updateShareRow(s.idx, 'split_pct', e.target.value)}
+                                    disabled={!canEdit} placeholder="%"
+                                    className="w-20 px-2 py-1 text-sm border border-gray-200 rounded text-right disabled:bg-gray-50"
+                                  />
+                                )}
                                 <label className="flex items-center gap-1 text-xs text-secondary whitespace-nowrap">
                                   <input type="checkbox" checked={s.is_primary} disabled={!canEdit}
                                     onChange={(e) => updateShareRow(s.idx, 'is_primary', e.target.checked)} />

@@ -6,6 +6,7 @@ import {
   orderedVisibleColumnIds,
   toggleColumn,
   isInvoiceColumnVisible,
+  jobColumnsForRole,
   type JobColumnId,
 } from './jobListColumns';
 
@@ -185,5 +186,16 @@ describe('toggleColumn', () => {
   it('preserves showCompleted', () => {
     const settings = { visibleColumns: ['job_number'] as JobColumnId[], showCompleted: false };
     expect(toggleColumn(settings, 'status').showCompleted).toBe(false);
+  });
+});
+
+describe('applicators never get the Price column (Mason 2026-11-25)', () => {
+  const withPrice = { visibleColumns: ['job_number', 'total_price_cents'] as JobColumnId[], showCompleted: true };
+  it('drops Price for applicators, on screen and in print', () => {
+    expect(orderedVisibleColumnIds(withPrice, 'applicator')).toEqual(['job_number']);
+    expect(jobColumnsForRole('applicator').some((c) => c.id === 'total_price_cents')).toBe(false);
+  });
+  it.each(['admin', 'sales_rep', undefined])('keeps Price for %s', (role) => {
+    expect(orderedVisibleColumnIds(withPrice, role)).toEqual(['job_number', 'total_price_cents']);
   });
 });

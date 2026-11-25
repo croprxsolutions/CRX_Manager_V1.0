@@ -314,3 +314,17 @@ it('ignores an older map assignment response after a newer job reload removes it
   expect(map.queryByRole('heading', { name: 'My dispatched field' })).not.toBeInTheDocument();
   expect(map.getByRole('heading', { name: 'Other crew field' })).toBeInTheDocument();
 });
+
+it('keeps the job load error after a map recheck fails before any jobs were loaded', async () => {
+  localStorage.clear();
+  fixtures.dispatchError = { message: 'Failed to fetch' };
+  render(fieldView());
+  expect(await screen.findByText("Couldn't load your jobs")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Map' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Reload map' }));
+  await waitFor(() => expect(fixtures.jobReads).toHaveBeenCalledTimes(2));
+  await screen.findByRole('button', { name: 'Reload map' });
+  fireEvent.click(screen.getByRole('button', { name: 'List' }));
+  expect(await screen.findByText("Couldn't load your jobs")).toBeInTheDocument();
+  expect(screen.queryByText(/No jobs assigned to you right now/)).not.toBeInTheDocument();
+});

@@ -261,7 +261,6 @@ export default function FieldView() {
       if (sequence === jobLoadSequence.current) update();
     };
     setLoading(true);
-    setFetchError(false);
     try {
       const all: DispatchedListRow[] = [];
       for (let from = 0; ; from += PAGE) {
@@ -330,6 +329,7 @@ export default function FieldView() {
       applyLatest(() => {
         // Today's read-only copy for a dead spot (src/lib/todaySnapshot.ts): the cards as shown, nothing more.
         if (profile?.id) saveTodaySnapshot(MY_DAY_SNAPSHOT, profile.id, grouped);
+        setFetchError(false);
         setSavedCopyAt(null);
         setMapAssignmentFailed(false);
         setCards(grouped);
@@ -347,6 +347,7 @@ export default function FieldView() {
           // Shown read-only: Start and Complete stay off until a load succeeds (the banner says why), and an open
           // Complete form closes, as it did when a failed load emptied the list.
           setCompleteFormOpenFor(null);
+          setFetchError(false);
           setSavedCopyAt(fallback.saved.savedAt);
           setCards(fallback.saved.data);
         } else {

@@ -509,4 +509,53 @@ describe('PricingChangePreviewModal', () => {
     fireEvent.click(closeButtons[closeButtons.length - 1]);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+  // Audit 2026-11-24 #3: 0.35 typed for 35% priced a $6.40-cost product at $6.42 on staging.
+  function nearCostPreview(changeSetId = 'change-set-1'): PricingPreviewResult {
+    const preview = makePreview({ change_set_id: changeSetId });
+    const ready = preview.rows[1];
+    ready.effect = {
+      ...ready.effect!,
+      cost: '6.40', cost_cents: 640n,
+      tier1_price: '6.42', tier1_price_cents: 642n,
+      tier2_price: '6.52', tier2_price_cents: 652n, // exactly inside 2% (6.528)
+      tier3_price: '6.53', tier3_price_cents: 653n, // just over 2%: not flagged
+    };
+    return { ...preview, warnings: [{ ...belowCostWarning, warning_codes: [...belowCostWarning.warning_codes] }] };
+  }
+
+  it('keeps Apply locked for a price within 2% of cost until that product is ticked, even with a reason', () => {
+    const onApprove = vi.fn();
+    const { rerender } = render(
+      <PricingChangePreviewModal open preview={nearCostPreview()} applying={false} onClose={vi.fn()} onApprove={onApprove} />,
+    );
+    const panel = screen.getByRole('region', { name: 'Prices close to cost' });
+    expect(within(panel).getByText('Tier 1 $6.42 on a cost of $6.40')).toBeTruthy();
+    expect(within(panel).getByText('Tier 2 $6.52 on a cost of $6.40')).toBeTruthy();
+    expect(within(panel).queryByText(/Tier 3/)).toBeNull();
+    const apply = screen.getByRole('button', { name: 'Apply approved changes' });
+
+    fireEvent.change(screen.getByLabelText('Reason for First Product'), { target: { value: 'Matched competitor' } });
+    expect(apply).toBeDisabled();
+    fireEvent.click(within(panel).getByRole('checkbox'));
+    expect(apply).toBeEnabled();
+    fireEvent.click(apply);
+    expect(onApprove).toHaveBeenCalledTimes(1);
+
+    // A new preview starts unticked.
+    rerender(
+      <PricingChangePreviewModal open preview={nearCostPreview('change-set-2')} applying={false} onClose={vi.fn()} onApprove={onApprove} />,
+    );
+    expect(within(screen.getByRole('region', { name: 'Prices close to cost' })).getByRole('checkbox')).not.toBeChecked();
+  });
+
+  it('asks for the near-cost tick even when the database raised no warning', () => {
+    render(
+      <PricingChangePreviewModal open preview={{ ...nearCostPreview(), warnings: [] }} applying={false} onClose={vi.fn()} onApprove={vi.fn()} />,
+    );
+    expect(screen.queryByRole('region', { name: 'Warnings to acknowledge' })).toBeNull();
+    const apply = screen.getByRole('button', { name: 'Apply approved changes' });
+    expect(apply).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(apply).toBeEnabled();
+  });
 });

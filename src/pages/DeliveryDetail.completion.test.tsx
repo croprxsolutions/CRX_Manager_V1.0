@@ -208,6 +208,29 @@ describe('Record without proof is admin-only on screen', () => {
   });
 });
 
+describe('one completion step for drivers and the office', () => {
+  it('the driver view completes through the shared step and sends the same signature completion', async () => {
+    setRole('driver');
+    mockRpc.mockResolvedValue({ data: COMPLETE_RESULT, error: null });
+    await renderPage();
+    expect(await screen.findByText('Report Issue (Optional)')).toBeInTheDocument();
+    await signAndFillSigner();
+    await completeAndConfirm();
+    await waitFor(() => expect(completeRpcCalls()).toHaveLength(1));
+    const params = completeRpcCalls()[0][1];
+    expect(params.p_signed_by).toBe('Pat Farmer');
+    expect(params.p_evidence).toBe('signature');
+    expect(params.p_evidence_ref).toBe(await signatureImagePathFor('del-1', params.p_idempotency_key));
+  });
+
+  it('keeps the office issue (shortage, damage) reporting beside the shared step', async () => {
+    await renderPage();
+    expect(await screen.findByLabelText('Signed by (name)')).toBeInTheDocument();
+    expect(screen.getByText('Issue (Optional)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Customer signed a paper ticket')).toBeInTheDocument();
+  });
+});
+
 describe('completion paths', () => {
   it('completes as brands not confirmed when the brand list never finishes loading (brands never block)', async () => {
     brandsLoad = () => new Promise(() => undefined);

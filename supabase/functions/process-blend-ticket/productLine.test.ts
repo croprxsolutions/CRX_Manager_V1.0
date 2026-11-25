@@ -63,6 +63,7 @@ Deno.test("Sol r2: damaged totals keep their number; grams and per acre are read
   // Sol r3: a damaged total never becomes zero; an attached /ac stays the rate.
   check("Roundup | | 10-gal", "Roundup", 10, null);
   check("Atrazine | | 80- qt", "Atrazine", 80, null);
+  check("Roundup | | Used: 10 gal", "Roundup", 10, null);
 });
 
 Deno.test("the multi-line reader uses the same rule", () => {
@@ -159,4 +160,5 @@ Deno.test("a matched product with a number the read name lacks is caught (Sol r4
   assertEquals(matchAddsNumber("Atrazlne", "Atrazine 4L"), true);
   assertEquals(matchAddsNumber("2,4-D Amine", "2,4-D Amine"), false);
   assertEquals(matchAddsNumber("Roundup", "Roundup PowerMax"), false);
+  assertEquals(matchAddsNumber("2,4-D", "2, 4D Amine 4#"), true);
 });

@@ -124,8 +124,13 @@ export function pickQuantity(
 ): { quantity: number; unit: string | null } {
   const total = totalText ? readAmountCell(totalText) : null;
   const loose = totalText?.match(LOOSE_NUMBER)?.[1];
+  // Last resort with no rate: any number in the total ("Used: 10 gal"), never zero when one is there
+  // (a zero row files without a stock check, Sol r5). Its unit is blank, so the rep checks it.
+  const anyNumber = totalText?.match(/\d+(?:\.\d+)?/)?.[0];
   const quantity = total?.amount ??
-    (loose ? parseFloat(loose.replace(/,/g, "")) : rate?.amount ?? 0);
+    (loose
+      ? parseFloat(loose.replace(/,/g, ""))
+      : rate?.amount ?? (anyNumber ? parseFloat(anyNumber) : 0));
   const exact = rate?.unit != null && total?.unit != null &&
     END.test(total.rest) && !extraColumns;
   return { quantity, unit: exact ? total.unit : null };
@@ -182,6 +187,12 @@ export function nameSwallowsRate(
 // The matched catalog product has a number the read name lacks ("Atrazine 4L" matched from
 // "Atrazlne"): the number may have been read as the rate, so the caller blanks the unit (Sol r4).
 export function matchAddsNumber(readName: string, matchedName: string): boolean {
-  const read = new Set(readName.match(/\d+/g) ?? []);
-  return (matchedName.match(/\d+/g) ?? []).some((n) => !read.has(n));
+  // Counted, not a set: "2,4-D" holds one 4, "2,4-D Amine 4#" two (Sol r5).
+  const read: string[] = [...(readName.match(/\d+/g) ?? [])];
+  return (matchedName.match(/\d+/g) ?? []).some((n) => {
+    const i = read.indexOf(n);
+    if (i < 0) return true;
+    read.splice(i, 1);
+    return false;
+  });
 }

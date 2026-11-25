@@ -32,6 +32,7 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import ReceiptsToCheck from '../components/deliveries/ReceiptsToCheck';
+import UnassignedDeliveriesBanner from '../components/deliveries/UnassignedDeliveriesBanner';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import type { SortDir } from '../lib/tableSearchSort';
@@ -1824,6 +1825,7 @@ export default function Deliveries() {
       />
 
       {canCreate && <ReceiptsToCheck />}
+      {canCreate && <UnassignedDeliveriesBanner refreshKey={deliveries} />}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -2329,7 +2331,6 @@ export default function Deliveries() {
                 key={completeTarget?.id ?? 'none'}
                 onSignatureChange={setCompleteSignature}
                 label="Customer Signature"
-                height={120}
               />
             </div>
           )}

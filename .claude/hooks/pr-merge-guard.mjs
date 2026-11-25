@@ -68,11 +68,11 @@ import {
   teammateCommentsUnreadableDenial,
 } from "./teammate-comments-lib.mjs";
 import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
-import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
+import { ownerHoldProblem } from "./pr-owner-hold-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 import { ownerAcceptedForPr, trackedNamesIn, usesCarriedSkip } from "./sol-accept-lib.mjs";
-import { prFilesOnGitHub, tahaLaneGate, tellTahaOnGitHub } from "./taha-lane-lib.mjs";
+import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneGate, tellTahaOnGitHub } from "./taha-lane-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
 
@@ -510,7 +510,7 @@ function gateRequest(request) {
     // merge actually lands on. The proof must be bound to THAT, not to the local
     // origin/main, which can be stale (Codex round-6: a proof reviewed against an
     // old local base validated while GitHub merged onto newer main content).
-    viewArgs.push("--json", "number,url,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
+    viewArgs.push("--json", "number,url,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author,title");
     if (request.repo) viewArgs.push("--repo", request.repo);
     pr = JSON.parse(hardGateGh(viewArgs));
     if (!pr?.baseRefName || !pr?.headRefOid || !pr?.baseRefOid) {
@@ -519,6 +519,10 @@ function gateRequest(request) {
   } catch (error) {
     deny(`PR MERGE GATE: could not resolve this pull request's base branch and exact SHAs, so the merge is denied (fail closed). ${error?.message || error}`);
   }
+
+  // Owner hold: a "[HOLD FOR MASON]" title refuses before any landing claim or follow-up is recorded.
+  const holdProblem = ownerHoldProblem(pr);
+  if (holdProblem) deny("PR MERGE GATE: " + holdProblem);
 
   // Landing claim (pr-claim-lib.mjs, fail open): refuse when another session is landing this PR.
   // Only checked here; recorded at the allow point, so a merge denied later claims nothing.
@@ -542,12 +546,13 @@ function gateRequest(request) {
     if (frozen) deny(`PR MERGE GATE: this merge into staging is refused: ${frozen}.`);
     const destructive = stagingDestructiveProblem({ repo: request.repo, gh: hardGateGh, number: pr.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pr.headRefOid, baseSha: pr.baseRefOid });
     if (destructive) deny(`PR MERGE GATE: this merge into staging is refused: ${destructive}.`);
-    // Taha's lanes until Dec 15 (taha-lane-lib.mjs, Mason 2026-11-22); Mason's `taha override #<PR> <code>` lets one PR at one commit through.
+    // Taha's lanes (taha-lane-lib.mjs, Mason 2026-11-22): Taha's Approve on this head, or Mason's `taha override #<PR> <code>`, lets one PR at one commit through.
     const lane = tahaLaneGate({
       prefix: "PR MERGE GATE",
       pullRequest: Number(pr.number),
       headSha: pr.headRefOid,
       tellTaha: (body) => tellTahaOnGitHub({ repo: request.repo, gh: hardGateGh, pullRequest: Number(pr.number), body }),
+      tahaApproved: () => tahaApprovedOnGitHub({ repo: request.repo, gh: hardGateGh, pullRequest: Number(pr.number), headSha: pr.headRefOid }),
       files: prFilesOnGitHub({ repo: request.repo, gh: hardGateGh, number: Number(pr.number), headSha: pr.headRefOid }),
       dirs: skipStateDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]),
       notice: (text) => process.stderr.write(text),
@@ -575,9 +580,6 @@ function gateRequest(request) {
     );
   }
 
-  // Every PR names what it put off, so the close-out can tell Mason what remains (Mason, 2026-11-09).
-  const followUps = followUpsProblem(pr);
-  if (followUps) deny(followUpsDenial("PR MERGE GATE", request.selector, followUps));
 
   // The Codex GitHub App's review is read at the ALLOW point below, not here.
   // @speed-bump — advisory; deferring it protects the hard gates, it is not one.

@@ -11,7 +11,7 @@ import { buildSweepQuery } from "../../scripts/db-invariant-sweeps/allowlist-mat
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import { claimOrRefuse } from "../../.claude/hooks/pr-claim-lib.mjs";
 import { skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
-import { recordTahaLaneOverride, TAHA_LANE_UNTIL_MS } from "../../.claude/hooks/taha-lane-lib.mjs";
+import { recordTahaLaneOverride } from "../../.claude/hooks/taha-lane-lib.mjs";
 
 // Since 2026-10-19 (Luna round 3) the merge gate FAILS CLOSED when it cannot
 // read the PR's review threads, because unresolved CodeRabbit threads block a
@@ -612,18 +612,61 @@ try {
   // Taha lane block (#2303): the same staging merge, but the PR changes a quote screen.
   const quoteFiles = "modified\tsrc/pages/QuoteBuilder.tsx\t";
   mkdirSync(path.join(ordinary.repo, ".claude"), { recursive: true }); // the code is saved under .claude, as in a real checkout
-  const laneNow = TAHA_LANE_UNTIL_MS - 24 * 3600e3; // frozen before the cutoff so this test still runs after Dec 15
-  const afterCutoff = evaluateProductionAction({
+  const laneNow = Date.now();
+  const afterDec15 = evaluateProductionAction({
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
-    nowMs: TAHA_LANE_UNTIL_MS + 1, runGh: () => ordinaryPrJson, prFiles: quoteFiles,
+    nowMs: Date.UTC(2027, 5, 1), runGh: () => ordinaryPrJson, prFiles: quoteFiles,
   });
-  assert.doesNotMatch(afterCutoff.reason ?? "", /TAHA LANE/, "after Dec 15 the lane block is off");
+  assert.match(afterDec15.reason ?? "", /TAHA LANE BLOCK/, "the lane block has no end date (Mason, 2026-11-24)");
+  // Taha's Approve on this exact head lets it on to the next gate, with no code (Mason, 2026-11-24).
+  // Reviews come back as "account id, state, commit, time"; the timeline read lists base-branch changes.
+  const tahaGh = (commit, baseChanges = "") => (args) => {
+    if (args.some((a) => /\/reviews/.test(a))) return `50602678\tAPPROVED\t${commit}\t2026-11-24T15:00:00Z\n`;
+    if (args.some((a) => /\/timeline/.test(a))) return baseChanges;
+    return ordinaryPrJson;
+  };
+  const ordinaryHead = JSON.parse(ordinaryPrJson).headRefOid;
+  const tahaApprovedMerge = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo, nowMs: laneNow, prFiles: quoteFiles,
+    runGh: tahaGh(ordinaryHead),
+  });
+  assert.doesNotMatch(tahaApprovedMerge.reason ?? "", /TAHA LANE/, "Taha's Approve on the head clears the lane block");
+  const tahaApprovedRetargeted = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo, nowMs: laneNow, prFiles: quoteFiles,
+    runGh: tahaGh(ordinaryHead, "2026-11-24T16:00:00Z\n"),
+  });
+  assert.match(tahaApprovedRetargeted.reason ?? "", /TAHA LANE BLOCK/, "a base-branch change after his Approve refuses");
+  const tahaApprovedOld = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo, nowMs: laneNow, prFiles: quoteFiles,
+    runGh: tahaGh("0".repeat(40)),
+  });
+  assert.match(tahaApprovedOld.reason ?? "", /TAHA LANE BLOCK/, "an Approve of an older head does not");
   const laneMerge = evaluateProductionAction({
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
     nowMs: laneNow, runGh: () => ordinaryPrJson, prFiles: quoteFiles,
   });
   assert.equal(laneMerge.blocked, true, "a staging merge in Taha's areas is refused");
   assert.match(laneMerge.reason, /TAHA LANE BLOCK — #5 is refused because it changes Taha's areas \(src\/pages\/QuoteBuilder\.tsx\)/, "and names the file");
+  // Taha's own Approve on the PR's head lifts the block in the Codex gate too; one on an older commit does not (#2406).
+  const tahaReview = (commitId, ...later) => (args) => (args[0] === "api" && /\/pulls\/5\/reviews\?/.test(String(args[2] ?? ""))
+    ? [{ state: "APPROVED", commit_id: commitId }, ...later].map((r) => ["50602678", r.state, r.commit_id, "2026-11-24T15:00:00Z"].join("\t")).join("\n")
+    : args.some((a) => /\/timeline/.test(a)) ? "" : ordinaryPrJson);
+  const signedOff = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: laneNow, runGh: tahaReview(ordinary.sha), prFiles: quoteFiles,
+  });
+  assert.doesNotMatch(signedOff.reason ?? "", /TAHA LANE/, "Taha's Approve on the head lets the merge on to the next gate");
+  const staleSignOff = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: laneNow, runGh: tahaReview("0".repeat(40)), prFiles: quoteFiles,
+  });
+  assert.match(staleSignOff.reason ?? "", /TAHA LANE BLOCK/, "an Approve on an older commit does not");
+  // Taha, 2026-11-24: a dismissed Request changes after his Approve leaves the PR held until he approves again.
+  const dismissedSignOff = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: laneNow, runGh: tahaReview(ordinary.sha, { user: { login: "TahaKhanAbdalli" }, state: "DISMISSED", commit_id: ordinary.sha }), prFiles: quoteFiles,
+  });
+  assert.match(dismissedSignOff.reason ?? "", /TAHA LANE BLOCK/, "an Approve followed by a dismissed review does not");
   const laneCode = /taha override #5 (\d{6})/.exec(laneMerge.reason)?.[1];
   assert.ok(laneCode, "and gives Mason the exact line to send");
   assert.equal(recordTahaLaneOverride({ dirs: skipStateDirs([ordinary.repo]), pullRequest: 5, code: laneCode, now: laneNow }).ok, true, "Mason's line records the override");
@@ -643,19 +686,28 @@ try {
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
     nowMs: Date.now(), runGh: () => ordinaryPrJson,
   }).blocked, false, "...and merges once the exact-SHA Sol proof exists");
-  // Follow-ups gate (Mason, 2026-11-09): the same mergeable PR, but its description lists nothing.
-  for (const [body, why] of [["## Summary\nx", /no `## Follow-ups` section/], ["## Follow-ups\n- fix later", /name no issue/]]) {
-    const missing = evaluateProductionAction({
+  // The guard passes the PR's base to the proof check: a main review does not prove a PR into staging (Taha, #2226 LOW 3c).
+  for (const [reviewRef, blocked] of [["origin/main", true], ["origin/staging", false]]) {
+    writeProof(ordinary.repo, {
+      codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high", review_ref: reviewRef, release_rules: false,
+      head_sha: ordinary.sha, base_sha: ordinary.base, timestamp: new Date().toISOString(),
+    });
+    assert.equal(evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+      nowMs: Date.now(), runGh: () => ordinaryPrJson,
+    }).blocked, blocked, `a ${reviewRef} review ${blocked ? "does not prove" : "proves"} a PR into staging`);
+  }
+  writeProof(ordinary.repo, {
+    codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
+    head_sha: ordinary.sha, base_sha: ordinary.base, timestamp: new Date().toISOString(),
+  });
+  // The Follow-ups merge veto was removed (Mason, 2026-11-23): a PR with no section merges.
+  for (const body of ["## Summary\nx", "## Follow-ups\n- fix later"]) {
+    assert.equal(evaluateProductionAction({
       toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
       nowMs: Date.now(), runGh: () => JSON.stringify({ ...JSON.parse(ordinaryPrJson), body }),
-    });
-    assert.equal(missing.blocked, true, "a PR without a usable Follow-ups section cannot merge");
-    assert.match(missing.reason, why);
+    }).blocked, false, "the Follow-ups section never blocks a merge");
   }
-  assert.equal(evaluateProductionAction({
-    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
-    nowMs: Date.now(), runGh: () => JSON.stringify({ ...JSON.parse(ordinaryPrJson), body: "## Follow-ups\n- #1700 later" }),
-  }).blocked, false, "a Follow-ups line naming an issue merges");
   // A teammate's comment is the only thing wrong with this otherwise mergeable PR.
   const teammateAnswer = (comments) => (args) => (
     args.some((a) => /reviewThreads\(last:100\)/.test(String(a)))
@@ -716,8 +768,10 @@ try {
   assert.match(cutOffComments.reason, /more comments than the gate reads at once/);
   // Sol once before the PR (Mason, 2026-10-29): a proof of an earlier commit covers
   // the commits after it only when those are low risk themselves (Sol, 2026-10-29).
-  for (const [later, expectBlocked, label] of [
+  for (const [later, expectBlocked, label, reviewRef] of [
     ["src/lib/invoiceMath.ts", true, "a later money commit needs a fresh Sol review"],
+    // The earlier-commit path passes the PR's base too (Taha, #2226 LOW 3c).
+    ["docs/plans/later.md", true, "an earlier main review does not cover a PR into staging", "origin/main"],
     ["docs/plans/later.md", false, "a later notes commit merges on the earlier Sol review"],
     ["docs/reference/sql-canonical-patterns.md", false, "a later commit off the Sol list merges on the earlier Sol review"],
   ]) {
@@ -725,6 +779,7 @@ try {
     writeProof(branch.repo, {
       codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
       head_sha: branch.sha, base_sha: branch.base, timestamp: new Date().toISOString(),
+      ...(reviewRef ? { review_ref: reviewRef, release_rules: false } : {}),
     });
     mkdirSync(path.join(branch.repo, ...path.dirname(later).split("/")), { recursive: true });
     writeFileSync(path.join(branch.repo, ...later.split("/")), "export const x = 1;\n", "utf8");
@@ -740,7 +795,8 @@ try {
         if (args[0] === "api" && /\/compare\//.test(String(args[1]))) {
           compared.push(String(args[1]));
           return JSON.stringify({ status: "ahead", ahead_by: 1, behind_by: 0, merge_base: branch.sha, head,
-            files: [{ filename: later, previous_filename: null, status: "added", changes: 1 }] });
+            // With reviewRef, the PR's whole diff is on the Sol list, so a missing proof is not excused.
+            files: [{ filename: reviewRef && String(args[1]).includes(`${branch.base}...`) ? "src/lib/invoiceMath.ts" : later, previous_filename: null, status: "added", changes: 1 }] });
         }
         if (args.some((a) => /object\(expression/.test(String(a)))) {
           return JSON.stringify({ data: { repository: { d0: { entries: [{ name: path.basename(later), mode: 0o100644, type: "blob" }] } } } });
@@ -749,7 +805,9 @@ try {
       },
     });
     assert.equal(verdict.blocked, expectBlocked, label);
-    assert.ok(compared.includes(`repos/{owner}/{repo}/compare/${branch.sha}...${head}`), `the later commits were compared (${later})`);
+    // Refused at the earlier-commit search itself, not later when the found proof is checked.
+    if (reviewRef) assert.match(verdict.reason, /Missing required Sol high-effort proof/, `${label}: never picked as the earlier proof`);
+    if (!reviewRef) assert.ok(compared.includes(`repos/{owner}/{repo}/compare/${branch.sha}...${head}`), `the later commits were compared (${later})`);
   }
   // Money PRs need a completed CodeRabbit review of the head (Mason, 2026-10-21).
   // Same merge-ready, Sol-proven PR; only the requirement answer changes.
@@ -4046,25 +4104,15 @@ try {
       assert.match(mergeUpdated({ claim: realClaim("claude-B") }).reason || "", /LANDING CLAIM/, "#1948: another session is then refused");
       assert.equal(mergeUpdated({ claim: realClaim("") }).blocked, false, "#1948: no session id fails open");
       assert.equal(mergeUpdated({ claim: realClaim("codex-A") }).blocked, false, "#1948: the holder keeps merging");
-      // Pushes claim too: a ref-less push claims the current branch, a dry run claims nothing.
+      // Ordinary pushes take no claim (Mason, 2026-11-23): a push to a claimed branch is
+      // allowed and records nothing.
       const pushAs = (sessionId, command) => evaluateProductionAction({
         toolName: "PowerShell", toolInput: { command }, repoDir: stale.repo, nowMs: now, claim: realClaim(sessionId),
       });
-      assert.equal(pushAs("codex-C", "git push origin HEAD:refs/heads/claude/other").blocked, false, "#1948: a push to a free branch is allowed");
-      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/other"]?.session, "codex-C", "#1948: ...and claims its destination");
-      assert.match(pushAs("codex-D", "git push origin HEAD:claude/other").reason || "", /CODEX PRODUCTION GATE: LANDING CLAIM/, "#1948: another session's push to it is refused");
-      assert.equal(pushAs("codex-D", "git push --dry-run origin HEAD:claude/other").blocked, false, "#1948: a dry run is never refused");
-      // Luna MED: a multi-ref push refused on one destination claims none of the others.
-      assert.match(pushAs("codex-D", "git push origin HEAD:claude/free HEAD:claude/other").reason || "", /LANDING CLAIM/, "#1948: a multi-ref push touching a claimed branch is refused");
-      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/free"], undefined, "#1948: ...and its free destination stays unclaimed");
-      // Codex App P2 on #2041: a push in a command refused later claims nothing.
-      assert.equal(pushAs("codex-D", "git push origin HEAD:claude/free && git push --force origin HEAD:claude/x").blocked, true, "a command with a forced push is refused");
-      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/free"], undefined, "#1948: ...and its allowed push claims nothing");
-      // Codex App P2 on #2041: an explicit refspec claims only its destination, never the upstream.
-      git(stale.repo, ["config", "branch.feature/test.remote", "origin"]);
-      git(stale.repo, ["config", "branch.feature/test.merge", "refs/heads/claude/other"]);
-      assert.equal(pushAs("codex-E", "git push origin HEAD:claude/mine").blocked, false, "#1948: an explicit refspec is not refused for another session's upstream");
-      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/mine"]?.session, "codex-E", "#1948: ...and claims its own destination at the allow point");
+      assert.equal(pushAs("claude-B", "git push origin HEAD:feature/test").blocked, false, "a push to a branch another session claimed is allowed");
+      assert.equal(pushAs("codex-C", "git push origin HEAD:refs/heads/claude/other").blocked, false, "a push to a free branch is allowed");
+      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/other"], undefined, "...and claims nothing");
+      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["feature/test"]?.session, "codex-A", "a push never moves an existing claim");
     }
     PIN = ` --match-head-commit ${stale.sha}`; // the cases below use the original head again
 

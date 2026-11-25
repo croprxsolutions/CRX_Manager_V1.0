@@ -2,6 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('explains a refused product price sheet without its code', () => {
+    for (const code of ['WORKBOOK_V2_EXPORT_REQUIRED', 'WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED']) {
+      expect(sanitizeError({ message: code })).toMatch(/^No prices were changed\. This price sheet can no longer be used: it was already applied/);
+    }
+    expect(sanitizeError(new Error('PRICING_DUPLICATE_PRODUCT_ID')))
+      .toBe('No prices were changed. The same product appears on more than one row of the price sheet. Download a fresh price sheet and make your changes in it, without copying or pasting product rows');
+  });
+
   it('explains a refused delivery Unassigned in plain words', () => {
     expect(sanitizeError({ message: 'DRIVER_CHANGED: the driver was changed since the form opened; reload and try again' }))
       .toMatch(/^Nothing was saved\. The driver was changed since you opened this form/);
@@ -62,6 +70,18 @@ describe('sanitizeError', () => {
   ])('explains the parent refusal %s by name', (raw, expected) => {
     expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
   });
+  // M9 (20270301180000): the RAISE text of _edit / _delete_prepay_credit_replay_impl_20261015.
+  it('explains a locked prepayment check amount and an applied check without the raw token', () => {
+    const locked = sanitizeError({ message: "PREPAY_CHECK_AMOUNT_LOCKED: a prepayment check's amount cannot be edited; delete the whole check and enter it again" });
+    expect(locked).toContain('delete the whole check and enter it again');
+    expect(locked).not.toContain('PREPAY_CHECK_AMOUNT_LOCKED');
+    const over = sanitizeError({ message: "PREPAY_OVERPAYMENT_LOCKED: an overpayment comes from its payment and cannot be deleted; void the payment to undo it" });
+    expect(over).toContain('void the payment');
+    expect(over).not.toContain('PREPAY_OVERPAYMENT_LOCKED');
+    const applied = sanitizeError({ message: 'PREPAY_CHECK_APPLIED: part of this check was applied to an invoice; it cannot be deleted' });
+    expect(applied).toContain('applied to an invoice');
+    expect(applied).not.toContain('PREPAY_CHECK_APPLIED');
+  });
   it('explains an UNKNOWN_STORAGE_LOCATION refusal without the raw token (KI-85)', () => {
     const message = sanitizeError({ message: 'UNKNOWN_STORAGE_LOCATION: stock can be received only into Main Warehouse until stock transfers between warehouses exist' });
     expect(message).toContain('only into Main Warehouse');
@@ -86,8 +106,14 @@ describe('sanitizeError', () => {
   it.each([
     ['DELIVERY_QUANTITIES_STALE', "this delivery's lines changed since the screen loaded them; reload it and enter the quantities again."],
     ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
+    ['DELIVERY_NOTHING_DELIVERED', 'every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'],
   ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
-    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` }))
+      .toBe(`The delivery was not completed. ${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}`);
+  });
+  it('starts the explained refusal with a capital letter (Taha, #2324)', () => {
+    expect(sanitizeError({ code: '23514', message: 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero.' }))
+      .toBe('The delivery was not completed. Every product on it has a delivered quantity of zero.');
   });
   it.each([
     ['DELIVERY_OVER_ORDER', 'Atrazine 4L — only 0 left to schedule (ordered 10, delivered 10, on other open deliveries 0: none). Cancel another delivery for this order, or reduce one that has not started, first.'],
@@ -102,6 +128,14 @@ describe('sanitizeError', () => {
     const shown = sanitizeError({ code: 'P0001', message });
     expect(shown).toBe('Nothing was saved. Other open deliveries for this order already hold 2 of this product, so only 0 more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.');
     expect(shown).not.toMatch(/ITEM_OVER|2b680d4a/);
+  });
+  it.each(['delivery_items_quantity_finite_chk', 'delivery_items_quantity_delivered_finite_chk'])('explains the finite-quantity check %s on delivery lines in plain words', (name) => {
+    const shown = sanitizeError({ code: '23514', message: `new row for relation "delivery_items" violates check constraint "${name}"` });
+    expect(shown).toBe('Nothing was saved. Delivery quantities must be ordinary numbers. Reload the delivery and enter them again');
+  });
+  it('keeps a mixed-case product name as written (Sol r5 LOW)', () => {
+    const sentence = 'pH Plus — this would deliver more than was ordered. Call the office before completing this delivery.';
+    expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
   });
   it('explains a completion past the order (F05) without the raw token', () => {
     const sentence = 'Atrazine 4L — this would deliver more than was ordered. Call the office before completing this delivery.';
@@ -329,6 +363,8 @@ describe('sanitizeError', () => {
       .toBe('This purchase order is cancelled, so its cost cannot change');
     expect(sanitizeError('PO_COST_BELOW_BILLED: this correction would put the active vendor bills more than 5% over what arrived on the purchase order or over its ordered total; void or adjust the bill first'))
       .toBe('This would put the vendor bills more than 5% over what has arrived on the purchase order, or over its ordered total. Void or adjust the bill first');
+    expect(sanitizeError('PO_BILLED_LINES_LOCKED: this purchase order has a vendor bill, so its lines cannot be changed here; void the bill first, or have an admin use Correct Unit Cost'))
+      .toBe("This purchase order has a vendor bill, so its lines can't be changed here. To change lines, void the bill (if it has a payment, void that first), edit, then enter the bill again. To fix only a cost, an admin can use Correct Unit Cost");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can change a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))
@@ -399,6 +435,21 @@ describe('sanitizeError', () => {
       .toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
     expect(sanitizeError({ message: 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery' }))
       .toBe('Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery');
+    // Supplier Pricing bounds (20270305200000): the database refusal reads as the rule, never the constraint name.
+    expect(sanitizeError({ message: 'new row for relation "product_supplier_links" violates check constraint "product_supplier_links_conversion_floor"' }))
+      .toBe('Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals');
+    expect(sanitizeError({ message: 'SUPPLIER_LINK_REUSE_FIELDS_REQUIRED' }))
+      .toBe('Nothing was saved. Fill in Supplier SKU, Supplier price unit and Supplier pack description, then save the link again');
+    expect(sanitizeError({ message: 'SUPPLIER_PRODUCT_NAME_REQUIRED' }))
+      .toBe('Nothing was saved. Fill in Supplier Product name, then save the link again');
+    expect(sanitizeError('SUPPLIER_CONVERSION_INVALID'))
+      .toBe('Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals');
+    expect(sanitizeError({ message: 'new row for relation "supplier_price_observations" violates check constraint "supplier_price_observations_package_quantity_floor"' }))
+      .toBe('Nothing was saved. Package quantity must be 0.001 or more');
+    expect(sanitizeError({ message: 'new row for relation "supplier_price_observations" violates check constraint "supplier_price_observations_cost_ceiling"' }))
+      .toBe('Nothing was saved. A supplier cost cannot be more than $10,000,000 for one line. Check the amount');
+    expect(sanitizeError({ message: 'new row for relation "supplier_price_import_rows" violates check constraint "supplier_price_import_rows_pending_bounds"' }))
+      .toBe('Nothing was saved. A quote line needs a package quantity of 0.001 or more and a cost of $10,000,000 or less. Check the line and try again');
     // The hold-rule name inside some other message is not mistaken for the rule.
     expect(sanitizeError({ message: 'Product inventory_holds_source_needs_customer not found' }))
       .not.toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
@@ -723,6 +774,8 @@ describe('customer receipt refusals (KI-25)', () => {
       .toBe('Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.');
     expect(sanitizeError(new Error("DELIVERY_RECEIPT_CHANGED: this delivery's receipt was queued again since; reload the page")))
       .toBe("Nothing was changed. This delivery's receipt was queued again since. Reload the page.");
+    expect(sanitizeError(new Error('RECEIPT_HANDLED_ADMIN_ONLY: only an admin can mark a customer receipt handled')))
+      .toBe('Nothing was changed. Only an admin can mark a customer receipt handled.');
   });
   it('leaves the invoice-posting DELIVERY_NOT_COMPLETED sentence alone', () => {
     const msg = 'DELIVERY_NOT_COMPLETED: delivery D-42 for invoice INV-1002 has been deleted. Void this invoice instead of posting it.';

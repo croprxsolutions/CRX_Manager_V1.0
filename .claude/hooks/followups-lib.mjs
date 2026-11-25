@@ -4,8 +4,8 @@
 // conversation afterwards misses deferrals made in another session or lost to a
 // summary (Sol, 2026-11-09), so each PR records them when they are decided: a
 // "## Follow-ups" section whose every line is "None" or names the durable home of
-// the deferred work (a GitHub issue `#123` or a known issue `KI-12`). Both merge
-// gates refuse a PR into a gated base without it; the /ship close-out reads it.
+// the deferred work (a GitHub issue `#123` or a known issue `KI-12`). The /ship
+// close-out reads it. No merge gate refuses on it since 2026-11-23 (Mason).
 // Taha's own PRs are his (.claude/commands/ship.md › Taha's PRs).
 
 // Same login as migration-landing-gate-lib's TAHA_LOGIN; not imported, so the Codex

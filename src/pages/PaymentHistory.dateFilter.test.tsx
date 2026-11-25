@@ -3,7 +3,7 @@
  * choices; the totals cover only the payments shown. Days are Chicago business days.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { buildInMemoryQuery } from '../test-utils/inMemoryQuery';
 import { dayParam, firstOfBusinessMonth, isDayInRange, paymentBusinessDate } from '../lib/paymentDateRange';
@@ -85,6 +85,29 @@ describe('Payment History date filter', () => {
   });
 });
 
+describe('Payment History date filter and the opened payment', () => {
+  it('closes the opened payment\'s allocations when the new dates hide it, and keeps them when they do not', async () => {
+    H.tables.invoice_line_allocations = [{
+      id: 'a1', allocation_set_id: 'october', invoice_id: 'i1', amount_cents: 100000, split_percentage: 100,
+      bill_to_customer_id: 'c1', created_at: '2026-10-30T15:00:00Z',
+      invoices: { invoice_number: 'INV-OCT' }, customers: { farm_name: 'Big Farm' },
+    }];
+    render(<MemoryRouter><PaymentHistory /></MemoryRouter>);
+    const row = (await screen.findByText('CHK-october')).closest('tr')!;
+    fireEvent.click(within(row).getAllByRole('button')[0]);
+    expect(await screen.findByText('INV-OCT')).toBeInTheDocument();
+
+    // All dates still shows October's payment, so its panel stays open.
+    fireEvent.click(screen.getByRole('button', { name: 'All dates' }));
+    expect(screen.getByText('INV-OCT')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'This month' }));
+    expect(screen.queryByText('CHK-october')).not.toBeInTheDocument();
+    expect(screen.queryByText('Invoice Allocations')).not.toBeInTheDocument();
+    expect(screen.queryByText('INV-OCT')).not.toBeInTheDocument();
+  });
+});
+
 describe('payment date range helpers', () => {
   it('uses the payment date, else the Chicago day it was entered', () => {
     expect(paymentBusinessDate('2026-11-24', '2026-11-30T12:00:00Z')).toBe('2026-11-24');
@@ -118,5 +141,6 @@ describe('Payment History opened on a range from a link', () => {
     expect(dayParam('2026-11-01')).toBe('2026-11-01');
     expect(dayParam('11/01/2026')).toBeNull();
     expect(dayParam(null)).toBeNull();
+    expect(dayParam('2026-02-31')).toBeNull();
   });
 });

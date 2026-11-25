@@ -22,8 +22,8 @@ import { fingerprintIntentPayload, getIdempotencyBindingRejection, getIdempotenc
 import { getLicenseStatus, licenseStatusLabel } from '../lib/licenseStatus';
 import { generateWpsNoticePdf } from '../lib/wpsNoticePdf';
 import { applyKeptEpa } from '../lib/jobEpa';
-import { generateApplicatorSheetPdf } from '../lib/applicatorSheetPdf';
-import { prepareApplicatorSheetPrintData } from '../lib/applicatorSheetPrintData';
+import { generateApplicatorSheetPdf, NO_MAP_PAGES_MESSAGE } from '../lib/applicatorSheetPdf';
+import { prepareApplicatorSheetPrintData, printApplicatorMapPages } from '../lib/applicatorSheetPrintData';
 import PrintOptionsDialog, { type ApplicatorPrintSelection } from '../components/jobs/PrintOptionsDialog';
 import {
   buildApplicatorSheetData,
@@ -100,7 +100,7 @@ import { JobChemicalProductPicker } from '../components/jobs/JobChemicalProductP
 import JobLabelCorrectionsNotice from '../components/jobs/JobLabelCorrectionsNotice';
 import { buildJobChemicalsPayload } from '../lib/jobChemicalPayload';
 import { JOB_CHEMICAL_COLUMNS, JOB_COLUMNS, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
-import { JOB_CHANGED_SINCE_LOADED_MESSAGE, jobChangedSinceLoaded, pickJobStaleSnapshot, withFreshDispatches, type JobStaleSnapshot } from '../lib/jobStaleEdit';
+import { JOB_CHANGED_SINCE_LOADED_MESSAGE, readJobEditVersion, withOwnDispatches, type JobEditVersion } from '../lib/jobStaleEdit';
 import { sendEmail } from '../lib/emailService';
 import {
   parsePreNotificationTemplate,
@@ -213,7 +213,8 @@ interface JobDbRow {
   vehicle?: { vehicle_name: string; capacity_gallons?: number | null; capacity_unit?: string | null } | null;
 }
 
-interface SaveJobResult { job_id: string }
+// replayed: a retry after a lost reply got the first save's stored result (20270302160000).
+interface SaveJobResult { job_id: string; replayed?: boolean }
 interface CompleteJobResult { record_number: string }
 interface TransferJobResult {
   // Checked against the route's job before the request key is retired.
@@ -315,8 +316,8 @@ export default function JobDetail() {
   const transferJobIdem = useIdempotencyKey('transfer_job_to_invoice', profile?.id || '');
   // Crew/loader values as last loaded, so a save sends (and checks) only the ones the user changed.
   const savedLoaderRef = useRef({ groundCrewId: '', carrier: '', capacity: '' });
-  // The job as last loaded: Save is refused if someone else changed it since (applicator, date, crew, ...).
-  const loadedJobSnapshotRef = useRef<JobStaleSnapshot | null>(null);
+  // The job's edit version as last loaded: save_job refuses the Save if someone else changed the job since.
+  const loadedJobVersionRef = useRef<JobEditVersion | null>(null);
   const isNew = id === 'new';
   const isEditable = role === 'admin' || role === 'sales_rep';
   // Cost is admin-only (Mason, 2026-10-15): the server works it out for everyone else's saves.
@@ -1153,6 +1154,7 @@ export default function JobDetail() {
           const lbl = labelById.get(c.product_id);
           return {
             product_name: c.product_name || 'Product',
+            product_id: c.product_id,
             rate_per_acre: parseFloat(c.rate_per_acre) || null,
             rate_unit: c.rate_unit || null,
             // The Total Applied quantity's measure unit (e.g. GAL/LB) — drives the
@@ -1223,6 +1225,28 @@ export default function JobDetail() {
     } catch (err) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'applicator_sheet_pdf' } });
       toast('error', 'Failed to generate field sheet');
+    }
+    setGeneratingSheet(null);
+  };
+
+  // Map pages only: an extra maps print for the crew. No job order, so no "printed" stamp.
+  const handleMapPagesOnly = async () => {
+    if (isNew || !id || !canGenerateWpsNotice({ isDirty })) {
+      toast('error', 'Save the job before printing its maps — they must match the saved record.');
+      return;
+    }
+    setGeneratingSheet('original');
+    try {
+      const sheetData = await buildSheetDataFromState(false);
+      if (sheetData) await printApplicatorMapPages(id, sheetData);
+      else toast('error', 'Could not load the job — try again before printing its maps.');
+    } catch (err) {
+      if (err instanceof Error && err.message === NO_MAP_PAGES_MESSAGE) {
+        toast('error', NO_MAP_PAGES_MESSAGE);
+      } else {
+        Sentry.captureException(toSentryError(err), { extra: { context: 'applicator_map_pages_pdf' } });
+        toast('error', 'Failed to print the field maps');
+      }
     }
     setGeneratingSheet(null);
   };
@@ -1902,7 +1926,18 @@ export default function JobDetail() {
     // settle guard defers adoption until this fetch's state has actually rendered.
     baselineSettleGuardRef.current = true;
     baselineRef.current = null;
-    const { data, error } = await supabase
+    // The version is read before the job select, so a change landing in between can only refuse a Save, never be
+    // overwritten. A failed read leaves no version, and Save then asks for a reload.
+    const readVersion = async (): Promise<JobEditVersion | null> => {
+      if (!isEditable) return null;
+      try {
+        return await readJobEditVersion(id!);
+      } catch (versionErr) {
+        Sentry.captureException(toSentryError(versionErr), { extra: { context: 'job_edit_version' } });
+        return null;
+      }
+    };
+    const selectJob = () => supabase
       // PR-07 follow-up: dropped applicator FK embed — full_name isn't read
       // anywhere in this page; only applicator_id is consumed (line 235).
       .from('jobs')
@@ -1920,6 +1955,20 @@ export default function JobDetail() {
       `)
       .eq('id', id!)
       .single();
+    let before = await readVersion();
+    let loaded = await selectJob();
+    let loadedVersion: JobEditVersion | null = null;
+    // Read again after the select: if rev moved, something wrote the job while the form loaded (maybe changing a value
+    // and putting it back), so the form may not be the state the version describes. Reload, up to 3 tries; after
+    // that no version is kept and Save asks for a reload.
+    for (let tries = 1; before && !loaded.error && isCurrentLoad(); tries++) {
+      const after = await readVersion();
+      if (after && after.rev === before.rev) { loadedVersion = before; break; }
+      if (tries >= 3) break;
+      before = await readVersion();
+      loaded = await selectJob();
+    }
+    const { data, error } = loaded;
 
     // Superseded — the operator is on a different job now. Install nothing. In
     // particular do NOT fall into the not-found branch below: its toast and its
@@ -2043,7 +2092,7 @@ export default function JobDetail() {
     // #10 loader-worksheet inputs (numbers stored as strings in the form).
     setCarrierRateGpa(j.carrier_rate_gpa != null ? String(j.carrier_rate_gpa) : '');
     setTankCapacity(j.loader_tank_capacity != null ? String(j.loader_tank_capacity) : '');
-    loadedJobSnapshotRef.current = pickJobStaleSnapshot(j as unknown as Record<string, unknown>);
+    loadedJobVersionRef.current = loadedVersion;
     savedLoaderRef.current = {
       groundCrewId: j.ground_crew_id || '',
       carrier: j.carrier_rate_gpa != null ? String(j.carrier_rate_gpa) : '',
@@ -2131,7 +2180,7 @@ export default function JobDetail() {
     setBaselineSettleTick((t) => t + 1);
     // initialLoadDone is armed by the loading-settle effect (rAF after loading=false).
     return true;
-  }, [id, toast, navigate, isAdmin]);
+  }, [id, toast, navigate, isAdmin, isEditable]);
 
   // Route invalidation runs in a LAYOUT effect, not the passive one below. Passive
   // effects are deferred: React commits the new route's render and can yield to the
@@ -2791,7 +2840,7 @@ export default function JobDetail() {
   const performSave = async (licenseOverride: boolean, overrideReasonForAudit?: string) => {
     // Crew/loader values as loaded when Save was clicked: a reload during the save must not make an untouched value look edited.
     const loaderBaseAtSave = isNew ? { groundCrewId: '', carrier: '', capacity: '' } : { ...savedLoaderRef.current };
-    const snapshotAtSave = isNew ? null : loadedJobSnapshotRef.current;
+    const versionAtSave = isNew ? null : loadedJobVersionRef.current;
     // Bound to the route this save STARTED on — see captureRouteEpoch. Captured here
     // rather than in handleSave because the expired-license override path calls
     // performSave directly, and this is where the save actually begins. The job row is
@@ -2818,9 +2867,17 @@ export default function JobDetail() {
     // Before save_job, so a refused loader number never lets the main save commit alone.
     if (refuseBadLoaderInputs()) return;
 
+    // Fail closed: without the version read at load, save_job could not tell a newer change from none.
+    if (!isNew && !versionAtSave) {
+      toast('error', 'This page could not check whether the job is current. Nothing was saved. Reload the page, then save again.');
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
+        // save_job refuses JOB_CHANGED_SINCE_LOADED when the job no longer matches this (20270302160000).
+        ...(versionAtSave ? { expected_version: versionAtSave } : {}),
         customer_id: customerId,
         job_date: jobDate,
         scheduled_time: scheduledTime || null,
@@ -2913,36 +2970,6 @@ export default function JobDetail() {
       // lost reply is refused with the committed job, which the catch below opens; an edit to an existing job gets a
       // key per exact payload, since re-applying an edit to the same job is harmless.
       const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, payload, fieldsPayload, chemsPayload]);
-      // Refuse a save over a newer change instead of silently replacing it. Compared with the job as it was when
-      // Save was clicked, so a refetch during the save cannot move the baseline under this payload.
-      if (!isNew && snapshotAtSave) {
-        let changed: string[];
-        try {
-          changed = await jobChangedSinceLoaded(id!, snapshotAtSave, isAdmin);
-        } catch (readErr) {
-          Sentry.captureException(toSentryError(readErr), { extra: { context: 'job_stale_edit_check' } });
-          if (stillOnThisJob()) toast('error', sanitizeError(readErr));
-          setSaving(false);
-          return;
-        }
-        if (changed.includes('deleted_at') && stillOnThisJob()) {
-          // #2188: a job deleted meanwhile reloads read-only; stay locked until the reload lands.
-          toast('info', 'Not saved: this job was deleted.');
-          await fetchJob();
-          setSaving(false);
-          return;
-        }
-        if (changed.length > 0) {
-          if (stillOnThisJob()) toast('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
-          setSaving(false);
-          return;
-        }
-        // The operator left (or discarded) this job while the check ran: write nothing.
-        if (!stillOnThisJob()) {
-          setSaving(false);
-          return;
-        }
-      }
       if (lastJobSaveScopeRef.current && lastJobSaveScopeRef.current !== saveScope) saveJobIdem.resetKeyFor(lastJobSaveScopeRef.current);
       lastJobSaveScopeRef.current = saveScope;
       const { data, error } = await supabase.rpc('save_job', {
@@ -2985,6 +3012,29 @@ export default function JobDetail() {
       // notification on every save for an over-limit customer and train admins to ignore it.
       if (isNew) {
         void warnIfOverCreditLimit(customerId, toast);
+      }
+
+      // A retry after a lost reply: save_job returned the first save's stored result and wrote nothing. The crew/loader
+      // and override-applicator follow-ups below are not version-checked and could overwrite a newer change, so they
+      // are skipped and the job is reloaded instead (Sol round 12, 20270302160000).
+      if (result.replayed) {
+        // The first attempt's lost reply never reached the logger below.
+        if (profile) logActivity({ event: isNew ? 'job_created' : 'job_updated', description: isNew ? `Job created for ${customers.find(c => c.id === customerId)?.farm_name}` : `Job ${jobNumber} updated`, performedBy: profile.id });
+        if (overrideReasonForAudit) {
+          await writeOverrideAudit(overrideReasonForAudit, isNew ? result.job_id : (id || null));
+        }
+        if (stillOnThisJob()) {
+          toast('info', `${isNew ? 'Job created' : 'Job saved'}. The page reloaded it: check the crew, loader and applicator, and change them again if needed.`);
+          setIsDirty(false);
+          if (isNew) {
+            skipUnsavedPromptRef.current = true;
+            navigate(`/jobs/${result.job_id}`);
+          } else {
+            await fetchJob();
+          }
+        }
+        setSaving(false);
+        return;
       }
 
       // Field-app parity #6 + #10: persist the ground crew AND the loader-worksheet
@@ -3218,6 +3268,15 @@ export default function JobDetail() {
       // on arrival here: save_job's refusal arrives as a plain PostgREST object,
       // so the guard never matched a real refusal and this friendly message never
       // fired. hasRpcCode() reads object-shaped errors, so it now does.
+      } else if (hasRpcCode(err, RpcErrorCodes.JOB_CHANGED_SINCE_LOADED)) {
+        // #2188: a job deleted meanwhile reloads read-only; any other change keeps the edits until the user reloads.
+        const { data: gone } = await supabase.from('jobs').select('deleted_at').eq('id', id!).maybeSingle();
+        if (gone?.deleted_at && stillOnThisJob()) {
+          toast('info', 'Not saved: this job was deleted.');
+          await fetchJob();
+        } else if (stillOnThisJob()) {
+          toast('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
+        }
       } else if (hasRpcCode(err, RpcErrorCodes.SHARE_NOT_100)) {
         toast('error', "Each field's customer shares must total 100%.");
       } else if (isNew && typeof getIdempotencyMismatchResult(err, 'save_job')?.job_id === 'string') {
@@ -4016,6 +4075,9 @@ export default function JobDetail() {
               <Button icon={<ClipboardList className="w-4 h-4" />} variant="secondary" onClick={() => setPrintOptionsOpen(true)} loading={generatingSheet !== null}>
                 
                 Field Sheet
+              </Button>
+              <Button icon={<MapIcon className="w-4 h-4" />} variant="secondary" onClick={handleMapPagesOnly} loading={generatingSheet !== null}>
+                Maps Only
               </Button>
               <Button icon={<FlaskConical className="w-4 h-4" />} variant="secondary" onClick={handleChemicalReport} loading={generatingChemReport}>
                 
@@ -5504,15 +5566,12 @@ export default function JobDetail() {
         crews={groundCrews}
         performedBy={profile?.id || ''}
         isAdmin={role === 'admin'}
-        onDispatched={() => {
+        onDispatched={(sent) => {
           setDispatchWizardOpen(false);
-          // Our own dispatch is not someone else's change: move just the dispatch lines of the baseline forward.
-          // A failed read leaves the old baseline, so the next Save asks for a reload (the safe side).
-          const snap = loadedJobSnapshotRef.current;
-          if (!snap || !id) return;
-          withFreshDispatches(id, snap)
-            .then((next) => { if (loadedJobSnapshotRef.current === snap) loadedJobSnapshotRef.current = next; })
-            .catch((err: unknown) => Sentry.captureException(toSentryError(err), { extra: { context: 'job_stale_dispatch_refresh' } }));
+          // Our own dispatch is not someone else's change: move just those locations' dispatch strings forward.
+          // A late reply after the user moved to another job must not touch that job's version.
+          const v = loadedJobVersionRef.current;
+          if (v && routeIdRef.current === id) loadedJobVersionRef.current = withOwnDispatches(v, sent);
         }}
       />
     </div>

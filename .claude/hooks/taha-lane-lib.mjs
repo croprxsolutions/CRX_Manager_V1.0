@@ -1,8 +1,12 @@
-// TAHA'S LANES (Mason to Taha in Slack, 2026-11-22): until Dec 15 our agents
-// never merge into staging a PR that changes Taha's areas (quotes, bookings,
-// purchasing holds, chemical invoices and billing), whatever OK line the PR has.
+// TAHA'S LANES (Mason to Taha in Slack, 2026-11-22): our agents never merge into
+// staging a PR that changes Taha's areas (quotes, bookings, purchasing holds,
+// chemical invoices and billing), whatever OK line the PR has, unless Taha's own
+// GitHub Approve is on the exact head being merged (Mason, 2026-11-24). No end
+// date: Mason kept the block past Dec 15 (2026-11-24). Edits to the block's own
+// wiring (BLOCK_FILES_RE) still need Mason's code, whatever Taha's review says.
 // Field billing (field invoices, spray jobs, blend tickets) stays Mason's.
 // #1980 and #1989 merged after Taha asked; a written note did not stop them.
+// Comments do not count (Taha, 2026-11-24).
 //
 // Mason can still let ONE named PR through: the merge refusal issues a 6-digit
 // code for that PR at its current head, and his chat message `taha override #<PR> <code>`
@@ -20,8 +24,6 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, wr
 import path from "node:path";
 import { ghApiRepoPath } from "./codex-push-lib.mjs";
 
-// End of Dec 15 in Central time (06:00 UTC on Dec 16). After it the block is off.
-export const TAHA_LANE_UNTIL_MS = Date.UTC(2026, 11, 16, 6, 0, 0);
 export const TAHA_LANE_CODE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const TAHA_LANE_OVERRIDE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_FILES = 250; // GitHub's compare can stop short silently; at this size, fail closed.
@@ -80,9 +82,16 @@ function isFieldBillingName(name) {
   return isFieldBilling(words) && !words.some((w) => STRONG_LANE_WORDS.has(w));
 }
 
+// Supplier quotes are Mason's purchasing lane, not customer quotes (Taha, 2026-11-25, after #2524).
+// Only inside one path segment, so src/pages/supplier/Quotes.tsx stays Taha's (desk review of #2548, LOW 1).
+const dropSupplierQuotes = (name) => String(name).split("/").flatMap((segment) => {
+  const words = wordsOf(segment);
+  return words.filter((w, i) => !(/^quotes?$/.test(w) && words[i - 1] === "supplier"));
+});
+
 function isLaneName(name) {
   if (isFieldBillingName(name)) return false;
-  const words = wordsOf(name);
+  const words = dropSupplierQuotes(name);
   return isBill(words) || words.some((w, i) => LANE_WORDS.has(w) || (w === "write" && /^offs?$/.test(words[i + 1] ?? "")));
 }
 
@@ -93,7 +102,19 @@ function isLaneName(name) {
 // Every name may carry a leading "_": the impls and wrappers behind the public names (Taha, #2382 MED 1).
 const TAHA_LANE_FUNCTIONS_RE = new RegExp("^_?(?:complete_delivery|start_and_complete_delivery|void_delivery|cancel_delivery|void_order|cancel_order" +
   "|update_order_items|price_order|apply_write_off|reverse_write_off|lock_accounting_months|get_customer_balance|get_monthly_summary" +
-  "|prevent_order_shares)(?=_|$)|^_?get_ar_|accounting_period|credit_memo", "i");
+  "|prevent_order_shares" +
+  // A sweep of staging (2026-11-24, Taha's ask via Mason): functions whose bodies write his tables but whose names
+  // carry no lane word. Field-billing ones (field app, blend ticket, job, application) stay Mason's and are left out.
+  "|create_direct_order|create_rush_order|bulk_import_order|restore_cancelled_order|close_undelivered_order_remainder" +
+  "|bump_order_item_edit_version|check_unpriced_orders|trg_recalc_order_totals|guard_order_item_shares|validate_order_shares_total" +
+  "|assert_order_line_fits|create_return|receive_return|generate_finance_charges|create_delivery_with_items|create_quick_delivery" +
+  "|edit_delivery|fix_delivery|correct_delivery_brands|batch_cancel_deliveries|delivery_line_matches_order_line" +
+  "|enforce_delivery_items_parent_lock|prebook_quick_delivery_inventory" +
+  // Taha's review of #2408: read-only billing reports, the month lock, and NEW-setting triggers the write sweep missed.
+  "|get_customer_year_end_summary|get_batch_year_end_summaries|check_period_open|preview_finance_charges" +
+  "|get_sales_summary_report|get_sales_detail_report|get_gross_sales_report|get_profitability_report|financial_dashboard_summary" +
+  "|bump_order_edit_version|prevent_oifa_edit_after_post|guard_order_reopen_inactive_product" +
+  ")(?=_|$)|^_?get_ar_|accounting_period|credit_memo", "i");
 const isLaneFunction = (name) => TAHA_LANE_FUNCTIONS_RE.test(name) || isLaneName(name);
 
 // A migration is Taha's when its SQL writes to, locks or changes one of these tables, or creates,
@@ -132,6 +153,10 @@ const FIELD_RES = { write: writeRe(tableRe(FIELD_TABLES)), read: readRe(tableRe(
 const ROW_LOCK_RE = /\bfor\s+(?:no\s+key\s+)?update\b|\bfor\s+(?:key\s+)?share\b/i;
 // Booking stock (Taha on #2382): a write that sets inventory.quantity_prebooked, or a function body that does.
 const PREBOOKED_RE = /\bset\b(?:(?!\bwhere\b)[^;])*?\bquantity_prebooked"?\s*=|\bquantity_prebooked"?\s*:=|\binto\s+[\w".]*\binventory"?\s*\([^)]*\bquantity_prebooked\b|\bset\s*\([^)]*\bquantity_prebooked\b|\b(?:column|add|drop|alter|rename)\s+(?:column\s+)?(?:if\s+(?:not\s+)?exists\s+)?"?quantity_prebooked\b/i;
+// Taha's #2382 LOW 2: a PL/pgSQL `NEW.quantity_prebooked = 0;` at a statement start, and RENAME COLUMN x TO quantity_prebooked.
+const PREBOOKED_MORE_RE = /(?:^|;|\bbegin\b|\bthen\b|\belse\b|\bloop\b)\s*(?:"?[\w$]+"?\s*\.\s*)?"?quantity_prebooked"?\s*=(?!=)|\brename\s+(?:column\s+)?[^;]*?\bto\s+"?quantity_prebooked\b/i;
+// The SET branch stops at the first WHERE, so a subquery's WHERE is blanked out first (LOW 2).
+const withoutParens = (t) => { let prev; do { prev = t; t = t.replace(/\([^()]*\)/g, "()"); } while (t !== prev); return t; };
 const QNAME = String.raw`(?:"?public"?\s*\.\s*)?"?([\w$]+)`;
 const FUNCTION_RE = new RegExp(String.raw`\b(?:create(?:\s+or\s+replace)?|alter)\s+(?:function|procedure|routine)\s+` + QNAME, "gi");
 // ALTER FUNCTION … RENAME TO <new name> (MED 4).
@@ -202,7 +227,7 @@ export function isTahaLaneSql(sql, { fieldBilling = false } = {}) {
   const text = withoutComments(sql);
   // Second pass joins string pieces ('UPDATE ' || 'invoices …'), so dynamic SQL built in parts still counts.
   const joined = text.replace(/'\s*\|\|\s*'/g, "");
-  if ([text, joined].some((t) => write.test(t) || PREBOOKED_RE.test(t))) return true;
+  if ([text, joined].some((t) => write.test(t) || PREBOOKED_RE.test(t) || PREBOOKED_MORE_RE.test(t) || PREBOOKED_RE.test(withoutParens(t)))) return true;
   // A row lock in the same statement as a read of his tables counts (Taha's review of #2382, LOW 9).
   if (text.split(";").some((statement) => ROW_LOCK_RE.test(statement) && read.test(statement))) return true;
   return functionNames(text).some(isLaneFunction);
@@ -213,8 +238,7 @@ export function isTahaLaneSql(sql, { fieldBilling = false } = {}) {
  * ({filename, previous_filename, sql?}) or null when they could not be read (refuses).
  * An entry carrying `sql` (a migration's text, or null when unreadable) is also judged by its SQL.
  */
-export function tahaLaneProblem({ files, now = Date.now() }) {
-  if (now >= TAHA_LANE_UNTIL_MS) return null;
+export function tahaLaneProblem({ files }) {
   if (!Array.isArray(files)) return { files: [], reason: "its changed files could not be read, so it can't be shown to stay out of Taha's areas" };
   if (files.length >= MAX_FILES) return { files: [], reason: `${files.length} changed files may be a cut-short list` };
   const hits = [];
@@ -268,6 +292,41 @@ function migrationSql({ repoPath, gh, filename, ref }) {
     const sql = String(gh(["api", "-H", "Accept: application/vnd.github.raw", `${repoPath}/contents/${filePath}?ref=${ref}`]));
     return sql.trim() ? sql : null;
   } catch { return null; }
+}
+
+export const TAHA_LOGIN = "tahakhanabdalli";
+// His GitHub account number: a login can be renamed and re-registered by someone else; this cannot.
+export const TAHA_ID = "50602678";
+
+/**
+ * Taha's latest deciding review (approve / changes-requested / dismissed, on any commit) must be an
+ * Approve of exactly `headSha`; comments and pending reviews do not count. A dismissal is deciding, so
+ * dismissing his Request changes never revives an older Approve (#2406). `rows`: [{ id, state, commit, at }]
+ * oldest first. True only when that Approve also came after the PR's last base-branch change
+ * (`baseChangedAt`, ISO time or ""): a retarget keeps the head but changes the code that merges.
+ */
+export function tahaApprovedHead(rows, headSha, baseChangedAt = "") {
+  if (!usableHead(headSha)) return false;
+  const verdict = (rows || []).filter((r) => String(r?.id || "") === TAHA_ID
+    && ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(r?.state)).at(-1);
+  if (verdict?.state !== "APPROVED" || String(verdict.commit || "").toLowerCase() !== headSha.toLowerCase()) return false;
+  if (!baseChangedAt) return true;
+  const approvedAt = Date.parse(verdict.at);
+  return Number.isFinite(approvedAt) && approvedAt > Date.parse(baseChangedAt);
+}
+
+/** Taha's reviews and the PR's base changes read from GitHub, fed to tahaApprovedHead. Any read error → false (refuse). */
+export function tahaApprovedOnGitHub({ repo, gh, pullRequest, headSha }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath || !usablePr(pullRequest)) return false;
+  try {
+    const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${pullRequest}/reviews?per_page=100`, "--jq",
+      '.[] | [(.user.id // "" | tostring), .state, (.commit_id // ""), (.submitted_at // "")] | @tsv'])).split(/\r?\n/).filter(Boolean)
+      .map((line) => { const [id, state, commit, at] = line.split("\t"); return { id, state, commit, at }; });
+    const baseChangedAt = String(gh(["api", "--paginate", `${repoPath}/issues/${pullRequest}/timeline?per_page=100`, "--jq",
+      '.[] | select(.event == "base_ref_changed" or .event == "automatic_base_change_succeeded") | .created_at'])).split(/\r?\n/).filter(Boolean).sort().at(-1) || "";
+    return tahaApprovedHead(rows, headSha, baseChangedAt);
+  } catch { return false; }
 }
 
 const usablePr = (n) => Number.isInteger(n) && n > 0;
@@ -384,12 +443,21 @@ export function tellTahaOnGitHub({ repo, gh, pullRequest, body }) {
 
 /**
  * The merge gates' single call: null when the merge may go on, otherwise the
- * refusal text. With Mason's override for this PR and head, `tellTaha(body)`
+ * refusal text. `tahaApproved()` true (Taha signed off on this head) lets it through.
+ * With Mason's override for this PR and head, `tellTaha(body)`
  * must post the PR comment first (once per override); if it can't, the merge is refused.
  */
-export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, notice = () => {} }) {
-  const problem = tahaLaneProblem({ files, now });
+export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, tahaApproved = () => false, notice = () => {} }) {
+  const problem = tahaLaneProblem({ files });
   if (!problem) return null;
+  // Taha's Approve on this exact head lets lane code through. Not an unreadable file list, a migration
+  // whose SQL could not be read, or the block's own files.
+  // Unreadable SQL is checked on the raw entries: a lane-named migration is listed by name, never with the suffix (Astra, 2026-11-24).
+  const unreadableSql = !Array.isArray(files) || files.some((e) => e && "sql" in e && e.sql === null);
+  if (problem.files.length && !unreadableSql && !problem.files.some((f) => BLOCK_FILES_RE.test(f)) && tahaApproved()) {
+    notice(`${prefix}: TAHA LANE: Taha approved #${pullRequest} at ${String(headSha).slice(0, 12)}; it may go on to the next gate.\n`);
+    return null;
+  }
   const override = findTahaLaneOverride({ dirs, pullRequest, headSha, now });
   if (override) {
     if (!override.tahaToldAt) {
@@ -406,8 +474,9 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
   }
   const code = issueTahaLaneCode({ dirs, pullRequest, headSha, now });
   return `${prefix}: TAHA LANE BLOCK — #${pullRequest || "?"} is refused because ${problem.reason}. ` +
-    "Until Dec 15 agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) " +
-    "or change this block, whatever OK line the PR has (Mason to Taha, 2026-11-22). Leave it for Taha: post a PR comment or a KI. " +
+    "Agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) without Taha's " +
+    "GitHub Approve on this exact commit, and never change this block without Mason's code (Mason, 2026-11-22 and 2026-11-24). " +
+    `Request his review (gh pr edit ${pullRequest || "<n>"} --add-reviewer TahaKhanAbdalli) and wait for his Approve. ` +
     (code
       ? `Only if Mason wants it merged anyway: tell him why in one line and ask him to send, as a message of its own: taha override #${pullRequest} ${code} ` +
         "(it covers this PR at its current commit only; a new push needs a new code)"

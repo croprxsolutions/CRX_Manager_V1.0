@@ -439,8 +439,12 @@ describe('SupplierPricing page', () => {
     expect(await screen.findByText('You are adding 7 supplier observations. You are changing ZERO sell prices.')).toBeInTheDocument();
     const approve = screen.getByRole('button', { name: 'Approve selected observations' });
     await waitFor(() => expect(approve).toBeEnabled());
+    // A warned row can be deselected; the count follows the selection.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select row 5' }));
     fireEvent.click(approve);
-    expect(await screen.findByText(/Check first: 3 selected row\(s\) are more than 40% away from the current approved price\.$/)).toBeInTheDocument();
+    const confirmStart = 'You are adding 6 supplier observations. You are changing ZERO sell prices.'
+      + ' Check first: 2 selected row(s) are more than 40% away from the current approved price. Atrazine:';
+    expect(await screen.findByText((text) => text.startsWith(confirmStart))).toBeInTheDocument();
   });
 
   it('shows no converted cost for a link in another unit, and says so for an oversized package', async () => {

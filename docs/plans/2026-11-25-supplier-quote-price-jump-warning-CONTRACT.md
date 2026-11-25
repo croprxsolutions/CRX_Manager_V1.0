@@ -31,8 +31,9 @@ Follow-up to `2026-11-24-supplier-quote-unit-floor-CONTRACT.md` (Astra #4, plaus
   link can still be the comparison. The warning is a typo catch, not a guarantee.
 - The comparison is a snapshot of the workspace as loaded; Refresh reloads it. No promise about prices approved in
   another tab since.
-- Both amounts use the link's current conversion factor and the same whole-cent rounding, so a changed factor scales
-  both sides. Rounding can move a sub-dollar comparison across the line; irrelevant at real chemical prices.
+- Both amounts use the link's conversion factor (a link with approved history cannot change it:
+  `SUPPLIER_LINK_WITH_HISTORY_IMMUTABLE`) and the same whole-cent rounding. Rounding to the cent can hide a swing when
+  the price per inventory unit is a few cents (a per-ton quote on a per-pound product); accepted, see Sol below.
 - The row's amount and unit label are the converted cost the screen already shows (unchanged behavior, including how
   a missing conversion unit is labeled and the "package size too large" text).
 - The row's converted cost is shown only when the link is comparable, active, has a factor above 0 and converts to
@@ -79,7 +80,18 @@ Follow-up to `2026-11-24-supplier-quote-unit-floor-CONTRACT.md` (Astra #4, plaus
   of a warning). #9 settled by Mason's answer below.
 - #21/#22: staging check stages quotes, opens the approve confirmation and cancels, then rejects the test import, so
   no test price becomes a baseline.
-- #24 declined: rows are few; computing the converted cost twice per row is cheaper than adding an index.
+- #24: the approved-price lookup is now built once per workspace load.
+
+## Sol round 1 (gpt-6.2-sol high, head 48681de74, CLEAN with 4 MED / 2 LOW), settled
+
+- Fixed: the "Check first" count now comes first in the approve confirmation, ahead of the cost list; the approved-price
+  lookup is built once per workspace load and the confirmation text only while it is open; the page test deselects a
+  warned row and checks the count follows; this contract no longer describes changing a factor on a link with history.
+- Deferred, accepted (warning only, Mason's flags-not-blocks preference): rounding both sides to whole cents can hide
+  a swing when the price per inventory unit is a few cents (a per-ton quote on a per-pound product); staging and
+  production products price per gallon or pound at well above that. A stale workspace (another admin corrected the
+  approved price since this page loaded) shows the old comparison until Refresh; same as every other number on the
+  page.
 
 ## Business decision
 

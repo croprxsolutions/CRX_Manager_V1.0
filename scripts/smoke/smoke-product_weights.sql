@@ -86,6 +86,13 @@ BEGIN
         IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_REVIEW_RELOAD%' THEN RAISE; END IF;
       END;
       BEGIN
+        PERFORM public.correct_parent_density(v_pa, 0, 9.5, 'lb_per_gal', 'measured', 'Smoke correction',
+          'Smoke evidence', 'smoke-pw-cutover-correct-' || v_tag);
+        RAISE EXCEPTION 'SMOKE_FAIL: direct density correction remains open after cutover';
+      EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_REVIEW_RELOAD%' THEN RAISE; END IF;
+      END;
+      BEGIN
         PERFORM public.approve_weights(jsonb_build_array(jsonb_build_object('kind', 'density', 'subject_id', v_pa,
           'draft_id', gen_random_uuid(), 'expected_version', 1)), 'smoke-pw-cutover-approval-' || v_tag);
         RAISE EXCEPTION 'SMOKE_FAIL: the legacy mixed approval path remains open after cutover';

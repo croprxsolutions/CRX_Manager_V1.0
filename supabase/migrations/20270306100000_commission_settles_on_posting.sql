@@ -169,14 +169,15 @@ BEGIN
    WHERE i.order_id = p_order_id
      AND i.invoice_type IN ('chemical_sale', 'misc_charge') AND i.status IN ('posted', 'overdue', 'paid')
      AND i.deleted_at IS NULL;
-  IF COALESCE(v_billed, 0) <= 0 THEN
-    -- No posted invoice is headed by the sale: its discount came only through legacy invoices with no order on the
-    -- header, which the P&L doesn't count as billed. Scale by those lines' own product cents, so the rows sit on the
-    -- rule's base and never take the whole discount on a part-billed sale (Sol posting r5 HIGH 3).
-    SELECT sum(l.extended_cents) INTO v_billed
+  -- Plus the sale's counted lines on legacy invoices with no order on the header: their discount is in D, so their
+  -- product cents are billed too (the P&L counts them as nothing, so it earns less there, never more). Without them
+  -- the discount would be scaled up (a fully billed sale on $300, not $350) or, with only such invoices, taken whole
+  -- on a part-billed sale (Sol posting r5 HIGH 3, r6 H1).
+  v_billed := COALESCE(v_billed, 0) + COALESCE((
+    SELECT sum(l.extended_cents)
       FROM public._order_commission_lines_20270306(p_order_id) l
-      JOIN invoice_items b ON b.id = l.item_id AND b.is_application_fee IS NOT TRUE;
-  END IF;
+      JOIN invoices i ON i.id = l.invoice_id AND i.order_id IS NULL
+      JOIN invoice_items b ON b.id = l.item_id AND b.is_application_fee IS NOT TRUE), 0);
   IF v_billed > 0 AND v_booked > v_billed THEN
     -- Part-billed: the posted invoices' discount rate across the whole sale, rounded toward the smaller base, so the
     -- P&L's billed share stays within its own per-row rounding of the posted profit after its discount.
@@ -294,14 +295,22 @@ BEGIN
        WHERE o.order_id = p_order_id AND o.deleted_at IS NULL AND o.status <> 'cancelled'
          AND o.id <> ALL (COALESCE(v_moving, '{}'));
       IF v_pool IS NOT NULL THEN
-        -- Non-moving rows get NULL here and are not written.
-        SELECT array_agg((floor(r.raw) + CASE WHEN r.remainder_rank <= v_pool - r.floored THEN 1 ELSE 0 END) / 100.0
+        -- Non-moving rows get NULL here and are not written. k = what is left after every moving row's floor: k >= 0
+        -- gives one cent each to the k largest remainders (never more); k < 0 (staying rows already rounded up) takes
+        -- the shortfall back, smallest remainders first, so the set never ends above the rule's total (Sol posting r6
+        -- H2: $300.05 at 30/30/40 had written $300.06). No row goes below zero.
+        SELECT array_agg(GREATEST(0, floor(r.raw)
+                           + CASE WHEN r.k >= 0 THEN CASE WHEN r.remainder_rank <= r.k THEN 1 ELSE 0 END
+                                  ELSE floor(r.k::numeric / r.n)
+                                       + CASE WHEN r.remainder_rank <= r.k - floor(r.k::numeric / r.n) * r.n THEN 1 ELSE 0 END
+                             END) / 100.0 * CASE WHEN r.id IS NOT NULL THEN 1 END
                          ORDER BY x.id)
           INTO v_new
           FROM unnest(v_ids) AS x(id)
           LEFT JOIN (SELECT u.id, u.raw,
                             row_number() OVER (ORDER BY u.raw - floor(u.raw) DESC, u.id) AS remainder_rank,
-                            sum(floor(u.raw)) OVER () AS floored
+                            v_pool - sum(floor(u.raw)) OVER () AS k,
+                            count(*) OVER () AS n
                        FROM (SELECT y.id, v_base_cents * y.pct / 100 AS raw FROM unnest(v_ids, v_pcts) AS y(id, pct)
                               WHERE y.id = ANY (v_moving)) u) r ON r.id = x.id;
       ELSE

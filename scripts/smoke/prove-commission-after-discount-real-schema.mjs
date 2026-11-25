@@ -352,7 +352,8 @@ async function main() {
     '(H) the 150-line sale', '(K1) the 40% row', '(K2) the 40% row', '(K3) the 40% row', '(M) $330.93 did not split',
     '(S) after the payout void', '(V) two payouts voided in turn', '(W) one payout voided', '(X) the settled rows are not marked', '(Z) unpost and repost',
     '(L) legacy rows already on $300', '(Q) a frozen row and a pending one', '(N) no settle helper',
-    '(I) lines added to a posted invoice', '(P) a NULL-header invoice']) {
+    '(I) lines added to a posted invoice', '(P) a NULL-header invoice',
+    '(R) a blank-header invoice mixed', '(U) a pool below the moving floors']) {
     assert.ok(before.fail.includes(step), `BEFORE: expected ${step} to fail, got: ${before.fail}`);
   }
   assert.ok(!/SMOKE_SETUP|\(E\)|\(G\)|\(O\)|\(T\)/.test(before.fail), `BEFORE: the fixture or a control failed: ${before.fail}`);

@@ -29,9 +29,13 @@
 --   P  Half posted, then the invoice's header order cleared (a legacy NULL-header invoice): the rows stay on the
 --      rule's $300.00, never the whole-discount $350.00 (Sol posting r5 HIGH 3)
 --   Q  50/25/25 on $300.90, a frozen row and a pending one tie after a payout void: never over $300.90 (r4 MED 6)
+--   R  Half posted at 10% on a legacy blank-header invoice, the other half posted at 0% on a normal one: fully billed,
+--      $210.00 / $140.00 on $350.00, not the scaled-up $300.00 (Sol posting r6 H1)
 --   S  Both rows batched (one payout each), the second half posted at 20%, the payouts voided: the rows come back on
 --      $250.00
 --   T  A chemical-sale invoice can't be born posted through save_invoice (it would skip the posting trigger)
+--   U  $300.90 at 50/25/25, both 25% rows rounded up to $75.23 (one batched), the 50% row moved: the set stays
+--      $300.90, never $300.91 (Sol posting r6 H2)
 --   V  Half posted, both rows batched, the rest posted, the payouts voided one at a time: the rows add up to the base
 --      (each invoice rounds its own 7%: $330.92) and differ by at most a cent
 --   W  Half posted, the lower-id row batched, the rest posted, its payout voided: the pair adds up to the base
@@ -685,6 +689,54 @@ BEGIN
     END IF;
   END IF;
 
+  -- R: half posted at 10% ($50 off) on an invoice whose header order is then cleared (a legacy blank-header invoice),
+  -- the other half posted at 0% on a normal invoice: the sale is fully billed, so $210 / $140 on $350, not the
+  -- discount scaled up to $300 by counting only the headed half as billed (Sol posting r6 H1).
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 'r-' || v_suffix);
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 50, 'r1-' || v_suffix);
+  v_inv := pg_temp.smk_draft(v_order);
+  PERFORM pg_temp.smk_post(v_inv, 'r1-' || v_suffix);
+  ALTER TABLE invoices DISABLE TRIGGER USER;
+  UPDATE invoices SET order_id = NULL WHERE id = v_inv;
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  ALTER TABLE invoices ENABLE TRIGGER USER;
+  UPDATE customers SET standing_discount_pct = 0 WHERE id = v_customer;
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 50, 'r2-' || v_suffix);
+  PERFORM pg_temp.smk_post(pg_temp.smk_draft(v_order), 'r2-' || v_suffix);
+  UPDATE customers SET standing_discount_pct = 10 WHERE id = v_customer;
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '210.00/140.00|350.00' THEN
+    v_fails := v_fails || ' (R) a blank-header invoice mixed with a headed one: not 210/140 on $350: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  END IF;
+
+  -- U: $1,001 / $600 at 10% posted whole: $300.90 at 50/25/25 ($150.45 / $75.23 / $75.22). The $75.22 row is then
+  -- rounded up to $75.23 as the edit paths round each row on its own, one 25% row is batched, and the 50% row is put
+  -- back on an older base: settling it again leaves $150.44 for it, so the set stays $300.90 (Sol posting r6 H2).
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10.01, 6, false,
+    jsonb_build_object('splits', jsonb_build_array(
+      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 50),
+      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 25),
+      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_admin), 'recipient_user_id', v_admin, 'percentage', 25))), 'u-' || v_suffix);
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'u-' || v_suffix);
+  PERFORM pg_temp.smk_post(pg_temp.smk_draft(v_order), 'u-' || v_suffix);
+  UPDATE commissions SET commission_amount = 75.23
+   WHERE order_id = v_order AND split_percentage = 25 AND deleted_at IS NULL AND status = 'pending';
+  PERFORM create_commission_payment(
+    ARRAY(SELECT id FROM commissions WHERE order_id = v_order AND split_percentage = 25 AND deleted_at IS NULL ORDER BY id LIMIT 1),
+    'check', 'SMK-CAD-U', (now() AT TIME ZONE 'America/Chicago')::date, 'Rolled-back smoke', v_admin, 'smk-cad-u-pay-' || v_suffix);
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  UPDATE commissions SET order_profit = 401, commission_amount = 200.50
+   WHERE order_id = v_order AND split_percentage = 50 AND deleted_at IS NULL;
+  IF to_regprocedure('public._settle_order_commission_20270306(uuid)') IS NULL THEN
+    v_fails := v_fails || ' (U) a pool below the moving floors: no settle helper;';
+  ELSE
+    PERFORM public._settle_order_commission_20270306(v_order);
+    v_got := (SELECT to_char(sum(commission_amount), 'FM999990.00') FROM commissions
+               WHERE order_id = v_order AND deleted_at IS NULL AND status <> 'cancelled');
+    IF v_got IS DISTINCT FROM '300.90' THEN
+      v_fails := v_fails || ' (U) a pool below the moving floors: rows total ' || COALESCE(v_got, 'none') || ', not 300.90;';
+    END IF;
+  END IF;
+
   -- T: a chemical-sale invoice can't be born posted through save_invoice.
   v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 't-' || v_suffix);
   BEGIN
@@ -705,7 +757,7 @@ BEGIN
   v_got := (SELECT string_agg(o.order_name || ' ' || c.order_profit || ' vs ' || (o.total_profit + _order_standing_discount_20270109(o.id)), '; ')
               FROM orders o JOIN commissions c ON c.order_id = o.id AND c.status = 'pending' AND c.deleted_at IS NULL
              WHERE o.order_name LIKE '[SMOKE] CAD %-' || v_suffix
-               AND o.order_name !~ '\[SMOKE\] CAD (d|f|s|c|e|o|t|g|k2|v|w|x|y|z|l|q|n|p)-'  -- part-posted, unposted or none; k2 holds k3's moved row
+               AND o.order_name !~ '\[SMOKE\] CAD (d|f|s|c|e|o|t|g|k2|v|w|x|y|z|l|q|n|p|r|u)-'  -- part-posted, unposted or none; k2 holds k3's moved row
                AND c.order_profit IS DISTINCT FROM o.total_profit + _order_standing_discount_20270109(o.id));
   IF v_got IS NOT NULL THEN
     v_fails := v_fails || ' (base) a commission base differs from the P&L profit after discount: ' || v_got || ';';

@@ -356,11 +356,13 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
     // Quotes come from their own read after the entity search. Keep room for them, so a broad
     // search whose other matches fill the list still shows its matching quotes.
-    const entityRoom = Math.max(0, MAX_RESULTS - items.length - quoteResults.length);
+    // Checked again here, not only when the read ran: results kept from before a role change never show.
+    const shownQuotes = canSearchQuotes ? quoteResults : [];
+    const entityRoom = Math.max(0, MAX_RESULTS - items.length - shownQuotes.length);
 
     // Entity results from RPC
     for (const r of entityResults.slice(0, entityRoom)) {
-      const price = r.entity_type === 'product' ? productPrices.get(r.id) : undefined;
+      const price = r.entity_type === 'product' && canSeePrices ? productPrices.get(r.id) : undefined;
       items.push({
         id: `${r.entity_type}-${r.id}`,
         type: r.entity_type,
@@ -370,7 +372,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
       });
     }
 
-    for (const q of quoteResults) {
+    for (const q of shownQuotes) {
       items.push({
         id: `quote-${q.id}`,
         type: 'quote',
@@ -381,7 +383,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
     }
 
     return items.slice(0, MAX_RESULTS);
-  }, [query, entityResults, quoteResults, productPrices, availablePages]);
+  }, [query, entityResults, quoteResults, productPrices, availablePages, canSearchQuotes, canSeePrices]);
 
   // Reset active index when results change
   useEffect(() => {

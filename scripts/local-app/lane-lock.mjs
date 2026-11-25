@@ -34,10 +34,10 @@ export function acquireLaneLock(lockPath, pid = process.pid) {
     }
     const owner = /^\d+$/.test(ownerText) ? Number(ownerText) : NaN;
     if (!Number.isSafeInteger(owner) || owner < 1) {
-      throw new Refused(`The lane lock at ${lockPath} is unreadable. Preserve it, then rename only that lock file to a dated .stale file to recover.`);
+      throw new Refused(`The lane lock at ${lockPath} is unreadable. Preserve it and follow the interrupted-command recovery in scripts/local-app/README.md.`);
     }
-    if (processIsRunning(owner)) throw new Refused(`Another local walkthrough command (process ${owner}) owns this lane. Wait for it to finish. If nothing is running (an old process number can be reused by an unrelated program), rename only ${lockPath} to a dated .stale file.`);
-    throw new Refused(`The lane lock records process ${owner}, which is no longer running. Nothing was changed. Confirm no walkthrough command is active, then rename only ${lockPath} to a dated .stale file, or use a different uniquely named checkout.`);
+    if (processIsRunning(owner)) throw new Refused(`Another local walkthrough command (process ${owner}) owns this lane. Wait for it to finish. If the process number was reused, follow the interrupted-command recovery in scripts/local-app/README.md.`);
+    throw new Refused(`The lane lock records process ${owner}, which is no longer running. Nothing was changed. A subprocess may still be active. Follow the interrupted-command recovery in scripts/local-app/README.md or use a different uniquely named checkout.`);
   }
   throw new Refused(`Could not acquire the walkthrough lane lock at ${lockPath}; another command may be starting.`);
 }

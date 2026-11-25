@@ -84,13 +84,14 @@ function createState() {
     } : {}),
   };
   mkdirSync(STATE_DIR, { recursive: true });
-  if (IS_SALES_GAUNTLET || IS_SCREEN_WALK) {
-    const gateway = readFileSync(path.join(HERE, 'kong.yml'), 'utf8');
-    if (gateway.split('http://127.0.0.1:5199').length !== 4) throw new Refused('The gateway origin template changed.');
-    writeFileSync(path.join(STATE_DIR, 'kong.yml'), gateway.replaceAll('http://127.0.0.1:5199', APP_URL));
-  }
   writeFileSync(STATE_FILE, Object.entries(state).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', { mode: 0o600 });
   return state;
+}
+
+function gatewayConfig() {
+  const gateway = readFileSync(path.join(HERE, 'kong.yml'), 'utf8');
+  if (gateway.split('http://127.0.0.1:5199').length !== 4) throw new Refused('The gateway origin template changed.');
+  return gateway.replaceAll('http://127.0.0.1:5199', APP_URL);
 }
 
 function compose(args, options) {
@@ -425,14 +426,18 @@ async function seed(state) {
 }
 
 async function rebuild({ firstStart = false } = {}) {
-  await preflight({ needState: false });
+  const existingState = await preflight({ needState: false });
+  if (IS_SCREEN_WALK && await portIsOpen(APP_PORT)) {
+    throw new Refused('This walkthrough frontend is running. When the walkthrough is finished, its owner can run stop before rebuilding. The database was kept.');
+  }
   const companion = supabaseCompanion();
-  if (firstStart) assertNewScreenWalkLaneIsEmpty();
-  if (!firstStart) stopFrontend();
-  const state = readState() ?? createState();
-  rmSync(BUILD_FILE, { force: true });
   const fingerprintBefore = IS_SCREEN_WALK ? schemaFingerprint(approvedMigrations()) : undefined;
+  const gateway = IS_SALES_GAUNTLET || IS_SCREEN_WALK ? gatewayConfig() : undefined;
+  if (!firstStart && !IS_SCREEN_WALK) stopFrontend();
+  const state = existingState ?? createState();
+  rmSync(BUILD_FILE, { force: true });
   if (!firstStart) compose(['down', '-v', '--remove-orphans']);
+  if (gateway !== undefined) writeFileSync(path.join(STATE_DIR, 'kong.yml'), gateway);
   await startDatabase(state);
   await startServices(state);
   assertSealed();

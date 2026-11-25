@@ -9,9 +9,11 @@ app built from the feature checkout, with invented data only and no route to pro
   their names, ports and state.
 - Every walkthrough command holds one per-checkout lock (`scripts/local-app/.state/screen-walk/first-start.lock`);
   a stale lock is reported, never removed automatically. API and database listeners must be loopback
-  (IPv6 included), and a schema fingerprint is checked before and after a rebuild.
-- The runner requires the matching Supabase CLI 2.109.1 pair (`supabase` and `supabase-go`).
+  (IPv6 included), and a schema fingerprint is checked before and after a rebuild. Rebuild refreshes
+  the lane's gateway settings and refuses while its frontend is running.
+- Rebuild checks the matching Supabase CLI 2.109.1 pair (`supabase` and `supabase-go`) before resetting data.
 - New `screen-walkthrough` skill for both agents (`.claude/skills/`, `.agents/skills/`), a `CLAUDE.md`
   route, and handoff guidance in `docs/workflows/AGENT_COLLABORATION.md`.
 - Tests: `npm run test:local-app` (`scripts/local-app/target.test.mjs`, lock and refusal cases), also run
-  from `test:agent-workflows` through `scripts/local-app/run-offline-tests.mjs`. Port 5199 must be free.
+  from `test:agent-workflows` through `scripts/local-app/run-offline-tests.mjs`. Only the full local-app
+  run needs Docker and a free port 5199.

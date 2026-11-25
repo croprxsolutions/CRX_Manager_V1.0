@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Offline half of target.test.mjs, as a plain `node path.mjs` so run-correction-guards.mjs accepts it in CI.
-// The skipped block needs a running Docker; the live screen walkthrough covers it.
+// The skipped block checks refusal paths and needs a running Docker and free app port.
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 

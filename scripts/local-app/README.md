@@ -16,8 +16,10 @@ from its path (10,000 lane slots), so different feature branches can walk throug
 launcher checks for port conflicts before changing anything and refuses any API/database listener not bound by
 that checkout's gateway. If its saved credentials are missing but Docker data remains, it preserves that data
 and recommends a different uniquely named checkout path to request a fresh lane. If the new path still collides,
-choose another name. Do not run `docker compose down -v` to recover
-another checkout. `rebuild` explicitly resets only the current checkout's verified walkthrough database.
+choose another name. Do not run `docker compose down -v` to recover another checkout. Keep one owner per
+walkthrough checkout until the owner runs `stop`, including during a manual browser check. `rebuild` refuses
+while the walkthrough frontend is running. With the frontend stopped, it checks the Supabase CLI pair before
+resetting the verified test database and regenerates the gateway settings from the current checkout.
 
 Run the focused localhost-only feature proof with, for example,
 `node scripts/local-app/walkthrough.mjs test product-unit.spec.ts`. The command accepts one existing
@@ -72,11 +74,12 @@ Walkthrough commands (`start`, `rebuild`, `stop`, `seed`, `status`, `test`) shar
 per checkout; `CRX_LOCAL_APP_STATE_DIR` cannot move it, and `walkthrough.mjs` refuses that variable outright.
 `status` is locked too, because it re-seals a running gateway. The other three profiles take no lock.
 
-If a command is interrupted (for example a build killed partway), the next command checks the recorded lock owner. It
-refuses immediately while the owner is still running (rerun it when that command finishes) and also refuses a lock
-whose process has exited; it never removes containers or volumes, or changes
-a lock, to recover automatically. After confirming no walkthrough command is active, rename only `first-start.lock`
-to a dated `.stale` name, then run `rebuild`. A malformed lock is left intact for inspection. A brand-new checkout is
+If a command is interrupted, the lock stays in place because Docker, Supabase, or Playwright subprocesses may still
+be running. Confirm the original CLI job and its subprocesses for this checkout have finished before renaming only
+`first-start.lock` to a dated `.stale` name. If you cannot establish that, use a fresh checkout and leave the old
+lane intact. After clearing a stale lock, run `status` and try `start` when resuming the walkthrough. The launcher
+requires `rebuild` only if the build record is missing or mismatched. If its frontend is still running, have the
+owner run `stop` first. A malformed lock is left intact for inspection. A brand-new checkout is
 safe only in a new, uniquely named folder: its lane (and Docker project) is derived from the folder path, so it has
 its own lock and resources. If the same folder was deleted and recreated while its Docker resources remain, use a new
 folder instead; the old lane is preserved for deliberate manual recovery.

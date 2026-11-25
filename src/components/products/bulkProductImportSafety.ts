@@ -22,7 +22,7 @@ const COLUMN_ALIASES: Record<ProductImportColumn, string[]> = {
   container_unit: ['pkg_unit', 'package_unit'],
   container_type: ['package_type', 'pkg_type'],
   vendor: ['supplier', 'distributor'],
-  manufacturer: ['mfg', 'brand'],
+  manufacturer: ['mfg', 'brand'], // A new brand-like alias here must also get the preview warning in mapProductImportHeaders.
   epa_registration: ['epa_reg', 'epa_number', 'epa', 'registration_number', 'reg_number'],
   is_rup: ['rup', 'restricted_use'],
   signal_word: ['signal'],
@@ -129,6 +129,8 @@ export interface ColumnMapping {
   conflicts: string[];
   /** Old headers that could mean two columns; the file is refused until they are renamed. */
   ambiguous: string[];
+  /** Columns that import, but maybe not where the user meant; shown in the preview. */
+  warnings: string[];
 }
 
 const AMBIGUOUS_HEADERS: Record<string, string> = {
@@ -142,6 +144,7 @@ export function mapProductImportHeaders(headers: readonly string[]): ColumnMappi
   const ignored: string[] = [];
   const conflicts: string[] = [];
   const ambiguous: string[] = [];
+  const warnings: string[] = [];
   headers.forEach((header, i) => {
     const meaning = AMBIGUOUS_HEADERS[normalizeProductImportHeader(header)];
     if (meaning) { ambiguous.push(`"${header.trim()}" (rename it to ${meaning})`); return; }
@@ -151,8 +154,13 @@ export function mapProductImportHeaders(headers: readonly string[]): ColumnMappi
     if (prior) conflicts.push(`"${prior}" and "${header.trim()}" both mean ${col}`);
     seen.set(col, header.trim());
     byIndex[i] = col;
+    // Old templates used "Brand" for the maker; a list of brand names would land in Manufacturer instead (audit L2).
+    if (normalizeProductImportHeader(header) === 'brand') {
+      warnings.push(`The "${header.trim()}" column is saved as Manufacturer (the company that makes the product). `
+        + "Brand names go on each product's Brands list, not here. If this column holds brand names, remove it before importing.");
+    }
   });
-  return { byIndex, ignored, conflicts, ambiguous };
+  return { byIndex, ignored, conflicts, ambiguous, warnings };
 }
 
 /** What insert mode of apply_product_setup takes (20261107090000). */

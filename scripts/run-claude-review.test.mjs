@@ -6,17 +6,21 @@ import {
   buildClaudeCommandArgs,
   buildClaudeReviewPrompt,
   buildScopeFingerprint,
+  baseStagingContextUnchanged,
   buildUntrackedEvidence,
   archiveClaudeReviewOutputPath,
   claudeExecutionExitStatus,
   classifyClaudeExecution,
   claudeExecutable,
   claudeReviewProofVerdict,
+  baseStagingReviewDecision,
   claudeReviewProofWithholdReason,
   defaultClaudeReviewOutputPath,
+  discardedReviewParts,
   getGitContext,
   parseClaudeReviewJson,
   parseReviewArgs,
+  stagingRunOutcome,
   slugify,
 } from "./run-claude-review.mjs";
 
@@ -124,6 +128,119 @@ const uncommittedContext = getGitContext("uncommitted", null, (_command, args) =
   return "";
 });
 assert.equal(uncommittedContext.baseSha, "", "non-base-main scope leaves base_sha empty");
+
+// base-staging: parse support, resolves against origin/staging (never main),
+// diffs merge-base..frozen HEAD, and demands a clean committed checkout.
+assert.equal(parseReviewArgs(["--scope", "base-staging"]).scope, "base-staging");
+assert.throws(() => parseReviewArgs(["--scope", "base-stagin"]), /base-staging/);
+const SHA = (c) => c.repeat(40);
+const gitCalls = [];
+const fakeStaging = (status = "") => (_command, args) => {
+  gitCalls.push(args.join(" "));
+  if (args[0] === "status") return status;
+  if (args[0] === "rev-parse" && args[1] === "HEAD") return SHA("a");
+  if (args[0] === "rev-parse" && args[1] === "origin/staging") return SHA("b");
+  if (args[0] === "merge-base") return SHA("c");
+  if (args[0] === "diff" && args.includes("--name-only")) return "src/a.ts";
+  if (args[0] === "diff") return "diff-body";
+  return "";
+};
+const stagingContext = getGitContext("base-staging", null, fakeStaging());
+assert.equal(stagingContext.baseSha, SHA("b"));
+assert.equal(stagingContext.mergeBase, SHA("c"));
+assert.equal(stagingContext.headSha, SHA("a"));
+assert.deepEqual(stagingContext.scopeEvidenceErrors, []);
+assert.ok(gitCalls.includes(`merge-base ${SHA("b")} ${SHA("a")}`), "merge-base is taken against the frozen staging tip");
+assert.ok(
+  gitCalls.includes(`diff --no-ext-diff --no-textconv --binary ${SHA("c")} ${SHA("a")}`),
+  "diff is merge-base..frozen HEAD, binary-capable, with external diff drivers and textconv off",
+);
+assert.ok(!gitCalls.some((c) => c.includes("origin/main")), "base-staging never resolves origin/main");
+assert.ok(!gitCalls.some((c) => c.startsWith("ls-files")), "committed scope ignores untracked files");
+assert.ok(
+  getGitContext("base-staging", null, fakeStaging(" M x.ts")).scopeEvidenceErrors
+    .some((e) => /clean committed checkout/.test(e)),
+  "a dirty checkout fails closed",
+);
+assert.ok(
+  getGitContext("base-staging", null, (_c, a) => (a[0] === "rev-parse" ? "short" : "")).scopeEvidenceErrors
+    .some((e) => /40-character/.test(e)),
+  "unresolvable SHAs fail closed",
+);
+const selfReviewContext = getGitContext("base-staging", null, (command, args) =>
+  args[0] === "diff" && args.includes("--name-only") ? "src/a.ts\nscripts/run-claude-review.mjs" : fakeStaging()(command, args));
+assert.ok(
+  selfReviewContext.scopeEvidenceErrors.some((e) => /self-review refused/.test(e)),
+  "base-staging refuses to review a change to the runner itself",
+);
+assert.ok(
+  gitCalls.includes(`diff --no-ext-diff --no-textconv --name-only --no-renames ${SHA("c")} ${SHA("a")}`),
+  "the staging name list disables rename detection, external diff and textconv",
+);
+const renameSensitive = (command, args) =>
+  args[0] === "diff" && args.includes("--name-only")
+    ? (args.includes("--no-renames") ? "scripts/run-claude-review.mjs" : "scripts/renamed.mjs")
+    : fakeStaging()(command, args);
+assert.ok(
+  getGitContext("base-staging", null, renameSensitive).scopeEvidenceErrors.some((e) => /self-review refused/.test(e)),
+  "a rename away from the runner is still caught as self-review",
+);
+const discarded = discardedReviewParts(
+  { result: "secret review text", isError: false },
+  { stdout: '{"result":"secret review text"}', stderr: "note" },
+);
+assert.equal(discarded.parsed.result, "", "discarded run drops the parsed review text");
+assert.equal(discarded.result.stdout, null, "discarded run drops the raw JSON");
+assert.equal(discarded.result.status, 1, "discarded run is never a success status");
+assert.equal(discarded.result.stderr, "note", "discarded run keeps the stderr note");
+const stagingBefore = { headSha: SHA("a"), baseSha: SHA("b"), mergeBase: SHA("c") };
+assert.equal(baseStagingContextUnchanged({ before: stagingBefore, after: { ...stagingBefore }, status: "" }), true);
+for (const key of ["headSha", "baseSha", "mergeBase"]) {
+  assert.equal(
+    baseStagingContextUnchanged({ before: stagingBefore, after: { ...stagingBefore, [key]: SHA("d") }, status: "" }),
+    false,
+    `${key} change fails closed`,
+  );
+}
+assert.equal(baseStagingContextUnchanged({ before: stagingBefore, after: { ...stagingBefore }, status: " M x" }), false);
+assert.equal(baseStagingContextUnchanged({ before: stagingBefore, after: { ...stagingBefore } }), false, "unknown status fails closed");
+assert.equal(baseStagingContextUnchanged({ before: { ...stagingBefore, mergeBase: "" }, after: { ...stagingBefore, mergeBase: "" }, status: "" }), false);
+
+const okResult = () => ({ status: 0, stdout: '{"result":"review"}', stderr: "" });
+const okParsed = () => ({ complete: true, result: "review" });
+const outcomeOf = (over) => stagingRunOutcome({
+  scope: "base-staging", before: stagingBefore, after: { ...stagingBefore }, status: "",
+  result: okResult(), parsed: okParsed(), ...over,
+});
+const clean = outcomeOf({});
+assert.equal(clean.changed, false);
+assert.equal(clean.executionState, "VERIFIED");
+assert.equal(clean.parsed.result, "review");
+assert.equal(clean.proofEligible, false, "staging never touches the legacy main proof");
+const scrubbed = (o) => {
+  assert.equal(o.changed, true);
+  assert.equal(o.executionState, "BLOCKED");
+  assert.equal(o.parsed.result, "");
+  assert.equal(o.result.stdout, null);
+  assert.equal(o.result.status, 1);
+  assert.match(o.result.stderr, /result discarded/);
+  assert.equal(o.proofEligible, false);
+};
+for (const key of ["headSha", "baseSha", "mergeBase"]) {
+  scrubbed(outcomeOf({ after: { ...stagingBefore, [key]: SHA("d") } }));
+}
+scrubbed(outcomeOf({ status: " M x.ts" }));
+scrubbed(outcomeOf({ status: undefined }));
+assert.equal(outcomeOf({ result: { ...okResult(), error: new Error("spawn") } }).executionState, "BLOCKED", "a spawn error blocks");
+assert.equal(outcomeOf({ result: { ...okResult(), status: 1 } }).executionState, "BLOCKED", "a failed run blocks");
+assert.equal(outcomeOf({ parsed: { ...okParsed(), complete: false } }).executionState, "BLOCKED", "an incomplete review blocks");
+const mainOutcome = stagingRunOutcome({ scope: "base-main", before: null, after: null, result: okResult(), parsed: okParsed() });
+assert.equal(mainOutcome.changed, false, "base-main never runs the staging compare");
+assert.equal(mainOutcome.executionState, "VERIFIED");
+assert.equal(mainOutcome.proofEligible, true);
+for (const scope of ["uncommitted", "commit", "base-staging"]) {
+  assert.equal(stagingRunOutcome({ scope, before: stagingBefore, after: { ...stagingBefore }, status: "", result: okResult(), parsed: okParsed() }).proofEligible, false, `${scope} cannot write the proof`);
+}
 
 const testRoot = path.resolve("tmp", "CRX_Manager");
 const defaultOutput = defaultClaudeReviewOutputPath({ root: testRoot });
@@ -319,6 +436,14 @@ assert.equal(claudeReviewProofVerdict({ status: 0, stdout: "No explicit verdict"
 assert.equal(claudeReviewProofVerdict({ status: 0, stdout: "Verdict: SHIP\nFINAL_VERDICT: NEEDS-WORK" }), null);
 assert.equal(claudeReviewProofVerdict({ status: 0, stdout: "FINAL_VERDICT: SHIP\nMore prose" }), null);
 assert.equal(claudeReviewProofVerdict({ status: 0, stdout: "FINAL_VERDICT: SHIP\nFINAL_VERDICT: SHIP" }), null);
+const opusModels = ["claude-opus-5-5"];
+const requestedModel = "claude-opus-5-5";
+assert.equal(baseStagingReviewDecision({ executionState: "VERIFIED", status: 0, stdout: "Clean.\nFINAL_VERDICT: SHIP", resolvedModels: opusModels, requestedModel }).clean, true);
+assert.equal(baseStagingReviewDecision({ executionState: "VERIFIED", status: 0, stdout: "One blocker.\nFINAL_VERDICT: NEEDS-WORK", resolvedModels: opusModels, requestedModel }).clean, false);
+assert.equal(baseStagingReviewDecision({ executionState: "BLOCKED", status: 0, stdout: "FINAL_VERDICT: SHIP", resolvedModels: opusModels, requestedModel }).clean, false);
+assert.equal(baseStagingReviewDecision({ executionState: "VERIFIED", status: 0, stdout: "FINAL_VERDICT: SHIP", resolvedModels: ["claude-sonnet-5-5"], requestedModel }).clean, false);
+assert.equal(baseStagingReviewDecision({ executionState: "VERIFIED", status: 0, stdout: "FINAL_VERDICT: SHIP", resolvedModels: ["claude-opus-4-7"], requestedModel }).clean, false);
+assert.equal(baseStagingReviewDecision({ executionState: "VERIFIED", status: 0, stdout: "FINAL_VERDICT: SHIP" }).clean, false);
 assert.match(
   claudeReviewProofWithholdReason({
     executionState: "VERIFIED",

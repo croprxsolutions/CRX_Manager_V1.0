@@ -2,7 +2,8 @@ import type { Worksheet } from 'exceljs';
 import type { PricingWorkbookExport } from './productPricing';
 import {
   generateProductPricingWorkbook,
-  parseProductPricingWorkbook,
+  loadPricingWorkbook,
+  parseLoadedPricingWorkbook,
   PRICING_WORKBOOK_HEADERS,
   PRICING_WORKBOOK_MIME,
   PRICING_WORKBOOK_SHEET,
@@ -42,11 +43,6 @@ async function loadExcelJs(): Promise<typeof import('exceljs')> {
     default?: typeof import('exceljs');
   } & Partial<typeof import('exceljs')>;
   return (imported.default ?? imported) as typeof import('exceljs');
-}
-
-function bufferToArrayBuffer(buffer: unknown): ArrayBuffer {
-  const bytes = new Uint8Array(buffer as ArrayBuffer);
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 
 function addMarketEvidenceColumns(
@@ -197,16 +193,17 @@ export async function generateProductPricingWorkbookWithSupplierEvidence(
 }
 
 /**
- * Accept old Phase 1a workbooks unchanged. For a Phase 1b export, first run the
- * original parser so its ZIP-bomb and archive checks complete. Its only expected
- * rejection is the known locked evidence suffix; remove that suffix and rerun
- * the unchanged Phase 1a parser for the authoritative pricing payload.
+ * Accept old Phase 1a workbooks unchanged. The file is checked (ZIP-bomb and archive limits) and
+ * loaded once. The Phase 1a parser's only expected rejection of a Phase 1b export is the known
+ * locked evidence suffix; once those headers match exactly, the same parser reads the pricing
+ * columns and skips the suffix.
  */
 export async function parseProductPricingWorkbookWithSupplierEvidence(
   arrayBuffer: ArrayBuffer,
 ): Promise<ParsedPricingWorkbook> {
+  const workbook = await loadPricingWorkbook(arrayBuffer);
   try {
-    return await parseProductPricingWorkbook(arrayBuffer);
+    return parseLoadedPricingWorkbook(workbook);
   } catch (error) {
     if (!(error instanceof PricingWorkbookFormatError)
       || error.message !== 'The Pricing Update sheet headers do not match the CRX template.') {
@@ -214,9 +211,6 @@ export async function parseProductPricingWorkbookWithSupplierEvidence(
     }
   }
 
-  const ExcelJS = await loadExcelJs();
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(arrayBuffer);
   const worksheet = workbook.getWorksheet(PRICING_WORKBOOK_SHEET);
   if (!worksheet) {
     throw new PricingWorkbookFormatError(`Missing required worksheet ${PRICING_WORKBOOK_SHEET}.`);
@@ -233,10 +227,5 @@ export async function parseProductPricingWorkbookWithSupplierEvidence(
     );
   }
 
-  worksheet.spliceColumns(
-    PRICING_WORKBOOK_HEADERS.length + 1,
-    PRICING_MARKET_EVIDENCE_HEADERS.length,
-  );
-  const sanitizedBuffer = await workbook.xlsx.writeBuffer();
-  return parseProductPricingWorkbook(bufferToArrayBuffer(sanitizedBuffer));
+  return parseLoadedPricingWorkbook(workbook, PRICING_MARKET_EVIDENCE_HEADERS.length);
 }

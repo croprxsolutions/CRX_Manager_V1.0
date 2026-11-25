@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Sentry } from '../lib/sentry';
 import { supabase } from '../lib/db';
 import { setUserContext, clearUserContext } from '../lib/metrics';
+import { dropAllSnapshots } from '../lib/todaySnapshot';
 import type { Profile, UserRole } from '../types';
 import type { Session } from '@supabase/supabase-js';
 
@@ -165,6 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     // Clear local state immediately so the UI goes to login
     clearUserContext();
+    dropAllSnapshots();
     signedOutLocallyRef.current = true;
     activeUserIdRef.current = null;
     setProfile(null);

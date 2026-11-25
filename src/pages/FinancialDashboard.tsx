@@ -136,8 +136,8 @@ interface QuickLink {
 
 const quickLinks: QuickLink[] = [
   { label: 'AR Aging', path: '/ar-aging', icon: <BarChart3 className="w-5 h-5" /> },
-  { label: 'Prepay Manager', path: '/prepay?tab=manager', icon: <Banknote className="w-5 h-5" /> },
-  { label: 'Prepay Workspace', path: '/prepay?tab=workspace', icon: <Wallet className="w-5 h-5" /> },
+  { label: 'Prepay Credits', path: '/prepay?tab=manager', icon: <Banknote className="w-5 h-5" /> },
+  { label: 'Apply Prepayments', path: '/prepay?tab=workspace', icon: <Wallet className="w-5 h-5" /> },
   { label: 'Payment History', path: '/payment-history', icon: <History className="w-5 h-5" /> },
   { label: 'Commission Pay', path: '/commission-payments', icon: <CreditCard className="w-5 h-5" /> },
   { label: 'Transactions', path: '/customer-transactions', icon: <ArrowLeftRight className="w-5 h-5" /> },

@@ -2702,12 +2702,17 @@ function runFocusedSolCheck(root, options, { baseRef, baseSha, headSha, prompt, 
 // stamp with the new one in other files. Anything else refuses: full review.
 // 2026-11-23 (#2338): the SQL may also change its link to its own record,
 // `migrations.d/<stem>.md`, in the leading `--` comment header (outside every
-// statement), and that record's `SQL sha256` pin then moves to the new SQL's LF
+// statement), and (2026-11-25, #2551) a header line that is only `-- <its name>`
+// or `-- <its name>.sql` (restampHeaderLine), and that record's `SQL sha256` pin then moves to the new SQL's LF
 // hash. No other file's hash may change, and no other branch migration may sit
 // between the old and new stamps (that would flip the apply order).
+// 2026-11-24 (#2267): a one-shot data migration's key in ONE_SHOT_LIST is renamed to the new stem, byte for
+// byte; the list may change nothing else, and must not still name the old stem.
 const RESTAMP_MIGRATION_RE = /^supabase\/migrations\/(\d{14})(_[^/]+\.sql)$/;
 const ABSENT_MODE = "000000";
 const RESTAMP_MODES = new Set(["100644", "100755", ABSENT_MODE]);
+// A one-shot data migration's key here follows its restamp (2026-11-24, #2267); nothing else in it may change.
+export const ONE_SHOT_LIST = "supabase/baselines/one-shot-migrations.json";
 
 // null when `entries` (gitChangedEntries of reviewed head → HEAD) is a pure
 // restamp, otherwise why not. `readFile(side, path)` returns the blob as a
@@ -2730,7 +2735,7 @@ export function restampProblem({ entries, readFile, branchAdded = [], note = {} 
   const lf = (text) => text.replace(/\r\n/g, "\n");
   const [oldStem, newStem] = [fromPath, toPath].map((p) => p.slice("supabase/migrations/".length, -".sql".length));
   const ownRecord = `docs/reference/migrations.d/${newStem}.md`;
-  const selfLink = (text) => text.split(`migrations.d/${oldStem}.md`).join(`migrations.d/${newStem}.md`);
+  const selfLink = (text) => restampHeaderLine(text, oldStem, newStem);
   const oldSql = readFile("old", fromPath);
   const newSql = readFile("new", toPath);
   if (oldSql === null || newSql === null) return "the migration could not be read";
@@ -2745,7 +2750,7 @@ export function restampProblem({ entries, readFile, branchAdded = [], note = {} 
     if (!RESTAMP_MODES.has(oldMode) || !RESTAMP_MODES.has(newMode) || (oldMode !== ABSENT_MODE && newMode !== ABSENT_MODE && oldMode !== newMode)) {
       return `${file} changed type or mode`;
     }
-    if (file.startsWith("supabase/") && file !== fromPath && file !== toPath) return `${file} is another database file`;
+    if (file.startsWith("supabase/") && file !== fromPath && file !== toPath && file !== ONE_SHOT_LIST) return `${file} is another database file`;
     if (newMode === ABSENT_MODE) {
       const target = paths.get(restamp(file));
       if (target?.oldMode !== ABSENT_MODE) return `${file} was removed, not renamed to the new stamp`;
@@ -2768,14 +2773,37 @@ export function restampProblem({ entries, readFile, branchAdded = [], note = {} 
       if (after !== restamp(before) && after !== restamp(before).split(pin(oldSha)).join(pin(newSha))) return `${file} changed beyond the timestamp and its SQL sha256 pin`;
       recordPins = [...after.matchAll(/SQL sha256: `([0-9a-f]{64})`/g)].map((m) => m[1]);
       if (recordPins.some((h) => h !== newSha)) return `${file}'s SQL sha256 pin is not the new SQL's hash`;
+    } else if (file === ONE_SHOT_LIST) {
+      if (!oneShotKeyRenamed(before, after, oldStem, newStem)) return `${file} changed beyond renaming the key ${oldStem} to ${newStem}`;
     } else if (after !== restamp(before)) {
       return `${file} changed beyond the timestamp`;
     }
   }
+  if (!paths.has(ONE_SHOT_LIST) && readFile("new", ONE_SHOT_LIST)?.includes(`"${oldStem}"`)) return `${ONE_SHOT_LIST} still lists ${oldStem}; rename its key too`;
   // A changed SQL must be bound by its renamed record's one pin; byte-identical SQL keeps the format's optional pin.
   if (oldSha !== newSha && recordPins?.length !== 1) return `the SQL changed, so ${ownRecord} must be renamed and pin it with one SQL sha256`;
   if (oldSha !== newSha) note.sqlSha256 = { from: oldSha, to: newSha };
   return null;
+}
+
+// True when `after` is `before` with its one `"<oldStem>"` (a one_shot key) renamed to `"<newStem>"`, byte for byte.
+function oneShotKeyRenamed(before, after, oldStem, newStem) {
+  const parts = before.split(`"${oldStem}"`);
+  if (parts.length !== 2 || before.includes(`"${newStem}"`) || after !== parts.join(`"${newStem}"`)) return false;
+  try {
+    return Object.hasOwn(JSON.parse(after).one_shot ?? {}, newStem);
+  } catch {
+    return false;
+  }
+}
+
+// The one header-line edit a restamp makes (restamp-migration.mjs uses it too): the link to the
+// migration's own record, and a line that is only `-- <its own name>` or `-- <its own name>.sql`
+// (#2524 needed that by hand).
+export function restampHeaderLine(line, oldStem, newStem) {
+  const linked = line.split(`migrations.d/${oldStem}.md`).join(`migrations.d/${newStem}.md`);
+  const bare = linked.trim();
+  return bare === `-- ${oldStem}` || bare === `-- ${oldStem}.sql` ? linked.replace(oldStem, newStem) : linked;
 }
 
 // True when `after` is `change(before)` and every changed line is in the leading
@@ -2856,7 +2884,7 @@ function runCarryRestamp(root, options) {
     `Restamp carry: reviewed head ${facts.fromHead.slice(0, 12)} → head ${facts.headSha.slice(0, 12)} ` +
     `(base ${facts.source.base_sha.slice(0, 12)}); ${facts.entries.length} file(s), ` +
     (note.sqlSha256
-      ? `the stamp and the SQL header's link to its own record changed (SQL sha256 ${note.sqlSha256.from.slice(0, 12)} -> ${note.sqlSha256.to.slice(0, 12)}).\n`
+      ? `the stamp and the SQL header's link to its own record or its name line changed (SQL sha256 ${note.sqlSha256.from.slice(0, 12)} -> ${note.sqlSha256.to.slice(0, 12)}).\n`
       : "only the migration's timestamp changed.\n"),
   );
   return mintSingleCommitCarry(root, options, facts, "restamp", note.sqlSha256 ? { sql_sha256: note.sqlSha256 } : {});

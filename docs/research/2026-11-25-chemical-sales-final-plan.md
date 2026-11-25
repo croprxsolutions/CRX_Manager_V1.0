@@ -100,5 +100,5 @@ These are from the #2304 sheet, and none of them was disputed. Each needs a slot
 
 - Removed `docs/research/2026-11-25-workflow-review-decision-6-correction.md`: its content is in section 5 above. Git history keeps it.
 - `docs/plans/2026-11-17-bookings-phases-B-C-prepay-PLAN.md` is marked partly superseded: its prepay and price-lock parts are replaced. Phase B (stock holds) is still used by the purchasing plan.
-- PR #2304 (the 22 Nov sheet) is superseded by this file and can be closed unmerged.
+- PR #2304 (the 22 Nov sheet) is closed unmerged (Mason, 2026-11-25), and this file replaces it. Its field application write-up is not carried into the repo because `docs/plans/field-application/` is the current master for the field side and holds the newer answers (for example, bill what went in the tank). The old write-up stays in git at commit `3ba7564fc` (branch `claude/workflow-review-docs-2026-11-22`), under `docs/research/2026-11-22-workflow-review/field-application-workflow-2026-11-22.*`.
 - Kept on purpose: build contracts and audits for work already shipped (`docs/plans/*-CONTRACT.md`, `docs/research/2026-11-17-bookings-flow-audit/`). They are records of what was built, and code and migrations point to them. They are not direction.

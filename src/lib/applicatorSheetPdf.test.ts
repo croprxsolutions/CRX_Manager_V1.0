@@ -190,6 +190,8 @@ describe('generateApplicatorSheetPdf map pages', () => {
 
     const renderedText = mockDoc.text.mock.calls.flat(Infinity).filter((value: unknown): value is string => typeof value === 'string');
     expect(renderedText).not.toContain('Billing Splits');
+    // Crews still need payer names and account numbers with the split table off (Mason 2026-11-25).
+    expect(renderedText.some((t) => t.includes('Smith Farm (1001)'))).toBe(true);
     expect(renderedText).not.toContain('Previous applications — North 40');
     expect(renderedText).not.toContain('Additional Application Record 1');
     expect(renderedText).toContain('Job JOB-2026-001 — Original Applicator Report');

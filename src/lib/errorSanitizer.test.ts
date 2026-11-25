@@ -57,8 +57,8 @@ describe('sanitizeError', () => {
     ['PRODUCT_PARENT_EPA_CORRECTION_OFF: EPA number correction is switched off until registrations (REG-1) are built',
       'Nothing was saved. EPA number correction is switched off until registrations (REG-1) are built'],
     // RAISE text of 20270307230000_parent_epa_correction_refuses_open_work.sql (#2579).
-    ['PRODUCT_PARENT_EPA_OPEN_WORK: finish this work first so it keeps the number it was done under, then correct the number (a job: complete and invoice it, or cancel it; a blend ticket: approve or reject it, make its application record and bill it; an invoice: post or delete it): job 1042 (scheduled), invoice INV-7 (draft)',
-      'Nothing was saved. Finish this work first so it keeps the number it was done under, then correct the number (a job: complete and invoice it, or cancel it; a blend ticket: approve or reject it, make its application record and bill it; an invoice: post or delete it): job 1042 (scheduled), invoice INV-7 (draft)'],
+    ['PRODUCT_PARENT_EPA_OPEN_WORK: finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete and invoice it; if it will not be sprayed, cancel it or take this product off it; a blend ticket: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): job 1042 (scheduled), invoice INV-7 (draft)',
+      'Nothing was saved. Finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete and invoice it; if it will not be sprayed, cancel it or take this product off it; a blend ticket: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): job 1042 (scheduled), invoice INV-7 (draft)'],
     ['EVIDENCE_REQUIRED: say what shows it', 'Nothing was saved. Say what shows it'],
     // RAISE texts of 20261117130000_tote_fill_from_bulk.sql (BLK-1a).
     ['TOTE_FILL_STOCK_MOVED: stock of the tote or its bulk has moved since this fill; adjust stock instead',

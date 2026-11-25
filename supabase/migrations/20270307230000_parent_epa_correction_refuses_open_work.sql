@@ -151,7 +151,7 @@ BEGIN
            || CASE WHEN max(total) > 10 THEN ' and ' || (max(total) - 10) || ' more' ELSE '' END
       INTO v_unsaved FROM numbered;
     IF v_unsaved IS NOT NULL THEN
-      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_OPEN_WORK: finish this work first so it keeps the number it was done under, then correct the number (a job: complete and invoice it, or cancel it; a blend ticket: approve or reject it, make its application record and bill it; an invoice: post or delete it): %', v_unsaved;
+      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_OPEN_WORK: finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete and invoice it; if it will not be sprayed, cancel it or take this product off it; a blend ticket: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): %', v_unsaved;
     END IF;
   END IF;
   RETURN jsonb_build_object(
@@ -165,7 +165,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public._product_parent_identity_after(public.product_parents,jsonb)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = '65122659f39618bb2b9d5603c375dabc'
+                    AND md5(replace(p.prosrc, chr(13), '')) = 'b85b3dafea18fc7733f7cd52f5174deb'
                     AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef AND p.provolatile = 'v'
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]) THEN

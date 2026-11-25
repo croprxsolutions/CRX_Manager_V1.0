@@ -33,6 +33,7 @@ const { buildContainer, removeContainer, seedUsers, scalar, psql, claims, USERS,
 const CANDIDATE = '20270306120000_booking_expiry_draw_recheck_and_posting_customer_lock.sql';
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'booking-expiry-draw-and-posting-lock-reverse.sql');
 const OLD_EXPIRY_MD5 = 'f677101398caef2eb0b195a42af5e38f';
+const OLD_DEACTIVATION_MD5 = '77141ca2b586a22418d08c15108b3c7e';
 const ADMIN = USERS.admin;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -131,6 +132,7 @@ async function expiryRace(tag) {
     booking: scalar(`SELECT status FROM public.quotes WHERE id = '${booking}';`),
     hold: scalar(`SELECT is_active FROM public.inventory_holds WHERE id = '${hold}';`),
     control: scalar(`SELECT status FROM public.quotes WHERE id = '${blocker}';`),
+    alert: scalar(`SELECT count(*) FROM public.notifications WHERE related_entity_id = '${booking}' AND notification_type = 'booking_past_expiry';`),
   };
 }
 
@@ -188,7 +190,7 @@ async function runAll(phase) {
 function assertBroken(r, when) {
   // Today the draw guard (_enforce_quote_terminal_not_drawn) stops the stale expiry, so the hold is not released,
   // but the whole night's run fails with it: no other quote expires and no alert is sent.
-  assert.deepEqual(r.expiry, { run: 'BOOKING_PARTIALLY_DRAWN', booking: 'sent', hold: 't', control: 'sent' },
+  assert.deepEqual(r.expiry, { run: 'BOOKING_PARTIALLY_DRAWN', booking: 'sent', hold: 't', control: 'sent', alert: '0' },
     `${when}: #2097 should reproduce (the run misses the draw and fails whole)`);
   assert.equal(r.postFirst.waited, 'idle', `${when}: the deactivation should not wait`);
   assert.deepEqual([r.postFirst.refused, r.postFirst.active, r.postFirst.invoice], [false, 'f', 'posted'],
@@ -217,7 +219,7 @@ try {
   console.log('[v021] candidate applied; a second apply is refused by its preflight');
 
   const after = await runAll('after');
-  assert.deepEqual(after.expiry, { run: 'ok', booking: 'sent', hold: 't', control: 'expired' },
+  assert.deepEqual(after.expiry, { run: 'ok', booking: 'sent', hold: 't', control: 'expired', alert: '1' },
     'AFTER #2097: the part-drawn booking must stay open with its hold (the undrawn control still expires)');
   assert.equal(after.postFirst.waited, 'lock', 'AFTER #2089a: the deactivation must wait for the posting');
   assert.equal(after.postFirst.refused, true);
@@ -227,33 +229,57 @@ try {
   assert.equal(after.deactFirst.refused, true);
   assert.match(after.deactFirst.error, /CUSTOMER_INACTIVE_POSTING/);
   assert.deepEqual([after.deactFirst.active, after.deactFirst.invoice], ['f', 'none']);
-  console.log('[v021] AFTER #2097: the run completes; booking stays sent with its hold; the undrawn quotes still expire');
+  console.log('[v021] AFTER #2097: the run completes; booking stays sent with its hold and gets its past-date alert; the undrawn quotes still expire');
   console.log('[v021] AFTER #2089a: deactivation waited, then CUSTOMER_HAS_OPEN_WORK; customer active, invoice posted');
   console.log('[v021] AFTER #2089b: posting waited, then CUSTOMER_INACTIVE_POSTING; customer inactive, no invoice');
 
-  // Not a race: an inactive customer's old draft cannot be posted; an active customer's posts as before.
-  const oldCustomer = newCustomer('after-old');
+  // Not races: what else counts as an invoice starting to carry a balance, and the isolation rule.
+  const oldCustomer = newCustomer(`after-old-${RUN}`);
   const draft = randomUUID();
-  psql(`${signedIn} INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number) VALUES ('${draft}', '${oldCustomer}', 'misc_charge', 'INV2089-old'); COMMIT;`);
+  const paid = randomUUID();
+  psql(`${signedIn} INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number) VALUES ('${draft}', '${oldCustomer}', 'misc_charge', 'INV2089-old-${RUN}');
+    INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number, total_amount_cents) VALUES ('${paid}', '${oldCustomer}', 'misc_charge', 'INV2089-paid-${RUN}', 100);
+    UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${paid}';
+    UPDATE public.invoices SET status = 'paid' WHERE id = '${paid}'; COMMIT;`);
   // KI-148 refuses deactivating with an open draft, so this customer goes inactive the way legacy rows are: directly.
   psql(`BEGIN; ALTER TABLE public.customers DISABLE TRIGGER customers_open_work_on_deactivate_20270128;
     UPDATE public.customers SET is_active = false WHERE id = '${oldCustomer}';
     ALTER TABLE public.customers ENABLE TRIGGER customers_open_work_on_deactivate_20270128; COMMIT;`);
-  const oldPost = psql(`${signedIn} UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${draft}'; COMMIT;`, { allowFailure: true });
-  assert.notEqual(oldPost.status, 0);
-  assert.match(oldPost.stderr, /CUSTOMER_INACTIVE_POSTING/);
+  const refused = (sql) => {
+    const r = psql(`${signedIn} ${sql} COMMIT;`, { allowFailure: true });
+    assert.notEqual(r.status, 0, `not refused: ${sql}`);
+    assert.match(r.stderr, /CUSTOMER_INACTIVE_POSTING/);
+  };
+  refused(`UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${draft}';`);
   assert.equal(scalar(`SELECT status FROM public.invoices WHERE id = '${draft}';`), 'draft');
-  // Paid back to posted is not a posting: the guard stays out of payment reversals.
-  assert.equal(scalar(`SELECT pg_get_triggerdef(oid) LIKE '%old.status = ANY (ARRAY[''draft''::text, ''unposted''::text])%' FROM pg_trigger WHERE tgname = 'zz_inactive_customer_posting_20270306';`), 't');
-  console.log('[v021] AFTER: an inactive customer\'s old draft is refused CUSTOMER_INACTIVE_POSTING and stays a draft');
+  // A returned check or voided payment moves paid back to posted: a balance again on an inactive customer.
+  refused(`UPDATE public.invoices SET status = 'posted' WHERE id = '${paid}';`);
+  // Restoring a deleted invoice that carries a balance status.
+  psql(`${signedIn} UPDATE public.invoices SET deleted_at = now() WHERE id = '${paid}'; COMMIT;`);
+  refused(`UPDATE public.invoices SET deleted_at = NULL WHERE id = '${paid}';`);
+  assert.equal(scalar(`SELECT status || '|' || (deleted_at IS NOT NULL) FROM public.invoices WHERE id = '${paid}';`), 'paid|true');
+  console.log('[v021] AFTER: for an inactive customer, posting an old draft, reopening a paid invoice and restoring a deleted one are refused CUSTOMER_INACTIVE_POSTING');
+  // A deactivation outside READ COMMITTED would count from its first snapshot, so it is refused.
+  const rrCustomer = newCustomer(`after-rr-${RUN}`);
+  const rr = psql(`BEGIN ISOLATION LEVEL REPEATABLE READ; ${claims(ADMIN)}
+    UPDATE public.customers SET is_active = false WHERE id = '${rrCustomer}'; COMMIT;`, { allowFailure: true });
+  assert.notEqual(rr.status, 0);
+  assert.match(rr.stderr, /CUSTOMER_DEACTIVATION_NEEDS_READ_COMMITTED/);
+  assert.equal(scalar(`SELECT is_active FROM public.customers WHERE id = '${rrCustomer}';`), 't');
+  console.log('[v021] AFTER: a REPEATABLE READ deactivation is refused CUSTOMER_DEACTIVATION_NEEDS_READ_COMMITTED');
 
   const reversed = applyFile(REVERSE);
   assert.equal(reversed.status, 0, reversed.output);
   assert.equal(scalar(`SELECT md5(replace(prosrc, E'\\r', '')) FROM pg_proc WHERE oid = 'public.auto_expire_quotes(text)'::regprocedure;`), OLD_EXPIRY_MD5);
+  assert.equal(scalar(`SELECT md5(replace(prosrc, E'\\r', '')) FROM pg_proc WHERE oid = 'public.guard_customer_deactivation_open_work_20270128()'::regprocedure;`), OLD_DEACTIVATION_MD5);
   assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgname = 'zz_inactive_customer_posting_20270306';`), '0');
   assert.equal(scalar(`SELECT array_to_string(proacl, ',') FROM pg_proc WHERE oid = 'public.auto_expire_quotes(text)'::regprocedure;`),
     'postgres=X/postgres,service_role=X/postgres');
   assertBroken(await runAll('rollback'), 'ROLLBACK');
-  console.log('[v021] ROLLBACK: the 20270129160000 body (md5 pinned) and no posting guard; all three races reproduce again');
+  console.log('[v021] ROLLBACK: both pinned bodies back and no posting guard; all three races reproduce again');
   console.log('V021_RACES_PROOF_PASS');
-} finally { if (!REUSE) removeContainer(); }
+} finally {
+  // A failed run must not leave its sessions holding locks in a kept container.
+  try { psql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name LIKE 'v021-%';", { allowFailure: true }); } catch { /* container gone */ }
+  if (!REUSE) removeContainer();
+}

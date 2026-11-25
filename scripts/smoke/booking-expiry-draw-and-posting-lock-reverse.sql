@@ -1,6 +1,7 @@
 -- Rollback text for 20270306120000_booking_expiry_draw_recheck_and_posting_customer_lock.sql (#2097, #2089).
 -- Proven by scripts/smoke/prove-2097-2089-real-schema.mjs: after this runs, auto_expire_quotes(text) is the
--- 20270129160000 body again (md5 f677101398caef2eb0b195a42af5e38f) and the posting guard is gone.
+-- 20270129160000 body again (md5 f677101398caef2eb0b195a42af5e38f), guard_customer_deactivation_open_work_20270128()
+-- is the 20270129210000 body again (md5 77141ca2b586a22418d08c15108b3c7e) and the posting guard is gone.
 -- A live rollback ships as its own reviewed migration with this text.
 SET LOCAL lock_timeout = '5s';
 DROP TRIGGER zz_inactive_customer_posting_20270306 ON public.invoices;
@@ -173,5 +174,83 @@ BEGIN
     PERFORM save_idempotency(p_idempotency_key, 'auto_expire_quotes', v_result);
   END IF;
   RETURN v_result;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.guard_customer_deactivation_open_work_20270128()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+-- KI148_FOLLOWUP_V1 (issue #2000).
+DECLARE
+  v_orders bigint;
+  v_deliveries bigint;
+  v_holds bigint;
+  v_quotes bigint;
+  v_invoices bigint;
+  v_jobs bigint;
+  v_returns bigint;
+  v_name text;
+  v_today date;
+  v_open text[] := ARRAY[]::text[];
+BEGIN
+  -- Only the active -> inactive change is checked; already-inactive customers stay editable.
+  IF NOT (OLD.is_active IS TRUE AND NEW.is_active IS NOT TRUE) THEN
+    RETURN NEW;
+  END IF;
+  v_today := (clock_timestamp() AT TIME ZONE 'America/Chicago')::date;
+  -- One statement, so all counts read the same committed state. No row locks (Mason, 2026-11-19:
+  -- locking drew deadlocks with payments and billing; the split-second gap is accepted instead).
+  SELECT
+    (SELECT count(*) FROM public.orders o
+      WHERE o.customer_id = OLD.id AND o.deleted_at IS NULL
+        AND o.status IN ('confirmed', 'partially_fulfilled')),
+    (SELECT count(*) FROM (
+       SELECT d.id FROM public.deliveries d
+        WHERE d.customer_id = OLD.id AND d.deleted_at IS NULL AND d.status IN ('scheduled', 'in_progress')
+       UNION
+       SELECT d.id FROM public.orders o JOIN public.deliveries d ON d.order_id = o.id
+        WHERE o.customer_id = OLD.id AND d.deleted_at IS NULL AND d.status IN ('scheduled', 'in_progress')) dd),
+    -- An expired or empty hold no longer reserves stock (the purchasing plan never counts one either).
+    -- `is_active = true` matches the partial index idx_inventory_holds_customer.
+    (SELECT count(*) FROM public.inventory_holds h
+      WHERE h.customer_id = OLD.id AND h.is_active = true AND h.quantity > 0
+        AND (h.expires_at IS NULL OR h.expires_at >= v_today)),
+    (SELECT count(*) FROM public.quotes q
+      WHERE q.customer_id = OLD.id AND q.deleted_at IS NULL
+        -- An accepted quote with no order still promises product (the purchasing plan's rule).
+        AND (q.status IN ('draft', 'sent', 'revised')
+             OR (q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM public.orders o WHERE o.quote_id = q.id AND o.deleted_at IS NULL)))),
+    (SELECT count(*) FROM public.invoices i
+      WHERE i.customer_id = OLD.id AND i.deleted_at IS NULL
+        -- Draft and unposted invoices still bill (Mason, 2026-11-19).
+        AND i.status IN ('draft', 'unposted', 'posted', 'overdue')),
+    -- Unchanged from 20270128140000: a completed job with no invoice has not been billed yet.
+    (SELECT count(*) FROM public.jobs j
+      WHERE j.customer_id = OLD.id AND j.deleted_at IS NULL
+        AND (j.status IN ('scheduled', 'in_progress') OR (j.status = 'completed' AND j.invoice_id IS NULL))),
+    (SELECT count(*) FROM public.returns r
+      WHERE r.customer_id = OLD.id AND r.deleted_at IS NULL AND r.status IN ('approved', 'received'))
+  INTO v_orders, v_deliveries, v_holds, v_quotes, v_invoices, v_jobs, v_returns;
+  IF v_orders > 0 THEN v_open := v_open || format('%s open order(s)', v_orders); END IF;
+  IF v_deliveries > 0 THEN v_open := v_open || format('%s undelivered delivery(ies)', v_deliveries); END IF;
+  IF v_holds > 0 THEN v_open := v_open || format('%s active stock hold(s)', v_holds); END IF;
+  IF v_quotes > 0 THEN v_open := v_open || format('%s open quote(s)', v_quotes); END IF;
+  -- No invoice count: the rep guard keeps invoice detail to itself for reps.
+  IF v_invoices > 0 THEN v_open := v_open || 'open invoices'::text; END IF;
+  IF v_jobs > 0 THEN v_open := v_open || format('%s open or unbilled spray job(s)', v_jobs); END IF;
+  IF v_returns > 0 THEN v_open := v_open || format('%s return(s) awaiting credit', v_returns); END IF;
+  -- No amount: the balance is the customer's money, not something this message needs to show.
+  IF COALESCE(OLD.prepay_balance_cents, 0) <> 0 THEN v_open := v_open || 'prepay money on account'::text; END IF;
+  IF cardinality(v_open) > 0 THEN
+    -- The farm name is typed by users and sits inside the sentence: at most 60 characters (issue #2000).
+    v_name := COALESCE(NULLIF(btrim(OLD.farm_name), ''), 'this customer');
+    IF char_length(v_name) > 60 THEN v_name := left(v_name, 59) || '…'; END IF;
+    RAISE EXCEPTION 'CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. % still has %. Finish or cancel that work, bill it, credit its returns and use up or refund its prepay first',
+      v_name, array_to_string(v_open, ', ');
+  END IF;
+  RETURN NEW;
 END;
 $function$;

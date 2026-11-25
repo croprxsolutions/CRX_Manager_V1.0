@@ -2765,6 +2765,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20270109100200',
   '20270109100300',
   '20270109100400',
+  '20270307210000', // Whole-group liquid weight review.
   '20270110110000', // Inactive rate-history cleanup: optional read argument, pending apply/type regeneration.
 ]);
 
@@ -2942,6 +2943,8 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // 20270130100000 (#1976, local candidate): the EPA batch fill's save; replays through _product_parent_replay and
   // commit_epa_proposal saves the receipt. Prune once the generated types carry it.
   'commit_epa_proposal_batch',
+  'approve_liquid_density_draft', // 20270307210000. Prune once generated types cover this RPC.
+  'submit_liquid_density_draft',
   // 20270203120000 (#1942, local candidate): re-emits the private completion body under its current name
   // (20270126110000 renamed it, so no generated type carries it yet); keyed by complete_delivery's p_idempotency_key.
   // Prune once the generated types carry it.
@@ -2967,6 +2970,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'read-only workbook validation (20270306170000): invokes the private helper with the preview flag fixed to true, skipping every lock and write',
   carry_grouped_brand_document_links:
     'constraint trigger only (20270306170000): it runs on the protected mapping writes of the keyed grouping approval, with API-role EXECUTE revoked',
+  return_liquid_density_to_draft_for_brand:
+    'private trigger (20270307210000): changes density only inside the parent brand transaction, with API-role EXECUTE revoked',
   // Generated public-schema functions are not necessarily app-callable RPCs.
   _delivery_brand_event:
     "private SECURITY DEFINER delivery-brand history writer called within keyed brand workflows; live catalog denies EXECUTE to anon, authenticated, and service_role",

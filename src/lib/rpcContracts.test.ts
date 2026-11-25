@@ -2759,6 +2759,7 @@ function registryMigrationHighWater(): string {
 // the staging-only M4 candidates below the applied-name high-water; production
 // has not applied these definitions, so their staging overlay stays explicit.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
+  '20270305160000', // Whole-group liquid weight review.
   '20270109100100',
   '20270109100200',
   '20270109100300',
@@ -2931,6 +2932,8 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 // names are present in the full snapshot, and the pending M4 functions are
 // explicitly retained in the staging schema overlay.
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
+  'approve_liquid_density_draft', // 20270305160000. Prune once generated types cover this RPC.
+  'submit_liquid_density_draft',
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
   'set_registration_adjuvants',
@@ -2954,6 +2957,8 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * as soon as the inventory no longer needs them.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  return_liquid_density_to_draft_for_brand:
+    'private trigger (20270305160000): changes density only inside the parent brand transaction, with API-role EXECUTE revoked',
   // Generated public-schema functions are not necessarily app-callable RPCs.
   _delivery_brand_event:
     "private SECURITY DEFINER delivery-brand history writer called within keyed brand workflows; live catalog denies EXECUTE to anon, authenticated, and service_role",

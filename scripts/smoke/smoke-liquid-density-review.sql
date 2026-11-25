@@ -1,0 +1,116 @@
+-- Run on an isolated schema with the review switch enabled. No fixture is committed.
+DO $$
+DECLARE
+  v_admin uuid;
+  v_reviewer uuid;
+  v_group uuid;
+  v_size uuid;
+  v_brand uuid;
+  v_draft uuid;
+  v_result jsonb;
+  v_brands jsonb;
+  v_previous_brands jsonb;
+  v_tag text := gen_random_uuid()::text;
+  v_category text;
+BEGIN
+  IF NOT public.liquid_density_review_open() THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: use the disposable core prover, or run after the authorized switch cutover';
+  END IF;
+  SELECT id INTO STRICT v_admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY id LIMIT 1;
+  SELECT id INTO STRICT v_reviewer FROM public.profiles WHERE role = 'admin' AND is_active AND id <> v_admin ORDER BY id LIMIT 1;
+  SELECT name INTO STRICT v_category FROM public.product_categories WHERE is_active ORDER BY name LIMIT 1;
+
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  v_result := public.create_product_with_parent(
+    jsonb_build_object('name', '[SMOKE] Review ' || v_tag, 'product_form', 'liquid', 'category', v_category),
+    jsonb_build_object('product_name', '[SMOKE] Review Size ' || v_tag, 'sku', 'SMOKE-REV-' || v_tag, 'inventory_unit', 'Gal'),
+    'core-density-product-' || v_tag);
+  v_group := (v_result->>'parent_id')::uuid;
+  v_size := (v_result->>'product_id')::uuid;
+  v_result := public.upsert_parent_brand(v_group, v_size, 'Smoke Brand A', '12345-1', 'Smoke Manufacturer A',
+    true, NULL, NULL, p_idempotency_key => 'core-brand-a-' || v_tag);
+  v_brand := (v_result->>'id')::uuid;
+  v_previous_brands := public.get_liquid_density_review(v_group)->'brands';
+  PERFORM public.change_brand_document_links(v_brand, true, 1,
+    '[{"action":"save","kind":"sds","url":"https://manufacturer.example/sds.pdf"}]'::jsonb, 'core-sds-' || v_tag);
+  v_brands := public.get_liquid_density_review(v_group)->'brands';
+  IF v_brands->0->>'sds_url' IS DISTINCT FROM 'https://manufacturer.example/sds.pdf' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: roster must show the current official SDS link';
+  END IF;
+
+  v_result := public.submit_liquid_density_draft(v_group, 0, 1.15, 'specific_gravity', 'sds', NULL, NULL, NULL, 'core-draft-' || v_tag);
+  v_draft := (v_result->>'value_id')::uuid;
+  IF (v_result->>'lb_per_gal')::numeric IS DISTINCT FROM 9.5972::numeric THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: specific gravity must use the existing stored conversion';
+  END IF;
+  BEGIN
+    PERFORM public.submit_liquid_density_draft(v_group, 1, 10, 'lb_per_gal', 'sds', NULL, NULL, NULL, 'core-overwrite-' || v_tag);
+    RAISE EXCEPTION 'SMOKE_FAIL: a second draft must be refused';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_DRAFT_WAITING%' THEN RAISE; END IF;
+  END;
+  BEGIN
+    PERFORM public.approve_liquid_density_draft(v_group, v_draft, 1, v_brands, true, 'core-self-' || v_tag);
+    RAISE EXCEPTION 'SMOKE_FAIL: the author cannot approve their own draft';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_SECOND_ADMIN_REQUIRED%' THEN RAISE; END IF;
+  END;
+
+  PERFORM set_config('request.jwt.claim.sub', v_reviewer::text, true);
+  BEGIN
+    PERFORM public.approve_liquid_density_draft(v_group, v_draft, 1, v_previous_brands, true, 'core-stale-link-' || v_tag);
+    RAISE EXCEPTION 'SMOKE_FAIL: reviewer must see the changed SDS link';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_BRANDS_CHANGED%' THEN RAISE; END IF;
+  END;
+  BEGIN
+    PERFORM public.approve_liquid_density_draft(v_group, v_draft, 1, v_brands, false, 'core-no-attestation-' || v_tag);
+    RAISE EXCEPTION 'SMOKE_FAIL: reviewer must explicitly confirm the whole group';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_BRAND_CHECK_REQUIRED%' THEN RAISE; END IF;
+  END;
+  BEGIN
+    PERFORM public.approve_weights(jsonb_build_array(jsonb_build_object(
+      'kind', 'density', 'subject_id', v_group, 'draft_id', v_draft, 'expected_version', 1)), 'core-legacy-approve-' || v_tag);
+    RAISE EXCEPTION 'SMOKE_FAIL: the legacy path must refuse liquid approval';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_REVIEW_RELOAD%' THEN RAISE; END IF;
+  END;
+  v_result := public.approve_liquid_density_draft(v_group, v_draft, 1, v_brands, true, 'core-approve-' || v_tag);
+  IF (v_result->>'version')::bigint IS DISTINCT FROM 2::bigint THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: complete review must approve a draft';
+  END IF;
+  EXECUTE 'RESET ROLE';
+  IF NOT EXISTS (SELECT 1 FROM public.product_weight_events WHERE id = (v_result->>'event_id')::bigint
+    AND after_value->0->'reviewed_brands' = v_brands AND changed_by = v_reviewer) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the review must keep the exact confirmed brands and reviewer in history';
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  v_result := public.submit_liquid_density_draft(v_group, 2, 9.8, 'lb_per_gal', 'sds', NULL, NULL, NULL, 'core-next-draft-' || v_tag);
+  v_draft := (v_result->>'value_id')::uuid;
+  PERFORM public.upsert_parent_brand(v_group, v_size, 'Smoke Brand B', '12345-2', 'Smoke Manufacturer B',
+    true, NULL, NULL, p_idempotency_key => 'core-brand-b-' || v_tag);
+  v_result := public.get_product_weights(ARRAY[v_size])->'products'->v_size::text;
+  IF v_result->'weight'->>'kind' IS DISTINCT FROM 'none' OR
+     (v_result->'draft'->>'id')::uuid IS DISTINCT FROM v_draft THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a brand join must withdraw the approval and preserve the waiting draft';
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', v_reviewer::text, true);
+  v_brands := public.get_liquid_density_review(v_group)->'brands';
+  PERFORM public.approve_liquid_density_draft(v_group, v_draft, 4, v_brands, true, 'core-reapprove-' || v_tag);
+  PERFORM public.upsert_parent_brand(v_group, v_size, 'Smoke Brand C', '12345-3', 'Smoke Manufacturer C',
+    true, NULL, NULL, p_idempotency_key => 'core-brand-c-' || v_tag);
+  v_result := public.get_product_weights(ARRAY[v_size])->'products'->v_size::text;
+  IF v_result->'weight'->>'kind' IS DISTINCT FROM 'none' OR
+     (v_result->'draft'->>'id')::uuid IS DISTINCT FROM v_draft OR
+     (v_result->'subject'->>'version')::bigint IS DISTINCT FROM 6::bigint THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a brand join with no waiting draft must return the last approval to draft';
+  END IF;
+
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';
+END;
+$$;

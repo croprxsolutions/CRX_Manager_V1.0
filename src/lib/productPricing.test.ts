@@ -220,6 +220,40 @@ describe('assertPricingPreviewRowsSafe', () => {
     },
   );
 
+  // Audit 2026-11-24 #3: margins are whole percents; 0.35 priced a $6.40 product at $6.42 on staging.
+  it.each(['0.35', '0.5', '0.99'])('refuses a margin of %s as a fraction typed for a percent', (margin) => {
+    expect(() => assertPricingPreviewRowsSafe([{
+      pricing_mode: 'margin_driven', new_cost: '6.40', product_name: 'Roundup',
+      tier1_margin_percent: '35', tier2_margin_percent: margin, tier3_margin_percent: '25',
+    }])).toThrow(`Tier 2 margin for Roundup is ${margin}%. Margins are whole percents: type 35 for 35%`);
+  });
+
+  it.each(['35', '1', '0', '18.5'])('accepts a margin of %s', (margin) => {
+    expect(() => assertPricingPreviewRowsSafe([{
+      pricing_mode: 'margin_driven', new_cost: '6.40',
+      tier1_margin_percent: margin, tier2_margin_percent: '20', tier3_margin_percent: '10',
+    }])).not.toThrow();
+  });
+
+  it('leaves a price sheet row whose small margin is unchanged from its current margin', () => {
+    expect(() => assertPricingPreviewRowsSafe([{
+      pricing_mode: 'margin_driven', new_cost: '6.40',
+      tier1_margin_percent: '0.5', current_tier1_margin_percent: '0.50',
+      tier2_margin_percent: '20', tier3_margin_percent: '10',
+    }])).not.toThrow();
+    expect(() => assertPricingPreviewRowsSafe([{
+      pricing_mode: 'margin_driven', new_cost: '6.40',
+      tier1_margin_percent: '0.35', current_tier1_margin_percent: '35',
+      tier2_margin_percent: '20', tier3_margin_percent: '10',
+    }])).toThrow('Tier 1 margin');
+  });
+
+  it('ignores margins on a price-driven row', () => {
+    expect(() => assertPricingPreviewRowsSafe([{
+      pricing_mode: 'price_driven', new_cost: '6.40', tier1_margin_percent: '0.35',
+    }])).not.toThrow();
+  });
+
   it('preserves zero cost for price-driven review', () => {
     expect(() => assertPricingPreviewRowsSafe([{
       pricing_mode: 'price_driven',

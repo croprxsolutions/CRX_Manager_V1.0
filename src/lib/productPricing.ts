@@ -65,15 +65,33 @@ export function pricingMarginTextIsValid(text: string): boolean {
   return /^[0-9]+([.][0-9]+)?$/.test(text) && Number(text) < 100;
 }
 
+type MarginTier = 1 | 2 | 3;
+type MarginCells = Partial<Record<`tier${MarginTier}_margin_percent` | `current_tier${MarginTier}_margin_percent`, string | null>>;
+
 export function assertPricingPreviewRowsSafe(
   rows: ReadonlyArray<{
     pricing_mode: PricingMode | '';
     new_cost: string;
     product_name?: string;
-  }>,
+  } & MarginCells>,
 ): void {
   for (const row of rows) {
     if (row.pricing_mode !== 'margin_driven') continue;
+    // Audit 2026-11-24 #3: margins are whole percents, so 0.35 means 0.35%, not 35%; on staging it
+    // priced a $6.40-cost product at $6.42. A new margin above 0 and under 1 is refused as a likely
+    // typo. A price sheet's unchanged margin (same as its current_ cell) is left alone.
+    for (const tier of [1, 2, 3] as const) {
+      const text = row[`tier${tier}_margin_percent`]?.trim() ?? '';
+      const value = Number(text);
+      if (!text || !(value > 0 && value < 1)) continue;
+      const current = row[`current_tier${tier}_margin_percent`]?.trim();
+      if (current != null && current !== '' && Number(current) === value) continue;
+      const productName = row.product_name?.trim() || 'this Product';
+      throw new Error(
+        `Tier ${tier} margin for ${productName} is ${text}%. Margins are whole percents: type 35 for 35%, not 0.35. `
+        + 'To price under 1% above cost on purpose, use price_driven and enter the price. No prices were changed.',
+      );
+    }
     const costCents = pricingDollarInputToCents(row.new_cost);
     const submittedZero = costCents === 0n
       || /^[+-]?0+(?:\.0+)?(?:e[+-]?\d+)?$/i.test(row.new_cost.trim());
@@ -568,6 +586,49 @@ export const PRICING_WARNING_LABELS: Record<PricingWarningCode, string> = {
   OPEN_SENT_QUOTE: 'An open sent quote will re-price on its next save',
   TIER_ORDER: 'Tier prices out of order: a higher tier is priced below a lower one',
 };
+
+export interface NearCostTier {
+  tier: 1 | 2 | 3;
+  price_cents: bigint;
+  cost_cents: bigint;
+}
+
+export interface NearCostProduct {
+  product_id: string;
+  product_name: string;
+  tiers: NearCostTier[];
+}
+
+/**
+ * Audit 2026-11-24 #3: every ready row whose new tier price is at or above its new cost but within
+ * 2% of it (2% included), e.g. $6.42 on a $6.40 cost. Read from the preview's own after-values, so it
+ * covers margin-driven, price-driven and cost-only changes alike. Below cost is the database's
+ * PRICE_BELOW_COST warning, not this.
+ */
+export function nearCostProducts(rows: readonly PricingPreviewRow[]): NearCostProduct[] {
+  const found: NearCostProduct[] = [];
+  for (const row of rows) {
+    const effect = row.effect;
+    if (row.row_status !== 'ready' || !effect || !row.product_id || effect.pricing_changed === false) continue;
+    const cost = effect.cost_cents;
+    if (cost === null || cost <= 0n) continue;
+    const tiers: NearCostTier[] = [];
+    for (const tier of [1, 2, 3] as const) {
+      const price = effect[`tier${tier}_price_cents`];
+      if (price !== null && price >= cost && price * 100n <= cost * 102n) {
+        tiers.push({ tier, price_cents: price, cost_cents: cost });
+      }
+    }
+    if (tiers.length === 0) continue;
+    const name = effect.product_name ?? row.submitted_row.product_name;
+    found.push({
+      product_id: row.product_id,
+      product_name: typeof name === 'string' && name.trim() ? name : row.product_id,
+      tiers,
+    });
+  }
+  return found;
+}
 
 /** The database's limit on an acknowledgement reason (approve_pricing_change_set). */
 export const PRICING_ACK_REASON_MAX = 500;

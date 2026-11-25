@@ -435,6 +435,16 @@ export async function loadExcelJs(): Promise<typeof import('exceljs')> {
   return (imported.default ?? imported) as typeof import('exceljs');
 }
 
+// The mode each product is edited in today, as the bulk grid defaults it (defaultPricingMode in
+// productPricing.ts, not imported so the Node proof runner never loads the browser client).
+function exportedPricingMode(row: PricingWorkbookExportRow): 'price_driven' | 'margin_driven' | '' {
+  const prices = [row.current_tier1_price, row.current_tier2_price, row.current_tier3_price];
+  if (prices.every((value) => value != null)) return 'price_driven';
+  if (prices.some((value) => value != null)) return '';
+  const margins = [row.current_tier1_margin_percent, row.current_tier2_margin_percent, row.current_tier3_margin_percent];
+  return margins.every((value) => value != null) ? 'margin_driven' : '';
+}
+
 function workbookRow(exportRow: PricingWorkbookExportRow): Record<PricingWorkbookHeader, string | number> {
   return {
     product_id: exportRow.product_id,
@@ -454,7 +464,7 @@ function workbookRow(exportRow: PricingWorkbookExportRow): Record<PricingWorkboo
     current_tier2_price: exportRow.current_tier2_price ?? '',
     current_tier3_margin_percent: exportRow.current_tier3_margin_percent ?? '',
     current_tier3_price: exportRow.current_tier3_price ?? '',
-    pricing_mode: '',
+    pricing_mode: exportedPricingMode(exportRow),
     new_cost: exportRow.current_cost ?? '',
     tier1_margin_percent: exportRow.current_tier1_margin_percent ?? '',
     tier1_price: exportRow.current_tier1_price ?? '',
@@ -534,7 +544,7 @@ function stylePricingWorksheet(worksheet: Worksheet, rowCount: number): void {
       formulae: ['"margin_driven,price_driven"'],
       showInputMessage: true,
       promptTitle: 'Pricing mode',
-      prompt: 'Leave blank for no change, or choose margin_driven or price_driven.',
+      prompt: "Filled with this product's current mode. Choose margin_driven or price_driven.",
       showErrorMessage: true,
       errorTitle: 'Invalid pricing mode',
       error: 'Choose margin_driven, price_driven, or leave the cell blank.',

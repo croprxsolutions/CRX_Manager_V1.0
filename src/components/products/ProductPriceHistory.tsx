@@ -103,10 +103,12 @@ export default function ProductPriceHistory({
     ));
   }, [history, supplierId]);
 
-  const plotted = useMemo(() => points.map((point) => ({
-    point,
-    value: point.normalized_cost_cents ?? point.cost_cents,
-  })), [points]);
+  // One unit on one axis (audit 2026-11-24 #2): only costs per inventory unit are charted. A package
+  // quote or PO cost the database could not convert stays in the list below, labelled per package.
+  const plotted = useMemo(() => points.flatMap((point) => (
+    point.normalized_cost_cents === null ? [] : [{ point, value: point.normalized_cost_cents }]
+  )), [points]);
+  const unchartedCount = points.length - plotted.length;
   const minimum = plotted.reduce<bigint | null>(
     (current, item) => current === null || item.value < current ? item.value : current,
     null,
@@ -199,9 +201,11 @@ export default function ProductPriceHistory({
         <p className="mt-4 text-sm text-secondary">No supplier observations, selected cost basis, or purchase facts yet.</p>
       )}
 
-      {history && plotted.length > 0 && minimum !== null && maximum !== null && (
+      {history && points.length > 0 && (
         <>
+          {plotted.length > 0 && minimum !== null && maximum !== null && (
           <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <p className="mb-1 text-xs font-medium text-secondary">Cost per inventory unit</p>
             <svg
               role="img"
               aria-label="Product supplier price history chart"
@@ -242,6 +246,13 @@ export default function ProductPriceHistory({
               ))}
             </div>
           </div>
+          )}
+          {unchartedCount > 0 && (
+            <p className="mt-2 text-xs text-secondary" role="note">
+              {unchartedCount} cost{unchartedCount === 1 ? ' is' : 's are'} in a supplier unit that could not be converted to the inventory unit,
+              so {unchartedCount === 1 ? 'it is' : 'they are'} listed below but not charted.
+            </p>
+          )}
 
           <div className="mt-4 max-h-96 space-y-3 overflow-y-auto">
             {[...points].reverse().map((point) => (
@@ -257,13 +268,14 @@ export default function ProductPriceHistory({
                   </span>
                   <span className="text-sm font-semibold tabular-nums text-nav-dark">
                     {formatSupplierCents(point.normalized_cost_cents ?? point.cost_cents)}
+                    <span className="ml-1 text-xs font-normal text-secondary">
+                      {point.normalized_cost_cents === null ? 'per supplier unit' : 'per inventory unit'}
+                    </span>
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-secondary">
                   {formatBusinessDate(point.occurred_at)} · {point.detail.replace(/_/g, ' ')}
-                  {point.normalized_cost_cents === null && point.stream === 'supplier_observation'
-                    ? ' · package quote cannot be normalized'
-                    : ''}
+                  {point.normalized_cost_cents === null ? ' · not charted: cannot be converted to the inventory unit' : ''}
                 </p>
                 {point.stream === 'supplier_observation' && (() => {
                   const candidate = costBasisWorkspace?.supplier_candidates.find(

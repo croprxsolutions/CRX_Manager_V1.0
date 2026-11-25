@@ -87,7 +87,15 @@ describe('ProductPriceHistory', () => {
     expect(screen.getAllByText('Van Diest')).toHaveLength(2);
     expect(screen.getByText('CRX selected basis')).toBeInTheDocument();
     expect(screen.getAllByText('Received PO cost').length).toBeGreaterThan(0);
-    expect(screen.getByRole('img', { name: 'Product supplier price history chart' })).toBeInTheDocument();
+    const chart = screen.getByRole('img', { name: 'Product supplier price history chart' });
+    // Audit 2026-11-24 #2: only per-inventory-unit costs share the chart; the two package-unit
+    // costs ($90.00 quote, $22.00 PO) are listed, labelled, and left off it.
+    expect(chart.querySelectorAll('circle')).toHaveLength(2);
+    expect([...chart.querySelectorAll('title')].map((t) => t.textContent).join(' ')).not.toMatch(/\$90\.00|\$22\.00/);
+    expect(screen.getByText('Cost per inventory unit')).toBeInTheDocument();
+    expect(screen.getByRole('note')).toHaveTextContent('2 costs are in a supplier unit');
+    expect(screen.getAllByText('per supplier unit')).toHaveLength(2);
+    expect(screen.getAllByText('per inventory unit')).toHaveLength(2);
     const selectButtons = screen.getAllByRole('button', { name: 'Select as cost basis' });
     expect(selectButtons).toHaveLength(2);
     fireEvent.click(selectButtons[0]);

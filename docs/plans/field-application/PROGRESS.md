@@ -26,7 +26,7 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 | 0–1 | Where the Chem Man export file lives (private, outside the repo), and the yes for the one live import after the reset | A private folder Mason names | **Deferred** until the field build is done (Mason, 2026-11-24; see Chem Man import above) |
 | 0–1 | Staging test login for any role missing from `docs/reference/qa-testing.md` | Create only what is missing | **Yes** (2026-11-24): missing roles only, staging only |
 | 2 | Go for slice 2's database work into staging | Yes | **Yes** (2026-11-25, "Yes, split it"): database work into `staging` only. Codex owns the Google Maps build (design steps 0–1, `docs/research/2026-11-24-google-maps-design.md`); slice 2's dispatch and phone map screens wait for that engine swap. No slice 2 migration merges until the applicator data-access fix (database half of #2574, Field Setup lane) is in staging |
-| 2 | Applicator extra-field permission; the mix-site account; Taha's reviews booked after 12-15 | Yes to each (asked 2026-11-25) | |
+| 2 | Applicator extra-field permission; the mix-site account; Taha's reviews booked after 12-15 | Yes to each (asked 2026-11-25) | **Yes, all three** (Mason, 2026-11-25): extra field allowed (field name and acres only, flagged for the office); one applicator-role mix-site account; Taha's reviews of FP-4, FP-3 and the posting window booked for the week of 12-15 |
 | 2 (at release) | `field_batch_stock_enabled` on in production; the `main` merge; each live apply; any production smoke write; who watches errors the first day | Asked at release, not before | |
 | 3 | Go for slice 3; Edge Function deploy; at release, in order: the billing switch-on date and the pilot job (chosen from the open-job list), the pilot draft checked by hand, posting on for the pilot set only, then (after the pilot is checked on statements) posting on for everyone | Yes to each, in that order | |
 
@@ -109,7 +109,7 @@ Briefs (2026-11-25, from the merged slice 1 code): `docs/loops/field-app-s2-db.m
 | 2.4 FP-4 jobs carry splits | PARKED until after 2026-12-15 | Quote-to-job writer (Taha); needs FP-2 |
 | 2.5 Review checks | NOT STARTED | |
 | 2.6 FP-3 archive fields | PARKED until after 2026-12-15 | Taha reviews (BUILD-PLAN) |
-| 2.7 Mixer account | WAITING ON MASON | Account creation needs his yes |
+| 2.7 Mixer account | NOT STARTED | Mason said yes 2026-11-25; created after loads and stock is on staging |
 | Crew and office screens | NOT STARTED | Dispatch board and phone maps wait for the Google Maps engine swap (Codex, steps 0–1) |
 
 ## Needs another lane

@@ -384,6 +384,12 @@ describe('Record Payments: faster entry', () => {
     expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
   });
 
+  it('shows the picked customer account number, so same-named farms can be told apart', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    expect(screen.getByText('Account #A-9')).toBeInTheDocument();
+  });
+
   it('leaving the box mid-search keeps posting blocked until a pick or "keep"', async () => {
     renderPayments();
     await chooseByKeyboard();

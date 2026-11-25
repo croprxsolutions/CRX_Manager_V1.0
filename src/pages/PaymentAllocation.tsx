@@ -539,6 +539,10 @@ export default function PaymentAllocation() {
                   placeholder="Search by name or account #..."
                   ariaLabel="Customer"
                 />
+                {/* Two farms can share a name; the account # tells the clerk which one will be paid. */}
+                {selectedCustomer?.account_number && (
+                  <p className="mt-1 text-xs text-secondary">Account #{selectedCustomer.account_number}</p>
+                )}
                 {customerBeingChanged && (
                   <p className="mt-1 text-xs text-amber-600">
                     You started a new customer search. Pick a customer from the list to switch, or{' '}

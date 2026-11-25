@@ -231,9 +231,15 @@ DECLARE
   v_existing_draft boolean;
   v_before jsonb;
   v_after jsonb;
+  v_reason text := 'An active brand joined the product group';
 BEGIN
   IF NOT public.liquid_density_review_open() OR NEW.status <> 'active' THEN RETURN NULL; END IF;
-  IF TG_OP = 'UPDATE' AND OLD.status = 'active' AND OLD.parent_id = NEW.parent_id THEN RETURN NULL; END IF;
+  IF TG_OP = 'UPDATE' AND OLD.status = 'active' AND OLD.parent_id = NEW.parent_id THEN
+    IF (OLD.epa_registration, OLD.manufacturer) IS NOT DISTINCT FROM (NEW.epa_registration, NEW.manufacturer) THEN
+      RETURN NULL;
+    END IF;
+    v_reason := 'An active brand changed its EPA registration or manufacturer';
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM public.product_parents WHERE id = NEW.parent_id AND is_active AND product_form = 'liquid') THEN
     RETURN NULL;
   END IF;
@@ -265,7 +271,7 @@ BEGIN
     v_after := v_before || jsonb_build_object('review_state', 'draft', 'reviewed_by', NULL, 'reviewed_at', NULL);
   END IF;
   PERFORM public._product_weight_event('parent_density', NEW.parent_id, NULL, 'returned_to_draft', v_approved.id,
-    jsonb_build_array(v_before), jsonb_build_array(v_after), 'An active brand joined the product group', NULL);
+    jsonb_build_array(v_before), jsonb_build_array(v_after), v_reason, NULL);
   RETURN NULL;
 END;
 $function$;
@@ -274,7 +280,7 @@ REVOKE ALL ON FUNCTION public.return_liquid_density_to_draft_for_brand()
   FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 CREATE TRIGGER return_liquid_density_to_draft_for_brand
-  AFTER INSERT OR UPDATE OF status, parent_id ON public.product_parent_brands
+  AFTER INSERT OR UPDATE OF status, parent_id, epa_registration, manufacturer ON public.product_parent_brands
   FOR EACH ROW EXECUTE FUNCTION public.return_liquid_density_to_draft_for_brand();
 
 

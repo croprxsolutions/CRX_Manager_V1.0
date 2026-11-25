@@ -169,13 +169,36 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_reviewer::text, true);
   v_brands := public.get_liquid_density_review(v_group)->'brands';
   PERFORM public.approve_liquid_density_draft(v_group, v_draft, 4, v_brands, true, 'core-reapprove-' || v_tag);
-  PERFORM public.upsert_parent_brand(v_group, v_size, 'Smoke Brand C', '12345-3', 'Smoke Manufacturer C',
+  v_result := public.upsert_parent_brand(v_group, v_size, 'Smoke Brand C', '12345-3', 'Smoke Manufacturer C',
     true, NULL, NULL, p_idempotency_key => 'core-brand-c-' || v_tag);
+  v_brand := (v_result->>'id')::uuid;
   v_result := public.get_product_weights(ARRAY[v_size])->'products'->v_size::text;
   IF v_result->'weight'->>'kind' IS DISTINCT FROM 'none' OR
      (v_result->'draft'->>'id')::uuid IS DISTINCT FROM v_draft OR
      (v_result->'subject'->>'version')::bigint IS DISTINCT FROM 6::bigint THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a brand join with no waiting draft must return the last approval to draft';
+  END IF;
+
+  v_brands := public.get_liquid_density_review(v_group)->'brands';
+  PERFORM public.approve_liquid_density_draft(v_group, v_draft, 6, v_brands, true, 'core-approve-after-c-' || v_tag);
+  PERFORM public.upsert_parent_brand(v_group, v_size, 'Smoke Brand C', '12345-3', 'New Manufacturer C',
+    true, NULL, NULL, v_brand, 1, p_idempotency_key => 'core-new-manufacturer-' || v_tag);
+  v_result := public.get_product_weights(ARRAY[v_size])->'products'->v_size::text;
+  IF v_result->'weight'->>'kind' IS DISTINCT FROM 'none' OR
+     (v_result->'draft'->>'id')::uuid IS DISTINCT FROM v_draft OR
+     (v_result->'subject'->>'version')::bigint IS DISTINCT FROM 8::bigint THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: an active manufacturer change must return the approval to draft';
+  END IF;
+
+  v_brands := public.get_liquid_density_review(v_group)->'brands';
+  PERFORM public.approve_liquid_density_draft(v_group, v_draft, 8, v_brands, true, 'core-approve-after-maker-' || v_tag);
+  PERFORM public.upsert_parent_brand(v_group, v_size, 'Smoke Brand C', '12345-4', 'New Manufacturer C',
+    true, NULL, NULL, v_brand, 2, p_idempotency_key => 'core-new-epa-' || v_tag);
+  v_result := public.get_product_weights(ARRAY[v_size])->'products'->v_size::text;
+  IF v_result->'weight'->>'kind' IS DISTINCT FROM 'none' OR
+     (v_result->'draft'->>'id')::uuid IS DISTINCT FROM v_draft OR
+     (v_result->'subject'->>'version')::bigint IS DISTINCT FROM 10::bigint THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: an active EPA registration change must return the approval to draft';
   END IF;
 
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';

@@ -21,7 +21,7 @@ try {
         VALUES (gen_random_uuid(), 'density-reviewer@example.invalid', '{"full_name":"Density Reviewer","role":"admin"}');`);
   const legacy = psql(read('scripts', 'smoke', 'smoke-product_weights.sql'), { allowFailure: true });
   assert.equal(legacy.status, 3, legacy.stderr + legacy.stdout);
-  assert.match(legacy.stderr, /^ERROR:\s+SMOKE_PASS_ROLLBACK\r?$/m, legacy.stderr + legacy.stdout);
+  assert.match(legacy.stderr, /^ERROR:\s+SMOKE_PASS_ROLLBACK: product weights chain passed\r?$/m, legacy.stderr + legacy.stdout);
   psql(`CREATE OR REPLACE FUNCTION public.liquid_density_review_open() RETURNS boolean
         LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$ SELECT true; $$;`);
   const result = psql(read('scripts', 'smoke', 'smoke-liquid-density-review.sql'), { allowFailure: true });

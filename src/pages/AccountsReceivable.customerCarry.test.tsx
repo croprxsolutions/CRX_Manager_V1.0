@@ -86,11 +86,7 @@ describe('A/R Workspace shared customer box', () => {
     expect(screen.getByTestId('where')).toHaveTextContent('customer=c1');
     expect(screen.getByRole('combobox', { name: 'Select customer' })).toHaveValue('Big Farm');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Prepayments' }));
-    expect(await screen.findByRole('combobox', { name: 'Prepayments customer' })).toHaveValue('Big Farm');
-    await waitFor(() => expect(screen.getAllByRole('button', { name: /Big Farm/ }).length).toBeGreaterThan(0));
-    expect(screen.queryByRole('button', { name: /Small Farm/ })).not.toBeInTheDocument();
-
+    // Prepayments left this workspace for its own page (/prepay, #2451), so there is no tab to carry it to.
     fireEvent.click(screen.getByRole('button', { name: 'AR Aging' }));
     expect(screen.getByTestId('where')).toHaveTextContent('customer=c1');
   });

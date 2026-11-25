@@ -903,8 +903,9 @@ function PrepayTieRow({ rows }: { rows: PrepayTie[] }) {
                 <td data-label="Credits add up to" className="px-4 py-2 text-right tabular-nums">{fmt(r.credits_cents)}</td>
                 <td data-label="Difference" className="px-4 py-2 text-right font-semibold tabular-nums">{signed(r.difference_cents)}</td>
                 <td className="px-4 py-2 text-right">
+                  {/* Its own layer, so no part of a stacked phone row can sit over the button (e2e F7). */}
                   <Link to={historyLink(r)} aria-label={`Open ${r.farm_name} prepay history`}
-                    className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-nav-dark hover:bg-gray-50 md:h-10 max-md:w-full">
+                    className="relative z-10 inline-flex h-11 items-center justify-center whitespace-nowrap rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-nav-dark hover:bg-gray-50 md:h-10 max-md:w-full">
                     Open history
                   </Link>
                 </td>

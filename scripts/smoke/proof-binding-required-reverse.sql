@@ -1,11 +1,11 @@
--- Reverse of 20270307190000_proof_binding_required: puts back 20270307160000's shared completion step (proof
--- checked only when it carries a list). Run as postgres in one transaction. Undo this before the 20270307160000 reverse.
+-- Reverse of 20270308010000_proof_binding_required: puts back 20270308000000's shared completion step (proof
+-- checked only when it carries a list). Run as postgres in one transaction. Undo this before the 20270308000000 reverse.
 DO $preflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
-     IS DISTINCT FROM 'bb3554e4edbf11456504e76d1776842c' THEN
-    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _complete_delivery_authorized_impl is not the 20270307190000 body';
+     IS DISTINCT FROM 'b542beff97b76eea519e6f067a5b7c8d' THEN
+    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _complete_delivery_authorized_impl is not the 20270308010000 body';
   END IF;
 END
 $preflight$;
@@ -156,7 +156,7 @@ BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
      IS DISTINCT FROM '92e373301409583f2f7fec1f0cb207ee' THEN
-    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: the 20270307160000 step was not restored';
+    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: the 20270308000000 step was not restored';
   END IF;
 END
 $postflight$;

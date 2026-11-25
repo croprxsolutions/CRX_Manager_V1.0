@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270304120000_proof_bound_to_load.sql (contract
+ * Real-schema proof for 20270305110000_proof_bound_to_load.sql (contract
  * docs/plans/2026-11-23-proof-bound-to-load-CONTRACT.md): a customer's signature or ticket photo completes a delivery
  * only for the load the screen showed when it was taken.
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container, replays
- * every post-baseline migration before the candidate (#2324's 20270303190000 included; harness from the F05b prover),
+ * every post-baseline migration before the candidate (#2324's 20270304160000 included; harness from the F05b prover),
  * shows the gap, applies the candidate beside a half-done completion, then runs every case as real committed calls
  * by the signed-in admin or driver, reading state back from a new connection. Ends with the reverse script.
  *
@@ -28,7 +28,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270304120000_proof_bound_to_load.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270305110000_proof_bound_to_load.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-bound-to-load-reverse.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
@@ -590,8 +590,8 @@ function afterCases() {
   }
   for (const sig of ['public._delivery_lines_match(uuid,jsonb,jsonb)', 'public._delivery_photo_lines_seen_kept()',
     'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)',
-    'public._complete_delivery_brands_impl_20270304(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone,text,text,boolean,bigint)',
-    'public._start_and_complete_delivery_brands_impl_20270304(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint)']) {
+    'public._complete_delivery_brands_impl_20270305(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone,text,text,boolean,bigint)',
+    'public._start_and_complete_delivery_brands_impl_20270305(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint)']) {
     for (const role of ['anon', 'authenticated', 'service_role']) {
       assert.equal(scalar(`SELECT has_function_privilege('${role}', '${sig}', 'EXECUTE');`), 'f', `${role} ${sig}`);
     }

@@ -8,7 +8,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { createMemoryRouter, RouterProvider } from 'react-router';
 vi.mock('react-router-dom', async () => vi.importActual('react-router'));
 
-const { mockFrom, mockRpc, mockToast } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, mockAuth } = vi.hoisted(() => ({
+  mockAuth: { role: 'admin' },
   mockFrom: vi.fn(),
   mockRpc: vi.fn().mockImplementation(() => Promise.resolve({ data: null, error: null })),
   mockToast: vi.fn(),
@@ -41,7 +42,7 @@ vi.mock('../lib/db', () => ({
 }));
 
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ profile: { id: 'user-1', role: 'admin', full_name: 'Test Admin' }, role: 'admin' }),
+  useAuth: () => ({ profile: { id: 'user-1', role: mockAuth.role, full_name: 'Test User' }, role: mockAuth.role }),
 }));
 
 vi.mock('../components/ui/Toast', () => ({
@@ -356,6 +357,36 @@ describe('Record Payments: faster entry', () => {
     await waitFor(() => expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument());
     expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
     expect(screen.queryByText('Somewhere else')).not.toBeInTheDocument();
+  });
+
+  it('typing over the chosen customer lets go of it, so Apply Payment cannot post to that customer', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
+
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(box, { target: { value: 'Small' } });
+    fireEvent.blur(box);
+
+    expect(screen.queryByText('INV-OLD')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Apply Payment/ })).not.toBeInTheDocument();
+    expect(mockRpc).not.toHaveBeenCalled();
+    // The typed check amount stays, as before.
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
+  });
+
+  it('Pay full balance is admin-only: a sales rep sees only their own invoices, so the total could be short', async () => {
+    mockAuth.role = 'sales_rep';
+    try {
+      renderPayments();
+      await chooseByKeyboard();
+      expect(screen.queryByRole('button', { name: /Pay full balance/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Auto-Allocate/ })).toBeInTheDocument();
+    } finally {
+      mockAuth.role = 'admin';
+    }
   });
 
   it('leaves without asking when nothing is typed', async () => {

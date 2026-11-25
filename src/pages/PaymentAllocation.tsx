@@ -101,6 +101,9 @@ const prepayMessage = (cents: number): string =>
 
 export default function PaymentAllocation() {
   const { profile, role, deniedPages } = useAuth();
+  // Pay full balance totals the invoices on screen. Only an admin sees all of a customer's
+  // invoices; a sales rep sees only their own, so the total could be short of what the farm owes.
+  const canPayFullBalance = role === 'admin';
   const { toast } = useToast();
   const allocatePaymentIdem = useIdempotencyKey('allocate_payment', profile?.id || '');
 
@@ -229,6 +232,22 @@ export default function PaymentAllocation() {
     setRetryRefused(false);
   }, []);
 
+  // Typing over the chosen customer's name lets go of that customer, as the old picker did, so
+  // Apply Payment cannot post a check (and its allocations) to the customer being replaced.
+  // The check amount, reference and notes stay, as before.
+  const releaseCustomerOnEdit = useCallback((typed: string) => {
+    if (!selectedCustomer || typed === selectedCustomer.farm_name) return;
+    invoiceLoadSeq.current += 1;
+    setLoadingInvoices(false);
+    setInvoicesFailed(false);
+    setSelectedCustomer(null);
+    prepayReadSeq.current += 1;
+    setPrepayBalanceCents(null);
+    setInvoices([]);
+    setLastResult(null);
+    setRetryRefused(false);
+  }, [selectedCustomer]);
+
   /* ── Allocation helpers ────────────────────────────────────────────── */
 
   // null = the typed check amount has more than two decimals (refused). It is
@@ -270,6 +289,7 @@ export default function PaymentAllocation() {
   // Pays every open invoice in full, in the order and by the rules Auto-Allocate uses. It only
   // fills the screen: nothing is saved until Apply Payment, which checks everything as before.
   const handlePayFullBalance = useCallback(() => {
+    if (!canPayFullBalance) return;
     if (checkAmountRefused) {
       toast('error', MONEY_PRECISION_MESSAGE);
       return;
@@ -293,7 +313,7 @@ export default function PaymentAllocation() {
         allocated_cents: allocMap.get(inv.invoice_id) || 0,
       })),
     );
-  }, [checkAmountRefused, checkCents, invoices, toast]);
+  }, [canPayFullBalance, checkAmountRefused, checkCents, invoices, toast]);
 
   const handleClearAllocations = useCallback(() => {
     setInvoices((prev) => prev.map((inv) => ({ ...inv, allocated_cents: 0 })));
@@ -498,7 +518,7 @@ export default function PaymentAllocation() {
           <Card>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Customer: the shared customer box */}
-              <div className="lg:col-span-2">
+              <div className="lg:col-span-2" onChange={(e) => releaseCustomerOnEdit((e.target as HTMLInputElement).value)}>
                 <label htmlFor="payment-customer" className="block text-sm font-medium text-nav-dark mb-1">Customer</label>
                 <CustomerSearchPicker<CustomerOption>
                   id="payment-customer"
@@ -630,17 +650,19 @@ export default function PaymentAllocation() {
                     >
                       Auto-Allocate
                     </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      icon={<ListChecks className="w-4 h-4" />}
-                      onClick={handlePayFullBalance}
-                      showChevron={false}
-                      disabled={submitting || invoicesNotReady || invoices.length === 0 || checkAmountRefused}
-                      title="Fill every open invoice with its full balance (fills in the check amount when it is empty). Nothing is saved until Apply Payment."
-                    >
-                      Pay full balance
-                    </Button>
+                    {canPayFullBalance && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<ListChecks className="w-4 h-4" />}
+                        onClick={handlePayFullBalance}
+                        showChevron={false}
+                        disabled={submitting || invoicesNotReady || invoices.length === 0 || checkAmountRefused}
+                        title="Fill every open invoice with its full balance (fills in the check amount when it is empty). Nothing is saved until Apply Payment."
+                      >
+                        Pay full balance
+                      </Button>
+                    )}
                     <Button
                       variant="secondary"
                       size="sm"

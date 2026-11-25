@@ -594,6 +594,11 @@ const gateRequestSource = guardSource.slice(
   guardSource.indexOf("const advisoryQueue = [];"),
 );
 ok(gateRequestSource.length > 0, "gateRequest() is present to inspect");
+{
+  const hold = gateRequestSource.search(/const holdProblem = ownerHoldProblem\(pr\);\s*if \(holdProblem\) deny\(/);
+  ok(hold > 0 && hold < gateRequestSource.indexOf("claimOrRefuse("), "the owner hold refuses before any landing claim");
+  ok(/"number,url,[^"]*\btitle\b[^"]*"/.test(gateRequestSource), "the PR resolve asks GitHub for the title");
+}
 eq(
   (gateRequestSource.match(/\bhardGateGh\(/g) || []).length,
   1,

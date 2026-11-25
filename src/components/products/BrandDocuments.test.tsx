@@ -72,4 +72,17 @@ describe('Brand documents on Product Detail', () => {
     await waitFor(() => expect(reload).toHaveBeenCalledWith(true));
     expect(hooks.toast).toHaveBeenCalledWith('error', 'This brand or link changed. Review it and try again.');
   });
+
+  it('tells an admin their link edit was refused before refreshing the brand', async () => {
+    hooks.toast.mockClear();
+    hooks.mutate.mockRejectedValueOnce({ message: 'BRAND_DOCUMENT_CHANGED: reload before changing' });
+    const reload = vi.fn();
+    render(<BrandDocuments target={target} brandName="Dual II Magnum" links={[label]}
+      canEdit userId="admin" onReload={reload} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Manage documents for Dual II Magnum' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit link' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save link' }));
+    await waitFor(() => expect(reload).toHaveBeenCalledWith(true));
+    expect(hooks.toast).toHaveBeenCalledExactlyOnceWith('error', 'This brand or link changed. Review it and try again.');
+  });
 });

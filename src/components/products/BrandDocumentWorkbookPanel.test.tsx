@@ -29,14 +29,15 @@ it('blocks workbook saving until the server approves the link changes', async ()
   expect(api.save).not.toHaveBeenCalled();
 });
 
-it('keeps confirmed brands saved and retries only the failed brand with its original key', async () => {
+it.each([false, true])('keeps confirmed brands saved after a partial failure (workbook stale: %s)', async (stale) => {
   const changes = [{ action: 'save', kind: 'sds', url: 'https://manufacturer.example/sds' }] as const;
   const rows: ParsedBrandDocuments['rows'] = ['brand-1', 'brand-2'].map((id) => ({
     target: { id, parent_brand: true, brand_version: 2 }, ownerName: 'Product group', brandName: id,
     changes: [...changes],
   }));
   api.save.mockReset().mockResolvedValueOnce(undefined)
-    .mockRejectedValueOnce(new Error('Connection dropped')).mockResolvedValueOnce(undefined);
+    .mockRejectedValueOnce(new Error(stale ? 'BRAND_DOCUMENT_CHANGED: reload before changing' : 'Connection dropped'))
+    .mockResolvedValueOnce(undefined);
   api.workspace.mockResolvedValue(rows.map((row) => ({ ...row.target, owner_name: row.ownerName, brand_name: row.brandName })));
   api.preview.mockResolvedValue(undefined);
   render(<BrandDocumentWorkbookPanel parsed={{ issues: [], rows }} profileId="admin" parentBusy={false} onBusyChange={vi.fn()} />);
@@ -49,6 +50,11 @@ it('keeps confirmed brands saved and retries only the failed brand with its orig
   expect(api.save).toHaveBeenNthCalledWith(1, rows[0].target, rows[0].changes, expect.any(String));
   expect(api.save).toHaveBeenNthCalledWith(2, rows[1].target, rows[1].changes, expect.any(String));
   expect(api.save.mock.calls[0][2]).not.toBe(api.save.mock.calls[1][2]);
+  if (stale) {
+    expect(screen.getByRole('alert')).toHaveTextContent('Download a fresh workbook');
+    expect(save).toBeDisabled();
+    return;
+  }
   fireEvent.click(save);
   expect(await screen.findByText('Saved links for 2 brands.')).toBeVisible();
   expect(api.save.mock.calls[2]).toEqual(api.save.mock.calls[1]);

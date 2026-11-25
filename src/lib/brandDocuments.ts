@@ -71,6 +71,11 @@ export function checkedDocumentUrl(input: string): string {
   return raw;
 }
 
+export function isBrandDocumentConflict(error: unknown): boolean {
+  return !!error && typeof error === 'object' && 'message' in error
+    && /^BRAND_(?:DOCUMENT_)?CHANGED:/.test(String(error.message));
+}
+
 export async function readBrandDocumentLinks(ids: string[], parentBrand: boolean, history = false): Promise<BrandDocumentLink[]> {
   if (ids.length === 0) return [];
   let query = supabaseUntyped.from('brand_document_links')

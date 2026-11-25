@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { useLoad } from '../../hooks/useLoad';
 import {
-  BRAND_DOCUMENT_TITLES, changeBrandDocumentLinks, previewBrandDocumentLinks, readBrandDocumentWorkspace,
+  BRAND_DOCUMENT_TITLES, changeBrandDocumentLinks, isBrandDocumentConflict, previewBrandDocumentLinks, readBrandDocumentWorkspace,
   type BrandDocumentWorkspaceRow,
 } from '../../lib/brandDocuments';
 import { sanitizeError } from '../../lib/errorSanitizer';
@@ -18,7 +18,7 @@ async function previewRow(row: BrandDocumentImport, brand: BrandDocumentWorkspac
   } catch (err) {
     if (typeof err !== 'object' || err === null || !('message' in err)) throw err;
     const message = String(err.message);
-    if (/^BRAND_(?:DOCUMENT_)?CHANGED:/.test(message)) return changed;
+    if (isBrandDocumentConflict(err)) return changed;
     if (message.startsWith('BRAND_DOCUMENT_')) return row.brandName + ' · ' + sanitizeError(err);
     throw err;
   }
@@ -50,7 +50,7 @@ export default function BrandDocumentWorkbookPanel({ parsed, profileId, parentBu
   const [remaining, setRemaining] = useState(parsed.rows);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(0);
-  const [saveError, setSaveError] = useState('');
+  const [saveError, setSaveError] = useState<{ message: string; stale: boolean } | null>(null);
   const active = useRef(false);
   const saveLock = useRef(false);
   const { getKeyFor, resetKeyFor } = useIdempotencyKey('change_brand_document_links', profileId);
@@ -61,14 +61,14 @@ export default function BrandDocumentWorkbookPanel({ parsed, profileId, parentBu
     return () => { active.current = false; };
   }, []);
   const issues = [...parsed.issues, ...(preview.status === 'loaded' ? preview.data : [])];
-  const canSave = preview.status === 'loaded' && !preview.stale && !preview.refreshing && issues.length === 0;
+  const canSave = preview.status === 'loaded' && !preview.stale && !preview.refreshing && issues.length === 0 && !saveError?.stale;
 
   async function save() {
     if (saveLock.current || !canSave) return;
     saveLock.current = true;
     setSaving(true);
     onBusyChange(true);
-    setSaveError('');
+    setSaveError(null);
     try {
       for (const row of remaining) {
         if (!active.current) return;
@@ -76,7 +76,12 @@ export default function BrandDocumentWorkbookPanel({ parsed, profileId, parentBu
         try {
           await changeBrandDocumentLinks(row.target, row.changes, getKeyFor(intent));
         } catch (err) {
-          if (active.current) setSaveError(row.brandName + ' · ' + sanitizeError(err));
+          if (active.current) {
+            const stale = isBrandDocumentConflict(err);
+            const message = stale ? row.brandName + ' changed. Download a fresh workbook'
+              : row.brandName + ' · ' + sanitizeError(err);
+            setSaveError({ message, stale });
+          }
           return;
         }
         if (!active.current) return;
@@ -113,7 +118,7 @@ export default function BrandDocumentWorkbookPanel({ parsed, profileId, parentBu
         </ul>
       )}
       {issues.length > 0 && <ul className="text-red-700" role="alert">{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
-      {saveError && <p role="alert" className="text-red-700">{saveError}. Earlier confirmed brands remain saved.</p>}
+      {saveError && <p role="alert" className="text-red-700">{saveError.message}. Earlier confirmed brands remain saved.</p>}
       <PreviewStatus preview={preview} disabled={parentBusy} />
       {remaining.length > 0 && (
         <Button disabled={parentBusy || !canSave} loading={saving}

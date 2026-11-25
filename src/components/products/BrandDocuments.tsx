@@ -3,7 +3,7 @@ import { ExternalLink } from 'lucide-react';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { useLoad } from '../../hooks/useLoad';
 import {
-  BRAND_DOCUMENT_TITLES, changeBrandDocumentLinks, checkedDocumentUrl, readBrandDocumentHistory,
+  BRAND_DOCUMENT_TITLES, changeBrandDocumentLinks, checkedDocumentUrl, isBrandDocumentConflict, readBrandDocumentHistory,
   type BrandDocumentChange, type BrandDocumentTarget,
 } from '../../lib/brandDocuments';
 import { BUSINESS_TIMEZONE, todayInBusinessTz } from '../../lib/dateUtils';
@@ -133,9 +133,9 @@ export default function BrandDocuments({ target, brandName, links, canEdit, user
       toast('success', change.action === 'report' ? 'Broken link reported' : 'Document links updated');
       onReload();
     } catch (error) {
-      if (error && typeof error === 'object' && 'message' in error
-          && /^BRAND_(?:DOCUMENT_)?CHANGED:/.test(String(error.message))) onReload(true);
-      throw error;
+      if (!isBrandDocumentConflict(error)) throw error;
+      toast('error', sanitizeError(error));
+      onReload(true);
     } finally {
       locked.current = false;
       setBusy(false);

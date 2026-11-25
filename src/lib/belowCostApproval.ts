@@ -1,5 +1,5 @@
-import type { BelowCostApprovalDetail, BelowCostApprovalError } from '../types';
-export type { BelowCostApprovalDetail, BelowCostApprovalError } from '../types';
+import type { BelowCostApprovalDetail, BelowCostApprovalError, BelowCostLine } from '../types';
+export type { BelowCostApprovalDetail, BelowCostApprovalError, BelowCostLine } from '../types';
 
 const BELOW_COST_PREFIXES = {
   BELOW_COST_CONTEXT_REQUIRED: 'context',
@@ -72,6 +72,28 @@ function parseDetail(raw: string): BelowCostApprovalDetail | null {
               : [];
           })
         : [],
+      lines: Array.isArray(detail.lines)
+        ? detail.lines.flatMap((line: unknown): BelowCostLine[] => {
+            if (!line || typeof line !== 'object') return [];
+            const row = line as Record<string, unknown>;
+            const price = nullableInteger(row.unit_price_cents);
+            const cost = nullableInteger(row.locked_unit_cost_cents);
+            const shortfall = nullableInteger(row.line_shortfall_cents);
+            const quantity = typeof row.quantity === 'number' && Number.isFinite(row.quantity) ? row.quantity : null;
+            return price !== null && cost !== null && shortfall !== null && quantity !== null
+              ? [{
+                  product_name: nullableString(row.product_name),
+                  unit_price_cents: price,
+                  locked_unit_cost_cents: cost,
+                  quantity,
+                  line_shortfall_cents: shortfall,
+                  per: row.per === 'line' ? 'line' : 'unit',
+                }]
+              : [];
+          })
+        : [],
+      more_count: nullableInteger(detail.more_count) ?? 0,
+      total_shortfall_cents: nullableInteger(detail.total_shortfall_cents),
     };
   } catch {
     return null;

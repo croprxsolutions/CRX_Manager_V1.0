@@ -20,11 +20,14 @@ export function BelowCostApprovalProvider({ children }: { children: ReactNode })
   const { toast } = useToast();
   const [detail, setDetail] = useState<BelowCostApprovalDetail | null>(null);
   const [open, setOpen] = useState(false);
+  // Each prompt is its own dialog instance, so a reason typed for one save never carries into the next save's prompt.
+  const [promptId, setPromptId] = useState(0);
   const resolverRef = useRef<((reason: string | null) => void) | null>(null);
 
   const requestReason = useCallback((nextDetail: BelowCostApprovalDetail | null) => {
     resolverRef.current?.(null);
     setDetail(nextDetail);
+    setPromptId((id) => id + 1);
     setOpen(true);
     return new Promise<string | null>((resolve) => { resolverRef.current = resolve; });
   }, []);
@@ -73,6 +76,7 @@ export function BelowCostApprovalProvider({ children }: { children: ReactNode })
     <BelowCostApprovalContext.Provider value={value}>
       {children}
       <BelowCostApprovalModal
+        key={promptId}
         open={open}
         detail={detail}
         onCancel={() => finishPrompt(null)}

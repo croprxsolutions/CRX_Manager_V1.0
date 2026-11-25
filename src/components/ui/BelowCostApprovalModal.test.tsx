@@ -14,12 +14,55 @@ const base: BelowCostApprovalDetail = {
   locked_unit_cost_cents: 500,
   zero_line_product_names: [],
   zero_lines: [],
+  lines: [],
+  more_count: 0,
+  total_shortfall_cents: null,
 };
 
 function renderWith(detail: BelowCostApprovalDetail) {
   render(<BelowCostApprovalModal open detail={detail} onCancel={vi.fn()} onConfirm={vi.fn()} />);
   return screen.getByRole('dialog', { name: 'Approve a below-cost price?' });
 }
+
+describe('BelowCostApprovalModal — every below-cost line in the save (pricing audit fix 1)', () => {
+  const listed: BelowCostApprovalDetail = {
+    ...base,
+    operation: 'save_invoice',
+    unit_price_cents: 300,
+    lines: [
+      { product_name: 'Atrazine 4L', unit_price_cents: 300, locked_unit_cost_cents: 500, quantity: 10, line_shortfall_cents: 2000, per: 'unit' },
+      { product_name: 'Roundup', unit_price_cents: 1000, locked_unit_cost_cents: 1050, quantity: 2.5, line_shortfall_cents: 125, per: 'unit' },
+      { product_name: 'Application fee', unit_price_cents: 4000, locked_unit_cost_cents: 4500, quantity: 1, line_shortfall_cents: 500, per: 'line' },
+    ],
+    more_count: 0,
+    total_shortfall_cents: 2625,
+  };
+
+  it('lists each line with price, cost, quantity and shortfall, then the total', () => {
+    const dialog = renderWith(listed);
+    expect(within(dialog).getByText(/3 lines in this save are priced below today's cost/)).toBeInTheDocument();
+    const rows = within(dialog).getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent));
+    expect(rows).toEqual([
+      ['Atrazine 4L', '$3.00', '$5.00', '10', '$20.00'],
+      ['Roundup', '$10.00', '$10.50', '2.5', '$1.25'],
+      ['Application fee (line total)', '$40.00', '$45.00', '—', '$5.00'],
+    ]);
+    expect(within(dialog).getByText('Total shortfall for this save: $26.25')).toBeInTheDocument();
+    expect(within(dialog).queryByText(/reported this line first/)).not.toBeInTheDocument();
+  });
+
+  it('counts the lines it could not list', () => {
+    const dialog = renderWith({ ...listed, lines: listed.lines.slice(0, 1), more_count: 4, total_shortfall_cents: 9000 });
+    expect(within(dialog).getByText(/5 lines in this save are priced below/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/and 4 more below-cost lines not listed here/)).toBeInTheDocument();
+    expect(within(dialog).getByText('Total shortfall for this save: $90.00')).toBeInTheDocument();
+  });
+
+  it('says "1 line" for a single line', () => {
+    const dialog = renderWith({ ...listed, lines: listed.lines.slice(0, 1), total_shortfall_cents: 2000 });
+    expect(within(dialog).getByText(/1 line in this save is priced below/)).toBeInTheDocument();
+  });
+});
 
 describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021070000)', () => {
   it('does not call a grower-share chemical free of charge', () => {
@@ -80,6 +123,12 @@ describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021070000)', ()
       'Atrazine 4L — cost $5.00 per unit (quoted at $0 on one share, included in a grower-share per-acre price on another)',
       'Roundup — cost $7.00 per unit (included in a grower-share per-acre price)',
     ]);
+  });
+
+  it('keeps the first-line wording when the database sent no list (an older database)', () => {
+    const dialog = renderWith({ ...base, operation: 'save_invoice', unit_price_cents: 300 });
+    expect(within(dialog).getByText(/The database reported this line first/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole('table')).not.toBeInTheDocument();
   });
 
   it('has a green go-ahead that needs a reason, and a Go back button', () => {

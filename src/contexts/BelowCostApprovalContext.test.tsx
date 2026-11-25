@@ -88,6 +88,50 @@ describe('BelowCostApprovalProvider', () => {
     });
   });
 
+  it('shows every line the database listed before the admin types a reason', async () => {
+    rpc.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: 'P0001',
+        message: `BELOW_COST_REASON_REQUIRED:${JSON.stringify({
+          operation: 'duplicate_quote',
+          product_name: 'Atrazine 4L',
+          unit_price_cents: 1050,
+          locked_unit_cost_cents: 1225,
+          lines: [
+            { product_name: 'Atrazine 4L', unit_price_cents: 1050, locked_unit_cost_cents: 1225, quantity: 2, line_shortfall_cents: 350, per: 'unit' },
+            { product_name: 'Roundup', unit_price_cents: 900, locked_unit_cost_cents: 1000, quantity: 3, line_shortfall_cents: 300, per: 'unit' },
+          ],
+          line_count: 2,
+          more_count: 0,
+          total_shortfall_cents: 650,
+        })}`,
+      },
+    });
+    renderHarness();
+
+    fireEvent.click(screen.getByText('Save'));
+    expect(await screen.findByText(/2 lines in this save are priced below/)).toBeInTheDocument();
+    expect(screen.getByText('Roundup')).toBeInTheDocument();
+    expect(screen.getByText('Total shortfall for this save: $6.50')).toBeInTheDocument();
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('never carries a reason typed for one save into the next save\'s prompt', async () => {
+    rpc.mockResolvedValue({ data: null, error: reasonError });
+    renderHarness();
+
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() => expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement));
+    fireEvent.change(screen.getByLabelText('Approval reason (required)'), { target: { value: 'reason for save A' } });
+
+    // A second save is refused while the first prompt is still open.
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByLabelText('Approval reason (required)')).toHaveValue(''));
+    expect(screen.getByText('Approve and Retry').closest('button')).toBeDisabled();
+  });
+
   it('shows the admin-required toast and never retries', async () => {
     rpc.mockResolvedValue({
       data: null,

@@ -5323,6 +5323,25 @@ export interface BelowCostApprovalDetail {
    * (20261021070000).
    */
   zero_lines: BelowCostZeroLine[];
+  /**
+   * Every below-cost line the database found in this save (pricing audit fix 1); empty when the
+   * database did not send a list (before that migration), and then the prompt names only the first line.
+   */
+  lines: BelowCostLine[];
+  /** Lines found beyond those listed (the database lists at most 200). */
+  more_count: number;
+  /** The whole save's shortfall in cents, listed lines and the rest; null when not sent. */
+  total_shortfall_cents: number | null;
+}
+
+export interface BelowCostLine {
+  product_name: string | null;
+  unit_price_cents: number;
+  locked_unit_cost_cents: number;
+  quantity: number;
+  line_shortfall_cents: number;
+  /** 'unit': price and cost are per unit; 'line': a non-product invoice line, price and cost are the line's totals. */
+  per: 'unit' | 'line';
 }
 
 export interface BelowCostZeroLine {

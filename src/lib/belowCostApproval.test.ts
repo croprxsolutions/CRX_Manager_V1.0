@@ -16,7 +16,7 @@ const detail = {
   unit_price_cents: 1050,
   locked_unit_cost_cents: 1225,
 };
-const parsed = { ...detail, zero_line_product_names: [], zero_lines: [] };
+const parsed = { ...detail, zero_line_product_names: [], zero_lines: [], lines: [], more_count: 0, total_shortfall_cents: null };
 
 describe('parseBelowCostApprovalError', () => {
   it.each([
@@ -59,6 +59,28 @@ describe('parseBelowCostApprovalError', () => {
         { line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'grower_share', cost_cents: 500, basis: 'b1' },
         { line_id: 'l4', product_id: 'p4', product_name: null, kind: null, cost_cents: null, basis: null },
       ]);
+  });
+
+  it('keeps every listed below-cost line, the count beyond the list and the total', () => {
+    const listed = {
+      ...detail,
+      lines: [
+        { ...detail, quantity: 10, line_shortfall_cents: 1750, per: 'unit' },
+        { product_name: 'Fee', unit_price_cents: 4000, locked_unit_cost_cents: 4500, quantity: 1, line_shortfall_cents: 500, per: 'line' },
+        { product_name: 'No cost', unit_price_cents: 100, quantity: 1, line_shortfall_cents: 5 },
+        null,
+      ],
+      line_count: 7,
+      more_count: 5,
+      total_shortfall_cents: 9999,
+    };
+    const result = parseBelowCostApprovalError({ message: `BELOW_COST_REASON_REQUIRED:${JSON.stringify(listed)}` })?.detail;
+    expect(result?.lines).toEqual([
+      { product_name: 'Atrazine 4L', unit_price_cents: 1050, locked_unit_cost_cents: 1225, quantity: 10, line_shortfall_cents: 1750, per: 'unit' },
+      { product_name: 'Fee', unit_price_cents: 4000, locked_unit_cost_cents: 4500, quantity: 1, line_shortfall_cents: 500, per: 'line' },
+    ]);
+    expect(result?.more_count).toBe(5);
+    expect(result?.total_shortfall_cents).toBe(9999);
   });
 
   it('fails soft when the JSON detail is truncated or malformed', () => {

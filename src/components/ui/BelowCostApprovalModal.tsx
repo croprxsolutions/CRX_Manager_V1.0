@@ -40,6 +40,12 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
         note: `${line.cost_cents != null ? ` — cost ${formatCents(line.cost_cents)} per unit` : ''}${lineNote(line.kind)}`,
       }))
     : zeroLines.map((name) => ({ name, note: '' }));
+  // Every below-cost line the database found in this save (pricing audit fix 1). Without it (an
+  // older database), the prompt below names only the first line, as before.
+  const belowCostLines = detail?.lines ?? [];
+  const moreCount = detail?.more_count ?? 0;
+  const lineCount = belowCostLines.length + moreCount;
+  const totalShortfall = detail?.total_shortfall_cents ?? null;
 
   return (
     <Modal
@@ -64,6 +70,44 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
       }
     >
       <div className="space-y-4">
+        {belowCostLines.length > 0 ? (
+          <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-medium">
+              {lineCount === 1 ? '1 line in this save is' : `${lineCount} lines in this save are`} priced below today&apos;s cost.
+              Your reason applies to every one.
+            </p>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-left tabular-nums">
+                <thead>
+                  <tr className="border-b border-amber-200">
+                    <th scope="col" className="py-1 pr-3 font-medium">Product</th>
+                    <th scope="col" className="py-1 pr-3 text-right font-medium">Price</th>
+                    <th scope="col" className="py-1 pr-3 text-right font-medium">Cost</th>
+                    <th scope="col" className="py-1 pr-3 text-right font-medium">Qty</th>
+                    <th scope="col" className="py-1 text-right font-medium">Shortfall</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {belowCostLines.map((line, index) => (
+                    <tr key={`${index}-${line.product_name ?? ''}`} className="border-b border-amber-100 last:border-0">
+                      <td className="py-1 pr-3">{line.product_name || 'Unnamed line'}{line.per === 'line' ? ' (line total)' : ''}</td>
+                      <td className="py-1 pr-3 text-right">{formatCents(line.unit_price_cents)}</td>
+                      <td className="py-1 pr-3 text-right">{formatCents(line.locked_unit_cost_cents)}</td>
+                      <td className="py-1 pr-3 text-right">{line.per === 'line' ? '—' : line.quantity.toLocaleString('en-US')}</td>
+                      <td className="py-1 text-right">{formatCents(line.line_shortfall_cents)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {moreCount > 0 && (
+              <p className="mt-1">…and {moreCount} more below-cost {moreCount === 1 ? 'line' : 'lines'} not listed here.</p>
+            )}
+            {totalShortfall !== null && (
+              <p className="mt-2 font-medium tabular-nums">Total shortfall for this save: {formatCents(totalShortfall)}</p>
+            )}
+          </div>
+        ) : (
         <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
           <p className="font-medium">{detail?.product_name || 'This product'} is priced below its locked cost.</p>
           {price === 0 && (
@@ -96,6 +140,7 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
             Review the other line prices before approving if you are unsure.
           </p>
         </div>
+        )}
         <div>
           <label htmlFor="below-cost-approval-reason" className="mb-1 block text-sm font-medium text-nav-dark">
             Approval reason (required)
@@ -105,6 +150,7 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             rows={3}
+            maxLength={1000}
             placeholder="Example: approved price match for this customer"
             className="w-full rounded-lg border border-gray-200 px-3 py-2 text-base md:text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
           />

@@ -2,6 +2,23 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('explains a refused product price sheet without its code', () => {
+    for (const code of ['WORKBOOK_V2_EXPORT_REQUIRED', 'WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED']) {
+      expect(sanitizeError({ message: code })).toMatch(/^No prices were changed\. This price sheet can no longer be used: it was already applied/);
+    }
+    expect(sanitizeError(new Error('PRICING_DUPLICATE_PRODUCT_ID')))
+      .toBe('No prices were changed. The same product appears on more than one row of the price sheet. Download a fresh price sheet and make your changes in it, without copying or pasting product rows');
+  });
+
+  it('explains a refused delivery Unassigned in plain words', () => {
+    expect(sanitizeError({ message: 'DRIVER_CHANGED: the driver was changed since the form opened; reload and try again' }))
+      .toMatch(/^Nothing was saved\. The driver was changed since you opened this form/);
+    expect(sanitizeError({ message: 'DRIVER_CLEAR_STARTED: a started delivery cannot be unassigned; assign another driver instead' }))
+      .toMatch(/^Nothing was saved\. This delivery has started, so it cannot be unassigned/);
+    expect(sanitizeError({ message: 'Cannot edit delivery items once delivery is in progress' }))
+      .toMatch(/^Nothing was saved\. This delivery has started, so its items cannot be edited/);
+  });
+
   it('keeps the product and order details from active-status refusals', () => {
     expect(sanitizeError('PRODUCT_INACTIVE: Atrazine 4L is turned off; an admin must reactivate it before reopening order ORD-42'))
       .toBe('Atrazine 4L is turned off; an admin must reactivate it before reopening order ORD-42');
@@ -53,6 +70,18 @@ describe('sanitizeError', () => {
   ])('explains the parent refusal %s by name', (raw, expected) => {
     expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
   });
+  // M9 (20270301180000): the RAISE text of _edit / _delete_prepay_credit_replay_impl_20261015.
+  it('explains a locked prepayment check amount and an applied check without the raw token', () => {
+    const locked = sanitizeError({ message: "PREPAY_CHECK_AMOUNT_LOCKED: a prepayment check's amount cannot be edited; delete the whole check and enter it again" });
+    expect(locked).toContain('delete the whole check and enter it again');
+    expect(locked).not.toContain('PREPAY_CHECK_AMOUNT_LOCKED');
+    const over = sanitizeError({ message: "PREPAY_OVERPAYMENT_LOCKED: an overpayment comes from its payment and cannot be deleted; void the payment to undo it" });
+    expect(over).toContain('void the payment');
+    expect(over).not.toContain('PREPAY_OVERPAYMENT_LOCKED');
+    const applied = sanitizeError({ message: 'PREPAY_CHECK_APPLIED: part of this check was applied to an invoice; it cannot be deleted' });
+    expect(applied).toContain('applied to an invoice');
+    expect(applied).not.toContain('PREPAY_CHECK_APPLIED');
+  });
   it('explains an UNKNOWN_STORAGE_LOCATION refusal without the raw token (KI-85)', () => {
     const message = sanitizeError({ message: 'UNKNOWN_STORAGE_LOCATION: stock can be received only into Main Warehouse until stock transfers between warehouses exist' });
     expect(message).toContain('only into Main Warehouse');
@@ -77,7 +106,7 @@ describe('sanitizeError', () => {
   it.each([
     ['DELIVERY_QUANTITIES_STALE', "this delivery's lines changed since the screen loaded them; reload it and enter the quantities again."],
     ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
-    ['DELIVERY_NOTHING_DELIVERED', 'every product on it has a delivered quantity of zero. If nothing was delivered, call the office.'],
+    ['DELIVERY_NOTHING_DELIVERED', 'every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'],
     ['DELIVERY_LOAD_CHANGED', 'the products on this delivery changed after the customer signed. Reload the delivery, check the products with the customer and get a new signature. If the customer already has the goods, call the office.'],
     ['PAPER_TICKET_LOAD_CHANGED', 'the products on this delivery changed after the ticket photo was taken. Get the current ticket signed and add a new photo of it. If the customer already has the goods, call the office.'],
   ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
@@ -336,6 +365,8 @@ describe('sanitizeError', () => {
       .toBe('This purchase order is cancelled, so its cost cannot change');
     expect(sanitizeError('PO_COST_BELOW_BILLED: this correction would put the active vendor bills more than 5% over what arrived on the purchase order or over its ordered total; void or adjust the bill first'))
       .toBe('This would put the vendor bills more than 5% over what has arrived on the purchase order, or over its ordered total. Void or adjust the bill first');
+    expect(sanitizeError('PO_BILLED_LINES_LOCKED: this purchase order has a vendor bill, so its lines cannot be changed here; void the bill first, or have an admin use Correct Unit Cost'))
+      .toBe("This purchase order has a vendor bill, so its lines can't be changed here. To change lines, void the bill (if it has a payment, void that first), edit, then enter the bill again. To fix only a cost, an admin can use Correct Unit Cost");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can change a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))
@@ -730,6 +761,8 @@ describe('customer receipt refusals (KI-25)', () => {
       .toBe('Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.');
     expect(sanitizeError(new Error("DELIVERY_RECEIPT_CHANGED: this delivery's receipt was queued again since; reload the page")))
       .toBe("Nothing was changed. This delivery's receipt was queued again since. Reload the page.");
+    expect(sanitizeError(new Error('RECEIPT_HANDLED_ADMIN_ONLY: only an admin can mark a customer receipt handled')))
+      .toBe('Nothing was changed. Only an admin can mark a customer receipt handled.');
   });
   it('leaves the invoice-posting DELIVERY_NOT_COMPLETED sentence alone', () => {
     const msg = 'DELIVERY_NOT_COMPLETED: delivery D-42 for invoice INV-1002 has been deleted. Void this invoice instead of posting it.';

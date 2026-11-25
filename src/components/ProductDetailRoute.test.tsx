@@ -92,6 +92,9 @@ vi.mock('../lib/db', () => {
     sanitizeError: (error: unknown) => error instanceof Error ? error.message : String(error),
     assertRpcResult: (value: unknown) => value,
     checkMutationResult: vi.fn(),
+    // The Parent panel's rate-switch modal reads these when it loads.
+    RpcErrorCodes: {},
+    hasRpcCode: () => false,
   };
 });
 vi.mock('../lib/costFields', async (importOriginal) => ({

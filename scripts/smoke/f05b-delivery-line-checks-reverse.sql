@@ -1,4 +1,4 @@
--- Rollback for 20270227180000_f05b_delivery_line_checks.sql (F05b #2274), proven by
+-- Rollback for 20270303190000_f05b_delivery_line_checks.sql (F05b #2274), proven by
 -- scripts/smoke/prove-f05b-delivery-line-checks-real-schema.mjs.
 -- Restores the 20270203120000 completion wrapper, all or nothing. The forward
 -- migration wrote no data. To use it live, copy it into a new migration through the gates (without BEGIN / COMMIT);
@@ -12,7 +12,7 @@ BEGIN
   -- The security settings too, so a later change to only those is not silently undone (Sol r5 LOW).
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-         AND md5(replace(p.prosrc, chr(13), '')) = '2a7d8883d3767f93e2571a429898d683'
+         AND md5(replace(p.prosrc, chr(13), '')) = '09c2a3efd16258c66bea74b7b7b86151'
          AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']) THEN
     RAISE EXCEPTION 'F05B_REVERSE: _complete_delivery_authorized_impl is not the F05b body; re-plan the rollback';
   END IF;

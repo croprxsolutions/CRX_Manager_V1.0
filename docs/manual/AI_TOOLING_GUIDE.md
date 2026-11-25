@@ -115,7 +115,7 @@ used to fire on almost every message was removed on 2026-10-29.
 `unattended-autopilot` auto-approves routine calls overnight, only when Mason arms it.
 
 **5. Session housekeeping.** At start: `session-staleness` (schema snapshot behind migrations,
-missing backup), `worktree-awareness` (other sessions working), `worktree-cleanup` (removes finished
+missing backup), `worktree-cleanup` (removes finished
 worktrees), `session-snapshot`, `session-heartbeat`, `session-context-reminder`. At the end of a turn:
 `stop-wrap` (uncommitted files, unapplied migrations, undeployed functions). Codex also runs
 `stop-verify` (refuses "done" until the change was actually run and observed); Claude's wiring of
@@ -146,17 +146,7 @@ review aids. They mint no proof the merge gate reads.
 subagents, `/preflight`, `/audit`, the Luna rounds, the fleet and status reports, autopilot, the
 schema registry refresh, the daily landing summary workflow.
 
-**Mandatory for every merge into `main`** (`AGENTS.md`, "Safety and Protected Delivery"):
-1. A pull request, opened ready once Luna is clean (a draft first, marked ready once its head is final, when it touches a Sol-list file).
-2. Every required check green on that head.
-3. CodeRabbit and Codex App comments fixed or answered, each thread replied to and resolved. A
-   money PR also needs a clean CodeRabbit review of its current head; narrow fixes for a review
-   whose findings were all Minor or Trivial keep that review (Mason, 2026-10-26).
-4. A fresh Sol review of the exact head, run last, unless the PR is Sol-exempt.
-5. A migration, if any, applied live before the merge, through the gate.
-6. Merge with `gh pr merge <n> --squash --delete-branch --match-head-commit <sha>`.
-
-GitHub enforces items 1 and 2. Items 3 to 6 are enforced only by the agent hooks.
+For required delivery checks and merge ownership, use the current [ship workflow](../../.claude/commands/ship.md) and [agent contract](../../AGENTS.md).
 
 **Always Mason's call, in the current conversation:** destructive migrations, Edge Function
 deploys, deleting data, force-pushing, and changes to secrets, authentication, permissions, billing,
@@ -185,40 +175,11 @@ domains or ownership.
 - **You can hand work to an agent.** Asking a Claude session to "ship" your branch runs the whole
   path in `.claude/commands/ship.md`, including the Sol pass and the merge, from Mason's machine.
 
-## The protected delivery path, done by a human
+## Current delivery workflow
 
-Today's working answer, until the proposal below exists: **you build and open the PR; the Sol pass
-and the merge run where the Codex CLI and the gates are.** Two ways to do that:
-
-- **A. You install the tools** (Claude Code and the Codex CLI, with your own accounts). Then you run
-  the same path the agents do and the gates check you. This is the closest to today's process.
-- **B. You hand the final steps to an agent session on Mason's machine.** You do steps 1 to 4; a
-  Claude session does 5 to 7.
-
-Step by step:
-
-1. **Branch from current `main`.** `git fetch origin && git switch -c <you>/<topic> origin/main`.
-2. **Build and check locally.** `npm run typecheck`, `npm run lint`, `npm run build`, `npm run test`,
-   and `npm run test:agent-workflows` if you touched agent files. Then run the change for real
-   (`docs/manual/AGENT_ONBOARDING.md` and the "Done means ran and observed" rule in `AGENTS.md`).
-3. **Open a draft PR** with a changelog entry. `gh pr create --draft`. Wait for the three required
-   checks. Ask for Luna rounds if you want an extra review before freezing; they are optional for
-   you.
-4. **Freeze and mark ready.** Push your last fix, then `gh pr ready <n>`. The Codex GitHub App
-   reviews now. On a money PR, request one CodeRabbit review: `gh pr comment <n> --body "@coderabbitai full review"`.
-   Fix or answer every comment in one push, reply on each thread, and resolve it.
-5. **Sol, last.** On a clean checkout of the exact head: `git fetch origin`, then
-   `node scripts/write-codex-push-proof.mjs`. If `main` moves afterwards, merge it in with no other
-   edits, push, wait for checks, and run `node scripts/write-codex-push-proof.mjs --carry-forward`.
-   Skip this step for a Sol-exempt PR.
-6. **Migration, if any.** `node scripts/write-apply-proofs.mjs <name>`, then
-   `node scripts/apply-migration-file.mjs supabase/migrations/<file>.sql` (dry run) and again with
-   `--confirm`. Before the merge, never after: merged code that calls a function the database does
-   not have yet breaks production (this happened with PR #965 on 2026-10-20).
-7. **Merge, pinned.** `gh pr merge <n> --squash --delete-branch --match-head-commit <sha>` from a
-   Claude or Codex session, so the merge gate checks it. Merging deploys to croprxsolutions.app
-   through Vercel; check the deploy. If you applied a migration, comment `Applied live: <name>`
-   on the merged PR.
+Use the [ship workflow](../../.claude/commands/ship.md) for current branch, review, and merge steps.
+Contributors can prepare and open PRs. An authorized Claude session can take the handoff for a
+staging merge. Taha or Mason handles merges into main.
 
 ## Can a human merge without Claude Code or Codex?
 
@@ -251,7 +212,7 @@ without the gate's proofs cannot apply a migration through the sanctioned script
 run SQL in the Supabase dashboard if Mason gives them a database login; no gate covers that.
 
 So a human can merge, but only by stepping outside the process `AGENTS.md` says is mandatory.
-There is no checked path for a human today except installing the agent tools (option A above).
+The historical analysis below discusses installing the agent tools for local checks.
 
 ## Proposal: let GitHub check the Sol review
 
@@ -277,8 +238,8 @@ After that, GitHub refuses a merge without a Sol review for everybody, whether t
 use a plain terminal, or use an agent. The local hooks stay as they are, as a second check.
 
 **What a human developer then does:** install the Codex CLI and run
-`node scripts/write-codex-push-proof.mjs` on their clean checkout (option A), or ask an agent session
-to run it on the PR's head (option B), then press Merge.
+`node scripts/write-codex-push-proof.mjs` on their clean checkout, or ask a Claude session
+to run it on the PR's head. Follow the current ship workflow for the merge.
 
 **Limits to know before approving it:**
 - A commit status can be posted by anyone with write access, so this stops mistakes, not a
@@ -292,8 +253,8 @@ to run it on the PR's head (option B), then press Merge.
 - `ci.yml` re-runs on every push; the new job must also re-run when the status is posted (a
   `status` event trigger, or a re-run the proof writer starts).
 
-**Recommended until then:** treat option B as the rule for a human developer. Open PRs freely, and
-let an agent session run the Sol pass and the merge, or install the tools first. Mason may want to
+**Recommended until then:** open PRs and hand guarded staging delivery to a Claude session.
+Use the ship workflow for required review and merge steps. Mason may want to
 make that a written decision in `docs/manual/DECISION_LOG.md`.
 
 ## When a gate is stuck

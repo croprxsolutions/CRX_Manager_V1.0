@@ -50,6 +50,16 @@ describe('ProductChangeHistory', () => {
     expect(within(item).getByText('System')).toBeInTheDocument();
   });
 
+  it('points admins to the price and cost history cards, and staff see no pointer', async () => {
+    returnRows([]);
+    const { unmount } = render(<ProductChangeHistory productId="p1" showPriceHistoryNote />);
+    expect(await screen.findByText('Price and cost changes are listed in Sell Price History and Cost History.')).toBeInTheDocument();
+    unmount();
+    render(<ProductChangeHistory productId="p1" />);
+    await screen.findByText('No changes recorded yet.');
+    expect(screen.queryByText(/Price and cost changes are listed/)).not.toBeInTheDocument();
+  });
+
   it('shows an empty state', async () => {
     returnRows([]);
     render(<ProductChangeHistory productId="p1" />);

@@ -153,7 +153,6 @@ assert.equal(resolvePlainReply({ dirs, sessionId: SESSION, readShown: () => "" }
 assert.match(reply(`approve ${c1}`).reason, /is a Sol finding; accept it with/, "an `approve <code>` reply never accepts a finding");
 assert.match(reply(`accept ${c1}`).reason, /at least two words/, "accept without a reason is refused");
 assert.match(reply(`accept ${c1} it costs $40 only`).reason, /money/, "a reason with a money amount is refused (the log is public)");
-assert.match(reply(`accept ${c1} fine by me`, { sessionId: "other-session-99" }).reason, /different conversation/, "a reply in another conversation is refused");
 assert.match(reply(`accept ${c1} fine by me`, { now: NOW + 25 * 60 * 60 * 1000 }).reason, /expired/, "a stale request is refused");
 // None of those refusals used the code up.
 const ok1 = reply(`accept ${c1} we never sell before switch-on`);
@@ -263,6 +262,16 @@ assert.equal(proofValid({ ...proof, carry: { ...proof.carry, from_base: "d".repe
   // A staging merge never carries, even a proof minted before that rule (Mason, 2026-11-22, Sol r7 HIGH 1).
   assert.equal(carriedSolProof({ ...clean, review_ref: "origin/staging" }), false, "gate: a staging-carried proof is not a proof");
   assert.equal(carriedSolProof({ ...clean, carry: { ...clean.carry, mode: "disjoint" }, review_ref: "origin/staging" }), false, "gate: nor a free staging carry");
+  // A same-base restamp or post_apply on top of that base move does not launder it (Sol r8, #2226).
+  for (const mode of ["restamp", "post_apply"]) {
+    const relaundered = buildCarryForwardProof({ headSha: "f".repeat(40), baseSha: moved, source: later, mode, timestamp: iso(NOW) });
+    assert.equal(relaundered.carry.from_base, relaundered.base_sha, `gate: the ${mode} itself keeps its source's base`);
+    assert.equal(carriedSolProof(relaundered), false, `gate: a ${mode} cannot carry an acceptance past the base it was given on`);
+    const { owner_accepted: _gone, ...unlistedRe } = relaundered;
+    assert.equal(carriedSolProof(unlistedRe), false, `gate: nor a ${mode} that dropped the acceptance list`);
+    assert.equal(carriedSolProof({ ...relaundered, carry: { ...relaundered.carry, root_review: { ...relaundered.carry.root_review, owner_accepted: false } } }), false,
+      `gate: nor a ${mode} whose root lost its mark but kept the list`);
+  }
 }
 assert.equal(proofValid(proof, H2, NOW + 24 * 60 * 60 * 1000, BASE), false, "gate: expires with the Sol run it came from");
 
@@ -270,6 +279,7 @@ assert.equal(proofValid(proof, H2, NOW + 24 * 60 * 60 * 1000, BASE), false, "gat
 const chained = buildCarryForwardProof({ headSha: "e".repeat(40), baseSha: BASE, source: proof, mode: "post_apply", timestamp: iso(NOW) });
 assert.equal(chained.carry.root_review.owner_accepted, true, "chain: the root review stays marked owner-accepted");
 assert.deepEqual(chained.owner_accepted, proof.owner_accepted, "chain: the acceptances travel with the proof");
+assert.equal(carriedSolProof(chained), true, "chain: a same-base post_apply of an owner-accepted proof still counts");
 assert.equal("owner_accepted" in buildCarryForwardProof({ headSha: H2, baseSha: BASE, source: { head_sha: H1, base_sha: BASE, timestamp: iso(NOW) }, mode: "restamp" }), false,
   "chain: an ordinary carry gains no acceptance");
 
@@ -355,13 +365,19 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const resolveSkip = (shown, sessionId = SESSION) => resolvePlainReply({ dirs, sessionId, readShown: () => shown, purposes: [OWNER_SOL_SKIP_PURPOSE] });
   assert.equal(resolveSkip(shownText).code, r1.code, "resolve: the summary shown alone picks its request");
   assert.match(resolveSkip(`${shownText}\nAlso, want me to merge?`).reason, /did not show/, "resolve: summary plus other words picks nothing");
-  assert.equal(resolveSkip(shownText, "other-session-99").silent, true, "resolve: another conversation sees nothing waiting");
+  // Mason, 2026-11-23: a conversation that shows him the request word for word may take his skip.
+  assert.equal(resolveSkip(shownText, "other-session-99").code, r1.code, "resolve: another conversation that shows the summary picks it");
+  assert.equal(resolveSkip("Merged #900.", "other-session-99").silent, true, "resolve: another conversation that did not show it stays silent");
   assert.notEqual(resolvePlainReply({ dirs, sessionId: SESSION, readShown: () => shownText }).code, r1.code, "resolve: 'I approve' never answers a skip request");
   assert.match(recordReplyApproval({ code: r1.code, dirs, reply: `approve ${r1.code}`, sessionId: SESSION, readMark: markFor("x") }).reason, /answer it with: skip/, "approve never skips");
   assert.match(recordReplyApproval({ code: r1.code, dirs, reply: `accept ${r1.code} fine by me`, sessionId: SESSION, readMark: markFor("x"), form: "accept", reason: "fine by me" }).reason,
     /answer it with: skip/, "the old accept form never answers a skip request");
+  {
+    const c = request(1, { sessionId: "other-session-99" });
+    assert.match(recordReplyApproval({ code: c, dirs, reply: `accept ${c} fine by me`, sessionId: SESSION, readMark: markFor("x"), form: "accept", reason: "fine by me", readShown: () => "anything" }).reason,
+      /accept it there/, "the old per-finding accept form stays in the session that built the request");
+  }
   assert.match(skipReply(r1.code, "skip 2").reason, /not in the list/, "reply: a number not shown skips nothing");
-  assert.match(skipReply(r1.code, "skip", { sessionId: "other-session-99" }).reason, /different conversation/, "reply: another conversation skips nothing");
   assert.match(skipReply(r1.code, "skip", { now: NOW + 25 * 60 * 60 * 1000 }).reason, /expired/, "reply: a stale request skips nothing");
   const ok3 = skipReply(r1.code, "skip 3");
   assert.equal(ok3.ok, true, `reply: skip 3 records (${ok3.reason})`);
@@ -381,7 +397,7 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   assert.match(verifySolSkip({ approval: { ...receipts[0], replyMark: { ...receipts[0].replyMark, words: "skip" } }, record: rec3 }).reason, /does not hold the recorded reply/,
     "verify: the transcript mark must hold the recorded reply");
   assert.match(verifySolSkip({ approval: { ...receipts[0], replyMark: { ...receipts[0].replyMark, transcript: path.join(root, "other-session.jsonl") } }, record: rec3 }).reason,
-    /different conversation/, "verify: the mark must be in the conversation that asked");
+    /not in the conversation the receipt names/, "verify: the mark must be in the conversation the receipt names");
 
   const readNone = () => null;
   assert.match(collectAcceptances({ record: rec3, readAcceptance: readNone, readSkips: () => readSkipReceipts(stateDir, H3) }).problem, /finding 1/,
@@ -424,10 +440,12 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   assert.match(hook("yes"), /NOT SKIPPED.*reason/, "hook: a bare 'yes' skips nothing and asks for the reason");
   tx(`Here is something else.\n${shown4}`);
   assert.match(hook("skip"), /NOT SKIPPED.*did not show/, "hook: the summary must be the whole last message");
+  tx("Merged #900.");
+  assert.equal(hook("skip", "other-session-99"), "", "hook: another conversation that did not show it stays silent and skips nothing");
+  // Mason, 2026-11-23: the conversation he is talking to shows a captain's request; his word there counts.
   tx(shown4);
-  assert.equal(hook("skip", "other-session-99"), "", "hook: another conversation has nothing waiting, so it skips nothing");
-  const out = hook("skip");
-  assert.match(out, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 1, 2 of 3 on PR #2200/, `hook: one word skips both (${out})`);
+  const out = hook("skip", "other-session-99");
+  assert.match(out, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 1, 2 of 3 on PR #2200/, `hook: one word skips both, from another conversation (${out})`);
   assert.equal(hook("skip"), "", "hook: the same reply again skips nothing more (nothing is waiting, so it is ordinary chat)");
   // "Do you accept the risk?" answered "yes, <reason>" (Mason, 2026-11-22).
   const r5 = skipReq([3]);

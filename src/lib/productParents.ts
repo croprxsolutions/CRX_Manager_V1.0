@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { assertRpcResult, supabaseUntyped } from './db';
+import { assertRpcResult, supabase, supabaseUntyped } from './db';
 import { Sentry } from './sentry';
 import type { ProductRatePerAcre } from '../types';
 import { toSentryError } from './sentryError';
@@ -227,6 +227,73 @@ export const correctParentIdentity = async (input: {
   if (error) throw error;
   return assertRpcResult<ParentWriteResult>(data, 'correct_product_parent_identity');
 }
+
+// RT-4a (20270125100000_product_rate_cutover): a group uses its old ('legacy') or its approved RT-3 rate.
+export type RateSource = 'legacy' | 'approved';
+export type CutoverDirection = 'promote' | 'restore';
+
+/** preview_parent_rate_cutover: the plan, or why it is refused. `expected` goes back unchanged to commit. */
+export type RateCutoverPreview =
+  | { parent_id: string; direction: CutoverDirection; eligible: false; refusal: string }
+  | {
+    parent_id: string;
+    direction: CutoverDirection;
+    eligible: true;
+    name: string;
+    rate_source: RateSource;
+    changes: boolean;
+    current: { rate_per_acre: string | null; rate_unit: string | null };
+    target: RateValues;
+    expected: Record<string, unknown> & { sizes: ParentRatePreviewSize[] };
+    // 20270301200000: a promote's label check (Rate Review's statuses) and the over-label reason it will record.
+    label_check?: CutoverLabelCheck | null;
+    over_label_reason?: string | null;
+  };
+
+// Each maximum comes as exact text (the server sends it so; a JSON number could be rounded).
+export interface CutoverLabelCheck {
+  status: string;
+  above?: { epa_registration: string; max_label_rate: string; max_label_rate_unit: string }[] | null;
+}
+
+export interface RateCutoverReceipt {
+  parent_id: string;
+  direction: CutoverDirection;
+  rate_source: RateSource;
+  parent_version: number;
+  event_id: number;
+  changed: boolean;
+  label_check?: CutoverLabelCheck | null;
+  over_label_reason?: string | null;
+}
+
+export async function getParentRateSource(parentId: string): Promise<RateSource> {
+  const { data, error } = await supabase.from('product_parents').select('rate_source').eq('id', parentId).single();
+  if (error) throw error;
+  // Never guess: an unknown value leaves the switch unavailable rather than offering a direction.
+  if (data.rate_source !== 'legacy' && data.rate_source !== 'approved') throw new Error(`Unknown rate source ${String(data.rate_source)}`);
+  return data.rate_source;
+}
+
+// The over-label reason is sent only when typed, so the call also matches the database before 20270301200000.
+const overLabelArg = (overLabelReason?: string | null) => (overLabelReason?.trim() ? { p_over_label_reason: overLabelReason.trim() } : {});
+
+export const previewParentRateCutover = async (parentId: string, direction: CutoverDirection, overLabelReason?: string | null) => {
+  const { data, error } = await supabaseUntyped.rpc('preview_parent_rate_cutover', {
+    p_parent_id: parentId, p_direction: direction, ...overLabelArg(overLabelReason),
+  });
+  if (error) throw error;
+  return assertRpcResult<RateCutoverPreview>(data, 'preview_parent_rate_cutover');
+};
+
+export const commitParentRateCutover = async (preview: Extract<RateCutoverPreview, { eligible: true }>, reason: string, key: string) => {
+  const { data, error } = await supabaseUntyped.rpc('commit_parent_rate_cutover', {
+    p_parent_id: preview.parent_id, p_direction: preview.direction, p_expected: preview.expected,
+    p_reason: reason, p_idempotency_key: key, ...overLabelArg(preview.over_label_reason),
+  });
+  if (error) throw error;
+  return assertRpcResult<RateCutoverReceipt>(data, 'commit_parent_rate_cutover');
+};
 
 const OPEN_WORK_BATCH = 500;
 

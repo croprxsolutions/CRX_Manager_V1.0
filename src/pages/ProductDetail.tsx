@@ -17,6 +17,7 @@ import ProductSellPriceHistory from '../components/products/ProductSellPriceHist
 import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 import CancelledRegistrationBanner from '../components/products/CancelledRegistrationBanner';
+import { fetchParentEpaNumbers } from '../lib/epaProposals';
 import {
   CHECK_TIMEOUT_MS, normalizeEpaRegistration, registrationCheck, useCancelledRegistrations, useStickyCancellations,
 } from '../lib/epaRegistrationStatus';
@@ -41,7 +42,7 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
 import { sanitizeError, assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, supabase, supabaseUntyped } from '../lib/db';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
-import { localToday } from '../lib/dateUtils';
+import { BUSINESS_TIMEZONE, localToday } from '../lib/dateUtils';
 import { formatExactUSD } from '../lib/money';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
 import { Sentry } from '../lib/sentry';
@@ -448,17 +449,20 @@ export default function ProductDetail() {
   const reloadRequired = pricingReloadRequired || productStale;
   // cost_history is admin-only under RLS (the panel only renders for admins).
   const costHistoryRead = useLoad<CostHistory[]>(isAdmin && !isNew && id ? `cost-history:${id}` : null, async () => {
-    const { data, error } = await supabase
+    // cost_history also logs price-only changes (cost unchanged) for Sell Price History. PostgREST cannot
+    // compare two columns, so read every row and keep the newest 20 whose cost really changed.
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('cost_history')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('product_id', id!)
       // The starting snapshot (20261026140000) records no change; the Sell Price History card shows it.
       .neq('change_source', 'starting_snapshot')
       .order('changed_at', { ascending: false })
-      .limit(20);
+      .order('id', { ascending: false })
+      .range(from, to)));
     if (error) throw error;
     if (!Array.isArray(data)) throw new Error('cost history read returned no list');
-    return data as CostHistory[];
+    return (data as CostHistory[]).filter((row) => row.old_cost !== row.new_cost).slice(0, 20);
   }, { report: { tags: { read: 'product_detail_cost_history' } } });
   const reloadCostHistory = costHistoryRead.reload;
   const costHistory = costHistoryRead.status === 'loaded' ? costHistoryRead.data : NO_ROWS;
@@ -473,6 +477,12 @@ export default function ProductDetail() {
   const costBasisLoadFailed = costBasisRead.status === 'failed';
   // Refreshing or out of date: the options shown may be from before a pricing change, so no selection.
   const costBasisUnsure = costBasisRead.status === 'loaded' && (costBasisRead.refreshing || costBasisRead.stale);
+  // Which side cards show a settled, current read now; a late Reload Product warning skips a card that a
+  // Try again already recovered (#2308 LOW, Luna r1).
+  const sideCardsRecoveredRef = useLatestRef({
+    'Cost History': costHistoryRead.status === 'loaded' && !costHistoryRead.refreshing && !costHistoryRead.stale,
+    'Cost Basis': costBasisRead.status === 'loaded' && !costBasisRead.refreshing && !costBasisRead.stale,
+  });
   const [persistedLabelFields, setPersistedLabelFields] = useState<{
     signalWord: Product['signal_word'];
     epaRegistration: string | null;
@@ -540,6 +550,18 @@ export default function ProductDetail() {
   }, [productIdRef]);
   // Another product's brands never sit under this product's number.
   useEffect(() => { setBrandRegistrations([]); setBrandsRead('loading'); }, [id]);
+  // Generics keep their EPA numbers on the group's brands (the four places fetchParentEpaNumbers reads), for the setup badge.
+  const [groupHasEpa, setGroupHasEpa] = useState(false);
+  useEffect(() => { setGroupHasEpa(false); }, [parent]);
+  // Re-read after every brand list change too, so clearing a brand's last number brings the badge back without a reload.
+  useEffect(() => {
+    if (!parent) return undefined;
+    let cancelled = false;
+    fetchParentEpaNumbers(parent.id)
+      .then((numbers) => { if (!cancelled) setGroupHasEpa(numbers.length > 0); })
+      .catch((error: unknown) => Sentry.captureException(error, { extra: { context: 'product_detail_group_epa' } }));
+    return () => { cancelled = true; };
+  }, [parent, brandRegistrations]);
   const productLoaded = persistedProduct?.id === id;
   // The brand list's clock starts once the product (and so the Brands section) has loaded.
   const [brandsReadSlow, setBrandsReadSlow] = useState(false);
@@ -1054,30 +1076,34 @@ export default function ProductDetail() {
     const reloadRequest = ++pricingReloadRequestRef.current;
     setPricingReloading(true);
     setPriceHistoryReloadToken((current) => current + 1);
-    const sideReads = Promise.all([fetchCostHistory(), fetchCostBasisWorkspace()]);
+    const historyRead = fetchCostHistory();
+    const basisRead = fetchCostBasisWorkspace();
     const productRead = await reloadProduct();
     // Only the Product read holds the button (#2200): the side cards show their own loading and Try again.
     // A newer Reload Product owns the button now, so only the newest one releases it.
     if (reloadRequest === pricingReloadRequestRef.current) setPricingReloading(false);
     // Skipped: the page closed or a newer read took over, which reports itself (#2308 LOW).
-    if (productRead.status === 'skipped') return false;
+    if (productRead.status === 'skipped') return;
     if (productRead.status !== 'applied' || productRead.data.product === null) {
       toast('error', 'This Product could not be reloaded. Try again before making another change.');
-      return false;
+      return;
     }
     // The Product is current, so callers go on; the side cards report later (#2308 MED: a hung
-    // Cost Basis read no longer holds the rate-correction window open).
-    void sideReads.then(([historyReloaded, basisReloaded]) => {
-      // A newer Reload Product took over the side reads; only that one reports them.
-      if (reloadRequest !== pricingReloadRequestRef.current) return;
-      toast(
-        historyReloaded && basisReloaded ? 'success' : 'warning',
-        historyReloaded && basisReloaded
-          ? 'Product reloaded.'
-          : 'Product reloaded, but Cost History or Cost Basis did not load. Use Try again on that card.',
-      );
+    // Cost Basis read no longer holds the rate-correction window open). A newer Reload Product
+    // owns the side reads; only that one reports them.
+    const current = () => reloadRequest === pricingReloadRequestRef.current;
+    // Each failed card is reported as soon as it fails, so the warning never names a card that a
+    // later Try again already recovered (#2308 LOW).
+    const reportFailure = (read: Promise<boolean>, card: 'Cost History' | 'Cost Basis') => read.then((reloaded) => {
+      if (!reloaded && current() && !sideCardsRecoveredRef.current[card]) {
+        toast('warning', `Product reloaded, but ${card} did not load. Use Try again on that card.`);
+      }
+      return reloaded;
     });
-    return true;
+    void Promise.all([reportFailure(historyRead, 'Cost History'), reportFailure(basisRead, 'Cost Basis')])
+      .then(([historyReloaded, basisReloaded]) => {
+        if (historyReloaded && basisReloaded && current()) toast('success', 'Product reloaded.');
+      });
   };
 
   const handleEpaLookup = async () => {
@@ -1323,7 +1349,7 @@ export default function ProductDetail() {
     ? persistedLabelFields.epaRegistration.trim()
     : null;
 
-  const missingSetup = missingProductSetup(product);
+  const missingSetup = missingProductSetup(product, groupHasEpa || brandRegistrations.some((b) => b.epaRegistration?.trim()));
   // What a new quote line will show once this edit saves; existing quote lines keep their copied note.
   const quoteLine = !isNew && persistedProduct && persistedProduct.id === product.id ? quoteLineChange(persistedProduct, product) : null;
 
@@ -2420,11 +2446,11 @@ export default function ProductDetail() {
                     {costHistory.map((ch) => (
                       <div key={ch.id} className="border-b border-gray-50 pb-3 last:border-0">
                         <div className="flex justify-between text-sm">
-                          <span className="text-red-500 line-through">${ch.old_cost?.toFixed(2)}</span>
-                          <span className="text-crx-green font-medium">${ch.new_cost?.toFixed(2)}</span>
+                          <span className="text-red-500 line-through">{ch.old_cost == null ? 'No cost' : formatExactUSD(ch.old_cost)}</span>
+                          <span className="text-crx-green font-medium">{ch.new_cost == null ? 'No cost' : formatExactUSD(ch.new_cost)}</span>
                         </div>
                         {ch.change_note && <p className="text-xs text-secondary mt-1">{ch.change_note}</p>}
-                        <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString()}</p>
+                        <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString('en-US', { timeZone: BUSINESS_TIMEZONE })}</p>
                       </div>
                     ))}
                   </div>
@@ -2433,8 +2459,12 @@ export default function ProductDetail() {
                 ) : (
                   <div className="space-y-2 text-sm text-secondary">
                     <p>No legacy cost changes recorded.</p>
-                    {costBasisWorkspace?.current_basis && costBasisRead.status === 'loaded' && costBasisRead.stale ? (
+                    {/* Refreshing or out of date: the cached basis may no longer be current, and an empty cache
+                        does not prove there is none (#2308 MED). */}
+                    {costBasisUnsure && costBasisRead.status === 'loaded' && costBasisRead.stale ? (
                       <p>Governed cost-basis details could not be refreshed, so the current basis is not shown. Try again in Cost Basis above.</p>
+                    ) : costBasisUnsure ? (
+                      <p>Governed cost-basis details are refreshing, so the current basis is not shown yet.</p>
                     ) : costBasisWorkspace?.current_basis ? (
                       costBasisWorkspace.current_basis.selection_source === 'migration_baseline' ? (
                         <p>
@@ -2471,7 +2501,7 @@ export default function ProductDetail() {
               </Card>
               </PhoneSection>
             )}
-            <ProductChangeHistory productId={id} reloadToken={priceHistoryReloadToken} />
+            <ProductChangeHistory productId={id} reloadToken={priceHistoryReloadToken} showPriceHistoryNote={isAdmin} />
           </div>
         )}
       </div>
@@ -2532,7 +2562,7 @@ export default function ProductDetail() {
           unitOptions={rateUnitOptionsForProduct(unitConversions, persistedProduct.product_form, persistedProduct.inventory_unit).map((uc) => uc.unit)}
           onClose={() => setCorrectingRates(false)}
           // A correction bumps pricing_version, so reload the cost-basis workspace and histories too;
-          // the window stays over the form until then, so no edit is lost to the reload.
+          // the window stays over the form until the Product reloads, so no edit is lost to the reload.
           // Until the product reloads, edits stay blocked and Reload Product stays offered.
           onCorrected={() => {
             setPricingReloadRequired(true);

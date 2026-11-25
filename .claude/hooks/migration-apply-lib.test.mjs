@@ -1632,7 +1632,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   const gateDir = tempDir("crx-landing-gate-");
   mkdirSync(path.join(gateDir, ".claude", "session-state"), { recursive: true });
   const goodProof = { codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
-    head_sha: HEAD_SHA, base_sha: BASE_SHA, timestamp: new Date().toISOString() };
+    head_sha: HEAD_SHA, base_sha: BASE_SHA, timestamp: new Date().toISOString(), review_ref: "origin/main", release_rules: false };
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`), JSON.stringify(goodProof));
   const readyPr = {
     number: 900, url: "https://github.com/masonwells1/CRX_Manager_V1.0/pull/900",
@@ -1868,6 +1868,26 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ pr: { headRefName: "release/next", comments: [] } }), "Taha hasn't given the go-ahead", "the release too");
   // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
   ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");
+  // A proof made under the release-only rules proves only the release PR, never a hotfix (Sol r8, #2226).
+  {
+    const proofFile = path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`);
+    writeFileSync(proofFile, JSON.stringify({ ...goodProof, review_ref: "origin/main", release_rules: true }));
+    try {
+      refused(gate(), "no fresh gpt-6.2-sol/high proof", "a release-rules proof does not prove a hotfix");
+      ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "a release-rules proof still proves the release PR");
+      writeFileSync(proofFile, JSON.stringify({ ...goodProof, review_ref: "origin/main", release_rules: false }));
+      ok(gate().ok === true, "a hotfix's own main review still proves it");
+      // Nor a proof that records no review kind, or a staging review (Sol r1 HIGH 3 and LOW on the follow-up).
+      const { review_ref: _ref, release_rules: _rules, ...unkinded } = goodProof;
+      for (const [proof, why] of [[unkinded, "a proof with no review kind"], [{ ...goodProof, review_ref: "origin/staging" }, "a staging review"]]) {
+        writeFileSync(proofFile, JSON.stringify(proof));
+        refused(gate(), "no fresh gpt-6.2-sol/high proof", `${why} does not prove a hotfix`);
+        refused(gate({ pr: { headRefName: "release/next" } }), "no fresh gpt-6.2-sol/high proof", `${why} does not prove the release`);
+      }
+    } finally {
+      writeFileSync(proofFile, JSON.stringify(goodProof));
+    }
+  }
   // The name alone is not enough: main's release guard must have passed on this head.
   const build = readyPr.statusCheckRollup[0];
   const guardRun = readyPr.statusCheckRollup[1];
@@ -2005,7 +2025,10 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   const replyDir = tempDir("crx-apply-reply-");
   let replies = 0;
   const markFor = (content) => {
-    const f = path.join(replyDir, `t${replies++}.jsonl`);
+    // Claude Code names a transcript by its session id; the apply checks the receipt against it.
+    const tdir = path.join(replyDir, `t${replies++}`);
+    mkdirSync(tdir, { recursive: true });
+    const f = path.join(tdir, "sess-mason-chat-0001.jsonl");
     const said = (id, text) => JSON.stringify({ type: "assistant", message: { id, role: "assistant", content: [{ type: "text", text }] } });
     writeFileSync(f, `${said("m1", "Approve this ONE change ...")}\n`);
     const mark = replyMark(f, "approve 482913");
@@ -2158,10 +2181,24 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     expiresAt: new Date(Date.now() - 2 * 60_000).toISOString(),
   }, { approvedAt: new Date(Date.now() - OWNER_APPROVAL_MAX_AGE_MS - 60_000).toISOString() }) }), ACCESS),
     "24 hours after Mason replied", "an approval more than 24 hours after his reply is refused");
-  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS, { ownerSessionId: "sess-other-chat-0002" }),
-    "different conversation", "an approval given in another conversation is refused by the session applying it");
-  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS, { ownerSessionId: undefined }),
-    "applying session is unknown", "an apply with no session id fails closed");
+  // Mason, 2026-11-23: his yes carries to whichever session lands it (the merge captain).
+  allows(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS, { ownerSessionId: "sess-other-chat-0002" }),
+    "an approval given in another conversation is accepted by the session applying it");
+  {
+    // ...and from another checkout: the request was built, and answered, in the worker's worktree.
+    const root = ownerFixture(ACCESS);
+    const sibling = tempDir("crx-captain-sibling-");
+    const sibState = path.join(sibling, ".claude", "session-state");
+    mkdirSync(sibState, { recursive: true });
+    const approval = approvalFor(ACCESS);
+    writeFileSync(path.join(sibState, `owner-approval-${SAFE}.json`), JSON.stringify(approval), "utf8");
+    const list = () => `worktree ${root}\nHEAD ${"a".repeat(40)}\n\nworktree ${sibling}\nHEAD ${"b".repeat(40)}\n`;
+    allows(scriptDoor(root, ACCESS, { gitWorktreeList: list, ownerSessionId: "sess-captain-0003" }),
+      "an approval saved in another checkout of the repository is found by the captain's apply");
+    writeFileSync(path.join(sibState, `owner-approval-used-${JSON.parse(approval.payload).nonce}.json`), "{}", "utf8");
+    denies(scriptDoor(root, ACCESS, { gitWorktreeList: list }), "already used", "and its use there is seen too, so it still works once");
+    rmSync(sibling, { recursive: true, force: true });
+  }
   // Mason, 2026-11-20: his yes survives the PR head moving; the exact SQL is what it binds.
   allows(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { prHead: "f".repeat(40) }) }), ACCESS),
     "an approval given at an earlier head still applies the same SQL");

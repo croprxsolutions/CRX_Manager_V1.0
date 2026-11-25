@@ -22,6 +22,7 @@ const ROOT = path.resolve(HERE, '..', '..');
 const STATE_DIR = process.env.CRX_LOCAL_APP_STATE_DIR || path.join(HERE, STATE_FOLDER);
 const STATE_FILE = path.join(STATE_DIR, 'local.env');
 const BUILD_FILE = path.join(STATE_DIR, 'build.json');
+const TEST_RECORD_FILE = path.join(STATE_DIR, 'last-test.json');
 // One lock per checkout, in its canonical state folder, whatever CRX_LOCAL_APP_STATE_DIR says: the Docker project is fixed per checkout.
 const FIRST_START_LOCK = path.join(HERE, STATE_FOLDER, 'first-start.lock');
 const RECOVERY_COMMAND = `node scripts/local-app/${IS_SCREEN_WALK ? 'walkthrough' : IS_SALES_GAUNTLET ? 'sales' : IS_DOC_BYTES ? 'doc-bytes' : 'app'}.mjs rebuild`;
@@ -97,7 +98,10 @@ function gatewayConfig() {
 function compose(args, options) {
   return run('docker', ['compose', '-p', PROJECT, '-f', path.join(HERE, 'compose.yaml'), '--env-file', STATE_FILE, ...args], {
     ...options,
-    env: childEnv(IS_SALES_GAUNTLET || IS_SCREEN_WALK ? { LOCAL_KONG_CONFIG: path.join(STATE_DIR, 'kong.yml') } : {}),
+    env: childEnv({
+      ...(IS_SALES_GAUNTLET || IS_SCREEN_WALK ? { LOCAL_KONG_CONFIG: path.join(STATE_DIR, 'kong.yml') } : {}),
+      ...(IS_SCREEN_WALK ? { LOCAL_RESTART_POLICY: 'no' } : {}),
+    }),
   });
 }
 
@@ -467,6 +471,13 @@ function describeBuild(build) {
   return `${source}: ${build.migrations.length} migrations, ${build.ledgerRows} ledger rows`;
 }
 
+function checkoutRevision() {
+  return {
+    commit: text(run('git', ['rev-parse', 'HEAD'])),
+    uncommittedChanges: text(run('git', ['status', '--porcelain'])) !== '',
+  };
+}
+
 function schemaFingerprint(migrations) {
   return computeSchemaFingerprint(ROOT, migrations);
 }
@@ -535,7 +546,7 @@ async function frontend() {
   const flag = process.argv.indexOf('--port');
   const port = flag < 0 ? APP_PORT : assertExtraAppPort(process.argv[flag + 1]);
   const state = await preflight();
-  if (IS_SALES_GAUNTLET || IS_SCREEN_WALK) requireFinishedBuild();
+  if (IS_SALES_GAUNTLET) requireFinishedBuild();
   const supabaseUrl = port === APP_PORT ? API_URL : `http://127.0.0.1:${port}/_sb`;
   run(process.execPath, vite(port), { env: frontendEnv(state, supabaseUrl), stdio: 'inherit' });
 }
@@ -550,15 +561,38 @@ function assertSpec(spec) {
 
 async function test() {
   const spec = process.argv[3];
-  assertSpec(spec);
   const state = await preflight();
-  requireFinishedBuild();
-  await startDatabase(state);
-  await startServices(state);
-  // Playwright then finds Vite already running and never launches its own.
-  if (IS_SCREEN_WALK) await ensureFrontend(state);
-  if (IS_SALES_GAUNTLET) run(process.execPath, ['scripts/local-app/sales-checks.mjs'], { stdio: 'inherit' });
-  run(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '--config', 'scripts/local-app/playwright.config.ts', ...(spec ? [`scripts/local-app/e2e/${spec}`] : [])], { stdio: 'inherit' });
+  const build = requireFinishedBuild();
+  const startedAt = new Date().toISOString();
+  const runId = `${startedAt.replace(/[:.]/g, '-')}-${randomBytes(4).toString('hex')}`;
+  const record = IS_SCREEN_WALK ? {
+    ...checkoutRevision(), spec, databaseCommit: build.commit, databaseBuiltAt: build.builtAt,
+    databaseFingerprint: build.schemaFingerprint, startedAt, artifacts: `test-results/${runId}`,
+  } : null;
+  if (record) writeFileSync(TEST_RECORD_FILE, JSON.stringify({ ...record, result: 'running' }, null, 2));
+  let result = 'failed';
+  try {
+    await startDatabase(state);
+    await startServices(state);
+    // Playwright then finds Vite already running and never launches its own.
+    if (IS_SCREEN_WALK) await ensureFrontend(state);
+    if (IS_SALES_GAUNTLET) run(process.execPath, ['scripts/local-app/sales-checks.mjs'], { stdio: 'inherit' });
+    run(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '--config', 'scripts/local-app/playwright.config.ts', ...(spec ? [`scripts/local-app/e2e/${spec}`] : [])], {
+      stdio: 'inherit', env: childEnv(record ? { CRX_LOCAL_APP_TEST_RUN: runId } : {}),
+    });
+    if (record) {
+      const after = checkoutRevision();
+      if (after.commit !== record.commit || after.uncommittedChanges !== record.uncommittedChanges) {
+        throw new Refused('This checkout changed during the browser test. Run it again to record proof for this version.');
+      }
+    }
+    result = 'passed';
+  } finally {
+    if (record) {
+      writeFileSync(TEST_RECORD_FILE, JSON.stringify({ ...record, result, finishedAt: new Date().toISOString() }, null, 2));
+      console.log(`Browser test ${result}: ${spec} at ${record.commit}${record.uncommittedChanges ? ' plus uncommitted changes' : ''}. Record: ${TEST_RECORD_FILE}`);
+    }
+  }
 }
 
 async function status() {
@@ -568,6 +602,10 @@ async function status() {
   if (existsSync(BUILD_FILE)) {
     const build = JSON.parse(readFileSync(BUILD_FILE, 'utf8'));
     console.log(`Built ${build.builtAt} from ${describeBuild(build)}`);
+  }
+  if (IS_SCREEN_WALK && existsSync(TEST_RECORD_FILE)) {
+    const proof = JSON.parse(readFileSync(TEST_RECORD_FILE, 'utf8'));
+    console.log(`Last browser test: ${proof.result}, ${proof.spec}, ${proof.commit}${proof.uncommittedChanges ? ' plus uncommitted changes' : ''}, started ${proof.startedAt}. Evidence: ${proof.artifacts}`);
   }
 }
 

@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test';
-import { STATE_FOLDER } from '../target.mjs';
 
 test('a new product keeps the unit picked for it after a reload', async ({ page }) => {
   await page.addLocatorHandler(
@@ -23,5 +22,5 @@ test('a new product keeps the unit picked for it after a reload', async ({ page 
   await expect(page.getByLabel(/product name/i)).toHaveValue(name);
   await expect(page.locator('.border-t').filter({ hasText: 'Product Form' }).locator('select')).toHaveValue('liquid');
   await expect(unitSelect).toHaveValue('Gal');
-  await page.screenshot({ path: `scripts/local-app/${STATE_FOLDER}/product-unit.png`, fullPage: true });
+  await page.screenshot({ path: test.info().outputPath(`product-unit.png`), fullPage: true });
 });

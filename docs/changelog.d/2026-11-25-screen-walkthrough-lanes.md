@@ -12,6 +12,8 @@ app built from the feature checkout, with invented data only and no route to pro
   (IPv6 included), and a schema fingerprint is checked before and after a rebuild. Rebuild refreshes
   the lane's gateway settings and refuses while its frontend is running.
 - Rebuild checks the matching Supabase CLI 2.109.1 pair (`supabase` and `supabase-go`) before resetting data.
+- Walkthrough containers restart only through the launcher. Browser runs record the tested revision and
+  database build separately, with run-specific evidence.
 - New `screen-walkthrough` skill for both agents (`.claude/skills/`, `.agents/skills/`), a `CLAUDE.md`
   route, and handoff guidance in `docs/workflows/AGENT_COLLABORATION.md`.
 - Tests: `npm run test:local-app` (`scripts/local-app/target.test.mjs`, lock and refusal cases), also run

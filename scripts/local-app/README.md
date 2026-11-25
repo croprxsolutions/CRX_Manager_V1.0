@@ -9,9 +9,9 @@ production, and nothing outside this computer can reach it. The rules are in the
 
 ### Feature-screen walkthroughs
 
-Run `node scripts/local-app/walkthrough.mjs start` from any feature checkout. On first use it creates that
-worktree's isolated Docker database, login and storage, and opens the app at the URL it prints. Later starts
-reuse that checkout's saved database. Each worktree gets a stable Docker project and three loopback ports derived
+Run `node scripts/local-app/walkthrough.mjs start` from a feature checkout that includes the runner. On first use
+it creates that worktree's isolated Docker database, login and storage. Open the printed URL in your browser.
+Later starts reuse that checkout's saved database. Each worktree gets a stable Docker project and three loopback ports derived
 from its path (10,000 lane slots), so different feature branches can walk through screens side by side. The
 launcher checks for port conflicts before changing anything and refuses any API/database listener not bound by
 that checkout's gateway. If its saved credentials are missing but Docker data remains, it preserves that data
@@ -19,17 +19,21 @@ and recommends a different uniquely named checkout path to request a fresh lane.
 choose another name. Do not run `docker compose down -v` to recover another checkout. Keep one owner per
 walkthrough checkout until the owner runs `stop`, including during a manual browser check. `rebuild` refuses
 while the walkthrough frontend is running. With the frontend stopped, it checks the Supabase CLI pair before
-resetting the verified test database and regenerates the gateway settings from the current checkout.
+resetting the verified test database and regenerates the gateway settings from the current checkout. Stop the lane
+before retiring its checkout. If a checkout was moved, use a fresh, uniquely named worktree. Its old settings
+still belong to the lane at the original path, where Docker keeps the saved data.
 
 Run the focused localhost-only feature proof with, for example,
 `node scripts/local-app/walkthrough.mjs test product-unit.spec.ts`. The command accepts one existing
 `*.spec.ts` file from `scripts/local-app/e2e/` and checks the checkout's recorded migrations match its test DB.
 It refuses the sales-only scenario. The product unit proof signs in, creates a liquid product with a gallon
 inventory unit, and verifies those choices after reloading it. Close the app with
-`node scripts/local-app/walkthrough.mjs stop`, or use `status` to see its build commit and migration count.
+`node scripts/local-app/walkthrough.mjs stop`. `status` shows the database build and the last browser test separately.
 The shared `app.mjs` copy, sales gauntlet and document-proof stack retain their existing names, ports, volumes and state.
 Each walkthrough's generated login, local keys and browser evidence stay under its ignored
-`scripts/local-app/.state/screen-walk/` folder. Do not put those credentials in a handoff.
+`scripts/local-app/.state/screen-walk/` folder. `last-test.json` records the spec, tested commit, whether there
+were uncommitted changes, database build, result and the run's evidence folder under `test-results/`. Use a
+passed record from a clean checkout at the candidate commit for PR proof. Keep credentials out of the handoff.
 
 ### Customer-document byte proof (separate test copy, KI-113)
 

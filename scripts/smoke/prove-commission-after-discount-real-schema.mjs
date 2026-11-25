@@ -346,7 +346,7 @@ async function main() {
   for (const step of ['(A) posting did not put', '(A) with the tax box off', '(B) the 3-way rows', '(C) both payers posted',
     '(D) half posted: not 180/120', '(D) half posted: the P&L earns', '(D) after Cancel Remaining', '(F) batched row moved',
     '(H) the 150-line sale', '(K1) the 40% row', '(K2) the 40% row', '(K3) the 40% row', '(M) $330.93 did not split',
-    '(S) after the payout void', '(V) two payouts voided in turn', '(W) one payout voided', '(X) unposted then payouts voided']) {
+    '(S) after the payout void', '(V) two payouts voided in turn', '(W) one payout voided', '(X) unposted then payouts voided', '(Z) unpost and repost']) {
     assert.ok(before.fail.includes(step), `BEFORE: expected ${step} to fail, got: ${before.fail}`);
   }
   assert.ok(!/SMOKE_SETUP|\(E\)|\(G\)|\(O\)|\(T\)/.test(before.fail), `BEFORE: the fixture or a control failed: ${before.fail}`);
@@ -378,7 +378,7 @@ async function main() {
   const after = chain(NEW_CHAIN);
   assert.ok(after.pass, `AFTER: the new chain fails: ${after.fail}`);
   covering('AFTER', passedBefore);
-  console.log('[case] 4 AFTER: the new chain passes (A-X), and every covering chain that passed before still passes');
+  console.log('[case] 4 AFTER: the new chain passes (A-Z), and every covering chain that passed before still passes');
   // 5. RE-APPLY
   const again = apply('cand.sql');
   assert.notEqual(again.status, 0); assert.match(again.output, /COMMISSION_SETTLES_ON_POSTING_PREFLIGHT: already applied/);

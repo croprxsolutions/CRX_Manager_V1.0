@@ -35,7 +35,7 @@
 --   3. invoices_settle_commission_20270306 (+ its DELETE twin): a plain (not deferred) row trigger on invoices entering
 --      or leaving the posted chemical-sale set (status, deleted_at, invoice_type) or moving to another sale while in it. It covers post (single and group), unpost, void
 --      (including Fix Delivery's) and the deleted-delivery recovery post without re-emitting those functions; each
---      locks its invoice row first, and the sale lock is never waited for, so no lock cycle.
+--      locks its invoice row first and then waits for the sale, the order zz_cap_order_invoice_header already takes.
 --   4. Re-emitted with one call each (bodies pinned below): _insert_commissions_for_order (the 7 sale creators),
 --      fix_delivery (its re-inserted rows), cancel_order (Cancel Remaining), void_commission_payment (locks the
 --      payout's sales first, then settles them). update_order_items is not: a sale can be edited only before any
@@ -109,23 +109,19 @@ END
 $preflight$;
 
 -- 1. The base ---------------------------------------------------------------------------------------------------
--- The sale's counted product lines, one rule for the discount and for billed alike (Sol posting r2 H2): a product line
--- whose order line belongs to the sale, or one with no order line on an invoice whose header is the sale; on invoices
--- that are posted, overdue or paid and not deleted (chemical sales carry the discount; billed also counts misc charges,
--- as the P&L does; no application fees).
+-- The sale's discounted product lines (Sol posting r2 H2): a product line on a counted chemical sale (posted, overdue or
+-- paid, not deleted) whose order line is the sale's, or one with no order line on an invoice whose header is the sale.
 CREATE FUNCTION public._order_commission_lines_20270306(p_order_id uuid)
- RETURNS TABLE(invoice_id uuid, item_id uuid, invoice_type text, extended_cents bigint)
+ RETURNS TABLE(invoice_id uuid, item_id uuid, extended_cents bigint)
  LANGUAGE sql
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-  SELECT i.id, b.id, i.invoice_type, b.extended_cents
+  SELECT i.id, b.id, b.extended_cents
     FROM invoices i
     JOIN invoice_items b ON b.invoice_id = i.id AND b.product_id IS NOT NULL AND b.charge_type IS NULL
-                        AND b.is_application_fee IS NOT TRUE
     LEFT JOIN order_items oi ON oi.id = b.order_item_id
-   WHERE i.invoice_type IN ('chemical_sale', 'misc_charge') AND i.status IN ('posted', 'overdue', 'paid')
-     AND i.deleted_at IS NULL
+   WHERE i.invoice_type = 'chemical_sale' AND i.status IN ('posted', 'overdue', 'paid') AND i.deleted_at IS NULL
      AND (oi.order_id = p_order_id OR (b.order_item_id IS NULL AND i.order_id = p_order_id))
 $function$;
 REVOKE ALL ON FUNCTION public._order_commission_lines_20270306(uuid) FROM PUBLIC, anon, authenticated, service_role;
@@ -143,13 +139,14 @@ DECLARE
   v_booked numeric;
   v_profit numeric;
 BEGIN
-  SELECT COALESCE(total_profit, 0), round(total_price * 100) INTO v_profit, v_booked FROM orders WHERE id = p_order_id;
+  -- Booked as the P&L reads it: a non-finite legacy total is unusable (NaN and Infinity sort above 1e15).
+  SELECT COALESCE(total_profit, 0), CASE WHEN total_price < 1e15 THEN round(total_price * 100) END
+    INTO v_profit, v_booked FROM orders WHERE id = p_order_id;
   -- Each counted discounted chemical sale is spread once (a per-line helper per order line took a 150-line sale past
   -- the statement timeout in the first design).
   FOR v_invoice IN
     SELECT DISTINCT l.invoice_id FROM public._order_commission_lines_20270306(p_order_id) l
-     WHERE l.invoice_type = 'chemical_sale'
-       AND EXISTS (SELECT 1 FROM invoice_items d WHERE d.invoice_id = l.invoice_id AND d.charge_type = 'standing_discount')
+     WHERE EXISTS (SELECT 1 FROM invoice_items d WHERE d.invoice_id = l.invoice_id AND d.charge_type = 'standing_discount')
   LOOP
     v_discount := v_discount + COALESCE((
       SELECT sum(sh.net_cents - sh.tax_cents - l.extended_cents)
@@ -159,7 +156,16 @@ BEGIN
   IF v_discount = 0 THEN
     RETURN round(v_profit, 2);
   END IF;
-  SELECT sum(l.extended_cents) INTO v_billed FROM public._order_commission_lines_20270306(p_order_id) l;
+  -- Billed exactly as the P&L counts it (_report_commission_cents_20270203: product lines on the posted chemical-sale
+  -- and misc-charge invoices whose header is the sale, no application fees), so the two shares agree (Taha,
+  -- 2026-11-25, Sol posting r3 H2).
+  SELECT sum(b.extended_cents) INTO v_billed
+    FROM invoices i
+    JOIN invoice_items b ON b.invoice_id = i.id AND b.charge_type IS NULL AND b.is_application_fee IS NOT TRUE
+                        AND b.product_id IS NOT NULL
+   WHERE i.order_id = p_order_id
+     AND i.invoice_type IN ('chemical_sale', 'misc_charge') AND i.status IN ('posted', 'overdue', 'paid')
+     AND i.deleted_at IS NULL;
   IF v_billed > 0 AND v_booked > v_billed THEN
     -- Part-billed: the posted invoices' discount rate across the whole sale, rounded toward the smaller base, so the
     -- P&L's billed share stays within its own per-row rounding of the posted profit after its discount.
@@ -199,6 +205,7 @@ DECLARE
   v_moving uuid[];
   v_locked uuid[] := '{}';
   v_count int;
+  v_pool bigint;
 BEGIN
   IF p_order_id IS NULL THEN
     RETURN 0;
@@ -208,6 +215,10 @@ BEGIN
   -- the first committed (Sol posting r2 H1).
   SELECT COALESCE(total_profit, 0) INTO v_profit FROM orders WHERE id = p_order_id FOR NO KEY UPDATE;
   IF NOT FOUND THEN
+    RETURN 0;
+  END IF;
+  -- A legacy non-finite profit can't be settled; leave the sale exactly as it is (Sol posting r3 H3).
+  IF NOT (v_profit > -1e15 AND v_profit < 1e15) THEN
     RETURN 0;
   END IF;
   v_base := public._order_commission_base_20270306(p_order_id);
@@ -222,14 +233,11 @@ BEGIN
      WHERE c.order_id = p_order_id AND c.deleted_at IS NULL AND c.status = 'pending'
        AND NOT EXISTS (SELECT 1 FROM commission_payment_items cpi
                          JOIN commission_payments cp ON cp.id = cpi.commission_payment_id
-                        WHERE cpi.commission_id = c.id AND cp.status <> 'voided');
+                        WHERE cpi.commission_id = c.id AND cp.status <> 'voided')
+       -- No posted discount: only rows this file once moved onto a discount go back to the plain profit; rows it never
+       -- moved belong to their writers, whatever base they sit on (Sol posting r3 MED 10).
+       AND (v_discounted OR c.discount_settled_at IS NOT NULL);
     IF v_ids IS NULL THEN
-      RETURN 0;
-    END IF;
-    -- No posted discount: only rows this file once moved onto a discount go back to the plain profit; a sale with none
-    -- belongs to its writers, whatever base its rows sit on.
-    IF NOT v_discounted
-       AND NOT EXISTS (SELECT 1 FROM commissions WHERE id = ANY (v_ids) AND discount_settled_at IS NOT NULL) THEN
       RETURN 0;
     END IF;
     v_whole := NOT EXISTS (SELECT 1 FROM commissions c
@@ -250,10 +258,33 @@ BEGIN
         FROM commissions c JOIN unnest(v_ids, v_new) AS r(id, amount) ON r.id = c.id
        WHERE c.order_profit IS DISTINCT FROM v_base OR c.commission_amount IS DISTINCT FROM r.amount;
     ELSE
-      -- Some rows are paid or batched: each pending row is its own share (the edit paths' rule), and only rows whose
-      -- stored base differs move, so an unchanged base never moves a cent.
-      SELECT array_agg(public.compute_commission_amount(v_base, x.pct) ORDER BY x.id) INTO v_new
-        FROM unnest(v_ids, v_pcts) AS x(id, pct);
+      -- Some rows are paid, batched or left to their writers. When those all sit on this same base, the pending rows
+      -- share what is left of the set's exact total (largest remainder), so a row frozen on the same base can't make
+      -- the set a cent over after an unpost and repost (Sol posting r3 MED 9); otherwise each pending row is its own
+      -- share (the edit paths' rule). Only rows whose stored base differs move, so an unchanged base moves no cent.
+      SELECT CASE
+               WHEN bool_and(o.order_profit = v_base)
+                    AND round(v_base_cents * (sum(o.split_percentage) + (SELECT sum(p) FROM unnest(v_pcts) p)) / 100)
+                        - round(sum(o.commission_amount) * 100) - (SELECT sum(floor(v_base_cents * p / 100)) FROM unnest(v_pcts) p)
+                        BETWEEN 0 AND cardinality(v_ids)
+               THEN round(v_base_cents * (sum(o.split_percentage) + (SELECT sum(p) FROM unnest(v_pcts) p)) / 100)
+                    - round(sum(o.commission_amount) * 100)
+             END
+        INTO v_pool
+        FROM commissions o
+       WHERE o.order_id = p_order_id AND o.deleted_at IS NULL AND o.status <> 'cancelled' AND o.id <> ALL (v_ids);
+      IF v_pool IS NOT NULL THEN
+        SELECT array_agg((floor(r.raw) + CASE WHEN r.remainder_rank <= v_pool - r.floored THEN 1 ELSE 0 END) / 100.0
+                         ORDER BY r.id)
+          INTO v_new
+          FROM (SELECT u.id, u.raw,
+                       row_number() OVER (ORDER BY u.raw - floor(u.raw) DESC, u.id) AS remainder_rank,
+                       sum(floor(u.raw)) OVER () AS floored
+                  FROM (SELECT x.id, v_base_cents * x.pct / 100 AS raw FROM unnest(v_ids, v_pcts) AS x(id, pct)) u) r;
+      ELSE
+        SELECT array_agg(public.compute_commission_amount(v_base, x.pct) ORDER BY x.id) INTO v_new
+          FROM unnest(v_ids, v_pcts) AS x(id, pct);
+      END IF;
       SELECT array_agg(c.id ORDER BY c.id) INTO v_moving
         FROM commissions c
        WHERE c.id = ANY (v_ids) AND c.order_profit IS DISTINCT FROM v_base;
@@ -488,12 +519,13 @@ BEGIN
 
   -- The order stands, so the rep keeps the commission void_invoice just cancelled.
   PERFORM set_config('crx.fix_delivery_restore', 'on', true);
+  -- M4 (20270306100000): the restored row keeps the settle's mark with its discounted amount (Sol posting r3 H1).
   INSERT INTO commissions (order_id, customer_id, recipient, recipient_user_id, split_percentage,
                            commission_amount, order_profit, order_date, season, order_number, customer_name,
-                           status, replaces_commission_id)
+                           status, replaces_commission_id, discount_settled_at)
   SELECT c.order_id, c.customer_id, c.recipient, c.recipient_user_id, c.split_percentage,
          c.commission_amount, c.order_profit, c.order_date, c.season, c.order_number, c.customer_name,
-         'pending', c.id
+         'pending', c.id, c.discount_settled_at
     FROM commissions c
    WHERE c.id = ANY (v_pending_commission_ids) AND c.status = 'cancelled';
   GET DIAGNOSTICS v_commissions_restored = ROW_COUNT;

@@ -29,6 +29,8 @@
 --      (each invoice rounds its own 7%: $330.92) and differ by at most a cent
 --   W  Half posted, the lower-id row batched, the rest posted, its payout voided: the pair adds up to the base
 --   X  Posted (rows marked as settled), both rows batched, unposted, both payouts voided: back on $400.00
+--   Y  Two half invoices posted, Fix Delivery on the first, the second unposted: the restored rows go back on $400.00
+--   Z  $330.93 posted, the $165.47 row batched, unposted and posted again: the pair still totals $330.93
 --
 -- CONTAINER / LOCAL ONLY: completing deliveries and posting draw invoice numbers; the tax rate and discounts are set
 -- inside the rolled-back transaction.
@@ -506,6 +508,43 @@ BEGIN
     v_fails := v_fails || ' (X) unposted then payouts voided: rows not back on $400: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
 
+  -- Y: two half invoices at 10%, both posted ($300); Fix Delivery on the first (rows cancelled, restored at $300 with
+  -- their mark); then the second unposted: the restored rows go back on $400 (Sol posting r3 H1).
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 'y-' || v_suffix);
+  v_delivery := pg_temp.smk_deliver(v_admin, v_order, 50, 'y1-' || v_suffix);
+  PERFORM pg_temp.smk_post(pg_temp.smk_draft(v_order), 'y1-' || v_suffix);
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 50, 'y2-' || v_suffix);
+  v_inv := pg_temp.smk_draft(v_order);
+  PERFORM pg_temp.smk_post(v_inv, 'y2-' || v_suffix);
+  v_res := preview_fix_delivery(v_delivery);
+  PERFORM fix_delivery(v_delivery, 'Rolled-back smoke: wrong quantity', v_res ->> 'plan_token', 'smk-cad-y-fix-' || v_suffix);
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  PERFORM unpost_invoice(v_inv, v_admin, 'smk-cad-y-unpost-' || v_suffix);
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '240.00/160.00|400.00' THEN
+    v_fails := v_fails || ' (Y) Fix Delivery''s restored rows did not go back on $400 after the unpost: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  END IF;
+
+  -- Z: $330.93 split 50/50 posted, the $165.47 row batched, the invoice unposted and posted again: the pair still totals
+  -- the base, not a cent over (Sol posting r3 MED 9).
+  UPDATE customers SET standing_discount_pct = 7 WHERE id = v_customer;
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10.01, 6, false, pg_temp.smk_split(v_rep1, 50, v_rep2, 50), 'z-' || v_suffix);
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'z-' || v_suffix);
+  v_inv := pg_temp.smk_draft(v_order);
+  PERFORM pg_temp.smk_post(v_inv, 'z1-' || v_suffix);
+  v_pay := create_commission_payment(ARRAY(SELECT id FROM commissions WHERE order_id = v_order AND commission_amount = 165.47),
+    'check', 'SMK-CAD-Z', (now() AT TIME ZONE 'America/Chicago')::date, 'Rolled-back smoke', v_admin, 'smk-cad-z-pay-' || v_suffix);
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  PERFORM unpost_invoice(v_inv, v_admin, 'smk-cad-z-unpost-' || v_suffix);
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  PERFORM pg_temp.smk_post(v_inv, 'z2-' || v_suffix);
+  v_got := (SELECT to_char(sum(commission_amount), 'FM999990.00') FROM commissions
+             WHERE order_id = v_order AND deleted_at IS NULL AND status <> 'cancelled');
+  IF v_got IS DISTINCT FROM '330.93' THEN
+    v_fails := v_fails || ' (Z) unpost and repost with a frozen row: rows total ' || COALESCE(v_got, 'none') || ', not 330.93;';
+  END IF;
+  UPDATE customers SET standing_discount_pct = 10 WHERE id = v_customer;
+
   -- T: a chemical-sale invoice can't be born posted through save_invoice.
   v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 't-' || v_suffix);
   BEGIN
@@ -526,7 +565,7 @@ BEGIN
   v_got := (SELECT string_agg(o.order_name || ' ' || c.order_profit || ' vs ' || (o.total_profit + _order_standing_discount_20270109(o.id)), '; ')
               FROM orders o JOIN commissions c ON c.order_id = o.id AND c.status = 'pending' AND c.deleted_at IS NULL
              WHERE o.order_name LIKE '[SMOKE] CAD %-' || v_suffix
-               AND o.order_name !~ '\[SMOKE\] CAD (d|f|s|c|e|o|t|g|k2|v|w|x)-'  -- part-posted, unposted or none; k2 holds k3's moved row
+               AND o.order_name !~ '\[SMOKE\] CAD (d|f|s|c|e|o|t|g|k2|v|w|x|y|z)-'  -- part-posted, unposted or none; k2 holds k3's moved row
                AND c.order_profit IS DISTINCT FROM o.total_profit + _order_standing_discount_20270109(o.id));
   IF v_got IS NOT NULL THEN
     v_fails := v_fails || ' (base) a commission base differs from the P&L profit after discount: ' || v_got || ';';
@@ -535,6 +574,6 @@ BEGIN
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: commission settles on posting, on the profit after the standing discount, never on tax (A-X)';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: commission settles on posting, on the profit after the standing discount, never on tax (A-Z)';
 END
 $smoke$;

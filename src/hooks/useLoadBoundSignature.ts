@@ -28,11 +28,16 @@ export function useLoadBoundSignature(
     setSignedLines(null);
     setCanvasKey((key) => key + 1);
   }, [setSignature]);
+  // Shows a loadProofProblem message; a signature taken for other lines is cleared too.
+  const reportProofProblem = useCallback((problem: string) => {
+    if (problem === SIGNATURE_LOAD_CHANGED_MESSAGE) clearSignature();
+    toast('error', problem);
+  }, [clearSignature, toast]);
   const stale = !!signature && !!currentLines && !sameLinesSeen(signedLines, currentLines);
   useEffect(() => {
     if (!stale) return;
     clearSignature();
     toast('warning', SIGNATURE_LOAD_CHANGED_MESSAGE);
   }, [stale, clearSignature, toast]);
-  return { signedLines, canvasKey, onSignatureChange, clearSignature };
+  return { signedLines, canvasKey, onSignatureChange, clearSignature, reportProofProblem };
 }

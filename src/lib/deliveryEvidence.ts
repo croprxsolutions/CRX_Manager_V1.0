@@ -317,6 +317,26 @@ export function isLoadProofRefusal(error: unknown): boolean {
   return code === 'DELIVERY_NOTHING_DELIVERED' || code === 'DELIVERY_LOAD_CHANGED' || code === 'PAPER_TICKET_LOAD_CHANGED';
 }
 
+/**
+ * The client's copy of the server's proof-binding refusals, checked before anything (the signature
+ * image) is uploaded: lines not loaded, nothing delivered, or a signature or ticket photo taken for
+ * other lines or amounts. Returns the message to show, or null. No-proof and left-at-site are not bound.
+ */
+export function loadProofProblem(
+  evidence: string,
+  currentLines: ReadonlyArray<LineSeen> | null,
+  signedLines: ReadonlyArray<LineSeen> | null,
+  ticketPhotoLines: ReadonlyArray<LineSeen> | null | undefined,
+): string | null {
+  if (evidence !== 'signature' && evidence !== 'paper_ticket') return null;
+  if (!currentLines) return LINES_LOADING_MESSAGE;
+  if (!hasDeliveredAmount(currentLines)) return NOTHING_DELIVERED_MESSAGE;
+  if (evidence === 'signature' && !sameLinesSeen(signedLines, currentLines)) return SIGNATURE_LOAD_CHANGED_MESSAGE;
+  if (evidence === 'paper_ticket' && !sameLinesSeen(ticketPhotoLines, currentLines)) return TICKET_PHOTO_LOAD_CHANGED_MESSAGE;
+  return null;
+}
+
+export const LINES_LOADING_MESSAGE = 'The products on this delivery are still loading. Wait a moment, then try again.';
 export const SIGNATURE_LOAD_CHANGED_MESSAGE =
   'The products or amounts changed after the customer signed. The signature was cleared; have the customer sign again.';
 export const TICKET_PHOTO_LOAD_CHANGED_MESSAGE =

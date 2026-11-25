@@ -51,7 +51,7 @@ import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { digestIntentPayload, fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { isValidDeliveredOn, isValidNoProofReason, MAX_PAPER_TICKET_PHOTOS, NO_PROOF_REASON_MAX_CHARS, NO_PROOF_REASON_MIN_CHARS, NO_PROOF_SIGNER, noProofReasonLength, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
-import { buildLinesSeen, COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, hasDeliveredAmount, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, mergePhotosById, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadEvidencePhoto, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, sameLinesSeen, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, mergePhotosById, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadEvidencePhoto, uploadSignatureImage } from '../lib/deliveryEvidence';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
 import { useLoadBoundSignature } from '../hooks/useLoadBoundSignature';
 import { notifyDeliveryCompleted } from '../lib/notificationTriggers';
@@ -711,6 +711,18 @@ export default function Deliveries() {
     }
   };
 
+  // The ticket-photo and proof-binding checks (20270304120000), run before anything (the signature image)
+  // is uploaded. Returns the p_lines_seen part of the call, or null after showing why it cannot be sent.
+  const completeProofParams = (evidence: DeliveryCompletionEvidence): { p_lines_seen?: LineSeen[] } | null => {
+    if (evidence === 'paper_ticket' && !currentTicketPhoto) {
+      toast('error', 'Add a photo of the signed paper ticket before completing');
+      return null;
+    }
+    const problem = loadProofProblem(evidence, currentCompleteLines, completeSig.signedLines, currentTicketPhoto?.lines_seen);
+    if (problem) { completeSig.reportProofProblem(problem); return null; }
+    return evidence === 'signature' && completeSig.signedLines ? { p_lines_seen: completeSig.signedLines } : {};
+  };
+
   const runCompleteConfirm = async () => {
     if (!completeTarget || !profile) return;
     // The submitted mode decides every follow-up below (never a checkbox read later).
@@ -735,31 +747,10 @@ export default function Deliveries() {
       toast('error', INVALID_SIGNATURE_MESSAGE);
       return;
     }
-    if (submittedEvidence === 'paper_ticket' && !currentTicketPhoto) {
-      toast('error', 'Add a photo of the signed paper ticket before completing');
-      return;
-    }
-    // The proof is bound to the lines on screen (20270304120000): catch the usual refusals here,
-    // before anything (the signature image) is uploaded.
-    if (submittedEvidence !== 'no_proof') {
-      if (!currentCompleteLines) {
-        toast('error', 'The products on this delivery are still loading. Wait a moment, then try again.');
-        return;
-      }
-      if (!hasDeliveredAmount(currentCompleteLines)) { toast('error', NOTHING_DELIVERED_MESSAGE); return; }
-    }
-    if (submittedEvidence === 'signature' && !sameLinesSeen(completeSig.signedLines, currentCompleteLines)) {
-      completeSig.clearSignature();
-      toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
-      return;
-    }
-    if (submittedEvidence === 'paper_ticket' && !ticketPhotoMatchesLoad) {
-      toast('error', TICKET_PHOTO_LOAD_CHANGED_MESSAGE);
-      return;
-    }
+    const proofParams = completeProofParams(submittedEvidence);
+    if (!proofParams) return;
     const target = completeTarget;
     const signatureAtSubmit = completeSignature;
-    const signedLinesAtSubmit = submittedEvidence === 'signature' ? completeSig.signedLines : null;
     const ticketPhotoAtSubmit = submittedEvidence === 'paper_ticket' ? currentTicketPhoto : undefined;
     const reasonAtSubmit = noProofReason;
     // Captured before any await, so a cancel during the hashing or a signal check is seen.
@@ -778,7 +769,7 @@ export default function Deliveries() {
       // no_proof: the reason exactly as typed (the server collapses whitespace; an exact retry resends it).
       ...(submittedEvidence === 'no_proof' ? { p_evidence_ref: reasonAtSubmit } : {}),
       // The lines the customer signed for (part of the key's scope: another list is a new attempt).
-      ...(signedLinesAtSubmit ? { p_lines_seen: signedLinesAtSubmit } : {}),
+      ...proofParams,
     };
     // The server binds the key to this exact request (mode, signer, date, photo or reason), so a
     // retry with an edited value mints a fresh key instead of being refused. The scope uses the
@@ -810,7 +801,7 @@ export default function Deliveries() {
         if (!stillOpenForTarget()) return 'cancelled';
         if (!inputsUnchanged()) return 'changed';
         // Lines reloaded since signing: stop before the image goes up (the screen asks for a new signature).
-        if (signedLinesAtSubmit && !sameLinesSeen(signedLinesAtSubmit, currentCompleteLinesRef.current)) return 'changed';
+        if (proofParams.p_lines_seen && !sameLinesSeen(proofParams.p_lines_seen, currentCompleteLinesRef.current)) return 'changed';
         // The server completes only once this attempt's signature image is saved, so it goes up
         // first. A failed upload does not stop the call: after a lost reply the earlier attempt may
         // already have completed the delivery (storage then refuses the re-upload). The same key

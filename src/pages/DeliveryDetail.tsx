@@ -33,7 +33,7 @@ import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail, EmailUnconfirmedError } from '../lib/emailService';
 import { buildDeliveryReceiptHtml } from '../lib/deliveryReceiptEmail';
 import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
-import { buildLinesSeen, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
@@ -1217,15 +1217,8 @@ export default function DeliveryDetail() {
       toast('error', 'Take a photo of the signed paper ticket before completing');
       return;
     }
-    if (usePaperTicket && !ticketPhotoMatchesLoad) {
-      toast('error', TICKET_PHOTO_LOAD_CHANGED_MESSAGE);
-      return;
-    }
-    if (completionEvidence === 'signature' && !sameLinesSeen(sig.signedLines, currentLinesSeen)) {
-      sig.clearSignature();
-      toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
-      return;
-    }
+    const proofProblem = loadProofProblem(completionEvidence, currentLinesSeen, sig.signedLines, currentTicketPhoto?.lines_seen);
+    if (proofProblem) { sig.reportProofProblem(proofProblem); return; }
     if (usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn)) {
       toast('error', 'Enter the delivery date from the paper ticket (today or earlier)');
       return;
@@ -1270,12 +1263,8 @@ export default function DeliveryDetail() {
     // Caught here, before the signature image is uploaded: nothing delivered, or proof taken for other lines or amounts.
     if (!hasAnyQty) { toast('error', NOTHING_DELIVERED_MESSAGE); return; }
     const signedLinesAtSubmit = submittedEvidence === 'signature' ? sig.signedLines : null;
-    if (submittedEvidence === 'signature' && !sameLinesSeen(signedLinesAtSubmit, currentLinesSeen)) {
-      sig.clearSignature();
-      toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
-      return;
-    }
-    if (usePaperTicket && !ticketPhotoMatchesLoad) { toast('error', TICKET_PHOTO_LOAD_CHANGED_MESSAGE); return; }
+    const proofProblem = loadProofProblem(submittedEvidence, currentLinesSeen, signedLinesAtSubmit, currentTicketPhoto?.lines_seen);
+    if (proofProblem) { sig.reportProofProblem(proofProblem); return; }
     setCompleting(true);
     const deliveryId = id!;
 

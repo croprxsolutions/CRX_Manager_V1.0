@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { buildLinesSeen, hasDeliveredAmount, isLoadProofRefusal, sameLinesSeen } from './deliveryEvidence';
+import {
+  buildLinesSeen, hasDeliveredAmount, isLoadProofRefusal, LINES_LOADING_MESSAGE, loadProofProblem, NOTHING_DELIVERED_MESSAGE,
+  sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE,
+} from './deliveryEvidence';
 
 // Mirrors the server's _delivery_lines_match (migration 20270304120000): a multiset of
 // (order line, product, quantity, delivered), delivered kept between 0 and the quantity.
@@ -60,5 +63,19 @@ describe('proof bound to the load', () => {
     expect(isLoadProofRefusal({ message: 'DELIVERY_NOTHING_DELIVERED: x' })).toBe(true);
     expect(isLoadProofRefusal({ message: 'SIGNATURE_IMAGE_MISSING: x' })).toBe(false);
     expect(isLoadProofRefusal(new Error('Failed to fetch'))).toBe(false);
+  });
+
+  it('names the first proof-binding problem before anything is uploaded', () => {
+    const lines = buildLinesSeen(items);
+    const other = buildLinesSeen(items, () => 1);
+    expect(loadProofProblem('no_proof', null, null, null)).toBeNull();
+    expect(loadProofProblem('left_at_site', null, null, null)).toBeNull();
+    expect(loadProofProblem('signature', null, lines, null)).toBe(LINES_LOADING_MESSAGE);
+    expect(loadProofProblem('signature', buildLinesSeen(items, () => 0.005), null, null)).toBe(NOTHING_DELIVERED_MESSAGE);
+    expect(loadProofProblem('signature', lines, other, null)).toBe(SIGNATURE_LOAD_CHANGED_MESSAGE);
+    expect(loadProofProblem('signature', lines, lines, null)).toBeNull();
+    expect(loadProofProblem('paper_ticket', lines, null, other)).toBe(TICKET_PHOTO_LOAD_CHANGED_MESSAGE);
+    expect(loadProofProblem('paper_ticket', lines, null, undefined)).toBe(TICKET_PHOTO_LOAD_CHANGED_MESSAGE);
+    expect(loadProofProblem('paper_ticket', lines, null, lines)).toBeNull();
   });
 });

@@ -31,7 +31,7 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, countLeftAtSitePhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
-import { buildLinesSeen, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
 import type { DeliveryCompletionEvidence, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
@@ -373,7 +373,8 @@ export default function FieldStop() {
   );
   const currentLinesSeenRef = useLatestRef(currentLinesSeen);
   // The newest ticket photo counts only when it was taken for these lines and amounts (one without lines never does).
-  const ticketPhotoMatchesLoad = sameLinesSeen(latestEvidencePhoto(photos, PAPER_TICKET_PHOTO_CAPTION)?.lines_seen, currentLinesSeen);
+  const ticketPhotoLines = latestEvidencePhoto(photos, PAPER_TICKET_PHOTO_CAPTION)?.lines_seen;
+  const ticketPhotoMatchesLoad = sameLinesSeen(ticketPhotoLines, currentLinesSeen);
   const sig = useLoadBoundSignature(signatureDataUrl, setSignatureDataUrl, currentLinesSeen);
   // The proof the chosen path needs is in place (the server checks it again).
   const evidenceReady = completionEvidence === 'left_at_site'
@@ -462,16 +463,12 @@ export default function FieldStop() {
     if (!signedBy.trim()) { toast('error', 'Enter who signed for the delivery'); return; }
     if (!hasAnyQty) { toast('error', NOTHING_DELIVERED_MESSAGE); return; }
     if (usePaperTicket && !hasPaperTicketPhoto(photos)) { toast('error', 'Take a photo of the signed paper ticket before completing'); return; }
-    if (completionEvidence === 'paper_ticket' && !ticketPhotoMatchesLoad) { toast('error', TICKET_PHOTO_LOAD_CHANGED_MESSAGE); return; }
     if (usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn)) { toast('error', 'Enter the delivery date from the paper ticket (today or earlier)'); return; }
     if (completionEvidence === 'left_at_site' && !hasLeftAtSitePhoto(photos)) { toast('error', 'Take a photo of where the delivery was left before completing'); return; }
     if (completionEvidence === 'signature' && !signatureDataUrl) { toast('error', 'Have the customer sign on screen, or use a paper ticket'); return; }
     if (completionEvidence === 'signature' && !isSignatureDataUrl(signatureDataUrl)) { toast('error', INVALID_SIGNATURE_MESSAGE); return; }
-    if (completionEvidence === 'signature' && !sameLinesSeen(sig.signedLines, currentLinesSeen)) {
-      sig.clearSignature();
-      toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
-      return;
-    }
+    const proofProblem = loadProofProblem(completionEvidence, currentLinesSeen, sig.signedLines, ticketPhotoLines);
+    if (proofProblem) { sig.reportProofProblem(proofProblem); return; }
     // A missing or mismatched brand only warns (Mason, 2026-11-09).
     const warnings = brandWarnings(brandState.brands, brandState.drafts, deliveryQtys);
     if (warnings.length > 0) { setBrandWarning({ stopId: id!, list: warnings }); return; }
@@ -503,12 +500,8 @@ export default function FieldStop() {
     // Caught here, before the signature image is uploaded: nothing delivered, or proof taken for other lines or amounts.
     if (!hasAnyQty) { toast('error', NOTHING_DELIVERED_MESSAGE); setStep('verify'); return; }
     const signedLinesAtSubmit = completionEvidence === 'signature' ? sig.signedLines : null;
-    if (completionEvidence === 'signature' && !sameLinesSeen(signedLinesAtSubmit, currentLinesSeen)) {
-      sig.clearSignature();
-      toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
-      return;
-    }
-    if (completionEvidence === 'paper_ticket' && !ticketPhotoMatchesLoad) { toast('error', TICKET_PHOTO_LOAD_CHANGED_MESSAGE); return; }
+    const proofProblem = loadProofProblem(completionEvidence, currentLinesSeen, signedLinesAtSubmit, ticketPhotoLines);
+    if (proofProblem) { sig.reportProofProblem(proofProblem); return; }
     setCompleting(true);
 
     const quantitiesJson = isPartial

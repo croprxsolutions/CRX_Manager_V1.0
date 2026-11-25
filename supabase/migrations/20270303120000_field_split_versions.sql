@@ -24,7 +24,9 @@
 --      sets = today's percents scaled in proportion to exactly 100% (share / total, as order invoicing did), in micro-percent,
 --      the last micro-percent of rounding to the largest share, lowest customer id on a tie).
 --   7. Until FP-4: each payer's product and application shares must be equal (FIELD_SPLIT_SHARES_MUST_MATCH_UNTIL_FP4),
---      because job billing still falls back to the copy, which holds one share per payer.
+--      because job billing still falls back to the copy, which holds one share per payer; and set_field_billing_split
+--      takes only Central today as a start date (FIELD_SPLIT_STARTS_TODAY_UNTIL_FP4), because job billing reads
+--      today's copy, not the split in force on the job's date (Mason, 2026-11-24).
 --
 -- save_field changes (same signature, wrapper unchanged; only _save_field_replay_impl_20261015 is replaced):
 --   - a NULL p_billing_defaults leaves the split and notes as they are (field details only; before: NULL deleted the split);
@@ -32,7 +34,8 @@
 --     deleted the split and Create Invoice then stopped for that field); on a field with no split in force it writes nothing;
 --   - a split equal to today's in-force product shares (payers above 0%) writes no version (an old-screen name-only
 --     save); a different one writes a version starting Central today with product = application shares;
---   - each element's notes go to field_payer_notes; is_primary is ignored (the copy marks the owner primary when paying, else the largest share);
+--   - each element's notes are ignored (notes are saved only by set_field_billing_split; the copy no longer carries
+--     them, so applicators assigned to a field cannot read office payer notes); is_primary is ignored (the copy marks the owner primary when paying, else the largest share);
 --   - a price_override_cents or pricing_note is refused (per-acre pricing is retired, 20270224110000);
 --   - shares totalling within 0.01% of 100% are scaled in proportion to exactly 100%, as order invoicing did (e.g. 50.01/50.00
 --     is saved as 50.005/49.995, billing the same cents as before); a larger gap is refused.
@@ -309,9 +312,9 @@ AS $function$
   )
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'c', y.customer_id, 'pct', (y.product_share_micro_pct::numeric / 1000000)::numeric(9,6),
-           'pri', y.customer_id = (SELECT customer_id FROM pri), 'n', n.notes, 's', y.version_id) ORDER BY y.customer_id), '[]'::jsonb)
+           -- Payer notes stay in field_payer_notes (office only): the copy is readable by assigned applicators (Mason, 2026-11-24).
+           'pri', y.customer_id = (SELECT customer_id FROM pri), 'n', NULL::text, 's', y.version_id) ORDER BY y.customer_id), '[]'::jsonb)
     FROM paying y
-    LEFT JOIN public.field_payer_notes n ON n.field_id = y.field_id AND n.customer_id = y.customer_id
 $function$;
 REVOKE ALL ON FUNCTION public._field_billing_copy_expected_20270303(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
@@ -577,6 +580,12 @@ BEGIN
   IF p_payers IS NULL AND p_notes IS NULL THEN
     RAISE EXCEPTION 'FIELD_SPLIT_NOTHING_TO_SAVE: send a split, notes, or both' USING ERRCODE = '22023';
   END IF;
+  -- Until FP-4 (job billing reads split history), a split change starts Central today only (Mason, 2026-11-24).
+  IF p_payers IS NOT NULL AND p_effective_from IS NOT NULL AND isfinite(p_effective_from)
+     AND p_effective_from <> public._field_split_today_20270303() THEN
+    RAISE EXCEPTION 'FIELD_SPLIT_STARTS_TODAY_UNTIL_FP4: until billing reads split history, a split change starts today (%)',
+      public._field_split_today_20270303() USING ERRCODE = '22023';
+  END IF;
 
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor, 'p_field_id', p_field_id, 'p_effective_from', p_effective_from, 'p_payers', p_payers,
@@ -664,7 +673,6 @@ DECLARE
   v_field_id uuid;
   v_existing jsonb;
   v_payers jsonb;
-  v_notes jsonb;
   v_today date := public._field_split_today_20270303();
   v_in_force uuid;
   v_current jsonb;
@@ -736,8 +744,8 @@ BEGIN
                     to_jsonb((v_payers->0->>'product_share_micro_pct')::bigint + v_diff)),
                     '{0,application_share_micro_pct}', to_jsonb((v_payers->0->>'application_share_micro_pct')::bigint + v_diff));
     END IF;
-    SELECT jsonb_agg(jsonb_build_object('customer_id', e->>'customer_id', 'notes', e->'notes'))
-      INTO v_notes FROM jsonb_array_elements(p_billing_defaults) e WHERE e ? 'notes';
+    -- Notes are not taken from here: the old screen reads them from the copy, which no longer carries them,
+    -- so a resend would erase them. The new Field Setup screen saves notes through set_field_billing_split.
   END IF;
 
   IF p_field_id IS NULL THEN
@@ -805,8 +813,8 @@ BEGIN
       v_payers := NULL;
     END IF;
   END IF;
-  IF v_payers IS NOT NULL OR v_notes IS NOT NULL THEN
-    PERFORM public._set_field_billing_split_20270303(v_field_id, v_today, v_payers, v_notes, 'Saved from Field Setup', v_actor, true);
+  IF v_payers IS NOT NULL THEN
+    PERFORM public._set_field_billing_split_20270303(v_field_id, v_today, v_payers, NULL, 'Saved from Field Setup', v_actor, true);
   ELSE
     -- The owner may have changed: re-mark the copy's primary row.
     PERFORM public._refresh_field_billing_defaults_copy_20270303(v_field_id);

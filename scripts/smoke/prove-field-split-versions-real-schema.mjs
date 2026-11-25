@@ -11,9 +11,9 @@
  *   2. set_field_billing_split saves thirds exactly and the copy shows them; refuses (RPC and direct SQL) a 90% set,
  *      the same customer twice, a negative or blank share, a version with no payers, a payer added to an old
  *      version, UPDATE/DELETE of history, and (until FP-4) a payer whose product and application shares differ;
- *      a 0%/0% named payer saves;
- *   3. save_field: a name-only save writes no version and keeps notes; a notes-only save changes notes and writes no
- *      version; a named 0% payer survives two saves; a changed split writes a version; removing every payer from a
+ *      a 0%/0% named payer saves; a split starting on any day but Central today is refused (until FP-4);
+ *   3. save_field: a name-only save writes no version and keeps notes; notes it is sent are ignored (only
+ *      set_field_billing_split saves notes, and the copy carries none, so assigned applicators cannot read them); a named 0% payer survives two saves; a changed split writes a version; removing every payer from a
  *      field with a split is refused and the split kept; a per-acre price is refused; a sales rep with Fields & Maps
  *      turned off is refused by save_field and set_field_billing_split;
  *   4. retries: the same key resent writes nothing; the same key with different payers is refused; a missing or
@@ -22,7 +22,7 @@
  *      copy and reads no version or notes row; applicator, inactive applicator, driver and entity_recipient cannot
  *      call the writer or the resolver; anon can touch nothing;
  *   6. deleting a customer who owns or pays on a field is refused; one with no field still deletes;
- *   7. resolver: dated versions, duplicates, unknown ids and a null date; a dated change with the same payers is kept;
+ *   7. resolver: dated versions (written by the internal writer, as FP-4 will allow), duplicates, unknown ids and a null date; a dated change with the same payers is kept;
  *   8. the nightly refresh repairs a stale copy; a split save and a FOR SHARE reader on the same field run one after
  *      the other (the reader waits for the writer's FOR UPDATE).
  *
@@ -114,7 +114,7 @@ try {
   assert.equal(inForce(F3), `${A}:33333334/33333334,${B}:33333333/33333333,${C}:33333333/33333333`, 'thirds: the leftover goes to the lowest id on a tie');
   assert.equal(copy(F3), `${A}:33.333334:true:-,${B}:33.333333:false:-,${C}:33.333333:false:-`, 'the copy follows version 1');
   assert.equal(note(F5, C), 'landlord note', 'old split notes move to field_payer_notes');
-  assert.equal(copy(F5), `${B}:60.000000:true:-,${C}:40.000000:false:landlord note`, 'copy keeps the note');
+  assert.equal(copy(F5), `${B}:60.000000:true:-,${C}:40.000000:false:-`, 'the copy no longer carries the note (applicators read the copy)');
   assert.equal(copy(F6), `${B}:100.000000:true:-`, 'a non-owner sole payer stays primary (owner E pays nothing)');
   console.log('[backfill] version 1 on every field with a split, thirds exact, notes kept');
 
@@ -173,8 +173,12 @@ try {
   assert.equal(inForce(F1), `${A}:100000000/100000000,${D}:0/0`, 'the named 0% payer survives two saves');
   r = commit(USERS.admin, asUser(saveField(F1, A, 'One', copyRows(F1, { [A]: 'owner note' }), 'k-sf-notes')) + ' v := u::text;');
   assert.equal(versions(F1), v1, 'a notes-only save writes no version');
-  assert.equal(note(F1, A), 'owner note', 'a notes-only save changes the notes');
-  assert.equal(copy(F1), `${A}:100.000000:true:owner note`);
+  assert.equal(note(F1, A), '', 'save_field ignores notes (no note row is written; the old screen read them from the copy, which has none)');
+  commit(USERS.admin, asUser(`${setSplit(F1, TODAY, 'NULL', 'k-owner-note', `'[{"customer_id":"${A}","notes":"owner note"}]'::jsonb`)} v := r::text;`));
+  assert.equal(note(F1, A), 'owner note', 'the split writer saves the note');
+  assert.equal(copy(F1), `${A}:100.000000:true:-`, 'and the copy does not carry it');
+  r = commit(USERS.admin, asUser(saveField(F1, A, 'One', copyRows(F1), 'k-sf-after-note')) + ' v := u::text;');
+  assert.equal(note(F1, A), 'owner note', 'an old-screen resend of the note-free copy keeps the note');
   r = attempt(USERS.admin, `${refuse(saveField(F1, A, 'One', `'[]'::jsonb`, 'k-sf-empty'))} v := t;`);
   assert.match(r, /FIELD_SPLIT_CLEAR_REFUSED/, `an empty split on a field with a split is refused (Create Invoice never falls back to a payer): ${r}`);
   assert.equal(versions(F1), v1, 'and writes nothing');
@@ -200,18 +204,23 @@ try {
   console.log('[save_field] name-only and notes-only saves write no version; an empty save on a split field is refused; 0% payer survives; price refused');
 
   // 4. Retries.
-  const before = versions(F3);
-  r = commit(USERS.admin, asUser(`${setSplit(F3, "DATE '2027-03-01'", payers([[A, 70000000], [B, 30000000]]), 'k-retry')} v := r::text;`));
-  const r2 = commit(USERS.admin, asUser(`${setSplit(F3, "DATE '2027-03-01'", payers([[A, 70000000], [B, 30000000]]), 'k-retry')} v := r::text;`));
+  const before = versions(F6);
+  r = commit(USERS.admin, asUser(`${setSplit(F6, TODAY, payers([[B, 70000000], [E, 30000000]]), 'k-retry')} v := r::text;`));
+  const r2 = commit(USERS.admin, asUser(`${setSplit(F6, TODAY, payers([[B, 70000000], [E, 30000000]]), 'k-retry')} v := r::text;`));
   assert.equal(r2, r, 'the same key resent returns the first answer');
-  assert.equal(versions(F3), String(Number(before) + 1), 'and writes nothing more');
-  r = attempt(USERS.admin, `${refuse(setSplit(F3, "DATE '2027-03-01'", payers([[A, 10000000], [B, 90000000]]), 'k-retry'))} v := t;`);
+  assert.equal(versions(F6), String(Number(before) + 1), 'and writes nothing more');
+  r = attempt(USERS.admin, `${refuse(setSplit(F6, TODAY, payers([[B, 10000000], [E, 90000000]]), 'k-retry'))} v := t;`);
   assert.match(r, /IDEMPOTENCY_INTENT_MISMATCH/, `same key, different payers refused: ${r}`);
   r = attempt(USERS.admin, `${refuse(`r := public.set_field_billing_split('${F3}', ${TODAY}, ${payers([[A, M]])}, NULL, NULL, NULL);`)} v := t;`);
   assert.match(r, /IDEMPOTENCY_KEY_REQUIRED/);
   r = attempt(USERS.admin, `${refuse(setSplit(F3, TODAY, payers([[A, M]]), 'k-tab\t'))} v := t;`);
   assert.match(r, /IDEMPOTENCY_KEY_REQUIRED/, `a key with a tab is refused: ${r}`);
-  console.log('[retries] same key replays; a different request under it is refused');
+  // Until FP-4 a split change starts today only (Mason, 2026-11-24): job billing reads today's copy.
+  for (const date of ["DATE '2027-03-01'", `${TODAY} - 1`, `${TODAY} + 1`]) {
+    r = attempt(USERS.admin, `${refuse(setSplit(F3, date, payers([[A, 70000000], [B, 30000000]]), `k-dated-${date.length}`))} v := t;`);
+    assert.match(r, /FIELD_SPLIT_STARTS_TODAY_UNTIL_FP4/, `a split starting ${date} is refused: ${r}`);
+  }
+  console.log('[retries] same key replays; a different request under it is refused; non-today starts refused');
 
   // 5. Access.
   for (const stmt of [`INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct) VALUES ('${F4}', '${X}', 1);`,
@@ -273,7 +282,11 @@ try {
   assert.equal(r, 'ok|1', 'a customer with no field still deletes');
   console.log('[customers] owner and payer deletes refused');
 
-  // 7. Resolver and dated versions.
+  // 7. Resolver and dated versions. The public writer takes only today until FP-4, so the dated version is written by
+  // the internal writer, as FP-4 will allow.
+  const dated = (field, date, rows) => scalar(`SELECT set_config('request.jwt.claims', '{"sub":"${USERS.admin}","role":"authenticated"}', false);
+    SELECT public._set_field_billing_split_20270303('${field}', ${date}, ${rows}, NULL, 'proof dated', '${USERS.admin}', true)->>'wrote_version';`);
+  assert.equal(dated(F3, "DATE '2027-03-01'", payers([[A, 70000000], [B, 30000000]])), 'true', 'a dated version is written');
   r = attempt(USERS.rep, `v := (SELECT string_agg(field_id::text || ':' || has_split || ':' || coalesce(version_number::text, '-'), ',' ORDER BY field_id)
     FROM public.field_split_as_of(ARRAY['${F3}', '${F4}']::uuid[], DATE '2027-02-28'));`);
   assert.equal(r, `ok|${F3}:true:1,${F4}:true:1`, `before the dated version: ${r}`);
@@ -288,17 +301,15 @@ try {
     assert.match(r, re, `resolver refuses ${args}: ${r}`);
   }
   const f3 = versions(F3);
-  r = commit(USERS.admin, asUser(`${setSplit(F3, "DATE '2027-03-01'", payers([[A, 70000000], [B, 30000000]]), 'k-same-date')} v := r::text;`));
-  assert.match(r, /"wrote_version": false/, 'same payers on the in-force version\'s own date: nothing new');
-  r = commit(USERS.admin, asUser(`${setSplit(F3, "DATE '2027-04-01'", payers([[A, 70000000], [B, 30000000]]), 'k-later-date')} v := r::text;`));
-  assert.match(r, /"wrote_version": true/, 'a dated change with the same payers is kept');
+  assert.equal(dated(F3, "DATE '2027-03-01'", payers([[A, 70000000], [B, 30000000]])), 'false', 'same payers on the in-force version\'s own date: nothing new');
+  assert.equal(dated(F3, "DATE '2027-04-01'", payers([[A, 70000000], [B, 30000000]])), 'true', 'a dated change with the same payers is kept');
   assert.equal(versions(F3), String(Number(f3) + 1));
   console.log('[resolver] dated versions resolve; refusals; same-date no-op and dated change kept');
 
   // 8. Nightly refresh and lock order.
   psql(`DELETE FROM public.field_billing_defaults WHERE field_id = '${F1}';`);
   assert.equal(scalar(`SELECT public._refresh_all_field_billing_copies_20270303();`), '1', 'the nightly refresh repairs one stale copy');
-  assert.equal(copy(F1), `${A}:100.000000:true:owner note`);
+  assert.equal(copy(F1), `${A}:100.000000:true:-`);
   assert.equal(scalar(`SELECT public._refresh_all_field_billing_copies_20270303();`), '0', 'and then has nothing to do');
   // A split save holds the field row; an invoice writer's FOR SHARE on that field waits for it.
   const writer = spawn('docker', [...PSQL], { stdio: ['pipe', 'pipe', 'pipe'] });

@@ -845,12 +845,31 @@ export function priceSheetExpiredText(expiresAt: string, now = Date.now()): stri
   return Number.isFinite(expiry) && expiry <= now ? PRICE_SHEET_EXPIRED_TEXT : null;
 }
 
+/** True for the server's combined price sheet refusal, the only error whose single reason is looked up. */
+export function isPriceSheetRefusal(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : (error as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && PRICE_SHEET_REFUSED.test(message);
+}
+
 /** Plain words for the server's combined price sheet refusal; null for any other error. */
 export function priceSheetRefusalText(error: unknown, expiresAt: string, now = Date.now()): string | null {
-  const message = error instanceof Error ? error.message : (error as { message?: unknown } | null)?.message;
-  if (typeof message !== 'string' || !PRICE_SHEET_REFUSED.test(message)) return null;
-  if (!Number.isFinite(Date.parse(expiresAt))) return null;
+  if (!isPriceSheetRefusal(error) || !Number.isFinite(Date.parse(expiresAt))) return null;
   return priceSheetExpiredText(expiresAt, now) ?? PRICE_SHEET_USED_TEXT;
+}
+
+// get_pricing_workbook_export_refusal_reason's codes. ALREADY_APPLIED means a change set from this sheet was
+// applied, not that these exact edits went live; an old sheet that also expired reports OLD_TEMPLATE.
+const PRICE_SHEET_REASON_TEXT = new Map<string, string>([
+  ['EXPORT_NOT_FOUND', 'No prices were changed. CRX Manager has no record of this price sheet. Download a fresh one'],
+  ['DOWNLOADED_BY_OTHER_USER', 'No prices were changed. Another user downloaded this price sheet, and only the person who downloads a sheet can upload it. Download a fresh one yourself'],
+  ['ALREADY_APPLIED', "No prices were changed. This price sheet was already used; each product's Sell Price History, Cost History or Change History shows what it changed. To make more changes, download a fresh one"],
+  ['OLD_TEMPLATE', 'No prices were changed. This price sheet came from an older template. Download a fresh one'],
+  ['EXPIRED', PRICE_SHEET_EXPIRED_TEXT],
+]);
+
+/** One sentence for the database's refusal reason; null for NONE or an unknown code, which keep today's message. */
+export function priceSheetReasonText(reason: string): string | null {
+  return PRICE_SHEET_REASON_TEXT.get(reason) ?? null;
 }
 
 /**

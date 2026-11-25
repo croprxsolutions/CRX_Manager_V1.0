@@ -79,6 +79,7 @@ try {
 
   // Still refused after the change.
   assert.match(previewThenSave(ZETA, { cas: ZETA_CAS }, null, null), /REASON_REQUIRED/, 'reason still required');
+  assert.match(previewThenSave(ZETA, { cas: ZETA_CAS }, 'EPA gave no CAS', null), /EVIDENCE_REQUIRED/, 'evidence still required');
   assert.match(previewThenSave(ZETA, { cas: '52315-07-9' }), /INGREDIENT_CAS_INVALID/, 'bad check digit');
   assert.match(previewThenSave(ZETA, { cas: OTHER_CAS }), /INGREDIENT_CAS_TAKEN/, 'CAS of another ingredient');
   assert.match(previewThenSave(OTHER, { cas: '50-00-0' }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'changing a set CAS stays gated');
@@ -87,7 +88,7 @@ try {
   assert.match(previewThenSave(ZETA, { is_parent_form: true }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'acid flag stays gated');
   assert.match(attempt(USERS.rep, `${refuse(`r := public.preview_active_ingredient_change('${ZETA}', ${J({ cas: ZETA_CAS })});`)} v := t;`), /ADMIN_REQUIRED/);
   assert.match(attempt(USERS.rep, `${refuse(`r := public.save_active_ingredient('${ZETA}', 1, 'x', ${J({ cas: ZETA_CAS })}, 'r', 'e', 'k');`)} v := t;`), /ADMIN_REQUIRED/);
-  console.log('[refuse] no reason, bad check digit, taken CAS, changing/clearing a set CAS, CAS+acid, acid alone, sales rep -> all still refused');
+  console.log('[refuse] no reason, no evidence, bad check digit, taken CAS, changing/clearing a set CAS, CAS+acid, acid alone, sales rep -> all still refused');
 
   // The fix.
   const epaRowBefore = scalar(`SELECT row_version || ':' || strength_value || ':' || source FROM public.product_parent_ingredients WHERE parent_id = '${P_EPA}' AND ingredient_id = '${ZETA}';`);

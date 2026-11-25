@@ -67,6 +67,20 @@ const saveField = (field, owner, name, defaults, key) =>
 // The writer's "today" is the Central date; CURRENT_DATE is UTC in the container and runs a day ahead in the evening.
 const TODAY = "(now() AT TIME ZONE 'America/Chicago')::date";
 const commit = (uid, body) => attempt(uid, body, { commit: true });
+// $100.00 through order invoicing (calculate_billing_splits on shares / total) and job billing (cumulative rounding over
+// the shares' total), once from today's copy and once from the shares as saved before FP-1: the cents must match.
+const orderCents = (pcts) => scalar(`SELECT array_to_string(public.calculate_billing_splits(10000::bigint,
+  (SELECT array_agg(p / t * 100 ORDER BY o) FROM (SELECT p, o, sum(p) OVER () AS t FROM unnest(${pcts}) WITH ORDINALITY u(p, o)) x)), '/');`);
+const jobCents = (pcts) => scalar(`SELECT string_agg((round(10000 * c / t) - round(10000 * (c - p) / t))::text, '/' ORDER BY o)
+  FROM (SELECT p, o, sum(p) OVER (ORDER BY o) AS c, sum(p) OVER () AS t FROM unnest(${pcts}) WITH ORDINALITY u(p, o)) x;`);
+const billsAsBefore = (field, saved, label) => {
+  const fromCopy = `(SELECT array_agg(split_pct::numeric ORDER BY customer_id) FROM public.field_billing_defaults WHERE field_id = '${field}')`;
+  const asSaved = `ARRAY[${Object.keys(saved).sort().map((c) => saved[c]).join(', ')}]::numeric[]`;
+  assert.equal(orderCents(fromCopy), orderCents(asSaved), `${label}: order invoicing bills $100.00 exactly as before FP-1`);
+  assert.equal(jobCents(fromCopy), jobCents(asSaved), `${label}: job billing bills $100.00 exactly as before FP-1`);
+  assert.equal(orderCents(fromCopy).split('/').map(Number).reduce((a, b) => a + b), 10000, `${label}: every cent is billed`);
+  console.log(`[${label}] $100.00 on ${Object.values(saved).join('/')} bills ${orderCents(fromCopy)} (orders), ${jobCents(fromCopy)} (jobs), as before FP-1`);
+};
 // Whole output (scalar keeps only the last line; a sweep packet can span lines).
 const scalarAll = (sql) => docker([...PSQL, '-A', '-t'], { input: sql }).stdout.trim();
 
@@ -86,7 +100,7 @@ try {
     BEGIN;
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary, notes) VALUES
       ('${F1}', '${A}', 100, true, NULL),
-      ('${F2}', '${A}', 50, true, NULL), ('${F2}', '${B}', 50, false, NULL),
+      ('${F2}', '${A}', 50.01, true, NULL), ('${F2}', '${B}', 50.00, false, NULL),
       ('${F3}', '${A}', 33.333333, true, NULL), ('${F3}', '${B}', 33.333333, false, NULL), ('${F3}', '${C}', 33.333333, false, NULL),
       ('${F5}', '${B}', 60, true, NULL), ('${F5}', '${C}', 40, false, 'landlord note'),
       ('${F6}', '${B}', 100, true, NULL);
@@ -111,11 +125,14 @@ try {
   assert.equal(scalar(`SELECT count(*) || '/' || count(*) FILTER (WHERE version_number = 1 AND NOT history_known AND effective_from = '1900-01-01')
     FROM public.field_billing_split_versions;`), '5/5', 'five fields get version 1, history unknown');
   assert.equal(versions(F4), '0', 'a field with no split gets no version');
-  assert.equal(inForce(F3), `${A}:33333334/33333334,${B}:33333333/33333333,${C}:33333333/33333333`, 'thirds: the leftover goes to the lowest id on a tie');
-  assert.equal(copy(F3), `${A}:33.333334:true:-,${B}:33.333333:false:-,${C}:33.333333:false:-`, 'the copy follows version 1');
+  assert.equal(inForce(F3), `${A}:33333333/33333333,${B}:33333333/33333333,${C}:33333333/33333333`, 'thirds: stored exactly as saved, never rescaled');
+  assert.equal(copy(F3), `${A}:33.333333:true:-,${B}:33.333333:false:-,${C}:33.333333:false:-`, 'the copy is what it was before');
   assert.equal(note(F5, C), 'landlord note', 'old split notes move to field_payer_notes');
   assert.equal(copy(F5), `${B}:60.000000:true:-,${C}:40.000000:false:-`, 'the copy no longer carries the note (applicators read the copy)');
   assert.equal(copy(F6), `${B}:100.000000:true:-`, 'a non-owner sole payer stays primary (owner E pays nothing)');
+  // Sol HIGH (backfill): a saved 50.01/50.00 split imports unrounded and bills $100.00 exactly as before FP-1.
+  assert.equal(inForce(F2), [`${A}:50010000/50010000`, `${B}:50000000/50000000`].sort().join(','), 'a near-100% split imports as saved');
+  billsAsBefore(F2, { [A]: '50.01', [B]: '50.00' }, 'backfill');
   console.log('[backfill] version 1 on every field with a split, thirds exact, notes kept');
 
   // 2. The writer: thirds, refusals, 0% payers.
@@ -181,6 +198,12 @@ try {
   assert.equal(copy(F1), `${A}:100.000000:true:-`, 'and the copy does not carry it');
   r = commit(USERS.admin, asUser(saveField(F1, A, 'One', copyRows(F1), 'k-sf-after-note')) + ' v := u::text;');
   assert.equal(note(F1, A), 'owner note', 'an old-screen resend of the note-free copy keeps the note');
+  // A tab open across the deploy still holds the note it loaded: resending it unchanged saves; an edit is refused by name.
+  r = commit(USERS.admin, asUser(saveField(F1, A, 'One', copyRows(F1, { [A]: 'owner note' }), 'k-sf-old-tab-same')) + ' v := u::text;');
+  assert.equal(r, `ok|${F1}`, `an old tab resending its loaded note saves: ${r}`);
+  r = attempt(USERS.admin, `${refuse(saveField(F1, A, 'One', copyRows(F1, { [A]: 'edited in an old tab' }), 'k-sf-old-tab-edit'))} v := t;`);
+  assert.match(r, /FIELD_PAYER_NOTE_NOT_SAVED: .*Reload the page/, `an old tab's edited note is refused, not dropped: ${r}`);
+  assert.equal(note(F1, A), 'owner note', 'and the saved note is unchanged');
   r = attempt(USERS.admin, `${refuse(saveField(F1, A, 'One', `'[]'::jsonb`, 'k-sf-empty'))} v := t;`);
   assert.match(r, /FIELD_SPLIT_CLEAR_REFUSED/, `an empty split on a field with a split is refused (Create Invoice never falls back to a payer): ${r}`);
   assert.equal(versions(F1), v1, 'and writes nothing');
@@ -192,18 +215,28 @@ try {
   r = commit(USERS.admin, asUser(saveField(F3, A, 'Three details only', 'NULL::jsonb', 'k-sf-null')) + ' v := u::text;');
   assert.equal(r, `ok|${F3}`, `details-only save: ${r}`);
   assert.equal(versions(F3), f3Before, 'a NULL split leaves the split alone');
-  assert.equal(inForce(F3), `${A}:33333334/33333334,${B}:33333333/33333333,${C}:33333333/33333333`, 'thirds unchanged');
+  assert.equal(inForce(F3), `${A}:33333333/33333333,${B}:33333333/33333333,${C}:33333333/33333333`, 'thirds unchanged');
   r = attempt(USERS.admin, `${refuse(saveField(F5, B, 'Five', `'[{"customer_id":"${B}","split_pct":100,"price_override_cents":500}]'::jsonb`, 'k-sf-price'))} v := t;`);
   assert.match(r, /PER_ACRE_PRICING_RETIRED/, `per-acre price refused: ${r}`);
   r = attempt(USERS.admin, `${refuse(saveField(F5, B, 'Five', `'[{"customer_id":"${B}","split_pct":90}]'::jsonb`, 'k-sf-90'))} v := t;`);
   assert.match(r, /must total 100/, `save_field 90% refused: ${r}`);
-  // Shares within 0.01% of 100% are scaled in proportion, as order invoicing did: 50.01/50.00 -> 50.005/49.995 (Sol r5 HIGH).
+  // Shares within 0.01% of 100% are stored as entered, never rescaled (Mason, 2026-11-24: "fix them"): 50.01/50.00 stays.
   commit(USERS.admin, asUser(saveField(F5, B, 'Five', `'[{"customer_id":"${B}","split_pct":50.01},{"customer_id":"${C}","split_pct":50.00}]'::jsonb`, 'k-sf-near')) + ' v := u::text;');
-  assert.equal(inForce(F5), [`${B}:50005000/50005000`, `${C}:49995000/49995000`].sort().join(','), 'a near-100% split is scaled in proportion, not shifted onto one payer');
+  assert.equal(inForce(F5), [`${B}:50010000/50010000`, `${C}:50000000/50000000`].sort().join(','), 'a near-100% split is stored as entered');
+  assert.equal(copy(F5), [`${B}:50.010000:true:-`, `${C}:50.000000:false:-`].sort().join(','), 'the copy holds exactly what was entered');
+  billsAsBefore(F5, { [B]: '50.01', [C]: '50.00' }, 'save_field');
   const vF5 = versions(F5);
-  commit(USERS.admin, asUser(saveField(F5, B, 'Five renamed', `'[{"customer_id":"${B}","split_pct":50.005},{"customer_id":"${C}","split_pct":49.995}]'::jsonb`, 'k-sf-near-name')) + ' v := u::text;');
-  assert.equal(versions(F5), vF5, 'resending the scaled copy (an old-screen name-only save) writes no version');
-  console.log('[save_field] name-only and notes-only saves write no version; an empty save on a split field is refused; 0% payer survives; price refused');
+  commit(USERS.admin, asUser(saveField(F5, B, 'Five renamed', copyRows(F5), 'k-sf-near-name')) + ' v := u::text;');
+  assert.equal(versions(F5), vF5, 'resending the copy (an old-screen name-only save) writes no version');
+  // The main payer is automatic: marking anyone else primary is refused by name, not silently dropped.
+  r = attempt(USERS.admin, `${refuse(saveField(F5, B, 'Five', `'[{"customer_id":"${B}","split_pct":50.01,"is_primary":false},{"customer_id":"${C}","split_pct":50.00,"is_primary":true}]'::jsonb`, 'k-sf-primary'))} v := t;`);
+  assert.match(r, /FIELD_PRIMARY_IS_AUTOMATIC.*Mark Bravo Farms as primary/, `a non-automatic primary is refused, naming the automatic one: ${r}`);
+  assert.equal(versions(F5), vF5, 'and writes nothing');
+  r = commit(USERS.admin, asUser(saveField(F5, C, 'Five', `'[{"customer_id":"${B}","split_pct":50.01},{"customer_id":"${C}","split_pct":50.00,"is_primary":true}]'::jsonb`, 'k-sf-primary-owner')) + ' v := u::text;');
+  assert.equal(r, `ok|${F5}`, `the owner (now C) marked primary saves: ${r}`);
+  assert.equal(copy(F5), [`${B}:50.010000:false:-`, `${C}:50.000000:true:-`].sort().join(','), 'the copy marks the paying owner primary');
+  commit(USERS.admin, asUser(saveField(F5, B, 'Five', copyRows(F5).replace("'is_primary', is_primary", "'is_primary', false"), 'k-sf-owner-back')) + ' v := u::text;');
+  console.log('[save_field] name-only and notes-only saves write no version; an empty save on a split field is refused; 0% payer survives; price refused; non-automatic primary refused');
 
   // 4. Retries.
   const before = versions(F6);
@@ -260,6 +293,10 @@ try {
   r = attempt(USERS.rep, `${refuse(saveField(F2, A, 'Denied rename', 'NULL::jsonb', 'k-rep-denied-sf'))} v := t;`);
   assert.match(r, /PAGE_ACCESS_DENIED: fields/, `a rep without Fields & Maps cannot use save_field: ${r}`);
   assert.equal(versions(F2), vF2, 'and nothing is written');
+  r = attempt(USERS.rep, `${refuse(`UPDATE public.fields SET customer_id = '${D}' WHERE id = '${F2}';`)} v := t;`);
+  assert.match(r, /PAGE_ACCESS_DENIED: fields/, `a rep without Fields & Maps cannot change a field's owner directly (it decides the main payer): ${r}`);
+  r = attempt(USERS.rep, `UPDATE public.fields SET notes = 'rep note' WHERE id = '${F2}'; v := 'ok';`);
+  assert.equal(r, 'ok|ok', `other field edits by that rep are unchanged: ${r}`);
   // ... and cannot read split history, payers or notes, nor call the resolver (Sol r3 HIGH).
   const repReads = `v := (SELECT count(*) FROM public.field_billing_split_versions) + (SELECT count(*) FROM public.field_billing_split_payers)
     + (SELECT count(*) FROM public.field_payer_notes);`;

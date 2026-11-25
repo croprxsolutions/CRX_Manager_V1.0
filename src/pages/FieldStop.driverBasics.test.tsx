@@ -1,7 +1,8 @@
 /**
  * FieldStop.driverBasics.test.tsx: the stop screen's driver basics. Where to go (an address even when the
  * delivery has no address of its own), Call and Navigate, the one-tap Signed by name, Next Stop opening the
- * next stop on today's route, the one no-signal message, and today's saved copy of the stop in a dead spot.
+ * next stop on today's route, the one no-signal message, today's saved copy of the stop in a dead spot, and
+ * reporting an issue in the completion step (sent with complete_delivery as the delivery detail sends it).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -177,6 +178,57 @@ describe('FieldStop: Signed by', () => {
   });
 });
 
+describe('FieldStop: reporting an issue in the completion step', () => {
+  it('a driver reports a damaged product from the stop screen and it goes with the same complete_delivery save', async () => {
+    await reachSign();
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use J. Hollow' }));
+    // Notes appear only once a type is chosen, as on the delivery detail.
+    expect(screen.queryByLabelText('Describe the issue')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Report an issue/), { target: { value: 'other' } });
+    fireEvent.change(screen.getByLabelText('Describe the issue'), { target: { value: '  one jug cracked  ' } });
+    fireEvent.click(screen.getByRole('button', { name: /Continue to Review/ }));
+    // The driver sees the issue before completing.
+    expect(await screen.findByText('Issue')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Complete Delivery/ }));
+    await screen.findByText('Delivery complete');
+    const calls = mockRpc.mock.calls.filter(([name]) => name === 'complete_delivery');
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual(expect.objectContaining({
+      p_delivery_id: 'del-1', p_signed_by: 'J. Hollow', p_evidence: 'signature',
+      p_issue_type: 'other', p_issue_notes: 'one jug cracked',
+    }));
+  });
+
+  it('sends no issue fields when none is reported (the completion is unchanged)', async () => {
+    await reachSign();
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use J. Hollow' }));
+    expect(screen.getByLabelText(/Report an issue/)).toHaveValue('none');
+    fireEvent.click(screen.getByRole('button', { name: /Continue to Review/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Complete Delivery/ }));
+    await screen.findByText('Delivery complete');
+    const params = mockRpc.mock.calls.find(([name]) => name === 'complete_delivery')![1];
+    expect(params).not.toHaveProperty('p_issue_type');
+    expect(params).not.toHaveProperty('p_issue_notes');
+  });
+
+  it('drops a typed note when the driver switches the issue back to None', async () => {
+    await reachSign();
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use J. Hollow' }));
+    fireEvent.change(screen.getByLabelText(/Report an issue/), { target: { value: 'other' } });
+    fireEvent.change(screen.getByLabelText('Describe the issue'), { target: { value: 'one jug cracked' } });
+    fireEvent.change(screen.getByLabelText(/Report an issue/), { target: { value: 'none' } });
+    fireEvent.click(screen.getByRole('button', { name: /Continue to Review/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Complete Delivery/ }));
+    await screen.findByText('Delivery complete');
+    const params = mockRpc.mock.calls.find(([name]) => name === 'complete_delivery')![1];
+    expect(params).not.toHaveProperty('p_issue_type');
+    expect(params).not.toHaveProperty('p_issue_notes');
+  });
+});
+
 describe('FieldStop: Next Stop', () => {
   async function completeStop() {
     await reachSign();
@@ -260,6 +312,8 @@ describe('FieldStop: saved copy in a dead spot', () => {
     expect(screen.getByRole('link', { name: /Call/ })).toHaveAttribute('href', 'tel:6185550142');
     expect(screen.getByRole('button', { name: /Needs signal to start/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: /Start Delivery/ })).not.toBeInTheDocument();
+    // Like the main button, nothing on the saved copy can report an issue.
+    expect(screen.queryByLabelText(/Report an issue/)).not.toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalledWith('/my-route');
     expect(mockToast).not.toHaveBeenCalledWith('error', 'Could not load this stop');
   });

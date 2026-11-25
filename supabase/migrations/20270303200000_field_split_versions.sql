@@ -6,7 +6,8 @@
 -- WHAT:
 --   1. field_billing_split_versions + field_billing_split_payers: append-only history. Each version starts on a date
 --      the office picks (past or future) and carries two share sets, product and application, in micro-percent
---      (100,000,000 = 100%), each totalling exactly 100,000,000 (deferred check at commit). A payer may be 0% on one
+--      (100,000,000 = 100%), each totalling within 0.01% of 100% as entered, never rescaled (deferred check at commit),
+--      so billing, which divides by the total, bills the cents it billed before FP-1. A payer may be 0% on one
 --      side or both. UPDATE, DELETE and TRUNCATE are refused, and a payer can only be added to a version created in
 --      the same transaction.
 --   2. field_payer_notes: plain editable notes per field and customer (not versioned).
@@ -21,8 +22,7 @@
 --   5. fields.customer_id: ON DELETE CASCADE -> RESTRICT (I approve: constraint change). No customer-delete flow
 --      exists in the app; deleting a customer who owns or pays on a field is now refused.
 --   6. Backfill: each field's current split becomes version 1 (history_known = false, from 1900-01-01, both share
---      sets = today's percents scaled in proportion to exactly 100% (share / total, as order invoicing did), in micro-percent,
---      the last micro-percent of rounding to the largest share, lowest customer id on a tie).
+--      sets = today's percents exactly as saved, in micro-percent; nothing is rescaled (Mason, 2026-11-24: "fix them").
 --   7. Until FP-4: each payer's product and application shares must be equal (FIELD_SPLIT_SHARES_MUST_MATCH_UNTIL_FP4),
 --      because job billing still falls back to the copy, which holds one share per payer; and set_field_billing_split
 --      takes only Central today as a start date (FIELD_SPLIT_STARTS_TODAY_UNTIL_FP4), because job billing reads
@@ -35,10 +35,15 @@
 --   - a split equal to today's in-force product shares (payers above 0%) writes no version (an old-screen name-only
 --     save); a different one writes a version starting Central today with product = application shares;
 --   - each element's notes are ignored (notes are saved only by set_field_billing_split; the copy no longer carries
---     them, so applicators assigned to a field cannot read office payer notes); is_primary is ignored (the copy marks the owner primary when paying, else the largest share);
+--     them, so applicators assigned to a field cannot read office payer notes);
+--   - the main payer is automatic (Mason, 2026-11-24): the owner when paying, else the largest share (lowest customer id
+--     on a tie). A row marked is_primary that is not that payer is refused (FIELD_PRIMARY_IS_AUTOMATIC, naming the
+--     automatic one), so the old screen's Set Primary never reports success for a choice that is then dropped;
 --   - a price_override_cents or pricing_note is refused (per-acre pricing is retired, 20270224110000);
---   - shares totalling within 0.01% of 100% are scaled in proportion to exactly 100%, as order invoicing did (e.g. 50.01/50.00
---     is saved as 50.005/49.995, billing the same cents as before); a larger gap is refused.
+--   - a payer note that differs from the saved one is refused (FIELD_PAYER_NOTE_NOT_SAVED: a tab open across the deploy
+--     never reports a dropped note as saved); the note it loaded is accepted and left as it is;
+--   - shares totalling within 0.01% of 100% are stored as entered (50.01/50.00 stays 50.01/50.00, so every invoice
+--     bills the cents it billed before FP-1); a larger gap is refused.
 --
 -- CUTOVER (rule 6, inside this transaction after the locks): stops if any field_billing_defaults row carries a
 --   per-acre price or note, a primary mark the copy would move (owner if paying, else largest share), or a
@@ -46,13 +51,15 @@
 --   6 rows, 0 of each stop condition. Staging (2026-11-24): TEST fields only, incl. a non-owner 100% primary (kept).
 --
 -- NOT CHANGED: every reader of field_billing_defaults (they read the copy until FP-4 moves them), fbd_select, the
---   sum-100 trigger, save_field's wrapper and grants, fields policies.
+--   sum-100 trigger, save_field's wrapper and grants, fields policies (a new trigger refuses an owner change by a rep
+--   with Fields & Maps turned off, since the owner now decides the main payer).
 --
 -- KNOWN EFFECT: deleting a field that has a split is refused (its versions are history) until FP-3 adds archiving;
 --   the office marks such a field inactive instead. A field with no split still deletes as before.
 --
 -- ROLLBACK (its own reviewed migration): restore _save_field_replay_impl_20261015 to the 20261107140000 body, the three
---   fbd write policies and grants, fields_customer_id_fkey ON DELETE CASCADE; unschedule 'field-split-copy-refresh';
+--   fbd write policies and grants, fields_customer_id_fkey ON DELETE CASCADE; drop trigger fields_owner_change_page_access;
+--   unschedule 'field-split-copy-refresh';
 --   drop the new functions, field_billing_defaults.source_split_version_id and the three new tables (history lost).
 
 SET LOCAL lock_timeout = '5s';
@@ -243,7 +250,7 @@ REVOKE ALL ON FUNCTION public._field_split_payer_same_transaction_20270303() FRO
 CREATE TRIGGER field_billing_split_payers_same_transaction BEFORE INSERT ON public.field_billing_split_payers
   FOR EACH ROW EXECUTE FUNCTION public._field_split_payer_same_transaction_20270303();
 
--- At commit: every version has a payer, and each share set totals exactly 100,000,000.
+-- At commit: every version has a payer, and each share set totals within 0.01% of 100,000,000 (as entered).
 CREATE FUNCTION public._field_split_version_totals_20270303()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
 AS $function$
@@ -265,8 +272,8 @@ BEGIN
   IF v_count = 0 THEN
     RAISE EXCEPTION 'FIELD_SPLIT_NO_PAYERS: split version % has no payers', v_version USING ERRCODE = '23514';
   END IF;
-  IF v_product <> 100000000 OR v_application <> 100000000 THEN
-    RAISE EXCEPTION 'FIELD_SPLIT_NOT_100: split version % totals % product and % application micro-percent; each must be exactly 100,000,000',
+  IF abs(v_product - 100000000) > 10000 OR abs(v_application - 100000000) > 10000 THEN
+    RAISE EXCEPTION 'FIELD_SPLIT_NOT_100: split version % totals % product and % application micro-percent; each must be within 0.01%% of 100,000,000',
       v_version, v_product, v_application USING ERRCODE = '23514';
   END IF;
   RETURN NULL;
@@ -445,9 +452,9 @@ BEGIN
     IF (SELECT count(DISTINCT x->>'c') FROM jsonb_array_elements(v_new) x) <> jsonb_array_length(v_new) THEN
       RAISE EXCEPTION 'FIELD_SPLIT_DUPLICATE_PAYER: a customer is listed twice' USING ERRCODE = '22023';
     END IF;
-    IF (SELECT sum((x->>'p')::bigint) FROM jsonb_array_elements(v_new) x) <> 100000000
-       OR (SELECT sum((x->>'a')::bigint) FROM jsonb_array_elements(v_new) x) <> 100000000 THEN
-      RAISE EXCEPTION 'FIELD_SPLIT_NOT_100: product shares and application shares must each total exactly 100%%'
+    IF abs((SELECT sum((x->>'p')::bigint) FROM jsonb_array_elements(v_new) x) - 100000000) > 10000
+       OR abs((SELECT sum((x->>'a')::bigint) FROM jsonb_array_elements(v_new) x) - 100000000) > 10000 THEN
+      RAISE EXCEPTION 'FIELD_SPLIT_NOT_100: product shares and application shares must each total 100%% (within 0.01%%)'
         USING ERRCODE = '22023';
     END IF;
     -- shortcut: until FP-4 moves job billing off field_billing_defaults (one share per payer, so transfer_job_to_invoice
@@ -678,8 +685,8 @@ DECLARE
   v_in_force uuid;
   v_current jsonb;
   v_sent jsonb;
-  v_diff bigint;
   v_total numeric;
+  v_auto_primary uuid;
 BEGIN
   v_actor := auth.uid();
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
@@ -727,26 +734,41 @@ BEGIN
                 WHERE (e->>'split_pct')::numeric <= 0 OR (e->>'split_pct')::numeric > 100) THEN
       RAISE EXCEPTION 'FIELD_SPLIT_INVALID_SHARE: each share must be above 0%% and at most 100%%' USING ERRCODE = '22023';
     END IF;
-    -- Shares within 0.01% of 100% are scaled in proportion to exactly 100% (share / total), as order invoicing
-    -- already normalised them (20261029160000); the last micro-percent of rounding goes to the largest share
-    -- (lowest customer id on a tie) (Sol r5 HIGH: no silent shift between payers).
+    -- Shares within 0.01% of 100% are stored as entered (to the micro-percent, as numeric(9,6) stored them), never
+    -- rescaled: order invoicing and job billing divide by the total, so a 50.01/50.00 split bills the cents it billed
+    -- before FP-1 (Mason, 2026-11-24: "fix them").
     v_total := (SELECT sum((e->>'split_pct')::numeric) FROM jsonb_array_elements(p_billing_defaults) e);
     IF abs(v_total - 100) > 0.01 THEN
       RAISE EXCEPTION 'Billing splits must total 100%% (got %)', trim_scale(v_total) USING ERRCODE = '22023';
     END IF;
     SELECT jsonb_agg(jsonb_build_object('customer_id', e->>'customer_id',
-                                        'product_share_micro_pct', round((e->>'split_pct')::numeric * 100000000 / v_total),
-                                        'application_share_micro_pct', round((e->>'split_pct')::numeric * 100000000 / v_total))
-                     ORDER BY round((e->>'split_pct')::numeric * 100000000 / v_total) DESC, e->>'customer_id')
+                                        'product_share_micro_pct', round((e->>'split_pct')::numeric * 1000000),
+                                        'application_share_micro_pct', round((e->>'split_pct')::numeric * 1000000)))
       INTO v_payers FROM jsonb_array_elements(p_billing_defaults) e;
-    v_diff := 100000000 - (SELECT sum((x->>'product_share_micro_pct')::bigint) FROM jsonb_array_elements(v_payers) x);
-    IF v_diff <> 0 THEN
-      v_payers := jsonb_set(jsonb_set(v_payers, '{0,product_share_micro_pct}',
-                    to_jsonb((v_payers->0->>'product_share_micro_pct')::bigint + v_diff)),
-                    '{0,application_share_micro_pct}', to_jsonb((v_payers->0->>'application_share_micro_pct')::bigint + v_diff));
+    -- The main payer is automatic (Mason, 2026-11-24): the owner when paying, else the largest share (lowest customer
+    -- id on a tie), as the copy marks it. A row marked primary that is not that payer is refused by name, so the old
+    -- screen's Set Primary never reports success for a choice that would then be dropped.
+    SELECT (x->>'customer_id')::uuid INTO v_auto_primary FROM jsonb_array_elements(v_payers) x
+     ORDER BY ((x->>'customer_id')::uuid = (p_field_payload->>'customer_id')::uuid) DESC NULLS LAST,
+              (x->>'product_share_micro_pct')::bigint DESC, (x->>'customer_id')::uuid LIMIT 1;
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_billing_defaults) e
+                WHERE lower(e->>'is_primary') = 'true' AND (e->>'customer_id')::uuid <> v_auto_primary) THEN
+      RAISE EXCEPTION 'FIELD_PRIMARY_IS_AUTOMATIC: the main payer is picked automatically (the owner when paying, else the largest share). Mark % as primary.',
+        COALESCE((SELECT c.farm_name FROM public.customers c WHERE c.id = v_auto_primary), v_auto_primary::text)
+        USING ERRCODE = '22023';
     END IF;
     -- Notes are not taken from here: the old screen reads them from the copy, which no longer carries them,
     -- so a resend would erase them. The new Field Setup screen saves notes through set_field_billing_split.
+    -- A tab left open across the deploy still sends notes: the note it loaded is accepted unchanged, but an edited
+    -- note is refused by name rather than reported saved and dropped.
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_billing_defaults) e
+                WHERE NULLIF(btrim(e->>'notes'), '') IS NOT NULL
+                  AND NULLIF(btrim(e->>'notes'), '') IS DISTINCT FROM (
+                        SELECT NULLIF(btrim(n.notes), '') FROM public.field_payer_notes n
+                         WHERE n.field_id = p_field_id AND n.customer_id = (e->>'customer_id')::uuid)) THEN
+      RAISE EXCEPTION 'FIELD_PAYER_NOTE_NOT_SAVED: payer notes now save from the updated Field Setup screen. Reload the page and save the note again.'
+        USING ERRCODE = '22023';
+    END IF;
   END IF;
 
   IF p_field_id IS NULL THEN
@@ -847,6 +869,26 @@ ALTER TABLE public.fields
   DROP CONSTRAINT fields_customer_id_fkey,
   ADD CONSTRAINT fields_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE RESTRICT;
 
+-- The copy marks the paying owner primary, so a field's owner now decides its main payer. A rep with Fields & Maps
+-- turned off in Page Access could still change the owner by a direct update (fields policies are unchanged): refused
+-- here on every path, as save_field and the split writer already refuse that rep. No signed-in user (a migration,
+-- the service) is not checked.
+CREATE FUNCTION public._fields_owner_change_page_access_20270303()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF NEW.customer_id IS DISTINCT FROM OLD.customer_id
+     AND EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IS DISTINCT FROM 'admin'
+                  AND 'fields' = ANY (COALESCE(p.denied_pages, ARRAY[]::text[]))) THEN
+    RAISE EXCEPTION 'PAGE_ACCESS_DENIED: fields' USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public._fields_owner_change_page_access_20270303() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER fields_owner_change_page_access BEFORE UPDATE OF customer_id ON public.fields
+  FOR EACH ROW EXECUTE FUNCTION public._fields_owner_change_page_access_20270303();
+
 -- ---------------------------------------------------------------------------------------------------------------
 -- 8. Backfill: today's split becomes version 1 (history before this migration unknown)
 -- ---------------------------------------------------------------------------------------------------------------
@@ -854,21 +896,17 @@ DO $backfill$
 DECLARE
   v_field uuid;
   v_payers jsonb;
-  v_diff bigint;
   v_total numeric;
   v_version uuid;
 BEGIN
   FOR v_field IN SELECT DISTINCT field_id FROM public.field_billing_defaults ORDER BY field_id LOOP
-    -- Scaled in proportion to exactly 100%, as order invoicing normalises the copy (Sol r5 HIGH).
     SELECT sum(split_pct) INTO v_total FROM public.field_billing_defaults WHERE field_id = v_field;
     IF abs(v_total - 100) > 0.01 THEN
       RAISE EXCEPTION 'FIELD_SPLIT_CUTOVER_STOP: field % split totals % percent', v_field, v_total;
     END IF;
-    SELECT jsonb_agg(jsonb_build_object('c', customer_id, 'm', round(split_pct * 100000000 / v_total)::bigint)
-                     ORDER BY round(split_pct * 100000000 / v_total) DESC, customer_id)
+    -- Stored exactly as saved (numeric(9,6) is whole micro-percent), never rescaled: invoices bill the same cents.
+    SELECT jsonb_agg(jsonb_build_object('c', customer_id, 'm', round(split_pct * 1000000)::bigint) ORDER BY customer_id)
       INTO v_payers FROM public.field_billing_defaults WHERE field_id = v_field;
-    v_diff := 100000000 - (SELECT sum((x->>'m')::bigint) FROM jsonb_array_elements(v_payers) x);
-    v_payers := jsonb_set(v_payers, '{0,m}', to_jsonb((v_payers->0->>'m')::bigint + v_diff));
     INSERT INTO public.field_billing_split_versions (field_id, version_number, effective_from, history_known, reason, created_by)
     VALUES (v_field, 1, DATE '1900-01-01', false, 'Imported: the split saved before split history existed', NULL)
     RETURNING id INTO v_version;

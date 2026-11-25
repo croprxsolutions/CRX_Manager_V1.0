@@ -6,13 +6,15 @@
  *
  * Screen-specific proof paths come in through `extraOptions` (more ways to confirm, such as "No one
  * present" or the office's "Record without proof") and `alternateProof` (what replaces the signature for
- * that path). Issue reporting is not part of this step; the delivery detail keeps its own.
+ * that path). A problem with the delivery (short, damaged, refused...) is reported in this same step through
+ * `issue` (`DeliveryIssueFields`); the screen sends it with its own completion.
  */
 import type { ReactNode } from 'react';
 import { Camera, CheckCircle2 } from 'lucide-react';
 import SignatureCanvas from '../ui/SignatureCanvas';
 import HelpTip from '../ui/HelpTip';
 import { todayInBusinessTz } from '../../lib/dateUtils';
+import DeliveryIssueFields, { type DeliveryIssueValue } from './DeliveryIssueFields';
 
 const CHECKBOX = 'h-5 w-5 shrink-0 rounded border-gray-300 text-crx-green focus:ring-crx-green';
 const TEXT_INPUT = 'h-12 w-full rounded-xl border border-gray-300 bg-white px-3 text-base text-nav-dark placeholder:text-gray-500 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500';
@@ -50,6 +52,8 @@ interface CompletionProofFieldsProps {
   alternateProof?: ReactNode;
   /** The receipt email box; leave out where the screen asks it elsewhere or cannot send one. */
   receipt?: { checked: boolean; onChange: (checked: boolean) => void };
+  /** Report a problem with the delivery; the screen sends it as complete_delivery's p_issue_type and p_issue_notes. */
+  issue?: DeliveryIssueValue;
 }
 
 /** One way to confirm the delivery: a full-size checkbox row with optional help outside the label. */
@@ -115,7 +119,7 @@ function PaperTicketPanel({ idPrefix, proof }: { idPrefix: string; proof: PaperT
 
 export default function CompletionProofFields({
   idPrefix, signedBy, onSignedByChange, signerLocked = false, contactName = '', usePaperTicket, onUsePaperTicketChange,
-  showPaperTicketOption = true, paperTicket, onSignatureChange, signatureKey, extraOptions, alternateProof, receipt,
+  showPaperTicketOption = true, paperTicket, onSignatureChange, signatureKey, extraOptions, alternateProof, receipt, issue,
 }: CompletionProofFieldsProps) {
   const signerId = `${idPrefix}-signed-by`;
   const offerContact = !!contactName && !signerLocked && signedBy.trim() !== contactName;
@@ -161,6 +165,11 @@ export default function CompletionProofFields({
       </div>
       {proof}
       {receipt && <EmailReceiptOption checked={receipt.checked} onChange={receipt.onChange} />}
+      {issue && (
+        <div className="border-t border-gray-200 pt-3">
+          <DeliveryIssueFields idPrefix={idPrefix} issue={issue} />
+        </div>
+      )}
     </div>
   );
 }

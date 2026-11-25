@@ -12,8 +12,12 @@ const hookPath = fileURLToPath(new URL("./session-context-reminder.mjs", import.
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 const adapterPath = fileURLToPath(new URL("../../.codex/hooks/codex-hook-adapter.mjs", import.meta.url));
 
+// Claude runs the hook with no surface marker; drop any the calling shell carries.
+const { CRX_AGENT_SURFACE: _inheritedSurface, ...claudeEnv } = process.env;
+
 function runRaw(input) {
   const result = spawnSync(process.execPath, [hookPath], {
+    env: claudeEnv,
     input,
     encoding: "utf8",
   });

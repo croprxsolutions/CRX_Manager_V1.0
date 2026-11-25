@@ -1,4 +1,4 @@
--- Rollback for 20270307160000_proof_bound_to_load.sql, proven by
+-- Rollback for 20270308000000_proof_bound_to_load.sql, proven by
 -- scripts/smoke/prove-proof-bound-to-load-real-schema.mjs.
 -- Switches the check off: restores #2324's completion step (20270306230000) and nothing else. The wrappers' optional
 -- p_lines_seen, delivery_photos.lines_seen and its trigger stay, so screens already open and queued calls that send
@@ -14,7 +14,7 @@ BEGIN
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
          AND md5(replace(p.prosrc, chr(13), '')) = '92e373301409583f2f7fec1f0cb207ee'
          AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']) THEN
-    RAISE EXCEPTION 'PROOF_LOAD_REVERSE: the completion step is not the 20270307160000 one; re-plan the rollback';
+    RAISE EXCEPTION 'PROOF_LOAD_REVERSE: the completion step is not the 20270308000000 one; re-plan the rollback';
   END IF;
 END
 $installed$;

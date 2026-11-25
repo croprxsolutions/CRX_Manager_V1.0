@@ -9,11 +9,9 @@
 --   "Your ingredient has no CAS number; EPA gives ... Correct the ingredient to link them."
 -- WHAT: re-issues public._edit_active_ingredient (same signature, owner postgres, SECURITY DEFINER, search_path, no
 --   grants). One change: an edit of the CAS alone (fill, correct or clear) skips the per-product EPA gate. It changes
---   no product row (strengths, sources, modes of action stay as EPA wrote them). Limits (Sol, 2026-11-24): a CAS that
---   an EPA proposal (proposed, held or committed) gives stays gated; and, by the newest proposal per product and
---   number, the new value must be the CAS EPA gives the ingredient and must not be a CAS EPA lists under another name
---   (INGREDIENT_CAS_NOT_EPA). So a typed CAS never contradicts EPA and a mistyped one can be corrected.
--- NOT CHANGED: an EPA-given CAS, the acid fields, or any mix of fields still refuse on an EPA product. Admin only
+--   no product row (strengths, sources, modes of action stay as EPA wrote them). The admin's reason and evidence are
+--   trusted (Mason, 2026-11-25): a mistyped but valid, unused CAS is caught only by review and can be corrected here.
+-- NOT CHANGED: the acid fields, or any mix of fields, still refuse on an EPA product. Admin only
 --   (preview_active_ingredient_change and save_active_ingredient keep _product_parent_require_admin), reason and
 --   evidence still required when products use it, CAS format/check digit and CAS-taken checks, the ingredient event and
 --   one 'corrected' chemistry event per affected product, row_version/usage-fingerprint staleness checks.
@@ -40,9 +38,6 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: run this file as one transaction (psql -1 or the apply script)';
   END IF;
   SELECT md5(replace(prosrc, E'\r', '')) INTO v_md5 FROM pg_proc WHERE oid = to_regprocedure('public._edit_active_ingredient(uuid,jsonb,text,text,boolean)');
-  IF to_regclass('public.epa_chemistry_proposals') IS NULL THEN
-    RAISE EXCEPTION 'INGREDIENT_CAS_FILL_BASELINE_DRIFT: public.epa_chemistry_proposals (20270105110000) is missing';
-  END IF;
   IF v_md5 IS NULL THEN
     RAISE EXCEPTION 'INGREDIENT_CAS_FILL_BASELINE_DRIFT: public._edit_active_ingredient(uuid,jsonb,text,text,boolean) does not exist';
   END IF;
@@ -69,8 +64,6 @@ DECLARE
   v_conflict text;
   v_gate text;
   v_cas_edit boolean;
-  v_epa_cas text;
-  v_epa_name text;
   v_parent uuid;
   v_before jsonb := '{}'::jsonb;
   v_version bigint;
@@ -202,36 +195,10 @@ BEGIN
     v_reason := public._product_parent_reason(p_reason, 'reason', v_needs_reason);
     v_evidence := public._product_parent_reason(p_evidence, 'evidence', v_needs_reason);
   END IF;
-  -- A CAS-only edit passes the EPA gate (Mason, 2026-11-24): it changes no product row, and EPA asks for exactly this
-  -- ("Correct the ingredient to link them"). Two limits (Sol, 2026-11-24): a CAS that EPA itself gave stays gated, so
-  -- only a typed one can be corrected; and the new CAS must be the one EPA gives for this ingredient, when it gives one.
-  v_cas_edit := v_changed = ARRAY['cas']::text[]
-    AND NOT (v_old.cas IS NOT NULL AND EXISTS (
-      SELECT 1 FROM public.epa_chemistry_proposals p, jsonb_array_elements(p.items) i
-       WHERE p.status IN ('proposed', 'held', 'committed') AND i->'epa'->>'cas' = v_old.cas));
-  IF v_cas_edit AND cardinality(v_parents) > 0 THEN
-    -- EPA's current word (the newest proposal per product and number, not rejected or superseded) wins both ways:
-    -- the CAS EPA gives this ingredient, and the name EPA gives the new CAS (Sol, 2026-11-24).
-    WITH cur AS (
-      SELECT DISTINCT ON (p.parent_id, p.epa_registration) p.parent_id, p.items
-        FROM public.epa_chemistry_proposals p
-       WHERE p.status IN ('proposed', 'held', 'committed')
-       ORDER BY p.parent_id, p.epa_registration, p.created_at DESC, p.id DESC),
-    epa AS (
-      SELECT c.parent_id, i FROM cur c, jsonb_array_elements(c.items) i
-       WHERE i->>'kind' = 'ingredient' AND i->'epa'->>'cas' IS NOT NULL)
-    SELECT string_agg(DISTINCT i->'epa'->>'cas', ', ') FILTER (WHERE parent_id = ANY(v_parents)
-             AND i->'current'->>'ingredient_id' = p_ingredient_id::text AND i->'epa'->>'cas' IS DISTINCT FROM v_new.cas),
-           string_agg(DISTINCT i->'epa'->>'name', ', ') FILTER (WHERE i->'epa'->>'cas' = v_new.cas
-             AND lower(regexp_replace(btrim(i->'epa'->>'name'), '\s+', ' ', 'g')) <> lower(regexp_replace(btrim(v_old.name), '\s+', ' ', 'g')))
-      INTO v_epa_cas, v_epa_name FROM epa;
-    IF v_epa_cas IS NOT NULL THEN
-      RAISE EXCEPTION 'INGREDIENT_CAS_NOT_EPA: EPA gives % for %; enter EPA''s number', v_epa_cas, v_old.name;
-    END IF;
-    IF v_epa_name IS NOT NULL THEN
-      RAISE EXCEPTION 'INGREDIENT_CAS_NOT_EPA: EPA lists % as %, not %', v_new.cas, v_epa_name, v_old.name;
-    END IF;
-  END IF;
+  -- A CAS-only edit (fill, or correct) passes the EPA gate (Mason, 2026-11-24): it changes no product row, and EPA
+  -- asks for exactly this ("Correct the ingredient to link them"). The admin's evidence is trusted when EPA gives no CAS
+  -- (Mason, 2026-11-25, accepting Sol's mistyped-CAS risk); the check digit and CAS-taken checks above still apply.
+  v_cas_edit := v_changed = ARRAY['cas']::text[];
   FOREACH v_parent IN ARRAY v_parents LOOP
     v_gate := CASE WHEN v_cas_edit THEN NULL ELSE public._parent_chemistry_epa_refusal(v_parent) END;
     IF v_gate IS NOT NULL THEN
@@ -290,8 +257,7 @@ BEGIN
               WHERE a.privilege_type = 'EXECUTE' AND a.grantee <> 'postgres'::regrole) THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: _edit_active_ingredient is executable by a role other than its owner';
   END IF;
-  IF position('v_cas_edit' IN (SELECT prosrc FROM pg_proc WHERE oid = v_fn)) = 0
-     OR position('INGREDIENT_CAS_NOT_EPA' IN (SELECT prosrc FROM pg_proc WHERE oid = v_fn)) = 0 THEN
+  IF position('v_cas_edit' IN (SELECT prosrc FROM pg_proc WHERE oid = v_fn)) = 0 THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: the CAS-fill exception is missing';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK';

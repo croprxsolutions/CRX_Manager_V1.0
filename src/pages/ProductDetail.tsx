@@ -58,7 +58,6 @@ import {
   defaultPricingMode,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
-  assertMarginIsWholePercent,
   pricingMarginTextIsValid,
   previewProductPricingChanges,
   type PricingAcknowledgement,
@@ -227,10 +226,7 @@ function pricingPreviewRow(
       if (draft && !pricingMarginTextIsValid(draft)) {
         throw new Error('Enter each net margin as a plain number below 100.');
       }
-      const margin = draft ? draft : formatPricingMarginPercent(value);
-      const stored = persisted[`tier${tier}_margin` as const];
-      assertMarginIsWholePercent(persisted.product_name, tier, margin, stored == null ? null : formatPricingMarginPercent(stored));
-      row[`tier${tier}_margin_percent` as const] = margin;
+      row[`tier${tier}_margin_percent` as const] = draft ? draft : formatPricingMarginPercent(value);
     }
   } else {
     for (const tier of [1, 2, 3] as const) {

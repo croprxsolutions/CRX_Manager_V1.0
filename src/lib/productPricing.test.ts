@@ -17,7 +17,6 @@ vi.mock('./db', () => ({
 import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
-  assertMarginIsWholePercent,
   assertPricingPreviewRowsSafe,
   assertWorkbookLeavesRatesAlone,
   createPricingWorkbookExport,
@@ -222,50 +221,6 @@ describe('assertPricingPreviewRowsSafe', () => {
     },
   );
 
-  // Audit 2026-11-24 #3: margins are whole percents; 0.35 priced a $6.40 product at $6.42 on staging.
-  it.each(['0.35', '0.5', '0.99'])('refuses a margin of %s as a fraction typed for a percent', (margin) => {
-    expect(() => assertPricingPreviewRowsSafe([{
-      pricing_mode: 'margin_driven', new_cost: '6.40', product_name: 'Roundup',
-      tier1_margin_percent: '35', tier2_margin_percent: margin, tier3_margin_percent: '25',
-      current_tier1_margin_percent: '', current_tier2_margin_percent: '', current_tier3_margin_percent: '',
-    }])).toThrow(`Tier 2 margin for Roundup is ${margin}%. Margins are whole percents: type 35 for 35%`);
-  });
-
-  it.each(['35', '1', '0', '18.5'])('accepts a margin of %s', (margin) => {
-    expect(() => assertPricingPreviewRowsSafe([{
-      pricing_mode: 'margin_driven', new_cost: '6.40',
-      tier1_margin_percent: margin, tier2_margin_percent: '20', tier3_margin_percent: '10',
-    }])).not.toThrow();
-  });
-
-  it('leaves a price sheet row whose small margin is unchanged from its current margin', () => {
-    expect(() => assertPricingPreviewRowsSafe([{
-      pricing_mode: 'margin_driven', new_cost: '6.40',
-      tier1_margin_percent: '0.5', current_tier1_margin_percent: '0.50',
-      tier2_margin_percent: '20', tier3_margin_percent: '10',
-    }])).not.toThrow();
-    expect(() => assertPricingPreviewRowsSafe([{
-      pricing_mode: 'margin_driven', new_cost: '6.40',
-      tier1_margin_percent: '0.35', current_tier1_margin_percent: '35',
-      tier2_margin_percent: '20', tier3_margin_percent: '10',
-    }])).toThrow('Tier 1 margin');
-  });
-
-  // Review 2026-11-25 #4: the product page and bulk grid check typed margins themselves; cost-basis
-  // "keep margins" re-sends a product's stored margins, which may be under 1% on purpose.
-  it('leaves rows without current_ cells to the screen checks', () => {
-    expect(() => assertPricingPreviewRowsSafe([{
-      pricing_mode: 'margin_driven', new_cost: '7.00',
-      tier1_margin_percent: '0.5', tier2_margin_percent: '20', tier3_margin_percent: '10',
-    }])).not.toThrow();
-  });
-
-  it('ignores margins on a price-driven row', () => {
-    expect(() => assertPricingPreviewRowsSafe([{
-      pricing_mode: 'price_driven', new_cost: '6.40', tier1_margin_percent: '0.35',
-    }])).not.toThrow();
-  });
-
   it('preserves zero cost for price-driven review', () => {
     expect(() => assertPricingPreviewRowsSafe([{
       pricing_mode: 'price_driven',
@@ -325,27 +280,24 @@ describe('getPricingWorkbookExportRefusalReason', () => {
   });
 });
 
-describe('assertMarginIsWholePercent', () => {
-  it('refuses a new fraction, allows the stored margin, whole percents and zero', () => {
-    expect(() => assertMarginIsWholePercent('Roundup', 1, '0.35', '35')).toThrow('Tier 1 margin for Roundup is 0.35%');
-    expect(() => assertMarginIsWholePercent('Roundup', 1, '0.35', null)).toThrow('type 35 for 35%');
-    expect(() => assertMarginIsWholePercent('Roundup', 1, '0.5', '0.5')).not.toThrow();
-    expect(() => assertMarginIsWholePercent('Roundup', 1, '35', '0.5')).not.toThrow();
-    expect(() => assertMarginIsWholePercent('Roundup', 1, '0', null)).not.toThrow();
-    expect(() => assertMarginIsWholePercent('Roundup', 1, '1', null)).not.toThrow();
-  });
-});
-
 describe('nearCostProducts', () => {
-  const row = (productId: string, cost: bigint, t1: bigint) => ({
+  const row = (productId: string, cost: bigint, t1: bigint, t1Margin: number | null = null) => ({
     sequence: 1, product_id: productId, row_status: 'ready', submitted_row: { product_name: productId },
     effect: { product_name: productId, cost_cents: cost, pricing_changed: true,
-      tier1_price_cents: t1, tier2_price_cents: cost * 2n, tier3_price_cents: cost * 2n },
+      tier1_price_cents: t1, tier2_price_cents: cost * 2n, tier3_price_cents: cost * 2n,
+      tier1_margin: t1Margin, tier1_margin_percent: t1Margin == null ? null : String(Number((t1Margin * 100).toFixed(6))) },
   }) as unknown as Parameters<typeof nearCostProducts>[0][number];
+
+  it('flags a margin under 1% even when rounding puts the price over 2% (Mason Q2)', () => {
+    // 1 cent cost at 0.5% margin rounds to a 2-cent price: 100% over cost, but still a likely typo.
+    expect(nearCostProducts([row('A', 1n, 2n, 0.005)])[0].tiers[0].fraction_margin_percent).toBe('0.5');
+    expect(nearCostProducts([row('A', 640n, 642n, 0.0035)])[0].tiers[0].fraction_margin_percent).toBe('0.35');
+    expect(nearCostProducts([row('A', 640n, 985n, 0.35)])).toEqual([]);
+  });
 
   it('flags a price exactly 2% over cost and not one cent more', () => {
     expect(nearCostProducts([row('A', 500n, 510n)])).toEqual([
-      { product_id: 'A', product_name: 'A', tiers: [{ tier: 1, price_cents: 510n, cost_cents: 500n }] },
+      { product_id: 'A', product_name: 'A', tiers: [{ tier: 1, price_cents: 510n, cost_cents: 500n, fraction_margin_percent: null }] },
     ]);
     expect(nearCostProducts([row('A', 500n, 511n)])).toEqual([]);
     expect(nearCostProducts([row('A', 500n, 499n)])).toEqual([]);

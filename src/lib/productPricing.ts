@@ -65,47 +65,15 @@ export function pricingMarginTextIsValid(text: string): boolean {
   return /^[0-9]+([.][0-9]+)?$/.test(text) && Number(text) < 100;
 }
 
-type MarginTier = 1 | 2 | 3;
-type MarginCells = Partial<Record<`tier${MarginTier}_margin_percent` | `current_tier${MarginTier}_margin_percent`, string | null>>;
-
-/**
- * Audit 2026-11-24 #3: margins are whole percents, so 0.35 means 0.35%, not 35%; on staging it priced a
- * $6.40-cost product at $6.42. A margin above 0 and under 1 is refused as a likely typo, unless it equals
- * the product's current margin (re-sending a margin already saved is not a new typo).
- */
-export function assertMarginIsWholePercent(
-  productName: string | null | undefined,
-  tier: MarginTier,
-  margin: string | null | undefined,
-  currentMargin: string | null | undefined,
-): void {
-  const text = margin?.trim() ?? '';
-  const value = Number(text);
-  if (!text || !(value > 0 && value < 1)) return;
-  const current = currentMargin?.trim();
-  if (current != null && current !== '' && Number(current) === value) return;
-  throw new Error(
-    `Tier ${tier} margin for ${productName?.trim() || 'this Product'} is ${text}%. Margins are whole percents: type 35 for 35%, not 0.35. `
-    + 'To price under 1% above cost on purpose, use price_driven and enter the price. No prices were changed.',
-  );
-}
-
 export function assertPricingPreviewRowsSafe(
   rows: ReadonlyArray<{
     pricing_mode: PricingMode | '';
     new_cost: string;
     product_name?: string;
-  } & MarginCells>,
+  }>,
 ): void {
   for (const row of rows) {
     if (row.pricing_mode !== 'margin_driven') continue;
-    // Price-sheet rows carry their current_ cells. The product page and bulk grid check typed margins
-    // against the stored ones before asking for a reason; cost-basis "keep margins" re-sends stored ones.
-    for (const tier of [1, 2, 3] as const) {
-      const currentKey = `current_tier${tier}_margin_percent` as const;
-      if (!(currentKey in row)) continue;
-      assertMarginIsWholePercent(row.product_name, tier, row[`tier${tier}_margin_percent`], row[currentKey]);
-    }
     const costCents = pricingDollarInputToCents(row.new_cost);
     const submittedZero = costCents === 0n
       || /^[+-]?0+(?:\.0+)?(?:e[+-]?\d+)?$/i.test(row.new_cost.trim());
@@ -605,6 +573,8 @@ export interface NearCostTier {
   tier: 1 | 2 | 3;
   price_cents: bigint;
   cost_cents: bigint;
+  /** Set when the tier's margin is above 0% and under 1%: likely 0.35 typed for 35% (Mason Q2: warn, not block). */
+  fraction_margin_percent: string | null;
 }
 
 export interface NearCostProduct {
@@ -631,8 +601,13 @@ export function nearCostProducts(rows: readonly PricingPreviewRow[]): NearCostPr
     for (const tier of [1, 2, 3] as const) {
       const raw = effect[`tier${tier}_price_cents`];
       const price = raw == null ? null : BigInt(raw);
-      if (price !== null && price >= cost && price * 100n <= cost * 102n) {
-        tiers.push({ tier, price_cents: price, cost_cents: cost });
+      const margin = effect[`tier${tier}_margin`];
+      const fraction = margin != null && margin > 0 && margin < 0.01;
+      if (price !== null && (fraction || (price >= cost && price * 100n <= cost * 102n))) {
+        tiers.push({
+          tier, price_cents: price, cost_cents: cost,
+          fraction_margin_percent: fraction ? (effect[`tier${tier}_margin_percent`] ?? formatPricingMarginPercent(margin)) : null,
+        });
       }
     }
     if (tiers.length === 0) continue;

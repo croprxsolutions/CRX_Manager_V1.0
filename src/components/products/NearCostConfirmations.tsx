@@ -2,6 +2,11 @@ import { AlertTriangle } from 'lucide-react';
 import { formatExactCents } from '../../lib/money';
 import type { NearCostProduct } from '../../lib/productPricing';
 
+/** "0.35" -> "35"; toFixed keeps float noise (0.29 * 100) out of the hint. */
+function wholePercent(text: string): string {
+  return String(Number((Number(text) * 100).toFixed(6)));
+}
+
 interface NearCostConfirmationsProps {
   products: NearCostProduct[];
   ticked: ReadonlySet<string>;
@@ -10,7 +15,7 @@ interface NearCostConfirmationsProps {
 }
 
 /**
- * Audit 2026-11-24 #3: a price within 2% of cost is usually a margin typed as a fraction. Each such
+ * Audit 2026-11-24 #3: a price within 2% of cost or a margin under 1% is usually a margin typed as a fraction. Each such
  * product needs its own tick, naming every affected tier; a typed warning reason does not clear it.
  * A screen check only: the database records no near-cost acknowledgement.
  */
@@ -22,7 +27,7 @@ export default function NearCostConfirmations({ products, ticked, disabled, onTi
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
         <div>
           <div className="text-sm font-semibold text-amber-900">
-            {products.length} product{products.length === 1 ? ' has' : 's have'} a price within 2% of cost
+            {products.length} product{products.length === 1 ? ' has' : 's have'} a price within 2% of cost or a margin under 1%
           </div>
           <p className="mt-0.5 text-xs text-amber-900">
             This often means a margin was typed as a fraction (0.35 instead of 35). Tick each product to confirm the price is meant.
@@ -39,6 +44,11 @@ export default function NearCostConfirmations({ products, ticked, disabled, onTi
                 {product.tiers.map((tier) => (
                   <li key={tier.tier}>
                     Tier {tier.tier} {formatExactCents(tier.price_cents)} on a cost of {formatExactCents(tier.cost_cents)}
+                    {tier.fraction_margin_percent !== null && (
+                      <span className="font-semibold">
+                        {` (margin ${tier.fraction_margin_percent}%: did you mean ${wholePercent(tier.fraction_margin_percent)} for ${wholePercent(tier.fraction_margin_percent)}%?)`}
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>

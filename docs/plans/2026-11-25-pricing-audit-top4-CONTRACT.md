@@ -79,3 +79,11 @@ One PR into `staging`, front end only, no migration. Verified on staging as an a
 - **Finding 6 fixed.** An unconverted amount is labelled "as recorded, not per inventory unit".
 - **Finding 8 fixed:** each tick box is described by its product name and tiers. **Finding 9:** a boundary test covers exactly 2% over cost and one cent more. **Finding 11:** a repeated product is merged into one entry.
 - **Deferred or refuted.** 7 (tick all): one tick per product is the point of the guard, and Q3 is open. 10: a `no_changes` preview has no ready rows, so the list is empty. 12: a tier already at cost is still worth a look. 13: same as the existing zero-cost message, and React renders it as text. 14: tests added where code changed.
+
+## Mason's answers (2026-11-25, relayed from the parent session; he chose each option)
+
+- **Q1:** fix 1 becomes its own database-first PR, written and reviewed but applied nowhere until he approves.
+- **Q2, warn and confirm (supersedes the refusal above):** a margin over 0% and under 1% is not refused. The preview lists it in the "Prices close to cost" box with "margin 0.35%: did you mean 35 for 35%?", and Apply stays off until that product's box is ticked. It flags on the margin itself, so a tiny cost whose price rounds more than 2% above cost is still caught.
+- **Q3:** the tick is a screen check only.
+- **Q4, margins stay (fix 4 is back in this PR):** the export writes `margin_driven` when today's three margins re-derive today's exact prices (`round(cost / (1 - margin), 2)`, the database's formula), so an untouched re-upload is still unchanged and a cost-only edit moves prices with the margins. Every other row stays blank, as before. That covers missing values (the export sends `''`), a cost of $0, partial prices, and margins that no longer match their prices.
+- **Flag for Mason:** the bulk grid still defaults a product with three prices to `price_driven`, so a cost edit there keeps prices. On the sheet, the same edit now moves them. The preview shows every moved price before and after, and asks for a reason, so prices never move silently.

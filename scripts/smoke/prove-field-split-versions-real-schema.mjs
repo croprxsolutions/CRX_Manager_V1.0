@@ -7,13 +7,15 @@
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), seeds splits the old way, applies the candidate
  * (autocommit refused, POSTFLIGHT_OK, re-apply refused), then checks:
  *   1. backfill: every field with a split has version 1 (history unknown), fields without one have none; thirds
- *      saved as 33.333333 x 3 become 33,333,334 / 33,333,333 / 33,333,333; notes move to field_payer_notes;
+ *      saved as 33.333333 x 3 stay 33,333,333 x 3 (shares are copied exactly, never rescaled); notes move to
+ *      field_payer_notes;
  *   2. set_field_billing_split saves thirds exactly and the copy shows them; refuses (RPC and direct SQL) a 90% set,
  *      the same customer twice, a negative or blank share, a version with no payers, a payer added to an old
  *      version, UPDATE/DELETE of history, and (until FP-4) a payer whose product and application shares differ;
  *      a 0%/0% named payer saves; a split starting on any day but Central today is refused (until FP-4);
- *   3. save_field: a name-only save writes no version and keeps notes; notes it is sent are ignored (only
- *      set_field_billing_split saves notes, and the copy carries none, so assigned applicators cannot read them); a named 0% payer survives two saves; a changed split writes a version; removing every payer from a
+ *   3. save_field: a name-only save writes no version and keeps notes; a note it is sent that differs from
+ *      the saved one, edited or cleared, is refused (only set_field_billing_split saves notes, and the copy carries
+ *      none, so assigned applicators cannot read them); a named 0% payer survives two saves; a changed split writes a version; removing every payer from a
  *      field with a split is refused and the split kept; a per-acre price is refused; a sales rep with Fields & Maps
  *      turned off is refused by save_field and set_field_billing_split;
  *   4. retries: the same key resent writes nothing; the same key with different payers is refused; a missing or
@@ -24,7 +26,8 @@
  *   6. deleting a customer who owns or pays on a field is refused; one with no field still deletes;
  *   7. resolver: dated versions (written by the internal writer, as FP-4 will allow), duplicates, unknown ids and a null date; a dated change with the same payers is kept;
  *   8. the nightly refresh repairs a stale copy; a split save and a FOR SHARE reader on the same field run one after
- *      the other (the reader waits for the writer's FOR UPDATE).
+ *      the other (the reader waits for the writer's FOR UPDATE); two split saves with different keys queue and get
+ *      the next two version numbers.
  *
  * Run: node scripts/smoke/prove-field-split-versions-real-schema.mjs   (needs Docker; never touches live)
  * Prints FIELD_SPLIT_VERSIONS_PROOF_PASS on success.
@@ -152,6 +155,21 @@ try {
   ];
   for (const [label, rows, re, date = TODAY] of bad) {
     r = attempt(USERS.admin, `${refuse(setSplit(F1, date, rows, `k-bad-${label}`))} v := t;`);
+    assert.match(r, re, `RPC must refuse ${label}: ${r}`);
+  }
+  // Taha LOW (#2487 review): the refusals that need notes, a reason or an inactive customer.
+  const Y = id('c7');
+  psql(`INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${Y}', 'Yankee Inactive', false);`);
+  const call = (rows, notes, reason, key) => `r := public.set_field_billing_split('${F1}', ${TODAY}, ${rows}, ${notes}, ${reason}, '${key}');`;
+  const badCalls = [
+    ['inactive payer', call(payers([[A, 50000000], [Y, 50000000]]), 'NULL', "'proof'", 'k-bad-inactive'), /FIELD_SPLIT_PAYER_NOT_ACTIVE/],
+    ['note for a customer not on the field', call('NULL', `'[{"customer_id":"${X}","notes":"x"}]'::jsonb`, "'proof'", 'k-bad-note-off'), /FIELD_PAYER_NOTES_NOT_ON_FIELD/],
+    ['nothing to save', call('NULL', 'NULL', "'proof'", 'k-bad-nothing'), /FIELD_SPLIT_NOTHING_TO_SAVE/],
+    ['reason over 500 characters', call(payers([[A, M]]), 'NULL', "repeat('x', 501)", 'k-bad-reason'), /FIELD_SPLIT_REASON_TOO_LONG/],
+    ['notes not a list', call('NULL', `'{"customer_id":"${A}"}'::jsonb`, "'proof'", 'k-bad-notes-shape'), /FIELD_PAYER_NOTES_INVALID/],
+  ];
+  for (const [label, body, re] of badCalls) {
+    r = attempt(USERS.admin, `${refuse(body)} v := t;`);
     assert.match(r, re, `RPC must refuse ${label}: ${r}`);
   }
   // Direct SQL (as the table owner, past every grant): the triggers still refuse.
@@ -381,7 +399,31 @@ try {
   r = attempt(USERS.admin, `PERFORM 1 FROM public.fields WHERE id = '${F2}' FOR SHARE; v := 'read';`);
   assert.equal(r, 'ok|read', 'and then the reader proceeds');
   assert.equal(inForce(F2), `${A}:100000000/100000000`);
-  console.log('[locks] the nightly refresh repairs a stale copy; writer and FOR SHARE reader run one after the other');
+  // Taha LOW (#2487 review): two split saves on one field with different keys queue on the field row.
+  const raceFrom = Number(scalar(`SELECT max(version_number) FROM public.field_billing_split_versions WHERE field_id = '${F2}';`));
+  const session = (rows, key, tag) => {
+    const p = spawn('docker', [...PSQL], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; });
+    p.stderr.on('data', (d) => { out += d; });
+    p.stdin.end(`BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${USERS.admin}","role":"authenticated"}', true);
+      SET LOCAL ROLE authenticated; SELECT public.set_field_billing_split('${F2}', ${TODAY}, ${rows}, NULL, 'race', '${key}');
+      SELECT '${tag}'; SELECT pg_sleep(3); COMMIT;`);
+    return { done: new Promise((resolve) => p.on('close', resolve)), out: () => out };
+  };
+  const first = session(payers([[A, 60000000], [B, 40000000]]), 'k-race-1', 'RACE_1_HELD');
+  for (let i = 0; i < 100 && !first.out().includes('RACE_1_HELD'); i += 1) await new Promise((res) => setTimeout(res, 100));
+  assert.ok(first.out().includes('RACE_1_HELD'), `the first writer is holding: ${first.out()}`);
+  const second = session(payers([[B, M]]), 'k-race-2', 'RACE_2_HELD');
+  await new Promise((res) => setTimeout(res, 1000));
+  assert.ok(!second.out().includes('RACE_2_HELD'), 'the second writer waits for the first');
+  assert.equal(await first.done, 0, `the first writer commits: ${first.out()}`);
+  assert.equal(await second.done, 0, `the second writer commits: ${second.out()}`);
+  assert.equal(scalar(`SELECT string_agg(version_number::text, ',' ORDER BY version_number) FROM public.field_billing_split_versions
+    WHERE field_id = '${F2}' AND version_number > ${raceFrom};`), `${raceFrom + 1},${raceFrom + 2}`, 'two writers get the next two version numbers');
+  assert.equal(inForce(F2), `${B}:100000000/100000000`, 'the second save is in force');
+  assert.equal(copy(F2), `${B}:100.000000:true:-`, 'and the copy equals the second save');
+  console.log('[locks] the nightly refresh repairs a stale copy; writer and FOR SHARE reader run one after the other; two writers queue');
 
   // 9. The standing actor-forgery sweep, with the checked-in allowlist, flags none of the FP-1 entry points.
   const actorPredicate = { name: 'actor-forgery', sql: readFileSync(path.join(ROOT, 'scripts/db-invariant-sweeps/predicates/actor-forgery.sql'), 'utf8') };

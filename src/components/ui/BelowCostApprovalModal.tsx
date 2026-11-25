@@ -93,7 +93,7 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
                       <td className="py-1 pr-3">{line.product_name || 'Unnamed line'}{line.per === 'line' ? ' (line total)' : ''}</td>
                       <td className="py-1 pr-3 text-right">{formatCents(line.unit_price_cents)}</td>
                       <td className="py-1 pr-3 text-right">{formatCents(line.locked_unit_cost_cents)}</td>
-                      <td className="py-1 pr-3 text-right">{line.per === 'line' ? '—' : line.quantity.toLocaleString('en-US')}</td>
+                      <td className="py-1 pr-3 text-right">{line.per === 'line' ? '—' : line.quantity.toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
                       <td className="py-1 text-right">{formatCents(line.line_shortfall_cents)}</td>
                     </tr>
                   ))}

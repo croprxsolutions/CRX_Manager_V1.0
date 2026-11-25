@@ -289,7 +289,7 @@ const body = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
 const grants = () => scalar(`SELECT COALESCE(string_agg(g, ',' ORDER BY g), '-') FROM (SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END AS g
   FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = '${GUARD}'::regprocedure AND a.privilege_type = 'EXECUTE') x;`);
 const OLD_BODY = '5fa0a5f975dc2a84b3c6599a84b8cc55';
-const NEW_BODY = process.env.CRX_BCL_NEW_BODY || 'e982656e78d23e9345411f1a7bb83b01';
+const NEW_BODY = process.env.CRX_BCL_NEW_BODY || '0490ba18edd0a9338e3329c6c984ff19';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -464,6 +464,15 @@ ${copyLine(src, 1, 8)};`);
   assert.equal(resave.total_shortfall_cents, 600);
   assert.equal(scalar(`SELECT string_agg(id::text || ':' || unit_price_cents, ',') FROM public.invoice_items WHERE invoice_id = '${INV}';`), `${INV_LINE}:700`);
   console.log('[case 12] save_invoice re-saving a kept order-linked line repriced below cost, with no reason: still refused, at COMMIT, listing that line under its restored id ($6.00 short); the draft is unchanged');
+  // Case 12b: in one save_invoice write, a line written below cost whose id is then changed AND whose price is raised to
+  // cost leaves no note behind: the save goes through with no prompt (as case 6a, for a row whose id changes).
+  const raisedNewId = asAdminWrite(`DELETE FROM public.invoice_items WHERE id = '${INV_LINE}';
+INSERT INTO public.invoice_items (id, invoice_id, order_item_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, sort_order)
+  VALUES ('${id('e4')}', '${INV}', (${INV_OI}), '${P1}', '[PROVER] BCL one', 2, 700, 1400, 1000, 0);
+UPDATE public.invoice_items SET id = '${INV_LINE}', unit_price_cents = 1000, extended_cents = 2000 WHERE id = '${id('e4')}';`, 'save_invoice');
+  assert.equal(raisedNewId.status, 0, raisedNewId.output);
+  assert.equal(scalar(`SELECT string_agg(id::text || ':' || unit_price_cents, ',') FROM public.invoice_items WHERE invoice_id = '${INV}';`), `${INV_LINE}:1000`);
+  console.log('[case 12b] a line written below cost, then given another id and raised to cost in the same save: saves with no prompt');
 
   // Case 11: the real HTTP path. PostgREST commits after the function returns; the client sees the commit-time refusal.
   const secret = 'bcl-prover-jwt-secret-0123456789abcdef';

@@ -31,7 +31,7 @@ describe('BelowCostApprovalModal — every below-cost line in the save (pricing 
     unit_price_cents: 300,
     lines: [
       { product_name: 'Atrazine 4L', unit_price_cents: 300, locked_unit_cost_cents: 500, quantity: 10, line_shortfall_cents: 2000, per: 'unit' },
-      { product_name: 'Roundup', unit_price_cents: 1000, locked_unit_cost_cents: 1050, quantity: 2.5, line_shortfall_cents: 125, per: 'unit' },
+      { product_name: 'Roundup', unit_price_cents: 1000, locked_unit_cost_cents: 1050, quantity: 2.5005, line_shortfall_cents: 125, per: 'unit' },
       { product_name: 'Application fee', unit_price_cents: 4000, locked_unit_cost_cents: 4500, quantity: 1, line_shortfall_cents: 500, per: 'line' },
     ],
     more_count: 0,
@@ -44,7 +44,7 @@ describe('BelowCostApprovalModal — every below-cost line in the save (pricing 
     const rows = within(dialog).getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent));
     expect(rows).toEqual([
       ['Atrazine 4L', '$3.00', '$5.00', '10', '$20.00'],
-      ['Roundup', '$10.00', '$10.50', '2.5', '$1.25'],
+      ['Roundup', '$10.00', '$10.50', '2.5005', '$1.25'], // all 4 stored decimals
       ['Application fee (line total)', '$40.00', '$45.00', '—', '$5.00'],
     ]);
     expect(within(dialog).getByText('Total shortfall for this save: $26.25')).toBeInTheDocument();

@@ -251,8 +251,9 @@ function refusedProbe(sql, pattern, uid) {
 
 // A real concurrent session (its own connection), started after delayMs. Resolves with its exit code and output.
 function session(sql, delayMs = 0) {
-  return new Promise((resolve) => setTimeout(() => {
+  return new Promise((resolve, reject) => setTimeout(() => {
     const c = spawn('docker', [...psqlArgs(), '-A', '-t'], { cwd: ROOT });
+    c.on('error', reject);
     let out = '';
     c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; });
     c.on('close', (code) => resolve({ code, out }));
@@ -266,10 +267,11 @@ const id = (s) => `af05b000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), CUST = id('c1'), P = id('b1'), INV = id('d1'), ORD = id('e1'), OI = id('e11'), OI2 = id('e12');
 // D1 all-zero target; D2 mixed (two lines); D3 scheduled, for start-and-complete; D4 in progress with no lines;
 // DL legacy completed with no lines (the March 2026 shape); D5 offline target; D6 completes, then replays its key;
-// D7 scheduled, for the line-delete race; D8 completes while the migration is being applied; D10 completes with 0.01.
+// D7 scheduled, for the line-delete race; D8 completes while the migration is being applied; D10 completes with 0.01;
+// D11 two lines, completes with 0.005 and 0.01 (the rule is per line, not a sum).
 const D1 = id('f1'), D1A = id('f11'), D2 = id('f2'), D2A = id('f21'), D2B = id('f22'), D3 = id('f3'), D3A = id('f31');
 const D4 = id('f4'), DL = id('f9'), D5 = id('f5'), D5A = id('f51'), D6 = id('f6'), D6A = id('f61'), D7 = id('f7'), D7A = id('f71');
-const D8 = id('f8'), D8A = id('f81'), D10 = id('f10'), D10A = id('f101');
+const D8 = id('f8'), D8A = id('f81'), D10 = id('f10'), D10A = id('f101'), D11 = id('f11a'), D11A = id('f111'), D11B = id('f112');
 const OFF = id('ab1'), OFF_KEY = 'f05b-offline-1';
 
 function seed() {
@@ -297,7 +299,8 @@ function seed() {
       ('${D6}', 'F05B-D6', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
       ('${D7}', 'F05B-D7', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'scheduled', false),
       ('${D8}', 'F05B-D8', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
-      ('${D10}', 'F05B-D10', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false);
+      ('${D10}', 'F05B-D10', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
+      ('${D11}', 'F05B-D11', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false);
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status, is_quick_delivery, completed_at, signed_by) VALUES
       ('${DL}', 'F05B-DL', '${ORD}', '${CUST}', '${ADMIN}', 'completed', false, '2026-03-20', 'Legacy');
     INSERT INTO public.delivery_items (id, delivery_id, order_item_id, product_id, quantity, unit_size) VALUES
@@ -308,8 +311,9 @@ function seed() {
       ('${D6A}', '${D6}', '${OI}', '${P}', 1, 'Gal'),
       ('${D7A}', '${D7}', '${OI}', '${P}', 1, 'Gal'),
       ('${D8A}', '${D8}', '${OI}', '${P}', 1, 'Gal'),
-      ('${D10A}', '${D10}', '${OI}', '${P}', 1, 'Gal');`);
-  console.log('[prover] seeded one order (10 and 5 units) with nine open loads and one line-less legacy completed load');
+      ('${D10A}', '${D10}', '${OI}', '${P}', 1, 'Gal'),
+      ('${D11A}', '${D11}', '${OI2}', '${P}', 1, 'Gal'), ('${D11B}', '${D11}', '${OI}', '${P}', 1, 'Gal');`);
+  console.log('[prover] seeded one order (10 and 5 units) with ten open loads and one line-less legacy completed load');
 }
 
 const AS_ADMIN = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true); SET LOCAL ROLE authenticated;`;
@@ -386,6 +390,14 @@ function afterCases() {
   }
   assert.equal(stock(), stock0);
   assert.equal(orderLine(), line0);
+  // Two lines each under 0.01 are refused even though their sum is not (the rule is per line, not a sum).
+  r = committed(completeCall(D2, { [D2A]: 0.006, [D2B]: 0.006 }, 'f05b-1s'));
+  assert.notEqual(r.status, 0, r.output);
+  assert.match(r.output, /DELIVERY_NOTHING_DELIVERED/);
+  assert.equal(state(D2), 'in_progress|0,0|0');
+  assert.equal(stock(), stock0);
+  assert.equal(orderLine(), line0);
+  console.log('[case 1c] two lines of 0.006 each: refused; the rule is per line, not the sum');
   console.log('[case 1b] 0.009 and 0.000000001: refused DELIVERY_NOTHING_DELIVERED; load still in progress, nothing kept');
   console.log(`[case 1] all-zero (and negative) figures: refused DELIVERY_NOTHING_DELIVERED; load still in progress, no line delivered, no remainder; stock ${stock0} and order line ${line0} unchanged; no key saved`);
 
@@ -405,6 +417,15 @@ function afterCases() {
   assert.equal(state(D10).split('|').slice(0, 2).join('|'), 'completed|0.01');
   assert.equal(Number(orderLine().split('/')[0]), before2b + 0.01);
   console.log(`[case 2b] exactly 0.01: completes; line delivered 0.01; order line now ${orderLine()}`);
+
+  // 2c. Two lines, 0.005 and 0.01: completes, because one line reaches 0.01 (a rule refusing any positive line
+  //     under 0.01 would wrongly refuse it). The order line OI moves by the 0.01 line.
+  const before2c = Number(orderLine().split('/')[0]);
+  r = committed(completeCall(D11, { [D11A]: 0.005, [D11B]: 0.01 }, 'f05b-2c'));
+  assert.equal(r.status, 0, r.output);
+  assert.equal(state(D11).split('|')[0], 'completed');
+  assert.ok(Math.abs(Number(orderLine().split('/')[0]) - (before2c + 0.01)) < 1e-9, `order line after 2c: ${orderLine()}`);
+  console.log(`[case 2c] 0.005 and 0.01 on two lines: completes; order line now ${orderLine()}`);
 
   // 3. Start-and-complete on a scheduled load: all zero is refused and the load stays scheduled; no figures sent
   //    (the full scheduled amounts) completes.
@@ -437,11 +458,14 @@ function afterCases() {
   r = committed(completeCall(D6, { [D6A]: 1 }, 'f05b-6'));
   assert.equal(r.status, 0, r.output);
   const first = receiptLine(r.output);
+  const stock6 = stock(), line6 = orderLine();
   r = committed(completeCall(D6, { [D6A]: 1 }, 'f05b-6'));
   assert.equal(r.status, 0, `a retry of a saved completion must return its receipt, not be refused:\n${r.output}`);
   assert.ok(first);
   assert.equal(receiptLine(r.output), first, 'the retry must return the same saved receipt');
   assert.equal(state(D6), 'completed|1|0');
+  assert.equal(stock(), stock6, 'the retry must not move stock again');
+  assert.equal(orderLine(), line6, 'the retry must not move the order line again');
   console.log('[case 6] a retry of a saved completion returns the same saved receipt (not refused, not re-run)');
 
   // 7. Offline sync of an all-zero completion still goes to office review, committed, attempt counted. Offline
@@ -484,13 +508,15 @@ async function raceCase() {
   // Each side prints clock_timestamp() marks, so the proof shows the two really overlapped: the delete was made,
   // then the completion began, and only then did the delete commit.
   const mark = (name) => `SELECT '${name}=' || extract(epoch FROM clock_timestamp());`;
-  const deleter = session(`BEGIN; DELETE FROM public.delivery_items WHERE id = '${D7A}'; ${mark('deleted')} SELECT pg_sleep(8); ${mark('committing')} COMMIT;`);
+  const deleter = session(`BEGIN; DELETE FROM public.delivery_items WHERE id = '${D7A}'; ${mark('deleted')} SELECT pg_sleep(8); SELECT 'blocked=' || count(*) FROM pg_stat_activity WHERE pg_backend_pid() = ANY(pg_blocking_pids(pid)) AND query LIKE '%f05b-10%'; ${mark('committing')} COMMIT;`);
   const completer = session(`${mark('started')}\nBEGIN;\n${AS_ADMIN}\n${startComplete(D7, null, 'f05b-10')};\nCOMMIT;\n`, 4000);
   const [d, c] = await Promise.all([deleter, completer]);
   assert.equal(d.code, 0, d.out);
   const at = (out, name) => Number(out.match(new RegExp(`${name}=([0-9.]+)`))?.[1]);
   const [deleted, committing, started] = [at(d.out, 'deleted'), at(d.out, 'committing'), at(c.out, 'started')];
   assert.ok(deleted < started && started < committing, `the race did not overlap: deleted ${deleted}, started ${started}, committing ${committing}`);
+  // Server-side: just before the delete commits, the completion's backend is waiting on the delete's backend.
+  assert.equal(d.out.match(/blocked=(\d+)/)?.[1], '1', `the completion was not waiting on the delete in the database:\n${d.out}`);
   assert.notEqual(c.code, 0, `start-and-complete must be refused once the in-flight delete lands:\n${c.out}`);
   assert.match(c.out, /DELIVERY_NOTHING_DELIVERED/);
   assert.equal(state(D7), 'scheduled||0');

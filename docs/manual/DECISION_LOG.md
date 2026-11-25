@@ -1,24 +1,5 @@
 # Decision Log
 
-## 2026-11-23 — #2324: Mason owner-accepted 2 Sol finding(s) at `bd06a4d1ac26`
-
-**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2324 at `bd06a4d1ac26` (base `015566676500`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
-- Finding 1 (HIGH) at `supabase/migrations/20270227180000_f05b_delivery_line_checks.sql:94`, text sha256 `9faf6bd96614b502` (the wording stays with the proof, not here)
-  Mason chose to leave it unfixed (plain reply, ref 86e85412738c)
-- Finding 2 (HIGH) at `supabase/migrations/20270227180000_f05b_delivery_line_checks.sql:94`, text sha256 `022ab59ee678dda7` (the wording stays with the proof, not here)
-  Mason chose to leave it unfixed (plain reply, ref 86e85412738c)
-
-## 2026-11-23 — #2324: Mason owner-accepted 1 Sol finding(s) at `8efe9b212e66`
-
-**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2324 at `8efe9b212e66` (base `2a4b17f13baa`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
-- Finding 1 (HIGH) at `supabase/migrations/20270227140000_f05b_delivery_line_checks.sql:94`, text sha256 `8bad2e2839dad352` (the wording stays with the proof, not here)
-  Mason chose to leave it unfixed (plain reply, ref b644153b2db0)
-
-## 2026-11-23 — #2324: Mason owner-accepted 1 Sol finding(s) at `5b12fac2527f`
-
-**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2324 at `5b12fac2527f` (base `ac09b76f9877`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
-- Finding 1 (HIGH) at `supabase/migrations/20270226183000_f05b_delivery_line_checks.sql:113`, text sha256 `536ee062fda86bfa` (the wording stays with the proof, not here)
-  Mason chose to leave it unfixed (plain reply, ref fe9cb6de024e)
 ## 2026-11-24 — Field billing rounds like chemical sales; field app goes live in slices
 
 **Decision (Mason, in chat, 2026-11-24: "billing logic and rounding etc matches chemical sales"; "my newest answers beat old answer so remove conflicting older answers").** Field invoices use the chemical-sale split rule (others rounded down, the job's customer takes the rest; largest share if the customer has 0%), and each product is priced once per job, so a job never bills more than gallons × price (1 gal at 10.01 over two fields = 5.01 + 5.00). Replaces the 2026-11-24 morning "closest to exact" answer. Go-live in slices: who pays and paperwork, then crew on CRX, then billing on a switch-on date Mason picks; Chem Man bills until then. Partial hold release, leftover claims, one-click bill actual used and the duplicate-load flag move to spring.

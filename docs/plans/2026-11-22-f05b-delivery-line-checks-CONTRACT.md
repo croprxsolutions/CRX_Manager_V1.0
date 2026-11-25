@@ -17,7 +17,7 @@ Read at `origin/staging` 728f700a3 (2026-11-22). Follow-up to F05 (#2264, `20270
 - **Existing rows (live, read-only 2026-11-22):** 5 of 71 completed loads have nothing delivered (March 2026, all with no lines). The check runs only when an `in_progress` load is completed, so those rows and edits to them are untouched.
 - **Retries:** a retry of a saved completion (same key) is answered from its saved receipt when it carries the same figures, and is not re-checked (the delivery is already completed, so the new check is skipped). A refused call saves no key, so its retry is refused the same way.
 - **Offline sync:** today's offline completions carry no proof, so the proof check refuses them and they go to office review (`20261022075000`) before the new rule is reached. Nothing changes for them. If offline completions later carry proof, the new refusal is still raised inside the `complete_delivery` call, which `process_offline_action` catches and records for review (the refusal is an ordinary exception, not a commit-time one).
-- **Rollout:** the deployed app already refuses both cases on screen, so no screen flow hits the new refusal. `errorSanitizer` shows "The delivery was not completed. …" for `DELIVERY_NOTHING_DELIVERED`.
+- **Rollout:** the deployed app already refuses all-zero and line-less completions on screen. Its screens check only for a quantity above zero, so a figure under 0.01 (for example 0.005) on every line passes the screen and is refused by the database. `errorSanitizer` shows "The delivery was not completed. …" for `DELIVERY_NOTHING_DELIVERED`.
 - **Undo:** `scripts/smoke/f05b-delivery-line-checks-reverse.sql` restores the `20270203120000` wrapper exactly.
 
 ## Cold challenge (Astra, gpt-6.2-astra high): how each finding was settled

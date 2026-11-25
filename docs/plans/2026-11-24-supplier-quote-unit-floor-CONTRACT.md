@@ -169,3 +169,11 @@ it could save an out-of-bound row as `new` after the apply committed. New CHECK
 within the bounds, so that late save fails instead (plain message mapped). This ends the timing/lock line of findings
 (rounds 2-4). Correction also writes an import row, so a correction above the ceiling is now refused by this check
 first. Prover: an out-of-bound pending row is refused; all four checks validated.
+
+## Luna round 5 (2026-11-24)
+
+- MED fixed: the preflight's write lock was later upgraded by `ADD CONSTRAINT`, and its table order could deadlock with
+  a correction. The preflight now takes `ACCESS EXCLUSIVE` on all three tables in one statement, in the app's write
+  order (import rows, observations, links), so nothing is upgraded later. A deadlock or a wait over 5s still cancels
+  one side with nothing saved; that is safe, and the staff call or the apply is simply retried.
+- LOW fixed: the constraint-name checks in the preflight and postflight are scoped to the three tables.

@@ -48,18 +48,20 @@ BEGIN
   IF (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'stage_supplier_price_import') <> 1 THEN
     RAISE EXCEPTION 'SUPPLIER_QUOTE_UNIT_FLOOR_BASELINE_DRIFT: expected one stage_supplier_price_import';
   END IF;
-  IF EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conname IN (
+  IF EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conrelid IN ('public.product_supplier_links'::regclass, 'public.supplier_price_observations'::regclass,
+        'public.supplier_price_import_rows'::regclass) AND c.conname IN (
       'product_supplier_links_conversion_floor',
       'supplier_price_observations_package_quantity_floor',
       'supplier_price_observations_cost_ceiling',
       'supplier_price_import_rows_pending_bounds')) THEN
     RAISE EXCEPTION 'SUPPLIER_QUOTE_UNIT_FLOOR_BASELINE_DRIFT: a constraint already exists';
   END IF;
-  -- Block writes (reads continue) to the three tables until commit, so no row saved by an older in-flight call can land
-  -- between this count and the checks. Give up quickly rather than queue staff behind the lock.
+  -- Take every lock the checks below need now, at once and in the app's write order (import rows, then observations),
+  -- so the count is exact and no lock is upgraded later. Staff Supplier Pricing calls wait under a second; a wait over 5s
+  -- or a deadlock cancels one side with nothing saved (the staff call fails and can be retried, or the apply is re-run).
   PERFORM set_config('lock_timeout', '5s', true);
-  LOCK TABLE public.product_supplier_links, public.supplier_price_observations, public.supplier_price_import_rows
-    IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE public.supplier_price_import_rows, public.supplier_price_observations, public.product_supplier_links
+    IN ACCESS EXCLUSIVE MODE;
   -- Any stored row outside a bound stops the apply: fix or remove it first (production had none on 2026-11-24).
   SELECT count(*) INTO v_links FROM public.product_supplier_links
     WHERE inventory_units_per_supplier_unit < 0.001 OR inventory_units_per_supplier_unit = 'NaN';
@@ -75,7 +77,7 @@ BEGIN
 END;
 $preflight$;
 
--- ADD CONSTRAINT takes an exclusive lock held to commit (lock_timeout 5s from the preflight still applies).
+-- The preflight already holds the exclusive locks these need.
 ALTER TABLE public.product_supplier_links
   ADD CONSTRAINT product_supplier_links_conversion_floor
   CHECK (inventory_units_per_supplier_unit IS NULL
@@ -407,14 +409,16 @@ BEGIN
   IF NOT has_function_privilege('authenticated', v_sig, 'EXECUTE') OR has_function_privilege('anon', v_sig, 'EXECUTE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_GRANTS: execute must stay authenticated only';
   END IF;
-  IF (SELECT count(*) FROM pg_constraint c WHERE c.contype = 'c' AND c.conname IN (
+  IF (SELECT count(*) FROM pg_constraint c WHERE c.conrelid IN ('public.product_supplier_links'::regclass, 'public.supplier_price_observations'::regclass,
+        'public.supplier_price_import_rows'::regclass) AND c.contype = 'c' AND c.conname IN (
         'product_supplier_links_conversion_floor',
         'supplier_price_observations_package_quantity_floor',
         'supplier_price_observations_cost_ceiling',
         'supplier_price_import_rows_pending_bounds')) <> 4 THEN
     RAISE EXCEPTION 'POSTFLIGHT_CONSTRAINTS: expected the four checks';
   END IF;
-  IF EXISTS (SELECT 1 FROM pg_constraint c WHERE NOT c.convalidated AND c.conname IN (
+  IF EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conrelid IN ('public.product_supplier_links'::regclass, 'public.supplier_price_observations'::regclass,
+        'public.supplier_price_import_rows'::regclass) AND NOT c.convalidated AND c.conname IN (
         'product_supplier_links_conversion_floor',
         'supplier_price_observations_package_quantity_floor',
         'supplier_price_observations_cost_ceiling',

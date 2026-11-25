@@ -85,8 +85,9 @@ jobs:
 
   topics:
     name: Topic labels (Haiku)
-    # Scheduled runs only, from main: the API key lives in the main-only release-bot environment.
-    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+    # Scheduled or manual runs only, from main: the API key lives in the main-only release-bot environment.
+    # Manual too because GitHub runs the half-hourly schedule only every few hours (2026-11-25).
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: release-bot
     concurrency: { group: taha-ready-topics, cancel-in-progress: false }

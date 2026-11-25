@@ -145,7 +145,9 @@ try {
   // A ticket tied to a live job is counted through the job (Sol r1: its own application record would deduct twice).
   seed(`UPDATE public.blend_tickets SET deleted_at = NULL, job_id = '${JOB}' WHERE id = '${TICKET}';
     UPDATE public.jobs SET status = 'invoiced', invoice_id = '${POSTED}' WHERE id = '${JOB}';`);
-  allowed('unbilled ticket with no application record, tied to an invoiced job');
+  blocked('the ticket tied to an invoiced job that does not list its product', /blend ticket WRK-BT \(unbilled\)/);
+  seed(`UPDATE public.job_chemicals SET product_id = '${S1}' WHERE job_id = '${JOB}';`);
+  allowed('unbilled ticket with no application record, tied to an invoiced job listing its product');
   seed(`UPDATE public.jobs SET status = 'cancelled', invoice_id = NULL WHERE id = '${JOB}';`);
   blocked('the same ticket once its job is cancelled', /blend ticket WRK-BT \(unbilled\)/);
   // A job billed through its blend ticket counts as billed (job invoicing then refuses BLEND_TICKET_ALREADY_BILLED).

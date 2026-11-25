@@ -145,9 +145,10 @@ BEGIN
         FROM public.blend_tickets b JOIN public.blend_ticket_products bp ON bp.blend_ticket_id = b.id
         JOIN sizes s ON s.product_id = bp.product_id
        WHERE b.deleted_at IS NULL AND b.review_status IS DISTINCT FROM 'rejected'
-         -- A ticket for a live job is that job's work and is counted through it; its own application record would
+         -- A ticket line for a product its live job also lists is that job's work and is counted through it; its own application record would
          -- deduct the job's stock a second time (Sol r1).
-         AND NOT EXISTS (SELECT 1 FROM public.jobs bj WHERE bj.id = b.job_id AND bj.deleted_at IS NULL AND bj.status <> 'cancelled')
+         AND NOT EXISTS (SELECT 1 FROM public.jobs bj JOIN public.job_chemicals bjc ON bjc.job_id = bj.id AND bjc.product_id = bp.product_id
+                          WHERE bj.id = b.job_id AND bj.deleted_at IS NULL AND bj.status <> 'cancelled')
          AND (b.payment_status = 'unbilled'
               OR NOT EXISTS (SELECT 1 FROM public.application_records ar WHERE ar.source_type = 'blend_ticket' AND ar.source_id = b.id))
       UNION
@@ -173,7 +174,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public._product_parent_identity_after(public.product_parents,jsonb)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = '61d76303832274b0664a127835d78595'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '1ce88f15dc79e7baa2a7538d40379470'
                     AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef AND p.provolatile = 'v'
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]) THEN

@@ -106,8 +106,14 @@ describe('sanitizeError', () => {
   it.each([
     ['DELIVERY_QUANTITIES_STALE', "this delivery's lines changed since the screen loaded them; reload it and enter the quantities again."],
     ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
+    ['DELIVERY_NOTHING_DELIVERED', 'every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'],
   ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
-    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` }))
+      .toBe(`The delivery was not completed. ${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}`);
+  });
+  it('starts the explained refusal with a capital letter (Taha, #2324)', () => {
+    expect(sanitizeError({ code: '23514', message: 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero.' }))
+      .toBe('The delivery was not completed. Every product on it has a delivered quantity of zero.');
   });
   it.each([
     ['DELIVERY_OVER_ORDER', 'Atrazine 4L — only 0 left to schedule (ordered 10, delivered 10, on other open deliveries 0: none). Cancel another delivery for this order, or reduce one that has not started, first.'],
@@ -122,6 +128,14 @@ describe('sanitizeError', () => {
     const shown = sanitizeError({ code: 'P0001', message });
     expect(shown).toBe('Nothing was saved. Other open deliveries for this order already hold 2 of this product, so only 0 more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.');
     expect(shown).not.toMatch(/ITEM_OVER|2b680d4a/);
+  });
+  it.each(['delivery_items_quantity_finite_chk', 'delivery_items_quantity_delivered_finite_chk'])('explains the finite-quantity check %s on delivery lines in plain words', (name) => {
+    const shown = sanitizeError({ code: '23514', message: `new row for relation "delivery_items" violates check constraint "${name}"` });
+    expect(shown).toBe('Nothing was saved. Delivery quantities must be ordinary numbers. Reload the delivery and enter them again');
+  });
+  it('keeps a mixed-case product name as written (Sol r5 LOW)', () => {
+    const sentence = 'pH Plus — this would deliver more than was ordered. Call the office before completing this delivery.';
+    expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
   });
   it('explains a completion past the order (F05) without the raw token', () => {
     const sentence = 'Atrazine 4L — this would deliver more than was ordered. Call the office before completing this delivery.';

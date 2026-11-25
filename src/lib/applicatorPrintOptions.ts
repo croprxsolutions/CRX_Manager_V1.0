@@ -77,8 +77,14 @@ export function serializeApplicatorPrintOptions(options: ApplicatorPrintOptions)
   });
 }
 
-/** Read the saved defaults. RLS/read failures deliberately retain safe local defaults. */
-export async function loadApplicatorPrintOptions(): Promise<ApplicatorPrintOptions> {
+/** Read the saved defaults. RLS/read failures deliberately retain safe local defaults.
+ * Applicators never get the billing-split table (Mason, 2026-11-25: "Yes, hide them"). */
+export async function loadApplicatorPrintOptions(role?: string | null): Promise<ApplicatorPrintOptions> {
+  const options = await readApplicatorPrintOptions();
+  return role === 'applicator' ? { ...options, includeBillingSplits: false } : options;
+}
+
+async function readApplicatorPrintOptions(): Promise<ApplicatorPrintOptions> {
   try {
     const { data, error } = await supabase
       .from('app_settings')

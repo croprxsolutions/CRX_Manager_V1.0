@@ -29,6 +29,8 @@ vi.mock('../../lib/db', () => ({
 vi.mock('../ui/Toast', () => ({
   useToast: () => ({ toast: mockToast }),
 }));
+const authRole = vi.hoisted(() => ({ current: 'admin' }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ role: authRole.current }) }));
 
 import PrintOptionsDialog from './PrintOptionsDialog';
 
@@ -49,6 +51,29 @@ describe('PrintOptionsDialog', () => {
       error: null,
     });
     mockUpsertSelect.mockResolvedValue({ data: [{ setting_key: 'applicator_print_options' }], error: null });
+  });
+
+  it('applicators never get the billing-split table and do not see its toggle', async () => {
+    mockMaybeSingle.mockResolvedValue({ data: { setting_value: JSON.stringify({ includeBillingSplits: true }) }, error: null });
+    authRole.current = 'applicator';
+    const onPrint = vi.fn().mockResolvedValue(undefined);
+    try {
+      render(<PrintOptionsDialog open onClose={vi.fn()} onPrint={onPrint} />);
+      await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('app_settings'));
+      expect(screen.queryByText('Show billing-split table')).toBeNull();
+      const print = await screen.findByRole('button', { name: /^print/i });
+      await waitFor(() => expect(print).not.toBeDisabled());
+      fireEvent.click(print);
+      await waitFor(() => expect(onPrint).toHaveBeenCalledTimes(1));
+      expect(onPrint.mock.calls[0][0].options.includeBillingSplits).toBe(false);
+    } finally {
+      authRole.current = 'admin';
+    }
+  });
+
+  it('office users still see the billing-split toggle', async () => {
+    render(<PrintOptionsDialog open onClose={vi.fn()} onPrint={vi.fn()} />);
+    expect(await screen.findByText('Show billing-split table')).toBeInTheDocument();
   });
 
   it('loads saved print defaults when opened', async () => {

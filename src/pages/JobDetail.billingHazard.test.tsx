@@ -77,8 +77,9 @@ vi.mock('../lib/db', async () => ({
     INSUFFICIENT_ROLE: 'INSUFFICIENT_ROLE',
   },
 }));
+const authRole = vi.hoisted(() => ({ current: 'admin' }));
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ profile: { id: 'user-1', role: 'admin', full_name: 'Test Admin' }, role: 'admin' }),
+  useAuth: () => ({ profile: { id: 'user-1', role: authRole.current, full_name: 'Test User' }, role: authRole.current }),
 }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 vi.mock('react-router-dom', async () => {
@@ -382,6 +383,25 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
     labelLookupGated = false;
     releaseLabelLookup = () => {};
   });
+
+  it('an applicator sees no selling price, total, fee or internal memo; an admin still does', async () => {
+    authRole.current = 'applicator';
+    try {
+      const { unmount } = mountWith(HAZARD_CHEM);
+      await screen.findByText(/This line cannot be saved/i, {}, { timeout: 15000 });
+      for (const text of [/Price ¢\/unit/, /Total Price/, /Internal Job\/Invoice Memo/, /Application Service/, /per-acre machine fee/]) {
+        expect(screen.queryByText(text)).toBeNull();
+      }
+      unmount();
+    } finally {
+      authRole.current = 'admin';
+    }
+    mountWith(HAZARD_CHEM);
+    await screen.findByText(/This line cannot be saved/i, {}, { timeout: 15000 });
+    for (const text of [/Price ¢\/unit/, /Total Price/, /Internal Job\/Invoice Memo/, /Application Service/]) {
+      expect(screen.getAllByText(text).length).toBeGreaterThan(0);
+    }
+  }, 30000);
 
   it('shows the on-screen warning for the live Dry oz / Lb row', async () => {
     mountWith(HAZARD_CHEM);

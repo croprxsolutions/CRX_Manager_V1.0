@@ -4,6 +4,7 @@ import { ClipboardList, Printer, Save } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
+import { useAuth } from '../../contexts/AuthContext';
 import { sanitizeError, checkMutationResult, supabase } from '../../lib/db';
 import {
   APPLICATOR_PRINT_OPTIONS_KEY,
@@ -57,6 +58,8 @@ function ToggleSelect({
 
 export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOptionsDialogProps) {
   const { toast } = useToast();
+  const { role } = useAuth();
+  const isApplicator = role === 'applicator';
   const [format, setFormat] = useState<ApplicatorSheetFormat>('original');
   const [options, setOptions] = useState<ApplicatorPrintOptions>({ ...DEFAULT_APPLICATOR_PRINT_OPTIONS });
   const [loadingDefaults, setLoadingDefaults] = useState(false);
@@ -67,15 +70,15 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
     if (!open) return;
     let current = true;
     setFormat('original');
-    setOptions({ ...DEFAULT_APPLICATOR_PRINT_OPTIONS });
+    setOptions({ ...DEFAULT_APPLICATOR_PRINT_OPTIONS, includeBillingSplits: !isApplicator });
     setLoadingDefaults(true);
-    void loadApplicatorPrintOptions().then((saved) => {
+    void loadApplicatorPrintOptions(role).then((saved) => {
       if (current) setOptions(saved);
     }).finally(() => {
       if (current) setLoadingDefaults(false);
     });
     return () => { current = false; };
-  }, [open]);
+  }, [open, role, isApplicator]);
 
   const updateOption = <Key extends keyof ApplicatorPrintOptions>(key: Key, value: ApplicatorPrintOptions[Key]) => {
     setOptions((current) => ({ ...current, [key]: value }));
@@ -203,12 +206,14 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
             </select>
           </label>
 
-          <ToggleSelect
-            label="Show billing-split table"
-            value={options.includeBillingSplits}
-            onChange={(value) => updateOption('includeBillingSplits', value)}
-            disabled={busy}
-          />
+          {!isApplicator && (
+            <ToggleSelect
+              label="Show billing-split table"
+              value={options.includeBillingSplits}
+              onChange={(value) => updateOption('includeBillingSplits', value)}
+              disabled={busy}
+            />
+          )}
 
           <ToggleSelect
             label="Show company banner/header"

@@ -1163,7 +1163,7 @@ export default function Jobs() {
       }
       // Row printing stays one-click: use the saved packet defaults with the
       // Original format, because format itself is intentionally not persisted.
-      const options = await loadApplicatorPrintOptions();
+      const options = await loadApplicatorPrintOptions(role);
       const printableData = await prepareApplicatorSheetPrintData(jobId, data, options);
       await generateApplicatorSheetPdf(printableData, 'original', null, {
         includeBillingSplits: options.includeBillingSplits,

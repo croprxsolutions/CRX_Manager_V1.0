@@ -322,6 +322,8 @@ export default function JobDetail() {
   const isEditable = role === 'admin' || role === 'sales_rep';
   // Cost is admin-only (Mason, 2026-10-15): the server works it out for everyone else's saves.
   const isAdmin = role === 'admin';
+  // Mason 2026-11-25 ("Yes, hide them"): crews see payers, never selling prices, fees or the internal memo.
+  const isApplicatorRole = role === 'applicator';
 
   const [loading, setLoading] = useState(!isNew);
   // An admin's job-chemical cost read failed: show a retry panel instead of a cost-less form.
@@ -4303,6 +4305,7 @@ export default function JobDetail() {
               ))}
             </select>
           </div>
+          {!isApplicatorRole && (
           <div>
             <label className="block text-sm font-medium text-nav-dark mb-1">Application Service</label>
             <ApplicationServicePicker
@@ -4317,6 +4320,7 @@ export default function JobDetail() {
             />
             <p className="mt-1 text-xs text-gray-500">Adds a per-acre machine fee to this job's invoice.</p>
           </div>
+          )}
           <Input
             label="Batch ID"
             value={batchId}
@@ -4786,11 +4790,13 @@ export default function JobDetail() {
                           disabled={!canEdit} step="1" className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50" />
                       </div>
                       )}
+                      {!isApplicatorRole && (
                       <div className="col-span-6 md:col-span-2">
                         <label className="block text-xs font-medium text-secondary mb-1">Price ¢/unit</label>
                         <input type="number" value={c.price_per_unit_cents} onChange={(e) => updateChemRow(i, 'price_per_unit_cents', e.target.value)}
                           disabled={!canEdit} step="1" className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50" />
                       </div>
+                      )}
                     </div>
                     {/* #53/#54: grower-supplied product — applied but not deducted or billed. */}
                     <div className="flex items-center gap-2 pt-1">
@@ -4845,7 +4851,7 @@ export default function JobDetail() {
               })}
               <div className="flex justify-between text-sm text-secondary pt-2">
                 {isAdmin ? <span>Total Cost: ${(totalCostCents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> : <span />}
-                <span>Total Price: ${(totalPriceCents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                {!isApplicatorRole && <span>Total Price: ${(totalPriceCents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>}
               </div>
             </div>
           )}
@@ -5241,6 +5247,7 @@ export default function JobDetail() {
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-none disabled:bg-gray-50"
                 placeholder="Gate codes, directions, customer requests..." />
             </div>
+            {!isApplicatorRole && (
             <div>
               <label className="block text-sm font-medium text-nav-dark mb-1">
                 Internal Job/Invoice Memo
@@ -5250,6 +5257,7 @@ export default function JobDetail() {
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-none disabled:bg-gray-50"
                 placeholder="Internal only — never appears on customer-facing documents." />
             </div>
+            )}
             {!isNew && !isDeleted && (
               <p className="text-xs text-secondary">
                 Print status: {' '}

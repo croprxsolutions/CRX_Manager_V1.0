@@ -12,9 +12,12 @@ production, and nothing outside this computer can reach it. The rules are in the
 Run `node scripts/local-app/walkthrough.mjs start` from any feature checkout. On first use it creates that
 worktree's isolated Docker database, login and storage, and opens the app at the URL it prints. Later starts
 reuse that checkout's saved database. Each worktree gets a stable Docker project and three loopback ports derived
-from its path, so different feature branches can walk through screens side by side. If those ports are already
-busy, the launcher refuses before changing anything. If its saved credentials are missing, it also refuses to
-replace the database. `rebuild` explicitly resets only that checkout's verified walkthrough database.
+from its path (10,000 lane slots), so different feature branches can walk through screens side by side. The
+launcher checks for port conflicts before changing anything and refuses any API/database listener not bound by
+that checkout's gateway. If its saved credentials are missing but Docker data remains, it preserves that data
+and recommends a different uniquely named checkout path to request a fresh lane. If the new path still collides,
+choose another name. Do not run `docker compose down -v` to recover
+another checkout. `rebuild` explicitly resets only the current checkout's verified walkthrough database.
 
 Run the focused localhost-only feature proof with, for example,
 `node scripts/local-app/walkthrough.mjs test product-unit.spec.ts`. The command accepts one existing
@@ -55,12 +58,20 @@ this isolated copy sends no actual email. Stop the task-owned copy afterwards wi
 The Supabase 2.109.1 installation needs both release executables, `supabase` and `supabase-go`.
 A shim reporting 2.109.1 beside an older Go executable is insufficient. Put the complete official
 release folder first on this task's PATH, or set `SUPABASE_GO_BINARY` to its matching companion;
-the runner rejects a mismatched override. Before the invoice-brand migration, rebuild initializes
+the runner rejects a mismatched override. On Mason's Windows host, the verified pair is in
+`C:\Codex\sales-tools`; other hosts must use their own matching 2.109.1 pair. Before the invoice-brand migration, rebuild initializes
 the empty registration catalog through the real generated-admin seed workflow. No numbered business
 product is present at that point; business fixtures are seeded after all migrations finish.
 
 Historical migration provers are separate from this latest-schema browser proof: passing a historical
 candidate's before/after checks alone does not establish that today's sales workflow passes.
+
+If a command is interrupted, the next `start` or `rebuild` checks the recorded lock owner. It waits for a live
+owner and refuses a lock whose process has exited; it never removes containers or volumes, or changes a lock,
+to recover automatically. After confirming no walkthrough command is active, rename only `first-start.lock` to a
+dated `.stale` name. A malformed lock is left intact for inspection. If the same checkout folder was deleted and
+recreated while its Docker resources remain, use a new unique worktree folder to get another isolated lane;
+the old lane is preserved for deliberate manual recovery.
 
 Run these from the root of a checkout. They need Docker running, `npm ci` done and Supabase CLI 2.109.1,
 the version these steps are proven on.

@@ -13,13 +13,14 @@ export const IS_SCREEN_WALK = PROFILE === 'screen-walk';
 export const PROFILE_NAME = PROFILE ?? '';
 const screenLane = process.env.CRX_LOCAL_APP_LANE;
 if (IS_SCREEN_WALK && !/^[a-f0-9]{8}$/.test(screenLane ?? '')) throw new Error('LOCAL_APP_REFUSED: Invalid screen-walk lane.');
-const laneOffset = IS_SCREEN_WALK ? Number.parseInt(screenLane, 16) % 1000 : 0;
+// Keep feature lanes clear of common low service ports; 10,000 slots make accidental collisions rare.
+const laneOffset = IS_SCREEN_WALK ? Number.parseInt(screenLane, 16) % 10000 : 0;
 const pick = (normal, sales, docBytes, screenWalk) => (IS_SALES_GAUNTLET ? sales : IS_DOC_BYTES ? docBytes : IS_SCREEN_WALK ? screenWalk : normal);
 export const STATE_FOLDER = pick('.state', '.state/sales-gauntlet', '.state/doc-bytes', '.state/screen-walk');
 export const PROJECT = IS_SCREEN_WALK ? `crx-screen-${screenLane}` : pick('crx-local-app', 'crx-sales-gauntlet', 'crx-doc-bytes-proof', '');
 export const API_PORT = pick(54721, 54821, 54831, 24000 + laneOffset);
 export const DB_PORT = pick(54722, 54822, 54832, 34000 + laneOffset);
-export const APP_PORT = pick(5199, 5209, 5219, 5229 + laneOffset);
+export const APP_PORT = pick(5199, 5209, 5219, 10000 + laneOffset);
 export const API_URL = `http://127.0.0.1:${API_PORT}`;
 export const APP_URL = `http://127.0.0.1:${APP_PORT}`;
 export const DB_URL_PREFIX = `postgresql://postgres:`;
@@ -200,27 +201,46 @@ export async function assertFrontendIsOurs(anonKey, { isOpen = portIsOpen, fetch
 export function assertExtraAppPort(port) {
   const number = /^\d{4,5}$/.test(String(port ?? '')) ? Number(port) : NaN;
   if (!(number >= 1024 && number <= 65535) || [5199, 54721, 54722, 5209, 54821, 54822, 5219, 54831, 54832, APP_PORT, API_PORT, DB_PORT].includes(number)) {
-    throw new Refused('--port needs a port from 1024 to 65535 outside every test profile\' reserved ports.');
+    throw new Refused('--port needs a port from 1024 to 65535 outside every test profile\'s reserved ports.');
   }
   return number;
 }
 
 export function assertWalkthroughLaneResourcesAreEmpty({ containers, volumes, networks, netstat }) {
   for (const [kind, resources] of [['container', containers], ['volume', volumes], ['network', networks]]) {
-    if (resources) throw new Refused(`This walkthrough ${kind} exists but its local credentials are missing. Recover the matching checkout state before starting it.`);
+    if (resources) throw new Refused(`This walkthrough ${kind} exists but its local credentials are missing. Nothing was changed. Start a new uniquely named checkout to get a fresh lane; the old Docker data is preserved.`);
   }
   for (const port of [APP_PORT, API_PORT, DB_PORT]) {
     if (netstat.split(/\r?\n/).some((line) => line.includes(`:${port} `) && /LISTENING/.test(line))) {
-      throw new Refused(`Walkthrough port ${port} is already in use. Nothing was changed.`);
+      throw new Refused(`Walkthrough port ${port} is already in use or reserved. Nothing was changed. Start a new uniquely named checkout to get another lane; do not stop another service.`);
     }
   }
 }
 
-export function assertFinishedBuild(build, migrations, schemaFingerprint) {
-  if (!Array.isArray(build?.migrations)) throw new Refused('The last rebuild did not finish. Run: node scripts/local-app/walkthrough.mjs rebuild');
-  if (build.migrations.join() !== migrations.join()) throw new Refused('This checkout has different migrations from the test database. Run: node scripts/local-app/walkthrough.mjs rebuild');
-  if (schemaFingerprint && build.schemaFingerprint !== schemaFingerprint) throw new Refused('The local schema or migration contents changed after this database was built. Run: node scripts/local-app/walkthrough.mjs rebuild');
+export function assertFinishedBuild(build, migrations, schemaFingerprint, recoveryCommand = 'node scripts/local-app/app.mjs rebuild') {
+  if (!Array.isArray(build?.migrations)) throw new Refused(`The last rebuild did not finish. Run: ${recoveryCommand}`);
+  if (build.migrations.join() !== migrations.join()) throw new Refused(`This checkout has different migrations from the test database. Run: ${recoveryCommand}`);
+  if (schemaFingerprint && build.schemaFingerprint !== schemaFingerprint) throw new Refused(`The local schema or migration contents changed after this database was built. Run: ${recoveryCommand}`);
   return build;
+}
+
+export function assertOwnedApiDbListeners(netstat, gatewayBindings) {
+  const listens = [API_PORT, DB_PORT].filter((port) => netstat.split(/\r?\n/).some((line) => line.includes(`:${port} `) && /LISTENING/.test(line)));
+  for (const port of listens) {
+    if (!gatewayBindings.some((binding) => Number(binding.HostPort) === port && binding.HostIp === '127.0.0.1')) {
+      throw new Refused(`Port ${port} has a listener that is not owned by this checkout's local gateway. Nothing was changed.`);
+    }
+  }
+}
+
+export function assertWalkthroughGatewayIdentity(container, project, composeFile) {
+  const labels = container?.Config?.Labels ?? {};
+  if (container?.State?.Running !== true || labels['com.docker.compose.project'] !== project
+    || labels['com.docker.compose.service'] !== 'gateway'
+    || path.resolve(labels['com.docker.compose.project.config_files'] ?? '') !== path.resolve(composeFile)) {
+    throw new Refused('The running gateway identity or checkout does not match this walkthrough lane. Nothing was changed.');
+  }
+  return Object.values(container.HostConfig?.PortBindings ?? {}).flat();
 }
 
 /** Refuses a running gateway that publishes anywhere but loopback. */

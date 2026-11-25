@@ -3,17 +3,19 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, Refused,
-  IS_SALES_GAUNTLET, PROJECT,
-  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFinishedBuild, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, assertWalkthroughLaneResourcesAreEmpty,
+  IS_SALES_GAUNTLET, IS_SCREEN_WALK, PROJECT,
+  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFinishedBuild, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, assertWalkthroughLaneResourcesAreEmpty, assertOwnedApiDbListeners, assertWalkthroughGatewayIdentity,
   denyInsideCheckout,
 } from './target.mjs';
+import { acquireLaneLock } from './lane-lock.mjs';
+import { schemaFingerprint } from './schema-fingerprint.mjs';
 import { isFileLoadingAllowed, resolveConfig } from 'vite';
 import { tempDir } from "../lib/test-temp-dir.mjs";
 
@@ -70,7 +72,7 @@ describe('isolated sales profile', () => {
       console.log(JSON.stringify([target.PROJECT, target.APP_PORT, target.API_PORT, target.DB_PORT, target.ISSUER, target.STATE_FOLDER]));
     `], { encoding: 'utf8', env: { ...process.env, CRX_LOCAL_APP_PROFILE: 'screen-walk', CRX_LOCAL_APP_LANE: '89abcdef' } });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), ['crx-screen-89abcdef', 6196, 24967, 34967, 'crx-screen-89abcdef', '.state/screen-walk']);
+    assert.deepEqual(JSON.parse(result.stdout), ['crx-screen-89abcdef', 17967, 31967, 41967, 'crx-screen-89abcdef', '.state/screen-walk']);
   });
   it('refuses a walkthrough profile with no checkout identity', () => {
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', `import './scripts/local-app/target.mjs'`], {
@@ -84,7 +86,22 @@ describe('isolated sales profile', () => {
     assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: 'container-id', volumes: '', networks: '', netstat: '' }), /container exists/);
     assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: '', volumes: 'volume-id', networks: '', netstat: '' }), /volume exists/);
     assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: '', volumes: '', networks: 'network-id', netstat: '' }), /network exists/);
-    assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: '', volumes: '', networks: '', netstat: `TCP 127.0.0.1:${APP_PORT} 0.0.0.0:0 LISTENING 123` }), /already in use/);
+    assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: '', volumes: '', networks: '', netstat: `TCP 127.0.0.1:${APP_PORT} 0.0.0.0:0 LISTENING 123` }), /new uniquely named checkout/);
+  });
+  it('refuses API or database listeners not bound by this walkthrough gateway', () => {
+    assert.throws(() => assertOwnedApiDbListeners(`TCP 127.0.0.1:${API_PORT} 0.0.0.0:0 LISTENING 123`, []), /not owned by this checkout/);
+    assert.doesNotThrow(() => assertOwnedApiDbListeners(`TCP 127.0.0.1:${API_PORT} 0.0.0.0:0 LISTENING 123`, [{ HostIp: '127.0.0.1', HostPort: String(API_PORT) }]));
+  });
+  it('requires a running gateway from this checkout before trusting its published ports', () => {
+    const composeFile = path.join(HERE, 'compose.yaml');
+    const container = { State: { Running: true }, Config: { Labels: {
+      'com.docker.compose.project': PROJECT,
+      'com.docker.compose.service': 'gateway',
+      'com.docker.compose.project.config_files': composeFile,
+    } }, HostConfig: { PortBindings: { '8000/tcp': [{ HostIp: '127.0.0.1', HostPort: String(API_PORT) }] } } };
+    assert.equal(assertWalkthroughGatewayIdentity(container, PROJECT, composeFile).length, 1);
+    assert.throws(() => assertWalkthroughGatewayIdentity({ ...container, State: { Running: false } }, PROJECT, composeFile), /gateway identity/);
+    assert.throws(() => assertWalkthroughGatewayIdentity({ ...container, Config: { Labels: { ...container.Config.Labels, 'com.docker.compose.project.config_files': 'other-compose.yaml' } } }, PROJECT, composeFile), /gateway identity/);
   });
   it('refuses a state file from the other profile', () => {
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
@@ -111,6 +128,16 @@ describe('isolated sales profile', () => {
 });
 
 describe('walkthrough build manifest', () => {
+  it('fingerprints every path from the real approved migration list', () => {
+    const root = path.resolve(HERE, '..', '..');
+    const listed = spawnSync(process.execPath, ['scripts/list-post-baseline-migrations.mjs'], { cwd: root, encoding: 'utf8' });
+    assert.equal(listed.status, 0, listed.stderr);
+    const migrations = listed.stdout.trim().split(/\r?\n/).filter(Boolean);
+    assert.ok(migrations.length > 0);
+    assert.ok(migrations.every((name) => name.startsWith('supabase/migrations/')));
+    for (const name of migrations) assert.equal(existsSync(path.join(root, name)), true, name);
+    assert.match(schemaFingerprint(root, migrations), /^[a-f0-9]{64}$/);
+  });
   it('refuses a missing or incomplete build manifest', () => {
     assert.throws(() => assertFinishedBuild(null, ['one.sql']), /last rebuild did not finish/);
     assert.throws(() => assertFinishedBuild({ migrations: [] }, ['one.sql']), /different migrations/);
@@ -118,6 +145,10 @@ describe('walkthrough build manifest', () => {
   it('refuses same-named migrations with changed contents', () => {
     assert.throws(() => assertFinishedBuild({ migrations: ['one.sql'], schemaFingerprint: 'old' }, ['one.sql'], 'new'), /contents changed/);
     assert.doesNotThrow(() => assertFinishedBuild({ migrations: ['one.sql'], schemaFingerprint: 'new' }, ['one.sql'], 'new'));
+  });
+  it('uses the recovery command for the active profile', () => {
+    assert.throws(() => assertFinishedBuild(null, ['one.sql'], undefined, 'node scripts/local-app/walkthrough.mjs rebuild'), /walkthrough\.mjs rebuild/);
+    assert.throws(() => assertFinishedBuild(null, ['one.sql'], undefined, 'node scripts/local-app/sales.mjs rebuild'), /sales\.mjs rebuild/);
   });
   it('rejects a missing spec selection before it asks Docker to start', () => {
     const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'test', 'missing.spec.ts'], { encoding: 'utf8', timeout: 30000 });
@@ -128,6 +159,23 @@ describe('walkthrough build manifest', () => {
     const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'test'], { encoding: 'utf8', timeout: 30000 });
     assert.equal(result.status, 3);
     assert.match(result.stderr, /Choose one feature proof/);
+  });
+});
+
+describe('walkthrough lane lock', () => {
+  it('serializes concurrent first-start and rebuild commands', () => {
+    const lockPath = path.join(tempDir('lane-lock-'), 'first-start.lock');
+    const release = acquireLaneLock(lockPath);
+    assert.throws(() => acquireLaneLock(lockPath), /owns this lane/);
+    release();
+    assert.equal(existsSync(lockPath), false);
+  });
+  it('preserves a lock whose recorded process is gone for manual recovery', () => {
+    const lockPath = path.join(tempDir('lane-lock-'), 'first-start.lock');
+    writeFileSync(lockPath, '987654321\n');
+    assert.throws(() => acquireLaneLock(lockPath), /process 987654321.*Nothing was changed/);
+    assert.equal(existsSync(lockPath), true);
+    assert.equal(readFileSync(lockPath, 'utf8').trim(), '987654321');
   });
 });
 
@@ -356,7 +404,7 @@ describe('every command refuses before it changes anything', () => {
         try {
           writeFileSync(path.join(dir, 'local.env'), `${Object.entries(goodState()).map(([k, v]) => `${k}=${v}`).join('\n')}\n`);
           const before = containers();
-          const child = await runAsync(command, dir);
+          const child = await runAsync(command, dir, IS_SCREEN_WALK && command === 'test' ? ['product-unit.spec.ts'] : []);
           assert.equal(child.status, 3, `${command} did not refuse: ${child.output}`);
           assert.match(child.output, /unknown frontend/);
           assert.equal(containers(), before);
@@ -371,9 +419,9 @@ describe('every command refuses before it changes anything', () => {
 });
 
 // The server above lives in this process, so the child cannot block it.
-async function runAsync(command, dir) {
+async function runAsync(command, dir, args = []) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [APP, command], { timeout: 30000, env: { ...process.env, CRX_LOCAL_APP_STATE_DIR: dir } });
+    const child = spawn(process.execPath, [APP, command, ...args], { timeout: 30000, env: { ...process.env, CRX_LOCAL_APP_STATE_DIR: dir } });
     let output = '';
     child.stdout.on('data', (data) => { output += data; });
     child.stderr.on('data', (data) => { output += data; });

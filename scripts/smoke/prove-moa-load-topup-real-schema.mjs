@@ -2,10 +2,11 @@
 /**
  * Real-schema proof for the MOA-1 group load top-up (20270304100000): on the production
  * baseline plus every replayable migration on disk (Docker), it
- *   - fills each of its 12 ingredients with exactly its listed group and one event,
+ *   - carries exactly the 12 groups Mason approved (fixed answer key below, not read from the SQL),
+ *   - run after the main load (20270205150000, stamp order), fills each of its ingredients with
+ *     exactly its listed group and one event, and leaves the main load's rows alone,
  *   - never touches an ingredient that already has a group row, nor a retired one,
  *   - writes nothing on a second run,
- *   - is independent of the main load (20270205150000): each fills only its own list,
  *   - is not mistaken for the main load by the #2193 prerequisite guard.
  *
  * Run: node scripts/smoke/prove-moa-load-topup-real-schema.mjs   (needs Docker)
@@ -28,16 +29,26 @@ const LOAD_SQL = readFileSync(path.join(dir, LOAD), 'utf8');
 const rowsOf = (sql) => [...sql.matchAll(/^\s*\('((?:[^']|'')*)', '([0-9-]+)', '(HRAC|IRAC|FRAC)', '(\w+)'/gm)]
   .map((m) => ({ name: m[1].replace(/''/g, "'"), cas: m[2], code: `${m[3]} ${m[4]}` }));
 const LIST = rowsOf(TOPUP_SQL);
+// Mason's approval, 2026-11-24 (docs/manual/decision-log.d/2026-11-24-moa1-topup-list.md), by CAS.
+const APPROVED = {
+  '1928-43-4': 'HRAC 4', '2921-88-2': 'IRAC 1B', '2300-66-5': 'HRAC 4', '70901-12-1': 'HRAC 9',
+  '100784-20-1': 'HRAC 2', '114311-32-9': 'HRAC 2', '101917-66-2': 'HRAC 2', '66423-09-4': 'HRAC 4',
+  '51218-45-2': 'HRAC 15', '1910-42-5': 'HRAC 22', '62476-59-9': 'HRAC 14', '1582-09-8': 'HRAC 3',
+};
+const TYPED = '1582-09-8'; // Trifluralin: an admin already saved a group
+const RETIRED = '114311-32-9'; // Imazamox: retired
 const q = (s) => `'${s.replace(/'/g, "''")}'`;
 const groupsOf = (cas) => scalar(`SELECT coalesce(string_agg(o.scheme || ' ' || o.group_code, ',' ORDER BY o.scheme, o.group_code), '')
   FROM public.active_ingredient_modes_of_action o JOIN public.active_ingredients a ON a.id = o.ingredient_id
  WHERE a.cas = ${q(cas)} AND o.status = 'active';`);
 const counts = () => scalar(`SELECT (SELECT count(*) FROM public.active_ingredient_modes_of_action) || '/' ||
-  (SELECT count(*) FROM public.active_ingredient_events WHERE reason LIKE 'MOA-1 group load%');`);
+  (SELECT count(*) FROM public.active_ingredient_events WHERE reason LIKE 'MOA-1 %group load%');`);
+const apply = (sql) => { const r = psql(sql, { allowFailure: true }); assert.equal(r.status, 0, r.stderr); };
 
 try {
-  // The guard keyed on the main load must not mistake the top-up for it (it would refuse: 12 rows, not 123).
   assert.equal(LIST.length, 12);
+  assert.deepEqual(Object.fromEntries(LIST.map((r) => [r.cas, r.code])), APPROVED, 'the migration carries exactly the approved groups');
+  // The guard keyed on the main load must not mistake the top-up for it (it would refuse: 12 rows, not 123).
   assert.equal(prerequisiteFor(TOPUP.replace(/\.sql$/, ''), TOPUP_SQL), null, 'top-up is not the guarded load');
   assert.ok(prerequisiteFor(LOAD.replace(/\.sql$/, ''), LOAD_SQL), 'the main load is still guarded');
   const loadCas = new Set(rowsOf(LOAD_SQL).map((r) => r.cas));
@@ -49,36 +60,37 @@ try {
   // The 12 ingredients as they are on live (name and CAS), plus Atrazine from the main load's list.
   psql(`INSERT INTO public.active_ingredients (name, cas, created_by, updated_by) VALUES ${
     [...LIST, { name: 'Atrazine', cas: '1912-24-9' }].map((r) => `(${q(r.name)}, ${q(r.cas)}, '${USERS.admin}', '${USERS.admin}')`).join(', ')};`);
-  // Trifluralin already has a group someone saved (never overwritten); Imazamox is retired (never touched).
   psql(`INSERT INTO public.active_ingredient_modes_of_action (ingredient_id, scheme, group_code, source_note, created_by, updated_by)
-        SELECT id, 'HRAC', '99', 'typed by an admin (proof)', '${USERS.admin}', '${USERS.admin}' FROM public.active_ingredients WHERE cas = '1582-09-8';
-        UPDATE public.active_ingredients SET status = 'retired', retire_reason = 'proof' WHERE cas = '114311-32-9';`);
+        SELECT id, 'HRAC', '99', 'typed by an admin (proof)', '${USERS.admin}', '${USERS.admin}' FROM public.active_ingredients WHERE cas = '${TYPED}';
+        UPDATE public.active_ingredients SET status = 'retired', retire_reason = 'proof' WHERE cas = '${RETIRED}';`);
 
-  const run = psql(TOPUP_SQL, { allowFailure: true });
-  assert.equal(run.status, 0, run.stderr);
-  for (const r of LIST) {
-    const want = r.cas === '1582-09-8' ? 'HRAC 99' : r.cas === '114311-32-9' ? '' : r.code;
-    assert.equal(groupsOf(r.cas), want, `${r.name}`);
-  }
-  assert.equal(groupsOf('1912-24-9'), '', 'the main load\'s Atrazine is not the top-up\'s to fill');
-  assert.equal(counts(), '11/10', '10 rows + the typed one; one event per filled ingredient');
+  apply(LOAD_SQL);
+  assert.equal(groupsOf('1912-24-9'), 'HRAC 5', 'main load fills its own Atrazine');
+  assert.equal(counts(), '2/1', 'main load added only Atrazine (beside the typed row)');
+  console.log('[topup] main load first (stamp order): fills only its own list');
+
+  apply(TOPUP_SQL);
+  for (const r of LIST) assert.equal(groupsOf(r.cas), r.cas === TYPED ? 'HRAC 99' : r.cas === RETIRED ? '' : APPROVED[r.cas], r.name);
+  assert.equal(groupsOf('1912-24-9'), 'HRAC 5', 'the main load\'s row is left alone');
+  assert.equal(counts(), '12/11', '10 new rows; one event per filled ingredient');
   assert.equal(scalar(`SELECT count(*) FROM public.active_ingredient_events
     WHERE reason LIKE 'MOA-1 group load top-up%' AND before_values = '{"modes_of_action": []}'::jsonb
       AND jsonb_array_length(after_values -> 'modes_of_action') = 1;`), '10', 'events: before [], after the new group');
   assert.equal(scalar(`SELECT count(*) FROM public.active_ingredient_modes_of_action
     WHERE source_note LIKE '%MOA-1 top-up list, approved by Mason 2026-11-24' AND row_version = 1;`), '10', 'rollback marker on every row');
-  console.log('[topup] first run: 10 filled with their listed group, typed Trifluralin kept, retired Imazamox untouched');
+  console.log('[topup] top-up: 10 filled with their approved group, typed Trifluralin kept, retired Imazamox untouched');
 
-  const again = psql(TOPUP_SQL, { allowFailure: true });
-  assert.equal(again.status, 0, again.stderr);
-  assert.equal(counts(), '11/10', 'second run wrote nothing');
+  apply(TOPUP_SQL);
+  assert.equal(counts(), '12/11', 'second run wrote nothing');
   console.log('[topup] second run: nothing written');
 
-  const load = psql(LOAD_SQL, { allowFailure: true });
-  assert.equal(load.status, 0, load.stderr);
-  assert.equal(groupsOf('1912-24-9'), 'HRAC 5', 'main load fills its own Atrazine');
-  assert.equal(counts(), '12/11', 'main load added only Atrazine');
-  for (const r of LIST) if (!['1582-09-8', '114311-32-9'].includes(r.cas)) assert.equal(groupsOf(r.cas), r.code);
-  console.log('[topup] main load afterwards: fills only its own list, top-up rows unchanged');
+  // Imazamox reactivated gets its approved code; Trifluralin's typed group retired (an admin emptied its list) stays empty.
+  psql(`UPDATE public.active_ingredient_modes_of_action SET status = 'retired', row_version = row_version + 1
+         WHERE source_note = 'typed by an admin (proof)';
+        UPDATE public.active_ingredients SET status = 'active', retire_reason = NULL WHERE cas = '${RETIRED}';`);
+  apply(TOPUP_SQL);
+  assert.equal(groupsOf(RETIRED), APPROVED[RETIRED], 'Imazamox, once active');
+  assert.equal(groupsOf(TYPED), '', 'Trifluralin\'s list was emptied by an admin, so it stays empty');
+  console.log('[topup] reactivated Imazamox filled; an ingredient that ever had a group row is never refilled');
   console.log('MOA_LOAD_TOPUP_PROOF_PASS');
 } finally { removeContainer(); }

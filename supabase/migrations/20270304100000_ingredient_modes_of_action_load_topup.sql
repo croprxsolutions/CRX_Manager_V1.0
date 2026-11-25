@@ -19,7 +19,9 @@
 --   already has groups or gets them here.
 -- * One 'updated' event per filled ingredient (before [], after the new list), attributed to Mason, who approved
 --   the list. A second run finds every matched ingredient filled and writes nothing.
--- * Independent of the load: no row here shares a CAS or name with the load's list, so either may run first.
+-- * Runs after the main load (stamp order). No row here shares a CAS or name with its list. Run first, it would
+--   fill a salt here whose linked acid only the main load fills, so both would carry the same code (no live
+--   ingredient has an acid link today, 2026-11-24).
 -- * Locks: only the ingredient-list advisory lock every ingredient, chemistry and group writer takes first.
 -- Reports (NOTICE): rows written, ingredients filled, kept, skipped, list rows matching no ingredient, and
 -- active ingredients showing no group.

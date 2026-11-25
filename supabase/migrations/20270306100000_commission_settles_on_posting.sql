@@ -195,6 +195,7 @@ CREATE FUNCTION public._settle_order_commission_20270306(p_order_id uuid)
 AS $function$
 DECLARE
   v_profit numeric;
+  v_price numeric;
   v_base numeric;
   v_base_cents bigint;
   v_discounted boolean;
@@ -213,12 +214,13 @@ BEGIN
   -- The sale lock first, waited for (the same invoice -> sale order zz_cap_order_invoice_header already takes from the
   -- same invoice update), then everything is read under it, so two posts of one sale settle one after the other on what
   -- the first committed (Sol posting r2 H1).
-  SELECT COALESCE(total_profit, 0) INTO v_profit FROM orders WHERE id = p_order_id FOR NO KEY UPDATE;
+  SELECT COALESCE(total_profit, 0), total_price INTO v_profit, v_price FROM orders WHERE id = p_order_id FOR NO KEY UPDATE;
   IF NOT FOUND THEN
     RETURN 0;
   END IF;
-  -- A legacy non-finite profit can't be settled; leave the sale exactly as it is (Sol posting r3 H3).
-  IF NOT (v_profit > -1e15 AND v_profit < 1e15) THEN
+  -- A legacy non-finite profit or booked total can't be settled; leave the sale exactly as it is (Sol posting r3 H3; a
+  -- NaN total_price would otherwise skip the part-billed scaling and take the whole discount, r4 MED 7).
+  IF NOT (v_profit > -1e15 AND v_profit < 1e15) OR NOT (v_price < 1e15) THEN
     RETURN 0;
   END IF;
   v_base := public._order_commission_base_20270306(p_order_id);
@@ -256,38 +258,45 @@ BEGIN
                 FROM (SELECT x.id, v_base_cents * x.pct / 100 AS raw FROM unnest(v_ids, v_pcts) AS x(id, pct)) u) r;
       SELECT array_agg(c.id ORDER BY c.id) INTO v_moving
         FROM commissions c JOIN unnest(v_ids, v_new) AS r(id, amount) ON r.id = c.id
-       WHERE c.order_profit IS DISTINCT FROM v_base OR c.commission_amount IS DISTINCT FROM r.amount;
+       WHERE c.order_profit IS DISTINCT FROM v_base OR c.commission_amount IS DISTINCT FROM r.amount
+          -- A row already on the discounted base but never marked (a legacy row the backfill finds) is marked now, so
+          -- it goes back on an unpost (Sol posting r4 MED 5).
+          OR (v_discounted AND c.discount_settled_at IS NULL);
     ELSE
-      -- Some rows are paid, batched or left to their writers. When those all sit on this same base, the pending rows
-      -- share what is left of the set's exact total (largest remainder), so a row frozen on the same base can't make
-      -- the set a cent over after an unpost and repost (Sol posting r3 MED 9); otherwise each pending row is its own
-      -- share (the edit paths' rule). Only rows whose stored base differs move, so an unchanged base moves no cent.
-      SELECT CASE
-               WHEN bool_and(o.order_profit = v_base)
-                    AND round(v_base_cents * (sum(o.split_percentage) + (SELECT sum(p) FROM unnest(v_pcts) p)) / 100)
-                        - round(sum(o.commission_amount) * 100) - (SELECT sum(floor(v_base_cents * p / 100)) FROM unnest(v_pcts) p)
-                        BETWEEN 0 AND cardinality(v_ids)
-               THEN round(v_base_cents * (sum(o.split_percentage) + (SELECT sum(p) FROM unnest(v_pcts) p)) / 100)
+      -- Some rows are paid, batched or left to their writers. Only rows whose stored base differs move (or an unmarked
+      -- row on a discount, MED 5 above), so an unchanged base moves no cent.
+      SELECT array_agg(c.id ORDER BY c.id) INTO v_moving
+        FROM commissions c
+       WHERE c.id = ANY (v_ids)
+         AND (c.order_profit IS DISTINCT FROM v_base OR (v_discounted AND c.discount_settled_at IS NULL));
+      -- When every row that stays (pending ones already on the base included) sits on this same base, the moving rows
+      -- share what is left of the set's exact total by largest remainder, never more, so a frozen row on the same base
+      -- or a tie with a pending row can't make the set a cent over (Sol posting r3 MED 9, r4 MED 6); otherwise each
+      -- moving row is its own share (the edit paths' rule).
+      SELECT CASE WHEN bool_and(o.order_profit = v_base)
+               THEN round(v_base_cents * (SELECT sum(a.split_percentage) FROM commissions a
+                                           WHERE a.order_id = p_order_id AND a.deleted_at IS NULL AND a.status <> 'cancelled') / 100)
                     - round(sum(o.commission_amount) * 100)
              END
         INTO v_pool
         FROM commissions o
-       WHERE o.order_id = p_order_id AND o.deleted_at IS NULL AND o.status <> 'cancelled' AND o.id <> ALL (v_ids);
+       WHERE o.order_id = p_order_id AND o.deleted_at IS NULL AND o.status <> 'cancelled'
+         AND o.id <> ALL (COALESCE(v_moving, '{}'));
       IF v_pool IS NOT NULL THEN
+        -- Non-moving rows get NULL here and are not written.
         SELECT array_agg((floor(r.raw) + CASE WHEN r.remainder_rank <= v_pool - r.floored THEN 1 ELSE 0 END) / 100.0
-                         ORDER BY r.id)
+                         ORDER BY x.id)
           INTO v_new
-          FROM (SELECT u.id, u.raw,
-                       row_number() OVER (ORDER BY u.raw - floor(u.raw) DESC, u.id) AS remainder_rank,
-                       sum(floor(u.raw)) OVER () AS floored
-                  FROM (SELECT x.id, v_base_cents * x.pct / 100 AS raw FROM unnest(v_ids, v_pcts) AS x(id, pct)) u) r;
+          FROM unnest(v_ids) AS x(id)
+          LEFT JOIN (SELECT u.id, u.raw,
+                            row_number() OVER (ORDER BY u.raw - floor(u.raw) DESC, u.id) AS remainder_rank,
+                            sum(floor(u.raw)) OVER () AS floored
+                       FROM (SELECT y.id, v_base_cents * y.pct / 100 AS raw FROM unnest(v_ids, v_pcts) AS y(id, pct)
+                              WHERE y.id = ANY (v_moving)) u) r ON r.id = x.id;
       ELSE
         SELECT array_agg(public.compute_commission_amount(v_base, x.pct) ORDER BY x.id) INTO v_new
           FROM unnest(v_ids, v_pcts) AS x(id, pct);
       END IF;
-      SELECT array_agg(c.id ORDER BY c.id) INTO v_moving
-        FROM commissions c
-       WHERE c.id = ANY (v_ids) AND c.order_profit IS DISTINCT FROM v_base;
     END IF;
     IF v_moving IS NULL THEN
       RETURN 0;

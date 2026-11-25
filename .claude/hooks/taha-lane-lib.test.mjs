@@ -54,7 +54,11 @@ for (const p of [
 
 // Supplier quotes are Mason's purchasing lane (Taha, 2026-11-25, after #2524's supplier_quote_unit_floor).
 for (const p of ["supabase/migrations/20270305200000_supplier_quote_unit_floor.sql", "src/pages/SupplierQuotes.tsx"]) ok(!isTahaLanePath(p), `${p} is not Taha's`);
-for (const p of ["supabase/migrations/20270101000000_quote_items_x.sql", "src/pages/QuoteBuilder.tsx"]) ok(isTahaLanePath(p), `${p} stays Taha's`);
+for (const p of ["supabase/migrations/20270101000000_quote_items_x.sql", "src/pages/supplier/Quotes.tsx", "src/components/supplier/QuoteBuilder.tsx",
+  "supabase/migrations/20270101000000_supplier_quote_to_customer_quote.sql", "supabase/migrations/20270101000000_quote_supplier_x.sql", "src/lib/SupplierQuoteOrQuoteItems.ts"]) ok(isTahaLanePath(p), `${p} stays Taha's`);
+ok(!isTahaLanePath("src/lib/SUPPLIER_QUOTE_sheet.ts"), "case variants of a supplier quote are not Taha's");
+eq(isTahaLaneSql("CREATE OR REPLACE FUNCTION public.get_supplier_quote_sheet() RETURNS int AS $$ SELECT 1 $$;"), false, "get_supplier_quote_sheet is not Taha's");
+ok(isTahaLaneSql("UPDATE public.quotes SET status = 'sent';"), "a supplier-quote migration that writes quotes is still Taha's");
 eq(isTahaLaneSql("CREATE OR REPLACE FUNCTION public.supplier_quote_unit_floor() RETURNS int AS $$ SELECT 1 $$;"), false, "a supplier-quote function is not Taha's");
 eq(isTahaLaneSql("CREATE OR REPLACE FUNCTION public.create_quote() RETURNS int AS $$ SELECT 1 $$;"), true, "create_quote stays Taha's");
 

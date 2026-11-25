@@ -83,11 +83,15 @@ function isFieldBillingName(name) {
 }
 
 // Supplier quotes are Mason's purchasing lane, not customer quotes (Taha, 2026-11-25, after #2524).
-const dropSupplierQuotes = (words) => words.filter((w, i) => !(/^quotes?$/.test(w) && words[i - 1] === "supplier"));
+// Only inside one path segment, so src/pages/supplier/Quotes.tsx stays Taha's (desk review of #2548, LOW 1).
+const dropSupplierQuotes = (name) => String(name).split("/").flatMap((segment) => {
+  const words = wordsOf(segment);
+  return words.filter((w, i) => !(/^quotes?$/.test(w) && words[i - 1] === "supplier"));
+});
 
 function isLaneName(name) {
   if (isFieldBillingName(name)) return false;
-  const words = dropSupplierQuotes(wordsOf(name));
+  const words = dropSupplierQuotes(name);
   return isBill(words) || words.some((w, i) => LANE_WORDS.has(w) || (w === "write" && /^offs?$/.test(words[i + 1] ?? "")));
 }
 

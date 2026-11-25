@@ -54,6 +54,8 @@ function initialFixes(chem: ParentChemistry, prefill: ReplacePrefill | null): Re
   const target = prefill && chem.chemistry.ingredients.find((row) => row.ingredient_id === prefill.ingredientId);
   if (prefill && target) {
     const into = chem.chemistry.ingredients.find((row) => row.ingredient_id === prefill.withIngredient.id);
+    // An EPA product cannot consolidate, so a duplicate already on it is left for the admin to see (Sol round 1).
+    if (into && chem.epa_refusal !== null) return fixes;
     fixes[target.row_id] = into
       ? { ...fixes[target.row_id], action: 'consolidate', intoRowId: into.row_id, ...strengthFrom(into) }
       : { ...fixes[target.row_id], action: 'swap', swapTo: prefill.withIngredient };
@@ -122,8 +124,11 @@ function buildCorrection(values: ParentChemistryValues, fixes: Record<string, Ro
   return { changes, problem: changes.length === 0 ? 'Choose what to correct.' : null };
 }
 
-function SwapChoice({ row, fix, others, busy, patch }: {
-  row: ParentChemistryIngredientRow; fix: RowFix; others: ParentChemistryIngredientRow[]; busy: boolean; patch: (patch: Partial<RowFix>) => void;
+// Mirrors active_ingredients.name_key; the server makes the final check.
+const sameNameKey = (name: string) => name.replace(/[ \t\n\r\f\v]+/g, ' ').toLowerCase();
+
+function SwapChoice({ row, fix, others, busy, gated, patch }: {
+  row: ParentChemistryIngredientRow; fix: RowFix; others: ParentChemistryIngredientRow[]; busy: boolean; gated: boolean; patch: (patch: Partial<RowFix>) => void;
 }) {
   const { toast } = useToast();
   if (fix.swapTo) {
@@ -147,12 +152,16 @@ function SwapChoice({ row, fix, others, busy, patch }: {
       <IngredientSearch id={`swap-pick-${row.row_id}`} label="Replace with" excludeIds={[row.ingredient_id]}
         onPick={(swapTo) => {
           const into = others.find((other) => other.ingredient_id === swapTo.id);
-          if (into) {
+          if (gated && (sameNameKey(swapTo.name) !== sameNameKey(row.name) || row.cas !== null || swapTo.cas !== null)) {
+            toast('error', `On an EPA product ${row.name} can only be replaced by a duplicate record with the same name, and only while neither record has a CAS number.`);
+          } else if (into && gated) {
+            toast('error', `${swapTo.name} is already on this product. An EPA product cannot merge two rows; pick a record that is not on it.`);
+          } else if (into) {
             patch({ action: 'consolidate', intoRowId: into.row_id, ...strengthFrom(into) });
             toast('info', `${swapTo.name} is already on this product, so the two rows are merged instead.`);
           } else patch({ swapTo });
         }} />
-      <Button size="sm" variant="secondary" onClick={() => patch({ swapCreating: true })}>It is not listed: add a new ingredient</Button>
+      {!gated && <Button size="sm" variant="secondary" onClick={() => patch({ swapCreating: true })}>It is not listed: add a new ingredient</Button>}
     </>
   );
 }
@@ -199,7 +208,10 @@ function IngredientFixCard({ row, fix, chem, actions, busy, modeRetire, setModeR
 }) {
   const values = chem.chemistry;
   const modes = values.modes_of_action.filter((mode) => mode.ingredient_id === row.ingredient_id);
-  const editsStrength = fix.action === 'change' || fix.action === 'swap' || fix.action === 'consolidate';
+  const gated = chem.epa_refusal !== null;
+  // On an EPA product a swap only merges a same-name duplicate; the database carries strength and modes over unchanged.
+  const gatedSwap = gated && fix.action === 'swap';
+  const editsStrength = !gatedSwap && (fix.action === 'change' || fix.action === 'swap' || fix.action === 'consolidate');
   return (
     <div className="space-y-2 rounded-lg border border-gray-200 p-3">
       <div className="text-sm font-medium text-nav-dark">{ingredientIdentity(row)}</div>
@@ -207,7 +219,8 @@ function IngredientFixCard({ row, fix, chem, actions, busy, modeRetire, setModeR
       <Select id={`fix-${row.row_id}`} label="Correction" value={fix.action}
         options={actions.map((action) => ({ value: action, label: ACTION_LABEL[action] }))}
         onChange={(event) => patch({ action: event.target.value as IngredientAction })} />
-      {fix.action === 'swap' && <SwapChoice row={row} fix={fix} others={values.ingredients} busy={busy} patch={patch} />}
+      {fix.action === 'swap' && <SwapChoice row={row} fix={fix} others={values.ingredients} busy={busy} gated={gated} patch={patch} />}
+      {gatedSwap && <p className="text-xs text-secondary">This product has an EPA number, so only a duplicate record with the same name can replace {row.name}. Its strength, source and modes of action move over unchanged.</p>}
       {fix.action === 'consolidate' && (
         <Select id={`into-${row.row_id}`} label="Merge into" value={fix.intoRowId} placeholder="Pick the row to keep"
           options={values.ingredients.filter((other) => other.row_id !== row.row_id).map((other) => ({ value: other.row_id, label: other.name }))}
@@ -222,7 +235,7 @@ function IngredientFixCard({ row, fix, chem, actions, busy, modeRetire, setModeR
           <StrengthFields idPrefix={`fix-${row.row_id}`} form={chem.product_form} draft={fix} disabled={busy} onChange={patch} />
         </>
       )}
-      <ModeChecks fix={fix} modes={modes} gated={chem.epa_refusal !== null} modeRetire={modeRetire} setModeRetire={setModeRetire} patch={patch} />
+      {!gatedSwap && <ModeChecks fix={fix} modes={modes} gated={gated} modeRetire={modeRetire} setModeRetire={setModeRetire} patch={patch} />}
     </div>
   );
 }
@@ -282,9 +295,9 @@ function CorrectionPreview({ shown }: { shown: ParentChemistryPreview }) {
   );
 }
 
-/** Which corrections a row offers: EPA-gated parents only remove typed rows; inactive ones never change values. */
+/** Which corrections a row offers: EPA-gated parents only remove typed rows or merge a same-name duplicate ingredient; inactive ones never change values. */
 function rowActions(chem: ParentChemistry, source: string, full: string[]): string[] {
-  if (chem.epa_refusal !== null) return source === 'epa_lookup' ? ['keep'] : ['keep', 'retire'];
+  if (chem.epa_refusal !== null) return full.filter((action) => action === 'keep' || action === 'swap' || (action === 'retire' && source !== 'epa_lookup'));
   return chem.is_active ? full : full.filter((action) => action !== 'change');
 }
 
@@ -296,7 +309,7 @@ function correctionReady(problem: Problem, shown: ParentChemistryPreview | null,
 function CorrectionNotices({ chem }: { chem: ParentChemistry }) {
   return (
     <>
-      {chem.epa_refusal !== null && <p className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-secondary" role="status">{plainRefusal(chem.epa_refusal)} Only typed ingredient and nutrient rows can be removed here.</p>}
+      {chem.epa_refusal !== null && <p className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-secondary" role="status">{plainRefusal(chem.epa_refusal)} Only typed ingredient and nutrient rows can be removed here, and a duplicate ingredient can be replaced by its same-name record.</p>}
       {!chem.is_active && <p className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-secondary" role="status">This product is inactive: rows can be removed, replaced or merged, not changed.</p>}
     </>
   );
@@ -337,6 +350,10 @@ export default function ChemistryCorrectionModal({ parentId, profileId, prefill,
       if (cancelled) return;
       setChem(loaded);
       setFixes(initialFixes(loaded, prefill));
+      if (prefill && loaded.epa_refusal !== null && loaded.chemistry.ingredients.some((row) => row.ingredient_id === prefill.withIngredient.id)
+        && loaded.chemistry.ingredients.some((row) => row.ingredient_id === prefill.ingredientId)) {
+        toast('info', `${prefill.withIngredient.name} is already on this product. An EPA product cannot merge two rows, so nothing was pre-filled.`);
+      }
       setModeRetire([]);
       setNutrientFixes(initialNutrientFixes(loaded.chemistry.fertilizer));
       setPreview(null);
@@ -345,7 +362,7 @@ export default function ChemistryCorrectionModal({ parentId, profileId, prefill,
       if (!cancelled) setChem('failed');
     });
     return () => { cancelled = true; };
-  }, [parentId, prefill, attempt]);
+  }, [parentId, prefill, attempt, toast]);
 
   if (chem === 'loading' || chem === 'failed') {
     return (

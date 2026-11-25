@@ -625,7 +625,9 @@ export async function getPricingWorkbookExportRefusalReason(exportId: string): P
   const stalled = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       timeLimit.abort();
-      reject(new Error('get_pricing_workbook_export_refusal_reason timed out'));
+      const timedOut = new Error('get_pricing_workbook_export_refusal_reason timed out');
+      timedOut.name = 'TimeoutError';
+      reject(timedOut);
     }, REFUSAL_REASON_TIMEOUT_MS);
   });
   const { data, error } = await Promise.race([read, stalled]).finally(() => clearTimeout(timer));

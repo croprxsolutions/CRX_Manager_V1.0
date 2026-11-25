@@ -206,7 +206,9 @@ async function priceSheetUploadErrorText(
   const message = (expiresAt && priceSheetRefusalText(error, expiresAt)) || sanitizeError(error);
   if (!exportId || !isPriceSheetRefusal(error)) return message;
   const reason = await getPricingWorkbookExportRefusalReason(exportId).catch((lookupError: unknown) => {
-    Sentry.addBreadcrumb({ category: 'pricing', level: 'warning', message: `refusal reason lookup failed: ${sanitizeError(lookupError)}` });
+    // Sentry keeps only a breadcrumb's category (src/lib/sentry.ts), so the category tells a timeout from a failure.
+    const timedOut = lookupError instanceof Error && lookupError.name === 'TimeoutError';
+    Sentry.addBreadcrumb({ category: timedOut ? 'pricing.refusal_reason_timeout' : 'pricing.refusal_reason_failed', level: 'warning' });
     return null;
   });
   return (reason && priceSheetReasonText(reason)) || message;

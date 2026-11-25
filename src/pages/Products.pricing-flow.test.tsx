@@ -680,7 +680,7 @@ describe('Products governed inline pricing flow', () => {
     });
 
     it.each([
-      ['WORKBOOK_V2_EXPORT_REQUIRED', 'ALREADY_APPLIED', /already used; each product's Sell Price History or Change History shows what it changed/],
+      ['WORKBOOK_V2_EXPORT_REQUIRED', 'ALREADY_APPLIED', /already used; each product's Sell Price History, Cost History or Change History shows what it changed/],
       ['WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'DOWNLOADED_BY_OTHER_USER', /Another user downloaded this price sheet/],
       ['WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED', 'OLD_TEMPLATE', /older template/],
       ['WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED', 'EXPIRED', /expired \(sheets last 7 days\)/],

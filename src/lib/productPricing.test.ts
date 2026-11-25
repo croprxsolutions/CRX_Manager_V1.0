@@ -265,10 +265,14 @@ describe('getPricingWorkbookExportRefusalReason', () => {
   it('gives up when the database never answers, so the screen keeps the general message', async () => {
     vi.useFakeTimers();
     try {
-      answers(new Promise(() => undefined));
-      const lookup = expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toBeDefined();
+      const abortSignal = answers(new Promise(() => undefined));
+      const lookup = expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toMatchObject({ name: 'TimeoutError' });
+      const signal = (abortSignal.mock.calls[0] as unknown as [AbortSignal])[0];
+      expect(signal.aborted).toBe(false);
       await vi.advanceTimersByTimeAsync(REFUSAL_REASON_TIMEOUT_MS + 1);
       await lookup;
+      // The stalled request itself is cancelled, not just abandoned.
+      expect(signal.aborted).toBe(true);
     } finally {
       vi.useRealTimers();
     }

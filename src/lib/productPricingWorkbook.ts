@@ -862,7 +862,7 @@ export function priceSheetRefusalText(error: unknown, expiresAt: string, now = D
 const PRICE_SHEET_REASON_TEXT = new Map<string, string>([
   ['EXPORT_NOT_FOUND', 'No prices were changed. CRX Manager has no record of this price sheet. Download a fresh one'],
   ['DOWNLOADED_BY_OTHER_USER', 'No prices were changed. Another user downloaded this price sheet, and only the person who downloads a sheet can upload it. Download a fresh one yourself'],
-  ['ALREADY_APPLIED', "No prices were changed. This price sheet was already used; each product's Sell Price History or Change History shows what it changed. To make more changes, download a fresh one"],
+  ['ALREADY_APPLIED', "No prices were changed. This price sheet was already used; each product's Sell Price History, Cost History or Change History shows what it changed. To make more changes, download a fresh one"],
   ['OLD_TEMPLATE', 'No prices were changed. This price sheet came from an older template. Download a fresh one'],
   ['EXPIRED', PRICE_SHEET_EXPIRED_TEXT],
 ]);

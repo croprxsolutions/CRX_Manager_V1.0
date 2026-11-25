@@ -349,13 +349,16 @@ export function ownChanges(files) {
   return out;
 }
 
+const isMigration = (name) => /^supabase\/migrations\/[^/]+\.sql$/i.test(String(name ?? ""));
+
 /** Old stamp -> new stamp, read off the PR's own files whose names differ only by stamp (the restamp); null when inconsistent. */
 export function restampMap(before, after) {
   if (!before || !after) return null;
   const map = new Map();
   for (const [key, a] of before) {
     const b = after.get(key);
-    if (!b) continue;
+    // Only a migration file names a restamp (Luna r3: any other renamed file with a date in its name does not).
+    if (!b || !isMigration(a.name) || !isMigration(b.name)) continue;
     const [x, y] = [String(a.name ?? "").match(STAMP_RE) || [], String(b.name ?? "").match(STAMP_RE) || []];
     if (x.length !== y.length) return null;
     for (let i = 0; i < x.length; i++) {

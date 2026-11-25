@@ -78,8 +78,9 @@ export function tahaVerdict(pr, carried = () => false) {
   const state = (pr.reviews ?? []).filter((r) => isTaha(r.author?.login) && sameSha(r.commit?.oid, pr.headRefOid)
     && !['COMMENTED', 'PENDING'].includes(r.state)).at(-1)?.state;
   if (state) return state === 'APPROVED' ? APPROVED : state === 'CHANGES_REQUESTED' ? CHANGES : null;
-  // Ask GitHub only when he approved some commit of this PR (each carry check costs several calls).
-  const approvedEarlier = (pr.reviews ?? []).some((r) => isTaha(r.author?.login) && r.state === 'APPROVED');
+  // Ask GitHub only when he approved some commit of this PR (pushes dismiss it, so DISMISSED counts here; each
+  // carry check costs several calls and reads whether that dismissed review was an Approve).
+  const approvedEarlier = (pr.reviews ?? []).some((r) => isTaha(r.author?.login) && ['APPROVED', 'DISMISSED'].includes(r.state));
   return approvedEarlier && carried() ? APPROVED : null;
 }
 // Labels to add/remove so exactly the verdict's label (or neither) is on the PR, and `ready-for-taha`

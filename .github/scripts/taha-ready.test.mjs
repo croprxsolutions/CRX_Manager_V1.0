@@ -132,6 +132,7 @@ test("carried-over Approve (Mason, 2026-11-25): shows as approved, takes ready-f
   const old = pr({ reviews: [rv('APPROVED', NEW)], labels: L('ready-for-taha'), reviewRequests: [{ login: 'TahaKhanAbdalli' }] });
   assert.equal(tahaVerdict(old, yes), 'taha-approved');
   assert.equal(tahaVerdict(old, () => false), null, 'not carried: no verdict');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('DISMISSED', NEW)] }), yes), 'taha-approved', 'a push-dismissed Approve is checked too (Luna r3)');
   assert.equal(tahaVerdict(pr({ reviews: [rv('CHANGES_REQUESTED', NEW)] }), never), null, 'no earlier Approve: GitHub is not asked');
   assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED', NEW), rv('CHANGES_REQUESTED')] }), never), 'taha-changes', 'a verdict on this head wins without asking');
   assert.deepEqual(reviewLabelChanges(old, yes), { add: ['taha-approved'], remove: ['ready-for-taha'] });

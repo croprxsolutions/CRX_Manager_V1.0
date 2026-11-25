@@ -399,6 +399,8 @@ ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: {
   "a date-shaped number changed with no restamp of the PR's own migration is a real change (Luna r1 HIGH)");
 ok(!carried({ before: [quotes, mig19], after: [fl("src/pages/Quotes.tsx", D), mig03], blobs: { [C]: "x = 20270301160000", [D]: "x = 20270304160000" } }),
   "only the PR's own old -> new stamp may differ, not another date");
+ok(!carried({ before: [fl("src/report_20270301120000.ts", C, "added")], after: [fl("src/report_20270304120000.ts", D, "added")], blobs: { [C]: "cutoff = 20270301120000", [D]: "cutoff = 20270304120000" } }),
+  "a renamed code file with a date in its name is not a restamp (Luna r3 HIGH)");
 ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: Buffer.from([0x80]), [D]: Buffer.from([0x81]) } }),
   "two different non-text files never compare equal (security review LOW)");
 ok(carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: Buffer.from([0x80]), [D]: Buffer.from([0x80]) } }),

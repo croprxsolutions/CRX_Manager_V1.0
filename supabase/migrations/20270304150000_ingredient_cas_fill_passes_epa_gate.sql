@@ -8,9 +8,12 @@
 --   never fills a CAS, so the ingredient stays unlinked, though the EPA review itself says
 --   "Your ingredient has no CAS number; EPA gives ... Correct the ingredient to link them."
 -- WHAT: re-issues public._edit_active_ingredient (same signature, owner postgres, SECURITY DEFINER, search_path, no
---   grants). One change: when the edit only fills a CAS that is currently empty, the per-product EPA gate is skipped.
---   It changes no product row (strengths, sources, modes of action stay as EPA wrote them).
--- NOT CHANGED: a CAS already set, the acid fields, or any mix of fields still refuse on an EPA product. Admin only
+--   grants). One change: an edit of the CAS alone (fill, correct or clear) skips the per-product EPA gate. It changes
+--   no product row (strengths, sources, modes of action stay as EPA wrote them). Limits (Sol, 2026-11-24): a CAS that
+--   an EPA proposal (proposed, held or committed) gives stays gated; and when an EPA proposal for a product using the
+--   ingredient gives it a CAS, the new value must be that CAS (INGREDIENT_CAS_NOT_EPA), so a typed CAS never
+--   contradicts EPA and a mistyped one can be corrected with the same screen.
+-- NOT CHANGED: an EPA-given CAS, the acid fields, or any mix of fields still refuse on an EPA product. Admin only
 --   (preview_active_ingredient_change and save_active_ingredient keep _product_parent_require_admin), reason and
 --   evidence still required when products use it, CAS format/check digit and CAS-taken checks, the ingredient event and
 --   one 'corrected' chemistry event per affected product, row_version/usage-fingerprint staleness checks.
@@ -18,7 +21,7 @@
 --   with a CAS now finds this row by CAS instead of reporting it as differs_identity.
 -- PREFLIGHT: refuses autocommit, and unless the live body is the 20261209100000 one (md5 pinned); a second run refuses.
 -- ROLLBACK: a NEW forward migration re-issuing the 20261209100000 body (lines 1773-1958). CAS values filled meanwhile
---   stay (valid data; clear one with the same screen only on a product without an EPA number).
+--   stay (valid data; correct or clear one with the same screen only on a product without an EPA number).
 -- Proof: node scripts/smoke/prove-ingredient-cas-fill-epa-gate-real-schema.mjs (INGREDIENT_CAS_FILL_PROOF_PASS).
 -- ============================================================================
 
@@ -36,6 +39,9 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: run this file as one transaction (psql -1 or the apply script)';
   END IF;
   SELECT md5(prosrc) INTO v_md5 FROM pg_proc WHERE oid = to_regprocedure('public._edit_active_ingredient(uuid,jsonb,text,text,boolean)');
+  IF to_regclass('public.epa_chemistry_proposals') IS NULL THEN
+    RAISE EXCEPTION 'INGREDIENT_CAS_FILL_BASELINE_DRIFT: public.epa_chemistry_proposals (20270105110000) is missing';
+  END IF;
   IF v_md5 IS NULL THEN
     RAISE EXCEPTION 'INGREDIENT_CAS_FILL_BASELINE_DRIFT: public._edit_active_ingredient(uuid,jsonb,text,text,boolean) does not exist';
   END IF;
@@ -61,7 +67,8 @@ DECLARE
   v_names text;
   v_conflict text;
   v_gate text;
-  v_cas_fill boolean;
+  v_cas_edit boolean;
+  v_epa_cas text;
   v_parent uuid;
   v_before jsonb := '{}'::jsonb;
   v_version bigint;
@@ -193,11 +200,25 @@ BEGIN
     v_reason := public._product_parent_reason(p_reason, 'reason', v_needs_reason);
     v_evidence := public._product_parent_reason(p_evidence, 'evidence', v_needs_reason);
   END IF;
-  -- Filling a missing CAS (and nothing else) passes the EPA gate (Mason, 2026-11-24): it changes no product row,
-  -- and EPA asks for exactly this ("Correct the ingredient to link them"). Changing a CAS already set stays gated.
-  v_cas_fill := v_changed = ARRAY['cas']::text[] AND v_old.cas IS NULL;
+  -- A CAS-only edit passes the EPA gate (Mason, 2026-11-24): it changes no product row, and EPA asks for exactly this
+  -- ("Correct the ingredient to link them"). Two limits (Sol, 2026-11-24): a CAS that EPA itself gave stays gated, so
+  -- only a typed one can be corrected; and the new CAS must be the one EPA gives for this ingredient, when it gives one.
+  v_cas_edit := v_changed = ARRAY['cas']::text[]
+    AND NOT (v_old.cas IS NOT NULL AND EXISTS (
+      SELECT 1 FROM public.epa_chemistry_proposals p, jsonb_array_elements(p.items) i
+       WHERE p.status IN ('proposed', 'held', 'committed') AND i->'epa'->>'cas' = v_old.cas));
+  IF v_cas_edit AND cardinality(v_parents) > 0 THEN
+    SELECT string_agg(DISTINCT i->'epa'->>'cas', ', ') INTO v_epa_cas
+      FROM public.epa_chemistry_proposals p, jsonb_array_elements(p.items) i
+     WHERE p.status IN ('proposed', 'held', 'committed') AND p.parent_id = ANY(v_parents)
+       AND i->'current'->>'ingredient_id' = p_ingredient_id::text
+       AND i->'epa'->>'cas' IS NOT NULL AND i->'epa'->>'cas' IS DISTINCT FROM v_new.cas;
+    IF v_epa_cas IS NOT NULL THEN
+      RAISE EXCEPTION 'INGREDIENT_CAS_NOT_EPA: EPA gives % for %; enter EPA''s number', v_epa_cas, v_old.name;
+    END IF;
+  END IF;
   FOREACH v_parent IN ARRAY v_parents LOOP
-    v_gate := CASE WHEN v_cas_fill THEN NULL ELSE public._parent_chemistry_epa_refusal(v_parent) END;
+    v_gate := CASE WHEN v_cas_edit THEN NULL ELSE public._parent_chemistry_epa_refusal(v_parent) END;
     IF v_gate IS NOT NULL THEN
       RAISE EXCEPTION '%', v_gate || format(' (product "%s" uses %s; DM-4 will update it)',
         (SELECT name FROM public.product_parents WHERE id = v_parent), v_old.name);
@@ -254,7 +275,8 @@ BEGIN
               WHERE a.privilege_type = 'EXECUTE' AND a.grantee <> 'postgres'::regrole) THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: _edit_active_ingredient is executable by a role other than its owner';
   END IF;
-  IF position('v_cas_fill' IN (SELECT prosrc FROM pg_proc WHERE oid = v_fn)) = 0 THEN
+  IF position('v_cas_edit' IN (SELECT prosrc FROM pg_proc WHERE oid = v_fn)) = 0
+     OR position('INGREDIENT_CAS_NOT_EPA' IN (SELECT prosrc FROM pg_proc WHERE oid = v_fn)) = 0 THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: the CAS-fill exception is missing';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK';

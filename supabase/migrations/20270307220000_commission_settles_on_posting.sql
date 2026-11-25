@@ -22,35 +22,32 @@
 --      the same invoices (_report_commission_cents_20270203), so it earns exactly total_profit × share + D: the posted
 --      profit after its discount (Taha, rule "b"). Lines with different margins are prorated by revenue, as the P&L
 --      already does (accepted, Sol r6 H5).
---   2. _settle_order_commission_20270306(sale): takes the sale lock (orders row, FOR NO KEY UPDATE) and reads
---      everything under it. Every caller already holds that lock (point 4), so it never waits for the sale while
---      holding an invoice. It moves the pending rows in no live payout batch whose stored base differs from the new
---      base: each row its own percentage of the base (never a share of what is left), exact to the cent by largest
---      remainder when they are the sale's whole live set, otherwise each its own rounded share. Rows already on the
---      base never move (no cent after a batch). Rows it moves onto a discount are marked (new column commissions.discount_settled_at); with no posted
+--   2. _settle_order_commission_20270306(sale): takes the sale lock (orders row, FOR NO KEY UPDATE, waited for) and
+--      reads everything under it. From an invoice update it is taken after the invoice row, the house order for
+--      invoice writers (post_invoice's delivery-invoice cap zz_cap_delivery_invoice_header and every invoice-line
+--      writer's zz_cap_*_invoice_items lock the sale after the invoice); see point 4. It moves the pending rows in no live payout batch whose stored base differs from the new base: each row its own percentage
+--      of the base (never a share of what is left), exact to the cent by largest remainder when they are the sale's
+--      whole live set, otherwise each its own rounded share. Rows already on the base never move (no cent after a
+--      batch). Rows it moves onto a discount are marked (new column commissions.discount_settled_at); with no posted
 --      discount only marked rows go back to the plain profit, so rows it never moved (legacy rows; every sale on live
 --      while the M4 switch is off) are left exactly as their writers made them.
 --      It locks only the rows it moves, reads them again under the lock, and writes only those.
 --   3. invoices_settle_commission_20270306 (+ its DELETE twin): a plain (not deferred) row trigger on invoices entering
---      or leaving the posted chemical-sale set (status, deleted_at, invoice_type) or moving to another sale while in
---      it. It covers post (single, group, batch), unpost (single, group), void (single, group, batch, Fix Delivery's)
---      and the deleted-delivery recovery post (inside post).
+--      or leaving the posted chemical-sale set (status, deleted_at, invoice_type) or moving to another sale while in it. It covers post (single and group), unpost, void
+--      (including Fix Delivery's) and the deleted-delivery recovery post without re-emitting those functions; each
+--      locks its invoice row first and then waits for the sale (point 2).
 --      invoice_items_settle_commission_20270306: a statement trigger on lines inserted into an invoice that already
 --      counts, settling each sale they touch once (none today: posted invoices refuse new lines; ready for M6).
---   4. LOCK ORDER (Mason's review of b73ba35f5, item 1): sale, then invoices, then commissions, as Cancel Remaining
---      (_close_undelivered_order_remainder_20260718: order FOR UPDATE, then its whole-order invoices) and Fix Delivery
---      take them. The eight public RPCs that move an invoice into or out of the posted set lock the sales its header
---      and lines bill (_lock_invoice_sales_20270306, FOR UPDATE, in id order) before their first invoice lock:
---      post_invoice, post_invoice_group (before the group lock too), batch_post_invoices (every invoice's sales before
---      the loop), unpost_invoice, unpost_invoice_group, void_invoice, void_invoice_group, batch_void_invoices. Each is
---      re-emitted with that one call (bodies pinned below). Before, the trigger's settle waited for the sale while its
---      invoice was held, and a post or void racing Cancel Remaining on the same sale deadlocked (prover case 3b).
---      Fix Delivery already locks the sale first; void_commission_payment locks its payout's sales first.
---   5. Re-emitted with one call each (bodies pinned below): _insert_commissions_for_order (the 7 sale creators),
+--   4. Re-emitted with one call each (bodies pinned below): _insert_commissions_for_order (the 7 sale creators),
 --      fix_delivery (its re-inserted rows), cancel_order (Cancel Remaining), void_commission_payment (locks the
---      payout's sales first, then settles them). update_order_items is not: a sale can be edited only before any
+--      payout's sales first, then settles them). LOCK ORDER (Mason's review of b73ba35f5, item 1): cancel_order also
+--      locks the sale's whole-order invoices (no delivery, not deleted, voided or cancelled; the rows Cancel Remaining
+--      and a whole cancel lock after the sale) BEFORE its implementation takes the sale. Before, a post, unpost or void
+--      of such an invoice (invoice, then the sale in the settle) racing Cancel Remaining (sale, then that invoice)
+--      deadlocked (prover case 3b). Taking the sale before the invoice in the posting RPCs instead deadlocks a post
+--      against a save of the same draft (invoice, then the sale in zz_cap_*_invoice_items; prover case 3c). update_order_items is not: a sale can be edited only before any
 --      delivery ("Cannot edit order in status: partially_fulfilled"), so it never has a posted invoice.
---   6. Sales that already have a posted discounted invoice are settled once below (live has none while the M4 switch
+--   5. Sales that already have a posted discounted invoice are settled once below (live has none while the M4 switch
 --      is off).
 --
 -- NOT CHANGED: field-job commission (field-application invoices can't carry a discount line), the reports, the M4
@@ -63,10 +60,10 @@
 -- FUNCTION SUFFIXES: the new functions keep the suffix _20270306 from the first draft; it is a name, not this file's
 -- stamp.
 --
--- ROLLBACK (its own reviewed migration): drop the three triggers, the six new functions and
--- commissions.discount_settled_at, and re-emit the twelve pinned functions as they were before this file (the bodies
--- the preflight pins; the prover's rollback step re-emits exactly those). Amounts already settled stay until the
--- sale's next re-split.
+-- ROLLBACK (its own reviewed migration): drop the three triggers, the five new functions and
+--   commissions.discount_settled_at, and re-emit the four pinned
+-- functions from their source migrations (20260914100500, 20261106150000, 20260721145936, 20270228160000). Amounts
+-- already settled stay until the sale's next re-split.
 --
 -- ORDERING: after 20270117130000_standing_discount_in_order_profit (_invoice_line_tax_shares_20270109) and
 -- 20270228160000_idempotency_keys_printable_only (void_commission_payment as pinned).
@@ -77,20 +74,11 @@ CREATE TEMP TABLE commission_settles_on_posting_tx ON COMMIT DROP AS
 SELECT pg_current_xact_id()::text AS transaction_id;
 
 CREATE TEMP TABLE commission_settles_on_posting_acl ON COMMIT DROP AS
-SELECT p.oid, p.proacl, p.proname IN ('_insert_commissions_for_order', 'fix_delivery', 'cancel_order', 'void_commission_payment') AS settles
-  FROM pg_proc p
+SELECT p.oid, p.proacl FROM pg_proc p
  WHERE p.oid IN ('public._insert_commissions_for_order(uuid,uuid,numeric,jsonb,date)'::regprocedure,
                  'public.fix_delivery(uuid,text,text,text)'::regprocedure,
                  'public.cancel_order(uuid,uuid,text)'::regprocedure,
-                 'public.void_commission_payment(uuid,text,uuid,text)'::regprocedure,
-                 'public.post_invoice(uuid,text,text)'::regprocedure,
-                 'public.post_invoice_group(uuid,uuid,jsonb,text)'::regprocedure,
-                 'public.batch_post_invoices(jsonb,text)'::regprocedure,
-                 'public.unpost_invoice(uuid,uuid,text)'::regprocedure,
-                 'public.unpost_invoice_group(uuid,uuid,text)'::regprocedure,
-                 'public.void_invoice(uuid,text,text)'::regprocedure,
-                 'public.void_invoice_group(uuid,text,text)'::regprocedure,
-                 'public.batch_void_invoices(uuid[],text,uuid,text)'::regprocedure);
+                 'public.void_commission_payment(uuid,text,uuid,text)'::regprocedure);
 
 DO $preflight$
 BEGIN
@@ -106,7 +94,6 @@ BEGIN
      OR to_regprocedure('public._invoice_settles_commission_20270306()') IS NOT NULL
      OR to_regprocedure('public._invoice_lines_settle_commission_20270306()') IS NOT NULL
      OR to_regprocedure('public._order_commission_lines_20270306(uuid)') IS NOT NULL
-     OR to_regprocedure('public._lock_invoice_sales_20270306(uuid[])') IS NOT NULL
      OR EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.commissions'::regclass
                    AND attname = 'discount_settled_at' AND NOT attisdropped) THEN
     RAISE EXCEPTION 'COMMISSION_SETTLES_ON_POSTING_PREFLIGHT: already applied';
@@ -117,24 +104,16 @@ BEGIN
      OR to_regprocedure('public._void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)') IS NULL THEN
     RAISE EXCEPTION 'COMMISSION_SETTLES_ON_POSTING_PREFLIGHT: a helper this needs is missing';
   END IF;
-  -- The twelve functions re-emitted below must be exactly the bodies they were written from, with the same settings,
+  -- The four functions re-emitted below must be exactly the bodies they were written from, with the same settings,
   -- security and volatility; anything else is a concurrent change to merge first.
   IF (SELECT string_agg(md5(prosrc || '|' || COALESCE(proconfig::text, '') || '|' || prosecdef::text || '|' || provolatile::text),
                         ',' ORDER BY oid::regprocedure::text) FROM pg_proc
        WHERE oid IN (SELECT oid FROM pg_temp.commission_settles_on_posting_acl))
      IS DISTINCT FROM (SELECT string_agg(m, ',' ORDER BY f) FROM (VALUES
        ('_insert_commissions_for_order(uuid,uuid,numeric,jsonb,date)', '33cfc02bb473d257af955a14e78820b3'),
-       ('batch_post_invoices(jsonb,text)', '49bf0b9befd2f71483631d8286f3691b'),
-       ('batch_void_invoices(uuid[],text,uuid,text)', '3c657445c829c3dcd59099ab6423e19b'),
        ('cancel_order(uuid,uuid,text)', '7672dd2407f20ddf1378f26587646ad3'),
        ('fix_delivery(uuid,text,text,text)', '21cb2591ef973ac794a8167272050cee'),
-       ('post_invoice(uuid,text,text)', 'eb0fe0fe82b10603a9c1108b267b301b'),
-       ('post_invoice_group(uuid,uuid,jsonb,text)', 'fbe79984e8e0b8c2fcbdd0863ff2b88e'),
-       ('unpost_invoice(uuid,uuid,text)', '50c9cade12f9e865c3463c4807fc6645'),
-       ('unpost_invoice_group(uuid,uuid,text)', 'd19c6a9109f9900a2aed827f0c1a5e9d'),
-       ('void_commission_payment(uuid,text,uuid,text)', 'eb09e41a2af709c20562f44724f3c42b'),
-       ('void_invoice(uuid,text,text)', 'af71a776653eae5d415d296612b9350d'),
-       ('void_invoice_group(uuid,text,text)', 'a765b136ab717913dcd145737392bf6e')) AS v(f, m)) THEN
+       ('void_commission_payment(uuid,text,uuid,text)', 'eb09e41a2af709c20562f44724f3c42b')) AS v(f, m)) THEN
     RAISE EXCEPTION 'COMMISSION_SETTLES_ON_POSTING_PREFLIGHT: a re-emitted function changed since this was written';
   END IF;
 END
@@ -252,9 +231,9 @@ BEGIN
   IF p_order_id IS NULL THEN
     RETURN 0;
   END IF;
-  -- The sale lock first, then everything is read under it, so two posts of one sale settle one after the other on what
-  -- the first committed (Sol posting r2 H1). Every caller already holds it (header point 4): taken here while an
-  -- invoice row was held, it deadlocked against Cancel Remaining (Mason's review of b73ba35f5, item 1).
+  -- The sale lock first, waited for (after the invoice row on an invoice update, the house order for invoice writers;
+  -- header point 4), then everything is read under it, so two posts of one sale settle one after the other on what the
+  -- first committed (Sol posting r2 H1).
   SELECT COALESCE(total_profit, 0), total_price INTO v_profit, v_price FROM orders WHERE id = p_order_id FOR NO KEY UPDATE;
   IF NOT FOUND THEN
     RETURN 0;
@@ -452,673 +431,6 @@ CREATE TRIGGER invoice_items_settle_commission_20270306
   REFERENCING NEW TABLE AS new_lines
   FOR EACH STATEMENT
   EXECUTE FUNCTION public._invoice_lines_settle_commission_20270306();
-
--- 3b. Lock order: the sales before the invoices (header point 4) ---------------------------------------------------
--- The sales an invoice bills: its header's and every line's, as the posting trigger settles them. Called by the eight
--- invoice RPCs below before their first invoice lock. FOR UPDATE, as Cancel Remaining and Fix Delivery take it, so no
--- caller upgrades its lock later.
--- Read before it is locked: an invoice's header sale never changes (INVOICE_SOURCE_LINEAGE_IMMUTABLE) and a line of
--- another sale is refused (ORDER_INVOICE_LINE_INVALID), so only a legacy blank-header invoice can bill a sale a
--- concurrent line write adds here; the trigger then waits for that sale as before (r6 H4, accepted).
--- Some callers take it before their own role checks (void_invoice's are inside), so a signed-in user without the role
--- holds the sale lock only for the length of one refused call.
-CREATE FUNCTION public._lock_invoice_sales_20270306(p_invoice_ids uuid[])
- RETURNS void
- LANGUAGE plpgsql
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-BEGIN
-  PERFORM 1 FROM orders o
-   WHERE o.id IN (SELECT i.order_id FROM invoices i WHERE i.id = ANY (p_invoice_ids)
-                  UNION
-                  SELECT oi.order_id FROM invoice_items b JOIN order_items oi ON oi.id = b.order_item_id
-                   WHERE b.invoice_id = ANY (p_invoice_ids))
-   ORDER BY o.id
-     FOR UPDATE;
-END
-$function$;
-REVOKE ALL ON FUNCTION public._lock_invoice_sales_20270306(uuid[]) FROM PUBLIC, anon, authenticated, service_role;
-
-CREATE OR REPLACE FUNCTION public.post_invoice(p_invoice_id uuid, p_expected_version text, p_idempotency_key text DEFAULT NULL::text)
- RETURNS void
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_actor uuid := auth.uid();
-  v_actor_role text;
-  v_request jsonb;
-  v_existing jsonb;
-  v_number text;
-  v_salesman_id uuid;
-  v_created_by uuid;
-  v_current text;
-  v_content text;
-BEGIN
-  IF p_idempotency_key IS NULL OR p_idempotency_key !~ '[^[:space:]]' THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: post_invoice' USING ERRCODE = '22023';
-  END IF;
-  IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
-  SELECT role INTO v_actor_role FROM public.profiles WHERE id = v_actor AND is_active = true;
-  IF v_actor_role IS NULL OR v_actor_role NOT IN ('admin', 'sales_rep') THEN
-    RAISE EXCEPTION 'INSUFFICIENT_ROLE';
-  END IF;
-
-  v_request := jsonb_build_object(
-    'version', 2,
-    'invoice_id', p_invoice_id,
-    'actor_id', v_actor,
-    'expected_version', p_expected_version
-  );
-
-  PERFORM pg_advisory_xact_lock(hashtextextended('post_invoice:' || p_idempotency_key, 0));
-  v_existing := public.check_idempotency(p_idempotency_key, 'post_invoice');
-  IF v_existing IS NOT NULL THEN
-    IF NOT (v_existing ? 'request' AND v_existing ? 'response') THEN
-      RAISE EXCEPTION 'IDEMPOTENCY_RESULT_FORMAT_INVALID: post_invoice';
-    END IF;
-    IF v_existing->'request' IS DISTINCT FROM v_request THEN
-      RAISE EXCEPTION 'IDEMPOTENCY_ARGUMENT_MISMATCH: post_invoice key was already used for a different invoice, actor or invoice version';
-    END IF;
-    RETURN;
-  END IF;
-
-  IF p_expected_version IS NULL OR p_expected_version !~ '[^[:space:]]' THEN
-    RAISE EXCEPTION 'INVOICE_VERSION_REQUIRED: post_invoice needs the version of the invoice the screen loaded'
-      USING ERRCODE = '22023';
-  END IF;
-
-  -- M4 (commission_settles_on_posting): the sales first, then the invoices (Cancel Remaining's order; Mason's review item 1).
-  PERFORM public._lock_invoice_sales_20270306(ARRAY[p_invoice_id]);
-  SELECT invoice_number, salesman_id, created_by INTO v_number, v_salesman_id, v_created_by
-    FROM public.invoices WHERE id = p_invoice_id FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'INVOICE_NOT_FOUND'; END IF;
-  -- The rep own-name rule (enforced again by the posting chain below) is checked before the
-  -- version, so a rep is told the invoice is not theirs rather than to reload it.
-  IF v_actor_role = 'sales_rep'
-     AND NOT (v_salesman_id IS NOT DISTINCT FROM v_actor
-             OR (v_salesman_id IS NULL AND v_created_by IS NOT DISTINCT FROM v_actor)) THEN
-    RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
-  END IF;
-  -- Lock the lines and shares too, so a write to one that does not lock the invoice row (a direct
-  -- line update) finishes first and is seen below, or waits for this post.
-  PERFORM 1 FROM public.invoice_items WHERE invoice_id = p_invoice_id ORDER BY id FOR UPDATE;
-  PERFORM 1 FROM public.invoice_shares WHERE invoice_id = p_invoice_id ORDER BY id FOR UPDATE;
-  PERFORM public._lock_invoice_post_inputs(ARRAY[p_invoice_id]);
-
-  -- The rows are locked: a save now waits for this post. A save that committed since the screen
-  -- loaded changed the version.
-  v_current := public._invoice_post_version(p_invoice_id);
-  IF v_current IS DISTINCT FROM p_expected_version THEN
-    RAISE EXCEPTION 'INVOICE_CHANGED_SINCE_LOADED: invoice % was changed after this screen loaded it. Reload it, check it, then post again.', v_number;
-  END IF;
-  v_content := public._invoice_post_content_version(p_invoice_id);
-
-  PERFORM public._post_invoice_idem_impl_20260721(p_invoice_id, NULL);
-
-  -- A line write that does not lock the invoice row could have committed while this posted.
-  IF public._invoice_post_content_version(p_invoice_id) IS DISTINCT FROM v_content THEN
-    RAISE EXCEPTION 'INVOICE_CHANGED_SINCE_LOADED: invoice % was changed while it was being posted. Reload it, check it, then post again.', v_number;
-  END IF;
-
-  PERFORM public.save_idempotency(
-    p_idempotency_key,
-    'post_invoice',
-    jsonb_build_object(
-      'request', v_request,
-      'response', jsonb_build_object('success', true, 'invoice_id', p_invoice_id)
-    )
-  );
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.post_invoice_group(p_invoice_group_id uuid, p_performed_by uuid, p_expected_versions jsonb, p_idempotency_key text DEFAULT NULL::text)
- RETURNS jsonb
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_actor uuid := auth.uid();
-  v_actor_role text;
-  v_request jsonb;
-  v_existing jsonb;
-  v_expected_ids uuid[];
-  v_current_ids uuid[];
-  v_posted_ids uuid[];
-  v_member record;
-  v_content jsonb := '{}'::jsonb;
-  v_expected jsonb;
-  v_result jsonb;
-BEGIN
-  IF p_idempotency_key IS NULL OR p_idempotency_key !~ '[^[:space:]]' THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: post_invoice_group' USING ERRCODE = '22023';
-  END IF;
-  IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
-  IF p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF;
-  SELECT role INTO v_actor_role FROM public.profiles WHERE id = v_actor AND is_active = true;
-  IF v_actor_role IS NULL OR v_actor_role NOT IN ('admin', 'sales_rep') THEN
-    RAISE EXCEPTION 'INSUFFICIENT_ROLE';
-  END IF;
-  IF p_invoice_group_id IS NULL THEN RAISE EXCEPTION 'invoice_group_id is required'; END IF;
-
-  -- {invoice_id: version} for every member the screen loaded. Validated and normalized to
-  -- canonical (lower-case) uuid keys first, so the replay binding below compares the same request
-  -- however the caller spelled the ids, and two spellings of one id are refused.
-  IF p_expected_versions IS NULL OR jsonb_typeof(p_expected_versions) <> 'object'
-     OR p_expected_versions = '{}'::jsonb
-     OR EXISTS (
-       SELECT 1 FROM jsonb_each(p_expected_versions) e
-        WHERE e.key !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-           OR jsonb_typeof(e.value) <> 'string'
-           OR (e.value #>> '{}') !~ '[^[:space:]]'
-     ) THEN
-    RAISE EXCEPTION 'INVOICE_VERSION_REQUIRED: post_invoice_group needs the version of every invoice in the group the screen loaded'
-      USING ERRCODE = '22023';
-  END IF;
-  -- Only now are the keys known to be uuids, so they can be cast.
-  IF (SELECT count(DISTINCT e.key::uuid) <> count(*) FROM jsonb_each(p_expected_versions) e) THEN
-    RAISE EXCEPTION 'INVOICE_VERSION_REQUIRED: post_invoice_group was sent the same invoice twice'
-      USING ERRCODE = '22023';
-  END IF;
-  SELECT jsonb_object_agg(e.key::uuid::text, e.value) INTO v_expected
-    FROM jsonb_each(p_expected_versions) e;
-  SELECT array_agg(e.key::uuid ORDER BY e.key::uuid) INTO v_expected_ids
-    FROM jsonb_each(v_expected) e;
-
-  v_request := jsonb_build_object(
-    'version', 2,
-    'invoice_group_id', p_invoice_group_id,
-    'actor_id', v_actor,
-    'expected_versions', v_expected
-  );
-
-  PERFORM pg_advisory_xact_lock(hashtextextended('post_invoice_group:' || p_idempotency_key, 0));
-  v_existing := public.check_idempotency(p_idempotency_key, 'post_invoice_group');
-  IF v_existing IS NOT NULL THEN
-    IF NOT (v_existing ? 'request' AND v_existing ? 'response') THEN
-      RAISE EXCEPTION 'IDEMPOTENCY_RESULT_FORMAT_INVALID: post_invoice_group';
-    END IF;
-    IF v_existing->'request' IS DISTINCT FROM v_request THEN
-      RAISE EXCEPTION 'IDEMPOTENCY_ARGUMENT_MISMATCH: post_invoice_group key was already used for a different group, actor or invoice versions';
-    END IF;
-    RETURN v_existing->'response';
-  END IF;
-
-  -- M4 (commission_settles_on_posting): the sales first, then the invoices (Cancel Remaining's order; Mason's review item 1).
-  PERFORM public._lock_invoice_sales_20270306(ARRAY(SELECT i.id FROM public.invoices i WHERE i.invoice_group_id = p_invoice_group_id));
-  -- The group advisory lock: every RPC that writes a group's members or group-keyed field
-  -- locations takes it, and so does trg_serialize_invoice_group_writes for a direct write, so the
-  -- membership and those rows cannot change while this posts.
-  PERFORM pg_advisory_xact_lock(hashtextextended(p_invoice_group_id::text, 0));
-  PERFORM 1
-    FROM public.invoices
-   WHERE invoice_group_id = p_invoice_group_id
-     AND deleted_at IS NULL
-   ORDER BY id
-   FOR UPDATE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'No invoices found in group %', p_invoice_group_id;
-  END IF;
-
-  -- Reps post invoice groups for ANY customer (Mason, 2026-10-13; 20261013220000 removed
-  -- the assigned-rep check), but only when every invoice in the group is under their own name
-  -- (they are its salesperson, or it has none and they created it). Checked before the line locks.
-  IF v_actor_role = 'sales_rep'
-     AND EXISTS (
-       SELECT 1
-         FROM public.invoices invoice_row
-        WHERE invoice_row.invoice_group_id = p_invoice_group_id
-          AND invoice_row.deleted_at IS NULL
-          AND NOT (invoice_row.salesman_id IS NOT DISTINCT FROM v_actor
-             OR (invoice_row.salesman_id IS NULL AND invoice_row.created_by IS NOT DISTINCT FROM v_actor))
-     ) THEN
-    RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
-  END IF;
-
-  PERFORM 1 FROM public.invoice_items
-   WHERE invoice_id IN (SELECT id FROM public.invoices
-                         WHERE invoice_group_id = p_invoice_group_id AND deleted_at IS NULL)
-   ORDER BY id FOR UPDATE;
-  PERFORM 1 FROM public.invoice_shares
-   WHERE invoice_id IN (SELECT id FROM public.invoices
-                         WHERE invoice_group_id = p_invoice_group_id AND deleted_at IS NULL)
-   ORDER BY id FOR UPDATE;
-  PERFORM public._lock_invoice_post_inputs(ARRAY(
-    SELECT id FROM public.invoices WHERE invoice_group_id = p_invoice_group_id AND deleted_at IS NULL));
-
-  SELECT array_agg(id ORDER BY id) INTO v_current_ids
-    FROM public.invoices
-   WHERE invoice_group_id = p_invoice_group_id AND deleted_at IS NULL;
-  IF v_current_ids IS DISTINCT FROM v_expected_ids THEN
-    RAISE EXCEPTION 'INVOICE_CHANGED_SINCE_LOADED: invoices were added to or removed from this split group after this screen loaded it. Reload it, check it, then post again.';
-  END IF;
-
-  FOR v_member IN
-    SELECT id, invoice_number
-      FROM public.invoices
-     WHERE invoice_group_id = p_invoice_group_id AND deleted_at IS NULL
-     ORDER BY invoice_number
-  LOOP
-    IF public._invoice_post_version(v_member.id) IS DISTINCT FROM (v_expected ->> v_member.id::text) THEN
-      RAISE EXCEPTION 'INVOICE_CHANGED_SINCE_LOADED: invoice % in this split group was changed after this screen loaded it. Reload it, check it, then post again.', v_member.invoice_number;
-    END IF;
-    v_content := v_content || jsonb_build_object(v_member.id::text, public._invoice_post_content_version(v_member.id));
-  END LOOP;
-
-  v_result := public._post_invoice_group_customer_scope_impl(p_invoice_group_id, p_performed_by, NULL);
-
-  SELECT array_agg(x::uuid ORDER BY x::uuid) INTO v_posted_ids
-    FROM jsonb_array_elements_text(v_result->'posted_invoice_ids') x;
-  IF v_posted_ids IS DISTINCT FROM v_expected_ids THEN
-    RAISE EXCEPTION 'INVOICE_CHANGED_SINCE_LOADED: this split group changed while it was being posted. Reload it, check it, then post again.';
-  END IF;
-  FOR v_member IN
-    SELECT id, invoice_number FROM public.invoices WHERE id = ANY (v_expected_ids)
-  LOOP
-    IF public._invoice_post_content_version(v_member.id) IS DISTINCT FROM (v_content ->> v_member.id::text) THEN
-      RAISE EXCEPTION 'INVOICE_CHANGED_SINCE_LOADED: invoice % in this split group was changed while it was being posted. Reload it, check it, then post again.', v_member.invoice_number;
-    END IF;
-  END LOOP;
-
-  PERFORM public.save_idempotency(
-    p_idempotency_key,
-    'post_invoice_group',
-    jsonb_build_object('request', v_request, 'response', v_result)
-  );
-  RETURN v_result;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.batch_post_invoices(p_invoices jsonb, p_idempotency_key text DEFAULT NULL::text)
- RETURNS jsonb
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_item jsonb; v_id uuid; v_count int := 0; v_total bigint := 0; v_actor uuid;
-  v_actor_role text; v_existing jsonb; v_failures jsonb := '[]'::jsonb;
-  v_first_posted uuid; v_posted_ids uuid[] := '{}'; v_err text;
-  v_result jsonb; v_index int := 0;
-  v_contract CONSTANT text := 'batch_post_invoices_v3';
-  v_request jsonb; v_fingerprint text;
-BEGIN
-  IF p_idempotency_key IS NULL OR p_idempotency_key !~ '[^[:space:]]' THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: batch_post_invoices'
-      USING ERRCODE = '22023';
-  END IF;
-  v_actor := auth.uid();
-  IF v_actor IS NULL THEN RAISE EXCEPTION 'authentication required'; END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM public.profiles
-     WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')
-  ) THEN RAISE EXCEPTION 'Not authorized to batch post invoices'; END IF;
-  SELECT role INTO v_actor_role FROM public.profiles WHERE id = v_actor;
-  IF p_invoices IS NULL OR jsonb_typeof(p_invoices) <> 'array' OR jsonb_array_length(p_invoices) = 0 THEN
-    RAISE EXCEPTION 'No invoice IDs provided';
-  END IF;
-  IF EXISTS (
-    SELECT 1 FROM jsonb_array_elements(p_invoices) e
-     WHERE jsonb_typeof(e) <> 'object'
-        OR (e ->> 'invoice_id') IS NULL
-        OR (e ->> 'invoice_id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-        OR jsonb_typeof(e -> 'expected_version') IS DISTINCT FROM 'string'
-        OR (e ->> 'expected_version') !~ '[^[:space:]]'
-  ) THEN
-    RAISE EXCEPTION 'INVOICE_VERSION_REQUIRED: batch_post_invoices takes [{invoice_id, expected_version}]'
-      USING ERRCODE = '22023';
-  END IF;
-  IF (SELECT count(DISTINCT (e ->> 'invoice_id')::uuid) <> count(*) FROM jsonb_array_elements(p_invoices) e) THEN
-    RAISE EXCEPTION 'INVOICE_VERSION_REQUIRED: batch_post_invoices was sent the same invoice twice'
-      USING ERRCODE = '22023';
-  END IF;
-  v_request := jsonb_build_object(
-    'contract_version', v_contract,
-    'actor_id', v_actor,
-    'invoices', p_invoices
-  );
-  v_fingerprint := md5(v_request::text);
-  v_existing := public._claim_bound_lifecycle_idempotency(
-    p_idempotency_key, 'batch_post_invoices', v_contract,
-    v_fingerprint, v_request
-  );
-  IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
-
-  -- M4 (commission_settles_on_posting): the sales first, then the invoices (Cancel Remaining's order; Mason's review item 1).
-  PERFORM public._lock_invoice_sales_20270306(ARRAY(SELECT (e ->> 'invoice_id')::uuid FROM jsonb_array_elements(p_invoices) e));
-  FOR v_item IN SELECT e FROM jsonb_array_elements(p_invoices) e LOOP
-    v_index := v_index + 1;
-    v_id := (v_item ->> 'invoice_id')::uuid;
-    BEGIN
-      PERFORM public.post_invoice(
-        -- The child key is namespaced to the batch, so a direct post_invoice call can never have
-        -- used it and the batch never counts someone else's replay as its own post.
-        v_id, v_item ->> 'expected_version', 'batch_post_invoices:' || p_idempotency_key || ':post:' || v_index::text
-      );
-      v_count := v_count + 1;
-      IF v_first_posted IS NULL THEN v_first_posted := v_id; END IF;
-      v_posted_ids := array_append(v_posted_ids, v_id);
-      v_total := v_total + COALESCE((
-        SELECT total_amount_cents FROM public.invoices WHERE id = v_id
-      ), 0);
-    EXCEPTION WHEN OTHERS THEN
-      GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
-      v_failures := v_failures || jsonb_build_object('invoice_id', v_id, 'error', v_err);
-    END;
-  END LOOP;
-
-  IF v_count > 0 THEN
-    INSERT INTO public.financial_audit_log (
-      operation_type, entity_type, entity_id, actor_role,
-      new_values, total_impact_cents, description
-    ) VALUES (
-      'invoice_posted', 'invoice', v_first_posted, v_actor_role,
-      jsonb_build_object('batch_count', v_count,
-        'failed_count', jsonb_array_length(v_failures),
-        'invoice_ids', to_jsonb(v_posted_ids)),
-      v_total,
-      'Batch posted ' || v_count || ' invoice(s) totaling $' ||
-        (v_total / 100.0)::numeric(12,2) ||
-        CASE WHEN jsonb_array_length(v_failures) > 0
-          THEN ' (' || jsonb_array_length(v_failures) || ' failed)' ELSE '' END
-    );
-  END IF;
-  v_result := jsonb_build_object('success', jsonb_array_length(v_failures) = 0,
-    'count', v_count, 'total_cents', v_total, 'failed', v_failures);
-  PERFORM public._bind_completed_lifecycle_idempotency(
-    p_idempotency_key, 'batch_post_invoices', v_contract,
-    v_fingerprint, v_request, v_result
-  );
-  RETURN v_result;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.unpost_invoice(p_invoice_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)
- RETURNS jsonb
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_actor uuid := auth.uid();
-  v_fingerprint text;
-  v_replay jsonb;
-  v_result jsonb;
-BEGIN
-  IF p_idempotency_key IS NULL THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: unpost_invoice requires p_idempotency_key' USING ERRCODE = '22023';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')) THEN
-    RAISE EXCEPTION 'Not authorized: requires admin,sales_rep role';
-  END IF;
-  IF p_performed_by IS DISTINCT FROM v_actor THEN
-    RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match the authenticated user';
-  END IF;
-  v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
-    'actor_id', v_actor, 'invoice_id', p_invoice_id));
-  v_replay := public.check_idempotency_intent(p_idempotency_key, 'unpost_invoice', v_actor, v_fingerprint);
-  IF v_replay IS NOT NULL AND jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
-  END IF;
-  -- A retry of an unpost saved before this migration replays; only a new request is refused.
-  IF v_replay IS NULL AND EXISTS (SELECT 1 FROM invoices WHERE id = p_invoice_id AND invoice_group_id IS NOT NULL) THEN
-    RAISE EXCEPTION 'GROUP_UNPOST_REQUIRED';
-  END IF;
-  -- M4 (commission_settles_on_posting): the sales first, then the invoices (Cancel Remaining's order; Mason's review item 1).
-  PERFORM public._lock_invoice_sales_20270306(ARRAY[p_invoice_id]);
-  v_result := public._unpost_invoice_replay_impl_20261015(p_invoice_id, p_performed_by, p_idempotency_key);
-  IF v_replay IS NULL THEN
-    PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'unpost_invoice', v_fingerprint);
-  END IF;
-  RETURN v_result;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.unpost_invoice_group(p_invoice_group_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)
- RETURNS jsonb
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_actor uuid := auth.uid();
-  v_fingerprint text;
-  v_replay jsonb;
-  v_result jsonb;
-BEGIN
-  IF p_idempotency_key IS NULL THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: unpost_invoice_group requires p_idempotency_key' USING ERRCODE = '22023';
-  END IF;
-  IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
-  IF p_performed_by IS DISTINCT FROM v_actor THEN
-    RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match the authenticated user';
-  END IF;
-  IF NOT (is_admin() OR is_sales_rep()) THEN
-    RAISE EXCEPTION 'Not authorized: admin or sales role required to unpost invoice groups';
-  END IF;
-  v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
-    'actor_id', v_actor, 'invoice_group_id', p_invoice_group_id));
-  v_replay := public.check_idempotency_intent(p_idempotency_key, 'unpost_invoice_group', v_actor, v_fingerprint);
-  IF v_replay IS NOT NULL AND jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
-  END IF;
-  -- M4 (commission_settles_on_posting): the sales first, then the invoices (Cancel Remaining's order; Mason's review item 1).
-  PERFORM public._lock_invoice_sales_20270306(ARRAY(SELECT i.id FROM public.invoices i WHERE i.invoice_group_id = p_invoice_group_id));
-  v_result := public._unpost_invoice_group_replay_impl_20261015(p_invoice_group_id, p_performed_by, p_idempotency_key);
-  IF v_replay IS NULL THEN
-    PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'unpost_invoice_group', v_fingerprint);
-  END IF;
-  RETURN v_result;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.void_invoice(p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text)
- RETURNS void
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_is_return_credit boolean;
-BEGIN
-  -- M9: an invoice a returned (bounced) check paid keeps that history (the payment's allocation and the reversed
-  -- prepay application rows stay), so it cannot be voided; say so before the void reaches them.
-  -- Only for a caller the void itself would authorize (an active admin); anyone else gets the void's own refusal.
-  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true AND role = 'admin')
-     AND EXISTS (SELECT 1 FROM public.money_reversal_lines l
-              WHERE l.invoice_id = p_invoice_id AND l.line_kind IN ('invoice_payment', 'prepay_application')) THEN
-    RAISE EXCEPTION 'INVOICE_HAS_RETURNED_PAYMENT: a returned (bounced) check paid this invoice; it stays on the customer''s history and the invoice cannot be voided';
-  END IF;
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.returns r
-    WHERE r.credit_invoice_id = p_invoice_id
-  ) INTO v_is_return_credit;
-
-  IF v_is_return_credit THEN
-    PERFORM set_config('app.crx_return_credit_void', '1', true);
-  END IF;
-
-  -- M4 (commission_settles_on_posting): the sales first, then the invoices (Cancel Remaining's order; Mason's review item 1).
-  PERFORM public._lock_invoice_sales_20270306(ARRAY[p_invoice_id]);
-  BEGIN
-    PERFORM public._void_invoice_return_credit_guard_impl_20260826(
-      p_invoice_id,
-      p_void_reason,
-      p_idempotency_key
-    );
-  EXCEPTION WHEN OTHERS THEN
-    IF v_is_return_credit THEN
-      PERFORM set_config('app.crx_return_credit_void', '0', true);
-    END IF;
-    RAISE;
-  END;
-
-  IF v_is_return_credit THEN
-    PERFORM set_config('app.crx_return_credit_void', '0', true);
-    IF EXISTS (
-      SELECT 1
-      FROM public.returns r
-      WHERE r.credit_invoice_id = p_invoice_id
-    ) THEN
-      RAISE EXCEPTION 'RETURN_CREDIT_VOID_RELEASE_FAILED';
-    END IF;
-  END IF;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.void_invoice_group(p_invoice_group_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text)
- RETURNS integer
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_actor uuid := auth.uid();
-  v_contract CONSTANT text := 'void_invoice_group_v1';
-  v_request jsonb;
-  v_fingerprint text;
-  v_replay jsonb;
-  v_member record;
-  v_member_ids uuid[] := '{}'::uuid[];
-  v_count integer := 0;
-BEGIN
-  IF p_invoice_group_id IS NULL THEN
-    RAISE EXCEPTION 'INVOICE_GROUP_ID_REQUIRED';
-  END IF;
-  IF NULLIF(btrim(p_void_reason), '') IS NULL THEN
-    RAISE EXCEPTION 'VOID_REASON_REQUIRED';
-  END IF;
-  IF NOT EXISTS (
-    SELECT 1
-      FROM public.profiles p
-     WHERE p.id = v_actor
-       AND p.is_active = true
-       AND p.role = 'admin'
-  ) THEN
-    RAISE EXCEPTION 'Only admin users can void invoices';
-  END IF;
-
-  v_request := jsonb_build_object(
-    'contract_version', v_contract,
-    'actor_id', v_actor,
-    'invoice_group_id', p_invoice_group_id,
-    'void_reason', p_void_reason
-  );
-  v_fingerprint := md5(v_request::text);
-
-  IF p_idempotency_key IS NOT NULL THEN
-    v_replay := public._claim_bound_lifecycle_idempotency(
-      p_idempotency_key,
-      'void_invoice_group',
-      v_contract,
-      v_fingerprint,
-      v_request
-    );
-    IF v_replay IS NOT NULL THEN
-      RETURN (v_replay #>> '{}')::integer;
-    END IF;
-  END IF;
-
-  SELECT COALESCE(array_agg(i.id ORDER BY i.id), '{}'::uuid[])
-    INTO v_member_ids
-    FROM public.invoices i
-   WHERE i.invoice_group_id = p_invoice_group_id
-     AND i.deleted_at IS NULL
-     AND i.status NOT IN ('voided', 'cancelled');
-
-  IF cardinality(v_member_ids) = 0 THEN
-    RAISE EXCEPTION 'INVOICE_GROUP_HAS_NO_ACTIVE_MEMBERS: %', p_invoice_group_id;
-  END IF;
-
-  -- M4 (commission_settles_on_posting): the sales first, then the invoices (Cancel Remaining's order; Mason's review item 1).
-  PERFORM public._lock_invoice_sales_20270306(v_member_ids);
-  -- Deterministic row locking makes every precheck and mutation observe one
-  -- stable group. Any member failure rolls the entire function back.
-  PERFORM 1
-    FROM public.invoices i
-   WHERE i.id = ANY(v_member_ids)
-   ORDER BY i.id
-   FOR UPDATE;
-
-  IF EXISTS (
-    SELECT 1
-      FROM unnest(v_member_ids) member_id
-     WHERE NOT EXISTS (
-       SELECT 1
-         FROM public.split_invoice_provenance p
-        WHERE p.invoice_id = member_id
-          AND p.invoice_group_id = p_invoice_group_id
-     )
-  ) THEN
-    RAISE EXCEPTION
-      'INVOICE_GROUP_PROVENANCE_REQUIRED: every active member must have exact governed split provenance';
-  END IF;
-
-  FOR v_member IN
-    SELECT unnest(v_member_ids) AS invoice_id
-  LOOP
-    PERFORM public._void_invoice_group_guard_impl_20260720(
-      v_member.invoice_id,
-      p_void_reason,
-      NULL::text
-    );
-    v_count := v_count + 1;
-  END LOOP;
-
-  PERFORM public._bind_completed_lifecycle_idempotency(
-    p_idempotency_key,
-    'void_invoice_group',
-    v_contract,
-    v_fingerprint,
-    v_request,
-    to_jsonb(v_count)
-  );
-
-  RETURN v_count;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.batch_void_invoices(p_invoice_ids uuid[], p_void_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
- RETURNS integer
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_actor uuid := auth.uid();
-  v_fingerprint text;
-  v_replay jsonb;
-  v_result integer;
-BEGIN
-  IF p_idempotency_key IS NULL THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: batch_void_invoices requires p_idempotency_key' USING ERRCODE = '22023';
-  END IF;
-  IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
-  IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
-    RAISE EXCEPTION 'ACTOR_MISMATCH';
-  END IF;
-  -- The body treats the ids as a set (WHERE id = ANY), so the fingerprint does too.
-  v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
-    'actor_id', v_actor,
-    'invoice_ids', to_jsonb(ARRAY(SELECT DISTINCT u.id FROM unnest(p_invoice_ids) AS u(id) ORDER BY u.id)),
-    'void_reason', p_void_reason
-  ));
-  v_replay := public.check_idempotency_intent(p_idempotency_key, 'batch_void_invoices', v_actor, v_fingerprint);
-  IF v_replay IS NOT NULL AND jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
-  END IF;
-  -- M4 (commission_settles_on_posting): the sales first, then the invoices (Cancel Remaining's order; Mason's review item 1).
-  PERFORM public._lock_invoice_sales_20270306(p_invoice_ids);
-  v_result := public._batch_void_invoices_replay_impl_20261015(p_invoice_ids, p_void_reason, p_performed_by, p_idempotency_key);
-  IF v_replay IS NULL THEN
-    PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'batch_void_invoices', v_fingerprint);
-  END IF;
-  RETURN v_result;
-END;
-$function$;
 
 -- 4. The writers that put rows back on total_profit (bodies as pinned above, one call added each) ----------------
 CREATE OR REPLACE FUNCTION public._insert_commissions_for_order(p_order_id uuid, p_customer_id uuid, p_order_profit numeric, p_commission_split jsonb, p_order_date date DEFAULT ((now() AT TIME ZONE 'America/Chicago'::text))::date)
@@ -1341,6 +653,12 @@ BEGIN
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH';
   END IF;
+  -- M4 (commission_settles_on_posting): the whole-order invoices before the sale, so a post, unpost or void of one
+  -- (invoice, then the sale) can't deadlock against this (header point 4).
+  PERFORM 1 FROM public.invoices
+   WHERE order_id = p_order_id AND delivery_id IS NULL AND deleted_at IS NULL AND status NOT IN ('cancelled', 'voided')
+   ORDER BY id
+     FOR UPDATE;
   v_result := public._cancel_order_idem_impl_20260721(
     p_order_id, p_performed_by, p_idempotency_key
   );
@@ -1493,15 +811,13 @@ BEGIN
                      AND NOT tgdeferrable AND tgenabled = 'O')
      OR EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid IN ('public._order_commission_base_20270306(uuid)'::regprocedure,
                     'public._order_commission_lines_20270306(uuid)'::regprocedure,
-                    'public._lock_invoice_sales_20270306(uuid[])'::regprocedure,
                     'public._settle_order_commission_20270306(uuid)'::regprocedure,
                     'public._invoice_settles_commission_20270306()'::regprocedure,
                     'public._invoice_lines_settle_commission_20270306()'::regprocedure)
                   AND p.proacl IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[])
      OR EXISTS (SELECT 1 FROM pg_temp.commission_settles_on_posting_acl a JOIN pg_proc p ON p.oid = a.oid
                  WHERE p.proacl IS DISTINCT FROM a.proacl
-                    OR position(CASE WHEN a.settles THEN '_settle_order_commission_20270306' ELSE '_lock_invoice_sales_20270306' END
-                                IN p.prosrc) = 0) THEN
+                    OR position('_settle_order_commission_20270306' IN p.prosrc) = 0) THEN
     RAISE EXCEPTION 'COMMISSION_SETTLES_ON_POSTING_POSTFLIGHT: a trigger, grant or re-emitted body is not as written';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK';

@@ -11,11 +11,12 @@
  *      discount once posted (A, B, C, D, F, H, K, M, S); its controls (E, G, O, T) pass; the covering chains pass;
  *   2. AUTOCOMMIT: run statement by statement the file stops at its preflight;
  *   3. APPLY (committed): POSTFLIGHT_OK;
- *   3b. LOCK ORDER: two sessions, a legacy whole-order invoice posted, unposted, batch-posted and voided while Cancel
- *      Remaining runs on its sale: no deadlock (each RPC locks the sale before the invoice);
+ *   3b. LOCK ORDER: a legacy whole-order invoice posted, unposted, batch-posted and voided while Cancel Remaining runs
+ *      on its sale: no deadlock (cancel_order locks the whole-order invoices before the sale);
+ *   3c. LOCK ORDER: a draft saved (invoice, then the sale) while it is posted: no deadlock;
  *   4. AFTER: the new chain passes; every covering chain that passed before still passes;
  *   5. RE-APPLY: refused by the preflight;
- *   6. ROLLBACK: the documented rollback (drop the triggers and new functions, re-emit the twelve functions as they were)
+ *   6. ROLLBACK: the documented rollback (drop the triggers and new functions, re-emit the four functions as they were)
  *      restores the BEFORE behaviour.
  *
  * Run: node scripts/smoke/prove-commission-after-discount-real-schema.mjs   (needs Docker)
@@ -65,7 +66,7 @@ const LEDGER_ONLY = new Set([
 const LEDGER_ONLY_REVIEWED = new Map([['20270227110000_delivery_driver_checks_need_a_driver.sql', '78a24c2bf56e5901b771575e2c818ef2dccbaf3781cbd2bb159a0d762724714e']]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate or its follow-up creates or relies on.
-const TOUCHED = /(commissions|commission_payment|_order_standing_discount_|_recompute_standing_discount_|_invoice_line_tax_shares_|compute_commission_amount|fix_delivery|cancel_order|_insert_commissions_for_order|_cancel_order_idem_impl_|_void_commission_payment_intent_impl_|_20270306|discount_settled_at|FUNCTION public\.(post_invoice|post_invoice_group|batch_post_invoices|unpost_invoice|unpost_invoice_group|void_invoice|void_invoice_group|batch_void_invoices)\()/i;
+const TOUCHED = /(commissions|commission_payment|_order_standing_discount_|_recompute_standing_discount_|_invoice_line_tax_shares_|compute_commission_amount|fix_delivery|cancel_order|_insert_commissions_for_order|_cancel_order_idem_impl_|_void_commission_payment_intent_impl_|_20270306|discount_settled_at)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -358,12 +359,11 @@ const pause = (ms) => new Promise((r) => { setTimeout(r, ms); });
 const claims = (uid) => `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);`;
 
 /**
- * Lock order (Mason's review of b73ba35f5, item 1): a whole-order invoice posted, unposted or voided while Cancel
- * Remaining runs on the same sale. Cancel Remaining locks the sale, then its whole-order invoices; every settle path
- * must take the sale before the invoice, or one side dies with "deadlock detected". Session B holds the sale lock
- * (Cancel Remaining's own first lock, held 1.5 s so session A reaches its invoice), then runs Cancel Remaining.
- * Right: A waits for the sale before touching the invoice, B finds the whole-order invoice and refuses
- * (ORDER_LEVEL_INVOICE_ACTIVE), then A commits. Committed fixture: this database is disposable.
+ * 3b, lock order (Mason's review of b73ba35f5, item 1): a whole-order invoice posted, unposted or voided while Cancel
+ * Remaining runs on the same sale. Posting takes the invoice, then the sale (the settle); Cancel Remaining took the sale,
+ * then its whole-order invoices, so one side died with "deadlock detected". cancel_order now takes those invoices
+ * first. Right: Cancel Remaining waits for the invoice, then refuses it (ORDER_LEVEL_INVOICE_ACTIVE), and the post
+ * commits. Committed fixture: this database is disposable.
  */
 async function lockOrderPairs(tag) {
   const order = scalar(`BEGIN; ${claims(ADMIN)}
@@ -395,7 +395,7 @@ async function lockOrderPairs(tag) {
     SELECT public.delete_invoices(ARRAY(SELECT id FROM public.invoices WHERE delivery_id = '${delivery}' AND status = 'draft'),
       '${ADMIN}', 'fix2525-lock-delete-${tag}');
     COMMIT;`);
-  const invoice = id(`e${tag.slice(-6).replace(/[^0-9a-f]/g, '0').padStart(6, '0')}`);
+  const invoice = id(`e${createHash('md5').update(tag).digest('hex').slice(0, 11)}`);
   raw(`INSERT INTO public.invoices (id, invoice_number, customer_id, order_id, invoice_type, status, invoice_date, due_date,
         total_amount_cents, created_by)
       VALUES ('${invoice}', 'FIX2525-LEGACY-${tag}', '${CUST_C}', '${order}', 'chemical_sale', 'draft',
@@ -414,24 +414,62 @@ async function lockOrderPairs(tag) {
       'expected_version', '${scalar(`SELECT public._invoice_post_version('${invoice}');`)}')), 'fix2525-lock-batch-${tag}');`],
     ['void', () => `SELECT public.void_invoice('${invoice}', 'Prover lock order', 'fix2525-lock-void-${tag}');`],
   ];
+  // Session C holds the accounting-month lock (exclusive, as close_accounting_period takes it) for 4 s, so session A,
+  // having locked the invoice, waits at its period check; session B (Cancel Remaining) starts meanwhile. When C lets
+  // go, A reaches the settle and asks for the sale: on b73ba35f5 B held it and waited for A's invoice (deadlock).
+  const months = "ARRAY[(now() AT TIME ZONE 'America/Chicago')::date, (now() AT TIME ZONE 'UTC')::date]";
   for (const [name, call] of steps) {
-    const cancel = session(`BEGIN; ${claims(ADMIN)}
-      SELECT 1 FROM public.orders WHERE id = '${order}' FOR UPDATE;
-      SELECT pg_sleep(1.5);
-      SET LOCAL ROLE authenticated;
+    const sql = call();
+    const gate = session(`BEGIN; SELECT public._lock_accounting_months(${months}, true); SELECT pg_sleep(4); ROLLBACK;`);
+    await pause(700);
+    const lifecycle = session(`BEGIN; ${claims(ADMIN)} SET LOCAL ROLE authenticated;\n${sql}\nCOMMIT;`);
+    await pause(1500);
+    const cancel = session(`BEGIN; ${claims(ADMIN)} SET LOCAL ROLE authenticated;
       SELECT public.cancel_order('${order}', '${ADMIN}', 'fix2525-lock-cancel-${name.replace(' ', '-')}-${tag}');
       ROLLBACK;`);
-    await pause(500);
-    const lifecycle = session(`BEGIN; ${claims(ADMIN)} SET LOCAL ROLE authenticated;\n${call()}\nCOMMIT;`);
-    const [b, a] = await Promise.all([cancel, lifecycle]);
+    const [, a, b] = await Promise.all([gate, lifecycle, cancel]);
     assert.ok(!/deadlock detected/.test(a.out + b.out), `LOCK ORDER (${name} vs Cancel Remaining): deadlock\n${a.out}\n${b.out}`);
     assert.equal(a.status, 0, `LOCK ORDER (${name}): the ${name} failed\n${a.out}\n${b.out}`);
     if (name === 'batch post') assert.match(a.out, /"count": 1/, `LOCK ORDER (batch post): the invoice did not post\n${a.out}`);
-    // Cancel Remaining reached the whole-order invoice (so the two really met on it) and refused it.
-    assert.match(b.out, /ORDER_LEVEL_INVOICE_ACTIVE/, `LOCK ORDER (${name}): Cancel Remaining did not reach the invoice\n${b.out}`);
+    // Cancel Remaining waited for the invoice, then refused it while active (so the two really met on it); after the
+    // void it is gone, and Cancel Remaining stops on the sale's commission state instead.
+    assert.match(b.out, name === 'void' ? /ERROR:/ : /ORDER_LEVEL_INVOICE_ACTIVE/,
+      `LOCK ORDER (${name}): Cancel Remaining did not reach the invoice\n${b.out}`);
   }
   assert.equal(scalar(`SELECT status FROM public.invoices WHERE id = '${invoice}';`), 'voided');
-  console.log('[case] 3b LOCK ORDER: post, unpost, batch post and void of a legacy whole-order invoice vs Cancel Remaining: no deadlock (the sale is locked first; fails on b73ba35f5 with "deadlock detected")');
+  console.log('[case] 3b LOCK ORDER: post, unpost, batch post and void of a legacy whole-order invoice vs Cancel Remaining: no deadlock (fails on b73ba35f5 with "deadlock detected")');
+}
+
+/** 3c: a draft saved while it is posted. A save locks the invoice, then the sale (zz_cap_*_invoice_items on a line
+ * write); posting must take them in that order too (a post that took the sale first deadlocked here). */
+async function savePostPair(tag) {
+  const order = scalar(`BEGIN; ${claims(ADMIN)} SELECT set_config('request.jwt.claim.sub', '${ADMIN}', true);
+    SELECT (public.create_direct_order('${CUST_C}', (now() AT TIME ZONE 'America/Chicago')::date, '[PROVER] save vs post ${tag}', NULL,
+      jsonb_build_array(jsonb_build_object('product_id', '${PROD_C}', 'product_name', '[PROVER] save vs post', 'quantity', 10,
+        'price_per_unit', 9, 'unit_cost', 5, 'unit_size', 'Gal')), '${ADMIN}', 'fix2525-sv-order-${tag}') ->> 'order_id'); COMMIT;`);
+  const delivery = scalar(`BEGIN; ${claims(ADMIN)} SELECT set_config('request.jwt.claim.sub', '${ADMIN}', true);
+    WITH d AS (INSERT INTO public.deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+      SELECT 'FIX2525-SV-${tag}', o.id, o.customer_id, 'scheduled', (now() AT TIME ZONE 'America/Chicago')::date, '${ADMIN}'
+        FROM public.orders o WHERE o.id = '${order}' RETURNING id)
+    INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+      SELECT d.id, oi.id, oi.product_id, 5, 'Gal' FROM d, public.order_items oi WHERE oi.order_id = '${order}' RETURNING delivery_id; COMMIT;`);
+  psql(`BEGIN; ${claims(ADMIN)} SELECT set_config('request.jwt.claim.sub', '${ADMIN}', true);
+    SELECT public.confirm_delivery('${delivery}', '${ADMIN}', 'fix2525-sv-confirm-${tag}');
+    SELECT public.complete_delivery('${delivery}', 'No proof — recorded by office', '${ADMIN}', NULL, NULL, NULL,
+      'fix2525-sv-complete-${tag}', NULL, 'no_proof', 'Prover save-vs-post fixture'); COMMIT;`);
+  const invoice = scalar(`SELECT id FROM public.invoices WHERE delivery_id = '${delivery}' AND status = 'draft';`);
+  assert.match(invoice, /^[0-9a-f-]{36}$/, `save-vs-post fixture: no delivery draft (${invoice})`);
+  const version = scalar(`SELECT public._invoice_post_version('${invoice}');`);
+  const save = session(`BEGIN; SELECT 1 FROM public.invoices WHERE id = '${invoice}' FOR UPDATE; SELECT pg_sleep(4);
+    SELECT 1 FROM public.orders WHERE id = '${order}' FOR UPDATE; ROLLBACK;`);
+  await pause(1500);
+  const post = session(`BEGIN; ${claims(ADMIN)} SET LOCAL ROLE authenticated;
+    SELECT public.post_invoice('${invoice}', '${version}', 'fix2525-sv-post-${tag}'); COMMIT;`);
+  const [a, b] = await Promise.all([save, post]);
+  assert.ok(!/deadlock detected/.test(a.out + b.out), `LOCK ORDER (save vs post): deadlock\n${a.out}\n${b.out}`);
+  assert.equal(b.status, 0, `LOCK ORDER (save vs post): the post failed\n${b.out}`);
+  assert.equal(scalar(`SELECT status FROM public.invoices WHERE id = '${invoice}';`), 'posted');
+  console.log('[case] 3c LOCK ORDER: a draft saved (invoice, then the sale) while it is posted: no deadlock');
 }
 
 async function main() {
@@ -464,12 +502,9 @@ async function main() {
   assert.match(`${auto.stdout}\n${auto.stderr}`, /COMMISSION_SETTLES_ON_POSTING_NOT_IN_TRANSACTION/);
   assert.equal(scalar("SELECT count(*) FROM pg_proc WHERE proname IN ('_settle_order_commission_20270306', '_order_commission_base_20270306');"), '0');
   console.log('[case] 2 AUTOCOMMIT: run statement by statement, the file stops at its preflight and creates nothing');
-  // The twelve re-emitted functions as they are before the candidate: the documented rollback re-emits them.
+  // The four re-emitted functions as they are before the candidate: the documented rollback re-emits them.
   const ORIGINALS = ['_insert_commissions_for_order(uuid,uuid,numeric,jsonb,date)', 'fix_delivery(uuid,text,text,text)',
-    'cancel_order(uuid,uuid,text)', 'void_commission_payment(uuid,text,uuid,text)', 'post_invoice(uuid,text,text)',
-    'post_invoice_group(uuid,uuid,jsonb,text)', 'batch_post_invoices(jsonb,text)', 'unpost_invoice(uuid,uuid,text)',
-    'unpost_invoice_group(uuid,uuid,text)', 'void_invoice(uuid,text,text)', 'void_invoice_group(uuid,text,text)',
-    'batch_void_invoices(uuid[],text,uuid,text)']
+    'cancel_order(uuid,uuid,text)', 'void_commission_payment(uuid,text,uuid,text)']
     .map((sig) => full(`SELECT pg_get_functiondef('public.${sig}'::regprocedure);`));
   for (const def of ORIGINALS) assert.match(def, /^CREATE OR REPLACE FUNCTION [\s\S]+\$function\$$/);
   // 3. APPLY
@@ -478,6 +513,7 @@ async function main() {
   assert.match(applied.output, /POSTFLIGHT_OK/);
   console.log('[case] 3 APPLY: committed, POSTFLIGHT_OK');
   await lockOrderPairs(Date.now().toString(36));
+  await savePostPair(Date.now().toString(36));
   // 4. AFTER
   const after = chain(NEW_CHAIN);
   assert.ok(after.pass, `AFTER: the new chain fails: ${after.fail}`);
@@ -498,7 +534,6 @@ async function main() {
     DROP FUNCTION public._settle_order_commission_20270306(uuid);
     DROP FUNCTION public._order_commission_base_20270306(uuid);
     DROP FUNCTION public._order_commission_lines_20270306(uuid);
-    DROP FUNCTION public._lock_invoice_sales_20270306(uuid[]);
     ALTER TABLE public.commissions DROP COLUMN discount_settled_at;
     COMMIT;`);
   const rolled = chain(NEW_CHAIN);

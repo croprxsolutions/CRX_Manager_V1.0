@@ -163,6 +163,13 @@ test('summary: only title, description and file names go out; the answer is esca
   assert.equal(await summarize(pr(), [], { key: '', fetchImpl: never }), null, 'no key, no call');
   assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false }) }), null, 'API error');
   assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: async () => { throw new Error('timeout'); } }), null, 'network error');
+  const logged = [];
+  const log = console.log;
+  console.log = (m) => logged.push(m);
+  try {
+    await summarize(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({ error: { type: 'authentication_error', message: 'invalid x-api-key' } }) }) });
+  } finally { console.log = log; }
+  assert.deepEqual(logged, ['::warning::Haiku call failed: HTTP 401 authentication_error invalid x-api-key'], 'the API reason reaches the run log');
   assert.match(pingText(pr(), s), /\n> AI summary of the author's description, not checked: Hi &lt;!channel&gt;/);
   assert.doesNotMatch(pingText(pr(), null), /\n/);
   const reply = (text) => async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text }] }) });

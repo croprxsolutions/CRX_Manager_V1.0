@@ -96,7 +96,9 @@ if (oneShotParts.length === 2 && oneShotParts.join("").includes(`"${newStem}"`))
 const reviewed = git("rev-parse", "HEAD");
 if (!existsSync(codexPushProofPath(process.cwd(), reviewed))) console.error(`note: no Sol proof for ${reviewed.slice(0, 12)} in this worktree; the restamp commits, but nothing will carry.`);
 
-// The SQL: only its leading comment header's link to its own record changes; the body keeps every byte.
+// The SQL: only its leading comment header's link to its own record and a line that is only its name change;
+// the body keeps every byte. --restamp-from (apply proofs) needs byte-identical SQL, so a moved line there
+// needs a fresh apply review; a live-apply restamp of a migration with neither uses the plain rename.
 const sqlText = readFileSync(oldSql, "latin1");
 const sqlLines = sqlText.split("\n");
 const bodyStart = sqlLines.findIndex((line) => line.trim() !== "" && !line.trimStart().startsWith("--"));

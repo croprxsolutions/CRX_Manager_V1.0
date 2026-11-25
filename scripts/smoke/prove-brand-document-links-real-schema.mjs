@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, psql, seedUsers, ROOT } from './undo-paths/harness.mjs';
 
-const migration = '20270305140000_brand_document_links.sql';
+const migration = '20270306170000_brand_document_links.sql';
 const read = (...pieces) => readFileSync(path.join(ROOT, ...pieces), 'utf8').replaceAll('\r\n', '\n');
 
 try {

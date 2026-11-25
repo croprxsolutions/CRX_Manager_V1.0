@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeEol } from "./normalize-eol.mjs";
 import { findWindowsShellVariableHooks } from "./windows-hook-command.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -115,9 +116,11 @@ const adversarialEqualityRules = [
 const validNegativeEqualityRule = "Supabase MCP assigns a fresh live version at apply time, so the pre-apply filename is NOT expected to equal that future value.";
 
 record(agents.split(/\r?\n/).length <= 90, "AGENTS.md stays lean", `${agents.split(/\r?\n/).length} lines`);
-record(Buffer.byteLength(agents, "utf8") <= 12000, "AGENTS.md stays within the startup-context budget", `${Buffer.byteLength(agents, "utf8")} bytes`);
+// Budgets count LF bytes, so a Windows CRLF checkout measures the same file as CI.
+const lfBytes = (text) => Buffer.byteLength(normalizeEol(text), "utf8");
+record(lfBytes(agents) <= 12000, "AGENTS.md stays within the startup-context budget", `${lfBytes(agents)} bytes`);
 record(claude.split(/\r?\n/).length <= 60, "CLAUDE.md stays lean", `${claude.split(/\r?\n/).length} lines`);
-record(Buffer.byteLength(claude, "utf8") <= 6000, "CLAUDE.md stays within the startup-context budget", `${Buffer.byteLength(claude, "utf8")} bytes`);
+record(lfBytes(claude) <= 6000, "CLAUDE.md stays within the startup-context budget", `${lfBytes(claude)} bytes`);
 record(cursorRules.split(/\r?\n/).length <= 15, ".cursorrules stays a lean AGENTS.md router", `${cursorRules.split(/\r?\n/).length} lines`);
 record(/AGENTS\.md.*canonical shared contract/i.test(cursorRules), ".cursorrules delegates shared policy to AGENTS.md");
 record(!/\b\d{2,5}\s+(?:tables|migrations|pages|tests?|edge functions?)\b/i.test(cursorRules), ".cursorrules has no volatile project counts");

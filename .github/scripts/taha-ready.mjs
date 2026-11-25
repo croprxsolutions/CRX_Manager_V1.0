@@ -149,10 +149,15 @@ export async function haiku(prompt, maxTokens, { key = process.env.ANTHROPIC_API
       body: JSON.stringify({ model: HAIKU_MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] }),
       signal: AbortSignal.timeout(20_000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Logged so a bad key, empty credit or retired model shows in the run log instead of failing silently.
+      const err = await res.json?.().catch(() => null);
+      console.log(`::warning::Haiku call failed: HTTP ${res.status} ${err?.error?.type ?? ''} ${String(err?.error?.message ?? '').replace(/\s+/g, ' ').slice(0, 200)}`);
+      return null;
+    }
     const out = await res.json();
     return out.content?.find((c) => c.type === 'text')?.text?.trim() ?? '';
-  } catch { return null; }
+  } catch (e) { console.log(`::warning::Haiku call failed: ${e?.name ?? 'error'} ${String(e?.message ?? '').slice(0, 200)}`); return null; }
 }
 // Only what the public PR page already shows: title, description (cut short) and changed file names.
 export const prFacts = (pr, files) => `Title: ${pr.title}\nDescription:\n${String(pr.body ?? '').slice(0, 2000)}\nChanged files:\n${(files ?? []).slice(0, 100).join('\n')}`;

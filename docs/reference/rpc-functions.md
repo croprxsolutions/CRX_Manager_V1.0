@@ -610,6 +610,12 @@ These are NOT called directly from the frontend. They power triggers, guards, an
 - `preview_brand_document_links(p_brand_id, p_parent_brand, p_brand_version, p_changes)` → `{success: true}`. Admin-only read of one brand's proposed workbook changes. Applies the same brand, link version and URL checks and catches duplicate links. Save repeats validation under lock.
 - `get_brand_document_workspace(p_reported_only DEFAULT false, p_brand_ids DEFAULT NULL)` → the current brands and visible links for admins. Filter to the requested brand IDs for Product Detail, or request only brands with open reports. Staff read public link fields through Row Level Security.
 
+### Liquid density review (`20270307120000_liquid_density_review.sql`, local candidate)
+
+- `get_liquid_density_review(p_parent_id)` returns the switch state and the active brand roster with current SDS references.
+- `submit_liquid_density_draft(p_parent_id, p_expected_version, p_value, p_unit, p_source, p_source_note, p_reason, p_evidence, p_idempotency_key)` saves a new draft. The existing approved weight stays in use, and a waiting draft cannot be overwritten once review opens.
+- `approve_liquid_density_draft(p_parent_id, p_draft_id, p_expected_version, p_reviewed_brands, p_all_brands_match, p_idempotency_key)` requires a different admin and stores the confirmed roster. Both write actions require admin access and return `PRODUCT_WEIGHT_REVIEW_NOT_OPEN` before cutover. After cutover, liquid drafts must use this group review path. Legacy dry package approval remains available.
+
 ### Product categories (`20261102102000_product_setup_checks.sql`, local candidate; not applied)
 
 - `upsert_product_category(p_name text, p_is_active boolean, p_sort_order integer, p_idempotency_key text DEFAULT NULL)` → jsonb saved category. Admin only; trims and collapses inner whitespace, requires a nonblank name of at most 100 characters, and refuses a name differing from an existing one only by case. A required retry key is bound to the caller and exact request through the same intent and receipt sequence as `upsert_product_brand`. Retire with `p_is_active=false`; a trigger then refuses moving products into it while preserving existing assignments. Active authenticated profiles read `product_categories`; no API role writes the table directly.

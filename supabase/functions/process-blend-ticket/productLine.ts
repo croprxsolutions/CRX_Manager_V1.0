@@ -161,13 +161,17 @@ export function readAmountCell(text: string): AmountCell | null {
 
 const normName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-// A catalog name that ends with what the reader took as the rate ("Atrazine 4L" read as "Atrazine"
-// + rate 4L) means the columns shifted; the caller leaves the unit blank for the rep (Sol r2).
+// A catalog name longer than the read name that runs on into the amounts ("Atrazine 4 L" read as
+// "Atrazine" + rate "4 L") means the columns shifted; the caller leaves the unit blank (Sol r2, Luna r8).
+// A false match only blanks a unit, which the rep then sets.
 export function nameSwallowsRate(
-  prod: Pick<ParsedProduct, "productName" | "ratePerAcre">,
+  prod: Pick<ParsedProduct, "productName" | "ratePerAcre" | "totalProduct">,
   catalogNames: string[],
 ): boolean {
-  if (!prod.ratePerAcre) return false;
-  const joined = normName(prod.productName + prod.ratePerAcre);
-  return catalogNames.some((n) => normName(n) === joined);
+  const name = normName(prod.productName);
+  const line = normName(prod.productName + (prod.ratePerAcre ?? "") + (prod.totalProduct ?? ""));
+  return catalogNames.some((n) => {
+    const c = normName(n);
+    return c.length > name.length && c.startsWith(name) && line.startsWith(c);
+  });
 }

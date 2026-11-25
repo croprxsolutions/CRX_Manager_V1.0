@@ -96,6 +96,17 @@ Deno.test("a catalog name that swallows the rate token is caught (Sol r2)", () =
     nameSwallowsRate(parseProductLine("Piksi Dust 6 g 750 g")!, ["Piksi Dust"]),
     false,
   );
+  // Luna r8: the name's amount and unit are separate tokens.
+  const spaced = parseProductLine("Atrazine 4 L 2 qt")!;
+  assertEquals(nameSwallowsRate(spaced, ["Atrazine", "Atrazine 4 L"]), true);
+  assertEquals(
+    nameSwallowsRate(parseProductLine("Liberty 280 SL 32 oz 10 gal")!, ["Liberty 280 SL"]),
+    true,
+  );
+  assertEquals(
+    nameSwallowsRate(parseProductLine("Atrazine | 4 L | 2 qt")!, ["Atrazine 4L"]),
+    true,
+  );
 });
 
 Deno.test("anything uncertain leaves the unit blank so the stock check stops it (Astra, Luna, Sol r1)", () => {

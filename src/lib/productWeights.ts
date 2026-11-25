@@ -19,6 +19,7 @@ export function weightContextChanged(error: unknown): boolean {
     RpcErrorCodes.PRODUCT_WEIGHT_BASIS_CHANGED,
     RpcErrorCodes.PRODUCT_WEIGHT_BRANDS_CHANGED,
     RpcErrorCodes.PRODUCT_WEIGHT_NOT_ELIGIBLE,
+    RpcErrorCodes.PRODUCT_WEIGHT_NOT_LIQUID,
     RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_NOT_OPEN,
     RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_RELOAD,
   ].some((code) => hasRpcCode(error, code));

@@ -231,10 +231,14 @@ describe('ProductWeightCard', () => {
     expect(mocks.saveWeight).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])('closes weight entry and reloads if the switch changes from %s during a save', async (reviewOpen) => {
+  it.each([
+    [false, 'PRODUCT_WEIGHT_REVIEW_RELOAD'],
+    [true, 'PRODUCT_WEIGHT_REVIEW_NOT_OPEN'],
+    [true, 'PRODUCT_WEIGHT_NOT_LIQUID'],
+  ])('closes weight entry and reloads (switch open: %s, refusal: %s)', async (reviewOpen, code) => {
     mocks.fetchLiquidDensityReview.mockResolvedValue({ review_open: reviewOpen, brands: [] });
     const save = reviewOpen ? mocks.submitLiquidDensityDraft : mocks.saveWeight;
-    save.mockRejectedValue(new Error(reviewOpen ? 'PRODUCT_WEIGHT_REVIEW_NOT_OPEN' : 'PRODUCT_WEIGHT_REVIEW_RELOAD'));
+    save.mockRejectedValue(new Error(code));
     show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation });
     fireEvent.click(await screen.findByRole('button', { name: 'Enter weight' }));
     const dialog = within(await screen.findByRole('dialog', { name: 'Enter weight' }));

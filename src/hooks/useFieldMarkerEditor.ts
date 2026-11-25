@@ -271,7 +271,7 @@ export function useFieldMarkerEditor(
       await deleteFieldMarker(target, actorId);
       if (inSameView()) onDeleted?.(target.field_id, target.id);
     }, 'Marker deleted.',
-      'The marker could not be deleted. It may have changed or your access may have ended.');
+      'The deletion could not be confirmed. Check the field again before retrying.');
   }
 
   const preview = markerDraftPreview(draft, actorId);

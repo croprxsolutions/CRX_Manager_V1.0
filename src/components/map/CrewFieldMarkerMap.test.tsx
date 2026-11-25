@@ -54,6 +54,7 @@ it('shows progress while checking the device for a pending marker', async () => 
   await act(async () => finish());
 
   expect(screen.getByRole('heading', { name: 'Add marker to North field' })).toBeInTheDocument();
+  expect(screen.getByRole('form', { name: 'Field marker editor' })).toHaveFocus();
   expect(screen.queryByText(/Checking this device/)).not.toBeInTheDocument();
 });
 

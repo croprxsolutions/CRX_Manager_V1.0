@@ -337,6 +337,17 @@ export default function FieldView() {
 
   useEffect(() => { fetchCards(); }, [fetchCards]);
 
+  useEffect(() => {
+    if (view !== 'map' || mapChecking) return;
+    function onMapResume() {
+      if (document.visibilityState !== 'visible') return;
+      setMapOpenCount((count) => count + 1);
+      void fetchCards();
+    }
+    document.addEventListener('visibilitychange', onMapResume);
+    return () => document.removeEventListener('visibilitychange', onMapResume);
+  }, [view, mapChecking, fetchCards]);
+
   // A saved completion left the queue (sent, needs attention, or discarded): reload so a
   // sent one shows the job as done instead of offering Complete again. Wait for signal:
   // a reload that fails offline would blank the whole job list.

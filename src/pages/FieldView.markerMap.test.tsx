@@ -248,3 +248,19 @@ it('rechecks assignments and marker access on returning from the job list', asyn
   expect(await map.findByRole('heading', { name: 'Other crew field' })).toBeInTheDocument();
   expect(map.queryByRole('heading', { name: 'My dispatched field' })).toBeNull();
 });
+
+it('rechecks dispatch when the phone resumes with the map still open', async () => {
+  render(fieldView());
+  const map = await openMap();
+  await map.findByRole('heading', { name: 'My dispatched field' });
+  fixtures.movedField = true;
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  try {
+    fireEvent(document, new Event('visibilitychange'));
+    expect(map.getByRole('button', { name: 'Add marker' })).toBeDisabled();
+    expect(await map.findByRole('heading', { name: 'Other crew field' })).toBeInTheDocument();
+    expect(map.queryByRole('heading', { name: 'My dispatched field' })).toBeNull();
+  } finally {
+    visibility.mockRestore();
+  }
+});

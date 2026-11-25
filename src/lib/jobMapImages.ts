@@ -6,8 +6,7 @@
  * URL limit, and returns PNG data URLs that a PDF renderer can draw directly.
  */
 import { supabase, assertRpcResult } from './db';
-import { fieldObstacleToGeoJsonFeature } from './fieldObstacles';
-import type { FieldObstacle } from '../types';
+import { isFieldObstaclePoint } from './fieldObstacles';
 
 const MAPBOX_STYLE = 'mapbox/satellite-streets-v12';
 const MAPBOX_STATIC_URL = `https://api.mapbox.com/styles/v1/${MAPBOX_STYLE}/static`;
@@ -311,19 +310,6 @@ function boundaryFeature(field: ParsedJobField, includeFill: boolean, tolerance:
   return { type: 'Feature', properties, geometry: simplifyGeometry(field.geometry, tolerance) };
 }
 
-function obstacleFeature(obstacle: FieldObstacle): BoundaryFeature | null {
-  const feature = fieldObstacleToGeoJsonFeature(obstacle);
-  if (!feature) return null;
-  return {
-    type: 'Feature',
-    properties: { ...feature.properties },
-    geometry: {
-      type: 'Point',
-      coordinates: [feature.geometry.coordinates[0], feature.geometry.coordinates[1]],
-    },
-  };
-}
-
 function staticImageUrl(features: BoundaryFeature[], options: BuildStaticUrlOptions): string {
   const collection: BoundaryFeatureCollection = { type: 'FeatureCollection', features };
   const encodedOverlay = encodeURIComponent(JSON.stringify(collection));
@@ -614,24 +600,33 @@ async function customerNamesById(customerIds: string[]): Promise<Map<string, str
   return names;
 }
 
-async function fieldObstacleFeatures(fieldIds: string[]): Promise<BoundaryFeature[]> {
-  if (fieldIds.length === 0) return [];
+async function fieldObstacleFeatures(fieldIds: string[]): Promise<Map<string, BoundaryFeature[]>> {
+  const byField = new Map<string, BoundaryFeature[]>();
+  if (fieldIds.length === 0) return byField;
   try {
     const { data, error } = await supabase
       .from('field_obstacles')
-      .select('*')
+      .select('field_id, point_geojson')
       .in('field_id', fieldIds);
     if (error) {
       console.warn('Unable to load field obstacles for applicator-sheet maps.', error);
-      return [];
+      return byField;
     }
-    return ((data ?? []) as unknown as FieldObstacle[])
-      .map(obstacleFeature)
-      .filter((feature): feature is BoundaryFeature => feature !== null);
+    for (const { field_id, point_geojson } of data ?? []) {
+      if (!isFieldObstaclePoint(point_geojson)) continue;
+      const features = byField.get(field_id) ?? [];
+      const [longitude, latitude] = point_geojson.coordinates;
+      features.push({
+        type: 'Feature',
+        properties: { 'marker-color': '#dc2626', 'marker-size': 'small' },
+        geometry: { type: 'Point', coordinates: [longitude, latitude] },
+      });
+      byField.set(field_id, features);
+    }
   } catch (error) {
     console.warn('Unable to load field obstacles for applicator-sheet maps.', error);
-    return [];
   }
+  return byField;
 }
 
 /**
@@ -757,7 +752,7 @@ export async function fetchJobMapImages(
     const perField: JobFieldMapImage[] = [];
     if (opts.perField !== false) {
       for (const field of fields) {
-        const fieldObstacles = obstacles.filter((feature) => feature.properties.field_id === field.id);
+        const fieldObstacles = obstacles.get(field.id) ?? [];
         const image = buildStaticImageUrl([field], fieldObstacles, perFieldOptions);
         if (!image) {
           console.warn(`Skipping map for ${field.name} because its geometry exceeds Mapbox URL limits.`);

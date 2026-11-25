@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import type { useFieldMarkerEditor } from '../../hooks/useFieldMarkerEditor';
 import Button from '../ui/Button';
 import ConfirmModal from '../ui/ConfirmModal';
@@ -9,6 +10,7 @@ export default function FieldMarkerEditor({ editor, ready, unavailable }: {
   unavailable: boolean;
 }) {
   const { draft, placing, saving } = editor;
+  const focusForm = useCallback((form: HTMLFormElement | null) => form?.focus({ preventScroll: true }), []);
   return (
     <>
       {editor.message && <p role="status" className="text-sm text-nav-dark">{editor.message}</p>}
@@ -16,7 +18,9 @@ export default function FieldMarkerEditor({ editor, ready, unavailable }: {
         {draft.submitted ? 'Keep for later' : 'Cancel'}
       </Button>}
       {draft && !unavailable && (
-        <form className="space-y-3 rounded-lg border border-gray-300 p-3" onSubmit={(event) => { event.preventDefault(); void editor.save(); }}>
+        <form ref={focusForm} tabIndex={-1} aria-label="Field marker editor"
+          className="space-y-3 rounded-lg border border-gray-300 p-3"
+          onSubmit={(event) => { event.preventDefault(); void editor.save(); }}>
           <h3 className="font-semibold">{draft.marker ? 'Edit marker on' : 'Add marker to'} {draft.field.name}</h3>
           {placing && <p role="status" className="text-sm">Tap the map where the marker belongs.</p>}
           <MarkerKindSelect kind={draft.kind} onChange={(kind) => editor.patch({ kind })} disabled={saving || draft.submitted} />

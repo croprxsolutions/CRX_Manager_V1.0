@@ -70,7 +70,7 @@ function isFiniteCoordinate(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function isFieldObstaclePoint(value: unknown): value is Point {
+export function isFieldObstaclePoint(value: unknown): value is Point {
   if (!value || typeof value !== 'object') return false;
   const point = value as { type?: unknown; coordinates?: unknown };
   if (point.type !== 'Point' || !Array.isArray(point.coordinates) || point.coordinates.length < 2) return false;

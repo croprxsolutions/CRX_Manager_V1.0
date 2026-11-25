@@ -2980,7 +2980,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // M4a sales tax (local candidate 20270109100200): trigger function, never an RPC.
   _sales_tax_record_rate_20261231:
     'AFTER INSERT / UPDATE OF invoice_type row trigger on invoices: records a taxed sale\'s draft at the Settings rate once (ON CONFLICT DO NOTHING), and re-records only when a draft really switches type, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
-  // M4 commission settles on posting (local candidate 20270307030000): trigger function and its helper, never RPCs.
+  // M4 commission settles on posting (local candidate 20270307220000): trigger function and its helper, never RPCs.
   _settle_order_commission_20270306:
     'helper of the invoice posting trigger and four commission writers: puts a sale\'s pending, unbatched commission rows whose stored base differs onto its profit after the posted standing discount, writing nothing when they already sit on it, so a replay is a no-op; every API-role EXECUTE is revoked',
   _invoice_settles_commission_20270306:

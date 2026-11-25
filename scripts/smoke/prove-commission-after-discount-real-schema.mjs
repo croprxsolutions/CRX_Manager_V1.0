@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270307030000_commission_settles_on_posting.sql (M4: commission settles on the profit after
+ * Real-schema proof for 20270307220000_commission_settles_on_posting.sql (M4: commission settles on the profit after
  * the standing discount when a chemical-sale invoice is posted, voided or unposted; never on sales tax; Mason
  * 2026-11-09, re-planned 2026-11-25).
  *
@@ -40,7 +40,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270307030000_commission_settles_on_posting.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270307220000_commission_settles_on_posting.sql');
 
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set();

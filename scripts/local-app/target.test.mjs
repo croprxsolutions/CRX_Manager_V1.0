@@ -444,24 +444,25 @@ describe('every command refuses before it changes anything', () => {
     }).join();
   };
 
-  function refused(command, { state = goodState(), env = {} }) {
+  function refused(command, { state = goodState(), env = {}, reason }) {
     const dir = tempDir('crx-local-app-test-');
     try {
       writeFileSync(path.join(dir, 'local.env'), `${Object.entries(state).map(([k, v]) => `${k}=${v}`).join('\n')}\n`);
       const before = containers();
-      const result = spawnSync(process.execPath, [APP, command], { encoding: 'utf8', timeout: 30000, env: { ...process.env, CRX_LOCAL_APP_STATE_DIR: dir, ...env } });
+      const args = IS_SCREEN_WALK && command === 'test' ? ['product-unit.spec.ts'] : [];
+      const result = spawnSync(process.execPath, [APP, command, ...args], { encoding: 'utf8', timeout: 30000, env: { ...process.env, CRX_LOCAL_APP_STATE_DIR: dir, ...env } });
       assert.equal(result.status, 3, `${command} did not refuse: ${result.stdout}${result.stderr}`);
-      assert.match(result.stderr, /LOCAL_APP_REFUSED/);
+      assert.match(result.stderr, reason);
       assert.equal(containers(), before, `${command} changed a container`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   }
 
-  for (const command of COMMANDS) {
-    it(`${command}: a production address`, () => refused(command, { state: { ...goodState(), LOCAL_API_URL: NO_ROUTE_URL } }));
-    it(`${command}: a production database`, () => refused(command, { state: { ...goodState(), LOCAL_DB_URL: NO_ROUTE_DB } }));
-    it(`${command}: an inherited live credential`, () => refused(command, { env: { SUPABASE_SERVICE_ROLE_KEY: liveKey } }));
+  for (const command of COMMANDS.filter((name) => !IS_SCREEN_WALK || name !== 'frontend')) {
+    it(`${command}: a production address`, () => refused(command, { state: { ...goodState(), LOCAL_API_URL: NO_ROUTE_URL }, reason: /LOCAL_APP_REFUSED: LOCAL_API_URL is not this computer's test gateway/ }));
+    it(`${command}: a production database`, () => refused(command, { state: { ...goodState(), LOCAL_DB_URL: NO_ROUTE_DB }, reason: /LOCAL_APP_REFUSED: LOCAL_DB_URL is not this computer's test database/ }));
+    it(`${command}: an inherited live credential`, () => refused(command, { env: { SUPABASE_SERVICE_ROLE_KEY: liveKey }, reason: /LOCAL_APP_REFUSED: SUPABASE_SERVICE_ROLE_KEY (?:is set in this shell|holds a production address or credential)/ }));
   }
 
   for (const folder of [path.join(HERE, '..', '..', 'public'), path.join(HERE, '.state-private')]) {

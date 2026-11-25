@@ -58,7 +58,7 @@ test('signs in, saves a test product, and the save survives a reload, on localho
   await page.reload();
   await expect(page.getByLabel(/product name/i)).toHaveValue(name);
 
-  await page.screenshot({ path: test.info().outputPath(`proof.png`) });
+  await page.screenshot({ path: test.info().outputPath('proof.png') });
   console.warn(`hosts seen: ${[...hosts].join(', ')}`);
   expect(hosts.size).toBeGreaterThan(0);
   expect([...hosts].sort()).toEqual([new URL(API_URL).host, new URL(APP_URL).host].sort());

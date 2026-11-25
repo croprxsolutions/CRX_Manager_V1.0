@@ -1,21 +1,23 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270304100000_commission_after_standing_discount.sql (M4: commission on the profit after the
- * standing discount, never on sales tax; Mason 2026-11-09).
+ * Real-schema proof for 20270306100000_commission_settles_on_posting.sql (M4: commission settles on the profit after
+ * the standing discount when a chemical-sale invoice is posted, voided or unposted; never on sales tax; Mason
+ * 2026-11-09, re-planned 2026-11-25).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container, replays
  * every post-baseline migration before the candidate (every staging migration), seeds invented users, customers and a
  * product, then:
  *   1. BEFORE: the new chain (smoke-commission-after-discount.sql) fails: commission sits on the profit before the
- *      discount (A, B, C, D, F); its controls (E, G) pass; the covering chains pass;
+ *      discount once posted (A, B, C, D, F, H, K, M, S); its controls (E, G, O, T) pass; the covering chains pass;
  *   2. AUTOCOMMIT: run statement by statement the file stops at its preflight;
  *   3. APPLY (committed): POSTFLIGHT_OK;
  *   4. AFTER: the new chain passes; every covering chain that passed before still passes;
  *   5. RE-APPLY: refused by the preflight;
- *   6. ROLLBACK: the documented rollback restores the BEFORE behaviour.
+ *   6. ROLLBACK: the documented rollback (drop the trigger and new functions, re-emit the four functions as they were)
+ *      restores the BEFORE behaviour.
  *
  * Run: node scripts/smoke/prove-commission-after-discount-real-schema.mjs   (needs Docker)
- * Prints COMMISSION_AFTER_DISCOUNT_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
+ * Prints COMMISSION_SETTLES_ON_POSTING_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -34,7 +36,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270304100000_commission_after_standing_discount.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270306100000_commission_settles_on_posting.sql');
 
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set();
@@ -57,7 +59,7 @@ const LEDGER_ONLY = new Set([
 const LEDGER_ONLY_REVIEWED = new Map([['20270227110000_delivery_driver_checks_need_a_driver.sql', '78a24c2bf56e5901b771575e2c818ef2dccbaf3781cbd2bb159a0d762724714e']]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate or its follow-up creates or relies on.
-const TOUCHED = /(commissions|_order_standing_discount_|_recompute_standing_discount_)/i;
+const TOUCHED = /(commissions|commission_payment|_order_standing_discount_|_recompute_standing_discount_|_invoice_line_tax_shares_|compute_commission_amount|fix_delivery|cancel_order|_insert_commissions_for_order|_cancel_order_idem_impl_|_void_commission_payment_intent_impl_)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -339,13 +341,13 @@ async function main() {
   // 1. BEFORE
   const before = chain(NEW_CHAIN);
   assert.ok(!before.pass, 'the new chain must fail before the candidate');
-  for (const step of ['(A) commission is not 180/120', '(A) unticking tax', '(B) the 3-way rows', '(C) the Bill Split base',
-    '(D) half invoiced', '(D) after Cancel Remaining', '(F) batched row moved', '(H) the 150-line sale', '(I) a changed split', '(J) a changed split',
-    '(K1) after the discount changed', '(K2) after the discount changed', '(K3) after the discount changed',
-    '(L) sale 1 is not on', '(M) $330.93 did not split', '(N) a 50.06/49.94']) {
+  for (const step of ['(A) posting did not put', '(A) with the tax box off', '(B) the 3-way rows', '(C) both payers posted',
+    '(D) half posted: not 180/120', '(D) half posted: the P&L earns', '(D) after Cancel Remaining', '(F) batched row moved',
+    '(H) the 150-line sale', '(K1) the 40% row', '(K2) the 40% row', '(K3) the 40% row', '(M) $330.93 did not split',
+    '(S) after the payout void']) {
     assert.ok(before.fail.includes(step), `BEFORE: expected ${step} to fail, got: ${before.fail}`);
   }
-  assert.ok(!/SMOKE_SETUP|\(E\)|\(G\)/.test(before.fail), `BEFORE: the fixture or a control failed: ${before.fail}`);
+  assert.ok(!/SMOKE_SETUP|\(E\)|\(G\)|\(O\)|\(T\)/.test(before.fail), `BEFORE: the fixture or a control failed: ${before.fail}`);
   console.log(`[case] 1 BEFORE: commission sits on the profit before the discount: ${before.fail}`);
   const passedBefore = covering('BEFORE');
   // These must pass before, so "still passes after" can't be vacuous. (The standing-discount and sales-tax chains stop
@@ -357,9 +359,13 @@ async function main() {
   const sql = lf(CANDIDATE);
   stageText('cand.sql', sql);
   const auto = docker([...psqlArgs(), '-f', '/tmp/cand.sql'], { allowFailure: true });
-  assert.match(`${auto.stdout}\n${auto.stderr}`, /COMMISSION_AFTER_DISCOUNT_NOT_IN_TRANSACTION|"pg_temp\.commission_after_discount_tx" does not exist/);
-  assert.equal(scalar("SELECT count(*) FROM pg_proc WHERE proname = '_recompute_order_commissions_20270304';"), '0');
+  assert.match(`${auto.stdout}\n${auto.stderr}`, /COMMISSION_SETTLES_ON_POSTING_NOT_IN_TRANSACTION/);
+  assert.equal(scalar("SELECT count(*) FROM pg_proc WHERE proname IN ('_settle_order_commission_20270306', '_order_commission_base_20270306');"), '0');
   console.log('[case] 2 AUTOCOMMIT: run statement by statement, the file stops at its preflight and creates nothing');
+  // The four re-emitted functions as they are before the candidate: the documented rollback re-emits them.
+  const ORIGINALS = ['_insert_commissions_for_order(uuid,uuid,numeric,jsonb,date)', 'fix_delivery(uuid,text,text,text)',
+    'cancel_order(uuid,uuid,text)', 'void_commission_payment(uuid,text,uuid,text)']
+    .map((sig) => scalar(`SELECT pg_get_functiondef('public.${sig}'::regprocedure);`));
   // 3. APPLY
   const applied = apply('cand.sql');
   assert.equal(applied.status, 0, applied.output);
@@ -369,28 +375,23 @@ async function main() {
   const after = chain(NEW_CHAIN);
   assert.ok(after.pass, `AFTER: the new chain fails: ${after.fail}`);
   covering('AFTER', passedBefore);
-  console.log('[case] 4 AFTER: the new chain passes (A-N), and every covering chain that passed before still passes');
+  console.log('[case] 4 AFTER: the new chain passes (A-T), and every covering chain that passed before still passes');
   // 5. RE-APPLY
   const again = apply('cand.sql');
-  assert.notEqual(again.status, 0); assert.match(again.output, /COMMISSION_AFTER_DISCOUNT_PREFLIGHT: already applied/);
+  assert.notEqual(again.status, 0); assert.match(again.output, /COMMISSION_SETTLES_ON_POSTING_PREFLIGHT: already applied/);
   console.log('[case] 5 RE-APPLY: refused by the preflight');
   // 6. ROLLBACK (the header's)
   psql(`BEGIN;
-    DROP TRIGGER invoice_items_commission_after_discount_20270304 ON public.invoice_items;
-    DROP TRIGGER invoices_commission_after_discount_20270304 ON public.invoices;
-    DROP TRIGGER commissions_after_discount_20270304 ON public.commissions;
-    DROP TRIGGER invoice_items_commission_mark_20270304 ON public.invoice_items;
-    DROP TRIGGER invoices_commission_mark_20270304 ON public.invoices;
-    DROP TRIGGER commissions_mark_20270304 ON public.commissions;
-    DROP FUNCTION public._commission_after_discount_20270304();
-    DROP FUNCTION public._commission_mark_sale_20270304();
-    DROP FUNCTION public._recompute_order_commissions_20270304(uuid);
-    DROP FUNCTION public._order_commission_base_20270304(uuid);
+    DROP TRIGGER invoices_settle_commission_20270306 ON public.invoices;
+    DROP FUNCTION public._invoice_settles_commission_20270306();
+    ${ORIGINALS.join(';\n')};
+    DROP FUNCTION public._settle_order_commission_20270306(uuid);
+    DROP FUNCTION public._order_commission_base_20270306(uuid);
     COMMIT;`);
   const rolled = chain(NEW_CHAIN);
-  assert.ok(!rolled.pass && rolled.fail.includes('(A) commission is not 180/120'), `ROLLBACK: ${rolled.fail}`);
+  assert.ok(!rolled.pass && rolled.fail.includes('(A) posting did not put'), `ROLLBACK: ${rolled.fail}`);
   console.log('[case] 6 ROLLBACK: the documented rollback restores the old behaviour');
-  console.log('COMMISSION_AFTER_DISCOUNT_PROOF_PASS');
+  console.log('COMMISSION_SETTLES_ON_POSTING_PROOF_PASS');
 }
 
 try { await main(); }

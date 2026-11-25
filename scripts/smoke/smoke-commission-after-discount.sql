@@ -1,36 +1,33 @@
 -- ============================================================================
--- ROLLED-BACK smoke: a sale's commission is worked out on its profit AFTER the standing discount, never on sales tax
+-- ROLLED-BACK smoke: a sale's commission settles on its profit AFTER the standing discount when its chemical-sale
+-- invoices are posted, voided or unposted; never on sales tax; drafts never move it
 -- ----------------------------------------------------------------------------
--- Migration 20270304100000_commission_after_standing_discount (M4; Mason 2026-11-09: "commission on the profit after
--- discounts"). Commission splits a sale's profit between its recipients (percentages total 100), so the base moves
--- from orders.total_profit to total_profit + the sale's standing discount lines (_order_standing_discount_20270109,
--- the same figure the P&L already uses).
---   A  $1,000 sale, $600 cost, 10% standing discount, 7% tax, 60/40: base $300.00 → $180.00 / $120.00. Tax $63.00 is
---      on the invoice and nowhere in the base. Unticking tax changes nothing.
---   B  Odd cents, 3-way 33.33/33.33/33.34: rows add up to the base exactly
---   C  Bill Split 50/50, payer 1 at 10%, payer 2 at 0%: only payer 1's $50.00 comes off → $350.00
---   D  Before any invoice: $400.00. Half delivered and invoiced with $50.00 off: rows on $300.00 (the invoiced half's
---      rate across the sale; Taha 2026-11-25), and the P&L's invoiced share earns $150.00, the invoiced half's profit
---      after its discount (Sol HIGH 1). Then Cancel Remaining: $150.00
---   E  Fix Delivery (the discounted draft is voided): the restored rows are back on the undiscounted $400.00
---   F  Rep A's row in a payout batch, then the office raises the discount to 20%: rep A stays $180.00, rep B's pending
---      row moves alone ($200.00 × 40% = $80.00)
---   G  No discount: commission rows and the commission history ledger are exactly as today
---   H  A 150-line sale: changing its discount settles at commit in under 4 s (the API's statement timeout is 8 s;
---      attack run 2026-11-25 measured 21 s on the first draft), on the right base
---   I  A discounted sale's split moved from 60/40 to 70/30 by hand: $210.00 / $90.00 on $300.00; then 70.01/29.99: $210.03 / $89.97
---   J  An undiscounted sale's split moved from 60/40 to 70/30 by hand: $280.00 / $120.00 on $400.00 (G stays untouched)
---   K  The 60% row of a discounted 60/40 sale cancelled, soft-deleted or moved to another sale: the 40% row stays 40% of
---      the base ($120.00), and stays 40% when the discount then changes ($80.00 on $200.00) (Sol HIGH 2)
---   L  A discounted invoice's product line relinked from sale 1 to sale 2: sale 1 back on $400.00, sale 2 on $300.00
---      (Sol HIGH 3)
---   M  $330.93 split 50/50 ($165.47 / $165.46), the $165.47 row batched, then a recompute on the same base: still
---      $165.47 / $165.46, no extra cent (Sol MED 10)
---   N  $10.00 of undiscounted profit split 50/50, then 50.06/49.94: $5.01 / $4.99 (Sol MED 11)
---   Every sale above: the commission base = total_profit + _order_standing_discount_20270109 (the P&L's figure)
+-- Migration 20270306100000_commission_settles_on_posting (M4; Mason 2026-11-09: "commission on the profit after
+-- discounts"; re-planned 2026-11-25 after the commit-time design drew HIGHs in five review rounds). Base =
+-- total_profit + D × booked ÷ billed over the sale's POSTED chemical-sale invoices (D their standing-discount cents,
+-- billed their product cents, booked orders.total_price); when billed ≥ booked, total_profit + D (Taha, rule "b").
+--   A  $1,000 sale, $600 cost, 10% off, 7% tax, 60/40: the draft leaves $240.00 / $160.00 on $400.00; posting puts
+--      $180.00 / $120.00 on $300.00 (tax $63.00 on the invoice, never in the base). Tax box off: the same
+--   B  Odd cents, 3-way: $100.32 / $100.29 / $100.29 on $300.90 (each recipient)
+--   C  Bill Split 50/50, payer 1 at 10%, payer 2 at 0%, posted as one group: only payer 1's $50.00 comes off → $350.00
+--   D  Before any invoice $400.00; half invoiced as a draft: still $400.00; posted: $300.00, and the P&L's billed
+--      share earns $150.00 (Sol HIGH 1); Cancel Remaining: $90.00 / $60.00 on $150.00
+--   E  Fix Delivery on a posted invoice (voids it, restores the commission): the rows are back on $400.00
+--   F  Half posted ($300), rep A's row batched, the second half posted at 20%: rep A stays $180.00, rep B is its own
+--      40% of $250.00 = $100.00
+--   G  No discount: rows as minted, no extra history (the posting writes nothing)
+--   H  A 150-line invoice at 20% posts in under 4 s (API statement timeout 8 s): $1,800.00 / $1,200.00 on $3,000.00
+--   K  The 60% row cancelled, soft-deleted or moved away, then the invoice posted: the 40% row is 40% of $300.00
+--      (Sol HIGH 2)
+--   M  $330.93 split 50/50 ($165.47 / $165.46), the $165.47 row batched, settled again on the same base: no cent
+--      moves (Sol MED 10)
+--   O  A posted invoice unposted: back to $400.00
+--   S  Both rows batched (one payout each), the second half posted at 20%, the payouts voided: the rows come back on
+--      $250.00
+--   T  A chemical-sale invoice can't be born posted through save_invoice (it would skip the posting trigger)
 --
--- CONTAINER / LOCAL ONLY: completing deliveries draws invoice numbers; the tax rate and discounts are set inside the
--- rolled-back transaction.
+-- CONTAINER / LOCAL ONLY: completing deliveries and posting draw invoice numbers; the tax rate and discounts are set
+-- inside the rolled-back transaction.
 --
 -- HOW TO RUN: execute this whole file as ONE statement. It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...',
 -- so every fixture is rolled back. Any other error text is a failure.
@@ -55,6 +52,8 @@ DECLARE
   v_res jsonb;
   v_fails text := '';
   v_order2 uuid;
+  v_pay uuid;
+  v_pay2 uuid;
 BEGIN
   IF to_regclass('public.billing_m4_switch') IS NULL THEN
     RAISE EXCEPTION 'SMOKE_SETUP: needs the M4 switch (20270117140000)';
@@ -150,82 +149,103 @@ BEGIN
     CREATE FUNCTION pg_temp.smk_as(p_user uuid) RETURNS void LANGUAGE sql AS $b$
       SELECT set_config('request.jwt.claims', jsonb_build_object('sub', p_user, 'role', 'authenticated')::text, true),
              set_config('request.jwt.claim.sub', p_user::text, true) $b$;
+    -- Post a draft the way the screen does (with the version it loaded).
+    CREATE FUNCTION pg_temp.smk_post(p_inv uuid, p_tag text) RETURNS void LANGUAGE plpgsql AS $b$
+    BEGIN
+      SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+      PERFORM post_invoice(p_inv, public._invoice_post_version(p_inv), 'smk-cad-post-' || p_tag);
+      SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    END $b$;
+    -- The sale's newest draft chemical-sale invoice.
+    CREATE FUNCTION pg_temp.smk_draft(p_order uuid) RETURNS uuid LANGUAGE sql AS $b$
+      SELECT id FROM invoices WHERE order_id = p_order AND status = 'draft' AND invoice_type = 'chemical_sale'
+       ORDER BY created_at DESC, id LIMIT 1 $b$;
+    CREATE FUNCTION pg_temp.smk_split(p1 uuid, pct1 numeric, p2 uuid, pct2 numeric) RETURNS jsonb LANGUAGE sql AS $b$
+      SELECT jsonb_build_object('splits', jsonb_agg(x)) FROM (
+        SELECT jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = p1), 'recipient_user_id', p1, 'percentage', pct1) x
+        UNION ALL
+        SELECT jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = p2), 'recipient_user_id', p2, 'percentage', pct2)
+         WHERE p2 IS NOT NULL) s $b$;
+    -- What the P&L earns on the sale today: its billed share of the rows (_report_billed_part_cents_20270203) over the
+    -- posted invoices.
+    CREATE FUNCTION pg_temp.smk_earned(p_order uuid) RETURNS numeric LANGUAGE sql AS $b$
+      SELECT public._report_billed_part_cents_20270203(sum(c.commission_amount) * 100,
+               (SELECT sum(b.extended_cents) FROM invoice_items b JOIN order_items oi ON oi.id = b.order_item_id
+                  JOIN invoices i ON i.id = b.invoice_id
+                 WHERE oi.order_id = p_order AND b.charge_type IS NULL AND b.product_id IS NOT NULL
+                   AND i.status IN ('posted', 'overdue', 'paid') AND i.deleted_at IS NULL),
+               (SELECT round(total_price * 100) FROM orders WHERE id = p_order))
+        FROM commissions c WHERE c.order_id = p_order AND c.deleted_at IS NULL AND c.status <> 'cancelled' $b$;
   $f$;
   PERFORM pg_temp.smk_as(v_admin);
 
-  -- A: $1,000 / $600 / 10% off / 7% tax / 60-40.
-  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, true,
-    jsonb_build_object('splits', jsonb_build_array(
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40))), 'a-' || v_suffix);
-  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '240.00/160.00|400.00' THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: (A) the sale did not mint 240/160 on $400 profit: %', pg_temp.smk_rows(v_order);
-  END IF;
+  -- A: the draft leaves the rows; posting settles them. Tax on, then a second sale with tax off.
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, true, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 'a-' || v_suffix);
   PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'a-' || v_suffix);
-  SELECT id INTO v_inv FROM invoices WHERE order_id = v_order AND status = 'draft' AND invoice_type = 'chemical_sale';
+  v_inv := pg_temp.smk_draft(v_order);
   v_got := (SELECT string_agg(charge_type || ':' || extended_cents, ',' ORDER BY charge_type) FROM invoice_items
              WHERE invoice_id = v_inv AND charge_type IN ('standing_discount', 'sales_tax'));
   IF v_got IS DISTINCT FROM 'sales_tax:6300,standing_discount:-10000' THEN
     RAISE EXCEPTION 'SMOKE_SETUP: (A) the draft is not $1,000 less $100 plus $63 tax: %', v_got;
   END IF;
-  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '180.00/120.00|300.00' THEN
-    v_fails := v_fails || ' (A) commission is not 180/120 on $300 after the discount: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '240.00/160.00|400.00' THEN
+    v_fails := v_fails || ' (A) a draft moved commission: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
-  PERFORM set_order_sales_tax(v_order, false, 'smk-cad-a-off-' || v_suffix);
-  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  IF NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_inv AND charge_type = 'standing_discount')
-     OR EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_inv AND charge_type = 'sales_tax') THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: (A) unticking did not drop the tax line alone';
-  END IF;
+  PERFORM pg_temp.smk_post(v_inv, 'a-' || v_suffix);
   IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '180.00/120.00|300.00' THEN
-    v_fails := v_fails || ' (A) unticking tax moved commission: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+    v_fails := v_fails || ' (A) posting did not put commission on $300 after the discount: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  END IF;
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 'a2-' || v_suffix);
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'a2-' || v_suffix);
+  PERFORM pg_temp.smk_post(pg_temp.smk_draft(v_order), 'a2-' || v_suffix);
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '180.00/120.00|300.00' THEN
+    v_fails := v_fails || ' (A) with the tax box off, not 180/120 on $300: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
 
-  -- B: $1,001 / $600, 10% off ($100.10) → $300.90, 3-way.
+  -- B: $1,001 / $600, 10% off ($100.10) → $300.90, 3-way, each recipient.
   v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10.01, 6, false,
     jsonb_build_object('splits', jsonb_build_array(
       jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 33.34),
       jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 33.33),
       jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_admin), 'recipient_user_id', v_admin, 'percentage', 33.33))), 'b-' || v_suffix);
   PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'b-' || v_suffix);
-  -- Each recipient, not just the total (Sol LOW): 30090 × 33.34% = 10032.006, × 33.33% = 10028.997 twice.
+  PERFORM pg_temp.smk_post(pg_temp.smk_draft(v_order), 'b-' || v_suffix);
   IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '100.32/100.29/100.29|300.90' THEN
-    v_fails := v_fails || ' (B) the 3-way rows do not add up to $300.90: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+    v_fails := v_fails || ' (B) the 3-way rows are not 100.32/100.29/100.29 on $300.90: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
 
   -- C: Bill Split 50/50, only payer 1 has a discount.
-  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, v_payer2, 10, 6, false,
-    jsonb_build_object('splits', jsonb_build_array(
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 100))), 'c-' || v_suffix);
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, v_payer2, 10, 6, false, pg_temp.smk_split(v_rep1, 100, NULL, NULL), 'c-' || v_suffix);
   PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'c-' || v_suffix);
   IF (SELECT count(*) FROM invoices WHERE order_id = v_order AND status = 'draft') <> 2 THEN
     RAISE EXCEPTION 'SMOKE_SETUP: (C) the Bill Split did not draft two payers';
   END IF;
+  -- A Bill Split posts as one group.
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  v_inv := (SELECT invoice_group_id FROM invoices WHERE order_id = v_order AND status = 'draft' LIMIT 1);
+  PERFORM post_invoice_group(v_inv, v_admin,
+    (SELECT jsonb_object_agg(id, public._invoice_post_version(id)) FROM invoices WHERE invoice_group_id = v_inv AND deleted_at IS NULL),
+    'smk-cad-c-post-' || v_suffix);
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
   IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '350.00|350.00' THEN
-    v_fails := v_fails || ' (C) the Bill Split base is not $400 less payer 1''s $50: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+    v_fails := v_fails || ' (C) both payers posted: not $400 less payer 1''s $50: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
 
-  -- D: half delivered ($500 invoiced, $50 off) → $350; Cancel Remaining → profit $200 less $50 → $150.
-  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false,
-    jsonb_build_object('splits', jsonb_build_array(
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40))), 'd-' || v_suffix);
+  -- D: part-invoiced.
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 'd-' || v_suffix);
   IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '240.00/160.00|400.00' THEN
     v_fails := v_fails || ' (D) before any invoice: not 240/160 on $400: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
   PERFORM pg_temp.smk_deliver(v_admin, v_order, 50, 'd-' || v_suffix);
-  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '180.00/120.00|300.00' THEN
-    v_fails := v_fails || ' (D) half invoiced: not 180/120 on $300: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '240.00/160.00|400.00' THEN
+    v_fails := v_fails || ' (D) the half-invoice draft moved commission: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
-  -- What the P&L earns on the invoiced half: its billed share of the rows (_report_billed_part_cents_20270203).
-  v_got := (SELECT public._report_billed_part_cents_20270203(sum(c.commission_amount) * 100,
-                     (SELECT sum(b.extended_cents) FROM invoice_items b JOIN order_items oi ON oi.id = b.order_item_id
-                        JOIN invoices i ON i.id = b.invoice_id
-                       WHERE oi.order_id = v_order AND b.charge_type IS NULL AND i.status <> 'voided' AND i.deleted_at IS NULL),
-                     (SELECT round(total_price * 100) FROM orders WHERE id = v_order))::text
-              FROM commissions c WHERE c.order_id = v_order AND c.deleted_at IS NULL AND c.status <> 'cancelled');
-  IF v_got IS DISTINCT FROM '15000' THEN
-    v_fails := v_fails || ' (D) half invoiced: earned is not $150.00 (cents: ' || COALESCE(v_got, 'none') || ');';
+  PERFORM pg_temp.smk_post(pg_temp.smk_draft(v_order), 'd-' || v_suffix);
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '180.00/120.00|300.00' THEN
+    v_fails := v_fails || ' (D) half posted: not 180/120 on $300: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  END IF;
+  IF pg_temp.smk_earned(v_order) IS DISTINCT FROM 15000 THEN
+    v_fails := v_fails || ' (D) half posted: the P&L earns ' || COALESCE(pg_temp.smk_earned(v_order)::text, 'none') || ' cents, not 15000;';
   END IF;
   PERFORM cancel_order(v_order, v_admin, 'smk-cad-d-cancel-' || v_suffix);
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
@@ -236,43 +256,35 @@ BEGIN
     v_fails := v_fails || ' (D) after Cancel Remaining: not 90/60 on $150: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
 
-  -- E: Fix Delivery voids the discounted draft; the restored rows go back to $400.
-  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false,
-    jsonb_build_object('splits', jsonb_build_array(
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40))), 'e-' || v_suffix);
+  -- E: posted, then Fix Delivery (it voids the posted invoice and restores the commission): back to $400.
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 'e-' || v_suffix);
   v_delivery := pg_temp.smk_deliver(v_admin, v_order, 100, 'e-' || v_suffix);
+  v_inv := pg_temp.smk_draft(v_order);
+  PERFORM pg_temp.smk_post(v_inv, 'e-' || v_suffix);
   v_res := preview_fix_delivery(v_delivery);
   PERFORM fix_delivery(v_delivery, 'Rolled-back smoke: wrong quantity', v_res ->> 'plan_token', 'smk-cad-e-fix-' || v_suffix);
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  IF EXISTS (SELECT 1 FROM invoices WHERE order_id = v_order AND status NOT IN ('voided', 'cancelled') AND deleted_at IS NULL) THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: (E) Fix Delivery left a live invoice';
-  END IF;
   IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '240.00/160.00|400.00' THEN
-    v_fails := v_fails || ' (E) after Fix Delivery: not 240/160 on $400: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+    v_fails := v_fails || ' (E) after void + Fix Delivery: not 240/160 on $400: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
 
-  -- F: rep A batched, then 20% off: rep A stays 180.00, rep B = 200 × 40% = 80.00.
-  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false,
-    jsonb_build_object('splits', jsonb_build_array(
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40))), 'f-' || v_suffix);
-  PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'f-' || v_suffix);
-  SELECT id INTO v_inv FROM invoices WHERE order_id = v_order AND status = 'draft' AND invoice_type = 'chemical_sale';
+  -- F: half posted, rep A batched, the second half posted at 20%.
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 'f-' || v_suffix);
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 50, 'f1-' || v_suffix);
+  PERFORM pg_temp.smk_post(pg_temp.smk_draft(v_order), 'f1-' || v_suffix);
   PERFORM create_commission_payment(
     ARRAY(SELECT id FROM commissions WHERE order_id = v_order AND recipient_user_id = v_rep1 AND status = 'pending'),
     'check', 'SMK-CAD-F', (now() AT TIME ZONE 'America/Chicago')::date, 'Rolled-back smoke', v_admin, 'smk-cad-f-pay-' || v_suffix);
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 50, 'f2-' || v_suffix);
+  v_inv := pg_temp.smk_draft(v_order);
   PERFORM set_invoice_standing_discount(v_inv, 20, 'smk-cad-f-20-' || v_suffix);
-  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  IF (SELECT extended_cents FROM invoice_items WHERE invoice_id = v_inv AND charge_type = 'standing_discount') IS DISTINCT FROM -20000 THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: (F) the office discount did not become $200';
-  END IF;
+  PERFORM pg_temp.smk_post(v_inv, 'f2-' || v_suffix);
   v_got := (SELECT string_agg(to_char(commission_amount, 'FM999990.00') || '@' || to_char(order_profit, 'FM999990.00'), '/'
                               ORDER BY split_percentage DESC)
               FROM commissions WHERE order_id = v_order AND deleted_at IS NULL AND status <> 'cancelled');
-  IF v_got IS DISTINCT FROM '180.00@300.00/80.00@200.00' THEN
-    v_fails := v_fails || ' (F) batched row moved or pending row not on $200: ' || COALESCE(v_got, 'none') || ';';
+  IF v_got IS DISTINCT FROM '180.00@300.00/100.00@250.00' THEN
+    v_fails := v_fails || ' (F) batched row moved or pending row not 40% of $250: ' || COALESCE(v_got, 'none') || ';';
   END IF;
 
   -- G: no discount: rows as minted, no extra history.
@@ -285,6 +297,7 @@ BEGIN
       jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_admin), 'recipient_user_id', v_admin, 'percentage', 33.33))), 'g-' || v_suffix);
   v_got := pg_temp.smk_rows(v_order);
   PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'g-' || v_suffix);
+  PERFORM pg_temp.smk_post(pg_temp.smk_draft(v_order), 'g-' || v_suffix);
   IF pg_temp.smk_rows(v_order) IS DISTINCT FROM v_got OR v_got IS DISTINCT FROM '133.69/133.66/133.65|401.00' THEN
     v_fails := v_fails || ' (G) an undiscounted sale''s commission moved: ' || COALESCE(v_got, 'none') || ' → ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
@@ -293,73 +306,34 @@ BEGIN
       || ((SELECT count(*) FROM commission_earned_state_ledger) - v_ledger_before) || ' rows;';
   END IF;
 
-  -- H: 150 lines of 10 gal at $10 / $6 ($15,000 sale, $6,000 profit), delivered at 10%, then 20% off: base $3,000.
-  UPDATE customers SET standing_discount_pct = 10, default_commission_split = jsonb_build_object('splits', jsonb_build_array(
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40)))
-   WHERE id = v_customer;
+  -- H: 150 lines of 10 gal at $10 / $6 ($15,000, $6,000 profit), delivered, 20% off, posted: base $3,000.
+  UPDATE customers SET standing_discount_pct = 10, default_commission_split = pg_temp.smk_split(v_rep1, 60, v_rep2, 40) WHERE id = v_customer;
   v_order := (create_direct_order(v_customer, (now() AT TIME ZONE 'America/Chicago')::date, '[SMOKE] CAD h-' || v_suffix, NULL,
     (SELECT jsonb_agg(jsonb_build_object('product_id', v_product, 'product_name', '[SMOKE] Commission line ' || g,
        'quantity', 10, 'price_per_unit', 10, 'unit_cost', 6, 'unit_size', 'Gal')) FROM generate_series(1, 150) g),
     v_admin, 'smk-cad-order-h-' || v_suffix) ->> 'order_id')::uuid;
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
   PERFORM pg_temp.smk_deliver(v_admin, v_order, 10, 'h-' || v_suffix);
-  SELECT id INTO v_inv FROM invoices WHERE order_id = v_order AND status = 'draft' AND invoice_type = 'chemical_sale';
+  v_inv := pg_temp.smk_draft(v_order);
   PERFORM set_invoice_standing_discount(v_inv, 20, 'smk-cad-h-20-' || v_suffix);
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
   v_started := clock_timestamp();
+  PERFORM post_invoice(v_inv, public._invoice_post_version(v_inv), 'smk-cad-post-h-' || v_suffix);
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
   v_ms := extract(epoch FROM clock_timestamp() - v_started) * 1000;
   IF v_ms > 4000 THEN
-    v_fails := v_fails || ' (H) a 150-line discount change took ' || round(v_ms) || ' ms at commit;';
+    v_fails := v_fails || ' (H) posting a 150-line invoice took ' || round(v_ms) || ' ms;';
   END IF;
-  RAISE NOTICE 'SMOKE (H): a 150-line discount change settled in % ms', round(v_ms);
+  RAISE NOTICE 'SMOKE (H): a 150-line discounted invoice posted in % ms', round(v_ms);
   IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '1800.00/1200.00|3000.00' THEN
     v_fails := v_fails || ' (H) the 150-line sale is not 1800/1200 on $3,000: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
 
-  -- I: the split moved on a discounted sale.
-  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false,
-    jsonb_build_object('splits', jsonb_build_array(
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40))), 'i-' || v_suffix);
-  PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'i-' || v_suffix);
-  UPDATE commissions SET split_percentage = CASE WHEN recipient_user_id = v_rep1 THEN 70 ELSE 30 END
-   WHERE order_id = v_order AND status = 'pending';
-  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '210.00/90.00|300.00' THEN
-    v_fails := v_fails || ' (I) a changed split on a discounted sale did not move: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
-  END IF;
-  -- I2: a one-cent split change (70/30 → 70.01/29.99 on $300 moves $0.03) is not lost in any tolerance (Luna MED).
-  UPDATE commissions SET split_percentage = CASE WHEN recipient_user_id = v_rep1 THEN 70.01 ELSE 29.99 END
-   WHERE order_id = v_order AND status = 'pending';
-  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '210.03/89.97|300.00' THEN
-    v_fails := v_fails || ' (I) a one-cent split change did not move: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
-  END IF;
-
-  -- J: the split moved on an undiscounted sale (no customer discount; tax only).
-  UPDATE customers SET standing_discount_pct = 0 WHERE id = v_customer;
-  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, true,
-    jsonb_build_object('splits', jsonb_build_array(
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40))), 'j-' || v_suffix);
-  PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'j-' || v_suffix);
-  UPDATE commissions SET split_percentage = CASE WHEN recipient_user_id = v_rep1 THEN 70 ELSE 30 END
-   WHERE order_id = v_order AND status = 'pending';
-  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '280.00/120.00|400.00' THEN
-    v_fails := v_fails || ' (J) a changed split on an undiscounted sale did not move: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
-  END IF;
-
-  -- K: the 60% row leaves a discounted 60/40 sale three ways; the 40% row stays 40% of the base.
-  UPDATE customers SET standing_discount_pct = 10 WHERE id = v_customer;
+  -- K: the 60% row leaves three ways before posting; the 40% row is 40% of the base.
+  v_order2 := NULL;
   FOR i IN 1..3 LOOP
-    v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false,
-      jsonb_build_object('splits', jsonb_build_array(
-        jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
-        jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40))), 'k' || i || '-' || v_suffix);
+    v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 'k' || i || '-' || v_suffix);
     PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'k' || i || '-' || v_suffix);
-    SELECT id INTO v_inv FROM invoices WHERE order_id = v_order AND status = 'draft' AND invoice_type = 'chemical_sale';
     IF i = 1 THEN
       UPDATE commissions SET status = 'cancelled' WHERE order_id = v_order AND recipient_user_id = v_rep1;
     ELSIF i = 2 THEN
@@ -367,55 +341,18 @@ BEGIN
     ELSE
       UPDATE commissions SET order_id = v_order2 WHERE order_id = v_order AND recipient_user_id = v_rep1;
     END IF;
-    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    PERFORM pg_temp.smk_post(pg_temp.smk_draft(v_order), 'k' || i || '-' || v_suffix);
     IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '120.00|300.00' THEN
-      v_fails := v_fails || ' (K' || i || ') the 40% row did not stay 40% of $300: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
-    END IF;
-    PERFORM set_invoice_standing_discount(v_inv, 20, 'smk-cad-k' || i || '-20-' || v_suffix);
-    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-    IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '80.00|200.00' THEN
-      v_fails := v_fails || ' (K' || i || ') after the discount changed, the 40% row is not 40% of $200: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+      v_fails := v_fails || ' (K' || i || ') the 40% row is not 40% of $300: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
     END IF;
     v_order2 := v_order;
   END LOOP;
 
-  -- L: a product line relinked from sale 1 to sale 2 on a discounted draft.
-  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false,
-    jsonb_build_object('splits', jsonb_build_array(
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40))), 'l1-' || v_suffix);
-  v_order2 := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false,
-    jsonb_build_object('splits', jsonb_build_array(
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 60),
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 40))), 'l2-' || v_suffix);
-  PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'l1-' || v_suffix);
-  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '180.00/120.00|300.00' THEN
-    v_fails := v_fails || ' (L) sale 1 is not on $300 before the relink: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
-  END IF;
-  SELECT id INTO v_inv FROM invoices WHERE order_id = v_order AND status = 'draft' AND invoice_type = 'chemical_sale';
-  -- The app can't relink today (zz_cap_delivery_invoice_items and zz_cap_order_invoice_items refuse a line its delivery
-  -- or sale did not carry), so both guards are switched off inside this rolled-back transaction to prove the commission
-  -- side holds if a relink ever happens.
-  ALTER TABLE invoice_items DISABLE TRIGGER zz_cap_delivery_invoice_items;
-  ALTER TABLE invoice_items DISABLE TRIGGER zz_cap_order_invoice_items;
-  UPDATE invoice_items SET order_item_id = (SELECT id FROM order_items WHERE order_id = v_order2)
-   WHERE invoice_id = v_inv AND order_item_id IS NOT NULL AND charge_type IS NULL;
-  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  ALTER TABLE invoice_items ENABLE TRIGGER zz_cap_delivery_invoice_items;
-  ALTER TABLE invoice_items ENABLE TRIGGER zz_cap_order_invoice_items;
-  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '240.00/160.00|400.00' OR pg_temp.smk_rows(v_order2) IS DISTINCT FROM '180.00/120.00|300.00' THEN
-    v_fails := v_fails || ' (L) after the relink, sale 1 / sale 2: ' || COALESCE(pg_temp.smk_rows(v_order), 'none')
-      || ' / ' || COALESCE(pg_temp.smk_rows(v_order2), 'none') || ';';
-  END IF;
-
-  -- M: $1,001.00 sale, $600.00 cost, 7% off ($70.07) → $330.93 split 50/50; batch the $165.47 row; same base again.
+  -- M: $1,001.00 sale, $600.00 cost, 7% off ($70.07) → $330.93 split 50/50; batch the $165.47 row; settle again.
   UPDATE customers SET standing_discount_pct = 7 WHERE id = v_customer;
-  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10.01, 6, false,
-    jsonb_build_object('splits', jsonb_build_array(
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 50),
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 50))), 'm-' || v_suffix);
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10.01, 6, false, pg_temp.smk_split(v_rep1, 50, v_rep2, 50), 'm-' || v_suffix);
   PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'm-' || v_suffix);
+  PERFORM pg_temp.smk_post(pg_temp.smk_draft(v_order), 'm-' || v_suffix);
   v_got := (SELECT string_agg(to_char(commission_amount, 'FM999990.00'), '/' ORDER BY commission_amount DESC)
               FROM commissions WHERE order_id = v_order AND deleted_at IS NULL AND status <> 'cancelled');
   IF v_got IS DISTINCT FROM '165.47/165.46' THEN
@@ -425,32 +362,76 @@ BEGIN
       ARRAY(SELECT id FROM commissions WHERE order_id = v_order AND commission_amount = 165.47 AND status = 'pending'),
       'check', 'SMK-CAD-M', (now() AT TIME ZONE 'America/Chicago')::date, 'Rolled-back smoke', v_admin, 'smk-cad-m-pay-' || v_suffix);
     SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-    UPDATE commissions SET split_percentage = split_percentage WHERE order_id = v_order AND commission_amount = 165.46;
-    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    IF NOT EXISTS (SELECT 1 FROM commission_payment_items cpi JOIN commissions c ON c.id = cpi.commission_id
+                    WHERE c.order_id = v_order AND c.commission_amount = 165.47) THEN
+      RAISE EXCEPTION 'SMOKE_SETUP: (M) the $165.47 row is not in a batch';
+    END IF;
+    IF to_regprocedure('public._settle_order_commission_20270306(uuid)') IS NULL THEN
+      v_fails := v_fails || ' (M) no settle helper;';
+    ELSE
+      PERFORM public._settle_order_commission_20270306(v_order);
+    END IF;
     v_got := (SELECT string_agg(to_char(commission_amount, 'FM999990.00'), '/' ORDER BY commission_amount DESC)
                 FROM commissions WHERE order_id = v_order AND deleted_at IS NULL AND status <> 'cancelled');
     IF v_got IS DISTINCT FROM '165.47/165.46' THEN
-      v_fails := v_fails || ' (M) a recompute on an unchanged base after a batch moved a cent: ' || COALESCE(v_got, 'none') || ';';
+      v_fails := v_fails || ' (M) settling an unchanged base after a batch moved a cent: ' || COALESCE(v_got, 'none') || ';';
     END IF;
   END IF;
+  UPDATE customers SET standing_discount_pct = 10 WHERE id = v_customer;
 
-  -- N: $10.00 of undiscounted profit, 50/50 → 50.06/49.94.
-  UPDATE customers SET standing_discount_pct = 0 WHERE id = v_customer;
-  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 6.10, 6, false,
-    jsonb_build_object('splits', jsonb_build_array(
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep1), 'recipient_user_id', v_rep1, 'percentage', 50),
-      jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = v_rep2), 'recipient_user_id', v_rep2, 'percentage', 50))), 'n-' || v_suffix);
-  UPDATE commissions SET split_percentage = CASE WHEN recipient_user_id = v_rep1 THEN 50.06 ELSE 49.94 END
-   WHERE order_id = v_order AND status = 'pending';
+  -- O: posted, then unposted: back to $400.
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 'o-' || v_suffix);
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'o-' || v_suffix);
+  v_inv := pg_temp.smk_draft(v_order);
+  PERFORM pg_temp.smk_post(v_inv, 'o-' || v_suffix);
+  PERFORM unpost_invoice(v_inv, v_admin, 'smk-cad-o-unpost-' || v_suffix);
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '5.01/4.99|10.00' THEN
-    v_fails := v_fails || ' (N) a 50.06/49.94 split of $10.00 is not 5.01/4.99: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '240.00/160.00|400.00' THEN
+    v_fails := v_fails || ' (O) unposting did not put commission back on $400: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
   END IF;
 
-  -- Every sale: the stored base is the P&L's profit after discount.
+  -- S: both rows batched on $300, the second half posted at 20% ($250), the payout voided: rows back on $250.
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 's-' || v_suffix);
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 50, 's1-' || v_suffix);
+  PERFORM pg_temp.smk_post(pg_temp.smk_draft(v_order), 's1-' || v_suffix);
+  v_pay := create_commission_payment(
+    ARRAY(SELECT id FROM commissions WHERE order_id = v_order AND status = 'pending' AND recipient_user_id = v_rep1),
+    'check', 'SMK-CAD-S1', (now() AT TIME ZONE 'America/Chicago')::date, 'Rolled-back smoke', v_admin, 'smk-cad-s-pay1-' || v_suffix);
+  v_pay2 := create_commission_payment(
+    ARRAY(SELECT id FROM commissions WHERE order_id = v_order AND status = 'pending' AND recipient_user_id = v_rep2),
+    'check', 'SMK-CAD-S2', (now() AT TIME ZONE 'America/Chicago')::date, 'Rolled-back smoke', v_admin, 'smk-cad-s-pay2-' || v_suffix);
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  PERFORM pg_temp.smk_deliver(v_admin, v_order, 50, 's2-' || v_suffix);
+  v_inv := pg_temp.smk_draft(v_order);
+  PERFORM set_invoice_standing_discount(v_inv, 20, 'smk-cad-s-20-' || v_suffix);
+  PERFORM pg_temp.smk_post(v_inv, 's2-' || v_suffix);
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '180.00/120.00|300.00' THEN
+    v_fails := v_fails || ' (S) batched rows moved: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  END IF;
+  PERFORM void_commission_payment(v_pay, 'Rolled-back smoke', v_admin, 'smk-cad-s-void1-' || v_suffix);
+  PERFORM void_commission_payment(v_pay2, 'Rolled-back smoke', v_admin, 'smk-cad-s-void2-' || v_suffix);
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  IF pg_temp.smk_rows(v_order) IS DISTINCT FROM '150.00/100.00|250.00' THEN
+    v_fails := v_fails || ' (S) after the payout void, the rows are not on $250: ' || COALESCE(pg_temp.smk_rows(v_order), 'none') || ';';
+  END IF;
+
+  -- T: a chemical-sale invoice can't be born posted through save_invoice.
+  v_order := pg_temp.smk_sale(v_admin, v_product, v_customer, NULL, 10, 6, false, pg_temp.smk_split(v_rep1, 60, v_rep2, 40), 't-' || v_suffix);
+  BEGIN
+    PERFORM save_invoice(jsonb_build_object('order_id', v_order, 'customer_id', v_customer, 'invoice_type', 'chemical_sale',
+      'status', 'posted', 'invoice_date', ((now() AT TIME ZONE 'America/Chicago')::date)::text), '[]'::jsonb, 'smk-cad-t-' || v_suffix);
+    IF EXISTS (SELECT 1 FROM invoices WHERE order_id = v_order AND status = 'posted') THEN
+      v_fails := v_fails || ' (T) save_invoice created a posted chemical sale;';
+    END IF;
+  EXCEPTION WHEN raise_exception OR check_violation OR insufficient_privilege THEN
+    NULL;  -- refused: the posting trigger is the only way in
+  END;
+
+  -- Every fully posted discounted sale: the stored base is the P&L's profit after discount.
   v_got := (SELECT string_agg(o.order_name || ' ' || c.order_profit || ' vs ' || (o.total_profit + _order_standing_discount_20270109(o.id)), '; ')
               FROM orders o JOIN commissions c ON c.order_id = o.id AND c.status = 'pending' AND c.deleted_at IS NULL
-             WHERE o.order_name LIKE '[SMOKE] CAD %' AND o.order_name NOT LIKE '[SMOKE] CAD f-%'
+             WHERE o.order_name LIKE '[SMOKE] CAD %-' || v_suffix
+               AND o.order_name !~ '\[SMOKE\] CAD (d|f|s|c|e|o|t|g|k2)-'  -- part-posted, unposted or none; k2 holds k3's moved row
                AND c.order_profit IS DISTINCT FROM o.total_profit + _order_standing_discount_20270109(o.id));
   IF v_got IS NOT NULL THEN
     v_fails := v_fails || ' (base) a commission base differs from the P&L profit after discount: ' || v_got || ';';
@@ -459,6 +440,6 @@ BEGIN
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: commission is on the profit after the standing discount, never on tax (A-N)';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: commission settles on posting, on the profit after the standing discount, never on tax (A-T)';
 END
 $smoke$;

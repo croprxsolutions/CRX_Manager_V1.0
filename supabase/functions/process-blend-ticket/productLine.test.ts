@@ -59,6 +59,10 @@ Deno.test("Sol r2: damaged totals keep their number; grams and per acre are read
   check("Roundup | 2 qt | ~20 qt", "Roundup", 20, null);
   check("Roundup | 2 qt per acre | 20 qt", "Roundup", 20, "qt");
   check("Piksi 6 grams 750 grams", "Piksi", 750, "g");
+  // Sol r3: a damaged total never becomes zero; an attached /ac stays the rate.
+  check("Roundup | | 10-gal", "Roundup", 10, null);
+  check("Roundup 32oz/ac 10 gal", "Roundup", 10, "gal");
+  check("Roundup 32oz/ac 10 gal 5 gal", "Roundup", 10, null);
 });
 
 Deno.test("the multi-line reader uses the same rule", () => {
@@ -106,6 +110,12 @@ Deno.test("a catalog name that swallows the rate token is caught (Sol r2)", () =
   assertEquals(
     nameSwallowsRate(parseProductLine("Atrazine | 4 L | 2 qt")!, ["Atrazine 4L"]),
     true,
+  );
+  // Sol r3: the catalog name has more words after the number.
+  assertEquals(nameSwallowsRate(p, ["Atrazine 4L Herbicide"]), true);
+  assertEquals(
+    nameSwallowsRate(parseProductLine("Piksi Dust 6 g 750 g")!, ["Piksi Dust Inffurow"]),
+    false,
   );
 });
 

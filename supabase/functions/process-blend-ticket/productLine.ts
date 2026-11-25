@@ -69,7 +69,8 @@ export function parseProductLine(
       numIdx = t;
       break;
     }
-    if (tokens[t].match(/^\d+\.?\d*(pt|gal|lb|oz|qt|ml|l|g)$/i)) {
+    // An attached "/ac" ("32oz/ac") is still the rate, not part of the name (Sol r3).
+    if (tokens[t].match(/^\d+\.?\d*(pt|gal|lb|oz|qt|ml|l|g)(\/a(c(re)?)?\.?)?$/i)) {
       numIdx = t;
       break;
     }
@@ -107,9 +108,10 @@ const UNIT_WORD =
   /^(gals?|gallons?|lbs?|oz|qts?|pts?|pints?|quarts?|l|ml|g|grams?)$/i;
 // "/ac", "/A", "/acre.", "per acre"
 const PER_ACRE = /^(?:\/\s*|per\s+)a(?:c(?:re)?)?\.?(?=\s|$)\s*/i;
-// A damaged total like "~10 gal": only symbols before the number, so "lot 24" or "1,5" never count.
+// A damaged total like "~10 gal" or "10-gal": only symbols before the number, so "lot 24", "1,5"
+// or an EPA number "524-579" never count.
 const LOOSE_NUMBER =
-  /^[^a-z0-9.,]*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?=[\s a-z]|$)/i;
+  /^[^a-z0-9.,]*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?=[^\d.,-]|-[a-z]|$)/i;
 
 // Strict rule (Mason, 2026-11-24): a unit is filled only for an exact line, a rate with a known unit
 // and a total with a known unit, nothing else. The total is the quantity ("6 g 750 g" is 750 g, Sol
@@ -161,17 +163,19 @@ export function readAmountCell(text: string): AmountCell | null {
 
 const normName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-// A catalog name longer than the read name that runs on into the amounts ("Atrazine 4 L" read as
-// "Atrazine" + rate "4 L") means the columns shifted; the caller leaves the unit blank (Sol r2, Luna r8).
-// A false match only blanks a unit, which the rep then sets.
+// A catalog name longer than the read name whose next character matches the line's next character
+// ("Atrazine 4L Herbicide" for "Atrazine" + "4L ...", or "Atrazine 4 L") means the name may have
+// swallowed into the amounts; the caller leaves the unit blank (Sol r2-r3, Luna r8). A false match
+// only blanks a unit, which the rep then sets with the rest of the line (Mason, 2026-11-25).
 export function nameSwallowsRate(
   prod: Pick<ParsedProduct, "productName" | "ratePerAcre" | "totalProduct">,
   catalogNames: string[],
 ): boolean {
   const name = normName(prod.productName);
-  const line = normName(prod.productName + (prod.ratePerAcre ?? "") + (prod.totalProduct ?? ""));
+  const next = normName((prod.ratePerAcre ?? "") + (prod.totalProduct ?? ""))[0];
+  if (!next) return false;
   return catalogNames.some((n) => {
     const c = normName(n);
-    return c.length > name.length && c.startsWith(name) && line.startsWith(c);
+    return c.length > name.length && c.startsWith(name) && c[name.length] === next;
   });
 }

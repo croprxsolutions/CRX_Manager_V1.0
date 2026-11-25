@@ -361,7 +361,7 @@ function detectSignature(text: string): boolean {
 function isNumericLine(line: string): boolean {
   const trimmed = line.trim();
   if (
-    /^[\d,]+\.?\d*\s*(pt|gal|gals|gallons?|lb|lbs|oz|qt|ml|l|g|gools)?$/i
+    /^[\d,]+\.?\d*\s*(pts?|gal|gals|gallons?|lb|lbs|oz|qts?|ml|l|g|grams?|gools)?(\s*(\/\s*a(c(re)?)?\.?|per\s+acre))?$/i
       .test(trimmed)
   ) return true;
   if (/^gools$/i.test(trimmed)) return true;

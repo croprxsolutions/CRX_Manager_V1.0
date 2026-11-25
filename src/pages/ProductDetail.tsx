@@ -582,16 +582,16 @@ export default function ProductDetail() {
   useEffect(() => { setBrandRegistrations([]); setBrandsRead('loading'); }, [id]);
   // Generics keep their EPA numbers on the group's brands (the four places fetchParentEpaNumbers reads), for the setup badge.
   const [groupHasEpa, setGroupHasEpa] = useState(false);
-  useEffect(() => { setGroupHasEpa(false); }, [parent]);
+  useEffect(() => { setGroupHasEpa(false); }, [shownParent]);
   // Re-read after every brand list change too, so clearing a brand's last number brings the badge back without a reload.
   useEffect(() => {
-    if (!parent) return undefined;
+    if (!shownParent) return undefined;
     let cancelled = false;
-    fetchParentEpaNumbers(parent.id)
+    fetchParentEpaNumbers(shownParent.id)
       .then((numbers) => { if (!cancelled) setGroupHasEpa(numbers.length > 0); })
       .catch((error: unknown) => Sentry.captureException(error, { extra: { context: 'product_detail_group_epa' } }));
     return () => { cancelled = true; };
-  }, [parent, brandRegistrations]);
+  }, [shownParent, brandRegistrations]);
   const productLoaded = persistedProduct?.id === id;
   // The brand list's clock starts once the product (and so the Brands section) has loaded.
   const [brandsReadSlow, setBrandsReadSlow] = useState(false);
@@ -2202,8 +2202,8 @@ export default function ProductDetail() {
             <PhoneSection title="Brands" {...sectionProps('brands', reloadRequired)}>
               <ProductBrandsSection
                 // Shown only once this page's own product has loaded, and remounted for each product, so one
-                // product's name, brands, open form or copy picker never reach (or get saved onto) the next.
-                key={id}
+                // product's name, brands, open form or copy picker never reach the next product or group.
+                key={`${id}:${shownParent?.id ?? ''}`}
                 productId={id}
                 productName={persistedProduct.product_name}
                 isAdmin={isAdmin}

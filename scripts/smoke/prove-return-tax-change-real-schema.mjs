@@ -12,7 +12,7 @@
  *   4. AFTER: the new chain passes; the race records the tax the credit refunded; every covering chain that passed
  *      before still passes;
  *   5. RE-APPLY: refused by the preflight;
- *   6. ROLLBACK: re-emitting the three pinned bodies restores the BEFORE behaviour.
+ *   6. ROLLBACK: re-emitting the four pinned bodies and dropping return_items.priced_from restores the BEFORE behaviour.
  *
  * The race (#2091): transaction A begins (its credit is stamped at A's start), transaction B posts the taxed sale and
  * commits, then A makes, receives and credits a return of the whole sale and reaches its commit point. The credit
@@ -197,7 +197,7 @@ async function main() {
   // 3. APPLY
   const applied = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/cand.sql'], { allowFailure: true });
   assert.equal(applied.status, 0, `${applied.stdout}\n${applied.stderr}`);
-  assert.match(applied.stderr, /RETURN_TAX_CHANGE_POSTFLIGHT_OK: \d+ line\(s\) order_price, \d+ billed_share, 0 unlabelled/);
+  assert.match(applied.stderr, /RETURN_TAX_CHANGE_POSTFLIGHT_OK: \d+ line\(s\) order_price, \d+ billed_share, \d+ unrecorded/);
   console.log('[case] 3 APPLY: committed, POSTFLIGHT_OK');
   // 4. AFTER
   const after = chain(NEW_CHAIN);

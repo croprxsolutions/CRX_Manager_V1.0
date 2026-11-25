@@ -36,7 +36,11 @@ describe('20270307100000 return credit after a tax change, and the tax ledger ti
       expect(b).toContain("AND ri.priced_from = 'order_price'");
       expect(b).toContain('RETURN_REPRICE_OTHER_RETURN_PENDING');
       // only this return's lines are written
-      expect(b).toContain('WHERE ri.id = f.id AND f.extended_cents >= 0');
+      expect(b).toContain('     WHERE ri.id = f.id\n');
+      // a field split never triggers it (Taha, 25 Nov)
+      expect(b).toContain('NOT EXISTS (SELECT 1 FROM public.split_invoice_provenance sp WHERE sp.order_id = v_order_id)');
+      // clamped at zero like create_return
+      expect(b).toContain('greatest(0, round(s.billed_cents * (s.other_returned_qty + ri.quantity) / s.billed_qty)::bigint');
       expect(b).not.toContain('jsonb_to_recordset');
       expect(b).toContain('INSERT INTO public.financial_audit_log');
     });
@@ -47,11 +51,14 @@ describe('20270307100000 return credit after a tax change, and the tax ledger ti
     const refusal = b.indexOf("RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'");
     expect(refusal).toBeGreaterThan(0);
     expect(refusal).toBeLessThan(b.indexOf('UPDATE public.return_items ri'));
+    expect(b.indexOf("RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'")).toBeLessThan(b.indexOf('UPDATE public.return_items ri'));
   });
 
   it('create_return records how it priced each line', () => {
-    expect(body('_create_return_intent_impl_20260812')).toContain("CASE WHEN v_share.share_mode THEN 'billed_share' ELSE 'order_price' END");
-    expect(MIGRATION).toContain("CHECK (priced_from IN ('order_price', 'billed_share'))");
+    const c = body('_create_return_intent_impl_20260812');
+    expect(c).toContain("CASE WHEN v_share.share_mode THEN 'billed_share' ELSE 'order_price' END");
+    expect(c).toContain('RETURN_OLDER_RETURN_AT_ORDER_PRICE');
+    expect(MIGRATION).toContain("priced_from text NOT NULL DEFAULT 'unrecorded'");
   });
 
   it('issue_return_credit re-prices before its billed-share cap', () => {

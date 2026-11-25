@@ -51,6 +51,11 @@ BEGIN
       'supplier_price_observations_cost_ceiling')) THEN
     RAISE EXCEPTION 'SUPPLIER_QUOTE_UNIT_FLOOR_BASELINE_DRIFT: a constraint already exists';
   END IF;
+  -- Block writes (reads continue) to the three tables until commit, so no row saved by an older in-flight call can land
+  -- between this count and the checks. Give up quickly rather than queue staff behind the lock.
+  PERFORM set_config('lock_timeout', '5s', true);
+  LOCK TABLE public.product_supplier_links, public.supplier_price_observations, public.supplier_price_import_rows
+    IN SHARE ROW EXCLUSIVE MODE;
   -- Any stored row outside a bound stops the apply: fix or remove it first (production had none on 2026-11-24).
   SELECT count(*) INTO v_links FROM public.product_supplier_links
     WHERE inventory_units_per_supplier_unit < 0.001 OR inventory_units_per_supplier_unit = 'NaN';
@@ -66,10 +71,7 @@ BEGIN
 END;
 $preflight$;
 
--- ADD CONSTRAINT takes an exclusive lock held to commit (it also validates every stored row, so a row saved after the
--- preflight count still fails the apply): give up quickly rather than queue staff reads behind the lock.
-SET LOCAL lock_timeout = '5s';
-
+-- ADD CONSTRAINT takes an exclusive lock held to commit (lock_timeout 5s from the preflight still applies).
 ALTER TABLE public.product_supplier_links
   ADD CONSTRAINT product_supplier_links_conversion_floor
   CHECK (inventory_units_per_supplier_unit IS NULL

@@ -149,3 +149,14 @@ the apply now refuses while any stored row is outside a bound. Staging-only lega
 MED fixed: the preflight's import-row count now includes `cannot_compare`, which approval also accepts, so a pending
 non-comparable row outside a bound stops the apply instead of failing a later approval. Production count with it
 included: 0.
+
+## Luna round 3 (2026-11-24)
+
+- MED fixed: an older in-flight quote save could commit an out-of-bound import row between the preflight count and the
+  checks. The preflight now takes `SHARE ROW EXCLUSIVE` on the three tables (writes wait, reads continue) before
+  counting, under the 5s `lock_timeout`.
+- MED refuted as a change here: a JSON `null` package quantity becoming 1 is the existing blank-means-1 rule (Astra #8,
+  named follow-up). Both screens send the quantity as text (`'1'` default, `values.package_quantity || '1'`), never a
+  serialized `NaN`; a text `NaN` is refused.
+- LOW refuted: `convertedCostText` returns nothing for a row that is not eligible or approved, so an invalid
+  tiny-quantity row shows no converted cost.

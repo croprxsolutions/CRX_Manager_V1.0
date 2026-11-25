@@ -159,7 +159,7 @@ export default function ProductBrandsSection({
   const [reloadToken, setReloadToken] = useState(0);
   const brandIds = brands.map((brand) => brand.id);
   const documents = useLoad(!loading && !loadError && brandIds.length > 0
-    ? JSON.stringify([userId, isAdmin, productId, parent?.id, brandIds]) : null, async () => {
+    ? JSON.stringify([userId, isAdmin, productId, parent?.id, brandIds, reloadToken]) : null, async () => {
     const parentBrand = parent !== null;
     if (!isAdmin) return readBrandDocumentLinks(brandIds, parentBrand);
     const workspace = await readBrandDocumentWorkspace(false, brandIds);

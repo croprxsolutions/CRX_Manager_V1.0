@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   logActivity: vi.fn(),
   readBrandDocumentLinks: vi.fn(),
   readBrandDocumentWorkspace: vi.fn(),
+  changeBrandDocumentLinks: vi.fn(),
   parentOf: vi.fn((_id: string): { parentId?: string; parentName?: string } => ({})),
 }));
 
@@ -19,6 +20,7 @@ vi.mock('../../lib/brandDocuments', async (actual) => ({
   ...await actual<typeof import('../../lib/brandDocuments')>(),
   readBrandDocumentLinks: mocks.readBrandDocumentLinks,
   readBrandDocumentWorkspace: mocks.readBrandDocumentWorkspace,
+  changeBrandDocumentLinks: mocks.changeBrandDocumentLinks,
 }));
 vi.mock('./ProductSearchPicker', () => ({
   default: ({ onSelect, disabled }: { onSelect: (product: { id: string; product_name: string }) => void; disabled?: boolean }) => (
@@ -94,6 +96,23 @@ describe('ProductBrandsSection', () => {
     expect(screen.queryByText('Reported')).not.toBeInTheDocument();
     expect(mocks.readBrandDocumentLinks).toHaveBeenCalledWith([slam.id], false);
     expect(mocks.readBrandDocumentWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it('reloads a stale link even when the brand version is unchanged', async () => {
+    const sds = {
+      id: 'link-1', legacy_brand_id: slam.id, parent_brand_id: null, document_kind: 'sds',
+      url: 'https://manufacturer.example/old', expires_on: null, row_version: 2, reported_at: null,
+    };
+    mocks.readBrandDocumentLinks.mockResolvedValue([sds]);
+    mocks.changeBrandDocumentLinks.mockRejectedValueOnce({ message: 'BRAND_DOCUMENT_CHANGED: reload this link' });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin={false} userId="staff" />);
+    expect(await screen.findByRole('link', { name: 'SDS' })).toHaveAttribute('href', sds.url);
+
+    const currentUrl = 'https://manufacturer.example/current';
+    mocks.readBrandDocumentLinks.mockResolvedValue([{ ...sds, url: currentUrl, row_version: 3 }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Report broken link for Slam 5.4 SDS' }));
+    await waitFor(() => expect(screen.getByRole('link', { name: 'SDS' })).toHaveAttribute('href', currentUrl));
+    expect(mocks.listProductBrands).toHaveBeenCalledTimes(2);
   });
 
   it('does not show an EPA label search link for a brand without a registration', async () => {

@@ -43,6 +43,7 @@ export function parseProductLine(
       const { quantity, unit } = pickQuantity(
         readAmountCell(ratePerAcre || ""),
         totalProduct || null,
+        parts.slice(3).some((p) => p !== ""),
       );
 
       return {
@@ -101,29 +102,26 @@ export function parseProductLine(
 }
 
 const UNIT_WORD = /^(gals?|gallons?|lbs?|oz|qts?|pts?|pints?|quarts?|l|ml|g)$/i;
-const PER_ACRE = /^\/\s*a(?:c(?:re)?)?\.?(?=\s|$)\s*/i;
+const PER_ACRE = /^\/\s*a(?:c(?:re)?)?\.?(?=\s|$)\s*/i; // "/ac", "/A", "/acre."
 
-// The rate cell is column 2, the total text column 3. The total, when it is a clean amount cell with a
-// unit we know, is the quantity ("6 g 750 g" is 750 g, Sol #2267 r11). A line with only a rate keeps
-// it. Anything uncertain (unreadable or unit-less total, unknown unit, a name or extra amount that
-// shifts the columns) keeps a best-guess number but leaves the unit blank, which the stock-unit check
-// refuses, so a rep must correct the line before it can be filed.
+// Strict rule: a unit is filled only for an exact line, name + rate with a known unit + (optionally)
+// total with a known unit, and nothing else. The total, when present, is the quantity ("6 g 750 g" is
+// 750 g, Sol #2267 r11). Any other line keeps a best-guess number with a blank unit, which the filing
+// stock-unit check refuses, so a rep must correct it before it can be filed or deducted.
 function pickQuantity(
   rate: AmountCell | null,
   totalText: string | null,
+  extraColumns = false,
 ): { quantity: number; unit: string | null } {
-  if (!totalText) {
-    return { quantity: rate?.amount ?? 0, unit: rate?.unit ?? null };
-  }
-  const total = readAmountCell(totalText);
-  const columnsLineUp = rate !== null &&
-    (rate.word === null || rate.unit !== null) &&
-    total !== null && readAmountCell(total.rest) === null;
-  if (columnsLineUp && total.unit) {
-    return { quantity: total.amount, unit: total.unit };
-  }
-  return { quantity: total?.amount ?? rate?.amount ?? 0, unit: null };
+  if (!rate) return { quantity: 0, unit: null };
+  const total = totalText ? readAmountCell(totalText) : null;
+  const quantity = total?.amount ?? rate.amount;
+  const exact = rate.unit !== null && !extraColumns &&
+    (totalText === null || (total?.unit != null && END.test(total.rest)));
+  return { quantity, unit: exact ? (total ?? rate).unit : null };
 }
+
+const END = /^[.;]*$/;
 
 type AmountCell = {
   amount: number;

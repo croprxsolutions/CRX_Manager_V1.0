@@ -23,9 +23,9 @@ Deno.test("the total column, not the per-acre rate, is the quantity (Sol #2267 r
   check("Atrazine 2 lbs 80 lbs", "Atrazine", 80, "lb");
   check("Atrazine 2 qt 32 QTS", "Atrazine", 32, "QT"); // case kept, as before
   check("Atrazine 2 qt/ac 32 qt", "Atrazine", 32, "qt");
+  check("Atrazine 2 qt/ac. 32 qt", "Atrazine", 32, "qt");
   check("Atrazine 2 qt 32qt.", "Atrazine", 32, "qt");
   check("Piksi 6 g .75 g", "Piksi", 0.75, "g");
-  check("Piksi 6 g 750 g lot 24", "Piksi", 750, "g");
   check("Piksi | 6 g | 750 g", "Piksi", 750, "g");
   check("Atrazine | 2 qt | 32qt.", "Atrazine", 32, "qt");
 });
@@ -63,4 +63,10 @@ Deno.test("anything uncertain leaves the unit blank so the stock check stops it 
   // A number in the product name shifts the columns.
   check("Liberty 280 SL 32 oz 10 gal", "Liberty", 32, null);
   check("Atrazine 4L 2 qt 100 qt", "Atrazine", 2, null);
+  check("Liberty 280 32 oz", "Liberty", 32, null);
+  // Anything after the total, or extra pipe columns (Luna r3).
+  check("Piksi 6 g 750 g lot 24", "Piksi", 750, null);
+  check("Piksi 6 g 750 g Lot 24 10 gal", "Piksi", 750, null);
+  check("Piksi | 6 g | 750 g | 10 gal", "Piksi", 750, null);
+  check("Piksi | 6 g | | 10 gal", "Piksi", 6, null);
 });

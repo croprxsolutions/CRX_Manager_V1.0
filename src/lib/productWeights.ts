@@ -1,4 +1,4 @@
-import { assertRpcResult, supabaseUntyped } from './db';
+import { assertRpcResult, hasRpcCode, RpcErrorCodes, supabaseUntyped } from './db';
 import type { LiquidDensityBrand, LiquidDensityReview, ProductWeight, ProductWeightEvent, ProductWeightSource, WeightUnitFactors } from '../types';
 
 // DM-2 (20261207100000_product_weights): weight per gallon on a liquid's parent and net weight per pack
@@ -12,6 +12,17 @@ export const WEIGHT_SOURCES: ReadonlyArray<{ value: ProductWeightSource; label: 
 ];
 const SOURCE_TEXT: Record<string, string> = { measured: 'measured', sds: 'the SDS', label: 'the label', supplier: 'the supplier', unit: 'its stock unit' };
 export const sourceText = (source: string | null | undefined) => (source ? SOURCE_TEXT[source] ?? source : 'an unknown source');
+
+export function weightContextChanged(error: unknown): boolean {
+  return [
+    RpcErrorCodes.PRODUCT_WEIGHT_STALE,
+    RpcErrorCodes.PRODUCT_WEIGHT_BASIS_CHANGED,
+    RpcErrorCodes.PRODUCT_WEIGHT_BRANDS_CHANGED,
+    RpcErrorCodes.PRODUCT_WEIGHT_NOT_ELIGIBLE,
+    RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_NOT_OPEN,
+    RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_RELOAD,
+  ].some((code) => hasRpcCode(error, code));
+}
 
 /** Trust order, highest first (measured > SDS > label > supplier); same as `_product_weight_trust_rank`. */
 const TRUST: Record<ProductWeightSource, number> = { measured: 4, sds: 3, label: 2, supplier: 1 };

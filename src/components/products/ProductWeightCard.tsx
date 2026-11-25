@@ -13,7 +13,7 @@ import { Sentry } from '../../lib/sentry';
 import { BUSINESS_TIMEZONE } from '../../lib/dateUtils';
 import {
   approveWeightDraft, draftMatchesBasis, fetchLiquidDensityReview, fetchProductWeights, fetchWeightEvents, isLowerTrust, noWeightMessage,
-  saveWeight, sourceText, storedWeightPreview, submitLiquidDensityDraft, WEIGHT_SOURCES,
+  saveWeight, sourceText, storedWeightPreview, submitLiquidDensityDraft, weightContextChanged, WEIGHT_SOURCES,
   type ProductWeightEntry, type WeightDraft, type WeightSubject,
 } from '../../lib/productWeights';
 import { ReasonField } from './ProductParentPanel';
@@ -121,9 +121,7 @@ function EnterWeightModal({ subject, entry, profileId, startAsCorrection, draftO
     } catch (error) {
       toast('error', sanitizeError(error));
       if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_LOWER_TRUST)) setForceCorrection(true);
-      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE) ||
-          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_NOT_OPEN) ||
-          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_RELOAD)) onStale();
+      if (weightContextChanged(error)) onStale();
     } finally {
       setSaving(false);
     }
@@ -335,9 +333,7 @@ function ApproveDraftModal({ draft, subject, entry, name, profileId, onClose, on
       onDone();
     } catch (error) {
       toast('error', sanitizeError(error));
-      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE) ||
-          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_BASIS_CHANGED) ||
-          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_RELOAD)) onDone();
+      if (weightContextChanged(error)) onDone();
     } finally {
       setApproving(false);
     }

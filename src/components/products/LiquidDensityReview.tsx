@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
-import { hasRpcCode, RpcErrorCodes, sanitizeError } from '../../lib/db';
-import { approveLiquidDensityDraft, sourceText, type WeightDraft, type WeightSubject } from '../../lib/productWeights';
+import { sanitizeError } from '../../lib/db';
+import { approveLiquidDensityDraft, sourceText, weightContextChanged, type WeightDraft, type WeightSubject } from '../../lib/productWeights';
 import type { LiquidDensityBrand } from '../../types';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
@@ -58,11 +58,7 @@ export function ApproveLiquidDensityDraftModal({
       onDone();
     } catch (error: unknown) {
       toast('error', sanitizeError(error));
-      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE) ||
-          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_BASIS_CHANGED) ||
-          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_BRANDS_CHANGED) ||
-          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_NOT_OPEN) ||
-          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_RELOAD)) onDone();
+      if (weightContextChanged(error)) onDone();
     } finally {
       setSaving(false);
     }

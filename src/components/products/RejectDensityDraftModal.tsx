@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
-import { hasRpcCode, RpcErrorCodes, sanitizeError } from '../../lib/db';
-import { rejectLiquidDensityDraft, type WeightSubject } from '../../lib/productWeights';
+import { sanitizeError } from '../../lib/db';
+import { rejectLiquidDensityDraft, weightContextChanged, type WeightSubject } from '../../lib/productWeights';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import { useToast } from '../ui/Toast';
@@ -33,7 +33,7 @@ export function RejectDensityDraftModal({ subject, draftId, profileId, onClose, 
       onDone();
     } catch (error: unknown) {
       toast('error', sanitizeError(error));
-      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE)) onDone();
+      if (weightContextChanged(error)) onDone();
     } finally {
       setSaving(false);
     }

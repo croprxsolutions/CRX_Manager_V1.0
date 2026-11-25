@@ -118,8 +118,8 @@ describe('ProductWeightCard', () => {
     await waitFor(() => expect(mocks.fetchProductWeights).toHaveBeenCalledTimes(2));
   });
 
-  it('closes rejection and reloads when the draft changed', async () => {
-    mocks.rejectLiquidDensityDraft.mockRejectedValue(new Error('PRODUCT_WEIGHT_STALE'));
+  it.each(['PRODUCT_WEIGHT_STALE', 'PRODUCT_WEIGHT_NOT_ELIGIBLE'])('closes rejection and reloads after %s', async (code) => {
+    mocks.rejectLiquidDensityDraft.mockRejectedValue(new Error(code));
     const draft = { id: 'd1', value: 9.5, source: 'sds', created_by: 'u2', basis: formulation };
     show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation, draft });
     fireEvent.click(await screen.findByRole('button', { name: 'Reject draft' }));
@@ -157,7 +157,7 @@ describe('ProductWeightCard', () => {
     expect(mocks.approveWeightDraft).not.toHaveBeenCalled();
   });
 
-  it.each(['PRODUCT_WEIGHT_BRANDS_CHANGED', 'PRODUCT_WEIGHT_REVIEW_NOT_OPEN'])('reloads the group after approval returns %s', async (code) => {
+  it.each(['PRODUCT_WEIGHT_BRANDS_CHANGED', 'PRODUCT_WEIGHT_REVIEW_NOT_OPEN', 'PRODUCT_WEIGHT_NOT_ELIGIBLE'])('reloads the group after approval returns %s', async (code) => {
     mocks.fetchLiquidDensityReview.mockResolvedValue({ review_open: true, brands: [] });
     mocks.approveLiquidDensityDraft.mockRejectedValue(new Error(code));
     const draft = { id: 'd1', value: 9.5, source: 'sds', created_by: 'u2', basis: formulation };
@@ -229,6 +229,19 @@ describe('ProductWeightCard', () => {
     await waitFor(() => expect(mocks.submitLiquidDensityDraft).toHaveBeenCalledWith(
       expect.objectContaining({ subject: densitySubject, value: '1.15', unit: 'specific_gravity' })));
     expect(mocks.saveWeight).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('closes weight entry and reloads if the switch changes from %s during a save', async (reviewOpen) => {
+    mocks.fetchLiquidDensityReview.mockResolvedValue({ review_open: reviewOpen, brands: [] });
+    const save = reviewOpen ? mocks.submitLiquidDensityDraft : mocks.saveWeight;
+    save.mockRejectedValue(new Error(reviewOpen ? 'PRODUCT_WEIGHT_REVIEW_NOT_OPEN' : 'PRODUCT_WEIGHT_REVIEW_RELOAD'));
+    show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation });
+    fireEvent.click(await screen.findByRole('button', { name: 'Enter weight' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Enter weight' }));
+    fireEvent.change(dialog.getByLabelText('Weight'), { target: { value: '9.5' } });
+    fireEvent.click(dialog.getByRole('button', { name: reviewOpen ? 'Save draft' : 'Save weight' }));
+    await waitFor(() => expect(mocks.fetchLiquidDensityReview).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog', { name: 'Enter weight' })).not.toBeInTheDocument();
   });
 
   it('keeps a lower-trust correction in draft with its evidence when review is active', async () => {

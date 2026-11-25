@@ -146,7 +146,8 @@ export async function haiku(prompt, maxTokens, { key = process.env.ANTHROPIC_API
     const res = await fetchImpl('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: HAIKU_MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] }),
+      // Thinking off: Haiku 5.5 thinks by default, and thinking used up these small max_tokens, leaving no text (2026-11-25).
+      body: JSON.stringify({ model: HAIKU_MODEL, max_tokens: maxTokens, thinking: { type: 'disabled' }, messages: [{ role: 'user', content: prompt }] }),
       signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
@@ -156,7 +157,10 @@ export async function haiku(prompt, maxTokens, { key = process.env.ANTHROPIC_API
       return null;
     }
     const out = await res.json();
-    return out.content?.find((c) => c.type === 'text')?.text?.trim() ?? '';
+    const text = out.content?.find((c) => c.type === 'text')?.text?.trim();
+    // No text (cut off, refused) is a failed call, not an empty answer: no summary, and topics retry instead of topic:none.
+    if (!text) { console.log(`::warning::Haiku gave no text (stop_reason ${out.stop_reason ?? 'unknown'})`); return null; }
+    return text;
   } catch (e) { console.log(`::warning::Haiku call failed: ${e?.name ?? 'error'} ${String(e?.message ?? '').slice(0, 200)}`); return null; }
 }
 // Only what the public PR page already shows: title, description (cut short) and changed file names.

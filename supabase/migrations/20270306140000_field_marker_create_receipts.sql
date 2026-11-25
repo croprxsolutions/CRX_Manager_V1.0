@@ -47,7 +47,6 @@ BEGIN
     -- Receipt details are available only through the authorized result read.
     RAISE unique_violation USING
       MESSAGE = 'duplicate key value violates unique constraint "field_obstacles_pkey"',
-      DETAIL = format('Key (id)=(%s) already exists.', NEW.id),
       SCHEMA = 'public',
       TABLE = 'field_obstacles',
       CONSTRAINT = 'field_obstacles_pkey';

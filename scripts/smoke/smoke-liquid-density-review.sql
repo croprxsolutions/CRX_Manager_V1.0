@@ -7,6 +7,9 @@ DECLARE
   v_size uuid;
   v_brand uuid;
   v_draft uuid;
+  v_dry_size uuid;
+  v_dry_item jsonb;
+  v_workbook_rows jsonb;
   v_result jsonb;
   v_brands jsonb;
   v_previous_brands jsonb;
@@ -39,6 +42,12 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: roster must show the current official SDS link';
   END IF;
 
+  BEGIN
+    PERFORM public.set_parent_density(v_group, 0, 9.5, 'lb_per_gal', 'sds', NULL, 'core-legacy-set-' || v_tag);
+    RAISE EXCEPTION 'SMOKE_FAIL: the legacy direct approval path stayed open';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_REVIEW_RELOAD%' THEN RAISE; END IF;
+  END;
   v_result := public.submit_liquid_density_draft(v_group, 0, 1.15, 'specific_gravity', 'sds', NULL, NULL, NULL, 'core-draft-' || v_tag);
   v_draft := (v_result->>'value_id')::uuid;
   IF (v_result->>'lb_per_gal')::numeric IS DISTINCT FROM 9.5972::numeric THEN
@@ -49,6 +58,19 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: a second draft must be refused';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_DRAFT_WAITING%' THEN RAISE; END IF;
+  END;
+  v_workbook_rows := jsonb_build_array(jsonb_build_object(
+    'kind', 'density', 'subject_id', v_group, 'expected_version', 1, 'value', 10, 'source', 'sds'));
+  v_result := public.preview_weights_tab(v_workbook_rows)->'rows'->0;
+  IF v_result->>'status' IS DISTINCT FROM 'invalid' OR
+     NOT COALESCE(v_result->>'problem' LIKE 'PRODUCT_WEIGHT_DRAFT_WAITING%', false) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: workbook preview must identify the waiting draft';
+  END IF;
+  BEGIN
+    PERFORM public.commit_weights_tab(v_workbook_rows, 'core-workbook-overwrite-' || v_tag);
+    RAISE EXCEPTION 'SMOKE_FAIL: workbook must refuse the overwrite';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'WORKBOOK_WEIGHTS_REFUSED:%PRODUCT_WEIGHT_DRAFT_WAITING%' THEN RAISE; END IF;
   END;
   BEGIN
     PERFORM public.approve_liquid_density_draft(v_group, v_draft, 1, v_brands, true, 'core-self-' || v_tag);
@@ -70,13 +92,30 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_BRAND_CHECK_REQUIRED%' THEN RAISE; END IF;
   END;
+  v_result := public.create_product_with_parent(
+    jsonb_build_object('name', '[SMOKE] Dry ' || v_tag, 'product_form', 'dry', 'category', v_category),
+    jsonb_build_object('product_name', '[SMOKE] Dry Pack ' || v_tag, 'sku', 'SMOKE-DRY-' || v_tag,
+      'inventory_unit', 'Ea', 'container_size', 5, 'container_unit', 'Lb', 'container_type', 'Bag'),
+    'core-dry-product-' || v_tag);
+  v_dry_size := (v_result->>'product_id')::uuid;
+  EXECUTE 'RESET ROLE';
+  v_result := public._save_size_net_weight_draft(v_dry_size, 0, 5, 'label', NULL, NULL, NULL);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  v_dry_item := jsonb_build_object('kind', 'net_weight', 'subject_id', v_dry_size,
+    'draft_id', v_result->>'value_id', 'expected_version', 1);
   BEGIN
-    PERFORM public.approve_weights(jsonb_build_array(jsonb_build_object(
+    PERFORM public.approve_weights(jsonb_build_array(v_dry_item, jsonb_build_object(
       'kind', 'density', 'subject_id', v_group, 'draft_id', v_draft, 'expected_version', 1)), 'core-legacy-approve-' || v_tag);
-    RAISE EXCEPTION 'SMOKE_FAIL: the legacy path must refuse liquid approval';
+    RAISE EXCEPTION 'SMOKE_FAIL: the legacy path must refuse the whole mixed batch';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_REVIEW_RELOAD%' THEN RAISE; END IF;
   END;
+  PERFORM public.approve_weights(jsonb_build_array(v_dry_item), 'core-dry-approve-' || v_tag);
+  v_result := public.get_product_weights(ARRAY[v_dry_size])->'products'->v_dry_size::text->'weight';
+  IF v_result->>'kind' IS DISTINCT FROM 'net_weight' OR
+    (v_result->>'lb_per_unit')::numeric IS DISTINCT FROM 5::numeric THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the dry-only approval path must keep working';
+  END IF;
   v_result := public.approve_liquid_density_draft(v_group, v_draft, 1, v_brands, true, 'core-approve-' || v_tag);
   IF (v_result->>'version')::bigint IS DISTINCT FROM 2::bigint THEN
     RAISE EXCEPTION 'SMOKE_FAIL: complete review must approve a draft';

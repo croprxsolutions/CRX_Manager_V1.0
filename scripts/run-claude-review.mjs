@@ -137,6 +137,20 @@ export function claudeReviewProofWithholdReason({
   return null;
 }
 
+// base-staging review result is only valid if the clean head, the staging tip and
+// the merge-base are all unchanged and the checkout is still clean afterwards.
+export function baseStagingContextUnchanged({ before, after, status } = {}) {
+  const full = (v) => /^[0-9a-f]{40}$/i.test(v || "");
+  return Boolean(
+    before && after &&
+    full(before.headSha) && full(before.baseSha) && full(before.mergeBase) &&
+    before.headSha === after.headSha &&
+    before.baseSha === after.baseSha &&
+    before.mergeBase === after.mergeBase &&
+    !String(status ?? "dirty").trim(),
+  );
+}
+
 export function claudeExecutable({
   platform = process.platform,
   homeDir = homedir(),
@@ -186,7 +200,7 @@ function clearClaudePushProof(root = ROOT) {
 
 function usage() {
   return [
-    "Usage: node scripts/run-claude-review.mjs --scope <uncommitted|base-main|commit> [options]",
+    "Usage: node scripts/run-claude-review.mjs --scope <uncommitted|base-main|base-staging|commit> [options]",
     "",
     "Options:",
     "  --commit <sha>        Commit SHA when --scope commit is used",
@@ -251,8 +265,8 @@ export function parseReviewArgs(argv) {
     throw new Error(`--scope is required\n\n${usage()}`);
   }
 
-  if (!["uncommitted", "base-main", "commit"].includes(parsed.scope)) {
-    throw new Error(`Invalid --scope ${parsed.scope}. Use uncommitted, base-main, or commit.`);
+  if (!["uncommitted", "base-main", "base-staging", "commit"].includes(parsed.scope)) {
+    throw new Error(`Invalid --scope ${parsed.scope}. Use uncommitted, base-main, base-staging, or commit.`);
   }
 
   if (parsed.scope === "commit" && !parsed.commit) {
@@ -336,12 +350,36 @@ export function getGitContext(scope, commit, executeGit = execFileSync) {
     executeGit,
   );
   const optionalGit = (args, fallback = "") => runGit(args, fallback, null, executeGit);
-  const untracked = scope === "commit"
+  const untracked = scope === "commit" || scope === "base-staging"
     ? ""
     : requiredGit(["ls-files", "--others", "--exclude-standard"]);
   const untrackedResult = buildUntrackedEvidence(untracked);
   const untrackedEvidence = untrackedResult.evidence;
-  if (scope === "base-main") {
+  let mergeBase = "";
+  let headSha = "";
+  if (scope === "base-staging") {
+    // Review of a clean committed branch against origin/staging: freeze HEAD,
+    // the staging tip and their merge-base, then diff merge-base..frozen HEAD so
+    // files that belong only to intervening staging commits are excluded.
+    // Not a push proof; the base-main proof path is untouched.
+    if (optionalGit(["status", "--short"], "dirty").trim()) {
+      scopeEvidenceErrors.push("base-staging review requires a clean committed checkout (git status is not empty)");
+    }
+    headSha = requiredGit(["rev-parse", "HEAD"]);
+    baseSha = requiredGit(["rev-parse", "origin/staging"]);
+    mergeBase = requiredGit(["merge-base", baseSha, headSha]);
+    changed = requiredGit(["diff", "--no-ext-diff", "--no-textconv", "--name-only", "--no-renames", mergeBase, headSha]);
+    scopeEvidence = requiredGit(["diff", "--no-ext-diff", "--no-textconv", "--binary", mergeBase, headSha]);
+    // A runner reviewing its own change would be judged by the code under review.
+    if (changed.split(/\r?\n/).includes("scripts/run-claude-review.mjs")) {
+      scopeEvidenceErrors.push("base-staging self-review refused: changedFiles includes scripts/run-claude-review.mjs");
+    }
+    for (const [label, value] of [["HEAD", headSha], ["origin/staging", baseSha], ["merge-base", mergeBase]]) {
+      if (!/^[0-9a-f]{40}$/i.test(value)) {
+        scopeEvidenceErrors.push(`base-staging ${label} did not resolve to a full 40-character commit SHA`);
+      }
+    }
+  } else if (scope === "base-main") {
     const base = requiredGit(["merge-base", "origin/main", "HEAD"]);
     const tracked = requiredGit(["diff", "--name-only", base]);
     changed = [tracked, untracked].filter(Boolean).join("\n");
@@ -378,8 +416,9 @@ export function getGitContext(scope, commit, executeGit = execFileSync) {
     status: optionalGit(["status", "--short"]),
     // Captured BEFORE the review runs — the proof must bind to what was
     // actually reviewed, not whatever HEAD is afterwards (Codex round-4 TOCTOU).
-    headSha: requiredGit(["rev-parse", "HEAD"]),
+    headSha: headSha || requiredGit(["rev-parse", "HEAD"]),
     baseSha,
+    mergeBase,
     changedFiles: changed.split(/\r?\n/).filter(Boolean),
     stagedFiles: optionalGit(["diff", "--cached", "--name-only"])
       .split(/\r?\n/)
@@ -581,6 +620,25 @@ export function archiveClaudeReviewOutputPath({ outputPath, runId }) {
   return path.join(path.dirname(outputPath), "history", `claude-review-${runId}.txt`);
 }
 
+// A discarded review keeps neither the parsed review text nor the raw JSON in any capture.
+export function discardedReviewParts(parsed, result) {
+  return { parsed: { ...parsed, result: "" }, result: { ...result, stdout: null, status: 1 } };
+}
+
+const STAGING_CHANGED_NOTE = "HEAD, origin/staging, the merge-base, or worktree state changed while the base-staging review was running; result discarded.";
+
+// One decision for a finished review: compare the frozen staging context with the
+// re-read one, block and scrub if it moved. Only base-main may touch the legacy push proof.
+export function stagingRunOutcome({ scope, before, after, status, result, parsed }) {
+  const changed = scope === "base-staging" && !baseStagingContextUnchanged({ before, after, status });
+  const proofEligible = scope === "base-main";
+  if (!changed) {
+    return { changed, proofEligible, executionState: classifyClaudeExecution(result, parsed), parsed, result };
+  }
+  const note = { ...result, stderr: `${result.stderr || ""}\n${STAGING_CHANGED_NOTE}`.trim() };
+  return { changed, proofEligible, executionState: "BLOCKED", ...discardedReviewParts(parsed, note) };
+}
+
 function writeReviewOutput(outputPath, capture) {
   mkdirSync(path.dirname(outputPath), { recursive: true });
   const body = [
@@ -597,6 +655,13 @@ function writeReviewOutput(outputPath, capture) {
     `Timeout ms: ${capture.timeoutMs}`,
     `Repo HEAD: ${capture.head}`,
     `Scope fingerprint: ${capture.scopeFingerprint}`,
+    ...(capture.frozen
+      ? [
+        `Frozen HEAD: ${capture.frozen.headSha}`,
+        `Target (origin/staging): ${capture.frozen.baseSha}`,
+        `Merge-base: ${capture.frozen.mergeBase}`,
+      ]
+      : []),
     `Prompt sha256: ${capture.promptHash}`,
     `Terminal reason: ${capture.parsed.terminalReason}`,
     `Permission denials: ${capture.parsed.permissionDenials.length}`,
@@ -626,6 +691,12 @@ function getClaudeCliVersion(claudeBin) {
   return (version.stdout || version.stderr || "unavailable").trim() || "unavailable";
 }
 
+// VERIFIED only means the reviewer ran; base-staging also needs a clean verdict.
+export function baseStagingReviewDecision({ executionState, status, stdout } = {}) {
+  const clean = executionState === "VERIFIED" && claudeReviewProofVerdict({ status, stdout }) === "clean";
+  return { clean, label: clean ? "CLEAN" : "NOT CLEAN" };
+}
+
 export function runClaudeReview(options) {
   const gitContext = getGitContext(options.scope, options.commit);
   const output = options.output
@@ -640,7 +711,9 @@ export function runClaudeReview(options) {
     status: gitContext.status,
     changedFiles: gitContext.changedFiles,
     stagedFiles: gitContext.stagedFiles,
-    scopeEvidence: gitContext.scopeEvidence,
+    scopeEvidence: options.scope === "base-staging"
+      ? `Frozen scope: HEAD ${gitContext.headSha}; target origin/staging ${gitContext.baseSha}; merge-base ${gitContext.mergeBase}\n${gitContext.scopeEvidence}`
+      : gitContext.scopeEvidence,
     extraContext: readOptionalPromptFile(options.promptFile),
   });
 
@@ -690,7 +763,7 @@ export function runClaudeReview(options) {
     process.stderr.write(result.stderr + "\n");
     return { status: 1, output, archiveOutput, prompt, executionState: "BLOCKED" };
   }
-  const result = spawnSync(claudeBin, buildClaudeCommandArgs({
+  let result = spawnSync(claudeBin,buildClaudeCommandArgs({
     model: options.model,
     effort: options.effort,
   }), {
@@ -705,7 +778,28 @@ export function runClaudeReview(options) {
     shell: false,
   });
 
-  const parsed = parseClaudeReviewJson(result.stdout);
+  let afterStaging = null;
+  let afterStatus;
+  if (options.scope === "base-staging") {
+    const afterHead = runGit(["rev-parse", "HEAD"], "");
+    const afterBase = runGit(["rev-parse", "origin/staging"], "");
+    afterStaging = {
+      headSha: afterHead,
+      baseSha: afterBase,
+      mergeBase: runGit(["merge-base", afterBase, afterHead], ""),
+    };
+    afterStatus = runGit(["status", "--short"], "dirty");
+  }
+  const outcome = stagingRunOutcome({
+    scope: options.scope,
+    before: gitContext,
+    after: afterStaging,
+    status: afterStatus,
+    result,
+    parsed: parseClaudeReviewJson(result.stdout),
+  });
+  const { parsed, executionState } = outcome;
+  result = outcome.result;
   const runId = `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
   const generatedAt = new Date().toISOString();
   const scopeFingerprint = buildScopeFingerprint(
@@ -713,7 +807,6 @@ export function runClaudeReview(options) {
     options.scope,
     options.commit,
   );
-  const executionState = classifyClaudeExecution(result, parsed);
   const capture = {
     runId,
     generatedAt,
@@ -725,6 +818,9 @@ export function runClaudeReview(options) {
     head: gitContext.head,
     scopeFingerprint,
     promptHash: sha256(prompt),
+    frozen: options.scope === "base-staging"
+      ? { headSha: gitContext.headSha, baseSha: gitContext.baseSha, mergeBase: gitContext.mergeBase }
+      : null,
     parsed,
     result,
   };
@@ -733,7 +829,7 @@ export function runClaudeReview(options) {
   writeReviewOutput(output, capture);
   process.stdout.write(`Claude review ${executionState}: ${output}\n`);
   process.stdout.write(`Per-run capture: ${archiveOutput}\n`);
-  if (options.scope === "base-main") {
+  if (outcome.proofEligible) {
     // Bind protected-push proof to the exact clean HEAD that was reviewed AND to
     // the origin/main it was reviewed against. Re-read all three after Claude
     // returns so a concurrent commit (HEAD moved) or a sibling merge fetched
@@ -783,6 +879,11 @@ export function runClaudeReview(options) {
   if (result.error) {
     process.stderr.write(`${result.error.message}\n`);
     return { status: 1, output, archiveOutput, prompt, executionState: "BLOCKED" };
+  }
+  if (options.scope === "base-staging") {
+    const decision = baseStagingReviewDecision({ executionState, status: result.status, stdout: parsed.result });
+    process.stdout.write(`Base-staging review decision: ${decision.label}\n`);
+    return { status: decision.clean ? 0 : 1, output, archiveOutput, prompt, executionState };
   }
   return { status: 0, output, archiveOutput, prompt, executionState };
 }

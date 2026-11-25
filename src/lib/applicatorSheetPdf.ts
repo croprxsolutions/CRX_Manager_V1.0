@@ -33,6 +33,7 @@ import {
   type ApplicatorSheetFormat,
   type ApplicatorSheetCustomConfig,
   type ApplicatorSheetColumns,
+  type ApplicatorSheetSafety,
   DEFAULT_SHEET_COLUMNS,
   SHEET_FORMAT_LABELS,
   fieldDirectionsUrl,
@@ -482,6 +483,74 @@ function appendMapPage(
   }
 }
 
+/**
+ * The optional safety sheet: every product's signal word, REI and PHI on its own
+ * page(s), never cut short (Mason, 2026-11-24: off by default, all of it on its own sheet).
+ */
+/** One safety interval cell; a blank or negative value is not a real interval. */
+function safetyInterval(value: number | null, unit: string): string {
+  return value != null && Number.isFinite(value) && value >= 0 ? `${fmtNum(value)} ${unit}` : 'See label';
+}
+
+function appendSafetySheet(doc: JsPDFWithAutoTable, autoTable: typeof import('jspdf-autotable').default, data: ApplicatorSheetData): void {
+  if (data.safety === undefined) return;
+  const items: ApplicatorSheetSafety[] = data.safety ?? [];
+  const margin = 40;
+  const width = doc.internal.pageSize.getWidth() - 2 * margin;
+  const heading = `Job ${data.job_number} · ${customerLine(data)}`;
+  doc.addPage();
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(...CHARCOAL);
+  doc.text('Safety — Signal Word, REI, PHI', margin, margin + 10);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(...GRAY);
+  const printed = new Date().toLocaleDateString();
+  // Name the source only when the records were actually read.
+  const source = data.safety === null ? '' : ` · From product records on ${printed}`;
+  const intro = doc.splitTextToSize(`${heading}${source} · Always read and follow the product label.`, width) as string[];
+  doc.text(intro, margin, margin + 26);
+  const startY = margin + 30 + intro.length * 11;
+  if (items.length === 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(...CHARCOAL);
+    doc.text(data.safety === null
+      ? 'Safety could not be loaded from the product records. Read each product label before entering a treated field.'
+      : 'No products on this job.', margin, startY + 14, { maxWidth: width });
+    return;
+  }
+  const firstPage = doc.getNumberOfPages();
+  autoTable(doc, {
+    startY,
+    margin: { left: margin, right: margin, top: margin + 20, bottom: 60 },
+    // "#" is the line's place on the job order: it tells same-named lines apart.
+    head: [['#', 'Product', 'EPA Reg. No.', 'Signal Word', 'REI', 'PHI']],
+    body: items.map((item, index) => [
+      String(index + 1),
+      item.product_name,
+      // A blank number is not on file, not "unregistered" (that needs a registered flag, KI-206).
+      item.epa_registration || 'See label',
+      item.signal_word ? item.signal_word.toUpperCase() : 'See label',
+      safetyInterval(item.rei_hours, 'hr'),
+      safetyInterval(item.phi_days, 'd'),
+    ]),
+    styles: { fontSize: 10, cellPadding: 5 },
+    headStyles: { fillColor: CRX_GREEN, textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: ALT_ROW_BG },
+    // A loose continuation page still names its job.
+    didDrawPage: () => {
+      if (doc.getNumberOfPages() === firstPage) return;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(...GRAY);
+      // One line only, so it never runs into the repeated table header.
+      doc.text((doc.splitTextToSize(`Safety (continued) · ${heading}`, width) as string[])[0], margin, margin + 6);
+    },
+  });
+}
+
 /** Append optional overview and per-field satellite map pages after the crew sheet. */
 function appendMapPages(doc: JsPDFWithAutoTable, data: ApplicatorSheetData): void {
   if (!data.maps) return;
@@ -548,6 +617,8 @@ export async function generateApplicatorSheetPdf(
     doc.deletePage(1);
   } else {
     drawSheet(doc, autoTable, data, theme, resolvedOptions);
+    // The optional safety sheet goes with the job order, not with a map-pages-only print.
+    appendSafetySheet(doc, autoTable, data);
     appendMapPages(doc, data);
   }
 

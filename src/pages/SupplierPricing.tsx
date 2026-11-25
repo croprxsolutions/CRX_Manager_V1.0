@@ -47,6 +47,7 @@ import {
   type SupplierImportReviewRow,
   type SupplierPricingWorkspace,
 } from '../lib/supplierPricing';
+import { supplierUnitCostCents } from '../lib/supplierUnitCost';
 import {
   generateSupplierQuoteWorkbook,
   MAX_SUPPLIER_QUOTE_BYTES,
@@ -55,6 +56,27 @@ import {
 import { toSentryError } from '../lib/sentryError';
 
 const today = () => localToday();
+
+// The staging RPC flags rows with codes; staff read the rule instead of the code.
+const ROW_ERROR_MESSAGES: Record<string, string> = {
+  // No fix-it advice or example amount: every version Sol reviewed could mislead (the cost is a package
+  // total, and a second link for the same supplier SKU is refused).
+  PRICE_UNIT_MISMATCH: "The price unit does not match this product's supplier link, so this row cannot be compared or approved. Check the quote's unit and package size.",
+  PRICE_UNIT_REQUIRED: 'Enter the supplier price unit.',
+  COST_INVALID: 'The cost is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34.',
+  COST_MUST_BE_POSITIVE: 'The cost must be more than $0.',
+  PACKAGE_QUANTITY_INVALID: 'Package quantity must be a number above 0.',
+  EFFECTIVE_DATE_INVALID: 'The effective date is not a valid date.',
+  EFFECTIVE_RANGE_INVALID: 'The end date is before the effective date.',
+  FORMULA_NOT_ALLOWED: 'This row has an Excel formula. Replace it with a plain value.',
+  LINK_REQUIRED: 'This row is not linked to a product.',
+  LINK_ID_INVALID: "This row's product link is not valid. Download a fresh quote sheet.",
+  LINK_VENDOR_MISMATCH: 'This product link belongs to another supplier or is turned off.',
+  LINK_NOT_CONFIRMED_FOR_REUSE: 'This product link is not confirmed yet. Confirm it on the Product links tab.',
+  PRICE_KIND_INVALID: 'Choose a price type: list, quote, contract, promo or manual.',
+};
+
+const rowErrorText = (code: string) => ROW_ERROR_MESSAGES[code] ?? `${code.toLowerCase().split('_').join(' ')}.`;
 
 const blankLink = {
   productId: '',
@@ -81,6 +103,55 @@ const blankQuickQuote = {
 
 function eligibleReviewRow(status: string): boolean {
   return status === 'new' || status === 'changed' || status === 'cannot_compare';
+}
+
+// cost_cents is the total for package_quantity units, so never label it "per" unless that is 1.
+function packageUnitText(row: SupplierImportReviewRow): string {
+  if (!row.price_unit) return '';
+  return row.package_quantity != null && row.package_quantity !== 1
+    ? ` for ${row.package_quantity} ${row.price_unit}`
+    : ` per ${row.price_unit}`;
+}
+
+/**
+ * The cost per inventory unit the server records for this quote. Only for rows that become (or
+ * became) an observation: a refused row's unit may not be the link's, so its conversion means nothing.
+ */
+function convertedCostText(row: SupplierImportReviewRow, workspace: SupplierPricingWorkspace | null): string | null {
+  if (!eligibleReviewRow(row.row_status) && row.row_status !== 'approved') return null;
+  const link = workspace?.links.find((item) => item.id === row.product_supplier_link_id);
+  if (!link || row.cost_cents === null) return null;
+  // The server gives no per-unit cost unless the link is comparable with a factor above 0.
+  const factor = link.inventory_units_per_supplier_unit;
+  const inventoryUnit = workspace?.products.find((product) => product.id === link.product_id)?.inventory_unit;
+  // Cost-basis selection also needs the link's unit to be the product's inventory unit.
+  const unitsDiffer = !!inventoryUnit && !!link.conversion_unit
+    && inventoryUnit.trim().toLowerCase() !== link.conversion_unit.trim().toLowerCase();
+  if (link.comparison_status !== 'comparable' || !link.is_active || factor === null || !(Number(factor) > 0) || unitsDiffer) {
+    return 'cannot compare to inventory units';
+  }
+  const unitCost = supplierUnitCostCents(row.cost_cents, row.package_quantity, factor);
+  // A quantity too large to repeat exactly: say so rather than guess.
+  if (unitCost === null) return 'converted cost not shown (package size too large)';
+  const unit = inventoryUnit || link.conversion_unit || 'inventory unit';
+  return `= ${formatSupplierCents(unitCost)} per ${unit}`;
+}
+
+function approveMessage(
+  review: SupplierImportReview | null,
+  selectedRowIds: Set<string>,
+  workspace: SupplierPricingWorkspace | null,
+): string {
+  const rows = (review?.rows ?? []).filter((row) => selectedRowIds.has(row.id));
+  const costs = rows.slice(0, 10).map((row) => {
+    const converted = convertedCostText(row, workspace);
+    const quoted = `${formatSupplierCents(row.cost_cents)}${packageUnitText(row)}`;
+    const joiner = converted?.startsWith('=') ? ' ' : ', ';
+    return `${row.product_name || 'Unmatched Product'}: ${quoted}${converted ? `${joiner}${converted}` : ''}.`;
+  });
+  const more = rows.length > 10 ? ` And ${rows.length - 10} more; see the Cost column.` : '';
+  return `You are adding ${selectedRowIds.size} supplier observations. You are changing ZERO sell prices.`
+    + `${costs.length > 0 ? ` ${costs.join(' ')}` : ''}${more}`;
 }
 
 export default function SupplierPricing() {
@@ -854,6 +925,7 @@ export default function SupplierPricing() {
               <tbody>
                 {review.rows.map((row) => {
                   const eligible = eligibleReviewRow(row.row_status);
+                  const convertedCost = convertedCostText(row, workspace);
                   return (
                     <tr key={row.id} className="border-b border-gray-100">
                       <td className="px-2 py-2">
@@ -871,14 +943,18 @@ export default function SupplierPricing() {
                       </td>
                       <td className="px-2 py-2 font-medium">{row.product_name || 'Unmatched Product'}</td>
                       <td className="px-2 py-2">{row.supplier_product_name || row.supplier_sku || '—'}</td>
-                      <td className="px-2 py-2 tabular-nums">{formatSupplierCents(row.cost_cents)}</td>
+                      <td className="px-2 py-2 tabular-nums">
+                        {formatSupplierCents(row.cost_cents)}
+                        {row.price_unit && <span className="text-secondary">{packageUnitText(row)}</span>}
+                        {convertedCost && <p className="text-xs text-secondary">{convertedCost}</p>}
+                      </td>
                       <td className="px-2 py-2">{row.effective_from || '—'}</td>
                       <td className="px-2 py-2">
                         <Badge variant={eligible ? 'info' : row.row_status === 'approved' ? 'success' : 'warning'}>
                           {row.row_status.replace(/_/g, ' ')}
                         </Badge>
                         {row.validation_errors.length > 0 && (
-                          <p className="mt-1 text-xs text-red-700">{row.validation_errors.join(', ')}</p>
+                          <p className="mt-1 text-xs text-red-700">{row.validation_errors.map(rowErrorText).join(' ')}</p>
                         )}
                         {isAdmin && row.row_status === 'approved' && row.observation_id && (
                           <Button
@@ -1176,7 +1252,7 @@ export default function SupplierPricing() {
         onClose={() => setApproveOpen(false)}
         onConfirm={handleApprove}
         title="Approve supplier observations?"
-        message={`You are adding ${selectedRowIds.size} supplier observations. You are changing ZERO sell prices.`}
+        message={approveMessage(review, selectedRowIds, workspace)}
         confirmLabel="Approve observations"
         variant="info"
         loading={busy}

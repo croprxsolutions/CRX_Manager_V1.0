@@ -156,6 +156,21 @@ const EXTRA_PAGES: { path: string; label: string; pageKey?: string; allRoles?: b
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+// Names pages had before the 2026-11 menu rename (#2451): typing an old name still finds the page.
+const FORMER_PAGE_NAMES: Record<string, string> = {
+  invoices: 'Invoices — Chemical',
+  'to-ship': 'To-Ship',
+  'application-records': 'Record Book (Applications)',
+  field: 'Field View (phone preview)',
+  'accounts-receivable': 'A/R Workspace',
+  'ar-aging': 'A/R Aging',
+  'accounts-payable': 'A/P & Vendor Bills',
+  'lot-trace': 'Lot Trace (recall lookup)',
+  'blend-tickets': 'Blend Tickets (OCR)',
+  dashboard: 'Overview (KPI Dashboard)',
+  'application-services': 'Application Services (fees)',
+};
+
 function fuzzyMatch(query: string, text: string): boolean {
   const q = query.toLowerCase();
   const t = text.toLowerCase();
@@ -197,7 +212,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
     const permissionPages = PAGE_PERMISSIONS
       .filter((page) => page.roles.includes(role) && hasPageAccess(role, deniedPages, page.key))
-      .map((page) => ({ path: page.path, label: page.label }));
+      .map((page) => ({ path: page.path, label: page.label, formerName: FORMER_PAGE_NAMES[page.key] }));
     const isOfficeRole = role === 'admin' || role === 'sales_rep';
     const extraPages = EXTRA_PAGES
       .filter((page) => {
@@ -206,7 +221,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
         // Office deep-links: office role + the linked page's deny-list gate.
         return isOfficeRole && (!page.pageKey || hasPageAccess(role, deniedPages, page.pageKey));
       })
-      .map(({ path, label }) => ({ path, label }));
+      .map(({ path, label }) => ({ path, label, formerName: undefined as string | undefined }));
 
     return [...permissionPages, ...extraPages];
   }, [deniedPages, role]);
@@ -287,7 +302,9 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
     }
 
     // Pages (client-side fuzzy match, instant)
-    const matchingPages = availablePages.filter((p) => fuzzyMatch(trimmed, p.label));
+    const q = trimmed.toLowerCase();
+    const matchingPages = availablePages.filter((p) => fuzzyMatch(trimmed, p.label)
+      || !!p.formerName?.toLowerCase().includes(q));
     for (const p of matchingPages.slice(0, 5)) {
       items.push({
         id: `page-${p.path}`,

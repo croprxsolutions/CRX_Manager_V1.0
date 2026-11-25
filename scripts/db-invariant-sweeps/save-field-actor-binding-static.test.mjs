@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,7 +39,19 @@ const wrapperMatch = batch4d.slice(wrapperStart).match(/AS \$function\$([\s\S]*?
 assert.ok(wrapperMatch, 'batch 4d save_field wrapper body is missing');
 
 const fingerprints = predicate.match(/\b[0-9a-f]{64}\b/g) ?? [];
-assert.equal(fingerprints.length, 2, 'predicate must embed the reviewed body and the batch 4d wrapper fingerprints');
+assert.equal(fingerprints.length, 3, 'predicate must embed the reviewed body, the batch 4d wrapper and the FP-1 impl fingerprints');
+
+// Field application FP-1 replaces the impl body behind the same wrapper; the predicate accepts it too.
+// This pin lands before the FP-1 migration, so the body check runs once that migration file exists.
+const FP1 = path.join(ROOT, 'supabase', 'migrations', '20270303120000_field_split_versions.sql');
+if (existsSync(FP1)) {
+  const fp1 = readFileSync(FP1, 'utf8').replace(/\r\n/g, '\n');
+  const fp1Start = fp1.indexOf('CREATE OR REPLACE FUNCTION public._save_field_replay_impl_20261015(');
+  assert.notEqual(fp1Start, -1, 'FP-1 save_field impl is missing from its migration');
+  const fp1Match = fp1.slice(fp1Start).match(/AS \$function\$([\s\S]*?)\$function\$;/);
+  assert.ok(fp1Match, 'FP-1 save_field impl body is missing');
+  assert.equal(sha256(fp1Match[1]), fingerprints[2], 'checked-in FP-1 save_field impl drifted from the standing live-sweep fingerprint');
+}
 assert.equal(
   sha256(body),
   fingerprints[0],

@@ -42,7 +42,7 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
 import { sanitizeError, assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, supabase, supabaseUntyped } from '../lib/db';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
-import { localToday } from '../lib/dateUtils';
+import { BUSINESS_TIMEZONE, localToday } from '../lib/dateUtils';
 import { formatExactUSD } from '../lib/money';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
 import { Sentry } from '../lib/sentry';
@@ -449,17 +449,20 @@ export default function ProductDetail() {
   const reloadRequired = pricingReloadRequired || productStale;
   // cost_history is admin-only under RLS (the panel only renders for admins).
   const costHistoryRead = useLoad<CostHistory[]>(isAdmin && !isNew && id ? `cost-history:${id}` : null, async () => {
-    const { data, error } = await supabase
+    // cost_history also logs price-only changes (cost unchanged) for Sell Price History. PostgREST cannot
+    // compare two columns, so read every row and keep the newest 20 whose cost really changed.
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('cost_history')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('product_id', id!)
       // The starting snapshot (20261026140000) records no change; the Sell Price History card shows it.
       .neq('change_source', 'starting_snapshot')
       .order('changed_at', { ascending: false })
-      .limit(20);
+      .order('id', { ascending: false })
+      .range(from, to)));
     if (error) throw error;
     if (!Array.isArray(data)) throw new Error('cost history read returned no list');
-    return data as CostHistory[];
+    return (data as CostHistory[]).filter((row) => row.old_cost !== row.new_cost).slice(0, 20);
   }, { report: { tags: { read: 'product_detail_cost_history' } } });
   const reloadCostHistory = costHistoryRead.reload;
   const costHistory = costHistoryRead.status === 'loaded' ? costHistoryRead.data : NO_ROWS;
@@ -2443,11 +2446,11 @@ export default function ProductDetail() {
                     {costHistory.map((ch) => (
                       <div key={ch.id} className="border-b border-gray-50 pb-3 last:border-0">
                         <div className="flex justify-between text-sm">
-                          <span className="text-red-500 line-through">${ch.old_cost?.toFixed(2)}</span>
-                          <span className="text-crx-green font-medium">${ch.new_cost?.toFixed(2)}</span>
+                          <span className="text-red-500 line-through">{ch.old_cost == null ? 'No cost' : formatExactUSD(ch.old_cost)}</span>
+                          <span className="text-crx-green font-medium">{ch.new_cost == null ? 'No cost' : formatExactUSD(ch.new_cost)}</span>
                         </div>
                         {ch.change_note && <p className="text-xs text-secondary mt-1">{ch.change_note}</p>}
-                        <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString()}</p>
+                        <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString('en-US', { timeZone: BUSINESS_TIMEZONE })}</p>
                       </div>
                     ))}
                   </div>
@@ -2498,7 +2501,7 @@ export default function ProductDetail() {
               </Card>
               </PhoneSection>
             )}
-            <ProductChangeHistory productId={id} reloadToken={priceHistoryReloadToken} />
+            <ProductChangeHistory productId={id} reloadToken={priceHistoryReloadToken} showPriceHistoryNote={isAdmin} />
           </div>
         )}
       </div>

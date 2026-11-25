@@ -43,6 +43,20 @@ describe('ProductSellPriceHistory', () => {
     expect(within(items[1]).queryByText('$10.00')).not.toHaveClass('line-through');
   });
 
+  it('names who made each change, and shows the source alone when no name came back', async () => {
+    mocks.fetchSellPriceHistory.mockResolvedValue([
+      { ...base, id: 's', changed_at: '2026-10-01T15:00:00Z', change_source: 'starting_snapshot', changer: null, old_tier1_price: 10, new_tier1_price: 10 },
+      { ...base, id: 'a', changed_at: '2026-10-20T15:00:00Z', change_source: 'pricing_worksheet', changer: { full_name: 'Pat Admin' }, old_tier1_price: 10, new_tier1_price: 11 },
+      { ...base, id: 'b', changed_at: '2026-10-21T15:00:00Z', change_source: 'product_page', changer: { full_name: '  ' }, old_tier1_price: 11, new_tier1_price: 12 },
+    ]);
+    render(<ProductSellPriceHistory productId="p1" />);
+    await screen.findByRole('img', { name: /Sell prices by tier/ });
+    const items = screen.getAllByRole('listitem');
+    expect(within(items[0]).getByText('Product page')).toBeInTheDocument();
+    expect(within(items[1]).getByText('Price sheet · Pat Admin')).toBeInTheDocument();
+    expect(within(items[2]).getByText('Starting point')).toBeInTheDocument();
+  });
+
   it('draws the prices in effect before the first change of a product with older history', async () => {
     mocks.fetchSellPriceHistory.mockResolvedValue([
       { ...base, id: 'r', changed_at: '2026-10-20T15:00:00Z', change_source: 'product_page', old_tier1_price: 10, new_tier1_price: 11 },

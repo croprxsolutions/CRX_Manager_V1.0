@@ -164,24 +164,33 @@ function emptyCompleteForm(): CompleteForm {
 
 type ViewMode = 'list' | 'map';
 
-function crewMarkerScope(profile: Profile | null, loading: boolean, assignmentsChecked: boolean, savedCopyAt: string | null) {
+function crewMarkerScope(profile: Profile | null, loading: boolean, assignmentsChecked: boolean,
+  { savedCopyAt, isOnline, mapAssignmentFailed }: { savedCopyAt: string | null; isOnline: boolean; mapAssignmentFailed: boolean }) {
   const mapChecking = loading || !assignmentsChecked;
   const markerUser = {
     actorId: profile?.id ?? '',
     office: profile?.role === 'admin' || profile?.role === 'sales_rep',
-    placementAllowed: !(mapChecking || savedCopyAt),
+    placementAllowed: isOnline && !(mapChecking || savedCopyAt || mapAssignmentFailed),
   };
   return { mapChecking, markerUser };
 }
 
-function FieldMapReadWarning({ jobsFailed, fieldsFailed, savedCopyAt, loading, retry }: {
+function jobLoadFallback(error: unknown, actorId: string | undefined, forMap: boolean) {
+  const lostSignal = isNetworkFailure(error);
+  if (forMap && lostSignal) return { kind: 'keep-current' } as const;
+  const saved = savedCopyAfterFailure<FieldViewJobCard[]>(MY_DAY_SNAPSHOT, actorId, lostSignal);
+  return saved && Array.isArray(saved.data) ? { kind: 'saved', saved } as const : { kind: 'unavailable' } as const;
+}
+
+function FieldMapReadWarning({ jobsFailed, fieldsFailed, mapAssignmentFailed, savedCopyAt, loading, retry }: {
   jobsFailed: boolean;
   fieldsFailed: boolean;
+  mapAssignmentFailed: boolean;
   savedCopyAt: string | null;
   loading: boolean;
   retry: () => void;
 }) {
-  if (!jobsFailed && !fieldsFailed && !savedCopyAt) {
+  if (!jobsFailed && !fieldsFailed && !mapAssignmentFailed && !savedCopyAt) {
     return loading ? <p role="status" className="m-3 text-sm">Checking assigned fields…</p> : null;
   }
   return (
@@ -206,6 +215,7 @@ export default function FieldView() {
 
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
+  const [mapAssignmentFailed, setMapAssignmentFailed] = useState(false);
   // When the job list failed to load and today's saved copy is shown instead (read-only): when it was loaded.
   const [savedCopyAt, setSavedCopyAt] = useState<string | null>(null);
   const [cards, setCards] = useState<FieldViewJobCard[]>([]);
@@ -237,12 +247,14 @@ export default function FieldView() {
   const [mapActorId, setMapActorId] = useState<string>();
   const [mapReadFailed, setMapReadFailed] = useState(false);
   const [mapCheckedCards, setMapCheckedCards] = useState(cards);
-  const { mapChecking, markerUser } = crewMarkerScope(profile, loading, cards === mapCheckedCards, savedCopyAt);
+  const { mapChecking, markerUser } = crewMarkerScope(profile, loading, cards === mapCheckedCards, {
+    savedCopyAt, isOnline, mapAssignmentFailed,
+  });
   const mapRef = useRef<MapRef | null>(null);
   const [jobsByField, setJobsByField] = useState<Map<string, string[]>>(() => new Map());
 
   // --- Load "my jobs" (the dispatched-location rows for the caller) -----------------
-  const fetchCards = useCallback(async () => {
+  const fetchCards = useCallback(async (forMap = false) => {
     setLoading(true);
     setFetchError(false);
     try {
@@ -313,16 +325,22 @@ export default function FieldView() {
       // Today's read-only copy for a dead spot (src/lib/todaySnapshot.ts): the cards as shown, nothing more.
       if (profile?.id) saveTodaySnapshot(MY_DAY_SNAPSHOT, profile.id, grouped);
       setSavedCopyAt(null);
+      setMapAssignmentFailed(false);
       setCards(grouped);
     } catch (err) {
       Sentry.captureException(err, { tags: { source: 'fetch', action: 'field_view_my_jobs' } });
-      const saved = savedCopyAfterFailure<FieldViewJobCard[]>(MY_DAY_SNAPSHOT, profile?.id, isNetworkFailure(err));
-      if (saved && Array.isArray(saved.data)) {
+      const fallback = jobLoadFallback(err, profile?.id, forMap);
+      if (fallback.kind === 'keep-current') {
+        // Checking pins must not turn an already loaded job into a read-only copy.
+        setMapAssignmentFailed(true);
+        return;
+      }
+      if (fallback.kind === 'saved') {
         // Shown read-only: Start and Complete stay off until a load succeeds (the banner says why), and an open
         // Complete form closes, as it did when a failed load emptied the list.
         setCompleteFormOpenFor(null);
-        setSavedCopyAt(saved.savedAt);
-        setCards(saved.data);
+        setSavedCopyAt(fallback.saved.savedAt);
+        setCards(fallback.saved.data);
       } else {
         // Honest error state: distinguish "couldn't load" from "genuinely no jobs" —
         // the empty-state copy below only shows when fetchError is false.
@@ -331,8 +349,9 @@ export default function FieldView() {
         toast('error', 'Failed to load your jobs');
         setCards([]);
       }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [toast, profile?.id]);
 
   useEffect(() => { fetchCards(); }, [fetchCards]);
@@ -340,12 +359,16 @@ export default function FieldView() {
   useEffect(() => {
     if (view !== 'map' || mapChecking) return;
     function onMapResume() {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible' || !navigator.onLine) return;
       setMapOpenCount((count) => count + 1);
-      void fetchCards();
+      void fetchCards(true);
     }
     document.addEventListener('visibilitychange', onMapResume);
-    return () => document.removeEventListener('visibilitychange', onMapResume);
+    window.addEventListener('online', onMapResume);
+    return () => {
+      document.removeEventListener('visibilitychange', onMapResume);
+      window.removeEventListener('online', onMapResume);
+    };
   }, [view, mapChecking, fetchCards]);
 
   // A saved completion left the queue (sent, needs attention, or discarded): reload so a
@@ -1035,7 +1058,7 @@ export default function FieldView() {
             <button
               onClick={() => {
                 if (view === 'map') return;
-                if (mapOpenCount > 0 && !mapChecking) void fetchCards();
+                if (mapOpenCount > 0 && !mapChecking && isOnline) void fetchCards(true);
                 setMapOpenCount((count) => count + 1);
                 setView('map');
               }}
@@ -1064,7 +1087,7 @@ export default function FieldView() {
               />
             </div>
             <button
-              onClick={fetchCards}
+              onClick={() => void fetchCards()}
               aria-label="Reload my jobs"
               className="inline-flex items-center justify-center w-11 h-11 rounded-lg bg-white/10 hover:bg-white/20 text-white shrink-0"
             >
@@ -1087,8 +1110,8 @@ export default function FieldView() {
       {/* Preserve the marker draft and retry ID when someone checks their job list. */}
       {mapOpenCount > 0 && (
         <div hidden={view !== 'map'} className="m-3 rounded-xl border border-gray-200">
-          <FieldMapReadWarning jobsFailed={fetchError} fieldsFailed={mapReadFailed}
-            savedCopyAt={savedCopyAt} loading={mapChecking} retry={() => void fetchCards()} />
+          <FieldMapReadWarning jobsFailed={fetchError} fieldsFailed={mapReadFailed} mapAssignmentFailed={mapAssignmentFailed}
+            savedCopyAt={savedCopyAt} loading={mapChecking} retry={() => void fetchCards(true)} />
           <ErrorBoundary inline>
             <CrewFieldMarkerMap
               key={markerUser.actorId}
@@ -1125,7 +1148,7 @@ export default function FieldView() {
             <p className="mt-3 font-heading text-xl font-bold text-amber-900">Couldn't load your jobs</p>
             <p className="mt-1 text-sm text-amber-800">Check your connection and try again.</p>
             <button
-              onClick={fetchCards}
+              onClick={() => void fetchCards()}
               className="mt-4 inline-flex items-center gap-2 px-4 min-h-[44px] rounded-lg bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 text-sm font-semibold"
             >
               <RefreshCw className="w-4 h-4" aria-hidden="true" /> Retry

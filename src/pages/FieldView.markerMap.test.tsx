@@ -10,6 +10,8 @@ const fixtures = vi.hoisted(() => ({
   locationGate: null as Promise<void> | null,
   geometryError: null as { message: string } | null,
   locationsError: null as { message: string } | null,
+  dispatchError: null as { message: string } | null,
+  wholeJobStatus: 'scheduled',
   omitGeometry: false,
   omitLocation: false,
   unlinkedLocation: false,
@@ -47,7 +49,7 @@ vi.mock('../lib/db', async (importOriginal) => ({
   supabase: {
     from: (table: string) => ({
       select: () => table === 'jobs' ? reply([{
-        id: 'whole-job', job_number: 'J-100', status: 'scheduled', job_date: null, customer: { farm_name: 'Whole job farm' },
+        id: 'whole-job', job_number: 'J-100', status: fixtures.wholeJobStatus, job_date: null, customer: { farm_name: 'Whole job farm' },
       }]) : {
         in: (column: 'id' | 'job_id', ids: string[]) => {
           fixtures.mapReads(column, ids);
@@ -71,7 +73,7 @@ vi.mock('../lib/db', async (importOriginal) => ({
         dispatch_id: 'dispatch', job_field_id: fixtures.movedField ? 'other-location' : 'my-location', job_id: 'split-job', job_number: 'J-101',
         job_status: 'scheduled', field_id: fixtures.movedField ? 'other-field' : 'my-field', dispatch_status: 'dispatched', assignee_kind: 'applicator',
         applicator_id: 'user-1', field_name: 'My dispatched field', customer_name: 'Split job farm',
-      }]);
+      }], fixtures.dispatchError);
     },
   },
 }));
@@ -100,6 +102,8 @@ beforeEach(() => {
   fixtures.locationGate = null;
   fixtures.geometryError = null;
   fixtures.locationsError = null;
+  fixtures.dispatchError = null;
+  fixtures.wholeJobStatus = 'scheduled';
   fixtures.omitGeometry = false;
   fixtures.omitLocation = false;
   fixtures.unlinkedLocation = false;
@@ -262,5 +266,27 @@ it('rechecks dispatch when the phone resumes with the map still open', async () 
     expect(map.queryByRole('heading', { name: 'My dispatched field' })).toBeNull();
   } finally {
     visibility.mockRestore();
+  }
+});
+
+it.each([false, true])('keeps offline job completion available after a map recheck (navigator online: %s)', async (online) => {
+  fixtures.wholeJobStatus = 'in_progress';
+  render(fieldView());
+  const map = await openMap();
+  await map.findByRole('heading', { name: 'Whole-job field' });
+  fireEvent.click(screen.getByRole('button', { name: 'List' }));
+  expect(screen.getByRole('button', { name: 'Complete Job' })).toBeEnabled();
+
+  const onlineState = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(online);
+  try {
+    if (!online) act(() => { window.dispatchEvent(new Event('offline')); });
+    fixtures.dispatchError = { message: 'Failed to fetch' };
+    fireEvent.click(screen.getByRole('button', { name: 'Map' }));
+    if (online) await screen.findByText(/Couldn't check all assigned fields/);
+    expect(map.getByRole('button', { name: 'Add marker' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'List' }));
+    expect(await screen.findByRole('button', { name: 'Complete Job' })).toBeEnabled();
+  } finally {
+    onlineState.mockRestore();
   }
 });

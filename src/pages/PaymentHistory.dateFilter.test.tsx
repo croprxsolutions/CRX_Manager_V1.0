@@ -110,8 +110,7 @@ describe('Payment History counts checks entered on Prepay Credits (KI-207)', () 
     fireEvent.click(screen.getByRole('button', { name: 'Today' }));
     expect(activeTotal()).toHaveTextContent('$450.00');
     expect(activeTotal()).toHaveTextContent('3 payment(s) today');
-    expect(screen.getByText(/include 1 check\(s\) entered on Prepay Credits \(\$300\.00\)/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'See them on Prepay Credits' })).toHaveAttribute('href', '/prepay?tab=manager');
+    expect(screen.getByText(/include 1 check\(s\) entered on Prepay Credits \(\$300\.00\)/)).toHaveTextContent('Export CSV lists each one');
   });
 });
 

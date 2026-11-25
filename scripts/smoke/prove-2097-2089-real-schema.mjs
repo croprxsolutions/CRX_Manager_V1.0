@@ -142,21 +142,22 @@ function newCustomer(tag) {
   psql(`${signedIn} INSERT INTO public.customers (id, farm_name) VALUES ('${customer}', '[2089 ${tag}] Farm'); COMMIT;`);
   return customer;
 }
-const postSql = (customer, invoice, tag) => `${signedIn}
+// post = false: only the draft is saved (KI-148 counts a draft as open work too).
+const postSql = (customer, invoice, tag, post = true) => `${signedIn}
   INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number, total_amount_cents)
     VALUES ('${invoice}', '${customer}', 'misc_charge', 'INV2089-${tag}', 12500);
-  UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${invoice}';`;
+  ${post ? `UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${invoice}';` : ''}`;
 const deactivateSql = (customer) => `${signedIn} UPDATE public.customers SET is_active = false WHERE id = '${customer}';`;
 const state = (customer, invoice) => ({
   active: scalar(`SELECT is_active FROM public.customers WHERE id = '${customer}';`),
   invoice: scalar(`SELECT COALESCE((SELECT status FROM public.invoices WHERE id = '${invoice}'), 'none');`),
 });
 
-async function postingFirst(tag) {
-  const customer = newCustomer(`${tag}-a`);
+async function postingFirst(tag, post = true) {
+  const customer = newCustomer(`${tag}-a${post ? '' : '-draft'}`);
   const invoice = randomUUID();
   const p = session(`v021-post-${tag}`);
-  p.send(postSql(customer, invoice, `${tag}-a`));
+  p.send(postSql(customer, invoice, `${tag}-a`, post));
   assert.equal(await settle(p), 'idle', p.output());
   const d = session(`v021-deact-${tag}`);
   d.send(deactivateSql(customer));
@@ -167,14 +168,14 @@ async function postingFirst(tag) {
   return { waited, refused: deact.status !== 0, error: deact.out.trim(), ...state(customer, invoice) };
 }
 
-async function deactivationFirst(tag) {
-  const customer = newCustomer(`${tag}-b`);
+async function deactivationFirst(tag, post = true) {
+  const customer = newCustomer(`${tag}-b${post ? '' : '-draft'}`);
   const invoice = randomUUID();
   const d = session(`v021-deact-${tag}`);
   d.send(deactivateSql(customer));
   assert.equal(await settle(d), 'idle');
   const p = session(`v021-post-${tag}`);
-  p.send(postSql(customer, invoice, `${tag}-b`));
+  p.send(postSql(customer, invoice, `${tag}-b`, post));
   const waited = await settle(p);
   const deact = await d.end('COMMIT;');
   assert.equal(deact.status, 0, deact.out);
@@ -185,7 +186,13 @@ async function deactivationFirst(tag) {
 const RUN = Date.now().toString(36);  // unique names when a kept container is reused
 async function runAll(phase) {
   const tag = `${phase}-${RUN}`;
-  return { expiry: await expiryRace(tag), postFirst: await postingFirst(tag), deactFirst: await deactivationFirst(tag) };
+  return {
+    expiry: await expiryRace(tag),
+    postFirst: await postingFirst(tag),
+    deactFirst: await deactivationFirst(tag),
+    draftFirst: await postingFirst(`${tag}-d`, false),
+    deactFirstDraft: await deactivationFirst(`${tag}-d`, false),
+  };
 }
 function assertBroken(r, when) {
   // Today the draw guard (_enforce_quote_terminal_not_drawn) stops the stale expiry, so the hold is not released,
@@ -198,6 +205,11 @@ function assertBroken(r, when) {
   assert.equal(r.deactFirst.waited, 'idle', `${when}: the posting should not wait`);
   assert.deepEqual([r.deactFirst.refused, r.deactFirst.active, r.deactFirst.invoice], [false, 'f', 'posted'],
     `${when}: #2089b should reproduce (inactive customer with a posted invoice)`);
+  for (const k of ['draftFirst', 'deactFirstDraft']) {
+    assert.equal(r[k].waited, 'idle', `${when} ${k}: nothing should wait`);
+    assert.deepEqual([r[k].refused, r[k].active, r[k].invoice], [false, 'f', 'draft'],
+      `${when} ${k}: should reproduce (inactive customer with an open draft)`);
+  }
 }
 
 try {
@@ -232,15 +244,25 @@ try {
   console.log('[v021] AFTER #2097: the run completes; booking stays sent with its hold and gets its past-date alert; the undrawn quotes still expire');
   console.log('[v021] AFTER #2089a: deactivation waited, then CUSTOMER_HAS_OPEN_WORK; customer active, invoice posted');
   console.log('[v021] AFTER #2089b: posting waited, then CUSTOMER_INACTIVE_POSTING; customer inactive, no invoice');
+  assert.equal(after.draftFirst.waited, 'lock');
+  assert.match(after.draftFirst.error, /CUSTOMER_HAS_OPEN_WORK/);
+  assert.deepEqual([after.draftFirst.active, after.draftFirst.invoice], ['t', 'draft']);
+  assert.equal(after.deactFirstDraft.waited, 'lock');
+  assert.match(after.deactFirstDraft.error, /CUSTOMER_INACTIVE_POSTING/);
+  assert.deepEqual([after.deactFirstDraft.active, after.deactFirstDraft.invoice], ['f', 'none']);
+  console.log('[v021] AFTER #2089 drafts: the same in both orders for a draft saved during a deactivation');
 
   // Not races: what else counts as an invoice starting to carry a balance, and the isolation rule.
   const oldCustomer = newCustomer(`after-old-${RUN}`);
   const draft = randomUUID();
   const paid = randomUUID();
+  const deletedDraft = randomUUID();
   psql(`${signedIn} INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number) VALUES ('${draft}', '${oldCustomer}', 'misc_charge', 'INV2089-old-${RUN}');
     INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number, total_amount_cents) VALUES ('${paid}', '${oldCustomer}', 'misc_charge', 'INV2089-paid-${RUN}', 100);
     UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${paid}';
-    UPDATE public.invoices SET status = 'paid' WHERE id = '${paid}'; COMMIT;`);
+    UPDATE public.invoices SET status = 'paid' WHERE id = '${paid}';
+    INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number) VALUES ('${deletedDraft}', '${oldCustomer}', 'misc_charge', 'INV2089-del-${RUN}');
+    UPDATE public.invoices SET deleted_at = now() WHERE id = '${deletedDraft}'; COMMIT;`);
   // KI-148 refuses deactivating with an open draft, so this customer goes inactive the way legacy rows are: directly.
   psql(`BEGIN; ALTER TABLE public.customers DISABLE TRIGGER customers_open_work_on_deactivate_20270128;
     UPDATE public.customers SET is_active = false WHERE id = '${oldCustomer}';
@@ -254,11 +276,16 @@ try {
   assert.equal(scalar(`SELECT status FROM public.invoices WHERE id = '${draft}';`), 'draft');
   // A returned check or voided payment moves paid back to posted: a balance again on an inactive customer.
   refused(`UPDATE public.invoices SET status = 'posted' WHERE id = '${paid}';`);
-  // Restoring a deleted invoice that carries a balance status.
-  psql(`${signedIn} UPDATE public.invoices SET deleted_at = now() WHERE id = '${paid}'; COMMIT;`);
-  refused(`UPDATE public.invoices SET deleted_at = NULL WHERE id = '${paid}';`);
-  assert.equal(scalar(`SELECT status || '|' || (deleted_at IS NOT NULL) FROM public.invoices WHERE id = '${paid}';`), 'paid|true');
-  console.log('[v021] AFTER: for an inactive customer, posting an old draft, reopening a paid invoice and restoring a deleted one are refused CUSTOMER_INACTIVE_POSTING');
+  assert.equal(scalar(`SELECT status FROM public.invoices WHERE id = '${paid}';`), 'paid');
+  // Restoring a deleted draft, and creating a new one.
+  refused(`UPDATE public.invoices SET deleted_at = NULL WHERE id = '${deletedDraft}';`);
+  refused(`INSERT INTO public.invoices (customer_id, invoice_type, invoice_number) VALUES ('${oldCustomer}', 'misc_charge', 'INV2089-new-${RUN}');`);
+  // Moving an open invoice onto the inactive customer.
+  const other = newCustomer(`after-other-${RUN}`);
+  const moving = randomUUID();
+  psql(`${signedIn} INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number) VALUES ('${moving}', '${other}', 'misc_charge', 'INV2089-mv-${RUN}'); COMMIT;`);
+  refused(`UPDATE public.invoices SET customer_id = '${oldCustomer}' WHERE id = '${moving}';`);
+  console.log('[v021] AFTER: for an inactive customer, posting an old draft, reopening a paid invoice, restoring a deleted draft, a new draft and moving an invoice onto it are refused CUSTOMER_INACTIVE_POSTING');
   // A deactivation outside READ COMMITTED would count from its first snapshot, so it is refused.
   const rrCustomer = newCustomer(`after-rr-${RUN}`);
   const rr = psql(`BEGIN ISOLATION LEVEL REPEATABLE READ; ${claims(ADMIN)}

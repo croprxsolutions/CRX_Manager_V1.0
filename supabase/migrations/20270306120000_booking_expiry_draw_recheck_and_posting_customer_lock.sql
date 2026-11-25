@@ -17,22 +17,26 @@
 -- 2. #2089 (Sol r58, 20270128140000:90). Deactivating a customer counts open invoices from one snapshot and takes
 --    no locks, so an invoice created and posted in a transaction that had not committed was missed: the customer
 --    went inactive with a posted balance, which statements, finance charges and the prepay runs then skip. Now
---    an invoice that starts to carry a balance takes the same customer row lock the #2000 new-work guard takes
---    (20270201120000): a new AFTER UPDATE OF status, deleted_at trigger on invoices locks the customer FOR SHARE and
---    refuses when the customer is inactive: CUSTOMER_INACTIVE_POSTING. It fires when an undeleted invoice is posted
---    (draft or unposted to posted, paid or overdue; every insert is a draft, trg_invoice_draft_insert), is reopened
---    to posted or overdue from any other status (a returned check or voided payment on a paid invoice; Mason's #2000
---    rule: correcting closed history that reopens work needs the customer reactivated first), or is undeleted while
---    posted, paid or overdue. FOR SHARE conflicts with the row lock a deactivation holds,
+--    invoices follow the #2000 new-work rule (20270201120000, which left invoices to this lane): a new AFTER INSERT
+--    OR UPDATE OF status, deleted_at, customer_id trigger on invoices locks the customer FOR SHARE, the lock the
+--    #2000 guard takes, and refuses when the customer is inactive: CUSTOMER_INACTIVE_POSTING. "Open" is KI-148's
+--    meaning (draft, unposted, posted or overdue, not deleted). It fires when an invoice is created (always a draft,
+--    trg_invoice_draft_insert), becomes open from closed (a returned check or voided payment reopening a paid
+--    invoice, a restore; Mason's #2000 rule: correcting closed history that reopens work needs the customer
+--    reactivated first), moves to another customer while open, or is posted (draft or unposted to posted, paid or
+--    overdue). FOR SHARE conflicts with the row lock a deactivation holds,
 --    so whichever commits first wins and the other sees it: a posting during a deactivation waits and is refused; a
 --    deactivation during a posting waits and KI-148's check then counts the posted invoice and refuses
---    (CUSTOMER_HAS_OPEN_WORK). The same rule refuses posting an inactive customer's old draft; reactivate first.
+--    (CUSTOMER_HAS_OPEN_WORK); a draft saved during a deactivation is handled the same way. The same rule refuses
+--    posting an inactive customer's old draft; reactivate first.
 --    The deactivation check (guard_customer_deactivation_open_work_20270128, re-emitted from its 20270129210000 body
 --    with one added IF) now refuses outside READ COMMITTED (CUSTOMER_DEACTIVATION_NEEDS_READ_COMMITTED): after waiting
 --    for a posting it must count from a fresh snapshot, which REPEATABLE READ and SERIALIZABLE do not take.
 --    LOCK ORDER: the posting functions (_post_invoice_impl_20260714, _post_deleted_delivery_recovery_invoice_20260719
 --    and their wrappers) never lock or update customers after posting (pg_proc 2026-11-25), so FOR SHARE is never
---    upgraded in the same transaction. Two postings for one customer share the lock and never wait on each other.
+--    upgraded in the same transaction, and no function that posts also applies a payment, prepay, credit or
+--    write-off (pg_proc 2026-11-25; each app call is its own transaction). Two postings for one customer share the
+--    lock and never wait on each other.
 --    Payment, prepay and returned-check paths lock the customer and then lock only posted invoices, which a posting
 --    in flight is not yet, so they never wait on it while it waits on them; a returned check already locks the
 --    customer FOR UPDATE before it reopens an invoice. Posting locks the invoice's order (BEFORE triggers) and then
@@ -77,10 +81,14 @@ BEGIN
      OR p.proowner <> 'postgres'::regrole OR NOT p.prosecdef
      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
      OR p.proacl IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[]
-     OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.customers'::regclass
-                     AND tgname = 'customers_open_work_on_deactivate_20270128' AND tgenabled = 'O' AND tgfoid = p.oid)
-     OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.invoices'::regclass
-                     AND tgname = 'trg_invoice_draft_insert' AND tgenabled = 'O') THEN
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.customers'::regclass
+                     AND t.tgname = 'customers_open_work_on_deactivate_20270128' AND t.tgenabled = 'O' AND t.tgfoid = p.oid
+                     AND t.tgqual IS NULL
+                     AND pg_get_triggerdef(t.oid) LIKE '%BEFORE UPDATE OF is_active ON public.customers FOR EACH ROW%')
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.invoices'::regclass
+                     AND t.tgname = 'trg_invoice_draft_insert' AND t.tgenabled = 'O' AND t.tgqual IS NULL
+                     AND t.tgfoid = to_regprocedure('public.enforce_invoice_draft_on_insert()')
+                     AND pg_get_triggerdef(t.oid) LIKE '%BEFORE INSERT ON public.invoices FOR EACH ROW%') THEN
     RAISE EXCEPTION 'V021_RACES_PREFLIGHT: the KI-148 deactivation check or the draft-on-insert rule is missing';
   END IF;
   IF (SELECT count(*) FROM information_schema.columns
@@ -366,13 +374,26 @@ CREATE FUNCTION public.guard_inactive_customer_posting_20270306()
 AS $function$
 DECLARE
   v_active boolean;
+  v_new_open boolean := NEW.deleted_at IS NULL AND NEW.status IN ('draft', 'unposted', 'posted', 'overdue');
 BEGIN
-  -- Fired only when the invoice starts to carry a balance (the trigger's WHEN clause). FOR SHARE waits for a deactivation in progress,
-  -- then reads its committed result; it also makes a deactivation wait for this posting, so KI-148's count sees it.
-  -- A customer this transaction cannot find is refused, never assumed active.
+  -- "Open" is KI-148's meaning (20270128140000). Checked: a new invoice, one that becomes open or moves to another
+  -- customer while open, and posting (draft or unposted to posted, paid or overdue), which carries a balance even
+  -- when the draft was already open.
+  IF TG_OP = 'UPDATE' AND NOT (
+       (v_new_open AND NOT (OLD.deleted_at IS NULL AND OLD.status IN ('draft', 'unposted', 'posted', 'overdue')))
+       OR (v_new_open AND NEW.customer_id IS DISTINCT FROM OLD.customer_id)
+       OR (NEW.deleted_at IS NULL AND OLD.status IN ('draft', 'unposted') AND NEW.status IN ('posted', 'paid', 'overdue'))) THEN
+    RETURN NULL;
+  END IF;
+  IF TG_OP = 'INSERT' AND NOT v_new_open THEN
+    RETURN NULL;
+  END IF;
+  -- FOR SHARE waits for a deactivation in progress, then reads its committed result; it also makes a deactivation
+  -- wait for this save, so KI-148's count sees it. A customer this transaction cannot find is refused, never
+  -- assumed active.
   SELECT c.is_active INTO v_active FROM public.customers c WHERE c.id = NEW.customer_id FOR SHARE;
   IF v_active IS NOT TRUE THEN
-    RAISE EXCEPTION 'CUSTOMER_INACTIVE_POSTING: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before an invoice is posted, reopened or restored for them';
+    RAISE EXCEPTION 'CUSTOMER_INACTIVE_POSTING: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before an invoice is created, posted, reopened or restored for them';
   END IF;
   RETURN NULL;
 END;
@@ -380,16 +401,10 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.guard_inactive_customer_posting_20270306() FROM PUBLIC, anon, authenticated, service_role;
 
--- AFTER, so every BEFORE posting check (and row-level security) runs first and keeps its own error.
+-- AFTER, so every BEFORE check (and row-level security) runs first and keeps its own error.
 CREATE TRIGGER zz_inactive_customer_posting_20270306
-  AFTER UPDATE OF status, deleted_at ON public.invoices
-  FOR EACH ROW
-  WHEN (NEW.deleted_at IS NULL AND (
-    -- posted (or posted straight to paid), or restored while posted, paid or overdue
-    (NEW.status IN ('posted', 'paid', 'overdue') AND (OLD.status IN ('draft', 'unposted') OR OLD.deleted_at IS NOT NULL))
-    -- reopened to a balance from any other status (paid by a returned check or voided payment, voided, cancelled)
-    OR (NEW.status IN ('posted', 'overdue') AND OLD.status NOT IN ('posted', 'overdue'))))
-  EXECUTE FUNCTION public.guard_inactive_customer_posting_20270306();
+  AFTER INSERT OR UPDATE OF status, deleted_at, customer_id ON public.invoices
+  FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_customer_posting_20270306();
 
 DO $postflight$
 DECLARE
@@ -400,7 +415,7 @@ BEGIN
   SELECT * INTO d FROM pg_proc WHERE oid = to_regprocedure('public.guard_customer_deactivation_open_work_20270128()');
   SELECT * INTO a FROM pg_proc WHERE oid = to_regprocedure('public.auto_expire_quotes(text)');
   SELECT * INTO g FROM pg_proc WHERE oid = to_regprocedure('public.guard_inactive_customer_posting_20270306()');
-  -- tgtype 17 = ROW | UPDATE (AFTER); tgattr = status and deleted_at.
+  -- tgtype 21 = ROW | INSERT | UPDATE (AFTER); tgattr = status, deleted_at and customer_id; no WHEN clause.
   IF a.oid IS NULL OR position('#2097' IN a.prosrc) = 0
      OR a.proowner <> 'postgres'::regrole OR NOT a.prosecdef
      OR a.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
@@ -418,11 +433,11 @@ BEGIN
      OR NOT EXISTS (
           SELECT 1 FROM pg_trigger t
            WHERE t.tgrelid = 'public.invoices'::regclass AND t.tgname = 'zz_inactive_customer_posting_20270306'
-             AND t.tgfoid = g.oid AND t.tgenabled = 'O' AND NOT t.tgisinternal AND t.tgqual IS NOT NULL
-             AND t.tgtype = 17 AND t.tgnargs = 0
+             AND t.tgfoid = g.oid AND t.tgenabled = 'O' AND NOT t.tgisinternal AND t.tgqual IS NULL
+             AND t.tgtype = 21 AND t.tgnargs = 0
              AND (SELECT array_agg(x ORDER BY x) FROM unnest(t.tgattr::int2[]) x)
                  = (SELECT array_agg(a2.attnum ORDER BY a2.attnum) FROM pg_attribute a2
-                     WHERE a2.attrelid = 'public.invoices'::regclass AND a2.attname IN ('status', 'deleted_at'))) THEN
+                     WHERE a2.attrelid = 'public.invoices'::regclass AND a2.attname IN ('status', 'deleted_at', 'customer_id'))) THEN
     RAISE EXCEPTION 'V021_RACES_POSTFLIGHT: auto_expire_quotes, the deactivation check or the posting guard lost its body, owner, mode, search_path, grants or trigger';
   END IF;
 END

@@ -43,6 +43,9 @@ const CANDIDATE = '20270305190000_field_split_versions.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });
+// FP-1 follow-up (Sol r6 MED): an owner change refreshes the copy. Applied right after the candidate.
+const FOLLOW_UP = '20270305210000_field_owner_change_refreshes_copy.sql';
+const followUp = readFileSync(path.join(ROOT, 'supabase', 'migrations', FOLLOW_UP), 'utf8').replaceAll('\r\n', '\n');
 
 const [A, B, C, D, E, X] = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'].map(id);
 const [F1, F2, F3, F4, F5, F6] = ['f1', 'f2', 'f3', 'f4', 'f5', 'f6'].map(id);
@@ -122,7 +125,9 @@ try {
   assert.match(once.stderr, /POSTFLIGHT_OK/);
   const again = apply(['-1']);
   assert.match(`${again.stdout}${again.stderr}`, /FIELD_SPLIT_BASELINE_DRIFT/, 're-apply must refuse');
-  console.log('[apply] autocommit refused, applied once with POSTFLIGHT_OK, re-apply refused');
+  const fu = docker([...PSQL, '-1'], { input: followUp, allowFailure: true });
+  assert.equal(fu.status, 0, `follow-up apply failed: ${fu.stderr}`);
+  console.log('[apply] autocommit refused, applied once with POSTFLIGHT_OK, re-apply refused; owner-change follow-up applied');
 
   // 1. Backfill.
   assert.equal(scalar(`SELECT count(*) || '/' || count(*) FILTER (WHERE version_number = 1 AND NOT history_known AND effective_from = '1900-01-01')
@@ -136,6 +141,51 @@ try {
   // Sol HIGH (backfill): a saved 50.01/50.00 split imports unrounded and bills $100.00 exactly as before FP-1.
   assert.equal(inForce(F2), [`${A}:50010000/50010000`, `${B}:50000000/50000000`].sort().join(','), 'a near-100% split imports as saved');
   billsAsBefore(F2, { [A]: '50.01', [B]: '50.00' }, 'backfill');
+  // Sol r6 LOW: the real Create Invoice (transfer_job_to_invoice) on a $100.00 job on that field, rolled back.
+  const INV_JOB = id('e9'), INV_PROD = id('d9');
+  // Each call runs in its own rolled-back transaction, so the same ids can be reused.
+  const createInvoice = (field, owner) => scalarAll(`BEGIN;
+    SET LOCAL session_replication_role = replica;
+    INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
+        current_cost, tier1_price, tier2_price, tier3_price, is_active, is_rup)
+      VALUES ('${INV_PROD}', 'Split proof chem', 'FS-INV-1', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 6, 10, 10, 10, true, false);
+    INSERT INTO public.jobs (id, job_number, customer_id, status, job_date, total_acres, total_cost_cents, total_price_cents)
+      VALUES ('${INV_JOB}', 'FS-INV', '${owner}', 'completed', ${TODAY}, 10, 6000, 10000);
+    INSERT INTO public.job_fields (job_id, field_id, acres_to_treat) VALUES ('${INV_JOB}', '${field}', 10);
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, price_per_unit_cents, cost_per_unit_cents, customer_supplied)
+      VALUES ('${INV_JOB}', '${INV_PROD}', 10, 'Gal', 1, 'Gal', 1000, 600, false);
+    INSERT INTO public.job_epa_sprayed (job_id, not_recorded) VALUES ('${INV_JOB}', true);
+    INSERT INTO public.job_product_epa (job_id, product_id, epa_registration, not_recorded) VALUES ('${INV_JOB}', '${INV_PROD}', NULL, true);
+    SET LOCAL session_replication_role = origin;
+    SELECT set_config('request.jwt.claims', '{"sub":"${USERS.admin}","role":"authenticated"}', true);
+    SET LOCAL ROLE authenticated;
+    SELECT public.transfer_job_to_invoice('${INV_JOB}', '${USERS.admin}', 'k-fs-invoice') IS NOT NULL;
+    RESET ROLE;
+    SELECT 'INVOICED ' || string_agg(i.customer_id::text || ':' || i.total_amount_cents, ',' ORDER BY i.customer_id)
+      || ' ANCHOR ' || (SELECT a.customer_id::text FROM public.jobs j JOIN public.invoices a ON a.id = j.invoice_id WHERE j.id = '${INV_JOB}')
+      FROM public.invoices i WHERE i.job_id = '${INV_JOB}' AND i.deleted_at IS NULL;
+    ROLLBACK;`).split('\n').find((l) => l.startsWith('INVOICED '));
+  const invoiced = createInvoice(F2, A);
+  // Job billing in A, B order on the shares as saved (A is listed first in billsAsBefore's sorted order only when A < B).
+  // Create Invoice splits the 10 Gal by acre share to 4 decimals (largest remainder) and prices each payer's
+  // quantity on its own, within 50 cents of the exact share (Mason, 2026-11-22, "Allow up to 50c"): 50.01/100.01 of
+  // 10 Gal = 5.0005 Gal -> $50.005 -> 5001 cents; 4.9995 Gal -> $49.995 -> 5000 cents. FP-1 stores the same 50.01/50.00
+  // shares (billsAsBefore above), so this is what Create Invoice billed before FP-1 too.
+  const billedNear = (line, field, owner) => {
+    const m = /^INVOICED (\S+) ANCHOR (\S+)$/.exec(line ?? '');
+    assert.ok(m, `Create Invoice returned an invoice line: ${line}`);
+    assert.equal(m[2], owner, `${line}: the job anchors to the main payer`);
+    const pcts = Object.fromEntries(scalar(`SELECT string_agg(customer_id::text || '=' || split_pct, ',') FROM public.field_billing_defaults WHERE field_id = '${field}';`).split(',').map((x) => x.split('=')));
+    const total = Object.values(pcts).reduce((t, p) => t + Number(p), 0);
+    const billed = m[1].split(',').map((x) => x.split(':'));
+    assert.deepEqual(billed.map(([c]) => c).sort(), Object.keys(pcts).sort(), `${line}: one invoice per payer`);
+    for (const [c, cents] of billed) assert.ok(Math.abs(Number(cents) - (10000 * Number(pcts[c])) / total) <= 50, `${line}: ${c} within 50 cents of its share`);
+    return m;
+  };
+  billedNear(invoiced, F2, A);
+  assert.equal(invoiced, `INVOICED ${[`${A}:5001`, `${B}:5000`].sort().join(',')} ANCHOR ${A}`,
+    'Create Invoice bills 5.0005 Gal (5001 cents) and 4.9995 Gal (5000 cents) on 50.01/50.00, anchored to the owner');
+  console.log(`[backfill] Create Invoice on a $100.00 job: ${invoiced}`);
   console.log('[backfill] version 1 on every field with a split, thirds exact, notes kept');
 
   // 2. The writer: thirds, refusals, 0% payers.
@@ -281,8 +331,8 @@ try {
   r = attempt(USERS.admin, `${refuse(setSplit(F3, TODAY, payers([[A, M]]), 'k-tab\t'))} v := t;`);
   assert.match(r, /IDEMPOTENCY_KEY_REQUIRED/, `a key with a tab is refused: ${r}`);
   // Until FP-4 a split change starts today only (Mason, 2026-11-24): job billing reads today's copy.
-  for (const date of ["DATE '2027-03-01'", `${TODAY} - 1`, `${TODAY} + 1`]) {
-    r = attempt(USERS.admin, `${refuse(setSplit(F3, date, payers([[A, 70000000], [B, 30000000]]), `k-dated-${date.length}`))} v := t;`);
+  for (const [n, date] of [`(${TODAY} + 30)`, `${TODAY} - 1`, `${TODAY} + 1`].entries()) {
+    r = attempt(USERS.admin, `${refuse(setSplit(F3, date, payers([[A, 70000000], [B, 30000000]]), `k-dated-${n}`))} v := t;`);
     assert.match(r, /FIELD_SPLIT_STARTS_TODAY_UNTIL_FP4/, `a split starting ${date} is refused: ${r}`);
   }
   console.log('[retries] same key replays; a different request under it is refused; non-today starts refused');
@@ -355,13 +405,13 @@ try {
   // the internal writer, as FP-4 will allow.
   const dated = (field, date, rows) => scalar(`SELECT set_config('request.jwt.claims', '{"sub":"${USERS.admin}","role":"authenticated"}', false);
     SELECT public._set_field_billing_split_20270303('${field}', ${date}, ${rows}, NULL, 'proof dated', '${USERS.admin}', true)->>'wrote_version';`);
-  assert.equal(dated(F3, "DATE '2027-03-01'", payers([[A, 70000000], [B, 30000000]])), 'true', 'a dated version is written');
+  assert.equal(dated(F3, `(${TODAY} + 30)`, payers([[A, 70000000], [B, 30000000]])), 'true', 'a dated version is written');
   r = attempt(USERS.rep, `v := (SELECT string_agg(field_id::text || ':' || has_split || ':' || coalesce(version_number::text, '-'), ',' ORDER BY field_id)
-    FROM public.field_split_as_of(ARRAY['${F3}', '${F4}']::uuid[], DATE '2027-02-28'));`);
+    FROM public.field_split_as_of(ARRAY['${F3}', '${F4}']::uuid[], (${TODAY} + 29)));`);
   assert.equal(r, `ok|${F3}:true:1,${F4}:true:1`, `before the dated version: ${r}`);
   r = attempt(USERS.rep, `v := (SELECT has_split || ':' || coalesce(version_number::text, '-') FROM public.field_split_as_of(ARRAY['${F4}']::uuid[], DATE '2026-01-01'));`);
   assert.equal(r, 'ok|false:-', `F4 before its first split has none: ${r}`);
-  r = attempt(USERS.rep, `v := (SELECT version_number || ':' || payers::text FROM public.field_split_as_of(ARRAY['${F3}']::uuid[], DATE '2027-03-01'));`);
+  r = attempt(USERS.rep, `v := (SELECT version_number || ':' || payers::text FROM public.field_split_as_of(ARRAY['${F3}']::uuid[], (${TODAY} + 30)));`);
   assert.match(r, /^ok\|2:.*70000000/, `from the dated version: ${r}`);
   for (const [args, re] of [[`ARRAY['${F3}', '${F3}']::uuid[], ${TODAY}`, /FIELD_SPLIT_DUPLICATE_FIELD/], [`ARRAY['${id('ff')}']::uuid[], ${TODAY}`, /FIELD_NOT_FOUND/],
     [`ARRAY['${F3}']::uuid[], NULL`, /FIELD_SPLIT_DATE_REQUIRED/], [`ARRAY['${F3}', NULL]::uuid[], ${TODAY}`, /FIELD_SPLIT_FIELDS_REQUIRED/],
@@ -370,8 +420,8 @@ try {
     assert.match(r, re, `resolver refuses ${args}: ${r}`);
   }
   const f3 = versions(F3);
-  assert.equal(dated(F3, "DATE '2027-03-01'", payers([[A, 70000000], [B, 30000000]])), 'false', 'same payers on the in-force version\'s own date: nothing new');
-  assert.equal(dated(F3, "DATE '2027-04-01'", payers([[A, 70000000], [B, 30000000]])), 'true', 'a dated change with the same payers is kept');
+  assert.equal(dated(F3, `(${TODAY} + 30)`, payers([[A, 70000000], [B, 30000000]])), 'false', 'same payers on the in-force version\'s own date: nothing new');
+  assert.equal(dated(F3, `(${TODAY} + 60)`, payers([[A, 70000000], [B, 30000000]])), 'true', 'a dated change with the same payers is kept');
   assert.equal(versions(F3), String(Number(f3) + 1));
   console.log('[resolver] dated versions resolve; refusals; same-date no-op and dated change kept');
 
@@ -424,6 +474,26 @@ try {
   assert.equal(inForce(F2), `${B}:100000000/100000000`, 'the second save is in force');
   assert.equal(copy(F2), `${B}:100.000000:true:-`, 'and the copy equals the second save');
   console.log('[locks] the nightly refresh repairs a stale copy; writer and FOR SHARE reader run one after the other; two writers queue');
+
+  // Sol r6 MED (follow-up 20270305210000): an owner change by a direct UPDATE moves the main payer at once.
+  const primary = (field) => scalar(`SELECT coalesce(string_agg(customer_id::text, ','), '-') FROM public.field_billing_defaults WHERE field_id = '${field}' AND is_primary;`);
+  const shares = (field) => scalar(`SELECT string_agg(customer_id::text || ':' || split_pct, ',' ORDER BY customer_id) FROM public.field_billing_defaults WHERE field_id = '${field}';`);
+  const f5Shares = shares(F5);
+  assert.equal(scalar(`SELECT customer_id FROM public.fields WHERE id = '${F5}';`), B, 'F5 is owned by B');
+  assert.equal(primary(F5), B, 'before: the paying owner B is primary');
+  assert.match(f5Shares, new RegExp(C), 'C pays on F5');
+  const ownerTo = (owner) => `UPDATE public.fields SET customer_id = '${owner}' WHERE id = '${F5}';
+    v := (SELECT string_agg(customer_id::text, ',') FROM public.field_billing_defaults WHERE field_id = '${F5}' AND is_primary);`;
+  r = commit(USERS.admin, ownerTo(C));
+  assert.equal(r, `ok|${C}`, `the new paying owner C is primary in the same transaction: ${r}`);
+  assert.equal(shares(F5), f5Shares, 'shares unchanged');
+  assert.equal(primary(F5), C, 'and stays so after commit');
+  assert.equal(scalar(`SELECT public._refresh_all_field_billing_copies_20270303();`), '0', 'nothing left for the nightly refresh');
+  // Contract case 2: Create Invoice right after the owner change (no Field Setup save, no nightly run) anchors to C.
+  const f5Invoiced = createInvoice(F5, C);
+  billedNear(f5Invoiced, F5, C);
+  console.log(`[owner] Create Invoice right after the change: ${f5Invoiced}`);
+  console.log('[owner] a direct owner change moves the main payer in the same transaction; shares unchanged');
 
   // 9. The standing actor-forgery sweep, with the checked-in allowlist, flags none of the FP-1 entry points.
   const actorPredicate = { name: 'actor-forgery', sql: readFileSync(path.join(ROOT, 'scripts/db-invariant-sweeps/predicates/actor-forgery.sql'), 'utf8') };

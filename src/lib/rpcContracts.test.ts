@@ -3172,6 +3172,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _set_field_billing_split_20270303: 'internal FP-1 split writer (20270305190000): called only by set_field_billing_split and save_field after their own replay checks (and by the one-time import); binds p_actor to auth.uid(); every API-role EXECUTE is revoked',
   _refresh_field_billing_defaults_copy_20270303: 'internal FP-1 helper (20270305190000): rewrites the read-only field_billing_defaults copy of one field only when it differs from the version in force, so a replay changes nothing; every API-role EXECUTE is revoked',
   _refresh_all_field_billing_copies_20270303: 'internal FP-1 pg_cron job (20270305190000): rewrites only stale copies, so a rerun changes nothing; every API-role EXECUTE is revoked',
+  _fields_owner_change_refresh_copy_20270305: 'FP-1 follow-up trigger function (20270305210000): RETURNS trigger, fires only on an actual fields.customer_id change and calls the copy refresh, which changes nothing on a replay; every API-role EXECUTE is revoked',
 };
 
 

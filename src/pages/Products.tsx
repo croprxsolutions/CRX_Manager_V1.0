@@ -194,6 +194,24 @@ function NetMarginNote({ margin, floor }: { margin: number; floor: number | unde
   );
 }
 
+/**
+ * A price sheet upload's error message. For the server's combined refusal the database names the one reason;
+ * NONE, an unknown code or a failed lookup keeps the general message.
+ */
+async function priceSheetUploadErrorText(
+  error: unknown,
+  exportId: string | null,
+  expiresAt: string | null,
+): Promise<string> {
+  const message = (expiresAt && priceSheetRefusalText(error, expiresAt)) || sanitizeError(error);
+  if (!exportId || !isPriceSheetRefusal(error)) return message;
+  const reason = await getPricingWorkbookExportRefusalReason(exportId).catch((lookupError: unknown) => {
+    Sentry.addBreadcrumb({ category: 'pricing', level: 'warning', message: `refusal reason lookup failed: ${sanitizeError(lookupError)}` });
+    return null;
+  });
+  return (reason && priceSheetReasonText(reason)) || message;
+}
+
 export default function Products() {
   const { role, profile } = useAuth();
   const navigate = useNavigate();
@@ -1023,17 +1041,8 @@ export default function Products() {
       setPricingPreview(preview);
     } catch (error) {
       if (upload !== pricingUploadSeq.current) return;
-      let message = (expiresAt && priceSheetRefusalText(error, expiresAt)) || sanitizeError(error);
-      if (exportId && isPriceSheetRefusal(error)) {
-        // The database names the one reason; NONE, an unknown code or a failed lookup keeps the message above.
-        const reason = await getPricingWorkbookExportRefusalReason(exportId).catch((lookupError: unknown) => {
-          Sentry.addBreadcrumb({ category: 'pricing', level: 'warning', message: `refusal reason lookup failed: ${sanitizeError(lookupError)}` });
-          return null;
-        });
-        if (upload !== pricingUploadSeq.current) return;
-        message = (reason && priceSheetReasonText(reason)) || message;
-      }
-      toast('error', message);
+      const message = await priceSheetUploadErrorText(error, exportId, expiresAt);
+      if (upload === pricingUploadSeq.current) toast('error', message);
     } finally {
       // A later upload owns the busy state and the file input.
       if (upload === pricingUploadSeq.current) {

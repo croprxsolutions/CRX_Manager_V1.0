@@ -133,7 +133,8 @@ BEGIN
                || CASE WHEN j.status = 'completed' THEN 'completed, not invoiced' ELSE replace(j.status, '_', ' ') END || ')' AS label
         FROM public.jobs j JOIN public.job_chemicals jc ON jc.job_id = j.id JOIN sizes s ON s.product_id = jc.product_id
        WHERE j.deleted_at IS NULL
-         AND (j.status IN ('scheduled', 'in_progress') OR (j.status = 'completed' AND j.invoice_id IS NULL))
+         AND (j.status IN ('scheduled', 'in_progress') OR (j.status = 'completed'
+              AND NOT EXISTS (SELECT 1 FROM public.invoices ji WHERE ji.id = j.invoice_id AND ji.deleted_at IS NULL)))
       UNION
       SELECT 2, b.id, 'blend ticket ' || COALESCE(b.ticket_number::text, b.id::text) || ' ('
                || CASE WHEN b.payment_status = 'unbilled' THEN 'unbilled' ELSE 'no application record' END || ')'
@@ -165,7 +166,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public._product_parent_identity_after(public.product_parents,jsonb)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = 'b85b3dafea18fc7733f7cd52f5174deb'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '4eea9f7795275a193f59a75f8549e260'
                     AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef AND p.provolatile = 'v'
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]) THEN

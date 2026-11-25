@@ -105,6 +105,11 @@ try {
   blocked('the same job on the other size', /job WRK-JOB/);
   seed(`UPDATE public.jobs SET status = 'invoiced', invoice_id = '${POSTED}' WHERE id = '${JOB}';`);
   allowed('invoiced job (posted invoice)');
+  seed(`UPDATE public.jobs SET status = 'completed' WHERE id = '${JOB}';`);
+  allowed('completed job linked to a live invoice');
+  seed(`UPDATE public.invoices SET deleted_at = now() WHERE id = '${POSTED}';`);
+  blocked('completed job whose invoice was deleted', /job WRK-JOB \(completed, not invoiced\)/);
+  seed(`UPDATE public.invoices SET deleted_at = NULL WHERE id = '${POSTED}';`);
   seed(`UPDATE public.jobs SET status = 'cancelled', invoice_id = NULL WHERE id = '${JOB}';`);
   allowed('cancelled job');
   seed(`UPDATE public.jobs SET status = 'scheduled', deleted_at = now() WHERE id = '${JOB}';`);

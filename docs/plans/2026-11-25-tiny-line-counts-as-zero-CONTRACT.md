@@ -44,10 +44,14 @@ Database only, one PR to staging, compatible with the deployed app (no new param
 7. A retry of a saved completion returns the same receipt.
 8. Grants: neither function callable by anon, authenticated or service_role.
 9. Rollback script restores the old chain; case 1's behavior returns.
+10. The tiny line on a product with no Main Warehouse row, beside a real line on another product: delivered 0, no movement for it; the named exception's empty row is created and asserted (prover case 9).
+11. The tiny line is its order line's last leftover: delivered 0, still owed as a pending remainder, the order stays partially fulfilled (prover case 10; Taha's review MED 1, decided B: the office cancels it).
 
 ## Open business decisions
 
-None: Taha and Mason settled "treated as zero".
+Taha and Mason settled "treated as zero".
+
+Decided 2026-11-25 (Taha's review of 2be1ad2f6, MED 1; Mason: "B: office cancels"): an order line whose last leftover is under 0.01 is not closed at completion. It stays owed as a pending remainder and the order stays partially fulfilled; the office closes it with Cancel remaining quantity on Order Detail (admins). Closing it automatically (option A) was declined. Prover case 10 asserts this.
 
 ## Cold challenge (Astra, gpt-6.2-astra high, 2026-11-25: FINDINGS 46) and how each was settled
 
@@ -59,3 +63,4 @@ None: Taha and Mason settled "treated as zero".
 - **Out of scope, unchanged existing behavior (8, 10, 14–15, 20–22, 24, 25, 27, 28, 34, 39, 40, 44).** Each concerns the existing typed-0, replay, undo, authorization or rollout behavior, which this change neither alters nor relies on newly. The rollback note says records completed while the rule was on stay as they are (40).
 - **Declined suggestions.** 45 (normalize inside #2324's step): it would change the function both proof-bound PRs pin. 46 (edit the body in place): a 570-line re-emit for a 20-line rule.
 - **#2324's prover (43).** Its own replay check stops at any later file touching `_complete_delivery_authorized_impl*`, so it now names this file if re-run; it is a historical proof, not CI.
+- **Taha's review of 2be1ad2f6 (LOWs).** LOW 2: `scripts/smoke/verify-return-credit-real-schema.mjs` now mutates `_complete_delivery_body_impl_20270307`, where the body lives after this change; `prove-single-short-stock-warning-real-schema.mjs` and `prove-inventory-edge-cases-1942-real-schema.mjs` are historical proofs that read the pre-change chain and are left as they are. LOW 4: prover cases 9 and 10 and order-line remaining checks in cases 2/2z added. LOW 1 (#2557's `_delivery_lines_match` compares the figures as sent, without the under-0.01 → 0 step) and LOW 3 (#2557's prover's later-file guard matches this file) belong to #2557, which is not applied yet; named there, not changed here.

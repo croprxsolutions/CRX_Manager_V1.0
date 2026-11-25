@@ -252,6 +252,10 @@ const LOADS = { DA: 'in_progress', DZ: 'in_progress', DB: 'in_progress', DF: 'in
 const TINY_SCHEDULE = new Set(['DB', 'DF']);
 const D = {}, R = {}, T = {};
 Object.keys(LOADS).forEach((k, i) => { D[k] = id(`f${i + 1}`); R[k] = id(`f${i + 1}1`); T[k] = id(`f${i + 1}2`); });
+// Two more orders (Taha's review LOW 4). DX (order ORD2): the real line on P, the tiny line on P2, a product with no
+// Main Warehouse row. DL (order ORD3): the tiny line is its order line's last leftover (0.005 of 0.005 owed).
+const P2 = id('b2'), ORD2 = id('e2'), OI3 = id('e21'), OI4 = id('e22'), ORD3 = id('e3'), OI5 = id('e31'), OI6 = id('e32');
+for (const [k, n] of [['DX', 'fa'], ['DL', 'fb']]) { D[k] = id(n); R[k] = id(`${n}1`); T[k] = id(`${n}2`); }
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -272,8 +276,24 @@ function seed() {
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, assigned_driver, status, is_quick_delivery) VALUES
       ${Object.entries(LOADS).map(([k, s]) => `('${D[k]}', 'TINY-${k}', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', '${s}', false)`).join(',\n      ')};
     INSERT INTO public.delivery_items (id, delivery_id, order_item_id, product_id, quantity, unit_size) VALUES
-      ${Object.keys(LOADS).map((k) => `('${R[k]}', '${D[k]}', '${OI}', '${P}', 1, 'Gal'), ('${T[k]}', '${D[k]}', '${OI2}', '${P}', ${TINY_SCHEDULE.has(k) ? 0.005 : 1}, 'Gal')`).join(',\n      ')};`);
-  console.log('[prover] seeded one order (two lines of 30, one product) and nine loads, each with a real line and a second line');
+      ${Object.keys(LOADS).map((k) => `('${R[k]}', '${D[k]}', '${OI}', '${P}', 1, 'Gal'), ('${T[k]}', '${D[k]}', '${OI2}', '${P}', ${TINY_SCHEDULE.has(k) ? 0.005 : 1}, 'Gal')`).join(',\n      ')};
+    INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
+        rate_per_acre, current_cost, tier1_price, tier2_price, tier3_price, pricing_version, is_active) VALUES
+      ('${P2}', '[PROVER] Tiny Unstocked', 'TINY-P2', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 16, 8, 10, 10, 10, 1, true);
+    INSERT INTO public.orders (id, order_number, customer_id, status) VALUES
+      ('${ORD2}', 'TINY-O2', '${CUST}', 'confirmed'), ('${ORD3}', 'TINY-O3', '${CUST}', 'confirmed');
+    INSERT INTO public.order_items (id, order_id, product_id, product_name, unit_size, total_units_needed, quantity_delivered, quantity_remaining, price_per_unit, cost_per_unit) VALUES
+      ('${OI3}', '${ORD2}', '${P}', '[PROVER] Tiny Product', 'Gal', 30, 0, 30, 10, 8),
+      ('${OI4}', '${ORD2}', '${P2}', '[PROVER] Tiny Unstocked', 'Gal', 30, 0, 30, 10, 8),
+      ('${OI5}', '${ORD3}', '${P}', '[PROVER] Tiny Product', 'Gal', 1, 0, 1, 10, 8),
+      ('${OI6}', '${ORD3}', '${P}', '[PROVER] Tiny Product', 'Gal', 0.005, 0, 0.005, 10, 8);
+    INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, assigned_driver, status, is_quick_delivery) VALUES
+      ('${D.DX}', 'TINY-DX', '${ORD2}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
+      ('${D.DL}', 'TINY-DL', '${ORD3}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false);
+    INSERT INTO public.delivery_items (id, delivery_id, order_item_id, product_id, quantity, unit_size) VALUES
+      ('${R.DX}', '${D.DX}', '${OI3}', '${P}', 1, 'Gal'), ('${T.DX}', '${D.DX}', '${OI4}', '${P2}', 1, 'Gal'),
+      ('${R.DL}', '${D.DL}', '${OI5}', '${P}', 1, 'Gal'), ('${T.DL}', '${D.DL}', '${OI6}', '${P}', 0.005, 'Gal');`);
+  console.log('[prover] seeded three orders and eleven loads, each with a real line and a second line');
 }
 
 const AS_ADMIN = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true); SET LOCAL ROLE authenticated;`;
@@ -294,10 +314,13 @@ const stock = () => scalar(`SELECT quantity_available || '/' || quantity_prebook
 const minus = (s, k) => s.split('/').map((x) => Number(x) - k).join('/');
 const same = (a, b, what) => assert.deepEqual(a.split('/').map(Number), b.split('/').map(Number), what);
 const lineDone = (oi) => num(`SELECT quantity_delivered FROM public.order_items WHERE id = '${oi}';`);
+const lineOwed = (oi) => num(`SELECT quantity_remaining FROM public.order_items WHERE id = '${oi}';`);
+const orderStatus = (o) => scalar(`SELECT status FROM public.orders WHERE id = '${o}';`);
 const near = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-9, `${what}: got ${a}, expected ${b}`);
 // Everything a completion writes for one load, with ids and names taken out so two loads can be compared.
 const footprint = (d) => scalar(`SELECT jsonb_build_object(
     'status', (SELECT status FROM public.deliveries WHERE id = '${d}'),
+    'order_status', (SELECT o.status FROM public.orders o JOIN public.deliveries dd ON dd.order_id = o.id WHERE dd.id = '${d}'),
     'lines', (SELECT jsonb_agg(jsonb_build_array(order_item_id, quantity, quantity_delivered, quantity_prebooked_released) ORDER BY order_item_id) FROM public.delivery_items WHERE delivery_id = '${d}'),
     'ledger', (SELECT coalesce(jsonb_agg(jsonb_build_array(transaction_type, quantity, requires_review) ORDER BY quantity), '[]') FROM public.inventory_transactions WHERE delivery_id = '${d}'),
     'remainders', (SELECT coalesce(jsonb_agg(jsonb_build_array(order_item_id, quantity_remaining, status) ORDER BY order_item_id), '[]') FROM public.delivery_remainders WHERE original_delivery_id = '${d}'),
@@ -326,7 +349,7 @@ function applyCandidate() {
 function afterCases() {
   // 2. 0.005 beside 1 on the same product: completes; only the real line moves stock (available and prebooked by
   //    exactly 1), its order line, and the ledger; the tiny line is 0 and its full quantity is owed as a remainder.
-  let s0 = stock(); const r0 = lineDone(OI), t0 = lineDone(OI2);
+  let s0 = stock(); const r0 = lineDone(OI), t0 = lineDone(OI2), ro0 = lineOwed(OI), to0 = lineOwed(OI2);
   let r = committed(completeCall(D.DA, { [R.DA]: 1, [T.DA]: 0.005 }, 'tiny-2'));
   assert.equal(r.status, 0, r.output);
   const receipt = r.output.split(/\r?\n/).filter((l) => l.includes('"delivery_id"')).at(-1);
@@ -337,15 +360,19 @@ function afterCases() {
   same(stock(), minus(s0, 1), 'stock (available/prebooked) after case 2');
   near(lineDone(OI), r0 + 1, 'real order line after case 2');
   near(lineDone(OI2), t0, 'tiny order line after case 2');
+  near(lineOwed(OI), ro0 - 1, 'real order line still owed after case 2');
+  near(lineOwed(OI2), to0, 'tiny order line still owed after case 2');
   const fpA = footprint(D.DA);
   assert.match(fpA, /"ledger": \[\["delivered", 1(\.0+)?, false\]\]/, fpA);
   assert.match(fpA, new RegExp(`"remainders": \\[\\["${OI2}", 1(\\.0+)?, "pending"\\]\\]`), fpA);
   console.log(`[case 2] 0.005 beside 1: completes (receipt partial); stock ${s0} -> ${stock()}; footprint ${fpA}`);
 
   // 2z. The typed-0 twin leaves exactly the same footprint.
-  s0 = stock();
+  s0 = stock(); const zr0 = lineOwed(OI), zt0 = lineOwed(OI2);
   r = committed(completeCall(D.DZ, { [R.DZ]: 1, [T.DZ]: 0 }, 'tiny-2z'));
   assert.equal(r.status, 0, r.output);
+  near(lineOwed(OI), zr0 - 1, 'real order line still owed after case 2z');
+  near(lineOwed(OI2), zt0, 'zero order line still owed after case 2z');
   assert.equal(footprint(D.DZ), fpA, 'a tiny figure must leave the same footprint as a typed 0');
   same(stock(), minus(s0, 1), 'stock after case 2z');
   console.log('[case 2z] the same load with 0 typed leaves an identical footprint (lines, ledger, remainder, invoice lines and totals)');
@@ -416,6 +443,32 @@ function afterCases() {
     }
   }
   console.log('[case 8] anon, authenticated and service_role cannot call the wrapper or the renamed body');
+
+  // 9. The tiny line is on another product, P2, which has no Main Warehouse row. The real line moves P only. The
+  //    named exception: #2324's step, before the zeroing, still gives P2 an empty flagged 0/0 row; no P2 stock moves.
+  s0 = stock();
+  r = committed(completeCall(D.DX, { [R.DX]: 1, [T.DX]: 0.005 }, 'tiny-9'));
+  assert.equal(r.status, 0, r.output);
+  assert.equal(status(D.DX), 'completed');
+  assert.equal(delivered(T.DX), 0);
+  assert.equal(delivered(R.DX), 1);
+  same(stock(), minus(s0, 1), 'P stock after case 9');
+  near(lineOwed(OI4), 30, 'P2 order line still owed after case 9');
+  assert.equal(scalar(`SELECT count(*) || ':' || string_agg(quantity_available || '/' || quantity_prebooked || '/' || manufactured_at_delivery, ',')
+    FROM public.inventory WHERE product_id = '${P2}' AND location = 'Main Warehouse';`), '1:0/0/true', 'the named exception row');
+  assert.equal(scalar(`SELECT count(*) FROM public.inventory_transactions WHERE delivery_id = '${D.DX}' AND product_id = '${P2}';`), '0');
+  console.log('[case 9] tiny line on an unstocked product beside 1 of another: delivered 0, no P2 movement; the named 0/0 row is created (accepted exception)');
+
+  // 10. The tiny line is its order line's last leftover (Taha's review MED 1). Behaviour as built: zeroed, the 0.005
+  //     stays owed as a pending remainder and the order stays partially fulfilled until the office closes it.
+  r = committed(completeCall(D.DL, null, 'tiny-10'));
+  assert.equal(r.status, 0, r.output);
+  assert.equal(delivered(T.DL), 0);
+  near(lineOwed(OI5), 0, 'real order line after case 10');
+  near(lineOwed(OI6), 0.005, 'tiny leftover still owed after case 10');
+  assert.match(scalar(`SELECT count(*) || ':' || max(quantity_remaining) FROM public.delivery_remainders WHERE original_delivery_id = '${D.DL}' AND status = 'pending';`), /^1:0\.0050*$/);
+  assert.equal(orderStatus(ORD3), 'partially_fulfilled');
+  console.log('[case 10] a 0.005 last leftover beside 1: delivered 0, still owed as a pending remainder; the order stays partially_fulfilled');
 }
 
 function rollbackCases() {

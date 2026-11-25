@@ -10,3 +10,4 @@ as a tiny amount. Taha asked (2026-11-24) for such lines to be treated as zero t
 of their own after #2324.
 
 2026-11-25: fix in review: `20270307200000_tiny_line_counts_as_zero.sql` delivers such a line as 0, as if 0 had been typed (no stock, order-line or invoice effect; its quantity stays owed). Status stays OPEN until it is applied live.
+A leftover under 0.01 that is an order line's last amount owed is not closed by a completion; the order stays partially fulfilled until the office uses Cancel remaining quantity on Order Detail (Mason, 2026-11-25: "B: office cancels").

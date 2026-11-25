@@ -40,7 +40,7 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { hasPageAccess } from '../lib/pagePermissions';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
-import { centsToDollarInput, formatCents as fmt } from '../lib/money';
+import { formatCents as fmt } from '../lib/money';
 import type { DuplicatePayment, PaymentAllocationEntry, PaymentAllocationResult, InvoiceType } from '../types';
 import { toSentryError } from '../lib/sentryError';
 
@@ -119,8 +119,6 @@ export default function PaymentAllocation() {
 
   // Payment fields
   const [checkAmountInput, setCheckAmountInput] = useState('');
-  // The check amount was filled by Pay full balance, from the chosen customer's balance, not typed.
-  const amountAutofilled = useRef(false);
   const [paymentMethod, setPaymentMethod] = useState('check');
   const [referenceNumber, setReferenceNumber] = useState('');
   const [notes, setNotes] = useState('');
@@ -208,23 +206,15 @@ export default function PaymentAllocation() {
     setLoadingInvoices(false);
   }, [toast]);
 
-  // An amount Pay full balance filled in is the old customer's balance: it never carries to another customer.
-  const dropAutofilledAmount = useCallback(() => {
-    if (!amountAutofilled.current) return;
-    amountAutofilled.current = false;
-    setCheckAmountInput('');
-  }, []);
-
   const selectCustomer = useCallback((c: CustomerOption) => {
     focusAmountAfterPick.current = true;
-    dropAutofilledAmount();
     setSelectedCustomer(c);
     prepayReadSeq.current += 1;
     setPrepayBalanceCents(c.prepay_balance_cents);
     setLastResult(null);
     setRetryRefused(false);
     fetchInvoices(c.id);
-  }, [dropAutofilledAmount, fetchInvoices]);
+  }, [fetchInvoices]);
 
   const clearCustomer = useCallback(() => {
     // A load still running for the cleared customer must not refill the list.
@@ -247,7 +237,6 @@ export default function PaymentAllocation() {
   // The check amount, reference and notes stay, as before.
   const releaseCustomerOnEdit = useCallback((typed: string) => {
     if (!selectedCustomer || typed === selectedCustomer.farm_name) return;
-    dropAutofilledAmount();
     invoiceLoadSeq.current += 1;
     setLoadingInvoices(false);
     setInvoicesFailed(false);
@@ -257,7 +246,7 @@ export default function PaymentAllocation() {
     setInvoices([]);
     setLastResult(null);
     setRetryRefused(false);
-  }, [dropAutofilledAmount, selectedCustomer]);
+  }, [selectedCustomer]);
 
   /* ── Allocation helpers ────────────────────────────────────────────── */
 
@@ -305,6 +294,12 @@ export default function PaymentAllocation() {
       toast('error', MONEY_PRECISION_MESSAGE);
       return;
     }
+    // The check amount always comes from the paper check, never from the balance owed (Mason,
+    // 2026-11-25): a filled-in balance could re-book a check already posted for a different amount.
+    if (checkCents <= 0) {
+      toast('error', 'Enter the check amount first.');
+      return;
+    }
     const owed = invoices.map((inv) => ({ id: inv.invoice_id, balance_cents: inv.balance_cents }));
     const fullBalanceCents = owed.reduce(
       (s, inv) => s + (Number.isFinite(inv.balance_cents) && inv.balance_cents > 0 ? inv.balance_cents : 0),
@@ -312,18 +307,9 @@ export default function PaymentAllocation() {
     );
     if (fullBalanceCents <= 0) return;
     // A typed check smaller than the balance cannot pay it all; its amount is never changed here.
-    if (checkCents > 0 && checkCents < fullBalanceCents) {
+    if (checkCents < fullBalanceCents) {
       toast('error', `This check is ${fmt(fullBalanceCents - checkCents)} short of the full balance of ${fmt(fullBalanceCents)}. Use Auto-Allocate to apply it oldest first.`);
       return;
-    }
-    if (checkCents <= 0) {
-      // Fill only an empty box: text like "1e2" or "abc" reads as $0 and must not be replaced unseen.
-      if (checkAmountInput.trim() !== '') {
-        toast('error', 'The check amount is not a dollar amount. Fix or clear it, then try again.');
-        return;
-      }
-      setCheckAmountInput(centsToDollarInput(fullBalanceCents));
-      amountAutofilled.current = true;
     }
     const allocMap = autoAllocate(fullBalanceCents, owed);
     setInvoices((prev) =>
@@ -332,7 +318,7 @@ export default function PaymentAllocation() {
         allocated_cents: allocMap.get(inv.invoice_id) || 0,
       })),
     );
-  }, [canPayFullBalance, checkAmountInput, checkAmountRefused, checkCents, invoices, toast]);
+  }, [canPayFullBalance, checkAmountRefused, checkCents, invoices, toast]);
 
   const handleClearAllocations = useCallback(() => {
     setInvoices((prev) => prev.map((inv) => ({ ...inv, allocated_cents: 0 })));
@@ -584,7 +570,7 @@ export default function PaymentAllocation() {
                     value={checkAmountInput}
                     // Choose the customer first: the open invoices to pay come from them.
                     disabled={submitting || !selectedCustomer}
-                    onChange={(e) => { amountAutofilled.current = false; setCheckAmountInput(e.target.value); }}
+                    onChange={(e) => setCheckAmountInput(e.target.value)}
                     aria-invalid={checkAmountRefused}
                     className={`w-full pl-9 pr-3 py-2 text-sm font-semibold bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50 ${checkAmountRefused ? 'border-red-400' : 'border-gray-200'}`}
                   />
@@ -676,8 +662,8 @@ export default function PaymentAllocation() {
                         icon={<ListChecks className="w-4 h-4" />}
                         onClick={handlePayFullBalance}
                         showChevron={false}
-                        disabled={submitting || invoicesNotReady || invoices.length === 0 || checkAmountRefused}
-                        title="Fill every open invoice with its full balance (fills in the check amount when it is empty). Nothing is saved until Apply Payment."
+                        disabled={submitting || invoicesNotReady || invoices.length === 0 || checkAmountRefused || checkCents <= 0}
+                        title="Enter the check amount first. Fills every open invoice with its full balance; any extra becomes prepay credit. Nothing is saved until Apply Payment."
                       >
                         Pay full balance
                       </Button>

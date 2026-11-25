@@ -527,6 +527,24 @@ describe('Record Payments: payment date and check number', () => {
     expect(screen.queryByText('Payment Applied Successfully')).not.toBeInTheDocument();
   });
 
+  it('a retry after a lost reply still reaches the save when the month has since been closed', async () => {
+    let replyLost = true;
+    mockRpc.mockImplementation(() => {
+      if (replyLost) { replyLost = false; return Promise.reject(new Error('Failed to fetch')); }
+      return Promise.resolve(saved);
+    });
+    await fillPayment();
+    apply();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to fetch'));
+
+    closedPeriods = [{ period_start: '2026-11-01', period_end: '2026-11-30' }];
+    apply();
+    await waitFor(() => expect(rpcCalls()).toHaveLength(2));
+    const [first, second] = rpcCalls().map(([, args]) => args);
+    expect(second.p_idempotency_key).toBe(first.p_idempotency_key);
+    expect(screen.queryByText(/is in a closed month/)).not.toBeInTheDocument();
+  });
+
   it('asks before leaving when only the payment date was changed', async () => {
     const { router } = renderPayments();
     stepDate('day', 'ArrowDown');

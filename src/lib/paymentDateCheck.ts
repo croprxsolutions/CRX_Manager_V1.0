@@ -10,6 +10,9 @@ import { daysSinceBusinessDate, parseLocalDate, todayInBusinessTz } from './date
 /** Past this many days back the screen asks before saving: an old date is usually a typo. */
 const OLD_PAYMENT_DATE_DAYS = 31;
 
+/** Same limit as the duplicate-payment check that runs beside it. */
+export const CLOSED_PERIOD_CHECK_TIMEOUT_MS = 15_000;
+
 const showDay = (day: string): string => parseLocalDate(day).toLocaleDateString('en-US');
 
 /** Why this payment date cannot be saved, or null when it can. Days are Central business days. */
@@ -45,13 +48,23 @@ export function closedPeriodMessage(day: string, period: ClosedPeriod): string {
  * A failed read also returns null: it only decides whether to warn early, never whether to save.
  */
 export async function findClosedPeriod(day: string): Promise<ClosedPeriod | null> {
-  const { data, error } = await supabase
+  // A stalled read must not hold the payment form disabled: past the limit, skip the early warning.
+  const timeLimit = AbortSignal.timeout(CLOSED_PERIOD_CHECK_TIMEOUT_MS);
+  const stalled = new Promise<null>((resolve) => {
+    timeLimit.addEventListener('abort', () => resolve(null), { once: true });
+  });
+  const read = Promise.resolve(supabase
     .from('accounting_periods')
     .select('period_start, period_end')
     .eq('status', 'closed')
     .lte('period_start', day)
     .gte('period_end', day)
-    .limit(1);
+    .limit(1)
+    .abortSignal(timeLimit))
+    .catch(() => null);
+  const result = await Promise.race([read, stalled]);
+  if (!result) return null;
+  const { data, error } = result;
   if (error || !Array.isArray(data) || data.length === 0) return null;
   return data[0] as ClosedPeriod;
 }

@@ -10,9 +10,9 @@ import {
   paymentDateRefusal,
 } from './paymentDateCheck';
 
-function chain(result: { data: unknown; error: unknown }, calls: Array<[string, unknown[]]> = []) {
+function chain(result: { data: unknown; error: unknown } | Promise<never>, calls: Array<[string, unknown[]]> = []) {
   const self: Record<string, unknown> = {};
-  for (const m of ['select', 'eq', 'lte', 'gte', 'limit']) {
+  for (const m of ['select', 'eq', 'lte', 'gte', 'limit', 'abortSignal']) {
     self[m] = (...args: unknown[]) => { calls.push([m, args]); return self; };
   }
   const promise = Promise.resolve(result);
@@ -70,6 +70,17 @@ describe('findClosedPeriod', () => {
     await expect(findClosedPeriod('2026-10-30')).resolves.toBeNull();
     mockFrom.mockReturnValueOnce(chain({ data: [], error: null }));
     await expect(findClosedPeriod('2026-10-30')).resolves.toBeNull();
+  });
+
+  it('gives up after 15 seconds instead of holding the payment form', async () => {
+    const limit = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(limit.signal);
+    mockFrom.mockReturnValueOnce(chain(new Promise<never>(() => {})));
+    const found = findClosedPeriod('2026-10-30');
+    limit.abort();
+    await expect(found).resolves.toBeNull();
+    expect(timeout).toHaveBeenCalledWith(15_000);
+    timeout.mockRestore();
   });
 });
 

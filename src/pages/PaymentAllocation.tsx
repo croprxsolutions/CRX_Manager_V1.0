@@ -148,6 +148,9 @@ export default function PaymentAllocation() {
   const { profile, role, deniedPages } = useAuth();
   const { toast } = useToast();
   const allocatePaymentIdem = useIdempotencyKey('allocate_payment', profile?.id || '');
+  // True from the first save attempt until one is confirmed: a retry must reach allocate_payment, which
+  // replays a save that committed before its reply was lost even if the month has since been closed.
+  const saveUnresolvedRef = useRef(false);
 
   // Customer: the shared customer box (type to search, arrow keys, Enter to choose).
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerOption | null>(null);
@@ -435,7 +438,7 @@ export default function PaymentAllocation() {
     if (!mountedRef.current) return;
     setSubmitting(false);
     // A closed month: say so plainly instead of letting allocate_payment refuse it.
-    if (closedPeriod) {
+    if (closedPeriod && !saveUnresolvedRef.current) {
       refuseDate(closedPeriodMessage(payment.paymentDate, closedPeriod));
       return;
     }
@@ -477,6 +480,7 @@ export default function PaymentAllocation() {
       // One key for this check until it is confirmed: allocate_payment compares a retry's arguments with the
       // first attempt's (the payment date and check number included), so an edited retry after a lost reply
       // is refused instead of saving a second payment. A new key per date would let that edit save twice.
+      saveUnresolvedRef.current = true;
       const { data, error } = await supabase.rpc('allocate_payment', {
         ...args,
         p_performed_by: profile.id,
@@ -486,6 +490,7 @@ export default function PaymentAllocation() {
       if (error) throw error;
       const result = assertRpcResult<PaymentAllocationResult>(data, 'allocate_payment');
       allocatePaymentIdem.resetKey();
+      saveUnresolvedRef.current = false;
       setLastResult(result);
 
       const parts = [`Applied ${fmt(result.total_allocated_cents)} to ${result.invoices_paid} invoice(s)`];

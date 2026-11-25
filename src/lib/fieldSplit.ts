@@ -78,6 +78,7 @@ const SERVER_MESSAGES: Array<[string, string]> = [
   ['FIELD_SPLIT_PAYER_NOT_ACTIVE', 'A payer in this split is not an active customer.'],
   ['FIELD_SPLIT_SHARES_MUST_MATCH_UNTIL_FP4', SHARES_MUST_MATCH],
   ['FIELD_SPLIT_DATE_REQUIRED', 'Choose the date the split starts.'],
+  ['FIELD_SPLIT_STARTS_TODAY_UNTIL_FP4', 'A change to who pays can only start today. Reload the page and save again.'],
   ['FIELD_PAYER_NOTES_NOT_ON_FIELD', 'Notes can only be kept for customers on this field.'],
   ['IDEMPOTENCY_PAYLOAD_CONFLICT', 'An earlier save of this split is still being checked. Reload the page and try again.'],
 ];

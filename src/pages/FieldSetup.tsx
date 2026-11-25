@@ -189,7 +189,6 @@ function FieldSetupPage() {
   const [billingSplits, setBillingSplits] = useState<BillingSplit[]>([]);
   // FP-1: the split is saved as a dated version; notes are per payer and never make a version.
   const today = useMemo(() => localToday(), []);
-  const [splitFrom, setSplitFrom] = useState(today);
   const [payerNotes, setPayerNotes] = useState<Record<string, string>>({});
   const [splitHistory, setSplitHistory] = useState<SplitVersion[]>([]);
   // Notes can be kept for current payers and anyone on a saved version (the database accepts both).
@@ -350,9 +349,9 @@ function FieldSetupPage() {
       return;
     }
     const notesSame = payerNoteChanges(notePayerIds, payerNotes, loadedNotesRef.current).length === 0;
-    if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current && notesSame && splitFrom === today) return;
+    if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current && notesSame) return;
     setIsDirty(true);
-  }, [field, billingSplits, payerNotes, splitFrom, today, notePayerIds]);
+  }, [field, billingSplits, payerNotes, notePayerIds]);
 
   // Shows the split saved in the FP-1 tables and makes it the clean state.
   const applySplitData = useCallback((data: Awaited<ReturnType<typeof loadFieldSplit>>) => {
@@ -363,8 +362,7 @@ function FieldSetupPage() {
     setPayerNotes(data.notes);
     setSplitHistory(data.history);
     setInForceSplit(data.inForce);
-    setSplitFrom(today);
-  }, [today]);
+  }, []);
 
   // Only the newest field read may set the page: moving to another field (or Try again) can
   // start one while an older read is still in flight.
@@ -643,8 +641,9 @@ function FieldSetupPage() {
   ): Promise<boolean> => {
     const request = {
       p_field_id: savedFieldId,
-      // The default start date is today when Save is pressed, not when the page was opened (a tab left open overnight).
-      p_effective_from: splitFrom === today ? localToday() : splitFrom,
+      // shortcut: Mason 2026-11-24, a split change starts today (Central) until FP-4; the date picker returns with FP-4.
+      // Today at Save, not at page open (a tab left open overnight).
+      p_effective_from: localToday(),
       p_payers: splitChanged
         ? billingSplits.map((r) => ({
           customer_id: r.customer_id,
@@ -686,9 +685,9 @@ function FieldSetupPage() {
     }
 
     // Only a changed split (payers, shares or start date) writes a version; a name-only or notes-only save sends none.
-    const splitChanged = splitShape(billingSplits) !== splitShape(loadedSplitsRef.current ?? []) || splitFrom !== today;
+    const splitChanged = splitShape(billingSplits) !== splitShape(loadedSplitsRef.current ?? []);
     if (splitChanged) {
-      const problem = splitFrom ? splitProblem(billingSplits) : 'Choose the date the split starts.';
+      const problem = splitProblem(billingSplits);
       if (problem) {
         toast('error', problem);
         return;
@@ -873,9 +872,7 @@ function FieldSetupPage() {
           // false "Unsaved Changes" prompt after every successful create.
           setPostSaveNavTarget(`/fields/${data}`);
         } else {
-          toast('success', splitSaved && splitChanged && splitFrom > today
-            ? `Field updated. The new split starts ${splitFrom}; until then the history lists it as scheduled.`
-            : 'Field updated');
+          toast('success', 'Field updated');
         }
       }
     } catch (err: unknown) {
@@ -1483,15 +1480,7 @@ function FieldSetupPage() {
                       );
                     })}
 
-                    <label className="flex items-center gap-3 text-sm">
-                      <span className="text-secondary">Split starts on</span>
-                      <input
-                        type="date"
-                        value={splitFrom}
-                        onChange={(e) => setSplitFrom(e.target.value)}
-                        className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                      />
-                    </label>
+                    <p className="text-xs text-secondary px-3">A change to who pays starts today.</p>
                   </div>
                 )}
 

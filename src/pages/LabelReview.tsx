@@ -588,8 +588,8 @@ export default function LabelReview() {
               <div className="space-y-3">
                 {[
                   { key: 'signal_word',      label: 'Signal Word' },
-                  { key: 'rei_hours',        label: 'REI Hours' },
-                  { key: 'phi_days',         label: 'PHI Days' },
+                  { key: 'rei_hours',        label: 'REI (number or none)' },
+                  { key: 'phi_days',         label: 'PHI (number or none)' },
                   { key: 'epa_registration', label: 'EPA Registration' },
                   { key: 'max_label_rate',   label: 'Max Label Rate' },
                 ].map(({ key, label }) => (

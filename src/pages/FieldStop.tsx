@@ -29,8 +29,8 @@ import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
-import { countOrdinaryPhotos, countLeftAtSitePhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
-import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { countOrdinaryPhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
+import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
 import type { DeliveryCompletionEvidence, DeliveryIssueType, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
@@ -415,10 +415,14 @@ export default function FieldStop() {
   // The newest ticket photo counts only when it was taken for these lines and amounts (one without lines never does).
   const ticketPhotoLines = latestEvidencePhoto(photos, PAPER_TICKET_PHOTO_CAPTION)?.lines_seen;
   const ticketPhotoMatchesLoad = sameLinesSeen(ticketPhotoLines, currentLinesSeen);
+  // The drop-location photo is bound the same way (Mason, 2026-11-25).
+  const leftPhotoLines = latestEvidencePhoto(photos, LEFT_AT_SITE_PHOTO_CAPTION)?.lines_seen;
+  const leftPhotoMatchesLoad = sameLinesSeen(leftPhotoLines, currentLinesSeen);
+  const evidencePhotoLines = completionEvidence === 'left_at_site' ? leftPhotoLines : ticketPhotoLines;
   const sig = useLoadBoundSignature(signatureDataUrl, setSignatureDataUrl, currentLinesSeen);
   // The proof the chosen path needs is in place (the server checks it again).
   const evidenceReady = completionEvidence === 'left_at_site'
-    ? hasLeftAtSitePhoto(photos)
+    ? leftPhotoMatchesLoad
     : completionEvidence === 'paper_ticket'
       ? ticketPhotoMatchesLoad && isValidPaperDeliveredOn(paperDeliveredOn)
       : !!signatureDataUrl;
@@ -440,14 +444,14 @@ export default function FieldStop() {
       toast('error', 'Maximum 2 ticket photos per delivery');
       return;
     }
-    if (caption === LEFT_AT_SITE_PHOTO_CAPTION && countLeftAtSitePhotos(photos) + files.length > MAX_LEFT_AT_SITE_PHOTOS) {
+    if (caption === LEFT_AT_SITE_PHOTO_CAPTION && countTicketPhotosForLoad(photos, currentLinesSeen, LEFT_AT_SITE_PHOTO_CAPTION) + files.length > MAX_LEFT_AT_SITE_PHOTOS) {
       toast('error', 'Maximum 2 drop-location photos per delivery');
       return;
     }
     setUploadingPhoto(true);
     let uploadCount = 0;
-    // A signed-ticket photo is saved with the lines and amounts on screen when it was taken (20270307030000).
-    const linesAtPhoto = caption === PAPER_TICKET_PHOTO_CAPTION ? currentLinesSeen : null;
+    // A signed-ticket or drop-location photo is saved with the lines and amounts on screen when it was taken (20270307030000).
+    const linesAtPhoto = caption === PAPER_TICKET_PHOTO_CAPTION || caption === LEFT_AT_SITE_PHOTO_CAPTION ? currentLinesSeen : null;
     for (const rawFile of Array.from(files)) {
       try {
         const file = await compressImage(rawFile);
@@ -507,7 +511,7 @@ export default function FieldStop() {
     if (completionEvidence === 'left_at_site' && !hasLeftAtSitePhoto(photos)) { toast('error', 'Take a photo of where the delivery was left before completing'); return; }
     if (completionEvidence === 'signature' && !signatureDataUrl) { toast('error', 'Have the customer sign on screen, or use a paper ticket'); return; }
     if (completionEvidence === 'signature' && !isSignatureDataUrl(signatureDataUrl)) { toast('error', INVALID_SIGNATURE_MESSAGE); return; }
-    const proofProblem = loadProofProblem(completionEvidence, currentLinesSeen, sig.signedLines, ticketPhotoLines);
+    const proofProblem = loadProofProblem(completionEvidence, currentLinesSeen, sig.signedLines, evidencePhotoLines);
     if (proofProblem) { sig.reportProofProblem(proofProblem); return; }
     // A missing or mismatched brand only warns (Mason, 2026-11-09).
     const warnings = brandWarnings(brandState.brands, brandState.drafts, deliveryQtys);
@@ -540,7 +544,7 @@ export default function FieldStop() {
     // Caught here, before the signature image is uploaded: nothing delivered, or proof taken for other lines or amounts.
     if (!hasAnyQty) { toast('error', NOTHING_DELIVERED_MESSAGE); setStep('verify'); return; }
     const signedLinesAtSubmit = completionEvidence === 'signature' ? sig.signedLines : null;
-    const proofProblem = loadProofProblem(completionEvidence, currentLinesSeen, signedLinesAtSubmit, ticketPhotoLines);
+    const proofProblem = loadProofProblem(completionEvidence, currentLinesSeen, signedLinesAtSubmit, evidencePhotoLines);
     if (proofProblem) { sig.reportProofProblem(proofProblem); return; }
     setCompleting(true);
 
@@ -926,12 +930,14 @@ export default function FieldStop() {
               )}
               alternateProof={noOnePresent ? (
                 <div className="border border-gray-200 rounded-xl p-3 space-y-3">
-                  {hasLeftAtSitePhoto(photos) ? (
+                  {leftPhotoMatchesLoad ? (
                     <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Photo of the drop location saved</p>
+                  ) : hasLeftAtSitePhoto(photos) ? (
+                    <p className="text-sm text-amber-800">{LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE}</p>
                   ) : (
                     <p className="text-sm text-amber-800">Signature skipped because no one was present. Take a photo of where you left the delivery.</p>
                   )}
-                  <button type="button" disabled={uploadingPhoto || !isOnline || countLeftAtSitePhotos(photos) >= MAX_LEFT_AT_SITE_PHOTOS} onClick={() => leftAtSiteInputRef.current?.click()} className={SECONDARY_BUTTON}>
+                  <button type="button" disabled={uploadingPhoto || !isOnline || countTicketPhotosForLoad(photos, currentLinesSeen, LEFT_AT_SITE_PHOTO_CAPTION) >= MAX_LEFT_AT_SITE_PHOTOS} onClick={() => leftAtSiteInputRef.current?.click()} className={SECONDARY_BUTTON}>
                     <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Drop Location'}
                   </button>
                 </div>
@@ -943,7 +949,7 @@ export default function FieldStop() {
             {signedBy.trim() && usePaperTicket && !ticketPhotoMatchesLoad && <p>Take the photo of the signed ticket to continue.</p>}
             {signedBy.trim() && usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn) && <p>Enter the delivery date from the paper ticket (today or earlier) to continue.</p>}
             {signedBy.trim() && completionEvidence === 'signature' && !signatureDataUrl && <p>Have the customer sign above to continue.</p>}
-            {noOnePresent && !hasLeftAtSitePhoto(photos) && <p>Take the drop-location photo to continue.</p>}
+            {noOnePresent && !leftPhotoMatchesLoad && <p>Take the drop-location photo to continue.</p>}
           </div>
           <MainAction disabled={!signedBy.trim() || !evidenceReady} onClick={() => setStep('review')}>
             Continue to Review <ChevronRight className="w-6 h-6" aria-hidden="true" />

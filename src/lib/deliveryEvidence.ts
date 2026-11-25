@@ -293,13 +293,14 @@ function lineSeenKey(line: LineSeen): string {
   return `${String(line.order_item_id).toLowerCase()}|${String(line.product_id).toLowerCase()}|${quantity.toFixed(6)}|${delivered.toFixed(6)}`;
 }
 
-/** Ticket photos taken for these lines: only they count toward the photo cap, so a photo of an older load never
- * blocks the photo the current load needs (Luna). */
+/** Ticket (or, with its caption, drop-location) photos taken for these lines: only they count toward the photo cap,
+ * so a photo of an older load never blocks the photo the current load needs (Luna). */
 export function countTicketPhotosForLoad(
   photos: ReadonlyArray<{ caption?: string | null; lines_seen?: ReadonlyArray<LineSeen> | null }>,
   lines: ReadonlyArray<LineSeen> | null | undefined,
+  caption: string = PAPER_TICKET_PHOTO_CAPTION,
 ): number {
-  return photos.filter((photo) => photo.caption === PAPER_TICKET_PHOTO_CAPTION && sameLinesSeen(photo.lines_seen, lines)).length;
+  return photos.filter((photo) => photo.caption === caption && sameLinesSeen(photo.lines_seen, lines)).length;
 }
 
 /** True when both lists hold the same entries, each as many times (the server's _delivery_lines_match). */
@@ -324,25 +325,29 @@ export function hasDeliveredAmount(lines: ReadonlyArray<LineSeen>): boolean {
 /** The server refused because nothing was delivered or the proof is not for this load: clear the proof and reload. */
 export function isLoadProofRefusal(error: unknown): boolean {
   const code = completionRefusalCode(error);
-  return code === 'DELIVERY_NOTHING_DELIVERED' || code === 'DELIVERY_LOAD_CHANGED' || code === 'PAPER_TICKET_LOAD_CHANGED';
+  return code === 'DELIVERY_NOTHING_DELIVERED' || code === 'DELIVERY_LOAD_CHANGED' || code === 'PAPER_TICKET_LOAD_CHANGED'
+    || code === 'LEFT_AT_SITE_LOAD_CHANGED';
 }
 
 /**
  * The client's copy of the server's proof-binding refusals, checked before anything (the signature
- * image) is uploaded: lines not loaded, nothing delivered, or a signature or ticket photo taken for
- * other lines or amounts. Returns the message to show, or null. No-proof and left-at-site are not bound.
+ * image) is uploaded: lines not loaded, nothing delivered, or a signature, ticket photo or drop-location
+ * photo taken for other lines or amounts (`photoLines`: the evidence photo's lines). Returns the message to
+ * show, or null. No-proof is not bound.
  */
 export function loadProofProblem(
   evidence: string,
   currentLines: ReadonlyArray<LineSeen> | null,
   signedLines: ReadonlyArray<LineSeen> | null,
-  ticketPhotoLines: ReadonlyArray<LineSeen> | null | undefined,
+  photoLines: ReadonlyArray<LineSeen> | null | undefined,
 ): string | null {
-  if (evidence !== 'signature' && evidence !== 'paper_ticket') return null;
+  if (evidence !== 'signature' && evidence !== 'paper_ticket' && evidence !== 'left_at_site') return null;
   if (!currentLines) return LINES_LOADING_MESSAGE;
   if (!hasDeliveredAmount(currentLines)) return NOTHING_DELIVERED_MESSAGE;
   if (evidence === 'signature' && !sameLinesSeen(signedLines, currentLines)) return SIGNATURE_LOAD_CHANGED_MESSAGE;
-  if (evidence === 'paper_ticket' && !sameLinesSeen(ticketPhotoLines, currentLines)) return TICKET_PHOTO_LOAD_CHANGED_MESSAGE;
+  if (evidence === 'paper_ticket' && !sameLinesSeen(photoLines, currentLines)) return TICKET_PHOTO_LOAD_CHANGED_MESSAGE;
+  // Mason, 2026-11-25: the drop-location photo is bound to the load like a ticket photo.
+  if (evidence === 'left_at_site' && !sameLinesSeen(photoLines, currentLines)) return LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE;
   return null;
 }
 
@@ -351,4 +356,6 @@ export const SIGNATURE_LOAD_CHANGED_MESSAGE =
   'The products or amounts changed after the customer signed. The signature was cleared; have the customer sign again.';
 export const TICKET_PHOTO_LOAD_CHANGED_MESSAGE =
   'The products or amounts changed since this ticket photo. Get the ticket signed for the current amounts and take a new photo.';
+export const LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE =
+  'The products or amounts changed since the drop-location photo. Take a new photo of where you left the delivery.';
 export const NOTHING_DELIVERED_MESSAGE = 'At least one item must have a delivered quantity of at least 0.01.';

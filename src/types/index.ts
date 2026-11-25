@@ -1372,7 +1372,7 @@ export interface DeliveryPhoto {
   uploaded_at: string;
   file_size: number | null;
   sort_order: number;
-  // The lines the screen showed when a signed-ticket photo was taken (20270305110000); never changes after save.
+  // The lines the screen showed when a signed-ticket photo was taken (20270306190000); never changes after save.
   lines_seen?: { order_item_id: string; product_id: string; quantity: number; delivered: number }[] | null;
   uploader?: Profile;
 }
@@ -3441,6 +3441,8 @@ export interface FieldBillingDefault {
   notes: string | null;
   price_override_cents: number | null;
   pricing_note: string | null;
+  /** FP-1: the split version this read-only copy row came from. */
+  source_split_version_id: string | null;
   created_at: string;
   updated_at: string;
   customer?: Customer;

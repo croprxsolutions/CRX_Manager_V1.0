@@ -3151,6 +3151,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   run_weekly_db_backup: 'cron-only maintenance with authenticated and anonymous EXECUTE revoked; each dated snapshot is independently retained and pruned',
   save_idempotency: 'idempotency infrastructure helper that stores the parent operation result',
   set_primary_customer_contact: 'convergent primary-contact promotion; replays settle to the same single-primary state; SECURITY INVOKER under customer RLS',
+  set_field_marker_write_metadata:
+    'BEFORE INSERT/UPDATE trigger on field_obstacles; PostgreSQL rejects direct calls and API-role EXECUTE is revoked. Creates use the client marker primary key and a duplicate INSERT rolls back its counter increment.',
   settle_applied_record_acres: 'trigger-only derived-acre recomputation; direct client EXECUTE is revoked',
   // trg_recalc_order_totals was listed here only for the pre-apply window: the
   // inventory admits a discovered mutator whose defining migration is still
@@ -3166,6 +3168,10 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // RETURNS trigger, so no API role can call it.
   // write_product_change_history (20261102100000) was pruned on 2026-11-02, when it
   // applied live and the registry high-water moved past it. It RETURNS trigger.
+  // Field application FP-1 (20270305190000) private helpers: every API-role EXECUTE (incl. service_role) is revoked.
+  _set_field_billing_split_20270303: 'internal FP-1 split writer (20270305190000): called only by set_field_billing_split and save_field after their own replay checks (and by the one-time import); binds p_actor to auth.uid(); every API-role EXECUTE is revoked',
+  _refresh_field_billing_defaults_copy_20270303: 'internal FP-1 helper (20270305190000): rewrites the read-only field_billing_defaults copy of one field only when it differs from the version in force, so a replay changes nothing; every API-role EXECUTE is revoked',
+  _refresh_all_field_billing_copies_20270303: 'internal FP-1 pg_cron job (20270305190000): rewrites only stale copies, so a rerun changes nothing; every API-role EXECUTE is revoked',
 };
 
 

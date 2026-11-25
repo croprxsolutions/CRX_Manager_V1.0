@@ -1,0 +1,5 @@
+## 2026-11-25 - PAR-1: EPA correction waits until the product's work in progress is finished (#2579)
+
+- Correcting a product parent's EPA number is refused while any of its sizes has a scheduled, in-progress, or completed-but-not-invoiced job, a blend ticket still unbilled or without its application record, or a draft or unposted invoice (`PRODUCT_PARENT_EPA_OPEN_WORK`, on preview and save). The refusal lists up to 10 by number and state, then "and N more". Finishing, cancelling or deleting that work lets the correction through.
+- Why: in-progress records picked up the corrected number when they were finished (Sol #2381 rounds 11-16, skipped by Mason as not money-affecting); Mason chose one refusal at the source (2026-11-25).
+- Migration `20270307230000_parent_epa_correction_refuses_open_work` (NOT APPLIED; apply right after `20270307180000`). Proof: `node scripts/smoke/prove-parent-epa-open-work-real-schema.mjs`. Contract: `docs/plans/2026-11-25-par1-epa-refuse-open-work-CONTRACT.md`.

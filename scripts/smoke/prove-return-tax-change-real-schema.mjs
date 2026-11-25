@@ -201,7 +201,7 @@ async function main() {
   // 4. AFTER
   const after = chain(NEW_CHAIN);
   assert.ok(after.pass, `AFTER: the new chain fails: ${after.fail}`);
-  console.log('[case] 4a AFTER (#2066): A-E pass: the credit is the taxed share (or discounted share), before or after receipt, each return its own units, never more than the posted total');
+  console.log('[case] 4a AFTER (#2066): A-G pass: the credit is the taxed (or discounted) share, before or after receipt, each return its own units, never more than the posted total');
   const r2 = await race();
   assert.ok(r2.tax > 0 && r2.credit > 0, `AFTER race: ${JSON.stringify(r2)}`);
   assert.equal(r2.ledger, r2.tax, `AFTER race: the ledger must record the tax the credit refunded: ${JSON.stringify(r2)}`);

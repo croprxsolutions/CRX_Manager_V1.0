@@ -14,6 +14,9 @@
 --      each other), not one taking the other's tax; with the last 2 the three credits add up to the posted total.
 --   E  A discount set on the draft after the whole sale was returned and received: the credit is the discounted
 --      posted total, not refused because the stored order price is above what was billed.
+--   F  Two returns of 5 made before a 20% discount: the first credited while the other still carries the old price
+--      gets half the discounted total, not what the other's old price leaves; together they credit the posted total.
+--   G  Five returns of 1 before a 1% discount, credited last-made first: each about a fifth, together the posted total.
 --
 -- Tax is written at commit (deferred triggers). This file runs as ONE statement, so each step ends with
 -- SET CONSTRAINTS ALL IMMEDIATE / DEFERRED: the commit point of that call in the app.
@@ -237,6 +240,46 @@ BEGIN
     END;
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (E) setup failed: ' || SQLERRM || ';';
+  END;
+
+  -- F and G: several returns made before a discount, credited one at a time.
+  DECLARE
+    v_case text;
+    v_qtys numeric[];
+    v_rets uuid[];
+    v_sum bigint;
+    v_n int;
+  BEGIN
+    FOR v_case, v_qtys IN SELECT * FROM (VALUES ('f', ARRAY[5, 5]::numeric[]), ('g', ARRAY[1, 1, 1, 1, 1]::numeric[])) v LOOP
+      BEGIN
+        v_order := pg_temp.rtx_sale(v_admin, v_product.id, v_product.current_cost, v_customer, v_case || '-' || v_suffix);
+        SELECT id INTO v_invoice FROM invoices WHERE order_id = v_order AND invoice_type <> 'credit_memo';
+        v_rets := ARRAY[]::uuid[];
+        FOR v_n IN 1 .. array_length(v_qtys, 1) LOOP
+          v_rets := v_rets || pg_temp.rtx_return(v_admin, v_customer, v_order, v_qtys[v_n], v_case || v_n || '-' || v_suffix);
+        END LOOP;
+        PERFORM pg_temp.rtx_step(format('SELECT set_invoice_standing_discount(%L, %s, %L)', v_invoice,
+          CASE v_case WHEN 'f' THEN 20 ELSE 1 END, 'smk-rtx-disc-' || v_case || '-' || v_suffix));
+        PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-' || v_case || '-' || v_suffix));
+        v_posted := (SELECT total_amount_cents FROM invoices WHERE id = v_invoice);
+        v_sum := 0;
+        FOR v_n IN REVERSE array_length(v_qtys, 1) .. 1 LOOP
+          PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_rets[v_n], v_admin, 'smk-rtx-rc-' || v_case || v_n || '-' || v_suffix));
+          PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_rets[v_n], v_admin, 'smk-rtx-ic-' || v_case || v_n || '-' || v_suffix));
+          IF abs(pg_temp.rtx_credit(v_rets[v_n]) - v_posted * v_qtys[v_n] / 10.0) > 1 THEN
+            v_fails := v_fails || format(' (%s) return %s of %s credits %s cents, want about %s of the posted %s;', upper(v_case), v_n,
+              v_qtys[v_n], pg_temp.rtx_credit(v_rets[v_n]), round(v_posted * v_qtys[v_n] / 10.0, 1), v_posted);
+          END IF;
+          v_sum := v_sum + pg_temp.rtx_credit(v_rets[v_n]);
+        END LOOP;
+        IF v_sum IS DISTINCT FROM round(v_posted * (SELECT sum(q) FROM unnest(v_qtys) q) / 10.0)::bigint THEN
+          v_fails := v_fails || format(' (%s) the returns credit %s cents in all, want %s of the posted %s;', upper(v_case), v_sum,
+            round(v_posted * (SELECT sum(q) FROM unnest(v_qtys) q) / 10.0), v_posted);
+        END IF;
+      EXCEPTION WHEN OTHERS THEN
+        v_fails := v_fails || format(' (%s) crediting returns made before a discount failed: %s;', upper(v_case), SQLERRM);
+      END;
+    END LOOP;
   END;
 
   IF v_fails <> '' THEN

@@ -24,7 +24,7 @@ describe('20270306110000 return credit after a tax change, and the tax ledger ti
   });
 
   for (const fn of ['_receive_return_intent_impl_20260812', '_issue_return_credit_intent_impl_20260812']) {
-    it(`${fn}: re-prices under the line locks, audits it, and still refuses a cancelled-return stale price`, () => {
+    it(`${fn}: re-prices order-price lines under the line locks, audits it, and still refuses any other stale price`, () => {
       const b = body(fn);
       const lock = b.indexOf('pg_advisory_xact_lock(hashtextextended(v_lock_order_item_id::text, 361))');
       const reprice = b.indexOf('UPDATE public.return_items ri');
@@ -32,8 +32,8 @@ describe('20270306110000 return credit after a tax change, and the tax ledger ti
       expect(lock).toBeGreaterThan(0);
       expect(reprice).toBeGreaterThan(lock);
       expect(refusal).toBeGreaterThan(reprice);
-      expect(b).toContain('s.other_returned_qty + ri.quantity <= s.billed_qty');
-      expect(b).toContain("orr.status IN ('rejected', 'cancelled') OR orr.deleted_at IS NOT NULL");
+      expect(b).toContain('l.at_order_price AND NOT l.credited');
+      expect(b).toContain('q.total_qty > q.billed_qty OR q.extended_cents < 0');
       expect(b).toContain('INSERT INTO public.financial_audit_log');
     });
   }

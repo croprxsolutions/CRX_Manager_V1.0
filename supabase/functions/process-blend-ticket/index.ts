@@ -18,6 +18,7 @@ import {
   type ParsedProduct,
   parseProductLine,
   pickQuantity,
+  rateHasExtra,
   readAmountCell,
 } from "./productLine.ts";
 
@@ -399,10 +400,11 @@ function parseMultiLineProducts(
       if (numericValues.length > 0) {
         const ratePerAcre = numericValues[0] || null;
         const totalProduct = numericValues.length > 1 ? numericValues[1] : null;
+        const rate = readAmountCell(ratePerAcre || "");
         const { quantity, unit } = pickQuantity(
-          readAmountCell(ratePerAcre || ""),
+          rate,
           totalProduct,
-          numericValues.length > 2,
+          numericValues.length > 2 || rateHasExtra(rate),
         );
 
         products.push({

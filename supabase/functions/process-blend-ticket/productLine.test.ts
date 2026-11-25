@@ -3,6 +3,7 @@ import {
   nameSwallowsRate,
   parseProductLine,
   pickQuantity,
+  rateHasExtra,
   readAmountCell,
 } from "./productLine.ts";
 
@@ -77,6 +78,14 @@ Deno.test("the multi-line reader uses the same rule", () => {
     quantity: 750,
     unit: null,
   });
+  // Luna r7: extra text in the multi-line rate cell is not exact.
+  const dirty = readAmountCell("6 g lot 24");
+  assertEquals(pickQuantity(dirty, "750 g", rateHasExtra(dirty)), {
+    quantity: 750,
+    unit: null,
+  });
+  assertEquals(rateHasExtra(readAmountCell("6 g/ac")), false);
+  assertEquals(rateHasExtra(readAmountCell("6 g")), false);
 });
 
 Deno.test("a catalog name that swallows the rate token is caught (Sol r2)", () => {

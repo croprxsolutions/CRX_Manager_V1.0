@@ -45,8 +45,7 @@ export function parseProductLine(
         rate,
         totalProduct || null,
         // Extra text in the rate cell or extra columns mean the line is not exact.
-        !END.test((rate?.rest ?? "").replace(PER_ACRE, "")) ||
-          parts.slice(3).some((p) => p !== ""),
+        rateHasExtra(rate) || parts.slice(3).some((p) => p !== ""),
       );
 
       return {
@@ -132,6 +131,11 @@ export function pickQuantity(
 }
 
 const END = /^[.;]*$/;
+
+// A rate cell read on its own (pipe or multi-line) is clean only as "amount unit" plus an optional /ac.
+export function rateHasExtra(rate: AmountCell | null): boolean {
+  return !END.test((rate?.rest ?? "").replace(PER_ACRE, ""));
+}
 
 export type AmountCell = {
   amount: number;

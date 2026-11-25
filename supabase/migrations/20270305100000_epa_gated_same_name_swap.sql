@@ -8,7 +8,8 @@
 --   resistance-group load matches a name only when it is unique, so the duplicates get no group.
 -- WHAT: re-issues public._apply_parent_chemistry (same signature, owner postgres, SECURITY DEFINER, search_path, no
 --   grants). One change: on an EPA-gated product a correction may swap an ingredient row to an EXISTING ingredient
---   with the same name_key (refused when both records carry a CAS, which is unique). The new row copies the old row's strength, unit, basis, source and note, and every mode
+--   with the same name_key, when the records are interchangeable: the old one has no CAS, both have the same
+--   acid-form settings and the same ingredient-level resistance groups. The new row copies the old row's strength, unit, basis, source and note, and every mode
 --   of action of the old row moves over with its own source (EPA-confirmed stays EPA-confirmed); the request's
 --   strength and mode list are not used. Only which shared active_ingredients row the product points at changes.
 -- NOT CHANGED: every other swap, consolidate, change or mode-of-action edit on a gated product still refuses with
@@ -18,7 +19,8 @@
 --   chemistry event with before/after values.
 -- PREFLIGHT: refuses autocommit, and unless the live body is the 20270115100000 one (md5 pinned); a second run refuses.
 -- ROLLBACK: a NEW forward migration re-issuing the 20270115100000 body (lines 349-774). Swaps made meanwhile stay
---   (each is a normal correction; reverse one with another same-name swap).
+--   (each is a normal correction); reverse one with another same-name swap BEFORE rolling back, since the old
+--   body refuses every swap on an EPA product.
 -- Proof: node scripts/smoke/prove-epa-gated-same-name-swap-real-schema.mjs (EPA_SAME_NAME_SWAP_PROOF_PASS).
 -- ============================================================================
 
@@ -279,8 +281,18 @@ BEGIN
       IF v_same_name AND (COALESCE(jsonb_typeof(v_entry->'ingredient_id'), 'null') = 'null'
           OR (SELECT name_key FROM public.active_ingredients WHERE id = v_ing)
              IS DISTINCT FROM (SELECT name_key FROM public.active_ingredients WHERE id = v_row.ingredient_id)
-          -- CAS is unique, so two records that both carry one are different chemicals despite the name.
-          OR (SELECT count(*) FROM public.active_ingredients WHERE id IN (v_ing, v_row.ingredient_id) AND cas IS NOT NULL) = 2) THEN
+          -- The records must be interchangeable: the old one has no CAS (never drop or swap a confirmed identity),
+          -- the same acid-form settings, and the same ingredient-level resistance groups (Sol round 1).
+          OR EXISTS (SELECT 1 FROM public.active_ingredients a, public.active_ingredients b
+                      WHERE a.id = v_row.ingredient_id AND b.id = v_ing
+                        AND (a.cas IS NOT NULL
+                             OR (a.canonical_ingredient_id, a.canonical_fraction, a.fraction_basis, a.is_parent_form)
+                                IS DISTINCT FROM (b.canonical_ingredient_id, b.canonical_fraction, b.fraction_basis, b.is_parent_form)))
+          OR ARRAY(SELECT m.scheme || ':' || m.group_code FROM public.active_ingredient_modes_of_action m
+                    WHERE m.ingredient_id = v_row.ingredient_id AND m.status = 'active' ORDER BY 1)
+             IS DISTINCT FROM
+             ARRAY(SELECT m.scheme || ':' || m.group_code FROM public.active_ingredient_modes_of_action m
+                    WHERE m.ingredient_id = v_ing AND m.status = 'active' ORDER BY 1)) THEN
         RAISE EXCEPTION '%', v_gate;
       END IF;
       IF v_same_name THEN

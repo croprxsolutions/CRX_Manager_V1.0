@@ -54,6 +54,8 @@ function initialFixes(chem: ParentChemistry, prefill: ReplacePrefill | null): Re
   const target = prefill && chem.chemistry.ingredients.find((row) => row.ingredient_id === prefill.ingredientId);
   if (prefill && target) {
     const into = chem.chemistry.ingredients.find((row) => row.ingredient_id === prefill.withIngredient.id);
+    // An EPA product cannot consolidate, so a duplicate already on it is left for the admin to see (Sol round 1).
+    if (into && chem.epa_refusal !== null) return fixes;
     fixes[target.row_id] = into
       ? { ...fixes[target.row_id], action: 'consolidate', intoRowId: into.row_id, ...strengthFrom(into) }
       : { ...fixes[target.row_id], action: 'swap', swapTo: prefill.withIngredient };
@@ -123,7 +125,7 @@ function buildCorrection(values: ParentChemistryValues, fixes: Record<string, Ro
 }
 
 // Mirrors active_ingredients.name_key; the server makes the final check.
-const sameNameKey = (name: string) => name.replace(/\s+/g, ' ').toLowerCase();
+const sameNameKey = (name: string) => name.replace(/[ \t\n\r\f\v]+/g, ' ').toLowerCase();
 
 function SwapChoice({ row, fix, others, busy, gated, patch }: {
   row: ParentChemistryIngredientRow; fix: RowFix; others: ParentChemistryIngredientRow[]; busy: boolean; gated: boolean; patch: (patch: Partial<RowFix>) => void;
@@ -150,8 +152,8 @@ function SwapChoice({ row, fix, others, busy, gated, patch }: {
       <IngredientSearch id={`swap-pick-${row.row_id}`} label="Replace with" excludeIds={[row.ingredient_id]}
         onPick={(swapTo) => {
           const into = others.find((other) => other.ingredient_id === swapTo.id);
-          if (gated && (sameNameKey(swapTo.name) !== sameNameKey(row.name) || (swapTo.cas !== null && row.cas !== null))) {
-            toast('error', `On an EPA product ${row.name} can only be replaced by a duplicate record with the same name (and not two records that both have a CAS number).`);
+          if (gated && (sameNameKey(swapTo.name) !== sameNameKey(row.name) || row.cas !== null)) {
+            toast('error', `On an EPA product ${row.name} can only be replaced by a duplicate record with the same name, and only while it has no CAS number.`);
           } else if (into && gated) {
             toast('error', `${swapTo.name} is already on this product. An EPA product cannot merge two rows; pick a record that is not on it.`);
           } else if (into) {

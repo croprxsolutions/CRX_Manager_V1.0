@@ -323,10 +323,10 @@ export function tahaApprovedCommit(rows, baseChangedAt = "") {
 
 // Mason, 2026-11-25: Taha's Approve of an older commit still counts when the PR's own change is the same
 // now. Pushes that only catch up with staging, add notes under docs/, or restamp a migration (only its
-// 14-digit stamps differ, in names or text) leave it so; any other change to the PR's own files needs him again.
+// own migration stamp changed, old -> new, in names and text; Luna r1) leave it so; any other change needs him again.
 // shortcut: a staging catch-up that changes how the PR's unchanged code behaves is not seen (Mason accepted, 2026-11-25).
-// Date-shaped only (YYYYMMDDhhmmss, 2000-2099), so other 14-digit numbers still count as a change. Not \b:
-// a stamp is followed by "_" in names.
+// shortcut: a file whose git mode alone changes (e.g. to a symlink) is not seen; same honest-mistake net (Luna r1, deferred).
+// Date-shaped (YYYYMMDDhhmmss, 2000-2099), never part of a decimal. Not \b: a stamp is followed by "_" in names.
 const STAMP_RE = /(?<!\d|\d\.)20\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:[01]\d|2[0-3])[0-5]\d[0-5]\d(?!\d|\.\d)/g;
 const unstamped = (text) => String(text ?? "").replace(STAMP_RE, "<stamp>");
 const COMPARE_MAX_FILES = 300; // GitHub's compare lists at most 300 files: at that size, refuse.
@@ -344,9 +344,27 @@ export function ownChanges(files) {
     const key = unstamped(name);
     if (out.has(key)) return null;
     const from = f.previous_filename ? `renamed from ${unstamped(f.previous_filename)}` : "";
-    out.set(key, { status: f.status === "removed" ? "removed" : `present ${from}`, sha: String(f.sha ?? "").toLowerCase() });
+    out.set(key, { status: f.status === "removed" ? "removed" : `present ${from}`, sha: String(f.sha ?? "").toLowerCase(), name });
   }
   return out;
+}
+
+/** Old stamp -> new stamp, read off the PR's own files whose names differ only by stamp (the restamp); null when inconsistent. */
+export function restampMap(before, after) {
+  if (!before || !after) return null;
+  const map = new Map();
+  for (const [key, a] of before) {
+    const b = after.get(key);
+    if (!b) continue;
+    const [x, y] = [String(a.name ?? "").match(STAMP_RE) || [], String(b.name ?? "").match(STAMP_RE) || []];
+    if (x.length !== y.length) return null;
+    for (let i = 0; i < x.length; i++) {
+      if (x[i] === y[i]) continue;
+      if (map.has(x[i]) && map.get(x[i]) !== y[i]) return null;
+      map.set(x[i], y[i]);
+    }
+  }
+  return map;
 }
 
 /** [beforeBlob, afterBlob] pairs whose text must match once stamps are blanked; null when the change differs. */
@@ -370,15 +388,19 @@ function sameOwnChange({ repoPath, gh, pullRequest, from, to }) {
   // base...commit is the PR's own diff at that commit (against where it branched off the base).
   const files = (commit) => JSON.parse(String(gh(["api", `${repoPath}/compare/${base}...${commit}`, "--jq",
     "[(.files // [])[] | {filename, status, sha, previous_filename}]"])));
-  const pairs = ownChangePairs(ownChanges(files(from)), ownChanges(files(to)));
-  if (!pairs) return false;
+  const [before, after] = [ownChanges(files(from)), ownChanges(files(to))];
+  const pairs = ownChangePairs(before, after);
+  const restamps = restampMap(before, after);
+  if (!pairs || !restamps) return false;
   const bytes = (sha) => Buffer.from(String(gh(["api", `${repoPath}/git/blobs/${sha}`, "--jq", ".content"])).replace(/\s+/g, ""), "base64");
-  // Stamps are blanked only in real UTF-8 text; anything else must match byte for byte.
+  // Only the PR's own restamp may differ in text (Luna r1: any other date-shaped number is a real change),
+  // and only in real UTF-8 text; anything else must match byte for byte.
   const text = (buf) => { try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch { return null; } };
+  const restamped = (t) => t.replace(STAMP_RE, (s) => restamps.get(s) ?? s);
   return pairs.every(([a, b]) => {
     const [x, y] = [bytes(a), bytes(b)];
     const [tx, ty] = [text(x), text(y)];
-    return tx !== null && ty !== null ? unstamped(tx) === unstamped(ty) : x.equals(y);
+    return tx !== null && ty !== null ? restamped(tx) === restamped(ty) : x.equals(y);
   });
 }
 

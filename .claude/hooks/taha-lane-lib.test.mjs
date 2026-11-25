@@ -391,8 +391,14 @@ ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: {
   "a 14-digit number that is not a date stamp is a real change (security review LOW)");
 ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "x = 100.00000000000001", [D]: "x = 100.20270304160000" } }),
   "digits after a decimal point are never a stamp");
-ok(carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "// see 20270306190000.\n-- 20270306190000.sql", [D]: "// see 20270307030000.\n-- 20270307030000.sql" } }),
+const mig19 = fl("supabase/migrations/20270306190000_proof.sql", E, "added");
+const mig03 = fl("supabase/migrations/20270307030000_proof.sql", E, "added");
+ok(carried({ before: [quotes, mig19], after: [fl("src/pages/Quotes.tsx", D), mig03], blobs: { [C]: "// see 20270306190000.\n-- 20270306190000.sql", [D]: "// see 20270307030000.\n-- 20270307030000.sql" } }),
   "a stamp at the end of a sentence or before .sql is still a stamp (PR #2557's real restamp)");
+ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "cutoff = 20270301160000", [D]: "cutoff = 20270304160000" } }),
+  "a date-shaped number changed with no restamp of the PR's own migration is a real change (Luna r1 HIGH)");
+ok(!carried({ before: [quotes, mig19], after: [fl("src/pages/Quotes.tsx", D), mig03], blobs: { [C]: "x = 20270301160000", [D]: "x = 20270304160000" } }),
+  "only the PR's own old -> new stamp may differ, not another date");
 ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: Buffer.from([0x80]), [D]: Buffer.from([0x81]) } }),
   "two different non-text files never compare equal (security review LOW)");
 ok(carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: Buffer.from([0x80]), [D]: Buffer.from([0x80]) } }),

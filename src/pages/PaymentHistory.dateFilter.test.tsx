@@ -141,5 +141,6 @@ describe('Payment History opened on a range from a link', () => {
     expect(dayParam('2026-11-01')).toBe('2026-11-01');
     expect(dayParam('11/01/2026')).toBeNull();
     expect(dayParam(null)).toBeNull();
+    expect(dayParam('2026-02-31')).toBeNull();
   });
 });

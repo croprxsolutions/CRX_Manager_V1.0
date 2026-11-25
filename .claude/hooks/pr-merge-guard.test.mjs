@@ -649,8 +649,8 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(/import \{ agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
   // Taha lane block (#2303; behaviour in taha-lane-lib.test.mjs and the Codex gate test): inside the staging branch,
   // bound to the head being merged, with the gate itself telling Taha, and a refusal denies.
-  ok(/if \(base === "staging"\) \{[\s\S]{0,2500}?const lane = tahaLaneGate\(\{[\s\S]{0,200}?pullRequest: Number\(pr\.number\),\s*headSha: pr\.headRefOid,\s*tellTaha: \(body\) => tellTahaOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, pullRequest: Number\(pr\.number\), body \}\),\s*files: prFilesOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, number: Number\(pr\.number\), headSha: pr\.headRefOid \}\),[\s\S]{0,300}?if \(lane\) deny\(lane\);/.test(gateRequestSource),
-    "a staging merge runs the Taha lane gate at the PR's head, reads its SQL at that head, and denies on its refusal");
+  ok(/if \(base === "staging"\) \{[\s\S]{0,2500}?const lane = tahaLaneGate\(\{[\s\S]{0,200}?pullRequest: Number\(pr\.number\),\s*headSha: pr\.headRefOid,\s*tellTaha: \(body\) => tellTahaOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, pullRequest: Number\(pr\.number\), body \}\),\s*tahaApproved: \(\) => tahaApprovedOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, pullRequest: Number\(pr\.number\), headSha: pr\.headRefOid \}\),\s*files: prFilesOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, number: Number\(pr\.number\), headSha: pr\.headRefOid \}\),[\s\S]{0,300}?if \(lane\) deny\(lane\);/.test(gateRequestSource),
+    "a staging merge runs the Taha lane gate at the PR's head, checks Taha's sign-off on that head, reads its SQL at that head, and denies on its refusal");
   ok(/if \(base === "staging"\) \{[\s\S]{0,300}mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused");
   // staging gets every main gate (Mason on #1363, 2026-11-04); staging-first: agents never merge into main
   // or the back-merge, and a migration may go into staging.
@@ -662,13 +662,8 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
     "the main and back-merge refusal runs before any allow point");
   ok(!/stagingMigration/.test(guardSource), "no migration refusal for staging is left");
   ok(!/docs\/changelog\.d|docs\/workflows/.test(guardSource), "no path list is forked into the guard itself");
-  // Follow-ups section (Mason, 2026-11-09): the PR view asks for body and author, and the
-  // shared rule denies before any allow point. The rule itself: followups-lib.test.mjs.
-  ok(/"number,url,baseRefName,baseRefOid,headRefName,headRefOid,[^"]*,body,author"/.test(gateRequestSource), "the PR view asks for the description and author");
-  ok(/const followUps = followUpsProblem\(pr\);\s*if \(followUps\) deny\(followUpsDenial\("PR MERGE GATE", request\.selector, followUps\)\);/.test(gateRequestSource),
-    "a PR without a usable Follow-ups section is denied");
-  ok(gateRequestSource.indexOf("followUpsProblem(pr)") < gateRequestSource.indexOf("advisoryQueue.push(request)"),
-    "the Follow-ups refusal runs before any allow point");
+  // The Follow-ups merge veto was removed (Mason, 2026-11-23); the section stays a /ship habit.
+  ok(!/followUps|followups-lib/i.test(guardSource), "the merge gate no longer checks the Follow-ups section");
 }
 
 // headContainsBaseOnGitHub / ghApiRepoPath — driven in-process with an injected gh.

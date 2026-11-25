@@ -15,7 +15,8 @@ import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
-import SignatureCanvas from '../components/ui/SignatureCanvas';
+import CompletionProofFields, { ProofOption } from '../components/deliveries/CompletionProofFields';
+import { ISSUE_TYPE_LABELS } from '../lib/deliveryIssueTypes';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
@@ -75,17 +76,6 @@ import type {
   Customer, CustomerAddress, Profile, OrderItem, DeliveryIssueType, DeliveryCompletionEvidence, ReceiptRecipient,
   LinkedEntityType,
 } from '../types';
-
-const ISSUE_TYPE_LABELS: Record<string, string> = {
-  none: 'None',
-  customer_not_home: 'Customer Not Home',
-  gate_locked: 'Gate Locked',
-  road_blocked: 'Road Blocked',
-  wrong_address: 'Wrong Address',
-  refused: 'Refused',
-  weather: 'Weather',
-  other: 'Other',
-};
 
 const PRIORITY_LABELS: Record<string, string> = {
   low: 'Low',
@@ -1510,7 +1500,12 @@ export default function DeliveryDetail() {
   };
 
   // After the hand send: mark the paused receipt handled. A failure only leaves it on the office list.
-  const closeSentReceipt = async (deliveryId: string, queuedAt: string | null, deliveryNumber: string) => {
+  const closeSentReceipt = async (deliveryId: string, queuedAt: string | null, deliveryNumber: string, pausedNow: boolean) => {
+    // Only an admin marks a receipt handled, a rep's own hand send included (Mason, 2026-11-24): the server refuses it.
+    if (!isAdmin && pausedNow) {
+      toast('info', `Delivery ${deliveryNumber}: its receipt stays on "Customer receipts to check" until an admin marks it handled.`);
+      return;
+    }
     if (!queuedAt) {
       // None was queued when the send started, so none is closed; one queued meanwhile may still be emailed (Sol LOW).
       // A failed read says so rather than staying silent; each warning names its delivery, as the page may have moved on (#2291).
@@ -1535,13 +1530,13 @@ export default function DeliveryDetail() {
         level: 'warning', extra: { context: 'close_delivery_receipt after Email Confirmation', deliveryId },
       });
       // Not "mark it handled": the close may have failed because a newer receipt the customer is owed replaced it (Sol HIGH).
-      toast('warning', 'The email went out, but the app could not confirm its receipt was closed. Check "Customer receipts to check" before marking anything handled: if this delivery was completed again, the customer may be owed a newer receipt.');
+      toast('warning', 'The email went out, but the app could not confirm its receipt was closed. It stays on "Customer receipts to check" for an admin, who should check it before marking anything handled: if this delivery was completed again, the customer may be owed a newer receipt.');
     }
   };
 
   // A paused receipt whose hand send never went out: the server will not send it either, so say so (Taha LOW).
   const warnHeldNotSent = (deliveryNumber: string) => {
-    toast('warning', `Delivery ${deliveryNumber}: the email did not go out. Its receipt is on "Customer receipts to check" and the server will not send it. Send it again or mark it handled.`);
+    toast('warning', `Delivery ${deliveryNumber}: the email did not go out. Its receipt is on "Customer receipts to check" and the server will not send it. Send it again, or an admin can mark it handled.`);
   };
 
   // ── Resend Delivery Confirmation Email ──────────────────────────────────
@@ -1597,13 +1592,13 @@ export default function DeliveryDetail() {
       });
       heldNotSent = false;
       toast('success', `Confirmation email sent to ${customer.email}`);
-      await closeSentReceipt(delivery.id, paused.queued_at, delivery.delivery_number);
+      await closeSentReceipt(delivery.id, paused.queued_at, delivery.delivery_number, paused.outcome === 'paused');
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
       // No answer came back: the email may have gone out, so never say it did not (Codex P2).
       if (heldNotSent && err instanceof EmailUnconfirmedError) {
         heldNotSent = false;
-        toast('warning', `Delivery ${delivery.delivery_number}: the email may have gone out. Its receipt is on "Customer receipts to check" and the server will not send it. Check before sending again, then mark it handled.`);
+        toast('warning', `Delivery ${delivery.delivery_number}: the email may have gone out. Its receipt is on "Customer receipts to check" and the server will not send it. Check before sending again; an admin can mark it handled.`);
       }
     } finally {
       if (heldNotSent) warnHeldNotSent(delivery.delivery_number);
@@ -1728,6 +1723,23 @@ export default function DeliveryDetail() {
       />
     </>
   );
+
+  // The signed-paper-ticket proof, as the shared completion step shows it (driver and office alike).
+  const paperTicketProof = {
+    hasPhoto: hasPaperTicketPhoto(photos),
+    deliveredOn: paperDeliveredOn,
+    onDeliveredOnChange: setPaperDeliveredOn,
+    onTakePhoto: () => paperTicketInputRef.current?.click(),
+    takePhotoDisabled: uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS,
+    uploading: uploadingPhoto,
+  };
+  // A problem with the delivery, reported in the same completion step (driver and office alike) and sent with it.
+  const completionIssue = {
+    type: driverIssueType,
+    notes: driverIssueNotes,
+    onTypeChange: setDriverIssueType,
+    onNotesChange: setDriverIssueNotes,
+  };
 
   if (isDriver) {
     const isActive = delivery.status !== 'completed' && delivery.status !== 'cancelled';
@@ -1977,128 +1989,22 @@ export default function DeliveryDetail() {
             </section>
           )}
 
-          {/* Issue reporting (driver, when in_progress) */}
-          {delivery.status === 'in_progress' && (
-            <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-              <h2 className="font-heading text-xl font-bold text-nav-dark">Report Issue (Optional)</h2>
-              <select
-                value={driverIssueType}
-                onChange={(e) => setDriverIssueType(e.target.value as DeliveryIssueType)}
-                aria-label="Issue type"
-                className={DRIVER_FIELD_CLASS}
-              >
-                {Object.entries(ISSUE_TYPE_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-              {driverIssueType !== 'none' && (
-                <textarea
-                  value={driverIssueNotes}
-                  onChange={(e) => setDriverIssueNotes(e.target.value)}
-                  placeholder="Describe the issue..."
-                  aria-label="Issue notes"
-                  rows={2}
-                  className={`${DRIVER_FIELD_CLASS} resize-none`}
-                />
-              )}
-            </section>
-          )}
-
           {/* Complete delivery section — only when in_progress; the Complete button is pinned at the bottom */}
           {delivery.status === 'in_progress' && (
             <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
               <h2 className="flex items-center font-heading text-xl font-bold text-nav-dark">Complete Delivery<HelpTip text="Finalizes the delivery. Inventory is deducted, the customer gets an email receipt, and a draft invoice is created automatically." className="ml-1" /></h2>
-              <div>
-                <label htmlFor="driver-signed-by" className="block text-sm font-semibold text-nav-dark mb-1">Signed By</label>
-                <input
-                  id="driver-signed-by"
-                  type="text"
-                  value={signedBy}
-                  onChange={(e) => setSignedBy(e.target.value)}
-                  placeholder="Customer name"
-                  className={DRIVER_FIELD_CLASS}
-                />
-              </div>
-              <div className="flex items-center gap-1">
-              <label className="flex items-center gap-2 text-sm text-nav-dark cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={usePaperTicket}
-                  onChange={(e) => {
-                    setUsePaperTicket(e.target.checked);
-                    if (e.target.checked) setSignatureDataUrl(null);
-                  }}
-                  className="w-5 h-5 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                />
-                Customer signed a paper ticket (no signal at the site)
-              </label>
-              {/* Outside the label, so opening help never toggles paper mode. */}
-              <HelpTip text="Use this when there was no signal at the customer and they signed a paper delivery ticket. Take a photo of the signed ticket instead of an on-screen signature." className="ml-1" />
-              </div>
-              {usePaperTicket ? (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
-                  <input
-                    ref={paperTicketInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)}
-                    className="hidden"
-                  />
-                  {hasPaperTicketPhoto(photos) ? (
-                    <p className="flex items-center gap-2 text-sm text-crx-green">
-                      <CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the signed ticket saved
-                    </p>
-                  ) : (
-                    <p className="text-sm text-amber-800">A photo of the signed paper ticket is required.</p>
-                  )}
-                  <div>
-                    <label htmlFor="paper-delivered-on" className="block text-sm font-semibold text-nav-dark mb-1">Delivered on (date on the ticket)</label>
-                    <input
-                      id="paper-delivered-on"
-                      type="date"
-                      value={paperDeliveredOn}
-                      max={todayInBusinessTz()}
-                      onChange={(e) => setPaperDeliveredOn(e.target.value)}
-                      className={DRIVER_FIELD_CLASS}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => paperTicketInputRef.current?.click()}
-                    disabled={uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS}
-                    className="w-full min-h-12 flex items-center justify-center gap-2 font-semibold text-nav-dark bg-white border border-gray-300 rounded-xl hover:bg-cream-dark disabled:opacity-50 transition-colors"
-                  >
-                    <Camera className="w-5 h-5" />
-                    {uploadingPhoto ? 'Uploading...' : 'Take Photo of Signed Ticket'}
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center gap-1 mb-1">
-                    <span className="text-sm font-semibold text-nav-dark">Customer Signature</span>
-                    <HelpTip text="Have the customer sign with their finger or mouse. This saves as part of the delivery record for your files." className="ml-1" />
-                  </div>
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                    <SignatureCanvas
-                      onSignatureChange={setSignatureDataUrl}
-                      label=""
-                      height={120}
-                    />
-                  </div>
-                </>
-              )}
-              {/* Always shown: a receipt is asked for unless unticked, even when this screen cannot see the email. */}
-              <label className="flex items-center gap-2 text-sm text-nav-dark cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={emailOnComplete}
-                  onChange={(e) => setEmailOnComplete(e.target.checked)}
-                  className="w-5 h-5 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                />
-                Email delivery receipt to customer
-                <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />
-              </label>
+              <CompletionProofFields
+                idPrefix="driver"
+                signedBy={signedBy}
+                onSignedByChange={setSignedBy}
+                usePaperTicket={usePaperTicket}
+                onUsePaperTicketChange={setUsePaperTicket}
+                paperTicket={paperTicketProof}
+                onSignatureChange={setSignatureDataUrl}
+                receipt={{ checked: emailOnComplete, onChange: setEmailOnComplete }}
+                issue={completionIssue}
+              />
+              <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
               {!isOnline && (
                 <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
                   <WifiOff className="h-4 w-4 shrink-0" />
@@ -2317,7 +2223,7 @@ export default function DeliveryDetail() {
               open={resendCopyCheck !== null && resendCopyCheck.delivery_id === delivery.id}
               onClose={() => {
                 // The server may already have sent it: never say it did not go out (Taha LOW).
-                if (resendCopyCheck?.outcome === 'paused') toast('warning', `Delivery ${delivery.delivery_number}: the server may already have emailed this receipt. It is on "Customer receipts to check" and the server will not send it again. Check with the customer before sending, then mark it handled.`);
+                if (resendCopyCheck?.outcome === 'paused') toast('warning', `Delivery ${delivery.delivery_number}: the server may already have emailed this receipt. It is on "Customer receipts to check" and the server will not send it again. Check with the customer before sending; an admin can mark it handled.`);
                 setResendCopyCheck(null);
               }}
               onConfirm={() => { void handleResendEmail(resendCopyCheck?.delivery_id); }}
@@ -2864,170 +2770,69 @@ export default function DeliveryDetail() {
             })}
           </div>
 
-          {/* Signed by */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            <Input
-              label="Signed By"
-              value={completionSignedBy}
-              onChange={(e) => setSignedBy(e.target.value)}
-              placeholder="Customer name"
-              disabled={completionEvidence === 'no_proof'}
-              required
-            />
-            <div>
-              <label className="block text-sm font-medium text-secondary mb-1">Issue (Optional)</label>
-              <select
-                value={driverIssueType}
-                onChange={(e) => setDriverIssueType(e.target.value as DeliveryIssueType)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-              >
-                {Object.entries(ISSUE_TYPE_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {driverIssueType !== 'none' && (
-            <div className="mb-4">
-              <Input
-                label="Issue Notes"
-                value={driverIssueNotes}
-                onChange={(e) => setDriverIssueNotes(e.target.value)}
-                placeholder="Describe the issue..."
-              />
-            </div>
-          )}
-
-          {completionEvidence !== 'no_proof' && (
-            <div className="flex items-center gap-1 mb-3">
-              <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={usePaperTicket}
-                  onChange={(e) => {
-                    setUsePaperTicket(e.target.checked);
-                    if (e.target.checked) setSignatureDataUrl(null);
-                  }}
-                  className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                />
-                Customer signed a paper ticket
-              </label>
-              <HelpTip text="Use this when the customer signed a paper delivery ticket instead of the screen. A photo of the signed ticket is required in place of the on-screen signature." className="ml-1" />
-            </div>
-          )}
-
-          {isAdmin && (
-            <div className="flex items-center gap-1 mb-3">
-              <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer">
-                <input
-                  type="checkbox"
+          <div className="mb-4 max-w-2xl">
+            <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
+            <CompletionProofFields
+              idPrefix="office"
+              signedBy={completionSignedBy}
+              onSignedByChange={setSignedBy}
+              signerLocked={completionEvidence === 'no_proof'}
+              usePaperTicket={usePaperTicket}
+              onUsePaperTicketChange={setUsePaperTicket}
+              showPaperTicketOption={completionEvidence !== 'no_proof'}
+              paperTicket={paperTicketProof}
+              onSignatureChange={setSignatureDataUrl}
+              extraOptions={isAdmin && (
+                <ProofOption
                   checked={useNoProof}
-                  onChange={(e) => {
-                    setUseNoProof(e.target.checked);
-                    if (e.target.checked) { setUsePaperTicket(false); setSignatureDataUrl(null); }
+                  onChange={(checked) => {
+                    setUseNoProof(checked);
+                    if (checked) { setUsePaperTicket(false); setSignatureDataUrl(null); }
                   }}
-                  className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                />
-                Record without proof (admin only)
-              </label>
-              <HelpTip text="Only when there is no signature and no ticket photo, for example a delivery confirmed by phone. Your name, the time and your written reason are saved with the delivery. No receipt is emailed automatically." className="ml-1" />
-            </div>
-          )}
-
-          {completionEvidence === 'no_proof' ? (
-            <div className="mb-4 border border-amber-300 rounded-lg p-3 bg-amber-50 space-y-2">
-              <label htmlFor="no-proof-reason" className="flex items-center gap-2 text-sm font-medium text-amber-900">
-                <AlertTriangle className="w-4 h-4 shrink-0" /> Why is there no proof? (required)
-              </label>
-              <textarea
-                id="no-proof-reason"
-                value={noProofReason}
-                onChange={(e) => setNoProofReason(e.target.value)}
-                rows={3}
-                maxLength={2000}
-                placeholder="For example: customer confirmed by phone on 10/21 that all items arrived"
-                aria-describedby="no-proof-reason-count"
-                className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-              />
-              <p
-                id="no-proof-reason-count"
-                className={`text-xs ${isValidNoProofReason(noProofReason) ? 'text-secondary' : 'text-amber-800'}`}
-              >
-                {noProofReasonLength(noProofReason)} / {NO_PROOF_REASON_MAX_CHARS} characters (at least {NO_PROOF_REASON_MIN_CHARS})
-              </p>
-              <div>
-                <label htmlFor="no-proof-delivered-on" className="block text-sm font-medium text-amber-900 mb-1">Delivered on</label>
-                <input
-                  id="no-proof-delivered-on"
-                  type="date"
-                  value={paperDeliveredOn}
-                  max={todayInBusinessTz()}
-                  onChange={(e) => setPaperDeliveredOn(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                />
-              </div>
-            </div>
-          ) : usePaperTicket ? (
-            <div className="mb-4 border border-gray-200 rounded-lg p-3 bg-white space-y-3">
-              <input
-                ref={paperTicketInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)}
-                className="hidden"
-              />
-              {hasPaperTicketPhoto(photos) ? (
-                <p className="flex items-center gap-2 text-sm text-green-700">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the signed ticket saved
-                </p>
-              ) : (
-                <p className="text-sm text-amber-700">A photo of the signed paper ticket is required.</p>
+                  help="Only when there is no signature and no ticket photo, for example a delivery confirmed by phone. Your name, the time and your written reason are saved with the delivery. No receipt is emailed automatically."
+                >
+                  Record without proof (admin only)
+                </ProofOption>
               )}
-              <div>
-                <label htmlFor="paper-delivered-on-office" className="block text-sm font-medium text-secondary mb-1">Delivered on (date on the ticket)</label>
-                <input
-                  id="paper-delivered-on-office"
-                  type="date"
-                  value={paperDeliveredOn}
-                  max={todayInBusinessTz()}
-                  onChange={(e) => setPaperDeliveredOn(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                />
-              </div>
-              <Button
-                variant="secondary"
-                icon={<Camera className="w-4 h-4" />}
-                onClick={() => paperTicketInputRef.current?.click()}
-                disabled={uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS}
-              >
-                {uploadingPhoto ? 'Uploading...' : 'Add Photo of Signed Ticket'}
-              </Button>
-            </div>
-          ) : (
-            <div className="mb-4 border border-gray-200 rounded-lg p-3 bg-white">
-              <SignatureCanvas
-                onSignatureChange={setSignatureDataUrl}
-                label="Customer Signature"
-                height={120}
-              />
-            </div>
-          )}
-
-          {/* Shown whenever a receipt can be asked for, even when this screen cannot see the email. */}
-          {completionEvidence !== 'no_proof' && (
-            <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer mb-4">
-              <input
-                type="checkbox"
-                checked={emailOnComplete}
-                onChange={(e) => setEmailOnComplete(e.target.checked)}
-                className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-              />
-              Email delivery receipt to customer
-              <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />
-            </label>
-          )}
+              alternateProof={completionEvidence === 'no_proof' ? (
+                  <div className="border border-amber-300 rounded-lg p-3 bg-amber-50 space-y-2">
+                    <label htmlFor="no-proof-reason" className="flex items-center gap-2 text-sm font-medium text-amber-900">
+                      <AlertTriangle className="w-4 h-4 shrink-0" /> Why is there no proof? (required)
+                    </label>
+                    <textarea
+                      id="no-proof-reason"
+                      value={noProofReason}
+                      onChange={(e) => setNoProofReason(e.target.value)}
+                      rows={3}
+                      maxLength={2000}
+                      placeholder="For example: customer confirmed by phone on 10/21 that all items arrived"
+                      aria-describedby="no-proof-reason-count"
+                      className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                    />
+                    <p
+                      id="no-proof-reason-count"
+                      className={`text-xs ${isValidNoProofReason(noProofReason) ? 'text-secondary' : 'text-amber-800'}`}
+                    >
+                      {noProofReasonLength(noProofReason)} / {NO_PROOF_REASON_MAX_CHARS} characters (at least {NO_PROOF_REASON_MIN_CHARS})
+                    </p>
+                    <div>
+                      <label htmlFor="no-proof-delivered-on" className="block text-sm font-medium text-amber-900 mb-1">Delivered on</label>
+                      <input
+                        id="no-proof-delivered-on"
+                        type="date"
+                        value={paperDeliveredOn}
+                        max={todayInBusinessTz()}
+                        onChange={(e) => setPaperDeliveredOn(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                      />
+                    </div>
+                  </div>
+              ) : undefined}
+              // Shown whenever a receipt can be asked for, even when this screen cannot see the email.
+              receipt={completionEvidence !== 'no_proof' ? { checked: emailOnComplete, onChange: setEmailOnComplete } : undefined}
+              issue={completionIssue}
+            />
+          </div>
 
           {!isOnline && (
             <p role="alert" className="flex items-start gap-2 mb-4 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -3305,8 +3110,6 @@ const DRIVER_STEPS = [
   { status: 'in_progress', label: 'Started' },
   { status: 'completed', label: 'Completed' },
 ];
-const DRIVER_FIELD_CLASS =
-  'w-full px-4 py-3 text-base text-nav-dark bg-white border border-gray-300 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green focus:border-crx-green';
 const DRIVER_MAIN_ACTION_CLASS =
   'flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-crx-green font-heading text-xl font-bold text-white hover:bg-crx-green-hover disabled:opacity-50 transition-colors';
 

@@ -262,9 +262,10 @@ A receipt asked for at completion is recorded in the same save in `delivery_rece
 PR #1495) and emailed with retries by the Edge Function `send-delivery-receipts` (PR #1647, live 2026-11-08); the app
 switch to the server receipt merged 2026-11-09 (PR #1649). The close action `close_delivery_receipt`
 (`20261221100000`, ledger `20261109152447`, PR #1678) now has its screens (2026-11-22): each row on "Customer receipts
-to check" (Deliveries) has **Mark handled**, so a handled receipt leaves the list and the server never emails it, and
+to check" (Deliveries) has **Mark handled** (admin-only since `20270301220000`, Mason 2026-11-23; sales reps see the
+list without it), so a handled receipt leaves the list and the server never emails it, and
 Email Confirmation pauses any receipt still queued before its hand send, then marks it handled once the email goes
-out (a failed hand send leaves it on the list). Still open: provider bounce handling (no email bounces are tracked
+out when an admin sent it (a rep's hand send stays listed for an admin; a failed hand send leaves it on the list). Still open: provider bounce handling (no email bounces are tracked
 on any path). The three rare duplicates Mason accepted on 2026-11-09 (DECISION_LOG) stay accepted.
 
 ### KI-26 — Delivery completion-evidence leftovers
@@ -402,6 +403,7 @@ this number is fixed and live (archive, 2026-11-05).
 ### KI-114 — Four kinds of old product rate data are wrong or have no rate basis
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-08 · #1958. Mason answered the label question 2026-11-21 (18 grams per acre); the remaining work is the data fix.
+> **2026-11-22 — Piksi grams fix in review:** Mason: Piksi is grams everywhere, price unchanged. Migration `20270303180000_piksi_mg_to_grams` (not live yet) relabels every Piksi MG row to `g` with no number changed ([contract](../plans/2026-11-22-ki114-piksi-grams-CONTRACT.md)). The Piksi bullet below closes when it is live; the seed-treatment, liquid-unit and per-ton bullets stay open.
 
 **MED · OPEN, planned (RT-2/RT-3) · products/rates · found 2026-11-08 ([RT-1 build sheet](../plans/2026-11-08-product-RT1-BUILD-SHEET.md) section 1)**
 RT-1's draft rates (`20261229110000`, live 2026-11-10) copy these as they are; nothing here is fixed yet. RT-2 step 1
@@ -807,7 +809,7 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   for the same product (LOW).
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
   defaults (MED). Decided for field splits (Mason, 2026-11-08): only payers saved on the field's split, or on
-  the job's own split; built in foundation 18.1 (`docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`). Any rep can read another rep's
+  the job's own split; built in foundation 18.1 (`docs/plans/field-application/CONTRACT-who-pays.md`). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).
 - Invoice lines could be written with no unit (from an order line or delivery line with no unit), so they could never
   get a return credit (MED): FIXED by `20270106100000` (applied live 2026-11-11, PR #1731). A new order line with no unit takes the product's

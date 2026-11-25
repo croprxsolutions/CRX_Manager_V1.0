@@ -20,7 +20,8 @@ const shown = (value: string | null) => value || 'blank';
 
 /**
  * Corrects what the formulation is (formulation type, safener, EPA number) on the parent, with a reason
- * and evidence. The database refuses an EPA number change until the EPA correction work (REG-1) lands.
+ * and evidence. An EPA number change reaches every size and jobs not sprayed yet; old invoices, sprayed jobs and
+ * restricted-use records keep the number they were made with (PAR-1 7.7, 20270307180000).
  */
 export default function ParentIdentityModal({ parent, profileId, onClose, onSaved }: {
   parent: ProductParent;
@@ -105,7 +106,7 @@ export default function ParentIdentityModal({ parent, profileId, onClose, onSave
           <Input key={key} id={`parent-identity-${key}`} label={label} value={values[key] ?? ''}
             onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.value }))} />
         ))}
-        <p className="text-xs text-secondary">EPA number corrections are switched off until the EPA correction work lands; the save will say so.</p>
+        <p className="text-xs text-secondary">A new EPA number applies to every size and to jobs not sprayed yet. Old invoices, sprayed jobs and restricted-use records keep the number saved on them.</p>
         <ReasonField id="parent-identity-reason" label="Reason" value={reason} onChange={setReason} />
         <ReasonField id="parent-identity-evidence" label="Evidence (what shows it)" value={evidence} onChange={setEvidence} />
         {previewed && (
@@ -116,7 +117,11 @@ export default function ParentIdentityModal({ parent, profileId, onClose, onSave
                 <li key={key}>{label}: {shown(previewed.before[key])} → {shown(previewed.after[key])}</li>
               ))}
             </ul>
-            <p className="text-secondary">Sizes: {previewed.sizes.map((size) => size.product_name).join(', ')}</p>
+            <p className="text-secondary">
+              Sizes: {previewed.sizes.map((size) => (previewed.after.generic_epa_registration !== previewed.before.generic_epa_registration
+                ? `${size.product_name} (${shown(size.epa_registration)} → ${shown(previewed.after.generic_epa_registration)})`
+                : size.product_name)).join(', ')}
+            </p>
           </div>
         )}
       </fieldset>

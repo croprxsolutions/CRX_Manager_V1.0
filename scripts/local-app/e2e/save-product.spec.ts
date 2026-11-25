@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { API_URL, APP_URL } from '../target.mjs';
+import { API_URL, APP_URL, STATE_FOLDER } from '../target.mjs';
 
 test('nobody can sign themselves up', async ({ request }) => {
   const response = await request.post(`${API_URL}/auth/v1/signup`, {
@@ -11,7 +11,7 @@ test('nobody can sign themselves up', async ({ request }) => {
 
 test('a website cannot reach the keys or the gateway', async ({ request }) => {
   // .env.example is harmless, but the rule that refuses it is the one that protects a real .env.
-  for (const file of ['/scripts/local-app/.state/local.env', '/.env.example']) {
+  for (const file of [`/scripts/local-app/${STATE_FOLDER}/local.env`, '/.env.example']) {
     expect((await request.get(file)).status(), file).toBe(403);
   }
 
@@ -32,6 +32,10 @@ test('the browser cannot leave this computer, even by IP address', async ({ page
 });
 
 test('signs in, saves a test product, and the save survives a reload, on localhost only', async ({ page }) => {
+  await page.addLocatorHandler(
+    page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: /What's new/i }) }),
+    async (dialog) => { await dialog.getByRole('button', { name: 'Close' }).click(); },
+  );
   const hosts = new Set<string>();
   page.on('request', (request) => {
     const url = new URL(request.url());
@@ -47,25 +51,14 @@ test('signs in, saves a test product, and the save survives a reload, on localho
   const name = `Test Product ${Date.now()} (invented)`;
   await page.goto('/products/new');
   await page.getByLabel(/product name/i).fill(name);
+  await page.locator('.border-t').filter({ hasText: 'Product Form' }).locator('select').selectOption('liquid');
+  await page.locator('.border-t').filter({ hasText: 'Inventory Unit' }).locator('select').selectOption('Gal');
   await page.getByRole('button', { name: 'Create Product' }).click();
-  await expect(page.getByText('Product created')).toBeVisible();
-  // The app can ask about unsaved changes just after a successful create, on some runs only.
-  await expect(async () => {
-    const leave = page.getByRole('button', { name: 'Discard changes' });
-    if (await leave.isVisible()) await leave.click();
-    await expect(page).toHaveURL(/\/products$/, { timeout: 500 });
-  }).toPass();
-
-  await page.reload();
-  await page.getByPlaceholder(/search/i).filter({ visible: true }).first().fill(name);
-  await expect(page.getByText(name).first()).toBeVisible();
-
-  await page.getByText(name).first().click();
   await expect(page).toHaveURL(/\/products\/[0-9a-f-]{36}$/);
   await page.reload();
   await expect(page.getByLabel(/product name/i)).toHaveValue(name);
 
-  await page.screenshot({ path: 'scripts/local-app/.state/proof.png' });
+  await page.screenshot({ path: test.info().outputPath('proof.png') });
   console.warn(`hosts seen: ${[...hosts].join(', ')}`);
   expect(hosts.size).toBeGreaterThan(0);
   expect([...hosts].sort()).toEqual([new URL(API_URL).host, new URL(APP_URL).host].sort());

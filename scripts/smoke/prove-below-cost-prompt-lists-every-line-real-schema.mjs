@@ -289,7 +289,7 @@ const body = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
 const grants = () => scalar(`SELECT COALESCE(string_agg(g, ',' ORDER BY g), '-') FROM (SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END AS g
   FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = '${GUARD}'::regprocedure AND a.privilege_type = 'EXECUTE') x;`);
 const OLD_BODY = '5fa0a5f975dc2a84b3c6599a84b8cc55';
-const NEW_BODY = process.env.CRX_BCL_NEW_BODY || '0490ba18edd0a9338e3329c6c984ff19';
+const NEW_BODY = process.env.CRX_BCL_NEW_BODY || '82587adf716380d46732bfc4f3313cd9';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -464,6 +464,16 @@ ${copyLine(src, 1, 8)};`);
   assert.equal(resave.total_shortfall_cents, 600);
   assert.equal(scalar(`SELECT string_agg(id::text || ':' || unit_price_cents, ',') FROM public.invoice_items WHERE invoice_id = '${INV}';`), `${INV_LINE}:700`);
   console.log('[case 12] save_invoice re-saving a kept order-linked line repriced below cost, with no reason: still refused, at COMMIT, listing that line under its restored id ($6.00 short); the draft is unchanged');
+  // Case 12c: a kept line restored to its saved id with a LOWER quantity is listed at the restored quantity and shortfall.
+  const lowered = refusedAtCommit(asAdminWrite(`DELETE FROM public.invoice_items WHERE id = '${INV_LINE}';
+INSERT INTO public.invoice_items (id, invoice_id, order_item_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, sort_order)
+  VALUES ('${id('e5')}', '${INV}', (${INV_OI}), '${P1}', '[PROVER] BCL one', 2, 700, 1400, 1000, 0);
+UPDATE public.invoice_items SET id = '${INV_LINE}', quantity = 1, extended_cents = 700 WHERE id = '${id('e5')}';`, 'save_invoice'));
+  assert.equal(lowered.lines.length, 1, JSON.stringify(lowered));
+  assert.equal(lowered.lines[0].line_id, INV_LINE); assert.equal(Number(lowered.lines[0].quantity), 1);
+  assert.equal(lowered.lines[0].line_shortfall_cents, 300); assert.equal(lowered.total_shortfall_cents, 300);
+  assert.equal(scalar(`SELECT string_agg(id::text || ':' || unit_price_cents, ',') FROM public.invoice_items WHERE invoice_id = '${INV}';`), `${INV_LINE}:700`);
+  console.log('[case 12c] a kept line restored to its id with a lower quantity: listed at the restored quantity 1 and its $3.00 shortfall');
   // Case 12b: in one save_invoice write, a line written below cost whose id is then changed AND whose price is raised to
   // cost leaves no note behind: the save goes through with no prompt (as case 6a, for a row whose id changes).
   const raisedNewId = asAdminWrite(`DELETE FROM public.invoice_items WHERE id = '${INV_LINE}';

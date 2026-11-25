@@ -3,3 +3,5 @@
 The migration keeps existing marker reads and leaves stored pins untouched. The database owns marker identity, dates, point validation and entrance numbering. The marker read function distinguishes a complete empty list from a field that the caller cannot check.
 
 Rollout and role proof are in [the field marker contract](../../plans/2026-11-24-field-markers-CONTRACT.md). If crew writes need to be withdrawn, restore the office-only write policies in a follow-up migration and keep the new marker types, entrance numbers and reads.
+
+A data-only restore into an existing schema needs a reviewed procedure that preserves marker authors, timestamps, and entrance numbers and restores the matching per-field counters. Ordinary inserts run the marker write trigger and assign metadata for new pins.

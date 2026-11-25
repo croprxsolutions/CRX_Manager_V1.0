@@ -12,6 +12,7 @@ const field = id(3001);
 const unassignedField = id(3002);
 const job = id(3003);
 const legacy = id(3004);
+const legacy3d = id(3006);
 const coworker = id('b1');
 const inactive = id('b2');
 const recipient = id('b3');
@@ -58,6 +59,7 @@ function seed() {
       + job + "','MARKER-PROOF','" + id(3000) + "',CURRENT_DATE,'scheduled','" + applicator + "');",
     "INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('" + id(3005) + "','" + job + "','" + field + "');",
     insert(legacy, 'oil_well').replace(point, '{"type":"Polygon"}') + ';',
+    insert(legacy3d, 'tower').replace(point, '{"type":"Point","coordinates":[-89.5,40.5,10]}') + ';',
     'COMMIT;',
   ].join('\n'));
 }
@@ -88,12 +90,14 @@ function proveAccess() {
   for (const office of [admin, rep]) {
     assert.equal(allowed(office, insert(next) + ' RETURNING created_by'), office);
     assert.equal(allowed(office, update(legacy, "label = 'Office'") + ' RETURNING label'), 'Office');
+    assert.equal(allowed(office, update(legacy3d, "label = repeat('a', 501)")
+      + " RETURNING (length(label) = 501 AND jsonb_array_length(point_geojson->'coordinates') = 3)::text"), 'true');
     assert.equal(allowed(office, remove(marker) + ' RETURNING id'), marker);
   }
   psql('BEGIN; ' + claims(admin) + " UPDATE public.jobs SET applicator_id = '" + coworker + "' WHERE id = '" + job + "'; COMMIT;");
   assert.deepEqual(read(applicator), { available: false });
   refused(applicator, insert(next), /row-level security/);
-  assert.equal(read(coworker).count, 2);
+  assert.equal(read(coworker).count, 3);
   for (const actor of [applicator, coworker]) {
     assert.equal(allowed(actor, update(marker, "label = 'Denied'") + ' RETURNING id'), '');
     assert.equal(allowed(actor, remove(marker) + ' RETURNING id'), '');
@@ -144,8 +148,7 @@ async function proveEntranceNumbers() {
 }
 
 try {
-  // Include the newest marker access predicate and the separate older-record field read policy.
-  buildContainer({ stopBefore: '20261221100000_close_delivery_receipt.sql' });
+  buildContainer({ stopBefore: candidate });
   seed();
   const policy = "SELECT qual FROM pg_policies WHERE tablename = 'field_obstacles' AND cmd = 'SELECT'";
   const previousSelect = scalar(policy);

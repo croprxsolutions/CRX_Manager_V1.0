@@ -1,11 +1,11 @@
--- Reverse of 20270305180000_proof_binding_required: puts back 20270305110000's shared completion step (proof
--- checked only when it carries a list). Run as postgres in one transaction. Undo this before the 20270305110000 reverse.
+-- Reverse of 20270306210000_proof_binding_required: puts back 20270306190000's shared completion step (proof
+-- checked only when it carries a list). Run as postgres in one transaction. Undo this before the 20270306190000 reverse.
 DO $preflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
-     IS DISTINCT FROM '8d86d66f38bf0b8c57e9d477c58c44a8' THEN
-    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _complete_delivery_authorized_impl is not the 20270305180000 body';
+     IS DISTINCT FROM 'a4f83e0ecc6849a226be620cef403cb6' THEN
+    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _complete_delivery_authorized_impl is not the 20270306210000 body';
   END IF;
 END
 $preflight$;
@@ -29,8 +29,8 @@ DECLARE
   v_status text;
   v_bad_figures boolean;
   v_product record;
-  v_binding jsonb;  -- 20270305110000
-  v_ticket_lines jsonb;  -- 20270305110000
+  v_binding jsonb;  -- 20270306190000
+  v_ticket_lines jsonb;  -- 20270306190000
 BEGIN
   -- KI-150: the delivery first (as the body does), then every stock row its lines can move, in product order, so two
   -- completions sharing products wait for each other instead of deadlocking. The body re-takes these locks.
@@ -85,7 +85,7 @@ BEGIN
     RAISE EXCEPTION 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'
       USING ERRCODE = 'check_violation';
   END IF;
-  -- 20270305110000: the customer's proof covers the load the screen showed when it was taken. Here, after the delivery
+  -- 20270306190000: the customer's proof covers the load the screen showed when it was taken. Here, after the delivery
   -- and line locks and every earlier rule (who may complete it, the replay decision, the evidence checks, nothing delivered), so
   -- the lines cannot change under it and every existing message comes first. Only the public wrappers set the binding,
   -- for this delivery; a call with none (today's app, offline sync, left at site, no proof) is not checked.
@@ -155,8 +155,8 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
-     IS DISTINCT FROM 'a5946da8ff04dde50f8ee0925ec0049d' THEN
-    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: the 20270305110000 step was not restored';
+     IS DISTINCT FROM 'f8cb36a8a97fe35abeade37ace956cfc' THEN
+    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: the 20270306190000 step was not restored';
   END IF;
 END
 $postflight$;

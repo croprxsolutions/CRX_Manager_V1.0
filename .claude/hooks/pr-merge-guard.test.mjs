@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { ownerHoldProblem } from "./pr-owner-hold-lib.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -347,6 +348,15 @@ for (const command of [
 }
 r = runHook({ tool_name: "mcp__github__create_pull_request_review", tool_input: { owner: "o", repo: "r", pull_number: 5, event: "APPROVE" } });
 ok(r.decision?.permissionDecision === "deny", "the GitHub review tool's APPROVE is denied");
+
+// Owner hold: the pure helper gateRequest uses to refuse a "[HOLD FOR MASON]" title.
+for (const title of ["[HOLD FOR MASON] fix thing", "fix thing [hold for mason]"]) {
+  const p = ownerHoldProblem({ title, baseRefName: "staging" });
+  ok(typeof p === "string" && /HOLD FOR MASON/.test(p) && /CURRENT exact head/.test(p), `held title refused: ${title}`);
+}
+ok(/title/.test(ownerHoldProblem({ baseRefName: "staging" }) ?? ""), "absent title on a staging PR fails closed");
+ok(ownerHoldProblem({ baseRefName: "main" }) === null, "absent title off staging does not block");
+ok(ownerHoldProblem({ title: "fix thing", baseRefName: "staging" }) === null, "an ordinary title is not held");
 r = runHook({ tool_name: "mcp__github__create_pull_request_review", tool_input: { owner: "o", repo: "r", pull_number: 5, event: "COMMENT", body: "Do not APPROVE until the proof passes" } });
 ok(r.status === 0 && r.decision === null, "a COMMENT review that mentions APPROVE in its body passes");
 for (const command of ["gh pr review 5 --comment -b 'see the note'", "gh pr review 5 -r -b 'needs a test'", "gh pr view 5 --json reviewDecision"]) {

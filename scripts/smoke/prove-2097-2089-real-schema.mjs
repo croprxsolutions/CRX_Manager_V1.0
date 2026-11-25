@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270307210000_booking_expiry_draw_recheck_and_posting_customer_lock (#2097, #2089).
+ * Real-schema proof for 20270308010000_booking_expiry_draw_recheck_and_posting_customer_lock (#2097, #2089).
  * Builds the production baseline plus every replayable migration before the candidate (Docker; the image may be
  * pulled once; no network), then runs three races on separate connections, each before the candidate, after it,
  * and after the rollback text (scripts/smoke/booking-expiry-draw-and-posting-lock-reverse.sql):
@@ -35,7 +35,7 @@ process.env.UNDO_PATHS_CONTAINER ||= `crx-v021-${process.pid}-${Date.now().toStr
 const { buildContainer, removeContainer, seedUsers, scalar, psql, claims, USERS, NAME, docker, ROOT } =
   await import('./undo-paths/harness.mjs');
 
-const CANDIDATE = '20270307210000_booking_expiry_draw_recheck_and_posting_customer_lock.sql';
+const CANDIDATE = '20270308010000_booking_expiry_draw_recheck_and_posting_customer_lock.sql';
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'booking-expiry-draw-and-posting-lock-reverse.sql');
 const OLD_EXPIRY_MD5 = 'f677101398caef2eb0b195a42af5e38f';
 const OLD_DEACTIVATION_MD5 = '77141ca2b586a22418d08c15108b3c7e';

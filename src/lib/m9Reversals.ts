@@ -64,8 +64,8 @@ export function planRefundDraw(credits: DrawCredit[], amountCents: number, picke
  * its receipt (record_outside_refund binds the key to the actor and the exact payload server-side, so a different
  * refund under the same key is refused, never recorded).
  */
-export function refundRetryKey(actorId: string, customerId: string, creditId: string | null, amountCents: number | null, reference: string, paidOn: string | null): string {
-  return `record_outside_refund:${actorId}:${fingerprintIntentPayload([customerId, creditId, amountCents, reference.toLowerCase(), paidOn])}`;
+export function refundRetryKey(r: { actorId: string; customerId: string; creditId: string | null; amountCents: number | null; reference: string; paidOn: string | null }): string {
+  return `record_outside_refund:${r.actorId}:${fingerprintIntentPayload([r.customerId, r.creditId, r.amountCents, r.reference.toLowerCase(), r.paidOn])}`;
 }
 
 export const drawText = (parts: DrawPart[]) => parts.map((p) => `${p.label} ${fmt(p.cents)}`).join(', then ');

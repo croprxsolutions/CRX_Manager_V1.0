@@ -54,7 +54,9 @@ export function useRefundForm(o: { customerId: string; basics: DialogBasics | nu
   // refund again, after a lost reply and even after closing the dialog or reloading, replays its receipt instead of
   // recording it twice. A changed reason on such a resend is refused as changed details. Only a second refund the
   // admin confirms through the "same reference?" prompt gets a fresh key.
-  const refundKey = refundRetryKey(o.profileId || '', o.customerId, pickedOnly, amountCents, refundReference, paidOn);
+  const refundKey = refundRetryKey({
+    actorId: o.profileId || '', customerId: o.customerId, creditId: pickedOnly, amountCents, reference: refundReference, paidOn,
+  });
   const secondRefund = useIdempotencyKey('record_outside_refund', o.profileId || '', intent);
 
   const reset = () => {

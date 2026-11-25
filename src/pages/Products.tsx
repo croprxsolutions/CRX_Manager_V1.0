@@ -39,6 +39,7 @@ import {
   approvePricingChangeSet,
   createPricingWorkbookExport,
   defaultPricingMode,
+  getPricingWorkbookExportRefusalReason,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
   pricingMarginTextIsValid,
@@ -52,8 +53,10 @@ import {
 } from '../lib/productPricing';
 import {
   groupedUseTimingRefusal,
+  isPriceSheetRefusal,
   MAX_PRICING_WORKBOOK_FILE_BYTES,
   MAX_PRICING_WORKBOOK_ROWS,
+  priceSheetReasonText,
   priceSheetRefusalText,
 } from '../lib/productPricingWorkbook';
 import {
@@ -191,6 +194,26 @@ function NetMarginNote({ margin, floor }: { margin: number; floor: number | unde
   );
 }
 
+/**
+ * A price sheet upload's error message. For the server's combined refusal the database names the one reason;
+ * NONE, an unknown code or a failed lookup keeps the general message.
+ */
+async function priceSheetUploadErrorText(
+  error: unknown,
+  exportId: string | null,
+  expiresAt: string | null,
+): Promise<string> {
+  const message = (expiresAt && priceSheetRefusalText(error, expiresAt)) || sanitizeError(error);
+  if (!exportId || !isPriceSheetRefusal(error)) return message;
+  const reason = await getPricingWorkbookExportRefusalReason(exportId).catch((lookupError: unknown) => {
+    // Sentry keeps only a breadcrumb's category (src/lib/sentry.ts), so the category tells a timeout from a failure.
+    const timedOut = lookupError instanceof Error && lookupError.name === 'TimeoutError';
+    Sentry.addBreadcrumb({ category: timedOut ? 'pricing.refusal_reason_timeout' : 'pricing.refusal_reason_failed', level: 'warning' });
+    return null;
+  });
+  return (reason && priceSheetReasonText(reason)) || message;
+}
+
 export default function Products() {
   const { role, profile } = useAuth();
   const navigate = useNavigate();
@@ -308,6 +331,10 @@ export default function Products() {
     if (!editing) setFloorDraftsVoid(false);
   };
   const pricingWorkbookInputRef = useRef<HTMLInputElement>(null);
+  // Each price sheet upload's number: only the latest chosen file may show a review or a message.
+  const pricingUploadSeq = useRef(0);
+  // Leaving the page retires any upload still waiting, so its late message never shows on a later visit.
+  useEffect(() => () => { pricingUploadSeq.current += 1; }, []);
 
   const previewPricingIdem = useIdempotencyKey('preview_product_pricing_changes', profile?.id || '');
   const approvePricingIdem = useIdempotencyKey('approve_pricing_change_set', profile?.id || '');
@@ -966,9 +993,15 @@ export default function Products() {
   };
 
   const handlePricingWorkbookUpload = async (file: File) => {
+    // Every chosen file is a new upload, even one refused below, so an earlier file's late answer is dropped.
+    const upload = ++pricingUploadSeq.current;
+    // An earlier file's review closes, so it cannot be applied after another file was chosen.
+    setPricingPreview(null);
+    setPricingSourceFile(null);
     // The review refuses a grouped size's use timing, so it waits for the groups.
     if (!profile || !parentsReady) {
       // Clear the pick so the same file can be chosen again once the groups load (#2160).
+      setWorkbookBusy(false);
       if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
       if (profile) toast('error', 'Product groups have not loaded. Use Try again, then choose the file again.');
       return;
@@ -978,17 +1011,21 @@ export default function Products() {
         'error',
         `Pricing workbooks must be ${MAX_PRICING_WORKBOOK_FILE_BYTES / 1024 / 1024} MB or smaller.`,
       );
+      setWorkbookBusy(false);
       if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
       return;
     }
     setWorkbookBusy(true);
     let expiresAt: string | null = null;
+    let exportId: string | null = null;
     try {
       const parsed = await parseProductPricingWorkbookWithSupplierEvidence(await file.arrayBuffer());
       expiresAt = parsed.expiresAt;
+      exportId = parsed.exportId;
       const sourceFile: PricingSourceFile = { name: file.name, sha256: await sha256Hex(file) };
       // One key per exact request (the file's bytes decide the rows), as for the inline preview.
       const intent = JSON.stringify(['workbook', sourceFile.sha256]);
+      if (upload !== pricingUploadSeq.current) return;
       const preview = await previewProductPricingChanges({
         source: 'pricing_worksheet',
         exportId: parsed.exportId,
@@ -997,6 +1034,7 @@ export default function Products() {
         idempotencyKey: previewPricingIdem.getKeyFor(intent),
       });
       previewPricingIdem.resetKeyFor(intent);
+      if (upload !== pricingUploadSeq.current) return;
       // A grouped size's use timing is set on its parent; the database refuses it too.
       const groupedRefusal = groupedUseTimingRefusal(preview, groupedParentNames);
       if (groupedRefusal) {
@@ -1006,10 +1044,15 @@ export default function Products() {
       setPricingSourceFile(sourceFile);
       setPricingPreview(preview);
     } catch (error) {
-      toast('error', (expiresAt && priceSheetRefusalText(error, expiresAt)) || sanitizeError(error));
+      if (upload !== pricingUploadSeq.current) return;
+      const message = await priceSheetUploadErrorText(error, exportId, expiresAt);
+      if (upload === pricingUploadSeq.current) toast('error', message);
     } finally {
-      setWorkbookBusy(false);
-      if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
+      // A later upload owns the busy state and the file input.
+      if (upload === pricingUploadSeq.current) {
+        setWorkbookBusy(false);
+        if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
+      }
     }
   };
 

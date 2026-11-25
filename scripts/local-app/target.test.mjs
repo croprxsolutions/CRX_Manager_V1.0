@@ -185,6 +185,27 @@ describe('walkthrough build manifest', () => {
 });
 
 describe('walkthrough lane lock', () => {
+  it('every screen command that can change the lane refuses while the lane lock is held, and leaves the lock alone', () => {
+    const dir = tempDir('crx-local-app-test-');
+    const lock = path.join(dir, 'first-start.lock');
+    writeFileSync(lock, `${process.pid}
+`);
+    try {
+      for (const args of [['start'], ['rebuild'], ['stop'], ['seed'], ['test', 'product-unit.spec.ts']]) {
+        const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), ...args], { encoding: 'utf8', timeout: 30000, env: { ...cleanEnv(), CRX_LOCAL_APP_STATE_DIR: dir } });
+        assert.equal(result.status, 3, `${args[0]}: ${result.stdout}${result.stderr}`);
+        assert.match(result.stderr, /owns this lane/, args[0]);
+        assert.equal(readFileSync(lock, 'utf8').trim(), String(process.pid));
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it('the walkthrough lane refuses a loose frontend command, which would run unlocked', () => {
+    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'frontend'], { encoding: 'utf8', timeout: 30000, env: cleanEnv() });
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /starts its own frontend/);
+  });
   it('serializes concurrent first-start and rebuild commands', () => {
     const lockPath = path.join(tempDir('lane-lock-'), 'first-start.lock');
     const release = acquireLaneLock(lockPath);

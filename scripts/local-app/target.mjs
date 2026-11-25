@@ -213,7 +213,7 @@ export function assertWalkthroughLaneResourcesAreEmpty({ containers, volumes, ne
   }
   for (const port of [APP_PORT, API_PORT, DB_PORT]) {
     if (netstat.split(/\r?\n/).some((line) => line.includes(`:${port} `) && /LISTENING/.test(line))) {
-      throw new Refused(`Walkthrough port ${port} is already in use or reserved. Nothing was changed. Start a new uniquely named checkout to get another lane; do not stop another service.`);
+      throw new Refused(`Walkthrough port ${port} is already listening on this computer. (Ports Windows has blocked are not checked; Docker will report those.) Nothing was changed. Start a new uniquely named checkout to get another lane; do not stop another service.`);
     }
   }
 }

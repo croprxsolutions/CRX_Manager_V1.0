@@ -485,6 +485,15 @@ function requireFinishedBuild() {
   return assertFinishedBuild(JSON.parse(readFileSync(BUILD_FILE, 'utf8')), migrations, IS_SCREEN_WALK ? schemaFingerprint(migrations) : undefined, RECOVERY_COMMAND);
 }
 
+// Starts the shared Vite if it is down, then proves whatever answers is this test app.
+async function ensureFrontend(state) {
+  if (!(await portIsOpen(APP_PORT))) {
+    spawn(process.execPath, vite(APP_PORT), { cwd: ROOT, env: frontendEnv(state), detached: true, stdio: 'ignore' }).unref();
+    await waitFor('test app', () => portIsOpen(APP_PORT));
+  }
+  await assertFrontendIsOurs(state.LOCAL_ANON_KEY);
+}
+
 async function start() {
   if (!readState() && IS_SCREEN_WALK) {
     await rebuild({ firstStart: true });
@@ -493,17 +502,15 @@ async function start() {
   requireFinishedBuild();
   await startDatabase(state);
   await startServices(state);
-  if (!(await portIsOpen(APP_PORT))) {
-    spawn(process.execPath, vite(APP_PORT), { cwd: ROOT, env: frontendEnv(state), detached: true, stdio: 'ignore' }).unref();
-    await waitFor('test app', () => portIsOpen(APP_PORT));
-  }
-  await assertFrontendIsOurs(state.LOCAL_ANON_KEY);
+  await ensureFrontend(state);
   console.log(`Test app: ${APP_URL}\nSign in with LOCAL_TEST_EMAIL and LOCAL_TEST_PASSWORD from scripts/local-app/${STATE_FOLDER}/local.env`);
 }
 
 // `frontend --port 5201` runs a second copy beside the shared one. It reaches the gateway through
 // its own /_sb relay (vite.config.mjs), so the browser makes no cross-site call.
 async function frontend() {
+  // The walkthrough lane starts Vite inside its locked start/test commands; a loose one would run unlocked.
+  if (IS_SCREEN_WALK) throw new Refused('The walkthrough lane starts its own frontend. Use: node scripts/local-app/walkthrough.mjs start');
   const flag = process.argv.indexOf('--port');
   const port = flag < 0 ? APP_PORT : assertExtraAppPort(process.argv[flag + 1]);
   const state = await preflight();
@@ -522,6 +529,8 @@ async function test() {
   requireFinishedBuild();
   await startDatabase(state);
   await startServices(state);
+  // Playwright then finds Vite already running and never launches its own.
+  if (IS_SCREEN_WALK) await ensureFrontend(state);
   if (IS_SALES_GAUNTLET) run(process.execPath, ['scripts/local-app/sales-checks.mjs'], { stdio: 'inherit' });
   run(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '--config', 'scripts/local-app/playwright.config.ts', ...(spec ? [`scripts/local-app/e2e/${spec}`] : [])], { stdio: 'inherit' });
 }
@@ -564,7 +573,8 @@ const validArguments = extra.length === 0
   if (!validArguments) throw new Refused('Unsupported test-app arguments. Use sales.mjs for the sales gauntlet.');
   const command = COMMANDS[process.argv[2]];
   if (!command) throw new Error(`Use one of: ${Object.keys(COMMANDS).join(', ')}`);
-  if (IS_SCREEN_WALK && ['start', 'rebuild', 'stop'].includes(process.argv[2])) {
+  // One lock for the whole command: any of these can change the lane's database or its saved evidence.
+  if (IS_SCREEN_WALK && ['start', 'rebuild', 'stop', 'seed', 'test'].includes(process.argv[2])) {
     assertCleanEnvironment();
     assertStateDirAllowed();
     mkdirSync(STATE_DIR, { recursive: true });

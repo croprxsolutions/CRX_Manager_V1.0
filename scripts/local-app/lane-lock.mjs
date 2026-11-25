@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { Refused } from './target.mjs';
 
 function processIsRunning(pid) {
@@ -25,13 +25,18 @@ export function acquireLaneLock(lockPath, pid = process.pid) {
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error;
     }
-    if (!existsSync(lockPath)) continue;
-    const ownerText = readFileSync(lockPath, 'utf8').trim();
+    let ownerText;
+    try {
+      ownerText = readFileSync(lockPath, 'utf8').trim();
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue; // released between our two looks; try again
+      throw error;
+    }
     const owner = /^\d+$/.test(ownerText) ? Number(ownerText) : NaN;
     if (!Number.isSafeInteger(owner) || owner < 1) {
       throw new Refused(`The lane lock at ${lockPath} is unreadable. Preserve it, then rename only that lock file to a dated .stale file to recover.`);
     }
-    if (processIsRunning(owner)) throw new Refused(`Another local walkthrough command (process ${owner}) owns this lane. Wait for it to finish.`);
+    if (processIsRunning(owner)) throw new Refused(`Another local walkthrough command (process ${owner}) owns this lane. Wait for it to finish. If nothing is running (an old process number can be reused by an unrelated program), rename only ${lockPath} to a dated .stale file.`);
     throw new Refused(`The lane lock records process ${owner}, which is no longer running. Nothing was changed. Confirm no walkthrough command is active, then rename only ${lockPath} to a dated .stale file, or use a different uniquely named checkout.`);
   }
   throw new Refused(`Could not acquire the walkthrough lane lock at ${lockPath}; another command may be starting.`);

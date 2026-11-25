@@ -21,6 +21,7 @@ test('a new product keeps the unit picked for it after a reload', async ({ page 
   await expect(page).toHaveURL(/\/products\/[0-9a-f-]{36}$/);
   await page.reload();
   await expect(page.getByLabel(/product name/i)).toHaveValue(name);
+  await expect(page.locator('.border-t').filter({ hasText: 'Product Form' }).locator('select')).toHaveValue('liquid');
   await expect(unitSelect).toHaveValue('Gal');
   await page.screenshot({ path: `scripts/local-app/${STATE_FOLDER}/product-unit.png`, fullPage: true });
 });

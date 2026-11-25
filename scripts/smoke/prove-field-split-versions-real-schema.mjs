@@ -166,11 +166,9 @@ try {
       FROM public.invoices i WHERE i.job_id = '${INV_JOB}' AND i.deleted_at IS NULL;
     ROLLBACK;`).split('\n').find((l) => l.startsWith('INVOICED '));
   const invoiced = createInvoice(F2, A);
-  // Job billing in A, B order on the shares as saved (A is listed first in billsAsBefore's sorted order only when A < B).
-  // Create Invoice splits the 10 Gal by acre share to 4 decimals (largest remainder) and prices each payer's
-  // quantity on its own, within 50 cents of the exact share (Mason, 2026-11-22, "Allow up to 50c"): 50.01/100.01 of
-  // 10 Gal = 5.0005 Gal -> $50.005 -> 5001 cents; 4.9995 Gal -> $49.995 -> 5000 cents. FP-1 stores the same 50.01/50.00
-  // shares (billsAsBefore above), so this is what Create Invoice billed before FP-1 too.
+  // Create Invoice prices each payer's quantity on its own, within 50 cents of the exact share (Mason, 2026-11-22,
+  // "Allow up to 50c"); today it bills 5001 + 5000 here (known issue 2026-11-25-job-invoice-split-cents-drift). FP-1
+  // does not own that rounding, so the proof checks only the anchor and each payer's share (Taha, #2539 LOW 1).
   const billedNear = (line, field, owner) => {
     const m = /^INVOICED (\S+) ANCHOR (\S+)$/.exec(line ?? '');
     assert.ok(m, `Create Invoice returned an invoice line: ${line}`);
@@ -183,8 +181,6 @@ try {
     return m;
   };
   billedNear(invoiced, F2, A);
-  assert.equal(invoiced, `INVOICED ${[`${A}:5001`, `${B}:5000`].sort().join(',')} ANCHOR ${A}`,
-    'Create Invoice bills 5.0005 Gal (5001 cents) and 4.9995 Gal (5000 cents) on 50.01/50.00, anchored to the owner');
   console.log(`[backfill] Create Invoice on a $100.00 job: ${invoiced}`);
   console.log('[backfill] version 1 on every field with a split, thirds exact, notes kept');
 

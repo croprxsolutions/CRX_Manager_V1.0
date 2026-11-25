@@ -54,6 +54,7 @@ import {
   groupedUseTimingRefusal,
   MAX_PRICING_WORKBOOK_FILE_BYTES,
   MAX_PRICING_WORKBOOK_ROWS,
+  priceSheetRefusalText,
 } from '../lib/productPricingWorkbook';
 import {
   generateProductPricingWorkbookWithSupplierEvidence,
@@ -981,8 +982,10 @@ export default function Products() {
       return;
     }
     setWorkbookBusy(true);
+    let expiresAt: string | null = null;
     try {
       const parsed = await parseProductPricingWorkbookWithSupplierEvidence(await file.arrayBuffer());
+      expiresAt = parsed.expiresAt;
       const sourceFile: PricingSourceFile = { name: file.name, sha256: await sha256Hex(file) };
       // One key per exact request (the file's bytes decide the rows), as for the inline preview.
       const intent = JSON.stringify(['workbook', sourceFile.sha256]);
@@ -1003,7 +1006,7 @@ export default function Products() {
       setPricingSourceFile(sourceFile);
       setPricingPreview(preview);
     } catch (error) {
-      toast('error', sanitizeError(error));
+      toast('error', (expiresAt && priceSheetRefusalText(error, expiresAt)) || sanitizeError(error));
     } finally {
       setWorkbookBusy(false);
       if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';

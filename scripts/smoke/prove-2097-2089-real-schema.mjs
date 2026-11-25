@@ -142,22 +142,24 @@ function newCustomer(tag) {
   psql(`${signedIn} INSERT INTO public.customers (id, farm_name) VALUES ('${customer}', '[2089 ${tag}] Farm'); COMMIT;`);
   return customer;
 }
-// post = false: only the draft is saved (KI-148 counts a draft as open work too).
-const postSql = (customer, invoice, tag, post = true) => `${signedIn}
+// kind 'post': a sales invoice created and posted; 'draft': only its draft (KI-148 counts a draft as open work
+// too); 'credit': a credit memo created and posted (allowed for an inactive customer, but it still takes the lock).
+const postSql = (customer, invoice, tag, kind = 'post') => `${signedIn}
   INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number, total_amount_cents)
-    VALUES ('${invoice}', '${customer}', 'misc_charge', 'INV2089-${tag}', 12500);
-  ${post ? `UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${invoice}';` : ''}`;
+    VALUES ('${invoice}', '${customer}', '${kind === 'credit' ? 'credit_memo' : 'misc_charge'}', 'INV2089-${tag}',
+            ${kind === 'credit' ? -500 : 12500});
+  ${kind === 'draft' ? '' : `UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${invoice}';`}`;
 const deactivateSql = (customer) => `${signedIn} UPDATE public.customers SET is_active = false WHERE id = '${customer}';`;
 const state = (customer, invoice) => ({
   active: scalar(`SELECT is_active FROM public.customers WHERE id = '${customer}';`),
   invoice: scalar(`SELECT COALESCE((SELECT status FROM public.invoices WHERE id = '${invoice}'), 'none');`),
 });
 
-async function postingFirst(tag, post = true) {
-  const customer = newCustomer(`${tag}-a${post ? '' : '-draft'}`);
+async function postingFirst(tag, kind = 'post') {
+  const customer = newCustomer(`${tag}-a-${kind}`);
   const invoice = randomUUID();
   const p = session(`v021-post-${tag}`);
-  p.send(postSql(customer, invoice, `${tag}-a`, post));
+  p.send(postSql(customer, invoice, `${tag}-a`, kind));
   assert.equal(await settle(p), 'idle', p.output());
   const d = session(`v021-deact-${tag}`);
   d.send(deactivateSql(customer));
@@ -168,14 +170,14 @@ async function postingFirst(tag, post = true) {
   return { waited, refused: deact.status !== 0, error: deact.out.trim(), ...state(customer, invoice) };
 }
 
-async function deactivationFirst(tag, post = true) {
-  const customer = newCustomer(`${tag}-b${post ? '' : '-draft'}`);
+async function deactivationFirst(tag, kind = 'post') {
+  const customer = newCustomer(`${tag}-b-${kind}`);
   const invoice = randomUUID();
   const d = session(`v021-deact-${tag}`);
   d.send(deactivateSql(customer));
   assert.equal(await settle(d), 'idle');
   const p = session(`v021-post-${tag}`);
-  p.send(postSql(customer, invoice, `${tag}-b`, post));
+  p.send(postSql(customer, invoice, `${tag}-b`, kind));
   const waited = await settle(p);
   const deact = await d.end('COMMIT;');
   assert.equal(deact.status, 0, deact.out);
@@ -190,8 +192,8 @@ async function runAll(phase) {
     expiry: await expiryRace(tag),
     postFirst: await postingFirst(tag),
     deactFirst: await deactivationFirst(tag),
-    draftFirst: await postingFirst(`${tag}-d`, false),
-    deactFirstDraft: await deactivationFirst(`${tag}-d`, false),
+    draftFirst: await postingFirst(`${tag}-d`, 'draft'),
+    deactFirstDraft: await deactivationFirst(`${tag}-d`, 'draft'),
   };
 }
 function assertBroken(r, when) {
@@ -251,6 +253,16 @@ try {
   assert.match(after.deactFirstDraft.error, /CUSTOMER_INACTIVE_POSTING/);
   assert.deepEqual([after.deactFirstDraft.active, after.deactFirstDraft.invoice], ['f', 'none']);
   console.log('[v021] AFTER #2089 drafts: the same in both orders for a draft saved during a deactivation');
+  // Credit memos are allowed for an inactive customer (Taha 2026-11-25) but still take the lock, so the race stays closed.
+  const creditFirst = await postingFirst(`after-${RUN}-c`, 'credit');
+  assert.equal(creditFirst.waited, 'lock', 'a deactivation must wait for a credit memo being posted');
+  assert.match(creditFirst.error, /CUSTOMER_HAS_OPEN_WORK/);
+  assert.deepEqual([creditFirst.active, creditFirst.invoice], ['t', 'posted']);
+  const deactFirstCredit = await deactivationFirst(`after-${RUN}-c`, 'credit');
+  assert.equal(deactFirstCredit.waited, 'lock', 'a credit memo must wait for a deactivation in progress');
+  assert.equal(deactFirstCredit.refused, false, deactFirstCredit.error);
+  assert.deepEqual([deactFirstCredit.active, deactFirstCredit.invoice], ['f', 'posted']);
+  console.log('[v021] AFTER #2089 credit memos: both orders wait on the lock; deactivation then refused, or the credit memo posts for the now-inactive customer');
 
   // Not races: what else counts as an invoice starting to carry a balance, and the isolation rule.
   const oldCustomer = newCustomer(`after-old-${RUN}`);
@@ -272,11 +284,20 @@ try {
     assert.notEqual(r.status, 0, `not refused: ${sql}`);
     assert.match(r.stderr, /CUSTOMER_INACTIVE_POSTING/);
   };
+  const allowed = (sql) => {
+    const r = psql(`${signedIn} ${sql} COMMIT;`, { allowFailure: true });
+    assert.equal(r.status, 0, `refused: ${sql}\n${r.stderr}`);
+  };
   refused(`UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${draft}';`);
   assert.equal(scalar(`SELECT status FROM public.invoices WHERE id = '${draft}';`), 'draft');
-  // A returned check or voided payment moves paid back to posted: a balance again on an inactive customer.
-  refused(`UPDATE public.invoices SET status = 'posted' WHERE id = '${paid}';`);
-  assert.equal(scalar(`SELECT status FROM public.invoices WHERE id = '${paid}';`), 'paid');
+  // Allowed (Taha 2026-11-25): a returned check or voided payment moves paid back to posted.
+  allowed(`UPDATE public.invoices SET status = 'posted' WHERE id = '${paid}';`);
+  assert.equal(scalar(`SELECT status FROM public.invoices WHERE id = '${paid}';`), 'posted');
+  // Allowed: a credit memo created, then posted, in separate saves.
+  const credit = randomUUID();
+  allowed(`INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number, total_amount_cents) VALUES ('${credit}', '${oldCustomer}', 'credit_memo', 'INV2089-cm-${RUN}', -500);`);
+  allowed(`UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${credit}';`);
+  assert.equal(scalar(`SELECT status FROM public.invoices WHERE id = '${credit}';`), 'posted');
   // Restoring a deleted draft, and creating a new one.
   refused(`UPDATE public.invoices SET deleted_at = NULL WHERE id = '${deletedDraft}';`);
   refused(`INSERT INTO public.invoices (customer_id, invoice_type, invoice_number) VALUES ('${oldCustomer}', 'misc_charge', 'INV2089-new-${RUN}');`);
@@ -285,7 +306,7 @@ try {
   const moving = randomUUID();
   psql(`${signedIn} INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number) VALUES ('${moving}', '${other}', 'misc_charge', 'INV2089-mv-${RUN}'); COMMIT;`);
   refused(`UPDATE public.invoices SET customer_id = '${oldCustomer}' WHERE id = '${moving}';`);
-  console.log('[v021] AFTER: for an inactive customer, posting an old draft, reopening a paid invoice, restoring a deleted draft, a new draft and moving an invoice onto it are refused CUSTOMER_INACTIVE_POSTING');
+  console.log('[v021] AFTER: for an inactive customer, posting an old sales draft, a new sales draft, restoring a deleted draft and moving an invoice onto it are refused CUSTOMER_INACTIVE_POSTING; a credit memo (create, post) and paid back to posted go through');
   // A deactivation outside READ COMMITTED would count from its first snapshot, so it is refused.
   const rrCustomer = newCustomer(`after-rr-${RUN}`);
   const rr = psql(`BEGIN ISOLATION LEVEL REPEATABLE READ; ${claims(ADMIN)}

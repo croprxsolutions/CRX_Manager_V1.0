@@ -17,18 +17,23 @@
 -- 2. #2089 (Sol r58, 20270128140000:90). Deactivating a customer counts open invoices from one snapshot and takes
 --    no locks, so an invoice created and posted in a transaction that had not committed was missed: the customer
 --    went inactive with a posted balance, which statements, finance charges and the prepay runs then skip. Now
---    invoices follow the #2000 new-work rule (20270201120000, which left invoices to this lane): a new AFTER INSERT
---    OR UPDATE OF status, deleted_at, customer_id trigger on invoices locks the customer FOR SHARE, the lock the
---    #2000 guard takes, and refuses when the customer is inactive: CUSTOMER_INACTIVE_POSTING. "Open" is KI-148's
---    meaning (draft, unposted, posted or overdue, not deleted). It fires when an invoice is created (always a draft,
---    trg_invoice_draft_insert), becomes open from closed (a returned check or voided payment reopening a paid
---    invoice, a restore; Mason's #2000 rule: correcting closed history that reopens work needs the customer
---    reactivated first), moves to another customer while open, or is posted (draft or unposted to posted, paid or
---    overdue). FOR SHARE conflicts with the row lock a deactivation holds,
+--    every invoice write that makes an invoice open work for a customer takes the customer row lock the #2000
+--    new-work guard takes (20270201120000): a new AFTER INSERT OR UPDATE OF status, deleted_at, customer_id trigger
+--    on invoices locks the customer FOR SHARE. "Open" is KI-148's meaning (draft, unposted, posted or overdue, not
+--    deleted). Locked: an invoice created (always a draft, trg_invoice_draft_insert), posted (draft or unposted to
+--    posted, paid or overdue), reopened (paid back to posted or overdue), restored, or moved to another customer
+--    while open. For an inactive customer (Taha 2026-11-25, to confirm with Mason on the 25 Nov call):
+--      REFUSED (CUSTOMER_INACTIVE_POSTING): creating a sales invoice (chemical sale, field application, misc charge),
+--      posting a sales invoice's draft, restoring a deleted invoice, moving an invoice onto the customer, and any
+--      other way a sales invoice becomes open (for example voided or cancelled back to posted).
+--      ALLOWED: credit memos (created and posted), and paid back to posted or overdue on any invoice (recording a
+--      returned check, voiding a payment), so money already received can still be corrected.
+--    The lock is taken on the allowed paths too. FOR SHARE conflicts with the row lock a deactivation holds,
 --    so whichever commits first wins and the other sees it: a posting during a deactivation waits and is refused; a
 --    deactivation during a posting waits and KI-148's check then counts the posted invoice and refuses
---    (CUSTOMER_HAS_OPEN_WORK); a draft saved during a deactivation is handled the same way. The same rule refuses
---    posting an inactive customer's old draft; reactivate first.
+--    (CUSTOMER_HAS_OPEN_WORK); a draft saved during a deactivation is handled the same way. An allowed write (a
+--    credit memo) during a deactivation waits, then goes through for the now-inactive customer; a deactivation
+--    during one waits, then counts it.
 --    The deactivation check (guard_customer_deactivation_open_work_20270128, re-emitted from its 20270129210000 body
 --    with one added IF) now refuses outside READ COMMITTED (CUSTOMER_DEACTIVATION_NEEDS_READ_COMMITTED): after waiting
 --    for a posting it must count from a fresh snapshot, which REPEATABLE READ and SERIALIZABLE do not take.
@@ -375,27 +380,44 @@ AS $function$
 DECLARE
   v_active boolean;
   v_new_open boolean := NEW.deleted_at IS NULL AND NEW.status IN ('draft', 'unposted', 'posted', 'overdue');
+  v_posting boolean := false;
+  v_reopen_paid boolean := false;
+  v_credit_memo boolean := false;  -- a credit memo created, or its own undeleted draft posted
 BEGIN
   -- "Open" is KI-148's meaning (20270128140000). Checked: a new invoice, one that becomes open or moves to another
   -- customer while open, and posting (draft or unposted to posted, paid or overdue), which carries a balance even
   -- when the draft was already open.
-  IF TG_OP = 'UPDATE' AND NOT (
-       (v_new_open AND NOT (OLD.deleted_at IS NULL AND OLD.status IN ('draft', 'unposted', 'posted', 'overdue')))
-       OR (v_new_open AND NEW.customer_id IS DISTINCT FROM OLD.customer_id)
-       OR (NEW.deleted_at IS NULL AND OLD.status IN ('draft', 'unposted') AND NEW.status IN ('posted', 'paid', 'overdue'))) THEN
-    RETURN NULL;
-  END IF;
-  IF TG_OP = 'INSERT' AND NOT v_new_open THEN
-    RETURN NULL;
+  IF TG_OP = 'INSERT' THEN
+    IF NOT v_new_open THEN
+      RETURN NULL;
+    END IF;
+    v_credit_memo := NEW.invoice_type = 'credit_memo';
+  ELSE
+    v_posting := NEW.deleted_at IS NULL AND OLD.status IN ('draft', 'unposted') AND NEW.status IN ('posted', 'paid', 'overdue');
+    -- A returned check or a voided payment: the same customer's undeleted paid invoice owes money again.
+    v_reopen_paid := OLD.deleted_at IS NULL AND NEW.deleted_at IS NULL AND OLD.status = 'paid'
+      AND NEW.status IN ('posted', 'overdue') AND NEW.customer_id IS NOT DISTINCT FROM OLD.customer_id;
+    v_credit_memo := v_posting AND NEW.invoice_type = 'credit_memo' AND OLD.deleted_at IS NULL
+      AND NEW.customer_id IS NOT DISTINCT FROM OLD.customer_id;
+    IF NOT ((v_new_open AND NOT (OLD.deleted_at IS NULL AND OLD.status IN ('draft', 'unposted', 'posted', 'overdue')))
+            OR (v_new_open AND NEW.customer_id IS DISTINCT FROM OLD.customer_id)
+            OR v_posting) THEN
+      RETURN NULL;
+    END IF;
   END IF;
   -- FOR SHARE waits for a deactivation in progress, then reads its committed result; it also makes a deactivation
-  -- wait for this save, so KI-148's count sees it. A customer this transaction cannot find is refused, never
-  -- assumed active.
+  -- wait for this save, so KI-148's count sees it. Taken on the allowed paths below too. A customer this
+  -- transaction cannot find is refused, never assumed active.
   SELECT c.is_active INTO v_active FROM public.customers c WHERE c.id = NEW.customer_id FOR SHARE;
-  IF v_active IS NOT TRUE THEN
-    RAISE EXCEPTION 'CUSTOMER_INACTIVE_POSTING: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before an invoice is created, posted, reopened or restored for them';
+  IF v_active IS TRUE THEN
+    RETURN NULL;
   END IF;
-  RETURN NULL;
+  -- Inactive (Taha 2026-11-25): a credit memo may be created and posted, and money already received may be
+  -- corrected (paid back to posted or overdue). A found inactive customer only; restores and moves stay refused.
+  IF v_active IS NOT NULL AND (v_reopen_paid OR v_credit_memo) THEN
+    RETURN NULL;
+  END IF;
+  RAISE EXCEPTION 'CUSTOMER_INACTIVE_POSTING: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them';
 END;
 $function$;
 

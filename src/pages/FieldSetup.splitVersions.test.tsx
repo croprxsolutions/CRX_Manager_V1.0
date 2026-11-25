@@ -228,8 +228,8 @@ describe('Field Setup — FP-1 split versions', () => {
     VERSIONS.unshift({ ...VERSIONS[0], id: 'version-3', version_number: 3, effective_from: '2026-11-24' });
     try {
       fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
-      expect(await screen.findByText('Split changed by someone else')).toBeInTheDocument();
-      expect(screen.getByText(/Pat Rep saved a new billing split \(version 3\)/)).toBeInTheDocument();
+      expect(await screen.findByText('Split changed since you opened this field')).toBeInTheDocument();
+      expect(screen.getByText(/version 3\) was saved by Pat Rep/)).toBeInTheDocument();
       expect(calls('set_field_billing_split')).toHaveLength(0);
       fireEvent.click(screen.getByRole('button', { name: 'Save mine anyway' }));
       await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
@@ -265,7 +265,7 @@ describe('Field Setup — FP-1 split versions', () => {
       expect(calls('set_field_billing_split')[1].p_payers).toContainEqual(
         { customer_id: 'customer-1', product_share_micro_pct: 100_000_000, application_share_micro_pct: 100_000_000 },
       );
-      expect(screen.queryByText('Split changed by someone else')).not.toBeInTheDocument();
+      expect(screen.queryByText('Split changed since you opened this field')).not.toBeInTheDocument();
     } finally {
       if (VERSIONS[0].id === 'version-3') VERSIONS.shift();
     }

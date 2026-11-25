@@ -703,9 +703,10 @@ function FieldSetupPage() {
   // After a failed split save, compare the user's edit against what is really saved now: a lost reply may have saved
   // it. The edit on screen stays; only the clean state, history and version the next save starts from are refreshed.
   const refreshSplitBaseline = async (fieldId: string) => {
+    const seq = fieldLoadSeqRef.current;
     try {
       const data = await loadFieldSplit(fieldId, localToday());
-      if (fieldId !== id) return; // moved to another field meanwhile
+      if (seq !== fieldLoadSeqRef.current) return; // another field (or a fresh read) took over meanwhile
       loadedSplitsRef.current = splitRowsFrom(data.inForce);
       loadedNotesRef.current = data.notes;
       setSplitHistory(data.history);
@@ -718,6 +719,7 @@ function FieldSetupPage() {
 
   // Low-friction field rule (Mason, 2026-11-25): someone else's newer split is a warning, never a block.
   const [staleSplit, setStaleSplit] = useState<SplitVersion | null>(null);
+  useEffect(() => { setStaleSplit(null); }, [id]); // the warning belongs to the field it was found on
 
   const handleSave = async (staleChecked = false) => {
     if (!field.field_name) {
@@ -749,9 +751,10 @@ function FieldSetupPage() {
 
     setSaving(true);
     if (splitChanged && !isNew && id && !staleChecked) {
+      const seq = fieldLoadSeqRef.current;
       try {
         const latest = (await loadFieldSplit(id, localToday())).history[0] ?? null;
-        if (latest && latest.id !== (splitHistory[0]?.id ?? null)) {
+        if (seq === fieldLoadSeqRef.current && latest && latest.id !== (splitHistory[0]?.id ?? null)) {
           setStaleSplit(latest);
           setSaving(false);
           return;
@@ -1877,9 +1880,9 @@ function FieldSetupPage() {
           setStaleSplit(null);
           void handleSave(true);
         }}
-        title="Split changed by someone else"
+        title="Split changed since you opened this field"
         message={staleSplit
-          ? `${staleSplit.created_by_name ?? 'Someone'} saved a new billing split (version ${staleSplit.version_number}) on ${new Date(staleSplit.created_at).toLocaleString()} after you opened this field. Saving replaces it with yours. To see theirs first, cancel and reload the page.`
+          ? `A newer billing split (version ${staleSplit.version_number}) was saved by ${staleSplit.created_by_name ?? 'Unknown'} on ${new Date(staleSplit.created_at).toLocaleString()}, after you opened this field. Saving replaces it with yours. To see it first, cancel and reload the page.`
           : ''}
         confirmLabel="Save mine anyway"
         variant="warning"

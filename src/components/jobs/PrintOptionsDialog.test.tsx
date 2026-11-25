@@ -61,6 +61,7 @@ describe('PrintOptionsDialog', () => {
       render(<PrintOptionsDialog open onClose={vi.fn()} onPrint={onPrint} />);
       await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('app_settings'));
       expect(screen.queryByText('Show billing-split table')).toBeNull();
+      expect(screen.queryByRole('button', { name: /save as default/i })).toBeNull();
       const print = await screen.findByRole('button', { name: /^print/i });
       await waitFor(() => expect(print).not.toBeDisabled());
       fireEvent.click(print);
@@ -71,9 +72,14 @@ describe('PrintOptionsDialog', () => {
     }
   });
 
-  it('office users still see the billing-split toggle', async () => {
-    render(<PrintOptionsDialog open onClose={vi.fn()} onPrint={vi.fn()} />);
-    expect(await screen.findByText('Show billing-split table')).toBeInTheDocument();
+  it.each(['admin', 'sales_rep'])('%s still sees the billing-split toggle', async (role) => {
+    authRole.current = role;
+    try {
+      render(<PrintOptionsDialog open onClose={vi.fn()} onPrint={vi.fn()} />);
+      expect(await screen.findByText('Show billing-split table')).toBeInTheDocument();
+    } finally {
+      authRole.current = 'admin';
+    }
   });
 
   it('loads saved print defaults when opened', async () => {

@@ -127,9 +127,12 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
       footer={(
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button variant="secondary" onClick={handleSaveDefault} loading={savingDefault} disabled={loadingDefaults || printing}>
-            <Save className="h-4 w-4" /> Save as default
-          </Button>
+          {/* Shared defaults are admin-only in the database; an applicator's view (split table forced off) must not become them. */}
+          {!isApplicator && (
+            <Button variant="secondary" onClick={handleSaveDefault} loading={savingDefault} disabled={loadingDefaults || printing}>
+              <Save className="h-4 w-4" /> Save as default
+            </Button>
+          )}
           <Button onClick={handlePrint} loading={printing} disabled={loadingDefaults || savingDefault}>
             <Printer className="h-4 w-4" /> Print
           </Button>

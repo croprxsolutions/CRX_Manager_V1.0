@@ -5,21 +5,26 @@
 // which returns ONLY the fields selected on THIS job and gates on the same visibility
 // predicate as jobs_select. We do NOT pull the whole customer's fields to the browser.
 // Fields with no geometry render a clear 'no boundary on file' state — never a broken map.
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapPin, AlertCircle, Map as MapIcon } from 'lucide-react';
 import SectionCard from '../ui/SectionCard';
+import Button from '../ui/Button';
 import CRXMap from '../map/CRXMap';
 import FieldBoundaryLayer from '../map/FieldBoundaryLayer';
 import FieldMarkerLayer from '../map/FieldMarkerLayer';
 import FieldObstacleLayer from '../map/FieldObstacleLayer';
-import { useToast } from '../ui/Toast';
 import { useFitBounds } from '../../hooks/useFitBounds';
+import { useFieldMarkers } from '../../hooks/useFieldMarkers';
+import { useAuth } from '../../contexts/AuthContext';
 import { supabase, assertRpcResult } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import type { Field, FieldObstacle } from '../../types';
 import { getJobFieldRouteNumbers } from './jobFieldRouteOrder';
 import { toSentryError } from '../../lib/sentryError';
+import { fieldObstacleToGeoJsonFeature } from '../../lib/fieldObstacles';
+import { isNetworkFailure } from '../../lib/deliveryEvidence';
+import FieldMarkerPanel, { MarkerTypeFilter } from '../map/FieldMarkerPanel';
 
 // Exactly the columns get_job_fields_with_geojson returns.
 interface JobMapFieldRow {
@@ -35,6 +40,13 @@ interface JobMapFieldRow {
 }
 
 type JobMapField = Field & { sort_order: number | null };
+
+function noGeometryMessage(filter: string, obstacles: FieldObstacle[], visibleObstacles: FieldObstacle[]) {
+  if (filter && visibleObstacles.length > 0) return 'Markers matching this symbol filter could not be placed on the map.';
+  return filter && obstacles.some(fieldObstacleToGeoJsonFeature)
+    ? 'No mapped markers match this symbol filter.'
+    : "None of this job's fields have a mapped boundary or location on file. Import or draw a boundary for these fields to see them on the map.";
+}
 
 /** Map a scoped RPC row into the Field shape the map layers consume. */
 function toField(r: JobMapFieldRow): JobMapField {
@@ -73,23 +85,69 @@ interface JobFieldMapProps {
   refreshKey?: number;
 }
 
+function JobFieldCheckStatus({ checking, failed, retry }: { checking: boolean; failed: boolean; retry: () => void }) {
+  if (checking) return <p role="status" className="text-sm">Checking this job’s fields…</p>;
+  if (!failed) return null;
+  return (
+    <div className="space-y-2">
+      <p role="status" className="text-sm text-amber-800">Could not recheck this job’s fields. Some locations may be out of date.</p>
+      <Button type="button" variant="secondary" onClick={retry}>Reload job fields</Button>
+    </div>
+  );
+}
+
+function JobFieldLoadStatus({ failed, checking, retry }: { failed?: boolean; checking: boolean; retry: () => void }) {
+  const message = failed
+    ? checking ? 'Checking this job’s fields…' : 'Could not load this job’s fields.'
+    : 'Loading map…';
+  return (
+    <SectionCard id="job-map" icon={<MapIcon className="w-5 h-5" />} title="Field Map">
+      <div className="space-y-2 py-10 text-center">
+        <p role="status" className="text-sm text-gray-500">{message}</p>
+        {failed && <Button type="button" variant="secondary" disabled={checking} onClick={retry}>Check again</Button>}
+      </div>
+    </SectionCard>
+  );
+}
+
 export default function JobFieldMap({ jobId, refreshKey }: JobFieldMapProps) {
   const navigate = useNavigate();
-  const { toast } = useToast();
-  const [jobFields, setJobFields] = useState<JobMapField[]>([]);
-  const [obstacles, setObstacles] = useState<FieldObstacle[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { profile } = useAuth();
+  const [retry, setRetry] = useState(0);
+  const fieldCheckInProgress = useRef(false);
+  const retryFields = useCallback(() => {
+    if (fieldCheckInProgress.current) return;
+    fieldCheckInProgress.current = true;
+    setRetry((previous) => previous + 1);
+  }, []);
+  const scope = `${profile?.id ?? ''}:${jobId}`;
+  const attempt = `${refreshKey ?? ''}:${retry}`;
+  const [result, setResult] = useState<{ scope: string; attempt: string; fields: JobMapField[]; failed: boolean }>();
+  const [filter, setFilter] = useState('');
+  const current = result?.scope === scope ? result : undefined;
+  const checking = current?.attempt !== attempt;
+  const jobFields = useMemo(() => current?.fields ?? [], [current]);
+  const { forField, refresh } = useFieldMarkers(profile?.id, jobFields.map((field) => field.id), refreshKey);
+  const obstacles = useMemo(() => jobFields.flatMap((field) => forField(field.id).markers), [jobFields, forField]);
+  const visibleObstacles = useMemo(() => filter ? obstacles.filter((marker) => marker.kind === filter) : obstacles, [filter, obstacles]);
+
+  useEffect(() => {
+    function refreshAssignmentsOnResume() {
+      if (document.visibilityState === 'visible') retryFields();
+    }
+    document.addEventListener('visibilitychange', refreshAssignmentsOnResume);
+    return () => document.removeEventListener('visibilitychange', refreshAssignmentsOnResume);
+  }, [retryFields]);
 
   useEffect(() => {
     let cancelled = false;
+    fieldCheckInProgress.current = true;
     async function load() {
       if (!jobId) {
-        setJobFields([]);
-        setObstacles([]);
-        setLoading(false);
+        setResult({ scope, attempt, fields: [], failed: false });
+        fieldCheckInProgress.current = false;
         return;
       }
-      setLoading(true);
       try {
         // Server-side scoped: returns ONLY this job's selected fields, gated by job
         // visibility (admin / sales_rep / the assigned applicator). No over-fetch.
@@ -98,45 +156,25 @@ export default function JobFieldMap({ jobId, refreshKey }: JobFieldMapProps) {
         });
         if (error) throw error;
         const rows = assertRpcResult<JobMapFieldRow[]>(data, 'get_job_fields_with_geojson');
-        const nextFields = rows.map(toField);
-        let nextObstacles: FieldObstacle[] = [];
-        const fieldIds = nextFields.map((field) => field.id);
-        if (fieldIds.length > 0) {
-          try {
-            const obstacleResult = await supabase
-              .from('field_obstacles')
-              .select('*')
-              .in('field_id', fieldIds);
-            if (obstacleResult.error) throw obstacleResult.error;
-            nextObstacles = (obstacleResult.data ?? []) as unknown as FieldObstacle[];
-          } catch (obstacleError: unknown) {
-            Sentry.captureException(toSentryError(obstacleError), {
-              tags: { source: 'fetch', action: 'job_field_obstacles' },
-            });
-            if (!cancelled) toast('error', 'Could not load field obstacles.');
-          }
-        }
-        if (!cancelled) {
-          setJobFields(nextFields);
-          setObstacles(nextObstacles);
-        }
+        if (!cancelled) setResult({ scope, attempt, fields: rows.map(toField), failed: false });
       } catch (err) {
         Sentry.captureException(toSentryError(err), {
           tags: { source: 'fetch', action: 'job_field_map' },
         });
-        if (!cancelled) {
-          setJobFields([]);
-          setObstacles([]);
-        }
+        if (!cancelled) setResult((previous) => ({
+          scope, attempt, failed: true,
+          fields: previous?.scope === scope && isNetworkFailure(err) ? previous.fields : [],
+        }));
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) fieldCheckInProgress.current = false;
       }
     }
     load();
     return () => {
       cancelled = true;
+      fieldCheckInProgress.current = false;
     };
-  }, [jobId, toast, refreshKey]);
+  }, [attempt, jobId, scope]);
 
   const fieldsWithGeometry = useMemo(
     () => jobFields.filter((f) => f.boundary_geojson || f.centroid_geojson),
@@ -148,22 +186,19 @@ export default function JobFieldMap({ jobId, refreshKey }: JobFieldMapProps) {
   );
   const routeNumberById = useMemo(() => getJobFieldRouteNumbers(jobFields), [jobFields]);
 
-  const geoStrings = useMemo(
-    () => [
-      ...fieldsWithGeometry.flatMap((f) => [f.boundary_geojson, f.centroid_geojson]),
-      ...obstacles.map((obstacle) => JSON.stringify(obstacle.point_geojson)),
-    ],
-    [fieldsWithGeometry, obstacles]
-  );
+  const plottedPoints = useMemo(() => visibleObstacles.flatMap((marker) => {
+    const feature = fieldObstacleToGeoJsonFeature(marker);
+    return feature ? [JSON.stringify(feature.geometry)] : [];
+  }), [visibleObstacles]);
+  const geoStrings = useMemo(() => [
+    ...fieldsWithGeometry.flatMap((f) => [f.boundary_geojson, f.centroid_geojson]),
+    ...plottedPoints,
+  ], [fieldsWithGeometry, plottedPoints]);
   const bounds = useFitBounds(geoStrings);
-  const hasMapGeometry = fieldsWithGeometry.length > 0 || obstacles.length > 0;
+  const hasMapGeometry = fieldsWithGeometry.length > 0 || plottedPoints.length > 0;
 
-  if (loading) {
-    return (
-      <SectionCard id="job-map" icon={<MapIcon className="w-5 h-5" />} title="Field Map">
-        <p className="text-sm text-gray-500 py-10 text-center">Loading map…</p>
-      </SectionCard>
-    );
+  if (!current || (current.failed && current.fields.length === 0)) {
+    return <JobFieldLoadStatus failed={current?.failed} checking={checking} retry={retryFields} />;
   }
 
   if (jobFields.length === 0) {
@@ -184,7 +219,9 @@ export default function JobFieldMap({ jobId, refreshKey }: JobFieldMapProps) {
       icon={<MapIcon className="w-5 h-5" />}
       title={`Field Map (${jobFields.length} location${jobFields.length === 1 ? '' : 's'})`}
     >
-      <div className="p-4 sm:p-5">
+      <div className="space-y-3 p-4 sm:p-5">
+      <JobFieldCheckStatus checking={checking} failed={current.failed} retry={retryFields} />
+      <MarkerTypeFilter value={filter} onChange={setFilter} />
 
       {hasMapGeometry ? (
         <CRXMap
@@ -206,14 +243,13 @@ export default function JobFieldMap({ jobId, refreshKey }: JobFieldMapProps) {
             showAll
             onFieldClick={(fieldId) => navigate(`/fields/${fieldId}/dashboard`)}
           />
-          <FieldObstacleLayer obstacles={obstacles} interactive={false} />
+          <FieldObstacleLayer obstacles={visibleObstacles} />
         </CRXMap>
       ) : (
         <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 text-amber-800">
           <AlertCircle className="w-5 h-5 shrink-0" />
           <p className="text-sm">
-            None of this job's fields have a mapped boundary or location on file. Import or draw a
-            boundary for these fields to see them on the map.
+            {noGeometryMessage(filter, obstacles, visibleObstacles)}
           </p>
         </div>
       )}
@@ -237,6 +273,9 @@ export default function JobFieldMap({ jobId, refreshKey }: JobFieldMapProps) {
           </ul>
         </div>
       )}
+      {jobFields.map((field) => (
+        <FieldMarkerPanel key={field.id} name={field.field_name} read={forField(field.id)} refresh={refresh} />
+      ))}
       </div>
     </SectionCard>
   );

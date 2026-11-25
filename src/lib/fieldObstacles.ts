@@ -9,6 +9,14 @@ export const FIELD_OBSTACLE_KINDS: readonly FieldObstacleKind[] = [
   'power_line',
   'waterway',
   'other',
+  'field_entrance',
+  'washout',
+  'pole',
+  'garden',
+  'well',
+  'pivot',
+  'sensitive_crop',
+  'gate',
 ];
 
 export const FIELD_OBSTACLE_KIND_LABELS: Record<FieldObstacleKind, string> = {
@@ -19,14 +27,28 @@ export const FIELD_OBSTACLE_KIND_LABELS: Record<FieldObstacleKind, string> = {
   power_line: 'Power line',
   waterway: 'Waterway',
   other: 'Other',
+  field_entrance: 'Field entrance',
+  washout: 'Washout',
+  pole: 'Pole',
+  garden: 'Garden',
+  well: 'Water well',
+  pivot: 'Pivot',
+  sensitive_crop: 'Sensitive crop',
+  gate: 'Gate / cattle guard',
 };
 
 export function isFieldObstacleKind(kind: string): kind is FieldObstacleKind {
   return Object.prototype.hasOwnProperty.call(FIELD_OBSTACLE_KIND_LABELS, kind);
 }
 
-export function fieldObstacleKindLabel(kind: string): string {
+function fieldObstacleKindLabel(kind: string): string {
   return isFieldObstacleKind(kind) ? FIELD_OBSTACLE_KIND_LABELS[kind] : 'Field marker';
+}
+
+export function fieldObstacleName(obstacle: FieldObstacle): string {
+  return obstacle.kind === 'field_entrance' && obstacle.entrance_number
+    ? `Entrance ${obstacle.entrance_number}`
+    : fieldObstacleKindLabel(obstacle.kind);
 }
 
 /** An in-progress boundary must be finished or cancelled before obstacle placement can begin. */
@@ -66,7 +88,7 @@ export function fieldObstacleToGeoJsonFeature(
   obstacle: FieldObstacle,
 ): Feature<Point, FieldObstacleFeatureProperties> | null {
   if (!isFieldObstaclePoint(obstacle.point_geojson)) return null;
-  const kindLabel = fieldObstacleKindLabel(obstacle.kind);
+  const kindLabel = fieldObstacleName(obstacle);
   const label = obstacle.label?.trim() || kindLabel;
   return {
     type: 'Feature',

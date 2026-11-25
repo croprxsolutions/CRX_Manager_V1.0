@@ -12,6 +12,7 @@ const obstacle: FieldObstacle = {
   kind: 'windmill',
   label: 'North windmill',
   point_geojson: { type: 'Point', coordinates: [-89.1, 39.2] },
+  entrance_number: null,
   created_by: 'user-1',
   created_at: '2026-07-11T12:00:00Z',
   updated_at: '2026-07-11T12:00:00Z',
@@ -32,6 +33,14 @@ describe('field obstacles', () => {
       power_line: 'Power line',
       waterway: 'Waterway',
       other: 'Other',
+      field_entrance: 'Field entrance',
+      washout: 'Washout',
+      pole: 'Pole',
+      garden: 'Garden',
+      well: 'Water well',
+      pivot: 'Pivot',
+      sensitive_crop: 'Sensitive crop',
+      gate: 'Gate / cattle guard',
     });
   });
 
@@ -58,7 +67,7 @@ describe('field obstacles', () => {
     })).toBeNull();
   });
 
-  it.each(['field_entrance', 'constructor', '__proto__'])(
+  it.each(['future_marker_kind', 'constructor', '__proto__'])(
     'keeps a pin and its note when a newer app stores kind %s',
     (kind) => {
       // The database may know a kind that this build's TypeScript union does not.

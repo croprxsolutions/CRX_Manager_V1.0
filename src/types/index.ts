@@ -3407,7 +3407,15 @@ export type FieldObstacleKind =
   | 'tree_line'
   | 'power_line'
   | 'waterway'
-  | 'other';
+  | 'other'
+  | 'field_entrance'
+  | 'washout'
+  | 'pole'
+  | 'garden'
+  | 'well'
+  | 'pivot'
+  | 'sensitive_crop'
+  | 'gate';
 
 export interface FieldObstacle {
   id: string;
@@ -3418,6 +3426,17 @@ export interface FieldObstacle {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  entrance_number: number | null;
+}
+
+export interface FieldMarkerState {
+  checking?: boolean;
+  status: 'loading' | 'complete' | 'incomplete' | 'unavailable' | 'stale';
+  markers: FieldObstacle[];
+  authors: Map<string, string>;
+  authorsUnavailable?: boolean;
+  accessDenied?: true;
+  checkedAt?: number;
 }
 
 // Result shapes for the two-acre RPCs (migration 20260623130000)

@@ -81,8 +81,7 @@ import {
 } from 'lucide-react';
 import type { MapRef } from 'react-map-gl/mapbox';
 import type { Json } from '../types/supabase';
-import CRXMap from '../components/map/CRXMap';
-import FieldBoundaryLayer from '../components/map/FieldBoundaryLayer';
+import CrewFieldMarkerMap from '../components/map/CrewFieldMarkerMap';
 import ErrorBoundary from '../components/ErrorBoundary';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import PhoneHeader from '../components/ui/PhoneHeader';
@@ -96,7 +95,7 @@ import { useQueuedJobCompletions } from '../hooks/useQueuedJobCompletions';
 import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { getOfflineStorageErrorMessage, queueAction } from '../lib/offlineQueue';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
-import { fetchAllRows } from '../lib/pagedRead';
+import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { localToday, parseLocalDate } from '../lib/dateUtils';
 import {
@@ -113,7 +112,7 @@ import {
   type DispatchedListRow,
   type FieldViewJobCard,
 } from '../lib/dispatchDisplay';
-import type { Field } from '../types';
+import type { Field, Profile } from '../types';
 import { saveTodaySnapshot, savedCopyAfterFailure } from '../lib/todaySnapshot';
 import { isNetworkFailure } from '../lib/deliveryEvidence';
 import SavedCopyBanner from '../components/route/SavedCopyBanner';
@@ -165,6 +164,37 @@ function emptyCompleteForm(): CompleteForm {
 
 type ViewMode = 'list' | 'map';
 
+function crewMarkerScope(profile: Profile | null, loading: boolean, assignmentsChecked: boolean, savedCopyAt: string | null) {
+  const mapChecking = loading || !assignmentsChecked;
+  const markerUser = {
+    actorId: profile?.id ?? '',
+    office: profile?.role === 'admin' || profile?.role === 'sales_rep',
+    placementAllowed: !(mapChecking || savedCopyAt),
+  };
+  return { mapChecking, markerUser };
+}
+
+function FieldMapReadWarning({ jobsFailed, fieldsFailed, savedCopyAt, loading, retry }: {
+  jobsFailed: boolean;
+  fieldsFailed: boolean;
+  savedCopyAt: string | null;
+  loading: boolean;
+  retry: () => void;
+}) {
+  if (!jobsFailed && !fieldsFailed && !savedCopyAt) {
+    return loading ? <p role="status" className="m-3 text-sm">Checking assigned fields…</p> : null;
+  }
+  return (
+    <div className="m-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+      <p role="status">Couldn't check all assigned fields. Some markers may be missing. Confirm hazards on site.</p>
+      <button type="button" disabled={loading} onClick={retry}
+        className="mt-2 min-h-[44px] rounded-lg border border-amber-300 bg-white px-3 font-semibold disabled:opacity-50">
+        {loading ? 'Checking assigned fields…' : 'Reload map'}
+      </button>
+    </div>
+  );
+}
+
 export default function FieldView() {
   usePageMeta();
   const { toast } = useToast();
@@ -181,6 +211,7 @@ export default function FieldView() {
   const [cards, setCards] = useState<FieldViewJobCard[]>([]);
   const [search, setSearch] = useState('');
   const [view, setView] = useState<ViewMode>('list');
+  const [mapOpenCount, setMapOpenCount] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Per-job expanded detail, fetched lazily on first expand and cached.
@@ -203,8 +234,12 @@ export default function FieldView() {
 
   // Map geometry (best-effort; the list view never depends on it).
   const [mapFields, setMapFields] = useState<Field[]>([]);
+  const [mapActorId, setMapActorId] = useState<string>();
+  const [mapReadFailed, setMapReadFailed] = useState(false);
+  const [mapCheckedCards, setMapCheckedCards] = useState(cards);
+  const { mapChecking, markerUser } = crewMarkerScope(profile, loading, cards === mapCheckedCards, savedCopyAt);
   const mapRef = useRef<MapRef | null>(null);
-  const [fieldToJob, setFieldToJob] = useState<Map<string, string>>(() => new Map());
+  const [jobsByField, setJobsByField] = useState<Map<string, string[]>>(() => new Map());
 
   // --- Load "my jobs" (the dispatched-location rows for the caller) -----------------
   const fetchCards = useCallback(async () => {
@@ -318,31 +353,40 @@ export default function FieldView() {
 
   // --- Map geometry for the visible job locations (best-effort) ---------------------
   useEffect(() => {
-    if (cards.length === 0) { setMapFields([]); setFieldToJob(new Map()); return; }
+    if (cards.length === 0) { setMapReadFailed(false); setMapFields([]); setJobsByField(new Map()); setMapCheckedCards(cards); return; }
     let cancelled = false;
+    let checkedJobs: Map<string, string[]> | undefined;
     (async () => {
       try {
         const myJobFieldIds = cards.flatMap((c) => c.locations.map((l) => l.job_field_id));
-        if (myJobFieldIds.length === 0) { if (!cancelled) { setMapFields([]); setFieldToJob(new Map()); } return; }
-        const jfRows: { job_id: string; field_id: string | null }[] = [];
+        const jfRows: { id: string; job_id: string; field_id: string | null }[] = [];
         for (const chunk of chunkIds(myJobFieldIds)) {
           const jfRes = await supabase
             .from('job_fields')
-            .select('job_id, field_id')
+            .select('id, job_id, field_id')
             .in('id', chunk);
           if (jfRes.error) throw jfRes.error;
-          jfRows.push(...((jfRes.data || []) as { job_id: string; field_id: string | null }[]));
+          jfRows.push(...(jfRes.data ?? []));
         }
-        const f2j = new Map<string, string>();
-        for (const r of jfRows) {
-          if (r.field_id && !f2j.has(r.field_id)) f2j.set(r.field_id, r.job_id);
+        // Read by job ID only for whole-job cards. A split job can include fields dispatched to another crew.
+        const wholeJobIds = cards.filter((card) => card.locations.length === 0).map((card) => card.job_id);
+        const wholeJobFields = await fetchAllRowsForIds(wholeJobIds, (jobIds, from, to) => pageWithList(supabase
+          .from('job_fields').select('id, job_id, field_id', { count: 'exact' })
+          .in('job_id', jobIds).order('id').range(from, to)));
+        if (wholeJobFields.error) throw wholeJobFields.error;
+        for (const row of wholeJobFields.data ?? []) jfRows.push(row);
+        const mappedJobs = new Map<string, string[]>();
+        for (const { field_id, job_id } of jfRows) {
+          if (!field_id) continue;
+          const jobs = mappedJobs.get(field_id);
+          if (jobs) jobs.push(job_id);
+          else mappedJobs.set(field_id, [job_id]);
         }
-        if (!cancelled) setFieldToJob(f2j);
-        const fieldIds = Array.from(new Set(Array.from(f2j.keys())));
-        if (fieldIds.length === 0) { if (!cancelled) setMapFields([]); return; }
+        checkedJobs = mappedJobs;
+        const fieldIds = [...mappedJobs.keys()];
         // Every requested field, page by page (one reply stopped at the server's row cap, Goal 4 N8).
         // A page with neither rows nor an error is a silent denial: reported, not read as "no fields".
-        const { data: geoData, error: geoErr } = await fetchAllRows(async (from, to) => {
+        const { data: geoData, error: geoErr } = fieldIds.length === 0 ? { data: [], error: null } : await fetchAllRows(async (from, to) => {
           const page = await supabase
             .rpc('get_fields_geojson_by_ids', { p_field_ids: fieldIds }, { count: 'exact' })
             .order('field_name').order('id').range(from, to);
@@ -353,14 +397,44 @@ export default function FieldView() {
         });
         if (geoErr) throw geoErr;
         const fRows = (assertRpcResult<Array<Field>>(geoData, 'get_fields_geojson_by_ids') || []) as unknown as Field[];
-        if (!cancelled) setMapFields(fRows);
+        if (!cancelled) {
+          const locationIds = new Set(jfRows.map((row) => row.id));
+          const mappedIds = new Set(fRows.map((field) => field.id));
+          setMapReadFailed([
+            jfRows.some((row) => !row.field_id),
+            myJobFieldIds.some((id) => !locationIds.has(id)),
+            fieldIds.some((id) => !mappedIds.has(id)),
+          ].some(Boolean));
+          setJobsByField(mappedJobs);
+          setMapFields(fRows);
+          setMapActorId(markerUser.actorId);
+          setMapCheckedCards(cards);
+        }
       } catch (err) {
         Sentry.captureException(err, { tags: { source: 'fetch', action: 'field_view_map_fields' } });
-        if (!cancelled) { setMapFields([]); setFieldToJob(new Map()); }
+        if (cancelled) return;
+        setMapCheckedCards(cards);
+        setMapReadFailed(true);
+        if (!isNetworkFailure(err)) {
+          setMapFields([]);
+          setJobsByField(new Map());
+        } else if (checkedJobs) {
+          setJobsByField(checkedJobs);
+        } else if (!savedCopyAt) {
+          // A fresh legacy job card alone does not identify the fields now on that job.
+          const splitJobs = new Set(cards.filter((card) => card.locations.length > 0).map((card) => card.job_id));
+          setJobsByField((previous) => {
+            const kept = new Map<string, string[]>();
+            for (const [id, jobs] of previous) {
+              kept.set(id, jobs.filter((job) => splitJobs.has(job)));
+            }
+            return kept;
+          });
+        }
       }
     })();
     return () => { cancelled = true; };
-  }, [cards]);
+  }, [cards, markerUser.actorId, savedCopyAt]);
 
   useEffect(() => {
     if (view !== 'map' || !mapRef.current) return;
@@ -374,13 +448,20 @@ export default function FieldView() {
     [visibleCards, today]
   );
 
-  const visibleMapFields = useMemo(() => {
-    const visibleJobIds = new Set(visibleCards.map((c) => c.job_id));
-    return mapFields.filter((f) => {
-      const jobId = fieldToJob.get(f.id);
-      return jobId != null && visibleJobIds.has(jobId);
-    });
-  }, [visibleCards, mapFields, fieldToJob]);
+  const fieldToJob = useMemo(() => {
+    const visibleFieldJobs = new Map<string, string>();
+    if (mapActorId !== markerUser.actorId) return visibleFieldJobs;
+    const currentJobs = new Map(cards.map((card) => [card.job_id, card.locations]));
+    for (const [fieldId, jobIds] of jobsByField) {
+      const jobId = [...jobIds].sort().find((id) => {
+        const locations = currentJobs.get(id);
+        return locations && (locations.length === 0 || locations.some((location) => location.field_id === fieldId));
+      });
+      if (jobId) visibleFieldJobs.set(fieldId, jobId);
+    }
+    return visibleFieldJobs;
+  }, [cards, jobsByField, mapActorId, markerUser.actorId]);
+  const visibleMapFields = useMemo(() => mapFields.filter((field) => fieldToJob.has(field.id)), [mapFields, fieldToJob]);
 
   // --- Lazy-load a card's read-only detail on first expand --------------------------
   const loadDetail = useCallback(async (card: FieldViewJobCard) => {
@@ -941,7 +1022,12 @@ export default function FieldView() {
               <ListIcon className="w-4 h-4" aria-hidden="true" /> List
             </button>
             <button
-              onClick={() => setView('map')}
+              onClick={() => {
+                if (view === 'map') return;
+                if (mapOpenCount > 0 && !mapChecking) void fetchCards();
+                setMapOpenCount((count) => count + 1);
+                setView('map');
+              }}
               aria-pressed={view === 'map'}
               className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-semibold min-h-[44px] ${
                 view === 'map' ? 'bg-crx-green text-white' : 'text-gray-300 hover:text-white'
@@ -987,33 +1073,39 @@ export default function FieldView() {
       />
 
       {/* CONTENT */}
-      {loading ? (
+      {/* Preserve the marker draft and retry ID when someone checks their job list. */}
+      {mapOpenCount > 0 && (
+        <div hidden={view !== 'map'} className="m-3 rounded-xl border border-gray-200">
+          <FieldMapReadWarning jobsFailed={fetchError} fieldsFailed={mapReadFailed}
+            savedCopyAt={savedCopyAt} loading={mapChecking} retry={() => void fetchCards()} />
+          <ErrorBoundary inline>
+            <CrewFieldMarkerMap
+              key={markerUser.actorId}
+              fields={visibleMapFields}
+              jobByField={fieldToJob}
+              refreshKey={mapOpenCount}
+              active={view === 'map'}
+              {...markerUser}
+              onMapLoad={(map) => { mapRef.current = map; }}
+              onFieldClick={(fieldId) => {
+                const jobId = resolveFieldToJob(fieldToJob, fieldId);
+                if (!jobId) return;
+                const card = cards.find((c) => c.job_id === jobId);
+                if (card) {
+                  if (!visibleCards.some((visible) => visible.job_id === jobId)) setSearch('');
+                  setView('list');
+                  setExpandedId(card.job_id);
+                }
+              }}
+            />
+          </ErrorBoundary>
+        </div>
+      )}
+      {view === 'map' ? null : loading ? (
         <div className="p-3 sm:p-4 space-y-3">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-24 rounded-xl bg-gray-200/70 animate-pulse" />
           ))}
-        </div>
-      ) : view === 'map' ? (
-        <div className="h-[calc(100vh-9rem)] m-3 rounded-xl overflow-hidden border border-gray-200">
-          <ErrorBoundary inline>
-            <CRXMap
-              className="h-full min-h-[360px]"
-              showLayerToggle
-              interactive
-              onMapLoad={(map) => { mapRef.current = map; }}
-            >
-              <FieldBoundaryLayer
-                fields={visibleMapFields as (Field & { customer_name?: string })[]}
-                showLabels
-                onFieldClick={(fieldId) => {
-                  const jobId = resolveFieldToJob(fieldToJob, fieldId);
-                  if (!jobId) return;
-                  const card = visibleCards.find((c) => c.job_id === jobId);
-                  if (card) { setView('list'); setExpandedId(card.job_id); }
-                }}
-              />
-            </CRXMap>
-          </ErrorBoundary>
         </div>
       ) : fetchError && visibleCards.length === 0 ? (
         <div className="p-3 sm:p-4">

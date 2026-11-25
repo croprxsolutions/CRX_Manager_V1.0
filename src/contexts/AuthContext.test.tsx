@@ -5,6 +5,8 @@
  * onAuthStateChange) and the profiles query to test the full auth lifecycle.
  */
 
+import { AuthRetryableFetchError, type Session } from '@supabase/supabase-js';
+import { IDBFactory } from 'fake-indexeddb';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, renderHook, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { useState, type ReactNode } from 'react';
@@ -67,6 +69,8 @@ vi.mock('../lib/db', () => ({
   },
 }));
 
+import type { MarkerPlacement } from '../lib/fieldMarkerData';
+import { readPendingMarker, reservePendingMarker, syncPendingMarkerSession } from '../lib/fieldMarkerPending';
 import { AuthProvider, useAuth } from './AuthContext';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
 
@@ -575,6 +579,61 @@ describe('AuthContext', () => {
       // State should be cleared even though signOut threw
       expect(result.current.session).toBeNull();
       expect(result.current.profile).toBeNull();
+    });
+
+    it('keeps a pending marker across an offline startup and the same session refreshing', async () => {
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      const claims = btoa(JSON.stringify({ session_id: '44444444-4444-4444-8444-444444444444' }));
+      const session = makeSession({ access_token: `header.${claims}.signature` }) as Session;
+      const placement: MarkerPlacement = {
+        id: '11111111-1111-4111-8111-111111111111', field_id: 'field-a', kind: 'gate', label: 'Use the gate',
+        point_geojson: { type: 'Point', coordinates: [-89, 40] },
+      };
+      try {
+        await syncPendingMarkerSession(session);
+        await reservePendingMarker('user-123', placement);
+        mockGetSession.mockResolvedValue({ data: { session: null }, error: new AuthRetryableFetchError('Offline', 0) });
+        const { result } = renderHook(() => useAuth(), { wrapper });
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        await act(async () => triggerAuthChange('INITIAL_SESSION', null));
+        await act(async () => triggerAuthChange('TOKEN_REFRESHED', session));
+        expect(await readPendingMarker('user-123', placement.field_id)).toEqual(placement);
+      } finally {
+        await syncPendingMarkerSession(null);
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('clears pending marker data from the device even if remote sign-out fails', async () => {
+      const device = new IDBFactory();
+      vi.stubGlobal('indexedDB', device);
+      const pendingCount = () => new Promise<number>((resolve, reject) => {
+        const open = device.open('crx_field_marker_pending');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const count = db.transaction('creations').objectStore('creations').count();
+          count.onerror = () => { db.close(); reject(count.error); };
+          count.onsuccess = () => { db.close(); resolve(count.result); };
+        };
+      });
+      try {
+        const claims = btoa(JSON.stringify({ session_id: '33333333-3333-4333-8333-333333333333' }));
+        mockGetSession.mockResolvedValue({ data: { session: makeSession({ access_token: `header.${claims}.signature` }) }, error: null });
+        mockSignOut.mockRejectedValue(new Error('Offline'));
+        const { result } = renderHook(() => useAuth(), { wrapper });
+        await waitFor(() => expect(result.current.session?.user.id).toBe('user-123'));
+        await reservePendingMarker('user-123', {
+          id: '11111111-1111-4111-8111-111111111111', field_id: 'field-a', kind: 'gate', label: null,
+          point_geojson: { type: 'Point', coordinates: [-89, 40] },
+        });
+        expect(await pendingCount()).toBe(2);
+        await act(async () => { await result.current.signOut(); });
+        expect(result.current.session).toBeNull();
+        expect(await pendingCount()).toBe(0);
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
 
     it('does not restore a session after a network-failed signOut', async () => {

@@ -50,4 +50,6 @@ One PR into `staging`. The Edge Function runs from the deployed copy, so the fix
 
 ## Open business decisions
 
-None.
+None open.
+
+- **Strict rule (Mason, 2026-11-24, "Yes, strict rule").** After the review stop rule fired (a new HIGH from the "is the reader sure?" rule in Luna r1, Sol r1 and Luna r3), Mason chose: the import fills a unit only for an exact line (name, rate with a known unit, optional total with a known unit, nothing else); every other line arrives with a blank unit that a rep must set before Create App Record will file it.

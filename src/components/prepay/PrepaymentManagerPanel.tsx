@@ -258,8 +258,10 @@ export default function PrepaymentManagerPanel() {
 
   const handleSaveEdit = async () => {
     if (!editCredit) return;
-    // A Prepayment Manager check's or an overpayment's amount is locked: send its balance unchanged, so notes and reference still save.
-    const newBalanceCents = isPrepaymentCheck(editCredit) || isOverpayment(editCredit) ? editCredit.balance_cents : parseDollarsToCents(editForm.balance);
+    // A Prepayment Manager check's or an overpayment's amount is locked: send no balance (null keeps it), so notes and
+    // reference still save even if the balance moved since the modal opened (Sol r14 MED 19).
+    const locked = isPrepaymentCheck(editCredit) || isOverpayment(editCredit);
+    const newBalanceCents = locked ? 0 : parseDollarsToCents(editForm.balance);
     // null = refused for excess precision. Never let it through as 0: the RPC
     // would wipe this live prepay bucket's balance to $0.
     if (newBalanceCents === null) {
@@ -276,7 +278,7 @@ export default function PrepaymentManagerPanel() {
         const editKey = getScopedKey(editKeysRef.current, 'edit_prepay_credit', editCredit.id);
         const { data, error } = await supabase.rpc('edit_prepay_credit', {
           p_credit_id: editCredit.id,
-          p_new_balance_cents: newBalanceCents,
+          p_new_balance_cents: locked ? undefined : newBalanceCents,
           p_reference_number: editForm.reference_number || undefined,
           p_bucket_label: editForm.bucket_label || undefined,
           p_notes: editForm.notes || undefined,

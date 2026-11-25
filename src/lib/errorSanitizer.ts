@@ -381,6 +381,17 @@ export function sanitizeError(error: unknown): string {
     return detail ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`
       : 'This customer still has open work (orders, deliveries, holds, quotes, invoices, spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.';
   }
+  // M9 (20270301180000): a refund or returned check the records behind it can't prove; the office records it by hand.
+  const handCheck = /^RECORD_NEEDS_HAND_CHECK:\s*([A-Z_]+)/.exec(message)?.[1];
+  if (handCheck) {
+    return `Nothing was saved. This customer's prepay records don't add up (${handCheck}), so this has to be recorded by hand. Month-End's prepay check shows what doesn't tie.`;
+  }
+  // M9: the server's sentence after the token says what is wrong and what to do.
+  const m9 = /^(?:CHECK_PREPAY_REFUNDED|CHECK_ALREADY_RETURNED|PREPAY_REFUND_EXCEEDS_AVAILABLE|RETURNED_BEFORE_RECEIVED|RETURNED_DATE_IN_FUTURE|PAID_ON_IN_FUTURE|NOT_A_CHECK_PAYMENT|PAYMENT_VOIDED|PAYMENT_UNDATED|RETURN_INVOICE_NOT_OPEN|NOTHING_TO_RETURN|PAYMENT_RETURNED|PAYMENT_PREPAY_REFUNDED|INVOICE_HAS_RETURNED_PAYMENT|PREPAY_CREDIT_HAS_REVERSALS|REFUND_DRAW_INCOMPLETE|REFUND_DUPLICATE_REFERENCE|CREDIT_NOT_FOUND):\s*(.+)$/s.exec(message)?.[1];
+  if (m9) {
+    const detail = m9.replace(/;?\s*nothing was saved\.?\s*$/i, '').trim();
+    return `Nothing was saved. ${detail.charAt(0).toUpperCase()}${detail.slice(1)}${/[.!?]$/.test(detail) ? '' : '.'}`;
+  }
   // 20270226150000 (Sol round 1 MED): Create Invoice on a job deleted since the screen opened.
   if (/^JOB_DELETED(?::|$)/.test(message)) {
     return "This job was deleted, so it can't be invoiced. Nothing was invoiced.";

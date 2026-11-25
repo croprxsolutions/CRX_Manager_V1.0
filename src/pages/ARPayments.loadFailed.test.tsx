@@ -276,7 +276,9 @@ describe('Payment History after a failed refresh', () => {
   it('closes an open void confirmation when the list read fails', async () => {
     H.tables.allocation_sets = [{ id: 'p1', customer_id: 'c1', total_payment_cents: 100, total_allocated_cents: 100, payment_method: 'check', check_number: 'CHK-1', reference_number: null, payment_date: '2026-10-01', season: 2027, is_active: true, notes: null, created_at: '2026-10-01T12:00:00Z', customers: { farm_name: 'Big Farm' } }];
     at('/payment-history', <PaymentHistory />);
-    fireEvent.click(await screen.findByRole('button', { name: /^Void$/ }));
+    // M9: Void lives in the payment's ⋯ menu, as its last item.
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions for check CHK-1' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Void payment' }));
     expect(await screen.findByRole('heading', { name: 'Void Payment' })).toBeInTheDocument();
 
     H.failing.set('allocation_sets', 'error');

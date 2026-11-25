@@ -2941,10 +2941,6 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // (20270126110000 renamed it, so no generated type carries it yet); keyed by complete_delivery's p_idempotency_key.
   // Prune once the generated types carry it.
   '_complete_delivery_authorized_impl_20270122',
-  // 20270301180000 (M9, local candidate): refund paid outside CRX and returned (bounced) check; each requires its key
-  // and saves and binds its receipt. The screen PR adds the generated types and prunes these entries.
-  'record_outside_refund',
-  'record_returned_check',
 ]);
 
 /**

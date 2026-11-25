@@ -4,7 +4,12 @@
  * Sprint 11: Financial Workflows
  */
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { DollarSign, XCircle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { DollarSign, XCircle, RefreshCw, ChevronDown, ChevronUp, Lock, RotateCcw, Ban } from 'lucide-react';
+import ActionMenu, { type ActionMenuItem } from '../components/ui/ActionMenu';
+import RefundOrReturnDialog from '../components/prepay/RefundOrReturnDialog';
+import { alreadyReturnedReason, loadReturnedPayments, RETURN_NOT_CHECK_REASON } from '../lib/m9Reversals';
+import { Sentry } from '../lib/sentry';
+import { toSentryError } from '../lib/sentryError';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
@@ -73,6 +78,11 @@ export default function PaymentHistory() {
   const [voidReason, setVoidReason] = useState('');
   const [savingVoid, setSavingVoid] = useState(false);
 
+  // M9: returned checks (payment id -> the day the return was recorded) and the one being marked returned.
+  const [returnedOn, setReturnedOn] = useState<Map<string, string>>(new Map());
+  const [returnPayment, setReturnPayment] = useState<AllocationSet | null>(null);
+  const isAdmin = profile?.role === 'admin';
+
   // A refresh after voiding a payment is a multi-page read; an older, slower
   // load must not overwrite the newer list, so only the latest may set state.
   const fetchSeq = useRef(0);
@@ -117,7 +127,17 @@ export default function PaymentHistory() {
 
     setPayments(mapped);
     setLoading(false);
-  }, [toast]);
+    // Which of them came back (admin read). A failed read leaves no Returned badges and the server still refuses
+    // a second return or a void of a returned check.
+    if (isAdmin) {
+      try {
+        const returned = await loadReturnedPayments(mapped.map((p) => p.id));
+        if (seq === fetchSeq.current) setReturnedOn(returned);
+      } catch (err) {
+        Sentry.captureException(toSentryError(err), { extra: { context: 'payment_history_returned' } });
+      }
+    }
+  }, [toast, isAdmin]);
 
   useEffect(() => {
     fetchPayments();
@@ -214,9 +234,48 @@ export default function PaymentHistory() {
     });
   };
 
-  const totalPayments = payments.filter((p) => p.is_active).reduce((s, p) => s + (p.total_payment_cents || 0), 0);
-  const activeCount = payments.filter((p) => p.is_active).length;
+  // A returned check never brought money in (M9), so it is not an active payment.
+  const counted = payments.filter((p) => p.is_active && !returnedOn.has(p.id));
+  const totalPayments = counted.reduce((s, p) => s + (p.total_payment_cents || 0), 0);
+  const activeCount = counted.length;
   const voidedCount = payments.filter((p) => !p.is_active).length;
+
+  // The ⋯ menu of a payment (admin): Mark check as returned, then Void payment as its red last item (M9).
+  const actionsFor = (r: AllocationSet) => {
+    if (!r.is_active || !isAdmin) return null;
+    const returned = returnedOn.get(r.id);
+    const notCheck = r.payment_method !== 'check';
+    const items: ActionMenuItem[] = [{
+      id: 'return', label: 'Mark check as returned',
+      icon: returned || notCheck ? <Lock className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />,
+      disabled: !!returned || notCheck,
+      disabledReason: returned ? alreadyReturnedReason(returned) : RETURN_NOT_CHECK_REASON(r.payment_method),
+      description: `Returns all of check ${r.check_number || r.reference_number || ''} (${fmt(r.total_payment_cents || 0)}). Opens with the check picked.`,
+      onAction: () => setReturnPayment(r),
+    }];
+    // A returned check is never voided (the server refuses PAYMENT_RETURNED).
+    if (!returned) items.push({ id: 'void', label: 'Void payment', icon: <Ban className="h-4 w-4" />, danger: true, onAction: () => openVoid(r) });
+    return (
+      <div className="flex justify-end">
+        <ActionMenu label={`More actions for ${r.payment_method || 'payment'} ${r.check_number || r.reference_number || ''}`.trim()} items={items} />
+      </div>
+    );
+  };
+  const statusBadge = (r: AllocationSet) => (returnedOn.has(r.id)
+    ? <Badge variant="danger">Returned</Badge>
+    : r.is_active
+      ? <Badge variant="success">Active</Badge>
+      : <Badge variant="danger">Voided</Badge>);
+  // Phone: each payment is a card (customer and total, then date, method, status and the ⋯ menu).
+  const mobileRow = (r: AllocationSet) => (
+    <div className="px-4 py-3.5">
+      <div className="flex items-baseline justify-between gap-3"><b className="text-nav-dark">{r.farm_name}</b><b className="tabular-nums">{fmt(r.total_payment_cents || 0)}</b></div>
+      <div className="mt-1 flex items-center justify-between gap-3 text-xs text-secondary">
+        <span>{r.payment_date ? parseLocalDate(r.payment_date).toLocaleDateString() : new Date(r.created_at).toLocaleDateString()} · <span className="capitalize">{r.payment_method || '—'}</span> {r.check_number || r.reference_number || ''}</span>
+        <span className="flex items-center gap-2">{statusBadge(r)}{actionsFor(r)}</span>
+      </div>
+    </div>
+  );
 
   const columns: Column<AllocationSet>[] = [
     {
@@ -247,32 +306,18 @@ export default function PaymentHistory() {
     {
       key: 'total_allocated_cents',
       header: 'Allocated',
-      render: (r) => <span>{fmt(r.total_allocated_cents || 0)}</span>,
+      // A returned check's invoice payments were reversed, so nothing of it is allocated any more.
+      render: (r) => <span>{fmt(returnedOn.has(r.id) ? 0 : r.total_allocated_cents || 0)}</span>,
     },
     {
       key: 'is_active',
       header: 'Status',
-      render: (r) => r.is_active
-        ? <Badge variant="success">Active</Badge>
-        : <Badge variant="danger">Voided</Badge>,
+      render: (r) => statusBadge(r),
     },
     {
       key: 'id',
       header: '',
-      render: (r) => (
-        r.is_active && profile?.role === 'admin' ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<XCircle className="w-3 h-3" />}
-            onClick={(e: React.MouseEvent) => { e.stopPropagation(); openVoid(r); }}
-            showChevron={false}
-            className="text-red-600 hover:bg-red-50"
-          >
-            Void
-          </Button>
-        ) : null
-      ),
+      render: (r) => actionsFor(r),
     },
   ];
 
@@ -282,7 +327,7 @@ export default function PaymentHistory() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold font-heading text-nav-dark">Payment History</h2>
-          <p className="text-sm text-secondary mt-1">View past payments and void incorrect entries</p>
+          <p className="text-sm text-secondary mt-1">View payments, mark returned checks and void incorrect entries</p>
         </div>
         <div className="flex gap-2">
           <Button
@@ -363,7 +408,8 @@ export default function PaymentHistory() {
             data={payments as unknown as Record<string, unknown>[]}
             columns={columns as unknown as Column<Record<string, unknown>>[]}
             searchable
-            searchPlaceholder="Search payments..."
+            searchPlaceholder="Search by customer or check #"
+            mobileRow={mobileRow as unknown as (row: Record<string, unknown>) => React.ReactNode}
             searchKeys={['farm_name', 'check_number', 'reference_number', 'payment_method']}
             emptyTitle="No payments yet"
             emptyDescription="Payment allocations will appear here after you record payments"
@@ -410,6 +456,18 @@ export default function PaymentHistory() {
           )}
         </div>
       </Card>
+
+      {returnPayment && (
+        <RefundOrReturnDialog
+          open
+          onClose={() => setReturnPayment(null)}
+          onRecorded={() => { void fetchPayments(); }}
+          customerId={returnPayment.customer_id}
+          farmName={returnPayment.farm_name}
+          allocationSetId={returnPayment.id}
+          fromLabel="Payment History"
+        />
+      )}
 
       {/* Void Payment Modal */}
       <Modal open={!!voidPayment} onClose={() => setVoidPayment(null)} title="Void Payment">

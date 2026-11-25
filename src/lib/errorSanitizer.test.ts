@@ -753,3 +753,19 @@ describe('customer receipt refusals (KI-25)', () => {
     expect(sanitizeError(new Error(msg))).not.toMatch(/receipt/);
   });
 });
+
+describe('M9 refund and returned-check refusals', () => {
+  it('turns the hand-check gate into a plain instruction', () => {
+    expect(sanitizeError({ message: 'RECORD_NEEDS_HAND_CHECK: STORED_BALANCE_MISMATCH (the records this touches do not agree; record it by hand)' }))
+      .toBe("Nothing was saved. This customer's prepay records don't add up (STORED_BALANCE_MISMATCH), so this has to be recorded by hand. Month-End's prepay check shows what doesn't tie.");
+  });
+
+  it("keeps the server's sentence after the token", () => {
+    expect(sanitizeError({ message: "CHECK_PREPAY_REFUNDED: $100.00 of this check's prepay was already refunded to the customer; record this bounce by hand" }))
+      .toBe("Nothing was saved. $100.00 of this check's prepay was already refunded to the customer; record this bounce by hand.");
+    expect(sanitizeError({ message: 'PAYMENT_RETURNED: this check is recorded as returned (bounced); it cannot also be voided' }))
+      .toBe('Nothing was saved. This check is recorded as returned (bounced); it cannot also be voided.');
+    expect(sanitizeError({ message: 'RETURNED_BEFORE_RECEIVED: the check was received on 2026-09-15; the bank cannot have returned it before that' }))
+      .toBe('Nothing was saved. The check was received on 2026-09-15; the bank cannot have returned it before that.');
+  });
+});

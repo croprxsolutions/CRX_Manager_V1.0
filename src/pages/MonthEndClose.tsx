@@ -28,6 +28,8 @@ import type { DetailedStatementData, StatementOptions, YearEndSummaryData } from
 import type { YearEndSummaryOptions } from '../lib/yearEndSummaryPdf';
 import { getRecognizedInvoiceCustomerIds } from '../lib/recognizedInvoiceCustomers';
 import { toSentryError } from '../lib/sentryError';
+import { Link } from 'react-router-dom';
+import { fetchPrepayTie, type PrepayTie } from '../lib/m9Reversals';
 
 interface PeriodInfo {
   id?: string;
@@ -47,6 +49,9 @@ interface MonthlySummary {
   // basis 'billed_share': the database counts commission on the share of each sale billed (KI-125); absent before that is live
   commissions: { earned_cents: number; paid_count: number; basis?: 'billed_share' };
   ar_balance_cents: number;
+  // M9 (20270301180000): refunds paid outside CRX and returned checks recorded in the month (absent before that is live)
+  refunds?: { count: number; total_cents: number };
+  returned_checks?: { count: number; total_cents: number };
   // #2175: fingerprint of this month's figures; the close is refused unless it still matches (absent before that is live)
   review_token?: string;
 }
@@ -103,6 +108,9 @@ export default function MonthEndClose() {
   const [needsPricingCount, setNeedsPricingCount] = useState(0);
   const [needsPricingError, setNeedsPricingError] = useState(false);
   const [yeLoading, setYeLoading] = useState(false);
+  // M9: the prepay balance check (today's figures). null while loading; a failed check blocks the close.
+  const [prepayTie, setPrepayTie] = useState<PrepayTie[] | null>(null);
+  const [prepayTieFailed, setPrepayTieFailed] = useState(false);
 
   // A9: month/year picker — defaults to the current business-clock month.
   const [initialBusinessToday] = useState(() => todayInBusinessTz());
@@ -202,6 +210,20 @@ export default function MonthEndClose() {
     }
     setNeedsPricingCount(npCount || 0);
 
+    // M9: every customer's stored prepay against its credits. Fail closed: no answer, no close.
+    try {
+      const rows = await fetchPrepayTie();
+      if (token !== fetchTokenRef.current) return;
+      if (!Array.isArray(rows)) throw new Error('get_prepay_balance_check returned no list');
+      setPrepayTie(rows);
+      setPrepayTieFailed(false);
+    } catch (err) {
+      if (token !== fetchTokenRef.current) return;
+      Sentry.captureException(toSentryError(err), { extra: { context: 'month_end_prepay_tie' } });
+      setPrepayTie(null);
+      setPrepayTieFailed(true);
+    }
+
     setLoading(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current.start, current.end]);
@@ -277,6 +299,15 @@ export default function MonthEndClose() {
           label: 'Finance charges generated (optional)',
           done: true,
           detail: 'Generate from AR Aging page if needed — this step is optional',
+        },
+        {
+          label: 'Prepay balances tie',
+          // M9: a customer whose stored prepay is not what its credits add up to blocks the close until it is fixed.
+          done: !prepayTieFailed && prepayTie !== null && prepayTie.every((r) => r.ok),
+          detail: prepayTieFailed
+            ? 'The prepay balance check could not run. Reload the page to try again'
+            : prepayTie === null ? 'Checking prepay balances…' : `All ${prepayTie.length} customers with prepay tie.`,
+          prepayTie: true,
         },
         // #2175: without the figures' review token the server refuses the close; say why Close stays off.
         ...(summary.review_token ? [] : [{
@@ -606,6 +637,18 @@ export default function MonthEndClose() {
                 <span className="text-secondary">Payments Received</span>
                 <span className="font-medium">{summary.payments.count} — {fmt(summary.payments.total_cents)}</span>
               </div>
+              {summary.refunds && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-secondary">Prepay refunded</span>
+                  <span className="font-medium">{summary.refunds.count} · {fmt(summary.refunds.total_cents)}</span>
+                </div>
+              )}
+              {summary.returned_checks && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-secondary">Checks returned</span>
+                  <span className="font-medium">{summary.returned_checks.count} · {fmt(summary.returned_checks.total_cents)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-secondary">Orders</span>
                 <span className="font-medium">{summary.orders.count} — {fmt(summary.orders.total_cents)}</span>
@@ -638,7 +681,9 @@ export default function MonthEndClose() {
         <Card>
           <h3 className="text-sm font-semibold text-nav-dark mb-4">Close Checklist</h3>
           <div className="space-y-3">
-            {checklist.map((item, i) => (
+            {checklist.map((item, i) => 'prepayTie' in item && !item.done && prepayTie && !prepayTieFailed ? (
+              <PrepayTieRow key={i} rows={prepayTie.filter((r) => !r.ok)} />
+            ) : (
               <div key={i} className="flex items-start gap-3">
                 {item.done ? (
                   <CheckCircle className="w-5 h-5 text-crx-green shrink-0 mt-0.5" />
@@ -821,6 +866,53 @@ export default function MonthEndClose() {
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/** M9: the customers whose stored prepay does not tie to their credits, each with a way to its prepay history. */
+function PrepayTieRow({ rows }: { rows: PrepayTie[] }) {
+  const total = rows.reduce((s, r) => s + Math.abs(r.difference_cents), 0);
+  const signed = (c: number) => `${c > 0 ? '+' : c < 0 ? '−' : ''}${fmt(Math.abs(c))}`;
+  const historyLink = (r: PrepayTie) => `/customers/${r.customer_id}?section=financials`;
+  return (
+    <div className="border-t border-gray-100 pt-3">
+      <div className="flex items-start gap-3">
+        <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <p className="text-sm font-medium text-amber-700">Prepay balances don't tie · {rows.length} customer{rows.length === 1 ? '' : 's'}</p>
+          <p className="text-xs text-secondary">{fmt(total)} in total. Open the history to find the cause.</p>
+        </div>
+      </div>
+      <div className="mt-2.5 overflow-x-auto rounded-xl border border-gray-200">
+        <table className="phone-stack w-full text-sm" aria-label="Customers whose prepay does not tie">
+          <thead>
+            <tr className="border-b border-gray-200 bg-cream-dark/50">
+              <th className="px-4 py-2.5 text-left font-medium text-secondary">Customer</th>
+              <th className="px-4 py-2.5 text-right font-medium text-secondary">Stored</th>
+              <th className="whitespace-nowrap px-4 py-2.5 text-right font-medium text-secondary">Credits add up to</th>
+              <th className="px-4 py-2.5 text-right font-medium text-secondary">Difference</th>
+              <th className="px-4 py-2.5"><span className="sr-only">Action</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.customer_id} className="border-b border-gray-50 last:border-b-0">
+                <td className="px-4 py-2"><Link to={historyLink(r)} className="inline-flex min-h-11 items-center font-medium text-crx-green md:min-h-10">{r.farm_name}</Link></td>
+                <td data-label="Stored" className="px-4 py-2 text-right tabular-nums">{fmt(r.stored_cents)}</td>
+                <td data-label="Credits add up to" className="px-4 py-2 text-right tabular-nums">{fmt(r.credits_cents)}</td>
+                <td data-label="Difference" className="px-4 py-2 text-right font-semibold tabular-nums">{signed(r.difference_cents)}</td>
+                <td className="px-4 py-2 text-right">
+                  <Link to={historyLink(r)} aria-label={`Open ${r.farm_name} prepay history`}
+                    className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-nav-dark hover:bg-gray-50 md:h-10 max-md:w-full">
+                    Open history
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

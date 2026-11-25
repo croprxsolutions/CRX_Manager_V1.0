@@ -61,7 +61,7 @@ async function openCredits() {
 }
 
 describe('Prepay Manager: Prepayment Manager check amounts (M9)', () => {
-  it('shows a check balance read-only with the hint, and saves a notes edit with the balance unchanged', async () => {
+  it('shows a check balance read-only with the hint, and saves a notes edit without sending a balance', async () => {
     H.rpc.mockResolvedValue({ data: { success: true }, error: null });
     await openCredits();
     fireEvent.click(screen.getByTitle('Edit credit'));
@@ -74,8 +74,10 @@ describe('Prepay Manager: Prepayment Manager check amounts (M9)', () => {
     fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'call before Friday' } });
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
     await waitFor(() => expect(H.rpc).toHaveBeenCalledWith('edit_prepay_credit', expect.objectContaining({
-      p_credit_id: 'k1', p_new_balance_cents: 30000, p_notes: 'call before Friday',
+      p_credit_id: 'k1', p_notes: 'call before Friday',
     })));
+    // MED 19: a locked amount is not sent at all, so a balance that moved since the modal opened is never written back.
+    expect(H.rpc.mock.calls.at(-1)?.[1]).toHaveProperty('p_new_balance_cents', undefined);
   });
 
   it("locks a payment's overpayment credit too: balance read-only, sent unchanged, and no delete (Sol PR final H1)", async () => {
@@ -90,8 +92,10 @@ describe('Prepay Manager: Prepayment Manager check amounts (M9)', () => {
     fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'paid twice' } });
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
     await waitFor(() => expect(H.rpc).toHaveBeenCalledWith('edit_prepay_credit', expect.objectContaining({
-      p_credit_id: 'k1', p_new_balance_cents: 30000, p_notes: 'paid twice',
+      p_credit_id: 'k1', p_notes: 'paid twice',
     })));
+    // MED 19: a locked amount is not sent at all, so a balance that moved since the modal opened is never written back.
+    expect(H.rpc.mock.calls.at(-1)?.[1]).toHaveProperty('p_new_balance_cents', undefined);
   });
 
   it('totals the whole check from all its parts even when the credits list stopped before a part (Sol PR final H6)', async () => {

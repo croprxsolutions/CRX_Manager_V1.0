@@ -58,6 +58,7 @@ import WriteOffModal from '../components/invoices/WriteOffModal';
 import StandingDiscountControl from '../components/invoices/StandingDiscountControl';
 import InvoiceAmountDue from '../components/invoices/InvoiceAmountDue';
 import InvoicePayersTable from '../components/invoices/InvoicePayersTable';
+import InvoicePaymentsCard from '../components/invoices/InvoicePaymentsCard';
 import InvoiceActionsBar from '../components/invoices/InvoiceActionsBar';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
@@ -2798,6 +2799,20 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         </section>
       </Card>
       </fieldset>
+
+      {/* Payments on this invoice; an admin marks a check that came back from its line (M9) */}
+      {!isNew && id && (
+        <InvoicePaymentsCard
+          // Re-read when a payment, void or return changes what the invoice was paid.
+          key={`${id}-${invoice.paid_amount_cents ?? 0}-${invoice.status}`}
+          className="order-5 md:order-none"
+          invoiceId={id}
+          invoiceNumber={invoice.invoice_number || 'this invoice'}
+          farmName={customerName}
+          isAdmin={isAdmin}
+          onChanged={() => { void fetchInvoice(id); }}
+        />
+      )}
 
       {/* Write-Offs */}
       {writeOffs.length > 0 && (

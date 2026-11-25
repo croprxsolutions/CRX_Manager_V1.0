@@ -7732,6 +7732,142 @@ export type Database = {
           },
         ]
       }
+      money_reversal_lines: {
+        Row: {
+          amount_cents: number
+          created_at: string
+          id: string
+          invoice_id: string | null
+          line_kind: string
+          prepay_application_id: string | null
+          prepay_credit_id: string | null
+          reversal_id: string
+        }
+        Insert: {
+          amount_cents: number
+          created_at?: string
+          id?: string
+          invoice_id?: string | null
+          line_kind: string
+          prepay_application_id?: string | null
+          prepay_credit_id?: string | null
+          reversal_id: string
+        }
+        Update: {
+          amount_cents?: number
+          created_at?: string
+          id?: string
+          invoice_id?: string | null
+          line_kind?: string
+          prepay_application_id?: string | null
+          prepay_credit_id?: string | null
+          reversal_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_reversal_lines_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_reversal_lines_prepay_application_id_fkey"
+            columns: ["prepay_application_id"]
+            isOneToOne: false
+            referencedRelation: "prepay_applications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_reversal_lines_prepay_credit_id_fkey"
+            columns: ["prepay_credit_id"]
+            isOneToOne: false
+            referencedRelation: "prepay_credits"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_reversal_lines_reversal_id_fkey"
+            columns: ["reversal_id"]
+            isOneToOne: false
+            referencedRelation: "money_reversals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_reversals: {
+        Row: {
+          allocation_set_id: string | null
+          amount_cents: number
+          created_at: string
+          customer_id: string
+          entry_date: string
+          id: string
+          kind: string
+          occurred_on: string | null
+          performed_by: string
+          prepay_credit_id: string | null
+          reason: string
+          reference: string | null
+        }
+        Insert: {
+          allocation_set_id?: string | null
+          amount_cents: number
+          created_at?: string
+          customer_id: string
+          entry_date: string
+          id?: string
+          kind: string
+          occurred_on?: string | null
+          performed_by: string
+          prepay_credit_id?: string | null
+          reason: string
+          reference?: string | null
+        }
+        Update: {
+          allocation_set_id?: string | null
+          amount_cents?: number
+          created_at?: string
+          customer_id?: string
+          entry_date?: string
+          id?: string
+          kind?: string
+          occurred_on?: string | null
+          performed_by?: string
+          prepay_credit_id?: string | null
+          reason?: string
+          reference?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_reversals_allocation_set_id_fkey"
+            columns: ["allocation_set_id"]
+            isOneToOne: false
+            referencedRelation: "allocation_sets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_reversals_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_reversals_performed_by_fkey"
+            columns: ["performed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_reversals_prepay_credit_id_fkey"
+            columns: ["prepay_credit_id"]
+            isOneToOne: false
+            referencedRelation: "prepay_credits"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       note_activity_log: {
         Row: {
           action_type: string
@@ -20106,6 +20242,10 @@ export type Database = {
       get_parent_chemistry: { Args: { p_parent_id: string }; Returns: Json }
       get_parent_draft_rates: { Args: { p_parent_id: string }; Returns: Json }
       get_parent_mode_groups: { Args: { p_parent_id: string }; Returns: Json }
+      get_prepay_balance_check: {
+        Args: { p_customer_id?: string }
+        Returns: Json
+      }
       get_product_brands: { Args: { p_product_id: string }; Returns: Json }
       get_product_cost_basis_workspace: {
         Args: { p_product_id: string }
@@ -21088,6 +21228,31 @@ export type Database = {
           p_message: string
           p_performed_by?: string
           p_subject: string
+        }
+        Returns: Json
+      }
+      record_outside_refund: {
+        Args: {
+          p_allow_duplicate_reference?: boolean
+          p_amount_cents: number
+          p_credit_id?: string
+          p_customer_id: string
+          p_idempotency_key?: string
+          p_paid_on: string
+          p_performed_by?: string
+          p_reason: string
+          p_reference: string
+        }
+        Returns: Json
+      }
+      record_returned_check: {
+        Args: {
+          p_allocation_set_id: string
+          p_credit_id?: string
+          p_idempotency_key?: string
+          p_performed_by?: string
+          p_reason: string
+          p_returned_date: string
         }
         Returns: Json
       }

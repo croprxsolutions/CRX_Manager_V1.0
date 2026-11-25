@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, lazy, Suspense } from 'react';
 import { billingM4Enabled } from '../lib/billingFeatures';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote, ChevronDown, Users, Lightbulb, FolderOpen, History, Map, Package, Wallet, ShoppingBasket, Receipt, Lock, RotateCcw } from 'lucide-react';
 import type { InputHTMLAttributes, ReactNode } from 'react';
 import Card, { CardHeader } from '../components/ui/Card';
@@ -20,6 +20,7 @@ import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, sanitizeError } from '../lib/db';
 import { isPricedAgingRow } from '../lib/arAging';
+import CustomerPrepayCards from '../components/prepay/CustomerPrepayCards';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import SectionCard from '../components/ui/SectionCard';
@@ -283,7 +284,7 @@ export default function CustomerDetail() {
 
   // Financials tab state
   interface TxnRow { transaction_date: string; transaction_type: string; reference_number: string; amount_cents: number; running_balance: number }
-  interface PrepayRow { id: string; bucket_label: string; original_amount_cents: number; balance_cents: number }
+  interface PrepayRow { id: string; bucket_label: string; original_amount_cents: number; balance_cents: number; source_reference: string | null; reference_number: string | null; created_at: string }
   const [aging, setAging] = useState<ARAgingPricedRow | null>(null);
   // KI-95: today's balance can't be rebuilt for this customer, so there is no Outstanding figure.
   const [agingUnavailable, setAgingUnavailable] = useState(false);
@@ -969,6 +970,15 @@ export default function CustomerDetail() {
     pendingJumpRef.current = section;
     openSection(section);
   };
+
+  // A link can open one section (Month-End's "Open history" opens Financials, where the prepay history is).
+  const [searchParams] = useSearchParams();
+  const linkedSection = searchParams.get('section');
+  useEffect(() => {
+    // Once the page has drawn, so the section's band exists to scroll to.
+    if (!loading && !isNew && id && linkedSection && FOLD_SECTIONS.some((s) => s.id === linkedSection)) jumpTo(linkedSection as CustomerSection);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, isNew, linkedSection, loading]);
 
   const handleSave = async (skipDuplicateCheck = false) => {
     if (saving) return;
@@ -2447,7 +2457,7 @@ export default function CustomerDetail() {
                         {transactions.slice(-RECENT_TRANSACTIONS_SHOWN).map((txn, idx) => (
                           <tr key={idx} className="border-b border-gray-50">
                             <td className="px-5 py-3">{parseLocalDate(txn.transaction_date).toLocaleDateString()}</td>
-                            <td data-label="Type" className="px-4 py-3 capitalize">{txn.transaction_type}</td>
+                            <td data-label="Type" className="px-4 py-3 capitalize">{txn.transaction_type.replace(/_/g, ' ')}</td>
                             <td data-label="Reference" className="px-4 py-3 font-mono text-xs">{txn.reference_number}</td>
                             <td data-label="Amount" className={`px-4 py-3 text-right ${txn.amount_cents < 0 ? 'text-red-600' : 'text-nav-dark'}`}>
                               {fmt(txn.amount_cents / 100)}
@@ -2461,34 +2471,14 @@ export default function CustomerDetail() {
                 )}
               </Card>
 
-              {/* Section D: Prepay Credits */}
-              {prepayCredits.length > 0 && (
-                <Card padding={false}>
-                  <div className="p-5">
-                    <CardHeader title="Prepay" accent="Credits" />
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="phone-stack w-full text-sm">
-                      <thead>
-                        <tr className="border-t border-b border-gray-100">
-                          <th className="px-5 py-3 text-left font-medium text-secondary">Bucket</th>
-                          <th className="px-4 py-3 text-right font-medium text-secondary">Original</th>
-                          <th className="px-4 py-3 text-right font-medium text-secondary">Remaining</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {prepayCredits.map((c) => (
-                          <tr key={c.id} className="border-b border-gray-50">
-                            <td className="px-5 py-3 font-medium text-nav-dark">{c.bucket_label}</td>
-                            <td data-label="Original" className="px-4 py-3 text-right">{fmt(c.original_amount_cents / 100)}</td>
-                            <td data-label="Remaining" className="px-4 py-3 text-right text-crx-green font-medium">{fmt(c.balance_cents / 100)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </Card>
-              )}
+              {/* Section D: Prepay Credits and History (M9: refunds, returned checks, the balance check) */}
+              <CustomerPrepayCards
+                customerId={id!}
+                farmName={customer.farm_name ?? ''}
+                credits={prepayCredits}
+                isAdmin={isAdmin}
+                onChanged={() => { financialsFetched.current = false; void fetchTabData('financials'); }}
+              />
             </>
           )}
         </div>

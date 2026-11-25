@@ -5,7 +5,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockFrom, mockRpc, mockToast, keyResets } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, keyResets, mockTie } = vi.hoisted(() => ({
+  // M9: the prepay balance check has its own mock, so every other test sees customers that tie.
+  mockTie: vi.fn(),
   mockFrom: vi.fn(),
   mockRpc: vi.fn().mockImplementation(() => Promise.resolve({ data: null, error: null })),
   mockToast: vi.fn(),
@@ -96,7 +98,7 @@ async function switchToMonth(monthIndex: number) {
 }
 
 vi.mock('../lib/db', async () => ({
-  supabase: { from: mockFrom, rpc: mockRpc },
+  supabase: { from: mockFrom, rpc: (name: string, args?: unknown) => (name === 'get_prepay_balance_check' ? mockTie() : mockRpc(name, args)) },
   checkMutationResult: vi.fn(),
   assertRpcResult: vi.fn((d) => d),
   // The REAL sanitizeError, never a stub. The previous stub invented a `Safe: `
@@ -174,6 +176,7 @@ describe('MonthEndClose', () => {
       return buildChain({ data: [], error: null });
     });
     mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: null }));
+    mockTie.mockImplementation(() => Promise.resolve({ data: [], error: null }));
   });
 
   afterEach(() => {
@@ -642,5 +645,54 @@ describe('MonthEndClose', () => {
       .map(([, args]) => (args as { p_idempotency_key: string }).p_idempotency_key);
     expect(keys[1]).toBe(keys[0]);
     expect(keys[2]).not.toBe(keys[1]);
+  });
+
+  describe('M9: prepay balances tie', () => {
+    const off = (name: string, stored: number, credits: number) => ({
+      customer_id: `id-${name}`, farm_name: name, stored_cents: stored, credits_cents: credits, expected_cents: credits,
+      difference_cents: stored - credits, ok: false,
+    });
+
+    it('lists each customer that does not tie with stored, credits and difference, and blocks the close', async () => {
+      mockCleanCloseableSummary();
+      mockTie.mockImplementation(() => Promise.resolve({ data: [off('Cedar Bend Ag', 121000, 109250), off('Prairie Ridge Farms', 52500, 50000), { ...off('Fine Farm', 100, 100), ok: true }], error: null }));
+      renderMonthEnd();
+      await switchToMonth(5);
+      expect(await screen.findByText("Prepay balances don't tie · 2 customers")).toBeInTheDocument();
+      expect(screen.getByText('$142.50 in total. Open the history to find the cause.')).toBeInTheDocument();
+      expect(screen.getByText('+$117.50')).toBeInTheDocument();
+      expect(screen.getByText('$1,092.50')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Open Prairie Ridge Farms prepay history' })).toHaveAttribute('href', '/customers/id-Prairie Ridge Farms?section=financials');
+      expect(screen.queryByText('Fine Farm')).not.toBeInTheDocument();
+      expect(screen.getByText('Resolve all checklist items before closing the period.')).toBeInTheDocument();
+    });
+
+    it('says all customers tie when they do', async () => {
+      mockCleanCloseableSummary();
+      mockTie.mockImplementation(() => Promise.resolve({ data: [{ ...off('A', 1, 1), ok: true }, { ...off('B', 2, 2), ok: true }], error: null }));
+      renderMonthEnd();
+      await switchToMonth(5);
+      expect(await screen.findByText('All 2 customers with prepay tie.')).toBeInTheDocument();
+    });
+
+    it('fails closed when the check cannot run', async () => {
+      mockCleanCloseableSummary();
+      mockTie.mockImplementation(() => Promise.resolve({ data: null, error: { message: 'INSUFFICIENT_ROLE' } }));
+      renderMonthEnd();
+      await switchToMonth(5);
+      expect(await screen.findByText('The prepay balance check could not run. Reload the page to try again')).toBeInTheDocument();
+      expect(screen.getByText('Resolve all checklist items before closing the period.')).toBeInTheDocument();
+    });
+
+    it('shows prepay refunded and checks returned in the Period Summary', async () => {
+      mockRpc.mockImplementation((name: string) => (name === 'get_monthly_summary'
+        ? Promise.resolve({ data: { ...cleanSummary(), refunds: { count: 2, total_cents: 45000 }, returned_checks: { count: 1, total_cents: 40000 } }, error: null })
+        : Promise.resolve({ data: null, error: null })));
+      renderMonthEnd();
+      expect(await screen.findByText('Prepay refunded')).toBeInTheDocument();
+      expect(screen.getByText('2 · $450.00')).toBeInTheDocument();
+      expect(screen.getByText('Checks returned')).toBeInTheDocument();
+      expect(screen.getByText('1 · $400.00')).toBeInTheDocument();
+    });
   });
 });

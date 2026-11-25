@@ -57,4 +57,14 @@ describe('field obstacles', () => {
       point_geojson: { type: 'Point', coordinates: [200, 95] },
     })).toBeNull();
   });
+
+  it.each(['field_entrance', 'constructor', '__proto__'])(
+    'keeps a pin and its note when a newer app stores kind %s',
+    (kind) => {
+      // The database may know a kind that this build's TypeScript union does not.
+      const futurePin = { ...obstacle, kind, label: 'Use the north gate' } as FieldObstacle;
+      expect(fieldObstacleToGeoJsonFeature(futurePin)?.properties.title).toBe('Field marker: Use the north gate');
+      expect(fieldObstacleToGeoJsonFeature({ ...futurePin, label: null })?.properties.label).toBe('Field marker');
+    },
+  );
 });

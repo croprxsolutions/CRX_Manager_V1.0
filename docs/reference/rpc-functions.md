@@ -327,6 +327,8 @@ they belong rather than duplicated here: `get_monthly_summary()` under Financial
 - `season_end_date(p_season)` — returns Sep 30 of the following year
 
 ## Geo / Maps
+
+- `get_field_marker_read(p_field_id uuid)` (pending migration `20270305130000`) returns a read-only JSON response with field marker availability, count and ordered pins. It uses the existing marker SELECT scope and returns `available: false` when the caller cannot check the field.
 - `get_fields_with_geojson()`, `get_field_geojson()`, `save_field_geometry()` — use `SET search_path = public, extensions` for PostGIS. Since `20261023090000` (row 11.4 part A) `get_fields_with_geojson` is office-only (`require_admin_or_sales_rep()`) and `get_field_geojson` returns a field only when `_can_see_field` passes.
 - `_can_see_field(p_field_id uuid)` → boolean (`20261023090000`, row 11.4) — SECURITY DEFINER, STABLE; EXECUTE for `authenticated` and `service_role`, never `anon`. True for an active admin or sales rep; for the whole-job applicator (`jobs.applicator_id`), the fields on that job unless it is soft-deleted; for a per-field or crew assignee, only the field their own `job_location_dispatches` row points at, while that dispatch is open or completed within 7 days (never cancelled), the job is not soft-deleted, the profile is active and (crew) the crew and membership are active.
   Since `20261026050000` (row 985, part B, applied live 2026-10-27 02:05 UTC, 9:05 PM Central on 2026-10-26) the dispatch leg covers every field of a job the caller is dispatched on (Mason, 2026-10-25: field staff see the entire job), and the field tables follow it for applicators (`fields`, `field_crop_history`, `field_obstacles`, `field_billing_defaults`, `application_record_fields`); `field_app_locations`/`_shares` reads and `field_polygons` writes become office-only.
@@ -481,7 +483,7 @@ These RPCs are called from `src/` but had no entry in this file. Each purpose wa
 | `dismiss_watchdog_flag` | `20260629220000` | `(p_flag_id, p_resolution, p_note, p_performed_by, p_idempotency_key)` → jsonb. Admin/sales_rep, strict actor; resolution is `looks_fine` or `needs_fix`. |
 | `create_label_draft` | `20260629210000` | Admin-only. Stages a product label-data draft for review. |
 | `commit_label_draft` | `20260629210000` | Admin-only. Accepts, edits, or rejects a pending label draft; accepted values fill only empty product fields unless the caller passes an explicit force-overwrite. |
-| `get_label_coverage_report` | `20260629210000` | Read-only label-field coverage across products. |
+| `get_label_coverage_report` | `20260629210000`, `20270304110000` (candidate) | Read-only label-field coverage across products. REI/PHI count as covered with a number or the "label gives no REI/PHI" tick (#2500). |
 
 ### Customer relationship management
 
@@ -661,6 +663,9 @@ All eleven functions are live from `20260718225511_supplier_price_evidence_phase
 - `get_product_cost_basis_workspace(product_id)` — admin-only read model for the current selected basis, comparable current supplier observations, and received PO costs with a proven conversion.
 - `preview_product_cost_basis_changes(source, export_id, rows, performed_by, idempotency_key)` — actor-bound/idempotent wrapper that validates evidence and stores explicit basis provenance, then delegates price calculation to `preview_product_pricing_changes`.
 - `apply_product_cost_basis_change_set(change_set_id, request_fingerprint, performed_by, idempotency_key)` — actor-bound/idempotent atomic apply. Revalidates evidence and the active-basis concurrency token, delegates money changes to `apply_product_pricing_change_set`, closes the prior basis, and appends the selected basis.
+
+**Price sheet refusal reason (`20270303140000_price_sheet_refusal_reason`, on staging 2026-11-24 via #2479, live with the next release):**
+- `get_pricing_workbook_export_refusal_reason(p_export_id uuid)` → text. Admin only (`AUTH_REQUIRED`, `ADMIN_REQUIRED`), read-only (no idempotency key), SECURITY DEFINER because `pricing_workbook_exports` is RPC-only; EXECUTE for `authenticated` only. Returns the single reason a price-sheet export is refused, checked in this order: `EXPORT_NOT_FOUND`, `DOWNLOADED_BY_OTHER_USER` (another user's sheet reveals nothing else), `ALREADY_APPLIED`, `OLD_TEMPLATE`, `EXPIRED`; `NONE` (never NULL) when the export passes the export-level check (row-level refusals keep their own codes). The preview and apply refusal codes are unchanged.
 
 **Price sheet warnings (`20261027050000_price_sheet_warnings_and_approval`, applied live 2026-10-27; To-Do 0.1):**
 - `preview_product_cost_basis_changes` also marks a row that changes a price, the cost or the per-acre rate invalid without a `change_reason` (≤500) and a `price_source` (≤200) (`PRICING_REASON_REQUIRED`, `PRICING_SOURCE_REQUIRED`, `PRICING_REASON_TOO_LONG`, `PRICING_SOURCE_TOO_LONG`), stores both on the change-set rows, records each warned product in `pricing_change_set_warnings`, and returns a `warnings` array `[{product_id, warning_codes, details}]`.

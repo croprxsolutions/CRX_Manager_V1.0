@@ -93,6 +93,9 @@ export interface Product {
   rei_hours: number | null;
   /** Pre-harvest interval in days, from the product label (NULL = not entered) */
   phi_days: number | null;
+  /** The label gives no REI / no PHI; only while the interval is blank. Never stored as 0. */
+  rei_not_applicable?: boolean;
+  phi_not_applicable?: boolean;
   product_form: ProductForm | null;
   product_family_id?: string | null;
   return_policy?: 'returnable' | 'no_return' | 'not_applicable' | 'unknown';
@@ -153,6 +156,8 @@ export type MobileProduct = Pick<
   | 'signal_word'
   | 'rei_hours'
   | 'phi_days'
+  | 'rei_not_applicable'
+  | 'phi_not_applicable'
 >;
 
 // ─── EPA PPLS Lookup ────────────────────────────────────────────────────────
@@ -3432,6 +3437,8 @@ export interface FieldBillingDefault {
   notes: string | null;
   price_override_cents: number | null;
   pricing_note: string | null;
+  /** FP-1: the split version this read-only copy row came from. */
+  source_split_version_id: string | null;
   created_at: string;
   updated_at: string;
   customer?: Customer;

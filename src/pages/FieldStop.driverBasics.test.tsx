@@ -1,7 +1,8 @@
 /**
  * FieldStop.driverBasics.test.tsx: the stop screen's driver basics. Where to go (an address even when the
  * delivery has no address of its own), Call and Navigate, the one-tap Signed by name, Next Stop opening the
- * next stop on today's route, and the one no-signal message.
+ * next stop on today's route, the one no-signal message, today's saved copy of the stop in a dead spot, and
+ * reporting an issue in the completion step (sent with complete_delivery as the delivery detail sends it).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -85,6 +86,7 @@ const baseStop = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
   env.role = 'driver';
   env.online = true;
   env.contact = 'J. Hollow';
@@ -176,6 +178,57 @@ describe('FieldStop: Signed by', () => {
   });
 });
 
+describe('FieldStop: reporting an issue in the completion step', () => {
+  it('a driver reports a damaged product from the stop screen and it goes with the same complete_delivery save', async () => {
+    await reachSign();
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use J. Hollow' }));
+    // Notes appear only once a type is chosen, as on the delivery detail.
+    expect(screen.queryByLabelText('Describe the issue')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Report an issue/), { target: { value: 'other' } });
+    fireEvent.change(screen.getByLabelText('Describe the issue'), { target: { value: '  one jug cracked  ' } });
+    fireEvent.click(screen.getByRole('button', { name: /Continue to Review/ }));
+    // The driver sees the issue before completing.
+    expect(await screen.findByText('Issue')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Complete Delivery/ }));
+    await screen.findByText('Delivery complete');
+    const calls = mockRpc.mock.calls.filter(([name]) => name === 'complete_delivery');
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual(expect.objectContaining({
+      p_delivery_id: 'del-1', p_signed_by: 'J. Hollow', p_evidence: 'signature',
+      p_issue_type: 'other', p_issue_notes: 'one jug cracked',
+    }));
+  });
+
+  it('sends no issue fields when none is reported (the completion is unchanged)', async () => {
+    await reachSign();
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use J. Hollow' }));
+    expect(screen.getByLabelText(/Report an issue/)).toHaveValue('none');
+    fireEvent.click(screen.getByRole('button', { name: /Continue to Review/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Complete Delivery/ }));
+    await screen.findByText('Delivery complete');
+    const params = mockRpc.mock.calls.find(([name]) => name === 'complete_delivery')![1];
+    expect(params).not.toHaveProperty('p_issue_type');
+    expect(params).not.toHaveProperty('p_issue_notes');
+  });
+
+  it('drops a typed note when the driver switches the issue back to None', async () => {
+    await reachSign();
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use J. Hollow' }));
+    fireEvent.change(screen.getByLabelText(/Report an issue/), { target: { value: 'other' } });
+    fireEvent.change(screen.getByLabelText('Describe the issue'), { target: { value: 'one jug cracked' } });
+    fireEvent.change(screen.getByLabelText(/Report an issue/), { target: { value: 'none' } });
+    fireEvent.click(screen.getByRole('button', { name: /Continue to Review/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Complete Delivery/ }));
+    await screen.findByText('Delivery complete');
+    const params = mockRpc.mock.calls.find(([name]) => name === 'complete_delivery')![1];
+    expect(params).not.toHaveProperty('p_issue_type');
+    expect(params).not.toHaveProperty('p_issue_notes');
+  });
+});
+
 describe('FieldStop: Next Stop', () => {
   async function completeStop() {
     await reachSign();
@@ -231,5 +284,105 @@ describe('FieldStop: no signal', () => {
     expect(screen.getAllByText(/saved offline/)).toHaveLength(1);
     expect(screen.queryByText(/You're offline/)).not.toBeInTheDocument();
     expect(screen.queryByText(/save locally/)).not.toBeInTheDocument();
+  });
+});
+
+describe('FieldStop: saved copy in a dead spot', () => {
+  function failStopRead() {
+    mockFrom.mockImplementation((table: string) => {
+      const chain = buildChain(table);
+      if (table === 'deliveries') chain.maybeSingle = () => Promise.resolve({ data: null, error: { message: 'TypeError: Failed to fetch' } });
+      return chain;
+    });
+  }
+
+  it('shows today\'s saved copy, read-only, instead of sending the driver back to My Route', async () => {
+    tables.data.deliveries = [{ ...baseStop, delivery_notes: 'Gate code 4471.' }];
+    const first = render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    expect(await screen.findByText('Gate code 4471.')).toBeInTheDocument();
+    first.unmount();
+
+    failStopRead();
+    render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    expect(await screen.findByText(/^No signal — showing this stop as of /)).toBeInTheDocument();
+    expect(screen.getByText("You can't start or complete this stop until signal returns.")).toBeInTheDocument();
+    expect(screen.getByText('Maple Hollow Farms')).toBeInTheDocument();
+    expect(screen.getByText('Gate code 4471.')).toBeInTheDocument();
+    expect(screen.getByText('Test Chem')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Call/ })).toHaveAttribute('href', 'tel:6185550142');
+    expect(screen.getByRole('button', { name: /Needs signal to start/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Start Delivery/ })).not.toBeInTheDocument();
+    // Like the main button, nothing on the saved copy can report an issue.
+    expect(screen.queryByLabelText(/Report an issue/)).not.toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalledWith('/my-route');
+    expect(mockToast).not.toHaveBeenCalledWith('error', 'Could not load this stop');
+  });
+
+  it('saves no customer email on the phone', async () => {
+    render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    expect(await screen.findByRole('button', { name: /Start Delivery/ })).toBeInTheDocument();
+    const stored = Object.keys(window.localStorage).map((key) => window.localStorage.getItem(key) ?? '').join('');
+    expect(stored).toContain('Maple Hollow Farms');
+    expect(stored).not.toContain('farm@example.test');
+  });
+
+  it('opens the live stop again when Try again finds signal', async () => {
+    const first = render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    expect(await screen.findByRole('button', { name: /Start Delivery/ })).toBeInTheDocument();
+    first.unmount();
+    failStopRead();
+    render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    // Still no signal: the saved copy stays.
+    fireEvent.click(await screen.findByRole('button', { name: /Try again/ }));
+    expect(await screen.findByRole('button', { name: /Try again/ })).toBeEnabled();
+    expect(screen.getByText(/^No signal — showing this stop/)).toBeInTheDocument();
+    mockFrom.mockImplementation((table: string) => buildChain(table));
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
+    expect(await screen.findByRole('button', { name: /Start Delivery/ })).toBeInTheDocument();
+    expect(screen.queryByText(/^No signal — showing this stop/)).not.toBeInTheDocument();
+  });
+
+  it("forgets the saved copy once the server says the stop is no longer this driver's", async () => {
+    tables.data.deliveries = [{ ...baseStop, delivery_notes: 'Gate code 4471.' }];
+    const first = render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    expect(await screen.findByText('Gate code 4471.')).toBeInTheDocument();
+    first.unmount();
+
+    // Reassigned: online, the read answers with no row.
+    tables.data.deliveries = [];
+    const second = render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/my-route'));
+    second.unmount();
+    expect(Object.values(window.localStorage).join('')).not.toContain('Gate code 4471.');
+
+    // Later, in a dead spot, nothing of it is left to show.
+    failStopRead();
+    render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Could not load this stop'));
+    expect(screen.queryByText('Gate code 4471.')).not.toBeInTheDocument();
+  });
+
+  it("removes the saved copy when the server refuses access, instead of showing it as no signal", async () => {
+    tables.data.deliveries = [{ ...baseStop, delivery_notes: 'Gate code 4471.' }];
+    const first = render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    expect(await screen.findByText('Gate code 4471.')).toBeInTheDocument();
+    first.unmount();
+
+    mockFrom.mockImplementation((table: string) => {
+      const chain = buildChain(table);
+      if (table === 'deliveries') chain.maybeSingle = () => Promise.resolve({ data: null, error: { code: '42501', message: 'permission denied' } });
+      return chain;
+    });
+    render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/my-route'));
+    expect(screen.queryByText('Gate code 4471.')).not.toBeInTheDocument();
+    expect(Object.values(window.localStorage).join('')).not.toContain('Gate code 4471.');
+  });
+
+  it('still goes back to My Route when there is no saved copy', async () => {
+    failStopRead();
+    render(<MemoryRouter><FieldStop /></MemoryRouter>);
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/my-route'));
+    expect(mockToast).toHaveBeenCalledWith('error', 'Could not load this stop');
   });
 });

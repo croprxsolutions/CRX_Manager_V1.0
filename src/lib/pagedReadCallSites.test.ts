@@ -209,6 +209,12 @@ const VIEWS_NOT_IN_REGISTRY: Record<string, string> = {
   profile_public_view: 'the non-sensitive employee directory over profiles; a view, so not in the registry',
 };
 
+// Tables a pending migration creates: the registry mirrors live, so they are missing until the migration is
+// applied live and the registry is regenerated. The check skips them; drop each entry after that regeneration.
+const TABLES_NOT_YET_LIVE: Record<string, string> = {
+  money_reversal_lines: 'M9 (migration 20270301180000_m9_refunds_and_returned_checks) creates it; read by src/lib/reconciliation.ts',
+};
+
 // What is checked, per call site (the callback text up to its `.range(`):
 // - the table is the one `.from('<table>')`; any other form (`.rpc(...)`, a
 //   variable or constant table name, or two different tables) is unreadable
@@ -272,7 +278,7 @@ describe('paged list reads only name columns their table has', () => {
 
   it('every selected and sorted column exists on its table in the schema registry', () => {
     const missing = sites.flatMap((site) => {
-      if (!site.table || site.table in VIEWS_NOT_IN_REGISTRY) return [];
+      if (!site.table || site.table in VIEWS_NOT_IN_REGISTRY || site.table in TABLES_NOT_YET_LIVE) return [];
       const known = REGISTRY_COLUMNS[site.table];
       if (!known) return [`${site.file}:${site.line} table ${site.table} is not in the schema registry`];
       return site.columns

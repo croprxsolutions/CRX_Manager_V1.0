@@ -301,13 +301,13 @@ export async function validatePricingWorkbookArchive(arrayBuffer: ArrayBuffer): 
     );
   }
   if (arrayBuffer.byteLength < ZIP_END_OF_CENTRAL_DIRECTORY_BYTES) {
-    throw new PricingWorkbookFormatError('The uploaded file is not a readable .xlsx workbook.');
+    throw new PricingWorkbookFormatError('This file could not be read as an Excel workbook. Open it in Excel, save it as .xlsx, and upload it again.');
   }
 
   const view = new DataView(arrayBuffer);
   const endOffset = findZipEndOfCentralDirectory(view);
   if (endOffset < 0) {
-    throw new PricingWorkbookFormatError('The uploaded file is not a readable .xlsx workbook.');
+    throw new PricingWorkbookFormatError('This file could not be read as an Excel workbook. Open it in Excel, save it as .xlsx, and upload it again.');
   }
 
   const commentLength = view.getUint16(endOffset + 20, true);
@@ -729,9 +729,10 @@ export async function parseProductPricingWorkbook(
   const workbook = new ExcelJS.Workbook();
   try {
     await workbook.xlsx.load(arrayBuffer);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new PricingWorkbookFormatError(`The uploaded file is not a readable .xlsx workbook: ${message}`);
+  } catch {
+    throw new PricingWorkbookFormatError(
+      'This file could not be read as an Excel price sheet. Open it in Excel, save it as .xlsx, and upload it again.',
+    );
   }
 
   const worksheet = workbook.getWorksheet(PRICING_WORKBOOK_SHEET);
@@ -753,7 +754,9 @@ export async function parseProductPricingWorkbook(
     throw new PricingWorkbookFormatError(`Pricing workbooks are limited to ${MAX_PRICING_WORKBOOK_ROWS} rows.`);
   }
   if (worksheet.actualRowCount - 1 !== rowCount) {
-    throw new PricingWorkbookFormatError('The Pricing Update row count does not match the CRX manifest.');
+    throw new PricingWorkbookFormatError(
+      'Rows were added to or deleted from the Pricing Update sheet. Keep every downloaded row (leave a row as it is to skip it), or download a fresh price sheet.',
+    );
   }
   const rows: PricingWorksheetPreviewRow[] = [];
   for (let rowNumber = 2; rowNumber <= rowCount + 1; rowNumber += 1) {

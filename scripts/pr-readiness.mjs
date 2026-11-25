@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isCodexBotLogin } from "../.claude/hooks/codex-bot-review-lib.mjs";
 import { readTeammateComments } from "../.claude/hooks/teammate-comments-lib.mjs";
+import { TAHA_LOGIN } from "../.claude/hooks/migration-landing-gate-lib.mjs";
 
 const REPO = "croprxsolutions/CRX_Manager_V1.0";
 const THREADS_QUERY = `query($n:Int!,$after:String){repository(owner:"croprxsolutions",name:"CRX_Manager_V1.0"){pullRequest(number:$n){
@@ -59,6 +60,18 @@ export function teammateLines(n, teammates) {
   return `${label}: ${comments.length} - NOT READY: answer each on the PR with its link (gh pr comment ${n} --body "<link> <answer>")${list}`;
 }
 
+// `ready-for-taha` (Mason, 2026-11-24): waits for Taha's Approve on the CURRENT head.
+// His latest approve/changes-requested/dismissed review on the head decides, as on GitHub.
+export function tahaApprovalLine(n, view) {
+  if (!(view.labels || []).some((l) => l.name === "ready-for-taha")) return null;
+  const head = String(view.headRefOid || "").toLowerCase();
+  const verdict = (view.reviews || []).filter((r) => String(r.author?.login || "").toLowerCase() === TAHA_LOGIN
+    && head && String(r.commit?.oid || "").toLowerCase() === head && r.state !== "COMMENTED" && r.state !== "PENDING").at(-1);
+  if (verdict?.state === "APPROVED") return "  ready-for-taha: Taha APPROVED the head";
+  return `  ready-for-taha: waiting on Taha - NOT READY: needs his Approve review on head ${head.slice(0, 12) || "?"}`
+    + ` (after any push: gh pr edit ${n} --add-reviewer TahaKhanAbdalli)`;
+}
+
 export function formatBlock(n, view, threadsNode, sol, teammates) {
   const { total, pending, bad } = checkCounts(view.statusCheckRollup);
   const threads = openThreads(threadsNode);
@@ -66,6 +79,7 @@ export function formatBlock(n, view, threadsNode, sol, teammates) {
     `#${n} ${view.title}`,
     `  head=${view.headRefOid} author=${view.author?.login} draft=${view.isDraft} mergeState=${view.mergeStateStatus}`,
     teammateLines(n, teammates),
+    ...[tahaApprovalLine(n, view)].filter(Boolean),
     `  checks: ${total} total, ${pending} pending, ${bad.length} bad${bad.length ? ` (${bad.join("; ")})` : ""}`,
     `  codex App on head: ${codexReviewedHead(view) ? "yes" : "NO"}`,
     `  open threads: ${threads.length}${threads.map((t) => `\n    - ${t}`).join("")}`,
@@ -89,7 +103,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   for (const n of prs) {
     try {
       const view = JSON.parse(gh(["pr", "view", n, "--repo", REPO, "--json",
-        "title,author,headRefOid,mergeStateStatus,isDraft,statusCheckRollup,comments,reviews"]));
+        "title,author,headRefOid,mergeStateStatus,isDraft,statusCheckRollup,comments,reviews,labels"]));
       const threads = { nodes: [] };
       for (let after = null, page; !page || page.pageInfo.hasNextPage; after = page.pageInfo.endCursor) {
         page = JSON.parse(gh(["api", "graphql", "-F", `n=${n}`, "-f", `query=${THREADS_QUERY}`, ...(after ? ["-f", `after=${after}`] : [])]))

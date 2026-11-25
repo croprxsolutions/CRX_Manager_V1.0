@@ -1510,7 +1510,12 @@ export default function DeliveryDetail() {
   };
 
   // After the hand send: mark the paused receipt handled. A failure only leaves it on the office list.
-  const closeSentReceipt = async (deliveryId: string, queuedAt: string | null, deliveryNumber: string) => {
+  const closeSentReceipt = async (deliveryId: string, queuedAt: string | null, deliveryNumber: string, pausedNow: boolean) => {
+    // Only an admin marks a receipt handled, a rep's own hand send included (Mason, 2026-11-24): the server refuses it.
+    if (!isAdmin && pausedNow) {
+      toast('info', `Delivery ${deliveryNumber}: its receipt stays on "Customer receipts to check" until an admin marks it handled.`);
+      return;
+    }
     if (!queuedAt) {
       // None was queued when the send started, so none is closed; one queued meanwhile may still be emailed (Sol LOW).
       // A failed read says so rather than staying silent; each warning names its delivery, as the page may have moved on (#2291).
@@ -1535,13 +1540,13 @@ export default function DeliveryDetail() {
         level: 'warning', extra: { context: 'close_delivery_receipt after Email Confirmation', deliveryId },
       });
       // Not "mark it handled": the close may have failed because a newer receipt the customer is owed replaced it (Sol HIGH).
-      toast('warning', 'The email went out, but the app could not confirm its receipt was closed. Check "Customer receipts to check" before marking anything handled: if this delivery was completed again, the customer may be owed a newer receipt.');
+      toast('warning', 'The email went out, but the app could not confirm its receipt was closed. It stays on "Customer receipts to check" for an admin, who should check it before marking anything handled: if this delivery was completed again, the customer may be owed a newer receipt.');
     }
   };
 
   // A paused receipt whose hand send never went out: the server will not send it either, so say so (Taha LOW).
   const warnHeldNotSent = (deliveryNumber: string) => {
-    toast('warning', `Delivery ${deliveryNumber}: the email did not go out. Its receipt is on "Customer receipts to check" and the server will not send it. Send it again or mark it handled.`);
+    toast('warning', `Delivery ${deliveryNumber}: the email did not go out. Its receipt is on "Customer receipts to check" and the server will not send it. Send it again, or an admin can mark it handled.`);
   };
 
   // ── Resend Delivery Confirmation Email ──────────────────────────────────
@@ -1597,13 +1602,13 @@ export default function DeliveryDetail() {
       });
       heldNotSent = false;
       toast('success', `Confirmation email sent to ${customer.email}`);
-      await closeSentReceipt(delivery.id, paused.queued_at, delivery.delivery_number);
+      await closeSentReceipt(delivery.id, paused.queued_at, delivery.delivery_number, paused.outcome === 'paused');
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
       // No answer came back: the email may have gone out, so never say it did not (Codex P2).
       if (heldNotSent && err instanceof EmailUnconfirmedError) {
         heldNotSent = false;
-        toast('warning', `Delivery ${delivery.delivery_number}: the email may have gone out. Its receipt is on "Customer receipts to check" and the server will not send it. Check before sending again, then mark it handled.`);
+        toast('warning', `Delivery ${delivery.delivery_number}: the email may have gone out. Its receipt is on "Customer receipts to check" and the server will not send it. Check before sending again; an admin can mark it handled.`);
       }
     } finally {
       if (heldNotSent) warnHeldNotSent(delivery.delivery_number);
@@ -2317,7 +2322,7 @@ export default function DeliveryDetail() {
               open={resendCopyCheck !== null && resendCopyCheck.delivery_id === delivery.id}
               onClose={() => {
                 // The server may already have sent it: never say it did not go out (Taha LOW).
-                if (resendCopyCheck?.outcome === 'paused') toast('warning', `Delivery ${delivery.delivery_number}: the server may already have emailed this receipt. It is on "Customer receipts to check" and the server will not send it again. Check with the customer before sending, then mark it handled.`);
+                if (resendCopyCheck?.outcome === 'paused') toast('warning', `Delivery ${delivery.delivery_number}: the server may already have emailed this receipt. It is on "Customer receipts to check" and the server will not send it again. Check with the customer before sending; an admin can mark it handled.`);
                 setResendCopyCheck(null);
               }}
               onConfirm={() => { void handleResendEmail(resendCopyCheck?.delivery_id); }}

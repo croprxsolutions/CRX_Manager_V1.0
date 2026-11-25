@@ -240,4 +240,16 @@ describe('DispatchBoard (dark field/tablet view)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open dispatch filters' }));
     expect(screen.getByRole('dialog', { name: 'More search options' })).toBeInTheDocument();
   });
+
+  it('keeps its text readable on the dark board: no dim slate-500 or slate-600 text', async () => {
+    renderDispatchBoard();
+    expect(await screen.findByText('FJOB-002')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open dispatch filters' }));
+    // slate-500 on the board's slate-950/900 is under the 4.5:1 text minimum; slate-400 passes.
+    const dimText = Array.from(document.querySelectorAll('.text-slate-500, .text-slate-600'))
+      .filter((el) => el.tagName.toLowerCase() !== 'svg' && (el.textContent ?? '').trim() !== '');
+    expect(dimText.map((el) => el.textContent)).toEqual([]);
+    for (const input of document.querySelectorAll('input[placeholder]')) expect(input).not.toHaveClass('placeholder-slate-500');
+    expect(screen.getByText('Status')).toHaveClass('text-slate-400');
+  });
 });

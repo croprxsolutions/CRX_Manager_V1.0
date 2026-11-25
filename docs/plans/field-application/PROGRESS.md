@@ -67,6 +67,14 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 | 5 Loader water to add + finished gallons | MERGED | #2466 (b634db721); rendered: tank loads, condensed, one batch, overfill, and a dash with its note for a form not on file, a liquid sold by weight, and a missing amount | **Mason 2026-11-24: "Yes, only when known".** Water to add shows only when every product record says liquid or dry and every liquid sizes to gallons; otherwise a dash and "set liquid/dry on the product" (or the amount/unit reason). No guessing from the unit |
 | 6 EPA dash / Unknown | PARKED ("Unknown" half) | dash: already prints for any blank number (`applicatorSheetPdf.test.ts`, blank and null rows) | No product value says a product is EPA-registered (`products.epa_registration` is the number only; `epa_registrations` is keyed by the number). "Unknown" needs that flag: asked below |
 
+Staging check 2026-11-24 (staging.croprxsolutions.app, test job JOB-2026-0016 on two TEST fields; downloads approved by Mason):
+
+- PASS 1 safety sheet: the option is off by default. Turned on, page 2 reads "Safety — Signal Word, REI, PHI · From product records on 11/24/2026", with "See label" for blank values. Turned off, there is no safety page.
+- PASS 4 directions: "Directions to each field", Stop 1 and Stop 2 with "Open directions", in route order.
+- PASS 5 loader panel: 300 gal finished and 295 gal water to add per tank (2,4-D at 640 fl oz = 5 gal), plus "Dry products are not counted as volume in water to add."
+- PASS 2 refusal: on a job with no maps, Map pages only says "This job has no field maps to print."
+- NOT SEEN 2 and 3 map pages: staging has no `VITE_MAPBOX_TOKEN` (the console says it skips maps), so no map page renders on staging. Proven by local renders before merge. Needs the staging map token (environment setting, Mason's call).
+
 Paperwork follow-ups (logged, not fixed; none touches money, stock or data):
 
 - Map pages only is hidden on a saved job that has mapped fields but no chemical lines yet (the button sits in the chemical-gated print group). Codex P2 on #2458.

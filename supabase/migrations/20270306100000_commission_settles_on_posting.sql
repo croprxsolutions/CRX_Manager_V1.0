@@ -14,13 +14,15 @@
 -- queue. A first design recomputed at commit from deferred triggers and drew HIGHs in five review rounds.
 --   1. _order_commission_base_20270306(sale) = total_profit + D × booked ÷ billed, over the sale's chemical-sale
 --      invoices that are posted, overdue or paid and not deleted: D their standing-discount cents (each product line's
---      share, never tax: _invoice_line_tax_shares_20270109), billed their product cents, booked orders.total_price.
+--      share, never tax: _invoice_line_tax_shares_20270109), billed the product cents the P&L counts as billed (the
+--      sale's posted chemical-sale and misc-charge invoices, no application fees), booked orders.total_price.
 --      Fully billed: total_profit + D. Nothing posted: total_profit. The P&L earns commission by the share billed over
 --      the same invoices (_report_commission_cents_20270203), so it earns exactly total_profit × share + D: the posted
 --      profit after its discount (Taha, rule "b"). Lines with different margins are prorated by revenue, as the P&L
 --      already does (accepted, Sol r6 H5).
---   2. _settle_order_commission_20270306(sale): takes the sale lock (orders row, FOR NO KEY UPDATE NOWAIT;
---      ORDER_LIFECYCLE_BUSY_RETRY when another save holds it, as guard_terminal_order_invoice_items does), then moves the
+--   2. _settle_order_commission_20270306(sale): when something must move, takes the sale lock (orders row, FOR NO KEY
+--      UPDATE NOWAIT; ORDER_LIFECYCLE_BUSY_RETRY when another save holds it, as guard_terminal_order_invoice_items
+--      does) and reads everything again under it; a sale with nothing to move takes no lock. It moves the
 --      pending rows in no live payout batch whose stored base differs from the new base: each row its own percentage
 --      of the base (never a share of what is left), exact to the cent by largest remainder when they are the sale's
 --      whole live set, otherwise each its own rounded share. Rows already on the base never move (no cent after a
@@ -134,12 +136,15 @@ BEGIN
   IF v_discount = 0 THEN
     RETURN round(v_profit, 2);
   END IF;
+  -- Billed exactly as the P&L counts it (_report_commission_cents_20270203: product lines on the sale's posted
+  -- chemical-sale and misc-charge invoices, no application fees), so the two shares agree.
   SELECT sum(b.extended_cents) INTO v_billed
-    FROM order_items oi
-    JOIN invoice_items b ON b.order_item_id = oi.id AND b.product_id IS NOT NULL AND b.charge_type IS NULL
-    JOIN invoices i ON i.id = b.invoice_id
-   WHERE oi.order_id = p_order_id
-     AND i.invoice_type = 'chemical_sale' AND i.status IN ('posted', 'overdue', 'paid') AND i.deleted_at IS NULL;
+    FROM invoices i
+    JOIN invoice_items b ON b.invoice_id = i.id AND b.charge_type IS NULL AND b.is_application_fee IS NOT TRUE
+                        AND b.product_id IS NOT NULL
+   WHERE i.order_id = p_order_id
+     AND i.invoice_type IN ('chemical_sale', 'misc_charge') AND i.status IN ('posted', 'overdue', 'paid')
+     AND i.deleted_at IS NULL;
   IF v_billed > 0 AND v_booked > v_billed THEN
     -- Part-billed: the posted invoices' discount rate across the whole sale, rounded toward the smaller base so the
     -- P&L's billed share never earns above the posted profit after its discount (Sol r1 H2; it can be a cent under).
@@ -167,25 +172,22 @@ DECLARE
   v_new numeric[];
   v_moving uuid[];
   v_locked uuid[] := '{}';
+  v_sale_locked boolean := false;
   v_count int;
 BEGIN
   IF p_order_id IS NULL THEN
     RETURN 0;
   END IF;
-  -- The one sale lock, taken first. Never waited for: a caller holding an invoice row must not queue behind a save
-  -- that holds the sale and wants that invoice.
-  BEGIN
-    SELECT COALESCE(total_profit, 0) INTO v_profit FROM orders WHERE id = p_order_id FOR NO KEY UPDATE NOWAIT;
-  EXCEPTION WHEN lock_not_available THEN
-    RAISE EXCEPTION 'ORDER_LIFECYCLE_BUSY_RETRY: this order is being changed; wait a moment and retry';
-  END;
-  IF NOT FOUND THEN
-    RETURN 0;
-  END IF;
-  v_base := public._order_commission_base_20270306(p_order_id);
-  v_base_cents := round(GREATEST(v_base, 0) * 100)::bigint;
-
   LOOP
+    -- First pass without the sale lock: a sale with nothing to move (most posts) is left alone and never blocks a
+    -- concurrent save of it. Once something must move, the sale lock is taken and everything is read again under it.
+    -- Never waited for: a caller holding an invoice row must not queue behind a save that holds the sale.
+    SELECT COALESCE(total_profit, 0) INTO v_profit FROM orders WHERE id = p_order_id;
+    IF NOT FOUND THEN
+      RETURN 0;
+    END IF;
+    v_base := public._order_commission_base_20270306(p_order_id);
+    v_base_cents := round(GREATEST(v_base, 0) * 100)::bigint;
     -- The rows this may move: pending, in no live payout batch.
     SELECT array_agg(c.id ORDER BY c.id), array_agg(c.split_percentage ORDER BY c.id)
       INTO v_ids, v_pcts
@@ -236,6 +238,15 @@ BEGIN
     IF v_moving IS NULL THEN
       RETURN 0;
     END IF;
+    IF NOT v_sale_locked THEN
+      BEGIN
+        PERFORM 1 FROM orders WHERE id = p_order_id FOR NO KEY UPDATE NOWAIT;
+      EXCEPTION WHEN lock_not_available THEN
+        RAISE EXCEPTION 'ORDER_LIFECYCLE_BUSY_RETRY: this order is being changed; wait a moment and retry';
+      END;
+      v_sale_locked := true;
+      CONTINUE;
+    END IF;
     EXIT WHEN v_moving <@ v_locked;
     -- Lock only the rows that move, then decide again: a row a payout took meanwhile drops out, and only locked rows
     -- are written.
@@ -285,21 +296,23 @@ END
 $function$;
 REVOKE ALL ON FUNCTION public._invoice_settles_commission_20270306() FROM PUBLIC, anon, authenticated, service_role;
 
--- An invoice counts while it is a chemical sale, posted (or overdue or paid) and not deleted. Settle when it starts or
+-- An invoice counts while it is a chemical sale (its discount and billed share) or a misc charge (its billed share, as
+-- the P&L counts it), posted (or overdue or paid) and not deleted. Settle when it starts or
 -- stops counting, when a counted one moves to another sale (Sol r1 H3), or when a counted one is deleted outright.
 CREATE TRIGGER invoices_settle_commission_20270306
   AFTER UPDATE OF status, deleted_at, invoice_type, order_id ON public.invoices
   FOR EACH ROW
-  WHEN ((OLD.invoice_type = 'chemical_sale' AND OLD.status IN ('posted', 'overdue', 'paid') AND OLD.deleted_at IS NULL)
+  WHEN ((OLD.invoice_type IN ('chemical_sale', 'misc_charge') AND OLD.status IN ('posted', 'overdue', 'paid') AND OLD.deleted_at IS NULL)
           IS DISTINCT FROM
-        (NEW.invoice_type = 'chemical_sale' AND NEW.status IN ('posted', 'overdue', 'paid') AND NEW.deleted_at IS NULL)
-        OR (NEW.invoice_type = 'chemical_sale' AND NEW.status IN ('posted', 'overdue', 'paid') AND NEW.deleted_at IS NULL
-            AND OLD.order_id IS DISTINCT FROM NEW.order_id))
+        (NEW.invoice_type IN ('chemical_sale', 'misc_charge') AND NEW.status IN ('posted', 'overdue', 'paid') AND NEW.deleted_at IS NULL)
+        OR (NEW.invoice_type IN ('chemical_sale', 'misc_charge') AND NEW.status IN ('posted', 'overdue', 'paid')
+            AND NEW.deleted_at IS NULL AND (OLD.order_id IS DISTINCT FROM NEW.order_id
+                                            OR OLD.invoice_type IS DISTINCT FROM NEW.invoice_type)))
   EXECUTE FUNCTION public._invoice_settles_commission_20270306();
 CREATE TRIGGER invoices_delete_settle_commission_20270306
   AFTER DELETE ON public.invoices
   FOR EACH ROW
-  WHEN (OLD.invoice_type = 'chemical_sale' AND OLD.status IN ('posted', 'overdue', 'paid') AND OLD.deleted_at IS NULL)
+  WHEN (OLD.invoice_type IN ('chemical_sale', 'misc_charge') AND OLD.status IN ('posted', 'overdue', 'paid') AND OLD.deleted_at IS NULL)
   EXECUTE FUNCTION public._invoice_settles_commission_20270306();
 
 -- 4. The writers that put rows back on total_profit (bodies as pinned above, one call added each) ----------------
@@ -525,7 +538,8 @@ BEGIN
   END IF;
   -- M4 (20270306100000): a replay returns its receipt and writes nothing (Sol r1 H4).
   v_replay := EXISTS (SELECT 1 FROM public.idempotency_keys
-                       WHERE idempotency_key = p_idempotency_key AND operation = 'cancel_order' AND result IS NOT NULL);
+                       WHERE idempotency_key = p_idempotency_key AND operation = 'cancel_order' AND result IS NOT NULL
+                         AND (expires_at IS NULL OR expires_at > now()));
   v_result := public._cancel_order_idem_impl_20260721(
     p_order_id, p_performed_by, p_idempotency_key
   );

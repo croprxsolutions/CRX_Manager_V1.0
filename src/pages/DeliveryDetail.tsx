@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useLayoutEffect, type ComponentProps } from 'react';
+import { useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo, type ComponentProps } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Phone, MapPin, CheckCircle2, Package, Download, WifiOff,
@@ -16,6 +16,7 @@ import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
+import { useLoadBoundSignature } from '../hooks/useLoadBoundSignature';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
@@ -32,7 +33,7 @@ import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail, EmailUnconfirmedError } from '../lib/emailService';
 import { buildDeliveryReceiptHtml } from '../lib/deliveryReceiptEmail';
 import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
-import { fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
@@ -694,7 +695,19 @@ export default function DeliveryDetail() {
   // an edit made during it is never silently dropped in favour of the values captured at confirm.
   const completionInputs = JSON.stringify([signedBy, deliveryQtys, driverIssueType, driverIssueNotes, usePaperTicket, paperDeliveredOn, signatureDataUrl, emailOnComplete, completionEvidence, noProofReason]);
   const completionInputsRef = useLatestRef(completionInputs);
-  const hasAnyQty = items.some((item) => (deliveryQtys[item.id] ?? item.quantity) > 0);
+  // Under 0.01 counts as nothing delivered, as on the server (DELIVERY_NOTHING_DELIVERED).
+  const hasAnyQty = items.some((item) => (deliveryQtys[item.id] ?? item.quantity) >= 0.01);
+  // The lines on screen with their delivered amounts: the signature and the ticket photo are bound to
+  // them (20270304120000). Null until the delivery's lines are loaded.
+  const currentLinesSeen = useMemo(
+    () => (items.length ? buildLinesSeen(items, (item) => deliveryQtys[item.id] ?? item.quantity) : null),
+    [items, deliveryQtys],
+  );
+  const currentLinesSeenRef = useLatestRef(currentLinesSeen);
+  const currentTicketPhoto = latestEvidencePhoto(photos, PAPER_TICKET_PHOTO_CAPTION);
+  // The newest ticket photo counts only when it was taken for these lines and amounts (one without lines never does).
+  const ticketPhotoMatchesLoad = !!currentTicketPhoto && sameLinesSeen(currentTicketPhoto.lines_seen, currentLinesSeen);
+  const sig = useLoadBoundSignature(signatureDataUrl, setSignatureDataUrl, currentLinesSeen);
 
   // ── Edit Mode ──────────────────────────────────────────────────────────
 
@@ -1037,6 +1050,8 @@ export default function DeliveryDetail() {
 
     setUploadingPhoto(true);
     let uploadCount = 0;
+    // A signed-ticket photo is saved with the lines and amounts on screen when it was taken (20270304120000).
+    const linesAtPhoto = caption === PAPER_TICKET_PHOTO_CAPTION ? currentLinesSeen : null;
 
     for (const rawFile of Array.from(files)) {
       try {
@@ -1065,6 +1080,7 @@ export default function DeliveryDetail() {
           file_size: file.size,
           sort_order: photos.length + uploadCount,
           ...(caption ? { caption } : {}),
+          ...(linesAtPhoto ? { lines_seen: linesAtPhoto } : {}),
         }).select();
         if (photoResult.error) {
           toast('error', `Photo saved to storage but DB record failed: ${photoResult.error.message}`);
@@ -1174,7 +1190,7 @@ export default function DeliveryDetail() {
     }
     if (!delivery || !profile) return;
     if (!hasAnyQty) {
-      toast('error', 'At least one item must have a quantity greater than 0');
+      toast('error', NOTHING_DELIVERED_MESSAGE);
       return;
     }
     if (completionEvidence === 'no_proof') {
@@ -1199,6 +1215,15 @@ export default function DeliveryDetail() {
     }
     if (usePaperTicket && !hasPaperTicketPhoto(photos)) {
       toast('error', 'Take a photo of the signed paper ticket before completing');
+      return;
+    }
+    if (usePaperTicket && !ticketPhotoMatchesLoad) {
+      toast('error', TICKET_PHOTO_LOAD_CHANGED_MESSAGE);
+      return;
+    }
+    if (completionEvidence === 'signature' && !sameLinesSeen(sig.signedLines, currentLinesSeen)) {
+      sig.clearSignature();
+      toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
       return;
     }
     if (usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn)) {
@@ -1242,6 +1267,15 @@ export default function DeliveryDetail() {
       toast('error', `Write why there is no proof (${NO_PROOF_REASON_MIN_CHARS} to ${NO_PROOF_REASON_MAX_CHARS} characters)`);
       return;
     }
+    // Caught here, before the signature image is uploaded: nothing delivered, or proof taken for other lines or amounts.
+    if (!hasAnyQty) { toast('error', NOTHING_DELIVERED_MESSAGE); return; }
+    const signedLinesAtSubmit = submittedEvidence === 'signature' ? sig.signedLines : null;
+    if (submittedEvidence === 'signature' && !sameLinesSeen(signedLinesAtSubmit, currentLinesSeen)) {
+      sig.clearSignature();
+      toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
+      return;
+    }
+    if (usePaperTicket && !ticketPhotoMatchesLoad) { toast('error', TICKET_PHOTO_LOAD_CHANGED_MESSAGE); return; }
     setCompleting(true);
     const deliveryId = id!;
 
@@ -1266,6 +1300,8 @@ export default function DeliveryDetail() {
       ...(ticketPhoto ? { p_evidence_ref: ticketPhoto.id } : {}),
       // no_proof: the reason exactly as typed (the server collapses whitespace; an exact retry resends it).
       ...(submittedEvidence === 'no_proof' ? { p_evidence_ref: noProofReason } : {}),
+      // The lines the customer signed for (part of the key's scope: another list is a new attempt).
+      ...(signedLinesAtSubmit ? { p_lines_seen: signedLinesAtSubmit } : {}),
     };
     // check_idempotency replays a saved result by key and operation only, so bind the
     // key to this exact payload: an edited retry (signer, quantities, issue, ticket date)
@@ -1298,6 +1334,7 @@ export default function DeliveryDetail() {
       p_evidence: DeliveryCompletionEvidence;
       p_evidence_ref?: string;
       p_email_receipt?: boolean;
+      p_lines_seen?: LineSeen[];
     } = { ...intentParams, ...(signaturePath ? { p_evidence_ref: signaturePath } : {}), p_idempotency_key: idemKey };
 
     // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;
@@ -1319,6 +1356,11 @@ export default function DeliveryDetail() {
       }
       if (completionInputsRef.current !== completionInputs) {
         toast('error', 'Details changed while checking for signal. The delivery was not completed; check them and tap Complete Delivery again.');
+        return false;
+      }
+      // Lines or amounts changed since signing: stop before the image goes up (the screen asks for a new signature).
+      if (signedLinesAtSubmit && !sameLinesSeen(signedLinesAtSubmit, currentLinesSeenRef.current)) {
+        toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
         return false;
       }
       return true;
@@ -1477,6 +1519,11 @@ export default function DeliveryDetail() {
       // status was read: a full reload would reset the edited partial quantities, which a retry would
       // then send as full. Still open: refresh only the photos (a refused photo may be gone).
       if (outcome.kind === 'completed_not_replayed' || outcome.kind === 'closed') {
+        await fetchDelivery();
+      } else if (outcome.kind === 'open' && isLoadProofRefusal(error)) {
+        // Nothing delivered, or the proof is not for this load: clear the signature and reload the
+        // delivery's lines and photos, so the stale proof no longer counts. No automatic retry.
+        sig.clearSignature();
         await fetchDelivery();
       } else if (outcome.kind === 'open') {
         const photoSeq = ++photoSeqRef.current;
@@ -2050,10 +2097,12 @@ export default function DeliveryDetail() {
                     onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)}
                     className="hidden"
                   />
-                  {hasPaperTicketPhoto(photos) ? (
+                  {ticketPhotoMatchesLoad ? (
                     <p className="flex items-center gap-2 text-sm text-crx-green">
                       <CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the signed ticket saved
                     </p>
+                  ) : hasPaperTicketPhoto(photos) ? (
+                    <p className="text-sm text-amber-800">{TICKET_PHOTO_LOAD_CHANGED_MESSAGE}</p>
                   ) : (
                     <p className="text-sm text-amber-800">A photo of the signed paper ticket is required.</p>
                   )}
@@ -2086,7 +2135,8 @@ export default function DeliveryDetail() {
                   </div>
                   <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <SignatureCanvas
-                      onSignatureChange={setSignatureDataUrl}
+                      key={sig.canvasKey}
+                      onSignatureChange={sig.onSignatureChange}
                       label=""
                       height={120}
                     />
@@ -2983,10 +3033,12 @@ export default function DeliveryDetail() {
                 onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)}
                 className="hidden"
               />
-              {hasPaperTicketPhoto(photos) ? (
+              {ticketPhotoMatchesLoad ? (
                 <p className="flex items-center gap-2 text-sm text-green-700">
                   <CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the signed ticket saved
                 </p>
+              ) : hasPaperTicketPhoto(photos) ? (
+                <p className="text-sm text-amber-700">{TICKET_PHOTO_LOAD_CHANGED_MESSAGE}</p>
               ) : (
                 <p className="text-sm text-amber-700">A photo of the signed paper ticket is required.</p>
               )}
@@ -3013,7 +3065,8 @@ export default function DeliveryDetail() {
           ) : (
             <div className="mb-4 border border-gray-200 rounded-lg p-3 bg-white">
               <SignatureCanvas
-                onSignatureChange={setSignatureDataUrl}
+                key={sig.canvasKey}
+                onSignatureChange={sig.onSignatureChange}
                 label="Customer Signature"
                 height={120}
               />

@@ -130,12 +130,13 @@ export function mergePhotosById<T extends { id: string }>(first: ReadonlyArray<T
   return [...byId.values()];
 }
 
-/** Saves one evidence photo (file + delivery_photos row) for the Deliveries list's dialog; throws on failure. */
+/** Saves one evidence photo (file + delivery_photos row) for the Deliveries list's dialog; throws on failure. `linesSeen`: ticket photos only. */
 export async function uploadEvidencePhoto(
   deliveryId: string,
   rawFile: File,
   uploadedBy: string,
   caption: string,
+  linesSeen?: LineSeen[],
 ): Promise<DeliveryEvidencePhoto> {
   const file = await compressImage(rawFile);
   const ext = file.name.split('.').pop() || 'jpg';
@@ -161,7 +162,9 @@ export async function uploadEvidencePhoto(
     file_size: file.size,
     sort_order: count ?? 0,
     caption,
-  }).select('id, storage_path, image_url, caption, uploaded_at');
+    // A signed-ticket photo carries the lines the screen showed when it was taken (20270304120000).
+    ...(linesSeen ? { lines_seen: linesSeen } : {}),
+  }).select('id, storage_path, image_url, caption, uploaded_at, lines_seen');
   checkMutationResult(result, 'Insert delivery photo');
   const row = (result.data || [])[0] as DeliveryEvidencePhoto | undefined;
   if (!row) throw new Error('The photo was uploaded but not recorded. Please try again.');
@@ -255,3 +258,67 @@ export async function storedNoProofReason(deliveryId: string, typedReason: strin
   const stored = (data as { completion_evidence_ref?: string | null } | null)?.completion_evidence_ref;
   return stored && stored.trim() ? stored : normalizeNoProofReason(typedReason);
 }
+
+/**
+ * Proof bound to the load (migration 20270304120000). One delivery line as the screen showed it when
+ * the customer signed or the ticket photo was taken: its order line, product, scheduled quantity and
+ * the delivered amount on screen (the scheduled quantity for a full delivery).
+ */
+// A type alias, not an interface, so it is assignable to the generated Json type.
+export type LineSeen = {
+  order_item_id: string;
+  product_id: string;
+  quantity: number;
+  delivered: number;
+};
+
+/** The lines the screen shows now; `deliveredFor` gives a line's delivered figure (default: the scheduled quantity). */
+export function buildLinesSeen<T extends { id: string; order_item_id?: string | null; product_id?: string | null; quantity: number | string }>(
+  items: ReadonlyArray<T>,
+  deliveredFor: (item: T) => number | string = (item) => item.quantity,
+): LineSeen[] {
+  return items.map((item) => ({
+    order_item_id: item.order_item_id ?? '',
+    product_id: item.product_id ?? '',
+    quantity: Number(item.quantity),
+    delivered: Number(deliveredFor(item)),
+  }));
+}
+
+// One entry as the server compares it: ids lower-cased, amounts as numbers, delivered kept between 0 and the quantity.
+function lineSeenKey(line: LineSeen): string {
+  const quantity = Number(line.quantity);
+  const delivered = Math.max(0, Math.min(Number(line.delivered), quantity));
+  return `${String(line.order_item_id).toLowerCase()}|${String(line.product_id).toLowerCase()}|${quantity}|${delivered}`;
+}
+
+/** True when both lists hold the same entries, each as many times (the server's _delivery_lines_match). */
+export function sameLinesSeen(a: ReadonlyArray<LineSeen> | null | undefined, b: ReadonlyArray<LineSeen> | null | undefined): boolean {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  const counts = new Map<string, number>();
+  for (const line of a) counts.set(lineSeenKey(line), (counts.get(lineSeenKey(line)) ?? 0) + 1);
+  for (const line of b) {
+    const key = lineSeenKey(line);
+    const left = counts.get(key);
+    if (!left) return false;
+    counts.set(key, left - 1);
+  }
+  return true;
+}
+
+/** Some line has a delivered amount of at least 0.01 (the server's DELIVERY_NOTHING_DELIVERED rule). */
+export function hasDeliveredAmount(lines: ReadonlyArray<LineSeen>): boolean {
+  return lines.some((line) => Math.max(0, Math.min(Number(line.delivered), Number(line.quantity))) >= 0.01);
+}
+
+/** The server refused because nothing was delivered or the proof is not for this load: clear the proof and reload. */
+export function isLoadProofRefusal(error: unknown): boolean {
+  const code = completionRefusalCode(error);
+  return code === 'DELIVERY_NOTHING_DELIVERED' || code === 'DELIVERY_LOAD_CHANGED' || code === 'PAPER_TICKET_LOAD_CHANGED';
+}
+
+export const SIGNATURE_LOAD_CHANGED_MESSAGE =
+  'The products or amounts changed after the customer signed. The signature was cleared; have the customer sign again.';
+export const TICKET_PHOTO_LOAD_CHANGED_MESSAGE =
+  'The products or amounts changed since this ticket photo. Get the ticket signed for the current amounts and take a new photo.';
+export const NOTHING_DELIVERED_MESSAGE = 'At least one item must have a delivered quantity of at least 0.01.';

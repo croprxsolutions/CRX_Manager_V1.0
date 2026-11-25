@@ -12,7 +12,7 @@
  * and a signed paper ticket photo can stand in for the on-screen signature. See
  * docs/roadmap/field-mode-build-plan.md.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   MapPin, PlayCircle, WifiOff, Minus, Plus, AlertTriangle, ChevronRight,
@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import PhoneHeader from '../components/ui/PhoneHeader';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
+import { useLoadBoundSignature } from '../hooks/useLoadBoundSignature';
 import { billSplitCompletion, billSplitFailedMessage } from '../lib/billSplitCompletion';
 import { supabase, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
@@ -30,7 +31,7 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, countLeftAtSitePhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
-import { fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
 import type { DeliveryCompletionEvidence, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
@@ -53,6 +54,7 @@ import StopContactActions, { type StopCoords } from '../components/route/StopCon
 interface StopItem {
   id: string;
   quantity: number;
+  order_item_id: string | null;
   product_id: string | null;
   product: { product_name: string | null } | null;
 }
@@ -63,6 +65,7 @@ interface StopPhoto {
   image_url: string;
   caption: string | null;
   uploaded_at?: string | null;
+  lines_seen?: LineSeen[] | null;
 }
 
 // The stop's own delivery address as one line ('' when missing or unreadable), with its map pin when it has one.
@@ -199,7 +202,7 @@ export default function FieldStop() {
     const seq = ++photoSeqRef.current;
     const { data, error } = await supabase
       .from('delivery_photos')
-      .select('id, storage_path, image_url, caption, uploaded_at')
+      .select('id, storage_path, image_url, caption, uploaded_at, lines_seen')
       .eq('delivery_id', id)
       .order('sort_order');
     if (activeStopIdRef.current !== id) return; // stale guard (H3)
@@ -267,7 +270,7 @@ export default function FieldStop() {
 
     const { data: itemData, error: itemErr } = await supabase
       .from('delivery_items')
-      .select('id, quantity, product_id, product:products(product_name)')
+      .select('id, quantity, order_item_id, product_id, product:products(product_name)')
       .eq('delivery_id', id);
     if (isStale()) return;
     // Don't let a failed items query masquerade as "No items on this delivery".
@@ -362,16 +365,27 @@ export default function FieldStop() {
   const completionEvidence: DeliveryCompletionEvidence = noOnePresent ? 'left_at_site' : usePaperTicket ? 'paper_ticket' : 'signature';
   // An email of only spaces is no email, so the missing-email warning still shows (#2167).
   const receiptEmail = delivery?.customer?.email?.trim() || receiptRecipient?.email?.trim() || null;
+  // The lines on screen with their delivered amounts: the signature and the ticket photo are bound to
+  // them (20270304120000). Null until the stop's lines are loaded.
+  const currentLinesSeen = useMemo(
+    () => (items.length ? buildLinesSeen(items, (it) => deliveryQtys[it.id] ?? it.quantity) : null),
+    [items, deliveryQtys],
+  );
+  const currentLinesSeenRef = useLatestRef(currentLinesSeen);
+  // The newest ticket photo counts only when it was taken for these lines and amounts (one without lines never does).
+  const ticketPhotoMatchesLoad = sameLinesSeen(latestEvidencePhoto(photos, PAPER_TICKET_PHOTO_CAPTION)?.lines_seen, currentLinesSeen);
+  const sig = useLoadBoundSignature(signatureDataUrl, setSignatureDataUrl, currentLinesSeen);
   // The proof the chosen path needs is in place (the server checks it again).
   const evidenceReady = completionEvidence === 'left_at_site'
     ? hasLeftAtSitePhoto(photos)
     : completionEvidence === 'paper_ticket'
-      ? hasPaperTicketPhoto(photos) && isValidPaperDeliveredOn(paperDeliveredOn)
+      ? ticketPhotoMatchesLoad && isValidPaperDeliveredOn(paperDeliveredOn)
       : !!signatureDataUrl;
   // What the driver can still edit while the signal check runs; compared after the check.
   const completionInputs = JSON.stringify([signedBy, deliveryQtys, usePaperTicket, noOnePresent, paperDeliveredOn, signatureDataUrl, emailOnComplete]);
   const completionInputsRef = useLatestRef(completionInputs);
-  const hasAnyQty = items.some((it) => (deliveryQtys[it.id] ?? it.quantity) > 0);
+  // Under 0.01 counts as nothing delivered, as on the server (DELIVERY_NOTHING_DELIVERED).
+  const hasAnyQty = items.some((it) => (deliveryQtys[it.id] ?? it.quantity) >= 0.01);
 
   // ── Photo upload (copied/adapted from DeliveryDetail.handlePhotoUpload) ──
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>, caption?: string) => {
@@ -391,6 +405,8 @@ export default function FieldStop() {
     }
     setUploadingPhoto(true);
     let uploadCount = 0;
+    // A signed-ticket photo is saved with the lines and amounts on screen when it was taken (20270304120000).
+    const linesAtPhoto = caption === PAPER_TICKET_PHOTO_CAPTION ? currentLinesSeen : null;
     for (const rawFile of Array.from(files)) {
       try {
         const file = await compressImage(rawFile);
@@ -412,6 +428,7 @@ export default function FieldStop() {
           file_size: file.size,
           sort_order: photos.length + uploadCount,
           ...(caption ? { caption } : {}),
+          ...(linesAtPhoto ? { lines_seen: linesAtPhoto } : {}),
         }).select();
         if (photoResult.error) {
           toast('error', `Photo saved to storage but DB record failed: ${photoResult.error.message}`);
@@ -443,12 +460,18 @@ export default function FieldStop() {
   // ── Complete (mirrors DeliveryDetail.handleComplete) ────────────────────
   const requestComplete = () => {
     if (!signedBy.trim()) { toast('error', 'Enter who signed for the delivery'); return; }
-    if (!hasAnyQty) { toast('error', 'At least one item must have a quantity above zero'); return; }
+    if (!hasAnyQty) { toast('error', NOTHING_DELIVERED_MESSAGE); return; }
     if (usePaperTicket && !hasPaperTicketPhoto(photos)) { toast('error', 'Take a photo of the signed paper ticket before completing'); return; }
+    if (completionEvidence === 'paper_ticket' && !ticketPhotoMatchesLoad) { toast('error', TICKET_PHOTO_LOAD_CHANGED_MESSAGE); return; }
     if (usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn)) { toast('error', 'Enter the delivery date from the paper ticket (today or earlier)'); return; }
     if (completionEvidence === 'left_at_site' && !hasLeftAtSitePhoto(photos)) { toast('error', 'Take a photo of where the delivery was left before completing'); return; }
     if (completionEvidence === 'signature' && !signatureDataUrl) { toast('error', 'Have the customer sign on screen, or use a paper ticket'); return; }
     if (completionEvidence === 'signature' && !isSignatureDataUrl(signatureDataUrl)) { toast('error', INVALID_SIGNATURE_MESSAGE); return; }
+    if (completionEvidence === 'signature' && !sameLinesSeen(sig.signedLines, currentLinesSeen)) {
+      sig.clearSignature();
+      toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
+      return;
+    }
     // A missing or mismatched brand only warns (Mason, 2026-11-09).
     const warnings = brandWarnings(brandState.brands, brandState.drafts, deliveryQtys);
     if (warnings.length > 0) { setBrandWarning({ stopId: id!, list: warnings }); return; }
@@ -477,6 +500,15 @@ export default function FieldStop() {
     // WRONG stop — the route id is fresh but component state could still lag.
     if (delivery.id !== id) { toast('error', 'This stop just changed — please retry'); return; }
     if (completionEvidence === 'signature' && !isSignatureDataUrl(signatureDataUrl)) { toast('error', INVALID_SIGNATURE_MESSAGE); return; }
+    // Caught here, before the signature image is uploaded: nothing delivered, or proof taken for other lines or amounts.
+    if (!hasAnyQty) { toast('error', NOTHING_DELIVERED_MESSAGE); setStep('verify'); return; }
+    const signedLinesAtSubmit = completionEvidence === 'signature' ? sig.signedLines : null;
+    if (completionEvidence === 'signature' && !sameLinesSeen(signedLinesAtSubmit, currentLinesSeen)) {
+      sig.clearSignature();
+      toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
+      return;
+    }
+    if (completionEvidence === 'paper_ticket' && !ticketPhotoMatchesLoad) { toast('error', TICKET_PHOTO_LOAD_CHANGED_MESSAGE); return; }
     setCompleting(true);
 
     const quantitiesJson = isPartial
@@ -497,6 +529,8 @@ export default function FieldStop() {
       ...(emailOnComplete ? { p_email_receipt: true } : {}),
       // The exact photo the screen shows as saved (the signature's reference comes from the key).
       ...(evidencePhoto ? { p_evidence_ref: evidencePhoto.id } : {}),
+      // The lines the customer signed for (part of the key's scope: another list is a new attempt).
+      ...(signedLinesAtSubmit ? { p_lines_seen: signedLinesAtSubmit } : {}),
     };
     // check_idempotency replays by key and operation only: bind the key to this exact
     // payload (stop, signer, quantities, ticket date) so an edited retry, or another
@@ -534,6 +568,11 @@ export default function FieldStop() {
       if (activeStopIdRef.current !== id) { toast('error', 'This stop just changed — please retry'); return false; }
       if (completionInputsRef.current !== completionInputs) {
         toast('error', 'Details changed while checking for signal. The delivery was not completed; check them and tap Complete Delivery again.');
+        return false;
+      }
+      // Lines or amounts changed since signing: stop before the image goes up (the screen asks for a new signature).
+      if (signedLinesAtSubmit && !sameLinesSeen(signedLinesAtSubmit, currentLinesSeenRef.current)) {
+        toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
         return false;
       }
       return true;
@@ -657,7 +696,13 @@ export default function FieldStop() {
       // status was read: a full reload would reset the driver's edited quantities, which a retry would
       // then send as full. Still open: refresh the photos (a refused photo may be gone).
       if (outcome.kind === 'completed_not_replayed' || outcome.kind === 'closed') await fetchStop(); // opens the completed delivery
-      else if (outcome.kind === 'open') await fetchPhotos();
+      else if (outcome.kind === 'open' && isLoadProofRefusal(error)) {
+        // Nothing delivered, or the proof is not for this load: clear the signature, reload the stop's
+        // lines and photos and go back to the quantity step. No automatic retry.
+        sig.clearSignature();
+        await fetchStop();
+        if (activeStopIdRef.current === id) setStep('verify');
+      } else if (outcome.kind === 'open') await fetchPhotos();
       return;
     }
     await finishCompleted(result);
@@ -784,7 +829,7 @@ export default function FieldStop() {
             )}
           </ul>
           <div className="mt-4"><DeliveryBrandsPanel state={brandState} busy={completing} /></div>
-          {!hasAnyQty && <p className="text-sm text-amber-800 mt-3 text-center">At least one item needs a quantity above zero.</p>}
+          {!hasAnyQty && <p className="text-sm text-amber-800 mt-3 text-center">At least one item needs a delivered quantity of at least 0.01.</p>}
           <MainAction disabled={!hasAnyQty} onClick={() => setStep('sign')}>
             {isPartial ? 'Continue with Partial' : 'All Full — Continue'}
             <ChevronRight className="w-6 h-6" aria-hidden="true" />
@@ -842,8 +887,10 @@ export default function FieldStop() {
             {usePaperTicket && !noOnePresent ? (
               <div className="border border-gray-200 rounded-xl p-3 space-y-3">
                 <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
-                {hasPaperTicketPhoto(photos) ? (
+                {ticketPhotoMatchesLoad ? (
                   <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Photo of the signed ticket saved</p>
+                ) : hasPaperTicketPhoto(photos) ? (
+                  <p className="text-sm text-amber-800">{TICKET_PHOTO_LOAD_CHANGED_MESSAGE}</p>
                 ) : (
                   <p className="text-sm text-amber-800">Take a photo of the signed paper ticket. It replaces the on-screen signature.</p>
                 )}
@@ -864,7 +911,7 @@ export default function FieldStop() {
               </div>
             ) : (
               <div className={noOnePresent ? 'pointer-events-none opacity-50' : ''} aria-disabled={noOnePresent}>
-                <SignatureCanvas key={noOnePresent ? 'signature-skipped' : 'signature-capture'} onSignatureChange={setSignatureDataUrl} label="Customer signs with their finger" height={160} disabled={noOnePresent} />
+                <SignatureCanvas key={noOnePresent ? 'signature-skipped' : `signature-capture-${sig.canvasKey}`} onSignatureChange={sig.onSignatureChange} label="Customer signs with their finger" height={160} disabled={noOnePresent} />
               </div>
             )}
             {noOnePresent && (
@@ -883,7 +930,7 @@ export default function FieldStop() {
           </div>
           <div className="mt-3 space-y-1 text-center text-sm text-amber-800 empty:hidden">
             {!signedBy.trim() && <p>Enter who signed or choose no one present to continue.</p>}
-            {signedBy.trim() && usePaperTicket && !hasPaperTicketPhoto(photos) && <p>Take the photo of the signed ticket to continue.</p>}
+            {signedBy.trim() && usePaperTicket && !ticketPhotoMatchesLoad && <p>Take the photo of the signed ticket to continue.</p>}
             {signedBy.trim() && usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn) && <p>Enter the delivery date from the paper ticket (today or earlier) to continue.</p>}
             {signedBy.trim() && completionEvidence === 'signature' && !signatureDataUrl && <p>Have the customer sign above to continue.</p>}
             {noOnePresent && !hasLeftAtSitePhoto(photos) && <p>Take the drop-location photo to continue.</p>}

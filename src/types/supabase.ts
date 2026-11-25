@@ -3454,6 +3454,7 @@ export type Database = {
           file_size: number | null
           id: string
           image_url: string
+          lines_seen: Json | null
           sort_order: number
           storage_path: string
           uploaded_at: string
@@ -3465,6 +3466,7 @@ export type Database = {
           file_size?: number | null
           id?: string
           image_url: string
+          lines_seen?: Json | null
           sort_order?: number
           storage_path: string
           uploaded_at?: string
@@ -3476,6 +3478,7 @@ export type Database = {
           file_size?: number | null
           id?: string
           image_url?: string
+          lines_seen?: Json | null
           sort_order?: number
           storage_path?: string
           uploaded_at?: string
@@ -18707,6 +18710,7 @@ export type Database = {
           p_idempotency_key?: string
           p_issue_notes?: string
           p_issue_type?: string
+          p_lines_seen?: Json
           p_performed_by?: string
           p_quantities?: Json
           p_signed_by: string
@@ -21855,6 +21859,7 @@ export type Database = {
           p_idempotency_key?: string
           p_issue_notes?: string
           p_issue_type?: string
+          p_lines_seen?: Json
           p_performed_by?: string
           p_quantities?: Json
           p_signed_by: string

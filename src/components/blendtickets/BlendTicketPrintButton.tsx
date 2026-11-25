@@ -1,0 +1,72 @@
+import { useState } from 'react';
+import { FileText } from 'lucide-react';
+import Button from '../ui/Button';
+import { useToast } from '../ui/Toast';
+import { fetchBlendTicketWeights, matchesPageRead, resolveTicketLines, totalWeightText } from '../../lib/blendTicketWeights';
+import { downloadReportPdf } from '../../lib/reportPdf';
+import { Sentry } from '../../lib/sentry';
+import { toSentryError } from '../../lib/sentryError';
+
+interface BlendTicketPrintButtonProps {
+  ticketId: string;
+  pageRead: { header: Record<string, unknown>; lines: ReadonlyArray<Record<string, unknown>> } | null;
+  disabled: boolean;
+}
+
+export function BlendTicketPrintButton({ ticketId, pageRead, disabled }: BlendTicketPrintButtonProps) {
+  const { toast } = useToast();
+  const [printing, setPrinting] = useState(false);
+
+  async function download() {
+    if (disabled || printing || !pageRead) return;
+    setPrinting(true);
+    try {
+      const saved = await fetchBlendTicketWeights(ticketId);
+      const number = saved.ticket?.ticket_number;
+      if (saved.ticket?.id !== ticketId || typeof number !== 'string' ||
+          !matchesPageRead(saved, pageRead.header, pageRead.lines)) {
+        toast('error', 'The saved ticket could not be matched to this page. Reopen the ticket before downloading.');
+        return;
+      }
+
+      const lines = resolveTicketLines(saved.lines.map(({ line_id, product_id, line }) => ({
+        id: line_id,
+        product_id,
+        product_name: typeof line.product_name === 'string' ? line.product_name : '',
+        quantity: line.quantity,
+        unit: typeof line.unit === 'string' ? line.unit : null,
+        catalogForm: null,
+      })), { saved, current: null });
+
+      await downloadReportPdf({
+        title: 'Blend Ticket',
+        fileName: `Blend Ticket ${number}`,
+        subtitle: [number, saved.ticket.ticket_date].filter(Boolean).join(' · '),
+        orientation: 'portrait',
+        columns: [
+          { key: 'product', header: 'Product' },
+          { key: 'amount', header: 'Amount' },
+          { key: 'weight', header: 'Saved product weight' },
+        ],
+        data: lines.map(({ mapped, text }) => ({
+          product: mapped.product_name,
+          amount: [mapped.quantity, mapped.unit].filter((value) => value != null).join(' '),
+          weight: text,
+        })),
+        totalsRow: ['', '', totalWeightText(lines)],
+      });
+    } catch (error: unknown) {
+      Sentry.captureException(toSentryError(error), { tags: { action: 'download_blend_ticket_pdf' } });
+      toast('error', 'Could not download the ticket PDF. Try again.');
+    } finally {
+      setPrinting(false);
+    }
+  }
+
+  return (
+    <Button type="button" variant="secondary" icon={<FileText className="h-4 w-4" />}
+      disabled={disabled || !pageRead} loading={printing} onClick={download}>
+      Download ticket PDF
+    </Button>
+  );
+}

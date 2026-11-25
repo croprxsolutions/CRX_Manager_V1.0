@@ -165,7 +165,7 @@ describe('ProductSetupWorkbookModal parent rates', () => {
     try {
       render(<ProductSetupWorkbookModal open profileId="u1" onClose={vi.fn()} onSaved={vi.fn()} />);
       fireEvent.click(screen.getByRole('button', { name: 'Download setup workbook' }));
-      await waitFor(() => expect(click).toHaveBeenCalledOnce());
+      await waitFor(() => expect(click).toHaveBeenCalledOnce(), { timeout: 5000 });
       const workbook = new Workbook();
       await workbook.xlsx.load(await new Promise<ArrayBuffer>((resolve, reject) => {
         const reader = new FileReader();

@@ -17,9 +17,11 @@ describe('Brand Links workbook tab', () => {
   it('does not create link changes for old workbooks, untouched files or blanked links', async () => {
     const old = new Workbook();
     expect(parseBrandDocumentSheet(old)).toBeNull();
-    addBrandDocumentSheet(old, [{ ...entry, owner_name: ' Example group ' }]);
+    const reportedLink = { ...entry.links[0], reported_at: '2026-11-25T14:00:00Z', reported_by: 'staff-id' };
+    addBrandDocumentSheet(old, [{ ...entry, owner_name: ' Example group ', links: [reportedLink] }]);
     const roundTrip = new Workbook();
     await roundTrip.xlsx.load(await old.xlsx.writeBuffer());
+    expect(roundTrip.getWorksheet('Brand Links')?.getCell('H2').value).not.toMatch(/reported_at|reported_by|staff-id/);
     expect(parseBrandDocumentSheet(roundTrip)).toEqual({ rows: [], issues: [] });
     roundTrip.getWorksheet('Brand Links')!.getCell('D2').value = '';
     expect(parseBrandDocumentSheet(roundTrip)).toEqual({ rows: [], issues: [] });

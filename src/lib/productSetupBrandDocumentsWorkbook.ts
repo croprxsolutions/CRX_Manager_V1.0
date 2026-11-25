@@ -33,6 +33,11 @@ export interface ParsedBrandDocuments {
   issues: string[];
 }
 
+function linkState(link: BrandDocumentLink): LinkState {
+  const { id, row_version, url, state_code, expires_on } = link;
+  return { id, row_version, url, state_code, expires_on };
+}
+
 function rowCells(state: DownloadRow): string[] {
   return [state.owner_name, state.brand_name, state.specimen?.url ?? '', state.sds?.url ?? '',
     state.supplemental?.url ?? '', state.supplemental?.state_code ?? '', state.supplemental?.expires_on ?? '',
@@ -57,13 +62,14 @@ export function addBrandDocumentSheet(workbook: Workbook, entries?: BrandDocumen
   for (const entry of entries) {
     const { id, parent_brand, brand_version, brand_name, owner_name, links } = entry;
     const target = { id, parent_brand, brand_version, brand_name, owner_name };
+    const specimen = links.find((link) => link.document_kind === 'specimen');
+    const sds = links.find((link) => link.document_kind === 'sds');
     sheet.addRow(rowCells({
       ...target, primary: true,
-      specimen: links.find((link) => link.document_kind === 'specimen'),
-      sds: links.find((link) => link.document_kind === 'sds'),
+      specimen: specimen && linkState(specimen), sds: sds && linkState(sds),
     }));
     for (const link of links.filter((item) => item.document_kind === 'supplemental')) {
-      sheet.addRow(rowCells({ ...target, primary: false, supplemental: link }));
+      sheet.addRow(rowCells({ ...target, primary: false, supplemental: linkState(link) }));
     }
   }
   sheet.getColumn(8).hidden = true;

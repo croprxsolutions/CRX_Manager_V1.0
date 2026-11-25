@@ -118,6 +118,18 @@ describe('ProductWeightCard', () => {
     await waitFor(() => expect(mocks.fetchProductWeights).toHaveBeenCalledTimes(2));
   });
 
+  it('closes rejection and reloads when the draft changed', async () => {
+    mocks.rejectLiquidDensityDraft.mockRejectedValue(new Error('PRODUCT_WEIGHT_STALE'));
+    const draft = { id: 'd1', value: 9.5, source: 'sds', created_by: 'u2', basis: formulation };
+    show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation, draft });
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject draft' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Reject draft weight?' }));
+    fireEvent.change(dialog.getByLabelText(/reason for rejection/i), { target: { value: 'Needs current SDS' } });
+    fireEvent.click(dialog.getByRole('button', { name: 'Reject draft' }));
+    await waitFor(() => expect(mocks.fetchProductWeights).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog', { name: 'Reject draft weight?' })).not.toBeInTheDocument();
+  });
+
   it.each([['u1', true], ['u2', false]])('hides rejection from the draft author and non-admins (%s, %s)', async (author, admin) => {
     const draft = { id: 'd1', value: 9.5, source: 'sds', created_by: author, basis: formulation };
     show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation, draft }, admin);
@@ -145,9 +157,9 @@ describe('ProductWeightCard', () => {
     expect(mocks.approveWeightDraft).not.toHaveBeenCalled();
   });
 
-  it('reloads the group when approval finds that its brands changed', async () => {
+  it.each(['PRODUCT_WEIGHT_BRANDS_CHANGED', 'PRODUCT_WEIGHT_REVIEW_NOT_OPEN'])('reloads the group after approval returns %s', async (code) => {
     mocks.fetchLiquidDensityReview.mockResolvedValue({ review_open: true, brands: [] });
-    mocks.approveLiquidDensityDraft.mockRejectedValue(new Error('PRODUCT_WEIGHT_BRANDS_CHANGED'));
+    mocks.approveLiquidDensityDraft.mockRejectedValue(new Error(code));
     const draft = { id: 'd1', value: 9.5, source: 'sds', created_by: 'u2', basis: formulation };
     show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation, draft });
     fireEvent.click(await screen.findByRole('button', { name: 'Approve draft' }));
@@ -156,6 +168,17 @@ describe('ProductWeightCard', () => {
     fireEvent.click(dialog.getByRole('button', { name: 'Approve weight' }));
     await waitFor(() => expect(mocks.fetchLiquidDensityReview).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole('dialog', { name: 'Approve liquid draft weight?' })).not.toBeInTheDocument();
+  });
+
+  it.each([null, 'PRODUCT_WEIGHT_REVIEW_RELOAD'])('uses legacy liquid approval with the switch closed, including %s', async (code) => {
+    if (code) mocks.approveWeightDraft.mockRejectedValue(new Error(code));
+    const draft = { id: 'd1', value: 9.5, source: 'sds', created_by: 'u2', basis: formulation };
+    show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation, draft });
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve draft' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(mocks.fetchLiquidDensityReview).toHaveBeenCalledTimes(2));
+    expect(mocks.approveWeightDraft).toHaveBeenCalledWith(densitySubject, 'd1', expect.any(String));
+    expect(mocks.approveLiquidDensityDraft).not.toHaveBeenCalled();
   });
 
   it('offers rejection instead of approval or replacement for an old formulation draft', async () => {
@@ -185,6 +208,14 @@ describe('ProductWeightCard', () => {
     expect(screen.queryByRole('button', { name: 'Enter weight' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve draft' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reject draft' })).not.toBeInTheDocument();
+  });
+
+  it('leaves an inactive group read-only with a reason and no retry prompt', async () => {
+    mocks.fetchLiquidDensityReview.mockRejectedValue(new Error('PRODUCT_WEIGHT_NOT_ELIGIBLE'));
+    show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation });
+    expect(await screen.findByText('Weight review requires an active liquid group.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Enter weight' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Brand and SDS details could not be loaded')).not.toBeInTheDocument();
   });
 
   it('saves specific gravity as a draft when liquid review is active', async () => {

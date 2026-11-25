@@ -60,7 +60,9 @@ export function ApproveLiquidDensityDraftModal({
       toast('error', sanitizeError(error));
       if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE) ||
           hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_BASIS_CHANGED) ||
-          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_BRANDS_CHANGED)) onDone();
+          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_BRANDS_CHANGED) ||
+          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_NOT_OPEN) ||
+          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_RELOAD)) onDone();
     } finally {
       setSaving(false);
     }

@@ -121,7 +121,9 @@ function EnterWeightModal({ subject, entry, profileId, startAsCorrection, draftO
     } catch (error) {
       toast('error', sanitizeError(error));
       if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_LOWER_TRUST)) setForceCorrection(true);
-      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE)) onStale();
+      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE) ||
+          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_NOT_OPEN) ||
+          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_RELOAD)) onStale();
     } finally {
       setSaving(false);
     }
@@ -189,7 +191,7 @@ function DraftRow({ draft, subject, entry, canApprove, canReplace, reviewOpen, b
       )}
       {reviewOpen && draft.created_by == null && <p>This draft has no recorded author.</p>}
       {needsReplacement && <p>An admin other than the draft author can reject it so a new weight can be entered.</p>}
-      {onReject && <Button size="sm" variant="secondary" disabled={busy} onClick={onReject}>Reject draft</Button>}
+      {onReject && <Button size="sm" variant="secondary" showChevron={false} disabled={busy} onClick={onReject}>Reject draft</Button>}
     </div>
   );
 }
@@ -333,7 +335,9 @@ function ApproveDraftModal({ draft, subject, entry, name, profileId, onClose, on
       onDone();
     } catch (error) {
       toast('error', sanitizeError(error));
-      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE) || hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_BASIS_CHANGED)) onDone();
+      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE) ||
+          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_BASIS_CHANGED) ||
+          hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_RELOAD)) onDone();
     } finally {
       setApproving(false);
     }
@@ -386,18 +390,32 @@ function WeightActionModals({ open, subject, entry, name, profileId, liquidRevie
   );
 }
 
-function LoadedWeight({ entry, isAdmin, profileId, busy, reloadToken, reload, onSaved, liquidReview }: {
-  entry: ProductWeightEntry; isAdmin: boolean; profileId: string; busy: boolean; reloadToken: number; reload: () => void; onSaved?: () => void; liquidReview: LiquidDensityReview | null;
+type LiquidReviewLoad = LiquidDensityReview | 'ineligible' | null;
+
+async function loadLiquidReview(parentId: string): Promise<LiquidReviewLoad> {
+  try {
+    return await fetchLiquidDensityReview(parentId);
+  } catch (error) {
+    if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_NOT_ELIGIBLE)) return 'ineligible';
+    Sentry.captureException(error instanceof Error ? error : new Error(sanitizeError(error)), { extra: { context: 'get_liquid_density_review' } });
+    return null;
+  }
+}
+
+function LoadedWeight({ entry, isAdmin, profileId, busy, reloadToken, reload, onSaved, review }: {
+  entry: ProductWeightEntry; isAdmin: boolean; profileId: string; busy: boolean; reloadToken: number; reload: () => void; onSaved?: () => void; review: LiquidReviewLoad;
 }) {
   const [open, setOpen] = useState<OpenState>(null);
   const subject = entry.subject ?? null;
   const name = entry.product_name ?? 'This product';
+  const liquidReview = review === 'ineligible' ? null : review;
   const saved = () => { setOpen(null); reload(); onSaved?.(); };
   return (
     <>
       <CardHeader title="Weight" accent={subject?.kind === 'density' ? `Parent ${subject.parent_name ?? ''}`.trim() : undefined} />
       <div className="space-y-3" data-testid="product-weight-card">
-        {subject?.kind === 'density' && !liquidReview && (
+        {review === 'ineligible' && <p className="text-sm text-secondary">Weight review requires an active liquid group.</p>}
+        {subject?.kind === 'density' && review === null && (
           <LoadFailedState title="Brand and SDS details could not be loaded" onRetry={reload} />
         )}
         <WeightBody entry={entry} name={name} isAdmin={isAdmin} profileId={profileId} busy={busy} reloadToken={reloadToken} liquidReview={liquidReview} setOpen={setOpen} />
@@ -423,7 +441,7 @@ export default function ProductWeightCard({ productId, isAdmin, profileId, busy,
   /** After a weight save or stale refusal, so figures that use the weight (cost per lb of active) re-read. */
   onSaved?: () => void;
 }) {
-  const [loaded, setState] = useState<{ forKey: string; status: 'loading' | 'failed' } | { forKey: string; status: 'loaded'; entry: ProductWeightEntry; liquidReview: LiquidDensityReview | null }>({ forKey: '', status: 'loading' });
+  const [loaded, setState] = useState<{ forKey: string; status: 'loading' | 'failed' } | { forKey: string; status: 'loaded'; entry: ProductWeightEntry; review: LiquidReviewLoad }>({ forKey: '', status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
 
@@ -439,13 +457,8 @@ export default function ProductWeightCard({ productId, isAdmin, profileId, busy,
         setState({ forKey, status: 'failed' });
         return;
       }
-      const liquidReview = entry.subject?.kind === 'density'
-        ? await fetchLiquidDensityReview(entry.subject.subject_id).catch((error: unknown) => {
-          Sentry.captureException(error instanceof Error ? error : new Error(sanitizeError(error)), { extra: { context: 'get_liquid_density_review' } });
-          return null;
-        })
-        : null;
-      if (!cancelled) setState({ forKey, status: 'loaded', entry, liquidReview });
+      const review = entry.subject?.kind === 'density' ? await loadLiquidReview(entry.subject.subject_id) : null;
+      if (!cancelled) setState({ forKey, status: 'loaded', entry, review });
     }).catch((error: unknown) => {
       Sentry.captureException(error instanceof Error ? error : new Error(sanitizeError(error)), { extra: { context: 'get_product_weights' } });
       if (!cancelled) setState({ forKey, status: 'failed' });
@@ -458,7 +471,7 @@ export default function ProductWeightCard({ productId, isAdmin, profileId, busy,
     <Card>
       {state.status === 'loaded' ? (
         <LoadedWeight entry={state.entry} isAdmin={isAdmin} profileId={profileId} busy={busy} reloadToken={attempt}
-            reload={reload} onSaved={onSaved} liquidReview={state.liquidReview} />
+            reload={reload} onSaved={onSaved} review={state.review} />
       ) : (
         <>
           <CardHeader title="Weight" />

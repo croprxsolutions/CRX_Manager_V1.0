@@ -43,6 +43,9 @@ import { localToday, parseLocalDate, localDatePlusDays, todayInBusinessTz } from
 import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
 import type { ARAgingRow, ARAgingPricedRow, CustomerStatementRow, SeasonComparisonRow, DetailedStatementData, StatementOptions } from '../types';
 
+// Excel misreads an en dash in a CSV with no byte-order mark, so the file uses a plain hyphen.
+const csvHeader = (label: string) => label.replace(/–/g, '-');
+
 type TabKey = 'aging' | 'statement' | 'season';
 
 
@@ -965,9 +968,9 @@ export default function ARaging() {
                       [
                         { key: 'farm_name', header: 'Customer' },
                         { key: 'current_amount', header: AR_AGING_LABELS.current, format: formatProductMoneyCSV },
-                        { key: 'days_30', header: AR_AGING_LABELS.days30, format: formatProductMoneyCSV },
-                        { key: 'days_60', header: AR_AGING_LABELS.days60, format: formatProductMoneyCSV },
-                        { key: 'days_90', header: AR_AGING_LABELS.days90, format: formatProductMoneyCSV },
+                        { key: 'days_30', header: csvHeader(AR_AGING_LABELS.days30), format: formatProductMoneyCSV },
+                        { key: 'days_60', header: csvHeader(AR_AGING_LABELS.days60), format: formatProductMoneyCSV },
+                        { key: 'days_90', header: csvHeader(AR_AGING_LABELS.days90), format: formatProductMoneyCSV },
                         { key: 'over_90', header: AR_AGING_LABELS.over120, format: formatProductMoneyCSV },
                         { key: 'total_outstanding', header: 'Total', format: formatProductMoneyCSV },
                         {

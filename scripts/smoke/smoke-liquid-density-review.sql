@@ -17,7 +17,20 @@ DECLARE
   v_previous_brands jsonb;
   v_tag text := gen_random_uuid()::text;
   v_category text;
+  v_signature text;
 BEGIN
+  FOREACH v_signature IN ARRAY ARRAY['public.liquid_density_review_open()',
+    'public.get_liquid_density_review(uuid)',
+    'public.submit_liquid_density_draft(uuid,bigint,numeric,text,text,text,text,text,text)',
+    'public.approve_liquid_density_draft(uuid,uuid,bigint,jsonb,boolean,text)'] LOOP
+    IF has_function_privilege('anon', v_signature, 'EXECUTE') THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: anon can execute %', v_signature;
+    END IF;
+  END LOOP;
+  IF has_function_privilege('authenticated', 'public.return_liquid_density_to_draft_for_brand()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a signed-in user can call the private brand trigger function';
+  END IF;
+
   SELECT id INTO STRICT v_admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY id LIMIT 1;
   SELECT name INTO STRICT v_category FROM public.product_categories WHERE is_active ORDER BY name LIMIT 1;
 

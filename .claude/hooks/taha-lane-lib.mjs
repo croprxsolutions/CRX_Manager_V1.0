@@ -332,6 +332,9 @@ const unstamped = (text) => String(text ?? "").replace(STAMP_RE, "<stamp>");
 const COMPARE_MAX_FILES = 300; // GitHub's compare lists at most 300 files: at that size, refuse.
 const MAX_CONTENT_READS = 20;
 const isNote = (name) => /^docs\//i.test(String(name ?? ""));
+const isMigration = (name) => /^supabase\/migrations\/[^/]+\.sql$/i.test(String(name ?? ""));
+// Only a migration's path loses its stamp (Sol: two differently dated code paths are different files).
+const pathKey = (name) => (isMigration(name) ? unstamped(name) : String(name));
 
 /** The PR's own changes (GitHub compare `files`) keyed by stamp-free path, docs/ left out; null when unusable. */
 export function ownChanges(files) {
@@ -341,15 +344,13 @@ export function ownChanges(files) {
     const name = String(f?.filename ?? "");
     if (!name) return null;
     if (isNote(name) && (!f.previous_filename || isNote(f.previous_filename))) continue;
-    const key = unstamped(name);
+    const key = pathKey(name);
     if (out.has(key)) return null;
-    const from = f.previous_filename ? `renamed from ${unstamped(f.previous_filename)}` : "";
+    const from = f.previous_filename ? `renamed from ${pathKey(f.previous_filename)}` : "";
     out.set(key, { status: f.status === "removed" ? "removed" : `present ${from}`, sha: String(f.sha ?? "").toLowerCase(), name });
   }
   return out;
 }
-
-const isMigration = (name) => /^supabase\/migrations\/[^/]+\.sql$/i.test(String(name ?? ""));
 
 /** Old stamp -> new stamp, read off the PR's own files whose names differ only by stamp (the restamp); null when inconsistent. */
 export function restampMap(before, after) {
@@ -385,16 +386,32 @@ export function ownChangePairs(before, after) {
   return pairs.length > MAX_CONTENT_READS ? null : pairs;
 }
 
+// Sol HIGH: a catch-up whose conflict resolution keeps the PR's copy of a file silently drops staging's change to
+// it, yet the PR's file is unchanged. So when the branch point moved, staging must not have touched any PR file.
+function stagingLeftOwnFilesAlone({ repoPath, gh, from, to, files }) {
+  if (!usableHead(from) || !usableHead(to)) return false;
+  if (from.toLowerCase() === to.toLowerCase()) return true;
+  const moved = JSON.parse(String(gh(["api", `${repoPath}/compare/${from}...${to}`, "--jq",
+    "{status, files: (if .files == null then null else [.files[] | .filename, (.previous_filename // empty)] end), count: (.files // [] | length)}"])));
+  if (moved?.status !== "ahead" || !Array.isArray(moved.files) || moved.count >= COMPARE_MAX_FILES) return false;
+  const own = new Set(files.filter((f) => !isNote(f.filename) || (f.previous_filename && !isNote(f.previous_filename)))
+    .flatMap((f) => [f.filename, f.previous_filename].filter(Boolean)));
+  return !moved.files.some((name) => own.has(name));
+}
+
 function sameOwnChange({ repoPath, gh, pullRequest, from, to }) {
   const base = String(gh(["api", `${repoPath}/pulls/${pullRequest}`, "--jq", ".base.ref"])).trim();
   if (!/^[\w.-]+(?:\/[\w.-]+)*$/.test(base)) return false;
   // base...commit is the PR's own diff at that commit (against where it branched off the base).
-  const files = (commit) => JSON.parse(String(gh(["api", `${repoPath}/compare/${base}...${commit}`, "--jq",
-    "[(.files // [])[] | {filename, status, sha, previous_filename}]"])));
-  const [before, after] = [ownChanges(files(from)), ownChanges(files(to))];
+  // A reply without `files` is unusable (null), never an empty change (Sol).
+  const compare = (commit) => JSON.parse(String(gh(["api", `${repoPath}/compare/${base}...${commit}`, "--jq",
+    "{mb: .merge_base_commit.sha, files: (if .files == null then null else [.files[] | {filename, status, sha, previous_filename}] end)}"])));
+  const [old, now] = [compare(from), compare(to)];
+  const [before, after] = [ownChanges(old?.files), ownChanges(now?.files)];
   const pairs = ownChangePairs(before, after);
   const restamps = restampMap(before, after);
   if (!pairs || !restamps) return false;
+  if (!stagingLeftOwnFilesAlone({ repoPath, gh, from: old.mb, to: now.mb, files: [...old.files, ...now.files] })) return false;
   const bytes = (sha) => Buffer.from(String(gh(["api", `${repoPath}/git/blobs/${sha}`, "--jq", ".content"])).replace(/\s+/g, ""), "base64");
   // Only the PR's own restamp may differ in text (Luna r1: any other date-shaped number is a real change),
   // and only in real UTF-8 text; anything else must match byte for byte.

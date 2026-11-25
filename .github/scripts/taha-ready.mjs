@@ -84,13 +84,13 @@ export function tahaVerdict(pr, carried = () => false) {
   return approvedEarlier && carried() ? APPROVED : null;
 }
 // Labels to add/remove so exactly the verdict's label (or neither) is on the PR, and `ready-for-taha`
-// comes off once Taha has decided (Mason, 2026-11-25). Taha's own PRs are left alone.
+// comes off once Taha approves (Mason, 2026-11-25); after Request changes it stays, so the fixed head is pinged (Sol). Taha's own PRs are left alone.
 export function reviewLabelChanges(pr, carried) {
   if (isTahasPr(pr)) return { add: [], remove: [] };
   const want = tahaVerdict(pr, carried);
   const have = new Set((pr.labels ?? []).map((l) => l.name));
   return { add: want && !have.has(want) ? [want] : [],
-    remove: [APPROVED, CHANGES].filter((l) => l !== want && have.has(l)).concat(want && have.has(LABEL) ? [LABEL] : []) };
+    remove: [APPROVED, CHANGES].filter((l) => l !== want && have.has(l)).concat(want === APPROVED && have.has(LABEL) ? [LABEL] : []) };
 }
 
 export const pingMarker = (sha) => `<!-- taha-ready-ping ${String(sha).toLowerCase()} -->`;

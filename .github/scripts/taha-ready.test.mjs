@@ -136,8 +136,8 @@ test("carried-over Approve (Mason, 2026-11-25): shows as approved, takes ready-f
   assert.equal(tahaVerdict(pr({ reviews: [rv('CHANGES_REQUESTED', NEW)] }), never), null, 'no earlier Approve: GitHub is not asked');
   assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED', NEW), rv('CHANGES_REQUESTED')] }), never), 'taha-changes', 'a verdict on this head wins without asking');
   assert.deepEqual(reviewLabelChanges(old, yes), { add: ['taha-approved'], remove: ['ready-for-taha'] });
-  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('CHANGES_REQUESTED')], labels: L('ready-for-taha') })), { add: ['taha-changes'], remove: ['ready-for-taha'] },
-    'changes requested also takes it off, so the fixed head is re-labelled');
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('CHANGES_REQUESTED')], labels: L('ready-for-taha') })), { add: ['taha-changes'], remove: [] },
+    'changes requested keeps it, so the fixed head is pinged again (Sol)');
   assert.deepEqual(reviewLabelChanges(old, () => false), { add: [], remove: [] }, 'a real change keeps it waiting');
   assert.match(decide(pr({ reviews: [rv('APPROVED', NEW)] }), { checks: never, lane: never, sol: never, carried: yes }).why, /carries over/);
   assert.equal(decide(pr({ reviews: [rv('APPROVED', NEW)] }), { ...ok, carried: () => false }).act, true, 'not carried: asked again');

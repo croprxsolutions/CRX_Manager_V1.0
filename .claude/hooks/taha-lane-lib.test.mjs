@@ -358,13 +358,15 @@ ok(!tahaApprovedOnGitHub({ repo: "o/r", gh: revGh(approvedTsv, null), pullReques
 ok(!tahaApprovedOnGitHub({ repo: "o/r", gh: () => { throw new Error("502"); }, pullRequest: 5, headSha: A }), "a failed read refuses");
 // Carry-over (Mason, 2026-11-25): his Approve of A still counts at B when the PR's own change is the same.
 const C = "c".repeat(40), D = "d".repeat(40), E = "e".repeat(40);
-const carryGh = ({ before, after, blobs = {}, base = "staging", reviews = approvedTsv, timeline = "" }) => (args) => {
+const M1 = "1".repeat(40), M2 = "2".repeat(40);
+const carryGh = ({ before, after, blobs = {}, base = "staging", reviews = approvedTsv, timeline = "", mbAfter = M1, moved = null }) => (args) => {
   const url = args.find((a) => /^repos\//.test(a)) || "";
   if (/\/pulls\/5\/reviews/.test(url)) return reviews;
   if (/\/issues\/5\/timeline/.test(url)) return timeline;
   if (/\/pulls\/5$/.test(url)) return `${base}\n`;
-  if (url === `repos/o/r/compare/staging...${A}`) return JSON.stringify(before);
-  if (url === `repos/o/r/compare/staging...${B}`) return JSON.stringify(after);
+  if (url === `repos/o/r/compare/staging...${A}`) return JSON.stringify({ mb: M1, files: before });
+  if (url === `repos/o/r/compare/staging...${B}`) return JSON.stringify({ mb: mbAfter, files: after });
+  if (url === `repos/o/r/compare/${M1}...${M2}` && moved) return JSON.stringify(moved);
   const blob = /\/git\/blobs\/([0-9a-f]{40})$/.exec(url);
   if (blob && blob[1] in blobs) return Buffer.from(blobs[blob[1]]).toString("base64");
   throw new Error(`unexpected ${url}`);
@@ -373,6 +375,17 @@ const carried = (opts) => tahaApprovedOnGitHub({ repo: "o/r", gh: carryGh(opts),
 const fl = (filename, sha, status = "modified", previous_filename = null) => ({ filename, status, sha, previous_filename });
 const quotes = fl("src/pages/Quotes.tsx", C);
 ok(carried({ before: [quotes], after: [quotes] }), "a staging catch-up that leaves the PR's own files alone carries his Approve");
+const movedOn = (files, status = "ahead") => ({ status, files, count: files.length });
+ok(carried({ before: [quotes], after: [quotes], mbAfter: M2, moved: movedOn(["src/pages/Bills.tsx", "docs/x.md"]) }),
+  "staging moved on other files only: carries");
+ok(!carried({ before: [quotes], after: [quotes], mbAfter: M2, moved: movedOn(["src/pages/Quotes.tsx"]) }),
+  "staging changed one of the PR's own files: a kept-ours conflict could drop its fix, so he is needed (Sol HIGH)");
+ok(!carried({ before: [quotes], after: [quotes], mbAfter: M2, moved: movedOn(["src/a.ts"], "diverged") }), "a branch point that did not move forward refuses");
+ok(!carried({ before: [quotes], after: [quotes], mbAfter: M2, moved: { status: "ahead", files: null, count: 0 } }), "an unreadable staging change list refuses");
+ok(!carried({ before: [quotes], after: [quotes], mbAfter: M2, moved: movedOn(Array.from({ length: 300 }, (_, i) => `x/${i}`)) }), "300+ staging files refuses");
+ok(!carried({ before: null, after: null }), "a compare reply without files is unusable, not empty (Sol)");
+ok(!carried({ before: [fl("src/report_20270301120000.ts", C, "added")], after: [fl("src/report_20270304120000.ts", C, "added")] }),
+  "two differently dated code paths are different files (Sol)");
 ok(carried({ before: [quotes], after: [quotes, fl("docs/manual/decision-log.d/x.md", D, "added")] }), "a new note under docs/ carries it");
 ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "a = 1", [D]: "a = 2" } }), "a change to the PR's own code needs him again");
 ok(!carried({ before: [quotes], after: [quotes, fl("src/lib/new.ts", D, "added")] }), "a new code file needs him again");

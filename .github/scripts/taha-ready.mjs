@@ -2,7 +2,9 @@
 //   label: on each open, non-draft PR that is not Taha's, add `ready-for-taha` and request Taha's
 //          review once (a) it touches his lane (taha-lane-lib.mjs, the merge block's own test),
 //          (b) it needs no Sol (sol-risk-lib.mjs, the merge gate's own classifier) and
-//          (c) every required check is green. It never removes the label.
+//          (c) every required check is green. It never removes the label. A hotfix into main also counts
+//          .github/ (Taha is a code owner) and skips the guard and release-gate, which wait on him; once he
+//          approved, a hotfix whose guard still wants the hotfix-backport label gets one label-only ping.
 //          It also mirrors Taha's verdict on the current head as `taha-approved` / `taha-changes`
 //          (display only: the merge gates read his review from GitHub themselves).
 //   ping:  post once per PR head to #crx-reviews for each labelled PR waiting on Taha (needsPing), with a
@@ -21,6 +23,7 @@ import { prFilesOnGitHub, tahaLaneProblem } from '../../.claude/hooks/taha-lane-
 import { solRiskOnGitHub } from '../../.claude/hooks/sol-risk-lib.mjs';
 import { TAHA_LOGIN } from '../../.claude/hooks/migration-landing-gate-lib.mjs';
 import { esc, link, slack } from './release-slack.mjs';
+import { BACKPORT_LABEL } from './release-flow.mjs';
 
 export const REPO = 'croprxsolutions/CRX_Manager_V1.0';
 export const LABEL = 'ready-for-taha';
@@ -40,6 +43,16 @@ export const tahaRequested = (pr) => (pr.reviewRequests ?? []).some((r) => isTah
 // the next move is his Approve or our fix, not another nudge.
 export const tahaReviewedHead = (pr) => (pr.reviews ?? []).some((r) => isTaha(r.author?.login) && !['PENDING', 'DISMISSED'].includes(r.state) && sameSha(r.commit?.oid, pr.headRefOid));
 
+// A hotfix into main (Mason, 2026-11-25): Taha is a code owner of .github/, and the release guard and
+// release-gate wait on his approval or hotfix-backport label, so those two can't hold back asking him.
+export const isMainHotfix = (pr) => pr.baseRefName === 'main' && /^hotfix\//.test(pr.headRefName ?? '');
+const GATE_CHECKS = ['Release flow guard (main)', 'release-gate'];
+const checksFor = (pr, checks) => (isMainHotfix(pr) && Array.isArray(checks) ? checks.filter((c) => !GATE_CHECKS.includes(c.name)) : checks);
+export function githubOwned(files) {
+  const hits = (files ?? []).map((f) => f?.filename).filter((n) => typeof n === 'string' && n.startsWith('.github/'));
+  return hits.length ? { files: hits, reason: `Taha is a code owner of ${hits.slice(0, 5).join(', ')}` } : null;
+}
+
 // Required checks from `gh pr check --required`: green only if there is at least one and all passed (or were skipped).
 export function requiredChecksProblem(checks) {
   if (!Array.isArray(checks)) return 'required checks could not be read';
@@ -57,7 +70,7 @@ export function decide(pr, { checks, lane, sol }) {
   if (pr.isCrossRepository) return skip('from a fork (not our team)');
   if (hasLabel(pr) && tahaRequested(pr)) return skip('already labelled and waiting on Taha');
   if (tahaReviewedHead(pr)) return skip('Taha already reviewed this head');
-  const checkProblem = requiredChecksProblem(checks());
+  const checkProblem = requiredChecksProblem(checksFor(pr, checks()));
   if (checkProblem) return skip(checkProblem);
   const inLane = lane();
   if (!inLane) return skip("not in Taha's lane");
@@ -102,17 +115,24 @@ export function askedAfterPush(pushTimes, askTimes) {
 // Ping once per head while Taha is requested and required checks are green. Off the Sol list the bot
 // checks readiness itself. A Sol-list head needs the label or his review request added after the push,
 // because the bot cannot see Sol proofs and a request or label can outlive a push.
-// checks/sol/asked are thunks as in decide(); returns { ping, why }.
-export function needsPing(pr, comments, { checks, sol, asked }) {
+// checks/sol/asked are thunks as in decide(); backport() says the release guard wants Taha's hotfix-backport label.
+// Returns { ping, why, backport }.
+export function needsPing(pr, comments, { checks, sol, asked, backport = () => false }) {
   const no = (why) => ({ ping: false, why });
+  // His approval survives a merge from main, but the label must follow the latest push: ask for the label alone.
+  if (isMainHotfix(pr) && !pr.isDraft && !isTahasPr(pr) && !pr.isCrossRepository && tahaVerdict(pr) === APPROVED) {
+    if (pinged(comments, pr.headRefOid).length) return no('already pinged for this head');
+    return backport() ? { ping: true, why: 'approved hotfix waits on the hotfix-backport label', backport: true, labelOnly: true } : no('Taha approved this head');
+  }
   if (!hasLabel(pr) || pr.isDraft || isTahasPr(pr) || pr.isCrossRepository) return no('not a labelled, ready PR of ours');
   if (tahaReviewedHead(pr)) return no('Taha already reviewed this head');
   if (pinged(comments, pr.headRefOid).length) return no('already pinged for this head');
   if (!tahaRequested(pr)) return no('Taha is not requested');
-  const checkProblem = requiredChecksProblem(checks());
+  const checkProblem = requiredChecksProblem(checksFor(pr, checks()));
   if (checkProblem) return no(checkProblem);
-  if (sol()?.risky === false) return { ping: true, why: 'no Sol needed, checks green' };
-  if (asked()) return { ping: true, why: 'Sol-list PR labelled or re-requested after its latest push' };
+  const yes = (why) => ({ ping: true, why, backport: isMainHotfix(pr) && Boolean(backport()) });
+  if (sol()?.risky === false) return yes('no Sol needed, checks green');
+  if (asked()) return yes('Sol-list PR labelled or re-requested after its latest push');
   return no('Sol-list PR: waiting for the label or a review request made after the latest push');
 }
 
@@ -126,13 +146,14 @@ export function needsReminder(pr, comments, now, { checks }) {
   if (!first) return no('not pinged for this head yet');
   if (!(now - Date.parse(first.createdAt) >= REMIND_AFTER_MS)) return no('pinged under 24 h ago');
   if (marked(comments, 'remind', pr.headRefOid).length) return no('already reminded for this head');
-  const checkProblem = requiredChecksProblem(checks());
+  const checkProblem = requiredChecksProblem(checksFor(pr, checks()));
   if (checkProblem) return no(checkProblem);
   return { remind: true, why: 'waiting on Taha over 24 h since the ping' };
 }
 
 const headTag = (pr) => `(head ${String(pr.headRefOid).slice(0, 7)})`;
-export const pingText = (pr, summary) => `<@${TAHA_SLACK}> ${link(pr.url, `#${pr.number}`)} ${esc(pr.title)} is waiting on your Approve ${headTag(pr)}`
+export const pingText = (pr, summary, { backport = false, labelOnly = false } = {}) => `<@${TAHA_SLACK}> ${link(pr.url, `#${pr.number}`)} ${esc(pr.title)} is waiting on your `
+  + (labelOnly ? '' : 'Approve') + (backport ? `${labelOnly ? '' : ' + '}\`${BACKPORT_LABEL}\` label (add it after the latest push)` : '') + ` ${headTag(pr)}`
   + (summary ? `\n> AI summary of the author's description, not checked: ${summary}` : '');
 export const remindText = (pr) => `<@${TAHA_SLACK}> reminder: ${link(pr.url, `#${pr.number}`)} ${esc(pr.title)} has waited over a day for your Approve ${headTag(pr)}`;
 
@@ -183,7 +204,7 @@ function gh(args) {
 }
 const tryGh = (args) => { try { return gh(args); } catch { return null; } };
 
-const LIST_FIELDS = 'number,title,url,author,isDraft,isCrossRepository,headRefName,headRefOid,baseRefOid,labels,reviewRequests';
+const LIST_FIELDS = 'number,title,url,author,isDraft,isCrossRepository,headRefName,headRefOid,baseRefName,baseRefOid,labels,reviewRequests';
 // shortcut: reads at most 500 open PRs; raise the limit if the repository ever holds more.
 const listOpen = () => JSON.parse(gh(['pr', 'list', '--repo', REPO, '--state', 'open', '--limit', '500', '--json', LIST_FIELDS]));
 const viewMore = (n) => JSON.parse(gh(['pr', 'view', String(n), '--repo', REPO, '--json', 'reviews,comments,body']));
@@ -201,7 +222,16 @@ async function handle(pr, mode, dry) {
   Object.assign(pr, viewMore(pr.number));
   const facts = {
     checks: () => requiredChecks(pr.number),
-    lane: () => tahaLaneProblem({ files: prFilesOnGitHub({ repo: REPO, gh, number: pr.number, headSha: pr.headRefOid }) }),
+    lane: () => {
+      const files = prFilesOnGitHub({ repo: REPO, gh, number: pr.number, headSha: pr.headRefOid });
+      return tahaLaneProblem({ files }) ?? (isMainHotfix(pr) ? githubOwned(files) : null);
+    },
+    // The guard's latest run on this head failed asking for the label (its ::error:: line is an annotation).
+    backport: () => {
+      const id = tryGh(['api', `repos/${REPO}/commits/${pr.headRefOid}/check-runs?check_name=${encodeURIComponent(GATE_CHECKS[0])}`,
+        '--jq', '.check_runs[0] | select(.conclusion == "failure") | .id'])?.trim();
+      return Boolean(id) && (tryGh(['api', `repos/${REPO}/check-runs/${id}/annotations`, '--jq', '.[].message']) ?? '').includes(BACKPORT_LABEL);
+    },
     sol: () => solRiskOnGitHub({ baseSha: pr.baseRefOid, headSha: pr.headRefOid, repo: REPO, gh }),
     asked: () => askedAfterPush(
       tryGh(['api', '--paginate', `repos/${REPO}/commits/${pr.headRefOid}/check-suites?per_page=100`, '--jq', '.check_suites[].created_at']),
@@ -243,10 +273,10 @@ async function handle(pr, mode, dry) {
   if (!p.ping && !r.remind) return 0;
   const kind = p.ping ? 'ping' : 'remind';
   const why = p.ping ? p.why : r.why;
-  if (mode === 'label' || dry) return console.log(`#${pr.number} ${kind.toUpperCase()} due (${why}): ${p.ping ? pingText(pr) : remindText(pr)}`), 1;
+  if (mode === 'label' || dry) return console.log(`#${pr.number} ${kind.toUpperCase()} due (${why}): ${p.ping ? pingText(pr, null, p) : remindText(pr)}`), 1;
   if (moved()) return console.log(`#${pr.number} head moved; next run decides`), 0;
   // The summary is optional: a file-list read error must not stop the ping.
-  const text = p.ping ? pingText(pr, await summarize(pr, (() => { try { return fileNames(pr.number); } catch { return []; } })())) : remindText(pr);
+  const text = p.ping ? pingText(pr, await summarize(pr, (() => { try { return fileNames(pr.number); } catch { return []; } })()), p) : remindText(pr);
   // Dedupe record first, so a re-run never double-posts. A failed Slack post deletes it so the next run
   // retries; a crash between the two loses that one ping (accepted: never double-post).
   const id = gh(['api', `repos/${REPO}/issues/${pr.number}/comments`, '-f',

@@ -103,6 +103,53 @@ test('ping text escapes PR titles and names the short head', () => {
   assert.match(t, /<https:\/\/github.com\/x\/y\/pull\/7\|#7>/);
 });
 
+// ── Hotfixes into main (Mason, 2026-11-25) ─────────────────────────────────────────────────────
+import { githubOwned, isMainHotfix } from './taha-ready.mjs';
+
+const hotfix = (o) => pr({ baseRefName: 'main', headRefName: 'hotfix/q', ...o });
+const gateWaiting = () => [...green(), { name: 'Release flow guard (main)', bucket: 'fail' }, { name: 'release-gate', bucket: 'pending' }];
+
+test('a hotfix into main is asked for even while the guard and release-gate wait on Taha; other checks still count', () => {
+  assert.equal(isMainHotfix(hotfix()), true);
+  assert.equal(isMainHotfix(pr({ baseRefName: 'staging', headRefName: 'hotfix/q' })), false);
+  assert.equal(isMainHotfix(pr({ baseRefName: 'main', headRefName: 'release/next' })), false);
+  assert.equal(decide(hotfix(), { ...ok, checks: gateWaiting }).act, true);
+  assert.equal(decide(hotfix(), { ...ok, checks: () => [...gateWaiting(), { name: 'CI', bucket: 'fail' }] }).act, false);
+  // Not a hotfix: the guard still blocks.
+  assert.equal(decide(pr({ baseRefName: 'main', headRefName: 'release/next' }), { ...ok, checks: gateWaiting }).act, false);
+  assert.equal(P(labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' }), [], { ...ok, checks: gateWaiting }), true);
+});
+
+test('.github/ files count as Taha\'s on a hotfix (he is a code owner)', () => {
+  assert.deepEqual(githubOwned([{ filename: '.github/workflows/release-pr.yml' }, { filename: 'README.md' }]).files, ['.github/workflows/release-pr.yml']);
+  assert.equal(githubOwned([{ filename: 'docs/x.md' }]), null);
+  assert.equal(githubOwned(null), null);
+});
+
+test('the ping asks for the hotfix-backport label only on a hotfix whose guard wants it', () => {
+  const h = labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' });
+  const p = needsPing(h, [], { ...ok, asked: () => false, backport: () => true });
+  assert.equal(p.backport, true);
+  assert.match(pingText(h, null, p), /Approve \+ `hotfix-backport` label \(add it after the latest push\) \(head aaaaaaa\)/);
+  assert.equal(needsPing(h, [], { ...ok, asked: () => false, backport: () => false }).backport, false);
+  assert.equal(needsPing(labelled(T), [], { ...ok, asked: () => false, backport: never }).backport, false);
+  assert.doesNotMatch(pingText(pr()), /hotfix-backport/);
+});
+
+test('an approved hotfix whose guard still wants the label gets one label-only ping (as on #2573)', () => {
+  const approved = hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: HEAD } }] });
+  const lazy = { checks: never, sol: never, asked: never };
+  const p = needsPing(approved, [], { ...lazy, backport: () => true });
+  assert.equal(p.ping, true);
+  assert.match(pingText(approved, null, p), /waiting on your `hotfix-backport` label \(add it after the latest push\) \(head/);
+  assert.doesNotMatch(pingText(approved, null, p), /Approve/);
+  assert.equal(needsPing(approved, [bot(HEAD)], { ...lazy, backport: () => true }).ping, false);
+  assert.equal(needsPing(approved, [], { ...lazy, backport: () => false }).ping, false);
+  // Approved on an older head, or not a hotfix: the normal rules apply.
+  assert.equal(needsPing(hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: NEW } }] }), [], { ...lazy, backport: () => true }).ping, false);
+  assert.equal(needsPing(pr({ reviews: approved.reviews }), [], { ...lazy, backport: never }).ping, false);
+});
+
 // ── Taha's verdict labels, reminder, Haiku (Mason, 2026-11-24) ─────────────────────────────────
 import { needsReminder, parseTopics, remindMarker, reviewLabelChanges, summarize, tahaVerdict } from './taha-ready.mjs';
 

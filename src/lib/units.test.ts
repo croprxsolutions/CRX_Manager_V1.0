@@ -57,6 +57,15 @@ describe('rateUnitOptionsForProduct', () => {
       expect(rateUnitOptionsForProduct(CONV, form, 'Lb')).toEqual(unitOptionsForForm(CONV, form));
     }
   });
+  it('never offers MG for a product stocked in grams (KI-114)', () => {
+    const withGrams = [...CONV,
+      { id: '7', unit: 'MG', factor_oz: 0.00003527396, unit_type: 'dry' },
+      { id: '8', unit: 'g', factor_oz: 0.03527396, unit_type: 'dry' },
+    ] as unknown as UnitConversion[];
+    expect(rateUnitOptionsForProduct(withGrams, 'dry', 'g').map((u) => u.unit)).toEqual(['Lb', 'Dry oz', 'Ea', 'Unit', 'g']);
+    expect(rateUnitOptionsForProduct(withGrams, 'dry', ' G ').map((u) => u.unit)).not.toContain('MG');
+    expect(rateUnitOptionsForProduct(withGrams, 'dry', 'Lb').map((u) => u.unit)).toContain('MG');
+  });
 });
 
 describe('isKnownUnit (grandfathering)', () => {

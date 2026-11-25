@@ -403,6 +403,7 @@ this number is fixed and live (archive, 2026-11-05).
 ### KI-114 — Four kinds of old product rate data are wrong or have no rate basis
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-08 · #1958. Mason answered the label question 2026-11-21 (18 grams per acre); the remaining work is the data fix.
+> **2026-11-22 — Piksi grams fix in review:** Mason: Piksi is grams everywhere, price unchanged. Migration `20270303180000_piksi_mg_to_grams` (not live yet) relabels every Piksi MG row to `g` with no number changed ([contract](../plans/2026-11-22-ki114-piksi-grams-CONTRACT.md)). The Piksi bullet below closes when it is live; the seed-treatment, liquid-unit and per-ton bullets stay open.
 
 **MED · OPEN, planned (RT-2/RT-3) · products/rates · found 2026-11-08 ([RT-1 build sheet](../plans/2026-11-08-product-RT1-BUILD-SHEET.md) section 1)**
 RT-1's draft rates (`20261229110000`, live 2026-11-10) copy these as they are; nothing here is fixed yet. RT-2 step 1

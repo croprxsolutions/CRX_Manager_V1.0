@@ -32,6 +32,7 @@ const P_TYPED = id('b2');
 const ZETA_A = id('c1'); // on the EPA product
 const ZETA_B = id('c2'); // same name_key, different spelling of spacing/case
 const OTHER = id('c3'); // different name
+const ZETA_C = id('c4'); // same name_key but its own CAS
 const q = (s) => (s === null || s === undefined ? 'NULL' : `'${String(s).replaceAll("'", "''")}'`);
 const J = (o) => `${q(JSON.stringify(o))}::jsonb`;
 const rowOf = (parent, ing) => scalar(`SELECT id FROM public.product_parent_ingredients WHERE parent_id = '${parent}' AND ingredient_id = '${ing}' AND status = 'active';`);
@@ -54,9 +55,10 @@ try {
       ('${P_EPA}', '[PROVER] Gated', 'liquid', 'EC', 'Insecticide', '91234-259', true, '${ADMIN}', '${ADMIN}'),
       ('${P_TYPED}', '[PROVER] Typed', 'liquid', 'EC', 'Insecticide', NULL, true, '${ADMIN}', '${ADMIN}');
     INSERT INTO public.active_ingredients (id, name, cas, created_by, updated_by) VALUES
-      ('${ZETA_A}', 'Prover Zeta-Cypermethrin', NULL, '${ADMIN}', '${ADMIN}'),
+      ('${ZETA_A}', 'Prover Zeta-Cypermethrin', '52315-07-8', '${ADMIN}', '${ADMIN}'),
       ('${ZETA_B}', 'prover  zeta-cypermethrin', NULL, '${ADMIN}', '${ADMIN}'),
-      ('${OTHER}', 'Prover Bifenthrin', NULL, '${ADMIN}', '${ADMIN}');
+      ('${OTHER}', 'Prover Bifenthrin', NULL, '${ADMIN}', '${ADMIN}'),
+      ('${ZETA_C}', 'PROVER ZETA-CYPERMETHRIN', '7732-18-5', '${ADMIN}', '${ADMIN}');
     INSERT INTO public.product_parent_ingredients (parent_id, ingredient_id, strength_value, strength_unit, strength_basis, source, source_note, created_by, updated_by) VALUES
       ('${P_EPA}', '${ZETA_A}', 9.15, 'pct_ww', 'active_ingredient', 'epa_lookup', 'EPA lookup of 91234-259', '${ADMIN}', '${ADMIN}'),
       ('${P_TYPED}', '${ZETA_A}', 1.5, 'lb_per_gal', 'active_ingredient', 'label', NULL, '${ADMIN}', '${ADMIN}');
@@ -86,12 +88,13 @@ try {
 
   // Still refused on the gated product.
   assert.match(previewThenSave(P_EPA, swap(epaRow, { ingredient_id: OTHER })), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'different name');
+  assert.match(previewThenSave(P_EPA, swap(epaRow, { ingredient_id: ZETA_C })), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'same name, both have a different CAS');
   assert.match(previewThenSave(P_EPA, swap(epaRow, { name: 'Prover Zeta-Cypermethrin ', cas: null })), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'same name, new ingredient');
   assert.match(previewThenSave(P_EPA, [{ kind: 'ingredient', action: 'change', row_id: epaRow, ...typedStrength }]), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'strength change');
   assert.match(previewThenSave(P_EPA, [{ kind: 'mode_of_action', action: 'retire', row_id: scalar(`SELECT id FROM public.product_parent_modes_of_action WHERE parent_id = '${P_EPA}' AND group_code = '3A';`) }]), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'mode retire');
   assert.match(previewThenSave(P_EPA, swap(epaRow, { ingredient_id: ZETA_B }), USERS.rep), /ADMIN_REQUIRED/, 'sales rep');
   assert.match(attempt(USERS.rep, `${refuse(`r := public.correct_parent_chemistry('${P_EPA}', 1, 'x', ${J(swap(epaRow, { ingredient_id: ZETA_B }))}, 'r', 'e', 'k');`)} v := t;`), /ADMIN_REQUIRED/);
-  console.log('[refuse] different name, same-name new ingredient, strength change, mode retire, sales rep -> all still refused');
+  console.log('[refuse] different name, same name with two CAS numbers, same-name new ingredient, strength change, mode retire, sales rep -> all still refused');
 
   // The fix: request strength (1 % label) and an empty mode list are ignored on the gated product.
   const saved = previewThenSave(P_EPA, swap(epaRow, { ingredient_id: ZETA_B }), ADMIN, true);

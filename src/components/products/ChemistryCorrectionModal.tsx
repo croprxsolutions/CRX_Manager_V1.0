@@ -147,7 +147,9 @@ function SwapChoice({ row, fix, others, busy, gated, patch }: {
       <IngredientSearch id={`swap-pick-${row.row_id}`} label="Replace with" excludeIds={[row.ingredient_id]}
         onPick={(swapTo) => {
           const into = others.find((other) => other.ingredient_id === swapTo.id);
-          if (into) {
+          if (into && gated) {
+            toast('error', `${swapTo.name} is already on this product. An EPA product cannot merge two rows; pick a record that is not on it.`);
+          } else if (into) {
             patch({ action: 'consolidate', intoRowId: into.row_id, ...strengthFrom(into) });
             toast('info', `${swapTo.name} is already on this product, so the two rows are merged instead.`);
           } else patch({ swapTo });

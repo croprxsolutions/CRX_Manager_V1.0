@@ -8,7 +8,7 @@
 --   resistance-group load matches a name only when it is unique, so the duplicates get no group.
 -- WHAT: re-issues public._apply_parent_chemistry (same signature, owner postgres, SECURITY DEFINER, search_path, no
 --   grants). One change: on an EPA-gated product a correction may swap an ingredient row to an EXISTING ingredient
---   with the same name_key. The new row copies the old row's strength, unit, basis, source and note, and every mode
+--   with the same name_key (refused when both records carry a CAS, which is unique). The new row copies the old row's strength, unit, basis, source and note, and every mode
 --   of action of the old row moves over with its own source (EPA-confirmed stays EPA-confirmed); the request's
 --   strength and mode list are not used. Only which shared active_ingredients row the product points at changes.
 -- NOT CHANGED: every other swap, consolidate, change or mode-of-action edit on a gated product still refuses with
@@ -278,7 +278,9 @@ BEGIN
       v_same_name := v_gate IS NOT NULL;
       IF v_same_name AND (COALESCE(jsonb_typeof(v_entry->'ingredient_id'), 'null') = 'null'
           OR (SELECT name_key FROM public.active_ingredients WHERE id = v_ing)
-             IS DISTINCT FROM (SELECT name_key FROM public.active_ingredients WHERE id = v_row.ingredient_id)) THEN
+             IS DISTINCT FROM (SELECT name_key FROM public.active_ingredients WHERE id = v_row.ingredient_id)
+          -- CAS is unique, so two records that both carry one are different chemicals despite the name.
+          OR (SELECT count(*) FROM public.active_ingredients WHERE id IN (v_ing, v_row.ingredient_id) AND cas IS NOT NULL) = 2) THEN
         RAISE EXCEPTION '%', v_gate;
       END IF;
       IF v_same_name THEN

@@ -2,8 +2,9 @@
 //   label: on each open, non-draft PR that is not Taha's, add `ready-for-taha` and request Taha's
 //          review once (a) it touches his lane (taha-lane-lib.mjs, the merge block's own test),
 //          (b) it needs no Sol (sol-risk-lib.mjs, the merge gate's own classifier) and
-//          (c) every required check is green. It never removes the label.
-//          It also mirrors Taha's verdict on the current head as `taha-approved` / `taha-changes`
+//          (c) every required check is green. It takes the label off once Taha has decided the head.
+//          It also mirrors Taha's verdict on the current head as `taha-approved` / `taha-changes`; an Approve
+//          the merge gate carries over (staging catch-up, docs/ notes, restamps; Mason 2026-11-25) shows as approved
 //          (display only: the merge gates read his review from GitHub themselves).
 //   ping:  post once per PR head to #crx-reviews for each labelled PR waiting on Taha (needsPing), with a
 //          two-line Haiku summary when ANTHROPIC_API_KEY is set; one reminder per head 24 h after that ping.
@@ -17,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { prFilesOnGitHub, tahaLaneProblem } from '../../.claude/hooks/taha-lane-lib.mjs';
+import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneProblem } from '../../.claude/hooks/taha-lane-lib.mjs';
 import { solRiskOnGitHub } from '../../.claude/hooks/sol-risk-lib.mjs';
 import { TAHA_LOGIN } from '../../.claude/hooks/migration-landing-gate-lib.mjs';
 import { esc, link, slack } from './release-slack.mjs';
@@ -50,13 +51,14 @@ export function requiredChecksProblem(checks) {
 
 // What to do with one PR. checks/lane/sol are called only when needed (each costs GitHub calls):
 // checks() -> [{name,bucket}] | null; lane() -> tahaLaneProblem result; sol() -> solRiskOnGitHub result.
-export function decide(pr, { checks, lane, sol }) {
+export function decide(pr, { checks, lane, sol, carried }) {
   const skip = (why) => ({ act: false, why });
   if (pr.isDraft) return skip('draft');
   if (isTahasPr(pr)) return skip("Taha's own PR");
   if (pr.isCrossRepository) return skip('from a fork (not our team)');
   if (hasLabel(pr) && tahaRequested(pr)) return skip('already labelled and waiting on Taha');
   if (tahaReviewedHead(pr)) return skip('Taha already reviewed this head');
+  if (tahaVerdict(pr, carried) === APPROVED) return skip("Taha's Approve carries over to this head");
   const checkProblem = requiredChecksProblem(checks());
   if (checkProblem) return skip(checkProblem);
   const inLane = lane();
@@ -70,17 +72,24 @@ export function decide(pr, { checks, lane, sol }) {
 
 // Taha's decisive verdict on the current head, as GitHub decides it: his latest approve /
 // changes-requested / dismissed review on that commit. Comments and pending reviews don't decide.
-export function tahaVerdict(pr) {
+// With no verdict on this head, an Approve of an earlier commit still counts when `carried()` says the merge
+// gate carries it over (tahaApprovedOnGitHub: only staging catch-ups, docs/ notes or restamps since; Mason, 2026-11-25).
+export function tahaVerdict(pr, carried = () => false) {
   const state = (pr.reviews ?? []).filter((r) => isTaha(r.author?.login) && sameSha(r.commit?.oid, pr.headRefOid)
     && !['COMMENTED', 'PENDING'].includes(r.state)).at(-1)?.state;
-  return state === 'APPROVED' ? APPROVED : state === 'CHANGES_REQUESTED' ? CHANGES : null;
+  if (state) return state === 'APPROVED' ? APPROVED : state === 'CHANGES_REQUESTED' ? CHANGES : null;
+  // Ask GitHub only when he approved some commit of this PR (each carry check costs several calls).
+  const approvedEarlier = (pr.reviews ?? []).some((r) => isTaha(r.author?.login) && r.state === 'APPROVED');
+  return approvedEarlier && carried() ? APPROVED : null;
 }
-// Labels to add/remove so exactly the verdict's label (or neither) is on the PR. Taha's own PRs are left alone.
-export function reviewLabelChanges(pr) {
+// Labels to add/remove so exactly the verdict's label (or neither) is on the PR, and `ready-for-taha`
+// comes off once Taha has decided (Mason, 2026-11-25). Taha's own PRs are left alone.
+export function reviewLabelChanges(pr, carried) {
   if (isTahasPr(pr)) return { add: [], remove: [] };
-  const want = tahaVerdict(pr);
+  const want = tahaVerdict(pr, carried);
   const have = new Set((pr.labels ?? []).map((l) => l.name));
-  return { add: want && !have.has(want) ? [want] : [], remove: [APPROVED, CHANGES].filter((l) => l !== want && have.has(l)) };
+  return { add: want && !have.has(want) ? [want] : [],
+    remove: [APPROVED, CHANGES].filter((l) => l !== want && have.has(l)).concat(want && have.has(LABEL) ? [LABEL] : []) };
 }
 
 export const pingMarker = (sha) => `<!-- taha-ready-ping ${String(sha).toLowerCase()} -->`;
@@ -103,11 +112,12 @@ export function askedAfterPush(pushTimes, askTimes) {
 // checks readiness itself. A Sol-list head needs the label or his review request added after the push,
 // because the bot cannot see Sol proofs and a request or label can outlive a push.
 // checks/sol/asked are thunks as in decide(); returns { ping, why }.
-export function needsPing(pr, comments, { checks, sol, asked }) {
+export function needsPing(pr, comments, { checks, sol, asked, carried }) {
   const no = (why) => ({ ping: false, why });
   if (!hasLabel(pr) || pr.isDraft || isTahasPr(pr) || pr.isCrossRepository) return no('not a labelled, ready PR of ours');
   if (tahaReviewedHead(pr)) return no('Taha already reviewed this head');
   if (pinged(comments, pr.headRefOid).length) return no('already pinged for this head');
+  if (tahaVerdict(pr, carried) === APPROVED) return no("Taha's Approve carries over to this head");
   if (!tahaRequested(pr)) return no('Taha is not requested');
   const checkProblem = requiredChecksProblem(checks());
   if (checkProblem) return no(checkProblem);
@@ -118,7 +128,7 @@ export function needsPing(pr, comments, { checks, sol, asked }) {
 
 // One reminder per head, 24 h after its first ping, while Taha is still requested, has not decided this head
 // (a comment alone still counts as waiting) and required checks are green. The clock is the ping comment's time.
-export function needsReminder(pr, comments, now, { checks }) {
+export function needsReminder(pr, comments, now, { checks, carried }) {
   const no = (why) => ({ remind: false, why });
   if (!hasLabel(pr) || pr.isDraft || isTahasPr(pr) || pr.isCrossRepository || !tahaRequested(pr)) return no('not a labelled PR waiting on Taha');
   if (tahaVerdict(pr)) return no('Taha decided this head');
@@ -126,6 +136,7 @@ export function needsReminder(pr, comments, now, { checks }) {
   if (!first) return no('not pinged for this head yet');
   if (!(now - Date.parse(first.createdAt) >= REMIND_AFTER_MS)) return no('pinged under 24 h ago');
   if (marked(comments, 'remind', pr.headRefOid).length) return no('already reminded for this head');
+  if (tahaVerdict(pr, carried)) return no('Taha decided this head (his Approve carries over)');
   const checkProblem = requiredChecksProblem(checks());
   if (checkProblem) return no(checkProblem);
   return { remind: true, why: 'waiting on Taha over 24 h since the ping' };
@@ -208,10 +219,13 @@ function requiredChecks(n) {
 
 async function handle(pr, mode, dry) {
   Object.assign(pr, viewMore(pr.number));
+  let carriedMemo;
   const facts = {
     checks: () => requiredChecks(pr.number),
     lane: () => tahaLaneProblem({ files: prFilesOnGitHub({ repo: REPO, gh, number: pr.number, headSha: pr.headRefOid }) }),
     sol: () => solRiskOnGitHub({ baseSha: pr.baseRefOid, headSha: pr.headRefOid, repo: REPO, gh }),
+    // Memoized: label, ping and reminder all ask, and each answer costs several GitHub reads.
+    carried: () => (carriedMemo ??= tahaApprovedOnGitHub({ repo: REPO, gh, pullRequest: pr.number, headSha: pr.headRefOid })),
     asked: () => askedAfterPush(
       tryGh(['api', '--paginate', `repos/${REPO}/commits/${pr.headRefOid}/check-suites?per_page=100`, '--jq', '.check_suites[].created_at']),
       tryGh(['api', '--paginate', `repos/${REPO}/issues/${pr.number}/events?per_page=100`, '--jq',
@@ -230,7 +244,7 @@ async function handle(pr, mode, dry) {
     return 0;
   }
   if (mode === 'label') {
-    const r = reviewLabelChanges(pr);
+    const r = reviewLabelChanges(pr, facts.carried);
     if (r.add.length || r.remove.length) {
       console.log(`#${pr.number} review labels: +${r.add.join(',') || '-'} -${r.remove.join(',') || '-'}`);
       if (!dry && !moved()) {

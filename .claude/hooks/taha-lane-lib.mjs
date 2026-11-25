@@ -10,8 +10,8 @@
 //
 // Mason can still let ONE named PR through: the merge refusal issues a 6-digit
 // code for that PR at its current head, and his chat message `taha override #<PR> <code>`
-// (taha-lane-prompt.mjs) turns it into a 24-hour override for that PR at that head
-// only: a later push needs a new code (Taha's review of #2303). When it is used the
+// (taha-lane-prompt.mjs) turns it into a 24-hour override for that PR, later pushes
+// included (Mason, 2026-11-25; it was one head only after Taha's review of #2303). When it is used the
 // gate itself tells Taha on the PR, or refuses. An agent cannot mint a
 // working code: only a request this guard wrote counts. Same accepted residual as
 // coderabbit-skip-lib.mjs: an agent that runs the prompt hook by hand with a forged
@@ -306,26 +306,112 @@ export const TAHA_ID = "50602678";
  * (`baseChangedAt`, ISO time or ""): a retarget keeps the head but changes the code that merges.
  */
 export function tahaApprovedHead(rows, headSha, baseChangedAt = "") {
-  if (!usableHead(headSha)) return false;
-  const verdict = (rows || []).filter((r) => String(r?.id || "") === TAHA_ID
-    && ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(r?.state)).at(-1);
-  if (verdict?.state !== "APPROVED" || String(verdict.commit || "").toLowerCase() !== headSha.toLowerCase()) return false;
-  if (!baseChangedAt) return true;
-  const approvedAt = Date.parse(verdict.at);
-  return Number.isFinite(approvedAt) && approvedAt > Date.parse(baseChangedAt);
+  return usableHead(headSha) && tahaApprovedCommit(rows, baseChangedAt) === headSha.toLowerCase();
 }
 
-/** Taha's reviews and the PR's base changes read from GitHub, fed to tahaApprovedHead. Any read error → false (refuse). */
+/** The commit Taha's standing Approve is on (lower case), under the same rules as tahaApprovedHead, or null. */
+export function tahaApprovedCommit(rows, baseChangedAt = "") {
+  const verdict = (rows || []).filter((r) => String(r?.id || "") === TAHA_ID
+    && ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(r?.state)).at(-1);
+  if (verdict?.state !== "APPROVED" || !usableHead(verdict.commit)) return null;
+  if (baseChangedAt) {
+    const approvedAt = Date.parse(verdict.at);
+    if (!(Number.isFinite(approvedAt) && approvedAt > Date.parse(baseChangedAt))) return null;
+  }
+  return verdict.commit.toLowerCase();
+}
+
+// Mason, 2026-11-25: Taha's Approve of an older commit still counts when the PR's own change is the same
+// now. Pushes that only catch up with staging, add notes under docs/, or restamp a migration (only its
+// 14-digit stamps differ, in names or text) leave it so; any other change to the PR's own files needs him again.
+// shortcut: a staging catch-up that changes how the PR's unchanged code behaves is not seen (Mason accepted, 2026-11-25).
+// Date-shaped only (YYYYMMDDhhmmss, 2000-2099), so other 14-digit numbers still count as a change. Not \b:
+// a stamp is followed by "_" in names.
+const STAMP_RE = /(?<!\d|\d\.)20\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:[01]\d|2[0-3])[0-5]\d[0-5]\d(?!\d|\.\d)/g;
+const unstamped = (text) => String(text ?? "").replace(STAMP_RE, "<stamp>");
+const COMPARE_MAX_FILES = 300; // GitHub's compare lists at most 300 files: at that size, refuse.
+const MAX_CONTENT_READS = 20;
+const isNote = (name) => /^docs\//i.test(String(name ?? ""));
+
+/** The PR's own changes (GitHub compare `files`) keyed by stamp-free path, docs/ left out; null when unusable. */
+export function ownChanges(files) {
+  if (!Array.isArray(files) || files.length >= COMPARE_MAX_FILES) return null;
+  const out = new Map();
+  for (const f of files) {
+    const name = String(f?.filename ?? "");
+    if (!name) return null;
+    if (isNote(name) && (!f.previous_filename || isNote(f.previous_filename))) continue;
+    const key = unstamped(name);
+    if (out.has(key)) return null;
+    const from = f.previous_filename ? `renamed from ${unstamped(f.previous_filename)}` : "";
+    out.set(key, { status: f.status === "removed" ? "removed" : `present ${from}`, sha: String(f.sha ?? "").toLowerCase() });
+  }
+  return out;
+}
+
+/** [beforeBlob, afterBlob] pairs whose text must match once stamps are blanked; null when the change differs. */
+export function ownChangePairs(before, after) {
+  if (!before || !after) return null;
+  const pairs = [];
+  for (const key of new Set([...before.keys(), ...after.keys()])) {
+    const a = before.get(key);
+    const b = after.get(key);
+    if (!a || !b || a.status !== b.status) return null;
+    if (a.sha === b.sha) continue;
+    if (a.status === "removed" || !usableHead(a.sha) || !usableHead(b.sha)) return null;
+    pairs.push([a.sha, b.sha]);
+  }
+  return pairs.length > MAX_CONTENT_READS ? null : pairs;
+}
+
+function sameOwnChange({ repoPath, gh, pullRequest, from, to }) {
+  const base = String(gh(["api", `${repoPath}/pulls/${pullRequest}`, "--jq", ".base.ref"])).trim();
+  if (!/^[\w.-]+(?:\/[\w.-]+)*$/.test(base)) return false;
+  // base...commit is the PR's own diff at that commit (against where it branched off the base).
+  const files = (commit) => JSON.parse(String(gh(["api", `${repoPath}/compare/${base}...${commit}`, "--jq",
+    "[(.files // [])[] | {filename, status, sha, previous_filename}]"])));
+  const pairs = ownChangePairs(ownChanges(files(from)), ownChanges(files(to)));
+  if (!pairs) return false;
+  const bytes = (sha) => Buffer.from(String(gh(["api", `${repoPath}/git/blobs/${sha}`, "--jq", ".content"])).replace(/\s+/g, ""), "base64");
+  // Stamps are blanked only in real UTF-8 text; anything else must match byte for byte.
+  const text = (buf) => { try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch { return null; } };
+  return pairs.every(([a, b]) => {
+    const [x, y] = [bytes(a), bytes(b)];
+    const [tx, ty] = [text(x), text(y)];
+    return tx !== null && ty !== null ? unstamped(tx) === unstamped(ty) : x.equals(y);
+  });
+}
+
+/**
+ * Taha's reviews and the PR's base changes read from GitHub: his standing Approve of this head, or of an older
+ * commit whose own change is the same (sameOwnChange). Any read error → false (refuse).
+ */
+// The repo's rulesets dismiss stale reviews on every push, so GitHub lists an Approve of an older commit as
+// DISMISSED. Those, and only those, still count as his Approve here: the timeline records them as an
+// approval dismissed by a push (a commit) with no message; a person dismissing one must give a message.
+export function pushDismissedApprovals(events) {
+  return new Set((events || []).filter((e) => e?.event === "review_dismissed" && e.state === "approved" && !e.message
+    && usableHead(e.commit) && /^\d+$/.test(String(e.review ?? ""))).map((e) => String(e.review)));
+}
+
 export function tahaApprovedOnGitHub({ repo, gh, pullRequest, headSha }) {
   const repoPath = ghApiRepoPath(repo);
-  if (!repoPath || !usablePr(pullRequest)) return false;
+  if (!repoPath || !usablePr(pullRequest) || !usableHead(headSha)) return false;
   try {
+    const events = String(gh(["api", "--paginate", `${repoPath}/issues/${pullRequest}/timeline?per_page=100`, "--jq",
+      '.[] | select(.event == "base_ref_changed" or .event == "automatic_base_change_succeeded" or .event == "review_dismissed") | ' +
+      '[.event, (.created_at // ""), (.dismissed_review.review_id // "" | tostring), (.dismissed_review.state // ""), ' +
+      '(.dismissed_review.dismissal_message // ""), (.dismissed_review.dismissal_commit_id // "")] | @tsv'])).split(/\r?\n/).filter(Boolean)
+      .map((line) => { const [event, at, review, state, message, commit] = line.split("\t"); return { event, at, review, state, message, commit }; });
+    const baseChangedAt = events.filter((e) => e.event !== "review_dismissed").map((e) => e.at).filter(Boolean).sort().at(-1) || "";
+    const pushDismissed = pushDismissedApprovals(events);
     const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${pullRequest}/reviews?per_page=100`, "--jq",
-      '.[] | [(.user.id // "" | tostring), .state, (.commit_id // ""), (.submitted_at // "")] | @tsv'])).split(/\r?\n/).filter(Boolean)
-      .map((line) => { const [id, state, commit, at] = line.split("\t"); return { id, state, commit, at }; });
-    const baseChangedAt = String(gh(["api", "--paginate", `${repoPath}/issues/${pullRequest}/timeline?per_page=100`, "--jq",
-      '.[] | select(.event == "base_ref_changed" or .event == "automatic_base_change_succeeded") | .created_at'])).split(/\r?\n/).filter(Boolean).sort().at(-1) || "";
-    return tahaApprovedHead(rows, headSha, baseChangedAt);
+      '.[] | [(.user.id // "" | tostring), .state, (.commit_id // ""), (.submitted_at // ""), (.id // "" | tostring)] | @tsv'])).split(/\r?\n/).filter(Boolean)
+      .map((line) => { const [id, state, commit, at, review] = line.split("\t");
+        return { id, state: state === "DISMISSED" && pushDismissed.has(review) ? "APPROVED" : state, commit, at }; });
+    const approved = tahaApprovedCommit(rows, baseChangedAt);
+    if (!approved) return false;
+    return approved === headSha.toLowerCase() || sameOwnChange({ repoPath, gh, pullRequest, from: approved, to: headSha });
   } catch { return false; }
 }
 
@@ -415,12 +501,15 @@ export function recordTahaLaneOverride({ dirs, pullRequest, code, now = Date.now
   return wrote ? { ok: true, payload } : { ok: false, reason: "the override could not be saved" };
 }
 
-/** Mason's live override for this PR at exactly this head, or null. */
-export function findTahaLaneOverride({ dirs, pullRequest, headSha, now = Date.now() }) {
-  if (!usablePr(pullRequest) || !usableHead(headSha)) return null;
+/**
+ * Mason's live override for this PR, or null. It covers every later push to the PR for its 24 hours
+ * (Mason, 2026-11-25: one message per PR, not per commit). `headSha` is unused, kept for callers.
+ */
+export function findTahaLaneOverride({ dirs, pullRequest, now = Date.now() }) {
+  if (!usablePr(pullRequest)) return null;
   for (const dir of dirs || []) {
     const data = readSmall(path.join(dir, overrideName(pullRequest)));
-    if (data?.pullRequest === pullRequest && data?.headSha === headSha.toLowerCase() && live(data, TAHA_LANE_OVERRIDE_MAX_AGE_MS, now)) return data;
+    if (data?.pullRequest === pullRequest && usableHead(data?.headSha) && live(data, TAHA_LANE_OVERRIDE_MAX_AGE_MS, now)) return data;
   }
   return null;
 }
@@ -443,14 +532,14 @@ export function tellTahaOnGitHub({ repo, gh, pullRequest, body }) {
 
 /**
  * The merge gates' single call: null when the merge may go on, otherwise the
- * refusal text. `tahaApproved()` true (Taha signed off on this head) lets it through.
- * With Mason's override for this PR and head, `tellTaha(body)`
+ * refusal text. `tahaApproved()` true (Taha's Approve stands for this head) lets it through.
+ * With Mason's override for this PR (any head, 24 hours), `tellTaha(body)`
  * must post the PR comment first (once per override); if it can't, the merge is refused.
  */
 export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, tahaApproved = () => false, notice = () => {} }) {
   const problem = tahaLaneProblem({ files });
   if (!problem) return null;
-  // Taha's Approve on this exact head lets lane code through. Not an unreadable file list, a migration
+  // Taha's standing Approve (tahaApprovedOnGitHub) lets lane code through. Not an unreadable file list, a migration
   // whose SQL could not be read, or the block's own files.
   // Unreadable SQL is checked on the raw entries: a lane-named migration is listed by name, never with the suffix (Astra, 2026-11-24).
   const unreadableSql = !Array.isArray(files) || files.some((e) => e && "sql" in e && e.sql === null);
@@ -461,7 +550,7 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
   const override = findTahaLaneOverride({ dirs, pullRequest, headSha, now });
   if (override) {
     if (!override.tahaToldAt) {
-      const body = `@TahaKhanAbdalli Mason's override of the Taha lane block was used for a merge attempt on this PR at \`${override.headSha}\` ` +
+      const body = `@TahaKhanAbdalli Mason's override of the Taha lane block was used for a merge attempt on this PR at \`${String(headSha).toLowerCase()}\` ` +
         `(his code ${override.code}, valid until ${override.expiresAt}). The other merge checks still apply, so this attempt may still be refused; ` +
         `the PR's own merged state is the record of whether it landed. It ${problem.reason}.`;
       if (!tellTaha(body)) {
@@ -469,16 +558,16 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
       }
       markTahaTold({ dirs, override });
     }
-    notice(`${prefix}: TAHA LANE OVERRIDDEN BY MASON for #${pullRequest} at ${override.headSha}; Taha was told on the PR.\n`);
+    notice(`${prefix}: TAHA LANE OVERRIDDEN BY MASON for #${pullRequest} at ${String(headSha).slice(0, 12)}; Taha was told on the PR.\n`);
     return null;
   }
   const code = issueTahaLaneCode({ dirs, pullRequest, headSha, now });
   return `${prefix}: TAHA LANE BLOCK — #${pullRequest || "?"} is refused because ${problem.reason}. ` +
     "Agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) without Taha's " +
-    "GitHub Approve on this exact commit, and never change this block without Mason's code (Mason, 2026-11-22 and 2026-11-24). " +
+    "GitHub Approve (it carries over pushes that only catch up with staging, add docs/ notes or restamp a migration), and never change this block without Mason's code (Mason, 2026-11-22 and 2026-11-24). " +
     `Request his review (gh pr edit ${pullRequest || "<n>"} --add-reviewer TahaKhanAbdalli) and wait for his Approve. ` +
     (code
       ? `Only if Mason wants it merged anyway: tell him why in one line and ask him to send, as a message of its own: taha override #${pullRequest} ${code} ` +
-        "(it covers this PR at its current commit only; a new push needs a new code)"
+        "(it covers this PR, later pushes included, for 24 hours)"
       : "The override code could not be saved, so only Taha can land it.");
 }

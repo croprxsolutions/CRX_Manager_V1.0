@@ -127,6 +127,26 @@ test('review labels: exactly one of approved / changes, or neither after a push'
   assert.deepEqual(reviewLabelChanges(pr({ author: { login: 'TahaKhanAbdalli' }, reviews: [rv('APPROVED')] })), { add: [], remove: [] }, "Taha's own PR untouched");
 });
 
+test("carried-over Approve (Mason, 2026-11-25): shows as approved, takes ready-for-taha off, stops re-labels and pings", () => {
+  const yes = () => true;
+  const old = pr({ reviews: [rv('APPROVED', NEW)], labels: L('ready-for-taha'), reviewRequests: [{ login: 'TahaKhanAbdalli' }] });
+  assert.equal(tahaVerdict(old, yes), 'taha-approved');
+  assert.equal(tahaVerdict(old, () => false), null, 'not carried: no verdict');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('CHANGES_REQUESTED', NEW)] }), never), null, 'no earlier Approve: GitHub is not asked');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED', NEW), rv('CHANGES_REQUESTED')] }), never), 'taha-changes', 'a verdict on this head wins without asking');
+  assert.deepEqual(reviewLabelChanges(old, yes), { add: ['taha-approved'], remove: ['ready-for-taha'] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('CHANGES_REQUESTED')], labels: L('ready-for-taha') })), { add: ['taha-changes'], remove: ['ready-for-taha'] },
+    'changes requested also takes it off, so the fixed head is re-labelled');
+  assert.deepEqual(reviewLabelChanges(old, () => false), { add: [], remove: [] }, 'a real change keeps it waiting');
+  assert.match(decide(pr({ reviews: [rv('APPROVED', NEW)] }), { checks: never, lane: never, sol: never, carried: yes }).why, /carries over/);
+  assert.equal(decide(pr({ reviews: [rv('APPROVED', NEW)] }), { ...ok, carried: () => false }).act, true, 'not carried: asked again');
+  assert.equal(needsPing(old, [], { ...ok, asked: never, carried: yes }).ping, false);
+  const day = Date.parse('2026-11-26T00:00:00Z');
+  const pingedAt = [{ author: { login: 'github-actions' }, body: pingMarker(HEAD), createdAt: '2026-11-24T00:00:00Z' }];
+  assert.equal(needsReminder(old, pingedAt, day, { checks: never, carried: yes }).remind, false);
+  assert.equal(needsReminder(old, pingedAt, day, { checks: green, carried: () => false }).remind, true);
+});
+
 test('reminder: once per head, 24 h after the first ping, while Taha has not decided', () => {
   const T0 = Date.UTC(2026, 10, 24, 12);
   const bot = (body, createdAt = new Date(T0).toISOString()) => ({ author: { login: 'github-actions' }, body, createdAt });

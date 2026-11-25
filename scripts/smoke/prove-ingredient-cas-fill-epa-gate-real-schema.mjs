@@ -11,8 +11,8 @@
  *      'corrected' chemistry event per product are written, the EPA product row is untouched;
  *   2. reason and evidence are still required; an invalid or taken CAS is still refused;
  *   3. a CAS plus another field, or the acid flag alone, is still refused on an EPA product;
- *   4. a CAS an admin typed can be corrected on an EPA product (a mistyped one is not locked in; Mason, 2026-11-25);
- *      a CAS the ingredient was created with (as an EPA commit creates it) stays gated (Sol, 2026-11-25);
+ *   4. once set, a CAS is locked on an EPA product: changing or clearing it is refused, whether it was filled
+ *      here or the ingredient was created with it (Mason, 2026-11-25, "Fix it" on Sol round 5);
  *   5. a sales rep is refused (ADMIN_REQUIRED).
  *
  * Run: node scripts/smoke/prove-ingredient-cas-fill-epa-gate-real-schema.mjs   (needs Docker; never touches live)
@@ -111,14 +111,15 @@ try {
   assert.equal(scalar(`SELECT row_version || ':' || strength_value || ':' || source FROM public.product_parent_ingredients WHERE parent_id = '${P_EPA}' AND ingredient_id = '${ZETA}';`), epaRowBefore, 'EPA row untouched');
   console.log(`[fill] admin filled CAS ${ZETA_CAS} on an EPA-sourced ingredient; events written; EPA product row unchanged`);
 
-  // A mistyped CAS can be corrected on the EPA product: a typed row's, and the EPA-sourced ingredient's.
+  // Once set, a CAS is locked on the EPA product (Mason, 2026-11-25, "Fix it"): fill only, no change or clear.
   assert.match(previewThenSave(TYPED_ING, { cas: '50-00-0' }, 'typed', 'SDS', ADMIN, true), /^ok\|/, 'typed fill');
-  assert.match(previewThenSave(TYPED_ING, { cas: '64-17-5' }, 'wrong SDS', 'right SDS', ADMIN, true), /^ok\|/, 'typed CAS corrected');
-  assert.equal(scalar(`SELECT cas FROM public.active_ingredients WHERE id = '${TYPED_ING}';`), '64-17-5');
-  assert.match(previewThenSave(ZETA, { cas: '67375-30-8' }, 'wrong SDS', 'right SDS', ADMIN, true), /^ok\|/, 'EPA-sourced CAS corrected');
-  assert.equal(scalar(`SELECT cas FROM public.active_ingredients WHERE id = '${ZETA}';`), '67375-30-8');
+  assert.match(previewThenSave(TYPED_ING, { cas: '64-17-5' }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'typed CAS locked');
+  assert.match(previewThenSave(TYPED_ING, { cas: null }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'typed CAS cannot be cleared');
+  assert.match(previewThenSave(ZETA, { cas: '67375-30-8' }), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'filled CAS locked');
+  assert.equal(scalar(`SELECT cas FROM public.active_ingredients WHERE id = '${TYPED_ING}';`), '50-00-0');
+  assert.equal(scalar(`SELECT cas FROM public.active_ingredients WHERE id = '${ZETA}';`), ZETA_CAS);
   assert.equal(scalar(`SELECT row_version || ':' || strength_value || ':' || source FROM public.product_parent_ingredients WHERE parent_id = '${P_EPA}' AND ingredient_id = '${ZETA}';`), epaRowBefore, 'EPA row still untouched');
-  console.log('[correct] a typed CAS and the EPA-sourced ingredient CAS were corrected on the EPA product; EPA row unchanged');
+  console.log('[lock] a filled CAS cannot be changed or cleared on the EPA product; EPA row unchanged');
 
   console.log('\nINGREDIENT_CAS_FILL_PROOF_PASS');
 } finally {

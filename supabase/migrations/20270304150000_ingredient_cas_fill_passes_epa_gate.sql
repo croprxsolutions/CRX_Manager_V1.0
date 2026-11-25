@@ -8,11 +8,10 @@
 --   never fills a CAS, so the ingredient stays unlinked, though the EPA review itself says
 --   "Your ingredient has no CAS number; EPA gives ... Correct the ingredient to link them."
 -- WHAT: re-issues public._edit_active_ingredient (same signature, owner postgres, SECURITY DEFINER, search_path, no
---   grants). One change: an edit of the CAS alone skips the per-product EPA gate when the CAS is empty or was typed by
---   an admin through this function (newest CAS change in active_ingredient_events is 'updated'). It changes no product
+--   grants). One change: an edit that only fills an EMPTY CAS skips the per-product EPA gate. It changes no product
 --   row (strengths, sources, modes of action stay as EPA wrote them). The admin's reason and evidence are trusted
---   (Mason, 2026-11-25): a mistyped but valid, unused CAS is caught only by review and can be corrected here.
--- NOT CHANGED: a CAS the ingredient was created with (by EPA or typed), the acid fields, or any mix of fields still
+--   (Mason, 2026-11-25). Once set, the CAS is locked on an EPA product (Mason, 2026-11-25, "Fix it").
+-- NOT CHANGED: changing or clearing a set CAS, the acid fields, or any mix of fields still
 --   refuse on an EPA product. Admin only
 --   (preview_active_ingredient_change and save_active_ingredient keep _product_parent_require_admin), reason and
 --   evidence still required when products use it, CAS format/check digit and CAS-taken checks, the ingredient event and
@@ -199,15 +198,9 @@ BEGIN
   END IF;
   -- A CAS-only edit passes the EPA gate (Mason, 2026-11-24): it changes no product row, and EPA asks for exactly this
   -- ("Correct the ingredient to link them"). The admin's evidence is trusted when EPA gives no CAS (Mason, 2026-11-25,
-  -- accepting Sol's mistyped-CAS risk), so only an empty CAS, or one an admin typed here (the newest CAS change in the
-  -- ingredient's history is an 'updated' event), passes. A CAS the ingredient was created with (EPA or typed) stays
-  -- gated (Sol, 2026-11-25). The check digit and CAS-taken checks above still apply.
-  v_cas_edit := v_changed = ARRAY['cas']::text[]
-    AND (v_old.cas IS NULL OR (
-      SELECT e.event_type = 'updated' AND e.after_values->>'cas' = v_old.cas
-        FROM public.active_ingredient_events e
-       WHERE e.ingredient_id = p_ingredient_id AND e.after_values->>'cas' IS DISTINCT FROM e.before_values->>'cas'
-       ORDER BY e.id DESC LIMIT 1) IS TRUE);
+  -- accepting Sol's mistyped-CAS risk), but only to FILL an empty CAS: once set, a CAS on an EPA product is locked
+  -- here (Mason, 2026-11-25, "Fix it" on Sol round 5). The check digit and CAS-taken checks above still apply.
+  v_cas_edit := v_changed = ARRAY['cas']::text[] AND v_old.cas IS NULL;
   FOREACH v_parent IN ARRAY v_parents LOOP
     v_gate := CASE WHEN v_cas_edit THEN NULL ELSE public._parent_chemistry_epa_refusal(v_parent) END;
     IF v_gate IS NOT NULL THEN

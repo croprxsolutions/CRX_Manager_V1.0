@@ -228,6 +228,8 @@ export function assertFinishedBuild(build, migrations, schemaFingerprint, recove
 export function assertOwnedApiDbListeners(netstat, gatewayBindings) {
   const listens = [API_PORT, DB_PORT].filter((port) => netstat.split(/\r?\n/).some((line) => line.includes(`:${port} `) && /LISTENING/.test(line)));
   for (const port of listens) {
+    // Every real listener must be loopback, whatever address the gateway binding claims.
+    assertAppPortIsLoopback(netstat, port);
     if (!gatewayBindings.some((binding) => Number(binding.HostPort) === port && binding.HostIp === '127.0.0.1')) {
       throw new Refused(`Port ${port} has a listener that is not owned by this checkout's local gateway. Nothing was changed.`);
     }

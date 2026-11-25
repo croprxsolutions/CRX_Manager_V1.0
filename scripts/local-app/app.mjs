@@ -116,6 +116,9 @@ function assertExistingStackIsOurs() {
   assertLoopbackBindings(inspected.flatMap((c) => Object.values(c.HostConfig.PortBindings ?? {}).flat()));
 }
 
+// `-p tcp` hides IPv6 listeners on Windows, so both families are read.
+const allListeners = () => ['tcp', 'tcpv6'].map((family) => text(run('netstat', ['-ano', '-p', family]))).join('\n');
+
 function assertNewScreenWalkLaneIsEmpty() {
   if (!IS_SCREEN_WALK) return;
   const list = (args) => text(run('docker', args));
@@ -123,7 +126,7 @@ function assertNewScreenWalkLaneIsEmpty() {
     containers: list(['ps', '-aq', '--filter', `label=com.docker.compose.project=${PROJECT}`]),
     volumes: list(['volume', 'ls', '-q', '--filter', `label=com.docker.compose.project=${PROJECT}`]),
     networks: list(['network', 'ls', '-q', '--filter', `label=com.docker.compose.project=${PROJECT}`]),
-    netstat: text(run('netstat', ['-ano', '-p', 'tcp'])),
+    netstat: allListeners(),
   });
 }
 
@@ -145,7 +148,7 @@ async function preflight({ needState = true } = {}) {
   }
   if (state) assertLocalState(state);
   assertLocalDockerEndpoint(text(run('docker', ['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'])));
-  assertAppPortIsLoopback(text(run('netstat', ['-ano', '-p', 'tcp'])), APP_PORT);
+  assertAppPortIsLoopback(allListeners(), APP_PORT);
   await assertFrontendIsOurs(state?.LOCAL_ANON_KEY);
   assertExistingStackIsOurs();
   if (IS_SCREEN_WALK) {
@@ -153,7 +156,7 @@ async function preflight({ needState = true } = {}) {
     const inspected = gateway ? JSON.parse(text(run('docker', ['inspect', ...gateway.split(/\s+/)]))) : [];
     if (inspected.length > 1) throw new Refused('More than one gateway claims this walkthrough lane. Nothing was changed.');
     const bindings = inspected.length ? assertWalkthroughGatewayIdentity(inspected[0], PROJECT, path.join(HERE, 'compose.yaml')) : [];
-    assertOwnedApiDbListeners(text(run('netstat', ['-ano', '-p', 'tcp'])), bindings);
+    assertOwnedApiDbListeners(allListeners(), bindings);
   }
   if (!state) assertNewScreenWalkLaneIsEmpty();
   // A Docker restart can hand the gateway its route back, so every command takes it away again.
@@ -419,6 +422,7 @@ async function rebuild({ firstStart = false } = {}) {
   if (!firstStart) stopFrontend();
   const state = readState() ?? createState();
   rmSync(BUILD_FILE, { force: true });
+  const fingerprintBefore = IS_SCREEN_WALK ? schemaFingerprint(approvedMigrations()) : undefined;
   if (!firstStart) compose(['down', '-v', '--remove-orphans']);
   await startDatabase(state);
   await startServices(state);
@@ -434,6 +438,7 @@ async function rebuild({ firstStart = false } = {}) {
   compose(['stop', 'gateway']);
   await startServices(state);
   await seed(state);
+  if (IS_SCREEN_WALK && schemaFingerprint(migrations) !== fingerprintBefore) throw new Refused('This checkout changed while the database was being built. Nothing was marked finished. Run the rebuild again.');
   const ledgerRows = scalar('SELECT count(*) FROM supabase_migrations.schema_migrations;');
   const uncommittedChanges = text(run('git', ['status', '--porcelain'])) !== '';
   const build = { commit: text(run('git', ['rev-parse', 'HEAD'])), uncommittedChanges, builtAt: new Date().toISOString(), ledgerRows, migrations,
@@ -520,12 +525,17 @@ async function frontend() {
   run(process.execPath, vite(port), { env: frontendEnv(state, supabaseUrl), stdio: 'inherit' });
 }
 
-async function test() {
-  const spec = process.argv[3];
+// Also runs before the lane lock, so a bad spec never touches the checkout's lock.
+function assertSpec(spec) {
   if (IS_SCREEN_WALK && !spec) throw new Refused('Choose one feature proof, for example: walkthrough.mjs test product-unit.spec.ts');
   if (spec && (!/^[\w-]+\.spec\.ts$/.test(spec) || !existsSync(path.join(HERE, 'e2e', spec)) || (IS_SCREEN_WALK && spec === 'chemical-sales.spec.ts'))) {
     throw new Refused('Choose an existing, non-sales spec file from scripts/local-app/e2e.');
   }
+}
+
+async function test() {
+  const spec = process.argv[3];
+  assertSpec(spec);
   const state = await preflight();
   requireFinishedBuild();
   await startDatabase(state);
@@ -576,6 +586,7 @@ const validArguments = extra.length === 0
   if (!command) throw new Error(`Use one of: ${Object.keys(COMMANDS).join(', ')}`);
   // One lock for the whole command: any of these can change the lane's database or its saved evidence (status reseals a running gateway).
   if (IS_SCREEN_WALK && ['start', 'rebuild', 'stop', 'seed', 'test', 'status'].includes(process.argv[2])) {
+    if (process.argv[2] === 'test') assertSpec(process.argv[3]);
     assertCleanEnvironment();
     assertStateDirAllowed();
     mkdirSync(path.dirname(FIRST_START_LOCK), { recursive: true });

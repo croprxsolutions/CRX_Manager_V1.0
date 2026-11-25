@@ -13,6 +13,7 @@ export function schemaFingerprint(root, migrations) {
     'scripts/verify-schema-baseline.mjs',
     'scripts/list-post-baseline-migrations.mjs',
     'scripts/local-app/app.mjs',
+    'scripts/local-app/walkthrough.mjs',
     'scripts/local-app/target.mjs',
     'scripts/local-app/schema-fingerprint.mjs',
     'scripts/local-app/compose.yaml',

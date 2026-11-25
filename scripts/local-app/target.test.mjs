@@ -95,6 +95,9 @@ describe('isolated sales profile', () => {
   it('refuses API or database listeners not bound by this walkthrough gateway', () => {
     assert.throws(() => assertOwnedApiDbListeners(`TCP 127.0.0.1:${API_PORT} 0.0.0.0:0 LISTENING 123`, []), /not owned by this checkout/);
     assert.doesNotThrow(() => assertOwnedApiDbListeners(`TCP 127.0.0.1:${API_PORT} 0.0.0.0:0 LISTENING 123`, [{ HostIp: '127.0.0.1', HostPort: String(API_PORT) }]));
+    for (const address of ['0.0.0.0', '192.168.1.5', '[::]']) {
+      assert.throws(() => assertOwnedApiDbListeners(`TCP ${address}:${DB_PORT} 0.0.0.0:0 LISTENING 123`, [{ HostIp: '127.0.0.1', HostPort: String(DB_PORT) }]), /open beyond this computer/);
+    }
   });
   it('requires a running gateway from this checkout before trusting its published ports', () => {
     const composeFile = path.join(HERE, 'compose.yaml');
@@ -197,6 +200,8 @@ describe('walkthrough lane lock', () => {
     const dir = path.join(root, 'scripts', 'local-app');
     mkdirSync(dir, { recursive: true });
     for (const file of readdirSync(HERE).filter((name) => /\.mjs$/.test(name) && !/\.test\./.test(name))) copyFileSync(path.join(HERE, file), path.join(dir, file));
+    mkdirSync(path.join(dir, 'e2e'), { recursive: true });
+    writeFileSync(path.join(dir, 'e2e', 'product-unit.spec.ts'), '');
     return { root, dir, lock: path.join(dir, '.state', 'screen-walk', 'first-start.lock') };
   };
   const hold = (lock) => { mkdirSync(path.dirname(lock), { recursive: true }); writeFileSync(lock, `${process.pid}

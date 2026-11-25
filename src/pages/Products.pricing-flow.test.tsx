@@ -11,6 +11,7 @@ const {
   mockPreviewPricing,
   mockProducts,
   mockProductUpdate,
+  mockRefusalReason,
   mockRole,
   mockToast,
   pricingWorkbookFileLimit,
@@ -24,6 +25,7 @@ const {
   mockPreviewPricing: vi.fn(),
   mockProducts: [] as Array<Record<string, unknown>>,
   mockProductUpdate: vi.fn(),
+  mockRefusalReason: vi.fn(),
   mockRole: { current: 'admin' },
   mockToast: vi.fn(),
   pricingWorkbookFileLimit: 10 * 1024 * 1024,
@@ -87,6 +89,7 @@ vi.mock('../lib/productPricing', async (importOriginal) => {
     approvePricingChangeSet: mockApprovePricing,
     applyProductPricingChangeSet: mockApplyPricing,
     createPricingWorkbookExport: mockExportPricing,
+    getPricingWorkbookExportRefusalReason: mockRefusalReason,
   };
 });
 
@@ -110,6 +113,8 @@ vi.mock('../lib/productPricingWorkbook', async () => {
     groupedUseTimingRefusal: () => null,
     priceSheetExpiredText: actual.priceSheetExpiredText,
     priceSheetRefusalText: actual.priceSheetRefusalText,
+    isPriceSheetRefusal: actual.isPriceSheetRefusal,
+    priceSheetReasonText: actual.priceSheetReasonText,
   };
 });
 
@@ -257,6 +262,8 @@ describe('Products governed inline pricing flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRole.current = 'admin';
+    // Until a test names a reason, the database finds none and the original wording stays.
+    mockRefusalReason.mockResolvedValue('NONE');
     mockProducts.splice(0, mockProducts.length, product);
     mockPreviewPricing.mockResolvedValue({
       change_set_id: '22222222-2222-4222-8222-222222222222',
@@ -658,6 +665,81 @@ describe('Products governed inline pricing flow', () => {
       'error',
       'No prices were changed. This price sheet was already applied, was downloaded by another user, or came from an older template. Download a fresh one',
     ));
+  });
+
+  describe('the database names the one refusal reason', () => {
+    const USED = 'No prices were changed. This price sheet was already applied, was downloaded by another user, or came from an older template. Download a fresh one';
+    const upload = async (container: HTMLElement, name = 'sheet.xlsx') => {
+      await screen.findByRole('button', { name: 'Review Pricing File' });
+      const input = container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!;
+      fireEvent.change(input, { target: { files: [new File(['abc'], name)] } });
+    };
+
+    beforeEach(() => {
+      mockParsePricing.mockResolvedValue({ exportId: 'export-1', expiresAt: '2999-01-01T00:00:00+00:00', rows: [] });
+    });
+
+    it.each([
+      ['WORKBOOK_V2_EXPORT_REQUIRED', 'ALREADY_APPLIED', /already used for a price change; a product's Sell Price History shows what changed/],
+      ['WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'DOWNLOADED_BY_OTHER_USER', /Another user downloaded this price sheet/],
+      ['WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED', 'OLD_TEMPLATE', /older template/],
+      ['WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED', 'EXPIRED', /expired \(sheets last 7 days\)/],
+      ['WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED', 'EXPORT_NOT_FOUND', /no record of this price sheet/],
+    ])('after %s, shows the sentence for %s', async (code, reason, sentence) => {
+      mockPreviewPricing.mockRejectedValue({ message: code });
+      mockRefusalReason.mockResolvedValue(reason);
+      const { container } = render(<Products />);
+      await upload(container);
+
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(sentence)));
+      expect(mockRefusalReason).toHaveBeenCalledExactlyOnceWith('export-1');
+      expect(mockToast).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['NONE', () => mockRefusalReason.mockResolvedValue('NONE')],
+      ['an unknown code', () => mockRefusalReason.mockResolvedValue('SOMETHING_NEW')],
+      ['a failed lookup', () => mockRefusalReason.mockRejectedValue(new Error('ADMIN_REQUIRED'))],
+    ])('keeps the original message on %s', async (_label, arrange) => {
+      mockPreviewPricing.mockRejectedValue({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+      arrange();
+      const { container } = render(<Products />);
+      await upload(container);
+
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', USED));
+      expect(mockRefusalReason).toHaveBeenCalledTimes(1);
+    });
+
+    it('never asks after other errors or a reviewed sheet', async () => {
+      mockPreviewPricing.mockRejectedValueOnce(new Error('PRICING_DUPLICATE_PRODUCT_ID'));
+      const { container } = render(<Products />);
+      await upload(container);
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'PRICING_DUPLICATE_PRODUCT_ID'));
+
+      mockPreviewPricing.mockResolvedValueOnce({ ...(await inlinePreview()), source: 'pricing_worksheet' });
+      await upload(container, 'good.xlsx');
+      await screen.findByRole('button', { name: 'Apply approved changes' });
+      expect(mockRefusalReason).not.toHaveBeenCalled();
+    });
+
+    it('drops a late reason that belongs to an earlier upload', async () => {
+      let answerFirst: (reason: string) => void = () => undefined;
+      mockPreviewPricing.mockRejectedValueOnce({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+      mockRefusalReason.mockReturnValueOnce(new Promise<string>((resolve) => { answerFirst = resolve; }));
+      const { container } = render(<Products />);
+      await upload(container, 'first.xlsx');
+      await waitFor(() => expect(mockRefusalReason).toHaveBeenCalledTimes(1));
+
+      // A second file is chosen while the first file's reason is still on its way.
+      mockParsePricing.mockResolvedValueOnce({ exportId: 'export-2', expiresAt: '2999-01-01T00:00:00+00:00', rows: [] });
+      mockPreviewPricing.mockRejectedValueOnce(new Error('PRICING_DUPLICATE_PRODUCT_ID'));
+      await upload(container, 'second.xlsx');
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'PRICING_DUPLICATE_PRODUCT_ID'));
+
+      answerFirst('ALREADY_APPLIED');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockToast).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('exports the full price sheet: every active product, never an inactive one', async () => {

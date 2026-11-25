@@ -1537,7 +1537,8 @@ improvement candidates" table. To-Do section 17; decisions 34 and 35.
   uninvoiced order.
 - Purchasing: show ordered cost, receipt snapshot, corrected PO cost and current product cost distinctly, and the
   effect of a correction before it is applied.
-- Pricing workbook: point at the invalid row when Apply is disabled; tell an already-applied replay from a bad file.
+- Pricing workbook: point at the invalid row when Apply is disabled. (A refused upload now names its one reason, already used,
+  another user's, older template, expired or not on record: `docs/plans/2026-11-24-price-sheet-refusal-reason-CONTRACT.md`.)
 - Pricing history: label current tier, last charged and quoted amounts with their scope, date and source.
 - Office exceptions and documents: an end-to-end dashboard-to-fix check by role, and one quote-to-statement trail
   that highlights differences.

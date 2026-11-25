@@ -63,6 +63,13 @@ Read at `origin/staging` ef21134fc, 2026-11-24. Related: KNOWN_ISSUES "Pricing w
 - Sol r1 (clean, head 0d353ff11): MED "installs after a refused preflight in autocommit with stop-on-error off" refuted: both sanctioned runners wrap the file and its ledger row in one transaction (`.github/workflows/db-apply.yml` header, `scripts/apply-migration-file.mjs` ~341), applying by hand is forbidden, and the marker is the house pattern. LOW "proof only tests expired old templates": fixed, an active unexpired v1 export now returns `OLD_TEMPLATE`. LOW "status preflight is install-time only": contract wording fixed.
 - Luna r2 LOW (file dated 2027-03-03 while the change is 2026-11-24): refuted. The repo's migration names already run ahead of the calendar (staging high-water `20270302180000`); the house rule is that a new migration sorts after the newest one, which `20270303140000` does. The apply script re-checks the live ledger order.
 
+## Screen half (2026-11-24)
+
+- `src/pages/Products.tsx` asks the function only when the upload's preview is refused with one of the three combined codes and the parsed sheet has an export id. `NONE`, an unknown code or a failed lookup keeps the earlier message (`priceSheetRefusalText` / `sanitizeError`). An answer that arrives after another file was chosen is dropped (an upload counter).
+- The apply step is unchanged: a refusal there keeps `sanitizeError`, and a lost apply response is checked in pricing history (#17).
+- Sentences (`priceSheetReasonText` in `src/lib/productPricingWorkbook.ts`) each start "No prices were changed." and end with "download a fresh one". `ALREADY_APPLIED` says the sheet "was already used for a price change" and points at a product's Sell Price History, not "these edits went live" (#1, #44). `EXPIRED` reuses the existing expired sentence.
+- `DOWNLOADED_BY_OTHER_USER`, `EXPIRED` and `OLD_TEMPLATE` cannot be produced on staging (one admin, 7-day sheets, v2-only downloads); unit and page tests cover them.
+
 ## Open business decisions
 
 None. (Order and wording of codes are technical; the screen sentences come with the client half.)

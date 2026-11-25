@@ -1,6 +1,6 @@
 import type { Json } from '../types/supabase';
 import type { ProductCostBasisSelectionSource, ProductCostBasisType } from '../types';
-import { assertRpcResult, supabase } from './db';
+import { assertRpcResult, supabase, supabaseUntyped } from './db';
 import { PRODUCT_RATE_KEYS } from './productRateLock';
 
 export type PricingSource = 'pricing_worksheet' | 'product_page' | 'products_inline';
@@ -608,6 +608,16 @@ export async function approvePricingChangeSet(input: ApprovePricingChangeSetInpu
   });
   if (error) throw error;
   assertRpcResult<{ status: 'approved' }>(data, 'approve_pricing_change_set');
+}
+
+/** Why the database refused a price sheet: one reason code, or NONE (read-only, active admins only). */
+export async function getPricingWorkbookExportRefusalReason(exportId: string): Promise<string> {
+  // Not in the generated types yet (20270303140000).
+  const { data, error } = await supabaseUntyped.rpc('get_pricing_workbook_export_refusal_reason', {
+    p_export_id: exportId,
+  });
+  if (error) throw error;
+  return assertRpcResult<string>(data, 'get_pricing_workbook_export_refusal_reason');
 }
 
 export async function applyProductPricingChangeSet(

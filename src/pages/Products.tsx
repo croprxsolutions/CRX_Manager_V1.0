@@ -39,6 +39,7 @@ import {
   approvePricingChangeSet,
   createPricingWorkbookExport,
   defaultPricingMode,
+  getPricingWorkbookExportRefusalReason,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
   pricingMarginTextIsValid,
@@ -52,8 +53,10 @@ import {
 } from '../lib/productPricing';
 import {
   groupedUseTimingRefusal,
+  isPriceSheetRefusal,
   MAX_PRICING_WORKBOOK_FILE_BYTES,
   MAX_PRICING_WORKBOOK_ROWS,
+  priceSheetReasonText,
   priceSheetRefusalText,
 } from '../lib/productPricingWorkbook';
 import {
@@ -308,6 +311,8 @@ export default function Products() {
     if (!editing) setFloorDraftsVoid(false);
   };
   const pricingWorkbookInputRef = useRef<HTMLInputElement>(null);
+  // Each price sheet upload's number, so a late refusal reason for an earlier upload is dropped.
+  const pricingUploadSeq = useRef(0);
 
   const previewPricingIdem = useIdempotencyKey('preview_product_pricing_changes', profile?.id || '');
   const approvePricingIdem = useIdempotencyKey('approve_pricing_change_set', profile?.id || '');
@@ -982,10 +987,13 @@ export default function Products() {
       return;
     }
     setWorkbookBusy(true);
+    const upload = ++pricingUploadSeq.current;
     let expiresAt: string | null = null;
+    let exportId: string | null = null;
     try {
       const parsed = await parseProductPricingWorkbookWithSupplierEvidence(await file.arrayBuffer());
       expiresAt = parsed.expiresAt;
+      exportId = parsed.exportId;
       const sourceFile: PricingSourceFile = { name: file.name, sha256: await sha256Hex(file) };
       // One key per exact request (the file's bytes decide the rows), as for the inline preview.
       const intent = JSON.stringify(['workbook', sourceFile.sha256]);
@@ -1006,10 +1014,20 @@ export default function Products() {
       setPricingSourceFile(sourceFile);
       setPricingPreview(preview);
     } catch (error) {
-      toast('error', (expiresAt && priceSheetRefusalText(error, expiresAt)) || sanitizeError(error));
+      let message = (expiresAt && priceSheetRefusalText(error, expiresAt)) || sanitizeError(error);
+      if (exportId && isPriceSheetRefusal(error)) {
+        // The database names the one reason; NONE, an unknown code or a failed lookup keeps the message above.
+        const reason = await getPricingWorkbookExportRefusalReason(exportId).catch(() => null);
+        if (upload !== pricingUploadSeq.current) return;
+        message = (reason && priceSheetReasonText(reason)) || message;
+      }
+      toast('error', message);
     } finally {
-      setWorkbookBusy(false);
-      if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
+      // A later upload owns the busy state and the file input.
+      if (upload === pricingUploadSeq.current) {
+        setWorkbookBusy(false);
+        if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
+      }
     }
   };
 

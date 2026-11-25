@@ -10,7 +10,9 @@ import {
   MAX_PRICING_WORKBOOK_ROWS,
   MAX_PRICING_WORKBOOK_UNCOMPRESSED_BYTES,
   parseProductPricingWorkbook,
+  isPriceSheetRefusal,
   priceSheetExpiredText,
+  priceSheetReasonText,
   priceSheetRefusalText,
   PRICING_WORKBOOK_FORMAT_VERSION,
   PRICING_WORKBOOK_HEADERS,
@@ -520,5 +522,38 @@ describe('price sheet refusal wording', () => {
     expect(priceSheetRefusalText({ message: 'PRICING_DUPLICATE_PRODUCT_ID' }, expiresAt, before)).toBeNull();
     expect(priceSheetRefusalText({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' }, '', before)).toBeNull();
     expect(priceSheetRefusalText(null, expiresAt, before)).toBeNull();
+  });
+});
+
+describe('price sheet refusal reason wording', () => {
+  it('looks a reason up only for the three combined refusal codes', () => {
+    for (const code of ['WORKBOOK_V2_EXPORT_REQUIRED', 'WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED']) {
+      expect(isPriceSheetRefusal(new Error(code))).toBe(true);
+      expect(isPriceSheetRefusal({ message: `${code}: detail` })).toBe(true);
+    }
+    for (const other of [new Error('PRICING_DUPLICATE_PRODUCT_ID'), new Error('ADMIN_REQUIRED'), { message: 'x WORKBOOK_V2_EXPORT_REQUIRED' }, null, 'WORKBOOK_V2_EXPORT_REQUIRED']) {
+      expect(isPriceSheetRefusal(other)).toBe(false);
+    }
+  });
+
+  it('gives one sentence per reason, each saying nothing changed and how to fix it', () => {
+    const expected: Record<string, RegExp> = {
+      EXPORT_NOT_FOUND: /no record of this price sheet/,
+      DOWNLOADED_BY_OTHER_USER: /Another user downloaded this price sheet/,
+      ALREADY_APPLIED: /already used for a price change; a product's Sell Price History shows what changed/,
+      OLD_TEMPLATE: /came from an older template/,
+      EXPIRED: /expired \(sheets last 7 days\)/,
+    };
+    for (const [reason, pattern] of Object.entries(expected)) {
+      const text = priceSheetReasonText(reason);
+      expect(text).toMatch(pattern);
+      expect(text).toMatch(/^No prices were changed\. .*[Dd]ownload a fresh one( yourself)?$/);
+    }
+  });
+
+  it('has no sentence for NONE or an unknown code, so the original message stays', () => {
+    for (const reason of ['NONE', 'SOMETHING_NEW', '', 'constructor', '__proto__', 'expired']) {
+      expect(priceSheetReasonText(reason)).toBeNull();
+    }
   });
 });

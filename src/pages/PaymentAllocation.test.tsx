@@ -445,13 +445,17 @@ describe('Record Payments: faster entry', () => {
       await screen.findByText('INV-OLD');
     }
 
-    it('starts the second customer with nothing allocated, and Apply posts to that customer', async () => {
+    it('starts the second customer with nothing allocated and no amount filled from the first, and Apply posts to it', async () => {
       renderPayments();
       await chooseByKeyboard();
       fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+      expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
       expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
 
       await switchToSmallFarm();
+      // $80.00 was Big Farm's balance, filled in by Pay full balance: it must not become Small Farm's check.
+      expect(screen.getByLabelText('Check Amount')).toHaveValue('');
+      fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
       expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$0.00');
       fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
       fireEvent.click(await screen.findByRole('button', { name: /^Continue/ }));

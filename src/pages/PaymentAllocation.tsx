@@ -119,6 +119,8 @@ export default function PaymentAllocation() {
 
   // Payment fields
   const [checkAmountInput, setCheckAmountInput] = useState('');
+  // The check amount was filled by Pay full balance, from the chosen customer's balance, not typed.
+  const amountAutofilled = useRef(false);
   const [paymentMethod, setPaymentMethod] = useState('check');
   const [referenceNumber, setReferenceNumber] = useState('');
   const [notes, setNotes] = useState('');
@@ -206,15 +208,23 @@ export default function PaymentAllocation() {
     setLoadingInvoices(false);
   }, [toast]);
 
+  // An amount Pay full balance filled in is the old customer's balance: it never carries to another customer.
+  const dropAutofilledAmount = useCallback(() => {
+    if (!amountAutofilled.current) return;
+    amountAutofilled.current = false;
+    setCheckAmountInput('');
+  }, []);
+
   const selectCustomer = useCallback((c: CustomerOption) => {
     focusAmountAfterPick.current = true;
+    dropAutofilledAmount();
     setSelectedCustomer(c);
     prepayReadSeq.current += 1;
     setPrepayBalanceCents(c.prepay_balance_cents);
     setLastResult(null);
     setRetryRefused(false);
     fetchInvoices(c.id);
-  }, [fetchInvoices]);
+  }, [dropAutofilledAmount, fetchInvoices]);
 
   const clearCustomer = useCallback(() => {
     // A load still running for the cleared customer must not refill the list.
@@ -237,6 +247,7 @@ export default function PaymentAllocation() {
   // The check amount, reference and notes stay, as before.
   const releaseCustomerOnEdit = useCallback((typed: string) => {
     if (!selectedCustomer || typed === selectedCustomer.farm_name) return;
+    dropAutofilledAmount();
     invoiceLoadSeq.current += 1;
     setLoadingInvoices(false);
     setInvoicesFailed(false);
@@ -246,7 +257,7 @@ export default function PaymentAllocation() {
     setInvoices([]);
     setLastResult(null);
     setRetryRefused(false);
-  }, [selectedCustomer]);
+  }, [dropAutofilledAmount, selectedCustomer]);
 
   /* ── Allocation helpers ────────────────────────────────────────────── */
 
@@ -312,6 +323,7 @@ export default function PaymentAllocation() {
         return;
       }
       setCheckAmountInput(centsToDollarInput(fullBalanceCents));
+      amountAutofilled.current = true;
     }
     const allocMap = autoAllocate(fullBalanceCents, owed);
     setInvoices((prev) =>
@@ -572,7 +584,7 @@ export default function PaymentAllocation() {
                     value={checkAmountInput}
                     // Choose the customer first: the open invoices to pay come from them.
                     disabled={submitting || !selectedCustomer}
-                    onChange={(e) => setCheckAmountInput(e.target.value)}
+                    onChange={(e) => { amountAutofilled.current = false; setCheckAmountInput(e.target.value); }}
                     aria-invalid={checkAmountRefused}
                     className={`w-full pl-9 pr-3 py-2 text-sm font-semibold bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50 ${checkAmountRefused ? 'border-red-400' : 'border-gray-200'}`}
                   />

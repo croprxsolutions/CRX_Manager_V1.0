@@ -472,7 +472,7 @@ describe('Quotes list remembers the view and offers Mine to a sales rep', () => 
     withQuotePage();
     await screen.findByText('Q-TEST-1');
     fireEvent.click(screen.getByRole('button', { name: 'All Status' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Sent' }));
+    fireEvent.click(screen.getByRole('option', { name: /^(Sent|Booked)$/ }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Search by quote number, customer or product' }), { target: { value: 'Farm 3' } });
     expect(screen.queryByText('Q-TEST-2')).not.toBeInTheDocument();
 

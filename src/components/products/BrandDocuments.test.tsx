@@ -87,4 +87,21 @@ describe('Brand documents on Product Detail', () => {
     await waitFor(() => expect(reload).toHaveBeenCalledWith(true));
     expect(hooks.toast).toHaveBeenCalledExactlyOnceWith('error', 'This brand or link changed. Review it and try again.');
   });
+
+  it('edits an existing supplemental expiration from Product Detail', async () => {
+    const supplement: BrandDocumentLink = { ...label, document_kind: 'supplemental',
+      state_code: 'IA', expires_on: '2027-01-01' };
+    hooks.mutate.mockClear().mockResolvedValueOnce(undefined);
+    const reload = vi.fn();
+    render(<BrandDocuments target={target} brandName="Dual II Magnum" links={[supplement]}
+      canEdit userId="admin" onReload={reload} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Manage documents for Dual II Magnum' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit link' }));
+    fireEvent.change(screen.getByLabelText('Expiration date'), { target: { value: '2027-12-31' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save link' }));
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+    expect(hooks.mutate).toHaveBeenCalledExactlyOnceWith(target, [{ action: 'save', kind: 'supplemental',
+      id: supplement.id, version: supplement.row_version, url: supplement.url, state: 'IA', expires_on: '2027-12-31',
+    }], expect.any(String));
+  });
 });

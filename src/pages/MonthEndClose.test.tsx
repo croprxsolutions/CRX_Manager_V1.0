@@ -665,6 +665,7 @@ describe('MonthEndClose', () => {
     expect(screen.getByRole('link', { name: 'Open field invoice drafts' })).toHaveAttribute('href', '/field-invoices?tab=drafts');
     expect(screen.getByRole('link', { name: 'Open payment history' }))
       .toHaveAttribute('href', '/payment-history?from=2026-07-01&to=2026-07-31');
+    expect(screen.getByRole('link', { name: 'Open Prepayment Manager checks' })).toHaveAttribute('href', '/prepay?tab=manager');
     expect(screen.getByRole('link', { name: 'Open deliveries' })).toHaveAttribute('href', '/deliveries');
     expect(screen.getByRole('link', { name: 'Open AR Aging' })).toHaveAttribute('href', '/ar-aging');
     // Nothing to open where nothing is left: no commissions and no unpriced rush orders this month.

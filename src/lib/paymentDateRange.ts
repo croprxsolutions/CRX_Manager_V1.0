@@ -45,5 +45,8 @@ export function dateRangeCaption(from: string | null, to: string | null): string
 
 /** A YYYY-MM-DD value from the address bar, or null for anything else. */
 export function dayParam(value: string | null): string | null {
-  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  // A real calendar day only: 2026-02-31 would otherwise filter as if it were a date.
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value ? value : null;
 }

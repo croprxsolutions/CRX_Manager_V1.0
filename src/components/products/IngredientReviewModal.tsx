@@ -78,7 +78,7 @@ function EditPreview({ shown }: { shown: IngredientChangePreview }) {
           <p>Changes: {(shown.changed_fields ?? []).map((field) => FIELD_LABEL[field] ?? field).join(', ') || 'nothing'}{shown.after ? ` → ${ingredientLine(shown.after)}` : ''}</p>
           <p className="text-secondary">
             Products affected: {shown.affected_parents.length
-              ? shown.affected_parents.map((p) => `${p.name} (${p.sizes.length} size${p.sizes.length === 1 ? '' : 's'})${p.epa_refusal ? ', EPA-confirmed' : ''}`).join('; ')
+              ? shown.affected_parents.map((p) => `${p.name} (${p.sizes.length} size${p.sizes.length === 1 ? '' : 's'})${p.epa_refusal ? ', has an EPA number' : ''}`).join('; ')
               : 'none'}
           </p>
           {shown.users.forms.length > 0 && <p className="text-secondary">Forms measured as it: {shown.users.forms.map((f) => f.name).join(', ')}</p>}

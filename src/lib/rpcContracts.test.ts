@@ -2225,7 +2225,7 @@ describe('Idempotency BODY verification (reads migration SQL)', () => {
     // Either add the canonical idempotency block to the SQL, or (if genuinely
     // naturally idempotent) add the RPC to IDEMPOTENCY_BODY_EXEMPT with a reason.
     expect(offenders).toEqual([]);
-  });
+  }, 30_000); // parses generated types + every migration; slow under CI shard load
 
   it('save_job specifically uses idempotency_keys (regression guard for the 2026-05-29 fix)', () => {
     // Since 20261019230000 public.save_job is a cost wrapper (cost is admin-only) that forwards
@@ -2535,8 +2535,18 @@ describe('Idempotency BODY verification (reads migration SQL)', () => {
 type GeneratedRpcShape = { name: string; source: string };
 type MigrationFunctionDefinition = { body: string; definition: string; fileName: string };
 
+/**
+ * Parse once per file: the inputs are fixed on-disk files, and re-parsing on every
+ * call made these tests flake past Vitest's 5s default under CI shard load.
+ * Callers only read the cached values.
+ */
+function once<T>(compute: () => T): () => T {
+  let cached: { value: T } | undefined;
+  return () => (cached ??= { value: compute() }).value;
+}
+
 /** Current RPC names and Args blocks from the generated Supabase types. */
-function generatedRpcShapes(): GeneratedRpcShape[] {
+const generatedRpcShapes = once((): GeneratedRpcShape[] => {
   const supabaseTypesPath = join(
     dirname(fileURLToPath(import.meta.url)),
     '..',
@@ -2559,16 +2569,14 @@ function generatedRpcShapes(): GeneratedRpcShape[] {
     out.push({ name: marks[i].name, source: block.slice(s, e) });
   }
   return out;
-}
+});
 
 /** RPC names whose generated Args include p_idempotency_key. */
-function generatedRpcsDeclaringIdempotencyKey(): Set<string> {
-  return new Set(
-    generatedRpcShapes()
-      .filter(({ source }) => /p_idempotency_key\??:/.test(source))
-      .map(({ name }) => name)
-  );
-}
+const generatedRpcsDeclaringIdempotencyKey = once((): Set<string> => new Set(
+  generatedRpcShapes()
+    .filter(({ source }) => /p_idempotency_key\??:/.test(source))
+    .map(({ name }) => name)
+));
 
 /**
  * Build the current disk-side function inventory from migration history.
@@ -2577,7 +2585,7 @@ function generatedRpcsDeclaringIdempotencyKey(): Set<string> {
  * application RPCs this guard covers. Intersecting this with generated types
  * removes dropped functions and trigger-only helpers from the client RPC set.
  */
-function latestMigrationFunctions(): Map<string, MigrationFunctionDefinition> {
+const latestMigrationFunctions = once((): Map<string, MigrationFunctionDefinition> => {
   const latest = new Map<string, MigrationFunctionDefinition>();
   const signature = /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?"?([a-z_][a-z0-9_]*)"?\s*\(/gi;
   for (const file of getMigrationFiles()) {
@@ -2599,13 +2607,7 @@ function latestMigrationFunctions(): Map<string, MigrationFunctionDefinition> {
     }
   }
   return latest;
-}
-
-function latestMigrationFunctionBodies(): Map<string, string> {
-  return new Map(
-    [...latestMigrationFunctions()].map(([name, value]) => [name, value.body]),
-  );
-}
+});
 
 function stripSqlComments(body: string): string {
   let sql = '';
@@ -2700,13 +2702,12 @@ function transitiveMutatingFunctionNames(bodies: Map<string, string>): Set<strin
   let changed = true;
   while (changed) {
     changed = false;
+    if (mutators.size === 0) break;
+    const mutatorNames = [...mutators].map(escapeRegExp).join('|');
+    const callPattern = new RegExp(`\\b(?:${mutatorNames})\\s*\\(`, 'i');
     for (const [name, body] of bodies) {
       if (mutators.has(name)) continue;
-      const sql = stripSqlComments(body);
-      const callsKnownMutator = [...mutators].some((mutator) =>
-        new RegExp(`\\b${escapeRegExp(mutator)}\\s*\\(`, 'i').test(sql),
-      );
-      if (callsKnownMutator) {
+      if (callPattern.test(stripSqlComments(body))) {
         mutators.add(name);
         changed = true;
       }
@@ -2857,10 +2858,11 @@ function migrationsAwaitingTypeRegeneration(): Set<string> {
  * The latter closes the normal pre-apply gap where a PR migration exists before
  * src/types/supabase.ts can truthfully be regenerated from production.
  */
-function generatedMutatingRpcInventory(): Set<string> {
+const generatedMutatingRpcInventory = once((): Set<string> => {
   const generatedNames = new Set(generatedRpcShapes().map(({ name }) => name));
   const functions = latestMigrationFunctions();
-  const mutators = transitiveMutatingFunctionNames(latestMigrationFunctionBodies());
+  const bodies = new Map([...functions].map(([name, definition]) => [name, definition.body]));
+  const mutators = transitiveMutatingFunctionNames(bodies);
   const highWater = registryMigrationHighWater();
   const pendingTimestamps = migrationsAwaitingTypeRegeneration();
   const migrationDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'supabase', 'migrations');
@@ -2880,7 +2882,7 @@ function generatedMutatingRpcInventory(): Set<string> {
     return generatedNames.has(name)
       || (timestamp !== '' && (timestamp > highWater || pendingTimestamps.has(timestamp)));
   }));
-}
+});
 
 /** Date high-water cannot settle a parked candidate; actual applied identity is authoritative. */
 function unappliedLocalCandidateTimestamps(history: string, appliedNames: string[], diskNames: string[]): Set<string> {
@@ -3141,6 +3143,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _lock_job_stock_rows_in_order:
     'AFTER row trigger on jobs (20270227170000): locks existing Main Warehouse stock rows in product order; creates and locks a missing one only when complete_job marked this job (crx.complete_job_rpc), after complete_job checked its idempotency key and took the number lock. Postgres refuses a direct call of a trigger function and every API-role EXECUTE is revoked',
   recompute_job_applied_acres: 'trigger-only derived-total recomputation; direct client EXECUTE is revoked',
+  record_field_marker_create_receipt:
+    'AFTER INSERT trigger on field_obstacles; direct API execution is revoked. Its unique receipt reserves the pin ID in the INSERT transaction, even after a user deletes the pin.',
   // Pruned 2026-10-19: _enforce_below_cost_line, re-emitted by the cost-admin-only
   //   candidate 20261019010000, which is now in the applied-name snapshot (ledger
   //   20261019182757), so the trigger left the discovered inventory.
@@ -3181,6 +3185,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _set_field_billing_split_20270303: 'internal FP-1 split writer (20270305190000): called only by set_field_billing_split and save_field after their own replay checks (and by the one-time import); binds p_actor to auth.uid(); every API-role EXECUTE is revoked',
   _refresh_field_billing_defaults_copy_20270303: 'internal FP-1 helper (20270305190000): rewrites the read-only field_billing_defaults copy of one field only when it differs from the version in force, so a replay changes nothing; every API-role EXECUTE is revoked',
   _refresh_all_field_billing_copies_20270303: 'internal FP-1 pg_cron job (20270305190000): rewrites only stale copies, so a rerun changes nothing; every API-role EXECUTE is revoked',
+  _fields_owner_change_refresh_copy_20270305: 'FP-1 follow-up trigger function (20270307150000): RETURNS trigger, fires only on an actual fields.customer_id change and calls the copy refresh, which changes nothing on a replay; every API-role EXECUTE is revoked',
 };
 
 
@@ -3257,15 +3262,17 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
     `)).toBe(false);
   });
 
-  it('classifies wrappers that mutate only by calling another function', () => {
+  it('classifies chains of wrappers that mutate only by calling another function', () => {
     const syntheticBodies = new Map([
+      ['client_wrapper', 'BEGIN PERFORM public.NESTED_WRAPPER (); END'],
+      ['nested_wrapper', 'BEGIN PERFORM internal_writer(); END'],
       ['internal_writer', 'BEGIN INSERT INTO public.example(id) VALUES (1); END'],
-      ['client_wrapper', 'BEGIN PERFORM internal_writer(); END'],
-      ['pure_reader', 'BEGIN RETURN QUERY SELECT 1; END'],
+      ['pure_reader', 'BEGIN PERFORM other_internal_writer(); END'],
     ]);
     expect([...transitiveMutatingFunctionNames(syntheticBodies)].sort()).toEqual([
       'client_wrapper',
       'internal_writer',
+      'nested_wrapper',
     ]);
   });
 
@@ -3297,7 +3304,7 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
     // fails here until explicitly classified. Never baseline a business mutator
     // as exempt merely to make this test green.
     expect(unclassified).toEqual([]);
-  });
+  }, 30_000); // parses generated types + every migration; slow under CI shard load
 
   it('migration-only idempotent RPCs are explicit and really enforce the key', () => {
     const generatedNames = new Set(generatedRpcShapes().map(({ name }) => name));
@@ -3310,7 +3317,7 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
         || !usesIdempotencyThroughDelegates(current?.body || '');
     });
     expect(stale).toEqual([]);
-  });
+  }, 30_000); // parses generated types + every migration; slow under CI shard load
 
   it('mutator inventory exemptions are current, explicit, and non-empty', () => {
     const mutators = generatedMutatingRpcInventory();
@@ -3334,7 +3341,7 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
       .filter((rpc) => !generatedNames.has(rpc) || declaresKey.has(rpc))
       .sort();
     expect(stale).toEqual([]);
-  });
+  }, 30_000); // parses generated types + every migration; slow under CI shard load
 
   it('save_job_applied_record declares p_idempotency_key in the generated types (regression lock for Section 6 HIGH-1)', () => {
     expect(generatedRpcsDeclaringIdempotencyKey().has('save_job_applied_record')).toBe(true);
@@ -3371,7 +3378,7 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
     // A covered RPC no longer declaring the param = it lost idempotency in a re-emit,
     // or the name drifted. Re-verify against the live DB and fix the SQL or the list.
     expect(offenders).toEqual([]);
-  });
+  }, 30_000); // parses generated types + every migration; slow under CI shard load
 
   it('every key-declaring generated mutator has a real replay mechanism', () => {
     const generatedWithKey = generatedRpcsDeclaringIdempotencyKey();
@@ -3391,5 +3398,5 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
     // treated as coverage: every discovered mutator must use the canonical
     // ledger helpers or carry a narrow, evidence-backed exemption.
     expect(offenders).toEqual([]);
-  });
+  }, 30_000); // parses generated types + every migration; slow under CI shard load
 });

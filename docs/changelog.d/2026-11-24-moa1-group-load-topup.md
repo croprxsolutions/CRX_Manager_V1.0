@@ -1,6 +1,6 @@
 ## 2026-11-24 — MOA-1: resistance groups for 12 ingredients added after the approved list (not applied)
 
-- Migration `20270305120000_ingredient_modes_of_action_load_topup.sql` (build sheet section 3.6).
+- Migration `20270304130000_ingredient_modes_of_action_load_topup.sql` (build sheet section 3.6).
 - The live EPA batch fill added 12 ingredients after Mason approved the main group list on 2026-11-18. This gives
   them their published groups (11 HRAC, 1 IRAC), the list Mason approved on 2026-11-24.
 - Same rules as the main load (`20270205150000`): matched by CAS number, never overwrites a saved list, logs one

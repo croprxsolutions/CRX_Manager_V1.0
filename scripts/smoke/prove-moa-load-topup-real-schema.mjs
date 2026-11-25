@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for the MOA-1 group load top-up (20270305120000): on the production
+ * Real-schema proof for the MOA-1 group load top-up (20270304130000): on the production
  * baseline plus every replayable migration on disk (Docker), it
  *   - carries exactly the 12 groups Mason approved (fixed answer key below, not read from the SQL),
  *   - run after the main load (20270205150000, stamp order), fills each of its ingredients with

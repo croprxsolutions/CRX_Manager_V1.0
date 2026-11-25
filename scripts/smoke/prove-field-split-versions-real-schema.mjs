@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270303200000_field_split_versions.sql (field application FP-1,
+ * Real-schema proof for 20270304190000_field_split_versions.sql (field application FP-1,
  * docs/plans/field-application/CONTRACT-who-pays.md › FP-1 "Done when").
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
@@ -36,7 +36,7 @@ import path from 'node:path';
 import { buildSweepQuery, functionContractSql, subtractAllowlist } from '../db-invariant-sweeps/allowlist-match.mjs';
 import { buildContainer, removeContainer, seedUsers, scalar, psql, attempt, asUser, refuse, id, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270303200000_field_split_versions.sql';
+const CANDIDATE = '20270304190000_field_split_versions.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });
@@ -190,14 +190,24 @@ try {
   r = commit(USERS.admin, asUser(saveField(F1, A, 'One renamed again', copyRows(F1), 'k-sf-name2')) + ' v := u::text;');
   assert.equal(versions(F1), v1, 'two name-only saves write no version');
   assert.equal(inForce(F1), `${A}:100000000/100000000,${D}:0/0`, 'the named 0% payer survives two saves');
-  r = commit(USERS.admin, asUser(saveField(F1, A, 'One', copyRows(F1, { [A]: 'owner note' }), 'k-sf-notes')) + ' v := u::text;');
-  assert.equal(versions(F1), v1, 'a notes-only save writes no version');
-  assert.equal(note(F1, A), '', 'save_field ignores notes (no note row is written; the old screen read them from the copy, which has none)');
+  r = attempt(USERS.admin, `${refuse(saveField(F1, A, 'One', copyRows(F1, { [A]: 'owner note' }), 'k-sf-notes'))} v := t;`);
+  assert.match(r, /FIELD_PAYER_NOTE_NOT_SAVED: .*Reload the page/, `save_field never saves a new note; it refuses it by name: ${r}`);
+  assert.equal(versions(F1), v1, 'and writes no version');
+  assert.equal(note(F1, A), '', 'and no note row is written');
   commit(USERS.admin, asUser(`${setSplit(F1, TODAY, 'NULL', 'k-owner-note', `'[{"customer_id":"${A}","notes":"owner note"}]'::jsonb`)} v := r::text;`));
   assert.equal(note(F1, A), 'owner note', 'the split writer saves the note');
   assert.equal(copy(F1), `${A}:100.000000:true:-`, 'and the copy does not carry it');
-  r = commit(USERS.admin, asUser(saveField(F1, A, 'One', copyRows(F1), 'k-sf-after-note')) + ' v := u::text;');
-  assert.equal(note(F1, A), 'owner note', 'an old-screen resend of the note-free copy keeps the note');
+  // A cleared note (null or blank where one is saved) is refused by name, not reported saved while the note stays.
+  for (const [cleared, key] of [['NULL', 'k-sf-clear-null'], ["''", 'k-sf-clear-blank']]) {
+    const rows = `(SELECT jsonb_agg(e || jsonb_build_object('notes', ${cleared}::text)) FROM jsonb_array_elements(${copyRows(F1, { [A]: 'owner note' })}) e)`;
+    r = attempt(USERS.admin, `${refuse(saveField(F1, A, 'One', rows, key))} v := t;`);
+    assert.match(r, /FIELD_PAYER_NOTE_NOT_SAVED: .*Reload the page/, `an old tab's cleared note (${cleared}) is refused, not dropped: ${r}`);
+  }
+  assert.equal(note(F1, A), 'owner note', 'and the saved note is unchanged');
+  // Rows without a notes key are not checked (only an explicit note is a change).
+  r = commit(USERS.admin, asUser(saveField(F1, A, 'One', `(SELECT jsonb_agg(e - 'notes') FROM jsonb_array_elements(${copyRows(F1)}) e)`, 'k-sf-no-notes-key')) + ' v := u::text;');
+  assert.equal(r, `ok|${F1}`, `a save without notes keys saves: ${r}`);
+  assert.equal(note(F1, A), 'owner note', 'and keeps the note');
   // A tab open across the deploy still holds the note it loaded: resending it unchanged saves; an edit is refused by name.
   r = commit(USERS.admin, asUser(saveField(F1, A, 'One', copyRows(F1, { [A]: 'owner note' }), 'k-sf-old-tab-same')) + ' v := u::text;');
   assert.equal(r, `ok|${F1}`, `an old tab resending its loaded note saves: ${r}`);
@@ -226,7 +236,8 @@ try {
   assert.equal(copy(F5), [`${B}:50.010000:true:-`, `${C}:50.000000:false:-`].sort().join(','), 'the copy holds exactly what was entered');
   billsAsBefore(F5, { [B]: '50.01', [C]: '50.00' }, 'save_field');
   const vF5 = versions(F5);
-  commit(USERS.admin, asUser(saveField(F5, B, 'Five renamed', copyRows(F5), 'k-sf-near-name')) + ' v := u::text;');
+  r = commit(USERS.admin, asUser(saveField(F5, B, 'Five renamed', copyRows(F5, { [C]: 'landlord note' }), 'k-sf-near-name')) + ' v := u::text;');
+  assert.equal(r, `ok|${F5}`, `an old-screen resend with its loaded note saves: ${r}`);
   assert.equal(versions(F5), vF5, 'resending the copy (an old-screen name-only save) writes no version');
   // The main payer is automatic: marking anyone else primary is refused by name, not silently dropped.
   r = attempt(USERS.admin, `${refuse(saveField(F5, B, 'Five', `'[{"customer_id":"${B}","split_pct":50.01,"is_primary":false},{"customer_id":"${C}","split_pct":50.00,"is_primary":true}]'::jsonb`, 'k-sf-primary'))} v := t;`);
@@ -235,7 +246,8 @@ try {
   r = commit(USERS.admin, asUser(saveField(F5, C, 'Five', `'[{"customer_id":"${B}","split_pct":50.01},{"customer_id":"${C}","split_pct":50.00,"is_primary":true}]'::jsonb`, 'k-sf-primary-owner')) + ' v := u::text;');
   assert.equal(r, `ok|${F5}`, `the owner (now C) marked primary saves: ${r}`);
   assert.equal(copy(F5), [`${B}:50.010000:false:-`, `${C}:50.000000:true:-`].sort().join(','), 'the copy marks the paying owner primary');
-  commit(USERS.admin, asUser(saveField(F5, B, 'Five', copyRows(F5).replace("'is_primary', is_primary", "'is_primary', false"), 'k-sf-owner-back')) + ' v := u::text;');
+  r = commit(USERS.admin, asUser(saveField(F5, B, 'Five', copyRows(F5, { [C]: 'landlord note' }).replace("'is_primary', is_primary", "'is_primary', false"), 'k-sf-owner-back')) + ' v := u::text;');
+  assert.equal(r, `ok|${F5}`, `the owner back to B saves: ${r}`);
   console.log('[save_field] name-only and notes-only saves write no version; an empty save on a split field is refused; 0% payer survives; price refused; non-automatic primary refused');
 
   // 4. Retries.

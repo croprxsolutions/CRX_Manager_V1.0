@@ -40,8 +40,9 @@
 --     on a tie). A row marked is_primary that is not that payer is refused (FIELD_PRIMARY_IS_AUTOMATIC, naming the
 --     automatic one), so the old screen's Set Primary never reports success for a choice that is then dropped;
 --   - a price_override_cents or pricing_note is refused (per-acre pricing is retired, 20270224110000);
---   - a payer note that differs from the saved one is refused (FIELD_PAYER_NOTE_NOT_SAVED: a tab open across the deploy
---     never reports a dropped note as saved); the note it loaded is accepted and left as it is;
+--   - a payer note sent that differs from the saved one, an edit or a clear (null or blank where one is saved), is
+--     refused (FIELD_PAYER_NOTE_NOT_SAVED: a tab open across the deploy never reports a dropped note change as saved);
+--     the note it loaded is accepted and left as it is; an element without a notes key is not checked;
 --   - shares totalling within 0.01% of 100% are stored as entered (50.01/50.00 stays 50.01/50.00, so every invoice
 --     bills the cents it billed before FP-1); a larger gap is refused.
 --
@@ -760,13 +761,15 @@ BEGIN
     -- Notes are not taken from here: the old screen reads them from the copy, which no longer carries them,
     -- so a resend would erase them. The new Field Setup screen saves notes through set_field_billing_split.
     -- A tab left open across the deploy still sends notes: the note it loaded is accepted unchanged, but an edited
-    -- note is refused by name rather than reported saved and dropped.
+    -- or cleared note (null or blank where one is saved) is refused by name rather than reported saved and dropped.
+    -- An element without a notes key is not checked. shortcut: the old screen after the deploy loads no notes, so it
+    -- cannot save a split on a field with a payer note; ends when the Field Setup screen PR (#2498) replaces it.
     IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_billing_defaults) e
-                WHERE NULLIF(btrim(e->>'notes'), '') IS NOT NULL
+                WHERE e ? 'notes'
                   AND NULLIF(btrim(e->>'notes'), '') IS DISTINCT FROM (
                         SELECT NULLIF(btrim(n.notes), '') FROM public.field_payer_notes n
                          WHERE n.field_id = p_field_id AND n.customer_id = (e->>'customer_id')::uuid)) THEN
-      RAISE EXCEPTION 'FIELD_PAYER_NOTE_NOT_SAVED: payer notes now save from the updated Field Setup screen. Reload the page and save the note again.'
+      RAISE EXCEPTION 'FIELD_PAYER_NOTE_NOT_SAVED: payer notes now save from the updated Field Setup screen. Reload the page and make the note change again.'
         USING ERRCODE = '22023';
     END IF;
   END IF;

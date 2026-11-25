@@ -129,6 +129,12 @@ describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021070000)', ()
     const dialog = renderWith({ ...base, operation: 'save_invoice', unit_price_cents: 300 });
     expect(within(dialog).getByText(/The database reported this line first/)).toBeInTheDocument();
     expect(within(dialog).queryByRole('table')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/could not be shown/)).not.toBeInTheDocument();
+  });
+
+  it('says how many lines it could not show when none of the list could be shown', () => {
+    const dialog = renderWith({ ...base, operation: 'save_invoice', unit_price_cents: 300, more_count: 2 });
+    expect(within(dialog).getByText('2 below-cost lines could not be shown here.')).toBeInTheDocument();
   });
 
   it('has a green go-ahead that needs a reason, and a Go back button', () => {

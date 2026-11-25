@@ -13,7 +13,7 @@ BEGIN
      WHERE p.oid = to_regprocedure('public._enforce_below_cost_line()')
        AND ((SELECT count(*) FROM pg_proc o
               WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_enforce_below_cost_line') <> 1
-        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '82587adf716380d46732bfc4f3313cd9'
+        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '02478f868d1ec7319f5bdb7986a20ed9'
         OR p.proowner <> 'postgres'::regrole
         OR NOT p.prosecdef
         OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
@@ -31,7 +31,7 @@ BEGIN
   -- Drop only what the migration created: the list function's body and each trigger's shape, so drifted code is not
   -- silently removed.
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._raise_below_cost_reason_list()'::regprocedure)
-       IS DISTINCT FROM 'ee4ce0fd96b2249d45febc335413b96c'
+       IS DISTINCT FROM 'd1c0979c5a2f769e80179d6e7708a24a'
      OR (SELECT count(*) FROM pg_trigger t
           WHERE t.tgname = 'zzz_crx_below_cost_reason_list'
             AND t.tgrelid IN ('public.order_items'::regclass, 'public.quote_items'::regclass, 'public.invoice_items'::regclass)

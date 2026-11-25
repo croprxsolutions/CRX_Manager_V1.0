@@ -427,6 +427,7 @@ BEGIN
       'quantity', v_quantity,
       'line_shortfall_cents', v_shortfall_cents,
       'per', CASE WHEN TG_TABLE_NAME = 'invoice_items' AND v_product_id IS NULL THEN 'line' ELSE 'unit' END,
+      'order_item_id', to_jsonb(NEW) -> 'order_item_id',
       'seq', (v_pending ->> 'seq')::bigint));
     v_pending := jsonb_set(v_pending, '{seq}', to_jsonb((v_pending ->> 'seq')::bigint + 1));
     PERFORM set_config('app.crx_below_cost_pending', v_pending::text, true);
@@ -470,13 +471,22 @@ BEGIN
          sum((e.value ->> 'line_shortfall_cents')::bigint)
     INTO v_lines, v_total_cents
     FROM jsonb_each(v_pending -> 'lines') AS e
-   WHERE split_part(e.key, ':', 2) = ''
+   WHERE (split_part(e.key, ':', 2) = ''
       OR CASE split_part(e.key, ':', 1)
            WHEN 'order_items' THEN EXISTS (SELECT 1 FROM public.order_items x WHERE x.id = split_part(e.key, ':', 2)::uuid)
            WHEN 'quote_items' THEN EXISTS (SELECT 1 FROM public.quote_items x WHERE x.id = split_part(e.key, ':', 2)::uuid)
            WHEN 'invoice_items' THEN EXISTS (SELECT 1 FROM public.invoice_items x WHERE x.id = split_part(e.key, ':', 2)::uuid)
            ELSE true
-         END;
+         END)
+     -- An invoice line billing an order line listed in this same save at the same price and cost is that sale
+     -- (price_order on a delivered rush order writes both): list it once, under the order line.
+     AND NOT (split_part(e.key, ':', 1) = 'invoice_items'
+              AND COALESCE((
+                SELECT o.value -> 'unit_price_cents' = e.value -> 'unit_price_cents'
+                       AND o.value -> 'locked_unit_cost_cents' = e.value -> 'locked_unit_cost_cents'
+                       AND EXISTS (SELECT 1 FROM public.order_items x WHERE x.id = (e.value ->> 'order_item_id')::uuid)
+                  FROM jsonb_each(v_pending -> 'lines') AS o
+                 WHERE o.key = 'order_items:' || (e.value ->> 'order_item_id')), false));
   IF v_lines IS NULL THEN
     PERFORM set_config('app.crx_below_cost_pending', '', true);
     RETURN NULL;
@@ -484,7 +494,7 @@ BEGIN
   RAISE EXCEPTION USING
     ERRCODE = 'P0001',
     MESSAGE = 'BELOW_COST_REASON_REQUIRED:' || (
-      ((v_lines -> 0) - 'quantity' - 'line_shortfall_cents' - 'per')
+      ((v_lines -> 0) - 'quantity' - 'line_shortfall_cents' - 'per' - 'order_item_id')
       || jsonb_build_object(
            'lines', v_lines,
            'line_count', jsonb_array_length(v_lines),
@@ -527,7 +537,7 @@ BEGIN
      WHERE p.oid = to_regprocedure('public._enforce_below_cost_line()')
        AND ((SELECT count(*) FROM pg_proc o
               WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_enforce_below_cost_line') <> 1
-        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '82587adf716380d46732bfc4f3313cd9'
+        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '02478f868d1ec7319f5bdb7986a20ed9'
         OR p.proowner <> 'postgres'::regrole
         OR NOT p.prosecdef
         OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]

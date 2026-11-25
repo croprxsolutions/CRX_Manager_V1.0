@@ -289,7 +289,7 @@ const body = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
 const grants = () => scalar(`SELECT COALESCE(string_agg(g, ',' ORDER BY g), '-') FROM (SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END AS g
   FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = '${GUARD}'::regprocedure AND a.privilege_type = 'EXECUTE') x;`);
 const OLD_BODY = '5fa0a5f975dc2a84b3c6599a84b8cc55';
-const NEW_BODY = process.env.CRX_BCL_NEW_BODY || '82587adf716380d46732bfc4f3313cd9';
+const NEW_BODY = process.env.CRX_BCL_NEW_BODY || '02478f868d1ec7319f5bdb7986a20ed9';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -474,6 +474,17 @@ UPDATE public.invoice_items SET id = '${INV_LINE}', quantity = 1, extended_cents
   assert.equal(lowered.lines[0].line_shortfall_cents, 300); assert.equal(lowered.total_shortfall_cents, 300);
   assert.equal(scalar(`SELECT string_agg(id::text || ':' || unit_price_cents, ',') FROM public.invoice_items WHERE invoice_id = '${INV}';`), `${INV_LINE}:700`);
   console.log('[case 12c] a kept line restored to its id with a lower quantity: listed at the restored quantity 1 and its $3.00 shortfall');
+  // Case 12d (Sol round 1): price_order on a delivered rush order writes the order line and its linked invoice line at
+  // the same price. That is one sale: listed once, under the order line, and counted once. At another price, both list.
+  const priceBoth = (invoiceCents) => asAdminWrite(`UPDATE public.order_items SET price_per_unit = 6.00 WHERE id = (${INV_OI});
+UPDATE public.invoice_items SET unit_price_cents = ${invoiceCents}, extended_cents = ${invoiceCents * 2} WHERE id = '${INV_LINE}';`, 'price_order');
+  const once = refusedAtCommit(priceBoth(600));
+  assert.equal(once.lines.length, 1, JSON.stringify(once));
+  assert.equal(once.lines[0].line_id, scalar(INV_OI)); assert.equal(once.total_shortfall_cents, 800);
+  const both = refusedAtCommit(priceBoth(500));
+  assert.equal(both.lines.length, 2, JSON.stringify(both)); assert.equal(both.total_shortfall_cents, 1800);
+  assert.equal(scalar(`SELECT string_agg(id::text || ':' || unit_price_cents, ',') FROM public.invoice_items WHERE invoice_id = '${INV}';`), `${INV_LINE}:700`);
+  console.log('[case 12d] pricing an order line and its linked invoice line at the same $6.00: one line, $8.00 short (not $16.00); at different prices both are listed ($18.00)');
   // Case 12b: in one save_invoice write, a line written below cost whose id is then changed AND whose price is raised to
   // cost leaves no note behind: the save goes through with no prompt (as case 6a, for a row whose id changes).
   const raisedNewId = asAdminWrite(`DELETE FROM public.invoice_items WHERE id = '${INV_LINE}';

@@ -139,6 +139,9 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
             <span className="font-medium">every below-cost line in this save</span>, not only the one shown.
             Review the other line prices before approving if you are unsure.
           </p>
+          {moreCount > 0 && (
+            <p className="mt-1">{moreCount} below-cost {moreCount === 1 ? 'line' : 'lines'} could not be shown here.</p>
+          )}
         </div>
         )}
         <div>

@@ -12,6 +12,7 @@ const field = id(3001);
 const unassignedField = id(3002);
 const job = id(3003);
 const legacy = id(3004);
+const jobField = id(3005);
 const legacy3d = id(3006);
 const coworker = id('b1');
 const inactive = id('b2');
@@ -57,7 +58,7 @@ function seed() {
       + "('" + unassignedField + "','" + id(3000) + "','Unassigned field');",
     "INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, applicator_id) VALUES ('"
       + job + "','MARKER-PROOF','" + id(3000) + "',CURRENT_DATE,'scheduled','" + applicator + "');",
-    "INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('" + id(3005) + "','" + job + "','" + field + "');",
+    "INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('" + jobField + "','" + job + "','" + field + "');",
     insert(legacy, 'oil_well').replace(point, '{"type":"Polygon"}') + ';',
     insert(legacy3d, 'tower').replace(point, '{"type":"Point","coordinates":[-89.5,40.5,10]}') + ';',
     'COMMIT;',
@@ -81,10 +82,18 @@ function proveAccess() {
   assert.equal(allowed(applicator, remove(marker) + ' RETURNING id'), marker);
   assert.equal(allowed(applicator, update(legacy, "label = 'Denied'") + ' RETURNING id'), '');
   assert.equal(allowed(applicator, remove(legacy) + ' RETURNING id'), '');
-  for (const actor of [coworker, inactive, driver, recipient]) {
+  assert.deepEqual(read(coworker), { available: false });
+  refused(coworker, insert(next), /row-level security/);
+  // Exercise a stale dispatch to each rejected account, even though the normal dispatcher rejects these assignees.
+  const assignFixtureDispatch = (actor) => assert.equal(scalar("UPDATE public.job_location_dispatches SET applicator_id = '"
+    + actor + "' WHERE job_field_id = '" + jobField + "' RETURNING applicator_id"), actor);
+  for (const actor of [inactive, driver, recipient]) {
+    assignFixtureDispatch(actor);
+    assert.equal(allowed(actor, "SELECT public._can_see_field('" + field + "')::text"), actor === inactive ? 'false' : 'true');
     assert.deepEqual(read(actor), { available: false });
     refused(actor, insert(next), /row-level security/);
   }
+  assignFixtureDispatch(applicator);
   refused(applicator, insert(next, 'field_entrance', unassignedField), /FIELD_MARKER_ACCESS_REQUIRED/);
   assert.match(psql("BEGIN; SET LOCAL ROLE anon; SELECT public.get_field_marker_read('" + field + "');", { allowFailure: true }).stderr, /permission denied/);
   for (const office of [admin, rep]) {

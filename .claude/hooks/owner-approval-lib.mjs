@@ -276,6 +276,9 @@ const isBookkeeping = (e, currentPrompt) => BOOKKEEPING_TYPES.has(e?.type) ||
   (e?.type === "system" && e.subtype === "stop_hook_summary") ||
   // The turn timer (no content in 267 real records, 2026-11-22); one carrying text still ends the scan.
   (e?.type === "system" && e.subtype === "turn_duration" && (e.content == null || String(e.content).trim() === "")) ||
+  // Claude Code 2.1.33x (2026-11-25): the permission-mode marker ({mode:"normal"}) and the
+  // data-flow ledger (tool names and ids only, ~29,000 real records); one carrying text still ends the scan.
+  ((e?.type === "mode" || e?.type === "data-flow-records") && e.message == null && e.content == null && e.text == null) ||
   (e?.type === "queue-operation" &&
     (e.content == null || String(e.content).trim() === String(currentPrompt ?? "").trim()));
 const isToolResult = (e) => e?.type === "user" && Array.isArray(e.message?.content) && e.message.content.length > 0 &&

@@ -16,6 +16,7 @@ import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import CompletionProofFields, { ProofOption } from '../components/deliveries/CompletionProofFields';
+import { ISSUE_TYPE_LABELS } from '../lib/deliveryIssueTypes';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
@@ -75,17 +76,6 @@ import type {
   Customer, CustomerAddress, Profile, OrderItem, DeliveryIssueType, DeliveryCompletionEvidence, ReceiptRecipient,
   LinkedEntityType,
 } from '../types';
-
-const ISSUE_TYPE_LABELS: Record<string, string> = {
-  none: 'None',
-  customer_not_home: 'Customer Not Home',
-  gate_locked: 'Gate Locked',
-  road_blocked: 'Road Blocked',
-  wrong_address: 'Wrong Address',
-  refused: 'Refused',
-  weather: 'Weather',
-  other: 'Other',
-};
 
 const PRIORITY_LABELS: Record<string, string> = {
   low: 'Low',
@@ -1743,6 +1733,13 @@ export default function DeliveryDetail() {
     takePhotoDisabled: uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS,
     uploading: uploadingPhoto,
   };
+  // A problem with the delivery, reported in the same completion step (driver and office alike) and sent with it.
+  const completionIssue = {
+    type: driverIssueType,
+    notes: driverIssueNotes,
+    onTypeChange: setDriverIssueType,
+    onNotesChange: setDriverIssueNotes,
+  };
 
   if (isDriver) {
     const isActive = delivery.status !== 'completed' && delivery.status !== 'cancelled';
@@ -1992,33 +1989,6 @@ export default function DeliveryDetail() {
             </section>
           )}
 
-          {/* Issue reporting (driver, when in_progress) */}
-          {delivery.status === 'in_progress' && (
-            <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-              <h2 className="font-heading text-xl font-bold text-nav-dark">Report Issue (Optional)</h2>
-              <select
-                value={driverIssueType}
-                onChange={(e) => setDriverIssueType(e.target.value as DeliveryIssueType)}
-                aria-label="Issue type"
-                className={DRIVER_FIELD_CLASS}
-              >
-                {Object.entries(ISSUE_TYPE_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-              {driverIssueType !== 'none' && (
-                <textarea
-                  value={driverIssueNotes}
-                  onChange={(e) => setDriverIssueNotes(e.target.value)}
-                  placeholder="Describe the issue..."
-                  aria-label="Issue notes"
-                  rows={2}
-                  className={`${DRIVER_FIELD_CLASS} resize-none`}
-                />
-              )}
-            </section>
-          )}
-
           {/* Complete delivery section — only when in_progress; the Complete button is pinned at the bottom */}
           {delivery.status === 'in_progress' && (
             <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
@@ -2032,6 +2002,7 @@ export default function DeliveryDetail() {
                 paperTicket={paperTicketProof}
                 onSignatureChange={setSignatureDataUrl}
                 receipt={{ checked: emailOnComplete, onChange: setEmailOnComplete }}
+                issue={completionIssue}
               />
               <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
               {!isOnline && (
@@ -2799,33 +2770,6 @@ export default function DeliveryDetail() {
             })}
           </div>
 
-          {/* Issue (shortage, damage): reported with the completion on this screen only */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-secondary mb-1">Issue (Optional)</label>
-              <select
-                value={driverIssueType}
-                onChange={(e) => setDriverIssueType(e.target.value as DeliveryIssueType)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-              >
-                {Object.entries(ISSUE_TYPE_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {driverIssueType !== 'none' && (
-            <div className="mb-4">
-              <Input
-                label="Issue Notes"
-                value={driverIssueNotes}
-                onChange={(e) => setDriverIssueNotes(e.target.value)}
-                placeholder="Describe the issue..."
-              />
-            </div>
-          )}
-
           <div className="mb-4 max-w-2xl">
             <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
             <CompletionProofFields
@@ -2886,6 +2830,7 @@ export default function DeliveryDetail() {
               ) : undefined}
               // Shown whenever a receipt can be asked for, even when this screen cannot see the email.
               receipt={completionEvidence !== 'no_proof' ? { checked: emailOnComplete, onChange: setEmailOnComplete } : undefined}
+              issue={completionIssue}
             />
           </div>
 
@@ -3165,8 +3110,6 @@ const DRIVER_STEPS = [
   { status: 'in_progress', label: 'Started' },
   { status: 'completed', label: 'Completed' },
 ];
-const DRIVER_FIELD_CLASS =
-  'w-full px-4 py-3 text-base text-nav-dark bg-white border border-gray-300 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green focus:border-crx-green';
 const DRIVER_MAIN_ACTION_CLASS =
   'flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-crx-green font-heading text-xl font-bold text-white hover:bg-crx-green-hover disabled:opacity-50 transition-colors';
 

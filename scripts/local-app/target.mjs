@@ -1,6 +1,7 @@
 // The safety checks every local-app command runs before it touches anything.
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { connect } from 'node:net';
+import path from 'node:path';
 
 // doc-bytes: a third, separate stack for the customer-document byte proof (KI-113); never the other two.
 const PROFILE = process.env.CRX_LOCAL_APP_PROFILE;
@@ -233,11 +234,17 @@ export function assertOwnedApiDbListeners(netstat, gatewayBindings) {
   }
 }
 
+/** Same file? Windows paths differ only by capitals (the lane id is built from the lowercased path). */
+export function sameComposePath(a, b, platform = process.platform) {
+  const [x, y] = [path.resolve(a), path.resolve(b)];
+  return platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+
 export function assertWalkthroughGatewayIdentity(container, project, composeFile) {
   const labels = container?.Config?.Labels ?? {};
   if (container?.State?.Running !== true || labels['com.docker.compose.project'] !== project
     || labels['com.docker.compose.service'] !== 'gateway'
-    || path.resolve(labels['com.docker.compose.project.config_files'] ?? '') !== path.resolve(composeFile)) {
+    || !sameComposePath(labels['com.docker.compose.project.config_files'] ?? '', composeFile)) {
     throw new Refused('The running gateway identity or checkout does not match this walkthrough lane. Nothing was changed.');
   }
   return Object.values(container.HostConfig?.PortBindings ?? {}).flat();

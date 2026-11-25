@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, Refused,
   IS_SALES_GAUNTLET, IS_SCREEN_WALK, PROJECT,
-  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFinishedBuild, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, assertWalkthroughLaneResourcesAreEmpty, assertOwnedApiDbListeners, assertWalkthroughGatewayIdentity,
+  sameComposePath, assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFinishedBuild, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, assertWalkthroughLaneResourcesAreEmpty, assertOwnedApiDbListeners, assertWalkthroughGatewayIdentity,
   denyInsideCheckout,
 } from './target.mjs';
 import { acquireLaneLock } from './lane-lock.mjs';
@@ -25,6 +25,9 @@ const PROD_URL = 'https://rhyzpcqhnizqbxphqdkr.supabase.co';
 const PROD_DB = 'postgresql://postgres:x@db.rhyzpcqhnizqbxphqdkr.supabase.co:5432/postgres';
 // Everything below assumes a shell with nothing live in it, the Docker calls here included.
 assertCleanEnvironment();
+
+// A child must pick its own profile, lane and state folder, never the ones this runner was started with.
+const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^CRX_LOCAL_APP_(PROFILE|LANE|STATE_DIR)$/.test(name)));
 
 const COMMANDS = ['rebuild', 'seed', 'start', 'frontend', 'stop', 'status', 'test'];
 
@@ -103,6 +106,11 @@ describe('isolated sales profile', () => {
     assert.throws(() => assertWalkthroughGatewayIdentity({ ...container, State: { Running: false } }, PROJECT, composeFile), /gateway identity/);
     assert.throws(() => assertWalkthroughGatewayIdentity({ ...container, Config: { Labels: { ...container.Config.Labels, 'com.docker.compose.project.config_files': 'other-compose.yaml' } } }, PROJECT, composeFile), /gateway identity/);
   });
+  it('compares compose paths without regard to capitals on Windows only', () => {
+    assert.equal(sameComposePath('C:\\CRX_wt\\a\\compose.yaml', 'c:\\crx_wt\\a\\compose.yaml', 'win32'), true);
+    assert.equal(sameComposePath('/srv/A/compose.yaml', '/srv/a/compose.yaml', 'linux'), false);
+    assert.equal(sameComposePath('/srv/a/compose.yaml', '/srv/b/compose.yaml', 'linux'), false);
+  });
   it('refuses a state file from the other profile', () => {
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
       import assert from 'node:assert/strict';
@@ -151,12 +159,26 @@ describe('walkthrough build manifest', () => {
     assert.throws(() => assertFinishedBuild(null, ['one.sql'], undefined, 'node scripts/local-app/sales.mjs rebuild'), /sales\.mjs rebuild/);
   });
   it('rejects a missing spec selection before it asks Docker to start', () => {
-    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'test', 'missing.spec.ts'], { encoding: 'utf8', timeout: 30000 });
+    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'test', 'missing.spec.ts'], { encoding: 'utf8', timeout: 30000, env: cleanEnv() });
     assert.equal(result.status, 3);
     assert.match(result.stderr, /existing, non-sales spec/);
   });
+  it('accepts a spec argument only on the walkthrough lane', () => {
+    for (const profile of ['', 'sales-gauntlet', 'doc-bytes']) {
+      const result = spawnSync(process.execPath, [APP, 'test', 'product-unit.spec.ts'], { encoding: 'utf8', timeout: 30000, env: { ...cleanEnv(), CRX_LOCAL_APP_PROFILE: profile } });
+      assert.equal(result.status, 3, profile);
+      assert.match(result.stderr, /Unsupported test-app arguments/, profile);
+    }
+  });
+  it('refuses a bad state folder before it writes a lock or folder', () => {
+    const bad = path.join(HERE, '.state-private-lock-check');
+    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'start'], { encoding: 'utf8', timeout: 30000, env: { ...cleanEnv(), CRX_LOCAL_APP_STATE_DIR: bad } });
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /temp folder/);
+    assert.equal(existsSync(bad), false);
+  });
   it('requires a feature spec on the walkthrough lane', () => {
-    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'test'], { encoding: 'utf8', timeout: 30000 });
+    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'test'], { encoding: 'utf8', timeout: 30000, env: cleanEnv() });
     assert.equal(result.status, 3);
     assert.match(result.stderr, /Choose one feature proof/);
   });

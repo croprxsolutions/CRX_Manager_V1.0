@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, PROJECT, Refused, TEST_EMAIL,
   IS_SALES_GAUNTLET, IS_DOC_BYTES, IS_SCREEN_WALK, PROFILE_NAME, STATE_FOLDER, REP_EMAIL, OTHER_REP_EMAIL,
-  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFinishedBuild, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, assertWalkthroughLaneResourcesAreEmpty, assertOwnedApiDbListeners, assertWalkthroughGatewayIdentity, portIsOpen,
+  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFinishedBuild, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, assertWalkthroughLaneResourcesAreEmpty, assertOwnedApiDbListeners, assertWalkthroughGatewayIdentity, portIsOpen, sameComposePath,
 } from './target.mjs';
 import { schemaFingerprint as computeSchemaFingerprint } from './schema-fingerprint.mjs';
 import { acquireLaneLock } from './lane-lock.mjs';
@@ -107,7 +107,7 @@ function assertExistingStackIsOurs() {
     if (!/scripts[\\/]local-app[\\/]compose\.yaml$/.test(container.Config.Labels['com.docker.compose.project.config_files'] ?? '')) {
       throw new Refused(`Another stack is using the name ${PROJECT}. Nothing was changed.`);
     }
-    if ((IS_SALES_GAUNTLET || IS_DOC_BYTES || IS_SCREEN_WALK) && path.resolve(container.Config.Labels['com.docker.compose.project.config_files']) !== path.join(HERE, 'compose.yaml')) {
+    if ((IS_SALES_GAUNTLET || IS_DOC_BYTES || IS_SCREEN_WALK) && !sameComposePath(container.Config.Labels['com.docker.compose.project.config_files'], path.join(HERE, 'compose.yaml'))) {
       const owner = IS_DOC_BYTES ? 'document-proof' : IS_SALES_GAUNTLET ? 'sales' : 'screen-walk';
       throw new Refused(`The ${owner} test stack belongs to another checkout. Nothing was changed.`);
     }
@@ -126,13 +126,18 @@ function assertNewScreenWalkLaneIsEmpty() {
   });
 }
 
-/** Runs before anything changes. A missing state file is fine only for a first rebuild. */
-async function preflight({ needState = true } = {}) {
-  assertCleanEnvironment();
+// Also runs before the lane lock is written, so a bad override never gets a folder or lock file.
+function assertStateDirAllowed() {
   const inside = (folder) => `${path.resolve(STATE_DIR)}${path.sep}`.startsWith(`${path.resolve(folder)}${path.sep}`);
   if (!inside(path.join(HERE, '.state')) && !inside(tmpdir())) {
     throw new Refused('CRX_LOCAL_APP_STATE_DIR may only point at the temp folder.');
   }
+}
+
+/** Runs before anything changes. A missing state file is fine only for a first rebuild. */
+async function preflight({ needState = true } = {}) {
+  assertCleanEnvironment();
+  assertStateDirAllowed();
   const state = readState();
   if (!state && needState) {
     throw new Refused(`No test app here yet. Run: ${RECOVERY_COMMAND}, unless another checkout owns it (see the README).`);
@@ -482,7 +487,6 @@ function requireFinishedBuild() {
 
 async function start() {
   if (!readState() && IS_SCREEN_WALK) {
-    mkdirSync(STATE_DIR, { recursive: true });
     await rebuild({ firstStart: true });
   }
   const state = await preflight();
@@ -555,13 +559,14 @@ const COMMANDS = {
 const extra = process.argv.slice(3);
 const validArguments = extra.length === 0
   || (process.argv[2] === 'frontend' && extra.length === 2 && extra[0] === '--port')
-  || (process.argv[2] === 'test' && extra.length === 1 && /^[\w-]+\.spec\.ts$/.test(extra[0]));
+  || (IS_SCREEN_WALK && process.argv[2] === 'test' && extra.length === 1 && /^[\w-]+\.spec\.ts$/.test(extra[0]));
 (async () => {
   if (!validArguments) throw new Refused('Unsupported test-app arguments. Use sales.mjs for the sales gauntlet.');
   const command = COMMANDS[process.argv[2]];
   if (!command) throw new Error(`Use one of: ${Object.keys(COMMANDS).join(', ')}`);
-  if (IS_SCREEN_WALK && ['start', 'rebuild'].includes(process.argv[2])) {
+  if (IS_SCREEN_WALK && ['start', 'rebuild', 'stop'].includes(process.argv[2])) {
     assertCleanEnvironment();
+    assertStateDirAllowed();
     mkdirSync(STATE_DIR, { recursive: true });
     const release = acquireLaneLock(FIRST_START_LOCK);
     try { await command(); } finally { release(); }

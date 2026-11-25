@@ -87,11 +87,7 @@ function checklistLinks(period: { start: string; end: string }): Record<string, 
       { to: '/invoices', label: 'Open chemical invoices' },
       { to: '/field-invoices?tab=drafts', label: 'Open field invoice drafts' },
     ],
-    payments: [
-      { to: `/payment-history?from=${period.start}&to=${period.end}`, label: 'Open payment history' },
-      // The count above also includes Prepayment Manager checks, which Payment History does not list.
-      { to: '/prepay?tab=manager', label: 'Open Prepayment Manager checks' },
-    ],
+    payments: [{ to: `/payment-history?from=${period.start}&to=${period.end}`, label: 'Open payment history' }],
     deliveries: [{ to: '/deliveries', label: 'Open deliveries' }],
     commissions: [{ to: '/commission-payments', label: 'Open commission payments' }],
     rushOrders: [{ to: '/orders', label: 'Open orders' }],
@@ -270,7 +266,8 @@ export default function MonthEndClose() {
           done: summary.payments.count === 0 || reviewedPayments,
           detail: summary.payments.count === 0
             ? 'No payments this period'
-            : `${summary.payments.count} payments totaling ${fmt(summary.payments.total_cents)} — verify and check box to confirm`,
+            // The count includes checks entered on Prepay Credits, which Payment History's list does not show.
+            : `${summary.payments.count} payments totaling ${fmt(summary.payments.total_cents)} (includes checks entered on Prepay Credits) — verify and check box to confirm`,
           reviewKey: summary.payments.count > 0 ? 'payments' : undefined,
           links: summary.payments.count > 0 ? links.payments : undefined,
         },

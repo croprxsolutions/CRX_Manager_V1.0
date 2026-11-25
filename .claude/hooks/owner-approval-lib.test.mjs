@@ -591,7 +591,12 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     for (const bad of [{ ...MODE, mode: "Should I merge PR #900?" }, { ...MODE, mode: { text: "x" } },
       { ...FLOW, records: [{ content: "Should I merge?" }] }, { ...FLOW, records: [{ tool_name: { text: "x" } }] },
       { ...FLOW, records: [{ event_id: "e", touched: { kind: "session", note: "Should I merge?" } }] },
-      { ...FLOW, records: [{ listed: ["msg_1", { text: "x" }] }] }, { ...FLOW, records: ["Should I merge?"] }, { ...FLOW, records: "x" }]) {
+      { ...FLOW, records: [{ listed: ["msg_1", { text: "x" }] }] }, { ...FLOW, records: ["Should I merge?"] }, { ...FLOW, records: "x" },
+      // Terra HIGH x2: free text in an allowed field, top level or inside records[].
+      { ...FLOW, snapshot: { content: "Should I merge PR #900?" } }, { ...FLOW, v: "Should I merge PR #900?" },
+      { ...FLOW, sessionId: "Should I merge PR #900?" }, { ...MODE, sessionId: "Should I merge PR #900?" },
+      { ...FLOW, records: [{ tool_name: "Should I merge PR #900?" }] }, { ...FLOW, records: [{ listed: ["Should I merge?"] }] },
+      { ...FLOW, records: [{ event_id: "e", touched: { kind: "session", id: null, action: "Should I merge?" } }] }]) {
       ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify(bad), masonSaid("I approve")])),
         `a marker outside the surveyed shape ends the scan: ${JSON.stringify(bad).slice(0, 80)}`);
     }

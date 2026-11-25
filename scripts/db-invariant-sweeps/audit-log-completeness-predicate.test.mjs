@@ -68,6 +68,8 @@ CREATE FUNCTION public._fill_audit_actor() RETURNS trigger LANGUAGE plpgsql AS
 CREATE FUNCTION public._other_trigger() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';
 CREATE TRIGGER trg_fill_audit_actor BEFORE INSERT ON public.financial_audit_log
   FOR EACH ROW EXECUTE FUNCTION public._fill_audit_actor();
+CREATE TRIGGER trg_guard_audit_log_immutable BEFORE UPDATE OR DELETE ON public.financial_audit_log
+  FOR EACH ROW EXECUTE FUNCTION public._other_trigger();
 `);
 
   assert.deepEqual(keysAfter(''), [], 'healthy configuration must produce no rows');

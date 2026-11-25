@@ -56,6 +56,16 @@ try {
     equal(subtractAllowlist(entry.predicate, [row], [entry], withoutAuditTrigger), [row], 'a missing audit trigger function leaves the blend invoice flag visible');
     equal(subtractAllowlist(entry.predicate, [row], [entry], changedAuditTrigger), [row], 'a changed audit trigger function leaves the blend invoice flag visible');
   }
+  const poEntries = actorEntries.filter((entry) => entry.violation_key.startsWith('save_purchase_order('));
+  equal(poEntries.length, 2, 'purchase order has separately reviewed production and candidate wrappers');
+  const poRow = { violation_key: poEntries[0].violation_key, suspect_param: 'p_performed_by' };
+  const poWrapperKey = `public.${poRow.violation_key}`;
+  check(poEntries[0].reviewed_contracts[poWrapperKey] !== poEntries[1].reviewed_contracts[poWrapperKey],
+    'purchase-order entries use different wrapper contracts');
+  for (const entry of poEntries) {
+    const catalog = Object.entries(entry.reviewed_contracts).map(([function_key, contract_md5]) => ({ function_key, contract_md5 }));
+    equal(subtractAllowlist('actor-forgery', [poRow], poEntries, catalog), [], 'each reviewed purchase-order variant clears its own flag');
+  }
   const convertEntries = actorEntries.filter((entry) => entry.violation_key.startsWith('convert_quote_to_order('));
   equal(convertEntries.length, 2, 'convert_quote_to_order has exactly one current-live and one candidate contract set');
   const convertImplKey = Object.keys(convertEntries[0].reviewed_contracts).find((key) => key.startsWith('public._convert_quote_to_order_below_cost_impl_20260810('));

@@ -1,5 +1,5 @@
 -- ============================================================================
--- 20270304140000_supplier_quote_unit_floor
+-- 20270305200000_supplier_quote_unit_floor
 -- Supplier Pricing follow-up (#2486 Sol round 1 MED). Contract: docs/plans/2026-11-24-supplier-quote-unit-floor-CONTRACT.md
 --
 -- WHY: the converted cost per inventory unit, round(cost_cents / package_quantity / inventory_units_per_supplier_unit),

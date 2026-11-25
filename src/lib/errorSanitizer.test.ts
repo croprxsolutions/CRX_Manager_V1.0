@@ -421,7 +421,7 @@ describe('sanitizeError', () => {
       .toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
     expect(sanitizeError({ message: 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery' }))
       .toBe('Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery');
-    // Supplier Pricing bounds (20270304140000): the database refusal reads as the rule, never the constraint name.
+    // Supplier Pricing bounds (20270305200000): the database refusal reads as the rule, never the constraint name.
     expect(sanitizeError({ message: 'new row for relation "product_supplier_links" violates check constraint "product_supplier_links_conversion_floor"' }))
       .toBe('Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals');
     expect(sanitizeError('SUPPLIER_CONVERSION_INVALID'))

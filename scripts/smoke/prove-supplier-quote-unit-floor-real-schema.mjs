@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270304140000_supplier_quote_unit_floor.sql.
+ * Real-schema proof for 20270305200000_supplier_quote_unit_floor.sql.
  * Contract: docs/plans/2026-11-24-supplier-quote-unit-floor-CONTRACT.md
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, attempt, asUser, refuse, id, psql, scalar, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270304140000_supplier_quote_unit_floor.sql';
+const CANDIDATE = '20270305200000_supplier_quote_unit_floor.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });

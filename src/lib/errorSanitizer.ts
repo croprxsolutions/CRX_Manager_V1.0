@@ -18,7 +18,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Product price sheet: the server refuses a used, expired or someone else's sheet, or a sheet listing a product twice.
   [/^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/,
    'No prices were changed. This price sheet can no longer be used: it was already applied, is more than 7 days old, came from an older template, or was downloaded by another user. Download a fresh price sheet and make your changes in it'],
-  // Supplier Pricing (20270304140000): bounds that keep the converted cost per inventory unit a sane number.
+  // Supplier Pricing (20270305200000): bounds that keep the converted cost per inventory unit a sane number.
   [/^SUPPLIER_CONVERSION_INVALID\b|violates check constraint "product_supplier_links_conversion_floor"/,
    'Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals'],
   [/violates check constraint "supplier_price_observations_package_quantity_floor"/,

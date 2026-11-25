@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270305220000_ingredient_cas_fill_passes_epa_gate.sql.
+ * Real-schema proof for 20270307140000_ingredient_cas_fill_passes_epa_gate.sql.
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs). Fixture: an EPA-numbered product (gated) whose
@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, attempt, asUser, refuse, id, psql, scalar, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270305220000_ingredient_cas_fill_passes_epa_gate.sql';
+const CANDIDATE = '20270307140000_ingredient_cas_fill_passes_epa_gate.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });

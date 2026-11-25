@@ -152,8 +152,8 @@ function SwapChoice({ row, fix, others, busy, gated, patch }: {
       <IngredientSearch id={`swap-pick-${row.row_id}`} label="Replace with" excludeIds={[row.ingredient_id]}
         onPick={(swapTo) => {
           const into = others.find((other) => other.ingredient_id === swapTo.id);
-          if (gated && (sameNameKey(swapTo.name) !== sameNameKey(row.name) || row.cas !== null)) {
-            toast('error', `On an EPA product ${row.name} can only be replaced by a duplicate record with the same name, and only while it has no CAS number.`);
+          if (gated && (sameNameKey(swapTo.name) !== sameNameKey(row.name) || row.cas !== null || swapTo.cas !== null)) {
+            toast('error', `On an EPA product ${row.name} can only be replaced by a duplicate record with the same name, and only while neither record has a CAS number.`);
           } else if (into && gated) {
             toast('error', `${swapTo.name} is already on this product. An EPA product cannot merge two rows; pick a record that is not on it.`);
           } else if (into) {
@@ -350,6 +350,10 @@ export default function ChemistryCorrectionModal({ parentId, profileId, prefill,
       if (cancelled) return;
       setChem(loaded);
       setFixes(initialFixes(loaded, prefill));
+      if (prefill && loaded.epa_refusal !== null && loaded.chemistry.ingredients.some((row) => row.ingredient_id === prefill.withIngredient.id)
+        && loaded.chemistry.ingredients.some((row) => row.ingredient_id === prefill.ingredientId)) {
+        toast('info', `${prefill.withIngredient.name} is already on this product. An EPA product cannot merge two rows, so nothing was pre-filled.`);
+      }
       setModeRetire([]);
       setNutrientFixes(initialNutrientFixes(loaded.chemistry.fertilizer));
       setPreview(null);
@@ -358,7 +362,7 @@ export default function ChemistryCorrectionModal({ parentId, profileId, prefill,
       if (!cancelled) setChem('failed');
     });
     return () => { cancelled = true; };
-  }, [parentId, prefill, attempt]);
+  }, [parentId, prefill, attempt, toast]);
 
   if (chem === 'loading' || chem === 'failed') {
     return (

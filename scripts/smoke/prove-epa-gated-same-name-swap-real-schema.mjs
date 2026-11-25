@@ -33,9 +33,9 @@ const P_TYPED = id('b2');
 const ZETA_A = id('c1'); // on the EPA product, no CAS (an EPA-lookup orphan)
 const ZETA_B = id('c2'); // same name_key, but its own ingredient-level resistance group
 const OTHER = id('c3'); // different name
-const ZETA_C = id('c4'); // same name_key with the CAS: the record to keep
+const ZETA_C = id('c4'); // same name_key but has a CAS: a swap may not attach it
 const ZETA_D = id('c5'); // same name_key, different acid-form setting
-const ZETA_E = id('c6'); // same name_key, plain (no CAS, no group)
+const ZETA_E = id('c6'); // same name_key, plain (no CAS, same groups): the record to keep
 const LAMBDA = id('c7'); // a second ingredient already on the EPA product (consolidate target)
 const q = (s) => (s === null || s === undefined ? 'NULL' : `'${String(s).replaceAll("'", "''")}'`);
 const J = (o) => `${q(JSON.stringify(o))}::jsonb`;
@@ -68,7 +68,10 @@ try {
     INSERT INTO public.active_ingredients (id, name, cas, is_parent_form, created_by, updated_by) VALUES
       ('${ZETA_D}', 'Prover Zeta-CYPERMETHRIN', NULL, true, '${ADMIN}', '${ADMIN}');
     INSERT INTO public.active_ingredient_modes_of_action (ingredient_id, scheme, group_code, source_note, created_by, updated_by) VALUES
-      ('${ZETA_B}', 'IRAC', '4A', 'prover fixture', '${ADMIN}', '${ADMIN}');
+      ('${ZETA_B}', 'IRAC', '4A', 'prover fixture', '${ADMIN}', '${ADMIN}'),
+      -- the same group spelled two ways (02 = 2): the kept record still counts as interchangeable
+      ('${ZETA_A}', 'FRAC', '02', 'prover fixture', '${ADMIN}', '${ADMIN}'),
+      ('${ZETA_E}', 'FRAC', '2', 'prover fixture', '${ADMIN}', '${ADMIN}');
     INSERT INTO public.product_parent_ingredients (parent_id, ingredient_id, strength_value, strength_unit, strength_basis, source, source_note, created_by, updated_by) VALUES
       ('${P_EPA}', '${ZETA_A}', 9.15, 'pct_ww', 'active_ingredient', 'epa_lookup', 'EPA lookup of 91234-259', '${ADMIN}', '${ADMIN}'),
       ('${P_EPA}', '${LAMBDA}', 2, 'pct_ww', 'active_ingredient', 'epa_lookup', 'EPA lookup of 91234-259', '${ADMIN}', '${ADMIN}'),
@@ -99,6 +102,7 @@ try {
 
   // Still refused on the gated product.
   assert.match(previewThenSave(P_EPA, swap(epaRow, { ingredient_id: OTHER })), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'different name');
+  assert.match(previewThenSave(P_EPA, swap(epaRow, { ingredient_id: ZETA_C })), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'same name, target has a CAS');
   assert.match(previewThenSave(P_EPA, swap(epaRow, { ingredient_id: ZETA_B })), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'same name, different ingredient-level group');
   assert.match(previewThenSave(P_EPA, swap(epaRow, { ingredient_id: ZETA_D })), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'same name, different acid-form setting');
   assert.match(previewThenSave(P_EPA, [{ kind: 'ingredient', action: 'consolidate', row_id: epaRow, into_row_id: rowOf(P_EPA, LAMBDA), modes_of_action: [], ...typedStrength }]),
@@ -108,22 +112,23 @@ try {
   assert.match(previewThenSave(P_EPA, [{ kind: 'mode_of_action', action: 'retire', row_id: scalar(`SELECT id FROM public.product_parent_modes_of_action WHERE parent_id = '${P_EPA}' AND group_code = '3A';`) }]), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'mode retire');
   assert.match(previewThenSave(P_EPA, swap(epaRow, { ingredient_id: ZETA_C }), USERS.rep), /ADMIN_REQUIRED/, 'sales rep');
   assert.match(attempt(USERS.rep, `${refuse(`r := public.correct_parent_chemistry('${P_EPA}', 1, 'x', ${J(swap(epaRow, { ingredient_id: ZETA_C }))}, 'r', 'e', 'k');`)} v := t;`), /ADMIN_REQUIRED/);
-  console.log('[refuse] different name, same name with a different group or acid form, consolidate, same-name new ingredient, strength change, mode retire, sales rep -> all still refused');
+  console.log('[refuse] different name, same name with a CAS, a different group or acid form, consolidate, same-name new ingredient, strength change, mode retire, sales rep -> all still refused');
 
   // The fix: request strength (1 % label) and an empty mode list are ignored on the gated product.
-  const saved = previewThenSave(P_EPA, swap(epaRow, { ingredient_id: ZETA_C }), ADMIN, true);
+  const saved = previewThenSave(P_EPA, swap(epaRow, { ingredient_id: ZETA_E }), ADMIN, true);
   assert.match(saved, /^ok\|/, `same-name swap must save: ${saved}`);
   assert.equal(scalar(`SELECT status FROM public.product_parent_ingredients WHERE id = '${epaRow}';`), 'retired');
   assert.equal(scalar(`SELECT strength_value || '|' || strength_unknown || '|' || strength_unit || '|' || strength_basis || '|' || source || '|' || source_note
-                         FROM public.product_parent_ingredients WHERE parent_id = '${P_EPA}' AND ingredient_id = '${ZETA_C}' AND status = 'active';`),
+                         FROM public.product_parent_ingredients WHERE parent_id = '${P_EPA}' AND ingredient_id = '${ZETA_E}' AND status = 'active';`),
     '9.15|false|pct_ww|active_ingredient|epa_lookup|EPA lookup of 91234-259', 'strength, source and note carried over');
   assert.equal(scalar(`SELECT string_agg(scheme || ' ' || group_code || ' ' || source, ', ' ORDER BY scheme) FROM public.product_parent_modes_of_action
-                        WHERE parent_id = '${P_EPA}' AND ingredient_id = '${ZETA_C}' AND status = 'active';`), 'FRAC 99 typed, IRAC 3A epa_lookup', 'modes moved with their source');
+                        WHERE parent_id = '${P_EPA}' AND ingredient_id = '${ZETA_E}' AND status = 'active';`), 'FRAC 99 typed, IRAC 3A epa_lookup', 'modes moved with their source');
   assert.equal(scalar(`SELECT count(*) FROM public.product_parent_modes_of_action WHERE parent_id = '${P_EPA}' AND ingredient_id = '${ZETA_A}' AND status = 'active';`), '0');
   assert.equal(scalar(`SELECT count(*) FROM public.product_chemistry_events WHERE parent_id = '${P_EPA}' AND event_type = 'corrected' AND reason = 'Duplicate ingredient record';`), '1', 'event');
   assert.equal(scalar(`SELECT chemistry_version FROM public.product_parent_chemistry_state WHERE parent_id = '${P_EPA}';`), '2');
-  // Now the row is on the record with the CAS: swapping it away again is refused (never drop a confirmed identity).
-  assert.match(previewThenSave(P_EPA, swap(rowOf(P_EPA, ZETA_C), { ingredient_id: ZETA_E })), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'old record has a CAS');
+  // Once the kept record gets its CAS, swapping its row away again is refused (never drop a confirmed identity).
+  psql(`SET session_replication_role = replica; UPDATE public.active_ingredients SET cas = NULL WHERE id = '${ZETA_C}'; UPDATE public.active_ingredients SET cas = '52315-07-8' WHERE id = '${ZETA_E}';`);
+  assert.match(previewThenSave(P_EPA, swap(rowOf(P_EPA, ZETA_E), { ingredient_id: ZETA_A })), /PREVIEW_REFUSED CHEMISTRY_FROM_EPA_ONLY/, 'old record has a CAS');
   console.log('[fix] admin repointed the EPA product at its same-name duplicate; 9.15 % epa_lookup, IRAC 3A epa_lookup and FRAC 99 typed carried over; one corrected event; swapping off the CAS record is refused');
 
   // Un-gated product: the old swap behaviour is unchanged.

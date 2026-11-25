@@ -89,9 +89,9 @@ function DocumentEditForm({ edit, busy, retryOnly, onCancel, onSubmit }: {
           value={reason} maxLength={1000} onChange={(event) => setReason(event.target.value)} disabled={busy} />
       )}
       {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
-      {retryOnly && <p className="text-sm text-secondary">The last save could not be confirmed. Retry it before changing this link.</p>}
+      {retryOnly && <p className="text-sm text-secondary">The last save could not be confirmed. Retry it, or go back to reload the links and see whether it was saved.</p>}
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="secondary" onClick={onCancel} disabled={busy || retryOnly}>Back</Button>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={busy}>Back</Button>
         <Button type="submit" loading={busy}>
           {retryOnly ? 'Retry save' : edit.action === 'save' ? 'Save link' : edit.action === 'hide' ? 'Hide link' : 'Close report'}
         </Button>
@@ -143,8 +143,9 @@ export default function BrandDocuments({ target, brandName, links, canEdit, user
     } catch (error) {
       if (!isBrandDocumentConflict(error)) {
         const refused = !!error && typeof error === 'object' && 'message' in error
-          && /^(BRAND_DOCUMENT_INVALID|ADMIN_REQUIRED|NOT_AUTHORIZED)$/.test(String(error.message));
-        if (createsSupplement && !refused) setPendingCreate({ target: requestTarget, change: requestChange, key });
+          && /^(?:BRAND_DOCUMENT_URL_(?:INVALID|BLOCKED):|(?:BRAND_DOCUMENT_INVALID|ADMIN_REQUIRED|NOT_AUTHORIZED)$)/.test(String(error.message));
+        // A lost reply may hide a committed create: lock the form to an exact replay of that request.
+        if (createsSupplement) setPendingCreate(refused ? null : { target: requestTarget, change: requestChange, key });
         throw error;
       }
       setPendingCreate(null);
@@ -157,7 +158,16 @@ export default function BrandDocuments({ target, brandName, links, canEdit, user
     }
   }
 
+  // Leaving settles an unclear create like the brand form does: retire its key and reload the links,
+  // which shows whether it was saved before any new Add can be made.
+  const settlePending = () => {
+    if (!pendingCreate) return;
+    resetKeyFor(JSON.stringify([pendingCreate.target, pendingCreate.change]));
+    setPendingCreate(null);
+    onReload(true);
+  };
   const close = () => {
+    settlePending();
     setManageOpen(false);
     setEdit(null);
     setHistoryOpen(false);
@@ -200,10 +210,10 @@ export default function BrandDocuments({ target, brandName, links, canEdit, user
         </div>
       )}
       {canEdit && manageOpen && (
-        <Modal open onClose={close} closeDisabled={busy || pendingCreate !== null} title={brandName + ' documents'}>
+        <Modal open onClose={close} closeDisabled={busy} title={brandName + ' documents'}>
           {edit ? (
             <DocumentEditForm edit={edit} busy={busy} retryOnly={pendingCreate !== null}
-              onCancel={() => setEdit(null)} onSubmit={apply} />
+              onCancel={() => { settlePending(); setEdit(null); }} onSubmit={apply} />
           ) : (
             <div className="space-y-3">
               {links.map((link) => (

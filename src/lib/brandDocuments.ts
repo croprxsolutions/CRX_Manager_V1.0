@@ -63,8 +63,11 @@ export function checkedDocumentUrl(input: string): string {
   } catch {
     throw new Error('Enter an HTTPS document link.');
   }
-  const host = url.hostname.toLowerCase().replace(/\.$/, '');
-  if (url.username || url.password || url.port === '0' || !host.includes('.') || host.split('.').some((label) => label.length > 63)) {
+  const authority = /^https:\/\/([a-z0-9.-]+)(?::([0-9]{1,5}))?(?:[/?#]|$)/i.exec(raw);
+  const rawHost = authority?.[1].toLowerCase() ?? '';
+  const host = rawHost.replace(/\.$/, '');
+  if (!authority || rawHost.endsWith('..') || host.length > 253 || url.port === '0' || !host.includes('.')
+    || host.split('.').some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) {
     throw new Error('Enter a valid HTTPS document link without a sign-in.');
   }
   if (/(^|\.)(cdms\.net|greenbook\.net)$/.test(host)) {

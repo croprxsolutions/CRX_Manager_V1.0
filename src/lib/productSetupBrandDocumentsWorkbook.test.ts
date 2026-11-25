@@ -109,4 +109,10 @@ describe('Brand Links workbook tab', () => {
     expect(() => checkedDocumentUrl('https://greenbook.net:443/example')).toThrow(/Greenbook/);
     expect(checkedDocumentUrl('https://manufacturer.example/sds')).toBe('https://manufacturer.example/sds');
   });
+
+  it.each(['my_site.example', '-site.example', 'site-.example', 'café.example', 'site.example..'])(
+    'refuses a host the database will reject (%s)', (host) => {
+      expect(() => checkedDocumentUrl('https://' + host + '/sds')).toThrow(/valid HTTPS/);
+    },
+  );
 });

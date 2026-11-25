@@ -106,7 +106,7 @@ describe('Brand documents on Product Detail', () => {
   });
 
   it('retries an unconfirmed supplemental create with its original target, payload and key', async () => {
-    hooks.mutate.mockClear().mockRejectedValueOnce(new Error('Connection closed before the response'))
+    hooks.mutate.mockReset().mockRejectedValueOnce(new Error('Connection closed before the response'))
       .mockResolvedValueOnce(undefined);
     const reload = vi.fn();
     const { rerender } = render(<BrandDocuments target={target} brandName="Dual II Magnum" links={[]}
@@ -121,7 +121,7 @@ describe('Brand documents on Product Detail', () => {
     expect(screen.getByLabelText('Supplemental / 24(c) link')).toBeDisabled();
     expect(screen.getByLabelText('State code')).toBeDisabled();
     expect(screen.getByLabelText('Expiration date')).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled();
 
     rerender(<BrandDocuments target={{ ...target, brand_version: 3 }} brandName="Dual II Magnum" links={[]}
       canEdit userId="admin" onReload={reload} />);
@@ -134,5 +134,22 @@ describe('Brand documents on Product Detail', () => {
     ]);
     expect(hooks.mutate.mock.calls[1]).toEqual(hooks.mutate.mock.calls[0]);
     expect(screen.getByRole('button', { name: 'Add Supplemental / 24(c)' })).toBeEnabled();
+  });
+
+  it('allows correcting a supplemental URL after the server refuses it', async () => {
+    hooks.mutate.mockReset().mockRejectedValueOnce({ message: 'BRAND_DOCUMENT_URL_INVALID: enter an HTTPS document link' });
+    render(<BrandDocuments target={target} brandName="Dual II Magnum" links={[]}
+      canEdit userId="admin" onReload={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Manage documents for Dual II Magnum' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Supplemental / 24(c)' }));
+    const url = screen.getByLabelText('Supplemental / 24(c) link');
+    fireEvent.change(url, { target: { value: label.url } });
+    fireEvent.change(screen.getByLabelText('State code'), { target: { value: 'IA' } });
+    fireEvent.change(screen.getByLabelText('Expiration date'), { target: { value: '2027-12-31' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save link' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('enter an HTTPS document link');
+    expect(url).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Retry save' })).not.toBeInTheDocument();
   });
 });

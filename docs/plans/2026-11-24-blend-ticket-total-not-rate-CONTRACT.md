@@ -57,3 +57,4 @@ One PR into `staging`. The Edge Function runs from the deployed copy, so the fix
 None open.
 
 - **Strict rule (Mason, 2026-11-24, "Yes, strict rule").** After the review stop rule fired (a new HIGH from the "is the reader sure?" rule in Luna r1, Sol r1 and Luna r3), Mason chose: the import fills a unit only for an exact line (name, rate with a known unit, optional total with a known unit, nothing else); every other line arrives with a blank unit that a rep must set before Create App Record will file it.
+- **A blank unit makes the rep fix the whole line (Mason, 2026-11-25, "Yes, rep fixes line").** After Luna r9 (the catalog check's third HIGH round: a shifted line keeps the rate as its quantity guess and a product matched from the cut-short name), Mason chose: a blank unit is what stops the line, and the rep who sets the unit also checks its product and amount. The product match is not cleared, because filing silently skips a line with no product.

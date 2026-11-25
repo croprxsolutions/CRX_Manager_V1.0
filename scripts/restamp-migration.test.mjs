@@ -21,7 +21,9 @@ const OLD = "20270226100000";
 const NEW = "20270227110000";
 const STEM = "delivery_driver_checks";
 // Non-ASCII on purpose: the pin is the hash of the bytes, and the writer reads blobs as latin1.
-const header = (stamp) => `-- Written 2026-11-23 — not applied. Tracked in\n-- docs/reference/migrations.d/${stamp}_${STEM}.md.\n\n`;
+// The first line is only the migration's own name: a restamp moves it too (#2524 needed that by hand).
+const header = (stamp) => `-- ${stamp}_${STEM}
+-- Written 2026-11-23 — not applied. Tracked in\n-- docs/reference/migrations.d/${stamp}_${STEM}.md.\n\n`;
 const body = `CREATE TABLE t (id bigint); -- first written as ${OLD}\n`;
 const record = (stamp, sql) => `**LOCAL CANDIDATE — NOT APPLIED.** \`${stamp}_${STEM}.sql\` (SQL sha256: \`${sha(sql)}\`). Test.\n`;
 const latin1 = (text) => Buffer.from(text, "utf8").toString("latin1");
@@ -69,6 +71,14 @@ const latin1 = (text) => Buffer.from(text, "utf8").toString("latin1");
   assert.match(judgeSql(withBody(OLD), header(NEW) + linkBody.split(`${OLD}_`).join(`${NEW}_`)), /the migration's SQL changed/, "restamp rule: the body's self-link swapped is refused");
   const crHeader = (stamp) => `-- note\rSELECT 1; -- docs/reference/migrations.d/${stamp}_${STEM}.md\n\n`;
   assert.match(judgeSql(crHeader(OLD) + body, crHeader(NEW) + body), /the migration's SQL changed/, "restamp rule: a lone carriage return in the header is refused");
+  // Only a header line that is just the name moves; the same line in the body, or the name inside other header text, stays.
+  const nameBody = `SELECT 1;
+-- ${OLD}_${STEM}
+`;
+  assert.match(judgeSql(header(OLD) + nameBody, header(NEW) + nameBody.split(`${OLD}_`).join(`${NEW}_`)), /the migration's SQL changed/, "restamp rule: the name line swapped in the body is refused");
+  const seeLine = (stamp) => `-- see ${stamp}_${STEM} first
+` + header(stamp);
+  assert.match(judgeSql(seeLine(OLD) + body, seeLine(NEW) + body), /the migration's SQL changed/, "restamp rule: the name inside a longer header line is refused");
   // The one-shot list: exactly its key renamed old stamp -> new stamp, nothing else (2026-11-24, #2267).
   const oneShot = (key, why = "why") => `{\n  "_comment": ["x"],\n  "one_shot": {\n    "20260101000000_a": "a",\n    "${key}": "${why}"\n  }\n}\n`;
   const withList = [...entries, { path: ONE_SHOT_LIST, oldMode: "100644", newMode: "100644" }];

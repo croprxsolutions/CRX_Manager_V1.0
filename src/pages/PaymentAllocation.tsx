@@ -305,7 +305,14 @@ export default function PaymentAllocation() {
       toast('error', `This check is ${fmt(fullBalanceCents - checkCents)} short of the full balance of ${fmt(fullBalanceCents)}. Use Auto-Allocate to apply it oldest first.`);
       return;
     }
-    if (checkCents <= 0) setCheckAmountInput(centsToDollarInput(fullBalanceCents));
+    if (checkCents <= 0) {
+      // Fill only an empty box: text like "1e2" or "abc" reads as $0 and must not be replaced unseen.
+      if (checkAmountInput.trim() !== '') {
+        toast('error', 'The check amount is not a dollar amount. Fix or clear it, then try again.');
+        return;
+      }
+      setCheckAmountInput(centsToDollarInput(fullBalanceCents));
+    }
     const allocMap = autoAllocate(fullBalanceCents, owed);
     setInvoices((prev) =>
       prev.map((inv) => ({
@@ -313,7 +320,7 @@ export default function PaymentAllocation() {
         allocated_cents: allocMap.get(inv.invoice_id) || 0,
       })),
     );
-  }, [canPayFullBalance, checkAmountRefused, checkCents, invoices, toast]);
+  }, [canPayFullBalance, checkAmountInput, checkAmountRefused, checkCents, invoices, toast]);
 
   const handleClearAllocations = useCallback(() => {
     setInvoices((prev) => prev.map((inv) => ({ ...inv, allocated_cents: 0 })));

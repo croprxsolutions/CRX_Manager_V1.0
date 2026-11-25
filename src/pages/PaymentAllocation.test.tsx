@@ -9,7 +9,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 vi.mock('react-router-dom', async () => vi.importActual('react-router'));
 
 const { mockFrom, mockRpc, mockToast, mockAuth } = vi.hoisted(() => ({
-  mockAuth: { role: 'admin' },
+  mockAuth: { role: 'admin', deniedPages: [] as string[] },
   mockFrom: vi.fn(),
   mockRpc: vi.fn().mockImplementation(() => Promise.resolve({ data: null, error: null })),
   mockToast: vi.fn(),
@@ -42,7 +42,7 @@ vi.mock('../lib/db', () => ({
 }));
 
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ profile: { id: 'user-1', role: mockAuth.role, full_name: 'Test User' }, role: mockAuth.role }),
+  useAuth: () => ({ profile: { id: 'user-1', role: mockAuth.role, full_name: 'Test User' }, role: mockAuth.role, deniedPages: mockAuth.deniedPages }),
 }));
 
 vi.mock('../components/ui/Toast', () => ({
@@ -387,6 +387,94 @@ describe('Record Payments: faster entry', () => {
     } finally {
       mockAuth.role = 'admin';
     }
+  });
+
+  it('Pay full balance fills only an empty check amount: text that reads as $0 is left alone', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '1e2' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+
+    expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('not a dollar amount'));
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('1e2');
+    expect(screen.getAllByPlaceholderText('0.00').slice(1).map((el) => (el as HTMLInputElement).value)).not.toContain('50.00');
+  });
+
+  it('hides the Apply prepay link from a user without the Prepay Credits page (admin-only)', async () => {
+    mockAuth.role = 'sales_rep';
+    try {
+      renderPayments();
+      await chooseByKeyboard();
+      expect(screen.getByText('$25.00')).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Apply prepay to invoices' })).not.toBeInTheDocument();
+    } finally {
+      mockAuth.role = 'admin';
+    }
+  });
+
+  describe('switching to a second customer', () => {
+    const small = { ...customer, id: 'cust-2', farm_name: 'Small Farm', account_number: 'A-2', prepay_balance_cents: 900 };
+    let finishPrepayRead: (result: { data: unknown; error: unknown }) => void;
+
+    beforeEach(() => {
+      const held = new Promise<{ data: unknown; error: unknown }>((resolve) => { finishPrepayRead = resolve; });
+      mockRpc.mockImplementation(() => Promise.resolve({ data: { total_allocated_cents: 8000, prepay_created_cents: 0, invoices_paid: 2 }, error: null }));
+      mockFrom.mockImplementation((table: string) => {
+        if (table !== 'customers') {
+          return buildChain(table === 'invoices'
+            ? { data: openInvoices, error: null, count: openInvoices.length } as { data: unknown; error: unknown }
+            : { data: [], error: null });
+        }
+        const chain = buildChain({ data: [customer, small], error: null });
+        // The balance re-read after a save waits until the test lets it finish.
+        chain.select = (columns: string) => {
+          if (columns !== 'prepay_balance_cents') return chain;
+          const read = buildChain({ data: null, error: null });
+          read.then = held.then.bind(held);
+          return read;
+        };
+        return chain;
+      });
+    });
+
+    async function switchToSmallFarm() {
+      const box = screen.getByRole('combobox', { name: 'Customer' });
+      fireEvent.change(box, { target: { value: 'Small' } });
+      fireEvent.click(await screen.findByRole('option', { name: /Small Farm/ }));
+      await waitFor(() => expect(box).toHaveValue('Small Farm'));
+      await screen.findByText('INV-OLD');
+    }
+
+    it('starts the second customer with nothing allocated, and Apply posts to that customer', async () => {
+      renderPayments();
+      await chooseByKeyboard();
+      fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+      expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
+
+      await switchToSmallFarm();
+      expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$0.00');
+      fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
+      fireEvent.click(await screen.findByRole('button', { name: /^Continue/ }));
+
+      const calls = () => mockRpc.mock.calls.filter(([name]) => name === 'allocate_payment');
+      await waitFor(() => expect(calls()).toHaveLength(1));
+      expect(calls()[0][1]).toMatchObject({ p_customer_id: 'cust-2', p_total_cents: 8000 });
+      expect(JSON.stringify(calls()[0][1])).not.toContain('"i1"');
+    });
+
+    it('ignores a late prepay balance for the first customer once the second is chosen', async () => {
+      renderPayments();
+      await chooseByKeyboard();
+      fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
+      fireEvent.click(await screen.findByRole('button', { name: /Next Check/ }));
+
+      await switchToSmallFarm();
+      expect(screen.getByText('$9.00')).toBeInTheDocument();
+      await act(async () => { finishPrepayRead({ data: { prepay_balance_cents: 7777 }, error: null }); });
+      expect(screen.getByText('$9.00')).toBeInTheDocument();
+      expect(screen.queryByText('$77.77')).not.toBeInTheDocument();
+    });
   });
 
   it('leaves without asking when nothing is typed', async () => {

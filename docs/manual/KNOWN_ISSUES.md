@@ -872,7 +872,7 @@ click, correct focus and Escape, exactly one approval, Approved after reload.
 Payment History read Record Payments only (`allocation_sets`), so a check entered through Prepay Credits > New
 Check (`prepay_credits`) was missing from its Today / date-range total while Month-End Close counted it. Fixed:
 the totals, count and CSV export now include those checks, grouped one per check the way Month-End Close's
-`_month_payments_received` groups them; a line under the cards says how many and links to Prepay Credits.
+`_month_payments_received` groups them; a line under the cards says how many (each is in the CSV export).
 Mason asked to fix it rather than log it (2026-11-25).
 
 ### KI-120 — Any rep can change a customer's payment terms and finance-charge settings

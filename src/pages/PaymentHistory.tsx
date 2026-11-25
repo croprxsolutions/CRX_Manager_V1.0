@@ -495,7 +495,7 @@ export default function PaymentHistory() {
           <p className="text-xs text-secondary mt-1">reversed {rangeCaption}</p>
         </Card>
       </div>
-      <PrepayChecksNote count={shownPrepayChecks.length} cents={prepayCheckCents} customerId={customerId} />
+      <PrepayChecksNote count={shownPrepayChecks.length} cents={prepayCheckCents} />
       </>
       )}
 

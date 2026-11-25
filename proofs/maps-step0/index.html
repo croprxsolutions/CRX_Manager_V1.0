@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MapLibre Draw Proof</title>
+  </head>
+  <body>
+    <main id="proof-shell">
+      <div id="proof-map" aria-label="Map drawing proof"></div>
+      <nav id="proof-toolbar" aria-label="Proof controls">
+        <button id="start-polygon" type="button">Start polygon</button>
+        <button id="switch-picture-a" type="button">Picture A</button>
+        <button id="switch-picture-b" type="button">Picture B</button>
+        <output id="proof-status" aria-live="polite">Loading map</output>
+      </nav>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

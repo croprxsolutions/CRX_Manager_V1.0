@@ -24,6 +24,7 @@ Deno.test("the total column, not the per-acre rate, is the quantity (Sol #2267 r
   check("Atrazine 2 qt 32 QTS", "Atrazine", 32, "QT"); // case kept, as before
   check("Atrazine 2 qt/ac 32 qt", "Atrazine", 32, "qt");
   check("Atrazine 2 qt/ac. 32 qt", "Atrazine", 32, "qt");
+  check("Atrazine | 2 qt/ac | 32 qt", "Atrazine", 32, "qt");
   check("Atrazine 2 qt 32qt.", "Atrazine", 32, "qt");
   check("Piksi 6 g .75 g", "Piksi", 0.75, "g");
   check("Piksi | 6 g | 750 g", "Piksi", 750, "g");

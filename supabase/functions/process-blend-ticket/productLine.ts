@@ -45,7 +45,8 @@ export function parseProductLine(
         rate,
         totalProduct || null,
         // Extra text in the rate cell or extra columns mean the line is not exact.
-        !END.test(rate?.rest ?? "") || parts.slice(3).some((p) => p !== ""),
+        !END.test((rate?.rest ?? "").replace(PER_ACRE, "")) ||
+          parts.slice(3).some((p) => p !== ""),
       );
 
       return {

@@ -148,6 +148,7 @@ export default function ARaging() {
   // The last comparison read failed: no rows, so the old seasons' figures never sit under the new labels.
   const [seasonFailed, setSeasonFailed] = useState(false);
   const seasonLoadSeq = useRef(0);
+  const lastEmailedLoadSeq = useRef(0);
 
   const fetchAging = useCallback(async () => {
     const seq = ++agingLoadSeq.current;
@@ -207,10 +208,15 @@ export default function ARaging() {
   }, [seasonA, seasonB, toast]);
 
   const loadLastEmailed = useCallback(async () => {
+    const seq = ++lastEmailedLoadSeq.current;
     try {
-      setLastEmailedAt(await fetchLastStatementEmailedAt());
+      const sent = await fetchLastStatementEmailedAt();
+      // A newer read (after a batch email) started while this one loaded.
+      if (seq !== lastEmailedLoadSeq.current) return;
+      setLastEmailedAt(sent);
       setLastEmailedFailed(false);
     } catch (err) {
+      if (seq !== lastEmailedLoadSeq.current) return;
       Sentry.captureException(err, { tags: { source: 'fetch', page: 'ar_aging', action: 'load_last_statement_emailed' } });
       setLastEmailedAt(null);
       setLastEmailedFailed(true);
@@ -228,7 +234,7 @@ export default function ARaging() {
   const searchHidesRows = visibleAgingRows.length !== agingData.length;
   const selectedVisibleIds = visibleAgingRows.filter((r) => selectedCustomers.has(r.customer_id)).map((r) => r.customer_id);
   const allVisibleSelected = visibleAgingRows.length > 0 && selectedVisibleIds.length === visibleAgingRows.length;
-  const hiddenTickedCount = selectedCustomers.size - selectedVisibleIds.length;
+  const hiddenTickedCount = agingData.filter((r) => selectedCustomers.has(r.customer_id)).length - selectedVisibleIds.length;
 
   useEffect(() => {
     if (tab === 'aging') fetchAging();

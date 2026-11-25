@@ -40,10 +40,11 @@ WITH RECURSIVE fn AS (
 ),
 -- One regex pass per function, then a name join: the old every-pair regex (~1.7M matches) ran past the
 -- production 2-minute statement limit. Names resolve as PostgreSQL resolves them: a quoted call "Foo"() keeps its
--- case (m[1]); an unquoted call folds to lower case (m[2]).
+-- case and may hold any character ("" is an escaped quote) (m[1]); an unquoted call, letters, digits, _ and $,
+-- folds to lower case (m[2]).
 call AS (
-  SELECT DISTINCT a.oid AS caller, coalesce(m[1], lower(m[2])) AS callee_name
-  FROM fn a, regexp_matches(a.prosrc, '(?:"(\w+)"|\m(\w+))\s*\(', 'g') m
+  SELECT DISTINCT a.oid AS caller, coalesce(replace(m[1], '""', '"'), lower(m[2])) AS callee_name
+  FROM fn a, regexp_matches(a.prosrc, '(?:"((?:[^"]|"")+)"|\m([\w$]+))\s*\(', 'g') m
 ),
 edge AS (
   SELECT DISTINCT c.caller, b.oid AS callee

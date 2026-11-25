@@ -953,7 +953,7 @@ export const KNOWN_SWEEP_PREDICATES = new Map([
   ["5c49a1f5d8afca87439cf87fc1a74ffebaa38de68cb5eb1790109fc0a8dce1e6", "auth-bound-role-ungated.sql"],
   ["cf7d26579eb94ed66ede19cd97d6c7143676c16687cc69c1adb1615870f115ed", "browser-table-maintenance.sql"],
   ["c9a03c9a022912fdbf263251f3ec48155cf49259cf097f23a3daf28d445d4a54", "commission-admin-active.sql"],
-  ["31bbb6e711fd2b7ef42eca9179a0111d23c685a2ab84ade0692a5a17d8fb9241", "cost-exposure-review.sql"],
+  ["2dc2bce9232e632683009f9b366a302131a8a3c0ec93f6a1112b43a1172369e8", "cost-exposure-review.sql"],
   ["c769b15bf97485e4d8b1d7457a8ed9a726627a57ec1c16c06c198308d8984f0d", "dispatch-sync-nonqualifying-profile.sql"],
   ["b15716e33a3061f3ebced1eb6b4ca20b90ec53c5967f4a34531ec8e56088ff08", "fin-allocations-bounded.sql"],
   ["61e703c79b85374001fd80719e0faa00bda1b5f899cb66d5cd4b04ba5a1693b6", "fin-ar-statement-balance.sql"],

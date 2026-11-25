@@ -319,6 +319,12 @@ export default function PaymentHistory() {
     });
   };
 
+  // A range that hides the opened payment closes it through the openId effect below.
+  const changeRange = (from: string | null, to: string | null) => {
+    setFromDate(from);
+    setToDate(to);
+  };
+
   const rangeInvalid = isRangeBackwards(fromDate, toDate);
   const isFiltered = !!(fromDate || toDate);
   // Display only: the list, totals and export cover the chosen customer's payments dated inside the range.
@@ -471,7 +477,7 @@ export default function PaymentHistory() {
         )}
         fromDate={fromDate}
         toDate={toDate}
-        onChange={(from, to) => { setFromDate(from); setToDate(to); }}
+        onChange={changeRange}
       />
 
       {/* Summary Cards: hidden while loading, after a failed load, and for an impossible range, where $0 would read as "no payments". */}
@@ -506,7 +512,7 @@ export default function PaymentHistory() {
             <span className="text-sm text-secondary">Voided Payments</span>
           </div>
           <p className="text-2xl font-semibold font-heading text-red-600">{voidedCount}</p>
-          <p className="text-xs text-secondary mt-1">reversed {rangeCaption}</p>
+          <p className="text-xs text-secondary mt-1">payments dated {rangeCaption}</p>
         </Card>
       </div>
       <PrepayChecksNote count={shownPrepayChecks.length} cents={prepayCheckCents} />

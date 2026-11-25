@@ -266,7 +266,8 @@ export default function MonthEndClose() {
           done: summary.payments.count === 0 || reviewedPayments,
           detail: summary.payments.count === 0
             ? 'No payments this period'
-            : `${summary.payments.count} payments totaling ${fmt(summary.payments.total_cents)} — verify and check box to confirm`,
+            // The count includes checks entered on Prepay Credits, which Payment History's list does not show.
+            : `${summary.payments.count} payments totaling ${fmt(summary.payments.total_cents)} (includes checks entered on Prepay Credits) — verify and check box to confirm`,
           reviewKey: summary.payments.count > 0 ? 'payments' : undefined,
           links: summary.payments.count > 0 ? links.payments : undefined,
         },

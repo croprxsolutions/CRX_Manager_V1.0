@@ -297,6 +297,8 @@ export default function Products() {
   const [vendorFilter, setVendorFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
   const [setupFilter, setSetupFilter] = useState<SetupFilter>('');
+  // The table owns its search box; it reports the text so the price sheet can match what the table shows.
+  const [tableSearch, setTableSearch] = useState('');
   const [bulkProductImportOpen, setBulkProductImportOpen] = useState(false);
   const [setupWorkbookOpen, setSetupWorkbookOpen] = useState(false);
   const [rateReviewOpen, setRateReviewOpen] = useState(false);
@@ -943,7 +945,8 @@ export default function Products() {
   const handleExportPricingWorkbook = async (fullSheet: boolean) => {
     // The workbook marks grouped sizes, so it waits for the groups as well as a current list.
     if (!profile || listBlocked || !parentsReady) return;
-    const productIds = (fullSheet ? products : selectedRows.length > 0 ? selectedRows : filtered)
+    const shown = tableSearch ? filtered.filter((product) => searchProducts(product, tableSearch)) : filtered;
+    const productIds = (fullSheet ? products : selectedRows.length > 0 ? selectedRows : shown)
       .filter((product) => product.is_active)
       .map((product) => product.id);
     if (productIds.length === 0) {
@@ -980,11 +983,7 @@ export default function Products() {
       anchor.click();
       URL.revokeObjectURL(url);
       exportPricingIdem.resetKeyFor(exportIntent);
-      // The table's search box lives inside the table, so a filtered export never sees it.
-      const scope = !fullSheet && selectedRows.length === 0
-        ? ' The search box does not narrow this file: tick products to export only those.'
-        : '';
-      toast('success', `Exported ${productIds.length} Product pricing row(s).${scope}`);
+      toast('success', `Exported ${productIds.length} Product pricing row(s).`);
     } catch (error) {
       toast('error', sanitizeError(error));
     } finally {
@@ -1420,7 +1419,7 @@ export default function Products() {
                 onClick={() => void handleExportPricingWorkbook(false)}
                 loading={workbookBusy}
                 disabled={listBlocked || !parentsReady || filtered.length === 0}
-                title="The selected products, or every active product the filters show. The search box does not narrow this file."
+                title="The selected products, or every active product the filters and search show"
               >
                 Pricing .xlsx
               </Button>
@@ -1521,6 +1520,7 @@ export default function Products() {
             searchable
             searchPlaceholder="Search products..."
             searchMatcher={searchProducts}
+            onSearchChange={setTableSearch}
             onRowClick={(row) => navigate(`/products/${row.id}`)}
             emptyTitle={products.length > 0 ? 'No matching products' : 'No products yet'}
             emptyDescription={products.length > 0 ? 'Try a different search or filter' : 'Add your first product to get started'}

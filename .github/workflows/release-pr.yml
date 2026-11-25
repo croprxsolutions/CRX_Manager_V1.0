@@ -23,9 +23,10 @@ on:
 permissions: {}
 
 # ponytail: a queued run replaces an older queued one; a lost Thursday run is redone by hand
-# (Actions → Release PR → Run workflow).
+# (Actions → Release PR → Run workflow). A hotfix gate queues apart, per PR: only posts a status, and
+# in the shared group the frequent refresh dispatches replaced it while queued (#2482, #2495).
 concurrency:
-  group: release-pr
+  group: release-pr${{ inputs.hotfix_pr && format('-hotfix-{0}', inputs.hotfix_pr) || '' }}
   cancel-in-progress: false
 
 jobs:

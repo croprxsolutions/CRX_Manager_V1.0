@@ -109,6 +109,8 @@ export default function PaymentAllocation() {
 
   // Customer: the shared customer box (type to search, arrow keys, Enter to choose).
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerOption | null>(null);
+  // What the customer box shows while it is being edited; null once a pick, blur or Escape settles it.
+  const [customerBoxText, setCustomerBoxText] = useState<string | null>(null);
   // A customer chosen in the box sends the cursor straight to the check amount.
   const focusAmountAfterPick = useRef(false);
   const amountInputRef = useRef<HTMLInputElement>(null);
@@ -208,6 +210,7 @@ export default function PaymentAllocation() {
 
   const selectCustomer = useCallback((c: CustomerOption) => {
     focusAmountAfterPick.current = true;
+    setCustomerBoxText(null);
     setSelectedCustomer(c);
     prepayReadSeq.current += 1;
     setPrepayBalanceCents(c.prepay_balance_cents);
@@ -222,6 +225,7 @@ export default function PaymentAllocation() {
     setLoadingInvoices(false);
     setInvoicesFailed(false);
     setSelectedCustomer(null);
+    setCustomerBoxText(null);
     prepayReadSeq.current += 1;
     setPrepayBalanceCents(null);
     setInvoices([]);
@@ -232,21 +236,12 @@ export default function PaymentAllocation() {
     setRetryRefused(false);
   }, []);
 
-  // Typing over the chosen customer's name lets go of that customer, as the old picker did, so
-  // Apply Payment cannot post a check (and its allocations) to the customer being replaced.
-  // The check amount, reference and notes stay, as before.
-  const releaseCustomerOnEdit = useCallback((typed: string) => {
-    if (!selectedCustomer || typed === selectedCustomer.farm_name) return;
-    invoiceLoadSeq.current += 1;
-    setLoadingInvoices(false);
-    setInvoicesFailed(false);
-    setSelectedCustomer(null);
-    prepayReadSeq.current += 1;
-    setPrepayBalanceCents(null);
-    setInvoices([]);
-    setLastResult(null);
-    setRetryRefused(false);
-  }, [selectedCustomer]);
+  // The customer changes only when one is picked from the list. A stray keystroke keeps the
+  // chosen customer and the typed allocations; blur or Escape puts the name back. While the box
+  // shows other text, nothing that posts or fills allocations runs, so Apply Payment can never
+  // post to a customer the box is not showing.
+  const customerBeingChanged = selectedCustomer !== null && customerBoxText !== null
+    && customerBoxText !== selectedCustomer.farm_name;
 
   /* ── Allocation helpers ────────────────────────────────────────────── */
 
@@ -350,7 +345,7 @@ export default function PaymentAllocation() {
   const invoicesNotReady = loadingInvoices || invoicesFailed;
 
   const handleSubmit = async () => {
-    if (!selectedCustomer || !profile) return;
+    if (!selectedCustomer || !profile || customerBeingChanged) return;
     if (invoicesNotReady) {
       toast('error', 'Wait for the open invoices to load before applying the check.');
       return;
@@ -523,7 +518,13 @@ export default function PaymentAllocation() {
           <Card>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Customer: the shared customer box */}
-              <div className="lg:col-span-2" onChange={(e) => releaseCustomerOnEdit((e.target as HTMLInputElement).value)}>
+              <div
+                className="lg:col-span-2"
+                onChange={(e) => setCustomerBoxText((e.target as HTMLInputElement).value)}
+                // The shared box puts the chosen name back on blur and Escape.
+                onBlur={() => setCustomerBoxText(null)}
+                onKeyDown={(e) => { if (e.key === 'Escape') setCustomerBoxText(null); }}
+              >
                 <label htmlFor="payment-customer" className="block text-sm font-medium text-nav-dark mb-1">Customer</label>
                 <CustomerSearchPicker<CustomerOption>
                   id="payment-customer"
@@ -538,6 +539,11 @@ export default function PaymentAllocation() {
                   placeholder="Search by name or account #..."
                   ariaLabel="Customer"
                 />
+                {customerBeingChanged && (
+                  <p className="mt-1 text-xs text-amber-600">
+                    Pick a customer from the list to switch, or press Esc to keep {selectedCustomer.farm_name}.
+                  </p>
+                )}
                 {selectedCustomer && prepayBalanceCents !== null && prepayBalanceCents > 0 && (
                   <p className="mt-1 text-xs text-secondary">
                     Prepay on account: <span className="font-medium text-crx-green">{fmt(prepayBalanceCents)}</span>
@@ -651,7 +657,7 @@ export default function PaymentAllocation() {
                       size="sm"
                       icon={<Zap className="w-4 h-4" />}
                       onClick={handleAutoAllocate}
-                      disabled={submitting || checkCents <= 0 || invoices.length === 0}
+                      disabled={submitting || customerBeingChanged || checkCents <= 0 || invoices.length === 0}
                     >
                       Auto-Allocate
                     </Button>
@@ -662,7 +668,7 @@ export default function PaymentAllocation() {
                         icon={<ListChecks className="w-4 h-4" />}
                         onClick={handlePayFullBalance}
                         showChevron={false}
-                        disabled={submitting || invoicesNotReady || invoices.length === 0 || checkAmountRefused || checkCents <= 0}
+                        disabled={submitting || customerBeingChanged || invoicesNotReady || invoices.length === 0 || checkAmountRefused || checkCents <= 0}
                         title="Enter the check amount first. Fills every open invoice with its full balance; any extra becomes prepay credit. Nothing is saved until Apply Payment."
                       >
                         Pay full balance
@@ -815,6 +821,7 @@ export default function PaymentAllocation() {
                     onClick={handleSubmit}
                     loading={submitting}
                     disabled={
+                      customerBeingChanged ||
                       invoicesNotReady ||
                       remaining < 0 ||
                       hasValidationError ||

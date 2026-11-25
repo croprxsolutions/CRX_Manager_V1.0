@@ -22,7 +22,7 @@ const shortMonth = (ymd: string) => parseLocalDate(ymd).toLocaleDateString('en-U
 
 export interface ClosedPeriod { period_start: string; period_end: string }
 
-export const isInClosedMonth = (ymd: string, closed: ClosedPeriod[]) => closed.some((p) => ymd >= p.period_start && ymd <= p.period_end);
+const isInClosedMonth = (ymd: string, closed: ClosedPeriod[]) => closed.some((p) => ymd >= p.period_start && ymd <= p.period_end);
 
 /** The first day after the latest closed month that has ended (the open months start there); null if none closed. */
 export function firstOpenDay(closed: ClosedPeriod[], today: string): string | null {
@@ -102,11 +102,10 @@ export interface ReturnableCheck {
   /** "Paid INV-20290 $1,200.00 · created Fall 2026 prepay $500.00" */
   meta: string;
   closedMonth: boolean;
-  /** Set when it can't be picked: "Already returned Nov 3" or "Edited/deleted, handle by hand". */
+  /** Set when it can't be picked: "Already returned Nov 3". */
   disabledReason: string | null;
 }
 
-export const RETURN_EDITED_REASON = 'Edited/deleted, handle by hand';
 export const RETURN_NOT_CHECK_REASON = (method: string | null) => `Not a check${method ? ` (${method.toUpperCase()})` : ''}. Only checks can come back.`;
 export const alreadyReturnedReason = (entryDate: string) => `Already returned ${parseLocalDate(entryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 
@@ -128,7 +127,7 @@ async function all<T = Row>(query: (from: number, to: number) => PromiseLike<{ d
   return (data ?? []) as T[];
 }
 
-export async function loadClosedPeriods(): Promise<ClosedPeriod[]> {
+async function loadClosedPeriods(): Promise<ClosedPeriod[]> {
   return all<ClosedPeriod>((from, to) => supabase.from('accounting_periods')
     .select('id, period_start, period_end', { count: 'exact' }).eq('status', 'closed').order('id').range(from, to));
 }
@@ -171,9 +170,86 @@ const sumBy = (rows: Row[], key: string, value: string) => {
   return m;
 };
 
+type Returned = Map<string, string>;
+
+/** Record Payment checks: what each paid and the prepay it created. */
+async function paymentCheckRows(customerId: string, sets: Row[], closed: ClosedPeriod[], returned: Returned): Promise<ReturnableCheck[]> {
+  const setIds = sets.map((s) => s.id as string);
+  if (!setIds.length) return [];
+  const [allocs, overpay] = await Promise.all([
+    all((from, to) => supabase.from('invoice_line_allocations')
+      .select('id, allocation_set_id, invoice_id, amount_cents, invoices!invoice_line_allocations_invoice_id_fkey ( invoice_number )', { count: 'exact' })
+      .in('allocation_set_id', setIds).order('id').range(from, to)),
+    all((from, to) => supabase.from('prepay_credits')
+      .select('id, allocation_set_id, original_amount_cents, bucket_label, reference_number, source_reference', { count: 'exact' })
+      .in('allocation_set_id', setIds).eq('source_type', 'overpayment').order('id').range(from, to)),
+  ]);
+  return sets.map((s) => {
+    const id = s.id as string;
+    const date = s.payment_date as string;
+    const byInvoice = new Map<string, { number: string; cents: number }>();
+    for (const a of allocs.filter((x) => x.allocation_set_id === id)) {
+      const number = (a.invoices as { invoice_number?: string } | null)?.invoice_number ?? 'invoice';
+      byInvoice.set(a.invoice_id as string, { number, cents: (byInvoice.get(a.invoice_id as string)?.cents ?? 0) + Number(a.amount_cents) });
+    }
+    const meta = [
+      ...[...byInvoice.values()].map((v) => `Paid ${v.number} ${fmt(v.cents)}`),
+      ...overpay.filter((c) => c.allocation_set_id === id && Number(c.original_amount_cents) > 0)
+        .map((c) => `created ${creditLabel(c)} ${fmt(Number(c.original_amount_cents))}`),
+    ].join(' · ');
+    const returnedOn = returned.get(id);
+    return {
+      allocationSetId: id, creditId: null, customerId,
+      number: (s.check_number as string) || (s.reference_number as string) || 'no number',
+      date, amountCents: Number(s.total_payment_cents ?? 0), prepayCheck: false, meta,
+      closedMonth: isInClosedMonth(date, closed),
+      disabledReason: returnedOn ? alreadyReturnedReason(returnedOn) : null,
+    };
+  });
+}
+
+/** Prepayment Manager checks: one row per entry (all its buckets), as the server returns them. */
+async function prepayCheckRows(customerId: string, pmCredits: Row[], closed: ClosedPeriod[], returned: Returned): Promise<ReturnableCheck[]> {
+  if (!pmCredits.length) return [];
+  const entries = await all((from, to) => supabase.from('financial_audit_log').select('id, new_values', { count: 'exact' })
+    .eq('operation_type', 'prepay_credit_created').eq('entity_id', customerId).order('id').range(from, to));
+  const placed = new Set<string>();
+  const groups: Row[][] = [];
+  for (const e of entries) {
+    const ids = (e.new_values as { credit_ids?: unknown } | null)?.credit_ids;
+    const buckets = Array.isArray(ids) ? pmCredits.filter((c) => ids.includes(c.id)) : [];
+    if (!buckets.length) continue;
+    buckets.forEach((b) => placed.add(b.id as string));
+    groups.push(buckets);
+  }
+  // A bucket no entry names (legacy data) is its own row; the server refuses it with "record it by hand".
+  for (const c of pmCredits.filter((x) => !placed.has(x.id as string))) groups.push([c]);
+  return groups.map((g) => prepayCheckRow(customerId, g, closed, returned)).filter((r): r is ReturnableCheck => r !== null);
+}
+
+function prepayCheckRow(customerId: string, buckets: Row[], closed: ClosedPeriod[], returned: Returned): ReturnableCheck | null {
+  const face = buckets.reduce((s, b) => s + Number(b.original_amount_cents), 0);
+  // A deleted check is not listed (its amounts are locked since M9, and a delete takes the whole check to $0).
+  if (face <= 0) return null;
+  const first = buckets[0];
+  const date = businessDay(first.created_at as string);
+  const left = buckets.reduce((s, b) => s + Number(b.balance_cents), 0);
+  const meta = buckets.length > 1
+    ? `${buckets.length} prepay buckets: ${buckets.map((b) => `${creditLabel(b)} ${fmt(Number(b.original_amount_cents))}`).join(' · ')}${left === 0 ? ', all used' : ''} (returns all)`
+    : `${creditLabel(first)} ${fmt(face)}${left > 0 && left < face ? ` (${fmt(left)} left)` : ''}`;
+  const returnedOn = buckets.map((b) => returned.get(b.id as string)).find(Boolean);
+  return {
+    allocationSetId: null, creditId: first.id as string, customerId,
+    number: (first.source_reference as string) || (first.reference_number as string) || 'no number',
+    date, amountCents: face, prepayCheck: true, meta,
+    closedMonth: isInClosedMonth(date, closed),
+    disabledReason: returnedOn ? alreadyReturnedReason(returnedOn) : null,
+  };
+}
+
 /**
  * The checks this customer can say came back: Record Payment checks and Prepayment Manager checks of the last
- * 12 months, newest first. ACH and other payments are not listed; a returned or edited check is listed, disabled.
+ * 12 months, newest first. ACH and other payments are not listed; a returned check is listed, disabled, and a deleted one is not listed.
  */
 export async function loadReturnableChecks(customerId: string, today = todayInBusinessTz(), lastYearOnly = true): Promise<ReturnableCheck[]> {
   // The picker lists the last 12 months; a payment opened by its own line is found at any age.
@@ -190,86 +266,10 @@ export async function loadReturnableChecks(customerId: string, today = todayInBu
     loadClosedPeriods(),
     loadReturned(customerId),
   ]);
-  const setIds = sets.map((s) => s.id as string);
-  const [allocs, overpay] = setIds.length ? await Promise.all([
-    all((from, to) => supabase.from('invoice_line_allocations')
-      .select('id, allocation_set_id, invoice_id, amount_cents, invoices!invoice_line_allocations_invoice_id_fkey ( invoice_number )', { count: 'exact' })
-      .in('allocation_set_id', setIds).order('id').range(from, to)),
-    all((from, to) => supabase.from('prepay_credits')
-      .select('id, allocation_set_id, original_amount_cents, bucket_label, reference_number, source_reference', { count: 'exact' })
-      .in('allocation_set_id', setIds).eq('source_type', 'overpayment').order('id').range(from, to)),
-  ]) : [[], []];
-
-  const out: ReturnableCheck[] = [];
-  for (const s of sets) {
-    const id = s.id as string;
-    const date = s.payment_date as string;
-    const byInvoice = new Map<string, { number: string; cents: number }>();
-    for (const a of allocs.filter((x) => x.allocation_set_id === id)) {
-      const key = a.invoice_id as string;
-      const prev = byInvoice.get(key);
-      const number = (a.invoices as { invoice_number?: string } | null)?.invoice_number ?? 'invoice';
-      byInvoice.set(key, { number, cents: (prev?.cents ?? 0) + Number(a.amount_cents) });
-    }
-    const meta = [
-      ...[...byInvoice.values()].map((v) => `Paid ${v.number} ${fmt(v.cents)}`),
-      ...overpay.filter((c) => c.allocation_set_id === id && Number(c.original_amount_cents) > 0)
-        .map((c) => `created ${creditLabel(c)} ${fmt(Number(c.original_amount_cents))}`),
-    ].join(' · ');
-    const returnedOn = returned.bySet.get(id);
-    out.push({
-      allocationSetId: id, creditId: null, customerId,
-      number: (s.check_number as string) || (s.reference_number as string) || 'no number',
-      date, amountCents: Number(s.total_payment_cents ?? 0), prepayCheck: false, meta,
-      closedMonth: isInClosedMonth(date, closed),
-      disabledReason: returnedOn ? alreadyReturnedReason(returnedOn) : null,
-    });
-  }
-
-  if (pmCredits.length) {
-    const ids = pmCredits.map((c) => c.id as string);
-    const [entries, edits] = await Promise.all([
-      all((from, to) => supabase.from('financial_audit_log').select('id, new_values', { count: 'exact' })
-        .eq('operation_type', 'prepay_credit_created').eq('entity_id', customerId).order('id').range(from, to)),
-      all((from, to) => supabase.from('financial_audit_log').select('id, entity_id, old_values, new_values', { count: 'exact' })
-        .eq('operation_type', 'prepay_edited').in('entity_id', ids).order('id').range(from, to)),
-    ]);
-    const edited = new Set(edits.filter((e) => (e.old_values as Row | null)?.original_amount_cents !== (e.new_values as Row | null)?.original_amount_cents)
-      .map((e) => e.entity_id as string));
-    const placed = new Set<string>();
-    const groups: { buckets: Row[]; total: number | null }[] = [];
-    for (const e of entries) {
-      const nv = (e.new_values ?? {}) as { credit_ids?: unknown; total_cents?: unknown };
-      if (!Array.isArray(nv.credit_ids)) continue;
-      const buckets = pmCredits.filter((c) => (nv.credit_ids as unknown[]).includes(c.id));
-      if (!buckets.length) continue;
-      buckets.forEach((b) => placed.add(b.id as string));
-      groups.push({ buckets, total: Number(nv.total_cents ?? NaN) });
-    }
-    // A bucket no entry names cannot be returned by the server either; list it, disabled.
-    for (const c of pmCredits.filter((x) => !placed.has(x.id as string))) groups.push({ buckets: [c], total: null });
-
-    for (const g of groups) {
-      const face = g.buckets.reduce((s, b) => s + Number(b.original_amount_cents), 0);
-      // An edited or deleted check (its buckets no longer add up to what was received) is listed, disabled.
-      const received = g.total !== null && Number.isFinite(g.total) ? g.total : face;
-      const first = g.buckets[0];
-      const date = businessDay(first.created_at as string);
-      const left = g.buckets.reduce((s, b) => s + Number(b.balance_cents), 0);
-      const meta = g.buckets.length > 1
-        ? `${g.buckets.length} prepay buckets: ${g.buckets.map((b) => `${creditLabel(b)} ${fmt(Number(b.original_amount_cents))}`).join(' · ')}${left === 0 ? ', all used' : ''} (returns all)`
-        : `${creditLabel(first)} ${fmt(received)}${left > 0 && left < face ? ` (${fmt(left)} left)` : ''}`;
-      const returnedOn = g.buckets.map((b) => returned.byCredit.get(b.id as string)).find(Boolean);
-      const handEdited = g.total === null || g.total !== face || g.buckets.some((b) => edited.has(b.id as string));
-      out.push({
-        allocationSetId: null, creditId: first.id as string, customerId,
-        number: (first.source_reference as string) || (first.reference_number as string) || 'no number',
-        date, amountCents: received, prepayCheck: true, meta,
-        closedMonth: isInClosedMonth(date, closed),
-        disabledReason: returnedOn ? alreadyReturnedReason(returnedOn) : handEdited ? RETURN_EDITED_REASON : null,
-      });
-    }
-  }
+  const out = [
+    ...(await paymentCheckRows(customerId, sets, closed, returned.bySet)),
+    ...(await prepayCheckRows(customerId, pmCredits, closed, returned.byCredit)),
+  ];
   return out.sort((a, b) => (a.date === b.date ? (a.number < b.number ? 1 : -1) : a.date < b.date ? 1 : -1));
 }
 
@@ -372,6 +372,42 @@ export async function fetchPrepayTie(customerId?: string): Promise<PrepayTie[]> 
 export type HistoryKind = 'in' | 'out' | 'refund' | 'bounce';
 export interface HistoryRow { key: string; at: string; day: string; kind: HistoryKind; what: string; sub: string; ref: string; by: string; cents: number; afterCents: number }
 
+type HistoryEntry = Omit<HistoryRow, 'afterCents'>;
+type Who = (id: unknown) => string;
+
+function creditEntry(c: Row, who: Who): HistoryEntry {
+  const overpayment = c.source_type === 'overpayment';
+  const ref = (c.source_reference as string) || (c.reference_number as string) || '';
+  return {
+    key: `c-${c.id}`, at: c.created_at as string, day: businessDay(c.created_at as string), kind: 'in', what: 'Prepay received',
+    sub: overpayment ? 'Left over from a payment' : creditLabel(c),
+    ref: overpayment ? ref : `Check ${ref}`.trim(),
+    by: who(c.created_by), cents: Number(c.original_amount_cents),
+  };
+}
+
+function applicationEntry(a: Row, credits: Row[], who: Who): HistoryEntry {
+  return {
+    key: `a-${a.id}`, at: a.applied_at as string, day: businessDay(a.applied_at as string), kind: 'out', what: 'Applied to invoice',
+    sub: (a.invoices as { invoice_number?: string } | null)?.invoice_number ?? 'Invoice',
+    ref: creditLabel(credits.find((c) => c.id === a.prepay_credit_id) ?? {}), by: who(a.applied_by),
+    cents: -Number(a.applied_amount_cents),
+  };
+}
+
+/** A refund or return: what it took off the credits, less the applications it put back (those invoices owe again). */
+function reversalEntry(r: Row, lines: Row[], who: Who): HistoryEntry {
+  const sum = (kind: string) => lines.filter((l) => l.reversal_id === r.id && l.line_kind === kind).reduce((s, l) => s + Number(l.amount_cents), 0);
+  const refund = r.kind === 'outside_refund';
+  const ref = (r.reference as string) ?? '';
+  return {
+    key: `r-${r.id}`, at: r.created_at as string, day: r.entry_date as string, kind: refund ? 'refund' : 'bounce',
+    what: refund ? 'Refund paid outside CRX' : 'Check came back (bounced)', sub: r.reason as string,
+    ref: refund ? ref : `Check ${ref}`.trim(), by: who(r.performed_by),
+    cents: -(sum('prepay_credit') - sum('prepay_application')),
+  };
+}
+
 /**
  * Every change to this customer's prepay, newest first, with the balance after it: money received, applied to
  * invoices, refunded outside CRX and taken back by a returned check. Admin only (money_reversals is admin-read).
@@ -399,37 +435,11 @@ export async function loadPrepayHistory(customerId: string): Promise<HistoryRow[
     .select('id, full_name', { count: 'exact' }).in('id', people).order('id').range(from, to)) : [];
   const who = (id: unknown) => names.find((n) => n.id === id)?.full_name || 'someone';
 
-  const rows: Omit<HistoryRow, 'afterCents'>[] = [];
-  for (const c of credits) {
-    const cents = Number(c.original_amount_cents);
-    if (cents <= 0) continue; // voided or deleted: never counted
-    rows.push({
-      key: `c-${c.id}`, at: c.created_at as string, day: businessDay(c.created_at as string), kind: 'in', what: 'Prepay received',
-      sub: c.source_type === 'overpayment' ? 'Left over from a payment' : creditLabel(c),
-      ref: c.source_type === 'overpayment' ? (c.source_reference as string) || '' : `Check ${(c.source_reference as string) || (c.reference_number as string) || ''}`.trim(),
-      by: who(c.created_by), cents,
-    });
-  }
-  for (const a of apps) {
-    const credit = credits.find((c) => c.id === a.prepay_credit_id) ?? {};
-    rows.push({
-      key: `a-${a.id}`, at: a.applied_at as string, day: businessDay(a.applied_at as string), kind: 'out', what: 'Applied to invoice',
-      sub: (a.invoices as { invoice_number?: string } | null)?.invoice_number ?? 'Invoice', ref: creditLabel(credit), by: who(a.applied_by),
-      cents: -Number(a.applied_amount_cents),
-    });
-  }
-  for (const r of reversals) {
-    const mine = lines.filter((l) => l.reversal_id === r.id);
-    const taken = mine.filter((l) => l.line_kind === 'prepay_credit').reduce((s, l) => s + Number(l.amount_cents), 0);
-    const restored = mine.filter((l) => l.line_kind === 'prepay_application').reduce((s, l) => s + Number(l.amount_cents), 0);
-    const refund = r.kind === 'outside_refund';
-    rows.push({
-      key: `r-${r.id}`, at: r.created_at as string, day: r.entry_date as string, kind: refund ? 'refund' : 'bounce',
-      what: refund ? 'Refund paid outside CRX' : 'Check came back (bounced)', sub: r.reason as string,
-      ref: refund ? (r.reference as string) ?? '' : `Check ${(r.reference as string) ?? ''}`.trim(), by: who(r.performed_by),
-      cents: -(taken - restored),
-    });
-  }
+  const rows: HistoryEntry[] = [
+    ...credits.filter((c) => Number(c.original_amount_cents) > 0).map((c) => creditEntry(c, who)), // voided or deleted: never counted
+    ...apps.map((a) => applicationEntry(a, credits, who)),
+    ...reversals.map((r) => reversalEntry(r, lines, who)),
+  ];
   rows.sort((a, b) => (a.at === b.at ? (a.key < b.key ? -1 : 1) : a.at < b.at ? -1 : 1));
   let running = 0;
   return rows.map((r) => ({ ...r, afterCents: (running += r.cents) })).reverse();

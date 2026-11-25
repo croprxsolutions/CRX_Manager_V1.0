@@ -45,7 +45,7 @@ beforeEach(() => {
     check({ allocationSetId: 'set-6311', number: '6311', date: '2026-11-10', amountCents: 90000, meta: 'Paid INV-20512 $900.00', closedMonth: false }),
     check({ allocationSetId: null, creditId: 'k-6230', number: '6230', date: '2026-10-14', amountCents: 40000, prepayCheck: true, meta: 'Fall 2026 prepay $400.00', disabledReason: 'Already returned Nov 3' }),
     check({}),
-    check({ allocationSetId: null, creditId: 'k-6102', number: '6102', date: '2026-09-08', amountCents: 25000, prepayCheck: true, meta: 'Fall top-up $250.00', disabledReason: 'Edited/deleted, handle by hand' }),
+    check({ allocationSetId: null, creditId: 'k-5521', number: '5521', date: '2026-03-02', amountCents: 100000, prepayCheck: true, meta: 'Spring 2026 prepay $1,000.00 ($200.00 left)', closedMonth: false }),
   ]);
   H.effect.mockResolvedValue({
     invoices: [
@@ -142,14 +142,13 @@ describe('RefundOrReturnDialog: refund paid outside CRX', () => {
 });
 
 describe('RefundOrReturnDialog: check came back', () => {
-  it('lists checks with returned and edited ones disabled, tagged prepay check and closed month', async () => {
+  it('lists checks with returned ones disabled, tagged prepay check and closed month', async () => {
     open();
     fireEvent.click(await screen.findByRole('radio', { name: /Check came back/ }));
     const r6230 = await screen.findByRole('radio', { name: /Check 6230/ });
     expect(r6230).toBeDisabled();
     expect(screen.getByText('Already returned Nov 3')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /Check 6102/ })).toBeDisabled();
-    expect(screen.getByText('Edited/deleted, handle by hand')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Check 5521/ })).toBeEnabled();
     expect(screen.getAllByText('Prepay check')).toHaveLength(2);
     expect(screen.getAllByText('Sep · closed month').length).toBeGreaterThan(0);
     fireEvent.change(screen.getByRole('searchbox', { name: 'Find a check by number' }), { target: { value: '63' } });
@@ -182,6 +181,17 @@ describe('RefundOrReturnDialog: check came back', () => {
     await waitFor(() => expect(H.rpc).toHaveBeenCalledWith('record_returned_check', expect.objectContaining({
       p_allocation_set_id: 'set-6107', p_returned_date: '2026-11-23', p_reason: 'Bank returned it: insufficient funds', p_performed_by: 'admin-1',
     })));
+  });
+
+  it('keeps Record returned check… disabled while What happens loads', async () => {
+    let release!: (v: unknown) => void;
+    H.effect.mockReturnValue(new Promise((r) => { release = r; }));
+    open();
+    fireEvent.click(await screen.findByRole('radio', { name: /Check came back/ }));
+    fireEvent.click(await screen.findByRole('radio', { name: /Check 6107/ }));
+    expect(screen.getByRole('button', { name: /Record returned check/ })).toBeDisabled();
+    release({ invoices: [], prepayRemovedCents: 0, removedLabel: 'prepay', totalCents: 170000 });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Record returned check/ })).toBeEnabled());
   });
 
   it('opened from a payment line: the check is already picked, with no choice step and no list', async () => {

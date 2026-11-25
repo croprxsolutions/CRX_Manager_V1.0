@@ -44,14 +44,13 @@ beforeEach(() => {
 });
 
 describe('loadReturnableChecks', () => {
-  it('lists checks of the last 12 months: payments, a bucket-split check as one row, returned and deleted ones disabled', async () => {
+  it('lists checks of the last 12 months: payments, a bucket-split check as one row, a returned one disabled; a deleted one is not listed', async () => {
     const list = await loadReturnableChecks('c1', '2026-11-23');
-    expect(list.map((c) => c.number)).toEqual(['6311', '6230', '6102', '5870', '6107']);
+    expect(list.map((c) => c.number)).toEqual(['6311', '6230', '5870', '6107']);
     const c6107 = list.find((c) => c.number === '6107')!;
     expect(c6107).toMatchObject({ amountCents: 170000, closedMonth: true, disabledReason: null, meta: 'Paid INV-20290 $1,200.00 · created Fall 2026 prepay $500.00' });
     expect(list.find((c) => c.number === '5870')).toMatchObject({ amountCents: 100000, prepayCheck: true, creditId: 'b1', disabledReason: null,
       meta: '2 prepay buckets: Summer $600.00 · Seed $400.00 (returns all)' });
-    expect(list.find((c) => c.number === '6102')).toMatchObject({ amountCents: 25000, disabledReason: 'Edited/deleted, handle by hand' });
     expect(list.find((c) => c.number === '6230')?.disabledReason).toBe('Already returned Nov 3');
   });
 

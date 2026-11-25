@@ -898,7 +898,7 @@ function PrepayTieRow({ rows }: { rows: PrepayTie[] }) {
           <tbody>
             {rows.map((r) => (
               <tr key={r.customer_id} className="border-b border-gray-50 last:border-b-0">
-                <td className="px-4 py-2"><Link to={historyLink(r)} className="inline-flex min-h-11 items-center font-medium text-crx-green md:min-h-10">{r.farm_name}</Link></td>
+                <td className="max-w-56 px-4 py-2"><Link to={historyLink(r)} title={r.farm_name} className="flex min-h-11 items-center font-medium text-crx-green md:min-h-10"><span className="truncate whitespace-nowrap">{r.farm_name}</span></Link></td>
                 <td data-label="Stored" className="px-4 py-2 text-right tabular-nums">{fmt(r.stored_cents)}</td>
                 <td data-label="Credits add up to" className="px-4 py-2 text-right tabular-nums">{fmt(r.credits_cents)}</td>
                 <td data-label="Difference" className="px-4 py-2 text-right font-semibold tabular-nums">{signed(r.difference_cents)}</td>

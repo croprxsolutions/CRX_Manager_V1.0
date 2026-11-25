@@ -185,7 +185,7 @@ const ALLOWED_REASONS: Record<string, Reason[]> = {
   'src/components/prepay/PrepayWorkspacePanel.tsx': ['recovery'],
   'src/components/prepay/PrepaymentManagerPanel.tsx': ['recovery'],
   // M9 screens: the refund and returned-check dialog retires its key on an intent/actor binding refusal.
-  'src/components/prepay/RefundOrReturnDialog.tsx': ['recovery'],
+  'src/components/prepay/useRefundOrReturn.ts': ['recovery'],
   // Replay-binding batch 2 (20261016140000): the same intent/actor recovery reset at each stock
   // call site. These four stay pinned below for their OTHER sites; 'recovery' excuses only the
   // binding-rejection reset, which classify() verifies on its own line.

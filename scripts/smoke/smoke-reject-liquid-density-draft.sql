@@ -15,6 +15,7 @@ DECLARE
   v_reason text;
   v_key text;
   v_expected text;
+  v_version bigint;
 BEGIN
   IF has_function_privilege('anon', 'public.reject_liquid_density_draft(uuid,uuid,bigint,text,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: anonymous caller can execute rejection';
@@ -37,16 +38,17 @@ BEGIN
   v_result := public._save_parent_density_draft(v_group, 1, 10, 'lb_per_gal', 'sds', NULL, NULL, NULL);
   v_draft := (v_result->>'value_id')::uuid;
 
-  FOR v_actor, v_reason, v_key, v_expected IN VALUES
-    (v_rep, 'Different SDS', 'rep', 'ADMIN_REQUIRED%'),
-    (v_admin, 'Different SDS', 'self', 'PRODUCT_WEIGHT_SECOND_ADMIN_REQUIRED%'),
-    (v_reviewer, '', 'blank', 'REASON_REQUIRED%'),
-    (v_reviewer, 'Different SDS', NULL::text, 'IDEMPOTENCY_KEY_REQUIRED%')
+  FOR v_actor, v_reason, v_key, v_version, v_expected IN VALUES
+    (v_rep, 'Different SDS', 'rep', 2, 'ADMIN_REQUIRED%'),
+    (v_admin, 'Different SDS', 'self', 2, 'PRODUCT_WEIGHT_SECOND_ADMIN_REQUIRED%'),
+    (v_reviewer, '', 'blank', 2, 'REASON_REQUIRED%'),
+    (v_reviewer, 'Different SDS', NULL::text, 2, 'IDEMPOTENCY_KEY_REQUIRED%'),
+    (v_reviewer, 'Different SDS', 'stale-version', 1, 'PRODUCT_WEIGHT_STALE%')
   LOOP
     PERFORM set_config('request.jwt.claim.sub', v_actor::text, true);
     BEGIN
       EXECUTE 'SET LOCAL ROLE authenticated';
-      PERFORM public.reject_liquid_density_draft(v_group, v_draft, 2, v_reason, v_key || v_tag);
+      PERFORM public.reject_liquid_density_draft(v_group, v_draft, v_version, v_reason, v_key || v_tag);
       RAISE EXCEPTION 'SMOKE_FAIL: expected %', v_expected;
     EXCEPTION WHEN OTHERS THEN
       IF SQLERRM NOT LIKE v_expected THEN RAISE; END IF;
@@ -64,6 +66,13 @@ BEGIN
   BEGIN
     PERFORM public.reject_liquid_density_draft(v_group, v_draft, 2, 'Different reason', v_key);
     RAISE EXCEPTION 'SMOKE_FAIL: changed reason must not replay';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'IDEMPOTENCY_PAYLOAD_MISMATCH' THEN RAISE; END IF;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  BEGIN
+    PERFORM public.reject_liquid_density_draft(v_group, v_draft, 2, 'Different SDS', v_key);
+    RAISE EXCEPTION 'SMOKE_FAIL: another admin cannot redeem the reviewer receipt';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM <> 'IDEMPOTENCY_PAYLOAD_MISMATCH' THEN RAISE; END IF;
   END;

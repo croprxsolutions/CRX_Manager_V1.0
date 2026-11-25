@@ -3,7 +3,8 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -172,10 +173,15 @@ describe('walkthrough build manifest', () => {
   });
   it('refuses a bad state folder before it writes a lock or folder', () => {
     const bad = path.join(HERE, '.state-private-lock-check');
-    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'start'], { encoding: 'utf8', timeout: 30000, env: { ...cleanEnv(), CRX_LOCAL_APP_STATE_DIR: bad } });
+    const result = spawnSync(process.execPath, [APP, 'start'], { encoding: 'utf8', timeout: 30000, env: { ...cleanEnv(), CRX_LOCAL_APP_PROFILE: 'screen-walk', CRX_LOCAL_APP_LANE: '89abcdef', CRX_LOCAL_APP_STATE_DIR: bad } });
     assert.equal(result.status, 3);
     assert.match(result.stderr, /temp folder/);
     assert.equal(existsSync(bad), false);
+  });
+  it('the public walkthrough command takes no alternate state folder', () => {
+    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'status'], { encoding: 'utf8', timeout: 30000, env: { ...cleanEnv(), CRX_LOCAL_APP_STATE_DIR: tmpdir() } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /does not accept CRX_LOCAL_APP_STATE_DIR/);
   });
   it('requires a feature spec on the walkthrough lane', () => {
     const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'test'], { encoding: 'utf8', timeout: 30000, env: cleanEnv() });
@@ -185,20 +191,49 @@ describe('walkthrough build manifest', () => {
 });
 
 describe('walkthrough lane lock', () => {
-  it('every screen command that can change the lane refuses while the lane lock is held, and leaves the lock alone', () => {
-    const dir = tempDir('crx-local-app-test-');
-    const lock = path.join(dir, 'first-start.lock');
-    writeFileSync(lock, `${process.pid}
-`);
+  // A throwaway copy of the scripts: its canonical lock is the fixture's own, so no developer lock is touched.
+  const fixture = () => {
+    const root = tempDir('crx-lock-fixture-');
+    const dir = path.join(root, 'scripts', 'local-app');
+    mkdirSync(dir, { recursive: true });
+    for (const file of readdirSync(HERE).filter((name) => /\.mjs$/.test(name) && !/\.test\./.test(name))) copyFileSync(path.join(HERE, file), path.join(dir, file));
+    return { root, dir, lock: path.join(dir, '.state', 'screen-walk', 'first-start.lock') };
+  };
+  const hold = (lock) => { mkdirSync(path.dirname(lock), { recursive: true }); writeFileSync(lock, `${process.pid}
+`); };
+  const screen = (dir, args, stateDir, profile = 'screen-walk') => spawnSync(process.execPath, [path.join(dir, 'app.mjs'), ...args], {
+    encoding: 'utf8', timeout: 30000, env: { ...cleanEnv(), CRX_LOCAL_APP_PROFILE: profile, CRX_LOCAL_APP_LANE: '89abcdef', ...(stateDir ? { CRX_LOCAL_APP_STATE_DIR: stateDir } : {}) },
+  });
+  it('every screen command, including status, contends on the one canonical lock whatever state folder is set', () => {
+    const { root, dir, lock } = fixture();
+    const alternates = [tempDir('crx-alt-a-'), tempDir('crx-alt-b-')];
+    hold(lock);
     try {
-      for (const args of [['start'], ['rebuild'], ['stop'], ['seed'], ['test', 'product-unit.spec.ts']]) {
-        const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), ...args], { encoding: 'utf8', timeout: 30000, env: { ...cleanEnv(), CRX_LOCAL_APP_STATE_DIR: dir } });
-        assert.equal(result.status, 3, `${args[0]}: ${result.stdout}${result.stderr}`);
-        assert.match(result.stderr, /owns this lane/, args[0]);
-        assert.equal(readFileSync(lock, 'utf8').trim(), String(process.pid));
+      for (const args of [['start'], ['rebuild'], ['stop'], ['seed'], ['status'], ['test', 'product-unit.spec.ts']]) {
+        for (const stateDir of [undefined, ...alternates]) {
+          const result = screen(dir, args, stateDir);
+          assert.equal(result.status, 3, `${args[0]}: ${result.stdout}${result.stderr}`);
+          assert.match(result.stderr, /owns this lane/, args[0]);
+          assert.equal(readFileSync(lock, 'utf8').trim(), String(process.pid));
+        }
       }
+      for (const alt of alternates) assert.equal(existsSync(path.join(alt, 'first-start.lock')), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      for (const folder of [root, ...alternates]) rmSync(folder, { recursive: true, force: true });
+    }
+  });
+  it('the other three profiles take no lane lock', () => {
+    const { root, dir, lock } = fixture();
+    hold(lock);
+    try {
+      for (const profile of ['', 'sales-gauntlet', 'doc-bytes']) {
+        const result = screen(dir, ['status'], tempDir('crx-alt-'), profile);
+        assert.match(result.stderr, /No test app here yet/, profile);
+        assert.doesNotMatch(result.stderr, /owns this lane/, profile);
+      }
+      assert.equal(readFileSync(lock, 'utf8').trim(), String(process.pid));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
   it('the walkthrough lane refuses a loose frontend command, which would run unlocked', () => {
@@ -354,7 +389,7 @@ describe('network exposure', () => {
   it('frontend --port refuses the shared copy\'s port before anything starts', () => {
     const result = spawnSync(process.execPath, [APP, 'frontend', '--port', String(APP_PORT)], { encoding: 'utf8', timeout: 30000 });
     assert.equal(result.status, 3);
-    assert.match(result.stderr, /--port needs a port/);
+    assert.match(result.stderr, IS_SCREEN_WALK ? /starts its own frontend/ : /--port needs a port/);
   });
   it('accepts this computer\'s Docker', () => {
     assert.doesNotThrow(() => assertLocalDockerEndpoint('npipe:////./pipe/dockerDesktopLinuxEngine'));
@@ -449,7 +484,7 @@ describe('every command refuses before it changes anything', () => {
           const before = containers();
           const child = await runAsync(command, dir, IS_SCREEN_WALK && command === 'test' ? ['product-unit.spec.ts'] : []);
           assert.equal(child.status, 3, `${command} did not refuse: ${child.output}`);
-          assert.match(child.output, /unknown frontend/);
+          assert.match(child.output, IS_SCREEN_WALK && command === 'frontend' ? /starts its own frontend/ : /unknown frontend/);
           assert.equal(containers(), before);
         } finally {
           rmSync(dir, { recursive: true, force: true });

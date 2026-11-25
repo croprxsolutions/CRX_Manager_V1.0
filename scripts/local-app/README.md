@@ -66,12 +66,18 @@ product is present at that point; business fixtures are seeded after all migrati
 Historical migration provers are separate from this latest-schema browser proof: passing a historical
 candidate's before/after checks alone does not establish that today's sales workflow passes.
 
-If a command is interrupted, the next `start` or `rebuild` checks the recorded lock owner. It waits for a live
-owner and refuses a lock whose process has exited; it never removes containers or volumes, or changes a lock,
-to recover automatically. After confirming no walkthrough command is active, rename only `first-start.lock` to a
-dated `.stale` name. A malformed lock is left intact for inspection. If the same checkout folder was deleted and
-recreated while its Docker resources remain, use a new unique worktree folder to get another isolated lane;
-the old lane is preserved for deliberate manual recovery.
+Walkthrough commands (`start`, `rebuild`, `stop`, `seed`, `status`, `test`) share one lock per checkout:
+`scripts/local-app/.state/screen-walk/first-start.lock`. It is always that path, because the Docker project is fixed
+per checkout; `CRX_LOCAL_APP_STATE_DIR` cannot move it, and `walkthrough.mjs` refuses that variable outright.
+`status` is locked too, because it re-seals a running gateway. The other three profiles take no lock.
+
+If a command is interrupted (for example a build killed partway), the next command checks the recorded lock owner. It
+waits for a live owner and refuses a lock whose process has exited; it never removes containers or volumes, or changes
+a lock, to recover automatically. After confirming no walkthrough command is active, rename only `first-start.lock`
+to a dated `.stale` name, then run `rebuild`. A malformed lock is left intact for inspection. A brand-new checkout is
+safe only in a new, uniquely named folder: its lane (and Docker project) is derived from the folder path, so it has
+its own lock and resources. If the same folder was deleted and recreated while its Docker resources remain, use a new
+folder instead; the old lane is preserved for deliberate manual recovery.
 
 Run these from the root of a checkout. They need Docker running, `npm ci` done and Supabase CLI 2.109.1,
 the version these steps are proven on.

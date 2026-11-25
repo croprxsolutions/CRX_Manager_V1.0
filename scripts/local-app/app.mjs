@@ -22,7 +22,8 @@ const ROOT = path.resolve(HERE, '..', '..');
 const STATE_DIR = process.env.CRX_LOCAL_APP_STATE_DIR || path.join(HERE, STATE_FOLDER);
 const STATE_FILE = path.join(STATE_DIR, 'local.env');
 const BUILD_FILE = path.join(STATE_DIR, 'build.json');
-const FIRST_START_LOCK = path.join(STATE_DIR, 'first-start.lock');
+// One lock per checkout, in its canonical state folder, whatever CRX_LOCAL_APP_STATE_DIR says: the Docker project is fixed per checkout.
+const FIRST_START_LOCK = path.join(HERE, STATE_FOLDER, 'first-start.lock');
 const RECOVERY_COMMAND = `node scripts/local-app/${IS_SCREEN_WALK ? 'walkthrough' : IS_SALES_GAUNTLET ? 'sales' : IS_DOC_BYTES ? 'doc-bytes' : 'app'}.mjs rebuild`;
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const SERVICES = ['auth', 'rest', 'storage', 'gateway'];
@@ -573,11 +574,11 @@ const validArguments = extra.length === 0
   if (!validArguments) throw new Refused('Unsupported test-app arguments. Use sales.mjs for the sales gauntlet.');
   const command = COMMANDS[process.argv[2]];
   if (!command) throw new Error(`Use one of: ${Object.keys(COMMANDS).join(', ')}`);
-  // One lock for the whole command: any of these can change the lane's database or its saved evidence.
-  if (IS_SCREEN_WALK && ['start', 'rebuild', 'stop', 'seed', 'test'].includes(process.argv[2])) {
+  // One lock for the whole command: any of these can change the lane's database or its saved evidence (status reseals a running gateway).
+  if (IS_SCREEN_WALK && ['start', 'rebuild', 'stop', 'seed', 'test', 'status'].includes(process.argv[2])) {
     assertCleanEnvironment();
     assertStateDirAllowed();
-    mkdirSync(STATE_DIR, { recursive: true });
+    mkdirSync(path.dirname(FIRST_START_LOCK), { recursive: true });
     const release = acquireLaneLock(FIRST_START_LOCK);
     try { await command(); } finally { release(); }
   } else await command();

@@ -567,11 +567,6 @@
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/session-staleness.mjs\"",
             "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/worktree-awareness.mjs\"",
-            "timeout": 10
           }
         ]
       },

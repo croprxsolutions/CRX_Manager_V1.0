@@ -1,4 +1,4 @@
-import type { Cell, CellValue, Worksheet } from 'exceljs';
+import type { Cell, CellValue, Workbook, Worksheet } from 'exceljs';
 import type {
   PricingPreviewResult,
   PricingWorkbookExport,
@@ -105,6 +105,16 @@ const MARGIN_HEADERS = new Set<PricingWorkbookHeader>([
   'tier2_margin_percent',
   'tier3_margin_percent',
 ]);
+
+// Locked current margins are shown as numbers to 2 decimals. The parser reads the full number back,
+// so a cell is written as a number only when that reads back to the server's exact text.
+const LOCKED_MARGIN_HEADERS = [
+  'current_tier1_margin_percent',
+  'current_tier2_margin_percent',
+  'current_tier3_margin_percent',
+] as const satisfies readonly PricingWorkbookHeader[];
+
+export const DOLLAR_HEADER_NOTE = 'Dollars per inventory unit (see the inventory_unit column)';
 
 const COLUMN_WIDTHS: Record<PricingWorkbookHeader, number> = {
   product_id: 38,
@@ -301,13 +311,13 @@ export async function validatePricingWorkbookArchive(arrayBuffer: ArrayBuffer): 
     );
   }
   if (arrayBuffer.byteLength < ZIP_END_OF_CENTRAL_DIRECTORY_BYTES) {
-    throw new PricingWorkbookFormatError('The uploaded file is not a readable .xlsx workbook.');
+    throw new PricingWorkbookFormatError('This file could not be read as an Excel workbook. Open it in Excel, save it as .xlsx, and upload it again.');
   }
 
   const view = new DataView(arrayBuffer);
   const endOffset = findZipEndOfCentralDirectory(view);
   if (endOffset < 0) {
-    throw new PricingWorkbookFormatError('The uploaded file is not a readable .xlsx workbook.');
+    throw new PricingWorkbookFormatError('This file could not be read as an Excel workbook. Open it in Excel, save it as .xlsx, and upload it again.');
   }
 
   const commentLength = view.getUint16(endOffset + 20, true);
@@ -549,6 +559,21 @@ export async function generateProductPricingWorkbook(
     worksheet.addRow(PRICING_WORKBOOK_HEADERS.map((header) => row[header]));
   }
   stylePricingWorksheet(worksheet, pricingExport.rows.length);
+  for (const header of DOLLAR_HEADERS) {
+    worksheet.getCell(1, PRICING_WORKBOOK_HEADERS.indexOf(header) + 1).note = DOLLAR_HEADER_NOTE;
+  }
+  for (const header of LOCKED_MARGIN_HEADERS) {
+    const column = PRICING_WORKBOOK_HEADERS.indexOf(header) + 1;
+    for (let row = 2; row <= pricingExport.rows.length + 1; row += 1) {
+      const cell = worksheet.getCell(row, column);
+      const text = cell.value;
+      if (typeof text !== 'string' || text === '') continue;
+      const number = Number(text);
+      if (!Number.isFinite(number) || numberToPlainDecimal(number, header) !== text) continue;
+      cell.value = number;
+      cell.numFmt = '0.00';
+    }
+  }
   const useTimingColumn = PRICING_WORKBOOK_HEADERS.indexOf('use_timing') + 1;
   for (let row = 2; row <= pricingExport.rows.length + 1; row += 1) {
     const cell = worksheet.getCell(row, useTimingColumn);
@@ -678,10 +703,10 @@ function readManifest(manifest: Worksheet): Record<(typeof MANIFEST_KEYS)[number
   return Object.fromEntries(entries) as Record<(typeof MANIFEST_KEYS)[number], string>;
 }
 
-function validateHeaders(worksheet: Worksheet): void {
+function validateHeaders(worksheet: Worksheet, ignoredTrailingColumns: number): void {
   const headerRow = worksheet.getRow(1);
   const headers = Array.from(
-    { length: headerRow.cellCount },
+    { length: Math.max(headerRow.cellCount - ignoredTrailingColumns, 0) },
     (_, index) => {
       const cell = headerRow.getCell(index + 1);
       if (isFormulaValue(cell.value)) {
@@ -721,19 +746,48 @@ function parsePricingRow(worksheet: Worksheet, rowNumber: number): PricingWorksh
   };
 }
 
-export async function parseProductPricingWorkbook(
-  arrayBuffer: ArrayBuffer,
-): Promise<ParsedPricingWorkbook> {
+/** Archive safety checks, then one ExcelJS load. */
+export async function loadPricingWorkbook(arrayBuffer: ArrayBuffer): Promise<Workbook> {
   await validatePricingWorkbookArchive(arrayBuffer);
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   try {
     await workbook.xlsx.load(arrayBuffer);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new PricingWorkbookFormatError(`The uploaded file is not a readable .xlsx workbook: ${message}`);
+  } catch {
+    throw new PricingWorkbookFormatError(
+      'This file could not be read as an Excel price sheet. Open it in Excel, save it as .xlsx, and upload it again.',
+    );
   }
+  return workbook;
+}
 
+/** Rows holding any value outside the ignored columns, as actualRowCount would count them were those columns removed. */
+function rowsWithValues(worksheet: Worksheet, ignoredFrom: number, ignoredTo: number): number {
+  let count = 0;
+  worksheet.eachRow((row) => {
+    let counted = false;
+    row.eachCell((_, column) => {
+      if (column < ignoredFrom || column > ignoredTo) counted = true;
+    });
+    if (counted) count += 1;
+  });
+  return count;
+}
+
+export async function parseProductPricingWorkbook(
+  arrayBuffer: ArrayBuffer,
+): Promise<ParsedPricingWorkbook> {
+  return parseLoadedPricingWorkbook(await loadPricingWorkbook(arrayBuffer));
+}
+
+/**
+ * Parse an already loaded price sheet. ignoredTrailingColumns skips that many locked columns right
+ * after the CRX headers (the supplier-evidence summary); the caller must have checked their headers.
+ */
+export function parseLoadedPricingWorkbook(
+  workbook: Workbook,
+  ignoredTrailingColumns = 0,
+): ParsedPricingWorkbook {
   const worksheet = workbook.getWorksheet(PRICING_WORKBOOK_SHEET);
   if (!worksheet) {
     throw new PricingWorkbookFormatError(`Missing required worksheet ${PRICING_WORKBOOK_SHEET}.`);
@@ -743,7 +797,7 @@ export async function parseProductPricingWorkbook(
     throw new PricingWorkbookFormatError('Missing CRX workbook manifest. Export a fresh pricing workbook.');
   }
 
-  validateHeaders(worksheet);
+  validateHeaders(worksheet, ignoredTrailingColumns);
   const manifest = readManifest(manifestWorksheet);
   if (!/^(?:0|[1-9][0-9]*)$/.test(manifest.row_count)) {
     throw new PricingWorkbookFormatError('The workbook manifest row count is invalid.');
@@ -752,8 +806,17 @@ export async function parseProductPricingWorkbook(
   if (rowCount > MAX_PRICING_WORKBOOK_ROWS) {
     throw new PricingWorkbookFormatError(`Pricing workbooks are limited to ${MAX_PRICING_WORKBOOK_ROWS} rows.`);
   }
-  if (worksheet.actualRowCount - 1 !== rowCount) {
-    throw new PricingWorkbookFormatError('The Pricing Update row count does not match the CRX manifest.');
+  const valueRows = ignoredTrailingColumns === 0
+    ? worksheet.actualRowCount
+    : rowsWithValues(
+      worksheet,
+      PRICING_WORKBOOK_HEADERS.length + 1,
+      PRICING_WORKBOOK_HEADERS.length + ignoredTrailingColumns,
+    );
+  if (valueRows - 1 !== rowCount) {
+    throw new PricingWorkbookFormatError(
+      'Rows were added to or deleted from the Pricing Update sheet. Keep every downloaded row (leave a row as it is to skip it), or download a fresh price sheet.',
+    );
   }
   const rows: PricingWorksheetPreviewRow[] = [];
   for (let rowNumber = 2; rowNumber <= rowCount + 1; rowNumber += 1) {
@@ -768,6 +831,26 @@ export async function parseProductPricingWorkbook(
     rowCount,
     rows,
   };
+}
+
+// The server refuses a used, expired or another user's price sheet with one combined code
+// (errorSanitizer keeps the combined wording as the fallback); the sheet's own expiry says which.
+const PRICE_SHEET_REFUSED = /^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/;
+const PRICE_SHEET_EXPIRED_TEXT = 'No prices were changed. This price sheet expired (sheets last 7 days). Download a fresh one';
+const PRICE_SHEET_USED_TEXT = 'No prices were changed. This price sheet was already applied, was downloaded by another user, or came from an older template. Download a fresh one';
+
+/** The refusal for a price sheet already past its expires_at; null while it is current or unreadable. */
+export function priceSheetExpiredText(expiresAt: string, now = Date.now()): string | null {
+  const expiry = Date.parse(expiresAt);
+  return Number.isFinite(expiry) && expiry <= now ? PRICE_SHEET_EXPIRED_TEXT : null;
+}
+
+/** Plain words for the server's combined price sheet refusal; null for any other error. */
+export function priceSheetRefusalText(error: unknown, expiresAt: string, now = Date.now()): string | null {
+  const message = error instanceof Error ? error.message : (error as { message?: unknown } | null)?.message;
+  if (typeof message !== 'string' || !PRICE_SHEET_REFUSED.test(message)) return null;
+  if (!Number.isFinite(Date.parse(expiresAt))) return null;
+  return priceSheetExpiredText(expiresAt, now) ?? PRICE_SHEET_USED_TEXT;
 }
 
 /**

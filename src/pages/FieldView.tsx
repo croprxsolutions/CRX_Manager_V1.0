@@ -77,6 +77,7 @@ import {
   ShieldAlert,
   WifiOff,
   AlertCircle,
+  CloudUpload,
 } from 'lucide-react';
 import type { MapRef } from 'react-map-gl/mapbox';
 import type { Json } from '../types/supabase';
@@ -85,11 +86,13 @@ import FieldBoundaryLayer from '../components/map/FieldBoundaryLayer';
 import ErrorBoundary from '../components/ErrorBoundary';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import PhoneHeader from '../components/ui/PhoneHeader';
+import CompletionWeatherFields from '../components/jobs/CompletionWeatherFields';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useQueuedJobCompletions } from '../hooks/useQueuedJobCompletions';
 import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { getOfflineStorageErrorMessage, queueAction } from '../lib/offlineQueue';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
@@ -111,6 +114,9 @@ import {
   type FieldViewJobCard,
 } from '../lib/dispatchDisplay';
 import type { Field } from '../types';
+import { saveTodaySnapshot, savedCopyAfterFailure } from '../lib/todaySnapshot';
+import { isNetworkFailure } from '../lib/deliveryEvidence';
+import SavedCopyBanner from '../components/route/SavedCopyBanner';
 
 // The Supabase Data API caps a single response at ~1000 rows; page get_dispatched_list
 // via .range() until a short page ends the scan (same pattern as the DispatchBoard's
@@ -170,6 +176,8 @@ export default function FieldView() {
 
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
+  // When the job list failed to load and today's saved copy is shown instead (read-only): when it was loaded.
+  const [savedCopyAt, setSavedCopyAt] = useState<string | null>(null);
   const [cards, setCards] = useState<FieldViewJobCard[]>([]);
   const [search, setSearch] = useState('');
   const [view, setView] = useState<ViewMode>('list');
@@ -189,6 +197,9 @@ export default function FieldView() {
   const [completeForm, setCompleteForm] = useState<CompleteForm>(emptyCompleteForm());
   const [completeConfirmFor, setCompleteConfirmFor] = useState<FieldViewJobCard | null>(null);
   const [completing, setCompleting] = useState(false);
+  // Jobs whose completion is saved on this phone and still waiting to send: no second
+  // Complete for them until it sends, needs attention, or is discarded.
+  const { queuedJobIds, markQueued } = useQueuedJobCompletions(profile);
 
   // Map geometry (best-effort; the list view never depends on it).
   const [mapFields, setMapFields] = useState<Field[]>([]);
@@ -264,19 +275,46 @@ export default function FieldView() {
         grouped.sort((a, b) => a.job_number.localeCompare(b.job_number));
       }
 
+      // Today's read-only copy for a dead spot (src/lib/todaySnapshot.ts): the cards as shown, nothing more.
+      if (profile?.id) saveTodaySnapshot(MY_DAY_SNAPSHOT, profile.id, grouped);
+      setSavedCopyAt(null);
       setCards(grouped);
     } catch (err) {
       Sentry.captureException(err, { tags: { source: 'fetch', action: 'field_view_my_jobs' } });
-      // Honest error state: distinguish "couldn't load" from "genuinely no jobs" —
-      // the empty-state copy below only shows when fetchError is false.
-      setFetchError(true);
-      toast('error', 'Failed to load your jobs');
-      setCards([]);
+      const saved = savedCopyAfterFailure<FieldViewJobCard[]>(MY_DAY_SNAPSHOT, profile?.id, isNetworkFailure(err));
+      if (saved && Array.isArray(saved.data)) {
+        // Shown read-only: Start and Complete stay off until a load succeeds (the banner says why), and an open
+        // Complete form closes, as it did when a failed load emptied the list.
+        setCompleteFormOpenFor(null);
+        setSavedCopyAt(saved.savedAt);
+        setCards(saved.data);
+      } else {
+        // Honest error state: distinguish "couldn't load" from "genuinely no jobs" —
+        // the empty-state copy below only shows when fetchError is false.
+        setSavedCopyAt(null);
+        setFetchError(true);
+        toast('error', 'Failed to load your jobs');
+        setCards([]);
+      }
     }
     setLoading(false);
   }, [toast, profile?.id]);
 
   useEffect(() => { fetchCards(); }, [fetchCards]);
+
+  // A saved completion left the queue (sent, needs attention, or discarded): reload so a
+  // sent one shows the job as done instead of offering Complete again. Wait for signal:
+  // a reload that fails offline would blank the whole job list.
+  const prevQueuedJobIds = useRef(queuedJobIds);
+  const reloadAfterSend = useRef(false);
+  useEffect(() => {
+    if ([...prevQueuedJobIds.current].some((id) => !queuedJobIds.has(id))) reloadAfterSend.current = true;
+    prevQueuedJobIds.current = queuedJobIds;
+    if (reloadAfterSend.current && isOnline) {
+      reloadAfterSend.current = false;
+      void fetchCards();
+    }
+  }, [queuedJobIds, fetchCards, isOnline]);
 
   // --- Map geometry for the visible job locations (best-effort) ---------------------
   useEffect(() => {
@@ -506,6 +544,7 @@ export default function FieldView() {
 
   // --- Complete Job (queues offline) --------------------------------------------------
   const openCompleteForm = (card: FieldViewJobCard) => {
+    if (queuedJobIds.has(card.job_id)) return;
     setExpandedId(card.job_id); // Complete lives in the expanded panel (needs detail loaded)
     // U12 Codex R4 #2: completeForm is ONE shared state — without a reset, values
     // typed for job A (wind/notes/gallons) silently submit for job B after
@@ -523,6 +562,7 @@ export default function FieldView() {
   };
 
   const requestComplete = (card: FieldViewJobCard) => {
+    if (queuedJobIds.has(card.job_id)) return;
     setCompleteConfirmFor(card);
   };
 
@@ -531,6 +571,8 @@ export default function FieldView() {
     if (!card || !profile) return;
     const detail = details[cardDetailCacheKey(card)];
     setCompleteConfirmFor(null); // close confirm immediately
+    // A completion for this job is already saved on this phone: a second one is never queued or sent.
+    if (queuedJobIds.has(card.job_id)) return;
     setCompleting(true);
 
     // field_id comes from get_dispatched_list (U12 Codex P1 — the RPC now returns
@@ -578,6 +620,7 @@ export default function FieldView() {
           snapshotAt: detail?.jobUpdatedAt ?? undefined,
         });
         completeIdem.resetKey();
+        markQueued(card.job_id);
         toast('success', `Job ${card.job_number} saved offline — it will retry when connected and remain saved if it needs attention`);
         setCompleteFormOpenFor(null);
         setCompleteForm(emptyCompleteForm());
@@ -639,7 +682,8 @@ export default function FieldView() {
       ? (card.job_date === today ? 'Today' : parseLocalDate(card.job_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
       : null;
     const reiPhi = detail ? maxLabelReiPhi(detail.chemicals) : { reiHours: null, phiDays: null };
-    const showingCompleteForm = completeFormOpenFor === card.job_id;
+    const completionQueued = queuedJobIds.has(card.job_id);
+    const showingCompleteForm = completeFormOpenFor === card.job_id && !completionQueued;
 
     return (
       <div
@@ -684,8 +728,8 @@ export default function FieldView() {
           </div>
         </button>
 
-        {/* Quick actions — visible on the card face, no expand required for Start. */}
-        {!isTerminal && (
+        {/* Quick actions — visible on the card face, no expand required for Start. Off on a saved copy. */}
+        {!isTerminal && !savedCopyAt && (
           <div className="px-4 pb-3 flex gap-2">
             {card.job_status === 'scheduled' && (
               <button
@@ -697,7 +741,12 @@ export default function FieldView() {
                 <PlayCircle className="w-5 h-5" aria-hidden="true" /> Start Job
               </button>
             )}
-            {card.job_status === 'in_progress' && (
+            {card.job_status === 'in_progress' && (completionQueued ? (
+              <p role="status" className="flex-1 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-base font-semibold text-amber-900">
+                <CloudUpload className="w-5 h-5 shrink-0" aria-hidden="true" />
+                Completion saved on this phone — will send when signal returns
+              </p>
+            ) : (
               <button
                 type="button"
                 onClick={() => openCompleteForm(card)}
@@ -705,10 +754,10 @@ export default function FieldView() {
               >
                 <CheckCircle2 className="w-5 h-5" aria-hidden="true" /> Complete Job
               </button>
-            )}
+            ))}
           </div>
         )}
-        {!isOnline && card.job_status === 'scheduled' && (
+        {!isOnline && !savedCopyAt && card.job_status === 'scheduled' && (
           <p className="px-4 pb-3 -mt-1 flex items-center gap-1.5 text-sm text-amber-800">
             <WifiOff className="w-4 h-4" aria-hidden="true" /> Connect to the internet to start this job.
           </p>
@@ -801,15 +850,12 @@ export default function FieldView() {
                         <WifiOff className="w-4 h-4" aria-hidden="true" /> You're offline &mdash; this will save now and sync when you reconnect.
                       </p>
                     )}
+                    <CompletionWeatherFields
+                      value={completeForm}
+                      onChange={(patch) => setCompleteForm((p) => ({ ...p, ...patch }))}
+                      otherJobs={cards.filter((c) => c.job_id !== card.job_id)}
+                    />
                     <div className="grid grid-cols-2 gap-2 mb-3">
-                      <FieldInput label="Wind Speed (mph)" value={completeForm.wind_speed}
-                        onChange={(v) => setCompleteForm((p) => ({ ...p, wind_speed: v }))} />
-                      <FieldInput label="Wind Direction" value={completeForm.wind_direction}
-                        onChange={(v) => setCompleteForm((p) => ({ ...p, wind_direction: v }))} placeholder="e.g. NW" />
-                      <FieldInput label="Temperature (°F)" value={completeForm.temperature}
-                        onChange={(v) => setCompleteForm((p) => ({ ...p, temperature: v }))} />
-                      <FieldInput label="Humidity (%)" value={completeForm.humidity}
-                        onChange={(v) => setCompleteForm((p) => ({ ...p, humidity: v }))} />
                       <FieldInput label="Actual Gallons" value={completeForm.actual_gallons_applied}
                         onChange={(v) => setCompleteForm((p) => ({ ...p, actual_gallons_applied: v }))} />
                     </div>
@@ -931,6 +977,15 @@ export default function FieldView() {
         )}
       </PhoneHeader>
 
+      <SavedCopyBanner
+        what="your jobs"
+        savedAt={savedCopyAt}
+        blocked="You can't start or complete jobs until signal returns."
+        onRetry={() => void fetchCards()}
+        retrying={loading}
+        className="m-3 sm:mx-4 mb-0"
+      />
+
       {/* CONTENT */}
       {loading ? (
         <div className="p-3 sm:p-4 space-y-3">
@@ -1034,6 +1089,7 @@ export default function FieldView() {
   );
 }
 
+const MY_DAY_SNAPSHOT = 'my-day';
 const JOB_LIST = 'bg-white rounded-xl border border-gray-200 overflow-hidden divide-y divide-gray-100';
 const ROW_ACTION = 'flex-1 inline-flex h-12 items-center justify-center gap-2 bg-crx-green text-white font-heading text-lg font-bold rounded-xl hover:bg-crx-green-hover active:scale-[0.99] disabled:opacity-50 disabled:active:scale-100';
 
@@ -1065,15 +1121,16 @@ function Section({ icon, title, tone = 'green', children }: { icon: JSX.Element;
 
 /** Compact labeled number input for the Complete Job form. */
 function FieldInput({
-  label, value, onChange, placeholder,
-}: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  label, value, onChange,
+}: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <label className="block">
       <span className="block text-sm font-semibold text-nav-dark mb-1">{label}</span>
       <input
-        type={placeholder ? 'text' : 'number'}
+        type="number"
+        inputMode="decimal"
+        step="any"
         value={value}
-        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         className="h-11 w-full bg-white border border-gray-300 rounded-lg px-3 text-base text-nav-dark placeholder:text-gray-500"
       />

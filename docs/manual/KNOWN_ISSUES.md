@@ -262,9 +262,10 @@ A receipt asked for at completion is recorded in the same save in `delivery_rece
 PR #1495) and emailed with retries by the Edge Function `send-delivery-receipts` (PR #1647, live 2026-11-08); the app
 switch to the server receipt merged 2026-11-09 (PR #1649). The close action `close_delivery_receipt`
 (`20261221100000`, ledger `20261109152447`, PR #1678) now has its screens (2026-11-22): each row on "Customer receipts
-to check" (Deliveries) has **Mark handled**, so a handled receipt leaves the list and the server never emails it, and
+to check" (Deliveries) has **Mark handled** (admin-only since `20270301220000`, Mason 2026-11-23; sales reps see the
+list without it), so a handled receipt leaves the list and the server never emails it, and
 Email Confirmation pauses any receipt still queued before its hand send, then marks it handled once the email goes
-out (a failed hand send leaves it on the list). Still open: provider bounce handling (no email bounces are tracked
+out when an admin sent it (a rep's hand send stays listed for an admin; a failed hand send leaves it on the list). Still open: provider bounce handling (no email bounces are tracked
 on any path). The three rare duplicates Mason accepted on 2026-11-09 (DECISION_LOG) stay accepted.
 
 ### KI-26 — Delivery completion-evidence leftovers
@@ -446,6 +447,8 @@ recomputing margins from prices; consider failing closed instead of defaulting t
 Re-checked 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md)): 587 of 588 margins
 consistent, 1 outlier. Related catalog gaps found the same day, all for Mason (To-Do decision 27): 3 products have
 Tier 2 above Tier 3; 3 active products have no cost, 4 have no Tier 1 price, and 12 have no container size.
+Answered 2026-11-23 (Mason: "Intended, leave them"): those catalog gaps are intended and need no fix. The stale
+margins above are not part of that answer.
 
 ### KI-160 — Two stock counts open on the same product apply the same correction twice
 
@@ -805,7 +808,7 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   for the same product (LOW).
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
   defaults (MED). Decided for field splits (Mason, 2026-11-08): only payers saved on the field's split, or on
-  the job's own split; built in foundation 18.1 (`docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`). Any rep can read another rep's
+  the job's own split; built in foundation 18.1 (`docs/plans/field-application/CONTRACT-who-pays.md`). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).
 - Invoice lines could be written with no unit (from an order line or delivery line with no unit), so they could never
   get a return credit (MED): FIXED by `20270106100000` (applied live 2026-11-11, PR #1731). A new order line with no unit takes the product's

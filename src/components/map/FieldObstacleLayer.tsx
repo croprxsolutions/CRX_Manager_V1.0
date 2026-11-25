@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CircleDot,
+  MapPin,
   RadioTower,
   TreePine,
   Waves,
@@ -10,7 +11,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Marker, Popup } from 'react-map-gl/mapbox';
-import { FIELD_OBSTACLE_KIND_LABELS, fieldObstacleToGeoJsonFeature } from '../../lib/fieldObstacles';
+import { fieldObstacleKindLabel, fieldObstacleToGeoJsonFeature, isFieldObstacleKind } from '../../lib/fieldObstacles';
 import type { FieldObstacle, FieldObstacleKind } from '../../types';
 
 const OBSTACLE_ICONS: Record<FieldObstacleKind, LucideIcon> = {
@@ -47,7 +48,7 @@ export default function FieldObstacleLayer({
   return (
     <>
       {markers.map(({ obstacle, feature }) => {
-        const Icon = OBSTACLE_ICONS[obstacle.kind];
+        const Icon = isFieldObstacleKind(obstacle.kind) ? OBSTACLE_ICONS[obstacle.kind] : MapPin;
         return (
           <Marker
             key={obstacle.id}
@@ -85,7 +86,7 @@ export default function FieldObstacleLayer({
         >
           <div className="space-y-0.5 px-1 py-1 text-xs">
             <p className="font-semibold text-nav-dark">{selected.feature.properties.label}</p>
-            <p className="text-secondary">{FIELD_OBSTACLE_KIND_LABELS[selected.obstacle.kind]}</p>
+            <p className="text-secondary">{fieldObstacleKindLabel(selected.obstacle.kind)}</p>
           </div>
         </Popup>
       )}

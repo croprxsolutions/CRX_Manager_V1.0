@@ -42,10 +42,10 @@ describe('ProductMarginFloorCard', () => {
     expect(screen.getByRole('button', { name: /save floor/i })).toBeDisabled();
   });
 
-  it('says the price sheet does not check floors yet (its warning is To-Do 0.1)', async () => {
+  it('says the price sheet warns about a below-floor price (MARGIN_UNDER_FLOOR, To-Do 0.1)', async () => {
     render(<ProductMarginFloorCard productId="p1" tierMargins={[0.2, 0.1, null]} userId="u1" />);
-    expect(await screen.findByText(/price sheet does not check floors yet/)).toBeInTheDocument();
-    expect(screen.queryByText(/price sheet warns/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/price sheet warns about a below-floor price and asks for a reason/)).toBeInTheDocument();
+    expect(screen.queryByText(/does not check floors/)).not.toBeInTheDocument();
   });
 
   it('never shows a tier just under the floor rounded up to the floor', async () => {

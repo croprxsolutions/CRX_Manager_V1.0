@@ -1781,13 +1781,13 @@ describe('QuoteBuilder', () => {
     it('a ?draw=1 link opens the draw window by itself and drops the flag', async () => {
       const fixture = configureDrawDownFixture({ message: 'unused' });
       render(
-        <MemoryRouter initialEntries={[`/quotes/${fixture.quote.id}/edit?draw=1`]}>
-          <Routes><Route path="/quotes/:id/edit" element={<QuoteBuilder />} /></Routes>
+        <MemoryRouter initialEntries={[`/quotes/${fixture.quote.id}?draw=1`]}>
+          <Routes><Route path="/quotes/:id" element={<QuoteBuilder />} /></Routes>
         </MemoryRouter>,
       );
       const dialog = await screen.findByRole('dialog', { name: 'Draw from booking' });
       expect(await within(dialog).findByRole('spinbutton', { name: 'Quantity to draw for Product' })).toHaveValue(null);
-      expect(mockNavigate).toHaveBeenCalledWith({ pathname: `/quotes/${fixture.quote.id}/edit`, search: '' }, { replace: true });
+      expect(mockNavigate).toHaveBeenCalledWith({ pathname: `/quotes/${fixture.quote.id}`, search: '' }, { replace: true });
       expect(mockRpc.mock.calls.some(([name]) => name === 'draw_down_quote')).toBe(false);
     });
 

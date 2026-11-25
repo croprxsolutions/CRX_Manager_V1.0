@@ -687,6 +687,8 @@ export default function CustomerDetail() {
         .from('quotes')
         .select(QUOTE_COLUMNS)
         .eq('customer_id', id!)
+        // "Repeat last quote" copies quotes[0]: a deleted quote must never be it.
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
       // Cost is admin-only (Mason, 2026-10-15).
       let quoteRows = (data || []) as Quote[];

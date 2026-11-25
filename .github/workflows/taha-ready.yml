@@ -70,7 +70,7 @@ jobs:
       checks: read
       statuses: read
       issues: write
-      pull-requests: read
+      pull-requests: write # posting a comment on a PR needs PR write, not just issues: write (first live run, 2026-11-24)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -93,7 +93,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-      pull-requests: read
+      pull-requests: write # adding labels to a PR, same reason
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

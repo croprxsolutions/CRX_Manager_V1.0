@@ -38,11 +38,16 @@ WITH RECURSIVE fn AS (
     AND NOT EXISTS (SELECT 1 FROM pg_depend d
                     WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
 ),
+-- One regex pass per function, then a name join: the old every-pair regex (~1.7M matches) ran past the
+-- production 2-minute statement limit. An unquoted call folds to lower case, as PostgreSQL resolves it, so a
+-- quoted mixed-case "Foo"() is not linked to a caller of foo().
+call AS (
+  SELECT DISTINCT a.oid AS caller, lower(m[1]) AS callee_name
+  FROM fn a, regexp_matches(a.prosrc, '\m(\w+)\s*\(', 'g') m
+),
 edge AS (
-  SELECT DISTINCT a.oid AS caller, b.oid AS callee
-  FROM fn a JOIN fn b ON b.oid <> a.oid
-   AND position(b.proname IN a.prosrc) > 0
-   AND a.prosrc ~* ('\m' || b.proname || '\s*\(')
+  SELECT DISTINCT c.caller, b.oid AS callee
+  FROM call c JOIN fn b ON b.proname = c.callee_name AND b.oid <> c.caller
 ),
 -- (root, node) pairs; UNION de-duplicates, so call cycles terminate.
 reach (root, node) AS (

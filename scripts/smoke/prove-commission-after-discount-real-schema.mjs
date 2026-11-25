@@ -389,7 +389,7 @@ async function main() {
     DROP TRIGGER invoices_delete_settle_commission_20270306 ON public.invoices;
     DROP FUNCTION public._invoice_settles_commission_20270306();
     ${ORIGINALS.join(';\n')};
-    DROP FUNCTION public._settle_order_commission_20270306(uuid,boolean);
+    DROP FUNCTION public._settle_order_commission_20270306(uuid);
     DROP FUNCTION public._order_commission_base_20270306(uuid);
     COMMIT;`);
   const rolled = chain(NEW_CHAIN);

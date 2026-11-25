@@ -21,13 +21,13 @@
 --      profit after its discount (Taha, rule "b"). Lines with different margins are prorated by revenue, as the P&L
 --      already does (accepted, Sol r6 H5).
 --   2. _settle_order_commission_20270306(sale): when something must move, takes the sale lock (orders row, FOR NO KEY
---      UPDATE NOWAIT; ORDER_LIFECYCLE_BUSY_RETRY when another save holds it, as guard_terminal_order_invoice_items
---      does) and reads everything again under it; a sale with nothing to move takes no lock. It moves the
+--      UPDATE, waited for as zz_cap_order_invoice_header waits for it from the same invoice update) and reads
+--      everything again under it; a sale with nothing to move takes no lock. It moves the
 --      pending rows in no live payout batch whose stored base differs from the new base: each row its own percentage
 --      of the base (never a share of what is left), exact to the cent by largest remainder when they are the sale's
 --      whole live set, otherwise each its own rounded share. Rows already on the base never move (no cent after a
---      batch). A sale with no posted discount is left exactly as its writers made it (legacy rows included), unless a
---      discounted invoice just left the posted set: then rows go back to the plain profit (p_restore).
+--      batch). A sale with no posted discount that never carried a standing-discount line is left exactly as its
+--      writers made it (legacy rows included); one that did has its rows put back on the plain profit.
 --      It locks only the rows it moves, reads them again under the lock, and writes only those.
 --   3. invoices_settle_commission_20270306 (+ its DELETE twin): a plain (not deferred) row trigger on invoices entering
 --      or leaving the posted chemical-sale set (status, deleted_at, invoice_type) or moving to another sale while in it. It covers post (single and group), unpost, void
@@ -75,7 +75,7 @@ BEGIN
   IF (SELECT transaction_id FROM pg_temp.commission_settles_on_posting_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'COMMISSION_SETTLES_ON_POSTING_NOT_IN_TRANSACTION: apply this file as one transaction';
   END IF;
-  IF to_regprocedure('public._settle_order_commission_20270306(uuid,boolean)') IS NOT NULL
+  IF to_regprocedure('public._settle_order_commission_20270306(uuid)') IS NOT NULL
      OR to_regprocedure('public._order_commission_base_20270306(uuid)') IS NOT NULL
      OR to_regprocedure('public._invoice_settles_commission_20270306()') IS NOT NULL THEN
     RAISE EXCEPTION 'COMMISSION_SETTLES_ON_POSTING_PREFLIGHT: already applied';
@@ -156,7 +156,7 @@ $function$;
 REVOKE ALL ON FUNCTION public._order_commission_base_20270306(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
 -- 2. The settle -------------------------------------------------------------------------------------------------
-CREATE FUNCTION public._settle_order_commission_20270306(p_order_id uuid, p_restore boolean DEFAULT false)
+CREATE FUNCTION public._settle_order_commission_20270306(p_order_id uuid)
  RETURNS integer
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -181,7 +181,6 @@ BEGIN
   LOOP
     -- First pass without the sale lock: a sale with nothing to move (most posts) is left alone and never blocks a
     -- concurrent save of it. Once something must move, the sale lock is taken and everything is read again under it.
-    -- Never waited for: a caller holding an invoice row must not queue behind a save that holds the sale.
     SELECT COALESCE(total_profit, 0) INTO v_profit FROM orders WHERE id = p_order_id;
     IF NOT FOUND THEN
       RETURN 0;
@@ -199,12 +198,17 @@ BEGIN
     IF v_ids IS NULL THEN
       RETURN 0;
     END IF;
-    -- No posted discount: the rows belong to their writer, whatever base they sit on (legacy rows, fixtures), so a
-    -- sale that never had a discount is never touched. The one exception is p_restore: a discounted invoice just left
-    -- the posted set (unpost, void, delete), so rows this file moved onto its discount go back to the plain profit.
+    -- No posted discount: a sale that never carried a standing-discount line (every sale on live while the M4 switch
+    -- is off; legacy rows, fixtures) belongs to its writers, whatever base its rows sit on, and is never touched. One
+    -- that did (its discounted invoice unposted, voided or deleted, a payout of it voided afterwards) has rows put back
+    -- on the plain profit (attack run F1).
     IF v_base = round(v_profit, 2)
-       AND (NOT p_restore
-            OR NOT EXISTS (SELECT 1 FROM commissions WHERE id = ANY (v_ids) AND order_profit IS DISTINCT FROM v_base)) THEN
+       AND (NOT EXISTS (SELECT 1 FROM commissions WHERE id = ANY (v_ids) AND order_profit IS DISTINCT FROM v_base)
+            OR NOT EXISTS (SELECT 1 FROM invoices i JOIN invoice_items d ON d.invoice_id = i.id
+                            WHERE d.charge_type = 'standing_discount'
+                              AND (i.order_id = p_order_id
+                                   OR EXISTS (SELECT 1 FROM invoice_items b JOIN order_items oi ON oi.id = b.order_item_id
+                                               WHERE b.invoice_id = i.id AND oi.order_id = p_order_id)))) THEN
       RETURN 0;
     END IF;
     v_whole := NOT EXISTS (SELECT 1 FROM commissions c
@@ -239,11 +243,9 @@ BEGIN
       RETURN 0;
     END IF;
     IF NOT v_sale_locked THEN
-      BEGIN
-        PERFORM 1 FROM orders WHERE id = p_order_id FOR NO KEY UPDATE NOWAIT;
-      EXCEPTION WHEN lock_not_available THEN
-        RAISE EXCEPTION 'ORDER_LIFECYCLE_BUSY_RETRY: this order is being changed; wait a moment and retry';
-      END;
+      -- Waited for, as zz_cap_order_invoice_header already waits for the sale from the same invoice update (attack
+      -- run F2: NOWAIT failed ordinary posts that met a payout void or a delivery of the same sale).
+      PERFORM 1 FROM orders WHERE id = p_order_id FOR NO KEY UPDATE;
       v_sale_locked := true;
       CONTINUE;
     END IF;
@@ -262,7 +264,7 @@ BEGIN
   RETURN v_count;
 END
 $function$;
-REVOKE ALL ON FUNCTION public._settle_order_commission_20270306(uuid,boolean) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public._settle_order_commission_20270306(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
 -- 3. Posting, unposting and voiding ------------------------------------------------------------------------------
 CREATE FUNCTION public._invoice_settles_commission_20270306()
@@ -274,16 +276,13 @@ AS $function$
 DECLARE
   v_new_id uuid;
   v_new_order uuid;
-  v_restore boolean;
 BEGIN
   IF TG_OP = 'UPDATE' THEN
     v_new_id := NEW.id;
     v_new_order := NEW.order_id;
   END IF;
-  -- A discounted invoice leaving the posted set may leave its sale with no posted discount: put that sale's rows back.
-  v_restore := EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = OLD.id AND charge_type = 'standing_discount');
   -- The invoice's sale before and after, and every sale its product lines bill, in id order.
-  PERFORM public._settle_order_commission_20270306(s.order_id, v_restore)
+  PERFORM public._settle_order_commission_20270306(s.order_id)
      FROM (SELECT OLD.order_id AS order_id WHERE OLD.order_id IS NOT NULL
            UNION
            SELECT v_new_order WHERE v_new_order IS NOT NULL
@@ -525,7 +524,6 @@ AS $function$
 DECLARE
   v_actor uuid;
   v_result jsonb;
-  v_replay boolean;
 BEGIN
   IF p_idempotency_key IS NULL OR p_idempotency_key !~ '[^[:space:]]' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: cancel_order'
@@ -536,18 +534,13 @@ BEGIN
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH';
   END IF;
-  -- M4 (20270306100000): a replay returns its receipt and writes nothing (Sol r1 H4).
-  v_replay := EXISTS (SELECT 1 FROM public.idempotency_keys
-                       WHERE idempotency_key = p_idempotency_key AND operation = 'cancel_order' AND result IS NOT NULL
-                         AND (expires_at IS NULL OR expires_at > now()));
   v_result := public._cancel_order_idem_impl_20260721(
     p_order_id, p_performed_by, p_idempotency_key
   );
   -- M4 (20270306100000): Cancel Remaining re-splits the pending rows on total_profit; put them on the profit after
-  -- the sale's posted discount. A whole cancel leaves no pending row, so this does nothing.
-  IF NOT v_replay THEN
-    PERFORM public._settle_order_commission_20270306(p_order_id);
-  END IF;
+  -- the sale's posted discount. Run on a replay too: it moves only rows off their base, so a replay writes nothing, and
+  -- a key old enough to run the cancel again settles it again. A whole cancel leaves no pending row.
+  PERFORM public._settle_order_commission_20270306(p_order_id);
   RETURN v_result;
 END;
 $function$;
@@ -687,7 +680,7 @@ BEGIN
          AND tgfoid = 'public._invoice_settles_commission_20270306()'::regprocedure
          AND NOT tgdeferrable AND tgenabled = 'O') <> 2
      OR EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid IN ('public._order_commission_base_20270306(uuid)'::regprocedure,
-                    'public._settle_order_commission_20270306(uuid,boolean)'::regprocedure,
+                    'public._settle_order_commission_20270306(uuid)'::regprocedure,
                     'public._invoice_settles_commission_20270306()'::regprocedure)
                   AND p.proacl IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[])
      OR EXISTS (SELECT 1 FROM pg_temp.commission_settles_on_posting_acl a JOIN pg_proc p ON p.oid = a.oid

@@ -25,7 +25,9 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 | 0–1 | Drop the kit's extra `I approve` for non-destructive field migrations (FP-1, FP-3, FP-4, engine grants) | Yes | **Yes** (2026-11-24). Mason 2026-11-24 (slice 0–1 batch): no extra kit `I approve` for non-destructive field migrations; they apply under AGENTS.md › Autonomous landing (Taha's `Ready to merge`, the migration-apply proof gate). Mason's yes stays for anything the repo's guard classes as destructive (it asks him itself), Taha's reset, logins and roles, Edge Function deploys, production switches, `field_billing_start_date` and the live Chem Man import. |
 | 0–1 | Where the Chem Man export file lives (private, outside the repo), and the yes for the one live import after the reset | A private folder Mason names | **Deferred** until the field build is done (Mason, 2026-11-24; see Chem Man import above) |
 | 0–1 | Staging test login for any role missing from `docs/reference/qa-testing.md` | Create only what is missing | **Yes** (2026-11-24): missing roles only, staging only |
-| 2 | Go for slice 2; applicator extra-field permission; the mix-site account; `field_batch_stock_enabled` on in production at release; book the posting window with Taha | Yes to each | |
+| 2 | Go for slice 2's database work into staging | Yes | **Yes** (2026-11-25, "Yes, split it"): database work into `staging` only. Codex owns the Google Maps build (design steps 0–1, `docs/research/2026-11-24-google-maps-design.md`); slice 2's dispatch and phone map screens wait for that engine swap. No slice 2 migration merges until the applicator data-access fix (database half of #2574, Field Setup lane) is in staging |
+| 2 | Applicator extra-field permission; the mix-site account; Taha's reviews booked after 12-15 | Yes to each (asked 2026-11-25) | |
+| 2 (at release) | `field_batch_stock_enabled` on in production; the `main` merge; each live apply; any production smoke write; who watches errors the first day | Asked at release, not before | |
 | 3 | Go for slice 3; Edge Function deploy; at release, in order: the billing switch-on date and the pilot job (chosen from the open-job list), the pilot draft checked by hand, posting on for the pilot set only, then (after the pilot is checked on statements) posting on for everyone | Yes to each, in that order | |
 
 ## Slice 0
@@ -52,7 +54,7 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 
 | Item | State | Proof / link | Note |
 |---|---|---|---|
-| FP-1 field splits + payer notes | IN PROGRESS | branch `feat/field-1.1-fp1-splits` | migration `20270303120000_field_split_versions`; Docker proof, Luna, Sol, then the PR. Field Setup screen PR: owned by the Field Setup screen lane (`feat/field-1.1-setup-screen`); merges only after FP-1 is VERIFIED on staging |
+| FP-1 field splits + payer notes | MERGED | #2487 (`20270305190000_field_split_versions`), follow-up #2539 (`20270307150000_field_owner_change_refreshes_copy`); staging applies passed (db-apply runs 45629192766, 45672118827) | Screen half #2498 + #2558 merged. VERIFIED waits on the scenario re-run on staging (thin end-to-end check, slice 2 database lane) |
 | Chem Man field import | DEFERRED | | until the field build is done (Mason, 2026-11-24); then his export (private folder he names), a trial on a local copy, live after his yes. Testing meanwhile uses the 10 TEST fields on staging |
 | FP-2 billable acres | PARKED | | until after 2026-12-15 (its quote-to-job change is in Taha's quotes area); then with Taha's review |
 
@@ -93,6 +95,22 @@ Paperwork follow-ups (logged, not fixed; none touches money, stock or data):
 | Save locks the page and reloads fresh | DONE (Mason, 2026-11-24) | | Replaced keep-editing-and-merge after the save/reload logic drew a HIGH in Luna rounds 2, 4 and 5 |
 | Different product and application shares | DEFERRED to FP-4 | | Screen shows both columns but refuses unequal shares with the database's plain message until FP-4 |
 | Note edited on a payer then removed before save | DONE | | Sent when that payer already has a saved note on the field (FP-1 keeps those editable) |
+
+## Slice 2
+
+Briefs (2026-11-25, from the merged slice 1 code): `docs/loops/field-app-s2-db.md`, `field-app-s2-crew.md`, `field-app-s2-office.md`. No lane is running yet.
+
+| Item | State | Note |
+|---|---|---|
+| Start gate: applicator data-access fix (database half of #2574) | BLOCKED (Field Setup lane building it) | Only database writer until it merges into staging; every slice 2 applicator read follows its safe-column shape |
+| 2.1 Loads and stock | NOT STARTED | Can merge before 12-15 if `jobs.stock_path` is set by a `jobs` insert trigger (no quote or booking writer edited) and vendor lines keep `customer_supplied = true` (so Taha's holds and purchasing-plan readers stay right untouched) |
+| 2.2 Work entries and statuses | NOT STARTED | New `ready_for_review` status must count as open work in the customer-deactivation guard Taha's #2526 rewrites; extra-field read function waits on Mason's yes |
+| 2.3 Application services | NOT STARTED | Must not change commission writers (Taha's #2525) |
+| 2.4 FP-4 jobs carry splits | PARKED until after 2026-12-15 | Quote-to-job writer (Taha); needs FP-2 |
+| 2.5 Review checks | NOT STARTED | |
+| 2.6 FP-3 archive fields | PARKED until after 2026-12-15 | Taha reviews (BUILD-PLAN) |
+| 2.7 Mixer account | WAITING ON MASON | Account creation needs his yes |
+| Crew and office screens | NOT STARTED | Dispatch board and phone maps wait for the Google Maps engine swap (Codex, steps 0–1) |
 
 ## Needs another lane
 

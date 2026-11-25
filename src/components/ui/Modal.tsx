@@ -200,7 +200,7 @@ export default function Modal({
         {title}
         {accent && <span className="split-heading-accent"> {accent}</span>}
       </h2>
-      {subtitle && <p className="truncate text-sm text-secondary">{subtitle}</p>}
+      {subtitle && <p className="text-sm text-secondary md:truncate">{subtitle}</p>}
     </>
   );
 

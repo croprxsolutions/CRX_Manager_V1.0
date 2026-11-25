@@ -501,6 +501,12 @@ ${copyLine(src, 1, 8)};`);
   } finally { docker(['rm', '-f', apiName], { allowFailure: true }); }
 
   // Case 9 (undo): the reverse restores the old body and drops the list; the candidate re-applies.
+  // A drifted list trigger (here: disabled) stops the reverse at its preflight; the one transaction rolls back whole.
+  stageText('drift-reverse.sql', `ALTER TABLE public.order_items DISABLE TRIGGER zzz_crx_below_cost_reason_list;\n${lf(REVERSE)}`);
+  const drift = apply('drift-reverse.sql');
+  assert.notEqual(drift.status, 0, drift.output);
+  assert.match(drift.output, /BELOW_COST_LIST_REVERSE: _raise_below_cost_reason_list or a list trigger is not the 20270307100000 definition/);
+  assert.equal(body(), NEW_BODY, 'a refused reverse changes nothing');
   stageText('reverse.sql', lf(REVERSE));
   const rev = apply('reverse.sql');
   assert.equal(rev.status, 0, rev.output);
@@ -515,7 +521,7 @@ ${copyLine(src, 1, 8)};`);
   assert.equal(again.status, 0, again.output);
   assert.equal(body(), NEW_BODY);
   checkList(refusedAtCommit(committed(orderSql(orderArgs(ADMIN, 'again')), ADMIN)), 'after re-apply');
-  console.log('[case 9] the reverse restores the old body (first-line refusal, no list; an approved save still works); the candidate re-applies and lists again');
+  console.log('[case 9] a drifted list trigger stops the reverse at its preflight (nothing changes); the reverse restores the old body (first-line refusal, no list; an approved save still works); the candidate re-applies and lists again');
   console.log('BELOW_COST_LIST_PROOF_PASS');
 }
 

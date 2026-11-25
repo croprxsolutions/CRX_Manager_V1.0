@@ -5328,7 +5328,7 @@ export interface BelowCostApprovalDetail {
    * database did not send a list (before that migration), and then the prompt names only the first line.
    */
   lines: BelowCostLine[];
-  /** Lines found beyond those listed (the database lists at most 200). */
+  /** Lines found beyond those listed. The database lists every line, so it sends 0; kept for a future cap. */
   more_count: number;
   /** The whole save's shortfall in cents, listed lines and the rest; null when not sent. */
   total_shortfall_cents: number | null;

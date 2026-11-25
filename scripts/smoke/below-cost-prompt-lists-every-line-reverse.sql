@@ -28,6 +28,19 @@ BEGIN
      OR to_regprocedure('public._raise_below_cost_reason_list()') IS NULL THEN
     RAISE EXCEPTION 'BELOW_COST_LIST_REVERSE: the three list triggers or their function are missing';
   END IF;
+  -- Drop only what the migration created: the list function's body and each trigger's shape, so drifted code is not
+  -- silently removed.
+  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._raise_below_cost_reason_list()'::regprocedure)
+       IS DISTINCT FROM 'ee4ce0fd96b2249d45febc335413b96c'
+     OR (SELECT count(*) FROM pg_trigger t
+          WHERE t.tgname = 'zzz_crx_below_cost_reason_list'
+            AND t.tgrelid IN ('public.order_items'::regclass, 'public.quote_items'::regclass, 'public.invoice_items'::regclass)
+            AND t.tgfoid = 'public._raise_below_cost_reason_list()'::regprocedure
+            AND t.tgconstraint <> 0 AND t.tgdeferrable AND t.tginitdeferred AND t.tgenabled = 'O'
+            AND t.tgtype = 21 -- ROW, AFTER, INSERT OR UPDATE
+            AND pg_get_triggerdef(t.oid) LIKE '%WHEN ((COALESCE(current_setting(''app.crx_below_cost_pending''::text, true), ''''::text) <> ''''::text)) EXECUTE FUNCTION %_raise_below_cost_reason_list()') <> 3 THEN
+    RAISE EXCEPTION 'BELOW_COST_LIST_REVERSE: _raise_below_cost_reason_list or a list trigger is not the 20270307100000 definition';
+  END IF;
   PERFORM set_config('crx.bclr_xid', pg_current_xact_id()::text, true);
   PERFORM set_config('crx.bclr_acl', (SELECT coalesce(proacl::text, '') FROM pg_proc WHERE oid = 'public._enforce_below_cost_line()'::regprocedure), true);
 END;

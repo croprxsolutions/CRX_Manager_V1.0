@@ -171,6 +171,7 @@ map.on('load', () => {
 });
 
 map.on('error', (event) => {
+  // eslint-disable-next-line no-console -- the spec fails on any console.error, so map errors must reach it
   if (event.error) console.error('MapLibre proof error:', event.error.message);
 });
 

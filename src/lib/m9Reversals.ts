@@ -155,13 +155,18 @@ async function loadReturned(customerId: string) {
   return { bySet, byCredit };
 }
 
-/** Returned-check dates by payment (allocation set) for a set of payments: Payment History's status and menu. */
+/**
+ * Returned-check dates by payment (allocation set) for these payments: Payment History's status and menu. Every
+ * returned check is read (returns are few) rather than sending every payment id, so a long list never overflows
+ * the request (Sol r1 MED 16).
+ */
 export async function loadReturnedPayments(setIds: string[]): Promise<Map<string, string>> {
   if (!setIds.length) return new Map();
+  const wanted = new Set(setIds);
   const rows = await all<ReturnedRecord>((from, to) => supabase.from('money_reversals')
     .select('id, entry_date, allocation_set_id, prepay_credit_id', { count: 'exact' })
-    .eq('kind', 'returned_check').in('allocation_set_id', setIds).order('id').range(from, to));
-  return new Map(rows.map((r) => [r.allocation_set_id as string, r.entry_date]));
+    .eq('kind', 'returned_check').order('id').range(from, to));
+  return new Map(rows.filter((r) => r.allocation_set_id && wanted.has(r.allocation_set_id)).map((r) => [r.allocation_set_id as string, r.entry_date]));
 }
 
 const sumBy = (rows: Row[], key: string, value: string) => {
@@ -171,6 +176,11 @@ const sumBy = (rows: Row[], key: string, value: string) => {
 };
 
 type Returned = Map<string, string>;
+
+const yearBefore = (ymd: string) => {
+  const d = `${Number(ymd.slice(0, 4)) - 1}${ymd.slice(4)}`;
+  return d.endsWith('-02-29') ? `${d.slice(0, 8)}28` : d;
+};
 
 /** Record Payment checks: what each paid and the prepay it created. */
 async function paymentCheckRows(customerId: string, sets: Row[], closed: ClosedPeriod[], returned: Returned): Promise<ReturnableCheck[]> {
@@ -253,7 +263,8 @@ function prepayCheckRow(customerId: string, buckets: Row[], closed: ClosedPeriod
  */
 export async function loadReturnableChecks(customerId: string, today = todayInBusinessTz(), lastYearOnly = true): Promise<ReturnableCheck[]> {
   // The picker lists the last 12 months; a payment opened by its own line is found at any age.
-  const since = lastYearOnly ? addDaysToDate(today, -365) : '2000-01-01';
+  // 12 calendar months back (Mar 1 → Mar 1 a year before); a Feb 29 start falls back to Feb 28.
+  const since = lastYearOnly ? yearBefore(today) : '2000-01-01';
   const [sets, pmCredits, closed, returned] = await Promise.all([
     all((from, to) => supabase.from('allocation_sets')
       .select('id, total_payment_cents, check_number, reference_number, payment_date', { count: 'exact' })
@@ -341,14 +352,14 @@ export async function loadDialogBasics(customerId: string): Promise<{ credits: D
       .eq('customer_id', customerId).gt('balance_cents', 0).order('id').range(from, to)),
     loadClosedPeriods(),
   ]);
+  // What the customer owes is only a preview line: a failed read leaves it out and never blocks a save (Sol r1 MED 18).
   const { data, error } = await supabase.rpc('get_ar_aging', { p_as_of_date: todayInBusinessTz() }).eq('customer_id', customerId);
-  if (error) throw error;
-  const aging = assertRpcResult<ARAgingRow[]>(data, 'get_ar_aging').find((a) => a.customer_id === customerId) ?? null;
+  const aging = error ? undefined : assertRpcResult<ARAgingRow[]>(data, 'get_ar_aging').find((a) => a.customer_id === customerId) ?? null;
   return {
     credits: credits.map((c) => ({ id: c.id as string, label: creditLabel(c), balance_cents: Number(c.balance_cents), created_at: c.created_at as string })),
     closed,
     // No row: nothing owed. A row that can't be priced: unknown, so the dialog leaves the figure out.
-    owesCents: aging === null ? 0 : isPricedAgingRow(aging) ? agingCents(aging.total_outstanding) : null,
+    owesCents: aging === undefined ? null : aging === null ? 0 : isPricedAgingRow(aging) ? agingCents(aging.total_outstanding) : null,
   };
 }
 
@@ -369,20 +380,49 @@ export async function fetchPrepayTie(customerId?: string): Promise<PrepayTie[]> 
 // ---------------------------------------------------------------------------------------------------------------
 // Prepay history
 
-export type HistoryKind = 'in' | 'out' | 'refund' | 'bounce';
+export type HistoryKind = 'in' | 'out' | 'refund' | 'bounce' | 'adjust';
 export interface HistoryRow { key: string; at: string; day: string; kind: HistoryKind; what: string; sub: string; ref: string; by: string; cents: number; afterCents: number }
 
 type HistoryEntry = Omit<HistoryRow, 'afterCents'>;
 type Who = (id: unknown) => string;
 
-function creditEntry(c: Row, who: Who): HistoryEntry {
+/** What a credit was received at: before any hand edit or delete changed its amount (the audit's first before-image). */
+function initialAmount(c: Row, audits: Row[]): number {
+  const first = audits.find((a) => creditsOfAudit(a).includes(c.id as string));
+  if (!first) return Number(c.original_amount_cents);
+  const old = (first.old_values ?? {}) as { original_amount_cents?: unknown; buckets?: { id: string; original_amount_cents: number }[] };
+  const bucket = Array.isArray(old.buckets) ? old.buckets.find((b) => b.id === c.id) : undefined;
+  return Number(bucket?.original_amount_cents ?? old.original_amount_cents ?? c.original_amount_cents);
+}
+
+/** The credits an edit or delete changed: one, or every bucket of a whole Prepayment Manager check. */
+function creditsOfAudit(a: Row): string[] {
+  const ids = (a.new_values as { credit_ids?: unknown } | null)?.credit_ids;
+  return Array.isArray(ids) ? (ids as string[]) : [a.entity_id as string];
+}
+
+/** A hand edit or delete of a credit: the change to what it holds. */
+function adjustmentEntry(a: Row, who: Who): HistoryEntry {
+  const deleted = a.operation_type === 'prepay_deleted';
+  const oldV = (a.old_values ?? {}) as { original_amount_cents?: unknown; total_cents?: unknown; reference_number?: unknown; bucket_label?: unknown };
+  const newV = (a.new_values ?? {}) as { original_amount_cents?: unknown; reason?: unknown; whole_check?: unknown };
+  const cents = newV.whole_check ? -Number(oldV.total_cents ?? 0) : Number(newV.original_amount_cents ?? 0) - Number(oldV.original_amount_cents ?? 0);
+  return {
+    key: `e-${a.id}`, at: a.created_at as string, day: businessDay(a.created_at as string), kind: 'adjust',
+    what: deleted ? (newV.whole_check ? 'Prepayment check deleted' : 'Credit deleted') : 'Credit edited by hand',
+    sub: (newV.reason as string) || (oldV.bucket_label as string) || '',
+    ref: (oldV.reference_number as string) || '', by: who(a.actor_user_id), cents,
+  };
+}
+
+function creditEntry(c: Row, who: Who, audits: Row[] = []): HistoryEntry {
   const overpayment = c.source_type === 'overpayment';
   const ref = (c.source_reference as string) || (c.reference_number as string) || '';
   return {
     key: `c-${c.id}`, at: c.created_at as string, day: businessDay(c.created_at as string), kind: 'in', what: 'Prepay received',
     sub: overpayment ? 'Left over from a payment' : creditLabel(c),
     ref: overpayment ? ref : `Check ${ref}`.trim(),
-    by: who(c.created_by), cents: Number(c.original_amount_cents),
+    by: who(c.created_by), cents: initialAmount(c, audits),
   };
 }
 
@@ -430,17 +470,29 @@ export async function loadPrepayHistory(customerId: string): Promise<HistoryRow[
       .select('id, reversal_id, line_kind, amount_cents', { count: 'exact' })
       .in('reversal_id', reversals.map((r) => r.id as string)).order('id').range(from, to)) : [],
   ]);
-  const people = [...new Set([...credits.map((c) => c.created_by), ...apps.map((a) => a.applied_by), ...reversals.map((r) => r.performed_by)].filter(Boolean) as string[])];
+  // Hand edits and deletes, oldest first: they change a credit's amount in place, so each is its own row.
+  const audits = creditIds.length ? (await all((from, to) => supabase.from('financial_audit_log')
+    .select('id, operation_type, entity_id, actor_user_id, old_values, new_values, created_at', { count: 'exact' })
+    .in('operation_type', ['prepay_edited', 'prepay_deleted']).in('entity_id', creditIds).order('id').range(from, to)))
+    .filter((a) => Number((a.new_values as Row | null)?.original_amount_cents ?? 0) !== Number((a.old_values as Row | null)?.original_amount_cents ?? 0)
+      || a.operation_type === 'prepay_deleted')
+    .sort((a, b) => ((a.created_at as string) < (b.created_at as string) ? -1 : 1)) : [];
+  const people = [...new Set([...credits.map((c) => c.created_by), ...apps.map((a) => a.applied_by), ...reversals.map((r) => r.performed_by),
+    ...audits.map((a) => a.actor_user_id)].filter(Boolean) as string[])];
   const names = people.length ? await all<{ id: string; full_name: string | null }>((from, to) => supabase.from('profiles')
     .select('id, full_name', { count: 'exact' }).in('id', people).order('id').range(from, to)) : [];
   const who = (id: unknown) => names.find((n) => n.id === id)?.full_name || 'someone';
 
   const rows: HistoryEntry[] = [
-    ...credits.filter((c) => Number(c.original_amount_cents) > 0).map((c) => creditEntry(c, who)), // voided or deleted: never counted
+    // A voided payment's prepay never counted (the void zeroes it and removes what it paid); everything else did.
+    ...credits.filter((c) => initialAmount(c, audits) > 0).map((c) => creditEntry(c, who, audits)),
+    ...audits.map((a) => adjustmentEntry(a, who)),
     ...apps.map((a) => applicationEntry(a, credits, who)),
     ...reversals.map((r) => reversalEntry(r, lines, who)),
   ];
-  rows.sort((a, b) => (a.at === b.at ? (a.key < b.key ? -1 : 1) : a.at < b.at ? -1 : 1));
+  // Same instant: money received first, so a receipt always funds what is applied from it.
+  const rank = (r: HistoryEntry) => (r.kind === 'in' ? 0 : 1);
+  rows.sort((a, b) => (a.at !== b.at ? (a.at < b.at ? -1 : 1) : rank(a) - rank(b) || (a.key < b.key ? -1 : 1)));
   let running = 0;
   return rows.map((r) => ({ ...r, afterCents: (running += r.cents) })).reverse();
 }

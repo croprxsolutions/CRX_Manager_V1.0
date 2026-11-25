@@ -3,9 +3,9 @@
  * Admins also see the prepay balance check ("Doesn't tie" with both numbers), the "Record refund or returned check"
  * button and the history (it reads refunds and returned checks, which only admins may read).
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, Banknote, CircleX, FileCheck2, History, RotateCcw, Undo2, Wallet } from 'lucide-react';
+import { AlertTriangle, Banknote, CircleX, FileCheck2, History, Pencil, RotateCcw, Undo2, Wallet } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import HelpTip from '../ui/HelpTip';
@@ -22,6 +22,7 @@ export interface CustomerPrepayCredit {
   original_amount_cents: number;
   balance_cents: number;
   source_reference?: string | null;
+  source_type?: string | null;
   reference_number?: string | null;
   created_at?: string;
 }
@@ -40,12 +41,14 @@ const ICONS: Record<HistoryKind, { icon: typeof Wallet; cls: string }> = {
   out: { icon: FileCheck2, cls: 'bg-gray-100 text-secondary' },
   refund: { icon: Undo2, cls: 'bg-amber-50 text-amber-700' },
   bounce: { icon: CircleX, cls: 'bg-red-50 text-red-700' },
+  adjust: { icon: Pencil, cls: 'bg-gray-100 text-secondary' },
 };
 const signed = (cents: number) => (cents > 0 ? `+${fmt(cents)}` : formatCentsMinus(cents));
 
 /** "Check 5521 · Mar 2, 2026": where a credit came from and when. */
 const creditSource = (c: CustomerPrepayCredit) => [
-  c.source_reference || c.reference_number ? `Check ${c.source_reference || c.reference_number}` : '',
+  // Only a Prepayment Manager check is a check by definition; a payment's overpayment keeps its own wording.
+  c.source_type === 'check' && (c.source_reference || c.reference_number) ? `Check ${c.source_reference || c.reference_number}` : c.source_reference || '',
   c.created_at ? fmtDay(businessDay(c.created_at)) : '',
 ].filter(Boolean).join(' · ');
 
@@ -61,16 +64,20 @@ export default function CustomerPrepayCards({ customerId, farmName, credits, isA
   // One layout at a time (as DataTable): cards on phones, tables from 768px.
   const isPhone = useIsPhone();
 
+  // Only the latest load may set what shows: an older, slower read never brings back a stale badge or history.
+  const loadSeq = useRef(0);
   const load = useCallback(() => {
     if (!isAdmin) return;
+    const seq = ++loadSeq.current;
+    const latest = () => seq === loadSeq.current;
     setHistoryFailed(false);
-    fetchPrepayTie(customerId).then((rows) => setTie(rows.find((r) => r.customer_id === customerId) ?? null)).catch((err) => {
+    fetchPrepayTie(customerId).then((rows) => { if (latest()) setTie(rows.find((r) => r.customer_id === customerId) ?? null); }).catch((err) => {
       Sentry.captureException(toSentryError(err), { extra: { context: 'prepay_tie_customer' } });
-      setTie(null);
+      if (latest()) setTie(null);
     });
-    loadPrepayHistory(customerId).then(setHistory).catch((err) => {
+    loadPrepayHistory(customerId).then((rows) => { if (latest()) setHistory(rows); }).catch((err) => {
       Sentry.captureException(toSentryError(err), { extra: { context: 'prepay_history' } });
-      setHistoryFailed(true);
+      if (latest()) setHistoryFailed(true);
     });
   }, [customerId, isAdmin]);
   useEffect(() => { load(); }, [load]);

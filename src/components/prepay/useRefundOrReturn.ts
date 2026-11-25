@@ -26,25 +26,34 @@ export function useRefundForm(o: { customerId: string; basics: DialogBasics | nu
   const [reference, setReference] = useState('');
   const [source, setSource] = useState<'oldest' | 'pick'>('oldest');
   const [pickedId, setPickedId] = useState('');
-  const [duplicate, setDuplicate] = useState(false);
+  // The duplicate-reference go-ahead, bound to the exact refund it was given for: any change takes it back (Sol r1 H3).
+  const [duplicateFor, setDuplicateFor] = useState<string | null>(null);
 
   const credits = o.basics?.credits ?? [];
   const availableCents = credits.reduce((s, c) => s + c.balance_cents, 0);
   const pickedOnly = source === 'pick' && pickedId ? pickedId : null;
   const refundCap = credits.filter((c) => !pickedOnly || c.id === pickedOnly).reduce((s, c) => s + c.balance_cents, 0);
   const amountCents = parseDollarsToCents(amount);
-  const errors = refundErrors({
-    amountCents: amount.trim() ? amountCents : 0, availableCents: refundCap, paidOn, reference, reason: o.reason, today: o.today,
-    closed: o.basics?.closed ?? [],
-  });
+  const errors = {
+    ...refundErrors({
+      amountCents: amount.trim() ? amountCents : 0, availableCents: refundCap, paidOn, reference, reason: o.reason, today: o.today,
+      closed: o.basics?.closed ?? [],
+    }),
+    // "A credit I pick" with no credit picked never falls back to oldest first (Sol r1 H1).
+    ...(source === 'pick' && !pickedId ? { credit: 'Pick the credit to take it from.' } : {}),
+  };
   const canDraw = amountCents !== null && amountCents > 0 && amountCents <= refundCap;
   const draw = canDraw ? planRefundDraw(credits, amountCents, pickedOnly) : [];
-  const refundReference = `${method} · ${reference.trim()}`;
-  const idem = useIdempotencyKey('record_outside_refund', o.profileId || '',
-    JSON.stringify([o.customerId, amountCents, paidOn, refundReference, o.reason.trim(), pickedOnly, duplicate]));
+  // The reference is what was typed, so the server's duplicate check sees the same outside payment whatever the
+  // method; the method goes with the reason (Sol r1 MED 6).
+  const refundReference = reference.trim();
+  const refundReason = `${o.reason.trim()} (paid by ${method})`;
+  const intent = JSON.stringify([o.customerId, amountCents, paidOn, refundReference, refundReason, pickedOnly]);
+  const duplicate = duplicateFor === intent;
+  const idem = useIdempotencyKey('record_outside_refund', o.profileId || '', JSON.stringify([intent, duplicate]));
 
   const reset = () => {
-    setAmount(''); setPaidOn(o.today); setMethod('Check'); setReference(''); setSource('oldest'); setPickedId(''); setDuplicate(false);
+    setAmount(''); setPaidOn(o.today); setMethod('Check'); setReference(''); setSource('oldest'); setPickedId(''); setDuplicateFor(null);
   };
 
   /** True once recorded (the toast is shown); false when refused or asked to confirm a duplicate. */
@@ -57,7 +66,7 @@ export function useRefundForm(o: { customerId: string; basics: DialogBasics | nu
           p_amount_cents: amountCents,
           p_paid_on: paidOn,
           p_reference: refundReference,
-          p_reason: o.reason.trim(),
+          p_reason: refundReason,
           p_credit_id: pickedOnly ?? undefined,
           p_performed_by: o.profileId,
           p_idempotency_key: idem.getKey(),
@@ -67,10 +76,10 @@ export function useRefundForm(o: { customerId: string; basics: DialogBasics | nu
           // Refused as another request's retry key: nothing was saved, so the next try starts fresh.
           const binding = getIdempotencyBindingRejection(error);
           if (binding === 'intent' || binding === 'actor') idem.resetKey();
-          if (/^REFUND_DUPLICATE_REFERENCE\b/.test(error.message ?? '')) { setDuplicate(true); throw new CriticalActionHandledError('duplicate reference'); }
+          if (/^REFUND_DUPLICATE_REFERENCE\b/.test(error.message ?? '')) { setDuplicateFor(intent); throw new CriticalActionHandledError('duplicate reference'); }
           throw error;
         }
-        return assertRpcResult<{ amount_cents: number }>(data, 'record_outside_refund');
+        return assertRpcResult<{ amount_cents: number; prepay_balance_cents?: number }>(data, 'record_outside_refund');
       },
       toast: o.toast,
       setLoading: setSaving,
@@ -78,13 +87,14 @@ export function useRefundForm(o: { customerId: string; basics: DialogBasics | nu
     });
     if (!result) return false;
     idem.resetKey();
-    o.toast('success', `Refund of ${fmt(result.amount_cents)} recorded. Prepay is now ${fmt(Math.max(availableCents - result.amount_cents, 0))}.`);
+    // The receipt's balance, not the preview's (another change may have landed meanwhile; Sol r1 MED 15).
+    o.toast('success', `Refund of ${fmt(result.amount_cents)} recorded. Prepay is now ${fmt(result.prepay_balance_cents ?? availableCents - result.amount_cents)}.`);
     return true;
   };
 
   return {
-    amount, setAmount, paidOn, setPaidOn, method, setMethod, reference, setReference, source, setSource, pickedId, setPickedId,
-    duplicate, availableCents, refundCap, amountCents, errors, errorCount: Object.keys(errors).length, draw, refundReference, reset, record,
+    amount, setAmount, paidOn, setPaidOn, setMethod, reference, setReference, source, setSource, pickedId, setPickedId,
+    method, duplicate, availableCents, refundCap, amountCents, errors, errorCount: Object.keys(errors).length, draw, refundReference, reset, record,
   };
 }
 export type RefundForm = ReturnType<typeof useRefundForm>;
@@ -98,6 +108,7 @@ export function useReturnForm(o: {
   const [picked, setPicked] = useState<ReturnableCheck | null>(null);
   const [effect, setEffect] = useState<ReturnEffect | null>(null);
   const [failed, setFailed] = useState(false);
+  const [listFailed, setListFailed] = useState(false);
   const [bankDate, setBankDate] = useState<string | null>(o.today);
   const seq = useRef(0);
 
@@ -115,25 +126,34 @@ export function useReturnForm(o: {
   useEffect(() => {
     if (!o.open || !o.allocationSetId) return;
     let live = true;
-    loadReturnableCheck(o.customerId, o.allocationSetId).then((c) => { if (live) pick(c); }).catch(() => { if (live) setFailed(true); });
+    // Not found (not a check, voided, another customer's): say so rather than load forever (Sol r1 MED 17).
+    loadReturnableCheck(o.customerId, o.allocationSetId).then((c) => { if (!live) return; if (c) pick(c); else setFailed(true); })
+      .catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
   }, [o.open, o.customerId, o.allocationSetId]);
 
   // The picker: the customer's checks of the last 12 months, read once the choice is made.
+  // A read answers only the customer it was asked for (Sol r1 H2): another customer's late list is dropped.
+  const [listFor, setListFor] = useState<string | null>(null);
   useEffect(() => {
-    if (!o.open || !o.active || preset || checks) return;
-    loadReturnableChecks(o.customerId).then(setChecks).catch((err) => {
+    if (!o.open || !o.active || preset || listFor === o.customerId) return;
+    let live = true;
+    setListFor(o.customerId); setChecks(null); setListFailed(false);
+    if (!preset) pick(null);
+    loadReturnableChecks(o.customerId).then((list) => { if (live) setChecks(list); }).catch((err) => {
       Sentry.captureException(toSentryError(err), { extra: { context: 'm9_returnable_checks' } });
-      setChecks([]); setFailed(true);
+      if (live) { setChecks([]); setListFailed(true); }
     });
-  }, [o.open, o.active, preset, checks, o.customerId]);
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [o.open, o.active, preset, o.customerId]);
 
   const bankError = picked ? returnedDateError(bankDate, picked.date, o.today) : null;
   const idem = useIdempotencyKey('record_returned_check', o.profileId || '',
     JSON.stringify([picked?.allocationSetId, picked?.creditId, bankDate, o.reason.trim()]));
 
   const reset = () => {
-    setChecks(null); setSearch(''); setBankDate(o.today);
+    setChecks(null); setListFor(null); setListFailed(false); setSearch(''); setBankDate(o.today);
     if (!preset) pick(null);
   };
 
@@ -156,7 +176,7 @@ export function useReturnForm(o: {
           if (binding === 'intent' || binding === 'actor') idem.resetKey();
           throw error;
         }
-        return assertRpcResult<{ amount_cents: number }>(data, 'record_returned_check');
+        return assertRpcResult<{ amount_cents: number; prepay_balance_cents?: number }>(data, 'record_returned_check');
       },
       toast: o.toast,
       setLoading: setSaving,
@@ -164,12 +184,12 @@ export function useReturnForm(o: {
     });
     if (!result) return false;
     idem.resetKey();
-    o.toast('success', `Check ${picked.number} (${fmt(result.amount_cents)}) recorded as returned. Prepay is now ${fmt(Math.max(availableCents - (effect?.prepayRemovedCents ?? 0), 0))}.`);
+    o.toast('success', `Check ${picked.number} (${fmt(result.amount_cents)}) recorded as returned. Prepay is now ${fmt(result.prepay_balance_cents ?? availableCents - (effect?.prepayRemovedCents ?? 0))}.`);
     return true;
   };
 
   return {
-    preset, checks, search, setSearch, picked, pick, effect, failed, bankDate, setBankDate, bankError,
+    preset, checks, listFailed, search, setSearch, picked, pick, effect, failed, bankDate, setBankDate, bankError,
     // A picked check's "What happens" is still loading: the save waits for it (it is what the confirm shows).
     effectLoading: !!picked && !effect && !failed,
     reset, record,

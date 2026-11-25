@@ -115,13 +115,25 @@ describe('RefundOrReturnDialog: refund paid outside CRX', () => {
     fireEvent.click(within(confirm).getByRole('button', { name: 'Record refund' }));
 
     await waitFor(() => expect(H.rpc).toHaveBeenCalledWith('record_outside_refund', expect.objectContaining({
-      p_customer_id: 'c1', p_amount_cents: 30000, p_paid_on: '2026-11-23', p_reference: 'Check · QuickBooks check 1057',
-      p_reason: 'Grower overpaid for spring', p_performed_by: 'admin-1', p_allow_duplicate_reference: false,
+      p_customer_id: 'c1', p_amount_cents: 30000, p_paid_on: '2026-11-23', p_reference: 'QuickBooks check 1057',
+      p_reason: 'Grower overpaid for spring (paid by Check)', p_performed_by: 'admin-1', p_allow_duplicate_reference: false,
     })));
     expect(H.rpc.mock.calls[0][1].p_credit_id).toBeUndefined();
     expect(H.rpc.mock.calls[0][1].p_idempotency_key).toEqual(expect.any(String));
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('success', 'Refund of $300.00 recorded. Prepay is now $200.00.'));
     expect(onRecorded).toHaveBeenCalled();
+  });
+
+  it('"A credit I pick" with no credit picked is refused, never drawn oldest first (Sol r1 H1)', async () => {
+    open();
+    fireEvent.click(await screen.findByRole('radio', { name: /Refund paid outside CRX/ }));
+    fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: '100' } });
+    fireEvent.change(screen.getByLabelText(/^Reference/), { target: { value: 'QB 1' } });
+    fireEvent.change(screen.getByLabelText(/^Reason/), { target: { value: 'why' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'A credit I pick' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Record refund…' }));
+    expect(screen.getByText('Pick the credit to take it from.')).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 
   it('asks before recording a second refund with the same reference', async () => {
@@ -138,6 +150,23 @@ describe('RefundOrReturnDialog: refund paid outside CRX', () => {
     expect(screen.getByText(/already recorded for this customer/)).toBeInTheDocument();
     fireEvent.click(again);
     await waitFor(() => expect(H.rpc).toHaveBeenLastCalledWith('record_outside_refund', expect.objectContaining({ p_allow_duplicate_reference: true })));
+  });
+
+  it('the duplicate go-ahead is taken back when the refund changes (Sol r1 H3)', async () => {
+    H.rpc.mockResolvedValue({ data: null, error: { message: 'REFUND_DUPLICATE_REFERENCE: already recorded' } });
+    open();
+    fireEvent.click(await screen.findByRole('radio', { name: /Refund paid outside CRX/ }));
+    fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText(/^Reference/), { target: { value: 'QB 1' } });
+    fireEvent.change(screen.getByLabelText(/^Reason/), { target: { value: 'second check' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Record refund…' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Record refund' }));
+    await screen.findByRole('button', { name: 'Record a second refund' });
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
+    fireEvent.change(await screen.findByLabelText(/^Reason/), { target: { value: 'a different reason' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Record refund…' }));
+    expect(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Record refund' })).toBeInTheDocument();
+    expect(screen.queryByText(/already recorded for this customer/)).not.toBeInTheDocument();
   });
 });
 
@@ -181,6 +210,17 @@ describe('RefundOrReturnDialog: check came back', () => {
     await waitFor(() => expect(H.rpc).toHaveBeenCalledWith('record_returned_check', expect.objectContaining({
       p_allocation_set_id: 'set-6107', p_returned_date: '2026-11-23', p_reason: 'Bank returned it: insufficient funds', p_performed_by: 'admin-1',
     })));
+  });
+
+  it('keeps the picked check in the list while searching, and a reason does not carry into the other choice (Sol LOW)', async () => {
+    open();
+    fireEvent.click(await screen.findByRole('radio', { name: /Check came back/ }));
+    fireEvent.click(await screen.findByRole('radio', { name: /Check 6107/ }));
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Find a check by number' }), { target: { value: '6311' } });
+    expect(screen.getByRole('radio', { name: /Check 6107/ })).toBeChecked();
+    fireEvent.change(await screen.findByLabelText(/^Reason/), { target: { value: 'Insufficient funds' } });
+    fireEvent.click(screen.getByRole('radio', { name: /Refund paid outside CRX/ }));
+    expect(screen.getByLabelText(/^Reason/)).toHaveValue('');
   });
 
   it('keeps Record returned check… disabled while What happens loads', async () => {

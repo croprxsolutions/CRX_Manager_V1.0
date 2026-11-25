@@ -66,6 +66,9 @@ describe('Payment History: returned checks and Void in the ⋯ menu', () => {
   it('a returned check shows Returned, $0.00 allocated, no Void', async () => {
     render(<PaymentHistory />);
     expect(await screen.findByText('Returned')).toBeInTheDocument();
+    const row = screen.getByText('Returned').closest('tr')!;
+    expect(row).toHaveTextContent('$1,700.00');
+    expect(row).toHaveTextContent('$0.00');
     const items = await menu('More actions for check 6107');
     expect(items).toHaveLength(1);
     expect(items[0]).toHaveAttribute('aria-disabled', 'true');

@@ -99,7 +99,7 @@ export function RefundFields({ f, tried, credits, closed, today, reason, setReas
         </Field>
       </div>
       <ReasonField id="m9-refund-reason" value={reason} onChange={setReason} error={err('reason')} placeholder="Why was this paid back?" />
-      <RefundSource f={f} credits={credits} />
+      <RefundSource f={f} credits={credits} error={err('credit')} />
       {f.draw.length > 0 && (
         <div data-testid="refund-summary" aria-live="polite" className="rounded-xl border border-gray-200 bg-cream px-3.5 py-3">
           <div className="text-xs text-secondary">After this refund</div>
@@ -110,7 +110,7 @@ export function RefundFields({ f, tried, credits, closed, today, reason, setReas
   );
 }
 
-function RefundSource({ f, credits }: { f: RefundState; credits: DrawCredit[] }) {
+function RefundSource({ f, credits, error }: { f: RefundState; credits: DrawCredit[]; error?: string }) {
   return (
     <fieldset>
       <legend className="text-sm font-medium text-secondary">Take it from</legend>
@@ -128,6 +128,7 @@ function RefundSource({ f, credits }: { f: RefundState; credits: DrawCredit[] })
               {credits.map((c) => <option key={c.id} value={c.id}>{c.label} · {fmt(c.balance_cents)}</option>)}
             </select>
           )}
+          {error && <span role="alert" className="mt-1 flex items-center gap-1.5 text-xs text-red-600"><AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />{error}</span>}
         </span>
       </label>
     </fieldset>
@@ -140,7 +141,7 @@ export function RefundConfirmBody({ f }: { f: RefundState }) {
       <p className="mb-2 font-heading text-2xl font-semibold tabular-nums text-nav-dark"><span className="font-light text-secondary">Prepay {fmt(f.availableCents)}</span> → {fmt(f.availableCents - (f.amountCents ?? 0))}</p>
       <Kv label="From"><span className="whitespace-pre-line">{f.draw.map((d) => `${d.label} ${fmt(d.cents)}`).join('\n')}</span></Kv>
       <Kv label="Dated">{f.paidOn ? fmtDay(f.paidOn) : ''}</Kv>
-      <Kv label="Paid by">{f.refundReference}</Kv>
+      <Kv label="Paid by">{f.method} · {f.refundReference}</Kv>
       {f.duplicate && (
         <p role="alert" className="mt-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-amber-800">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -180,7 +181,9 @@ export function CheckCard({ c, picked, onPick }: { c: ReturnableCheck; picked: R
 
 export function CheckPicker({ r, tried }: { r: ReturnState; tried: boolean }) {
   const q = r.search.trim().toLowerCase();
-  const visible = (r.checks ?? []).filter((c) => !q || c.number.toLowerCase().includes(q));
+  // The picked check stays in view whatever the search, so the list never hides what the save will return.
+  const isPicked = (c: ReturnableCheck) => r.picked?.allocationSetId === c.allocationSetId && r.picked?.creditId === c.creditId;
+  const visible = (r.checks ?? []).filter((c) => !q || c.number.toLowerCase().includes(q) || isPicked(c));
   const empty = r.checks?.length ? 'No check with that number.' : 'No checks from this customer in the last 12 months.';
   return (
     <fieldset>
@@ -189,7 +192,8 @@ export function CheckPicker({ r, tried }: { r: ReturnState; tried: boolean }) {
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" aria-hidden="true" />
         <input type="search" aria-label="Find a check by number" placeholder="Find a check by number" value={r.search} onChange={(e) => r.setSearch(e.target.value)} className={`${inputClass()} pl-9`} />
       </div>
-      {r.checks === null ? <div className="h-24 animate-pulse rounded-xl bg-gray-100" />
+      {r.listFailed ? <p role="alert" className="py-3 text-sm text-red-600">This customer's checks could not be loaded. Close and try again.</p>
+        : r.checks === null ? <div className="h-24 animate-pulse rounded-xl bg-gray-100" />
         : visible.length === 0 ? <p className="py-3 text-sm text-secondary">{empty}</p>
           : visible.map((c) => <CheckCard key={`${c.allocationSetId}-${c.creditId}`} c={c} picked={r.picked} onPick={r.pick} />)}
       {tried && !r.picked && <p role="alert" className="text-xs text-red-600">Pick the check that came back.</p>}
@@ -220,7 +224,7 @@ function EffectList({ effect, check, availableCents, owesCents, bankDate, today 
     : `The entry goes in ${monthOf(today)}, which is open.`;
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200" aria-live="polite">
-      {effect.invoices.map((i) => <InvoiceEffect key={`${i.id}-${i.viaPrepay}`} i={i} />)}
+      {effect.invoices.map((i, n) => <InvoiceEffect key={`${i.id}-${n}`} i={i} />)}
       {effect.prepayRemovedCents > 0 && (
         <EffectRow icon={<Wallet className="h-4 w-4" />} tone="refund" title={`Remaining ${effect.removedLabel} is removed`} cents={effect.prepayRemovedCents}>
           <span className="tabular-nums">Prepay {fmt(availableCents)} → {fmt(availableCents - effect.prepayRemovedCents)}</span>

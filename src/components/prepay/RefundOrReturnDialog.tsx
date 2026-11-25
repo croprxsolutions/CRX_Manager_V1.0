@@ -51,7 +51,7 @@ function subtitleText(farmName: string, kind: Kind | null, fromLabel: string | u
 }
 
 /** The returned-check form can go to its confirm: a check, a valid bank date, a reason, and its effect loaded. */
-const returnReady = (r: ReturnForm, reason: string) => !!r.picked && !r.bankError && !!reason.trim() && !!r.effect;
+const returnReady = (r: ReturnForm, reason: string) => !!r.picked && !r.picked.disabledReason && !r.bankError && !!reason.trim() && !!r.effect;
 
 /** The confirm: a centred card, a bottom sheet on phones. It repeats the action and shows the balance change. */
 function ConfirmDialog({ refund, f, r, saving, onBack, onRecord, farmName, today, reason }: {
@@ -112,7 +112,8 @@ export default function RefundOrReturnDialog({ open, onClose, onRecorded, custom
     f.reset(); r.reset();
     onClose();
   };
-  const pickKind = (k: Kind) => { setKind(k); setTried(false); };
+  // Each choice starts with its own reason: a bounce's reason never carries into a refund.
+  const pickKind = (k: Kind) => { if (k !== kind) setReason(''); setKind(k); setTried(false); };
 
   const onPrimary = () => {
     setTried(true);
@@ -194,6 +195,10 @@ function ReturnBody({ r, tried, today, availableCents, owesCents, reason, setRea
   return (
     <>
       {!r.preset && <CheckPicker r={r} tried={tried} />}
+      {r.picked?.disabledReason && (
+        // Opened from a payment returned since its page loaded: it can't come back twice (Sol r1 MED 12).
+        <p role="alert" className="text-sm text-red-600">This check can't be returned: {r.picked.disabledReason}.</p>
+      )}
       {r.preset && (r.picked ? <CheckCard c={r.picked} picked={r.picked} />
         : r.failed ? <p role="alert" className="text-sm text-red-600">This payment can't be returned here: it is not a check, or it was voided. Close and check Payment History.</p>
           : <div className="h-20 animate-pulse rounded-xl bg-gray-100" />)}

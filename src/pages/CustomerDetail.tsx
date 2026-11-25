@@ -284,7 +284,7 @@ export default function CustomerDetail() {
 
   // Financials tab state
   interface TxnRow { transaction_date: string; transaction_type: string; reference_number: string; amount_cents: number; running_balance: number }
-  interface PrepayRow { id: string; bucket_label: string; original_amount_cents: number; balance_cents: number; source_reference: string | null; reference_number: string | null; created_at: string }
+  interface PrepayRow { id: string; bucket_label: string; original_amount_cents: number; balance_cents: number; source_reference: string | null; source_type: string | null; reference_number: string | null; created_at: string }
   const [aging, setAging] = useState<ARAgingPricedRow | null>(null);
   // KI-95: today's balance can't be rebuilt for this customer, so there is no Outstanding figure.
   const [agingUnavailable, setAgingUnavailable] = useState(false);

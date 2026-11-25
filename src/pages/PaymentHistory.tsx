@@ -118,25 +118,33 @@ export default function PaymentHistory() {
       setLoading(false);
       return;
     }
-    setLoadFailed(false);
-
     const mapped: AllocationSet[] = data.map((row: Record<string, unknown>) => ({
       ...(row as AllocationSet),
       farm_name: (row.customers as { farm_name: string } | null)?.farm_name || 'Unknown',
     }));
 
-    setPayments(mapped);
-    setLoading(false);
-    // Which of them came back (admin read). A failed read leaves no Returned badges and the server still refuses
-    // a second return or a void of a returned check.
+    // Which of them came back (admin read), before the list shows: a returned check must never show as Active
+    // with Void and Return offered (Sol r1 MED 7). A failed read fails the list, as the list read does.
+    let returned = new Map<string, string>();
     if (isAdmin) {
       try {
-        const returned = await loadReturnedPayments(mapped.map((p) => p.id));
-        if (seq === fetchSeq.current) setReturnedOn(returned);
+        returned = await loadReturnedPayments(mapped.map((p) => p.id));
       } catch (err) {
         Sentry.captureException(toSentryError(err), { extra: { context: 'payment_history_returned' } });
+        if (seq !== fetchSeq.current) return;
+        toast('error', 'Failed to load payment history');
+        setPayments([]);
+        setLoadFailed(true);
+        setVoidPayment(null);
+        setLoading(false);
+        return;
       }
     }
+    if (seq !== fetchSeq.current) return;
+    setLoadFailed(false);
+    setReturnedOn(returned);
+    setPayments(mapped);
+    setLoading(false);
   }, [toast, isAdmin]);
 
   useEffect(() => {

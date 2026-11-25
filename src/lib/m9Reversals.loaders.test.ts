@@ -58,3 +58,31 @@ describe('loadReturnableChecks', () => {
     expect((await loadReturnableCheck('c1', 's-old'))?.number).toBe('old');
   });
 });
+
+describe('loadPrepayHistory', () => {
+  it('shows a hand edit and a delete as their own rows, from what was first received (Sol r1 H4)', async () => {
+    const { loadPrepayHistory } = await import('./m9Reversals');
+    H.tables = {
+      prepay_credits: [
+        { id: 'k1', customer_id: 'c1', original_amount_cents: 8000, balance_cents: 8000, source_type: 'check', source_reference: 'A1', bucket_label: 'Spring', created_at: '2026-10-01T15:00:00Z', created_by: 'u1' },
+        { id: 'k2', customer_id: 'c1', original_amount_cents: 0, balance_cents: 0, source_type: 'check', source_reference: 'B2', bucket_label: 'Fall', created_at: '2026-10-02T15:00:00Z', created_by: 'u1' },
+      ],
+      money_reversals: [], prepay_applications: [], money_reversal_lines: [],
+      financial_audit_log: [
+        { id: 'e1', operation_type: 'prepay_edited', entity_id: 'k1', actor_user_id: 'u1', created_at: '2026-10-05T15:00:00Z',
+          old_values: { original_amount_cents: 10000 }, new_values: { original_amount_cents: 8000 } },
+        { id: 'e2', operation_type: 'prepay_deleted', entity_id: 'k2', actor_user_id: 'u1', created_at: '2026-10-06T15:00:00Z',
+          old_values: { total_cents: 5000, reference_number: 'B2', buckets: [{ id: 'k2', original_amount_cents: 5000 }] },
+          new_values: { whole_check: true, credit_ids: ['k2'], original_amount_cents: 0, reason: 'typed twice' } },
+      ],
+      profiles: [{ id: 'u1', full_name: 'Test Admin' }],
+    };
+    const rows = await loadPrepayHistory('c1');
+    expect(rows.map((r) => [r.what, r.cents, r.afterCents])).toEqual([
+      ['Prepayment check deleted', -5000, 8000],
+      ['Credit edited by hand', -2000, 13000],
+      ['Prepay received', 5000, 15000],
+      ['Prepay received', 10000, 10000],
+    ]);
+  });
+});

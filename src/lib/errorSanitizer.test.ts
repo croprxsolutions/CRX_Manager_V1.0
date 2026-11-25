@@ -757,7 +757,7 @@ describe('customer receipt refusals (KI-25)', () => {
 describe('M9 refund and returned-check refusals', () => {
   it('turns the hand-check gate into a plain instruction', () => {
     expect(sanitizeError({ message: 'RECORD_NEEDS_HAND_CHECK: STORED_BALANCE_MISMATCH (the records this touches do not agree; record it by hand)' }))
-      .toBe("Nothing was saved. This customer's prepay records don't add up (STORED_BALANCE_MISMATCH), so this has to be recorded by hand. Month-End's prepay check shows what doesn't tie.");
+      .toBe("Nothing was saved. The records this touches don't agree (STORED_BALANCE_MISMATCH), so this has to be recorded by hand. Month-End's prepay check shows the customer's stored and credit totals.");
   });
 
   it("keeps the server's sentence after the token", () => {

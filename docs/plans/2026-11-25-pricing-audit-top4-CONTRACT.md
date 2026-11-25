@@ -38,6 +38,8 @@ Read at `origin/staging` `e1e2d6f99` (2026-11-25). Source: Mason's "CRX Pricing 
 
 ## 3. Margin typed as a fraction; prices hugging cost
 
+> **Superseded:** the refusal and tick text below were replaced by Mason's Q2 answer (see "Mason's answers" at the end). Final code: margins over 0% and under 1% are warned and need the tick, never refused; the 2% test is `price × 100 ≤ cost × 102`; the tick reads "Yes, this price and margin are what I meant"; the product page and bulk grid add no refusal.
+
 **Facts.** Sheet margins are whole percents (`18.5` = 18.5%). `0.35` is read as 0.35%; on staging that priced a $6.40-cost product at $6.42. Preview warnings come from the database; each warned product needs a typed reason (`pricingAcknowledgements`).
 
 **Change.**
@@ -49,6 +51,8 @@ Read at `origin/staging` `e1e2d6f99` (2026-11-25). Source: Mason's "CRX Pricing 
 **Proof.** `0.35` margin is refused with the message; `35` passes; `0` passes the refusal. A preview with a $6.42 price on $6.40 cost keeps Apply disabled until the tick box is ticked, even with a reason typed. (Unit tests + staging run with a staging test product, restored afterwards.)
 
 ## 4. Export fills pricing_mode
+
+> **Superseded:** the `defaultPricingMode` / `price_driven` design below was dropped (Opus findings 1-3) and replaced by Mason's Q4 answer: the export writes `margin_driven` only when today's margins re-derive today's exact prices, else blank.
 
 **Facts.** Products store no mode; the screens infer it with `defaultPricingMode` (all three prices set = `price_driven`; else all three margins = `margin_driven`; else blank). The export writes `pricing_mode: ''` (`src/lib/productPricingWorkbook.ts:457`), and a changed row with a blank mode is refused (`WORKBOOK_BLANK_MODE_CHANGED_VALUES`).
 
@@ -66,13 +70,15 @@ One PR into `staging`, front end only, no migration. Verified on staging as an a
 
 **Fix 2.** 15: the list renders independently of the chart (built that way). 16: an unconverted amount is labelled "per supplier unit", not "per package". 18: the left-off count is taken after the supplier filter. 17 (older basis rows copied into the normalized field without a historical-unit check) is a pre-existing data question. It is out of scope and listed in the PR as a follow-up.
 
-**Fix 3.** 19: DECISION (Q2, recommend refuse). 20: a sheet row whose margin equals its current_ cell is not refused. The product page and bulk grid re-send current margins, so a product already saved under 1% is refused there with a "use price_driven" path (listed in the PR). 21: an Excel cell formatted as a percent stores 35% as 0.35. The refusal catches it and its message gives the fix. 22: uses the preview's after-cost and after-prices on ready rows with pricing changes, 2% included (`price × 100 ≤ cost × 102`). 23: lists every affected tier. 24: shown and required even with no database warning. 25: ticks are scoped to the change set, and the Apply click re-checks. 27: DECISION (Q3, recommend screen check only). 38: existing mis-priced products are out of scope; a read-only report is a possible follow-up.
+**Fix 3.** (Q2 later chose warn-and-confirm, not refuse; see the end.) 19: DECISION (Q2, recommend refuse). 20: a sheet row whose margin equals its current_ cell is not refused. The product page and bulk grid re-send current margins, so a product already saved under 1% is refused there with a "use price_driven" path (listed in the PR). 21: an Excel cell formatted as a percent stores 35% as 0.35. The refusal catches it and its message gives the fix. 22: uses the preview's after-cost and after-prices on ready rows with pricing changes, 2% included (`price × 100 ≤ cost × 102`). 23: lists every affected tier. 24: shown and required even with no database warning. 25: ticks are scoped to the change set, and the Apply click re-checks. 27: DECISION (Q3, recommend screen check only). 38: existing mis-priced products are out of scope; a read-only report is a possible follow-up.
 
 **Fix 4.** 28/29: mode is read from the nullable export values before formatting, in the same order as `defaultPricingMode`. 30: DECISION (Q4, recommend price_driven as the bulk grid does). 31-33: verified on staging (blank companion cell, reason/source required, untouched round trip). 34: the validation prompt now explains the pre-filled value.
 
 **Delivery (35-37).** Staging checks use staging test products. Each change is recorded and restored, and any history rows a staging apply leaves are named in the PR.
 
 ## Opus review (2026-11-25, 14 findings) and what changed
+
+> **Superseded:** "fix 4 is out" and the product-page and bulk-grid refusal checks below were reversed by Mason's answers (next section); neither the refusal nor the page checks are in the final diff.
 
 - **Fix 4 is out of this PR (findings 1-3).** The export function fills missing values with `''`, not null, so the inferred mode said `price_driven` for every row. The deeper problem is that the screen cannot know how a product was last priced. A product priced from margins, exported as `price_driven`, re-previews with recalculated margins (for example 0.35025381 instead of 0.35) and stops an untouched upload. The export keeps a blank mode. Fix 4 moves to the database-first PR with fix 1: the export should return the mode of each product's last applied pricing row (`pricing_change_set_rows.pricing_mode`), and the cost-only behavior (Q4) is decided there.
 - **Finding 4 fixed.** The generic preview check refuses a fraction only on price-sheet rows (they carry `current_` cells). The product page and bulk grid check typed margins against the stored margin before asking for a source and reason (finding 5). Cost-basis "keep margins" re-sends stored margins and is not refused.

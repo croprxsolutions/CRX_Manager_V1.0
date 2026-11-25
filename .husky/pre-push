@@ -162,7 +162,9 @@ require_packages
 # prove nothing). Add a new whole-app scan test here.
 LIST_MATCHES=yes
 for LIST_SHA in $(printf '%s\n' "$PUSH_REFS" | awk 'NF >= 2 && $2 !~ /^0+$/ { print $2 }'); do
-  if ! git diff --quiet "$LIST_SHA" || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+  # Files flagged assume-unchanged (lower-case tag) or skip-worktree (S) hide their edits from git diff.
+  if ! git diff --quiet "$LIST_SHA" || [ -n "$(git ls-files --others --exclude-standard)" ] \
+      || git ls-files -v | grep -q '^[a-zS] '; then
     LIST_MATCHES=no
   fi
 done

@@ -280,6 +280,11 @@ BEGIN
       -- On a gated parent only a swap to an existing ingredient with the same name passes: it merges a duplicate
       -- ingredient record. Everything is carried over unchanged, so no EPA-written value changes (Mason, 2026-11-24).
       v_same_name := v_gate IS NOT NULL;
+      IF v_same_name THEN
+        -- Hold both records still until commit so no CAS, acid-form or group edit lands between this check and the save.
+        PERFORM pg_advisory_xact_lock(hashtext('crx.active_ingredients'));
+        PERFORM 1 FROM public.active_ingredients WHERE id IN (v_ing, v_row.ingredient_id) ORDER BY id FOR SHARE;
+      END IF;
       IF v_same_name AND (COALESCE(jsonb_typeof(v_entry->'ingredient_id'), 'null') = 'null'
           OR (SELECT name_key FROM public.active_ingredients WHERE id = v_ing)
              IS DISTINCT FROM (SELECT name_key FROM public.active_ingredients WHERE id = v_row.ingredient_id)

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -11,6 +11,7 @@ const {
   mockPreviewPricing,
   mockProducts,
   mockProductUpdate,
+  mockRefusalReason,
   mockRole,
   mockToast,
   pricingWorkbookFileLimit,
@@ -24,6 +25,7 @@ const {
   mockPreviewPricing: vi.fn(),
   mockProducts: [] as Array<Record<string, unknown>>,
   mockProductUpdate: vi.fn(),
+  mockRefusalReason: vi.fn(),
   mockRole: { current: 'admin' },
   mockToast: vi.fn(),
   pricingWorkbookFileLimit: 10 * 1024 * 1024,
@@ -87,6 +89,7 @@ vi.mock('../lib/productPricing', async (importOriginal) => {
     approvePricingChangeSet: mockApprovePricing,
     applyProductPricingChangeSet: mockApplyPricing,
     createPricingWorkbookExport: mockExportPricing,
+    getPricingWorkbookExportRefusalReason: mockRefusalReason,
   };
 });
 
@@ -100,17 +103,27 @@ vi.mock('../lib/productPricingSupplierEvidenceWorkbook', () => ({
   parseProductPricingWorkbookWithSupplierEvidence: mockParsePricing,
 }));
 
-vi.mock('../lib/productPricingWorkbook', () => ({
-  generateProductPricingWorkbook: vi.fn(),
-  MAX_PRICING_WORKBOOK_FILE_BYTES: pricingWorkbookFileLimit,
-  MAX_PRICING_WORKBOOK_ROWS: pricingWorkbookRowLimit,
-  parseProductPricingWorkbook: mockParsePricing,
-  groupedUseTimingRefusal: () => null,
-}));
+vi.mock('../lib/productPricingWorkbook', async () => {
+  const actual = await vi.importActual<typeof import('../lib/productPricingWorkbook')>('../lib/productPricingWorkbook');
+  return {
+    generateProductPricingWorkbook: vi.fn(),
+    MAX_PRICING_WORKBOOK_FILE_BYTES: pricingWorkbookFileLimit,
+    MAX_PRICING_WORKBOOK_ROWS: pricingWorkbookRowLimit,
+    parseProductPricingWorkbook: mockParsePricing,
+    groupedUseTimingRefusal: () => null,
+    priceSheetExpiredText: actual.priceSheetExpiredText,
+    priceSheetRefusalText: actual.priceSheetRefusalText,
+    isPriceSheetRefusal: actual.isPriceSheetRefusal,
+    priceSheetReasonText: actual.priceSheetReasonText,
+  };
+});
 
 vi.mock('../components/ui/EditableDataTable', () => ({
-  default: function MockEditableDataTable({ data, onSave, filters, columns }: {
+  default: function MockEditableDataTable({ data, onSave, filters, columns, searchPlaceholder, searchMatcher, onSearchChange }: {
     data: typeof product[];
+    searchPlaceholder?: string;
+    searchMatcher?: (row: typeof product, search: string) => boolean;
+    onSearchChange?: (search: string) => void;
     onSave: (changes: Map<string, Record<string, unknown>>) => Promise<void | boolean>;
     filters?: ReactNode;
     columns: Array<{
@@ -123,11 +136,17 @@ vi.mock('../components/ui/EditableDataTable', () => ({
     }>;
   }) {
     const [dirty, setDirty] = useState<Record<string, unknown>>({});
+    // Like the real table, the search box is the table's own state, reported through onSearchChange.
+    const [search, setSearch] = useState('');
+    useEffect(() => { onSearchChange?.(search); }, [onSearchChange, search]);
+    const shown = data.filter((item) => !search || searchMatcher?.(item, search)).length;
     const row = data[0];
     const getCellValue = (key: string): unknown => key in dirty ? dirty[key] : row[key as keyof typeof product];
     const setCellValue = (key: string, value: unknown) => setDirty((current) => ({ ...current, [key]: value }));
     return <>
       {filters}
+      <input placeholder={searchPlaceholder} value={search} onChange={(event) => setSearch(event.target.value)} />
+      <p>Table shows {shown} rows</p>
       {row && columns.filter((column) => ['pricing_mode', 'tier1_price', 'tier2_price', 'tier3_price'].includes(column.key))
         .map((column) => <div key={column.key}>{column.editRender?.(row, getCellValue, setCellValue)}</div>)}
       <button
@@ -233,7 +252,6 @@ vi.mock('../lib/productSetup', async (importOriginal) => ({
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 
 import Products from './Products';
-import { todayInBusinessTz } from '../lib/dateUtils';
 
 /** The preview beforeEach installs, read back without counting as a call. */
 async function inlinePreview(): Promise<Record<string, unknown>> {
@@ -246,6 +264,8 @@ describe('Products governed inline pricing flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRole.current = 'admin';
+    // Until a test names a reason, the database finds none and the original wording stays.
+    mockRefusalReason.mockResolvedValue('NONE');
     mockProducts.splice(0, mockProducts.length, product);
     mockPreviewPricing.mockResolvedValue({
       change_set_id: '22222222-2222-4222-8222-222222222222',
@@ -619,6 +639,216 @@ describe('Products governed inline pricing flow', () => {
     })));
   });
 
+  it('lets the server refuse an expired price sheet, then says it expired', async () => {
+    mockParsePricing.mockResolvedValue({ exportId: 'export-1', expiresAt: '2020-01-01T00:00:00+00:00', rows: [] });
+    mockPreviewPricing.mockRejectedValue({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+    const { container } = render(<Products />);
+    await screen.findByRole('button', { name: 'Review Pricing File' });
+    const input = container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!;
+    fireEvent.change(input, { target: { files: [new File(['abc'], 'old.xlsx')] } });
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error',
+      'No prices were changed. This price sheet expired (sheets last 7 days). Download a fresh one',
+    ));
+    // The browser clock only picks the wording; the server decides whether the sheet is refused.
+    expect(mockPreviewPricing).toHaveBeenCalledTimes(1);
+  });
+
+  it('says a current price sheet the server refuses was already applied or belongs to another user', async () => {
+    mockParsePricing.mockResolvedValue({ exportId: 'export-1', expiresAt: '2999-01-01T00:00:00+00:00', rows: [] });
+    mockPreviewPricing.mockRejectedValue({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+    const { container } = render(<Products />);
+    await screen.findByRole('button', { name: 'Review Pricing File' });
+    const input = container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!;
+    fireEvent.change(input, { target: { files: [new File(['abc'], 'used.xlsx')] } });
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error',
+      'No prices were changed. This price sheet was already applied, was downloaded by another user, or came from an older template. Download a fresh one',
+    ));
+  });
+
+  describe('the database names the one refusal reason', () => {
+    const USED = 'No prices were changed. This price sheet was already applied, was downloaded by another user, or came from an older template. Download a fresh one';
+    const upload = async (container: HTMLElement, name = 'sheet.xlsx') => {
+      await screen.findByRole('button', { name: 'Review Pricing File' });
+      const input = container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!;
+      fireEvent.change(input, { target: { files: [new File(['abc'], name)] } });
+    };
+
+    beforeEach(() => {
+      mockParsePricing.mockResolvedValue({ exportId: 'export-1', expiresAt: '2999-01-01T00:00:00+00:00', rows: [] });
+    });
+
+    it.each([
+      ['WORKBOOK_V2_EXPORT_REQUIRED', 'ALREADY_APPLIED', /already used; each product's Sell Price History, Cost History or Change History shows what it changed/],
+      ['WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'DOWNLOADED_BY_OTHER_USER', /Another user downloaded this price sheet/],
+      ['WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED', 'OLD_TEMPLATE', /older template/],
+      ['WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED', 'EXPIRED', /expired \(sheets last 7 days\)/],
+      ['WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED', 'EXPORT_NOT_FOUND', /no record of this price sheet/],
+    ])('after %s, shows the sentence for %s', async (code, reason, sentence) => {
+      mockPreviewPricing.mockRejectedValue({ message: code });
+      mockRefusalReason.mockResolvedValue(reason);
+      const { container } = render(<Products />);
+      await upload(container);
+
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(sentence)));
+      expect(mockRefusalReason).toHaveBeenCalledExactlyOnceWith('export-1');
+      expect(mockToast).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['NONE', () => mockRefusalReason.mockResolvedValue('NONE')],
+      ['an unknown code', () => mockRefusalReason.mockResolvedValue('SOMETHING_NEW')],
+      ['a failed lookup', () => mockRefusalReason.mockRejectedValue(new Error('ADMIN_REQUIRED'))],
+    ])('keeps the original message on %s', async (_label, arrange) => {
+      mockPreviewPricing.mockRejectedValue({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+      arrange();
+      const { container } = render(<Products />);
+      await upload(container);
+
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', USED));
+      expect(mockRefusalReason).toHaveBeenCalledTimes(1);
+    });
+
+    it('never asks after an unreadable sheet or a permission refusal', async () => {
+      mockParsePricing.mockRejectedValueOnce(new Error('WORKBOOK_V2_EXPORT_REQUIRED'));
+      const { container } = render(<Products />);
+      await upload(container, 'broken.xlsx');
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'WORKBOOK_V2_EXPORT_REQUIRED'));
+
+      mockPreviewPricing.mockRejectedValueOnce(new Error('ADMIN_REQUIRED'));
+      await upload(container, 'not-admin.xlsx');
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'ADMIN_REQUIRED'));
+      expect(mockRefusalReason).not.toHaveBeenCalled();
+    });
+
+    it('never asks after other errors or a reviewed sheet', async () => {
+      mockPreviewPricing.mockRejectedValueOnce(new Error('PRICING_DUPLICATE_PRODUCT_ID'));
+      const { container } = render(<Products />);
+      await upload(container);
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'PRICING_DUPLICATE_PRODUCT_ID'));
+
+      mockPreviewPricing.mockResolvedValueOnce({ ...(await inlinePreview()), source: 'pricing_worksheet' });
+      await upload(container, 'good.xlsx');
+      await screen.findByRole('button', { name: 'Apply approved changes' });
+      expect(mockRefusalReason).not.toHaveBeenCalled();
+    });
+
+    it('drops a late reason that belongs to an earlier upload', async () => {
+      let answerFirst: (reason: string) => void = () => undefined;
+      mockPreviewPricing.mockRejectedValueOnce({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+      mockRefusalReason.mockReturnValueOnce(new Promise<string>((resolve) => { answerFirst = resolve; }));
+      const { container } = render(<Products />);
+      await upload(container, 'first.xlsx');
+      await waitFor(() => expect(mockRefusalReason).toHaveBeenCalledTimes(1));
+
+      // A second file is chosen while the first file's reason is still on its way.
+      mockParsePricing.mockResolvedValueOnce({ exportId: 'export-2', expiresAt: '2999-01-01T00:00:00+00:00', rows: [] });
+      mockPreviewPricing.mockRejectedValueOnce(new Error('PRICING_DUPLICATE_PRODUCT_ID'));
+      await upload(container, 'second.xlsx');
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'PRICING_DUPLICATE_PRODUCT_ID'));
+
+      answerFirst('ALREADY_APPLIED');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockToast).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['a review', true],
+      ['an error', false],
+    ])('drops %s for an earlier file once a newer file is chosen', async (_label, succeeds) => {
+      const preview = { ...(await inlinePreview()), source: 'pricing_worksheet' };
+      let settleFirst: () => void = () => undefined;
+      mockPreviewPricing.mockReturnValueOnce(new Promise((resolve, reject) => {
+        settleFirst = () => (succeeds ? resolve(preview) : reject(new Error('PRICING_DUPLICATE_PRODUCT_ID')));
+      }));
+      const { container } = render(<Products />);
+      await upload(container, 'first.xlsx');
+      await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledTimes(1));
+
+      const tooBig = new File(['abc'], 'huge.xlsx');
+      Object.defineProperty(tooBig, 'size', { value: pricingWorkbookFileLimit + 1 });
+      fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!, { target: { files: [tooBig] } });
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/MB or smaller/)));
+
+      settleFirst();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(screen.queryByRole('button', { name: 'Apply approved changes' })).toBeNull();
+      expect(mockToast).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes an earlier file's review when a newer file is chosen, even one refused before it is read", async () => {
+      mockPreviewPricing.mockResolvedValueOnce({ ...(await inlinePreview()), source: 'pricing_worksheet' });
+      const { container } = render(<Products />);
+      await upload(container, 'first.xlsx');
+      await screen.findByRole('button', { name: 'Apply approved changes' });
+
+      const tooBig = new File(['abc'], 'huge.xlsx');
+      Object.defineProperty(tooBig, 'size', { value: pricingWorkbookFileLimit + 1 });
+      fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!, { target: { files: [tooBig] } });
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/MB or smaller/)));
+      expect(screen.queryByRole('button', { name: 'Apply approved changes' })).toBeNull();
+    });
+
+    it('never asks for a review of an earlier file still being read when a newer file is chosen', async () => {
+      let finishParse: () => void = () => undefined;
+      mockParsePricing.mockReturnValueOnce(new Promise((resolve) => {
+        finishParse = () => resolve({ exportId: 'export-1', expiresAt: '2999-01-01T00:00:00+00:00', rows: [] });
+      }));
+      const { container } = render(<Products />);
+      await upload(container, 'first.xlsx');
+      await waitFor(() => expect(mockParsePricing).toHaveBeenCalledTimes(1));
+
+      const tooBig = new File(['abc'], 'huge.xlsx');
+      Object.defineProperty(tooBig, 'size', { value: pricingWorkbookFileLimit + 1 });
+      fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!, { target: { files: [tooBig] } });
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/MB or smaller/)));
+
+      finishParse();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(mockPreviewPricing).not.toHaveBeenCalled();
+      expect(mockToast).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows no late message after the admin leaves the page', async () => {
+      let answerFirst: (reason: string) => void = () => undefined;
+      mockPreviewPricing.mockRejectedValueOnce({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+      mockRefusalReason.mockReturnValueOnce(new Promise<string>((resolve) => { answerFirst = resolve; }));
+      const { container, unmount } = render(<Products />);
+      await upload(container, 'first.xlsx');
+      await waitFor(() => expect(mockRefusalReason).toHaveBeenCalledTimes(1));
+
+      unmount();
+      answerFirst('ALREADY_APPLIED');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockToast).not.toHaveBeenCalled();
+    });
+
+    it('drops a late reason after a newer file is refused before it is read, and frees the button', async () => {
+      let answerFirst: (reason: string) => void = () => undefined;
+      mockPreviewPricing.mockRejectedValueOnce({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+      mockRefusalReason.mockReturnValueOnce(new Promise<string>((resolve) => { answerFirst = resolve; }));
+      const { container } = render(<Products />);
+      await upload(container, 'first.xlsx');
+      await waitFor(() => expect(mockRefusalReason).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('button', { name: 'Review Pricing File' })).toBeDisabled();
+
+      const tooBig = new File(['abc'], 'huge.xlsx');
+      Object.defineProperty(tooBig, 'size', { value: pricingWorkbookFileLimit + 1 });
+      const input = container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!;
+      fireEvent.change(input, { target: { files: [tooBig] } });
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/MB or smaller/)));
+      expect(screen.getByRole('button', { name: 'Review Pricing File' })).toBeEnabled();
+
+      answerFirst('ALREADY_APPLIED');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockToast).toHaveBeenCalledTimes(1);
+      expect(mockParsePricing).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('exports the full price sheet: every active product, never an inactive one', async () => {
     mockExportPricing.mockRejectedValue(new Error('stop after the request'));
     mockProducts.push({ ...product, id: '44444444-4444-4444-8444-444444444444', product_name: 'Retired', is_active: false });
@@ -660,7 +890,7 @@ describe('Products governed inline pricing flow', () => {
     expect(other.idempotencyKey).not.toBe(first.idempotencyKey);
   });
 
-  it('says the search box does not narrow a filtered pricing export, and names the file by the business day', async () => {
+  it('exports only the products the search shows, and names the file by the business day', async () => {
     mockExportPricing.mockResolvedValue({ rows: [] });
     mockGeneratePricing.mockResolvedValue(new Blob(['xlsx']));
     // jsdom has no object URLs; add them for this test only.
@@ -669,18 +899,30 @@ describe('Products governed inline pricing flow', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
       clicked.push(this.download);
     });
+    // 03:00 UTC on Nov 25 is still Nov 24 in Chicago, so a UTC file name would be a day ahead.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-25T03:00:00Z'));
     try {
       render(<Products />);
       const exportButton = await screen.findByRole('button', { name: 'Pricing .xlsx' });
       await waitFor(() => expect(exportButton).toBeEnabled());
+      // A search that hides every row exports nothing.
+      const search = screen.getByPlaceholderText('Search products...');
+      fireEvent.change(search, { target: { value: 'no such product' } });
+      expect(screen.getByText('Table shows 0 rows')).toBeInTheDocument();
       fireEvent.click(exportButton);
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', 'Select at least one active Product to export.'));
+      expect(mockExportPricing).not.toHaveBeenCalled();
 
-      await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
-        'success',
-        'Exported 1 Product pricing row(s). The search box does not narrow this file: tick products to export only those.',
-      ));
-      expect(clicked).toEqual([`crx-product-pricing-${todayInBusinessTz()}.xlsx`]);
+      // A search that shows the product exports it.
+      fireEvent.change(search, { target: { value: product.product_name } });
+      expect(screen.getByText('Table shows 1 rows')).toBeInTheDocument();
+      fireEvent.click(exportButton);
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Exported 1 Product pricing row(s).'));
+      expect(mockExportPricing).toHaveBeenCalledWith(expect.objectContaining({ productIds: [product.id] }));
+      expect(clicked).toEqual(['crx-product-pricing-2026-11-24.xlsx']);
     } finally {
+      vi.useRealTimers();
       click.mockRestore();
       Reflect.deleteProperty(URL, 'createObjectURL');
       Reflect.deleteProperty(URL, 'revokeObjectURL');

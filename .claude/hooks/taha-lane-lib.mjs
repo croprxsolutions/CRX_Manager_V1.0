@@ -1,11 +1,12 @@
-// TAHA'S LANES (Mason to Taha in Slack, 2026-11-22): until Dec 15 our agents
-// never merge into staging a PR that changes Taha's areas (quotes, bookings,
-// purchasing holds, chemical invoices and billing), whatever OK line the PR has.
+// TAHA'S LANES (Mason to Taha in Slack, 2026-11-22): our agents never merge into
+// staging a PR that changes Taha's areas (quotes, bookings, purchasing holds,
+// chemical invoices and billing), whatever OK line the PR has, unless Taha's own
+// GitHub Approve is on the exact head being merged (Mason, 2026-11-24). No end
+// date: Mason kept the block past Dec 15 (2026-11-24). Edits to the block's own
+// wiring (BLOCK_FILES_RE) still need Mason's code, whatever Taha's review says.
 // Field billing (field invoices, spray jobs, blend tickets) stays Mason's.
 // #1980 and #1989 merged after Taha asked; a written note did not stop them.
-//
-// Taha's own GitHub Approve on the PR's current commit lets it through with no code
-// (Mason, 2026-11-24; comments do not count, Taha 2026-11-24).
+// Comments do not count (Taha, 2026-11-24).
 //
 // Mason can still let ONE named PR through: the merge refusal issues a 6-digit
 // code for that PR at its current head, and his chat message `taha override #<PR> <code>`
@@ -23,8 +24,6 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, wr
 import path from "node:path";
 import { ghApiRepoPath } from "./codex-push-lib.mjs";
 
-// End of Dec 15 in Central time (06:00 UTC on Dec 16). After it the block is off.
-export const TAHA_LANE_UNTIL_MS = Date.UTC(2026, 11, 16, 6, 0, 0);
 export const TAHA_LANE_CODE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const TAHA_LANE_OVERRIDE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_FILES = 250; // GitHub's compare can stop short silently; at this size, fail closed.
@@ -83,9 +82,16 @@ function isFieldBillingName(name) {
   return isFieldBilling(words) && !words.some((w) => STRONG_LANE_WORDS.has(w));
 }
 
+// Supplier quotes are Mason's purchasing lane, not customer quotes (Taha, 2026-11-25, after #2524).
+// Only inside one path segment, so src/pages/supplier/Quotes.tsx stays Taha's (desk review of #2548, LOW 1).
+const dropSupplierQuotes = (name) => String(name).split("/").flatMap((segment) => {
+  const words = wordsOf(segment);
+  return words.filter((w, i) => !(/^quotes?$/.test(w) && words[i - 1] === "supplier"));
+});
+
 function isLaneName(name) {
   if (isFieldBillingName(name)) return false;
-  const words = wordsOf(name);
+  const words = dropSupplierQuotes(name);
   return isBill(words) || words.some((w, i) => LANE_WORDS.has(w) || (w === "write" && /^offs?$/.test(words[i + 1] ?? "")));
 }
 
@@ -232,8 +238,7 @@ export function isTahaLaneSql(sql, { fieldBilling = false } = {}) {
  * ({filename, previous_filename, sql?}) or null when they could not be read (refuses).
  * An entry carrying `sql` (a migration's text, or null when unreadable) is also judged by its SQL.
  */
-export function tahaLaneProblem({ files, now = Date.now() }) {
-  if (now >= TAHA_LANE_UNTIL_MS) return null;
+export function tahaLaneProblem({ files }) {
   if (!Array.isArray(files)) return { files: [], reason: "its changed files could not be read, so it can't be shown to stay out of Taha's areas" };
   if (files.length >= MAX_FILES) return { files: [], reason: `${files.length} changed files may be a cut-short list` };
   const hits = [];
@@ -287,6 +292,41 @@ function migrationSql({ repoPath, gh, filename, ref }) {
     const sql = String(gh(["api", "-H", "Accept: application/vnd.github.raw", `${repoPath}/contents/${filePath}?ref=${ref}`]));
     return sql.trim() ? sql : null;
   } catch { return null; }
+}
+
+export const TAHA_LOGIN = "tahakhanabdalli";
+// His GitHub account number: a login can be renamed and re-registered by someone else; this cannot.
+export const TAHA_ID = "50602678";
+
+/**
+ * Taha's latest deciding review (approve / changes-requested / dismissed, on any commit) must be an
+ * Approve of exactly `headSha`; comments and pending reviews do not count. A dismissal is deciding, so
+ * dismissing his Request changes never revives an older Approve (#2406). `rows`: [{ id, state, commit, at }]
+ * oldest first. True only when that Approve also came after the PR's last base-branch change
+ * (`baseChangedAt`, ISO time or ""): a retarget keeps the head but changes the code that merges.
+ */
+export function tahaApprovedHead(rows, headSha, baseChangedAt = "") {
+  if (!usableHead(headSha)) return false;
+  const verdict = (rows || []).filter((r) => String(r?.id || "") === TAHA_ID
+    && ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(r?.state)).at(-1);
+  if (verdict?.state !== "APPROVED" || String(verdict.commit || "").toLowerCase() !== headSha.toLowerCase()) return false;
+  if (!baseChangedAt) return true;
+  const approvedAt = Date.parse(verdict.at);
+  return Number.isFinite(approvedAt) && approvedAt > Date.parse(baseChangedAt);
+}
+
+/** Taha's reviews and the PR's base changes read from GitHub, fed to tahaApprovedHead. Any read error → false (refuse). */
+export function tahaApprovedOnGitHub({ repo, gh, pullRequest, headSha }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath || !usablePr(pullRequest)) return false;
+  try {
+    const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${pullRequest}/reviews?per_page=100`, "--jq",
+      '.[] | [(.user.id // "" | tostring), .state, (.commit_id // ""), (.submitted_at // "")] | @tsv'])).split(/\r?\n/).filter(Boolean)
+      .map((line) => { const [id, state, commit, at] = line.split("\t"); return { id, state, commit, at }; });
+    const baseChangedAt = String(gh(["api", "--paginate", `${repoPath}/issues/${pullRequest}/timeline?per_page=100`, "--jq",
+      '.[] | select(.event == "base_ref_changed" or .event == "automatic_base_change_succeeded") | .created_at'])).split(/\r?\n/).filter(Boolean).sort().at(-1) || "";
+    return tahaApprovedHead(rows, headSha, baseChangedAt);
+  } catch { return false; }
 }
 
 const usablePr = (n) => Number.isInteger(n) && n > 0;
@@ -401,47 +441,21 @@ export function tellTahaOnGitHub({ repo, gh, pullRequest, body }) {
   } catch { return false; }
 }
 
-// Taha's own sign-off on the exact head lifts the block with no code (Mason, 2026-11-24: #2382 needed a code after
-// Taha had reviewed and accepted it). Only his account counts: agents post as Mason, never as Taha.
-const TAHA_LOGIN = "tahakhanabdalli";
-const DECISIVE_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
-
-/**
- * True only when Taha's latest deciding review (APPROVED, CHANGES_REQUESTED or DISMISSED) is an APPROVED review on
- * exactly `headSha`. A comment, `Ready to merge:` line included, is not a sign-off (Taha, Slack 2026-11-24: Approve
- * is the one sign-off, as in pr-readiness and ship.md). A dismissed review is deciding, so dismissing his Request
- * changes never revives an older Approve; he approves again. `reviews`: GitHub's REST rows, oldest first
- * ({user:{login}, state, commit_id}); anything unreadable is false.
- */
-export function tahaApprovedHead({ reviews, headSha }) {
-  if (!usableHead(headSha) || !Array.isArray(reviews)) return false;
-  const isTaha = (row) => String(row?.user?.login ?? "").trim().toLowerCase() === TAHA_LOGIN;
-  const deciding = reviews.filter((r) => isTaha(r) && DECISIVE_REVIEW_STATES.has(String(r?.state ?? "").toUpperCase())).at(-1);
-  return String(deciding?.state ?? "").toUpperCase() === "APPROVED" && String(deciding?.commit_id ?? "").toLowerCase() === headSha.toLowerCase();
-}
-
-/** Reads the PR's reviews from GitHub and asks tahaApprovedHead; false when unreadable. */
-export function tahaApprovedOnGitHub({ repo, gh, number, headSha }) {
-  const repoPath = ghApiRepoPath(repo);
-  if (!repoPath || !usablePr(number) || !usableHead(headSha)) return false;
-  try {
-    const reviews = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/reviews?per_page=100`, "--jq", ".[] | {user: {login: .user.login}, state, commit_id} | tojson"]))
-      .split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
-    return tahaApprovedHead({ headSha, reviews });
-  } catch { return false; }
-}
-
 /**
  * The merge gates' single call: null when the merge may go on, otherwise the
  * refusal text. `tahaApproved()` true (Taha signed off on this head) lets it through.
  * With Mason's override for this PR and head, `tellTaha(body)`
  * must post the PR comment first (once per override); if it can't, the merge is refused.
  */
-export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, notice = () => {}, tahaApproved = () => false }) {
-  const problem = tahaLaneProblem({ files, now });
+export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, tahaApproved = () => false, notice = () => {} }) {
+  const problem = tahaLaneProblem({ files });
   if (!problem) return null;
-  if (tahaApproved()) {
-    notice(`${prefix}: TAHA LANE — Taha signed off on #${pullRequest} at ${headSha}, so it may merge.\n`);
+  // Taha's Approve on this exact head lets lane code through. Not an unreadable file list, a migration
+  // whose SQL could not be read, or the block's own files.
+  // Unreadable SQL is checked on the raw entries: a lane-named migration is listed by name, never with the suffix (Astra, 2026-11-24).
+  const unreadableSql = !Array.isArray(files) || files.some((e) => e && "sql" in e && e.sql === null);
+  if (problem.files.length && !unreadableSql && !problem.files.some((f) => BLOCK_FILES_RE.test(f)) && tahaApproved()) {
+    notice(`${prefix}: TAHA LANE: Taha approved #${pullRequest} at ${String(headSha).slice(0, 12)}; it may go on to the next gate.\n`);
     return null;
   }
   const override = findTahaLaneOverride({ dirs, pullRequest, headSha, now });
@@ -460,9 +474,9 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
   }
   const code = issueTahaLaneCode({ dirs, pullRequest, headSha, now });
   return `${prefix}: TAHA LANE BLOCK — #${pullRequest || "?"} is refused because ${problem.reason}. ` +
-    "Until Dec 15 agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) " +
-    "or change this block, whatever OK line the PR has (Mason to Taha, 2026-11-22). Leave it for Taha: post a PR comment or a KI. " +
-    `It merges once Taha presses Approve on GitHub on this commit (${String(headSha ?? "").slice(0, 12)}) from his own account; a comment does not count, and a later Request changes or dismissal takes it back. ` +
+    "Agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) without Taha's " +
+    "GitHub Approve on this exact commit, and never change this block without Mason's code (Mason, 2026-11-22 and 2026-11-24). " +
+    `Request his review (gh pr edit ${pullRequest || "<n>"} --add-reviewer TahaKhanAbdalli) and wait for his Approve. ` +
     (code
       ? `Only if Mason wants it merged anyway: tell him why in one line and ask him to send, as a message of its own: taha override #${pullRequest} ${code} ` +
         "(it covers this PR at its current commit only; a new push needs a new code)"

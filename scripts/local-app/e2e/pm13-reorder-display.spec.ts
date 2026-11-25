@@ -39,14 +39,14 @@ test('the product page shows the same stock as Inventory, and its link opens tha
   await expect(page.getByText('Total on hand: 12.75 —')).toBeVisible();
   await expect(page.getByText('Not set')).toBeVisible();
   await expect(page.getByText(/^As of /)).toBeVisible();
-  await page.screenshot({ path: 'scripts/local-app/.state/pm13-product-card.png' });
+  await page.screenshot({ path: test.info().outputPath('pm13-product-card.png') });
 
   await page.getByRole('link', { name: 'Open in Inventory' }).click();
   await expect(page).toHaveURL(new RegExp(`/inventory\\?product=${STOCKED_ID}$`));
   await expect(page.getByText(`Showing one product: ${STOCKED_NAME}`)).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: 'North Barn' })).toContainText('12.5');
   await expect(page.getByRole('row').filter({ hasText: 'South Barn' })).toContainText('0.25');
-  await page.screenshot({ path: 'scripts/local-app/.state/pm13-inventory-one-product.png' });
+  await page.screenshot({ path: test.info().outputPath('pm13-inventory-one-product.png') });
 
   await page.getByRole('button', { name: 'Show all' }).click();
   await expect(page).toHaveURL(/\/inventory$/);

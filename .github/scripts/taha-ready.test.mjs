@@ -104,7 +104,7 @@ test('ping text escapes PR titles and names the short head', () => {
 });
 
 // ── Hotfixes into main (Mason, 2026-11-25) ─────────────────────────────────────────────────────
-import { githubOwned, isMainHotfix } from './taha-ready.mjs';
+import { cutAtSentence, githubOwned, isMainHotfix } from './taha-ready.mjs';
 
 const hotfix = (o) => pr({ baseRefName: 'main', headRefName: 'hotfix/q', ...o });
 const gateWaiting = () => [...green(), { name: 'Release flow guard (main)', bucket: 'fail' }, { name: 'release-gate', bucket: 'pending' }];
@@ -118,6 +118,19 @@ test('a hotfix into main is asked for even while the guard and release-gate wait
   // Not a hotfix: the guard still blocks.
   assert.equal(decide(pr({ baseRefName: 'main', headRefName: 'release/next' }), { ...ok, checks: gateWaiting }).act, false);
   assert.equal(P(labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' }), [], { ...ok, checks: gateWaiting }), true);
+});
+
+test('a hotfix waits while the guard is still running: it may yet ask for the label (Codex on #2589)', () => {
+  const guardPending = () => [...green(), { name: 'Release flow guard (main)', bucket: 'pending' }];
+  assert.equal(decide(hotfix(), { ...ok, checks: guardPending }).act, false);
+  assert.equal(P(labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' }), [], { ...ok, checks: guardPending }), false);
+});
+
+test('summaries end at a sentence, or a whole word with an ellipsis, never mid-word', () => {
+  assert.equal(cutAtSentence('Short.', 350), 'Short.');
+  const two = `${'a'.repeat(200)}. ${'b '.repeat(150)}`;
+  assert.equal(cutAtSentence(two, 350), `${'a'.repeat(200)}.`);
+  assert.equal(cutAtSentence('word '.repeat(100), 350), `${'word '.repeat(70).trim()}…`);
 });
 
 test('.github/ files count as Taha\'s on a hotfix (he is a code owner)', () => {

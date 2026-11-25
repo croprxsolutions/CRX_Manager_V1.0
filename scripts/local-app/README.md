@@ -32,8 +32,9 @@ inventory unit, and verifies those choices after reloading it. Close the app wit
 The shared `app.mjs` copy, sales gauntlet and document-proof stack retain their existing names, ports, volumes and state.
 Each walkthrough's generated login, local keys and browser evidence stay under its ignored
 `scripts/local-app/.state/screen-walk/` folder. `last-test.json` records the spec, tested commit, whether there
-were uncommitted changes, database build, result and the run's evidence folder under `test-results/`. Use a
-passed record from a clean checkout at the candidate commit for PR proof. Keep credentials out of the handoff.
+were uncommitted changes, database build, result and the checkout-relative path to the run's evidence folder.
+At least one browser test must actually pass for the run to count. Use a passed record from a clean checkout
+at the candidate commit for PR proof. Keep credentials out of the handoff.
 
 ### Customer-document byte proof (separate test copy, KI-113)
 

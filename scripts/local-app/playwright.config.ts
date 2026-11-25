@@ -10,6 +10,7 @@ const runId = process.env.CRX_LOCAL_APP_TEST_RUN;
 if (runId && !/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[a-f0-9]{8}$/.test(runId)) {
   throw new Error('Invalid walkthrough test run ID.');
 }
+const outputDir = `./${STATE_FOLDER}/test-results${runId ? `/${runId}` : ''}`;
 const state = Object.fromEntries(
   readFileSync(resolve(here, STATE_FOLDER, 'local.env'), 'utf8').split(/\r?\n/).filter(Boolean).map((line) => {
     const at = line.indexOf('=');
@@ -31,11 +32,11 @@ if (IS_SALES_GAUNTLET) {
 export default defineConfig({
   testDir: './e2e',
   ...(IS_SALES_GAUNTLET ? { testMatch: 'chemical-sales.spec.ts' } : { testIgnore: '**/chemical-sales.spec.ts' }),
-  outputDir: `./${STATE_FOLDER}/test-results${runId ? `/${runId}` : ''}`,
+  outputDir,
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: 'list',
+  reporter: runId ? [['list'], ['json', { outputFile: resolve(here, outputDir, 'playwright.json') }]] : 'list',
   use: {
     ...devices['Desktop Chrome'],
     baseURL: APP_URL,

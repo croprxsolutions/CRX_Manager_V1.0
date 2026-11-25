@@ -559,6 +559,12 @@ function assertSpec(spec) {
   }
 }
 
+function hasPassingBrowserTest(suites) {
+  return suites.some((suite) =>
+    suite.specs.some((spec) => spec.tests.some((test) => test.results.some((result) => result.status === 'passed')))
+    || hasPassingBrowserTest(suite.suites ?? []));
+}
+
 async function test() {
   const spec = process.argv[3];
   const state = await preflight();
@@ -567,7 +573,7 @@ async function test() {
   const runId = `${startedAt.replace(/[:.]/g, '-')}-${randomBytes(4).toString('hex')}`;
   const record = IS_SCREEN_WALK ? {
     ...checkoutRevision(), spec, databaseCommit: build.commit, databaseBuiltAt: build.builtAt,
-    databaseFingerprint: build.schemaFingerprint, startedAt, artifacts: `test-results/${runId}`,
+    databaseFingerprint: build.schemaFingerprint, startedAt, artifacts: `scripts/local-app/${STATE_FOLDER}/test-results/${runId}`,
   } : null;
   if (record) writeFileSync(TEST_RECORD_FILE, JSON.stringify({ ...record, result: 'running' }, null, 2));
   let result = 'failed';
@@ -581,6 +587,8 @@ async function test() {
       stdio: 'inherit', env: childEnv(record ? { CRX_LOCAL_APP_TEST_RUN: runId } : {}),
     });
     if (record) {
+      const report = JSON.parse(readFileSync(path.join(ROOT, record.artifacts, 'playwright.json'), 'utf8'));
+      if (!hasPassingBrowserTest(report.suites)) throw new Refused('No browser test passed. A skipped or expected-failure run is not walkthrough proof.');
       const after = checkoutRevision();
       if (after.commit !== record.commit || after.uncommittedChanges !== record.uncommittedChanges) {
         throw new Refused('This checkout changed during the browser test. Run it again to record proof for this version.');

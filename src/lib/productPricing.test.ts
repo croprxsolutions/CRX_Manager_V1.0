@@ -10,6 +10,7 @@ const { mockRpc, mockAssertRpcResult } = vi.hoisted(() => ({
 
 vi.mock('./db', () => ({
   supabase: { rpc: mockRpc },
+  supabaseUntyped: { rpc: mockRpc },
   assertRpcResult: mockAssertRpcResult,
 }));
 
@@ -21,6 +22,7 @@ import {
   createPricingWorkbookExport,
   defaultPricingMode,
   formatPricingMarginPercent,
+  getPricingWorkbookExportRefusalReason,
   pricingDollarInputToCents,
   pricingMarginTextIsValid,
   previewProductPricingChanges,
@@ -223,6 +225,23 @@ describe('assertPricingPreviewRowsSafe', () => {
       new_cost: '0.00',
       product_name: 'Price-driven Product',
     }])).not.toThrow();
+  });
+});
+
+describe('getPricingWorkbookExportRefusalReason', () => {
+  beforeEach(() => mockRpc.mockReset());
+
+  it('asks for one export by id and returns the code', async () => {
+    mockRpc.mockResolvedValue({ data: 'ALREADY_APPLIED', error: null });
+    await expect(getPricingWorkbookExportRefusalReason('export-1')).resolves.toBe('ALREADY_APPLIED');
+    expect(mockRpc).toHaveBeenCalledWith('get_pricing_workbook_export_refusal_reason', { p_export_id: 'export-1' });
+  });
+
+  it('throws on an error or on no data (a silent denial)', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'ADMIN_REQUIRED' } });
+    await expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toMatchObject({ message: 'ADMIN_REQUIRED' });
+    mockRpc.mockResolvedValueOnce({ data: null, error: null });
+    await expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toThrow(/returned no data/);
   });
 });
 

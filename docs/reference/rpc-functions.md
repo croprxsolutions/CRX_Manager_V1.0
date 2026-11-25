@@ -662,7 +662,7 @@ All eleven functions are live from `20260718225511_supplier_price_evidence_phase
 - `preview_product_cost_basis_changes(source, export_id, rows, performed_by, idempotency_key)` — actor-bound/idempotent wrapper that validates evidence and stores explicit basis provenance, then delegates price calculation to `preview_product_pricing_changes`.
 - `apply_product_cost_basis_change_set(change_set_id, request_fingerprint, performed_by, idempotency_key)` — actor-bound/idempotent atomic apply. Revalidates evidence and the active-basis concurrency token, delegates money changes to `apply_product_pricing_change_set`, closes the prior basis, and appends the selected basis.
 
-**Price sheet refusal reason (`20270303140000_price_sheet_refusal_reason`, local candidate, not applied):**
+**Price sheet refusal reason (`20270303140000_price_sheet_refusal_reason`, on staging 2026-11-24 via #2479, live with the next release):**
 - `get_pricing_workbook_export_refusal_reason(p_export_id uuid)` → text. Admin only (`AUTH_REQUIRED`, `ADMIN_REQUIRED`), read-only (no idempotency key), SECURITY DEFINER because `pricing_workbook_exports` is RPC-only; EXECUTE for `authenticated` only. Returns the single reason a price-sheet export is refused, checked in this order: `EXPORT_NOT_FOUND`, `DOWNLOADED_BY_OTHER_USER` (another user's sheet reveals nothing else), `ALREADY_APPLIED`, `OLD_TEMPLATE`, `EXPIRED`; `NONE` (never NULL) when the export passes the export-level check (row-level refusals keep their own codes). The preview and apply refusal codes are unchanged.
 
 **Price sheet warnings (`20261027050000_price_sheet_warnings_and_approval`, applied live 2026-10-27; To-Do 0.1):**

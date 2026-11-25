@@ -710,6 +710,18 @@ describe('Products governed inline pricing flow', () => {
       expect(mockRefusalReason).toHaveBeenCalledTimes(1);
     });
 
+    it('never asks after an unreadable sheet or a permission refusal', async () => {
+      mockParsePricing.mockRejectedValueOnce(new Error('WORKBOOK_V2_EXPORT_REQUIRED'));
+      const { container } = render(<Products />);
+      await upload(container, 'broken.xlsx');
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'WORKBOOK_V2_EXPORT_REQUIRED'));
+
+      mockPreviewPricing.mockRejectedValueOnce(new Error('ADMIN_REQUIRED'));
+      await upload(container, 'not-admin.xlsx');
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'ADMIN_REQUIRED'));
+      expect(mockRefusalReason).not.toHaveBeenCalled();
+    });
+
     it('never asks after other errors or a reviewed sheet', async () => {
       mockPreviewPricing.mockRejectedValueOnce(new Error('PRICING_DUPLICATE_PRODUCT_ID'));
       const { container } = render(<Products />);
@@ -739,6 +751,28 @@ describe('Products governed inline pricing flow', () => {
       answerFirst('ALREADY_APPLIED');
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(mockToast).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops a late reason after a newer file is refused before it is read, and frees the button', async () => {
+      let answerFirst: (reason: string) => void = () => undefined;
+      mockPreviewPricing.mockRejectedValueOnce({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+      mockRefusalReason.mockReturnValueOnce(new Promise<string>((resolve) => { answerFirst = resolve; }));
+      const { container } = render(<Products />);
+      await upload(container, 'first.xlsx');
+      await waitFor(() => expect(mockRefusalReason).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('button', { name: 'Review Pricing File' })).toBeDisabled();
+
+      const tooBig = new File(['abc'], 'huge.xlsx');
+      Object.defineProperty(tooBig, 'size', { value: pricingWorkbookFileLimit + 1 });
+      const input = container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!;
+      fireEvent.change(input, { target: { files: [tooBig] } });
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/MB or smaller/)));
+      expect(screen.getByRole('button', { name: 'Review Pricing File' })).toBeEnabled();
+
+      answerFirst('ALREADY_APPLIED');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockToast).toHaveBeenCalledTimes(1);
+      expect(mockParsePricing).toHaveBeenCalledTimes(1);
     });
   });
 

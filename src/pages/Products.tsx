@@ -971,9 +971,12 @@ export default function Products() {
   };
 
   const handlePricingWorkbookUpload = async (file: File) => {
+    // Every chosen file is a new upload, even one refused below, so an earlier upload's late answer is dropped.
+    const upload = ++pricingUploadSeq.current;
     // The review refuses a grouped size's use timing, so it waits for the groups.
     if (!profile || !parentsReady) {
       // Clear the pick so the same file can be chosen again once the groups load (#2160).
+      setWorkbookBusy(false);
       if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
       if (profile) toast('error', 'Product groups have not loaded. Use Try again, then choose the file again.');
       return;
@@ -983,11 +986,11 @@ export default function Products() {
         'error',
         `Pricing workbooks must be ${MAX_PRICING_WORKBOOK_FILE_BYTES / 1024 / 1024} MB or smaller.`,
       );
+      setWorkbookBusy(false);
       if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
       return;
     }
     setWorkbookBusy(true);
-    const upload = ++pricingUploadSeq.current;
     let expiresAt: string | null = null;
     let exportId: string | null = null;
     try {
@@ -1017,7 +1020,10 @@ export default function Products() {
       let message = (expiresAt && priceSheetRefusalText(error, expiresAt)) || sanitizeError(error);
       if (exportId && isPriceSheetRefusal(error)) {
         // The database names the one reason; NONE, an unknown code or a failed lookup keeps the message above.
-        const reason = await getPricingWorkbookExportRefusalReason(exportId).catch(() => null);
+        const reason = await getPricingWorkbookExportRefusalReason(exportId).catch((lookupError: unknown) => {
+          Sentry.addBreadcrumb({ category: 'pricing', level: 'warning', message: `refusal reason lookup failed: ${sanitizeError(lookupError)}` });
+          return null;
+        });
         if (upload !== pricingUploadSeq.current) return;
         message = (reason && priceSheetReasonText(reason)) || message;
       }

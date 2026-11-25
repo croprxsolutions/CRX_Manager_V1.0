@@ -83,6 +83,17 @@ Paperwork follow-ups (logged, not fixed; none touches money, stock or data):
 - #2468 LOW: safety continuation pages don't repeat the record date.
 - #2468 LOW: the 40-row test checks table rows, not a rendered page 2 (covered by a render before merge).
 
+## Slice 1 · Field Setup screen
+
+| Item | State | Proof / link | Note |
+|---|---|---|---|
+| FP-1 screen half (split versions, history, payer notes, retry key) | BUILT, WAITING ON FP-1 | Luna clean of BLOCKER/HIGH at `8c46c5094` (round 7) | Branch `feat/field-1.1-setup-screen`, not pushed. Next: stack on the FP-1 branch once pushed, Sol, browser proof on staging. Merges only after FP-1 is VERIFIED on staging, rebased on fresh `origin/staging` and re-proved in the browser |
+| Set Primary removed; main payer is the database rule (owner if paying, else largest share) | DONE (Mason, 2026-11-24) | | PR body must say it reaches live in the SAME release as FP-1 |
+| Split changes start today; start-date picker removed | DONE (Mason, 2026-11-24) | | Until FP-4; payer notes are office only (read from `field_payer_notes`) |
+| Save locks the page and reloads fresh | DONE (Mason, 2026-11-24) | | Replaced keep-editing-and-merge after the save/reload logic drew a HIGH in Luna rounds 2, 4 and 5 |
+| Different product and application shares | DEFERRED to FP-4 | | Screen shows both columns but refuses unequal shares with the database's plain message until FP-4 |
+| Note edited on a payer then removed before save | DONE | | Sent when that payer already has a saved note on the field (FP-1 keeps those editable) |
+
 ## Needs another lane
 
 | Asked by | Owning lane | What | Done? |

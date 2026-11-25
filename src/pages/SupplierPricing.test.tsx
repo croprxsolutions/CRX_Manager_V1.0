@@ -234,6 +234,14 @@ describe('SupplierPricing page', () => {
         supplier_product_name: 'Atrazine 4L', cost_cents: 25_001n, price_unit: 'case',
         package_quantity: 2, effective_from: '2026-07-18', effective_to: null,
         price_kind: 'quote', row_status: 'changed', validation_errors: [], observation_id: null,
+      }, {
+        // An oversized cost is not kept on the row (the server stores NULL), and a tiny package quantity is refused.
+        id: 'row-5', row_number: 5, product_id: 'product-1', product_name: 'Atrazine',
+        product_supplier_link_id: 'link-1', supplier_sku: 'AND-1',
+        supplier_product_name: 'Atrazine 4L', cost_cents: null, price_unit: 'case',
+        package_quantity: 0.0001, effective_from: '2026-07-18', effective_to: null,
+        price_kind: 'quote', row_status: 'invalid', validation_errors: ['COST_TOO_LARGE', 'PACKAGE_QUANTITY_INVALID'],
+        observation_id: null,
       }],
     });
 
@@ -277,6 +285,11 @@ describe('SupplierPricing page', () => {
     )).toBeInTheDocument();
     expect(screen.queryByText(/convert|\$150/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/PRICE_UNIT_MISMATCH/)).not.toBeInTheDocument();
+    // The unit-floor codes read as rules too, never as the generic "cost too large." fallback.
+    expect(screen.getByText(
+      'The cost is over $10,000,000 for one line. Check the amount. Package quantity must be a number of at least 0.001.',
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/cost too large\.|package quantity invalid\./)).not.toBeInTheDocument();
 
     await waitFor(() => expect(mockGetBasisWorkspace).toHaveBeenCalledWith('product-1'));
     const workspaceLoads = mockGetWorkspace.mock.calls.length;
@@ -296,11 +309,13 @@ describe('SupplierPricing page', () => {
       conversion_unit: 'gal', comparison_status: 'comparable', comparison_note: null,
       link_status: 'confirmed', is_reusable: true, is_preferred: true, is_active: true,
     };
-    const row = (id: string, costCents: bigint, packageQuantity: number) => ({
+    // The server marks a second row with the same link, cost, effective date and price type duplicate, so each row
+    // gets its own effective date.
+    const row = (id: string, costCents: bigint, packageQuantity: number, effectiveFrom: string) => ({
       id, row_number: Number(id.slice(-1)), product_id: 'product-1', product_name: 'Atrazine',
       product_supplier_link_id: 'link-1', supplier_sku: 'AND-1', supplier_product_name: 'Atrazine 2x2.5',
       cost_cents: costCents, price_unit: 'case', package_quantity: packageQuantity,
-      effective_from: '2026-07-18', effective_to: null, price_kind: 'quote', row_status: 'new',
+      effective_from: effectiveFrom, effective_to: null, price_kind: 'quote', row_status: 'new',
       validation_errors: [], observation_id: null,
     });
     mockGetWorkspace.mockResolvedValue({
@@ -324,11 +339,11 @@ describe('SupplierPricing page', () => {
       approved_observation_count: 0, created_at: '2026-07-18T12:00:00Z',
       rows: [
         // $30 typed for 2 cases: a package total, so $30 / 2 / 5 = $3.00 per gal, not "per case".
-        row('row-1', 3_000n, 2),
+        row('row-1', 3_000n, 2, '2026-07-18'),
         // A $30-per-gal quote relabelled as one case: $30 / 1 / 5 = $6.00 per gal, visibly not $30.
-        row('row-2', 3_000n, 1),
+        row('row-2', 3_000n, 1, '2026-07-19'),
         // "$150 per case" entered for 2 cases: $150 / 2 / 5 = $15.00 per gal, visibly not $30.
-        row('row-3', 15_000n, 2),
+        row('row-3', 15_000n, 2, '2026-07-20'),
       ],
     });
 
@@ -350,6 +365,86 @@ describe('SupplierPricing page', () => {
       + ' Atrazine: $30.00 for 2 case = $3.00 per gal. Atrazine: $30.00 per case = $6.00 per gal.'
       + ' Atrazine: $150.00 for 2 case = $15.00 per gal.',
     )).toBeInTheDocument();
+  });
+
+  it('warns, without blocking approval, when a quote is more than 40% from the current approved price per unit for its link', async () => {
+    const link = (id: string) => ({
+      id, product_id: 'product-1', product_name: 'Atrazine',
+      vendor_id: 'vendor-1', vendor_name: 'The Andersons', supplier_sku: id,
+      supplier_product_name: 'Atrazine 2x2.5', supplier_uom: 'case',
+      supplier_pack_description: '2 x 2.5 gal', inventory_units_per_supplier_unit: 5,
+      conversion_unit: 'gal', comparison_status: 'comparable', comparison_note: null,
+      link_status: 'confirmed', is_reusable: true, is_preferred: false, is_active: true,
+    });
+    const supplier = (linkId: string, perGalCents: bigint) => ({
+      vendor_id: 'vendor-1', vendor_name: 'The Andersons', product_supplier_link_id: linkId,
+      quoted_package_cost_cents: perGalCents * 5n, normalized_cost_cents: perGalCents, effective_from: '2026-07-01',
+      comparison_status: 'comparable', is_best_comparable: linkId === 'link-1',
+    });
+    // Each row is one case (5 gal), so cost_cents / 5 is the cost per gallon.
+    const row = (n: number, linkId: string, caseCents: bigint, rowStatus = 'new') => ({
+      id: `row-${n}`, row_number: n, product_id: 'product-1', product_name: 'Atrazine',
+      product_supplier_link_id: linkId, supplier_sku: linkId, supplier_product_name: 'Atrazine 2x2.5',
+      cost_cents: caseCents, price_unit: 'case', package_quantity: 1,
+      effective_from: `2026-07-${10 + n}`, effective_to: null, price_kind: 'quote', row_status: rowStatus,
+      validation_errors: [], observation_id: null,
+    });
+    mockGetWorkspace.mockResolvedValue({
+      vendors: [{ id: 'vendor-1', name: 'The Andersons' }],
+      products: [{ id: 'product-1', product_name: 'Atrazine', sku: 'A-1', inventory_unit: 'gal' }],
+      links: [link('link-1'), link('link-2'), link('link-3')],
+      imports: [{
+        id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
+        document_date: '2026-07-18', ingestion_method: 'quick_quote', status: 'needs_review',
+        row_count: 7, eligible_row_count: 7, approved_observation_count: 0,
+        source_document_name: null, created_at: '2026-07-18T12:00:00Z',
+      }],
+      aliases: [],
+      // Two links on one product: link-1 is $9.00 per gal, link-2 is $900.00 per gal. link-3 has no approved price.
+      evidence: [{
+        product_id: 'product-1', supplier_quote_count: 2, comparable_quote_count: 2,
+        replacement_cost_cents: 900n, replacement_cost_as_of: '2026-07-01', best_supplier: 'The Andersons',
+        last_paid_cents: null, last_paid_as_of: null, recent_po_weighted_average_cents: null,
+        recent_po_window: 'trailing_12_months', comparison_status: 'comparable',
+        suppliers: [supplier('link-1', 900n), supplier('link-2', 90_000n)],
+      }],
+    });
+    mockGetImport.mockResolvedValue({
+      id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
+      document_date: '2026-07-18', ingestion_method: 'quick_quote',
+      format_version: 'crx-supplier-quick-quote-phase1b-v1', status: 'needs_review',
+      source_document_name: null, row_count: 7, eligible_row_count: 7,
+      approved_observation_count: 0, created_at: '2026-07-18T12:00:00Z',
+      rows: [
+        row(1, 'link-1', 6_300n), // $12.60 per gal: exactly 40% above, no warning.
+        row(2, 'link-1', 6_305n, 'changed'), // $12.61 per gal: just over 40% above; a routine price update.
+        row(3, 'link-1', 2_700n), // $5.40 per gal: exactly 40% below, no warning.
+        row(4, 'link-1', 2_695n), // $5.39 per gal: just over 40% below.
+        row(5, 'link-1', 450_000n), // $900.00 per gal: a 100x typo on link-1.
+        row(6, 'link-2', 450_000n), // $900.00 per gal is link-2's own price: no warning.
+        row(7, 'link-3', 450_000n), // No approved price on link-3: nothing to compare.
+      ],
+    });
+
+    renderSupplierPricing();
+    fireEvent.click(await screen.findByRole('button', { name: /The Andersons/ }));
+
+    const warning = (perGal: string, direction: string) => `Check this price: ${perGal} per gal is ${direction} the current`
+      + ' approved $9.00 per gal (effective 2026-07-01). This warning does not block approval.';
+    // The first wait covers the click, the review load and the render.
+    expect(await screen.findByText(warning('$12.61', 'more than 40% above'), undefined, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.getByText(warning('$5.39', 'more than 40% below'))).toBeInTheDocument();
+    expect(screen.getByText(warning('$900.00', 'more than 40% above'))).toBeInTheDocument();
+    expect(screen.getAllByText(/^Check this price/)).toHaveLength(3);
+    expect(await screen.findByText('You are adding 7 supplier observations. You are changing ZERO sell prices.')).toBeInTheDocument();
+    const approve = screen.getByRole('button', { name: 'Approve selected observations' });
+    await waitFor(() => expect(approve).toBeEnabled());
+    // A warned row can be deselected; the count follows the selection.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select row 5' }));
+    fireEvent.click(approve);
+    const confirmStart = 'You are adding 6 supplier observations. You are changing ZERO sell prices.'
+      + ' Check first: 2 selected row(s) are more than 40% away from the current approved price. Atrazine:';
+    expect(await screen.findByText((text) => text.startsWith(confirmStart))).toBeInTheDocument();
   });
 
   it('shows no converted cost for a link in another unit, and says so for an oversized package', async () => {
@@ -397,6 +492,46 @@ describe('SupplierPricing page', () => {
     expect(await screen.findByText('cannot compare to inventory units')).toBeInTheDocument();
     expect(screen.getByText('converted cost not shown (package size too large)')).toBeInTheDocument();
     expect(screen.queryByText(/^= \$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/This supplier is archived/)).not.toBeInTheDocument();
+  });
+
+  it('warns, without blocking approval, when a pending quote belongs to an archived supplier', async () => {
+    // The workspace lists only suppliers that are not archived; the import still names its archived supplier.
+    mockGetWorkspace.mockResolvedValue({
+      vendors: [{ id: 'vendor-2', name: 'Helena' }],
+      products: [{ id: 'product-1', product_name: 'Atrazine', sku: 'A-1', inventory_unit: 'gal' }],
+      links: [],
+      imports: [{
+        id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
+        document_date: '2026-07-18', ingestion_method: 'quick_quote', status: 'needs_review',
+        row_count: 1, eligible_row_count: 1, approved_observation_count: 0,
+        source_document_name: null, created_at: '2026-07-18T12:00:00Z',
+      }],
+      aliases: [],
+      evidence: [],
+    });
+    mockGetImport.mockResolvedValue({
+      id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
+      document_date: '2026-07-18', ingestion_method: 'quick_quote',
+      format_version: 'crx-supplier-quick-quote-phase1b-v1', status: 'needs_review',
+      source_document_name: null, row_count: 1, eligible_row_count: 1,
+      approved_observation_count: 0, created_at: '2026-07-18T12:00:00Z',
+      rows: [{
+        id: 'row-1', row_number: 1, product_id: 'product-1', product_name: 'Atrazine',
+        product_supplier_link_id: 'link-1', supplier_sku: 'AND-1', supplier_product_name: 'Atrazine',
+        cost_cents: 3_000n, price_unit: 'case', package_quantity: 1,
+        effective_from: '2026-07-18', effective_to: null, price_kind: 'quote', row_status: 'new',
+        validation_errors: [], observation_id: null,
+      }],
+    });
+
+    renderSupplierPricing();
+    fireEvent.click(await screen.findByRole('button', { name: /The Andersons/ }));
+
+    expect(await screen.findByText(
+      "This supplier is archived. Approving saves the price, but it won't show in supplier evidence or cost basis unless the supplier is restored.",
+    )).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve selected observations' })).toBeEnabled());
   });
 
   it('keeps the workbook supplier selected through its immediate workspace refresh', async () => {

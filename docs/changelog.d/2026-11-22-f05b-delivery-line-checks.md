@@ -10,4 +10,3 @@
 - Restamp (2026-11-23, second): moved to `20270227180000` so it lands after #2366 (`20270227150000`), #2372 and #2170 (`20270227170000`); the SQL is unchanged (same sha256).
 - Restamp (2026-11-24): moved to `20270228260000` so it lands after #2397 (`20270228200000`) and the stamps reserved for #2394, #2381, #2267, #2019 and #2352; the SQL is unchanged (same sha256).
 - Restamp (2026-11-25): moved to `20270306230000` after a staging catch-up (for #2519 doc freshness) brought in `20270305130000` and `20270305190000`; the SQL is unchanged. The migration file is now `20270306230000_f05b_delivery_line_checks.sql`.
-- Sol round 11's findings went to the proof-binding follow-up (`docs/plans/2026-11-23-proof-bound-to-load-CONTRACT.md`, Round 3).

@@ -114,10 +114,15 @@ const adversarialEqualityRules = [
 ];
 const validNegativeEqualityRule = "Supabase MCP assigns a fresh live version at apply time, so the pre-apply filename is NOT expected to equal that future value.";
 
+// Budgets are for the committed (LF) text; a Windows CRLF checkout adds a byte per line.
+function lfBytes(text) {
+  return Buffer.byteLength(text.replace(/\r\n/g, "\n"), "utf8");
+}
+record(lfBytes("a\r\nb\r\n") === lfBytes("a\nb\n"), "startup-context byte budgets ignore CRLF checkouts");
 record(agents.split(/\r?\n/).length <= 90, "AGENTS.md stays lean", `${agents.split(/\r?\n/).length} lines`);
-record(Buffer.byteLength(agents, "utf8") <= 12000, "AGENTS.md stays within the startup-context budget", `${Buffer.byteLength(agents, "utf8")} bytes`);
+record(lfBytes(agents) <= 12000, "AGENTS.md stays within the startup-context budget", `${lfBytes(agents)} bytes`);
 record(claude.split(/\r?\n/).length <= 60, "CLAUDE.md stays lean", `${claude.split(/\r?\n/).length} lines`);
-record(Buffer.byteLength(claude, "utf8") <= 6000, "CLAUDE.md stays within the startup-context budget", `${Buffer.byteLength(claude, "utf8")} bytes`);
+record(lfBytes(claude) <= 6000, "CLAUDE.md stays within the startup-context budget", `${lfBytes(claude)} bytes`);
 record(cursorRules.split(/\r?\n/).length <= 15, ".cursorrules stays a lean AGENTS.md router", `${cursorRules.split(/\r?\n/).length} lines`);
 record(/AGENTS\.md.*canonical shared contract/i.test(cursorRules), ".cursorrules delegates shared policy to AGENTS.md");
 record(!/\b\d{2,5}\s+(?:tables|migrations|pages|tests?|edge functions?)\b/i.test(cursorRules), ".cursorrules has no volatile project counts");

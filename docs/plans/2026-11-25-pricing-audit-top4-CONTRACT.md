@@ -71,3 +71,11 @@ One PR into `staging`, front end only, no migration. Verified on staging as an a
 **Fix 4.** 28/29: mode is read from the nullable export values before formatting, in the same order as `defaultPricingMode`. 30: DECISION (Q4, recommend price_driven as the bulk grid does). 31-33: verified on staging (blank companion cell, reason/source required, untouched round trip). 34: the validation prompt now explains the pre-filled value.
 
 **Delivery (35-37).** Staging checks use staging test products. Each change is recorded and restored, and any history rows a staging apply leaves are named in the PR.
+
+## Opus review (2026-11-25, 14 findings) and what changed
+
+- **Fix 4 is out of this PR (findings 1-3).** The export function fills missing values with `''`, not null, so the inferred mode said `price_driven` for every row. The deeper problem is that the screen cannot know how a product was last priced. A product priced from margins, exported as `price_driven`, re-previews with recalculated margins (for example 0.35025381 instead of 0.35) and stops an untouched upload. The export keeps a blank mode. Fix 4 moves to the database-first PR with fix 1: the export should return the mode of each product's last applied pricing row (`pricing_change_set_rows.pricing_mode`), and the cost-only behavior (Q4) is decided there.
+- **Finding 4 fixed.** The generic preview check refuses a fraction only on price-sheet rows (they carry `current_` cells). The product page and bulk grid check typed margins against the stored margin before asking for a source and reason (finding 5). Cost-basis "keep margins" re-sends stored margins and is not refused.
+- **Finding 6 fixed.** An unconverted amount is labelled "as recorded, not per inventory unit".
+- **Finding 8 fixed:** each tick box is described by its product name and tiers. **Finding 9:** a boundary test covers exactly 2% over cost and one cent more. **Finding 11:** a repeated product is merged into one entry.
+- **Deferred or refuted.** 7 (tick all): one tick per product is the point of the guard, and Q3 is open. 10: a `no_changes` preview has no ready rows, so the list is empty. 12: a tier already at cost is still worth a look. 13: same as the existing zero-cost message, and React renders it as text. 14: tests added where code changed.

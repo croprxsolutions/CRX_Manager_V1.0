@@ -193,8 +193,7 @@ describe('product pricing workbook', () => {
       current_tier1_margin_percent: '20',
       current_tier2_margin_percent: '15.5',
       current_tier3_margin_percent: '10.125',
-      // Audit 2026-11-24 #4: exported with the product's current mode (all three prices set).
-      pricing_mode: 'price_driven',
+      pricing_mode: '',
       new_cost: '125.40',
       tier1_margin_percent: '20',
       tier1_price: '156.75',
@@ -231,9 +230,7 @@ describe('product pricing workbook', () => {
     expect(manifest.state).toBe('veryHidden');
     expect(worksheet.getColumn(identityColumn).hidden).toBe(true);
     expect(worksheet.getColumn(tokenColumn).hidden).toBe(true);
-    expect(worksheet.getCell(2, modeColumn).value).toBe('price_driven');
-    // Only some prices set: no single current mode, so the cell stays blank for the admin to choose.
-    expect(worksheet.getCell(3, modeColumn).value).toBe('');
+    expect(worksheet.getCell(2, modeColumn).value).toBe('');
     expect(worksheet.getCell(2, currentCostColumn).value).toBe('125.40');
     expect(worksheet.getCell(2, currentCostColumn).numFmt).toBe('@');
     expect(worksheet.getCell(2, quotingNotesColumn).value).toBe('Sales guidance');

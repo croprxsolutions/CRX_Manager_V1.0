@@ -93,8 +93,8 @@ describe('ProductPriceHistory', () => {
     expect(chart.querySelectorAll('circle')).toHaveLength(2);
     expect([...chart.querySelectorAll('title')].map((t) => t.textContent).join(' ')).not.toMatch(/\$90\.00|\$22\.00/);
     expect(screen.getByText('Cost per inventory unit')).toBeInTheDocument();
-    expect(screen.getByRole('note')).toHaveTextContent('2 costs are in a supplier unit');
-    expect(screen.getAllByText('per supplier unit')).toHaveLength(2);
+    expect(screen.getByRole('note')).toHaveTextContent('2 costs are recorded in a unit that could not be converted');
+    expect(screen.getAllByText('as recorded, not per inventory unit')).toHaveLength(2);
     expect(screen.getAllByText('per inventory unit')).toHaveLength(2);
     const selectButtons = screen.getAllByRole('button', { name: 'Select as cost basis' });
     expect(selectButtons).toHaveLength(2);

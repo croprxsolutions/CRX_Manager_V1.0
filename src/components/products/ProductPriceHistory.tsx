@@ -104,7 +104,7 @@ export default function ProductPriceHistory({
   }, [history, supplierId]);
 
   // One unit on one axis (audit 2026-11-24 #2): only costs per inventory unit are charted. A package
-  // quote or PO cost the database could not convert stays in the list below, labelled per package.
+  // quote or PO cost the database could not convert stays in the list below, labelled as recorded.
   const plotted = useMemo(() => points.flatMap((point) => (
     point.normalized_cost_cents === null ? [] : [{ point, value: point.normalized_cost_cents }]
   )), [points]);
@@ -249,7 +249,7 @@ export default function ProductPriceHistory({
           )}
           {unchartedCount > 0 && (
             <p className="mt-2 text-xs text-secondary" role="note">
-              {unchartedCount} cost{unchartedCount === 1 ? ' is' : 's are'} in a supplier unit that could not be converted to the inventory unit,
+              {unchartedCount} cost{unchartedCount === 1 ? ' is' : 's are'} recorded in a unit that could not be converted to the inventory unit,
               so {unchartedCount === 1 ? 'it is' : 'they are'} listed below but not charted.
             </p>
           )}
@@ -269,7 +269,7 @@ export default function ProductPriceHistory({
                   <span className="text-sm font-semibold tabular-nums text-nav-dark">
                     {formatSupplierCents(point.normalized_cost_cents ?? point.cost_cents)}
                     <span className="ml-1 text-xs font-normal text-secondary">
-                      {point.normalized_cost_cents === null ? 'per supplier unit' : 'per inventory unit'}
+                      {point.normalized_cost_cents === null ? 'as recorded, not per inventory unit' : 'per inventory unit'}
                     </span>
                   </span>
                 </div>

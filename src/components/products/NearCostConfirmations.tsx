@@ -34,8 +34,8 @@ export default function NearCostConfirmations({ products, ticked, disabled, onTi
           const inputId = `pricing-near-cost-${product.product_id}`;
           return (
             <li key={product.product_id} className="rounded-lg border border-amber-200 bg-white p-3">
-              <div className="text-sm font-semibold text-nav-dark">{product.product_name}</div>
-              <ul className="mt-1 space-y-0.5 text-xs tabular-nums text-amber-900">
+              <div id={`${inputId}-name`} className="text-sm font-semibold text-nav-dark">{product.product_name}</div>
+              <ul id={`${inputId}-tiers`} className="mt-1 space-y-0.5 text-xs tabular-nums text-amber-900">
                 {product.tiers.map((tier) => (
                   <li key={tier.tier}>
                     Tier {tier.tier} {formatExactCents(tier.price_cents)} on a cost of {formatExactCents(tier.cost_cents)}
@@ -47,6 +47,7 @@ export default function NearCostConfirmations({ products, ticked, disabled, onTi
                   id={inputId}
                   type="checkbox"
                   className="h-4 w-4"
+                  aria-describedby={`${inputId}-name ${inputId}-tiers`}
                   checked={ticked.has(product.product_id)}
                   disabled={disabled}
                   onChange={(event) => onTickChange(product.product_id, event.target.checked)}

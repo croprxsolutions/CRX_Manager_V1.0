@@ -42,6 +42,7 @@ import {
   getPricingWorkbookExportRefusalReason,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
+  assertMarginIsWholePercent,
   pricingMarginTextIsValid,
   previewProductPricingChanges,
   sha256Hex,
@@ -851,6 +852,7 @@ export default function Products() {
               if (value === null || !pricingMarginTextIsValid(value)) {
                 throw new Error(`Enter each net margin for ${original.product_name} as a plain number below 100.`);
               }
+              assertMarginIsWholePercent(original.product_name, tier, value, storedMarginPercent(stored));
               row[field] = value;
             }
           } else {

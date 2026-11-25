@@ -106,16 +106,26 @@ try {
     quoteRow(BOUND, '10', 'NaN', '2026-11-05'),
     quoteRow(BOUND, '10', '0.000999999', '2026-11-06'),
   ])};`) + ` v := ${rowStatuses};
-    -- A row saved by an older call (out of bound yet awaiting approval) is refused by the pending-row check.
+    -- An oversized cost is not kept on the invalid row (the screen must still read the import).
+    v := v || '|' || (SELECT (cost_cents IS NULL)::text FROM public.supplier_price_import_rows
+      WHERE import_id = (r->>'id')::uuid AND row_number = 3);
+    -- A row saved by an older call (out of bound yet awaiting approval) is refused by the pending-row check:
+    -- each bound on its own row, so one guard cannot hide another.
     BEGIN
       UPDATE public.supplier_price_import_rows SET row_status = 'new', validation_errors = '{}'
-        WHERE import_id = (r->>'id')::uuid AND row_number IN (1, 3);
+        WHERE import_id = (r->>'id')::uuid AND row_number = 1;
+      t := 'NOT REFUSED';
+    EXCEPTION WHEN OTHERS THEN t := SQLERRM; END;
+    v := v || '|' || (t LIKE '%supplier_price_import_rows_pending_bounds%')::text;
+    BEGIN
+      UPDATE public.supplier_price_import_rows SET row_status = 'new', validation_errors = '{}', cost_cents = 1000000001
+        WHERE import_id = (r->>'id')::uuid AND row_number = 4;
       t := 'NOT REFUSED';
     EXCEPTION WHEN OTHERS THEN t := SQLERRM; END;
     v := v || '|' || (t LIKE '%supplier_price_import_rows_pending_bounds%')::text;`);
-  assert.equal(staged, 'ok|invalid:PACKAGE_QUANTITY_INVALID;new:;invalid:COST_TOO_LARGE;new:;invalid:PACKAGE_QUANTITY_INVALID;new:|true');
+  assert.equal(staged, 'ok|invalid:PACKAGE_QUANTITY_INVALID;new:;invalid:COST_TOO_LARGE;new:;invalid:PACKAGE_QUANTITY_INVALID;new:|true|true|true');
   console.log('[stage] qty 0.0001 and NaN -> PACKAGE_QUANTITY_INVALID; qty 0.001 (and 0.000999999, stored as 0.001) -> new;'
-    + ' $10,000,000.01 -> COST_TOO_LARGE; $10,000,000.00 -> new; an out-of-bound row awaiting approval is refused');
+    + ' $10,000,000.01 -> COST_TOO_LARGE (amount not kept); $10,000,000.00 -> new; a pending row below the quantity floor or above the cost ceiling is refused');
 
   // 3. Bounds and a normal quote approve, and both reads still work.
   const approved = attempt(ADMIN, asUser(`r := ${stage([

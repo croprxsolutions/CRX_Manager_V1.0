@@ -97,7 +97,7 @@ ALTER TABLE public.supplier_price_import_rows
          OR ((package_quantity IS NULL OR (package_quantity >= 0.001 AND package_quantity <> 'NaN'))
              AND (cost_cents IS NULL OR cost_cents <= 1000000000)));
 
--- Unchanged from 20260720230000 except the COST_TOO_LARGE branch and the 0.001 package-quantity floor.
+-- Unchanged from 20260720230000 except the COST_TOO_LARGE branch (cost not kept) and the 0.001 package-quantity floor.
 CREATE OR REPLACE FUNCTION public.stage_supplier_price_import(
   p_vendor_id uuid,
   p_document_date date,
@@ -280,8 +280,10 @@ BEGIN
       IF v_cost_cents <= 0 THEN
         v_errors := array_append(v_errors, 'COST_MUST_BE_POSITIVE');
       ELSIF v_cost_cents > 1000000000 THEN
-        -- $10,000,000 per line: with the 0.001 floors the converted cost stays below 1e15 cents.
+        -- $10,000,000 per line: with the 0.001 floors the converted cost stays below 1e15 cents. The amount is not kept
+        -- (it stays in submitted_row): a value past JavaScript's exact integers would make the saved import unreadable.
         v_errors := array_append(v_errors, 'COST_TOO_LARGE');
+        v_cost_cents := NULL;
       END IF;
     EXCEPTION WHEN OTHERS THEN
       v_errors := array_append(v_errors, 'COST_INVALID');

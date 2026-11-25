@@ -185,3 +185,19 @@ quantity to 1 and marks a missing or bad cost invalid (`COST_MUST_BE_POSITIVE` /
 the original observation's quantity, which is `NOT NULL`. Approval would write an observation, whose quantity and cost
 are `NOT NULL`, so such a row could only fail with nothing saved. The NULL allowance matches the table's existing
 column checks. Production read-only count 2026-11-24: 0 such rows. Unchanged.
+
+## Sol round 1 (2026-11-25, head 1b8e82817): clean, six MED/LOW settled
+
+- MED #1 fixed: a `COST_TOO_LARGE` row no longer keeps its cents (a value past JavaScript's exact integers made the
+  whole saved import unreadable); the amount stays in `submitted_row`. Prover asserts it.
+- MED #2 accepted: a stored legacy link with quote history would stop the apply with no in-app repair. Production
+  count 0 (read-only, 2026-11-24 and 2026-11-25); staging links checked in the browser. If the staging job stops with
+  `SUPPLIER_QUOTE_UNIT_FLOOR_LEGACY_ROWS`, nothing applied and the named test rows get a reviewed fix.
+- MED #3 accepted: a correction and the apply can deadlock in any lock order (callers touch the tables in different
+  orders). PostgreSQL cancels one side with nothing saved; the staff call or the apply is retried. `lock_timeout` 5s.
+- MED #4 follow-up: the archived-supplier warning uses the supplier list from the last refresh, so a supplier
+  archived in another session after that is not flagged until Refresh. Approval is allowed either way (Mason's rule).
+- MED #5 follow-up (existing behaviour): duplicate detection ignores package quantity, so a direct RPC call with two
+  rows that differ only by quantity keeps the first and marks the second duplicate. Before this change the first
+  (tiny-quantity) row was approvable; now neither is. The workbook screen already refuses repeated links.
+- LOW fixed: the prover checks the quantity floor and the cost ceiling on separate rows.

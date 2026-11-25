@@ -509,7 +509,16 @@ function afterCases() {
   start(d, 'pbl-4r-start');
   ok(completeSig(d, 'pbl-4r', A()));
   assert.equal(status(d), 'completed');
-  console.log('[case 4] a changed quantity, an added or removed line, a duplicated entry and malformed lists are refused; a reordered list (2.0, upper-case ids) and an identical re-save with new line ids complete');
+  // A stored amount longer than a JavaScript number keeps (unit conversions): the screen sends what it read, and the
+  // proof still counts; a real change at the sixth decimal is still refused (Luna on the screen PR).
+  d = delivery(A(), 'in_progress');
+  raw(`UPDATE public.delivery_items SET quantity = 0.123456789123456789 WHERE delivery_id = '${d}';`);
+  const read = Number(scalar(`SELECT quantity FROM public.delivery_items WHERE delivery_id = '${d}';`));
+  assert.notEqual(String(read), '0.123456789123456789', 'JavaScript must lose digits here for the case to mean anything');
+  refused(completeSig(d, 'pbl-4p-x', A(0.123458, 0.123458)), LOAD);
+  ok(completeSig(d, 'pbl-4p', A(read, read)));
+  assert.equal(status(d), 'completed');
+  console.log('[case 4] a changed quantity, an added or removed line, a duplicated entry and malformed lists are refused; a reordered list (2.0, upper-case ids), an identical re-save with new line ids, and a stored amount longer than a JavaScript number (as the screen reads it) complete');
 
   // 5. Unchanged: signature with no list, a ticket photo with no lines_seen, left at site (with a stale list: not
   //    checked), no proof (admin, stale list: not checked). Each completes and leaves no binding behind.

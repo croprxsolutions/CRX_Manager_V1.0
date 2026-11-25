@@ -20,4 +20,13 @@ that payer's note after the page opened, it shows "Note changed since you opened
 "Save mine anyway" saves, Cancel keeps the newer note (reload to see it). A failed re-read never stops the save.
 "Split Evenly" now sits in the open Default Billing panel, not inside its open/close button. Proved on a local test
 copy as a sales rep: the two-tab repro warns, Split Evenly gives 33.33/33.33/33.33 = 100.00%, and no nested-button
-warning. Still open (LOW): the open/close button wraps the section heading, as the FSA section does.
+warning.
+
+**Still open (named, not fixed):**
+- LOW: the Default Billing open/close button wraps the section heading (block content in a button), as the FSA
+  section does.
+- MED (Sol and Luna, 2026-11-25): the warning is a screen-side check, so it is best-effort. A note saved by someone
+  else in the moment between the re-read and the save, a failed re-read, or a newer note adopted after a failed save
+  can still be overwritten without the warning. Closing that fully needs the database save to compare the note the
+  user saw, which would refuse a stale save; that conflicts with the "flag, never block" field rule, so it waits for
+  Mason's call. Field edits typed during the short re-read follow the existing save-time lock rules.

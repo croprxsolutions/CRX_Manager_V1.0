@@ -30,7 +30,7 @@ Current code, migrations, tests, grants, and live read-only evidence outrank his
 |---|---|
 | First session or unfamiliar area | `docs/manual/start-here/Home.md`, `docs/manual/start-here/Codebase-Map.md`, then `docs/manual/AGENT_ONBOARDING.md` and `docs/manual/ARCHITECTURE.md` |
 | Any code change | `docs/reference/coding-guidelines.md`; relevant `docs/reference/gotchas.md` sections; `docs/workflows/SAFE_DEVELOPMENT_RULES.md` for multi-file, data, money, security, permission, production, migration, or customer-facing work; `plan-contract` first for money, stock, data, permission or lifecycle changes |
-| Architecture, difficult debugging, workflow/migration tracing, structural audit, or PR impact | `graphify` skill (search recipe first; graph optional); focused source inspection for docs |
+| Architecture, hard debugging, workflow/migration tracing, or PR impact | `graphify` skill (search recipe first) |
 | Database, migration, or RLS | `docs/workflows/DATABASE_CHANGE_CHECKLIST.md`, `docs/workflows/RLS_SECURITY_GUIDE.md`, `.claude/schema-registry.json` |
 | Quote-to-cash or inventory | `docs/workflows/QUOTE_TO_DELIVERY.md` or `docs/workflows/INVENTORY_RULES.md` |
 | Frontend/UI | `docs/workflows/UI_PATTERNS.md` |
@@ -38,7 +38,7 @@ Current code, migrations, tests, grants, and live read-only evidence outrank his
 | Choosing a Codex model or effort | `docs/reference/codex-model-tuning.md` |
 | Push, PR finalization, merge, release, or a live migration apply | `.claude/commands/ship.md` |
 | Settled decisions, known problems, or current status | `docs/manual/DECISION_LOG.md` + `decision-log.d/`, `docs/manual/KNOWN_ISSUES.md` + `known-issues.d/`; `docs/manual/CURRENT_STATE.md` |
-| Research, how other ag software works, or past app context | `docs/research/` first, then the shared CRX Notes vault (`docs/reference/knowledge-vaults.md`), before starting new research |
+| Research or past app context | `docs/research/`, then the shared CRX Notes vault (`docs/reference/knowledge-vaults.md`) |
 | Mason asks how the system or agent process works | `docs/manual/OWNER_PLAYBOOK.md` |
 
 ## Engineering Principles
@@ -52,7 +52,7 @@ Choose the simplest complete implementation preserving business rules: existing 
 - Money must resolve to exact whole cents. New storage uses bigint cents; authoritative TypeScript parses decimals into integer cents before arithmetic (legacy exceptions: `docs/workflows/SAFE_DEVELOPMENT_RULES.md`).
 - Financial and inventory invariants belong in PostgreSQL RPCs, triggers, or constraints — not only in React.
 - Use `src/lib/db.ts` as the only Supabase client. Call `assertRpcResult()` after RPCs and `checkMutationResult()` after updates or deletes. Never write generated columns.
-- Match status values to `.claude/schema-registry.json`. Use shared types from `src/types/index.ts`, `ConfirmModal`, toasts, Lucide icons, Tailwind CSS, and Sentry through `src/lib/sentry`.
+- Match status values to `.claude/schema-registry.json`; UI and shared-type conventions: `docs/reference/coding-guidelines.md`.
 
 ## Safety and Protected Delivery
 
@@ -77,4 +77,4 @@ Business context lives in Mason's Obsidian vaults; procedure: `docs/reference/kn
 
 ## Guidance Ownership
 
-Hand-maintain this contract; edit `.agents/` adapters only through their sources (`.claude/commands/`, `.claude/skills/`, `.claude/hooks/`). Command/policy changes and shipped/parked work update affected docs in the same change. A new migration needs a `docs/changelog.d/<YYYY-MM-DD>-<slug>.md` record in the same commit. Volatile status lives in the ledger, not here. Run `npm run check:agent-guidance`; agent-tooling verification follows the collaboration route.
+Hand-maintain this contract; `.agents/` adapters come only from their `.claude/` sources. Policy changes and shipped/parked work update affected docs in the same change; a new migration adds a `docs/changelog.d/` record in the same commit. Volatile status lives in the ledger, not here. Run `npm run check:agent-guidance`; agent-tooling verification follows the collaboration route.

@@ -87,7 +87,7 @@ const routedGuidance = [...new Set(
 const requiredRouteRows = [
   ["First session or unfamiliar area", ["docs/manual/AGENT_ONBOARDING.md", "docs/manual/ARCHITECTURE.md"]],
   ["Any code change", ["docs/reference/coding-guidelines.md", "docs/reference/gotchas.md", "docs/workflows/SAFE_DEVELOPMENT_RULES.md"]],
-  ["Architecture, difficult debugging, workflow/migration tracing, structural audit, or PR impact", ["graphify"]],
+  ["Architecture, hard debugging, workflow/migration tracing, or PR impact", ["graphify"]],
   ["Database, migration, or RLS", ["docs/workflows/DATABASE_CHANGE_CHECKLIST.md", "docs/workflows/RLS_SECURITY_GUIDE.md", ".claude/schema-registry.json"]],
   ["Quote-to-cash or inventory", ["docs/workflows/QUOTE_TO_DELIVERY.md", "docs/workflows/INVENTORY_RULES.md"]],
   ["Frontend/UI", ["docs/workflows/UI_PATTERNS.md"]],

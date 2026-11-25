@@ -43,7 +43,7 @@
 --    write-off (pg_proc 2026-11-25; each app call is its own transaction). Two postings for one customer share the
 --    lock and never wait on each other.
 --    Payment, prepay, credit and returned-check paths lock their invoices (posted or paid, which a posting in flight
---    is not yet) and then the customer. A paid invoice reopened or a credit memo takes the customer FOR NO KEY UPDATE
+--    is not yet) and then the customer. A paid invoice reopened takes the customer FOR NO KEY UPDATE
 --    (the lock UPDATE customers takes) instead of FOR SHARE, after its invoices like every money path, so a payment
 --    void or credit memo reversal that then changes the prepay balance never upgrades a shared lock (two voids for
 --    one customer deadlocked that way, PR #2526 review); a returned check already holds the customer FOR UPDATE.
@@ -410,10 +410,11 @@ BEGIN
   -- FOR SHARE waits for a deactivation in progress, then reads its committed result; it also makes a deactivation
   -- wait for this save, so KI-148's count sees it. Taken on the allowed paths below too. A customer this
   -- transaction cannot find is refused, never assumed active.
-  -- A money correction (a paid invoice reopened, a credit memo) may go on to change the customer's prepay balance in
-  -- this transaction (a payment void, a credit memo reversal). Upgrading FOR SHARE then deadlocks two of them for
-  -- one customer, so they take the lock UPDATE customers takes, after their invoices, as the money paths order it.
-  IF v_reopen_paid OR v_credit_memo THEN
+  -- A paid invoice reopened (a payment void, a credit memo reversal) may go on to change the customer's prepay
+  -- balance in this transaction. Upgrading FOR SHARE then deadlocks two of them for one customer, so a reopen takes
+  -- the lock UPDATE customers takes, after its invoices, as the money paths order it. Only reopens: no path that
+  -- reopens a paid invoice also creates or posts an invoice first, and no credit memo path updates customers.
+  IF v_reopen_paid THEN
     SELECT c.is_active INTO v_active FROM public.customers c WHERE c.id = NEW.customer_id FOR NO KEY UPDATE;
   ELSE
     SELECT c.is_active INTO v_active FROM public.customers c WHERE c.id = NEW.customer_id FOR SHARE;

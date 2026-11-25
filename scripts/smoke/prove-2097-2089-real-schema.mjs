@@ -210,16 +210,19 @@ async function voidRace(tag) {
     v.send(`${signedIn} SELECT public.void_payment('${set}', 'prover #2526', NULL, 'v2526-${randomUUID()}');`);
     return v;
   });
-  for (const v of voids) await settle(v);
+  const waits = [];
+  for (const v of voids) waits.push(await settle(v));
   await holder.end('COMMIT;');
   const ends = await Promise.all(voids.map((v) => v.end('COMMIT;')));
   return {
     voids: ends.map((e) => (e.status === 0 ? 'ok' : (/deadlock detected/.test(e.out) ? 'deadlock' : e.out.trim()))),
     prepay: scalar(`SELECT prepay_balance_cents FROM public.customers WHERE id = '${customer}';`),
     reopened: scalar(`SELECT count(*) FROM public.invoices WHERE customer_id = '${customer}' AND status = 'posted';`),
+    waits,
   };
 }
 const VOIDS_OK = { voids: ['ok', 'ok'], prepay: '0', reopened: '3' };
+const voidOutcome = ({ waits, ...outcome }) => outcome;
 
 const RUN = Date.now().toString(36);  // unique names when a kept container is reused
 async function runAll(phase) {
@@ -253,7 +256,7 @@ function assertBroken(r, when) {
   // KI-148 already counts the committed draft, so the deactivation is refused at once, without waiting.
   assert.notEqual(r.existingFirst.waited, 'lock', `${when}: posting an existing draft takes no lock yet`);
   assert.deepEqual([r.existingFirst.refused, r.existingFirst.active, r.existingFirst.invoice], [true, 't', 'posted']);
-  assert.deepEqual(r.voidRace, VOIDS_OK, `${when}: two voids for one customer must both commit`);
+  assert.deepEqual(voidOutcome(r.voidRace), VOIDS_OK, `${when}: two voids for one customer must both commit`);
 }
 
 try {
@@ -301,7 +304,9 @@ try {
   assert.match(after.existingFirst.error, /CUSTOMER_HAS_OPEN_WORK/);
   assert.deepEqual([after.existingFirst.active, after.existingFirst.invoice], ['t', 'posted']);
   console.log('[v021] AFTER #2089: posting a draft committed earlier locks the customer too; the deactivation waits, then is refused');
-  assert.deepEqual(after.voidRace, VOIDS_OK, 'AFTER #2526: two voids for one customer must both commit (no deadlock)');
+  assert.deepEqual(voidOutcome(after.voidRace), VOIDS_OK, 'AFTER #2526: two voids for one customer must both commit (no deadlock)');
+  // Each void's reopen waits on the posting's FOR SHARE: the reopen takes the customer lock, before its prepay update.
+  assert.deepEqual(after.voidRace.waits, ['lock', 'lock'], 'AFTER #2526: each void must wait on the customer lock');
   console.log('[v021] AFTER #2526: two payment voids for one customer during a posting both commit; no deadlock');
   // Credit memos are allowed for an inactive customer (Taha 2026-11-25) but still take the lock, so the race stays closed.
   const creditFirst = await postingFirst(`after-${RUN}-c`, 'credit');

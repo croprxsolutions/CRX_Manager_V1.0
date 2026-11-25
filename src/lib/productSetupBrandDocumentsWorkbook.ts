@@ -11,14 +11,12 @@ const VISIBLE_HEADERS = ['Product or group', 'Brand', 'Specimen label link', 'SD
   'Supplemental link', 'State', 'Expires (YYYY-MM-DD)'] as const;
 const HEADERS = [...VISIBLE_HEADERS, 'Download record'] as const;
 
-type LinkState = Pick<BrandDocumentLink, 'id' | 'row_version' | 'url' | 'state_code' | 'expires_on'>;
+type LinkState = Pick<BrandDocumentLink, 'id' | 'row_version' | 'url'>;
 interface DownloadRow extends BrandDocumentTarget {
   brand_name: string;
   owner_name: string;
-  primary: boolean;
   specimen?: LinkState;
   sds?: LinkState;
-  supplemental?: LinkState;
 }
 
 export interface BrandDocumentImport {
@@ -34,20 +32,17 @@ export interface ParsedBrandDocuments {
 }
 
 function linkState(link: BrandDocumentLink): LinkState {
-  const { id, row_version, url, state_code, expires_on } = link;
-  return { id, row_version, url, state_code, expires_on };
+  const { id, row_version, url } = link;
+  return { id, row_version, url };
 }
 
 function rowCells(state: DownloadRow): string[] {
   return [state.owner_name, state.brand_name, state.specimen?.url ?? '', state.sds?.url ?? '',
-    state.supplemental?.url ?? '', state.supplemental?.state_code ?? '', state.supplemental?.expires_on ?? '',
-    JSON.stringify(state)];
+    '', '', '', JSON.stringify(state)];
 }
 
 export function assertBrandWorkbookFitsParserLimit(entries: BrandDocumentWorkspaceRow[]): void {
-  const rows = entries.reduce((sum, entry) =>
-    sum + 1 + entry.links.filter((link) => link.document_kind === 'supplemental').length, 0);
-  if (rows > MAX_BRAND_LINK_ROWS) {
+  if (entries.length > MAX_BRAND_LINK_ROWS) {
     throw new PricingWorkbookFormatError('There are too many Brand Links rows for one workbook.');
   }
 }
@@ -58,19 +53,16 @@ export function addBrandDocumentSheet(workbook: Workbook, entries?: BrandDocumen
   const sheet = workbook.addWorksheet(SHEET, { views: [{ state: 'frozen', ySplit: 1 }] });
   sheet.addRow([...HEADERS]).font = { bold: true };
   sheet.getCell('C1').note = 'Blank link cells leave saved links as they are.';
-  sheet.getCell('E1').note = 'The first row for each brand allows a new supplemental link with state and expiry.';
+  sheet.getCell('E1').note = 'Add a new supplemental link with its state and expiration. Edit existing supplements on Product Detail.';
   for (const entry of entries) {
     const { id, parent_brand, brand_version, brand_name, owner_name, links } = entry;
     const target = { id, parent_brand, brand_version, brand_name, owner_name };
     const specimen = links.find((link) => link.document_kind === 'specimen');
     const sds = links.find((link) => link.document_kind === 'sds');
     sheet.addRow(rowCells({
-      ...target, primary: true,
+      ...target,
       specimen: specimen && linkState(specimen), sds: sds && linkState(sds),
     }));
-    for (const link of links.filter((item) => item.document_kind === 'supplemental')) {
-      sheet.addRow(rowCells({ ...target, primary: false, supplemental: linkState(link) }));
-    }
   }
   sheet.getColumn(8).hidden = true;
   [34, 26, 52, 52, 52, 9, 25].forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
@@ -92,14 +84,17 @@ function downloaded(sheet: Worksheet, row: number): DownloadRow {
     throw error;
   }
   if (!raw || typeof raw !== 'object') throw new Error('Download a fresh workbook.');
-  const state = raw as Partial<DownloadRow>;
+  const state = raw as Partial<DownloadRow> & { primary?: unknown; supplemental?: unknown };
+  if (state.primary === false || state.supplemental != null) {
+    throw new Error('Edit existing supplemental links on Product Detail. Download a fresh workbook for new links.');
+  }
   if (typeof state.id !== 'string' || typeof state.parent_brand !== 'boolean'
-      || !Number.isInteger(state.brand_version) || typeof state.primary !== 'boolean'
+      || !Number.isInteger(state.brand_version)
       || typeof state.brand_name !== 'string' || state.brand_name.trim() !== cell(sheet, row, 2)
       || typeof state.owner_name !== 'string' || state.owner_name.trim() !== cell(sheet, row, 1)) {
     throw new Error('Brand or product details changed. Download a fresh workbook.');
   }
-  for (const link of [state.specimen, state.sds, state.supplemental]) {
+  for (const link of [state.specimen, state.sds]) {
     if (link && (typeof link.id !== 'string' || !Number.isInteger(link.row_version) || typeof link.url !== 'string')) {
       throw new Error('Download a fresh workbook.');
     }
@@ -112,11 +107,10 @@ function changesAt(sheet: Worksheet, row: number, saved: DownloadRow): BrandDocu
   for (const [kind, col] of [['specimen', 3], ['sds', 4], ['supplemental', 5]] as const) {
     const text = cell(sheet, row, col);
     if (!text) continue;
-    if (kind !== 'supplemental' && !saved.primary) throw new Error('Edit specimen and SDS on the first row for this brand.');
-    const prior = saved[kind];
+    const prior = kind === 'supplemental' ? undefined : saved[kind];
     const state = kind === 'supplemental' ? cell(sheet, row, 6).toUpperCase() : '';
     const expiry = kind === 'supplemental' ? cell(sheet, row, 7) : '';
-    if (text === prior?.url && state === (prior.state_code ?? '') && expiry === (prior.expires_on ?? '')) continue;
+    if (text === prior?.url) continue;
     if (kind === 'supplemental' && (!/^[A-Z]{2}$/.test(state) || !isCalendarDate(expiry))) {
       throw new Error('Enter the supplemental state and expiration date.');
     }

@@ -68,6 +68,26 @@ describe('Brand Links workbook tab', () => {
     });
   });
 
+  it('leaves existing supplements off the workbook and refuses old supplemental edit records', () => {
+    const workbook = new Workbook();
+    const supplement = { ...entry.links[0], id: 'supplement-id', document_kind: 'supplemental' as const,
+      url: 'https://manufacturer.example/old-supplement', state_code: 'IA', expires_on: '2027-01-01' };
+    addBrandDocumentSheet(workbook, [{ ...entry, links: [...entry.links, supplement] }]);
+    const sheet = workbook.getWorksheet('Brand Links')!;
+    expect(sheet.rowCount).toBe(2);
+    expect(sheet.getCell('E2').value ?? '').toBe('');
+    expect(sheet.getCell('H2').text).not.toContain(supplement.id);
+
+    sheet.getCell('E2').value = 'https://manufacturer.example/pasted';
+    sheet.getCell('F2').value = 'IA';
+    sheet.getCell('G2').value = '2027-12-31';
+    sheet.getCell('H2').value = JSON.stringify({ ...JSON.parse(sheet.getCell('H2').text), primary: false, supplemental: supplement });
+    expect(parseBrandDocumentSheet(workbook)).toEqual({
+      rows: [],
+      issues: ['Brand Links row 2 · Edit existing supplemental links on Product Detail. Download a fresh workbook for new links.'],
+    });
+  });
+
   it('refuses blocked hosts and accepts manufacturer URLs', () => {
     expect(() => checkedDocumentUrl('http://manufacturer.example/sds')).toThrow(/HTTPS/);
     expect(() => checkedDocumentUrl('https://docs.CDMS.net./example')).toThrow(/CDMS/);

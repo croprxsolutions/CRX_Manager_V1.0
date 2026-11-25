@@ -22,8 +22,15 @@ try {
   const legacy = psql(read('scripts', 'smoke', 'smoke-product_weights.sql'), { allowFailure: true });
   assert.equal(legacy.status, 3, legacy.stderr + legacy.stdout);
   assert.match(legacy.stderr, /^ERROR:\s+SMOKE_PASS_ROLLBACK: product weights chain passed\r?$/m, legacy.stderr + legacy.stdout);
+  const closed = psql(read('scripts', 'smoke', 'smoke-liquid-density-review.sql'), { allowFailure: true });
+  assert.equal(closed.status, 3, closed.stderr + closed.stdout);
+  assert.match(closed.stderr, /^ERROR:\s+SMOKE_PASS_ROLLBACK\r?$/m, closed.stderr + closed.stdout);
   psql(`CREATE OR REPLACE FUNCTION public.liquid_density_review_open() RETURNS boolean
         LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$ SELECT true; $$;`);
+  const retiredLegacy = psql(read('scripts', 'smoke', 'smoke-product_weights.sql'), { allowFailure: true });
+  assert.equal(retiredLegacy.status, 3, retiredLegacy.stderr + retiredLegacy.stdout);
+  assert.match(retiredLegacy.stderr, /^ERROR:\s+SMOKE_PASS_ROLLBACK: product weights chain passed\r?$/m,
+    retiredLegacy.stderr + retiredLegacy.stdout);
   const result = psql(read('scripts', 'smoke', 'smoke-liquid-density-review.sql'), { allowFailure: true });
   assert.equal(result.status, 3, result.stderr + result.stdout);
   assert.match(result.stderr, /^ERROR:\s+SMOKE_PASS_ROLLBACK\r?$/m, result.stderr + result.stdout);

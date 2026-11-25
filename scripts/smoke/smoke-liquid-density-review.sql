@@ -1,4 +1,4 @@
--- Run on an isolated schema with the review switch enabled. No fixture is committed.
+-- Prove the current switch state. No fixture is committed.
 DO $$
 DECLARE
   v_admin uuid;
@@ -18,12 +18,7 @@ DECLARE
   v_tag text := gen_random_uuid()::text;
   v_category text;
 BEGIN
-  IF NOT public.liquid_density_review_open() THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: use the disposable core prover, or run after the authorized switch cutover';
-  END IF;
   SELECT id INTO STRICT v_admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY id LIMIT 1;
-  SELECT id INTO STRICT v_reviewer FROM public.profiles WHERE role = 'admin' AND is_active AND id <> v_admin ORDER BY id LIMIT 1;
-  SELECT id INTO STRICT v_rep FROM public.profiles WHERE role = 'sales_rep' AND is_active ORDER BY id LIMIT 1;
   SELECT name INTO STRICT v_category FROM public.product_categories WHERE is_active ORDER BY name LIMIT 1;
 
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -34,6 +29,34 @@ BEGIN
     'core-density-product-' || v_tag);
   v_group := (v_result->>'parent_id')::uuid;
   v_size := (v_result->>'product_id')::uuid;
+  IF NOT public.liquid_density_review_open() THEN
+    BEGIN
+      PERFORM public.submit_liquid_density_draft(v_group, 0, 9.5, 'lb_per_gal', 'measured', NULL, NULL, NULL,
+        'core-closed-draft-' || v_tag);
+      RAISE EXCEPTION 'SMOKE_FAIL: the new draft path opened early';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM <> 'PRODUCT_WEIGHT_REVIEW_NOT_OPEN' THEN RAISE; END IF;
+    END;
+    BEGIN
+      PERFORM public.approve_liquid_density_draft(v_group, gen_random_uuid(), 0, '[]'::jsonb, true,
+        'core-closed-review-' || v_tag);
+      RAISE EXCEPTION 'SMOKE_FAIL: the new approval path opened early';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM <> 'PRODUCT_WEIGHT_REVIEW_NOT_OPEN' THEN RAISE; END IF;
+    END;
+    PERFORM public.set_parent_density(v_group, 0, 9.5, 'lb_per_gal', 'measured', NULL, 'core-closed-legacy-' || v_tag);
+    PERFORM public.upsert_parent_brand(v_group, v_size, 'Smoke Brand A', '12345-1', 'Smoke Manufacturer A',
+      true, NULL, NULL, p_idempotency_key => 'core-closed-brand-' || v_tag);
+    v_result := public.get_product_weights(ARRAY[v_size])->'products'->(v_size::text)->'weight';
+    IF v_result->>'kind' IS DISTINCT FROM 'density' OR (v_result->>'lb_per_unit')::numeric IS DISTINCT FROM 9.5 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: a brand join withdrew an approval before cutover';
+    END IF;
+    RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';
+  END IF;
+  EXECUTE 'RESET ROLE';
+  SELECT id INTO STRICT v_reviewer FROM public.profiles WHERE role = 'admin' AND is_active AND id <> v_admin ORDER BY id LIMIT 1;
+  SELECT id INTO STRICT v_rep FROM public.profiles WHERE role = 'sales_rep' AND is_active ORDER BY id LIMIT 1;
+  EXECUTE 'SET LOCAL ROLE authenticated';
   v_result := public.upsert_parent_brand(v_group, v_size, 'Smoke Brand A', '12345-1', 'Smoke Manufacturer A',
     true, NULL, NULL, p_idempotency_key => 'core-brand-a-' || v_tag);
   v_brand := (v_result->>'id')::uuid;

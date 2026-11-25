@@ -19,7 +19,6 @@ import {
   Camera, CheckCircle2, ClipboardCheck, Receipt,
 } from 'lucide-react';
 import PhoneHeader from '../components/ui/PhoneHeader';
-import SignatureCanvas from '../components/ui/SignatureCanvas';
 import { useLoadBoundSignature } from '../hooks/useLoadBoundSignature';
 import { billSplitCompletion, billSplitFailedMessage } from '../lib/billSplitCompletion';
 import { supabase, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
@@ -32,7 +31,7 @@ import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idem
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, countLeftAtSitePhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
 import { buildLinesSeen, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
-import type { DeliveryCompletionEvidence, ReceiptRecipient } from '../types';
+import type { DeliveryCompletionEvidence, DeliveryIssueType, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
 import { logActivity } from '../lib/activityLogger';
@@ -50,6 +49,10 @@ import { DeliveryBrandsPanel } from '../components/deliveries/DeliveryBrandPicke
 import { brandWarnings } from '../lib/deliveryBrands';
 import { fetchNextRouteStopId, ROUTE_NO_SIGNAL_MESSAGE } from '../lib/routeStops';
 import StopContactActions, { type StopCoords } from '../components/route/StopContactActions';
+import StopSavedCopy, { type SavedStopCopy } from '../components/route/StopSavedCopy';
+import CompletionProofFields, { EmailReceiptOption, ProofOption } from '../components/deliveries/CompletionProofFields';
+import { ISSUE_TYPE_LABELS } from '../lib/deliveryIssueTypes';
+import { dropTodaySnapshot, saveTodaySnapshot, savedCopyAfterFailure, stopSnapshotKey } from '../lib/todaySnapshot';
 
 interface StopItem {
   id: string;
@@ -130,6 +133,15 @@ interface StopDelivery {
   } | null;
 }
 
+function toSavedStopCopy(del: StopDelivery, items: StopItem[], addressLine: string, addressCoords: StopCoords | null): SavedStopCopy {
+  return {
+    id: del.id, delivery_number: del.delivery_number, status: del.status, delivery_notes: del.delivery_notes,
+    farm_name: del.customer?.farm_name ?? null, phone: del.customer?.phone ?? null,
+    address_line: addressLine, address_coords: addressCoords,
+    items: items.map((it) => ({ id: it.id, quantity: it.quantity, product_name: it.product?.product_name ?? null })),
+  };
+}
+
 type Step = 'arrive' | 'verify' | 'sign' | 'review' | 'done';
 const STEP_ORDER: Step[] = ['arrive', 'verify', 'sign', 'review', 'done'];
 
@@ -138,6 +150,7 @@ export default function FieldStop() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const isDriver = profile?.role === 'driver';
+  const userIdRef = useLatestRef(profile?.id ?? null);
   // The load shape is fixed at first render: a role refresh must not reload and reset entered quantities (Sol #2165 r4).
   const [loadAsDriver] = useState(isDriver);
   const { toast } = useToast();
@@ -164,6 +177,8 @@ export default function FieldStop() {
   const [addressCoords, setAddressCoords] = useState<StopCoords | null>(null);
   const [findingNextStop, setFindingNextStop] = useState(false);
   const [loading, setLoading] = useState(true);
+  // A failed load in a dead spot shows today's saved copy of this stop, read-only, instead of leaving the stop.
+  const [savedCopy, setSavedCopy] = useState<{ stop: SavedStopCopy; savedAt: string } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -175,6 +190,9 @@ export default function FieldStop() {
   const [usePaperTicket, setUsePaperTicket] = useState(false);
   const [paperDeliveredOn, setPaperDeliveredOn] = useState(todayInBusinessTz());
   const [emailOnComplete, setEmailOnComplete] = useState(true);
+  // A problem with the delivery (short, damaged, refused...), sent with the completion exactly as the delivery detail sends it.
+  const [issueType, setIssueType] = useState<DeliveryIssueType>('none');
+  const [issueNotes, setIssueNotes] = useState('');
   // The receipt address when the customer row is hidden from this driver (see fetchReceiptRecipient).
   const [receiptRecipient, setReceiptRecipient] = useState<ReceiptRecipient | null>(null);
   // What the completion response said about billing, for the Done step (the same data the toasts use).
@@ -184,8 +202,10 @@ export default function FieldStop() {
   // (fails closed) instead of letting the last stop's ticket photo pass the check. The receipt
   // box and the Done step's billing line start fresh, as on a stop opened from My Route.
   useEffect(() => {
+    setSavedCopy(null);
     setUsePaperTicket(false); setNoOnePresent(false); setSignedBy(''); setSignatureDataUrl(null);
     setPaperDeliveredOn(todayInBusinessTz()); setPhotos([]); setEmailOnComplete(true); setDoneBilling(null);
+    setIssueType('none'); setIssueNotes('');
   }, [id]);
   // Brand PR B (B-2): which brand went off the truck, saved before completion. Never blocks a completion.
   const brandState = useDeliveryBrands(id, !!delivery && delivery.id === id && (delivery.status === 'scheduled' || delivery.status === 'in_progress'));
@@ -231,25 +251,38 @@ export default function FieldStop() {
       .maybeSingle();
 
     if (isStale()) return;
-    if (error || !data) {
-      if (error) Sentry.captureException(error, { tags: { source: 'fetch', page: 'field-stop' } });
+    // Only a lost connection shows today's saved copy. Any answer from the server (no row: reassigned or gone;
+    // access denied) removes the copy, and the driver goes back to My Route.
+    const showSavedCopyOrLeave = (failure: unknown) => {
+      const saved = savedCopyAfterFailure<SavedStopCopy>(stopSnapshotKey(id), userIdRef.current, isNetworkFailure(failure));
+      if (saved?.data?.id === id) {
+        setSavedCopy({ stop: saved.data, savedAt: saved.savedAt });
+        setLoading(false);
+        return;
+      }
       toast('error', 'Could not load this stop');
       navigate('/my-route');
+    };
+    if (error || !data) {
+      if (error) Sentry.captureException(error, { tags: { source: 'fetch', page: 'field-stop' } });
+      showSavedCopyOrLeave(error);
       return;
     }
 
     // A driver reads the farm through get_driver_customers (#2018), not the customers table.
+    let farmFailure: unknown = null;
     const stop = await withStopFarm(data as unknown as StopDelivery, loadAsDriver).catch((farmErr: unknown) => {
       Sentry.captureException(farmErr, { tags: { source: 'fetch', page: 'field-stop' } });
+      farmFailure = farmErr;
       return null;
     });
     if (isStale()) return;
     if (!stop) {
-      toast('error', 'Could not load this stop');
-      navigate('/my-route');
+      showSavedCopyOrLeave(farmFailure);
       return;
     }
     const { del, address: farmAddress } = stop;
+    setSavedCopy(null);
     setDelivery(del);
     // A stop with its own delivery address shows only that one (read below); otherwise the farm's address.
     setAddressLine(farmAddress);
@@ -263,6 +296,7 @@ export default function FieldStop() {
     if (del.status === 'scheduled') setStep('arrive');
     else if (del.status === 'in_progress') setStep('verify');
     else {
+      dropTodaySnapshot(stopSnapshotKey(id), userIdRef.current);
       toast('info', `This stop is ${del.status} — opening full detail`);
       navigate(`/deliveries/${del.id}`);
       return;
@@ -285,6 +319,7 @@ export default function FieldStop() {
     loaded.forEach((it) => { initQtys[it.id] = it.quantity; });
     setDeliveryQtys(initQtys);
 
+    let stopAddress = { line: farmAddress, coords: null as StopCoords | null, loaded: true };
     if (del.delivery_address_id) {
       const { line, coords, error: addrErr } = await readStopAddress(del.delivery_address_id);
       if (isStale()) return;
@@ -294,10 +329,15 @@ export default function FieldStop() {
       }
       setAddressLine(line);
       setAddressCoords(coords);
+      stopAddress = { line, coords, loaded: !addrErr };
+    }
+    // Only a complete load replaces the saved copy, so a dead spot never shows a half-loaded stop.
+    if (!itemErr && stopAddress.loaded) {
+      saveTodaySnapshot(stopSnapshotKey(id), userIdRef.current ?? '', toSavedStopCopy(del, loaded, stopAddress.line, stopAddress.coords));
     }
     await fetchPhotos();
     setLoading(false);
-  }, [id, navigate, toast, fetchPhotos, loadAsDriver]);
+  }, [id, navigate, toast, fetchPhotos, loadAsDriver, userIdRef]);
 
   useEffect(() => { activeStopIdRef.current = id; fetchStop(); }, [id, fetchStop]);
   // Leaving the screen ends this stop, so a slow reply (e.g. Next Stop) can no longer navigate the driver.
@@ -383,7 +423,7 @@ export default function FieldStop() {
       ? ticketPhotoMatchesLoad && isValidPaperDeliveredOn(paperDeliveredOn)
       : !!signatureDataUrl;
   // What the driver can still edit while the signal check runs; compared after the check.
-  const completionInputs = JSON.stringify([signedBy, deliveryQtys, usePaperTicket, noOnePresent, paperDeliveredOn, signatureDataUrl, emailOnComplete]);
+  const completionInputs = JSON.stringify([signedBy, deliveryQtys, usePaperTicket, noOnePresent, paperDeliveredOn, signatureDataUrl, emailOnComplete, issueType, issueNotes]);
   const completionInputsRef = useLatestRef(completionInputs);
   // Under 0.01 counts as nothing delivered, as on the server (DELIVERY_NOTHING_DELIVERED).
   const hasAnyQty = items.some((it) => (deliveryQtys[it.id] ?? it.quantity) >= 0.01);
@@ -515,6 +555,9 @@ export default function FieldStop() {
       p_signed_by: signedBy,
       p_performed_by: profile.id,
       ...(quantitiesJson ? { p_quantities: quantitiesJson } : {}),
+      // The issue as the delivery detail sends it (DeliveryDetail runComplete): nothing when none is reported.
+      ...(issueType !== 'none' ? { p_issue_type: issueType } : {}),
+      ...(issueNotes.trim() ? { p_issue_notes: issueNotes.trim() } : {}),
       ...(usePaperTicket && paperDeliveredAt(paperDeliveredOn) ? { p_completed_at: paperDeliveredAt(paperDeliveredOn) } : {}),
       p_evidence: completionEvidence,
       // KI-25: the receipt is recorded in the same save and emailed by the server (send-delivery-receipts),
@@ -526,7 +569,7 @@ export default function FieldStop() {
       ...(signedLinesAtSubmit ? { p_lines_seen: signedLinesAtSubmit } : {}),
     };
     // check_idempotency replays by key and operation only: bind the key to this exact
-    // payload (stop, signer, quantities, ticket date) so an edited retry, or another
+    // payload (stop, signer, quantities, issue, ticket date) so an edited retry, or another
     // stop, mints a fresh key. complete_delivery refuses an already-completed delivery.
     // Fingerprint the date the driver chose, not the completion time derived from it:
     // "today" sends no p_completed_at but becomes a past date after midnight, and an
@@ -655,6 +698,8 @@ export default function FieldStop() {
 
       // KI-25: the receipt was recorded with the completion; the server emails it (or lists it for the office).
       if (emailOnComplete && !receiptEmail) toast('warning', RECEIPT_NO_EMAIL_ON_FILE_MESSAGE);
+      // A completed stop is no longer on today's route: its saved copy goes too.
+      dropTodaySnapshot(stopSnapshotKey(id), profile.id);
 
       if (stillOnStop) setStep('done');
     };
@@ -716,6 +761,17 @@ export default function FieldStop() {
     navigate(nextStopId ? `/my-route/${nextStopId}` : '/my-route');
   };
 
+  if (savedCopy) {
+    return (
+      <StopSavedCopy
+        stop={savedCopy.stop}
+        savedAt={savedCopy.savedAt}
+        retrying={loading}
+        onRetry={() => void fetchStop()}
+        onBack={() => navigate('/my-route')}
+      />
+    );
+  }
   if (loading) {
     return (
       <div className="max-w-2xl mx-auto">
@@ -833,93 +889,54 @@ export default function FieldStop() {
       {step === 'sign' && (
         <>
           <div className="bg-white border border-gray-200 rounded-xl p-4">
-            <label className="flex items-center gap-3 text-base text-nav-dark mb-2">
-              <input
-                type="checkbox"
-                checked={noOnePresent}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setNoOnePresent(checked);
-                  setSignedBy(checked ? 'No one present — left at site' : '');
-                  if (checked) { setSignatureDataUrl(null); setUsePaperTicket(false); }
-                }}
-                className={CHECKBOX}
-              />
-              No one present — left at site
-            </label>
-            {!noOnePresent && (
-              <label className="flex items-center gap-3 text-base text-nav-dark mb-2">
-                <input
-                  type="checkbox"
-                  checked={usePaperTicket}
-                  onChange={(e) => {
-                    setUsePaperTicket(e.target.checked);
-                    if (e.target.checked) setSignatureDataUrl(null);
+            <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
+            <input ref={leftAtSiteInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, LEFT_AT_SITE_PHOTO_CAPTION)} className="hidden" />
+            <CompletionProofFields
+              idPrefix="stop"
+              signedBy={signedBy}
+              onSignedByChange={setSignedBy}
+              signerLocked={noOnePresent}
+              contactName={contactName}
+              usePaperTicket={usePaperTicket}
+              onUsePaperTicketChange={setUsePaperTicket}
+              showPaperTicketOption={!noOnePresent}
+              paperTicket={{
+                hasPhoto: ticketPhotoMatchesLoad,
+                staleMessage: hasPaperTicketPhoto(photos) ? TICKET_PHOTO_LOAD_CHANGED_MESSAGE : undefined,
+                deliveredOn: paperDeliveredOn,
+                onDeliveredOnChange: setPaperDeliveredOn,
+                onTakePhoto: () => paperTicketInputRef.current?.click(),
+                takePhotoDisabled: uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS,
+                uploading: uploadingPhoto,
+              }}
+              onSignatureChange={sig.onSignatureChange}
+              signatureKey={`signature-capture-${sig.canvasKey}`}
+              issue={{ type: issueType, notes: issueNotes, onTypeChange: setIssueType, onNotesChange: setIssueNotes }}
+              extraOptions={(
+                <ProofOption
+                  checked={noOnePresent}
+                  onChange={(checked) => {
+                    setNoOnePresent(checked);
+                    setSignedBy(checked ? 'No one present — left at site' : '');
+                    if (checked) { setSignatureDataUrl(null); setUsePaperTicket(false); }
                   }}
-                  className={CHECKBOX}
-                />
-                Customer signed a paper ticket (no signal at the site)
-              </label>
-            )}
-            <label htmlFor="signed-by" className="block text-sm font-semibold text-nav-dark mt-2 mb-1">Signed by (name)</label>
-            {contactName && !noOnePresent && signedBy.trim() !== contactName && (
-              <button type="button" onClick={() => setSignedBy(contactName)} className="mb-2 inline-flex min-h-[44px] max-w-full items-center rounded-full border border-crx-green bg-crx-green-light px-4 text-base font-semibold text-crx-green-hover active:scale-[0.99]">
-                <span className="truncate">Use {contactName}</span>
-              </button>
-            )}
-            <input
-              id="signed-by"
-              type="text"
-              value={signedBy}
-              onChange={(e) => setSignedBy(e.target.value)}
-              placeholder="Who received the delivery?"
-              disabled={noOnePresent}
-              className={`${TEXT_INPUT} mb-4 ${noOnePresent ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
-              autoComplete="off"
-            />
-            {usePaperTicket && !noOnePresent ? (
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3">
-                <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
-                {ticketPhotoMatchesLoad ? (
-                  <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Photo of the signed ticket saved</p>
-                ) : hasPaperTicketPhoto(photos) ? (
-                  <p className="text-sm text-amber-800">{TICKET_PHOTO_LOAD_CHANGED_MESSAGE}</p>
-                ) : (
-                  <p className="text-sm text-amber-800">Take a photo of the signed paper ticket. It replaces the on-screen signature.</p>
-                )}
-                <div>
-                  <label htmlFor="paper-delivered-on" className="block text-sm font-semibold text-nav-dark mb-1">Delivered on (date on the ticket)</label>
-                  <input
-                    id="paper-delivered-on"
-                    type="date"
-                    value={paperDeliveredOn}
-                    max={todayInBusinessTz()}
-                    onChange={(e) => setPaperDeliveredOn(e.target.value)}
-                    className={TEXT_INPUT}
-                  />
+                >
+                  No one present — left at site
+                </ProofOption>
+              )}
+              alternateProof={noOnePresent ? (
+                <div className="border border-gray-200 rounded-xl p-3 space-y-3">
+                  {hasLeftAtSitePhoto(photos) ? (
+                    <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Photo of the drop location saved</p>
+                  ) : (
+                    <p className="text-sm text-amber-800">Signature skipped because no one was present. Take a photo of where you left the delivery.</p>
+                  )}
+                  <button type="button" disabled={uploadingPhoto || !isOnline || countLeftAtSitePhotos(photos) >= MAX_LEFT_AT_SITE_PHOTOS} onClick={() => leftAtSiteInputRef.current?.click()} className={SECONDARY_BUTTON}>
+                    <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Drop Location'}
+                  </button>
                 </div>
-                <button type="button" disabled={uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS} onClick={() => paperTicketInputRef.current?.click()} className={SECONDARY_BUTTON}>
-                  <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Signed Ticket'}
-                </button>
-              </div>
-            ) : (
-              <div className={noOnePresent ? 'pointer-events-none opacity-50' : ''} aria-disabled={noOnePresent}>
-                <SignatureCanvas key={noOnePresent ? 'signature-skipped' : `signature-capture-${sig.canvasKey}`} onSignatureChange={sig.onSignatureChange} label="Customer signs with their finger" height={160} disabled={noOnePresent} />
-              </div>
-            )}
-            {noOnePresent && (
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3 mt-3">
-                <input ref={leftAtSiteInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, LEFT_AT_SITE_PHOTO_CAPTION)} className="hidden" />
-                {hasLeftAtSitePhoto(photos) ? (
-                  <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Photo of the drop location saved</p>
-                ) : (
-                  <p className="text-sm text-amber-800">Signature skipped because no one was present. Take a photo of where you left the delivery.</p>
-                )}
-                <button type="button" disabled={uploadingPhoto || !isOnline || countLeftAtSitePhotos(photos) >= MAX_LEFT_AT_SITE_PHOTOS} onClick={() => leftAtSiteInputRef.current?.click()} className={SECONDARY_BUTTON}>
-                  <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Drop Location'}
-                </button>
-              </div>
-            )}
+              ) : undefined}
+            />
           </div>
           <div className="mt-3 space-y-1 text-center text-sm text-amber-800 empty:hidden">
             {!signedBy.trim() && <p>Enter who signed or choose no one present to continue.</p>}
@@ -956,12 +973,14 @@ export default function FieldStop() {
               <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Delivery</dt><dd className={isPartial ? 'font-semibold text-amber-800' : 'text-nav-dark'}>{isPartial ? `Partial — ${shortCount} short` : 'Full delivery'}</dd></div>
               <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Signed by</dt><dd className="text-nav-dark text-right break-words">{signedBy || '—'}</dd></div>
               <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Photos</dt><dd className="text-nav-dark">{photos.length}</dd></div>
+              {issueType !== 'none' && (
+                <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Issue</dt><dd className="font-semibold text-amber-800 text-right">{ISSUE_TYPE_LABELS[issueType]}</dd></div>
+              )}
             </dl>
             {/* Always shown: a receipt is asked for unless unticked, even when this screen cannot see the email. */}
-            <label className="flex items-center gap-3 border-t border-gray-100 px-4 py-2.5 text-base text-nav-dark">
-              <input type="checkbox" checked={emailOnComplete} onChange={(e) => setEmailOnComplete(e.target.checked)} className={CHECKBOX} />
-              Email a receipt to the customer
-            </label>
+            <div className="border-t border-gray-100 px-4 py-1">
+              <EmailReceiptOption checked={emailOnComplete} onChange={setEmailOnComplete} />
+            </div>
           </div>
 
           <div className="mt-3 flex gap-2.5 rounded-xl border border-gray-200 bg-white px-3.5 py-3">
@@ -1022,8 +1041,6 @@ export default function FieldStop() {
 
 const STEP_LABELS = ['Arrive', 'Items', 'Sign', 'Review', 'Done'];
 const STEPPER_BUTTON = 'flex h-12 w-12 items-center justify-center rounded-xl bg-crx-green-light text-crx-green active:scale-95';
-const CHECKBOX = 'h-5 w-5 shrink-0 rounded border-gray-300 text-crx-green';
-const TEXT_INPUT = 'h-12 w-full rounded-xl border border-gray-300 px-3 text-base text-nav-dark placeholder:text-gray-500';
 const SECONDARY_BUTTON = 'flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white font-semibold text-nav-dark active:scale-[0.99] disabled:opacity-50';
 
 interface DoneBillingResult { numbers: string[]; failed: boolean }

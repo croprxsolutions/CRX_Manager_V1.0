@@ -16,6 +16,7 @@ const FIELD_LABELS: Record<string, string> = {
   rate_unit: 'Rate unit', notes: 'Notes', internal_notes: 'Internal notes', quoting_notes: 'Quoting notes',
   is_active: 'Active', epa_registration: 'EPA registration', is_rup: 'Restricted use',
   signal_word: 'Signal word', rei_hours: 'REI hours', phi_days: 'PHI days',
+  rei_not_applicable: 'Label gives no REI', phi_not_applicable: 'Label gives no PHI',
   max_label_rate: 'Maximum label rate', max_label_rate_unit: 'Maximum label rate unit',
   use_timing: 'Use timing', product_family_id: 'Product family', return_policy: 'Return policy',
   packaging_variant: 'Packaging variant', is_full_tote_only: 'Full tote only',
@@ -23,7 +24,7 @@ const FIELD_LABELS: Record<string, string> = {
 
 type History = { rows: ProductChangeHistoryEntry[]; parentNames: ReadonlyMap<number, string> };
 
-const BOOLEAN_FIELDS = new Set(['is_active', 'is_rup', 'is_full_tote_only']);
+const BOOLEAN_FIELDS = new Set(['is_active', 'is_rup', 'is_full_tote_only', 'rei_not_applicable', 'phi_not_applicable']);
 const NO_VALUE_FIELDS = new Set(['notes', 'internal_notes', 'quoting_notes', 'product_family_id']);
 
 /** Parent event id -> parent name for the parent copies shown. A failed read shows them without a name. */

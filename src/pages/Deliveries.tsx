@@ -2381,7 +2381,6 @@ export default function Deliveries() {
                   key={`${completeTarget?.id ?? 'none'}-${completeSig.canvasKey}`}
                   onSignatureChange={completeSig.onSignatureChange}
                   label="Customer Signature"
-                  height={120}
                 />
               ) : (
                 <p className="text-sm text-secondary">Loading the products on this delivery before the customer signs…</p>

@@ -30,7 +30,8 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270305110000_proof_bound_to_load.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-bound-to-load-reverse.sql');
-const FOLLOW_UPS = [];
+const REQUIRED_REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-binding-required-reverse.sql');
+const FOLLOW_UPS = [path.join(MIGRATIONS, '20270305180000_proof_binding_required.sql')];  // step 4: the binding is required
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -608,6 +609,47 @@ function afterCases() {
   console.log('[case 9] anon cannot call either completion; no client role can call the renamed bodies, the helper or the trigger function');
 }
 
+// Step 4 (20270305180000): proof with no list is refused like proof for another load; nothing else changes.
+const STEP_MD5 = "SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure;";
+function requiredCases() {
+  stageText('required.sql', lf(FOLLOW_UPS[0]));
+  let r = apply('required.sql');
+  assert.equal(r.status, 0, r.output);
+  assert.equal(scalar(STEP_MD5), '88f42e60c64e4b15ae60014c18201d95');
+  let d = delivery(A(), 'in_progress');
+  refused(completeSig(d, 'pbl-q1', undefined), LOAD);
+  assert.equal(status(d), 'in_progress');
+  ok(completeSig(d, 'pbl-q1b', A()));
+  assert.equal(status(d), 'completed');
+  // A retry of that completed call with no list still returns its saved receipt (a replay never reaches the check).
+  const receipt = (out) => out.split(/\r?\n/).filter((l) => l.includes('"delivery_id"')).at(-1);
+  const again = receipt(ok(`SELECT public.complete_delivery(p_delivery_id => '${d}', p_signed_by => '[PROVER] Customer', p_performed_by => '${ADMIN}',
+    p_idempotency_key => 'pbl-q1b', p_evidence => 'signature', p_evidence_ref => '${sigPath(d, 'pbl-q1b')}')`));
+  assert.ok(again);
+  d = delivery(A());
+  refused(startSig(d, 'pbl-q2', undefined), LOAD);
+  assert.equal(status(d), 'scheduled');
+  d = delivery(A(), 'in_progress');
+  refused(completeTicket(d, 'pbl-q3', photo(d, undefined)), TICKET);
+  refused(completeTicket(d, 'pbl-q3n', photo(d, null)), TICKET);
+  assert.equal(status(d), 'in_progress');
+  ok(completeTicket(d, 'pbl-q3b', photo(d, A())));
+  assert.equal(status(d), 'completed');
+  d = delivery(A());
+  refused(startTicket(d, 'pbl-q4', photo(d, undefined)), TICKET);
+  assert.equal(status(d), 'scheduled');
+  d = delivery(A(), 'in_progress'); ok(completeLeft(d, 'pbl-q5', photo(d, null, 'Left at site — drop location'))); assert.equal(status(d), 'completed');
+  d = delivery(A(), 'in_progress'); ok(completeNoProof(d, 'pbl-q6')); assert.equal(status(d), 'completed');
+  console.log('[required] a signature with no list and a ticket photo saved with no list are refused (complete and Mark Delivered), nothing changes; with the list they complete; a replay with no list returns its receipt; left at site and no proof still complete');
+  stageText('required-reverse.sql', lf(REQUIRED_REVERSE));
+  r = apply('required-reverse.sql');
+  assert.equal(r.status, 0, r.output);
+  assert.equal(scalar(STEP_MD5), 'a5946da8ff04dde50f8ee0925ec0049d');
+  d = delivery(A(), 'in_progress'); ok(completeSig(d, 'pbl-q7', undefined)); assert.equal(status(d), 'completed');
+  d = delivery(A(), 'in_progress'); ok(completeTicket(d, 'pbl-q8', photo(d, undefined))); assert.equal(status(d), 'completed');
+  console.log('[required rollback] its reverse script restores 20270305110000\'s step: proof with no list completes again');
+}
+
 function rollbackCases() {
   stageText('reverse.sql', lf(REVERSE));
   const r = apply('reverse.sql');
@@ -635,6 +677,7 @@ async function main() {
   beforeCases();
   await applyCandidate();
   afterCases();
+  requiredCases();
   rollbackCases();
   console.log('PROOF_BOUND_TO_LOAD_PROOF_PASS');
 }

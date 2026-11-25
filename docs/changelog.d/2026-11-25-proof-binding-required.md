@@ -1,0 +1,4 @@
+## 2026-11-25 — A customer's proof must carry the load it was taken for
+
+- New migration `20270305180000_proof_binding_required.sql` (not applied anywhere yet; needs `20270305110000_proof_bound_to_load.sql` first). Step 4 of `docs/plans/2026-11-23-proof-bound-to-load-CONTRACT.md`, decided by Mason on 2026-11-24 (Q2: in the same release as the screen fix). A signature sent without the list of products the screen showed, or a signed-ticket photo saved without one, is now refused the same way as proof taken for a different load (`DELIVERY_LOAD_CHANGED`, `PAPER_TICKET_LOAD_CHANGED`). This closes Sol round 11 findings 1 and 2 on #2324 for old app copies, queued calls and ticket photos saved before the screen fix. Left at site, no proof and retries of a completed call behave as before.
+- Proof: `node scripts/smoke/prove-proof-bound-to-load-real-schema.mjs` (`[required]` cases). Rollback: `scripts/smoke/proof-binding-required-reverse.sql`.

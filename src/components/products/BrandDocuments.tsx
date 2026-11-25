@@ -32,8 +32,8 @@ type DocumentEdit =
   | { action: 'save'; kind: BrandDocumentKind; link?: BrandDocumentLink }
   | { action: 'hide' | 'dismiss'; link: BrandDocumentLink };
 
-function DocumentEditForm({ edit, busy, onCancel, onSubmit }: {
-  edit: DocumentEdit; busy: boolean; onCancel: () => void;
+function DocumentEditForm({ edit, busy, retryOnly, onCancel, onSubmit }: {
+  edit: DocumentEdit; busy: boolean; retryOnly: boolean; onCancel: () => void;
   onSubmit: (change: BrandDocumentChange) => Promise<void>;
 }) {
   const id = useId();
@@ -74,13 +74,13 @@ function DocumentEditForm({ edit, busy, onCancel, onSubmit }: {
       {edit.action === 'save' ? (
         <>
           <Input id={id + '-url'} label={BRAND_DOCUMENT_TITLES[edit.kind] + ' link'} type="url"
-            value={url} maxLength={2048} onChange={(event) => setUrl(event.target.value)} disabled={busy} />
+            value={url} maxLength={2048} onChange={(event) => setUrl(event.target.value)} disabled={busy || retryOnly} />
           {edit.kind === 'supplemental' && (
             <div className="grid grid-cols-2 gap-3">
               <Input id={id + '-state'} label="State code" maxLength={2} value={state}
-                onChange={(event) => setState(event.target.value)} disabled={busy} />
+                onChange={(event) => setState(event.target.value)} disabled={busy || retryOnly} />
               <Input id={id + '-expires'} label="Expiration date" type="date" value={expiry}
-                onChange={(event) => setExpiry(event.target.value)} disabled={busy} />
+                onChange={(event) => setExpiry(event.target.value)} disabled={busy || retryOnly} />
             </div>
           )}
         </>
@@ -89,10 +89,11 @@ function DocumentEditForm({ edit, busy, onCancel, onSubmit }: {
           value={reason} maxLength={1000} onChange={(event) => setReason(event.target.value)} disabled={busy} />
       )}
       {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
+      {retryOnly && <p className="text-sm text-secondary">The last save could not be confirmed. Retry it before changing this link.</p>}
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="secondary" onClick={onCancel} disabled={busy}>Back</Button>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={busy || retryOnly}>Back</Button>
         <Button type="submit" loading={busy}>
-          {edit.action === 'save' ? 'Save link' : edit.action === 'hide' ? 'Hide link' : 'Close report'}
+          {retryOnly ? 'Retry save' : edit.action === 'save' ? 'Save link' : edit.action === 'hide' ? 'Hide link' : 'Close report'}
         </Button>
       </div>
     </form>
@@ -113,6 +114,7 @@ export default function BrandDocuments({ target, brandName, links, canEdit, user
   const [manageOpen, setManageOpen] = useState(false);
   const [edit, setEdit] = useState<DocumentEdit | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingCreate, setPendingCreate] = useState<{ target: BrandDocumentTarget; change: BrandDocumentChange; key: string } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyPage, setHistoryPage] = useState(0);
   const locked = useRef(false);
@@ -123,17 +125,29 @@ export default function BrandDocuments({ target, brandName, links, canEdit, user
 
   async function apply(change: BrandDocumentChange) {
     if (locked.current) return;
+    const createsSupplement = change.action === 'save' && change.kind === 'supplemental' && !change.id;
+    const pending = createsSupplement ? pendingCreate : null;
+    const requestTarget = pending?.target ?? target;
+    const requestChange = pending?.change ?? change;
     locked.current = true;
     setBusy(true);
-    const intent = JSON.stringify([target, change]);
+    const intent = JSON.stringify([requestTarget, requestChange]);
+    const key = pending?.key ?? getKeyFor(intent);
     try {
-      await changeBrandDocumentLinks(target, [change], getKeyFor(intent));
+      await changeBrandDocumentLinks(requestTarget, [requestChange], key);
       resetKeyFor(intent);
+      setPendingCreate(null);
       setEdit(null);
       toast('success', change.action === 'report' ? 'Broken link reported' : 'Document links updated');
       onReload();
     } catch (error) {
-      if (!isBrandDocumentConflict(error)) throw error;
+      if (!isBrandDocumentConflict(error)) {
+        const refused = !!error && typeof error === 'object' && 'message' in error
+          && /^(BRAND_DOCUMENT_INVALID|ADMIN_REQUIRED|NOT_AUTHORIZED)$/.test(String(error.message));
+        if (createsSupplement && !refused) setPendingCreate({ target: requestTarget, change: requestChange, key });
+        throw error;
+      }
+      setPendingCreate(null);
       toast('error', sanitizeError(error));
       setEdit(null);
       onReload(true);
@@ -186,9 +200,10 @@ export default function BrandDocuments({ target, brandName, links, canEdit, user
         </div>
       )}
       {canEdit && manageOpen && (
-        <Modal open onClose={close} closeDisabled={busy} title={brandName + ' documents'}>
+        <Modal open onClose={close} closeDisabled={busy || pendingCreate !== null} title={brandName + ' documents'}>
           {edit ? (
-            <DocumentEditForm edit={edit} busy={busy} onCancel={() => setEdit(null)} onSubmit={apply} />
+            <DocumentEditForm edit={edit} busy={busy} retryOnly={pendingCreate !== null}
+              onCancel={() => setEdit(null)} onSubmit={apply} />
           ) : (
             <div className="space-y-3">
               {links.map((link) => (

@@ -7,12 +7,15 @@ import Input from '../ui/Input';
 import Modal from '../ui/Modal';
 import Select from '../ui/Select';
 import EpaLabelLink from './EpaLabelLink';
+import BrandDocuments from './BrandDocuments';
 import LabelAdjuvants from './LabelAdjuvants';
 import ProductSearchPicker from './ProductSearchPicker';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
+import { useLoad } from '../../hooks/useLoad';
 import { useLatestRef } from '../../hooks/useLatestRef';
 import { logActivity } from '../../lib/activityLogger';
+import { readBrandDocumentLinks, readBrandDocumentWorkspace } from '../../lib/brandDocuments';
 import { hasRpcCode, RpcErrorCodes } from '../../lib/db';
 import { lookupEpaRegistration } from '../../lib/epaLookupClient';
 import {
@@ -154,6 +157,14 @@ export default function ProductBrandsSection({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const brandIds = brands.map((brand) => brand.id);
+  const documents = useLoad(!loading && !loadError && brandIds.length > 0
+    ? JSON.stringify([userId, isAdmin, productId, parent?.id, brandIds]) : null, async () => {
+    const parentBrand = parent !== null;
+    if (!isAdmin) return readBrandDocumentLinks(brandIds, parentBrand);
+    const workspace = await readBrandDocumentWorkspace(false, brandIds);
+    return workspace.filter((brand) => brand.parent_brand === parentBrand).flatMap((brand) => brand.links);
+  });
   const onBrandsChangeRef = useLatestRef(onBrandsChange);
   useEffect(() => {
     onBrandsChangeRef.current?.(productId, loading ? undefined : loadError ? null : brands);
@@ -503,6 +514,7 @@ export default function ProductBrandsSection({
                 <th scope="col" className="py-2 pr-3">Restricted use</th>
                 <th scope="col" className="py-2 pr-3">Signal word</th>
                 <th scope="col" className="py-2 pr-3">Status</th>
+                <th scope="col" className="py-2 pr-3">Manufacturer documents</th>
                 {isAdmin && <th scope="col" className="py-2"><span className="sr-only">Actions</span></th>}
               </tr>
             </thead>
@@ -534,6 +546,16 @@ export default function ProductBrandsSection({
                     <Badge variant={brand.is_currently_sourced ? 'success' : 'default'} size="sm">
                       {brand.is_currently_sourced ? 'Sourced' : 'Not sourced'}
                     </Badge>
+                  </td>
+                  <td className="py-2 pr-3">
+                    {documents.status === 'loaded' && !documents.stale ? (
+                      <BrandDocuments target={{ id: brand.id, parent_brand: parent !== null, brand_version: brand.row_version }}
+                        brandName={brand.brand_name} userId={userId ?? ''} canEdit={isAdmin}
+                        links={documents.data.filter((link) => (link.parent_brand_id ?? link.legacy_brand_id) === brand.id)}
+                        onReload={() => void documents.reload()} />
+                    ) : documents.status === 'failed' || documents.status === 'loaded' ? (
+                      <Button variant="secondary" size="sm" onClick={() => void documents.reload()}>Retry links</Button>
+                    ) : <span className="text-secondary">Loading links…</span>}
                   </td>
                   {isAdmin && (
                     <td className="py-2 text-right">

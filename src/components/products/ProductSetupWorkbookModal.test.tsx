@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { Workbook } from 'exceljs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const H = vi.hoisted(() => ({
@@ -140,6 +141,34 @@ describe('ProductSetupWorkbookModal parent rates', () => {
     expect(H.chemistryWeightsPreview).not.toHaveBeenCalled();
     expect(H.chemistryIngredientsPreview).not.toHaveBeenCalled();
     expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it('downloads Setup and Rates when Brand Links cannot load', async () => {
+    H.rpc.mockResolvedValueOnce({ data: null, error: { message: 'Brand Links unavailable' } });
+    const downloadUrl = vi.fn((_blob: Blob) => 'blob:setup-test');
+    vi.stubGlobal('URL', Object.assign(class extends URL {}, {
+      createObjectURL: downloadUrl, revokeObjectURL: vi.fn(),
+    }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    try {
+      render(<ProductSetupWorkbookModal open profileId="u1" onClose={vi.fn()} onSaved={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Download setup workbook' }));
+      await waitFor(() => expect(click).toHaveBeenCalledOnce());
+      expect(H.toast).toHaveBeenCalledWith('warning', expect.stringContaining('Downloaded without Brand Links.'));
+      const workbook = new Workbook();
+      await workbook.xlsx.load(await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsArrayBuffer(downloadUrl.mock.calls[0][0]);
+      }));
+      expect(workbook.getWorksheet('Setup')).toBeDefined();
+      expect(workbook.getWorksheet('Rates')).toBeDefined();
+      expect(workbook.getWorksheet('Brand Links')).toBeUndefined();
+    } finally {
+      click.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it.each(['Weights', 'Ingredients'] as const)('refuses a %s download that exceeds the upload parser limit', async (sheet) => {

@@ -58,6 +58,7 @@ DECLARE
   v_order2 uuid;
   v_pay uuid;
   v_pay2 uuid;
+  v_ok boolean;
 BEGIN
   IF to_regclass('public.billing_m4_switch') IS NULL THEN
     RAISE EXCEPTION 'SMOKE_SETUP: needs the M4 switch (20270117140000)';
@@ -170,6 +171,14 @@ BEGIN
         UNION ALL
         SELECT jsonb_build_object('recipient', (SELECT full_name FROM profiles WHERE id = p2), 'recipient_user_id', p2, 'percentage', pct2)
          WHERE p2 IS NOT NULL) s $b$;
+    -- The candidate's base, or NULL before it exists (the prover runs this file before the migration too).
+    CREATE FUNCTION pg_temp.smk_base(p_order uuid) RETURNS numeric LANGUAGE plpgsql AS $b$
+    DECLARE v numeric;
+    BEGIN
+      IF to_regprocedure('public._order_commission_base_20270306(uuid)') IS NULL THEN RETURN NULL; END IF;
+      EXECUTE 'SELECT public._order_commission_base_20270306($1)' INTO v USING p_order;
+      RETURN v;
+    END $b$;
     -- What the P&L earns on the sale today: its billed share of the rows (_report_billed_part_cents_20270203) over the
     -- posted invoices.
     CREATE FUNCTION pg_temp.smk_earned(p_order uuid) RETURNS numeric LANGUAGE sql AS $b$
@@ -439,14 +448,14 @@ BEGIN
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
   -- Each invoice rounds its own 7%, so the base is the sale's actual posted discount (two invoices: $330.92).
   v_got := (SELECT string_agg(to_char(commission_amount, 'FM999990.00'), '/' ORDER BY commission_amount DESC)
-                   || ' of ' || to_char(public._order_commission_base_20270306(v_order), 'FM999990.00')
+                   || ' of ' || to_char(pg_temp.smk_base(v_order), 'FM999990.00')
               FROM commissions WHERE order_id = v_order AND deleted_at IS NULL AND status <> 'cancelled'
-            HAVING sum(commission_amount) = public._order_commission_base_20270306(v_order)
+            HAVING sum(commission_amount) = pg_temp.smk_base(v_order)
                AND max(commission_amount) - min(commission_amount) <= 0.01);
   IF v_got IS NULL THEN
     v_fails := v_fails || ' (V) two payouts voided in turn: rows do not add up to the base: '
       || (SELECT string_agg(to_char(commission_amount, 'FM999990.00'), '/') FROM commissions WHERE order_id = v_order AND status <> 'cancelled')
-      || ' vs ' || public._order_commission_base_20270306(v_order) || ';';
+      || ' vs ' || COALESCE(pg_temp.smk_base(v_order)::text, 'no base') || ';';
   END IF;
 
   -- W: half posted at 7%, only the lower-id row batched, the rest posted, the payout voided: the pair totals $330.93.
@@ -461,10 +470,10 @@ BEGIN
   PERFORM void_commission_payment(v_pay, 'Rolled-back smoke', v_admin, 'smk-cad-w-void-' || v_suffix);
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
   IF (SELECT sum(commission_amount) FROM commissions WHERE order_id = v_order AND deleted_at IS NULL AND status <> 'cancelled')
-     IS DISTINCT FROM public._order_commission_base_20270306(v_order) THEN
+     IS DISTINCT FROM pg_temp.smk_base(v_order) THEN
     v_fails := v_fails || ' (W) one payout voided after the rest posted: rows total '
       || (SELECT sum(commission_amount) FROM commissions WHERE order_id = v_order AND status <> 'cancelled')
-      || ', not the base ' || public._order_commission_base_20270306(v_order) || ';';
+      || ', not the base ' || COALESCE(pg_temp.smk_base(v_order)::text, 'no base') || ';';
   END IF;
   UPDATE customers SET standing_discount_pct = 10 WHERE id = v_customer;
 
@@ -482,8 +491,13 @@ BEGIN
   PERFORM unpost_invoice(v_inv, v_admin, 'smk-cad-x-unpost-' || v_suffix);
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
   -- The rows carry the settle's mark, not a surviving discount line, as evidence (Sol posting r2 H3).
-  IF NOT EXISTS (SELECT 1 FROM commissions WHERE order_id = v_order AND discount_settled_at IS NOT NULL) THEN
-    v_fails := v_fails || ' (X) the settled rows are not marked;';
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.commissions'::regclass AND attname = 'discount_settled_at') THEN
+    v_fails := v_fails || ' (X) the settled rows are not marked (no column);';
+  ELSE
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM commissions WHERE order_id = $1 AND discount_settled_at IS NOT NULL)' INTO v_ok USING v_order;
+    IF NOT v_ok THEN
+      v_fails := v_fails || ' (X) the settled rows are not marked;';
+    END IF;
   END IF;
   PERFORM void_commission_payment(v_pay, 'Rolled-back smoke', v_admin, 'smk-cad-x-void1-' || v_suffix);
   PERFORM void_commission_payment(v_pay2, 'Rolled-back smoke', v_admin, 'smk-cad-x-void2-' || v_suffix);

@@ -346,7 +346,7 @@ async function main() {
   for (const step of ['(A) posting did not put', '(A) with the tax box off', '(B) the 3-way rows', '(C) both payers posted',
     '(D) half posted: not 180/120', '(D) half posted: the P&L earns', '(D) after Cancel Remaining', '(F) batched row moved',
     '(H) the 150-line sale', '(K1) the 40% row', '(K2) the 40% row', '(K3) the 40% row', '(M) $330.93 did not split',
-    '(S) after the payout void']) {
+    '(S) after the payout void', '(V) two payouts voided in turn', '(W) one payout voided', '(X) unposted then payouts voided']) {
     assert.ok(before.fail.includes(step), `BEFORE: expected ${step} to fail, got: ${before.fail}`);
   }
   assert.ok(!/SMOKE_SETUP|\(E\)|\(G\)|\(O\)|\(T\)/.test(before.fail), `BEFORE: the fixture or a control failed: ${before.fail}`);

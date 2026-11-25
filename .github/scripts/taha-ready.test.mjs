@@ -158,11 +158,19 @@ test('summary: only title, description and file names go out; the answer is esca
   const s = await summarize(pr({ body: 'desc' }), ['src/a.ts'], { key: 'k', fetchImpl });
   assert.equal(sent.url, 'https://api.anthropic.com/v1/messages');
   assert.equal(sent.body.model, 'claude-haiku-5-5');
+  assert.deepEqual(sent.body.thinking, { type: 'disabled' }, 'thinking off, or it eats the small max_tokens');
   assert.match(sent.body.messages[0].content, /Title: fix: <!channel> quotes\nDescription:\ndesc\nChanged files:\nsrc\/a\.ts$/);
   assert.ok(!s.includes('<') && s.length <= 400 && !s.includes('\n'), 'no Slack control text, no newlines, capped');
   assert.equal(await summarize(pr(), [], { key: '', fetchImpl: never }), null, 'no key, no call');
   assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false }) }), null, 'API error');
   assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: async () => { throw new Error('timeout'); } }), null, 'network error');
+  const logged = [];
+  const log = console.log;
+  console.log = (m) => logged.push(m);
+  try {
+    await summarize(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({ error: { type: 'authentication_error', message: 'invalid x-api-key' } }) }) });
+  } finally { console.log = log; }
+  assert.deepEqual(logged, ['::warning::Haiku call failed: HTTP 401 authentication_error invalid x-api-key'], 'the API reason reaches the run log');
   assert.match(pingText(pr(), s), /\n> AI summary of the author's description, not checked: Hi &lt;!channel&gt;/);
   assert.doesNotMatch(pingText(pr(), null), /\n/);
   const reply = (text) => async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text }] }) });
@@ -175,6 +183,12 @@ test('topics: an outage is retried (null), only a real but unusable answer becom
   const { pickTopics } = await import('./taha-ready.mjs');
   const reply = (text) => async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text }] }) });
   assert.equal(await pickTopics(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false }) }), null, 'API error');
+  const log = console.log;
+  console.log = () => {};
+  try {
+    const noText = async () => ({ ok: true, json: async () => ({ stop_reason: 'max_tokens', content: [{ type: 'thinking', thinking: '' }] }) });
+    assert.equal(await pickTopics(pr(), [], { key: 'k', fetchImpl: noText }), null, 'no text means retry, not topic:none');
+  } finally { console.log = log; }
   assert.equal(await pickTopics(pr(), [], { key: 'k', fetchImpl: async () => { throw new Error('timeout'); } }), null, 'timeout');
   assert.deepEqual(await pickTopics(pr(), [], { key: 'k', fetchImpl: reply('nothing fits') }), [], 'answered, nothing usable');
   assert.deepEqual(await pickTopics(pr(), [], { key: 'k', fetchImpl: reply('billing') }), ['topic:billing']);

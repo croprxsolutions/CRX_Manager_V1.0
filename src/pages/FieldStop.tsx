@@ -30,7 +30,7 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
-import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, keptQuantity, LINES_LOADING_MESSAGE, LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
 import type { DeliveryCompletionEvidence, DeliveryIssueType, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
@@ -236,7 +236,8 @@ export default function FieldStop() {
     setPhotos((data || []) as StopPhoto[]);
   }, [id]);
 
-  const fetchStop = useCallback(async () => {
+  // keepQtys: the driver's entered amounts, kept (within each reloaded line) after a load-proof refusal (Luna).
+  const fetchStop = useCallback(async (keepQtys?: Record<string, number>) => {
     if (!id) return;
     // Stale-route guard (H3): on rapid stop-to-stop navigation an older in-flight
     // fetch must not overwrite the current stop's delivery/items/address/photos —
@@ -316,7 +317,7 @@ export default function FieldStop() {
     const loaded = ((itemData || []) as unknown as StopItem[]);
     setItems(loaded);
     const initQtys: Record<string, number> = {};
-    loaded.forEach((it) => { initQtys[it.id] = it.quantity; });
+    loaded.forEach((it) => { initQtys[it.id] = keptQuantity(keepQtys, it.id, it.quantity); });
     setDeliveryQtys(initQtys);
 
     let stopAddress = { line: farmAddress, coords: null as StopCoords | null, loaded: true };
@@ -440,6 +441,8 @@ export default function FieldStop() {
       toast('error', 'Maximum 10 photos per delivery');
       return;
     }
+    // A ticket or drop-location photo is bound to the lines on screen, so it waits until they are loaded (Luna).
+    if ((caption === PAPER_TICKET_PHOTO_CAPTION || caption === LEFT_AT_SITE_PHOTO_CAPTION) && !currentLinesSeen) { toast('error', LINES_LOADING_MESSAGE); return; }
     if (caption === PAPER_TICKET_PHOTO_CAPTION && countTicketPhotosForLoad(photos, currentLinesSeen) + files.length > MAX_PAPER_TICKET_PHOTOS) {
       toast('error', 'Maximum 2 ticket photos per delivery');
       return;
@@ -742,7 +745,7 @@ export default function FieldStop() {
         // Nothing delivered, or the proof is not for this load: clear the signature, reload the stop's
         // lines and photos and go back to the quantity step. No automatic retry.
         sig.clearSignature();
-        await fetchStop();
+        await fetchStop(deliveryQtys);
         if (activeStopIdRef.current === id) setStep('verify');
       } else if (outcome.kind === 'open') await fetchPhotos();
       return;

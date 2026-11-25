@@ -317,6 +317,13 @@ export function sameLinesSeen(a: ReadonlyArray<LineSeen> | null | undefined, b: 
   return true;
 }
 
+/** A reloaded line's delivered amount: the one entered before the reload (kept between 0 and the line's
+ * quantity), or the full quantity for a line that was not on screen. */
+export function keptQuantity(keepQtys: Readonly<Record<string, number>> | undefined, lineId: string, quantity: number): number {
+  const kept = keepQtys?.[lineId];
+  return kept === undefined ? quantity : Math.max(0, Math.min(kept, quantity));
+}
+
 /** Some line has a delivered amount of at least 0.01 (the server's DELIVERY_NOTHING_DELIVERED rule). */
 export function hasDeliveredAmount(lines: ReadonlyArray<LineSeen>): boolean {
   return lines.some((line) => Math.max(0, Math.min(Number(line.delivered), Number(line.quantity))) >= 0.01);

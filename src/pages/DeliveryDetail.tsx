@@ -34,7 +34,7 @@ import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail, EmailUnconfirmedError } from '../lib/emailService';
 import { buildDeliveryReceiptHtml } from '../lib/deliveryReceiptEmail';
 import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
-import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, keptQuantity, LINES_LOADING_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
@@ -361,7 +361,8 @@ export default function DeliveryDetail() {
     && orderNeedsSplitBilling
     && billedOutsideCrxReason === null;
 
-  const fetchDelivery = useCallback(async () => {
+  // keepQtys: the entered partial amounts, kept (within each reloaded line) after a load-proof refusal (Luna).
+  const fetchDelivery = useCallback(async (keepQtys?: Record<string, number>) => {
     // Never carry the previous delivery's billed-outside-CRX badge onto this one.
     setBilledOutsideCrxReason(null);
     // This page is reused across deliveries: a slow load for the previous one must
@@ -433,7 +434,7 @@ export default function DeliveryDetail() {
         const loadedItems = (itemsRes.data || []) as unknown as DeliveryItem[];
         setItems(loadedItems);
         const initQtys: Record<string, number> = {};
-        loadedItems.forEach((item) => { initQtys[item.id] = item.quantity; });
+        loadedItems.forEach((item) => { initQtys[item.id] = keptQuantity(keepQtys, item.id, item.quantity); });
         setDeliveryQtys(initQtys);
         setAddress(addrRes.data as CustomerAddress | null);
         setDriver(driverRes.data as Profile | null);
@@ -1033,6 +1034,8 @@ export default function DeliveryDetail() {
       toast('error', 'Maximum 10 photos per delivery');
       return;
     }
+    // A ticket or drop-location photo is bound to the lines on screen, so it waits until they are loaded (Luna).
+    if (caption === PAPER_TICKET_PHOTO_CAPTION && !currentLinesSeen) { toast('error', LINES_LOADING_MESSAGE); return; }
     if (caption === PAPER_TICKET_PHOTO_CAPTION && countTicketPhotosForLoad(photos, currentLinesSeen) + files.length > MAX_PAPER_TICKET_PHOTOS) {
       toast('error', 'Maximum 2 ticket photos per delivery');
       return;
@@ -1503,7 +1506,7 @@ export default function DeliveryDetail() {
         // Nothing delivered, or the proof is not for this load: clear the signature and reload the
         // delivery's lines and photos, so the stale proof no longer counts. No automatic retry.
         sig.clearSignature();
-        await fetchDelivery();
+        await fetchDelivery(deliveryQtys);
       } else if (outcome.kind === 'open') {
         const photoSeq = ++photoSeqRef.current;
         const { data: refreshedPhotos, error: photosErr } = await supabase

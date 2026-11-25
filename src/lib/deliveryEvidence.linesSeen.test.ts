@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildLinesSeen, countTicketPhotosForLoad, hasDeliveredAmount, isLoadProofRefusal, LINES_LOADING_MESSAGE, loadProofProblem, NOTHING_DELIVERED_MESSAGE,
+  buildLinesSeen, keptQuantity, countTicketPhotosForLoad, hasDeliveredAmount, isLoadProofRefusal, LINES_LOADING_MESSAGE, loadProofProblem, NOTHING_DELIVERED_MESSAGE,
   LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE,
 } from './deliveryEvidence';
 import { LEFT_AT_SITE_PHOTO_CAPTION, PAPER_TICKET_PHOTO_CAPTION } from './paperTicket';
@@ -104,5 +104,15 @@ describe('proof bound to the load', () => {
     expect(loadProofProblem('paper_ticket', lines, null, other)).toBe(TICKET_PHOTO_LOAD_CHANGED_MESSAGE);
     expect(loadProofProblem('paper_ticket', lines, null, undefined)).toBe(TICKET_PHOTO_LOAD_CHANGED_MESSAGE);
     expect(loadProofProblem('paper_ticket', lines, null, lines)).toBeNull();
+  });
+});
+
+describe('keptQuantity', () => {
+  it('keeps an entered amount within the reloaded line and gives a new line its full quantity', () => {
+    expect(keptQuantity({ d1: 4 }, 'd1', 10)).toBe(4);
+    expect(keptQuantity({ d1: 12 }, 'd1', 10)).toBe(10);
+    expect(keptQuantity({ d1: -1 }, 'd1', 10)).toBe(0);
+    expect(keptQuantity({ d1: 4 }, 'd2', 10)).toBe(10);
+    expect(keptQuantity(undefined, 'd1', 10)).toBe(10);
   });
 });

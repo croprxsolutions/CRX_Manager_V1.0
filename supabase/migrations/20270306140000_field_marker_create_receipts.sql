@@ -1,5 +1,6 @@
 -- Keep a pin's create identity after deletion so an uncertain save cannot restore it.
 SET LOCAL lock_timeout = '5s';
+SET LOCAL statement_timeout = '15s';
 
 CREATE TABLE public.field_marker_create_receipts (
   id uuid PRIMARY KEY,
@@ -30,7 +31,7 @@ CREATE TRIGGER set_updated_at
   BEFORE UPDATE ON public.field_marker_create_receipts
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 
--- The caller passed the existing pin INSERT policy before this trigger runs.
+-- The existing BEFORE trigger binds the author to auth.uid(), which the INSERT policy checks.
 -- Only this trigger needs the ability to claim new IDs in the receipt table.
 CREATE FUNCTION public.record_field_marker_create_receipt()
 RETURNS trigger
@@ -40,7 +41,17 @@ SET search_path = public, pg_temp
 AS $function$
 BEGIN
   INSERT INTO public.field_marker_create_receipts (id, field_id, created_by)
-    VALUES (NEW.id, NEW.field_id, NEW.created_by);
+    VALUES (NEW.id, NEW.field_id, NEW.created_by)
+    ON CONFLICT (id) DO NOTHING;
+  IF NOT FOUND THEN
+    -- Receipt details are available only through the authorized result read.
+    RAISE unique_violation USING
+      MESSAGE = 'duplicate key value violates unique constraint "field_obstacles_pkey"',
+      DETAIL = format('Key (id)=(%s) already exists.', NEW.id),
+      SCHEMA = 'public',
+      TABLE = 'field_obstacles',
+      CONSTRAINT = 'field_obstacles_pkey';
+  END IF;
   RETURN NEW;
 END;
 $function$;

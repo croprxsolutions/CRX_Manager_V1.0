@@ -25,6 +25,7 @@ function denied(actor, sql, pattern) {
   const result = psql(statement(actor, sql), { allowFailure: true });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, pattern);
+  return result.stderr;
 }
 
 function place(pin, kind = 'field_entrance') {
@@ -58,10 +59,11 @@ try {
   assert.equal(state(admin, existing), 'saved');
   remove(admin, existing);
   assert.equal(state(admin, existing), 'removed');
-  denied(admin, place(existing), /field_marker_create_receipts_pkey/);
+  denied(admin, place(existing), /field_obstacles_pkey/);
 
   assert.equal(state(applicator, retry), 'missing');
   assert.equal(allowed(applicator, place(retry) + ' RETURNING entrance_number', 'COMMIT'), '1');
+  const stillSavedError = denied(applicator, place(retry), /field_obstacles_pkey/);
   assert.equal(state(applicator, retry), 'saved');
   assert.equal(state(rep, retry), 'missing');
   assert.equal(state(applicator, retry, otherField), 'unavailable');
@@ -73,7 +75,9 @@ try {
 
   remove(admin, retry);
   assert.equal(state(applicator, retry), 'removed');
-  denied(applicator, place(retry), /field_marker_create_receipts_pkey/);
+  const removedError = denied(applicator, place(retry), /field_obstacles_pkey/);
+  const publicError = (stderr) => stderr.split(/\r?\n/).filter((line) => /^(ERROR|DETAIL):/.test(line));
+  assert.deepEqual(publicError(removedError), publicError(stillSavedError));
   assert.equal(state(applicator, retry), 'removed');
   assert.equal(allowed(applicator, place(notSent) + ' RETURNING entrance_number', 'COMMIT'), '2');
 

@@ -40,10 +40,12 @@ export function parseProductLine(
       const ratePerAcre = parts[1] || null;
       const totalProduct = parts.length >= 3 ? parts[2] : null;
 
+      const rate = readAmountCell(ratePerAcre || "");
       const { quantity, unit } = pickQuantity(
-        readAmountCell(ratePerAcre || ""),
+        rate,
         totalProduct || null,
-        parts.slice(3).some((p) => p !== ""),
+        // Extra text in the rate cell or extra columns mean the line is not exact.
+        !END.test(rate?.rest ?? "") || parts.slice(3).some((p) => p !== ""),
       );
 
       return {
@@ -113,8 +115,8 @@ function pickQuantity(
   totalText: string | null,
   extraColumns = false,
 ): { quantity: number; unit: string | null } {
-  if (!rate) return { quantity: 0, unit: null };
   const total = totalText ? readAmountCell(totalText) : null;
+  if (!rate) return { quantity: total?.amount ?? 0, unit: null };
   const quantity = total?.amount ?? rate.amount;
   const exact = rate.unit !== null && !extraColumns &&
     (totalText === null || (total?.unit != null && END.test(total.rest)));

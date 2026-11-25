@@ -33,6 +33,9 @@ Deno.test("the total column, not the per-acre rate, is the quantity (Sol #2267 r
 Deno.test("a line with only a rate keeps it", () => {
   check("Roundup 32 oz", "Roundup", 32, "oz");
   check("Roundup 32oz", "Roundup", 32, "oz");
+  check("Roundup 10 ml", "Roundup", 10, "ml");
+  check("Roundup 10ml", "Roundup", 10, "ml");
+  check("Roundup | 2 l | 10 ml", "Roundup", 10, "ml");
   check("Atrazine 2. qt", "Atrazine", 2, "qt");
   check("Roundup | 32 oz", "Roundup", 32, "oz");
   check("Roundup | 32 oz |", "Roundup", 32, "oz");
@@ -69,4 +72,7 @@ Deno.test("anything uncertain leaves the unit blank so the stock check stops it 
   check("Piksi 6 g 750 g Lot 24 10 gal", "Piksi", 750, null);
   check("Piksi | 6 g | 750 g | 10 gal", "Piksi", 750, null);
   check("Piksi | 6 g | | 10 gal", "Piksi", 6, null);
+  // Luna r4: extra text in the pipe rate cell; an unreadable rate keeps a readable total's number.
+  check("Piksi | 6 g 750 g | 10 gal", "Piksi", 10, null);
+  check("Roundup | N/A | 10 gal", "Roundup", 10, null);
 });

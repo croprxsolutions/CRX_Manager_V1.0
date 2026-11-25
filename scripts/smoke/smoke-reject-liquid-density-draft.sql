@@ -18,9 +18,13 @@ DECLARE
   v_version bigint;
   v_draft_version bigint;
   v_review_open boolean := false;
+  v_reject_signature constant text := 'public.reject_liquid_density_draft(uuid,uuid,bigint,text,text)';
 BEGIN
-  IF has_function_privilege('anon', 'public.reject_liquid_density_draft(uuid,uuid,bigint,text,text)', 'EXECUTE') THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: anonymous caller can execute rejection';
+  IF NOT has_function_privilege('authenticated', v_reject_signature, 'EXECUTE')
+     OR has_function_privilege('anon', v_reject_signature, 'EXECUTE')
+     OR has_function_privilege('service_role', v_reject_signature, 'EXECUTE')
+     OR has_function_privilege('metabase_ro', v_reject_signature, 'EXECUTE') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: only signed-in callers should reach the rejection admin check';
   END IF;
   SELECT id INTO STRICT v_admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY id LIMIT 1;
   SELECT id INTO STRICT v_reviewer FROM public.profiles WHERE role = 'admin' AND is_active AND id <> v_admin ORDER BY id LIMIT 1;

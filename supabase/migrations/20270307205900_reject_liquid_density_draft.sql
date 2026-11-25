@@ -2,6 +2,8 @@
 -- draft with a reason. The value and audit events stay available after rejection.
 -- The definer writes the protected density and history tables after an admin check.
 
+SET LOCAL lock_timeout = '5s';
+
 ALTER TABLE public.product_weight_events
   DROP CONSTRAINT product_weight_events_event_type_check,
   ADD CONSTRAINT product_weight_events_event_type_check CHECK (

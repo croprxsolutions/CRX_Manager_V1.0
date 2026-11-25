@@ -39,6 +39,12 @@ describe('proof bound to the load', () => {
     expect(sameLinesSeen([{ ...a[0], delivered: 0.005 }], [{ ...a[0], delivered: 0.05 }])).toBe(false);
   });
 
+  it('compares amounts to 6 decimal places, as the server does', () => {
+    const a = buildLinesSeen(items);
+    expect(sameLinesSeen([{ ...a[0], delivered: 0.1234564 }], [{ ...a[0], delivered: 0.12345649 }])).toBe(true);
+    expect(sameLinesSeen([{ ...a[0], delivered: 0.123456 }], [{ ...a[0], delivered: 0.123457 }])).toBe(false);
+  });
+
   it('clamps delivered to [0, quantity] on both sides', () => {
     const a = buildLinesSeen(items);
     expect(sameLinesSeen([{ ...a[0], delivered: 12 }], [{ ...a[0], delivered: 10 }])).toBe(true);

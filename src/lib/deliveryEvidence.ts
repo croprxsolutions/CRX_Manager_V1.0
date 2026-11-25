@@ -285,11 +285,12 @@ export function buildLinesSeen<T extends { id: string; order_item_id?: string | 
   }));
 }
 
-// One entry as the server compares it: ids lower-cased, amounts as numbers, delivered kept between 0 and the quantity.
+// One entry as the server compares it: ids lower-cased, delivered kept between 0 and the quantity, amounts to
+// 6 decimal places (the server's round(…, 6); this is a screen hint, the server decides).
 function lineSeenKey(line: LineSeen): string {
   const quantity = Number(line.quantity);
   const delivered = Math.max(0, Math.min(Number(line.delivered), quantity));
-  return `${String(line.order_item_id).toLowerCase()}|${String(line.product_id).toLowerCase()}|${quantity}|${delivered}`;
+  return `${String(line.order_item_id).toLowerCase()}|${String(line.product_id).toLowerCase()}|${quantity.toFixed(6)}|${delivered.toFixed(6)}`;
 }
 
 /** True when both lists hold the same entries, each as many times (the server's _delivery_lines_match). */

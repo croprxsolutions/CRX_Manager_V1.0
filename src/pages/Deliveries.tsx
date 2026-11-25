@@ -303,6 +303,8 @@ export default function Deliveries() {
   // after a refusal. The customer signs, or the ticket photo is taken, only once they are loaded (20270305110000).
   const [completeLines, setCompleteLines] = useState<{ deliveryId: string; lines: LineSeen[] } | null>(null);
   const loadCompleteLines = async (deliveryId: string, dialogGen: number) => {
+    // The old lines stop counting at once: a failed reload must not leave proof controls bound to them (Luna).
+    setCompleteLines(null);
     const { data, error } = await supabase.from('delivery_items')
       .select('id, order_item_id, product_id, quantity').eq('delivery_id', deliveryId);
     if (completeDialogGenRef.current !== dialogGen) return;

@@ -2705,9 +2705,13 @@ function runFocusedSolCheck(root, options, { baseRef, baseSha, headSha, prompt, 
 // statement), and that record's `SQL sha256` pin then moves to the new SQL's LF
 // hash. No other file's hash may change, and no other branch migration may sit
 // between the old and new stamps (that would flip the apply order).
+// 2026-11-24 (#2267): a one-shot data migration's key in ONE_SHOT_LIST is renamed to the new stem, byte for
+// byte; the list may change nothing else, and must not still name the old stem.
 const RESTAMP_MIGRATION_RE = /^supabase\/migrations\/(\d{14})(_[^/]+\.sql)$/;
 const ABSENT_MODE = "000000";
 const RESTAMP_MODES = new Set(["100644", "100755", ABSENT_MODE]);
+// A one-shot data migration's key here follows its restamp (2026-11-24, #2267); nothing else in it may change.
+export const ONE_SHOT_LIST = "supabase/baselines/one-shot-migrations.json";
 
 // null when `entries` (gitChangedEntries of reviewed head → HEAD) is a pure
 // restamp, otherwise why not. `readFile(side, path)` returns the blob as a
@@ -2745,7 +2749,7 @@ export function restampProblem({ entries, readFile, branchAdded = [], note = {} 
     if (!RESTAMP_MODES.has(oldMode) || !RESTAMP_MODES.has(newMode) || (oldMode !== ABSENT_MODE && newMode !== ABSENT_MODE && oldMode !== newMode)) {
       return `${file} changed type or mode`;
     }
-    if (file.startsWith("supabase/") && file !== fromPath && file !== toPath) return `${file} is another database file`;
+    if (file.startsWith("supabase/") && file !== fromPath && file !== toPath && file !== ONE_SHOT_LIST) return `${file} is another database file`;
     if (newMode === ABSENT_MODE) {
       const target = paths.get(restamp(file));
       if (target?.oldMode !== ABSENT_MODE) return `${file} was removed, not renamed to the new stamp`;
@@ -2768,14 +2772,28 @@ export function restampProblem({ entries, readFile, branchAdded = [], note = {} 
       if (after !== restamp(before) && after !== restamp(before).split(pin(oldSha)).join(pin(newSha))) return `${file} changed beyond the timestamp and its SQL sha256 pin`;
       recordPins = [...after.matchAll(/SQL sha256: `([0-9a-f]{64})`/g)].map((m) => m[1]);
       if (recordPins.some((h) => h !== newSha)) return `${file}'s SQL sha256 pin is not the new SQL's hash`;
+    } else if (file === ONE_SHOT_LIST) {
+      if (!oneShotKeyRenamed(before, after, oldStem, newStem)) return `${file} changed beyond renaming the key ${oldStem} to ${newStem}`;
     } else if (after !== restamp(before)) {
       return `${file} changed beyond the timestamp`;
     }
   }
+  if (!paths.has(ONE_SHOT_LIST) && readFile("new", ONE_SHOT_LIST)?.includes(`"${oldStem}"`)) return `${ONE_SHOT_LIST} still lists ${oldStem}; rename its key too`;
   // A changed SQL must be bound by its renamed record's one pin; byte-identical SQL keeps the format's optional pin.
   if (oldSha !== newSha && recordPins?.length !== 1) return `the SQL changed, so ${ownRecord} must be renamed and pin it with one SQL sha256`;
   if (oldSha !== newSha) note.sqlSha256 = { from: oldSha, to: newSha };
   return null;
+}
+
+// True when `after` is `before` with its one `"<oldStem>"` (a one_shot key) renamed to `"<newStem>"`, byte for byte.
+function oneShotKeyRenamed(before, after, oldStem, newStem) {
+  const parts = before.split(`"${oldStem}"`);
+  if (parts.length !== 2 || before.includes(`"${newStem}"`) || after !== parts.join(`"${newStem}"`)) return false;
+  try {
+    return Object.hasOwn(JSON.parse(after).one_shot ?? {}, newStem);
+  } catch {
+    return false;
+  }
 }
 
 // True when `after` is `change(before)` and every changed line is in the leading

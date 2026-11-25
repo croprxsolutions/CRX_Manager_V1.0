@@ -12,7 +12,7 @@
 WITH pins AS (
   SELECT '1db4e4fe60469c50dcb4ae5ae892fb0781919422f8624cc3626368195f1850cf'::text AS reviewed_body,
          '54bc2ac100ec93402ce3990b387b8b7f2bd2549e7746dfe2d72162ceaba345c7'::text AS batch4d_wrapper,
-         'ff1d267ce17a72fde8a7382ecb58335e79cef26253056e95ea5fb45cae355dca'::text AS fp1_impl
+         '3eecc3b2332ddf224dd1bb75e7a58871c75375d7c3e5f2104f002d4791d52fe0'::text AS fp1_impl
 ), installed AS (
   SELECT p.proname, encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') AS body_sha
   FROM pg_proc p

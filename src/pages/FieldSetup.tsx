@@ -707,7 +707,19 @@ function FieldSetupPage() {
     try {
       const data = await loadFieldSplit(fieldId, localToday());
       if (seq !== fieldLoadSeqRef.current) return; // another field (or a fresh read) took over meanwhile
-      loadedSplitsRef.current = splitRowsFrom(data.inForce);
+      // What the user did not touch takes the saved value, so a retry never sends an old split or clears a note
+      // someone else wrote. The page is locked while saving, so billingSplits and payerNotes are what was sent.
+      const rows = splitRowsFrom(data.inForce);
+      if (splitShape(billingSplits) === splitShape(loadedSplitsRef.current ?? [])) setBillingSplits(rows);
+      const oldNotes = loadedNotesRef.current;
+      setPayerNotes((current) => {
+        const merged = { ...current };
+        for (const cid of new Set([...Object.keys(oldNotes), ...Object.keys(data.notes)])) {
+          if ((current[cid] ?? '') === (oldNotes[cid] ?? '')) merged[cid] = data.notes[cid] ?? '';
+        }
+        return merged;
+      });
+      loadedSplitsRef.current = rows;
       loadedNotesRef.current = data.notes;
       setSplitHistory(data.history);
       setInForceSplit(data.inForce);
@@ -721,7 +733,8 @@ function FieldSetupPage() {
   const [staleSplit, setStaleSplit] = useState<SplitVersion | null>(null);
   useEffect(() => { setStaleSplit(null); }, [id]); // the warning belongs to the field it was found on
 
-  const handleSave = async (staleChecked = false) => {
+  // acknowledgedVersionId: the newer version the user chose to replace; a later one still warns.
+  const handleSave = async (acknowledgedVersionId?: string) => {
     if (!field.field_name) {
       toast('error', 'Field name is required');
       return;
@@ -750,11 +763,11 @@ function FieldSetupPage() {
     }
 
     setSaving(true);
-    if (splitChanged && !isNew && id && !staleChecked) {
+    if (splitChanged && !isNew && id) {
       const seq = fieldLoadSeqRef.current;
       try {
         const latest = (await loadFieldSplit(id, localToday())).history[0] ?? null;
-        if (seq === fieldLoadSeqRef.current && latest && latest.id !== (splitHistory[0]?.id ?? null)) {
+        if (seq === fieldLoadSeqRef.current && latest && latest.id !== (acknowledgedVersionId ?? splitHistory[0]?.id ?? null)) {
           setStaleSplit(latest);
           setSaving(false);
           return;
@@ -1877,8 +1890,9 @@ function FieldSetupPage() {
         open={staleSplit !== null}
         onClose={() => setStaleSplit(null)}
         onConfirm={() => {
+          const acknowledged = staleSplit?.id;
           setStaleSplit(null);
-          void handleSave(true);
+          void handleSave(acknowledged);
         }}
         title="Split changed since you opened this field"
         message={staleSplit

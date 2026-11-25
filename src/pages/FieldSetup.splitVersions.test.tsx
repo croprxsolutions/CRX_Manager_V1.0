@@ -238,6 +238,37 @@ describe('Field Setup — FP-1 split versions', () => {
     }
   });
 
+  it('after a failed notes save, what the user did not touch takes what others saved meanwhile', async () => {
+    let fail = true;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'set_field_billing_split' && fail) {
+        fail = false;
+        // Meanwhile another rep saved 50/50 and changed the landlord's note.
+        VERSIONS.unshift({
+          ...VERSIONS[0], id: 'version-3', version_number: 3, effective_from: '2026-11-24',
+          field_billing_split_payers: [payer('customer-1', 'Owner Farm', 50_000_000), payer('customer-2', 'Landlord Farm', 50_000_000)],
+        });
+        notes = [{ customer_id: 'customer-2', notes: 'Call before spraying' }];
+        return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+      }
+      return Promise.resolve({ data: name === 'set_field_billing_split' ? { wrote_version: false } : [], error: null });
+    });
+    try {
+      await open();
+      fireEvent.change(screen.getByLabelText('Notes for Owner Farm'), { target: { value: 'Gate code 42' } });
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+      await waitFor(() => expect(screen.getByLabelText('Notes for Landlord Farm')).toHaveValue('Call before spraying'));
+      expect(screen.getByLabelText('Product share for Owner Farm')).toHaveValue('50.00');
+      expect(screen.getByLabelText('Notes for Owner Farm')).toHaveValue('Gate code 42');
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+      await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(2));
+      // The retry sends only the user's own note: no old split, no cleared landlord note.
+      expect(calls('set_field_billing_split')[1]).toMatchObject({ p_payers: null, p_notes: [{ customer_id: 'customer-1', notes: 'Gate code 42' }] });
+    } finally {
+      if (VERSIONS[0].id === 'version-3') VERSIONS.shift();
+    }
+  });
+
   it('after a failed split save it compares against the split really saved (a lost reply may have saved it)', async () => {
     let lostReplies = 1;
     mockRpc.mockImplementation((name: string) => {

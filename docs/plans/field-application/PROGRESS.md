@@ -2,7 +2,7 @@
 
 Each lane writes only its own section; a slice 2 or 3 lane adds its own section when it starts. The shared lines (lease, Mason batches, release state) are written by the database lane. States (`BUILD-PLAN.md` › Rules 5): NOT STARTED, IN PROGRESS, IN REVIEW (PR open), MERGED (in staging), VERIFIED (applied on staging, scenarios re-run there), READY FOR RELEASE, LIVE, PARKED (reason), BLOCKED (on what), WAITING ON MASON.
 
-`JobDetail.tsx` lease: paperwork lane (field-paper-2), granted 2026-11-24; released when its PR merges into staging.
+`JobDetail.tsx` lease: free. The paperwork lane released it 2026-11-24 when #2458 merged into staging.
 
 ## Kit
 
@@ -60,12 +60,20 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 
 | Item | State | Proof / link | Note |
 |---|---|---|---|
-| 1 Safety sheet (off by default) | IN REVIEW | #2468 `feat/field-paper-1`; rendered: off (no safety page), on with 3 products, on with 38 products (all 38 rows, flowing onto a second safety page) | **Mason decision 2026-11-24:** "were not going to print safety info by defualt it will normally be off but if selected it all print on its own sheet". Replaces "safety on every page". New print option "Print safety sheet" (off); a saved preference from before reads as off. Lists exactly the job order's product lines; every safety value (EPA no., signal word, REI, PHI) read at print time from that line's own product record (by id; Job Detail now passes the line's product id, orchestrator 2026-11-24). **Mason 2026-11-24, "Yes, today's records":** the safety sheet shows today's product records and says "From product records on <print date>"; the job order itself keeps its own saved REI/PHI; a # column gives each row's job order line; a missing value prints "See label"; a failed read prints "could not be loaded". Touches `JobDetail.tsx` (Sol). The Enhanced/Custom tank-mix table keeps its existing REI/PHI columns |
-| 2 Map pages only print | IN REVIEW | #2458 `feat/field-paper-2` (stacked on 4) | Maps only; a job with no maps refuses plainly. `JobDetail.tsx` lease: paperwork lane (field-paper-2), granted 2026-11-24; released when its PR merges into staging. JobDetail is on the Sol list |
+| 1 Safety sheet (off by default) | MERGED | #2468 (fd3206e53); rendered: off (no safety page), on with 3 products, on with 38 products (all 38 rows, flowing onto a second safety page) | **Mason decision 2026-11-24:** "were not going to print safety info by defualt it will normally be off but if selected it all print on its own sheet". Replaces "safety on every page". New print option "Print safety sheet" (off); a saved preference from before reads as off. Lists exactly the job order's product lines; every safety value (EPA no., signal word, REI, PHI) read at print time from that line's own product record (by id; Job Detail now passes the line's product id, orchestrator 2026-11-24). **Mason 2026-11-24, "Yes, today's records":** the safety sheet shows today's product records and says "From product records on <print date>"; the job order itself keeps its own saved REI/PHI; a # column gives each row's job order line; a missing value prints "See label"; a failed read prints "could not be loaded". Touches `JobDetail.tsx` (Sol). The Enhanced/Custom tank-mix table keeps its existing REI/PHI columns. **Mason 2026-11-24, "Today's only, no flag":** no flag when a job's saved interval is longer than today's record (Sol finding skipped by Mason; `docs/manual/decision-log.d/2026-11-24-pr2468-*`) |
+| 2 Map pages only print | MERGED | #2458 (652da1d25) | Maps only; a job with no maps refuses plainly. `JobDetail.tsx` lease released on merge |
 | 3 Spray-order numbers on maps | MERGED | #2455 (5f375e8be) | Overview labels `N · acres`; per-field page title `Stop N`; numbers restart per job (test) |
-| 4 Directions link per field | IN REVIEW | #2456 `feat/field-paper-4`; Terra CLEAN vs 3 | Tappable Google Maps link per mapped field, in stop order, under the field table |
-| 5 Loader water to add + finished gallons | MERGED | #2466 `feat/field-paper-5`; rendered: tank loads, condensed, one batch, overfill, and a dash with its note for a form not on file, a liquid sold by weight, and a missing amount | **Mason 2026-11-24: "Yes, only when known".** Water to add shows only when every product record says liquid or dry and every liquid sizes to gallons; otherwise a dash and "set liquid/dry on the product" (or the amount/unit reason). No guessing from the unit |
+| 4 Directions link per field | MERGED | #2456 (66061d332) | Tappable Google Maps link per mapped field, in stop order, under the field table |
+| 5 Loader water to add + finished gallons | MERGED | #2466 (b634db721); rendered: tank loads, condensed, one batch, overfill, and a dash with its note for a form not on file, a liquid sold by weight, and a missing amount | **Mason 2026-11-24: "Yes, only when known".** Water to add shows only when every product record says liquid or dry and every liquid sizes to gallons; otherwise a dash and "set liquid/dry on the product" (or the amount/unit reason). No guessing from the unit |
 | 6 EPA dash / Unknown | PARKED ("Unknown" half) | dash: already prints for any blank number (`applicatorSheetPdf.test.ts`, blank and null rows) | No product value says a product is EPA-registered (`products.epa_registration` is the number only; `epa_registrations` is keyed by the number). "Unknown" needs that flag: asked below |
+
+Paperwork follow-ups (logged, not fixed; none touches money, stock or data):
+
+- Map pages only is hidden on a saved job that has mapped fields but no chemical lines yet (the button sits in the chemical-gated print group). Codex P2 on #2458.
+- #2468 MED: a tab left open across the deploy can save print options without the safety choice (reads as off, the safe default).
+- #2468 MED: in a batch print, a failed safety read shows only inside that job's PDF, not as a toast.
+- #2468 LOW: safety continuation pages don't repeat the record date.
+- #2468 LOW: the 40-row test checks table rows, not a rendered page 2 (covered by a render before merge).
 
 ## Needs another lane
 

@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-24 — Field billing rounds like chemical sales; field app goes live in slices
+
+**Decision (Mason, in chat, 2026-11-24: "billing logic and rounding etc matches chemical sales"; "my newest answers beat old answer so remove conflicting older answers").** Field invoices use the chemical-sale split rule (others rounded down, the job's customer takes the rest; largest share if the customer has 0%), and each product is priced once per job, so a job never bills more than gallons × price (1 gal at 10.01 over two fields = 5.01 + 5.00). Replaces the 2026-11-24 morning "closest to exact" answer. Go-live in slices: who pays and paperwork, then crew on CRX, then billing on a switch-on date Mason picks; Chem Man bills until then. Partial hold release, leftover claims, one-click bill actual used and the duplicate-load flag move to spring.
+**Why:** one rounding rule customers see on every invoice; the extra-cent bug is gone; less to build before February.
+**What this forbids/implies:** the field kit (`docs/plans/field-application/`) is now master copies only; the 2026-11-08 build sheet and backlog were removed (git history) and their still-valid rules live in `CONTRACT-who-pays.md` and `CONTRACT-field-billing.md`, so older entries' links to them point at history. On an even split the grower can carry up to one cent more per other payer on each line. Per-payer prices on one field also wait for spring; if the mixer tablet account is late, mixers use their own logins.
+
 ## 2026-11-22 — #2217: Mason owner-accepted 1 Sol finding(s) at `e197b9d15d20`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2217 at `e197b9d15d20` (base `6e77a9e7a5e2`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

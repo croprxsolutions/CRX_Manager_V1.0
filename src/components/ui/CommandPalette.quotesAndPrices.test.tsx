@@ -111,6 +111,17 @@ describe('CommandPalette quotes and prices', () => {
     expect(mockFrom.mock.calls.some(([t]) => t === 'quotes')).toBe(false);
   });
 
+  it('keeps room for matching quotes when other matches fill the list', async () => {
+    mockRpc.mockResolvedValue({
+      data: Array.from({ length: 25 }, (_, i) => ({ entity_type: 'customer', id: `cust-${i}`, primary_text: `Hill Customer ${i}`, secondary_text: 'Robinson' })),
+      error: null,
+    });
+    renderAndSearch('hill');
+    expect(await screen.findByText('Quote Q-1042')).toBeInTheDocument();
+    expect(screen.getByText('Quote Q-0999')).toBeInTheDocument();
+    expect(screen.getAllByRole('option').length).toBeLessThanOrEqual(25);
+  });
+
   it('keeps the other results when the quote or price read fails', async () => {
     mockFrom.mockImplementation((table: string) => chain(table, () => ({ data: null, error: { message: 'nope' } })));
     renderAndSearch('roundup');

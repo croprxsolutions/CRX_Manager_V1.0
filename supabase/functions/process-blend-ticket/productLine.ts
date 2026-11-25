@@ -40,15 +40,10 @@ export function parseProductLine(
       const ratePerAcre = parts[1] || null;
       const totalProduct = parts.length >= 3 ? parts[2] : null;
 
-      const qtyMatch = (totalProduct || ratePerAcre || "").match(
-        /([\d,]+\.?\d*)/,
-      );
-      const quantity = qtyMatch ? parseFloat(qtyMatch[1].replace(/,/g, "")) : 0;
+      // Same strict amount cell as the plain reader: unreadable text gives 0 and a blank unit for the rep.
       const cell = readAmountCell(totalProduct || ratePerAcre || "");
-      const unitMatch = (totalProduct || ratePerAcre || "").match(
-        /(gal|gallon|gallons|lb|lbs|oz|qt|pt|pint|quart|l|ml)/i,
-      );
-      const unit = cell ? cell.unit : (unitMatch ? unitMatch[1] : null);
+      const quantity = cell?.amount ?? 0;
+      const unit = cell?.unit ?? null;
 
       return {
         productName,
@@ -82,12 +77,6 @@ export function parseProductLine(
   const productName = tokens.slice(0, numIdx).join(" ");
   if (productName.length < 2) return null;
 
-  const numToken = tokens[numIdx];
-  const qtyUnitMatch = numToken.match(
-    /^([\d,]+\.?\d*)(pt|gal|lb|oz|qt|ml|l|g)?$/i,
-  );
-  const unitFromQty = qtyUnitMatch?.[2] || null;
-
   const ratePerAcre = tokens[numIdx] || null;
   const totalProduct = tokens.length > numIdx + 1
     ? tokens.slice(numIdx + 1).join(" ")
@@ -98,19 +87,13 @@ export function parseProductLine(
   const rate = readAmountCell(tokens.slice(numIdx).join(" "));
   const total = rate?.rest ? readAmountCell(rate.rest) : null;
 
-  let quantity: number;
-  let unit: string | null;
+  let quantity = rate?.amount ?? 0;
+  let unit = rate?.unit ?? null;
   if (total) {
     quantity = total.amount;
     // A bare total at the end of the line shares the rate's unit; anything else unrecognised stays blank for the rep.
     unit = total.unit ??
-      (total.word === null && total.rest === "" ? rate?.unit ?? null : null);
-  } else {
-    quantity = qtyUnitMatch ? parseFloat(qtyUnitMatch[1].replace(/,/g, "")) : 0;
-    const unitMatch = (totalProduct || "").match(
-      /(gal|gallon|gallons|lb|lbs|oz|qt|pt|pint|quart|l|ml|g)/i,
-    );
-    unit = unitFromQty || (unitMatch ? unitMatch[1] : null);
+      (total.word === null && total.rest === "" ? unit : null);
   }
 
   return {

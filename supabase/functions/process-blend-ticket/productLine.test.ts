@@ -124,3 +124,20 @@ Deno.test("lot numbers, EPA numbers and unknown units never become a confident t
     unit: null,
   });
 });
+
+Deno.test("both readers use the strict cell; no g is found inside another word (Luna round 1)", () => {
+  assertEquals(read("Piksi | 6 g | .75 g")?.quantity, 0.75);
+  assertEquals(read("Piksi | 6 g | 1,5 g"), {
+    name: "Piksi",
+    quantity: 0,
+    unit: null,
+  });
+  assertEquals(read("Piksi 6 mg"), { name: "Piksi", quantity: 6, unit: null });
+  assertEquals(read("Piksi 6 kg"), { name: "Piksi", quantity: 6, unit: null });
+  assertEquals(read("Seed 6 bags"), { name: "Seed", quantity: 6, unit: null });
+  assertEquals(read("Roundup | 32 oz"), {
+    name: "Roundup",
+    quantity: 32,
+    unit: "oz",
+  });
+});

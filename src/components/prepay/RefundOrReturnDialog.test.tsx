@@ -136,6 +136,33 @@ describe('RefundOrReturnDialog: refund paid outside CRX', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 
+  it('entering the same refund again, even after closing the dialog, sends the same retry key (Sol r3 H2)', async () => {
+    H.rpc.mockResolvedValue({ data: null, error: { message: 'NETWORK: the reply was lost' } });
+    const fill = async (amount: string) => {
+      fireEvent.click(await screen.findByRole('radio', { name: /Refund paid outside CRX/ }));
+      fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: amount } });
+      fireEvent.change(screen.getByLabelText(/^Reference/), { target: { value: 'QuickBooks check 1057' } });
+      fireEvent.change(screen.getByLabelText(/^Reason/), { target: { value: 'Grower overpaid' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Record refund…' }));
+      fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Record refund' }));
+      await waitFor(() => expect(H.toast).toHaveBeenCalled());
+      H.toast.mockClear();
+    };
+    const first = render(<RefundOrReturnDialog open onClose={vi.fn()} onRecorded={vi.fn()} customerId="c1" farmName="Prairie Ridge Farms" />);
+    await fill('300');
+    first.unmount();
+    render(<RefundOrReturnDialog open onClose={vi.fn()} onRecorded={vi.fn()} customerId="c1" farmName="Prairie Ridge Farms" />);
+    await fill('300');
+    expect(H.rpc).toHaveBeenCalledTimes(2);
+    const [a, b] = H.rpc.mock.calls.map((c) => c[1].p_idempotency_key);
+    expect(b).toBe(a);
+    expect(a).toMatch(/^record_outside_refund:admin-1:[0-9a-f]{16}$/);
+    cleanup();
+    render(<RefundOrReturnDialog open onClose={vi.fn()} onRecorded={vi.fn()} customerId="c1" farmName="Prairie Ridge Farms" />);
+    await fill('301');
+    expect(H.rpc.mock.calls[2][1].p_idempotency_key).not.toBe(a);
+  });
+
   it('asks before recording a second refund with the same reference', async () => {
     H.rpc.mockResolvedValueOnce({ data: null, error: { message: 'REFUND_DUPLICATE_REFERENCE: a refund with reference "x" is already recorded' } })
       .mockResolvedValueOnce({ data: { reversal_id: 'r2', amount_cents: 1000, prepay_balance_cents: 49000 }, error: null });
@@ -150,8 +177,8 @@ describe('RefundOrReturnDialog: refund paid outside CRX', () => {
     expect(screen.getByText(/already recorded for this customer/)).toBeInTheDocument();
     fireEvent.click(again);
     await waitFor(() => expect(H.rpc).toHaveBeenLastCalledWith('record_outside_refund', expect.objectContaining({ p_allow_duplicate_reference: true })));
-    // The same refund keeps its retry key with or without the go-ahead, so a lost reply replays (Sol r2 H2).
-    expect(H.rpc.mock.calls[1][1].p_idempotency_key).toBe(H.rpc.mock.calls[0][1].p_idempotency_key);
+    // A second refund the admin confirmed gets its own fresh key, never the first refund's (Sol r3 H2).
+    expect(H.rpc.mock.calls[1][1].p_idempotency_key).not.toBe(H.rpc.mock.calls[0][1].p_idempotency_key);
   });
 
   it('the duplicate go-ahead is taken back when the refund changes (Sol r1 H3)', async () => {

@@ -7,6 +7,7 @@ import { supabase, assertRpcResult } from './db';
 import { fetchAllRows } from './pagedRead';
 import { addDaysToDate, businessDayStartIso, parseLocalDate, todayInBusinessTz } from './dateUtils';
 import { formatCents as fmt } from './money';
+import { fingerprintIntentPayload } from './idempotency';
 import { agingCents, isPricedAgingRow } from './arAging';
 import type { ARAgingRow } from '../types';
 
@@ -56,6 +57,15 @@ export function planRefundDraw(credits: DrawCredit[], amountCents: number, picke
     left -= take;
   }
   return parts;
+}
+
+/**
+ * A refund's retry key, built from the refund itself, so the same refund entered again after a lost reply replays
+ * its receipt (record_outside_refund binds the key to the actor and the exact payload server-side, so a different
+ * refund under the same key is refused, never recorded).
+ */
+export function refundRetryKey(actorId: string, customerId: string, creditId: string | null, amountCents: number | null, reference: string, paidOn: string | null): string {
+  return `record_outside_refund:${actorId}:${fingerprintIntentPayload([customerId, creditId, amountCents, reference.toLowerCase(), paidOn])}`;
 }
 
 export const drawText = (parts: DrawPart[]) => parts.map((p) => `${p.label} ${fmt(p.cents)}`).join(', then ');

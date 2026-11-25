@@ -12,7 +12,7 @@ import { formatCents as fmt } from '../../lib/money';
 import { Sentry } from '../../lib/sentry';
 import { toSentryError } from '../../lib/sentryError';
 import {
-  loadReturnEffect, loadReturnableCheck, loadReturnableChecks, planRefundDraw, refundErrors, returnedDateError,
+  loadReturnEffect, loadReturnableCheck, loadReturnableChecks, planRefundDraw, refundErrors, refundRetryKey, returnedDateError,
   type ClosedPeriod, type DrawCredit, type ReturnEffect, type ReturnableCheck,
 } from '../../lib/m9Reversals';
 
@@ -50,9 +50,12 @@ export function useRefundForm(o: { customerId: string; basics: DialogBasics | nu
   const refundReason = `${o.reason.trim()} (paid by ${method})`;
   const intent = JSON.stringify([o.customerId, amountCents, paidOn, refundReference, refundReason, pickedOnly]);
   const duplicate = duplicateFor === intent;
-  // One key per refund, whether or not its duplicate go-ahead is given: a lost reply retried either way replays the
-  // receipt, or is refused as changed details, never recorded twice (Sol r2 H2).
-  const idem = useIdempotencyKey('record_outside_refund', o.profileId || '', intent);
+  // The retry key is the refund itself (customer, credit, amount, reference, date paid; Sol r3 H2): entering the same
+  // refund again, after a lost reply and even after closing the dialog or reloading, replays its receipt instead of
+  // recording it twice. A changed reason on such a resend is refused as changed details. Only a second refund the
+  // admin confirms through the "same reference?" prompt gets a fresh key.
+  const refundKey = refundRetryKey(o.profileId || '', o.customerId, pickedOnly, amountCents, refundReference, paidOn);
+  const secondRefund = useIdempotencyKey('record_outside_refund', o.profileId || '', intent);
 
   const reset = () => {
     setAmount(''); setPaidOn(o.today); setMethod('Check'); setReference(''); setSource('oldest'); setPickedId(''); setDuplicateFor(null);
@@ -71,13 +74,13 @@ export function useRefundForm(o: { customerId: string; basics: DialogBasics | nu
           p_reason: refundReason,
           p_credit_id: pickedOnly ?? undefined,
           p_performed_by: o.profileId,
-          p_idempotency_key: idem.getKey(),
+          p_idempotency_key: duplicate ? secondRefund.getKey() : refundKey,
           p_allow_duplicate_reference: duplicate,
         });
         if (error) {
           // Refused as another request's retry key: nothing was saved, so the next try starts fresh.
           const binding = getIdempotencyBindingRejection(error);
-          if (binding === 'intent' || binding === 'actor') idem.resetKey();
+          if (duplicate && (binding === 'intent' || binding === 'actor')) secondRefund.resetKey();
           if (/^REFUND_DUPLICATE_REFERENCE\b/.test(error.message ?? '')) { setDuplicateFor(intent); throw new CriticalActionHandledError('duplicate reference'); }
           throw error;
         }
@@ -88,7 +91,7 @@ export function useRefundForm(o: { customerId: string; basics: DialogBasics | nu
       sentryTag: 'record_outside_refund',
     });
     if (!result) return false;
-    idem.resetKey();
+    if (duplicate) secondRefund.resetKey();
     // The receipt's balance, not the preview's (another change may have landed meanwhile; Sol r1 MED 15).
     o.toast('success', `Refund of ${fmt(result.amount_cents)} recorded. Prepay is now ${fmt(result.prepay_balance_cents ?? availableCents - result.amount_cents)}.`);
     return true;

@@ -367,6 +367,82 @@ describe('SupplierPricing page', () => {
     )).toBeInTheDocument();
   });
 
+  it('warns, without blocking approval, when a quote is more than 40% from the current approved price per unit for its link', async () => {
+    const link = (id: string) => ({
+      id, product_id: 'product-1', product_name: 'Atrazine',
+      vendor_id: 'vendor-1', vendor_name: 'The Andersons', supplier_sku: id,
+      supplier_product_name: 'Atrazine 2x2.5', supplier_uom: 'case',
+      supplier_pack_description: '2 x 2.5 gal', inventory_units_per_supplier_unit: 5,
+      conversion_unit: 'gal', comparison_status: 'comparable', comparison_note: null,
+      link_status: 'confirmed', is_reusable: true, is_preferred: false, is_active: true,
+    });
+    const supplier = (linkId: string, perGalCents: bigint) => ({
+      vendor_id: 'vendor-1', vendor_name: 'The Andersons', product_supplier_link_id: linkId,
+      quoted_package_cost_cents: perGalCents * 5n, normalized_cost_cents: perGalCents, effective_from: '2026-07-01',
+      comparison_status: 'comparable', is_best_comparable: linkId === 'link-1',
+    });
+    // Each row is one case (5 gal), so cost_cents / 5 is the cost per gallon.
+    const row = (n: number, linkId: string, caseCents: bigint) => ({
+      id: `row-${n}`, row_number: n, product_id: 'product-1', product_name: 'Atrazine',
+      product_supplier_link_id: linkId, supplier_sku: linkId, supplier_product_name: 'Atrazine 2x2.5',
+      cost_cents: caseCents, price_unit: 'case', package_quantity: 1,
+      effective_from: `2026-07-${10 + n}`, effective_to: null, price_kind: 'quote', row_status: 'new',
+      validation_errors: [], observation_id: null,
+    });
+    mockGetWorkspace.mockResolvedValue({
+      vendors: [{ id: 'vendor-1', name: 'The Andersons' }],
+      products: [{ id: 'product-1', product_name: 'Atrazine', sku: 'A-1', inventory_unit: 'gal' }],
+      links: [link('link-1'), link('link-2'), link('link-3')],
+      imports: [{
+        id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
+        document_date: '2026-07-18', ingestion_method: 'quick_quote', status: 'needs_review',
+        row_count: 7, eligible_row_count: 7, approved_observation_count: 0,
+        source_document_name: null, created_at: '2026-07-18T12:00:00Z',
+      }],
+      aliases: [],
+      // Two links on one product: link-1 is $9.00 per gal, link-2 is $900.00 per gal. link-3 has no approved price.
+      evidence: [{
+        product_id: 'product-1', supplier_quote_count: 2, comparable_quote_count: 2,
+        replacement_cost_cents: 900n, replacement_cost_as_of: '2026-07-01', best_supplier: 'The Andersons',
+        last_paid_cents: null, last_paid_as_of: null, recent_po_weighted_average_cents: null,
+        recent_po_window: 'trailing_12_months', comparison_status: 'comparable',
+        suppliers: [supplier('link-1', 900n), supplier('link-2', 90_000n)],
+      }],
+    });
+    mockGetImport.mockResolvedValue({
+      id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
+      document_date: '2026-07-18', ingestion_method: 'quick_quote',
+      format_version: 'crx-supplier-quick-quote-phase1b-v1', status: 'needs_review',
+      source_document_name: null, row_count: 7, eligible_row_count: 7,
+      approved_observation_count: 0, created_at: '2026-07-18T12:00:00Z',
+      rows: [
+        row(1, 'link-1', 6_300n), // $12.60 per gal: exactly 40% above, no warning.
+        row(2, 'link-1', 6_305n), // $12.61 per gal: just over 40% above.
+        row(3, 'link-1', 2_700n), // $5.40 per gal: exactly 40% below, no warning.
+        row(4, 'link-1', 2_695n), // $5.39 per gal: just over 40% below.
+        row(5, 'link-1', 450_000n), // $900.00 per gal: a 100x typo on link-1.
+        row(6, 'link-2', 450_000n), // $900.00 per gal is link-2's own price: no warning.
+        row(7, 'link-3', 450_000n), // No approved price on link-3: nothing to compare.
+      ],
+    });
+
+    renderSupplierPricing();
+    fireEvent.click(await screen.findByRole('button', { name: /The Andersons/ }));
+
+    const warning = (perGal: string, direction: string) => `Check this price: ${perGal} per gal is ${direction} the current`
+      + ' approved $9.00 per gal (effective 2026-07-01). This warning does not block approval.';
+    // The first wait covers the click, the review load and the render.
+    expect(await screen.findByText(warning('$12.61', 'more than 40% above'), undefined, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.getByText(warning('$5.39', 'more than 40% below'))).toBeInTheDocument();
+    expect(screen.getByText(warning('$900.00', 'more than 40% above'))).toBeInTheDocument();
+    expect(screen.getAllByText(/^Check this price/)).toHaveLength(3);
+    expect(await screen.findByText('You are adding 7 supplier observations. You are changing ZERO sell prices.')).toBeInTheDocument();
+    const approve = screen.getByRole('button', { name: 'Approve selected observations' });
+    await waitFor(() => expect(approve).toBeEnabled());
+    fireEvent.click(approve);
+    expect(await screen.findByText(/Check first: 3 selected row\(s\) are more than 40% away from the current approved price\.$/)).toBeInTheDocument();
+  });
+
   it('shows no converted cost for a link in another unit, and says so for an oversized package', async () => {
     const link = (id: string, conversionUnit: string) => ({
       id, product_id: 'product-1', product_name: 'Atrazine',

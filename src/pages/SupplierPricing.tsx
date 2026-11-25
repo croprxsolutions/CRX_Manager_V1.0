@@ -115,10 +115,13 @@ function packageUnitText(row: SupplierImportReviewRow): string {
 }
 
 /**
- * The cost per inventory unit the server records for this quote. Only for rows that become (or
- * became) an observation: a refused row's unit may not be the link's, so its conversion means nothing.
+ * The cost per inventory unit the server records for this quote, or why it is not shown. Only for rows that become
+ * (or became) an observation: a refused row's unit may not be the link's, so its conversion means nothing.
  */
-function convertedCostText(row: SupplierImportReviewRow, workspace: SupplierPricingWorkspace | null): string | null {
+function rowUnitCost(
+  row: SupplierImportReviewRow,
+  workspace: SupplierPricingWorkspace | null,
+): { cents: bigint; unit: string } | string | null {
   if (!eligibleReviewRow(row.row_status) && row.row_status !== 'approved') return null;
   const link = workspace?.links.find((item) => item.id === row.product_supplier_link_id);
   if (!link || row.cost_cents === null) return null;
@@ -134,8 +137,33 @@ function convertedCostText(row: SupplierImportReviewRow, workspace: SupplierPric
   const unitCost = supplierUnitCostCents(row.cost_cents, row.package_quantity, factor);
   // A quantity too large to repeat exactly: say so rather than guess.
   if (unitCost === null) return 'converted cost not shown (package size too large)';
-  const unit = inventoryUnit || link.conversion_unit || 'inventory unit';
-  return `= ${formatSupplierCents(unitCost)} per ${unit}`;
+  return { cents: unitCost, unit: inventoryUnit || link.conversion_unit || 'inventory unit' };
+}
+
+function convertedCostText(row: SupplierImportReviewRow, workspace: SupplierPricingWorkspace | null): string | null {
+  const cost = rowUnitCost(row, workspace);
+  return cost === null || typeof cost === 'string' ? cost : `= ${formatSupplierCents(cost.cents)} per ${cost.unit}`;
+}
+
+// Mason, 2026-11-25: warn, never block, on a price swing of more than 40% either way from the link's current
+// approved price per unit (above 1.4x or below 0.6x), compared in whole cents.
+
+/** A plain-English warning when a pending row's per-unit cost is far from the link's current approved price, as loaded. */
+function priceJumpText(row: SupplierImportReviewRow, workspace: SupplierPricingWorkspace | null): string | null {
+  if (!eligibleReviewRow(row.row_status)) return null;
+  const cost = rowUnitCost(row, workspace);
+  if (cost === null || typeof cost === 'string') return null;
+  // Evidence holds each active link's current approved observation (effective today), at this row's conversion.
+  const last = workspace?.evidence
+    .flatMap((product) => product.suppliers)
+    .find((supplier) => supplier.product_supplier_link_id === row.product_supplier_link_id);
+  if (!last || last.normalized_cost_cents === null || last.normalized_cost_cents <= 0n) return null;
+  const lastCents = last.normalized_cost_cents;
+  const direction = cost.cents * 10n > lastCents * 14n ? 'more than 40% above'
+    : cost.cents * 10n < lastCents * 6n ? 'more than 40% below' : null;
+  if (!direction) return null;
+  return `Check this price: ${formatSupplierCents(cost.cents)} per ${cost.unit} is ${direction} the current approved `
+    + `${formatSupplierCents(lastCents)} per ${cost.unit} (effective ${last.effective_from}). This warning does not block approval.`;
 }
 
 function approveMessage(
@@ -151,8 +179,10 @@ function approveMessage(
     return `${row.product_name || 'Unmatched Product'}: ${quoted}${converted ? `${joiner}${converted}` : ''}.`;
   });
   const more = rows.length > 10 ? ` And ${rows.length - 10} more; see the Cost column.` : '';
+  const jumps = rows.filter((row) => priceJumpText(row, workspace) !== null).length;
+  const jumpNote = jumps > 0 ? ` Check first: ${jumps} selected row(s) are more than 40% away from the current approved price.` : '';
   return `You are adding ${selectedRowIds.size} supplier observations. You are changing ZERO sell prices.`
-    + `${costs.length > 0 ? ` ${costs.join(' ')}` : ''}${more}`;
+    + `${costs.length > 0 ? ` ${costs.join(' ')}` : ''}${more}${jumpNote}`;
 }
 
 export default function SupplierPricing() {
@@ -935,6 +965,7 @@ export default function SupplierPricing() {
                 {review.rows.map((row) => {
                   const eligible = eligibleReviewRow(row.row_status);
                   const convertedCost = convertedCostText(row, workspace);
+                  const priceJump = review.status === 'needs_review' ? priceJumpText(row, workspace) : null;
                   return (
                     <tr key={row.id} className="border-b border-gray-100">
                       <td className="px-2 py-2">
@@ -956,6 +987,7 @@ export default function SupplierPricing() {
                         {formatSupplierCents(row.cost_cents)}
                         {row.price_unit && <span className="text-secondary">{packageUnitText(row)}</span>}
                         {convertedCost && <p className="text-xs text-secondary">{convertedCost}</p>}
+                        {priceJump && <p className="mt-1 max-w-xs text-xs font-medium text-amber-800">{priceJump}</p>}
                       </td>
                       <td className="px-2 py-2">{row.effective_from || '—'}</td>
                       <td className="px-2 py-2">

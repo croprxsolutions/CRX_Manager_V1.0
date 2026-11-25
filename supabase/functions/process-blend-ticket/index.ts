@@ -1,6 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
-import { captureEdgeException, warnIfSentryMisconfigured } from "../_shared/sentry.ts";
+import {
+  captureEdgeException,
+  warnIfSentryMisconfigured,
+} from "../_shared/sentry.ts";
 import { requireActiveProfile } from "../_shared/auth.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import {
@@ -9,7 +12,14 @@ import {
   startSerializedLeaseHeartbeat,
   validateBlendImageRecords,
 } from "./guards.ts";
-import { calcProductConfidence, type ParsedProduct, parseProductLine } from "./productLine.ts";
+import {
+  calcProductConfidence,
+  nameSwallowsRate,
+  type ParsedProduct,
+  parseProductLine,
+  pickQuantity,
+  readAmountCell,
+} from "./productLine.ts";
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -389,27 +399,20 @@ function parseMultiLineProducts(
       if (numericValues.length > 0) {
         const ratePerAcre = numericValues[0] || null;
         const totalProduct = numericValues.length > 1 ? numericValues[1] : null;
-        const qtyStr = totalProduct || ratePerAcre || "0";
-        const qtyMatch = qtyStr.match(/([\d,]+\.?\d*)/);
-        const quantity = qtyMatch
-          ? parseFloat(qtyMatch[1].replace(/,/g, ""))
-          : 0;
-        const unitMatch = (totalProduct || ratePerAcre || "").match(
-          /(gal|gals|gallons?|lb|lbs|oz|qt|pt|pint|quart|l|ml|g|gools)/i,
+        const { quantity, unit } = pickQuantity(
+          readAmountCell(ratePerAcre || ""),
+          totalProduct,
+          numericValues.length > 2,
         );
 
         products.push({
           productName,
           quantity,
-          unit: unitMatch ? unitMatch[1] : null,
+          unit,
           ratePerAcre,
           totalProduct,
           lotNumber: null,
-          confidenceScore: calcProductConfidence(
-            productName,
-            quantity,
-            unitMatch?.[1] || null,
-          ),
+          confidenceScore: calcProductConfidence(productName, quantity, unit),
         });
         i = j;
         continue;
@@ -1057,14 +1060,21 @@ Deno.serve(async (req: Request) => {
       const matched = products
         ? fuzzyMatchProduct(prod.productName, products)
         : null;
+      const nameSwallowedRate = nameSwallowsRate(
+        prod,
+        (products ?? []).filter((p) => p.is_active).map((p) => p.product_name),
+      );
+      const unit = nameSwallowedRate ? null : prod.unit;
       return {
         product_id: matched?.id ?? null,
         product_name: prod.productName,
         quantity: prod.quantity,
-        unit: prod.unit,
+        unit,
         lot_number: prod.lotNumber,
         sequence_order: index + 1,
-        confidence_score: prod.confidenceScore,
+        confidence_score: nameSwallowedRate
+          ? calcProductConfidence(prod.productName, prod.quantity, null)
+          : prod.confidenceScore,
       };
     });
 

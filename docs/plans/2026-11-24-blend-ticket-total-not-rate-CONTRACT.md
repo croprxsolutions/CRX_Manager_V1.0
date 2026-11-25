@@ -11,11 +11,11 @@ Source: Sol round 11 HIGH 1 on #2267 (head `0b23deaef2cc`, skipped by Mason 2026
 
 ## Outcome
 
-Both single-line readers (plain spaces and pipes) read column 2 as the rate per acre and column 3 as the total used, with one rule (`pickQuantity` in `productLine.ts`):
+All three readers (plain spaces, pipes, and the multi-line reader) read the rate per acre, then the total used, through one rule (`pickQuantity` in `productLine.ts`), as Mason chose on 2026-11-24 ("strict rule"):
 
-- **Sure:** the total is a clean amount cell (`750 g`, `750g`, `.75 g`, `32qt.`, `1,500 qt`, an optional `/ac` after the rate) with a unit the reader knows, and nothing shifts the columns. Quantity and unit are the total's.
-- **Only a rate on the line:** quantity and unit are the rate's (unchanged).
-- **Anything else is a guess:** an unreadable or unit-less total, a unit the reader does not know (`mg`, `kg`, `bags`, `Lot`), a rate whose unit is unknown (`280 SL`), or another amount after the total. The best-guess number is kept but the unit is left **blank**. The reader never borrows the rate's unit and never finds `g` inside another word.
+- **Exact:** a rate with a known unit (an optional `/ac` or `per acre` after it) and a total that is a clean amount cell with a known unit (`750 g`, `750g`, `.75 g`, `32qt.`, `1,500 qt`, `750 grams`), and nothing else. Quantity and unit are the total's.
+- **Everything else keeps a best-guess number but a blank unit:** a line with only one amount (rate or total? the header has both columns), an empty, unreadable or unit-less total, a unit the reader does not know (`mg`, `kg`, `bags`, `Lot`), a rate whose unit is unknown (`280 SL`), extra text, amounts or columns. The guess is the total's number when one is readable (also a damaged `~10 gal`), else the rate's. The reader never borrows the rate's unit and never finds `g` inside another word.
+- **Catalog check:** if an active product's name equals the read name plus the read "rate" token (`Atrazine` + `4L` = `Atrazine 4L`), the columns shifted, and the unit is left blank (`nameSwallowsRate`, applied in `index.ts`).
 
 A blank unit is the safety valve: `create_application_record_from_blend_ticket` (body from `20260713060200`, renamed by `20261016140000`) passes the line unit to `field_app_priced_quantity`, which returns NULL for a blank unit, and the function raises `BLEND_TICKET_UNIT_UNCONVERTIBLE`. So a guessed line cannot be filed or deducted until a rep sets its unit. The batch approval screen does not show product lines, so this check, not a rep's reading of every line, is what stops a guess (Sol r1 LOW).
 
@@ -36,9 +36,10 @@ One PR into `staging`. The Edge Function runs from the deployed copy, so the fix
 
 ## Proof cases (Deno test against the real reader, `productLine.test.ts`)
 
-1. `Piksi Dust Inffurow 6 g 750 g` → 750 g; `6g 750g`, `32 oz 10 gal` → 10 gal, `1,500 qt`, `2 lbs 80 lbs` → 80 lb, `32 QTS`, `2 qt/ac 32 qt`, `32qt.`, `.75 g`, a trailing lot after a clean total, and the pipe forms.
-2. One-rate lines keep the rate: `Roundup 32 oz`, `32oz`, `2. qt`, `Roundup | 32 oz`.
-3. Every guess has a blank unit: lot and EPA numbers, `N/A`, `1,5 g`, a bare total, `mg`/`kg`/`bags`, `1 500 qt`, `Liberty 280 SL 32 oz 10 gal`, `Atrazine 4L 2 qt 100 qt`.
+1. Exact lines give the total: `Piksi Dust Inffurow 6 g 750 g` → 750 g; `6g 750g`; `32 oz 10 gal` → 10 gal; `1,500 qt`; `2 lbs 80 lbs` → 80 lb; `32 QTS`; `2 qt/ac 32 qt`; `2 qt per acre | 20 qt`; `32qt.`; `.75 g` total; `6 grams 750 grams`; `ml` stays `ml`; the pipe forms.
+2. One-amount lines keep the number, blank unit: `Roundup 32 oz`, `2. qt`, `Roundup | 32 oz`, an empty pipe total, `750 grams`.
+3. Every other guess has a blank unit: lot and EPA numbers, `N/A`, `1,5 g`, a bare total, `mg`/`kg`/`bags`, `1 500 qt`, damaged `~10 gal` (keeps 10), `Liberty 280 SL 32 oz 10 gal`, `Atrazine 4L 2 qt 100 qt`, extra pipe columns.
+4. The multi-line reader uses the same rule; `Atrazine 4L 2 qt` with `Atrazine 4L` in the catalog is caught.
 
 ## Challenge settlement (Astra `gpt-6.2-astra` high, 47 findings; compliance reviewer, 3 HIGH)
 
@@ -46,7 +47,8 @@ One PR into `staging`. The Edge Function runs from the deployed copy, so the fix
 - Luna r1–r2 and Sol r1 (`1029256da`): the pipe reader also uses the strict cell; a guess (unreadable or unit-less total, numeric product name, shifted columns) now always has a blank unit instead of borrowing the rate's (this reverses Luna r2's "inherit the rate's unit" suggestion, which Sol r1 showed can deduct 10 oz for 10 gal); `2.`, `QTS`, `/ac` read correctly.
 - Refuted: `ratePerAcre`/`totalProduct` text contents — only name, quantity, unit, lot and confidence are sent to `commit_blend_ticket_ocr_result` (`index.ts` `ocrProducts` mapping).
 - Out of scope, unchanged by this PR (pre-existing OCR layout limits): a row wrapped over two lines, mixed horizontal/vertical layouts, header order, section boundaries, the confidence formula, reprocess and filing/stock paths. Listed as follow-ups in the PR.
-- Luna r4–r6: pipe rate cells with extra text are not exact; an unreadable rate keeps a readable total's number; `/ac` is allowed in a pipe rate cell. Refuted: `ml` read as `l` (tested). Deferred: a product name ending in an amount with a known unit (`Atrazine 4L 2 qt`) still reads as rate + total, as the old reader also misread it; telling names from rates needs the product catalog. The first-number scan still drops lines like `1,500 qt` (old behavior; the line is missing, not wrong). A trailing empty pipe column is a table border and stays allowed.
+- Luna r4–r6: pipe rate cells with extra text are not exact; an unreadable rate keeps a readable total's number; `/ac` is allowed in a pipe rate cell. Refuted: `ml` read as `l` (tested). The first-number scan still drops lines like `1,500 qt` (old behavior; the line is missing, not wrong). A trailing empty pipe column is a table border and stays allowed.
+- Sol r2 (`270c1d338`): an empty pipe total and any one-amount line are now a guess (blank unit), since a single amount may be the rate; the catalog check catches a name that swallowed the rate token; damaged totals keep their number; `grams` and `per acre` are read; the multi-line reader uses the same rule. Still deferred: `Atrazine 4L 2 qt` when the catalog name is spelled differently; the token scan dropping lines that start with `.75` or `1,500`.
 - Decisions: legacy exposure and rollback are not new — the app is not in real use yet (2026-11-24) and #2267's gram change is on staging only; production deploy of the function waits for Mason's yes. No business decision is open.
 
 ## Open business decisions

@@ -1,5 +1,10 @@
 import { assertEquals } from "jsr:@std/assert@1.0.14";
-import { parseProductLine } from "./productLine.ts";
+import {
+  nameSwallowsRate,
+  parseProductLine,
+  pickQuantity,
+  readAmountCell,
+} from "./productLine.ts";
 
 function read(line: string) {
   const p = parseProductLine(line);
@@ -19,6 +24,7 @@ Deno.test("the total column, not the per-acre rate, is the quantity (Sol #2267 r
   check("Piksi Dust Inffurow 6 g 750 g", "Piksi Dust Inffurow", 750, "g");
   check("Piksi Dust 6g 750g", "Piksi Dust", 750, "g");
   check("Roundup 32 oz 10 gal", "Roundup", 10, "gal");
+  check("Roundup 32 oz/ac 10 gal", "Roundup", 10, "gal");
   check("Atrazine 2 qt 1,500 qt", "Atrazine", 1500, "qt");
   check("Atrazine 2 lbs 80 lbs", "Atrazine", 80, "lb");
   check("Atrazine 2 qt 32 QTS", "Atrazine", 32, "QT"); // case kept, as before
@@ -31,15 +37,56 @@ Deno.test("the total column, not the per-acre rate, is the quantity (Sol #2267 r
   check("Atrazine | 2 qt | 32qt.", "Atrazine", 32, "qt");
 });
 
-Deno.test("a line with only a rate keeps it", () => {
-  check("Roundup 32 oz", "Roundup", 32, "oz");
-  check("Roundup 32oz", "Roundup", 32, "oz");
-  check("Roundup 10 ml", "Roundup", 10, "ml");
-  check("Roundup 10ml", "Roundup", 10, "ml");
+Deno.test("ml stays ml", () => {
+  check("Roundup 2 l 10 ml", "Roundup", 10, "ml");
+  check("Roundup 2l 10ml", "Roundup", 10, "ml");
   check("Roundup | 2 l | 10 ml", "Roundup", 10, "ml");
-  check("Atrazine 2. qt", "Atrazine", 2, "qt");
-  check("Roundup | 32 oz", "Roundup", 32, "oz");
-  check("Roundup | 32 oz |", "Roundup", 32, "oz");
+});
+
+Deno.test("a line with only one amount keeps it but leaves the unit blank (strict rule, Sol r2)", () => {
+  check("Roundup 32 oz", "Roundup", 32, null);
+  check("Roundup 32oz", "Roundup", 32, null);
+  check("Atrazine 2. qt", "Atrazine", 2, null);
+  check("Roundup | 32 oz", "Roundup", 32, null);
+  check("Roundup | 32 oz |", "Roundup", 32, null);
+  check("Piksi Dust Inffurow | 6 g/ac | |", "Piksi Dust Inffurow", 6, null);
+  check("Piksi Dust Inffurow 750 grams", "Piksi Dust Inffurow", 750, null);
+});
+
+Deno.test("Sol r2: damaged totals keep their number; grams and per acre are read", () => {
+  check("Roundup | | ~10 gal", "Roundup", 10, null);
+  check("Roundup | 2 qt | ~20 qt", "Roundup", 20, null);
+  check("Roundup | 2 qt per acre | 20 qt", "Roundup", 20, "qt");
+  check("Piksi 6 grams 750 grams", "Piksi", 750, "g");
+});
+
+Deno.test("the multi-line reader uses the same rule", () => {
+  assertEquals(pickQuantity(readAmountCell("6 g"), "750 g"), {
+    quantity: 750,
+    unit: "g",
+  });
+  assertEquals(pickQuantity(readAmountCell("6 g"), null), {
+    quantity: 6,
+    unit: null,
+  });
+  assertEquals(pickQuantity(readAmountCell("6 g"), "750 mg"), {
+    quantity: 750,
+    unit: null,
+  });
+  assertEquals(pickQuantity(readAmountCell("6 g"), "750 g", true), {
+    quantity: 750,
+    unit: null,
+  });
+});
+
+Deno.test("a catalog name that swallows the rate token is caught (Sol r2)", () => {
+  const p = parseProductLine("Atrazine 4L 2 qt")!;
+  assertEquals(nameSwallowsRate(p, ["Roundup", "Atrazine 4L"]), true);
+  assertEquals(nameSwallowsRate(p, ["Atrazine"]), false);
+  assertEquals(
+    nameSwallowsRate(parseProductLine("Piksi Dust 6 g 750 g")!, ["Piksi Dust"]),
+    false,
+  );
 });
 
 Deno.test("anything uncertain leaves the unit blank so the stock check stops it (Astra, Luna, Sol r1)", () => {

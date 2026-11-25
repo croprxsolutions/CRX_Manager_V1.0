@@ -104,29 +104,36 @@ export function parseProductLine(
   };
 }
 
-const UNIT_WORD = /^(gals?|gallons?|lbs?|oz|qts?|pts?|pints?|quarts?|l|ml|g)$/i;
-const PER_ACRE = /^\/\s*a(?:c(?:re)?)?\.?(?=\s|$)\s*/i; // "/ac", "/A", "/acre."
+const UNIT_WORD =
+  /^(gals?|gallons?|lbs?|oz|qts?|pts?|pints?|quarts?|l|ml|g|grams?)$/i;
+// "/ac", "/A", "/acre.", "per acre"
+const PER_ACRE = /^(?:\/\s*|per\s+)a(?:c(?:re)?)?\.?(?=\s|$)\s*/i;
+// A damaged total like "~10 gal": only symbols before the number, so "lot 24" or "1,5" never count.
+const LOOSE_NUMBER =
+  /^[^a-z0-9.,]*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?=[\s a-z]|$)/i;
 
-// Strict rule: a unit is filled only for an exact line, name + rate with a known unit + (optionally)
-// total with a known unit, and nothing else. The total, when present, is the quantity ("6 g 750 g" is
-// 750 g, Sol #2267 r11). Any other line keeps a best-guess number with a blank unit, which the filing
-// stock-unit check refuses, so a rep must correct it before it can be filed or deducted.
-function pickQuantity(
+// Strict rule (Mason, 2026-11-24): a unit is filled only for an exact line, a rate with a known unit
+// and a total with a known unit, nothing else. The total is the quantity ("6 g 750 g" is 750 g, Sol
+// #2267 r11). Every other line (one amount only, an empty or unreadable total, an unknown unit, extra
+// text or columns) keeps a best-guess number with a blank unit, which the filing stock-unit check
+// refuses, so a rep must correct it before it can be filed or deducted. Used by all three readers.
+export function pickQuantity(
   rate: AmountCell | null,
   totalText: string | null,
   extraColumns = false,
 ): { quantity: number; unit: string | null } {
   const total = totalText ? readAmountCell(totalText) : null;
-  if (!rate) return { quantity: total?.amount ?? 0, unit: null };
-  const quantity = total?.amount ?? rate.amount;
-  const exact = rate.unit !== null && !extraColumns &&
-    (totalText === null || (total?.unit != null && END.test(total.rest)));
-  return { quantity, unit: exact ? (total ?? rate).unit : null };
+  const loose = totalText?.match(LOOSE_NUMBER)?.[1];
+  const quantity = total?.amount ??
+    (loose ? parseFloat(loose.replace(/,/g, "")) : rate?.amount ?? 0);
+  const exact = rate?.unit != null && total?.unit != null &&
+    END.test(total.rest) && !extraColumns;
+  return { quantity, unit: exact ? total.unit : null };
 }
 
 const END = /^[.;]*$/;
 
-type AmountCell = {
+export type AmountCell = {
   amount: number;
   word: string | null;
   unit: string | null;
@@ -146,4 +153,17 @@ export function readAmountCell(text: string): AmountCell | null {
     ? word.match(/(gal|gallon|gallons|lb|lbs|oz|qt|pt|pint|quart|l|ml|g)/i)![1]
     : null;
   return { amount: parseFloat(m[1].replace(/,/g, "")), word, unit, rest: m[3] };
+}
+
+const normName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+// A catalog name that ends with what the reader took as the rate ("Atrazine 4L" read as "Atrazine"
+// + rate 4L) means the columns shifted; the caller leaves the unit blank for the rep (Sol r2).
+export function nameSwallowsRate(
+  prod: Pick<ParsedProduct, "productName" | "ratePerAcre">,
+  catalogNames: string[],
+): boolean {
+  if (!prod.ratePerAcre) return false;
+  const joined = normName(prod.productName + prod.ratePerAcre);
+  return catalogNames.some((n) => normName(n) === joined);
 }

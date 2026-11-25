@@ -57,6 +57,6 @@ describe('GettingStarted — first billing cycle tracker', () => {
     // counts = [3,5,2,0,0] → first zero is index 3 → "Invoice posted"
     expect(await screen.findByText(/Next step: Invoice posted\./)).toBeTruthy();
     expect(screen.getByText('Payment recorded')).toBeTruthy();
-    expect(screen.getByText('Quote sent')).toBeTruthy();
+    expect(screen.getByText('Quote booked')).toBeTruthy();
   });
 });

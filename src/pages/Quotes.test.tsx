@@ -93,7 +93,7 @@ describe('Quotes list', () => {
     expect(screen.queryByText('Q-TEST-2')).not.toBeInTheDocument();
   });
 
-  it('row menu offers Convert to order only for sent and revised', async () => {
+  it('row menu offers Draw whole booking only for sent (Booked) and revised', async () => {
     H.tables.quotes = [quote(1, 'draft'), quote(2, 'sent'), quote(3, 'revised'), quote(4, 'accepted')];
     at('/quotes');
     await screen.findByText('Q-TEST-1');
@@ -104,8 +104,8 @@ describe('Quotes list', () => {
       return names;
     };
     expect(itemsFor(1)).toEqual(['Duplicate']);
-    expect(itemsFor(2)).toEqual(['Convert to order', 'Duplicate']);
-    expect(itemsFor(3)).toEqual(['Convert to order', 'Duplicate']);
+    expect(itemsFor(2)).toEqual(['Draw whole booking', 'Duplicate']);
+    expect(itemsFor(3)).toEqual(['Draw whole booking', 'Duplicate']);
     expect(itemsFor(4)).toEqual(['Duplicate']);
   });
 
@@ -201,7 +201,7 @@ describe('Quotes list', () => {
 
     // The status filter counts too.
     fireEvent.click(screen.getByRole('button', { name: 'All Status' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Sent' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Booked' }));
     expect(screen.queryByText('Q-TEST-1')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear filters' })).toBeInTheDocument();
   });
@@ -258,7 +258,7 @@ describe('Quotes list', () => {
     expect(await screen.findByText('Closed short', { selector: 'span' })).not.toHaveClass('capitalize');
     fireEvent.click(screen.getByRole('button', { name: 'All Status' }));
     const options = screen.getAllByRole('option').map((el) => el.textContent);
-    expect(options).toEqual(['All', 'Draft', 'Sent', 'Revised', 'Accepted', 'Declined', 'Expired', 'Cancelled', 'Fulfilled', 'Closed short']);
+    expect(options).toEqual(['All', 'Draft', 'Booked', 'Revised', 'Accepted', 'Declined', 'Expired', 'Cancelled', 'Fulfilled', 'Closed short']);
   });
 
   it('desktop search uses the long board placeholder, and Import quotes is reachable on phone too', async () => {
@@ -278,8 +278,8 @@ describe('Quotes list', () => {
     await screen.findByText('Q-TEST-1');
     expect(screen.getByRole('button', { name: 'All Status' })).not.toHaveClass('bg-crx-green-light');
     fireEvent.click(screen.getByRole('button', { name: 'All Status' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Sent' }));
-    expect(screen.getByRole('button', { name: 'Sent Status' })).toHaveClass('bg-crx-green-light');
+    fireEvent.click(screen.getByRole('option', { name: 'Booked' }));
+    expect(screen.getByRole('button', { name: 'Booked Status' })).toHaveClass('bg-crx-green-light');
   });
 
   it('row badges use the quote palette (Revised violet, Fulfilled teal, Closed short orange)', async () => {
@@ -321,7 +321,7 @@ describe('Quotes list on a phone', () => {
     expect(screen.queryByText('Quote page')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Q-TEST-1' }));
-    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Convert to order', 'Duplicate']);
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Draw whole booking', 'Duplicate']);
     expect(screen.queryByText('Quote page')).not.toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
 
@@ -472,7 +472,7 @@ describe('Quotes list remembers the view and offers Mine to a sales rep', () => 
     withQuotePage();
     await screen.findByText('Q-TEST-1');
     fireEvent.click(screen.getByRole('button', { name: 'All Status' }));
-    fireEvent.click(screen.getByRole('option', { name: /^(Sent|Booked)$/ }));
+    fireEvent.click(screen.getByRole('option', { name: 'Booked' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Search by quote number, customer or product' }), { target: { value: 'Farm 3' } });
     expect(screen.queryByText('Q-TEST-2')).not.toBeInTheDocument();
 

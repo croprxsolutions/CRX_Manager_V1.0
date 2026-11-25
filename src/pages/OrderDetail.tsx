@@ -755,7 +755,7 @@ export default function OrderDetail() {
           // Server-side backstop for the hidden Edit button: a draw-created
           // order's items are locked to the booking ledger (Codex r2 HIGH).
           if (hasRpcCode(error, RpcErrorCodes.BOOKING_DRAW_ORDER_LOCKED)) {
-            toast('error', 'This order was created by a booking draw-down — its items are locked to the booking. Void or cancel the order to return quantity to the booking, then draw again.');
+            toast('error', 'This order was drawn from a booking — its items are locked to the booking. Void or cancel the order to return quantity to the booking, then draw from booking again.');
             setEditing(false);
             setNewItems([]);
             fetchOrder();
@@ -1557,7 +1557,7 @@ export default function OrderDetail() {
           ) : (
             <>
               {order.booking_draw && (role === 'admin' || role === 'sales_rep') && order.status !== 'cancelled' && order.status !== 'voided' && (
-                <span className="text-xs text-secondary" title="This order was created by a booking draw-down. Its items mirror the booking ledger, so they can't be edited here — void or cancel the order to return quantity to the booking, then draw again.">
+                <span className="text-xs text-secondary" title="This order was drawn from a booking. Its items mirror the booking ledger, so they can't be edited here — void or cancel the order to return quantity to the booking, then draw from booking again.">
                   Booking draw — items locked
                 </span>
               )}

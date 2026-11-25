@@ -76,6 +76,33 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: a new parent should read no_approved_weight, read %', v_w;
   END IF;
 
+  -- After cutover, the liquid review chain covers the new approval path.
+  IF to_regprocedure('public.liquid_density_review_open()') IS NOT NULL THEN
+    IF public.liquid_density_review_open() THEN
+      BEGIN
+        PERFORM public.set_parent_density(v_pa, 0, 9.5, 'lb_per_gal', 'measured', NULL, 'smoke-pw-cutover-set-' || v_tag);
+        RAISE EXCEPTION 'SMOKE_FAIL: direct density approval remains open after cutover';
+      EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_REVIEW_RELOAD%' THEN RAISE; END IF;
+      END;
+      BEGIN
+        PERFORM public.correct_parent_density(v_pa, 0, 9.5, 'lb_per_gal', 'measured', NULL, 'Smoke correction',
+          'Smoke evidence', 'smoke-pw-cutover-correct-' || v_tag);
+        RAISE EXCEPTION 'SMOKE_FAIL: direct density correction remains open after cutover';
+      EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_REVIEW_RELOAD%' THEN RAISE; END IF;
+      END;
+      BEGIN
+        PERFORM public.approve_weights(jsonb_build_array(jsonb_build_object('kind', 'density', 'subject_id', v_pa,
+          'draft_id', gen_random_uuid(), 'expected_version', 1)), 'smoke-pw-cutover-approval-' || v_tag);
+        RAISE EXCEPTION 'SMOKE_FAIL: the legacy mixed approval path remains open after cutover';
+      EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT LIKE 'PRODUCT_WEIGHT_REVIEW_RELOAD%' THEN RAISE; END IF;
+      END;
+      RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: product weights chain passed';
+    END IF;
+  END IF;
+
   -- Set, replay, read.
   v_r1 := public.set_parent_density(v_pa, 0, 9.5, 'lb_per_gal', 'measured', NULL, 'smoke-pw-set-' || v_tag);
   v_r2 := public.set_parent_density(v_pa, 0, 9.5, 'lb_per_gal', 'measured', NULL, 'smoke-pw-set-' || v_tag);

@@ -44,22 +44,20 @@ export function parseProductLine(
         /([\d,]+\.?\d*)/,
       );
       const quantity = qtyMatch ? parseFloat(qtyMatch[1].replace(/,/g, "")) : 0;
+      const cell = readAmountCell(totalProduct || ratePerAcre || "");
       const unitMatch = (totalProduct || ratePerAcre || "").match(
-        /(gal|gallon|gallons|lb|lbs|oz|qt|pt|pint|quart|l|ml|g)/i,
+        /(gal|gallon|gallons|lb|lbs|oz|qt|pt|pint|quart|l|ml)/i,
       );
+      const unit = cell ? cell.unit : (unitMatch ? unitMatch[1] : null);
 
       return {
         productName,
         quantity,
-        unit: unitMatch ? unitMatch[1] : null,
+        unit,
         ratePerAcre,
         totalProduct,
         lotNumber: null,
-        confidenceScore: calcProductConfidence(
-          productName,
-          quantity,
-          unitMatch?.[1] || null,
-        ),
+        confidenceScore: calcProductConfidence(productName, quantity, unit),
       };
     }
   }
@@ -95,19 +93,25 @@ export function parseProductLine(
     ? tokens.slice(numIdx + 1).join(" ")
     : null;
 
-  // The first number is the per-acre rate; a later number is the total used, which is the quantity,
-  // as in the pipe and multi-line readers ("6 g 750 g" is 750 g, Sol #2267 round 11).
-  const totalMatch = (totalProduct || "").match(
-    /(\d[\d,]*\.?\d*)\s*(gal|gallon|gallons|lb|lbs|oz|qt|pt|pint|quart|l|ml|g)?/i,
-  );
-  const qtyText = totalMatch?.[1] ?? qtyUnitMatch?.[1];
-  const quantity = qtyText ? parseFloat(qtyText.replace(/,/g, "")) : 0;
+  // The first cell is the per-acre rate; a clean amount cell right after it is the total used, and the
+  // total is the quantity, as in the pipe and multi-line readers ("6 g 750 g" is 750 g, Sol #2267 r11).
+  const rate = readAmountCell(tokens.slice(numIdx).join(" "));
+  const total = rate?.rest ? readAmountCell(rate.rest) : null;
 
-  const unitMatch = (totalProduct || "").match(
-    /(gal|gallon|gallons|lb|lbs|oz|qt|pt|pint|quart|l|ml|g)/i,
-  );
-  const unit = totalMatch?.[2] || unitFromQty ||
-    (unitMatch ? unitMatch[1] : null);
+  let quantity: number;
+  let unit: string | null;
+  if (total) {
+    quantity = total.amount;
+    // A bare total at the end of the line shares the rate's unit; anything else unrecognised stays blank for the rep.
+    unit = total.unit ??
+      (total.word === null && total.rest === "" ? rate?.unit ?? null : null);
+  } else {
+    quantity = qtyUnitMatch ? parseFloat(qtyUnitMatch[1].replace(/,/g, "")) : 0;
+    const unitMatch = (totalProduct || "").match(
+      /(gal|gallon|gallons|lb|lbs|oz|qt|pt|pint|quart|l|ml|g)/i,
+    );
+    unit = unitFromQty || (unitMatch ? unitMatch[1] : null);
+  }
 
   return {
     productName,
@@ -118,4 +122,25 @@ export function parseProductLine(
     lotNumber: null,
     confidenceScore: calcProductConfidence(productName, quantity, unit),
   };
+}
+
+const UNIT_WORD = /^(gals?|gallons?|lbs?|oz|qt|pt|pints?|quarts?|l|ml|g)$/i;
+
+// One "amount [unit]" cell at the start of text, e.g. "750 g", "750g", ".75 g", "1,500 qt".
+// word is the letters right after the amount; unit is set only when that word is a unit we know,
+// so "750 mg" or "750 kg" never turns into grams.
+export function readAmountCell(
+  text: string,
+):
+  | { amount: number; word: string | null; unit: string | null; rest: string }
+  | null {
+  const m = text.trim().match(
+    /^((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)\s*([a-z]+)?(?=\s|$)\s*(.*)$/i,
+  );
+  if (!m) return null;
+  const word = m[2] ?? null;
+  const unit = word && UNIT_WORD.test(word)
+    ? word.match(/(gal|gallon|gallons|lb|lbs|oz|qt|pt|pint|quart|l|ml|g)/i)![1]
+    : null;
+  return { amount: parseFloat(m[1].replace(/,/g, "")), word, unit, rest: m[3] };
 }

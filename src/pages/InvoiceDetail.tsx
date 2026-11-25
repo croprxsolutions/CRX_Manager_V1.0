@@ -2800,8 +2800,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       </Card>
       </fieldset>
 
-      {/* Payments on this invoice; an admin marks a check that came back from its line (M9) */}
-      {!isNew && id && (
+      {/* Payments on this invoice; an admin marks a check that came back from its line (M9). Admin only: whether a
+          check came back is admin-read, and a rep must never see a returned check as a live payment (Sol r2 H3). */}
+      {!isNew && id && isAdmin && (
         <InvoicePaymentsCard
           // Re-read when a payment, void or return changes what the invoice was paid.
           key={`${id}-${invoice.paid_amount_cents ?? 0}-${invoice.status}`}

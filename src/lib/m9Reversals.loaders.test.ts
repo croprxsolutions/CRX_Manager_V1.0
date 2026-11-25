@@ -86,3 +86,18 @@ describe('loadPrepayHistory', () => {
     ]);
   });
 });
+
+describe('loadPrepayHistory: a voided payment', () => {
+  it('keeps the receipt and shows the void, rebuilt from the void record (Sol r2 H4)', async () => {
+    const { loadPrepayHistory } = await import('./m9Reversals');
+    H.tables = {
+      prepay_credits: [{ id: 'o1', customer_id: 'c1', original_amount_cents: 0, balance_cents: 0, source_type: 'overpayment', allocation_set_id: 's1',
+        source_reference: 'From payment 77', created_at: '2026-10-05T15:00:00Z', created_by: 'u1' }],
+      money_reversals: [], prepay_applications: [], money_reversal_lines: [], profiles: [{ id: 'u1', full_name: 'Test Admin' }],
+      financial_audit_log: [{ id: 'v1', operation_type: 'payment_voided', entity_id: 's1', actor_user_id: 'u1', created_at: '2026-10-07T15:00:00Z',
+        old_values: { check_number: '77' }, new_values: { reason: 'entered twice', prepay_reversed_cents: 7000, prepay_applications_reversed_cents: 3000 } }],
+    };
+    const rows = await loadPrepayHistory('c1');
+    expect(rows.map((r) => [r.what, r.cents, r.afterCents])).toEqual([['Payment voided', -10000, 0], ['Prepay received', 10000, 10000]]);
+  });
+});

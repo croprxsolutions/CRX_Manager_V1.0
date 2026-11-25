@@ -80,7 +80,11 @@ export default function CustomerPrepayCards({ customerId, farmName, credits, isA
       if (latest()) setHistoryFailed(true);
     });
   }, [customerId, isAdmin]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    // Another customer: nothing of the last one stays on screen (Sol r2 H1, MED 16).
+    setDialogOpen(false); setTie(null); setHistory(null);
+    load();
+  }, [load]);
 
   const available = credits.reduce((s, c) => s + c.balance_cents, 0);
   const mismatch = isAdmin && tie !== null && !tie.ok;
@@ -120,7 +124,35 @@ export default function CustomerPrepayCards({ customerId, farmName, credits, isA
           </p>
         )}
       </div>
-      {credits.length === 0 ? (
+      <CreditsList credits={credits} isPhone={isPhone} />
+    </Card>
+  );
+
+  const historyCard = isAdmin && <PrepayHistoryCard history={history} failed={historyFailed} isPhone={isPhone} />;
+
+  return (
+    <>
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        {creditsCard}
+        {historyCard}
+      </div>
+      {isAdmin && (
+        <RefundOrReturnDialog
+          // One dialog per customer: a draft or open confirm never carries to another customer (Sol r2 H1).
+          key={customerId}
+          open={dialogOpen}
+          onClose={() => setDialogOpen(false)}
+          onRecorded={() => { onChanged(); load(); }}
+          customerId={customerId}
+          farmName={farmName}
+        />
+      )}
+    </>
+  );
+}
+
+function CreditsList({ credits, isPhone }: { credits: CustomerPrepayCredit[]; isPhone: boolean }) {
+  return credits.length === 0 ? (
         <div className="flex flex-col items-center px-5 pb-8 pt-2 text-center">
           <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-crx-green-light text-crx-green" aria-hidden="true"><Wallet className="h-5 w-5" /></span>
           <b className="text-[15px] text-nav-dark">No prepay for this customer</b>
@@ -163,11 +195,12 @@ export default function CustomerPrepayCards({ customerId, farmName, credits, isA
           </table>
         </div>
         )
-      )}
-    </Card>
-  );
+      );
+}
 
-  const historyCard = isAdmin && (
+function PrepayHistoryCard({ history, failed, isPhone }: { history: HistoryRow[] | null; failed: boolean; isPhone: boolean }) {
+  const historyFailed = failed;
+  return (
     <Card padding={false}>
       <div id="prepay-history" className="flex flex-wrap items-center gap-2.5 p-5 pb-3">
         <Title title="Prepay" accent="History" />
@@ -240,23 +273,5 @@ export default function CustomerPrepayCards({ customerId, farmName, credits, isA
         )
       )}
     </Card>
-  );
-
-  return (
-    <>
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        {creditsCard}
-        {historyCard}
-      </div>
-      {isAdmin && (
-        <RefundOrReturnDialog
-          open={dialogOpen}
-          onClose={() => setDialogOpen(false)}
-          onRecorded={() => { onChanged(); load(); }}
-          customerId={customerId}
-          farmName={farmName}
-        />
-      )}
-    </>
   );
 }

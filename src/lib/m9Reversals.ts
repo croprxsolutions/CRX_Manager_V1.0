@@ -387,7 +387,24 @@ type HistoryEntry = Omit<HistoryRow, 'afterCents'>;
 type Who = (id: unknown) => string;
 
 /** What a credit was received at: before any hand edit or delete changed its amount (the audit's first before-image). */
-function initialAmount(c: Row, audits: Row[]): number {
+/** What a voided payment had left over as prepay: what was still unused plus what it had paid. */
+const voidedPrepay = (v: Row) => {
+  const nv = (v.new_values ?? {}) as { prepay_reversed_cents?: unknown; prepay_applications_reversed_cents?: unknown };
+  return Number(nv.prepay_reversed_cents ?? 0) + Number(nv.prepay_applications_reversed_cents ?? 0);
+};
+
+function voidEntry(v: Row, who: Who): HistoryEntry {
+  const old = (v.old_values ?? {}) as { check_number?: unknown };
+  return {
+    key: `v-${v.id}`, at: v.created_at as string, day: businessDay(v.created_at as string), kind: 'adjust', what: 'Payment voided',
+    sub: ((v.new_values as { reason?: unknown } | null)?.reason as string) || '', ref: old.check_number ? `Check ${old.check_number}` : '',
+    by: who(v.actor_user_id), cents: -voidedPrepay(v),
+  };
+}
+
+function initialAmount(c: Row, audits: Row[], voids: Row[] = []): number {
+  const voided = c.allocation_set_id ? voids.find((v) => v.entity_id === c.allocation_set_id) : undefined;
+  if (voided && Number(c.original_amount_cents) === 0) return voidedPrepay(voided);
   const first = audits.find((a) => creditsOfAudit(a).includes(c.id as string));
   if (!first) return Number(c.original_amount_cents);
   const old = (first.old_values ?? {}) as { original_amount_cents?: unknown; buckets?: { id: string; original_amount_cents: number }[] };
@@ -415,14 +432,14 @@ function adjustmentEntry(a: Row, who: Who): HistoryEntry {
   };
 }
 
-function creditEntry(c: Row, who: Who, audits: Row[] = []): HistoryEntry {
+function creditEntry(c: Row, who: Who, audits: Row[] = [], voids: Row[] = []): HistoryEntry {
   const overpayment = c.source_type === 'overpayment';
   const ref = (c.source_reference as string) || (c.reference_number as string) || '';
   return {
     key: `c-${c.id}`, at: c.created_at as string, day: businessDay(c.created_at as string), kind: 'in', what: 'Prepay received',
     sub: overpayment ? 'Left over from a payment' : creditLabel(c),
     ref: overpayment ? ref : `Check ${ref}`.trim(),
-    by: who(c.created_by), cents: initialAmount(c, audits),
+    by: who(c.created_by), cents: initialAmount(c, audits, voids),
   };
 }
 
@@ -455,7 +472,7 @@ function reversalEntry(r: Row, lines: Row[], who: Who): HistoryEntry {
 export async function loadPrepayHistory(customerId: string): Promise<HistoryRow[]> {
   const [credits, reversals] = await Promise.all([
     all((from, to) => supabase.from('prepay_credits')
-      .select('id, original_amount_cents, bucket_label, reference_number, source_reference, source_type, created_at, created_by', { count: 'exact' })
+      .select('id, original_amount_cents, bucket_label, reference_number, source_reference, source_type, allocation_set_id, created_at, created_by', { count: 'exact' })
       .eq('customer_id', customerId).order('id').range(from, to)),
     all((from, to) => supabase.from('money_reversals')
       .select('id, kind, entry_date, reference, reason, performed_by, created_at, allocation_set_id, prepay_credit_id', { count: 'exact' })
@@ -477,15 +494,23 @@ export async function loadPrepayHistory(customerId: string): Promise<HistoryRow[
     .filter((a) => Number((a.new_values as Row | null)?.original_amount_cents ?? 0) !== Number((a.old_values as Row | null)?.original_amount_cents ?? 0)
       || a.operation_type === 'prepay_deleted')
     .sort((a, b) => ((a.created_at as string) < (b.created_at as string) ? -1 : 1)) : [];
+  // Voided payments: the void zeroes the prepay a payment left over (and removes what it paid), so the receipt and
+  // the void are both rebuilt from the void's own record (Sol r2 H4).
+  const voidedSets = [...new Set(credits.filter((c) => c.source_type === 'overpayment' && Number(c.original_amount_cents) === 0 && c.allocation_set_id)
+    .map((c) => c.allocation_set_id as string))];
+  const voids = voidedSets.length ? await all((from, to) => supabase.from('financial_audit_log')
+    .select('id, entity_id, actor_user_id, old_values, new_values, created_at', { count: 'exact' })
+    .eq('operation_type', 'payment_voided').in('entity_id', voidedSets).order('id').range(from, to)) : [];
   const people = [...new Set([...credits.map((c) => c.created_by), ...apps.map((a) => a.applied_by), ...reversals.map((r) => r.performed_by),
-    ...audits.map((a) => a.actor_user_id)].filter(Boolean) as string[])];
+    ...audits.map((a) => a.actor_user_id), ...voids.map((v) => v.actor_user_id)].filter(Boolean) as string[])];
   const names = people.length ? await all<{ id: string; full_name: string | null }>((from, to) => supabase.from('profiles')
     .select('id, full_name', { count: 'exact' }).in('id', people).order('id').range(from, to)) : [];
   const who = (id: unknown) => names.find((n) => n.id === id)?.full_name || 'someone';
 
   const rows: HistoryEntry[] = [
     // A voided payment's prepay never counted (the void zeroes it and removes what it paid); everything else did.
-    ...credits.filter((c) => initialAmount(c, audits) > 0).map((c) => creditEntry(c, who, audits)),
+    ...credits.filter((c) => initialAmount(c, audits, voids) > 0).map((c) => creditEntry(c, who, audits, voids)),
+    ...voids.map((v) => voidEntry(v, who)).filter((e) => e.cents !== 0),
     ...audits.map((a) => adjustmentEntry(a, who)),
     ...apps.map((a) => applicationEntry(a, credits, who)),
     ...reversals.map((r) => reversalEntry(r, lines, who)),

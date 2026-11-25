@@ -467,6 +467,7 @@ export default function PaymentHistory() {
 
       {returnPayment && (
         <RefundOrReturnDialog
+          key={returnPayment.id}
           open
           onClose={() => setReturnPayment(null)}
           onRecorded={() => { void fetchPayments(); }}

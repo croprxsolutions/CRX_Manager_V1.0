@@ -129,6 +129,7 @@ export default function InvoicePaymentsCard({ invoiceId, invoiceNumber, farmName
       </section>
       {returning && (
         <RefundOrReturnDialog
+          key={returning.setId}
           open
           onClose={() => setReturning(null)}
           onRecorded={() => { onChanged(); void load(); }}

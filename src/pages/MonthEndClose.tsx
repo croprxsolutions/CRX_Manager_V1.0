@@ -303,7 +303,7 @@ export default function MonthEndClose() {
         {
           label: 'Prepay balances tie',
           // M9: a customer whose stored prepay is not what its credits add up to blocks the close until it is fixed.
-          done: !prepayTieFailed && prepayTie !== null && prepayTie.every((r) => r.ok),
+          done: !prepayTieFailed && prepayTie !== null && prepayTie.every((r) => r?.ok === true),
           detail: prepayTieFailed
             ? 'The prepay balance check could not run. Reload the page to try again'
             : prepayTie === null ? 'Checking prepay balances…' : `All ${prepayTie.length} customers with prepay tie.`,
@@ -682,7 +682,7 @@ export default function MonthEndClose() {
           <h3 className="text-sm font-semibold text-nav-dark mb-4">Close Checklist</h3>
           <div className="space-y-3">
             {checklist.map((item, i) => 'prepayTie' in item && !item.done && prepayTie && !prepayTieFailed ? (
-              <PrepayTieRow key={i} rows={prepayTie.filter((r) => !r.ok)} />
+              <PrepayTieRow key={i} rows={prepayTie.filter((r) => !!r && r.ok !== true)} />
             ) : (
               <div key={i} className="flex items-start gap-3">
                 {item.done ? (

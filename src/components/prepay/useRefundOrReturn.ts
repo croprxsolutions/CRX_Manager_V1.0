@@ -50,7 +50,9 @@ export function useRefundForm(o: { customerId: string; basics: DialogBasics | nu
   const refundReason = `${o.reason.trim()} (paid by ${method})`;
   const intent = JSON.stringify([o.customerId, amountCents, paidOn, refundReference, refundReason, pickedOnly]);
   const duplicate = duplicateFor === intent;
-  const idem = useIdempotencyKey('record_outside_refund', o.profileId || '', JSON.stringify([intent, duplicate]));
+  // One key per refund, whether or not its duplicate go-ahead is given: a lost reply retried either way replays the
+  // receipt, or is refused as changed details, never recorded twice (Sol r2 H2).
+  const idem = useIdempotencyKey('record_outside_refund', o.profileId || '', intent);
 
   const reset = () => {
     setAmount(''); setPaidOn(o.today); setMethod('Check'); setReference(''); setSource('oldest'); setPickedId(''); setDuplicateFor(null);
@@ -144,7 +146,8 @@ export function useReturnForm(o: {
       Sentry.captureException(toSentryError(err), { extra: { context: 'm9_returnable_checks' } });
       if (live) { setChecks([]); setListFailed(true); }
     });
-    return () => { live = false; };
+    // Left before it answered (another choice, closed): the next visit reads again (Sol r2 MED 6).
+    return () => { live = false; setListFor(null); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [o.open, o.active, preset, o.customerId]);
 

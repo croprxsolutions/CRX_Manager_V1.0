@@ -150,6 +150,8 @@ describe('RefundOrReturnDialog: refund paid outside CRX', () => {
     expect(screen.getByText(/already recorded for this customer/)).toBeInTheDocument();
     fireEvent.click(again);
     await waitFor(() => expect(H.rpc).toHaveBeenLastCalledWith('record_outside_refund', expect.objectContaining({ p_allow_duplicate_reference: true })));
+    // The same refund keeps its retry key with or without the go-ahead, so a lost reply replays (Sol r2 H2).
+    expect(H.rpc.mock.calls[1][1].p_idempotency_key).toBe(H.rpc.mock.calls[0][1].p_idempotency_key);
   });
 
   it('the duplicate go-ahead is taken back when the refund changes (Sol r1 H3)', async () => {

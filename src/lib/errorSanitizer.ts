@@ -278,6 +278,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "This return would credit more than this customer was billed for the product. Check the customer's invoice and earlier returns. No changes were saved"],
   [/^RETURN_SPLIT_INVOICE_NOT_VISIBLE\b/i,
    "This order was split between payers, and you cannot view this customer's split invoice, so you cannot start their return. Ask an admin to create it. No changes were saved"],
+  [/^RETURN_REPRICE_OTHER_RETURN_PENDING\b/i,
+   "Another open return of this product for this customer still has the price from before the sale's tax or discount changed. Cancel that return and create it again, then try this one again. No changes were saved"],
   [/^RETURN_SPLIT_SHARE_REPRICED\b/i,
    "An earlier return of this product was cancelled or rejected after this one was made, so this return's credit is out of date. Cancel this return and create it again to price it correctly. No changes were saved"],
   [/^RETURN_SPLIT_CREDIT_UNBACKED\b/i,

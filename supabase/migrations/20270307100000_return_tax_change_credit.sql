@@ -1,5 +1,5 @@
 -- Written 2026-11-25. STATUS: NOT APPLIED (staging candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270306110000_return_tax_change_credit.md.
+-- docs/reference/migrations.d/20270307100000_return_tax_change_credit.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY: two release #1990 follow-ups (fix before the next release; Mason 20 Nov, Taha agreed):
@@ -11,33 +11,39 @@
 --     credit's posting time (its transaction start), but the credit is priced from every invoice posted when it runs,
 --     so a source invoice that posted in between could be refunded tax the ledger recorded as zero.
 --
--- WHAT:
---   1. receive_return and issue_return_credit (their private bodies _receive_return_intent_impl_20260812 and
---      _issue_return_credit_intent_impl_20260812): under the per-order-line locks they already take, a return line
---      made at the order price whose order line is now priced from what was billed (a sales-tax or discount line
---      reached a live invoice of the sale) is re-priced instead of refused, with one financial_audit_log row per
---      return. Every such line of the customer on that order line, this return's and its other open returns', moves
---      together in the order they were made, priced as create_return would have priced them one after another from
---      what posted invoices billed, tax and discount included: no return takes another's tax, and together they never
---      exceed the billed share of their units. Credited returns and lines priced any other way stay as they are; a line
---      still stale after that (an earlier return cancelled, a split payer's blend moved: Mason's #1010 rule, cancel and
---      recreate) is still refused (RETURN_SPLIT_SHARE_REPRICED), as is anything beyond the billed share.
+-- WHAT (Taha, 25 Nov: A+B):
+--   1. return_items.priced_from ('order_price' | 'billed_share'): how create_return priced the line, so a re-price
+--      never guesses from amounts. Existing lines are labelled once from today's state: 'billed_share' where the order
+--      line is priced from what was billed now, 'order_price' where it is not and the line is at the order price, NULL
+--      otherwise (never re-priced). create_return (_create_return_intent_impl_20260812) sets it on every new line.
+--   2. receive_return and issue_return_credit (_receive_return_intent_impl_20260812,
+--      _issue_return_credit_intent_impl_20260812): under the per-order-line locks they already take, a line of THIS
+--      return priced 'order_price' whose order line is now priced from what was billed is re-priced to exactly what
+--      create_return would price it at now (tax and discount included, from posted invoices only, never beyond the
+--      billed share) and marked 'billed_share', with one financial_audit_log row, instead of refused. No other
+--      return changes: while another open return of that customer and order line still has a price that is not what
+--      create_return would give it now, this one is refused (RETURN_REPRICE_OTHER_RETURN_PENDING) and nothing
+--      changes. A 'billed_share' line that went stale (an earlier return cancelled, a split payer's blend moved) is
+--      still refused (RETURN_SPLIT_SHARE_REPRICED, Mason's #1010 rule), as is anything beyond the billed share.
 --      issue_return_credit re-prices before its cents cap (its pre-lock check leaves the cents bound to that cap).
---      receive_return refuses a sales rep who cannot read every posted invoice it would price from
---      (RETURN_SPLIT_INVOICE_NOT_VISIBLE, as create_return).
---   2. _freeze_credit_sales_tax_20270109: the pool is every lot posted when the credit freezes (at its commit), not
+--      receive_return refuses a sales rep who cannot read every posted invoice of the customer on the order before
+--      re-pricing (RETURN_SPLIT_INVOICE_NOT_VISIBLE, as create_return).
+--   3. _freeze_credit_sales_tax_20270109: the pool is every lot posted when the credit freezes (at its commit), not
 --      only lots stamped at or before the credit's posting time. The credit holds the order lines' locks (361), which
 --      posting or unposting a sale of the line also takes, so that is exactly the set the credit was priced from.
+--      Known limit (Taha accepted, 25 Nov): a sale lot posted later in the same transaction as the credit is also
+--      pooled; the old filter did the same (same now()), and no app call credits and posts in one transaction.
 --
--- NOT CHANGED: create_return, _return_customer_line_share, the credit implementation _issue_return_credit_impl,
---   the public wrappers, every trigger, every stored row. Each re-emitted body is staging's current body (pinned below)
---   plus only the hunks marked (#2066) or (#2091). CREATE OR REPLACE keeps each OID, owner and exact ACL; the postflight
---   proves it.
+-- NOT CHANGED: _return_customer_line_share, the credit implementation _issue_return_credit_impl, the public wrappers,
+--   every trigger, every money amount already stored. Each re-emitted body is staging's current body (pinned below)
+--   plus only the hunks marked (#2066) or (#2091). CREATE OR REPLACE keeps each OID, owner and exact ACL; the
+--   postflight proves it.
 --
--- ROLLBACK (its own reviewed migration): re-emit the three bodies pinned in the preflight (20261021155000 for the two
---   return bodies, 20270117120000 for the freeze). Credits issued meanwhile keep their amounts and frozen tax.
+-- ROLLBACK (its own reviewed migration): re-emit the four bodies pinned in the preflight (20270228160000 for
+--   create_return, 20261021155000 for the two return bodies, 20270117120000 for the freeze), then drop
+--   return_items.priced_from. Credits issued meanwhile keep their amounts and frozen tax.
 --
--- ORDERING: after 20270117120000_billing_sol_fixes_staging (the freeze) and 20261021155000 (the return bodies).
+-- ORDERING: after 20270228160000 (create_return), 20270117120000 (the freeze) and 20261021155000 (the return bodies).
 
 SET LOCAL lock_timeout = '5s';
 
@@ -52,14 +58,14 @@ BEGIN
      OR (SELECT transaction_id FROM pg_temp.return_tax_change_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'RETURN_TAX_CHANGE_NOT_IN_TRANSACTION: apply this file as one transaction';
   END IF;
-  IF EXISTS (SELECT 1 FROM pg_proc
-              WHERE oid = to_regprocedure('public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)')
-                AND position('(#2066)' in prosrc) > 0) THEN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
+              AND table_name = 'return_items' AND column_name = 'priced_from') THEN
     RAISE EXCEPTION 'RETURN_TAX_CHANGE_PREFLIGHT: already applied';
   END IF;
-  -- The three functions re-emitted below, exactly as staging has them.
+  -- The four functions re-emitted below, exactly as staging has them.
   SELECT string_agg(f.name, ', ') INTO v_bad
     FROM (VALUES
+      ('public._create_return_intent_impl_20260812(jsonb,jsonb,text)', 'dd95a7decaea1130352bc03e31f23ccf', 2),
       ('public._receive_return_intent_impl_20260812(uuid,uuid,text)', '67566a09967e74b1ee813354038955b0', 1),
       ('public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', '0d5209ab7179f36d71f548b55a6cf77d', 1),
       ('public._freeze_credit_sales_tax_20270109(uuid)', '6b175becb29ac202c5b1983ddc6686a5', 0)
@@ -79,7 +85,249 @@ BEGIN
 END
 $preflight$;
 
--- 1. (#2066) receive_return: re-price a stale share line instead of refusing ----------------------------------------
+-- 1. (#2066) How each return line was priced ---------------------------------------------------------------------------
+ALTER TABLE public.return_items ADD COLUMN priced_from text
+  CONSTRAINT return_items_priced_from_check CHECK (priced_from IN ('order_price', 'billed_share'));
+COMMENT ON COLUMN public.return_items.priced_from IS
+  'How create_return priced this line: order_price (the order line''s price) or billed_share (the returner''s billed share, tax and discount included). A re-price at receive or credit (20270307100000) moves order_price to billed_share. NULL: a line labelled neither when the column was added; never re-priced.';
+
+-- Existing lines, labelled once from today's state (see WHAT 1). Only the new column is written.
+UPDATE public.return_items ri
+   SET priced_from = l.priced_from
+  FROM (
+    SELECT x.id, CASE WHEN s.share_mode THEN 'billed_share' ELSE 'order_price' END AS priced_from
+      FROM public.return_items x
+      JOIN public.returns r ON r.id = x.return_id
+      JOIN public.order_items oi ON oi.id = x.order_item_id AND oi.order_id = r.order_id
+      CROSS JOIN LATERAL public._return_customer_line_share(r.order_id, x.order_item_id, r.customer_id, r.id) s
+     WHERE s.share_mode
+        OR (x.unit_price_cents = round(oi.price_per_unit * 100)::bigint
+            AND x.extended_cents = round(x.quantity * oi.price_per_unit * 100)::bigint)
+  ) l
+ WHERE l.id = ri.id;
+
+-- 2. (#2066) create_return records how it priced each line ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public._create_return_intent_impl_20260812(p_return jsonb, p_items jsonb DEFAULT '[]'::jsonb, p_idempotency_key text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_return_id uuid;
+  v_return_number text;
+  v_order_id uuid;
+  v_customer_id uuid;
+  v_order_status text;
+  v_item jsonb;
+  v_order_item record;
+  v_qty numeric;
+  v_prior_qty numeric;
+  v_count integer := 0;
+  v_existing jsonb;
+  -- Phase 3 addition: sorted advisory locks cover all products in this request.
+  v_product_ids uuid[];
+  -- Split-payer return (20261021155000): see the order check and the per-line share below.
+  v_order_customer_id uuid;
+  v_share record;
+  v_extended bigint;
+  v_unit_price bigint;
+BEGIN
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')
+  ) THEN RAISE EXCEPTION 'INSUFFICIENT_ROLE'; END IF;
+
+  IF p_idempotency_key IS NOT NULL THEN
+    v_existing := public.check_idempotency(p_idempotency_key, 'create_return');
+    IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
+  END IF;
+
+  v_customer_id := nullif(p_return->>'customer_id', '')::uuid;
+  v_order_id := nullif(p_return->>'order_id', '')::uuid;
+  IF v_customer_id IS NULL THEN RAISE EXCEPTION 'CUSTOMER_REQUIRED'; END IF;
+  IF v_order_id IS NULL THEN RAISE EXCEPTION 'RETURN_ORDER_REQUIRED'; END IF;
+  IF coalesce(btrim(p_return->>'reason'), '') = '' THEN RAISE EXCEPTION 'REASON_REQUIRED'; END IF;
+  IF jsonb_array_length(COALESCE(p_items, '[]'::jsonb)) = 0 THEN RAISE EXCEPTION 'ITEMS_REQUIRED'; END IF;
+
+  -- Split-payer return (20261021155000): the order's customer, or a customer a posted governed
+  -- split invoice of this order bills (a field owner such as a landlord), may return its goods.
+  SELECT status, customer_id INTO v_order_status, v_order_customer_id FROM public.orders
+  WHERE id = v_order_id AND deleted_at IS NULL
+  FOR UPDATE;
+  IF NOT FOUND OR (
+    v_order_customer_id IS DISTINCT FROM v_customer_id
+    AND NOT public._return_customer_is_split_payer(v_order_id, v_customer_id)
+  ) THEN RAISE EXCEPTION 'RETURN_ORDER_CUSTOMER_MISMATCH'; END IF;
+  IF v_order_status IN ('voided', 'cancelled') THEN
+    RAISE EXCEPTION 'RETURN_SOURCE_ORDER_INACTIVE';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_items) item WHERE nullif(item->>'order_item_id', '') IS NULL) THEN
+    RAISE EXCEPTION 'RETURN_ORDER_ITEM_REQUIRED';
+  END IF;
+  IF (SELECT count(*) FROM jsonb_array_elements(p_items)) <>
+     (SELECT count(DISTINCT item->>'order_item_id') FROM jsonb_array_elements(p_items) item) THEN
+    RAISE EXCEPTION 'DUPLICATE_RETURN_ORDER_ITEM';
+  END IF;
+
+  PERFORM 1
+  FROM public.order_items oi
+  JOIN jsonb_array_elements(p_items) item
+    ON oi.id = (item->>'order_item_id')::uuid
+  WHERE oi.order_id = v_order_id
+  ORDER BY oi.id
+  FOR UPDATE OF oi;
+  IF (SELECT count(*) FROM jsonb_array_elements(p_items)) <>
+     (SELECT count(*) FROM public.order_items oi
+      JOIN jsonb_array_elements(p_items) item ON oi.id = (item->>'order_item_id')::uuid
+      WHERE oi.order_id = v_order_id) THEN
+    RAISE EXCEPTION 'RETURN_ORDER_ITEM_MISMATCH';
+  END IF;
+
+  -- Phase 3 addition: UUID-order locks and a policy re-read happen after all
+  -- source order-item locks/validation and before creating any return rows.
+  SELECT array_agg(DISTINCT oi.product_id ORDER BY oi.product_id)
+    INTO v_product_ids
+  FROM public.order_items oi
+  JOIN jsonb_array_elements(p_items) item
+    ON oi.id = (item->>'order_item_id')::uuid
+  WHERE oi.order_id = v_order_id;
+  PERFORM public.lock_phase3_product_policy_products(v_product_ids);
+  PERFORM public.assert_phase3_return_policy(v_product_ids);
+
+  v_return_number := public.next_return_number();
+  INSERT INTO public.returns (
+    return_number, customer_id, order_id, reason, reason_notes, notes, requested_by, status
+  ) VALUES (
+    v_return_number, v_customer_id, v_order_id, p_return->>'reason',
+    p_return->>'reason_notes', p_return->>'notes', v_actor, 'requested'
+  ) RETURNING id INTO v_return_id;
+
+  FOR v_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
+    SELECT * INTO v_order_item
+    FROM public.order_items
+    WHERE id = (v_item->>'order_item_id')::uuid AND order_id = v_order_id;
+
+    v_qty := coalesce((v_item->>'quantity')::numeric, 0);
+    IF v_qty <= 0 THEN RAISE EXCEPTION 'RETURN_QUANTITY_MUST_BE_POSITIVE'; END IF;
+    -- A return holds 2 decimal places (return_items.quantity numeric(10,2)). A finer quantity, such as a Bill
+    -- Split payer's 4-place share or a plain 2.125 line, would be stored rounded but priced in full, then refused at
+    -- receive and left stuck; refuse it here in plain words (billing plan M2, 2026-11-09). After the wrapper's
+    -- replay, so a retry of an earlier accepted request still answers as before.
+    IF v_qty <> round(v_qty, 2) THEN
+      RAISE EXCEPTION 'RETURN_QUANTITY_TOO_FINE: a return holds 2 decimal places; return a quantity like 0.70'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF coalesce(v_order_item.quantity_delivered, 0) <= 0 THEN
+      RAISE EXCEPTION 'RETURN_SOURCE_NOT_DELIVERED';
+    END IF;
+    IF v_order_item.price_per_unit IS NULL THEN
+      RAISE EXCEPTION 'RETURN_SOURCE_PRICE_MISSING';
+    END IF;
+
+    SELECT coalesce(sum(ri.quantity), 0) INTO v_prior_qty
+    FROM public.return_items ri
+    JOIN public.returns r ON r.id = ri.return_id
+    WHERE ri.order_item_id = v_order_item.id
+      AND r.deleted_at IS NULL
+      AND r.status NOT IN ('rejected', 'cancelled');
+
+    IF v_prior_qty + v_qty > v_order_item.quantity_delivered THEN
+      RAISE EXCEPTION 'RETURN_QUANTITY_EXCEEDS_DELIVERED';
+    END IF;
+
+    -- Split-payer return (20261021155000): on a split order, or when the returner is not the
+    -- order's customer, the returner may return only what it was billed, and its credit is what is
+    -- left of its own billed cents for that quantity, so its full share credits exactly.
+    SELECT * INTO v_share
+      FROM public._return_customer_line_share(v_order_id, v_order_item.id, v_customer_id, v_return_id);
+    IF v_share.share_mode THEN
+      -- A share-mode return stores a price derived from the returner's own invoices on this order,
+      -- so a non-admin may create one only when invoices_select lets it read every active invoice
+      -- billing the returner here (it created it or is its salesperson), as the Returns lookups do.
+      IF NOT public.is_admin() AND EXISTS (
+        SELECT 1 FROM public.invoices hidden
+         WHERE hidden.order_id = v_order_id
+           AND hidden.customer_id = v_customer_id
+           AND hidden.invoice_type <> 'credit_memo'
+           AND hidden.deleted_at IS NULL
+           AND hidden.status IN ('posted', 'overdue', 'paid')
+           AND NOT (hidden.created_by IS NOT DISTINCT FROM auth.uid()
+                    OR hidden.salesman_id IS NOT DISTINCT FROM auth.uid())
+      ) THEN RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'; END IF;
+      -- A posted sale line of this order line whose unit differs from the return's (an order line
+      -- with no unit is returned as 'ea', and its invoice lines carry no unit) can never back the
+      -- credit: _issue_return_credit_impl refuses every such return with this same code. Refuse it
+      -- here, before anything is restocked, rather than as "not billed".
+      IF EXISTS (
+        SELECT 1
+          FROM public.invoice_items ii
+          JOIN public.invoices i ON i.id = ii.invoice_id
+         WHERE ii.order_item_id = v_order_item.id
+           AND ii.product_id = v_order_item.product_id
+           AND ii.quantity > 0
+           AND i.invoice_type <> 'credit_memo'
+           AND i.status IN ('posted', 'overdue', 'paid')
+           AND i.deleted_at IS NULL
+           AND ii.unit_size IS DISTINCT FROM coalesce(v_order_item.unit_size, 'ea')
+      ) THEN RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'; END IF;
+      IF v_share.billed_qty <= 0 THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_NOT_BILLED'; END IF;
+      IF v_share.other_returned_qty + v_qty > v_share.billed_qty THEN
+        RAISE EXCEPTION 'RETURN_QUANTITY_EXCEEDS_BILLED_SHARE';
+      END IF;
+      v_extended := greatest(0,
+        round(v_share.billed_cents * (v_share.other_returned_qty + v_qty) / v_share.billed_qty)::bigint
+        - v_share.other_returned_cents);
+      IF v_share.other_returned_cents + v_extended > v_share.billed_cents THEN
+        RAISE EXCEPTION 'RETURN_CREDIT_EXCEEDS_BILLED_SHARE';
+      END IF;
+      -- The unit price the return and its credit memo show is the returner's own billed rate, not
+      -- the order price (a split invoice may bill a share at another rate).
+      v_unit_price := round(v_share.billed_cents / v_share.billed_qty)::bigint;
+    ELSE
+      v_extended := round(v_qty * v_order_item.price_per_unit * 100)::bigint;
+      v_unit_price := round(v_order_item.price_per_unit * 100)::bigint;
+    END IF;
+
+    INSERT INTO public.return_items (
+      return_id, order_item_id, product_id, product_name, quantity, unit,
+      unit_price_cents, extended_cents, condition, restock, sort_order, notes, priced_from
+    ) VALUES (
+      v_return_id, v_order_item.id, v_order_item.product_id, v_order_item.product_name,
+      v_qty, coalesce(v_order_item.unit_size, 'ea'),
+      v_unit_price,  -- Split-payer return (20261021155000): priced above
+      v_extended,
+      coalesce(v_item->>'condition', 'unopened'),
+      coalesce((v_item->>'restock')::boolean, false),
+      coalesce((v_item->>'sort_order')::integer, v_count), v_item->>'notes',
+      -- (#2066) how this line was priced, so a later re-price never has to guess
+      CASE WHEN v_share.share_mode THEN 'billed_share' ELSE 'order_price' END
+    );
+    v_count := v_count + 1;
+  END LOOP;
+
+  INSERT INTO public.activity_feed (
+    event_type, description, performed_by, related_entity_type, related_entity_id, customer_id
+  ) VALUES (
+    'return_requested', 'Return ' || v_return_number || ' requested for ' || v_count || ' product(s)',
+    v_actor, 'return', v_return_id, v_customer_id
+  );
+
+  v_existing := jsonb_build_object(
+    'success', true, 'return_id', v_return_id,
+    'return_number', v_return_number, 'item_count', v_count
+  );
+  IF p_idempotency_key IS NOT NULL THEN
+    PERFORM public.save_idempotency(p_idempotency_key, 'create_return', v_existing);
+  END IF;
+  RETURN v_existing;
+END;
+$function$;
+
+-- 3. (#2066) receive_return: re-price this return's order-price lines instead of refusing ----------------------------
 CREATE OR REPLACE FUNCTION public._receive_return_intent_impl_20260812(p_return_id uuid, p_received_by uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -100,6 +348,7 @@ DECLARE
   v_lock_order_item_id uuid;
   -- (#2066) the lines re-priced below
   v_repriced jsonb;
+  v_repriced_delta bigint;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_received_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF;
@@ -155,103 +404,92 @@ BEGIN
       LOOP
         PERFORM pg_advisory_xact_lock(hashtextextended(v_lock_order_item_id::text, 361));
       END LOOP;
-      -- (#2066) A return line made at the order price (the sale had no sales-tax or discount line yet) whose order line is
-      -- now priced from what was billed (a tax or discount line reached a live invoice of the sale) is re-priced here,
-      -- under these locks, instead of refused as stale (Mason, 22 Nov: the taxed share, never more than was charged on the
-      -- posted invoices, tax included). Every such line of this customer on the same order line moves together, this
-      -- return's and its other open returns' alike, in the order they were made, as create_return would have priced them
-      -- one after another: so no return takes another's tax or discount, and all of them add up to the billed share of
-      -- their units. Lines priced any other way, and credited returns, stay as they are; a line still stale after this
-      -- (an earlier return cancelled, a split payer's blend moved, more returned than billed) is refused below as before.
-      -- A sales rep may re-price only from invoices invoices_select lets them read (as create_return requires).
-      IF NOT public.is_admin() AND EXISTS (
-        SELECT 1 FROM public.invoices hidden
-         WHERE hidden.order_id = v_order_id
-           AND hidden.customer_id = v_customer_id
-           AND hidden.invoice_type <> 'credit_memo'
-           AND hidden.deleted_at IS NULL
-           AND hidden.status IN ('posted', 'overdue', 'paid')
-           AND NOT (hidden.created_by IS NOT DISTINCT FROM auth.uid()
-                    OR hidden.salesman_id IS NOT DISTINCT FROM auth.uid())
-      ) AND EXISTS (
+      -- (#2066) A line create_return priced at the order price (the sale had no sales-tax or discount line yet) whose
+      -- order line is now priced from what was billed (a tax or discount line reached a live invoice of the sale) is
+      -- re-priced here, under these locks, to exactly what create_return would price it at now (Mason, 22 Nov: the taxed
+      -- share, never more than was charged on the posted invoices, tax included), instead of refused as stale. Only this
+      -- return's lines change (Taha, 25 Nov): while another open return of the same customer and order line still has a
+      -- price that is not what create_return would give it now, this one is refused (RETURN_REPRICE_OTHER_RETURN_PENDING)
+      -- and nothing changes. A line priced from what was billed (priced_from 'billed_share'), or one beyond the billed
+      -- share, is never re-priced: if stale it is refused below as before (Mason's #1010 rule, cancel and recreate).
+      IF EXISTS (
         SELECT 1
           FROM public.return_items ri
-          JOIN public.order_items oi ON oi.id = ri.order_item_id AND oi.order_id = v_order_id
           CROSS JOIN LATERAL public._return_customer_line_share(
             v_order_id, ri.order_item_id, v_customer_id, p_return_id
           ) s
          WHERE ri.return_id = p_return_id
+           AND ri.priced_from = 'order_price'
            AND s.share_mode
-           AND ri.unit_price_cents = round(oi.price_per_unit * 100)::bigint
-           AND ri.extended_cents = round(ri.quantity * oi.price_per_unit * 100)::bigint
-      ) THEN RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'; END IF;
-      WITH lines AS (
-        SELECT ri.id, ri.return_id, ri.order_item_id, ri.quantity, ri.unit_price_cents, ri.extended_cents, r.created_at,
-               (r.status = 'credited' OR r.credit_invoice_id IS NOT NULL) AS credited,
-               (ri.unit_price_cents = round(oi.price_per_unit * 100)::bigint
-                AND ri.extended_cents = round(ri.quantity * oi.price_per_unit * 100)::bigint) AS at_order_price
-          FROM public.return_items ri
-          JOIN public.returns r ON r.id = ri.return_id
-          JOIN public.order_items oi ON oi.id = ri.order_item_id AND oi.order_id = v_order_id
-         WHERE ri.order_item_id IN (SELECT mine.order_item_id FROM public.return_items mine WHERE mine.return_id = p_return_id)
-           AND r.order_id = v_order_id
-           AND r.customer_id = v_customer_id
-           AND r.deleted_at IS NULL
-           AND r.status NOT IN ('rejected', 'cancelled')
-      ), share AS (
-        SELECT k.order_item_id, s.share_mode, s.billed_qty, s.billed_cents
-          FROM (SELECT DISTINCT order_item_id FROM lines) k
-          CROSS JOIN LATERAL public._return_customer_line_share(v_order_id, k.order_item_id, v_customer_id, p_return_id) s
-      ), moving AS (
-        SELECT l.*, sh.billed_qty, sh.billed_cents,
-               sum(l.quantity) OVER (PARTITION BY l.order_item_id ORDER BY l.created_at, l.return_id) AS cum_qty
-          FROM lines l
-          JOIN share sh ON sh.order_item_id = l.order_item_id
-         WHERE sh.share_mode AND sh.billed_qty > 0 AND l.at_order_price AND NOT l.credited
-      ), kept AS (
-        SELECT l.order_item_id, sum(l.quantity) AS qty, sum(l.extended_cents) AS cents
-          FROM lines l
-         WHERE NOT EXISTS (SELECT 1 FROM moving m WHERE m.id = l.id)
-         GROUP BY l.order_item_id
-      ), priced AS (
-        SELECT m.id, m.return_id, m.order_item_id, m.quantity, m.billed_qty,
-               m.unit_price_cents AS old_unit_price_cents, m.extended_cents AS old_extended_cents,
-               round(m.billed_cents / m.billed_qty)::bigint AS unit_price_cents,
-               round(m.billed_cents * (coalesce(k.qty, 0) + m.cum_qty) / m.billed_qty)::bigint
-                 - CASE WHEN m.cum_qty = m.quantity THEN coalesce(k.cents, 0)::bigint
-                        ELSE round(m.billed_cents * (coalesce(k.qty, 0) + m.cum_qty - m.quantity) / m.billed_qty)::bigint
-                   END AS extended_cents,
-               coalesce(k.qty, 0) + max(m.cum_qty) OVER (PARTITION BY m.order_item_id) AS total_qty
-          FROM moving m
-          LEFT JOIN kept k ON k.order_item_id = m.order_item_id
-      ), ok AS (
-        -- only an order line whose returns all fit inside what was billed, every line at zero or more
-        SELECT p.* FROM priced p
-         WHERE NOT EXISTS (SELECT 1 FROM priced q
-                            WHERE q.order_item_id = p.order_item_id AND (q.total_qty > q.billed_qty OR q.extended_cents < 0))
-      )
-      SELECT jsonb_agg(jsonb_build_object('id', ok.id, 'return_id', ok.return_id, 'order_item_id', ok.order_item_id,
-                         'quantity', ok.quantity, 'old_unit_price_cents', ok.old_unit_price_cents,
-                         'old_extended_cents', ok.old_extended_cents, 'unit_price_cents', ok.unit_price_cents,
-                         'extended_cents', ok.extended_cents) ORDER BY ok.order_item_id, ok.return_id)
-        INTO v_repriced
-        FROM ok
-       WHERE ok.unit_price_cents IS DISTINCT FROM ok.old_unit_price_cents
-          OR ok.extended_cents IS DISTINCT FROM ok.old_extended_cents;
-      IF v_repriced IS NOT NULL THEN
-        UPDATE public.return_items ri
-           SET unit_price_cents = f.unit_price_cents, extended_cents = f.extended_cents
-          FROM jsonb_to_recordset(v_repriced) AS f(id uuid, unit_price_cents bigint, extended_cents bigint)
-         WHERE ri.id = f.id;
-        INSERT INTO public.financial_audit_log (
-          operation_type, entity_type, entity_id, actor_user_id, old_values, new_values, total_impact_cents, description
+      ) THEN
+        -- A sales rep may re-price only from invoices invoices_select lets them read (as create_return requires).
+        IF NOT public.is_admin() AND EXISTS (
+          SELECT 1 FROM public.invoices hidden
+           WHERE hidden.order_id = v_order_id
+             AND hidden.customer_id = v_customer_id
+             AND hidden.invoice_type <> 'credit_memo'
+             AND hidden.deleted_at IS NULL
+             AND hidden.status IN ('posted', 'overdue', 'paid')
+             AND NOT (hidden.created_by IS NOT DISTINCT FROM auth.uid()
+                      OR hidden.salesman_id IS NOT DISTINCT FROM auth.uid())
+        ) THEN RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'; END IF;
+        IF EXISTS (
+          SELECT 1
+            FROM public.return_items ol
+            JOIN public.returns r ON r.id = ol.return_id
+            CROSS JOIN LATERAL public._return_customer_line_share(
+              v_order_id, ol.order_item_id, v_customer_id, ol.return_id
+            ) s
+           WHERE ol.order_item_id IN (SELECT mine.order_item_id FROM public.return_items mine WHERE mine.return_id = p_return_id)
+             AND r.id <> p_return_id
+             AND r.order_id = v_order_id
+             AND r.customer_id = v_customer_id
+             AND r.deleted_at IS NULL
+             AND r.status NOT IN ('rejected', 'cancelled', 'credited')
+             AND r.credit_invoice_id IS NULL
+             AND s.share_mode
+             AND (ol.priced_from IS DISTINCT FROM 'billed_share'
+                  OR ol.extended_cents IS DISTINCT FROM greatest(0,
+                       round(s.billed_cents * (s.other_returned_qty + ol.quantity) / NULLIF(s.billed_qty, 0))::bigint
+                       - s.other_returned_cents)
+                  OR ol.unit_price_cents IS DISTINCT FROM round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint)
+        ) THEN
+          RAISE EXCEPTION 'RETURN_REPRICE_OTHER_RETURN_PENDING: another open return of this product for this customer still has its old price; cancel it and create it again, then retry';
+        END IF;
+        WITH fresh AS (
+          SELECT ri.id, ri.order_item_id, ri.quantity, ri.unit_price_cents AS old_unit_price_cents,
+                 ri.extended_cents AS old_extended_cents,
+                 round(s.billed_cents / s.billed_qty)::bigint AS unit_price_cents,
+                 round(s.billed_cents * (s.other_returned_qty + ri.quantity) / s.billed_qty)::bigint
+                   - s.other_returned_cents AS extended_cents
+            FROM public.return_items ri
+            CROSS JOIN LATERAL public._return_customer_line_share(
+              v_order_id, ri.order_item_id, v_customer_id, p_return_id
+            ) s
+           WHERE ri.return_id = p_return_id
+             AND ri.priced_from = 'order_price'
+             AND s.share_mode
+             AND s.billed_qty > 0
+             AND s.other_returned_qty + ri.quantity <= s.billed_qty
+        ), repriced AS (
+          UPDATE public.return_items ri
+             SET unit_price_cents = f.unit_price_cents, extended_cents = f.extended_cents, priced_from = 'billed_share'
+            FROM fresh f
+           WHERE ri.id = f.id AND f.extended_cents >= 0
+          RETURNING f.*
         )
-        SELECT 'return_received', 'return', f.return_id, v_actor, NULL, jsonb_build_object('lines', jsonb_agg(to_jsonb(f))),
-               sum(f.extended_cents - f.old_extended_cents)::bigint,
-               'Return re-priced to the billed share (tax and discount included) after the sale''s billing changed'
-          FROM jsonb_to_recordset(v_repriced) AS f(id uuid, return_id uuid, order_item_id uuid, quantity numeric,
-                 old_unit_price_cents bigint, old_extended_cents bigint, unit_price_cents bigint, extended_cents bigint)
-         GROUP BY f.return_id;
+        SELECT jsonb_agg(to_jsonb(repriced) ORDER BY repriced.order_item_id),
+               sum(repriced.extended_cents - repriced.old_extended_cents)::bigint
+          INTO v_repriced, v_repriced_delta
+          FROM repriced;
+        IF v_repriced IS NOT NULL THEN
+          INSERT INTO public.financial_audit_log (
+            operation_type, entity_type, entity_id, actor_user_id, old_values, new_values, total_impact_cents, description
+          ) VALUES (
+            'return_received', 'return', p_return_id, v_actor, NULL, jsonb_build_object('lines', v_repriced), v_repriced_delta,
+            'Return re-priced to the billed share (tax and discount included) after the sale''s billing changed'
+          );
+        END IF;
       END IF;
       -- Each share line's stored credit must still be exactly what create_return would price it at
       -- now: an earlier return of the line cancelled or rejected after this one was created leaves it
@@ -388,7 +626,7 @@ BEGIN
 END;
 $function$;
 
--- 2. (#2066) issue_return_credit: re-price a stale share line, then cap it ---------------------------------------------
+-- 4. (#2066) issue_return_credit: re-price this return's order-price lines, then cap them ----------------------------
 CREATE OR REPLACE FUNCTION public._issue_return_credit_intent_impl_20260812(p_return_id uuid, p_actor_id uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -411,6 +649,7 @@ DECLARE
   v_split_return boolean;
   -- (#2066) the lines re-priced below
   v_repriced jsonb;
+  v_repriced_delta bigint;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_actor_id IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF;
@@ -560,81 +799,81 @@ BEGIN
     LOOP
       PERFORM pg_advisory_xact_lock(hashtextextended(v_lock_order_item_id::text, 361));
     END LOOP;
-    -- (#2066) A return line made at the order price (the sale had no sales-tax or discount line yet) whose order line is
-    -- now priced from what was billed (a tax or discount line reached a live invoice of the sale) is re-priced here,
-    -- under these locks, instead of refused as stale (Mason, 22 Nov: the taxed share, never more than was charged on the
-    -- posted invoices, tax included). Every such line of this customer on the same order line moves together, this
-    -- return's and its other open returns' alike, in the order they were made, as create_return would have priced them
-    -- one after another: so no return takes another's tax or discount, and all of them add up to the billed share of
-    -- their units. Lines priced any other way, and credited returns, stay as they are; a line still stale after this
-    -- (an earlier return cancelled, a split payer's blend moved, more returned than billed) is refused below as before.
-    WITH lines AS (
-      SELECT ri.id, ri.return_id, ri.order_item_id, ri.quantity, ri.unit_price_cents, ri.extended_cents, r.created_at,
-             (r.status = 'credited' OR r.credit_invoice_id IS NOT NULL) AS credited,
-             (ri.unit_price_cents = round(oi.price_per_unit * 100)::bigint
-              AND ri.extended_cents = round(ri.quantity * oi.price_per_unit * 100)::bigint) AS at_order_price
+    -- (#2066) A line create_return priced at the order price (the sale had no sales-tax or discount line yet) whose
+    -- order line is now priced from what was billed (a tax or discount line reached a live invoice of the sale) is
+    -- re-priced here, under these locks, to exactly what create_return would price it at now (Mason, 22 Nov: the taxed
+    -- share, never more than was charged on the posted invoices, tax included), instead of refused as stale. Only this
+    -- return's lines change (Taha, 25 Nov): while another open return of the same customer and order line still has a
+    -- price that is not what create_return would give it now, this one is refused (RETURN_REPRICE_OTHER_RETURN_PENDING)
+    -- and nothing changes. A line priced from what was billed (priced_from 'billed_share'), or one beyond the billed
+    -- share, is never re-priced: if stale it is refused below as before (Mason's #1010 rule, cancel and recreate).
+    IF EXISTS (
+      SELECT 1
         FROM public.return_items ri
-        JOIN public.returns r ON r.id = ri.return_id
-        JOIN public.order_items oi ON oi.id = ri.order_item_id AND oi.order_id = v_order_id
-       WHERE ri.order_item_id IN (SELECT mine.order_item_id FROM public.return_items mine WHERE mine.return_id = p_return_id)
-         AND r.order_id = v_order_id
-         AND r.customer_id = v_customer_id
-         AND r.deleted_at IS NULL
-         AND r.status NOT IN ('rejected', 'cancelled')
-    ), share AS (
-      SELECT k.order_item_id, s.share_mode, s.billed_qty, s.billed_cents
-        FROM (SELECT DISTINCT order_item_id FROM lines) k
-        CROSS JOIN LATERAL public._return_customer_line_share(v_order_id, k.order_item_id, v_customer_id, p_return_id) s
-    ), moving AS (
-      SELECT l.*, sh.billed_qty, sh.billed_cents,
-             sum(l.quantity) OVER (PARTITION BY l.order_item_id ORDER BY l.created_at, l.return_id) AS cum_qty
-        FROM lines l
-        JOIN share sh ON sh.order_item_id = l.order_item_id
-       WHERE sh.share_mode AND sh.billed_qty > 0 AND l.at_order_price AND NOT l.credited
-    ), kept AS (
-      SELECT l.order_item_id, sum(l.quantity) AS qty, sum(l.extended_cents) AS cents
-        FROM lines l
-       WHERE NOT EXISTS (SELECT 1 FROM moving m WHERE m.id = l.id)
-       GROUP BY l.order_item_id
-    ), priced AS (
-      SELECT m.id, m.return_id, m.order_item_id, m.quantity, m.billed_qty,
-             m.unit_price_cents AS old_unit_price_cents, m.extended_cents AS old_extended_cents,
-             round(m.billed_cents / m.billed_qty)::bigint AS unit_price_cents,
-             round(m.billed_cents * (coalesce(k.qty, 0) + m.cum_qty) / m.billed_qty)::bigint
-               - CASE WHEN m.cum_qty = m.quantity THEN coalesce(k.cents, 0)::bigint
-                      ELSE round(m.billed_cents * (coalesce(k.qty, 0) + m.cum_qty - m.quantity) / m.billed_qty)::bigint
-                 END AS extended_cents,
-             coalesce(k.qty, 0) + max(m.cum_qty) OVER (PARTITION BY m.order_item_id) AS total_qty
-        FROM moving m
-        LEFT JOIN kept k ON k.order_item_id = m.order_item_id
-    ), ok AS (
-      -- only an order line whose returns all fit inside what was billed, every line at zero or more
-      SELECT p.* FROM priced p
-       WHERE NOT EXISTS (SELECT 1 FROM priced q
-                          WHERE q.order_item_id = p.order_item_id AND (q.total_qty > q.billed_qty OR q.extended_cents < 0))
-    )
-    SELECT jsonb_agg(jsonb_build_object('id', ok.id, 'return_id', ok.return_id, 'order_item_id', ok.order_item_id,
-                       'quantity', ok.quantity, 'old_unit_price_cents', ok.old_unit_price_cents,
-                       'old_extended_cents', ok.old_extended_cents, 'unit_price_cents', ok.unit_price_cents,
-                       'extended_cents', ok.extended_cents) ORDER BY ok.order_item_id, ok.return_id)
-      INTO v_repriced
-      FROM ok
-     WHERE ok.unit_price_cents IS DISTINCT FROM ok.old_unit_price_cents
-        OR ok.extended_cents IS DISTINCT FROM ok.old_extended_cents;
-    IF v_repriced IS NOT NULL THEN
-      UPDATE public.return_items ri
-         SET unit_price_cents = f.unit_price_cents, extended_cents = f.extended_cents
-        FROM jsonb_to_recordset(v_repriced) AS f(id uuid, unit_price_cents bigint, extended_cents bigint)
-       WHERE ri.id = f.id;
-      INSERT INTO public.financial_audit_log (
-        operation_type, entity_type, entity_id, actor_user_id, old_values, new_values, total_impact_cents, description
+        CROSS JOIN LATERAL public._return_customer_line_share(
+          v_order_id, ri.order_item_id, v_customer_id, p_return_id
+        ) s
+       WHERE ri.return_id = p_return_id
+         AND ri.priced_from = 'order_price'
+         AND s.share_mode
+    ) THEN
+      IF EXISTS (
+        SELECT 1
+          FROM public.return_items ol
+          JOIN public.returns r ON r.id = ol.return_id
+          CROSS JOIN LATERAL public._return_customer_line_share(
+            v_order_id, ol.order_item_id, v_customer_id, ol.return_id
+          ) s
+         WHERE ol.order_item_id IN (SELECT mine.order_item_id FROM public.return_items mine WHERE mine.return_id = p_return_id)
+           AND r.id <> p_return_id
+           AND r.order_id = v_order_id
+           AND r.customer_id = v_customer_id
+           AND r.deleted_at IS NULL
+           AND r.status NOT IN ('rejected', 'cancelled', 'credited')
+           AND r.credit_invoice_id IS NULL
+           AND s.share_mode
+           AND (ol.priced_from IS DISTINCT FROM 'billed_share'
+                OR ol.extended_cents IS DISTINCT FROM greatest(0,
+                     round(s.billed_cents * (s.other_returned_qty + ol.quantity) / NULLIF(s.billed_qty, 0))::bigint
+                     - s.other_returned_cents)
+                OR ol.unit_price_cents IS DISTINCT FROM round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint)
+      ) THEN
+        RAISE EXCEPTION 'RETURN_REPRICE_OTHER_RETURN_PENDING: another open return of this product for this customer still has its old price; cancel it and create it again, then retry';
+      END IF;
+      WITH fresh AS (
+        SELECT ri.id, ri.order_item_id, ri.quantity, ri.unit_price_cents AS old_unit_price_cents,
+               ri.extended_cents AS old_extended_cents,
+               round(s.billed_cents / s.billed_qty)::bigint AS unit_price_cents,
+               round(s.billed_cents * (s.other_returned_qty + ri.quantity) / s.billed_qty)::bigint
+                 - s.other_returned_cents AS extended_cents
+          FROM public.return_items ri
+          CROSS JOIN LATERAL public._return_customer_line_share(
+            v_order_id, ri.order_item_id, v_customer_id, p_return_id
+          ) s
+         WHERE ri.return_id = p_return_id
+           AND ri.priced_from = 'order_price'
+           AND s.share_mode
+           AND s.billed_qty > 0
+           AND s.other_returned_qty + ri.quantity <= s.billed_qty
+      ), repriced AS (
+        UPDATE public.return_items ri
+           SET unit_price_cents = f.unit_price_cents, extended_cents = f.extended_cents, priced_from = 'billed_share'
+          FROM fresh f
+         WHERE ri.id = f.id AND f.extended_cents >= 0
+        RETURNING f.*
       )
-      SELECT 'return_credit_issued', 'return', f.return_id, v_actor, NULL, jsonb_build_object('lines', jsonb_agg(to_jsonb(f))),
-             sum(f.extended_cents - f.old_extended_cents)::bigint,
-             'Return re-priced to the billed share (tax and discount included) after the sale''s billing changed'
-        FROM jsonb_to_recordset(v_repriced) AS f(id uuid, return_id uuid, order_item_id uuid, quantity numeric,
-               old_unit_price_cents bigint, old_extended_cents bigint, unit_price_cents bigint, extended_cents bigint)
-       GROUP BY f.return_id;
+      SELECT jsonb_agg(to_jsonb(repriced) ORDER BY repriced.order_item_id),
+             sum(repriced.extended_cents - repriced.old_extended_cents)::bigint
+        INTO v_repriced, v_repriced_delta
+        FROM repriced;
+      IF v_repriced IS NOT NULL THEN
+        INSERT INTO public.financial_audit_log (
+          operation_type, entity_type, entity_id, actor_user_id, old_values, new_values, total_impact_cents, description
+        ) VALUES (
+          'return_credit_issued', 'return', p_return_id, v_actor, NULL, jsonb_build_object('lines', v_repriced), v_repriced_delta,
+          'Return re-priced to the billed share (tax and discount included) after the sale''s billing changed'
+        );
+      END IF;
     END IF;
     IF EXISTS (
       SELECT 1
@@ -698,7 +937,7 @@ BEGIN
 END;
 $function$;
 
--- 3. (#2091) the credit's tax ledger pools the same invoices the credit was priced from ---------------------------------
+-- 5. (#2091) the credit's tax ledger pools the same invoices the credit was priced from ---------------------------------
 CREATE OR REPLACE FUNCTION public._freeze_credit_sales_tax_20270109(p_invoice_id uuid)
  RETURNS void
  LANGUAGE plpgsql
@@ -779,6 +1018,7 @@ DECLARE
 BEGIN
   SELECT string_agg(f.name, ', ') INTO v_bad
     FROM (VALUES
+      ('public._create_return_intent_impl_20260812(jsonb,jsonb,text)', '(#2066)', 2),
       ('public._receive_return_intent_impl_20260812(uuid,uuid,text)', '(#2066)', 1),
       ('public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', '(#2066)', 1),
       ('public._freeze_credit_sales_tax_20270109(uuid)', '(#2091)', 0)
@@ -796,6 +1036,14 @@ BEGIN
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'RETURN_TAX_CHANGE_POSTFLIGHT: not as written: %', v_bad;
   END IF;
-  RAISE NOTICE 'RETURN_TAX_CHANGE_POSTFLIGHT_OK';
+  -- No Data API role may write the new column (return lines change only through the return functions).
+  IF has_column_privilege('authenticated', 'public.return_items', 'priced_from', 'UPDATE')
+     OR has_column_privilege('anon', 'public.return_items', 'priced_from', 'UPDATE') THEN
+    RAISE EXCEPTION 'RETURN_TAX_CHANGE_POSTFLIGHT: priced_from is writable from the Data API';
+  END IF;
+  RAISE NOTICE 'RETURN_TAX_CHANGE_POSTFLIGHT_OK: % line(s) order_price, % billed_share, % unlabelled',
+    (SELECT count(*) FROM public.return_items WHERE priced_from = 'order_price'),
+    (SELECT count(*) FROM public.return_items WHERE priced_from = 'billed_share'),
+    (SELECT count(*) FROM public.return_items WHERE priced_from IS NULL);
 END
 $postflight$;

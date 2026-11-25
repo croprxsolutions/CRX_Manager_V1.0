@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a return still credits after the sale's sales-tax box changes (issue #2066)
 -- ----------------------------------------------------------------------------
--- Migration 20270306110000_return_tax_change_credit. Mason's rule (22 Nov): when tax changed after the return was
+-- Migration 20270307100000_return_tax_change_credit. Mason's rule (22 Nov): when tax changed after the return was
 -- made, its credit re-prices to the taxed share, and is never more than the customer was charged on the posted
 -- invoice, tax included.
 --   A  Untaxed sale, return of 4 of 10 made and received at the order price; the box is ticked and the draft posts
@@ -10,13 +10,15 @@
 --   B  Same, but the box is ticked and the draft posts before the return is received: receive and credit both go
 --      through at the taxed share, and the re-price is in the financial audit log.
 --   C  Control: no tax change. The return credits the order price, as before.
---   D  Two returns of 4 made before the box is ticked: each credits its own 4 units' taxed share (within a cent of
---      each other), not one taking the other's tax; with the last 2 the three credits add up to the posted total.
+--   D  Two returns of 4 made before the box is ticked: crediting one is refused while the other still carries the old
+--      price (RETURN_REPRICE_OTHER_RETURN_PENDING) and nothing of the other changes; once the other is cancelled the
+--      first credits 4/10 of the posted total.
 --   E  A discount set on the draft after the whole sale was returned and received: the credit is the discounted
 --      posted total, not refused because the stored order price is above what was billed.
---   F  Two returns of 5 made before a 20% discount: the first credited while the other still carries the old price
---      gets half the discounted total, not what the other's old price leaves; together they credit the posted total.
---   G  Five returns of 1 before a 1% discount, credited last-made first: each about a fifth, together the posted total.
+--   F  create_return records how it priced each line: 'order_price' before the box is ticked, 'billed_share' after,
+--      and a re-priced line becomes 'billed_share'.
+--   G  A return made before the tick and one made after it (priced from the taxed invoice): the old one re-prices
+--      and credits, the new one still credits unchanged, and together they credit 8/10 of the posted total.
 --
 -- Tax is written at commit (deferred triggers). This file runs as ONE statement, so each step ends with
 -- SET CONSTRAINTS ALL IMMEDIATE / DEFERRED: the commit point of that call in the app.
@@ -194,25 +196,27 @@ BEGIN
     PERFORM pg_temp.rtx_step(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-rtx-tax-d-' || v_suffix));
     PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-d-' || v_suffix));
     v_posted := (SELECT total_amount_cents FROM invoices WHERE id = v_invoice);
+    v_credit2 := (SELECT extended_cents FROM return_items WHERE return_id = v_ret2);
     BEGIN
       PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-d1-' || v_suffix));
-      PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-ic-d1-' || v_suffix));
-      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret2, v_admin, 'smk-rtx-rc-d2-' || v_suffix));
-      PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret2, v_admin, 'smk-rtx-ic-d2-' || v_suffix));
-      v_credit := pg_temp.rtx_credit(v_ret);
-      v_credit2 := pg_temp.rtx_credit(v_ret2);
-      IF abs(v_credit - round(v_posted * 4 / 10.0)) > 1 OR abs(v_credit2 - round(v_posted * 4 / 10.0)) > 1
-         OR abs(v_credit + v_credit2 - round(v_posted * 8 / 10.0)) > 1 THEN
-        v_fails := v_fails || format(' (D) the two returns of 4 credit %s and %s cents, want each about 4/10 of the posted %s;', v_credit, v_credit2, v_posted);
+      v_fails := v_fails || ' (D) receiving one return while another still carries the old price was not refused;';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'RETURN_REPRICE_OTHER_RETURN_PENDING%' THEN
+        v_fails := v_fails || ' (D) the refusal is not RETURN_REPRICE_OTHER_RETURN_PENDING: ' || SQLERRM || ';';
       END IF;
-      v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 2, 'd3-' || v_suffix);
-      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-d3-' || v_suffix));
-      PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-ic-d3-' || v_suffix));
-      IF v_credit + v_credit2 + pg_temp.rtx_credit(v_ret) IS DISTINCT FROM v_posted THEN
-        v_fails := v_fails || format(' (D) the three credits add up to %s cents, want the posted %s;', v_credit + v_credit2 + pg_temp.rtx_credit(v_ret), v_posted);
+    END;
+    IF (SELECT extended_cents FROM return_items WHERE return_id = v_ret2) IS DISTINCT FROM v_credit2 THEN
+      v_fails := v_fails || ' (D) the other return''s price changed;';
+    END IF;
+    BEGIN
+      PERFORM pg_temp.rtx_step(format('SELECT cancel_return(%L, %L, %L, %L)', v_ret2, 'Recreate at the taxed price', v_admin, 'smk-rtx-cx-d2-' || v_suffix));
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-d1b-' || v_suffix));
+      PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-ic-d1-' || v_suffix));
+      IF pg_temp.rtx_credit(v_ret) IS DISTINCT FROM round(v_posted * 4 / 10.0)::bigint THEN
+        v_fails := v_fails || format(' (D) after the other was cancelled the credit is %s cents, want 4/10 of the posted %s;', pg_temp.rtx_credit(v_ret), v_posted);
       END IF;
     EXCEPTION WHEN OTHERS THEN
-      v_fails := v_fails || ' (D) crediting two returns made before the box was ticked failed: ' || SQLERRM || ';';
+      v_fails := v_fails || ' (D) crediting after the other return was cancelled failed: ' || SQLERRM || ';';
     END;
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (D) setup failed: ' || SQLERRM || ';';
@@ -242,49 +246,45 @@ BEGIN
     v_fails := v_fails || ' (E) setup failed: ' || SQLERRM || ';';
   END;
 
-  -- F and G: several returns made before a discount, credited one at a time.
-  DECLARE
-    v_case text;
-    v_qtys numeric[];
-    v_rets uuid[];
-    v_sum bigint;
-    v_n int;
+  -- F and G: how each line was priced, and a return made after the tick next to one made before it.
   BEGIN
-    FOR v_case, v_qtys IN SELECT * FROM (VALUES ('f', ARRAY[5, 5]::numeric[]), ('g', ARRAY[1, 1, 1, 1, 1]::numeric[])) v LOOP
-      BEGIN
-        v_order := pg_temp.rtx_sale(v_admin, v_product.id, v_product.current_cost, v_customer, v_case || '-' || v_suffix);
-        SELECT id INTO v_invoice FROM invoices WHERE order_id = v_order AND invoice_type <> 'credit_memo';
-        v_rets := ARRAY[]::uuid[];
-        FOR v_n IN 1 .. array_length(v_qtys, 1) LOOP
-          v_rets := v_rets || pg_temp.rtx_return(v_admin, v_customer, v_order, v_qtys[v_n], v_case || v_n || '-' || v_suffix);
-        END LOOP;
-        PERFORM pg_temp.rtx_step(format('SELECT set_invoice_standing_discount(%L, %s, %L)', v_invoice,
-          CASE v_case WHEN 'f' THEN 20 ELSE 1 END, 'smk-rtx-disc-' || v_case || '-' || v_suffix));
-        PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-' || v_case || '-' || v_suffix));
-        v_posted := (SELECT total_amount_cents FROM invoices WHERE id = v_invoice);
-        v_sum := 0;
-        FOR v_n IN REVERSE array_length(v_qtys, 1) .. 1 LOOP
-          PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_rets[v_n], v_admin, 'smk-rtx-rc-' || v_case || v_n || '-' || v_suffix));
-          PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_rets[v_n], v_admin, 'smk-rtx-ic-' || v_case || v_n || '-' || v_suffix));
-          IF abs(pg_temp.rtx_credit(v_rets[v_n]) - v_posted * v_qtys[v_n] / 10.0) > 1 THEN
-            v_fails := v_fails || format(' (%s) return %s of %s credits %s cents, want about %s of the posted %s;', upper(v_case), v_n,
-              v_qtys[v_n], pg_temp.rtx_credit(v_rets[v_n]), round(v_posted * v_qtys[v_n] / 10.0, 1), v_posted);
-          END IF;
-          v_sum := v_sum + pg_temp.rtx_credit(v_rets[v_n]);
-        END LOOP;
-        IF v_sum IS DISTINCT FROM round(v_posted * (SELECT sum(q) FROM unnest(v_qtys) q) / 10.0)::bigint THEN
-          v_fails := v_fails || format(' (%s) the returns credit %s cents in all, want %s of the posted %s;', upper(v_case), v_sum,
-            round(v_posted * (SELECT sum(q) FROM unnest(v_qtys) q) / 10.0), v_posted);
-        END IF;
-      EXCEPTION WHEN OTHERS THEN
-        v_fails := v_fails || format(' (%s) crediting returns made before a discount failed: %s;', upper(v_case), SQLERRM);
-      END;
-    END LOOP;
+    v_order := pg_temp.rtx_sale(v_admin, v_product.id, v_product.current_cost, v_customer, 'g-' || v_suffix);
+    SELECT id INTO v_invoice FROM invoices WHERE order_id = v_order AND invoice_type <> 'credit_memo';
+    v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 4, 'g1-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-rtx-tax-g-' || v_suffix));
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-g-' || v_suffix));
+    v_posted := (SELECT total_amount_cents FROM invoices WHERE id = v_invoice);
+    v_ret2 := pg_temp.rtx_return(v_admin, v_customer, v_order, 4, 'g2-' || v_suffix);
+    IF (SELECT priced_from FROM return_items WHERE return_id = v_ret) IS DISTINCT FROM 'order_price'
+       OR (SELECT priced_from FROM return_items WHERE return_id = v_ret2) IS DISTINCT FROM 'billed_share' THEN
+      v_fails := v_fails || ' (F) create_return did not record order_price before the tick and billed_share after;';
+    END IF;
+    v_credit2 := (SELECT extended_cents FROM return_items WHERE return_id = v_ret2);
+    BEGIN
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-g1-' || v_suffix));
+      PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-ic-g1-' || v_suffix));
+      IF (SELECT priced_from FROM return_items WHERE return_id = v_ret) IS DISTINCT FROM 'billed_share' THEN
+        v_fails := v_fails || ' (F) the re-priced line is not marked billed_share;';
+      END IF;
+      IF (SELECT extended_cents FROM return_items WHERE return_id = v_ret2) IS DISTINCT FROM v_credit2 THEN
+        v_fails := v_fails || ' (G) re-pricing one return changed the other;';
+      END IF;
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret2, v_admin, 'smk-rtx-rc-g2-' || v_suffix));
+      PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret2, v_admin, 'smk-rtx-ic-g2-' || v_suffix));
+      IF pg_temp.rtx_credit(v_ret) + pg_temp.rtx_credit(v_ret2) IS DISTINCT FROM round(v_posted * 8 / 10.0)::bigint THEN
+        v_fails := v_fails || format(' (G) the two credits add up to %s cents, want 8/10 of the posted %s;',
+          pg_temp.rtx_credit(v_ret) + pg_temp.rtx_credit(v_ret2), v_posted);
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      v_fails := v_fails || ' (G) crediting a return made before the tick next to one made after it failed: ' || SQLERRM || ';';
+    END;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (F/G) setup failed: ' || SQLERRM || ';';
   END;
 
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL return tax change:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK return tax change: a return credits the taxed share after the box is ticked, before or after it is received, never more than the posted total, each return its own units'' share; a later discount credits the discounted total; an untaxed return keeps the order price';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK return tax change: a return credits the taxed share after the box is ticked, before or after it is received, never more than the posted total; another return still at the old price is refused, never changed; a later discount credits the discounted total; create_return records how it priced each line; an untaxed return keeps the order price';
 END
 $smoke$;

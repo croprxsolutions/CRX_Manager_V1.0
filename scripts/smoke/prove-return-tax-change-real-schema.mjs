@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270306110000_return_tax_change_credit.sql (#2066, #2091).
+ * Real-schema proof for 20270307100000_return_tax_change_credit.sql (#2066, #2091).
  *
  * Builds the checked-in production baseline in a network-disabled PostgreSQL container and replays every
  * migration before the candidate (scripts/smoke/undo-paths/harness.mjs), seeds invented users, customers and a
@@ -29,11 +29,12 @@ import {
   NAME, ROOT, USERS, buildContainer, claims, docker, psql, removeContainer, scalar, seedUsers,
 } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270306110000_return_tax_change_credit.sql';
+const CANDIDATE = '20270307100000_return_tax_change_credit.sql';
 const SMOKE = path.join(ROOT, 'scripts', 'smoke');
 const NEW_CHAIN = 'smoke-return-tax-change.sql';
 const COVERING = ['smoke-sales-tax.sql', 'smoke-split-payer-return-credit.sql', 'smoke-billing-m4-switch.sql'];
 const FUNCTIONS = [
+  'public._create_return_intent_impl_20260812(jsonb,jsonb,text)',
   'public._receive_return_intent_impl_20260812(uuid,uuid,text)',
   'public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)',
   'public._freeze_credit_sales_tax_20270109(uuid)',
@@ -196,12 +197,12 @@ async function main() {
   // 3. APPLY
   const applied = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/cand.sql'], { allowFailure: true });
   assert.equal(applied.status, 0, `${applied.stdout}\n${applied.stderr}`);
-  assert.match(applied.stderr, /RETURN_TAX_CHANGE_POSTFLIGHT_OK/);
+  assert.match(applied.stderr, /RETURN_TAX_CHANGE_POSTFLIGHT_OK: \d+ line\(s\) order_price, \d+ billed_share, 0 unlabelled/);
   console.log('[case] 3 APPLY: committed, POSTFLIGHT_OK');
   // 4. AFTER
   const after = chain(NEW_CHAIN);
   assert.ok(after.pass, `AFTER: the new chain fails: ${after.fail}`);
-  console.log('[case] 4a AFTER (#2066): A-G pass: the credit is the taxed (or discounted) share, before or after receipt, each return its own units, never more than the posted total');
+  console.log('[case] 4a AFTER (#2066): A-G pass: the credit is the taxed (or discounted) share, before or after receipt, never more than the posted total; another return still at the old price is refused and never changed; create_return records how it priced each line');
   const r2 = await race();
   assert.ok(r2.tax > 0 && r2.credit > 0, `AFTER race: ${JSON.stringify(r2)}`);
   assert.equal(r2.ledger, r2.tax, `AFTER race: the ledger must record the tax the credit refunded: ${JSON.stringify(r2)}`);
@@ -213,7 +214,7 @@ async function main() {
   assert.match(again.stderr, /RETURN_TAX_CHANGE_PREFLIGHT: already applied/);
   console.log('[case] 5 RE-APPLY: refused by the preflight');
   // 6. ROLLBACK
-  psql(`BEGIN;\n${oldBodies.join(';\n')};\nCOMMIT;`);
+  psql(`BEGIN;\n${oldBodies.join(';\n')};\nALTER TABLE public.return_items DROP COLUMN priced_from;\nCOMMIT;`);
   assert.equal(md5s(), oldMd5, 'ROLLBACK: the bodies are not the pinned ones');
   expectBefore('ROLLBACK');
   const r3 = await race();

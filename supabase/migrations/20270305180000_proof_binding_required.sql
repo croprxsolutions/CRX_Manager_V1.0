@@ -12,7 +12,8 @@
 -- WHAT: _complete_delivery_authorized_impl (20270305110000's body) changes two conditions, nothing else: a fresh
 --   completion is refused
 --     DELIVERY_LOAD_CHANGED      for a signature sent with no p_lines_seen (as for one that is not the same load);
---     PAPER_TICKET_LOAD_CHANGED  for a ticket photo saved with no lines_seen (as for one that is not the same load).
+--     PAPER_TICKET_LOAD_CHANGED  for a ticket photo saved with no lines_seen, or one it cannot read (as for one that
+--                                is not the same load).
 --   The screens already treat both refusals as "clear the proof, reload the lines, get new proof".
 --
 -- NOT CHANGED: left-at-site photos and no-proof records (never checked); replays of a completed call (never reach the
@@ -123,13 +124,15 @@ BEGIN
       RAISE EXCEPTION 'DELIVERY_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the customer signed. Reload the delivery, check the products and amounts with the customer and get a new signature. If the customer already has the goods, call the office.'
         USING ERRCODE = 'check_violation';
     END IF;
-    IF v_binding ->> 'evidence' = 'paper_ticket'
-       AND v_binding ->> 'evidence_ref' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
-      -- The photo row the evidence step has already checked and locked.
-      SELECT ph.lines_seen INTO v_ticket_lines
-        FROM public.delivery_photos ph
-       WHERE ph.id = (v_binding ->> 'evidence_ref')::uuid AND ph.delivery_id = p_delivery_id;
-      -- 20270305180000: required. A photo saved with no list (before the screen fix) is not proof of this load.
+    IF v_binding ->> 'evidence' = 'paper_ticket' THEN
+      -- The photo row the evidence step has already checked and locked (it reads only the lower-case id).
+      IF v_binding ->> 'evidence_ref' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+        SELECT ph.lines_seen INTO v_ticket_lines
+          FROM public.delivery_photos ph
+         WHERE ph.id = (v_binding ->> 'evidence_ref')::uuid AND ph.delivery_id = p_delivery_id;
+      END IF;
+      -- 20270305180000: required. A photo saved with no list (before the screen fix), or one this step cannot
+      -- read, is not proof of this load (Luna).
       IF v_ticket_lines IS NULL OR NOT public._delivery_lines_match(p_delivery_id, v_ticket_lines, p_quantities) THEN
         RAISE EXCEPTION 'PAPER_TICKET_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the ticket photo was taken. Get the ticket signed for the current products and amounts and add a new photo of it. If the customer already has the goods, call the office.'
           USING ERRCODE = 'check_violation';
@@ -180,7 +183,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = '88f42e60c64e4b15ae60014c18201d95'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '8d86d66f38bf0b8c57e9d477c58c44a8'
                     AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')

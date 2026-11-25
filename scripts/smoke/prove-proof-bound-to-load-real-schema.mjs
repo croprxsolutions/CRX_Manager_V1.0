@@ -615,17 +615,18 @@ function requiredCases() {
   stageText('required.sql', lf(FOLLOW_UPS[0]));
   let r = apply('required.sql');
   assert.equal(r.status, 0, r.output);
-  assert.equal(scalar(STEP_MD5), '88f42e60c64e4b15ae60014c18201d95');
+  assert.equal(scalar(STEP_MD5), '8d86d66f38bf0b8c57e9d477c58c44a8');
   let d = delivery(A(), 'in_progress');
   refused(completeSig(d, 'pbl-q1', undefined), LOAD);
   assert.equal(status(d), 'in_progress');
-  ok(completeSig(d, 'pbl-q1b', A()));
+  const receipt = (out) => out.split(/\r?\n/).filter((l) => l.includes('"delivery_id"')).at(-1);
+  const first = receipt(ok(completeSig(d, 'pbl-q1b', A())));
   assert.equal(status(d), 'completed');
   // A retry of that completed call with no list still returns its saved receipt (a replay never reaches the check).
-  const receipt = (out) => out.split(/\r?\n/).filter((l) => l.includes('"delivery_id"')).at(-1);
   const again = receipt(ok(`SELECT public.complete_delivery(p_delivery_id => '${d}', p_signed_by => '[PROVER] Customer', p_performed_by => '${ADMIN}',
     p_idempotency_key => 'pbl-q1b', p_evidence => 'signature', p_evidence_ref => '${sigPath(d, 'pbl-q1b')}')`));
-  assert.ok(again);
+  assert.ok(first);
+  assert.equal(again, first);
   d = delivery(A());
   refused(startSig(d, 'pbl-q2', undefined), LOAD);
   assert.equal(status(d), 'scheduled');
@@ -633,6 +634,7 @@ function requiredCases() {
   refused(completeTicket(d, 'pbl-q3', photo(d, undefined)), TICKET);
   refused(completeTicket(d, 'pbl-q3n', photo(d, null)), TICKET);
   assert.equal(status(d), 'in_progress');
+  refused(completeTicket(d, 'pbl-q3u', photo(d, undefined).toUpperCase()), /PAPER_TICKET_PHOTO_MISSING|PAPER_TICKET_LOAD_CHANGED/);
   ok(completeTicket(d, 'pbl-q3b', photo(d, A())));
   assert.equal(status(d), 'completed');
   d = delivery(A());
@@ -640,7 +642,7 @@ function requiredCases() {
   assert.equal(status(d), 'scheduled');
   d = delivery(A(), 'in_progress'); ok(completeLeft(d, 'pbl-q5', photo(d, null, 'Left at site — drop location'))); assert.equal(status(d), 'completed');
   d = delivery(A(), 'in_progress'); ok(completeNoProof(d, 'pbl-q6')); assert.equal(status(d), 'completed');
-  console.log('[required] a signature with no list and a ticket photo saved with no list are refused (complete and Mark Delivered), nothing changes; with the list they complete; a replay with no list returns its receipt; left at site and no proof still complete');
+  console.log('[required] a signature with no list and a ticket photo saved with no list are refused (complete and Mark Delivered; the photo id in capitals too), nothing changes; with the list they complete; a replay with no list returns its receipt; left at site and no proof still complete');
   stageText('required-reverse.sql', lf(REQUIRED_REVERSE));
   r = apply('required-reverse.sql');
   assert.equal(r.status, 0, r.output);

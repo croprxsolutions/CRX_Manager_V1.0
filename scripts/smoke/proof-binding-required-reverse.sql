@@ -4,7 +4,7 @@ DO $preflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
-     IS DISTINCT FROM '88f42e60c64e4b15ae60014c18201d95' THEN
+     IS DISTINCT FROM '8d86d66f38bf0b8c57e9d477c58c44a8' THEN
     RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _complete_delivery_authorized_impl is not the 20270305180000 body';
   END IF;
 END

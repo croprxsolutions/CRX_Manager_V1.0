@@ -280,6 +280,8 @@ const isPlainObject = (o) => o !== null && typeof o === "object" && !Array.isArr
 const keysWithin = (o, allowed) => isPlainObject(o) && Object.keys(o).every((k) => allowed.has(k));
 const isId = (v) => typeof v === "string" && /^[A-Za-z0-9_.:@/+-]{1,200}$/.test(v);
 const MODE_KEYS = new Set(["type", "mode", "sessionId"]);
+// Claude Code's permission-mode names; only "normal" seen in real records (Terra HIGH, round 2).
+const PERMISSION_MODES = new Set(["normal", "default", "plan", "acceptEdits", "auto", "bypassPermissions", "dontAsk"]);
 const FLOW_KEYS = new Set(["type", "v", "sessionId", "snapshot", "records"]);
 const FLOW_ID_KEYS = new Set(["tool_name", "event_id", "tool_use_id", "mcp_tool_name", "response_id", "mark_sent_by", "plugin_id"]);
 const FLOW_REF_KEYS = new Set(["type", "id", "directory_id", "transport", "kind", "action"]);
@@ -289,7 +291,7 @@ const isFlowValue = (k, v) => FLOW_ID_KEYS.has(k) ? isId(v)
   : ["server", "touched", "source"].includes(k) ? keysWithin(v, FLOW_REF_KEYS) && Object.values(v).every((x) => x === null || isId(x))
   : false;
 const isContentFreeMarker = (e) =>
-  (e?.type === "mode" && keysWithin(e, MODE_KEYS) && /^[A-Za-z-]{1,40}$/.test(String(e.mode ?? "")) &&
+  (e?.type === "mode" && keysWithin(e, MODE_KEYS) && PERMISSION_MODES.has(e.mode) &&
     (e.sessionId === undefined || isId(e.sessionId))) ||
   (e?.type === "data-flow-records" && keysWithin(e, FLOW_KEYS) && Array.isArray(e.records) &&
     (e.v === undefined || Number.isInteger(e.v)) && (e.snapshot === undefined || typeof e.snapshot === "boolean") &&

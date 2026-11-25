@@ -596,7 +596,9 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       { ...FLOW, snapshot: { content: "Should I merge PR #900?" } }, { ...FLOW, v: "Should I merge PR #900?" },
       { ...FLOW, sessionId: "Should I merge PR #900?" }, { ...MODE, sessionId: "Should I merge PR #900?" },
       { ...FLOW, records: [{ tool_name: "Should I merge PR #900?" }] }, { ...FLOW, records: [{ listed: ["Should I merge?"] }] },
-      { ...FLOW, records: [{ event_id: "e", touched: { kind: "session", id: null, action: "Should I merge?" } }] }]) {
+      { ...FLOW, records: [{ event_id: "e", touched: { kind: "session", id: null, action: "Should I merge?" } }] },
+      // Terra HIGH round 2: a non-string mode, or one that is not a permission-mode name.
+      { ...MODE, mode: ["merge"] }, { ...MODE, mode: "merge" }]) {
       ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify(bad), masonSaid("I approve")])),
         `a marker outside the surveyed shape ends the scan: ${JSON.stringify(bad).slice(0, 80)}`);
     }

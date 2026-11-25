@@ -40,14 +40,10 @@ export function parseProductLine(
       const ratePerAcre = parts[1] || null;
       const totalProduct = parts.length >= 3 ? parts[2] : null;
 
-      // Same strict amount cells and rules as the plain reader below.
-      const rate = readAmountCell(ratePerAcre || "");
-      const total = readAmountCell(totalProduct || "");
-      const quantity = total?.amount ?? rate?.amount ?? 0;
-      const unit = total
-        ? total.unit ??
-          (total.word === null && total.rest === "" ? rate?.unit ?? null : null)
-        : rate?.unit ?? null;
+      const { quantity, unit } = pickQuantity(
+        readAmountCell(ratePerAcre || ""),
+        totalProduct || null,
+      );
 
       return {
         productName,
@@ -86,19 +82,12 @@ export function parseProductLine(
     ? tokens.slice(numIdx + 1).join(" ")
     : null;
 
-  // The first cell is the per-acre rate; a clean amount cell right after it is the total used, and the
-  // total is the quantity, as in the pipe and multi-line readers ("6 g 750 g" is 750 g, Sol #2267 r11).
   const rate = readAmountCell(tokens.slice(numIdx).join(" "));
-  const total = rate?.rest ? readAmountCell(rate.rest) : null;
-
-  let quantity = rate?.amount ?? 0;
-  let unit = rate?.unit ?? null;
-  if (total) {
-    quantity = total.amount;
-    // A bare total at the end of the line shares the rate's unit; anything else unrecognised stays blank for the rep.
-    unit = total.unit ??
-      (total.word === null && total.rest === "" ? unit : null);
-  }
+  const afterRate = (rate?.rest ?? "").replace(/^[.;]+(?=\s|$)\s*/, "").replace(
+    PER_ACRE,
+    "",
+  );
+  const { quantity, unit } = pickQuantity(rate, afterRate || null);
 
   return {
     productName,
@@ -111,18 +100,44 @@ export function parseProductLine(
   };
 }
 
-const UNIT_WORD = /^(gals?|gallons?|lbs?|oz|qt|pt|pints?|quarts?|l|ml|g)$/i;
+const UNIT_WORD = /^(gals?|gallons?|lbs?|oz|qts?|pts?|pints?|quarts?|l|ml|g)$/i;
+const PER_ACRE = /^\/\s*a(?:c(?:re)?)?\.?(?=\s|$)\s*/i;
 
-// One "amount [unit]" cell at the start of text, e.g. "750 g", "750g", ".75 g", "1,500 qt".
+// The rate cell is column 2, the total text column 3. The total, when it is a clean amount cell with a
+// unit we know, is the quantity ("6 g 750 g" is 750 g, Sol #2267 r11). A line with only a rate keeps
+// it. Anything uncertain (unreadable or unit-less total, unknown unit, a name or extra amount that
+// shifts the columns) keeps a best-guess number but leaves the unit blank, which the stock-unit check
+// refuses, so a rep must correct the line before it can be filed.
+function pickQuantity(
+  rate: AmountCell | null,
+  totalText: string | null,
+): { quantity: number; unit: string | null } {
+  if (!totalText) {
+    return { quantity: rate?.amount ?? 0, unit: rate?.unit ?? null };
+  }
+  const total = readAmountCell(totalText);
+  const columnsLineUp = rate !== null &&
+    (rate.word === null || rate.unit !== null) &&
+    total !== null && readAmountCell(total.rest) === null;
+  if (columnsLineUp && total.unit) {
+    return { quantity: total.amount, unit: total.unit };
+  }
+  return { quantity: total?.amount ?? rate?.amount ?? 0, unit: null };
+}
+
+type AmountCell = {
+  amount: number;
+  word: string | null;
+  unit: string | null;
+  rest: string;
+};
+
+// One "amount [unit]" cell at the start of text, e.g. "750 g", "750g", ".75 g", "2.", "1,500 qt".
 // word is the letters right after the amount; unit is set only when that word is a unit we know,
 // so "750 mg" or "750 kg" never turns into grams.
-export function readAmountCell(
-  text: string,
-):
-  | { amount: number; word: string | null; unit: string | null; rest: string }
-  | null {
+export function readAmountCell(text: string): AmountCell | null {
   const m = text.trim().match(
-    /^((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)\s*([a-z]+)?(?=\s|$)\s*(.*)$/i,
+    /^((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d*)?|\.\d+)\s*([a-z]+)?(?=[\s/.;]|$)\s*(.*)$/i,
   );
   if (!m) return null;
   const word = m[2] ?? null;

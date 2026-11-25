@@ -11,15 +11,20 @@ Source: Sol round 11 HIGH 1 on #2267 (head `0b23deaef2cc`, skipped by Mason 2026
 
 ## Outcome
 
-The plain-spaces path reads the same columns the other two readers do: the first amount after the name is the rate per acre; a clean amount cell right after it (`750 g`, `750g`, `.75 g`, `1,500 qt`) is the total, and the total is the quantity. Anything else after the rate (a lot or EPA number, `N/A`, damaged text) is not a total, and the line keeps today's behavior (the rate's number). The unit is the total's own unit when it is one we know; a bare total at the end of the line takes the rate's unit; any other word after the total (`mg`, `kg`, `bags`, `Lot`) leaves the unit blank so the rep must pick it. The pipe reader learns `g` as a whole unit word only, so `mg`/`kg` never become grams.
+Both single-line readers (plain spaces and pipes) read column 2 as the rate per acre and column 3 as the total used, with one rule (`pickQuantity` in `productLine.ts`):
 
-Files: `supabase/functions/process-blend-ticket/index.ts`, a new `productLine.ts` beside it (so a test can import the reader without starting the server), and its Deno test. No database, screen, permission or lifecycle change. Nothing is written by the reader itself; a rep still reviews every line before the application record is created.
+- **Sure:** the total is a clean amount cell (`750 g`, `750g`, `.75 g`, `32qt.`, `1,500 qt`, an optional `/ac` after the rate) with a unit the reader knows, and nothing shifts the columns. Quantity and unit are the total's.
+- **Only a rate on the line:** quantity and unit are the rate's (unchanged).
+- **Anything else is a guess:** an unreadable or unit-less total, a unit the reader does not know (`mg`, `kg`, `bags`, `Lot`), a rate whose unit is unknown (`280 SL`), or another amount after the total. The best-guess number is kept but the unit is left **blank**. The reader never borrows the rate's unit and never finds `g` inside another word.
+
+A blank unit is the safety valve: `create_application_record_from_blend_ticket` (body from `20260713060200`, renamed by `20261016140000`) passes the line unit to `field_app_priced_quantity`, which returns NULL for a blank unit, and the function raises `BLEND_TICKET_UNIT_UNCONVERTIBLE`. So a guessed line cannot be filed or deducted until a rep sets its unit. The batch approval screen does not show product lines, so this check, not a rep's reading of every line, is what stops a guess (Sol r1 LOW).
+
+Files: `supabase/functions/process-blend-ticket/index.ts`, a new `productLine.ts` beside it (so a test can import the reader without starting the server), and its Deno test. No database, screen, permission or lifecycle change.
 
 ## Rules that always hold
 
-- When the line has a clean total cell, the quantity is that cell's number, in that cell's unit or blank; it is never the rate.
-- A unit the reader does not know is never replaced by a known one.
-- The server-side stock-unit check and the rep's review are unchanged.
+- With a clean total cell and aligned columns, the quantity is the total's number in the total's unit; it is never the rate.
+- A unit the reader is not sure of is left blank, never replaced by a known one; a blank unit cannot be filed.
 
 ## Existing rows
 
@@ -29,22 +34,18 @@ Already-imported tickets are not re-read. Any ticket imported with the old reade
 
 One PR into `staging`. The Edge Function runs from the deployed copy, so the fix reaches users only after the function is deployed: staging first; production deploy needs Mason's explicit yes.
 
-## Proof cases (Deno test against the real reader)
+## Proof cases (Deno test against the real reader, `productLine.test.ts`)
 
-1. When the line is `Piksi Dust Inffurow 6 g 750 g`, then quantity 750, unit `g`.
-2. When the line is `Piksi Dust 6g 750g` (no spaces before units), then quantity 750, unit `g`.
-3. When the rate and total units differ (`Roundup 32 oz 10 gal`), then quantity 10, unit `gal`.
-4. When the line has only one number (`Roundup 32 oz`), then quantity 32, unit `oz` (unchanged).
-5. When the total has a thousands comma (`Atrazine 2 qt 1,500 qt`), then quantity 1500.
-6. When the line is the pipe form (`Piksi | 6 g | 750 g`), then quantity 750 and unit `g` (the pipe reader did not know `g` as a unit and left it blank; a one-token addition).
-
-7. Lot/EPA numbers, `mg`/`kg`/`bags`, leading decimals and `1,5` (Astra and compliance counterexamples): see `productLine.test.ts`.
+1. `Piksi Dust Inffurow 6 g 750 g` → 750 g; `6g 750g`, `32 oz 10 gal` → 10 gal, `1,500 qt`, `2 lbs 80 lbs` → 80 lb, `32 QTS`, `2 qt/ac 32 qt`, `32qt.`, `.75 g`, a trailing lot after a clean total, and the pipe forms.
+2. One-rate lines keep the rate: `Roundup 32 oz`, `32oz`, `2. qt`, `Roundup | 32 oz`.
+3. Every guess has a blank unit: lot and EPA numbers, `N/A`, `1,5 g`, a bare total, `mg`/`kg`/`bags`, `1 500 qt`, `Liberty 280 SL 32 oz 10 gal`, `Atrazine 4L 2 qt 100 qt`.
 
 ## Challenge settlement (Astra `gpt-6.2-astra` high, 47 findings; compliance reviewer, 3 HIGH)
 
-- Fixed in the contract and code: trailing lot/EPA numbers read as the total; `g` matching inside `mg`/`kg`/`bag` on the pipe path; unknown total units silently taking the rate's unit; leading decimals and `1,5`; wrong file name.
+- Fixed in the contract and code: trailing lot/EPA numbers read as the total; `g` matching inside `mg`/`kg`/`bag`; unknown total units taking the rate's unit; leading decimals and `1,5`; wrong file name.
+- Luna r1–r2 and Sol r1 (`1029256da`): the pipe reader also uses the strict cell; a guess (unreadable or unit-less total, numeric product name, shifted columns) now always has a blank unit instead of borrowing the rate's (this reverses Luna r2's "inherit the rate's unit" suggestion, which Sol r1 showed can deduct 10 oz for 10 gal); `2.`, `QTS`, `/ac` read correctly.
 - Refuted: `ratePerAcre`/`totalProduct` text contents — only name, quantity, unit, lot and confidence are sent to `commit_blend_ticket_ocr_result` (`index.ts` `ocrProducts` mapping).
-- Out of scope, unchanged by this PR (pre-existing OCR layout limits, a rep reviews every line): numeric product names (`Liberty 280 SL`), a row wrapped over two lines, mixed horizontal/vertical layouts, header order, section boundaries, the confidence formula, reprocess and filing/stock paths. Listed as follow-ups in the PR.
+- Out of scope, unchanged by this PR (pre-existing OCR layout limits): a row wrapped over two lines, mixed horizontal/vertical layouts, header order, section boundaries, the confidence formula, reprocess and filing/stock paths. Listed as follow-ups in the PR.
 - Decisions: legacy exposure and rollback are not new — the app is not in real use yet (2026-11-24) and #2267's gram change is on staging only; production deploy of the function waits for Mason's yes. No business decision is open.
 
 ## Open business decisions

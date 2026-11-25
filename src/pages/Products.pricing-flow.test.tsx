@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -119,10 +119,11 @@ vi.mock('../lib/productPricingWorkbook', async () => {
 });
 
 vi.mock('../components/ui/EditableDataTable', () => ({
-  default: function MockEditableDataTable({ data, onSave, filters, columns, searchPlaceholder, searchMatcher }: {
+  default: function MockEditableDataTable({ data, onSave, filters, columns, searchPlaceholder, searchMatcher, onSearchChange }: {
     data: typeof product[];
     searchPlaceholder?: string;
     searchMatcher?: (row: typeof product, search: string) => boolean;
+    onSearchChange?: (search: string) => void;
     onSave: (changes: Map<string, Record<string, unknown>>) => Promise<void | boolean>;
     filters?: ReactNode;
     columns: Array<{
@@ -135,8 +136,9 @@ vi.mock('../components/ui/EditableDataTable', () => ({
     }>;
   }) {
     const [dirty, setDirty] = useState<Record<string, unknown>>({});
-    // Like the real table, the search box is the table's own state: the page never sees it.
+    // Like the real table, the search box is the table's own state, reported through onSearchChange.
     const [search, setSearch] = useState('');
+    useEffect(() => { onSearchChange?.(search); }, [onSearchChange, search]);
     const shown = data.filter((item) => !search || searchMatcher?.(item, search)).length;
     const row = data[0];
     const getCellValue = (key: string): unknown => key in dirty ? dirty[key] : row[key as keyof typeof product];
@@ -888,7 +890,7 @@ describe('Products governed inline pricing flow', () => {
     expect(other.idempotencyKey).not.toBe(first.idempotencyKey);
   });
 
-  it('says the search box does not narrow a filtered pricing export, and names the file by the business day', async () => {
+  it('exports only the products the search shows, and names the file by the business day', async () => {
     mockExportPricing.mockResolvedValue({ rows: [] });
     mockGeneratePricing.mockResolvedValue(new Blob(['xlsx']));
     // jsdom has no object URLs; add them for this test only.
@@ -904,15 +906,19 @@ describe('Products governed inline pricing flow', () => {
       render(<Products />);
       const exportButton = await screen.findByRole('button', { name: 'Pricing .xlsx' });
       await waitFor(() => expect(exportButton).toBeEnabled());
-      // A search that hides every row still exports the filtered list, as the toast says.
-      fireEvent.change(screen.getByPlaceholderText('Search products...'), { target: { value: 'no such product' } });
+      // A search that hides every row exports nothing.
+      const search = screen.getByPlaceholderText('Search products...');
+      fireEvent.change(search, { target: { value: 'no such product' } });
       expect(screen.getByText('Table shows 0 rows')).toBeInTheDocument();
       fireEvent.click(exportButton);
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', 'Select at least one active Product to export.'));
+      expect(mockExportPricing).not.toHaveBeenCalled();
 
-      await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
-        'success',
-        'Exported 1 Product pricing row(s). The search box does not narrow this file: tick products to export only those.',
-      ));
+      // A search that shows the product exports it.
+      fireEvent.change(search, { target: { value: product.product_name } });
+      expect(screen.getByText('Table shows 1 rows')).toBeInTheDocument();
+      fireEvent.click(exportButton);
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Exported 1 Product pricing row(s).'));
       expect(mockExportPricing).toHaveBeenCalledWith(expect.objectContaining({ productIds: [product.id] }));
       expect(clicked).toEqual(['crx-product-pricing-2026-11-24.xlsx']);
     } finally {

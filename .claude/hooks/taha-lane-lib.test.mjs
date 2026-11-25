@@ -41,6 +41,8 @@ for (const p of [
   ".claude/hooks/taha-lane-lib.mjs", ".claude/hooks/taha-lane-prompt.mjs", ".claude/hooks/pr-merge-guard.mjs",
   ".claude/hooks/prompt-router.mjs", ".codex/hooks/production-action-guard.mjs", ".claude/settings.json", ".codex/hooks.json",
   ".claude/hooks/sol-risk-lib.mjs", // holds GATED_MERGE_BASES; dropping staging there would turn the block off
+  // A customer quote that only mentions a supplier stays Taha's; so does a supplier file with another lane word.
+  "src/pages/QuoteSupplierCosts.tsx", "supabase/migrations/20270401000000_supplier_quote_invoice_link.sql",
 ]) ok(isTahaLanePath(p), `${p} is Taha's`);
 for (const p of [
   "src/pages/FieldApplicationInvoice.tsx", "src/components/field-invoices/Row.tsx", "src/pages/FieldInvoices.tsx",
@@ -50,6 +52,8 @@ for (const p of [
   "src/lib/fieldAppNewInvoiceAddress.ts", "src/pages/FieldStop.billing.test.tsx", "src/pages/FieldAppSplitInvoiceEditor.tsx",
   "src/components/field-invoices/UnbilledApplicationsPanel.tsx", "src/pages/VendorBillDetail.tsx",
   "supabase/migrations/20261022021000_order_invoice_refuses_field_split.sql",
+  // Supplier quotes are Supplier Pricing, not customer quotes (Taha on #2524; Mason, 2026-11-25).
+  "supabase/migrations/20270305200000_supplier_quote_unit_floor.sql", "src/lib/supplierQuoteSheet.ts",
 ]) ok(!isTahaLanePath(p), `${p} is not Taha's`);
 
 // ── the problem ─────────────────────────────────────────────────────────────
@@ -105,6 +109,7 @@ for (const [sql, why] of [
   ["UPDATE invoices_archive SET x = 1;", "a table that only starts with a lane name"],
   ["CREATE OR REPLACE FUNCTION public.close_delivery_receipt() AS $$ SELECT 1 $$;", "a neutral function"],
   ["CREATE FUNCTION public.save_spray_job_invoice() AS $$ SELECT 1 $$;", "a field-billing function name"],
+  ["CREATE OR REPLACE FUNCTION public.get_supplier_quote_sheet(uuid) AS $$ SELECT 1 $$;", "a supplier-quote (Supplier Pricing) function"],
 ]) ok(!isTahaLaneSql(sql), `not Taha's: ${why}`);
 const mig = (filename, sql) => ({ filename, status: "added", sql });
 ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270226213000_refuse_impossible_quantities_and_dates.sql", "ALTER TABLE public.order_items ADD CHECK (q > 0);")], now: NOW }),

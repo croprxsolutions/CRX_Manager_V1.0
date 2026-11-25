@@ -45,6 +45,9 @@ const AFTER_FIELD = new Set(["app", "application", "applications", "invoice", "i
 const isFieldBilling = (words) => words.some((w, i) => FIELD_WORDS.has(w) || (w === "field" && AFTER_FIELD.has(words[i + 1])));
 // Chemical-sale bill splits (billSplitLock, LineBillSplit) are billing too; vendor bills are not (Codex P1, #2303).
 const isBill = (words) => words.includes("bill") && !words.includes("vendor");
+// A supplier quote is Supplier Pricing (Mason's), not a customer quote (Taha on #2524; Mason's retro yes, 2026-11-25).
+// Only "supplier quote" side by side counts, so a customer quote that mentions a supplier stays Taha's.
+const isSupplierQuoteWord = (words, w, i) => (w === "quote" || w === "quotes") && words[i - 1] === "supplier";
 
 const wordsOf = (name) => String(name)
   .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -85,7 +88,7 @@ function isFieldBillingName(name) {
 function isLaneName(name) {
   if (isFieldBillingName(name)) return false;
   const words = wordsOf(name);
-  return isBill(words) || words.some((w, i) => LANE_WORDS.has(w) || (w === "write" && /^offs?$/.test(words[i + 1] ?? "")));
+  return isBill(words) || words.some((w, i) => (LANE_WORDS.has(w) && !isSupplierQuoteWord(words, w, i)) || (w === "write" && /^offs?$/.test(words[i + 1] ?? "")));
 }
 
 // Taha's functions whose names carry no lane word (Taha's review of #2382, HIGH 2: #2324 rebuilt

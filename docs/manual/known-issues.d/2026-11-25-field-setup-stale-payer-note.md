@@ -1,7 +1,7 @@
 ## 2026-11-25 — Field Setup: an old tab can overwrite a newer payer note; nested Split Evenly button
 
-**Severity:** MED (note overwrite), LOW (nested button). **Area:** Field Setup (who-pays split and payer notes, FP-1). **Status:** FIXED (2026-11-25, on staging once merged).
-**Owner:** none. **Tracked:** found in the sales-rep role check on #2498 (results comment 7167925342).
+**Severity:** MED (note overwrite), LOW (nested button). **Area:** Field Setup (who-pays split and payer notes, FP-1). **Status:** PARTIAL (the warning and the button are fixed; a database compare waits for Mason's call).
+**Owner:** Mason decision. **Tracked:** found in the sales-rep role check on #2498 (results comment 7167925342).
 
 Both found on a local test copy built from staging at 8e1828690, signed in as a sales rep, with invented data.
 
@@ -26,7 +26,8 @@ warning.
 - LOW: the Default Billing open/close button wraps the section heading (block content in a button), as the FSA
   section does.
 - MED (Sol and Luna, 2026-11-25): the warning is a screen-side check, so it is best-effort. A note saved by someone
-  else in the moment between the re-read and the save, a failed re-read, or a newer note adopted after a failed save
-  can still be overwritten without the warning. Closing that fully needs the database save to compare the note the
+  else in the moment between the re-read and the save, or during a failed re-read, can still be overwritten without
+  the warning. (A split or note someone else saved during a failed save does warn on the retry, after Taha's review
+  of #2585.) Closing that fully needs the database save to compare the note the
   user saw, which would refuse a stale save; that conflicts with the "flag, never block" field rule, so it waits for
   Mason's call. Field edits typed during the short re-read follow the existing save-time lock rules.

@@ -210,6 +210,10 @@ function FieldSetupPage() {
   }, [billingSplits, splitHistory]);
   const [inForceSplit, setInForceSplit] = useState<SplitVersion | null>(null);
   const loadedNotesRef = useRef<Record<string, string>>({});
+  // What the user last saw (stale-save warning baseline): a failed save's refresh must not adopt someone else's newer
+  // split or note over the user's own unsaved edit to it, or the retry would replace it without a warning.
+  const seenVersionIdRef = useRef<string | null>(null);
+  const seenNotesRef = useRef<Record<string, string>>({});
   const [loading, setLoading] = useState(!isNew);
   // The field's read failed: say so, never "Field not found" or a form missing its saved values (To-Do 10.5).
   const [loadError, setLoadError] = useState(false);
@@ -370,6 +374,8 @@ function FieldSetupPage() {
     const rows = splitRowsFrom(data.inForce);
     loadedSplitsRef.current = rows;
     loadedNotesRef.current = data.notes;
+    seenVersionIdRef.current = data.history[0]?.id ?? null;
+    seenNotesRef.current = data.notes;
     setBillingSplits(rows);
     setPayerNotes(data.notes);
     setSplitHistory(data.history);
@@ -711,7 +717,19 @@ function FieldSetupPage() {
       // What the user did not touch takes the saved value, so a retry never sends an old split or clears a note
       // someone else wrote. The page is locked while saving, so billingSplits and payerNotes are what was sent.
       const rows = splitRowsFrom(data.inForce);
-      if (splitShape(billingSplits) === splitShape(loadedSplitsRef.current ?? [])) setBillingSplits(rows);
+      const splitUntouched = splitShape(billingSplits) === splitShape(loadedSplitsRef.current ?? []);
+      if (splitUntouched) setBillingSplits(rows);
+      // The warning baseline moves only where the user has no edit, or where the saved value is the user's own
+      // (a lost reply that did save it).
+      if (splitUntouched || splitShape(splitRowsFrom(data.history[0] ?? null)) === splitShape(billingSplits)) {
+        seenVersionIdRef.current = data.history[0]?.id ?? null;
+      }
+      const seen = { ...seenNotesRef.current };
+      for (const cid of new Set([...Object.keys(seen), ...Object.keys(data.notes)])) {
+        const mine = (payerNotes[cid] ?? '').trim();
+        if (mine === (loadedNotesRef.current[cid] ?? '').trim() || mine === (data.notes[cid] ?? '').trim()) seen[cid] = data.notes[cid] ?? '';
+      }
+      seenNotesRef.current = seen;
       const oldNotes = loadedNotesRef.current;
       setPayerNotes((current) => {
         const merged = { ...current };
@@ -772,9 +790,9 @@ function FieldSetupPage() {
       try {
         const now = await loadFieldSplit(id, localToday());
         const latest = now.history[0] ?? null;
-        const split = splitChanged && latest && latest.id !== (ack?.versionId ?? splitHistory[0]?.id ?? null) ? latest : null;
+        const split = splitChanged && latest && latest.id !== (ack?.versionId ?? seenVersionIdRef.current) ? latest : null;
         const names = new Map([...pastPayers, ...billingSplits].map((p) => [p.customer_id, p.customer_name]));
-        const notes = staleNoteIds(notesChanges, loadedNotesRef.current, now.notes, ack?.notes).map((cid) => ({
+        const notes = staleNoteIds(notesChanges, seenNotesRef.current, now.notes, ack?.notes).map((cid) => ({
           customer_id: cid, name: names.get(cid) ?? 'a payer', theirs: (now.notes[cid] ?? '').trim(),
         }));
         if (seq === fieldLoadSeqRef.current && (split || notes.length > 0)) {

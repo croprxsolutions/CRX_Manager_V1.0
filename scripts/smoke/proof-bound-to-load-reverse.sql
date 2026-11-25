@@ -1,6 +1,6 @@
--- Rollback for 20270306190000_proof_bound_to_load.sql, proven by
+-- Rollback for 20270307030000_proof_bound_to_load.sql, proven by
 -- scripts/smoke/prove-proof-bound-to-load-real-schema.mjs.
--- Switches the check off: restores #2324's completion step (20270306150000) and nothing else. The wrappers' optional
+-- Switches the check off: restores #2324's completion step (20270306230000) and nothing else. The wrappers' optional
 -- p_lines_seen, delivery_photos.lines_seen and its trigger stay, so screens already open and queued calls that send
 -- them keep working, and the saved photo lists survive for a re-apply. If the later "binding required" migration is
 -- live, reverse that one first. To use it live, copy it into a new migration through the gates (without BEGIN /
@@ -12,9 +12,9 @@ BEGIN
   -- Restore only over the reviewed body, so a later change is never silently undone.
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-         AND md5(replace(p.prosrc, chr(13), '')) = 'f8cb36a8a97fe35abeade37ace956cfc'
+         AND md5(replace(p.prosrc, chr(13), '')) = '92e373301409583f2f7fec1f0cb207ee'
          AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']) THEN
-    RAISE EXCEPTION 'PROOF_LOAD_REVERSE: the completion step is not the 20270306190000 one; re-plan the rollback';
+    RAISE EXCEPTION 'PROOF_LOAD_REVERSE: the completion step is not the 20270307030000 one; re-plan the rollback';
   END IF;
 END
 $installed$;

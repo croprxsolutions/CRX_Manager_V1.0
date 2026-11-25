@@ -41,7 +41,8 @@ export function useSaveShortcut(onSave: () => unknown, enabled: boolean | (() =>
       timer = setTimeout(() => {
         timer = undefined;
         if (!canSave()) { busy = false; return; }
-        void Promise.resolve(latest.current.onSave()).finally(() => { busy = false; });
+        // The page's own save shows any failure; catch here so a rejection is not also unhandled.
+        void Promise.resolve(latest.current.onSave()).catch(() => {}).finally(() => { busy = false; });
       }, 0);
     };
     document.addEventListener('keydown', handler);

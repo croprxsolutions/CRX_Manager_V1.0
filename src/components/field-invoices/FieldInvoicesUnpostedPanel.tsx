@@ -465,7 +465,7 @@ export default function FieldInvoicesUnpostedPanel() {
   const postableIdSet = new Set(postAllPlan.individualTargets.map((t) => t.id));
   const isPostableHere = (row: UnpostedFieldInvoiceRow) => postableIdSet.has(row.id);
   const selectBox = (row: UnpostedFieldInvoiceRow) => (
-    <InvoiceRowCheckbox invoiceNumber={row.invoice_number} checked={selected.has(row.id)} onToggle={() => toggleRow(row.id)} />
+    <InvoiceRowCheckbox invoiceNumber={row.invoice_number} checked={selected.has(row.id)} disabled={busy} onToggle={() => toggleRow(row.id)} />
   );
 
   // --- POST SELECTED (the ticked THIS-SEASON stand-alone invoices, after confirm). The same
@@ -668,6 +668,7 @@ export default function FieldInvoicesUnpostedPanel() {
           {postAllPlan.individualTargets.length > 0 && (
             <SelectAllToggle
               clears={allPostableSelected}
+              disabled={busy}
               onToggle={toggleAll}
               title={allPostableSelected
                 ? 'Clears every selected invoice.'

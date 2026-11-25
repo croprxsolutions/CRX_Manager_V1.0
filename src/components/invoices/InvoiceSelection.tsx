@@ -16,15 +16,17 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 interface InvoiceRowCheckboxProps {
   invoiceNumber: string;
   checked: boolean;
+  disabled?: boolean;
   onToggle: () => void;
 }
 
 /** One row's tick box. It never opens the row it sits in. */
-export function InvoiceRowCheckbox({ invoiceNumber, checked, onToggle }: InvoiceRowCheckboxProps) {
+export function InvoiceRowCheckbox({ invoiceNumber, checked, disabled = false, onToggle }: InvoiceRowCheckboxProps) {
   return (
     <input
       type="checkbox"
       checked={checked}
+      disabled={disabled}
       onChange={(e) => {
         e.stopPropagation();
         onToggle();
@@ -106,6 +108,7 @@ export default function InvoiceSelectionBar({
         type="button"
         aria-label="Clear selection"
         onClick={onClear}
+        disabled={posting}
         className="rounded-lg px-2 text-sm font-medium text-crx-green md:order-last md:p-1.5 md:text-white/80 md:hover:text-white"
       >
         <span className="md:hidden">Clear</span>

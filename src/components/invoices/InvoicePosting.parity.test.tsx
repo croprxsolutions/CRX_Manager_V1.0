@@ -231,4 +231,17 @@ describe('field Drafts: the same rows post with the same RPC arguments', () => {
     const [first, second] = H.rpc.mock.calls.map(([, args]) => (args as { p_idempotency_key: string }).p_idempotency_key);
     expect(second).toBe(first);
   });
+
+  it('tick boxes, Select All and Clear are locked while a post is running', async () => {
+    const pending = new Promise(() => {});
+    H.rpc.mockImplementation(() => Object.assign(pending, { throwOnError: () => pending }));
+    await renderDrafts();
+    fireEvent.click(within(rowOf('FA-1')).getByRole('checkbox'));
+    await confirmPost('Post 1 invoice');
+    await waitFor(() => expect(H.rpc).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(within(rowOf('FA-1')).getByRole('checkbox')).toBeDisabled());
+    expect(within(rowOf('FA-2')).getByRole('checkbox')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Select All' })).toBeDisabled();
+    expect(within(screen.getByRole('toolbar')).getByRole('button', { name: 'Clear selection' })).toBeDisabled();
+  });
 });

@@ -119,7 +119,7 @@ BEGIN
     IF v_binding ->> 'delivery_id' IS DISTINCT FROM p_delivery_id::text THEN
       v_binding := NULL;
     END IF;
-    -- 20270307180000: required. A signature sent with no list (an old app copy, a queued call) is not proof of
+    -- 20270307190000: required. A signature sent with no list (an old app copy, a queued call) is not proof of
     -- this load either.
     IF v_binding ->> 'evidence' = 'signature'
        AND (NOT v_binding ? 'lines_seen'
@@ -134,7 +134,7 @@ BEGIN
           FROM public.delivery_photos ph
          WHERE ph.id = (v_binding ->> 'evidence_ref')::uuid AND ph.delivery_id = p_delivery_id;
       END IF;
-      -- 20270307180000: required. A photo saved with no list (before the screen fix), or one this step cannot
+      -- 20270307190000: required. A photo saved with no list (before the screen fix), or one this step cannot
       -- read, is not proof of this load (Luna). The drop-location photo of a no-one-present stop is bound the same way
       -- (Mason, 2026-11-25, Taha's review of #2557: #2527 HIGH 4).
       IF v_binding ->> 'evidence' = 'left_at_site'
@@ -192,7 +192,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = '76f4276163b8d2183d3475887fbf67c3'
+                    AND md5(replace(p.prosrc, chr(13), '')) = 'bb3554e4edbf11456504e76d1776842c'
                     AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')

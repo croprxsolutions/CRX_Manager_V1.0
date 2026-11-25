@@ -618,7 +618,7 @@ function requiredCases() {
   stageText('required.sql', lf(FOLLOW_UPS[0]));
   let r = apply('required.sql');
   assert.equal(r.status, 0, r.output);
-  assert.equal(scalar(STEP_MD5), '76f4276163b8d2183d3475887fbf67c3');
+  assert.equal(scalar(STEP_MD5), 'bb3554e4edbf11456504e76d1776842c');
   let d = delivery(A(), 'in_progress');
   refused(completeSig(d, 'pbl-q1', undefined), LOAD);
   assert.equal(status(d), 'in_progress');

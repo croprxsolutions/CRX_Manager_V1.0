@@ -219,19 +219,13 @@ export default function ARaging() {
   }, [tab, loadLastEmailed]);
 
   // Batch print and email act only on customers the table is showing right now. Select All
-  // picks the rows the search leaves on screen, and a ticked customer the search hides is
-  // dropped from the selection at once, so a hidden customer is never printed or emailed.
+  // picks the rows the search leaves on screen. A ticked customer the search hides keeps its
+  // tick (Taha's rule) but is never printed, emailed or counted until the search shows it again.
   const visibleAgingRows = applyTableSearchSort(agingData, AGING_SEARCH_KEYS, agingSearch, null, 'asc');
-  const visibleAgingKey = visibleAgingRows.map((r) => r.customer_id).join(',');
-  useEffect(() => {
-    const inView = new Set(visibleAgingKey.split(','));
-    setSelectedCustomers((prev) => {
-      const kept = [...prev].filter((id) => inView.has(id));
-      return kept.length === prev.size ? prev : new Set(kept);
-    });
-  }, [visibleAgingKey, selectedCustomers]);
+  const searchHidesRows = visibleAgingRows.length !== agingData.length;
   const selectedVisibleIds = visibleAgingRows.filter((r) => selectedCustomers.has(r.customer_id)).map((r) => r.customer_id);
   const allVisibleSelected = visibleAgingRows.length > 0 && selectedVisibleIds.length === visibleAgingRows.length;
+  const hiddenTickedCount = selectedCustomers.size - selectedVisibleIds.length;
 
   useEffect(() => {
     if (tab === 'aging') fetchAging();
@@ -583,11 +577,16 @@ export default function ARaging() {
   };
 
   const toggleAllCustomers = () => {
-    if (allVisibleSelected) {
-      setSelectedCustomers(new Set());
-    } else {
-      setSelectedCustomers(new Set(visibleAgingRows.map((r) => r.customer_id)));
-    }
+    // Only the shown rows change: ticks the search hides are left as they are.
+    const shown = visibleAgingRows.map((r) => r.customer_id);
+    setSelectedCustomers((prev) => {
+      const next = new Set(prev);
+      for (const id of shown) {
+        if (allVisibleSelected) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
   };
 
   const handleBatchStatements = async (options: StatementOptions) => {
@@ -1015,8 +1014,11 @@ export default function ARaging() {
                   {allVisibleSelected
                     ? 'Deselect All'
                     // With a search typed, say that only the customers it shows are picked.
-                    : agingSearch.trim() ? `Select All ${visibleAgingRows.length} Shown` : 'Select All'}
+                    : searchHidesRows ? `Select All ${visibleAgingRows.length} Shown` : 'Select All'}
                 </button>
+              )}
+              {hiddenTickedCount > 0 && (
+                <span className="text-xs text-secondary">{hiddenTickedCount} more ticked, hidden by your search</span>
               )}
               <div className="ml-auto">
                 <Button
@@ -1407,7 +1409,7 @@ export default function ARaging() {
           handleEmailBatchStatements({ mode: 'summary', show_shares: true, as_of_date: asOfDate });
         }}
         title="Email Statements"
-        message={`Email a statement to each of the ${selectedVisibleIds.length} selected customer${selectedVisibleIds.length === 1 ? '' : 's'} ? Only customers shown in the list (after your search) are included.`}
+        message={`Email a statement to each of the ${selectedVisibleIds.length} selected customer${selectedVisibleIds.length === 1 ? '' : 's'}? Customers with no email on file or nothing to show are skipped. Only customers shown in the list (after your search) are included.`}
         confirmLabel={`Email ${statementCount(selectedVisibleIds.length)}`}
         variant="info"
         loading={emailingStatements}

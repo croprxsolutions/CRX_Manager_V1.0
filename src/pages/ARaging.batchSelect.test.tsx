@@ -3,8 +3,9 @@
  *
  * Select All used to pick every customer on the list even when the search box hid most of
  * them, so Email Statements reached customers nobody could see. Now Select All picks the rows
- * the search leaves on screen, a ticked customer the search hides is dropped, and the send
- * button and confirm say how many statements will go. The Last emailed column reads the
+ * the search leaves on screen. A ticked customer the search hides keeps the tick but is never
+ * printed, emailed or counted while hidden, and the send button and confirm say how many
+ * statements will go. The Last emailed column reads the
  * email log's sent statements.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,15 +19,20 @@ const H = vi.hoisted(() => ({
   emailLog: [] as Row[],
   emailLogFails: false,
   rpcCalls: [] as Array<{ name: string; args: Record<string, unknown> }>,
+  emailLogFilters: [] as unknown[][],
+  sendEmail: vi.fn(),
 }));
 
-const reply = (rows: unknown[] = [], error: { message: string } | null = null) => {
+const reply = (rows: unknown[] = [], error: { message: string } | null = null, eqCalls?: unknown[][]) => {
   const chain: object = new Proxy({}, {
     get: (_target, prop) => (prop === 'then'
       ? (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
         Promise.resolve(error ? { data: null, error, count: null } : { data: rows, error: null, count: rows.length })
           .then(resolve, reject)
-      : () => chain),
+      : (...args: unknown[]) => {
+        if (prop === 'eq') eqCalls?.push(args);
+        return chain;
+      }),
   });
   return chain;
 };
@@ -47,19 +53,33 @@ vi.mock('../lib/db', async () => {
     ...actual,
     supabase: {
       from: (table: string) => (table === 'email_log'
-        ? reply(H.emailLog, H.emailLogFails ? { message: 'denied' } : null)
+        ? reply(H.emailLog, H.emailLogFails ? { message: 'denied' } : null, H.emailLogFilters)
         : reply()),
       rpc: (name: string, args: Record<string, unknown>) => {
         H.rpcCalls.push({ name, args });
         if (name === 'get_ar_aging') return reply(AGING);
-        // A statement with no transactions: nothing is drawn or emailed.
+        // Each customer's statement carries that customer's own email and one transaction.
         if (name === 'get_detailed_statement_data') {
-          return reply({ customer: { farm_name: 'X', email: 'x@example.com' }, transactions: [] } as unknown as unknown[]);
+          const id = String(args.p_customer_id);
+          return reply({
+            customer: { farm_name: `Farm ${id}`, email: `${id}@example.com` },
+            transactions: [{ id: `t-${id}` }],
+            outstanding_balance_cents: 100, open_credit_cents: 0, net_account_position_cents: 100,
+          } as unknown as unknown[]);
         }
         return reply();
       },
     },
   };
+});
+vi.mock('../lib/statementPdf', () => ({
+  generateStatementPdf: vi.fn(async () => ({})),
+  downloadStatementPdf: vi.fn(),
+  downloadBatchStatements: vi.fn(async () => undefined),
+}));
+vi.mock('../lib/emailService', async () => {
+  const actual = await vi.importActual<typeof import('../lib/emailService')>('../lib/emailService');
+  return { ...actual, sendEmail: H.sendEmail, pdfToBase64: () => 'pdf', buildEmailHtml: () => '<p></p>' };
 });
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn(), captureMessage: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
@@ -75,6 +95,8 @@ beforeEach(() => {
   H.emailLog = [];
   H.emailLogFails = false;
   H.rpcCalls = [];
+  H.emailLogFilters = [];
+  H.sendEmail.mockResolvedValue({ success: true });
 });
 afterEach(() => cleanup());
 
@@ -104,19 +126,42 @@ describe('AR Aging batch statements: Select All with a search', () => {
     expect(screen.getByRole('button', { name: /Email 2 statements/ })).toBeTruthy();
   });
 
-  it('drops a selected customer once the search hides them', async () => {
+  it('keeps a tick the search hides, but counts and sends only the shown customers', async () => {
     await renderAging();
-    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
-    expect(screen.getByRole('button', { name: /Email 3 statements/ })).toBeTruthy();
+    fireEvent.click(box('Big Farm'));
+    fireEvent.click(box('Bigger Acres'));
 
-    search('Small');
-    await waitFor(() => expect(screen.getByRole('button', { name: /Email 1 statement$/ })).toBeTruthy());
+    search('Bigger');
+    expect(screen.getByRole('button', { name: /Email 1 statement$/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Batch Print \(1\)/ })).toBeTruthy();
+    expect(screen.getByText('1 more ticked, hidden by your search')).toBeTruthy();
 
-    // Back to the full list: the customers the search hid are no longer selected.
     search('');
-    await waitFor(() => expect(box('Big Farm').checked).toBe(false));
-    expect(box('Bigger Acres').checked).toBe(false);
+    expect(box('Big Farm').checked).toBe(true);
+    expect(box('Bigger Acres').checked).toBe(true);
+    expect(screen.queryByText(/hidden by your search/)).toBeNull();
+  });
+
+  it('Select All with a search adds the shown customers and keeps hidden ticks', async () => {
+    await renderAging();
+    fireEvent.click(box('Small Farm'));
+    search('Big');
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 2 Shown' }));
+    search('');
     expect(box('Small Farm').checked).toBe(true);
+    expect(box('Big Farm').checked).toBe(true);
+    expect(box('Bigger Acres').checked).toBe(true);
+  });
+
+  it('Deselect All with a search clears only the shown customers', async () => {
+    await renderAging();
+    fireEvent.click(box('Big Farm'));
+    search('Small');
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 1 Shown' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Deselect All' }));
+    search('');
+    expect(box('Big Farm').checked).toBe(true);
+    expect(box('Small Farm').checked).toBe(false);
   });
 
   it('the confirm names the count and only the shown, selected customers are emailed', async () => {
@@ -132,6 +177,10 @@ describe('AR Aging batch statements: Select All with a search', () => {
     await waitFor(() => expect(H.rpcCalls.filter((c) => c.name === 'get_detailed_statement_data')).toHaveLength(2));
     const asked = H.rpcCalls.filter((c) => c.name === 'get_detailed_statement_data').map((c) => c.args.p_customer_id);
     expect(asked.sort()).toEqual(['c1', 'c2']);
+    // Each email goes to that customer's own address, logged against that customer.
+    await waitFor(() => expect(H.sendEmail).toHaveBeenCalledTimes(2));
+    const sent = H.sendEmail.mock.calls.map(([arg]) => [arg.to, arg.customer_id]);
+    expect(sent.sort()).toEqual([['c1@example.com', 'c1'], ['c2@example.com', 'c2']]);
   });
 
   it('Deselect All clears the selection when every shown customer is selected', async () => {
@@ -156,6 +205,8 @@ describe('AR Aging Last emailed column', () => {
     await waitFor(() => expect(rowOf('Big Farm').textContent).toContain('Nov 3, 2026'));
     expect(rowOf('Bigger Acres').textContent).toContain('Sep 15, 2026');
     expect(rowOf('Small Farm').textContent).toContain('None on record');
+    // Only statements that actually went out count.
+    expect(H.emailLogFilters).toEqual(expect.arrayContaining([['email_type', 'statement'], ['status', 'sent']]));
   });
 
   it('says the dates could not be loaded instead of showing never emailed', async () => {

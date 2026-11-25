@@ -2702,7 +2702,8 @@ function runFocusedSolCheck(root, options, { baseRef, baseSha, headSha, prompt, 
 // stamp with the new one in other files. Anything else refuses: full review.
 // 2026-11-23 (#2338): the SQL may also change its link to its own record,
 // `migrations.d/<stem>.md`, in the leading `--` comment header (outside every
-// statement), and that record's `SQL sha256` pin then moves to the new SQL's LF
+// statement), and (2026-11-25, #2551) a header line that is only `-- <its name>`
+// or `-- <its name>.sql` (restampHeaderLine), and that record's `SQL sha256` pin then moves to the new SQL's LF
 // hash. No other file's hash may change, and no other branch migration may sit
 // between the old and new stamps (that would flip the apply order).
 // 2026-11-24 (#2267): a one-shot data migration's key in ONE_SHOT_LIST is renamed to the new stem, byte for
@@ -2797,10 +2798,12 @@ function oneShotKeyRenamed(before, after, oldStem, newStem) {
 }
 
 // The one header-line edit a restamp makes (restamp-migration.mjs uses it too): the link to the
-// migration's own record, and a line that is only `-- <its own name>` (#2524 needed that by hand).
+// migration's own record, and a line that is only `-- <its own name>` or `-- <its own name>.sql`
+// (#2524 needed that by hand).
 export function restampHeaderLine(line, oldStem, newStem) {
   const linked = line.split(`migrations.d/${oldStem}.md`).join(`migrations.d/${newStem}.md`);
-  return linked.trim() === `-- ${oldStem}` ? linked.replace(oldStem, newStem) : linked;
+  const bare = linked.trim();
+  return bare === `-- ${oldStem}` || bare === `-- ${oldStem}.sql` ? linked.replace(oldStem, newStem) : linked;
 }
 
 // True when `after` is `change(before)` and every changed line is in the leading
@@ -2881,7 +2884,7 @@ function runCarryRestamp(root, options) {
     `Restamp carry: reviewed head ${facts.fromHead.slice(0, 12)} → head ${facts.headSha.slice(0, 12)} ` +
     `(base ${facts.source.base_sha.slice(0, 12)}); ${facts.entries.length} file(s), ` +
     (note.sqlSha256
-      ? `the stamp and the SQL header's link to its own record changed (SQL sha256 ${note.sqlSha256.from.slice(0, 12)} -> ${note.sqlSha256.to.slice(0, 12)}).\n`
+      ? `the stamp and the SQL header's link to its own record or its name line changed (SQL sha256 ${note.sqlSha256.from.slice(0, 12)} -> ${note.sqlSha256.to.slice(0, 12)}).\n`
       : "only the migration's timestamp changed.\n"),
   );
   return mintSingleCommitCarry(root, options, facts, "restamp", note.sqlSha256 ? { sql_sha256: note.sqlSha256 } : {});

@@ -2931,6 +2931,7 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 // names are present in the full snapshot, and the pending M4 functions are
 // explicitly retained in the staging schema overlay.
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
+  'change_brand_document_links', // 20270306170000. Prune once generated types cover this RPC.
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
   'set_registration_adjuvants',
@@ -2954,6 +2955,14 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * as soon as the inventory no longer needs them.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  carry_last_size_document_reports:
+    'membership update trigger (20270306170000): transfers reports inside the keyed move only, with API-role EXECUTE revoked',
+  _process_brand_document_links:
+    'private helper (20270306170000): API-role EXECUTE is revoked and writes run only within the keyed save',
+  preview_brand_document_links:
+    'read-only workbook validation (20270306170000): invokes the private helper with the preview flag fixed to true, skipping every lock and write',
+  carry_grouped_brand_document_links:
+    'constraint trigger only (20270306170000): it runs on the protected mapping writes of the keyed grouping approval, with API-role EXECUTE revoked',
   // Generated public-schema functions are not necessarily app-callable RPCs.
   _delivery_brand_event:
     "private SECURITY DEFINER delivery-brand history writer called within keyed brand workflows; live catalog denies EXECUTE to anon, authenticated, and service_role",
@@ -3168,6 +3177,10 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // RETURNS trigger, so no API role can call it.
   // write_product_change_history (20261102100000) was pruned on 2026-11-02, when it
   // applied live and the registry high-water moved past it. It RETURNS trigger.
+  // Field application FP-1 (20270305190000) private helpers: every API-role EXECUTE (incl. service_role) is revoked.
+  _set_field_billing_split_20270303: 'internal FP-1 split writer (20270305190000): called only by set_field_billing_split and save_field after their own replay checks (and by the one-time import); binds p_actor to auth.uid(); every API-role EXECUTE is revoked',
+  _refresh_field_billing_defaults_copy_20270303: 'internal FP-1 helper (20270305190000): rewrites the read-only field_billing_defaults copy of one field only when it differs from the version in force, so a replay changes nothing; every API-role EXECUTE is revoked',
+  _refresh_all_field_billing_copies_20270303: 'internal FP-1 pg_cron job (20270305190000): rewrites only stale copies, so a rerun changes nothing; every API-role EXECUTE is revoked',
 };
 
 

@@ -21,7 +21,7 @@ const shown = (value: string | null) => value || 'blank';
 /**
  * Corrects what the formulation is (formulation type, safener, EPA number) on the parent, with a reason
  * and evidence. An EPA number change reaches every size and jobs not sprayed yet; old invoices, sprayed jobs and
- * restricted-use records keep the number they were made with (PAR-1 7.7, 20270303170000).
+ * restricted-use records keep the number they were made with (PAR-1 7.7, 20270306160000).
  */
 export default function ParentIdentityModal({ parent, profileId, onClose, onSaved }: {
   parent: ProductParent;

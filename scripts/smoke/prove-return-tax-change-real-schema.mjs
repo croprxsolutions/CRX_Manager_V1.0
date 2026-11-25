@@ -125,9 +125,11 @@ async function race() {
       PERFORM issue_return_credit(v_ret, '${admin}', '${tag}-ic');
       SET CONSTRAINTS ALL IMMEDIATE;
       SELECT credit_invoice_id INTO v_credit FROM returns WHERE id = v_ret;
-      RAISE NOTICE 'RACE|%|%|%', (SELECT abs(total_amount_cents) FROM invoices WHERE id = v_credit),
+      RAISE NOTICE 'RACE|%|%|%|%', (SELECT abs(total_amount_cents) FROM invoices WHERE id = v_credit),
         (SELECT sum(extended_cents) FROM invoice_items WHERE invoice_id = '${invoice}' AND charge_type = 'sales_tax'),
-        COALESCE((SELECT abs(sum(tax_cents)) FROM credit_memo_sales_tax WHERE invoice_id = v_credit), -1);
+        COALESCE((SELECT abs(sum(tax_cents)) FROM credit_memo_sales_tax WHERE invoice_id = v_credit), -1),
+        -- the race happened in the order it needs: the sale posted after the credit's transaction began
+        (SELECT s.posted_at > c.posted_at FROM invoices s, invoices c WHERE s.id = '${invoice}' AND c.id = v_credit);
     END $a$;
     ROLLBACK;`;
   const sessionB = `SELECT pg_sleep(0.5);\nBEGIN;\n${claims(admin)}
@@ -140,8 +142,9 @@ async function race() {
   const [ra, rb] = await Promise.all([run(sessionA), run(sessionB)]);
   assert.ok(!rb.error, `B could not post the sale: ${rb.out}`);
   assert.ok(!ra.error, `A could not credit the return: ${ra.out}`);
-  const m = /RACE\|(\d+)\|(\d+)\|(-?\d+)/.exec(ra.out);
+  const m = /RACE\|(\d+)\|(\d+)\|(-?\d+)\|(t|f)/.exec(ra.out);
   assert.ok(m, `A printed no result: ${ra.out}`);
+  assert.equal(m[4], 't', 'the sale must post after the credit transaction began (re-run: Docker started the sessions out of order)');
   return { credit: Number(m[1]), tax: Number(m[2]), ledger: Number(m[3]) };
 }
 
@@ -198,7 +201,7 @@ async function main() {
   // 4. AFTER
   const after = chain(NEW_CHAIN);
   assert.ok(after.pass, `AFTER: the new chain fails: ${after.fail}`);
-  console.log('[case] 4a AFTER (#2066): A, B and C pass: the credit is the taxed share, before or after receipt, never more than the posted total');
+  console.log('[case] 4a AFTER (#2066): A-E pass: the credit is the taxed share (or discounted share), before or after receipt, each return its own units, never more than the posted total');
   const r2 = await race();
   assert.ok(r2.tax > 0 && r2.credit > 0, `AFTER race: ${JSON.stringify(r2)}`);
   assert.equal(r2.ledger, r2.tax, `AFTER race: the ledger must record the tax the credit refunded: ${JSON.stringify(r2)}`);

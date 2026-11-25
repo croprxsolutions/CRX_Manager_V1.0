@@ -10,6 +10,10 @@
 --   B  Same, but the box is ticked and the draft posts before the return is received: receive and credit both go
 --      through at the taxed share, and the re-price is in the financial audit log.
 --   C  Control: no tax change. The return credits the order price, as before.
+--   D  Two returns of 4 made before the box is ticked: each credits its own 4 units' taxed share (within a cent of
+--      each other), not one taking the other's tax; with the last 2 the three credits add up to the posted total.
+--   E  A discount set on the draft after the whole sale was returned and received: the credit is the discounted
+--      posted total, not refused because the stored order price is above what was billed.
 --
 -- Tax is written at commit (deferred triggers). This file runs as ONE statement, so each step ends with
 -- SET CONSTRAINTS ALL IMMEDIATE / DEFERRED: the commit point of that call in the app.
@@ -142,6 +146,11 @@ BEGIN
     v_posted := (SELECT total_amount_cents FROM invoices WHERE id = v_invoice);
     BEGIN
       PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-b-' || v_suffix));
+      IF (SELECT extended_cents FROM return_items WHERE return_id = v_ret) IS DISTINCT FROM round(v_posted * 4 / 10.0)::bigint
+         OR NOT EXISTS (SELECT 1 FROM financial_audit_log WHERE entity_type = 'return' AND entity_id = v_ret
+                         AND operation_type = 'return_received' AND description LIKE 'Return re-priced%') THEN
+        v_fails := v_fails || ' (B) receiving did not re-price the return to the taxed share, with an audit row;';
+      END IF;
       PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-ic-b-' || v_suffix));
       v_credit := pg_temp.rtx_credit(v_ret);
       IF v_credit IS DISTINCT FROM round(v_posted * 4 / 10.0)::bigint THEN
@@ -173,9 +182,66 @@ BEGIN
     v_fails := v_fails || ' (C) the untaxed return failed: ' || SQLERRM || ';';
   END;
 
+  -- D: two returns made before the box is ticked.
+  BEGIN
+    v_order := pg_temp.rtx_sale(v_admin, v_product.id, v_product.current_cost, v_customer, 'd-' || v_suffix);
+    SELECT id INTO v_invoice FROM invoices WHERE order_id = v_order AND invoice_type <> 'credit_memo';
+    v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 4, 'd1-' || v_suffix);
+    v_ret2 := pg_temp.rtx_return(v_admin, v_customer, v_order, 4, 'd2-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-rtx-tax-d-' || v_suffix));
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-d-' || v_suffix));
+    v_posted := (SELECT total_amount_cents FROM invoices WHERE id = v_invoice);
+    BEGIN
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-d1-' || v_suffix));
+      PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-ic-d1-' || v_suffix));
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret2, v_admin, 'smk-rtx-rc-d2-' || v_suffix));
+      PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret2, v_admin, 'smk-rtx-ic-d2-' || v_suffix));
+      v_credit := pg_temp.rtx_credit(v_ret);
+      v_credit2 := pg_temp.rtx_credit(v_ret2);
+      IF abs(v_credit - round(v_posted * 4 / 10.0)) > 1 OR abs(v_credit2 - round(v_posted * 4 / 10.0)) > 1
+         OR abs(v_credit + v_credit2 - round(v_posted * 8 / 10.0)) > 1 THEN
+        v_fails := v_fails || format(' (D) the two returns of 4 credit %s and %s cents, want each about 4/10 of the posted %s;', v_credit, v_credit2, v_posted);
+      END IF;
+      v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 2, 'd3-' || v_suffix);
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-d3-' || v_suffix));
+      PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-ic-d3-' || v_suffix));
+      IF v_credit + v_credit2 + pg_temp.rtx_credit(v_ret) IS DISTINCT FROM v_posted THEN
+        v_fails := v_fails || format(' (D) the three credits add up to %s cents, want the posted %s;', v_credit + v_credit2 + pg_temp.rtx_credit(v_ret), v_posted);
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      v_fails := v_fails || ' (D) crediting two returns made before the box was ticked failed: ' || SQLERRM || ';';
+    END;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (D) setup failed: ' || SQLERRM || ';';
+  END;
+
+  -- E: a discount set after the whole sale was returned and received.
+  BEGIN
+    v_order := pg_temp.rtx_sale(v_admin, v_product.id, v_product.current_cost, v_customer, 'e-' || v_suffix);
+    SELECT id INTO v_invoice FROM invoices WHERE order_id = v_order AND invoice_type <> 'credit_memo';
+    v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 10, 'e-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-e-' || v_suffix));
+    PERFORM pg_temp.rtx_step(format('SELECT set_invoice_standing_discount(%L, 10, %L)', v_invoice, 'smk-rtx-disc-e-' || v_suffix));
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-e-' || v_suffix));
+    IF NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'standing_discount') THEN
+      RAISE EXCEPTION 'the posted sale has no discount line';
+    END IF;
+    v_posted := (SELECT total_amount_cents FROM invoices WHERE id = v_invoice);
+    BEGIN
+      PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-ic-e-' || v_suffix));
+      IF pg_temp.rtx_credit(v_ret) IS DISTINCT FROM v_posted THEN
+        v_fails := v_fails || format(' (E) the whole return credits %s cents, want the discounted posted %s;', pg_temp.rtx_credit(v_ret), v_posted);
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      v_fails := v_fails || ' (E) crediting after a discount was set failed: ' || SQLERRM || ';';
+    END;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (E) setup failed: ' || SQLERRM || ';';
+  END;
+
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL return tax change:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK return tax change: a return credits the taxed share after the box is ticked, before or after it is received, never more than the posted total; an untaxed return keeps the order price';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK return tax change: a return credits the taxed share after the box is ticked, before or after it is received, never more than the posted total, each return its own units'' share; a later discount credits the discounted total; an untaxed return keeps the order price';
 END
 $smoke$;

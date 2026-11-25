@@ -14,11 +14,15 @@
 -- WHAT:
 --   1. receive_return and issue_return_credit (their private bodies _receive_return_intent_impl_20260812 and
 --      _issue_return_credit_intent_impl_20260812): under the per-order-line locks they already take, a share-mode line
---      whose stored price is no longer what create_return would price it at now is re-priced to that (the returner's
---      billed share, tax and discount included, from posted invoices only), with one financial_audit_log row,
---      instead of refusing. The existing share caps still refuse a line beyond the billed share, so a return's credits
---      never add up to more than was billed. issue_return_credit re-prices before its cap check. Unchanged (Mason's
---      #1010 rule, cancel and recreate): a line made stale by an earlier return of it cancelled, rejected or deleted
+--      whose stored price is no longer what create_return would price it at now is re-priced, with one
+--      financial_audit_log row, instead of refused: to its own units' share of what the returner was billed on posted
+--      invoices, tax and discount included (so another return of the line still at an old price cannot move its tax
+--      onto this one), the return taking the last billed units taking exactly what is left, and never more than is
+--      left of the billed cents. The share caps still refuse a line beyond the billed share, so a return's credits
+--      never add up to more than was billed. issue_return_credit re-prices before its cents cap (its pre-lock check
+--      leaves the cents bound to that cap). receive_return re-prices for a sales rep only when the rep can read every
+--      posted invoice it prices from (RETURN_SPLIT_INVOICE_NOT_VISIBLE, as create_return). Unchanged (Mason's #1010
+--      rule, cancel and recreate): a line of a return whose line had another return cancelled, rejected or deleted
 --      after this one was made is still refused (RETURN_SPLIT_SHARE_REPRICED).
 --   2. _freeze_credit_sales_tax_20270109: the pool is every lot posted when the credit freezes (at its commit), not
 --      only lots stamped at or before the credit's posting time. The credit holds the order lines' locks (361), which
@@ -152,51 +156,72 @@ BEGIN
         PERFORM pg_advisory_xact_lock(hashtextextended(v_lock_order_item_id::text, 361));
       END LOOP;
       -- (#2066) A share line priced before the sale's billing changed (made at the order price before a sales-tax or
-      -- discount line reached a live invoice of the sale, or before such an invoice posted), under these locks,
-      -- (Mason, 22 Nov: re-price to the taxed share, never more than was charged on the posted invoices, tax included)
-      -- is re-priced to the returner's billed share instead of refused as stale. Not re-priced, so still refused below
-      -- (Mason's #1010 rule: cancel and recreate the return): a line beyond the billed share, and a line whose price is
-      -- stale because an earlier return of it was cancelled, rejected or deleted after this one was made.
-      WITH fresh AS (
-        SELECT ri.id, ri.order_item_id, ri.quantity, ri.unit_price_cents AS old_unit_price_cents,
-               ri.extended_cents AS old_extended_cents,
-               round(s.billed_cents / s.billed_qty)::bigint AS unit_price_cents,
-               greatest(0, round(s.billed_cents * (s.other_returned_qty + ri.quantity) / s.billed_qty)::bigint
-                 - s.other_returned_cents) AS extended_cents
-          FROM public.return_items ri
-          CROSS JOIN LATERAL public._return_customer_line_share(
-            v_order_id, ri.order_item_id, v_customer_id, p_return_id
-          ) s
-         WHERE ri.return_id = p_return_id
-           AND s.share_mode
-           AND s.billed_qty > 0
-           AND s.other_returned_qty + ri.quantity <= s.billed_qty
-           AND NOT EXISTS (
-             SELECT 1
-               FROM public.return_items ori
-               JOIN public.returns orr ON orr.id = ori.return_id
-               JOIN public.returns me ON me.id = p_return_id
-              WHERE ori.order_item_id = ri.order_item_id
-                AND orr.id <> p_return_id
-                AND orr.order_id = v_order_id
-                AND orr.customer_id = v_customer_id
-                AND (orr.status IN ('rejected', 'cancelled') OR orr.deleted_at IS NOT NULL)
-                AND orr.created_at <= me.created_at
-                AND orr.updated_at >= me.created_at
-           )
-      ), repriced AS (
+      -- discount line reached a live invoice of the sale, or before such an invoice posted) is re-priced here, under
+      -- these locks, to its own units' share of what the returner was billed on posted invoices, tax included (Mason,
+      -- 22 Nov: the taxed share, never more than was charged), instead of refused as stale. Stale means what it meant:
+      -- not what create_return would price it at now (r below). The new price is the line's own units' share (f), so
+      -- another return of the line still at an old price does not move its tax onto this one; the return that takes
+      -- the last billed units takes exactly what is left (r) when the others differ from their shares by rounding
+      -- only; and never more than is left of the billed cents. Not re-priced, so
+      -- still refused below (Mason's #1010 rule: cancel and recreate the return): a line beyond the billed share, and
+      -- any line of a return of that line cancelled, rejected or deleted after this return was made.
+      SELECT jsonb_agg(to_jsonb(f) ORDER BY f.order_item_id), sum(f.extended_cents - f.old_extended_cents)
+        INTO v_repriced, v_repriced_delta
+        FROM (
+          SELECT ri.id, ri.order_item_id, ri.quantity, ri.unit_price_cents AS old_unit_price_cents,
+                 ri.extended_cents AS old_extended_cents,
+                 round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint AS unit_price_cents,
+                 CASE WHEN s.other_returned_qty + ri.quantity = s.billed_qty AND abs(p.r - p.f) <= p.n THEN greatest(0, p.r)
+                      ELSE least(p.f, greatest(0, s.billed_cents - s.other_returned_cents)) END AS extended_cents
+            FROM public.return_items ri
+            JOIN public.returns me ON me.id = ri.return_id
+            CROSS JOIN LATERAL public._return_customer_line_share(
+              v_order_id, ri.order_item_id, v_customer_id, p_return_id
+            ) s
+            CROSS JOIN LATERAL (
+              SELECT round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
+                       - s.other_returned_cents AS r,
+                     round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
+                       - round(s.billed_cents * s.other_returned_qty / NULLIF(s.billed_qty, 0))::bigint AS f,
+                     (SELECT count(*) FROM public.return_items ori JOIN public.returns orr ON orr.id = ori.return_id
+                       WHERE ori.order_item_id = ri.order_item_id AND orr.order_id = v_order_id
+                         AND orr.customer_id = v_customer_id AND orr.deleted_at IS NULL
+                         AND orr.status NOT IN ('rejected', 'cancelled') AND orr.id <> p_return_id) AS n
+            ) p
+           WHERE ri.return_id = p_return_id
+             AND (ri.extended_cents IS DISTINCT FROM greatest(0, p.r)
+                  OR ri.unit_price_cents IS DISTINCT FROM round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint)
+             AND s.share_mode
+             AND s.billed_qty > 0
+             AND s.other_returned_qty + ri.quantity <= s.billed_qty
+             AND NOT EXISTS (
+               SELECT 1
+                 FROM public.return_items ori
+                 JOIN public.returns orr ON orr.id = ori.return_id
+                WHERE ori.order_item_id = ri.order_item_id
+                  AND orr.id <> p_return_id
+                  AND orr.order_id = v_order_id
+                  AND orr.customer_id = v_customer_id
+                  AND (orr.status IN ('rejected', 'cancelled') OR orr.deleted_at IS NOT NULL)
+                  AND orr.updated_at >= me.created_at
+             )
+        ) f;
+      IF v_repriced IS NOT NULL THEN
+        -- A sales rep may re-price only from invoices invoices_select lets them read (as create_return requires).
+        IF NOT public.is_admin() AND EXISTS (
+          SELECT 1 FROM public.invoices hidden
+           WHERE hidden.order_id = v_order_id
+             AND hidden.customer_id = v_customer_id
+             AND hidden.invoice_type <> 'credit_memo'
+             AND hidden.deleted_at IS NULL
+             AND hidden.status IN ('posted', 'overdue', 'paid')
+             AND NOT (hidden.created_by IS NOT DISTINCT FROM auth.uid()
+                      OR hidden.salesman_id IS NOT DISTINCT FROM auth.uid())
+        ) THEN RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'; END IF;
         UPDATE public.return_items ri
            SET unit_price_cents = f.unit_price_cents, extended_cents = f.extended_cents
-          FROM fresh f
-         WHERE ri.id = f.id
-           AND (ri.unit_price_cents IS DISTINCT FROM f.unit_price_cents OR ri.extended_cents IS DISTINCT FROM f.extended_cents)
-        RETURNING f.*
-      )
-      SELECT jsonb_agg(to_jsonb(repriced) ORDER BY repriced.order_item_id),
-             sum(repriced.extended_cents - repriced.old_extended_cents)
-        INTO v_repriced, v_repriced_delta
-        FROM repriced;
-      IF v_repriced IS NOT NULL THEN
+          FROM jsonb_to_recordset(v_repriced) AS f(id uuid, unit_price_cents bigint, extended_cents bigint)
+         WHERE ri.id = f.id;
         INSERT INTO public.financial_audit_log (
           operation_type, entity_type, entity_id, actor_user_id, old_values, new_values, total_impact_cents, description
         ) VALUES (
@@ -216,6 +241,7 @@ BEGIN
          WHERE ri.return_id = p_return_id
            AND s.share_mode
            AND s.billed_qty > 0
+           AND NOT (COALESCE(v_repriced, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id', ri.id)))  -- (#2066) just re-priced
            AND (
              ri.extended_cents IS DISTINCT FROM greatest(0,
                round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
@@ -464,7 +490,7 @@ BEGIN
             s.billed_qty <= 0
             OR ri.extended_cents < 0
             OR s.other_returned_qty + ri.quantity > s.billed_qty
-            OR s.other_returned_cents + ri.extended_cents > s.billed_cents
+            -- (#2066) the cents bound is checked after the re-price, under the locks (RETURN_CREDIT_EXCEEDS_BILLED_SHARE)
           ))
         )
     ) OR (
@@ -513,51 +539,61 @@ BEGIN
       PERFORM pg_advisory_xact_lock(hashtextextended(v_lock_order_item_id::text, 361));
     END LOOP;
     -- (#2066) A share line priced before the sale's billing changed (made at the order price before a sales-tax or
-    -- discount line reached a live invoice of the sale, or before such an invoice posted), under these locks,
-    -- (Mason, 22 Nov: re-price to the taxed share, never more than was charged on the posted invoices, tax included)
-    -- is re-priced to the returner's billed share instead of refused as stale. Not re-priced, so still refused below
-    -- (Mason's #1010 rule: cancel and recreate the return): a line beyond the billed share, and a line whose price is
-    -- stale because an earlier return of it was cancelled, rejected or deleted after this one was made.
-    WITH fresh AS (
-      SELECT ri.id, ri.order_item_id, ri.quantity, ri.unit_price_cents AS old_unit_price_cents,
-             ri.extended_cents AS old_extended_cents,
-             round(s.billed_cents / s.billed_qty)::bigint AS unit_price_cents,
-             greatest(0, round(s.billed_cents * (s.other_returned_qty + ri.quantity) / s.billed_qty)::bigint
-               - s.other_returned_cents) AS extended_cents
-        FROM public.return_items ri
-        CROSS JOIN LATERAL public._return_customer_line_share(
-          v_order_id, ri.order_item_id, v_customer_id, p_return_id
-        ) s
-       WHERE ri.return_id = p_return_id
-         AND s.share_mode
-         AND s.billed_qty > 0
-         AND s.other_returned_qty + ri.quantity <= s.billed_qty
-         AND NOT EXISTS (
-           SELECT 1
-             FROM public.return_items ori
-             JOIN public.returns orr ON orr.id = ori.return_id
-             JOIN public.returns me ON me.id = p_return_id
-            WHERE ori.order_item_id = ri.order_item_id
-              AND orr.id <> p_return_id
-              AND orr.order_id = v_order_id
-              AND orr.customer_id = v_customer_id
-              AND (orr.status IN ('rejected', 'cancelled') OR orr.deleted_at IS NOT NULL)
-              AND orr.created_at <= me.created_at
-              AND orr.updated_at >= me.created_at
-         )
-    ), repriced AS (
+    -- discount line reached a live invoice of the sale, or before such an invoice posted) is re-priced here, under
+    -- these locks, to its own units' share of what the returner was billed on posted invoices, tax included (Mason,
+    -- 22 Nov: the taxed share, never more than was charged), instead of refused as stale. Stale means what it meant:
+    -- not what create_return would price it at now (r below). The new price is the line's own units' share (f), so
+    -- another return of the line still at an old price does not move its tax onto this one; the return that takes
+    -- the last billed units takes exactly what is left (r) when the others differ from their shares by rounding
+    -- only; and never more than is left of the billed cents. Not re-priced, so
+    -- still refused below (Mason's #1010 rule: cancel and recreate the return): a line beyond the billed share, and
+    -- any line of a return of that line cancelled, rejected or deleted after this return was made.
+    SELECT jsonb_agg(to_jsonb(f) ORDER BY f.order_item_id), sum(f.extended_cents - f.old_extended_cents)
+      INTO v_repriced, v_repriced_delta
+      FROM (
+        SELECT ri.id, ri.order_item_id, ri.quantity, ri.unit_price_cents AS old_unit_price_cents,
+               ri.extended_cents AS old_extended_cents,
+               round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint AS unit_price_cents,
+               CASE WHEN s.other_returned_qty + ri.quantity = s.billed_qty AND abs(p.r - p.f) <= p.n THEN greatest(0, p.r)
+                    ELSE least(p.f, greatest(0, s.billed_cents - s.other_returned_cents)) END AS extended_cents
+          FROM public.return_items ri
+          JOIN public.returns me ON me.id = ri.return_id
+          CROSS JOIN LATERAL public._return_customer_line_share(
+            v_order_id, ri.order_item_id, v_customer_id, p_return_id
+          ) s
+          CROSS JOIN LATERAL (
+            SELECT round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
+                     - s.other_returned_cents AS r,
+                   round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
+                     - round(s.billed_cents * s.other_returned_qty / NULLIF(s.billed_qty, 0))::bigint AS f,
+                   (SELECT count(*) FROM public.return_items ori JOIN public.returns orr ON orr.id = ori.return_id
+                     WHERE ori.order_item_id = ri.order_item_id AND orr.order_id = v_order_id
+                       AND orr.customer_id = v_customer_id AND orr.deleted_at IS NULL
+                       AND orr.status NOT IN ('rejected', 'cancelled') AND orr.id <> p_return_id) AS n
+          ) p
+         WHERE ri.return_id = p_return_id
+           AND (ri.extended_cents IS DISTINCT FROM greatest(0, p.r)
+                OR ri.unit_price_cents IS DISTINCT FROM round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint)
+           AND s.share_mode
+           AND s.billed_qty > 0
+           AND s.other_returned_qty + ri.quantity <= s.billed_qty
+           AND NOT EXISTS (
+             SELECT 1
+               FROM public.return_items ori
+               JOIN public.returns orr ON orr.id = ori.return_id
+              WHERE ori.order_item_id = ri.order_item_id
+                AND orr.id <> p_return_id
+                AND orr.order_id = v_order_id
+                AND orr.customer_id = v_customer_id
+                AND (orr.status IN ('rejected', 'cancelled') OR orr.deleted_at IS NOT NULL)
+                AND orr.updated_at >= me.created_at
+           )
+      ) f;
+    IF v_repriced IS NOT NULL THEN
       UPDATE public.return_items ri
          SET unit_price_cents = f.unit_price_cents, extended_cents = f.extended_cents
-        FROM fresh f
-       WHERE ri.id = f.id
-         AND (ri.unit_price_cents IS DISTINCT FROM f.unit_price_cents OR ri.extended_cents IS DISTINCT FROM f.extended_cents)
-      RETURNING f.*
-    )
-    SELECT jsonb_agg(to_jsonb(repriced) ORDER BY repriced.order_item_id),
-           sum(repriced.extended_cents - repriced.old_extended_cents)
-      INTO v_repriced, v_repriced_delta
-      FROM repriced;
-    IF v_repriced IS NOT NULL THEN
+        FROM jsonb_to_recordset(v_repriced) AS f(id uuid, unit_price_cents bigint, extended_cents bigint)
+       WHERE ri.id = f.id;
       INSERT INTO public.financial_audit_log (
         operation_type, entity_type, entity_id, actor_user_id, old_values, new_values, total_impact_cents, description
       ) VALUES (
@@ -591,6 +627,7 @@ BEGIN
        WHERE ri.return_id = p_return_id
          AND s.share_mode
          AND s.billed_qty > 0
+         AND NOT (COALESCE(v_repriced, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id', ri.id)))  -- (#2066) just re-priced
          AND (
            ri.extended_cents IS DISTINCT FROM greatest(0,
              round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint

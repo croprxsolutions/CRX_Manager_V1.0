@@ -38,6 +38,13 @@ describe('20270306110000 return credit after a tax change, and the tax ledger ti
     });
   }
 
+  it('receive_return re-prices only for a caller who can read every posted invoice it prices from', () => {
+    const b = body('_receive_return_intent_impl_20260812');
+    const refusal = b.indexOf("RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'");
+    expect(refusal).toBeGreaterThan(0);
+    expect(refusal).toBeLessThan(b.indexOf('UPDATE public.return_items ri'));
+  });
+
   it('issue_return_credit re-prices before its billed-share cap', () => {
     const b = body('_issue_return_credit_intent_impl_20260812');
     expect(b.indexOf('UPDATE public.return_items ri')).toBeLessThan(b.indexOf("RAISE EXCEPTION 'RETURN_CREDIT_EXCEEDS_BILLED_SHARE'"));

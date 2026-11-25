@@ -2734,7 +2734,7 @@ export function restampProblem({ entries, readFile, branchAdded = [], note = {} 
   const lf = (text) => text.replace(/\r\n/g, "\n");
   const [oldStem, newStem] = [fromPath, toPath].map((p) => p.slice("supabase/migrations/".length, -".sql".length));
   const ownRecord = `docs/reference/migrations.d/${newStem}.md`;
-  const selfLink = (text) => text.split(`migrations.d/${oldStem}.md`).join(`migrations.d/${newStem}.md`);
+  const selfLink = (text) => restampHeaderLine(text, oldStem, newStem);
   const oldSql = readFile("old", fromPath);
   const newSql = readFile("new", toPath);
   if (oldSql === null || newSql === null) return "the migration could not be read";
@@ -2794,6 +2794,13 @@ function oneShotKeyRenamed(before, after, oldStem, newStem) {
   } catch {
     return false;
   }
+}
+
+// The one header-line edit a restamp makes (restamp-migration.mjs uses it too): the link to the
+// migration's own record, and a line that is only `-- <its own name>` (#2524 needed that by hand).
+export function restampHeaderLine(line, oldStem, newStem) {
+  const linked = line.split(`migrations.d/${oldStem}.md`).join(`migrations.d/${newStem}.md`);
+  return linked.trim() === `-- ${oldStem}` ? linked.replace(oldStem, newStem) : linked;
 }
 
 // True when `after` is `change(before)` and every changed line is in the leading

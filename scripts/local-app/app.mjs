@@ -288,20 +288,23 @@ function recordLedger(stem) {
   psql(`INSERT INTO supabase_migrations.schema_migrations (version, name) VALUES ('${stem.slice(0, 14)}', '${stem}') ON CONFLICT (version) DO NOTHING;`);
 }
 
-async function pushPostBaselineMigrations(state) {
-  let companion;
-  if (!IS_DOC_BYTES) {
-    const version = text(run('supabase', ['--version']));
-    if (version !== SUPABASE_CLI) throw new Error(`The push steps are proven on Supabase CLI ${SUPABASE_CLI}, not ${version}.`);
-    const launcher = process.platform === 'win32' ? text(run('where.exe', ['supabase'])).split(/\r?\n/)[0] : null;
-    companion = process.env.SUPABASE_GO_BINARY ?? (launcher ? path.join(path.dirname(launcher), 'supabase-go.exe') : 'supabase-go');
-    const companionVersion = text(run(companion, ['--version']));
-    if (companionVersion !== SUPABASE_CLI) {
-      const source = process.env.SUPABASE_GO_BINARY ? 'the SUPABASE_GO_BINARY setting' : 'the folder of the supabase on PATH';
-      throw new Error(`Supabase companion ${companion} (from ${source}) reports ${companionVersion || 'no version'}, not ${SUPABASE_CLI}. `
-        + `Set SUPABASE_GO_BINARY to the supabase-go beside your ${SUPABASE_CLI} supabase (scripts/local-app/README.md).`);
-    }
+// Checked before rebuild erases anything, so a wrong CLI leaves the current test database as it was.
+function supabaseCompanion() {
+  if (IS_DOC_BYTES) return undefined;
+  const version = text(run('supabase', ['--version']));
+  if (version !== SUPABASE_CLI) throw new Error(`The push steps are proven on Supabase CLI ${SUPABASE_CLI}, not ${version}.`);
+  const launcher = process.platform === 'win32' ? text(run('where.exe', ['supabase'])).split(/\r?\n/)[0] : null;
+  const companion = process.env.SUPABASE_GO_BINARY ?? (launcher ? path.join(path.dirname(launcher), 'supabase-go.exe') : 'supabase-go');
+  const companionVersion = text(run(companion, ['--version']));
+  if (companionVersion !== SUPABASE_CLI) {
+    const source = process.env.SUPABASE_GO_BINARY ? 'the SUPABASE_GO_BINARY setting' : 'the folder of the supabase on PATH';
+    throw new Error(`Supabase companion ${companion} (from ${source}) reports ${companionVersion || 'no version'}, not ${SUPABASE_CLI}. `
+      + `Set SUPABASE_GO_BINARY to the supabase-go beside your ${SUPABASE_CLI} supabase (scripts/local-app/README.md).`);
   }
+  return companion;
+}
+
+async function pushPostBaselineMigrations(state, companion) {
   const files = approvedMigrations();
   const workdir = mkdtempSync(path.join(STATE_DIR, 'push-'));
   // The password travels in the environment so it never shows in a process list.
@@ -423,6 +426,7 @@ async function seed(state) {
 
 async function rebuild({ firstStart = false } = {}) {
   await preflight({ needState: false });
+  const companion = supabaseCompanion();
   if (firstStart) assertNewScreenWalkLaneIsEmpty();
   if (!firstStart) stopFrontend();
   const state = readState() ?? createState();
@@ -438,7 +442,7 @@ async function rebuild({ firstStart = false } = {}) {
   console.log('Pushing the approved migrations...');
   // Some migrations refuse to run beside another open transaction, so the services wait.
   compose(['stop', 'auth', 'rest', 'storage']);
-  const migrations = await pushPostBaselineMigrations(state);
+  const migrations = await pushPostBaselineMigrations(state, companion);
   // The services can come back on swapped addresses, and the gateway remembers the old ones.
   compose(['stop', 'gateway']);
   await startServices(state);

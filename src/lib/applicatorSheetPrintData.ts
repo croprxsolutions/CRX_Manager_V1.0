@@ -5,8 +5,9 @@
  * authoritative print path.
  */
 import { assertRpcResult, supabase } from './db';
-import { fmtNum, type ApplicatorSheetBillingSplit, type ApplicatorSheetData, type PreviousFieldApplications } from './applicatorSheetData';
-import { type ApplicatorPrintOptions, mapImageOptions } from './applicatorPrintOptions';
+import { fmtNum, type ApplicatorSheetBillingSplit, type ApplicatorSheetData, type ApplicatorSheetSafety, type PreviousFieldApplications } from './applicatorSheetData';
+import { type ApplicatorPrintOptions, DEFAULT_APPLICATOR_PRINT_OPTIONS, mapImageOptions } from './applicatorPrintOptions';
+import { generateApplicatorSheetPdf } from './applicatorSheetPdf';
 import { fetchJobFieldLocations, fetchJobMapImages } from './jobMapImages';
 
 interface ApplicationRecordJoin {
@@ -201,13 +202,54 @@ export async function fetchApplicatorSheetBillingSplits(
   }
 }
 
+interface ProductSafetyRow {
+  id: string;
+  epa_registration: string | null;
+  signal_word: string | null;
+  rei_hours: number | null;
+  phi_days: number | null;
+}
+
+/**
+ * Safety for the optional safety sheet: exactly the job order's product lines, in
+ * order. Every value (EPA no., signal word, REI, PHI) comes from that line's own
+ * product record as it is today (by product id, never by name; Mason 2026-11-24),
+ * so one row never mixes sources. A failed read, or a line product the reader cannot
+ * see, returns null so the sheet says safety could not be loaded. A line without a
+ * product id prints "See label".
+ */
+async function sheetSafety(products: ApplicatorSheetData['products']): Promise<ApplicatorSheetSafety[] | null> {
+  const ids = [...new Set(products.map((product) => product.product_id).filter((id): id is string => Boolean(id)))];
+  const labels = new Map<string, ProductSafetyRow>();
+  if (ids.length > 0) {
+    try {
+      const { data, error } = await supabase.from('products').select('id, epa_registration, signal_word, rei_hours, phi_days').in('id', ids);
+      if (error || !data) return null;
+      (data as ProductSafetyRow[]).forEach((row) => labels.set(row.id, row));
+    } catch {
+      return null;
+    }
+    if (ids.some((id) => !labels.has(id))) return null;
+  }
+  return products.map((product) => {
+    const label = product.product_id ? labels.get(product.product_id) : undefined;
+    return {
+      product_name: product.product_name,
+      epa_registration: label?.epa_registration?.trim() || null,
+      signal_word: label?.signal_word?.trim() || null,
+      rei_hours: label?.rei_hours ?? null,
+      phi_days: label?.phi_days ?? null,
+    };
+  });
+}
+
 /** Load maps/history/billing additions for every print entry point in one place. */
 export async function prepareApplicatorSheetPrintData(
   jobId: string,
   data: ApplicatorSheetData,
   options: ApplicatorPrintOptions,
 ): Promise<ApplicatorSheetData> {
-  const [maps, previousApplications, billingSplits, locations] = await Promise.all([
+  const [maps, previousApplications, billingSplits, locations, safety] = await Promise.all([
     options.mapPages === 'none'
       ? Promise.resolve(null)
       : fetchJobMapImages(jobId, mapImageOptions(options.mapPages)),
@@ -218,7 +260,30 @@ export async function prepareApplicatorSheetPrintData(
       ? fetchApplicatorSheetBillingSplits(jobId, data.total_acres)
       : Promise.resolve([]),
     fetchJobFieldLocations(jobId),
+    options.includeSafetySheet ? sheetSafety(data.products) : Promise.resolve(undefined),
   ]);
   const fields = data.fields.map((field) => ({ ...field, location: field.field_id ? locations.get(field.field_id) ?? null : null }));
-  return { ...data, fields, maps, previousApplications, billingSplits };
+  return {
+    ...data,
+    fields,
+    maps,
+    previousApplications,
+    billingSplits,
+    // Safety is off unless chosen; when chosen it prints on its own sheet (Mason, 2026-11-24).
+    safety,
+  };
+}
+
+/**
+ * The "Map pages only" print: overview plus per-field maps for a saved job, with no
+ * job order. Throws NO_MAP_PAGES_MESSAGE when the job has no map.
+ */
+export async function printApplicatorMapPages(jobId: string, data: ApplicatorSheetData): Promise<void> {
+  const options: ApplicatorPrintOptions = {
+    ...DEFAULT_APPLICATOR_PRINT_OPTIONS,
+    mapPages: 'both',
+    includePreviousApplications: false,
+    includeBillingSplits: false,
+  };
+  await generateApplicatorSheetPdf(await prepareApplicatorSheetPrintData(jobId, data, options), 'original', null, { mapsOnly: true });
 }

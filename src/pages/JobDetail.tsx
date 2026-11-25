@@ -22,8 +22,8 @@ import { fingerprintIntentPayload, getIdempotencyBindingRejection, getIdempotenc
 import { getLicenseStatus, licenseStatusLabel } from '../lib/licenseStatus';
 import { generateWpsNoticePdf } from '../lib/wpsNoticePdf';
 import { applyKeptEpa } from '../lib/jobEpa';
-import { generateApplicatorSheetPdf } from '../lib/applicatorSheetPdf';
-import { prepareApplicatorSheetPrintData } from '../lib/applicatorSheetPrintData';
+import { generateApplicatorSheetPdf, NO_MAP_PAGES_MESSAGE } from '../lib/applicatorSheetPdf';
+import { prepareApplicatorSheetPrintData, printApplicatorMapPages } from '../lib/applicatorSheetPrintData';
 import PrintOptionsDialog, { type ApplicatorPrintSelection } from '../components/jobs/PrintOptionsDialog';
 import {
   buildApplicatorSheetData,
@@ -1153,6 +1153,7 @@ export default function JobDetail() {
           const lbl = labelById.get(c.product_id);
           return {
             product_name: c.product_name || 'Product',
+            product_id: c.product_id,
             rate_per_acre: parseFloat(c.rate_per_acre) || null,
             rate_unit: c.rate_unit || null,
             // The Total Applied quantity's measure unit (e.g. GAL/LB) — drives the
@@ -1223,6 +1224,28 @@ export default function JobDetail() {
     } catch (err) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'applicator_sheet_pdf' } });
       toast('error', 'Failed to generate field sheet');
+    }
+    setGeneratingSheet(null);
+  };
+
+  // Map pages only: an extra maps print for the crew. No job order, so no "printed" stamp.
+  const handleMapPagesOnly = async () => {
+    if (isNew || !id || !canGenerateWpsNotice({ isDirty })) {
+      toast('error', 'Save the job before printing its maps — they must match the saved record.');
+      return;
+    }
+    setGeneratingSheet('original');
+    try {
+      const sheetData = await buildSheetDataFromState(false);
+      if (sheetData) await printApplicatorMapPages(id, sheetData);
+      else toast('error', 'Could not load the job — try again before printing its maps.');
+    } catch (err) {
+      if (err instanceof Error && err.message === NO_MAP_PAGES_MESSAGE) {
+        toast('error', NO_MAP_PAGES_MESSAGE);
+      } else {
+        Sentry.captureException(toSentryError(err), { extra: { context: 'applicator_map_pages_pdf' } });
+        toast('error', 'Failed to print the field maps');
+      }
     }
     setGeneratingSheet(null);
   };
@@ -4016,6 +4039,9 @@ export default function JobDetail() {
               <Button icon={<ClipboardList className="w-4 h-4" />} variant="secondary" onClick={() => setPrintOptionsOpen(true)} loading={generatingSheet !== null}>
                 
                 Field Sheet
+              </Button>
+              <Button icon={<MapIcon className="w-4 h-4" />} variant="secondary" onClick={handleMapPagesOnly} loading={generatingSheet !== null}>
+                Maps Only
               </Button>
               <Button icon={<FlaskConical className="w-4 h-4" />} variant="secondary" onClick={handleChemicalReport} loading={generatingChemReport}>
                 

@@ -36,7 +36,7 @@ Read at `origin/staging` ef21134fc; production checked read-only the same day.
   value (`jobLabelCorrections.ts`), applicator sheet, WPS notice, chemical reports and the field app print blank.
   The flag keeps the number blank, so none of them can print or write 0. Only `missingProductSetup` reads the flag.
 - **Already-deployed app during rollout.** It never sends the new columns; its writes keep the default/old values.
-  An old tab can clear a flag only by saving a number (the rule above). Selecting the new columns needs the
+  An old tab can clear a flag only by saving a number or a changed EPA number (the rules above). A brand's EPA number changed on the Brands screen does not clear a generic's ticks (Mason, 2026-11-24: rare; untick by hand). Selecting the new columns needs the
   migration live first (DB-first PR split).
 - **Timing.** REI/PHI and the flags do not move `pricing_version`. The page sends an interval pair only when it
   changed, and that update also filters on the number and flag the page read. If anyone changed the pair since, zero

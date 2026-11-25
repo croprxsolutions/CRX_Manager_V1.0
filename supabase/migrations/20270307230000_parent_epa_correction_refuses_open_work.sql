@@ -134,13 +134,19 @@ BEGIN
         FROM public.jobs j JOIN public.job_chemicals jc ON jc.job_id = j.id JOIN sizes s ON s.product_id = jc.product_id
        WHERE j.deleted_at IS NULL
          AND (j.status IN ('scheduled', 'in_progress') OR (j.status = 'completed'
-              AND NOT EXISTS (SELECT 1 FROM public.invoices ji WHERE ji.id = j.invoice_id AND ji.deleted_at IS NULL)))
+              AND NOT EXISTS (SELECT 1 FROM public.invoices ji WHERE ji.id = j.invoice_id AND ji.deleted_at IS NULL)
+              -- Billed through its blend ticket instead (Sol r1): job invoicing then refuses (BLEND_TICKET_ALREADY_BILLED).
+              AND NOT EXISTS (SELECT 1 FROM public.blend_tickets jb JOIN public.invoices jbi ON jbi.blend_ticket_id = jb.id
+                               WHERE jb.job_id = j.id AND jbi.deleted_at IS NULL AND jbi.status NOT IN ('voided', 'cancelled'))))
       UNION
       SELECT 2, b.id, 'blend ticket ' || COALESCE(b.ticket_number::text, b.id::text) || ' ('
                || CASE WHEN b.payment_status = 'unbilled' THEN 'unbilled' ELSE 'no application record' END || ')'
         FROM public.blend_tickets b JOIN public.blend_ticket_products bp ON bp.blend_ticket_id = b.id
         JOIN sizes s ON s.product_id = bp.product_id
        WHERE b.deleted_at IS NULL AND b.review_status IS DISTINCT FROM 'rejected'
+         -- A ticket for a live job is that job's work and is counted through it; its own application record would
+         -- deduct the job's stock a second time (Sol r1).
+         AND NOT EXISTS (SELECT 1 FROM public.jobs bj WHERE bj.id = b.job_id AND bj.deleted_at IS NULL AND bj.status <> 'cancelled')
          AND (b.payment_status = 'unbilled'
               OR NOT EXISTS (SELECT 1 FROM public.application_records ar WHERE ar.source_type = 'blend_ticket' AND ar.source_id = b.id))
       UNION
@@ -152,7 +158,7 @@ BEGIN
            || CASE WHEN max(total) > 10 THEN ' and ' || (max(total) - 10) || ' more' ELSE '' END
       INTO v_unsaved FROM numbered;
     IF v_unsaved IS NOT NULL THEN
-      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_OPEN_WORK: finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete and invoice it; if it will not be sprayed, cancel it or take this product off it; a blend ticket: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): %', v_unsaved;
+      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_OPEN_WORK: finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete it and invoice it or its blend ticket; if it will not be sprayed, cancel it or take this product off it; a blend ticket not tied to a job: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): %', v_unsaved;
     END IF;
   END IF;
   RETURN jsonb_build_object(
@@ -166,7 +172,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public._product_parent_identity_after(public.product_parents,jsonb)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = '4eea9f7795275a193f59a75f8549e260'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '92f22cebe57c7ce47513a8bf6c4d38bd'
                     AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef AND p.provolatile = 'v'
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]) THEN

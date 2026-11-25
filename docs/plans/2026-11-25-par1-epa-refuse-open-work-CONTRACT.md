@@ -23,8 +23,8 @@ size, so open work on any size blocks the parent):
 | # | Record | Counts while | Source of the definition |
 |---|---|---|---|
 | W1 | `jobs` with a `job_chemicals` line for a size | not deleted, `status IN ('scheduled','in_progress')` | `jobs.status` enum |
-| W2 | same | not deleted, `status = 'completed'`, no live (not deleted) invoice linked (Luna r2) | Unbilled Applications panel (`src/components/field-invoices/UnbilledApplicationsPanel.tsx:186`) |
-| W3 | `blend_tickets` with a `blend_ticket_products` line for a size | not deleted, `review_status` not `rejected`, and either `payment_status = 'unbilled'` or no `application_records` row (`source_type = 'blend_ticket'`) yet | Unbilled panel (approved + unbilled), widened to not-yet-reviewed tickets; an application record can be made from an approved ticket at any time, billed or not (`20260713060200`) |
+| W2 | same | not deleted, `status = 'completed'`, no live (not deleted) invoice linked (Luna r2), and not billed through a blend ticket tied to it (a live, not voided or cancelled, invoice on that ticket; Sol r1) | Unbilled Applications panel (`src/components/field-invoices/UnbilledApplicationsPanel.tsx:186`) |
+| W3 | `blend_tickets` with a `blend_ticket_products` line for a size | not deleted, `review_status` not `rejected`, not tied to a live, not-cancelled job (that job counts it; making the ticket's own application record would deduct the job's stock twice, Sol r1), and either `payment_status = 'unbilled'` or no `application_records` row (`source_type = 'blend_ticket'`) yet | Unbilled panel (approved + unbilled), widened to not-yet-reviewed tickets; an application record can be made from an approved ticket at any time, billed or not (`20260713060200`) |
 | W4 | `invoices` with an `invoice_items` line for a size | not deleted, `status IN ('draft','unposted')` (chemical-sale and field invoices alike) | `invoices.status` enum |
 
 **Files:** `supabase/migrations/20270307230000_parent_epa_correction_refuses_open_work.sql`, its ledger and migration
@@ -87,6 +87,8 @@ never on in production without this rule (`20270307180000` is not applied live).
   the corrected number: it was not in progress when the correction ran.
 - Unsaved screens: a form never saved before the correction is a record made after it, and takes the corrected number
   (Mason 2026-11-23).
+- A blend ticket whose OCR line is not yet matched to a product has no product to count, so it does not block until staff match it (Sol r1 MED; follow-up).
+- The refusal shows in the usual short toast; a longer list stays readable via Preview, which re-shows it (Sol r1 LOW; follow-up if staff miss it).
 - Year-end return-credit attribution and first-number assignment of historical blank lines (the issue's out-of-scope items).
 
 ## Cold challenge (Astra gpt-6.2-astra high, 2026-11-25, packet-only, 53 findings) — settled

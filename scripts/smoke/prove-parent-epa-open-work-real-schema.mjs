@@ -23,7 +23,7 @@ const { buildContainer, removeContainer, seedUsers, psql, scalar, docker, USERS,
 const CANDIDATE = '20270307230000_parent_epa_correction_refuses_open_work.sql';
 const OLD = '524-475', NEW = '100-497-37686';
 const CUST = id('e1'), PARENT = id('e2'), S1 = id('e3'), S2 = id('e4'), OTHER = id('e5');
-const JOB = id('e6'), TICKET = id('e7'), INV = id('e8'), POSTED = id('e9');
+const JOB = id('e6'), TICKET = id('e7'), INV = id('e8'), POSTED = id('e9'), BTINV = id('ea');
 
 const as = (uid, sql) => `BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);
   SET LOCAL ROLE authenticated; ${sql} COMMIT;`;
@@ -138,6 +138,26 @@ try {
     seed(`UPDATE public.blend_tickets SET payment_status = 'unbilled', ${set} WHERE id = '${TICKET}';`);
     allowed(`blend ticket ${what}`);
   }
+
+  // A ticket tied to a live job is counted through the job (Sol r1: its own application record would deduct twice).
+  seed(`UPDATE public.blend_tickets SET deleted_at = NULL, job_id = '${JOB}' WHERE id = '${TICKET}';
+    UPDATE public.jobs SET status = 'invoiced', invoice_id = '${POSTED}' WHERE id = '${JOB}';`);
+  allowed('unbilled ticket with no application record, tied to an invoiced job');
+  seed(`UPDATE public.jobs SET status = 'cancelled', invoice_id = NULL WHERE id = '${JOB}';`);
+  blocked('the same ticket once its job is cancelled', /blend ticket WRK-BT \(unbilled\)/);
+  // A job billed through its blend ticket counts as billed (job invoicing then refuses BLEND_TICKET_ALREADY_BILLED).
+  seed(`UPDATE public.jobs SET status = 'completed', completed_at = now() WHERE id = '${JOB}';
+    UPDATE public.job_chemicals SET product_id = '${S1}' WHERE job_id = '${JOB}';
+    UPDATE public.blend_tickets SET payment_status = 'billed' WHERE id = '${TICKET}';
+    INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, created_by, posted_by, posted_at, total_amount_cents, season, blend_ticket_id) VALUES
+      ('${BTINV}', 'WRK-BTINV', '${CUST}', 'field_application', 'posted', '${USERS.admin}', '${USERS.admin}', now(), 0, 2026, '${TICKET}');`);
+  allowed('completed job billed through its blend ticket');
+  seed(`UPDATE public.invoices SET status = 'voided' WHERE id = '${BTINV}';`);
+  blocked('the same job once that ticket invoice is voided', /job WRK-JOB \(completed, not invoiced\)/);
+  seed(`UPDATE public.blend_tickets SET deleted_at = now() WHERE id = '${TICKET}';
+    UPDATE public.jobs SET status = 'scheduled' WHERE id = '${JOB}';
+    UPDATE public.job_chemicals SET product_id = '${OTHER}' WHERE job_id = '${JOB}';`);
+  allowed('linked work cleared');
 
   // Invoices (W4)
   seed(`INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, created_by, total_amount_cents, season) VALUES

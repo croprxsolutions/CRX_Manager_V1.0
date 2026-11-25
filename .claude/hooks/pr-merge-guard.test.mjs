@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { ownerHoldProblem } from "./pr-owner-hold-lib.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -347,6 +348,15 @@ for (const command of [
 }
 r = runHook({ tool_name: "mcp__github__create_pull_request_review", tool_input: { owner: "o", repo: "r", pull_number: 5, event: "APPROVE" } });
 ok(r.decision?.permissionDecision === "deny", "the GitHub review tool's APPROVE is denied");
+
+// Owner hold: the pure helper gateRequest uses to refuse a "[HOLD FOR MASON]" title.
+for (const title of ["[HOLD FOR MASON] fix thing", "fix thing [hold for mason]"]) {
+  const p = ownerHoldProblem({ title, baseRefName: "staging" });
+  ok(typeof p === "string" && /HOLD FOR MASON/.test(p) && /CURRENT exact head/.test(p), `held title refused: ${title}`);
+}
+ok(/title/.test(ownerHoldProblem({ baseRefName: "staging" }) ?? ""), "absent title on a staging PR fails closed");
+ok(/title/.test(ownerHoldProblem({ baseRefName: "main" }) ?? ""), "absent title fails closed on every base");
+ok(ownerHoldProblem({ title: "fix thing", baseRefName: "staging" }) === null, "an ordinary title is not held");
 r = runHook({ tool_name: "mcp__github__create_pull_request_review", tool_input: { owner: "o", repo: "r", pull_number: 5, event: "COMMENT", body: "Do not APPROVE until the proof passes" } });
 ok(r.status === 0 && r.decision === null, "a COMMENT review that mentions APPROVE in its body passes");
 for (const command of ["gh pr review 5 --comment -b 'see the note'", "gh pr review 5 -r -b 'needs a test'", "gh pr view 5 --json reviewDecision"]) {
@@ -584,6 +594,11 @@ const gateRequestSource = guardSource.slice(
   guardSource.indexOf("const advisoryQueue = [];"),
 );
 ok(gateRequestSource.length > 0, "gateRequest() is present to inspect");
+{
+  const hold = gateRequestSource.search(/const holdProblem = ownerHoldProblem\(pr\);\s*if \(holdProblem\) deny\(/);
+  ok(hold > 0 && hold < gateRequestSource.indexOf("claimOrRefuse("), "the owner hold refuses before any landing claim");
+  ok(/"number,url,[^"]*\btitle\b[^"]*"/.test(gateRequestSource), "the PR resolve asks GitHub for the title");
+}
 eq(
   (gateRequestSource.match(/\bhardGateGh\(/g) || []).length,
   1,
@@ -649,7 +664,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(/import \{ agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
   // Taha lane block (#2303; behaviour in taha-lane-lib.test.mjs and the Codex gate test): inside the staging branch,
   // bound to the head being merged, with the gate itself telling Taha, and a refusal denies.
-  ok(/if \(base === "staging"\) \{[\s\S]{0,2500}?const lane = tahaLaneGate\(\{[\s\S]{0,200}?pullRequest: Number\(pr\.number\),\s*headSha: pr\.headRefOid,\s*tellTaha: \(body\) => tellTahaOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, pullRequest: Number\(pr\.number\), body \}\),\s*tahaApproved: \(\) => tahaApprovedOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, number: Number\(pr\.number\), headSha: pr\.headRefOid \}\),\s*files: prFilesOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, number: Number\(pr\.number\), headSha: pr\.headRefOid \}\),[\s\S]{0,300}?if \(lane\) deny\(lane\);/.test(gateRequestSource),
+  ok(/if \(base === "staging"\) \{[\s\S]{0,2500}?const lane = tahaLaneGate\(\{[\s\S]{0,200}?pullRequest: Number\(pr\.number\),\s*headSha: pr\.headRefOid,\s*tellTaha: \(body\) => tellTahaOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, pullRequest: Number\(pr\.number\), body \}\),\s*tahaApproved: \(\) => tahaApprovedOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, pullRequest: Number\(pr\.number\), headSha: pr\.headRefOid \}\),\s*files: prFilesOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, number: Number\(pr\.number\), headSha: pr\.headRefOid \}\),[\s\S]{0,300}?if \(lane\) deny\(lane\);/.test(gateRequestSource),
     "a staging merge runs the Taha lane gate at the PR's head, checks Taha's sign-off on that head, reads its SQL at that head, and denies on its refusal");
   ok(/if \(base === "staging"\) \{[\s\S]{0,300}mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused");
   // staging gets every main gate (Mason on #1363, 2026-11-04); staging-first: agents never merge into main

@@ -14,7 +14,7 @@ Spray order: `job_fields.sort_order` (already printed as "Stop N" by `src/lib/ap
 
 ## Groups, in order (one PR each)
 
-1. Safety (REI, PHI, signal word) always printed on every page of the applicator sheet, including map-only prints; the option to leave it off removed (SPEC stage 3).
+1. Safety (signal word, REI, PHI): off by default; when chosen, every product's safety prints on its own sheet (Mason 2026-11-24, replacing "on every page"; SPEC stage 3).
 2. A "map pages only" print option. Tank contents always print on the applicator job order; no "hide tank contents" option (Mason 2026-11-24).
 3. Spray-order numbers 1, 2, 3 on printed maps from `sort_order`; numbers restart per job (Sol 86).
 4. Directions link per field on the sheet.
@@ -27,7 +27,7 @@ Spray order: `job_fields.sort_order` (already printed as "Stop N" by `src/lib/ap
 
 ## Definition of done
 
-All six groups merged into `staging` and checked there, each PR showing rendered pages for a one-field and a multi-field job (first and later pages, map-only and full prints, tank contents on every full print), directions links opened, the printed safety values matched against the product records, a registered product with no number ("Unknown") and an unregistered one (dash), a saved print preference that used to hide safety, and the print libraries given two jobs at once with spray numbers restarting per job (a test; the DispatchBoard tick-several-jobs wiring is the slice 2 office lane's). Anything parked is in `PROGRESS.md` with the reason, and the lane reports PARTIAL.
+All six groups merged into `staging` and checked there, each PR showing rendered pages for a one-field and a multi-field job (first and later pages, map-only and full prints, tank contents on every full print), directions links opened, the printed safety values matched against the product records, a registered product with no number ("Unknown") and an unregistered one (dash), a saved print preference from before the safety option (prints no safety sheet), and the print libraries given two jobs at once with spray numbers restarting per job (a test; the DispatchBoard tick-several-jobs wiring is the slice 2 office lane's). Anything parked is in `PROGRESS.md` with the reason, and the lane reports PARTIAL.
 
 ## Delivery gate
 

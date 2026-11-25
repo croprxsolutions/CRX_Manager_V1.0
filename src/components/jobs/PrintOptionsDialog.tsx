@@ -217,6 +217,14 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
             disabled={busy}
             hint={format === 'custom' ? 'Uses the header configured for the Custom format.' : 'Uses the standard CRX header band.'}
           />
+
+          <ToggleSelect
+            label="Print safety sheet"
+            value={options.includeSafetySheet}
+            onChange={(value) => updateOption('includeSafetySheet', value)}
+            disabled={busy}
+            hint="Signal word, REI and PHI for every product, on its own page."
+          />
         </div>
 
         <div className="flex items-start gap-2 rounded-lg bg-green-50 p-3 text-xs text-green-900">

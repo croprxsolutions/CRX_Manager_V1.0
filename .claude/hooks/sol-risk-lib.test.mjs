@@ -15,7 +15,7 @@ for (const name of [
   "src/components/Label.tsx", "src/lib/units.ts", "public/sw.js", ".gitignore",
   ".claude/commands/ship.md", ".claude/hooks/loop-guard.mjs", ".claude/hooks/pr-merge-guard.test.mjs", "scripts/agent-health-check.mjs",
   ".claude/hooks/pr-merge-guard.mjs", ".claude/hooks/sol-risk-lib.mjs", ".claude/hooks/env-guard.mjs", ".codex/hooks/production-action-guard.mjs", ".claude/settings.json",
-  "scripts/write-codex-push-proof.mjs", "scripts/check-agent-guidance.mjs", ".claude/agents/rls-security-reviewer.md",
+  "scripts/write-codex-push-proof.mjs", ".claude/agents/rls-security-reviewer.md",
   "package.json", "package-lock.json", "tools/x/package.json", ".npmrc", "deno.lock",
   ".github/workflows/ci.yml", ".husky/pre-push", "vercel.json", "vite.config.ts", "index.html", "scripts/classify-ci-scope.mjs",
   "src/pages/Jobs.tsx", "src/pages/Fields.tsx",
@@ -30,6 +30,8 @@ for (const name of [
   "src/App.tsx", "src/appPages.tsx", "src/pages/MonthEndClose.tsx", "src/pages/Rebates.tsx", "src/pages/Receiving.tsx", "src/pages/LotTrace.tsx", "src/pages/JobDetail.tsx", "src/pages/OfficeCockpit.tsx", "src/pages/Reports.tsx", "src/pages/SettingsPage.tsx", "src/lib/offlineSync.ts", "src/components/receiving/ReceiveForm.tsx",
   // Listed paths still need Sol for their tests; a non-test file with "test" in its name is still money code.
   "src/components/auth/LoginPage.test.tsx", "src/components/receiving/__tests__/ReceiveForm.test.tsx", "src/lib/invoiceTestHelpers.ts", "src/lib/testInvoice.ts",
+  // The locked agent-safety lines and their check (Mason, 2026-11-25); AGENTS.md itself stays off the list.
+  "scripts/agent-guidance-locks.json", "scripts/check-agent-guidance.mjs",
 ]) {
   check(`${name} needs Sol`, () => assert.ok(solRiskPathProblem(name)));
 }

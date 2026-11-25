@@ -45,6 +45,8 @@ interface EditableDataTableProps<T> {
   searchKeys?: string[];
   /** Optional row matcher for pages that share search rules across multiple layouts. */
   searchMatcher?: (row: T, search: string) => boolean;
+  /** Called with the search text whenever it changes, and with '' when the table mounts or remounts. */
+  onSearchChange?: (search: string) => void;
   onRowClick?: (row: T) => void;
   emptyTitle?: string;
   emptyDescription?: string;
@@ -149,6 +151,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
   searchPlaceholder = 'Search...',
   searchKeys = [],
   searchMatcher,
+  onSearchChange,
   onRowClick,
   emptyTitle = 'No data found',
   emptyDescription,
@@ -182,6 +185,11 @@ export default function EditableDataTable<T extends Record<string, any>>({
     if (editExitRef.current.editMode) editExitRef.current.onEditModeChange?.(false);
   }, []);
   const blocker = useUnsavedChanges(editMode && dirtyCount > 0);
+
+  // Reported on mount too: a remounted table starts with an empty search, so its parent must not keep an old one.
+  const onSearchChangeRef = useRef(onSearchChange);
+  useEffect(() => { onSearchChangeRef.current = onSearchChange; }, [onSearchChange]);
+  useEffect(() => { onSearchChangeRef.current?.(search); }, [search]);
 
   useEffect(() => {
     resetBlockerWhenClean(dirtyCount, blocker);

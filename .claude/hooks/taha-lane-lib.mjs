@@ -322,7 +322,7 @@ export function tahaApprovedCommit(rows, baseChangedAt = "") {
 }
 
 // Mason, 2026-11-25: Taha's Approve of an older commit still counts when the PR's own change is the same
-// now. Pushes that only catch up with staging, add notes under docs/, or restamp a migration (only its
+// now. Pushes that only catch up with staging, change only files under docs/, or restamp a migration (only its
 // own migration stamp changed, old -> new, in names and text; Luna r1) leave it so; any other change needs him again.
 // shortcut: a staging catch-up that changes how the PR's unchanged code behaves is not seen (Mason accepted, 2026-11-25).
 // shortcut: a file whose git mode alone changes (e.g. to a symlink) is not seen; same honest-mistake net (Luna r1, deferred).
@@ -396,6 +396,9 @@ function sameOwnChange({ repoPath, gh, pullRequest, from, to }) {
   // Only the PR's own restamp may differ in text (Luna r1: any other date-shaped number is a real change),
   // and only in real UTF-8 text; anything else must match byte for byte.
   const text = (buf) => { try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch { return null; } };
+  // shortcut: a code value equal to the PR's own migration stamp, moved in step with the restamp, carries over;
+  // real restamps rewrite bare stamp mentions in src/ and scripts/ comments (#2557), so all files are normalized
+  // (Luna r2, refuted; tighten only if a real code value ever matches a migration stamp).
   const restamped = (t) => t.replace(STAMP_RE, (s) => restamps.get(s) ?? s);
   return pairs.every(([a, b]) => {
     const [x, y] = [bytes(a), bytes(b)];
@@ -586,7 +589,7 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
   const code = issueTahaLaneCode({ dirs, pullRequest, headSha, now });
   return `${prefix}: TAHA LANE BLOCK — #${pullRequest || "?"} is refused because ${problem.reason}. ` +
     "Agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) without Taha's " +
-    "GitHub Approve (it carries over pushes that only catch up with staging, add docs/ notes or restamp a migration), and never change this block without Mason's code (Mason, 2026-11-22 and 2026-11-24). " +
+    "GitHub Approve (it carries over pushes that only catch up with staging, change only docs/ or restamp a migration), and never change this block without Mason's code (Mason, 2026-11-22 and 2026-11-24). " +
     `Request his review (gh pr edit ${pullRequest || "<n>"} --add-reviewer TahaKhanAbdalli) and wait for his Approve. ` +
     (code
       ? `Only if Mason wants it merged anyway: tell him why in one line and ask him to send, as a message of its own: taha override #${pullRequest} ${code} ` +

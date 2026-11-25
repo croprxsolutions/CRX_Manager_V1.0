@@ -3,7 +3,7 @@
 Mason: Taha's approval kept getting wiped by small pushes, so nobody could tell whether he had approved.
 
 - **Carry-over** (`taha-lane-lib.mjs` `tahaApprovedOnGitHub`): Taha's Approve of an older commit still lets a
-  lane PR through when the PR's own change is the same now. Pushes that only catch up with staging, add notes
+  lane PR through when the PR's own change is the same now. Pushes that only catch up with staging, change files
   under `docs/`, or restamp a migration keep it; any other change needs him again. GitHub's rulesets dismiss
   stale reviews on push, so an Approve the timeline shows dismissed by a push (no message) still counts; one a
   person dismissed does not. Proven on PR #2557's real history: docs note and restamp carried, the code fix did not.

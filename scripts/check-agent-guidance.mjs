@@ -64,7 +64,8 @@ function units(text) {
   let open = false;
   for (const line of String(text).replace(/\r\n/g, "\n").split("\n")) {
     const body = line.replace(/^\s*(?:>\s*)*/, "");
-    if (body.startsWith("```")) { fence = !fence; open = false; continue; }
+    // shortcut: a fence closes on either marker, not only its opener; fine for these docs.
+    if (/^(?:```|~~~)/.test(body)) { fence = !fence; open = false; continue; }
     if (fence || !body.trim()) { open = false; continue; }
     if (open && !/^(?:[-*+] |\d+[a-z]?\. |#{1,6} |\|)/.test(body)) out[out.length - 1] += ` ${body}`;
     else out.push(body);
@@ -248,8 +249,14 @@ record(
 // emptying the lock file fails as well.
 const LOCK_FILE = "scripts/agent-guidance-locks.json";
 const REQUIRED_LOCKS = {
-  "AGENTS.md": ["priority", "never-bans", "guard-cleanup", "review-chain", "sol", "staging-first", "coderabbit", "autonomous-landing", "owner-approval"],
-  ".claude/commands/ship.md": ["autonomous-landing", "sol-base", "coderabbit"],
+  "AGENTS.md": {
+    units: [
+      "priority", "never-bans", "guard-cleanup", "review-chain", "sol", "staging-first", "coderabbit", "autonomous-landing", "owner-approval",
+      "hard-rule-migrations", "hard-rule-rpc", "hard-rule-money", "hard-rule-invariants", "hard-rule-db-client", "hard-rule-status",
+    ],
+    passages: [],
+  },
+  ".claude/commands/ship.md": { units: ["autonomous-landing", "sol-base"], passages: ["coderabbit"] },
 };
 let locks = {};
 try {
@@ -258,11 +265,14 @@ try {
   record(false, `${LOCK_FILE} is valid JSON`, error.message);
 }
 const lockedAgentsUnits = new Set();
-for (const [file, names] of Object.entries(REQUIRED_LOCKS)) {
+for (const [file, required] of Object.entries(REQUIRED_LOCKS)) {
   const entry = locks[file] || {};
-  const declared = { ...(entry.units || {}), ...(entry.passages || {}) };
-  const undeclared = names.filter((name) => typeof declared[name] !== "string" || fold(declared[name]).length < 40);
-  record(undeclared.length === 0, `${LOCK_FILE} declares every required ${file} lock`, undeclared.join(", "));
+  // Each required name must sit under its own kind: an AGENTS.md rule moved to
+  // "passages" would stop being a whole-bullet match.
+  const undeclared = ["units", "passages"].flatMap((kind) =>
+    required[kind].filter((name) => typeof entry[kind]?.[name] !== "string" || fold(entry[kind][name]).length < 40).map((name) => `${kind}.${name}`));
+  const strayPassages = file === "AGENTS.md" ? Object.keys(entry.passages || {}) : [];
+  record(undeclared.length === 0 && strayPassages.length === 0, `${LOCK_FILE} declares every required ${file} lock`, [...undeclared, ...strayPassages.map((name) => `AGENTS.md passages.${name} (must be a unit)`)].join(", "));
   const fileUnits = units(file === "AGENTS.md" ? agents : readChecked(file));
   for (const [name, text] of Object.entries(entry.units || {})) {
     record(fileUnits.includes(fold(text)), `${file} keeps locked rule "${name}" word for word`);
@@ -274,10 +284,10 @@ for (const [file, names] of Object.entries(REQUIRED_LOCKS)) {
 }
 // Key terms cannot tell "needs approval" from "approval is optional", so an
 // unlocked AGENTS.md rule may not carry a weakening word (routing rows excepted).
-const WEAKENERS = /\b(?:optional|advisory|no longer|need not|needs no|not required|preferred|ideally|if convenient|best[- ]effort|at (?:your|their|its|his) discretion|(?:may|can) (?:skip|ignore|waive))\b/;
+const WEAKENERS = /\b(?:optional(?:ly)?|advisory|no longer|need not|needs no|not required|preferred|ideally|best[- ]effort|at (?:your|their|its|his) discretion|(?:if|when|where) (?:possible|practical|convenient|feasible)|(?:may|can|could|might) (?:skip|ignore|waive|omit|drop|bypass|disregard))\b/;
 const weakenedRules = units(agents).filter((unit) => !lockedAgentsUnits.has(unit) && !unit.startsWith("|") && WEAKENERS.test(unit));
 record(weakenedRules.length === 0, "unlocked AGENTS.md rules carry no weakening words (optional, advisory, need not…)", weakenedRules.map((unit) => unit.slice(0, 70)).join("; "));
-const tripwireSamples = ["- New tables: Row Level Security optional.", "- The Luna review is advisory.", "- Proofs under 24 hours are preferred."];
+const tripwireSamples = ["- New tables: Row Level Security optional.", "- The Luna review is advisory.", "- Proofs under 24 hours are preferred.", "- New tables can omit Row Level Security."];
 record(tripwireSamples.every((sample) => WEAKENERS.test(fold(sample))) && !WEAKENERS.test(fold(agents.match(/^- Mason cannot.*$/m)?.[0] || "x")), "weakening-word tripwire catches its samples and passes a plain rule");
 // Mason, 2026-11-25: with wording unfrozen, a renamed or moved heading is the real risk.
 // Every "AGENTS.md › <name>" citation (also written "`AGENTS.md` › <name>", possibly
@@ -309,7 +319,7 @@ for (const relative of trackedFiles) {
   if (!existsSync(full)) continue;
   const bytes = readFileSync(full);
   if (bytes.length > 4_000_000 || bytes.includes(0)) continue;
-  for (const match of bytes.toString("utf8").matchAll(/AGENTS\.md`?[ \t]*›[ \t]*([^\r\n]{0,80}(?:\r?\n[^\r\n]{0,80})?)/g)) {
+  for (const match of bytes.toString("utf8").matchAll(/AGENTS\.md`?[ \t]*(?:\r?\n[ \t>*#/]*)?›[ \t]*([^\r\n]{0,80}(?:\r?\n[^\r\n]{0,80})?)/g)) {
     const problem = citationProblem(match[1]);
     if (problem) brokenCitations.push(`${relative}: AGENTS.md › ${problem}`);
   }

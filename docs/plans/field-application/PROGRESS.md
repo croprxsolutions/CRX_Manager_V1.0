@@ -60,11 +60,11 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 
 | Item | State | Proof / link | Note |
 |---|---|---|---|
-| 1 Safety on every page | PARKED | `feat/field-paper-1` (not pushed) | Strip on every page (map pages too); Custom config can no longer hide REI/PHI. Parked: Terra HIGH (a 35+ product mix cannot fit the strip on every page) survived 2 fix rounds; asked Mason 2026-11-24 to allow 'see the safety table on page 1' past that size |
-| 2 Map pages only print | PARKED (menu entry) | `feat/field-paper-2` (stacked on 1): print library `mapsOnly` option, rendered one-field and multi-field, Terra CLEAN | Maps only, safety on every page, no blank first page; a job with no maps refuses plainly. The one `JobDetail.tsx` print-menu entry waits for the lease (asked below) and needs Sol (JobDetail is on the Sol list) |
-| 3 Spray-order numbers on maps | PARKED (stacked on 1) | `feat/field-paper-3`; Terra CLEAN on its own diff | Overview labels `N · acres`; per-field page title `Stop N`; numbers restart per job (test) |
-| 4 Directions link per field | PARKED (stacked on 3) | `feat/field-paper-4`; Terra 2 MED + 1 LOW, fixed or refuted | Tappable Google Maps link per mapped field, in stop order, under the field table |
-| 5 Loader water to add + finished gallons | IN REVIEW | `feat/field-paper-5`; rendered: tank loads, condensed, one batch, overfill, and a dash with its note for a form not on file, a liquid sold by weight, and a missing amount | **Mason 2026-11-24: "Yes, only when known".** Water to add shows only when every product record says liquid or dry and every liquid sizes to gallons; otherwise a dash and "set liquid/dry on the product" (or the amount/unit reason). No guessing from the unit |
+| 1 Safety sheet (off by default) | IN REVIEW | #2468 `feat/field-paper-1`; rendered: off (no safety page), on with 3 products, on with 38 products (all 38 rows, flowing onto a second safety page) | **Mason decision 2026-11-24:** "were not going to print safety info by defualt it will normally be off but if selected it all print on its own sheet". Replaces "safety on every page". New print option "Print safety sheet" (off); a saved preference from before reads as off. Lists exactly the job order's product lines; every safety value (EPA no., signal word, REI, PHI) read at print time from that line's own product record (by id; Job Detail now passes the line's product id, orchestrator 2026-11-24). **Mason 2026-11-24, "Yes, today's records":** the safety sheet shows today's product records and says "From product records on <print date>"; the job order itself keeps its own saved REI/PHI; a # column gives each row's job order line; a missing value prints "See label"; a failed read prints "could not be loaded". Touches `JobDetail.tsx` (Sol). The Enhanced/Custom tank-mix table keeps its existing REI/PHI columns |
+| 2 Map pages only print | IN REVIEW | #2458 `feat/field-paper-2` (stacked on 4) | Maps only; a job with no maps refuses plainly. `JobDetail.tsx` lease: paperwork lane (field-paper-2), granted 2026-11-24; released when its PR merges into staging. JobDetail is on the Sol list |
+| 3 Spray-order numbers on maps | MERGED | #2455 (5f375e8be) | Overview labels `N · acres`; per-field page title `Stop N`; numbers restart per job (test) |
+| 4 Directions link per field | IN REVIEW | #2456 `feat/field-paper-4`; Terra CLEAN vs 3 | Tappable Google Maps link per mapped field, in stop order, under the field table |
+| 5 Loader water to add + finished gallons | MERGED | #2466 `feat/field-paper-5`; rendered: tank loads, condensed, one batch, overfill, and a dash with its note for a form not on file, a liquid sold by weight, and a missing amount | **Mason 2026-11-24: "Yes, only when known".** Water to add shows only when every product record says liquid or dry and every liquid sizes to gallons; otherwise a dash and "set liquid/dry on the product" (or the amount/unit reason). No guessing from the unit |
 | 6 EPA dash / Unknown | PARKED ("Unknown" half) | dash: already prints for any blank number (`applicatorSheetPdf.test.ts`, blank and null rows) | No product value says a product is EPA-registered (`products.epa_registration` is the number only; `epa_registrations` is keyed by the number). "Unknown" needs that flag: asked below |
 
 ## Needs another lane
@@ -72,8 +72,6 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 | Asked by | Owning lane | What | Done? |
 |---|---|---|---|
 | Paperwork (group 6) | Database | A product value that says "this product is EPA-registered" (so a registered product with no number prints "Unknown" and an unregistered one prints a dash, KI-206). Today nothing tells the two apart | |
-| Paperwork (group 1) | Office screens (SettingsPage) | The Custom applicator sheet REI/PHI checkboxes no longer hide anything (safety always prints): remove or relabel them | |
-| Paperwork (group 2) | Database (lease holder) | The `JobDetail.tsx` lease, for one print-menu entry: "Map pages only" | |
 
 ## Disputed review findings (for the slice batch)
 

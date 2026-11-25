@@ -226,6 +226,71 @@ describe('generateApplicatorSheetPdf EPA column (KI-195)', () => {
   });
 });
 
+describe('generateApplicatorSheetPdf safety sheet (Mason, 2026-11-24)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pageCount = 1;
+    mockDoc.lastAutoTable = { finalY: 300 };
+  });
+  const product = (n: number, rei: number | null) => ({
+    product_name: `TEST Product ${n}`, rate_per_acre: 1, rate_unit: 'pt', total_applied: 40, total_unit: 'pt', total_gl_lb: '5 gal',
+    product_form: null, rei_hours: rei, phi_days: 30, epa_registration: null,
+  });
+  const safetyTable = async () => {
+    const autoTable = (await import('jspdf-autotable')).default as unknown as ReturnType<typeof vi.fn>;
+    return autoTable.mock.calls
+      .map((c) => c[1] as { head: string[][]; body: string[][] })
+      .find((o) => o.head?.[0]?.[3] === 'Signal Word');
+  };
+
+  it('prints no safety sheet unless it was chosen', async () => {
+    await generateApplicatorSheetPdf(makeSheetData({ products: [product(1, 12)] }), 'enhanced', null);
+    expect(await safetyTable()).toBeUndefined();
+    expect(pageCount).toBe(1);
+  });
+
+  it('prints every product of a 40-product mix on its own sheet, "See label" where a value is not on file', async () => {
+    const products = Array.from({ length: 40 }, (_, i) => product(i + 1, i === 0 ? null : 12));
+    await generateApplicatorSheetPdf(makeSheetData({
+      products,
+      safety: products.map((p, i) => ({ product_name: p.product_name, epa_registration: i === 1 ? '100-1' : null, signal_word: i === 1 ? 'warning' : null,
+        rei_hours: p.rei_hours, phi_days: p.phi_days })),
+    }), 'original', null);
+    const table = await safetyTable();
+    expect(table!.head[0]).toEqual(['#', 'Product', 'EPA Reg. No.', 'Signal Word', 'REI', 'PHI']);
+    expect(table!.body).toHaveLength(40);
+    expect(table!.body[0]).toEqual(['1', 'TEST Product 1', 'See label', 'See label', 'See label', '30 d']);
+    expect(table!.body[1]).toEqual(['2', 'TEST Product 2', '100-1', 'WARNING', '12 hr', '30 d']);
+    expect(mockDoc.addPage).toHaveBeenCalledTimes(1); // its own sheet; autotable flows any overflow onto more pages
+  });
+
+  it('says safety could not be loaded when the read failed, instead of an empty table', async () => {
+    await generateApplicatorSheetPdf(makeSheetData({ products: [product(1, 12)], safety: null }), 'original', null);
+    expect(await safetyTable()).toBeUndefined();
+    expect(mockDoc.addPage).toHaveBeenCalledTimes(1);
+    expect(mockDoc.text.mock.calls.some((c) => String(c[0]).startsWith('Safety could not be loaded'))).toBe(true);
+    expect(mockDoc.splitTextToSize.mock.calls.some((c) => String(c[0]).includes('From product records'))).toBe(false);
+  });
+
+  it('still prints REI and PHI on the safety sheet when a saved Custom layout hides those columns', async () => {
+    const custom = { header: { company_name: '', phone: '', address: '', email: '' }, footer: '',
+      columns: { crop: false, pest: false, rei: false, phi: false, total_applied: false, gl_lb: false } };
+    const p = product(1, 12);
+    await generateApplicatorSheetPdf(makeSheetData({ products: [p],
+      safety: [{ product_name: p.product_name, epa_registration: null, signal_word: 'caution', rei_hours: 12, phi_days: 30 }] }),
+    'custom', custom as never);
+    expect((await safetyTable())!.body[0]).toEqual(['1', 'TEST Product 1', 'See label', 'CAUTION', '12 hr', '30 d']);
+  });
+
+  it('says the values come from product records on the print date, and a negative value is not on file', async () => {
+    await generateApplicatorSheetPdf(makeSheetData({ products: [product(1, 12)], safety: [
+      { product_name: 'TEST B', epa_registration: null, signal_word: null, rei_hours: -1, phi_days: 14 },
+    ] }), 'original', null);
+    expect((await safetyTable())!.body[0]).toEqual(['1', 'TEST B', 'See label', 'See label', 'See label', '14 d']);
+    expect(mockDoc.splitTextToSize.mock.calls.some((c) => String(c[0]).includes(`From product records on ${new Date().toLocaleDateString()}`))).toBe(true);
+  });
+});
+
 describe('generateApplicatorSheetPdf directions links', () => {
   beforeEach(() => {
     vi.clearAllMocks();

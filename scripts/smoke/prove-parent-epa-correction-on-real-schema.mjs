@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270306160000_parent_epa_correction_on (PAR-1 7.7): with the switch on, an admin corrects a
+ * Real-schema proof for 20270307000000_parent_epa_correction_on (PAR-1 7.7): with the switch on, an admin corrects a
  * parent's EPA number and every OLD record keeps printing the number it was made with. Builds the baseline plus every
  * migration before the candidate (shared undo-paths harness; includes 20270201100000 and KI-195's 20270225193000), then:
  *   FIDELITY: the replayed year-end source has the md5 the candidate pins;
@@ -22,7 +22,7 @@ import path from 'node:path';
 process.env.UNDO_PATHS_CONTAINER ||= `crx-par1on-${process.pid}-${Date.now().toString(36)}`;
 const { buildContainer, removeContainer, seedUsers, psql, scalar, docker, USERS, id, NAME, ROOT } = await import('./undo-paths/harness.mjs');
 
-const CANDIDATE = '20270306160000_parent_epa_correction_on.sql';
+const CANDIDATE = '20270307000000_parent_epa_correction_on.sql';
 const YEAR_END_MD5 = 'd7b64aefdb2699854ab257c2893376e0';
 const OLD = '524-475', NEW = '100-497-37686';
 const CUST = id('d1'), FIELD = id('d2'), PARENT = id('d3'), S1 = id('d4'), S2 = id('d5');

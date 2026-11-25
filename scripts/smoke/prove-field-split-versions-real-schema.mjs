@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270303200000_field_split_versions.sql (field application FP-1,
+ * Real-schema proof for 20270304190000_field_split_versions.sql (field application FP-1,
  * docs/plans/field-application/CONTRACT-who-pays.md › FP-1 "Done when").
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
@@ -36,7 +36,7 @@ import path from 'node:path';
 import { buildSweepQuery, functionContractSql, subtractAllowlist } from '../db-invariant-sweeps/allowlist-match.mjs';
 import { buildContainer, removeContainer, seedUsers, scalar, psql, attempt, asUser, refuse, id, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270303200000_field_split_versions.sql';
+const CANDIDATE = '20270304190000_field_split_versions.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });

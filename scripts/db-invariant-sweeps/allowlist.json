@@ -934,12 +934,12 @@
     {
       "predicate": "actor-forgery",
       "violation_key": "save_field(p_field_id uuid, p_field_payload jsonb, p_billing_defaults jsonb, p_performed_by uuid, p_idempotency_key text)",
-      "justification": "Field application FP-1 (20270303200000_field_split_versions) replaces _save_field_replay_impl_20261015 behind the unchanged batch 4d wrapper; the entry above keeps matching the pre-FP-1 body until FP-1 is applied everywhere, then it can be removed. The new body keeps the same opening: v_actor := auth.uid(), AUTH_REQUIRED on NULL, ACTOR_MISMATCH when p_performed_by IS NOT NULL AND IS DISTINCT FROM v_actor, PERFORM require_admin_or_sales_rep(); after that p_performed_by is never used again: the split write goes through _set_field_billing_split_20270303 with v_actor (auth.uid()). No EXCEPTION handler, no dynamic SQL. Contract md5 from the local Docker proof (scripts/smoke/prove-field-split-versions-real-schema.mjs, section 9), reviewed 2026-11-24. Wrapper, auth.uid() and require_admin_or_sales_rep() pins unchanged.",
+      "justification": "Field application FP-1 (20270304190000_field_split_versions) replaces _save_field_replay_impl_20261015 behind the unchanged batch 4d wrapper; the entry above keeps matching the pre-FP-1 body until FP-1 is applied everywhere, then it can be removed. The new body keeps the same opening: v_actor := auth.uid(), AUTH_REQUIRED on NULL, ACTOR_MISMATCH when p_performed_by IS NOT NULL AND IS DISTINCT FROM v_actor, PERFORM require_admin_or_sales_rep(); after that p_performed_by is never used again: the split write goes through _set_field_billing_split_20270303 with v_actor (auth.uid()). No EXCEPTION handler, no dynamic SQL. Contract md5 from the local Docker proof (scripts/smoke/prove-field-split-versions-real-schema.mjs, section 9), reviewed 2026-11-24. Wrapper, auth.uid() and require_admin_or_sales_rep() pins unchanged.",
       "dated": "2026-11-24",
       "suspect_param": "p_performed_by",
       "reviewed_contracts": {
         "auth.uid()": "d0f4a847e4284ab3265335fd66ce2a12",
-        "public._save_field_replay_impl_20261015(p_field_id uuid, p_field_payload jsonb, p_billing_defaults jsonb, p_performed_by uuid, p_idempotency_key text)": "de08fe1af96dd15968d534ac080c9714",
+        "public._save_field_replay_impl_20261015(p_field_id uuid, p_field_payload jsonb, p_billing_defaults jsonb, p_performed_by uuid, p_idempotency_key text)": "dc80c97fac740d64b94d96930e864f97",
         "public.require_admin_or_sales_rep()": "0a91f0043c561d80b55132db38198dbb",
         "public.save_field(p_field_id uuid, p_field_payload jsonb, p_billing_defaults jsonb, p_performed_by uuid, p_idempotency_key text)": "a289684ee9c29702220ef50f59a10fc7"
       }

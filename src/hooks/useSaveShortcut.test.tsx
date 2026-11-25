@@ -67,4 +67,28 @@ describe('useSaveShortcut', () => {
     await flush();
     expect(onSave).not.toHaveBeenCalled();
   });
+
+  it("ignores a press while the last save is still running, then saves again once it finishes", async () => {
+    let finish = () => {};
+    const onSave = vi.fn(() => new Promise<void>((r) => { finish = r; }));
+    render(<Page onSave={onSave} enabled />);
+    press();
+    await flush();
+    press();
+    await flush();
+    expect(onSave).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(); });
+    press();
+    await flush();
+    expect(onSave).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not save after the page has closed", async () => {
+    const onSave = vi.fn();
+    const { unmount } = render(<Page onSave={onSave} enabled />);
+    press();
+    unmount();
+    await flush();
+    expect(onSave).not.toHaveBeenCalled();
+  });
 });

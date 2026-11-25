@@ -144,7 +144,8 @@ export default function SelectLocationsModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch bg-black/50">
+    // A dialog: Ctrl+S on the invoice behind it must wait until a selection is confirmed or cancelled.
+    <div role="dialog" aria-modal="true" aria-label="Select Locations" className="fixed inset-0 z-50 flex items-stretch bg-black/50">
       <div className="flex flex-1 bg-white m-4 rounded-xl shadow-2xl overflow-hidden">
         {/* Left: Map */}
         <div className="w-1/2 relative">

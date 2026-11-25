@@ -20,10 +20,14 @@ export function isTypingTarget(target: EventTarget | null): boolean {
  * typed in, so a value a field commits on blur is in what is saved; the save then runs on the
  * next tick, after React has applied that value, and checks `enabled` again at that point.
  * `enabled` may be a function when the button's state depends on refs, read only at key time.
+ * A press while the last save is still running does nothing, like a second click on a busy button.
  */
 export function useSaveShortcut(onSave: () => unknown, enabled: boolean | (() => boolean)): void {
   const latest = useLatestRef({ onSave, enabled });
   useEffect(() => {
+    // Set from the press until its save settles; a page that leaves cancels a save not yet started.
+    let busy = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const canSave = () => {
       const { enabled: e } = latest.current;
       return !isModalOpen() && (typeof e === 'function' ? e() : e);
@@ -31,13 +35,19 @@ export function useSaveShortcut(onSave: () => unknown, enabled: boolean | (() =>
     const handler = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 's') return;
       e.preventDefault();
-      if (e.repeat || !canSave()) return;
+      if (e.repeat || busy || !canSave()) return;
+      busy = true;
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-      setTimeout(() => {
-        if (canSave()) void latest.current.onSave();
+      timer = setTimeout(() => {
+        timer = undefined;
+        if (!canSave()) { busy = false; return; }
+        void Promise.resolve(latest.current.onSave()).finally(() => { busy = false; });
       }, 0);
     };
     document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
+    return () => {
+      document.removeEventListener('keydown', handler);
+      clearTimeout(timer);
+    };
   }, [latest]);
 }

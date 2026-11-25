@@ -79,4 +79,65 @@ describe('MobileBottomNav', () => {
     expect(onMoreClick).toHaveBeenCalledOnce();
     expect(moreButton).toHaveAttribute('aria-expanded', 'true');
   });
+
+  describe('buttons by role', () => {
+    function linkNames() {
+      return screen.getAllByRole('link').map((link) => link.textContent);
+    }
+
+    it('gives a driver My Route and Deliveries', () => {
+      mockProfile.mockReturnValue({ id: '1', role: 'driver', full_name: 'Driver' });
+      renderBottomNav('/my-route');
+
+      expect(linkNames()).toEqual(['My Route', 'Deliveries']);
+      expect(screen.getByRole('link', { name: 'My Route' })).toHaveAttribute('href', '/my-route');
+      expect(screen.getByRole('link', { name: 'My Route' })).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByRole('button', { name: 'Open navigation menu' })).toBeInTheDocument();
+    });
+
+    it('keeps My Route active on a stop screen', () => {
+      mockProfile.mockReturnValue({ id: '1', role: 'driver', full_name: 'Driver' });
+      renderBottomNav('/my-route/abc');
+
+      expect(screen.getByRole('link', { name: 'My Route' })).toHaveAttribute('aria-current', 'page');
+    });
+
+    it('gives an applicator My Day, My Jobs and Record Book', () => {
+      mockProfile.mockReturnValue({ id: '1', role: 'applicator', full_name: 'Applicator' });
+      renderBottomNav('/field');
+
+      expect(linkNames()).toEqual(['My Day', 'My Jobs', 'Record Book']);
+      expect(screen.getByRole('link', { name: 'My Day' })).toHaveAttribute('href', '/field');
+      expect(screen.getByRole('link', { name: 'My Day' })).toHaveAttribute('aria-current', 'page');
+    });
+
+    it('does not mark My Day active on Field Invoices', () => {
+      mockProfile.mockReturnValue({ id: '1', role: 'applicator', full_name: 'Applicator' });
+      renderBottomNav('/field-invoices');
+
+      expect(screen.getByRole('link', { name: 'My Day' })).not.toHaveAttribute('aria-current');
+    });
+
+    it('gives a sales rep Today, Quotes and Customers', () => {
+      mockProfile.mockReturnValue({ id: '1', role: 'sales_rep', full_name: 'Sales Rep' });
+      renderBottomNav('/quotes/new');
+
+      expect(linkNames()).toEqual(['Today', 'Quotes', 'Customers']);
+      expect(screen.getByRole('link', { name: 'Quotes' })).toHaveAttribute('aria-current', 'page');
+    });
+
+    it('keeps the office buttons for an admin', () => {
+      renderBottomNav();
+
+      expect(linkNames()).toEqual(['Today', 'Jobs', 'Inventory', 'Field Invoices']);
+    });
+
+    it('still hides a button whose page the person is denied', () => {
+      mockProfile.mockReturnValue({ id: '1', role: 'driver', full_name: 'Driver' });
+      mockDeniedPages.mockReturnValue(['deliveries']);
+      renderBottomNav('/my-route');
+
+      expect(linkNames()).toEqual(['My Route']);
+    });
+  });
 });

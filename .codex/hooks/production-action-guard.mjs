@@ -36,7 +36,6 @@ import {
   pushIsForced,
   pushUsesBulkMode,
   pullRequestChecksGreen as sharedPullRequestChecksGreen,
-  pushDestinationBranches,
   reviewProofPathMentioned,
   reviewStateDirectoryMentioned,
   riskyFiles,
@@ -67,9 +66,8 @@ import {
   teammateCommentsUnreadableDenial,
 } from "../../.claude/hooks/teammate-comments-lib.mjs";
 import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
-import { followUpsDenial, followUpsProblem } from "../../.claude/hooks/followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
-import { prFilesOnGitHub, tahaLaneGate, tellTahaOnGitHub } from "../../.claude/hooks/taha-lane-lib.mjs";
+import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneGate, tellTahaOnGitHub } from "../../.claude/hooks/taha-lane-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "../../.claude/hooks/pr-claim-lib.mjs";
 import { ownerAcceptedForPr, usesCarriedSkip } from "../../.claude/hooks/sol-accept-lib.mjs";
@@ -130,7 +128,7 @@ const NODE_REPL_TOOL = /(?:^|__)node[_-]?repl(?:__|$)/i;
 // `pr-claim-lib` and the `registry-freshness-lib` it imports joined 2026-11-19
 // (#1948): imported at startup, and the claim decides whether a push or merge is refused.
 // `taha-lane-lib` joined 2026-11-22: imported at startup, and it decides whether a
-// merge in Taha's areas is refused until Dec 15.
+// merge in Taha's areas is refused without Taha's Approve on the head (no end date).
 const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-risk-lib|coderabbit-skip-lib|sol-accept-lib|teammate-comments-lib|followups-lib|read-only-search-lib|app-repo-identity|session-context-reminder|pr-claim-lib|registry-freshness-lib|taha-lane-lib)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
 const PROTECTED_HARNESS_PATH_RE = new RegExp(String.raw`(?:^|[\\/])${PROTECTED_HARNESS_SOURCE}$`, "i");
 const PROTECTED_HARNESS_FRAGMENT_RE = new RegExp(`(?<![\\w.-])${PROTECTED_HARNESS_SOURCE}(?![\\w.-])`, "i");
@@ -753,11 +751,12 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh, claim = 
     if (frozen) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${frozen}.`);
     const destructive = stagingDestructiveProblem({ repo: request.repo, gh: (args) => runGh(args, repoDir), number: pullRequest.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pullRequest.headRefOid, baseSha: pullRequest.baseRefOid });
     if (destructive) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${destructive}.`);
-    // Taha's lanes until Dec 15 (taha-lane-lib.mjs, Mason 2026-11-22); Mason's `taha override #<PR> <code>` lets one PR at one commit through.
+    // Taha's lanes (taha-lane-lib.mjs, Mason 2026-11-22): Taha's Approve on this head, or Mason's `taha override #<PR> <code>`, lets one PR at one commit through.
     const lanePr = Number(pullRequest.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? request.selector : NaN));
     const lane = tahaLaneGate({
       prefix: "CODEX PRODUCTION GATE",
       pullRequest: lanePr,
+      tahaApproved: () => tahaApprovedOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), pullRequest: lanePr, headSha: pullRequest.headRefOid }),
       headSha: pullRequest.headRefOid,
       tellTaha: (body) => tellTahaOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), pullRequest: lanePr, body }),
       files: prFilesOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), number: lanePr, headSha: pullRequest.headRefOid }),
@@ -779,9 +778,6 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh, claim = 
       "a genuine nitpick may be dismissed with a one-line reason in the thread. Merge only after that."
     );
   }
-  // Every PR names what it put off — mirror of pr-merge-guard.mjs (Mason, 2026-11-09).
-  const followUps = followUpsProblem(pullRequest);
-  if (followUps) return denied(followUpsDenial("CODEX PRODUCTION GATE", request.selector, followUps));
   // Mason's autonomous-landing rule (2026-09-26) — mirror of pr-merge-guard.mjs.
   // An agent merges into main only when the newest run of every check is green
   // and a fresh exact-SHA Sol proof exists (or the diff is documentation-only).
@@ -1570,20 +1566,8 @@ export function evaluateProductionAction({
       return denied("CODEX PRODUCTION GATE: pushes to master/production remain blocked.");
     }
 
-    // Landing claim (pr-claim-lib.mjs, fail open; #1948) — mirror of codex-push-guard.mjs:
-    // the first session to push a PR branch claims it. Checked here, recorded at the
-    // command's allow point, so a refused command claims nothing. A dry run claims nothing.
-    // shortcut: a ref-less push to a differently named upstream claims only the local branch
-    // name (fail open; Codex App P2 on #2041); resolve @{push} only when no refspec was given.
-    if (claim && !/(?:^|\s)(?:--dry-run|-n)(?=\s|$)/.test(segment)) {
-      let destinations = [];
-      try { destinations = pushDestinationBranches(segment, rawBranch); } catch { /* fail open */ }
-      for (const destination of destinations) {
-        const refusal = claim(destination, "push", false);
-        if (refusal) return denied(`CODEX PRODUCTION GATE: ${refusal}`);
-        claimBranches.push({ branch: destination, action: "push" });
-      }
-    }
+    // Ordinary pushes take no landing claim (Mason, 2026-11-23); mirror of
+    // codex-push-guard.mjs. Only merges claim a branch here.
 
     const sourceRef = mainPushSource(segment, currentBranch);
     if (sourceRef === "DELETE") {

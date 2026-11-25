@@ -460,13 +460,32 @@ export function folderVariableValue(fullCmd, name) {
   return head[1] ?? head[2] ?? head[3];
 }
 
+// True when the push's first `-C` is a literal (or proven-literal variable)
+// absolute folder, so any earlier `cd` cannot change which repo it pushes from.
+export function pushNamesAbsoluteRepo(segment, fullCmd = "") {
+  const prefix = String(segment || "").match(GIT_PUSH_PREFIX_RE)?.[1] || "";
+  const first = prefix.match(new RegExp(`(?:^|\\s)-C\\s+(${GIT_ARG})`));
+  if (!first) return false;
+  const name = first[1].match(/^(?:"\$(\w+)"|"\$\{(\w+)\}"|\$(\w+)|\$\{(\w+)\})$/)?.slice(1).find(Boolean);
+  const folder = name ? folderVariableValue(fullCmd, name) : unquoteShellArg(first[1]);
+  if (!folder || /[$`%~!]/.test(folder)) return false;
+  return /^(?:[A-Za-z]:[\\/]|\/)/.test(nativeFolder(folder));
+}
+
 // Shell directory changes and git context environment variables apply outside
 // the git argv, so the ref parser cannot safely bind them to a worktree. Deny
 // these forms and require the explicit, inspectable `git -C <repo> push` form.
+// A directory change is harmless when every push names its own repo with an
+// absolute `git -C <path>` (Mason, 2026-11-23: 165 blocks/week, and GitHub's
+// rulesets refuse direct pushes to main and staging whatever the guard sees).
 export function pushContextIsAmbiguous(cmd) {
   const text = String(cmd || "");
   if (!isGitPush(text)) return false;
-  return DIRECTORY_CHANGE_RE.test(text) ||
+  const everyPushPinned = () => {
+    const pushes = shellSegments(text).map((s) => s.trim()).filter((s) => isGitPush(s));
+    return pushes.length > 0 && pushes.every((s) => pushNamesAbsoluteRepo(s, text));
+  };
+  return (DIRECTORY_CHANGE_RE.test(text) && !everyPushPinned()) ||
     // `[^\S\r\n]*`, not `\s*`: `\s*` re-read a whole run of newlines from every
     // newline in it (quadratic). A later newline in the run is itself a separator
     // start, so what matches is unchanged.
@@ -1771,6 +1790,10 @@ export function carriedSolProof(data) {
         // Only a main merge carries (Mason, 2026-11-22, #2226 Sol r7-r8): a staging carry, or an older
         // carry that records no review kind, is not a proof.
         && data.review_ref === "origin/main")
+    // An owner acceptance binds the base its review saw, through any carry chain: a restamp or
+    // post_apply keeps its source's base, so it must not launder an earlier move (Sol r8, #2226).
+    && ((carry.root_review?.owner_accepted !== true && !("owner_accepted" in data))
+      || carry.root_review?.base_sha === data.base_sha)
     && CARRY_SHA_RE.test(String(carry.from_head || ""))
     && CARRY_SHA_RE.test(String(carry.from_base || ""))
     && carry.from_head !== data.head_sha;

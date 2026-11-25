@@ -582,6 +582,8 @@ export default function QuoteBuilder() {
   const tierInputsRef = useRef('');
   // The id a new quote's first save opens: its tick carries over; opening any other quote clears it.
   const keepTierChoiceForRef = useRef<string | null>(null);
+  // The id a new quote's first save opens: the PDF layout picked in the preview carries over too.
+  const keepPdfLayoutForRef = useRef<string | null>(null);
   useEffect(() => { tierInputsRef.current = `${customerId}|${tier}|${tierChoice}`; }, [customerId, tier, tierChoice]);
   // The expiry date the rep picked; null = season end (Mason 2026-10-26/27). The database
   // applies it at each send (20261029100000).
@@ -639,6 +641,8 @@ export default function QuoteBuilder() {
   // The saved quote whose snapshot is on screen. `quoteId` starts as the URL's id
   // before anything loads, so it cannot tell a loaded quote from a failed first load.
   const [installedQuoteId, setInstalledQuoteId] = useState<string | null>(null);
+  // Counts quotes loaded from the database: an open preview rebuilds from the loaded (saved) prices.
+  const [quoteLoadCount, setQuoteLoadCount] = useState(0);
   const [loadedQuoteOwner, setLoadedQuoteOwner] = useState<{ quoteId: string; createdBy: string | null } | null>(null);
   // Scoped by the quote this save actually TARGETS. F1 makes an ambiguous reply
   // RETAIN this key, and QuoteBuilder does not remount when only `:id` changes (no
@@ -1550,6 +1554,7 @@ export default function QuoteBuilder() {
     }
     setQuoteId(q.id);
     setInstalledQuoteId(q.id);
+    setQuoteLoadCount((n) => n + 1);
     setLoadedQuoteOwner({ quoteId: q.id, createdBy: q.created_by ?? null });
     setQuoteLoadFailedId(null);
     setQuoteNumber(q.quote_number);
@@ -1718,13 +1723,20 @@ export default function QuoteBuilder() {
 
   useEffect(() => {
     fetchReferenceData();
+    // Saving a new quote from the preview opens its saved page; the layout the rep picked stays.
+    const keepPdfLayout = !!id && keepPdfLayoutForRef.current === id;
+    keepPdfLayoutForRef.current = null;
     // Fetch PDF templates (non-critical, inline to avoid TDZ issue with useCallback ordering)
     supabase.from('quote_pdf_templates').select('*').order('is_default', { ascending: false })
       .then(({ data }) => {
         if (data) {
-          setPdfTemplates(data as QuotePdfTemplate[]);
-          const defaultTemplate = (data as QuotePdfTemplate[]).find((t) => t.is_default);
-          if (defaultTemplate) setSelectedTemplateId(defaultTemplate.id);
+          const templates = data as QuotePdfTemplate[];
+          setPdfTemplates(templates);
+          const defaultTemplate = templates.find((t) => t.is_default);
+          if (defaultTemplate) {
+            setSelectedTemplateId((current) => (keepPdfLayout && current && templates.some((t) => t.id === current)
+              ? current : defaultTemplate.id));
+          }
         }
       });
     // Fetch quote templates for new quotes
@@ -2959,6 +2971,7 @@ export default function QuoteBuilder() {
           // The new quote's tier tick (KI-105) stays with it once it has an id.
           setTierChoice((choice) => (choice.startsWith('new:') ? `${result}${choice.slice(3)}` : choice));
       keepTierChoiceForRef.current = result;
+          keepPdfLayoutForRef.current = result;
           navigate(`/quotes/${result}`, { replace: true });
         }
       }
@@ -3329,7 +3342,7 @@ export default function QuoteBuilder() {
         const run = ++previewRunRef.current;
         const doc = await generateQuotePdf(buildQuotePdfData(), columns);
         if (run !== previewRunRef.current) return;
-        previewColumnsKeyRef.current = columns.join(',');
+        previewColumnsKeyRef.current = `${columns.join(',')}|${quoteLoadCount}`;
         setPreviewPdfBlob(doc.output('blob'));
         setShowPreviewModal(true);
       },
@@ -3598,9 +3611,11 @@ export default function QuoteBuilder() {
   // The preview follows the chosen layout and columns (display only: nothing sends or saves this blob).
   const activePdfColumns = customColumns || getTemplateColumns(selectedTemplateId);
   const activePdfColumnsKey = activePdfColumns.join(',');
+  // Saving from the preview reloads the saved quote, whose prices can differ: that rebuilds it too.
+  const activePreviewKey = `${activePdfColumnsKey}|${quoteLoadCount}`;
   const buildQuotePdfDataRef = useLatestRef(buildQuotePdfData);
   useEffect(() => {
-    if (!showPreviewModal || previewColumnsKeyRef.current === activePdfColumnsKey) {
+    if (!showPreviewModal || previewColumnsKeyRef.current === activePreviewKey) {
       setPreviewRebuild('idle');
       return;
     }
@@ -3610,7 +3625,7 @@ export default function QuoteBuilder() {
       try {
         const doc = await generateQuotePdf(buildQuotePdfDataRef.current(), activePdfColumnsKey ? activePdfColumnsKey.split(',') : []);
         if (stale) return;
-        previewColumnsKeyRef.current = activePdfColumnsKey;
+        previewColumnsKeyRef.current = activePreviewKey;
         setPreviewPdfBlob(doc.output('blob'));
         setPreviewRebuild('idle');
       } catch (err) {
@@ -3620,7 +3635,7 @@ export default function QuoteBuilder() {
       }
     }, 200);
     return () => { stale = true; clearTimeout(timer); };
-  }, [showPreviewModal, activePdfColumnsKey, buildQuotePdfDataRef]);
+  }, [showPreviewModal, activePdfColumnsKey, activePreviewKey, buildQuotePdfDataRef]);
 
   const fetchVersions = useCallback(async () => {
     if (!quoteId) return;

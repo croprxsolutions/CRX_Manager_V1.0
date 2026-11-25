@@ -66,12 +66,28 @@ describe('BlendTicketPrintButton', () => {
   });
 
   it('prints the captured linked product name when OCR text differs', async () => {
-    fetchWeights.mockResolvedValue(ticketWith({ ...snapshot, captured_name: 'Linked catalog product' }));
+    fetchWeights.mockResolvedValue({
+      ...ticketWith({ ...snapshot, captured_name: 'Linked catalog product' }),
+      ticket: { ...header, source: 'ocr', review_status: 'approved' },
+    });
     render(<BlendTicketPrintButton ticketId={header.id} pageRead={pageRead} disabled={false} />);
     fireEvent.click(screen.getByRole('button', { name: 'Download ticket PDF' }));
     await waitFor(() => expect(downloadPdf).toHaveBeenCalledWith(expect.objectContaining({
-      data: [{ product: 'Linked catalog product', amount: '2 Gal', weight: expect.stringContaining('16.00 lb') }],
+      data: [{ product: 'Linked catalog product\nTicket text: Test product', amount: '2 Gal', weight: expect.stringContaining('16.00 lb') }],
     })));
+  });
+
+  it('refuses to print an OCR match before the ticket is approved', async () => {
+    const unreviewed = { ...header, source: 'ocr', review_status: 'unreviewed' };
+    fetchWeights.mockResolvedValue({
+      ...ticketWith({ ...snapshot, captured_name: 'Linked catalog product' }),
+      ticket: unreviewed,
+    });
+    render(<BlendTicketPrintButton ticketId={header.id}
+      pageRead={{ header: unreviewed, lines: [line] }} disabled={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Download ticket PDF' }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('error', expect.stringContaining('Approve this OCR ticket')));
+    expect(downloadPdf).not.toHaveBeenCalled();
   });
 
   it('does not download an empty ticket or one whose saved date changed', async () => {

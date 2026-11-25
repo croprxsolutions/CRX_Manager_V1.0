@@ -30,6 +30,10 @@ export function BlendTicketPrintButton({ ticketId, pageRead, disabled }: BlendTi
         toast('error', 'The saved ticket could not be matched to this page. Reopen the ticket before downloading.');
         return;
       }
+      if (saved.ticket.source === 'ocr' && saved.ticket.review_status !== 'approved') {
+        toast('error', 'Approve this OCR ticket before downloading its PDF.');
+        return;
+      }
       if (saved.lines.length === 0) {
         toast('error', 'This ticket has no saved product lines to print.');
         return;
@@ -57,11 +61,15 @@ export function BlendTicketPrintButton({ ticketId, pageRead, disabled }: BlendTi
           { key: 'amount', header: 'Amount' },
           { key: 'weight', header: 'Saved product weight' },
         ],
-        data: lines.map(({ mapped, text }) => ({
-          product: mapped.product_name,
-          amount: [mapped.quantity, mapped.unit].filter((value) => value != null).join(' '),
-          weight: text,
-        })),
+        data: lines.map(({ mapped, text }, index) => {
+          const ticketName = saved.lines[index].line.product_name;
+          const differs = typeof ticketName === 'string' && ticketName.trim() !== '' && ticketName !== mapped.product_name;
+          return {
+            product: differs ? mapped.product_name + '\nTicket text: ' + ticketName : mapped.product_name,
+            amount: [mapped.quantity, mapped.unit].filter((value) => value != null).join(' '),
+            weight: text,
+          };
+        }),
         totalsRow: ['', '', totalWeightText(lines)],
       });
     } catch (error: unknown) {

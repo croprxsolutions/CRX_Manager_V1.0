@@ -234,6 +234,14 @@ describe('SupplierPricing page', () => {
         supplier_product_name: 'Atrazine 4L', cost_cents: 25_001n, price_unit: 'case',
         package_quantity: 2, effective_from: '2026-07-18', effective_to: null,
         price_kind: 'quote', row_status: 'changed', validation_errors: [], observation_id: null,
+      }, {
+        // An oversized cost is not kept on the row (the server stores NULL), and a tiny package quantity is refused.
+        id: 'row-5', row_number: 5, product_id: 'product-1', product_name: 'Atrazine',
+        product_supplier_link_id: 'link-1', supplier_sku: 'AND-1',
+        supplier_product_name: 'Atrazine 4L', cost_cents: null, price_unit: 'case',
+        package_quantity: 0.0001, effective_from: '2026-07-18', effective_to: null,
+        price_kind: 'quote', row_status: 'invalid', validation_errors: ['COST_TOO_LARGE', 'PACKAGE_QUANTITY_INVALID'],
+        observation_id: null,
       }],
     });
 
@@ -277,6 +285,11 @@ describe('SupplierPricing page', () => {
     )).toBeInTheDocument();
     expect(screen.queryByText(/convert|\$150/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/PRICE_UNIT_MISMATCH/)).not.toBeInTheDocument();
+    // The unit-floor codes read as rules too, never as the generic "cost too large." fallback.
+    expect(screen.getByText(
+      'The cost is over $10,000,000 for one line. Check the amount. Package quantity must be a number of at least 0.001.',
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/cost too large\.|package quantity invalid\./)).not.toBeInTheDocument();
 
     await waitFor(() => expect(mockGetBasisWorkspace).toHaveBeenCalledWith('product-1'));
     const workspaceLoads = mockGetWorkspace.mock.calls.length;

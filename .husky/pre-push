@@ -155,6 +155,24 @@ if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs)" = "s
 fi
 
 require_packages
+# Whole-app list tests (call-site lists, import rules) fail when a NEW file is added, which subset runs
+# miss; CI caught that twice (PR #1459, PR #2438; 2026-11-25 retro). About 30-40 seconds. They read this
+# folder, so uncommitted edits count. Add a new whole-app scan test here.
+echo "Running whole-app list tests..."
+if ! npx vitest run \
+    src/__tests__/browserTableMaintenanceGrants.test.ts src/__tests__/idempotency-reset-order.test.ts \
+    src/__tests__/paymentAllocationWriteLock.test.ts src/__tests__/postgrestEmbedsNamed.test.ts \
+    src/__tests__/replayBindingBatch2CallSites.test.ts src/__tests__/replayBindingBatch3aCallSites.test.ts \
+    src/lib/assertRpcCoverage.test.ts src/lib/bugClassRegressionGuards.test.ts src/lib/pagedReadCallSites.test.ts \
+    src/lib/rpcFixtureLiveDiff.test.ts src/lib/rpcIdempotencyScope.test.ts src/lib/sentryImportEnforcement.test.ts \
+    src/lib/sqlRoleGateNullFailOpen.test.ts src/lib/edgeSentryBootCheck.test.ts 2>&1; then
+  echo ""
+  echo "❌ WHOLE-APP LIST TESTS FAILED — push blocked."
+  echo "A new file usually needs adding to a list such as SHARED_FILES in src/lib/pagedReadCallSites.test.ts."
+  exit 1
+fi
+
+echo ""
 echo "Running TypeScript type check..."
 if ! npm run typecheck 2>&1; then
   echo ""

@@ -3132,6 +3132,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _lock_job_stock_rows_in_order:
     'AFTER row trigger on jobs (20270227170000): locks existing Main Warehouse stock rows in product order; creates and locks a missing one only when complete_job marked this job (crx.complete_job_rpc), after complete_job checked its idempotency key and took the number lock. Postgres refuses a direct call of a trigger function and every API-role EXECUTE is revoked',
   recompute_job_applied_acres: 'trigger-only derived-total recomputation; direct client EXECUTE is revoked',
+  record_field_marker_create_receipt:
+    'AFTER INSERT trigger on field_obstacles; direct API execution is revoked. Its unique receipt reserves the pin ID in the INSERT transaction, even after a user deletes the pin.',
   // Pruned 2026-10-19: _enforce_below_cost_line, re-emitted by the cost-admin-only
   //   candidate 20261019010000, which is now in the applied-name snapshot (ledger
   //   20261019182757), so the trigger left the discovered inventory.

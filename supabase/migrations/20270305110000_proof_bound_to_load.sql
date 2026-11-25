@@ -20,7 +20,7 @@
 --       DELIVERY_LOAD_CHANGED      for a signature sent with p_lines_seen that is not the same load;
 --       PAPER_TICKET_LOAD_CHANGED  for a ticket photo whose lines_seen is not the same load.
 --     "The same load": the same (order line, product, scheduled quantity, delivered amount) entries, counted as a
---     multiset, amounts compared as numbers; the delivered amount is this call's figure for the line (kept between 0 and
+--     multiset, amounts compared as numbers to 6 decimal places; the delivered amount is this call's figure for the line (kept between 0 and
 --     the scheduled quantity) or the scheduled quantity when none is sent. Line ids are not compared, so re-saving an
 --     identical list keeps the proof good.
 --
@@ -97,7 +97,9 @@ CREATE TRIGGER trigger_delivery_photo_lines_seen_kept
 --    current (order line, product, scheduled quantity, delivered amount) entries, each as many times as on the delivery.
 --    The delivered amount is the one the body delivers: the figure sent for the line (p_quantities), kept between 0 and
 --    the scheduled quantity, or the scheduled quantity when no figures were sent; the screen's figure is kept the same
---    way. Ids are compared as the database writes them (hyphenated, any case). Anything malformed is "not the same".
+--    way. Amounts are compared to 6 decimal places: the screen reads them as JavaScript numbers, which keep about 17
+--    digits, so a longer stored value must not void unchanged proof (Luna). Ids are compared as the database writes
+--    them (hyphenated, any case). Anything malformed is "not the same".
 --    Sol round 11 on #2324: a signature taken with 0.005 must not complete a delivery of 0.05.
 CREATE FUNCTION public._delivery_lines_match(p_delivery_id uuid, p_lines jsonb, p_quantities jsonb)
 RETURNS boolean
@@ -119,24 +121,24 @@ BEGIN
     RETURN false;
   END IF;
   RETURN NOT EXISTS (
-    (SELECT lower(e ->> 'order_item_id'), lower(e ->> 'product_id'), (e ->> 'quantity')::numeric,
-            GREATEST(0, LEAST((e ->> 'delivered')::numeric, (e ->> 'quantity')::numeric))
+    (SELECT lower(e ->> 'order_item_id'), lower(e ->> 'product_id'), round((e ->> 'quantity')::numeric, 6),
+            round(GREATEST(0, LEAST((e ->> 'delivered')::numeric, (e ->> 'quantity')::numeric)), 6)
        FROM jsonb_array_elements(p_lines) e
      EXCEPT ALL
-     SELECT di.order_item_id::text, di.product_id::text, di.quantity,
-            CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
+     SELECT di.order_item_id::text, di.product_id::text, round(di.quantity, 6),
+            round(CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
                  THEN GREATEST(0, LEAST((p_quantities ->> di.id::text)::numeric, di.quantity))
-                 ELSE di.quantity END
+                 ELSE di.quantity END, 6)
        FROM public.delivery_items di WHERE di.delivery_id = p_delivery_id)
     UNION ALL
-    (SELECT di.order_item_id::text, di.product_id::text, di.quantity,
-            CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
+    (SELECT di.order_item_id::text, di.product_id::text, round(di.quantity, 6),
+            round(CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
                  THEN GREATEST(0, LEAST((p_quantities ->> di.id::text)::numeric, di.quantity))
-                 ELSE di.quantity END
+                 ELSE di.quantity END, 6)
        FROM public.delivery_items di WHERE di.delivery_id = p_delivery_id
      EXCEPT ALL
-     SELECT lower(e ->> 'order_item_id'), lower(e ->> 'product_id'), (e ->> 'quantity')::numeric,
-            GREATEST(0, LEAST((e ->> 'delivered')::numeric, (e ->> 'quantity')::numeric))
+     SELECT lower(e ->> 'order_item_id'), lower(e ->> 'product_id'), round((e ->> 'quantity')::numeric, 6),
+            round(GREATEST(0, LEAST((e ->> 'delivered')::numeric, (e ->> 'quantity')::numeric)), 6)
        FROM jsonb_array_elements(p_lines) e));
 END;
 $function$;

@@ -66,6 +66,8 @@ export default function CustomerPrepayCards({ customerId, farmName, credits, isA
 
   // Only the latest load may set what shows: an older, slower read never brings back a stale badge or history.
   const loadSeq = useRef(0);
+  const shownCustomer = useRef(customerId);
+  useEffect(() => { shownCustomer.current = customerId; }, [customerId]);
   const load = useCallback(() => {
     if (!isAdmin) return;
     const seq = ++loadSeq.current;
@@ -142,7 +144,8 @@ export default function CustomerPrepayCards({ customerId, farmName, credits, isA
           key={customerId}
           open={dialogOpen}
           onClose={() => setDialogOpen(false)}
-          onRecorded={() => { onChanged(); load(); }}
+          // A save that finishes after the page moved to another customer refreshes nothing there (Sol r3 H1).
+          onRecorded={() => { if (shownCustomer.current !== customerId) return; onChanged(); load(); }}
           customerId={customerId}
           farmName={farmName}
         />

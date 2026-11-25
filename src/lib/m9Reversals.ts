@@ -393,11 +393,18 @@ const voidedPrepay = (v: Row) => {
   return Number(nv.prepay_reversed_cents ?? 0) + Number(nv.prepay_applications_reversed_cents ?? 0);
 };
 
+function voidSub(v: Row): string {
+  const nv = (v.new_values ?? {}) as { reason?: unknown; prepay_applications_reversed_cents?: unknown };
+  const applied = Number(nv.prepay_applications_reversed_cents ?? 0);
+  return [(nv.reason as string) || '', applied > 0 ? `${fmt(applied)} of it had paid invoices, which owe it again` : ''].filter(Boolean).join(' · ');
+}
+
 function voidEntry(v: Row, who: Who): HistoryEntry {
   const old = (v.old_values ?? {}) as { check_number?: unknown };
   return {
     key: `v-${v.id}`, at: v.created_at as string, day: businessDay(v.created_at as string), kind: 'adjust', what: 'Payment voided',
-    sub: ((v.new_values as { reason?: unknown } | null)?.reason as string) || '', ref: old.check_number ? `Check ${old.check_number}` : '',
+    // The void removed what this prepay had paid (those rows are gone), so say how much of it that was (Sol r3 H4).
+    sub: voidSub(v), ref: old.check_number ? `Check ${old.check_number}` : '',
     by: who(v.actor_user_id), cents: -voidedPrepay(v),
   };
 }

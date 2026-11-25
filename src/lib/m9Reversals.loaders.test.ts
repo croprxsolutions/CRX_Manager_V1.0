@@ -99,5 +99,6 @@ describe('loadPrepayHistory: a voided payment', () => {
     };
     const rows = await loadPrepayHistory('c1');
     expect(rows.map((r) => [r.what, r.cents, r.afterCents])).toEqual([['Payment voided', -10000, 0], ['Prepay received', 10000, 10000]]);
+    expect(rows[0].sub).toBe('entered twice · $30.00 of it had paid invoices, which owe it again');
   });
 });

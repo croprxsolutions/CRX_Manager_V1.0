@@ -52,7 +52,8 @@ try {
   ]).stdout.trim();
   let ready = false;
   for (let attempt = 0; attempt < 120 && !ready; attempt += 1) {
-    ready = docker(['exec', CONTAINER, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres'], { allowFailure: true }).status === 0;
+    const portReady = docker(['exec', CONTAINER, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres'], { allowFailure: true }).status === 0;
+    ready = portReady && docker(['exec', CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-c', 'SELECT 1'], { allowFailure: true }).status === 0;
     if (!ready) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
   }
   assert.ok(ready, 'disposable PostgreSQL container did not become ready');
@@ -64,8 +65,8 @@ CREATE FUNCTION public.uid() RETURNS uuid LANGUAGE sql STABLE AS 'SELECT NULL::u
 CREATE FUNCTION auth.other_uid() RETURNS uuid LANGUAGE sql STABLE AS 'SELECT NULL::uuid';
 CREATE TABLE public.financial_audit_log (id bigserial, actor_user_id uuid NOT NULL DEFAULT auth.uid());
 CREATE FUNCTION public._fill_audit_actor() RETURNS trigger LANGUAGE plpgsql AS
-  'BEGIN IF NEW.actor_user_id IS NULL THEN NEW.actor_user_id := auth.uid(); END IF; RETURN NEW; END';
-CREATE FUNCTION public._other_trigger() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';
+  'BEGIN IF NEW.actor_user_id IS NULL THEN NEW.actor_user_id := auth.uid(); END IF; RETURN NEW; END;';
+CREATE FUNCTION public._other_trigger() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END;';
 CREATE TRIGGER trg_fill_audit_actor BEFORE INSERT ON public.financial_audit_log
   FOR EACH ROW EXECUTE FUNCTION public._fill_audit_actor();
 CREATE TRIGGER trg_guard_audit_log_immutable BEFORE UPDATE OR DELETE ON public.financial_audit_log

@@ -532,16 +532,20 @@ BEGIN
   PERFORM pg_temp.smk_deliver(v_admin, v_order, 100, 'z-' || v_suffix);
   v_inv := pg_temp.smk_draft(v_order);
   PERFORM pg_temp.smk_post(v_inv, 'z1-' || v_suffix);
-  v_pay := create_commission_payment(ARRAY(SELECT id FROM commissions WHERE order_id = v_order AND commission_amount = 165.47),
-    'check', 'SMK-CAD-Z', (now() AT TIME ZONE 'America/Chicago')::date, 'Rolled-back smoke', v_admin, 'smk-cad-z-pay-' || v_suffix);
-  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  PERFORM unpost_invoice(v_inv, v_admin, 'smk-cad-z-unpost-' || v_suffix);
-  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  PERFORM pg_temp.smk_post(v_inv, 'z2-' || v_suffix);
-  v_got := (SELECT to_char(sum(commission_amount), 'FM999990.00') FROM commissions
-             WHERE order_id = v_order AND deleted_at IS NULL AND status <> 'cancelled');
-  IF v_got IS DISTINCT FROM '330.93' THEN
-    v_fails := v_fails || ' (Z) unpost and repost with a frozen row: rows total ' || COALESCE(v_got, 'none') || ', not 330.93;';
+  IF NOT EXISTS (SELECT 1 FROM commissions WHERE order_id = v_order AND commission_amount = 165.47) THEN
+    v_fails := v_fails || ' (Z) unpost and repost: $330.93 did not split 165.47/165.46 first;';
+  ELSE
+    v_pay := create_commission_payment(ARRAY(SELECT id FROM commissions WHERE order_id = v_order AND commission_amount = 165.47),
+      'check', 'SMK-CAD-Z', (now() AT TIME ZONE 'America/Chicago')::date, 'Rolled-back smoke', v_admin, 'smk-cad-z-pay-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    PERFORM unpost_invoice(v_inv, v_admin, 'smk-cad-z-unpost-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    PERFORM pg_temp.smk_post(v_inv, 'z2-' || v_suffix);
+    v_got := (SELECT to_char(sum(commission_amount), 'FM999990.00') FROM commissions
+               WHERE order_id = v_order AND deleted_at IS NULL AND status <> 'cancelled');
+    IF v_got IS DISTINCT FROM '330.93' THEN
+      v_fails := v_fails || ' (Z) unpost and repost with a frozen row: rows total ' || COALESCE(v_got, 'none') || ', not 330.93;';
+    END IF;
   END IF;
   UPDATE customers SET standing_discount_pct = 10 WHERE id = v_customer;
 

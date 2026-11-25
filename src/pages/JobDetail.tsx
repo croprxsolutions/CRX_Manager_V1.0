@@ -213,7 +213,8 @@ interface JobDbRow {
   vehicle?: { vehicle_name: string; capacity_gallons?: number | null; capacity_unit?: string | null } | null;
 }
 
-interface SaveJobResult { job_id: string }
+// replayed: a retry after a lost reply got the first save's stored result (20270302160000).
+interface SaveJobResult { job_id: string; replayed?: boolean }
 interface CompleteJobResult { record_number: string }
 interface TransferJobResult {
   // Checked against the route's job before the request key is retired.
@@ -1925,17 +1926,18 @@ export default function JobDetail() {
     // settle guard defers adoption until this fetch's state has actually rendered.
     baselineSettleGuardRef.current = true;
     baselineRef.current = null;
-    // Read before the job select: a change landing in between can only refuse a Save (the safe side), never be
+    // The version is read before the job select, so a change landing in between can only refuse a Save, never be
     // overwritten. A failed read leaves no version, and Save then asks for a reload.
-    let loadedVersion: JobEditVersion | null = null;
-    if (isEditable) {
+    const readVersion = async (): Promise<JobEditVersion | null> => {
+      if (!isEditable) return null;
       try {
-        loadedVersion = await readJobEditVersion(id!);
+        return await readJobEditVersion(id!);
       } catch (versionErr) {
         Sentry.captureException(toSentryError(versionErr), { extra: { context: 'job_edit_version' } });
+        return null;
       }
-    }
-    const { data, error } = await supabase
+    };
+    const selectJob = () => supabase
       // PR-07 follow-up: dropped applicator FK embed — full_name isn't read
       // anywhere in this page; only applicator_id is consumed (line 235).
       .from('jobs')
@@ -1953,6 +1955,20 @@ export default function JobDetail() {
       `)
       .eq('id', id!)
       .single();
+    let before = await readVersion();
+    let loaded = await selectJob();
+    let loadedVersion: JobEditVersion | null = null;
+    // Read again after the select: if rev moved, something wrote the job while the form loaded (maybe changing a value
+    // and putting it back), so the form may not be the state the version describes. Reload, up to 3 tries; after
+    // that no version is kept and Save asks for a reload.
+    for (let tries = 1; before && !loaded.error && isCurrentLoad(); tries++) {
+      const after = await readVersion();
+      if (after && after.rev === before.rev) { loadedVersion = before; break; }
+      if (tries >= 3) break;
+      before = await readVersion();
+      loaded = await selectJob();
+    }
+    const { data, error } = loaded;
 
     // Superseded — the operator is on a different job now. Install nothing. In
     // particular do NOT fall into the not-found branch below: its toast and its
@@ -2860,7 +2876,7 @@ export default function JobDetail() {
     setSaving(true);
     try {
       const payload = {
-        // save_job refuses JOB_CHANGED_SINCE_LOADED when the job no longer matches this (20270228110000).
+        // save_job refuses JOB_CHANGED_SINCE_LOADED when the job no longer matches this (20270302160000).
         ...(versionAtSave ? { expected_version: versionAtSave } : {}),
         customer_id: customerId,
         job_date: jobDate,
@@ -2996,6 +3012,27 @@ export default function JobDetail() {
       // notification on every save for an over-limit customer and train admins to ignore it.
       if (isNew) {
         void warnIfOverCreditLimit(customerId, toast);
+      }
+
+      // A retry after a lost reply: save_job returned the first save's stored result and wrote nothing. The crew/loader
+      // and override-applicator follow-ups below are not version-checked and could overwrite a newer change, so they
+      // are skipped and the job is reloaded instead (Sol round 12, 20270302160000).
+      if (result.replayed) {
+        if (overrideReasonForAudit) {
+          await writeOverrideAudit(overrideReasonForAudit, isNew ? result.job_id : (id || null));
+        }
+        if (stillOnThisJob()) {
+          toast('info', `${isNew ? 'Job created' : 'Job saved'}. The page reloaded it: check the crew, loader and applicator, and change them again if needed.`);
+          setIsDirty(false);
+          if (isNew) {
+            skipUnsavedPromptRef.current = true;
+            navigate(`/jobs/${result.job_id}`);
+          } else {
+            await fetchJob();
+          }
+        }
+        setSaving(false);
+        return;
       }
 
       // Field-app parity #6 + #10: persist the ground crew AND the loader-worksheet

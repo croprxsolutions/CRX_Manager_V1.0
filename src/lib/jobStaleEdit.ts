@@ -2,12 +2,13 @@ import { assertRpcResult, supabase } from './db';
 import type { DispatchAssignmentPayload } from './dispatchWizard';
 
 /**
- * The job's edit version as the database computes it (`job_edit_version`, migration 20270228110000): a hash of the
+ * The job's edit version as the database computes it (`job_edit_version`, migration 20270302160000): a hash of the
  * job's edited columns and lines, plus one "job_field_id|applicator_id|crew_id|dispatch_status" string per field
  * dispatch. Save sends it back as `expected_version`; `save_job` refuses JOB_CHANGED_SINCE_LOADED under the job row
  * lock if the job no longer matches, and a lost-reply retry with the same key gets the stored result instead.
  */
-export type JobEditVersion = { core: string; dispatches: string[] };
+/** rev moves on every write to the job's rows; save_job does not compare it, the page uses it to spot a write during its load. */
+export type JobEditVersion = { core: string; dispatches: string[]; rev: string };
 
 export const JOB_CHANGED_SINCE_LOADED_MESSAGE =
   'This job changed after you opened it. Nothing was saved. Reload the page to see the job as it is now, then make your edits again.';
@@ -17,7 +18,7 @@ export async function readJobEditVersion(jobId: string): Promise<JobEditVersion>
   const { data, error } = await supabase.rpc('job_edit_version', { p_job_id: jobId });
   if (error) throw error;
   const v = assertRpcResult<JobEditVersion>(data, 'job_edit_version');
-  if (typeof v?.core !== 'string' || !Array.isArray(v.dispatches)) throw new Error('job_edit_version returned no version');
+  if (typeof v?.core !== 'string' || !Array.isArray(v.dispatches) || typeof v.rev !== 'string') throw new Error('job_edit_version returned no version');
   return v;
 }
 

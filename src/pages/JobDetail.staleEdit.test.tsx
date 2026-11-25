@@ -2,14 +2,15 @@
  * JobDetail — a save over someone else's newer change is refused (Mason, 2026-11-23).
  *
  * The page reads the job's edit version (job_edit_version) before its job select and sends it with Save as
- * expected_version; save_job refuses JOB_CHANGED_SINCE_LOADED under the job row lock when the job moved
+ * expected_version (read again after the select; a moved rev reloads); save_job refuses JOB_CHANGED_SINCE_LOADED under the job row lock when the job moved
  * (database proof: scripts/smoke/prove-job-save-version-real-schema.mjs). These tests prove the page's half.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { mockFrom, mockRpc, mockToast, eqCalls, selectCalls } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, mockLog, eqCalls, selectCalls } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
+  mockLog: vi.fn(),
   mockRpc: vi.fn(),
   mockToast: vi.fn(),
   eqCalls: [] as unknown[][],
@@ -49,14 +50,14 @@ vi.mock('../contexts/AuthContext', () => ({
 }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'k', resetKey: vi.fn(), getKeyFor: () => 'k', resetKeyFor: vi.fn() }),
+  useIdempotencyKey: () => ({ getKey: () => 'k', resetKey: vi.fn(), getKeyFor: (scope: string) => `k:${scope}`, resetKeyFor: vi.fn() }),
 }));
 vi.mock('../hooks/usePageMeta', () => ({ usePageMeta: () => {} }));
 vi.mock('../hooks/useUnsavedChanges', () => ({
   useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
 }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn(), addBreadcrumb: vi.fn() } }));
-vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
+vi.mock('../lib/activityLogger', () => ({ logActivity: mockLog }));
 
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import JobDetail from './JobDetail';
@@ -68,11 +69,17 @@ const JOB = {
   customer: { farm_name: 'Farm Alpha' }, vehicle: null, quote: null, quote_section: null,
   job_fields: [], job_chemicals: [], job_field_shares: [], applied_info: null,
 };
-const VERSION = { core: 'abc123', dispatches: ['jf1|app-1||dispatched'] };
+const VERSION = { core: 'abc123', dispatches: ['jf1|app-1||dispatched'], rev: 'r1' };
 
 let order: string[] = [];
 let versionResult: { data: unknown; error: unknown } = { data: VERSION, error: null };
+// When set, each job_edit_version read takes the next entry (the last one repeats).
+let versionSeq: { data: unknown; error: unknown }[] | null = null;
 let saveResult: { data: unknown; error: unknown } = { data: { job_id: 'job-a' }, error: null };
+
+function saveCalls() {
+  return mockRpc.mock.calls.filter(([fn]) => fn === 'save_job').map(([, args]) => args as { p_idempotency_key: string });
+}
 
 function savePayloads() {
   return mockRpc.mock.calls.filter(([fn]) => fn === 'save_job').map(([, args]) => (args as { p_job_payload: Record<string, unknown> }).p_job_payload);
@@ -94,22 +101,26 @@ beforeEach(() => {
   selectCalls.length = 0;
   order = [];
   versionResult = { data: VERSION, error: null };
+  versionSeq = null;
   saveResult = { data: { job_id: 'job-a' }, error: null };
   mockFrom.mockImplementation((table: string) => {
     if (table === 'jobs') order.push('jobs');
     return buildChain({ data: table === 'jobs' ? JOB : [], error: null });
   });
   mockRpc.mockImplementation((fn: string) => {
-    if (fn === 'job_edit_version') { order.push('version'); return Promise.resolve(versionResult); }
+    if (fn === 'job_edit_version') {
+      order.push('version');
+      return Promise.resolve(versionSeq ? (versionSeq.length > 1 ? versionSeq.shift()! : versionSeq[0]) : versionResult);
+    }
     if (fn === 'save_job') return Promise.resolve(saveResult);
     return Promise.resolve({ data: null, error: null });
   });
 });
 
 describe('JobDetail edit-version check', () => {
-  it('reads the version before the job and sends it with Save', async () => {
+  it('reads the version before and after the job and sends it with Save', async () => {
     await openJob();
-    expect(order.slice(0, 2)).toEqual(['version', 'jobs']);
+    expect(order.slice(0, 3)).toEqual(['version', 'jobs', 'version']);
     expect(mockRpc).toHaveBeenCalledWith('job_edit_version', { p_job_id: 'job-a' });
     await clickSave();
     await waitFor(() => expect(savePayloads()).toHaveLength(1));
@@ -140,16 +151,54 @@ describe('JobDetail edit-version check', () => {
     await clickSave();
     await waitFor(() => expect(savePayloads()).toHaveLength(2));
     expect(savePayloads()[1]).toEqual(savePayloads()[0]);
+    expect(saveCalls()[1].p_idempotency_key).toBe(saveCalls()[0].p_idempotency_key);
     expect(mockToast).not.toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
+  });
+});
+
+describe('JobDetail edit-version load and replay (Sol round 12)', () => {
+  const v = (rev: string) => ({ data: { ...VERSION, rev }, error: null });
+
+  it('reloads when rev moved during the load, then sends the version of the reload', async () => {
+    versionSeq = [v('r1'), v('r2'), v('r3'), v('r3')];
+    await openJob();
+    await waitFor(() => expect(order.slice(0, 6)).toEqual(['version', 'jobs', 'version', 'version', 'jobs', 'version']));
+    await clickSave();
+    await waitFor(() => expect(savePayloads()).toHaveLength(1));
+    expect(savePayloads()[0].expected_version).toEqual({ ...VERSION, rev: 'r3' });
+  });
+
+  it('blocks Save when rev keeps moving for 3 loads', async () => {
+    versionSeq = [v('a'), v('b'), v('c'), v('d'), v('e'), v('f'), v('g')];
+    await openJob();
+    await clickSave();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/could not check whether the job is current/)));
+    expect(savePayloads()).toHaveLength(0);
+  });
+
+  it('a replayed save skips the follow-ups and reloads the job', async () => {
+    saveResult = { data: { job_id: 'job-a', replayed: true }, error: null };
+    await openJob();
+    const jobReads = order.filter((o) => o === 'jobs').length;
+    await clickSave();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringMatching(/reloaded it: check the crew, loader and applicator/)));
+    await waitFor(() => expect(order.filter((o) => o === 'jobs').length).toBe(jobReads + 1));
+    expect(mockLog).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'job_updated' }));
+  });
+
+  it('a normal save still runs to the end', async () => {
+    await openJob();
+    await clickSave();
+    await waitFor(() => expect(mockLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'job_updated' })));
   });
 });
 
 describe('withOwnDispatches', () => {
   it("replaces only the dispatched locations' strings, keeping everyone else's", () => {
-    const v = { core: 'c', dispatches: ['jf1|app-1||dispatched', 'jf2|app-2||completed'] };
+    const v = { core: 'c', dispatches: ['jf1|app-1||dispatched', 'jf2|app-2||completed'], rev: 'r' };
     expect(withOwnDispatches(v, [{ job_field_id: 'jf1', applicator_id: null, crew_id: 'crew-9' },
       { job_field_id: 'jf3', applicator_id: 'app-3', crew_id: null }])).toEqual({
-      core: 'c', dispatches: ['jf1||crew-9|dispatched', 'jf2|app-2||completed', 'jf3|app-3||dispatched'],
+      core: 'c', dispatches: ['jf1||crew-9|dispatched', 'jf2|app-2||completed', 'jf3|app-3||dispatched'], rev: 'r',
     });
   });
 });

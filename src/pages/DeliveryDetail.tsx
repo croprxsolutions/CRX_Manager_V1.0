@@ -1771,7 +1771,7 @@ export default function DeliveryDetail() {
     deliveredOn: paperDeliveredOn,
     onDeliveredOnChange: setPaperDeliveredOn,
     onTakePhoto: () => paperTicketInputRef.current?.click(),
-    takePhotoDisabled: uploadingPhoto || !isOnline || countTicketPhotosForLoad(photos, currentLinesSeen) >= MAX_PAPER_TICKET_PHOTOS,
+    takePhotoDisabled: uploadingPhoto || !isOnline || !currentLinesSeen || countTicketPhotosForLoad(photos, currentLinesSeen) >= MAX_PAPER_TICKET_PHOTOS,
     uploading: uploadingPhoto,
   };
   // A problem with the delivery, reported in the same completion step (driver and office alike) and sent with it.

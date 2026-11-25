@@ -913,7 +913,7 @@ export default function FieldStop() {
                 deliveredOn: paperDeliveredOn,
                 onDeliveredOnChange: setPaperDeliveredOn,
                 onTakePhoto: () => paperTicketInputRef.current?.click(),
-                takePhotoDisabled: uploadingPhoto || !isOnline || countTicketPhotosForLoad(photos, currentLinesSeen) >= MAX_PAPER_TICKET_PHOTOS,
+                takePhotoDisabled: uploadingPhoto || !isOnline || !currentLinesSeen || countTicketPhotosForLoad(photos, currentLinesSeen) >= MAX_PAPER_TICKET_PHOTOS,
                 uploading: uploadingPhoto,
               }}
               onSignatureChange={sig.onSignatureChange}
@@ -940,7 +940,7 @@ export default function FieldStop() {
                   ) : (
                     <p className="text-sm text-amber-800">Signature skipped because no one was present. Take a photo of where you left the delivery.</p>
                   )}
-                  <button type="button" disabled={uploadingPhoto || !isOnline || countTicketPhotosForLoad(photos, currentLinesSeen, LEFT_AT_SITE_PHOTO_CAPTION) >= MAX_LEFT_AT_SITE_PHOTOS} onClick={() => leftAtSiteInputRef.current?.click()} className={SECONDARY_BUTTON}>
+                  <button type="button" disabled={uploadingPhoto || !isOnline || !currentLinesSeen || countTicketPhotosForLoad(photos, currentLinesSeen, LEFT_AT_SITE_PHOTO_CAPTION) >= MAX_LEFT_AT_SITE_PHOTOS} onClick={() => leftAtSiteInputRef.current?.click()} className={SECONDARY_BUTTON}>
                     <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Drop Location'}
                   </button>
                 </div>

@@ -18,6 +18,13 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Product price sheet: the server refuses a used, expired or someone else's sheet, or a sheet listing a product twice.
   [/^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/,
    'No prices were changed. This price sheet can no longer be used: it was already applied, is more than 7 days old, came from an older template, or was downloaded by another user. Download a fresh price sheet and make your changes in it'],
+  // Supplier Pricing (20270304140000): bounds that keep the converted cost per inventory unit a sane number.
+  [/^SUPPLIER_CONVERSION_INVALID\b|violates check constraint "product_supplier_links_conversion_floor"/,
+   'Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals'],
+  [/violates check constraint "supplier_price_observations_package_quantity_floor"/,
+   'Nothing was saved. Package quantity must be 0.001 or more'],
+  [/violates check constraint "supplier_price_observations_cost_ceiling"/,
+   'Nothing was saved. A supplier cost cannot be more than $10,000,000 for one line. Check the amount'],
   [/^PRICING_DUPLICATE_PRODUCT_ID\b/, 'No prices were changed. The same product appears on more than one row of the price sheet. Download a fresh price sheet and make your changes in it, without copying or pasting product rows'],
   [/^PRODUCT_CATEGORY_RETIRED\b/, 'This category is retired. Choose an active category'],
   [/^PRODUCT_CATEGORY_NAME_REQUIRED\b/, 'Enter a category name'],

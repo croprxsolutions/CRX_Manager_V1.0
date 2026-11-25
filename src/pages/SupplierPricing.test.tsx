@@ -296,11 +296,13 @@ describe('SupplierPricing page', () => {
       conversion_unit: 'gal', comparison_status: 'comparable', comparison_note: null,
       link_status: 'confirmed', is_reusable: true, is_preferred: true, is_active: true,
     };
-    const row = (id: string, costCents: bigint, packageQuantity: number) => ({
+    // The server marks a second row with the same link, cost, effective date and price type duplicate, so each row
+    // gets its own effective date.
+    const row = (id: string, costCents: bigint, packageQuantity: number, effectiveFrom: string) => ({
       id, row_number: Number(id.slice(-1)), product_id: 'product-1', product_name: 'Atrazine',
       product_supplier_link_id: 'link-1', supplier_sku: 'AND-1', supplier_product_name: 'Atrazine 2x2.5',
       cost_cents: costCents, price_unit: 'case', package_quantity: packageQuantity,
-      effective_from: '2026-07-18', effective_to: null, price_kind: 'quote', row_status: 'new',
+      effective_from: effectiveFrom, effective_to: null, price_kind: 'quote', row_status: 'new',
       validation_errors: [], observation_id: null,
     });
     mockGetWorkspace.mockResolvedValue({
@@ -324,11 +326,11 @@ describe('SupplierPricing page', () => {
       approved_observation_count: 0, created_at: '2026-07-18T12:00:00Z',
       rows: [
         // $30 typed for 2 cases: a package total, so $30 / 2 / 5 = $3.00 per gal, not "per case".
-        row('row-1', 3_000n, 2),
+        row('row-1', 3_000n, 2, '2026-07-18'),
         // A $30-per-gal quote relabelled as one case: $30 / 1 / 5 = $6.00 per gal, visibly not $30.
-        row('row-2', 3_000n, 1),
+        row('row-2', 3_000n, 1, '2026-07-19'),
         // "$150 per case" entered for 2 cases: $150 / 2 / 5 = $15.00 per gal, visibly not $30.
-        row('row-3', 15_000n, 2),
+        row('row-3', 15_000n, 2, '2026-07-20'),
       ],
     });
 
@@ -397,6 +399,46 @@ describe('SupplierPricing page', () => {
     expect(await screen.findByText('cannot compare to inventory units')).toBeInTheDocument();
     expect(screen.getByText('converted cost not shown (package size too large)')).toBeInTheDocument();
     expect(screen.queryByText(/^= \$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/This supplier is archived/)).not.toBeInTheDocument();
+  });
+
+  it('warns, without blocking approval, when a pending quote belongs to an archived supplier', async () => {
+    // The workspace lists only suppliers that are not archived; the import still names its archived supplier.
+    mockGetWorkspace.mockResolvedValue({
+      vendors: [{ id: 'vendor-2', name: 'Helena' }],
+      products: [{ id: 'product-1', product_name: 'Atrazine', sku: 'A-1', inventory_unit: 'gal' }],
+      links: [],
+      imports: [{
+        id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
+        document_date: '2026-07-18', ingestion_method: 'quick_quote', status: 'needs_review',
+        row_count: 1, eligible_row_count: 1, approved_observation_count: 0,
+        source_document_name: null, created_at: '2026-07-18T12:00:00Z',
+      }],
+      aliases: [],
+      evidence: [],
+    });
+    mockGetImport.mockResolvedValue({
+      id: 'import-1', vendor_id: 'vendor-1', vendor_name: 'The Andersons',
+      document_date: '2026-07-18', ingestion_method: 'quick_quote',
+      format_version: 'crx-supplier-quick-quote-phase1b-v1', status: 'needs_review',
+      source_document_name: null, row_count: 1, eligible_row_count: 1,
+      approved_observation_count: 0, created_at: '2026-07-18T12:00:00Z',
+      rows: [{
+        id: 'row-1', row_number: 1, product_id: 'product-1', product_name: 'Atrazine',
+        product_supplier_link_id: 'link-1', supplier_sku: 'AND-1', supplier_product_name: 'Atrazine',
+        cost_cents: 3_000n, price_unit: 'case', package_quantity: 1,
+        effective_from: '2026-07-18', effective_to: null, price_kind: 'quote', row_status: 'new',
+        validation_errors: [], observation_id: null,
+      }],
+    });
+
+    renderSupplierPricing();
+    fireEvent.click(await screen.findByRole('button', { name: /The Andersons/ }));
+
+    expect(await screen.findByText(
+      "This supplier is archived. Approving saves the price, but it won't show in supplier evidence or cost basis unless the supplier is restored.",
+    )).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve selected observations' })).toBeEnabled());
   });
 
   it('keeps the workbook supplier selected through its immediate workspace refresh', async () => {

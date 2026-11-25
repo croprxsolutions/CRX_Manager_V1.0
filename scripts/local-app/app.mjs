@@ -9,9 +9,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, PROJECT, Refused, TEST_EMAIL,
-  IS_SALES_GAUNTLET, IS_DOC_BYTES, PROFILE_NAME, STATE_FOLDER, REP_EMAIL, OTHER_REP_EMAIL,
-  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, portIsOpen,
+  IS_SALES_GAUNTLET, IS_DOC_BYTES, IS_SCREEN_WALK, PROFILE_NAME, STATE_FOLDER, REP_EMAIL, OTHER_REP_EMAIL,
+  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFinishedBuild, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, assertWalkthroughLaneResourcesAreEmpty, assertOwnedApiDbListeners, assertWalkthroughGatewayIdentity, portIsOpen, sameComposePath,
 } from './target.mjs';
+import { schemaFingerprint as computeSchemaFingerprint } from './schema-fingerprint.mjs';
+import { acquireLaneLock } from './lane-lock.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
@@ -20,15 +22,20 @@ const ROOT = path.resolve(HERE, '..', '..');
 const STATE_DIR = process.env.CRX_LOCAL_APP_STATE_DIR || path.join(HERE, STATE_FOLDER);
 const STATE_FILE = path.join(STATE_DIR, 'local.env');
 const BUILD_FILE = path.join(STATE_DIR, 'build.json');
+const TEST_RECORD_FILE = path.join(STATE_DIR, 'last-test.json');
+// One lock per checkout, in its canonical state folder, whatever CRX_LOCAL_APP_STATE_DIR says: the Docker project is fixed per checkout.
+const FIRST_START_LOCK = path.join(HERE, STATE_FOLDER, 'first-start.lock');
+const RECOVERY_COMMAND = `node scripts/local-app/${IS_SCREEN_WALK ? 'walkthrough' : IS_SALES_GAUNTLET ? 'sales' : IS_DOC_BYTES ? 'doc-bytes' : 'app'}.mjs rebuild`;
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const SERVICES = ['auth', 'rest', 'storage', 'gateway'];
 const SUPABASE_CLI = '2.109.1';
 
 // Children get only what they need to run, never the caller's whole environment.
-const PASSTHROUGH = /^(path|pathext|systemroot|systemdrive|windir|comspec|temp|tmp|home|homedrive|homepath|userprofile|username|appdata|localappdata|programdata|programfiles|programfiles\(x86\)|supabase_go_binary|ms_playwright_browsers_path)$/i;
+const PASSTHROUGH = /^(path|pathext|systemroot|systemdrive|windir|comspec|temp|tmp|home|homedrive|homepath|userprofile|username|appdata|localappdata|programdata|programfiles|programfiles\(x86\)|supabase_go_binary|ms_playwright_browsers_path|crx_local_app_lane)$/i;
 function childEnv(extra = {}) {
   return { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => PASSTHROUGH.test(k))),
-    ...(PROFILE_NAME ? { CRX_LOCAL_APP_PROFILE: PROFILE_NAME } : {}), ...extra };
+    ...(PROFILE_NAME ? { CRX_LOCAL_APP_PROFILE: PROFILE_NAME } : {}),
+    ...extra };
 }
 
 function run(command, args, { input, allowFailure, env, stdio } = {}) {
@@ -78,19 +85,23 @@ function createState() {
     } : {}),
   };
   mkdirSync(STATE_DIR, { recursive: true });
-  if (IS_SALES_GAUNTLET) {
-    const gateway = readFileSync(path.join(HERE, 'kong.yml'), 'utf8');
-    if (gateway.split('http://127.0.0.1:5199').length !== 4) throw new Refused('The gateway origin template changed.');
-    writeFileSync(path.join(STATE_DIR, 'kong.yml'), gateway.replaceAll('http://127.0.0.1:5199', APP_URL));
-  }
   writeFileSync(STATE_FILE, Object.entries(state).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', { mode: 0o600 });
   return state;
+}
+
+function gatewayConfig() {
+  const gateway = readFileSync(path.join(HERE, 'kong.yml'), 'utf8');
+  if (gateway.split('http://127.0.0.1:5199').length !== 4) throw new Refused('The gateway origin template changed.');
+  return gateway.replaceAll('http://127.0.0.1:5199', APP_URL);
 }
 
 function compose(args, options) {
   return run('docker', ['compose', '-p', PROJECT, '-f', path.join(HERE, 'compose.yaml'), '--env-file', STATE_FILE, ...args], {
     ...options,
-    env: childEnv(IS_SALES_GAUNTLET ? { LOCAL_KONG_CONFIG: path.join(STATE_DIR, 'kong.yml') } : {}),
+    env: childEnv({
+      ...(IS_SALES_GAUNTLET || IS_SCREEN_WALK ? { LOCAL_KONG_CONFIG: path.join(STATE_DIR, 'kong.yml') } : {}),
+      ...(IS_SCREEN_WALK ? { LOCAL_RESTART_POLICY: 'no' } : {}),
+    }),
   });
 }
 
@@ -102,29 +113,57 @@ function assertExistingStackIsOurs() {
     if (!/scripts[\\/]local-app[\\/]compose\.yaml$/.test(container.Config.Labels['com.docker.compose.project.config_files'] ?? '')) {
       throw new Refused(`Another stack is using the name ${PROJECT}. Nothing was changed.`);
     }
-    if ((IS_SALES_GAUNTLET || IS_DOC_BYTES) && path.resolve(container.Config.Labels['com.docker.compose.project.config_files']) !== path.join(HERE, 'compose.yaml')) {
-      throw new Refused(`The ${IS_DOC_BYTES ? 'document-proof' : 'sales'} test stack belongs to another checkout. Nothing was changed.`);
+    if ((IS_SALES_GAUNTLET || IS_DOC_BYTES || IS_SCREEN_WALK) && !sameComposePath(container.Config.Labels['com.docker.compose.project.config_files'], path.join(HERE, 'compose.yaml'))) {
+      const owner = IS_DOC_BYTES ? 'document-proof' : IS_SALES_GAUNTLET ? 'sales' : 'screen-walk';
+      throw new Refused(`The ${owner} test stack belongs to another checkout. Nothing was changed.`);
     }
   }
   assertLoopbackBindings(inspected.flatMap((c) => Object.values(c.HostConfig.PortBindings ?? {}).flat()));
 }
 
-/** Runs before anything changes. A missing state file is fine only for a first rebuild. */
-async function preflight({ needState = true } = {}) {
-  assertCleanEnvironment();
+// `-p tcp` hides IPv6 listeners on Windows, so both families are read.
+const allListeners = () => ['tcp', 'tcpv6'].map((family) => text(run('netstat', ['-ano', '-p', family]))).join('\n');
+
+function assertNewScreenWalkLaneIsEmpty() {
+  if (!IS_SCREEN_WALK) return;
+  const list = (args) => text(run('docker', args));
+  assertWalkthroughLaneResourcesAreEmpty({
+    containers: list(['ps', '-aq', '--filter', `label=com.docker.compose.project=${PROJECT}`]),
+    volumes: list(['volume', 'ls', '-q', '--filter', `label=com.docker.compose.project=${PROJECT}`]),
+    networks: list(['network', 'ls', '-q', '--filter', `label=com.docker.compose.project=${PROJECT}`]),
+    netstat: allListeners(),
+  });
+}
+
+// Also runs before the lane lock is written, so a bad override never gets a folder or lock file.
+function assertStateDirAllowed() {
   const inside = (folder) => `${path.resolve(STATE_DIR)}${path.sep}`.startsWith(`${path.resolve(folder)}${path.sep}`);
   if (!inside(path.join(HERE, '.state')) && !inside(tmpdir())) {
     throw new Refused('CRX_LOCAL_APP_STATE_DIR may only point at the temp folder.');
   }
+}
+
+/** Runs before anything changes. A missing state file is fine only for a first rebuild. */
+async function preflight({ needState = true } = {}) {
+  assertCleanEnvironment();
+  assertStateDirAllowed();
   const state = readState();
   if (!state && needState) {
-    throw new Refused('No test app here yet. Run: node scripts/local-app/app.mjs rebuild, unless another checkout owns it (see the README).');
+    throw new Refused(`No test app here yet. Run: ${RECOVERY_COMMAND}, unless another checkout owns it (see the README).`);
   }
   if (state) assertLocalState(state);
   assertLocalDockerEndpoint(text(run('docker', ['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'])));
-  assertAppPortIsLoopback(text(run('netstat', ['-ano', '-p', 'tcp'])));
+  assertAppPortIsLoopback(allListeners(), APP_PORT);
   await assertFrontendIsOurs(state?.LOCAL_ANON_KEY);
   assertExistingStackIsOurs();
+  if (IS_SCREEN_WALK) {
+    const gateway = text(run('docker', ['ps', '-q', '--filter', `label=com.docker.compose.project=${PROJECT}`, '--filter', 'label=com.docker.compose.service=gateway']));
+    const inspected = gateway ? JSON.parse(text(run('docker', ['inspect', ...gateway.split(/\s+/)]))) : [];
+    if (inspected.length > 1) throw new Refused('More than one gateway claims this walkthrough lane. Nothing was changed.');
+    const bindings = inspected.length ? assertWalkthroughGatewayIdentity(inspected[0], PROJECT, path.join(HERE, 'compose.yaml')) : [];
+    assertOwnedApiDbListeners(allListeners(), bindings);
+  }
+  if (!state) assertNewScreenWalkLaneIsEmpty();
   // A Docker restart can hand the gateway its route back, so every command takes it away again.
   if (state && text(compose(['ps', '-q', 'gateway']))) sealGateway();
   return state;
@@ -203,7 +242,8 @@ function restoreBaseline() {
 // Files in the repository's committed form: Windows checkouts add CR, the database's checks do not
 // expect it. Live applies run each file in one transaction and the CLI does not, so add that here.
 function migrationBytes(file) {
-  const sql = withLiveLineEndings(file, readFileSync(path.join(ROOT, file), 'utf8').replaceAll('\r\n', '\n'));
+  const relative = file.startsWith('supabase/migrations/') ? file : path.posix.join('supabase', 'migrations', file);
+  const sql = withLiveLineEndings(relative, readFileSync(path.join(ROOT, relative), 'utf8').replaceAll('\r\n', '\n'));
   return /^\s*(BEGIN|START\s+TRANSACTION)\s*;/im.test(sql) ? sql : `BEGIN;\n${sql}\n;COMMIT;\n`;
 }
 
@@ -246,22 +286,30 @@ const approvedMigrations = () => text(run(process.execPath, ['scripts/list-post-
 // The doc-bytes proof stack applies the same ordered files straight through psql, one transaction each, and
 // writes the ledger row the CLI would (version + whole file stem), so it needs no Supabase CLI at all.
 function applyWithPsql(name) {
-  psql(migrationBytes(`supabase/migrations/${name}`));
+  psql(migrationBytes(name));
   recordLedger(name.replace(/\.sql$/, ''));
 }
 function recordLedger(stem) {
   psql(`INSERT INTO supabase_migrations.schema_migrations (version, name) VALUES ('${stem.slice(0, 14)}', '${stem}') ON CONFLICT (version) DO NOTHING;`);
 }
 
-async function pushPostBaselineMigrations(state) {
-  let companion;
-  if (!IS_DOC_BYTES) {
-    const version = text(run('supabase', ['--version']));
-    if (version !== SUPABASE_CLI) throw new Error(`The push steps are proven on Supabase CLI ${SUPABASE_CLI}, not ${version}.`);
-    const launcher = process.platform === 'win32' ? text(run('where.exe', ['supabase'])).split(/\r?\n/)[0] : null;
-    companion = process.env.SUPABASE_GO_BINARY ?? (launcher ? path.join(path.dirname(launcher), 'supabase-go.exe') : 'supabase-go');
-    if (text(run(companion, ['--version'])) !== SUPABASE_CLI) throw new Error(`Use the matching Supabase ${SUPABASE_CLI} companion executable.`);
+// Checked before rebuild erases anything, so a wrong CLI leaves the current test database as it was.
+function supabaseCompanion() {
+  if (IS_DOC_BYTES) return undefined;
+  const version = text(run('supabase', ['--version']));
+  if (version !== SUPABASE_CLI) throw new Error(`The push steps are proven on Supabase CLI ${SUPABASE_CLI}, not ${version}.`);
+  const launcher = process.platform === 'win32' ? text(run('where.exe', ['supabase'])).split(/\r?\n/)[0] : null;
+  const companion = process.env.SUPABASE_GO_BINARY ?? (launcher ? path.join(path.dirname(launcher), 'supabase-go.exe') : 'supabase-go');
+  const companionVersion = text(run(companion, ['--version']));
+  if (companionVersion !== SUPABASE_CLI) {
+    const source = process.env.SUPABASE_GO_BINARY ? 'the SUPABASE_GO_BINARY setting' : 'the folder of the supabase on PATH';
+    throw new Error(`Supabase companion ${companion} (from ${source}) reports ${companionVersion || 'no version'}, not ${SUPABASE_CLI}. `
+      + `Set SUPABASE_GO_BINARY to the supabase-go beside your ${SUPABASE_CLI} supabase (scripts/local-app/README.md).`);
   }
+  return companion;
+}
+
+async function pushPostBaselineMigrations(state, companion) {
   const files = approvedMigrations();
   const workdir = mkdtempSync(path.join(STATE_DIR, 'push-'));
   // The password travels in the environment so it never shows in a process list.
@@ -289,7 +337,7 @@ async function pushPostBaselineMigrations(state) {
         names = names.slice(registrationBoundary);
       }
       if (IS_DOC_BYTES) { names.forEach(applyWithPsql); return; }
-      for (const name of names) writeFileSync(path.join(workdir, 'supabase', 'migrations', ledgerFile(name)), migrationBytes(`supabase/migrations/${name}`));
+      for (const name of names) writeFileSync(path.join(workdir, 'supabase', 'migrations', ledgerFile(name)), migrationBytes(name));
       const db = ['--workdir', workdir, 'db', 'push', '--db-url', urlWithoutPassword, '--include-all'];
       const dry = run('supabase', [...db, '--dry-run'], { env });
       const planned = [...`${dry.stdout}${dry.stderr}`.matchAll(/\d{14}_\S+\.sql/g)].map(([name]) => name);
@@ -381,12 +429,19 @@ async function seed(state) {
   psql(readFileSync(path.join(HERE, 'seed.sql')));
 }
 
-async function rebuild() {
-  await preflight({ needState: false });
-  stopFrontend();
-  const state = readState() ?? createState();
+async function rebuild({ firstStart = false } = {}) {
+  const existingState = await preflight({ needState: false });
+  if (IS_SCREEN_WALK && await portIsOpen(APP_PORT)) {
+    throw new Refused('This walkthrough frontend is running. When the walkthrough is finished, its owner can run stop before rebuilding. The database was kept.');
+  }
+  const companion = supabaseCompanion();
+  const fingerprintBefore = IS_SCREEN_WALK ? schemaFingerprint(approvedMigrations()) : undefined;
+  const gateway = IS_SALES_GAUNTLET || IS_SCREEN_WALK ? gatewayConfig() : undefined;
+  if (!firstStart && !IS_SCREEN_WALK) stopFrontend();
+  const state = existingState ?? createState();
   rmSync(BUILD_FILE, { force: true });
-  compose(['down', '-v', '--remove-orphans']);
+  if (!firstStart) compose(['down', '-v', '--remove-orphans']);
+  if (gateway !== undefined) writeFileSync(path.join(STATE_DIR, 'kong.yml'), gateway);
   await startDatabase(state);
   await startServices(state);
   assertSealed();
@@ -396,14 +451,17 @@ async function rebuild() {
   console.log('Pushing the approved migrations...');
   // Some migrations refuse to run beside another open transaction, so the services wait.
   compose(['stop', 'auth', 'rest', 'storage']);
-  const migrations = await pushPostBaselineMigrations(state);
+  const migrations = await pushPostBaselineMigrations(state, companion);
   // The services can come back on swapped addresses, and the gateway remembers the old ones.
   compose(['stop', 'gateway']);
   await startServices(state);
   await seed(state);
+  // Re-list migrations so one added mid-build also refuses; record the fingerprint that passed, not a fresh read.
+  if (IS_SCREEN_WALK && schemaFingerprint(approvedMigrations()) !== fingerprintBefore) throw new Refused('This checkout changed while the database was being built. Nothing was marked finished. Run the rebuild again.');
   const ledgerRows = scalar('SELECT count(*) FROM supabase_migrations.schema_migrations;');
   const uncommittedChanges = text(run('git', ['status', '--porcelain'])) !== '';
-  const build = { commit: text(run('git', ['rev-parse', 'HEAD'])), uncommittedChanges, builtAt: new Date().toISOString(), ledgerRows, migrations };
+  const build = { commit: text(run('git', ['rev-parse', 'HEAD'])), uncommittedChanges, builtAt: new Date().toISOString(), ledgerRows, migrations,
+    ...(IS_SCREEN_WALK ? { schemaFingerprint: fingerprintBefore } : {}), };
   writeFileSync(BUILD_FILE, JSON.stringify(build, null, 2));
   console.log(`Rebuilt from ${describeBuild(build)}.`);
 }
@@ -411,6 +469,17 @@ async function rebuild() {
 function describeBuild(build) {
   const source = build.uncommittedChanges ? `${build.commit} plus uncommitted changes` : build.commit;
   return `${source}: ${build.migrations.length} migrations, ${build.ledgerRows} ledger rows`;
+}
+
+function checkoutRevision() {
+  return {
+    commit: text(run('git', ['rev-parse', 'HEAD'])),
+    uncommittedChanges: text(run('git', ['status', '--porcelain'])) !== '',
+  };
+}
+
+function schemaFingerprint(migrations) {
+  return computeSchemaFingerprint(ROOT, migrations);
 }
 
 // The sealed services, the database among them, must have no way out, or a stray job could reach
@@ -443,27 +512,37 @@ const vite = (port) => ['node_modules/vite/bin/vite.js', '--config', 'scripts/lo
 
 // A test on another branch's database would prove nothing about this one.
 function requireFinishedBuild() {
-  if (!existsSync(BUILD_FILE)) throw new Refused('The last rebuild did not finish. Run: node scripts/local-app/app.mjs rebuild');
-  const built = JSON.parse(readFileSync(BUILD_FILE, 'utf8')).migrations.join();
-  if (built !== approvedMigrations().join()) throw new Refused('This checkout has different migrations from the test database. Run: node scripts/local-app/app.mjs rebuild');
+  if (!existsSync(BUILD_FILE)) throw new Refused(`The last rebuild did not finish. Run: ${RECOVERY_COMMAND}`);
+  const migrations = approvedMigrations();
+  return assertFinishedBuild(JSON.parse(readFileSync(BUILD_FILE, 'utf8')), migrations, IS_SCREEN_WALK ? schemaFingerprint(migrations) : undefined, RECOVERY_COMMAND);
 }
 
-async function start() {
-  const state = await preflight();
-  requireFinishedBuild();
-  await startDatabase(state);
-  await startServices(state);
+// Starts the shared Vite if it is down, then proves whatever answers is this test app.
+async function ensureFrontend(state) {
   if (!(await portIsOpen(APP_PORT))) {
     spawn(process.execPath, vite(APP_PORT), { cwd: ROOT, env: frontendEnv(state), detached: true, stdio: 'ignore' }).unref();
     await waitFor('test app', () => portIsOpen(APP_PORT));
   }
   await assertFrontendIsOurs(state.LOCAL_ANON_KEY);
+}
+
+async function start() {
+  if (!readState() && IS_SCREEN_WALK) {
+    await rebuild({ firstStart: true });
+  }
+  const state = await preflight();
+  requireFinishedBuild();
+  await startDatabase(state);
+  await startServices(state);
+  await ensureFrontend(state);
   console.log(`Test app: ${APP_URL}\nSign in with LOCAL_TEST_EMAIL and LOCAL_TEST_PASSWORD from scripts/local-app/${STATE_FOLDER}/local.env`);
 }
 
 // `frontend --port 5201` runs a second copy beside the shared one. It reaches the gateway through
 // its own /_sb relay (vite.config.mjs), so the browser makes no cross-site call.
 async function frontend() {
+  // The walkthrough lane starts Vite inside its locked start/test commands; a loose one would run unlocked.
+  if (IS_SCREEN_WALK) throw new Refused('The walkthrough lane starts its own frontend. Use: node scripts/local-app/walkthrough.mjs start');
   const flag = process.argv.indexOf('--port');
   const port = flag < 0 ? APP_PORT : assertExtraAppPort(process.argv[flag + 1]);
   const state = await preflight();
@@ -472,22 +551,71 @@ async function frontend() {
   run(process.execPath, vite(port), { env: frontendEnv(state, supabaseUrl), stdio: 'inherit' });
 }
 
+// Also runs before the lane lock, so a bad spec never touches the checkout's lock.
+function assertSpec(spec) {
+  if (IS_SCREEN_WALK && !spec) throw new Refused('Choose one feature proof, for example: walkthrough.mjs test product-unit.spec.ts');
+  if (spec && (!/^[\w-]+\.spec\.ts$/.test(spec) || !existsSync(path.join(HERE, 'e2e', spec)) || (IS_SCREEN_WALK && spec === 'chemical-sales.spec.ts'))) {
+    throw new Refused('Choose an existing, non-sales spec file from scripts/local-app/e2e.');
+  }
+}
+
+function hasPassingBrowserTest(suites) {
+  return suites.some((suite) =>
+    suite.specs.some((spec) => spec.tests.some((test) => test.results.some((result) => result.status === 'passed')))
+    || hasPassingBrowserTest(suite.suites ?? []));
+}
+
 async function test() {
+  const spec = process.argv[3];
   const state = await preflight();
-  requireFinishedBuild();
-  await startDatabase(state);
-  await startServices(state);
-  if (IS_SALES_GAUNTLET) run(process.execPath, ['scripts/local-app/sales-checks.mjs'], { stdio: 'inherit' });
-  run(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '--config', 'scripts/local-app/playwright.config.ts'], { stdio: 'inherit' });
+  const build = requireFinishedBuild();
+  const startedAt = new Date().toISOString();
+  const runId = `${startedAt.replace(/[:.]/g, '-')}-${randomBytes(4).toString('hex')}`;
+  const record = IS_SCREEN_WALK ? {
+    ...checkoutRevision(), spec, databaseCommit: build.commit, databaseBuiltAt: build.builtAt,
+    databaseFingerprint: build.schemaFingerprint, startedAt, artifacts: `scripts/local-app/${STATE_FOLDER}/test-results/${runId}`,
+  } : null;
+  if (record) writeFileSync(TEST_RECORD_FILE, JSON.stringify({ ...record, result: 'running' }, null, 2));
+  let result = 'failed';
+  try {
+    await startDatabase(state);
+    await startServices(state);
+    // Playwright then finds Vite already running and never launches its own.
+    if (IS_SCREEN_WALK) await ensureFrontend(state);
+    if (IS_SALES_GAUNTLET) run(process.execPath, ['scripts/local-app/sales-checks.mjs'], { stdio: 'inherit' });
+    run(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '--config', 'scripts/local-app/playwright.config.ts', ...(spec ? [`scripts/local-app/e2e/${spec}`] : [])], {
+      stdio: 'inherit', env: childEnv(record ? { CRX_LOCAL_APP_TEST_RUN: runId } : {}),
+    });
+    if (record) {
+      const report = JSON.parse(readFileSync(path.join(ROOT, record.artifacts, 'playwright.json'), 'utf8'));
+      if (!hasPassingBrowserTest(report.suites)) throw new Refused('No browser test passed. A skipped or expected-failure run is not walkthrough proof.');
+      const after = checkoutRevision();
+      if (after.commit !== record.commit || after.uncommittedChanges !== record.uncommittedChanges) {
+        throw new Refused('This checkout changed during the browser test. Run it again to record proof for this version.');
+      }
+    }
+    result = 'passed';
+  } finally {
+    if (record) {
+      writeFileSync(TEST_RECORD_FILE, JSON.stringify({ ...record, result, finishedAt: new Date().toISOString() }, null, 2));
+      console.log(`Browser test ${result}: ${spec} at ${record.commit}${record.uncommittedChanges ? ' plus uncommitted changes' : ''}. Record: ${TEST_RECORD_FILE}`);
+    }
+  }
 }
 
 async function status() {
   const state = await preflight();
   console.log(`Test app is ${(await portIsOpen(APP_PORT)) ? 'running' : 'stopped'} at ${state.LOCAL_APP_URL}`);
   console.log(text(compose(['ps', '--format', '{{.Service}} {{.Status}}'])) || 'The back end is stopped.');
-  if (existsSync(BUILD_FILE)) {
-    const build = JSON.parse(readFileSync(BUILD_FILE, 'utf8'));
+  const build = existsSync(BUILD_FILE) ? JSON.parse(readFileSync(BUILD_FILE, 'utf8')) : null;
+  if (build) {
     console.log(`Built ${build.builtAt} from ${describeBuild(build)}`);
+  }
+  if (IS_SCREEN_WALK && existsSync(TEST_RECORD_FILE)) {
+    const proof = JSON.parse(readFileSync(TEST_RECORD_FILE, 'utf8'));
+    const result = proof.result === 'running' ? 'incomplete (interrupted)' : proof.result;
+    const database = build?.builtAt === proof.databaseBuiltAt ? 'current database build' : `previous database build ${proof.databaseCommit} from ${proof.databaseBuiltAt}`;
+    console.log(`Last browser test: ${result}, ${proof.spec}, ${proof.commit}${proof.uncommittedChanges ? ' plus uncommitted changes' : ''}, started ${proof.startedAt}, on ${database}. Evidence: ${proof.artifacts}`);
   }
 }
 
@@ -512,12 +640,22 @@ const COMMANDS = {
 };
 
 const extra = process.argv.slice(3);
-const validArguments = extra.length === 0 || (process.argv[2] === 'frontend' && extra.length === 2 && extra[0] === '--port');
+const validArguments = extra.length === 0
+  || (process.argv[2] === 'frontend' && extra.length === 2 && extra[0] === '--port')
+  || (IS_SCREEN_WALK && process.argv[2] === 'test' && extra.length === 1 && /^[\w-]+\.spec\.ts$/.test(extra[0]));
 (async () => {
   if (!validArguments) throw new Refused('Unsupported test-app arguments. Use sales.mjs for the sales gauntlet.');
   const command = COMMANDS[process.argv[2]];
   if (!command) throw new Error(`Use one of: ${Object.keys(COMMANDS).join(', ')}`);
-  await command();
+  // One lock for the whole command: any of these can change the lane's database or its saved evidence (status reseals a running gateway).
+  if (IS_SCREEN_WALK && ['start', 'rebuild', 'stop', 'seed', 'test', 'status'].includes(process.argv[2])) {
+    if (process.argv[2] === 'test') assertSpec(process.argv[3]);
+    assertCleanEnvironment();
+    assertStateDirAllowed();
+    mkdirSync(path.dirname(FIRST_START_LOCK), { recursive: true });
+    const release = acquireLaneLock(FIRST_START_LOCK);
+    try { await command(); } finally { release(); }
+  } else await command();
 })().catch((error) => {
   console.error(error.message);
   // Not process.exit(): on Windows it can crash Node while a fetch is still closing.

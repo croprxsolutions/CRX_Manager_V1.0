@@ -12,6 +12,11 @@
  *          does not wait and the customer ends inactive with a posted invoice. After: it waits, then is refused.
  *   #2089b the customer is being deactivated, uncommitted; an invoice is created and posted. Before: the posting
  *          does not wait and lands on the now-inactive customer. After: it waits, then is refused.
+ *   #2526  two payment voids for one customer, each reopening a paid invoice and taking back its prepay, while a
+ *          posting holds the customer FOR SHARE. With FOR SHARE on the reopen both voids shared the lock, then both
+ *          waited to upgrade it for the prepay update: a deadlock. Now both must commit, in every phase.
+ *   Also, after the candidate: posting a draft committed earlier must lock the customer (an insert-only guard
+ *   would not).
  * The draw is written the way every draw path writes it (booking row locked FOR UPDATE, a quote_product_draws
  * row, the booking row updated); posting is the status change every posting function makes. The triggers under
  * test fire on those writes whatever the caller.
@@ -143,11 +148,12 @@ function newCustomer(tag) {
   return customer;
 }
 // kind 'post': a sales invoice created and posted; 'draft': only its draft (KI-148 counts a draft as open work
-// too); 'credit': a credit memo created and posted (allowed for an inactive customer, but it still takes the lock).
+// too); 'credit': a credit memo created and posted (allowed for an inactive customer, but it still takes the lock);
+// 'existing': a draft committed earlier, then posted (only the posting can take the lock).
 const postSql = (customer, invoice, tag, kind = 'post') => `${signedIn}
-  INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number, total_amount_cents)
+  ${kind === 'existing' ? '' : `INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number, total_amount_cents)
     VALUES ('${invoice}', '${customer}', '${kind === 'credit' ? 'credit_memo' : 'misc_charge'}', 'INV2089-${tag}',
-            ${kind === 'credit' ? -500 : 12500});
+            ${kind === 'credit' ? -500 : 12500});`}
   ${kind === 'draft' ? '' : `UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${invoice}';`}`;
 const deactivateSql = (customer) => `${signedIn} UPDATE public.customers SET is_active = false WHERE id = '${customer}';`;
 const state = (customer, invoice) => ({
@@ -158,6 +164,7 @@ const state = (customer, invoice) => ({
 async function postingFirst(tag, kind = 'post') {
   const customer = newCustomer(`${tag}-a-${kind}`);
   const invoice = randomUUID();
+  if (kind === 'existing') psql(`${postSql(customer, invoice, `${tag}-a`, 'draft')} COMMIT;`);
   const p = session(`v021-post-${tag}`);
   p.send(postSql(customer, invoice, `${tag}-a`, kind));
   assert.equal(await settle(p), 'idle', p.output());
@@ -185,6 +192,35 @@ async function deactivationFirst(tag, kind = 'post') {
   return { waited, refused: posted.status !== 0, error: posted.out.trim(), ...state(customer, invoice) };
 }
 
+// #2526 ------------------------------------------------------------------------------------------------------
+async function voidRace(tag) {
+  const customer = newCustomer(`${tag}-void`);
+  const sets = [1, 2].map((n) => {
+    const invoice = randomUUID();
+    psql(`${postSql(customer, invoice, `${tag}-v${n}`)} COMMIT;`);
+    // $150 against the $125 invoice: it is paid and $25 becomes prepay, which the void takes back from the customer.
+    return scalar(`${signedIn} SELECT public.allocate_payment('${customer}', 15000, 'check', 'R2526-${tag}-${n}', NULL,
+      CURRENT_DATE, 'prover', '[{"invoice_id": "${invoice}", "amount_cents": 12500}]'::jsonb) ->> 'allocation_set_id'; COMMIT;`);
+  });
+  const holder = session(`v021-vhold-${tag}`);
+  holder.send(postSql(customer, randomUUID(), `${tag}-vh`));
+  assert.equal(await settle(holder), 'idle', holder.output());
+  const voids = sets.map((set, i) => {
+    const v = session(`v021-void${i}-${tag}`);
+    v.send(`${signedIn} SELECT public.void_payment('${set}', 'prover #2526', NULL, 'v2526-${randomUUID()}');`);
+    return v;
+  });
+  for (const v of voids) await settle(v);
+  await holder.end('COMMIT;');
+  const ends = await Promise.all(voids.map((v) => v.end('COMMIT;')));
+  return {
+    voids: ends.map((e) => (e.status === 0 ? 'ok' : (/deadlock detected/.test(e.out) ? 'deadlock' : e.out.trim()))),
+    prepay: scalar(`SELECT prepay_balance_cents FROM public.customers WHERE id = '${customer}';`),
+    reopened: scalar(`SELECT count(*) FROM public.invoices WHERE customer_id = '${customer}' AND status = 'posted';`),
+  };
+}
+const VOIDS_OK = { voids: ['ok', 'ok'], prepay: '0', reopened: '3' };
+
 const RUN = Date.now().toString(36);  // unique names when a kept container is reused
 async function runAll(phase) {
   const tag = `${phase}-${RUN}`;
@@ -194,6 +230,8 @@ async function runAll(phase) {
     deactFirst: await deactivationFirst(tag),
     draftFirst: await postingFirst(`${tag}-d`, 'draft'),
     deactFirstDraft: await deactivationFirst(`${tag}-d`, 'draft'),
+    existingFirst: await postingFirst(`${tag}-e`, 'existing'),
+    voidRace: await voidRace(tag),
   };
 }
 function assertBroken(r, when) {
@@ -212,6 +250,10 @@ function assertBroken(r, when) {
     assert.deepEqual([r[k].refused, r[k].active, r[k].invoice], [false, 'f', 'draft'],
       `${when} ${k}: should reproduce (inactive customer with an open draft)`);
   }
+  // KI-148 already counts the committed draft, so the deactivation is refused at once, without waiting.
+  assert.notEqual(r.existingFirst.waited, 'lock', `${when}: posting an existing draft takes no lock yet`);
+  assert.deepEqual([r.existingFirst.refused, r.existingFirst.active, r.existingFirst.invoice], [true, 't', 'posted']);
+  assert.deepEqual(r.voidRace, VOIDS_OK, `${when}: two voids for one customer must both commit`);
 }
 
 try {
@@ -253,6 +295,14 @@ try {
   assert.match(after.deactFirstDraft.error, /CUSTOMER_INACTIVE_POSTING/);
   assert.deepEqual([after.deactFirstDraft.active, after.deactFirstDraft.invoice], ['f', 'none']);
   console.log('[v021] AFTER #2089 drafts: the same in both orders for a draft saved during a deactivation');
+  // An insert-only guard passes the races above (insert and post share one transaction); this one posts a draft
+  // committed earlier, so only the posting itself can make the deactivation wait.
+  assert.equal(after.existingFirst.waited, 'lock', 'AFTER: the deactivation must wait for posting an existing draft');
+  assert.match(after.existingFirst.error, /CUSTOMER_HAS_OPEN_WORK/);
+  assert.deepEqual([after.existingFirst.active, after.existingFirst.invoice], ['t', 'posted']);
+  console.log('[v021] AFTER #2089: posting a draft committed earlier locks the customer too; the deactivation waits, then is refused');
+  assert.deepEqual(after.voidRace, VOIDS_OK, 'AFTER #2526: two voids for one customer must both commit (no deadlock)');
+  console.log('[v021] AFTER #2526: two payment voids for one customer during a posting both commit; no deadlock');
   // Credit memos are allowed for an inactive customer (Taha 2026-11-25) but still take the lock, so the race stays closed.
   const creditFirst = await postingFirst(`after-${RUN}-c`, 'credit');
   assert.equal(creditFirst.waited, 'lock', 'a deactivation must wait for a credit memo being posted');

@@ -1,4 +1,4 @@
--- Rollback for 20270307090000_tiny_line_counts_as_zero.sql, proven by
+-- Rollback for 20270307200000_tiny_line_counts_as_zero.sql, proven by
 -- scripts/smoke/prove-tiny-line-counts-as-zero-real-schema.mjs.
 -- Drops the wrapper and gives the unchanged body its old name back, all or nothing. The forward migration wrote no
 -- data; deliveries completed while it was on keep the zeros they were completed with. To use it live, copy it into a new migration through the gates (without BEGIN / COMMIT); never run it by

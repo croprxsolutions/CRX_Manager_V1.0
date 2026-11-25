@@ -272,13 +272,29 @@ const BOOKKEEPING_TYPES = new Set([
   "attachment", "last-prompt", "custom-title", "agent-name", "atis-latch", "pr-link",
   "bridge-session", "file-history-snapshot", "file-history-delta",
 ]);
+// Claude Code 2.1.33x (2026-11-25): the permission-mode marker and the data-flow ledger (tool
+// names and ids only; shapes surveyed on ~31,000 real records). Only those exact shapes are
+// skipped: any other key or value shape, where text could hide, ends the scan (Taha LOW 1, PR #2555).
+const isPlainObject = (o) => o !== null && typeof o === "object" && !Array.isArray(o);
+const keysWithin = (o, allowed) => isPlainObject(o) && Object.keys(o).every((k) => allowed.has(k));
+const MODE_KEYS = new Set(["type", "mode", "sessionId"]);
+const FLOW_KEYS = new Set(["type", "v", "sessionId", "snapshot", "records"]);
+const FLOW_ID_KEYS = new Set(["tool_name", "event_id", "tool_use_id", "mcp_tool_name", "response_id", "mark_sent_by", "plugin_id"]);
+const FLOW_REF_KEYS = new Set(["type", "id", "directory_id", "transport", "kind", "action"]);
+const isFlowValue = (k, v) => FLOW_ID_KEYS.has(k) ? typeof v === "string"
+  : k === "no_message" ? typeof v === "boolean"
+  : k === "listed" ? Array.isArray(v) && v.every((x) => typeof x === "string")
+  : ["server", "touched", "source"].includes(k) ? keysWithin(v, FLOW_REF_KEYS) && Object.values(v).every((x) => x === null || typeof x === "string")
+  : false;
+const isContentFreeMarker = (e) =>
+  (e?.type === "mode" && keysWithin(e, MODE_KEYS) && /^[A-Za-z-]{1,40}$/.test(String(e.mode ?? ""))) ||
+  (e?.type === "data-flow-records" && keysWithin(e, FLOW_KEYS) && Array.isArray(e.records) &&
+    e.records.every((r) => isPlainObject(r) && Object.entries(r).every(([k, v]) => isFlowValue(k, v))));
 const isBookkeeping = (e, currentPrompt) => BOOKKEEPING_TYPES.has(e?.type) ||
   (e?.type === "system" && e.subtype === "stop_hook_summary") ||
   // The turn timer (no content in 267 real records, 2026-11-22); one carrying text still ends the scan.
   (e?.type === "system" && e.subtype === "turn_duration" && (e.content == null || String(e.content).trim() === "")) ||
-  // Claude Code 2.1.33x (2026-11-25): the permission-mode marker ({mode:"normal"}) and the
-  // data-flow ledger (tool names and ids only, ~29,000 real records); one carrying text still ends the scan.
-  ((e?.type === "mode" || e?.type === "data-flow-records") && e.message == null && e.content == null && e.text == null) ||
+  isContentFreeMarker(e) ||
   (e?.type === "queue-operation" &&
     (e.content == null || String(e.content).trim() === String(currentPrompt ?? "").trim()));
 const isToolResult = (e) => e?.type === "user" && Array.isArray(e.message?.content) && e.message.content.length > 0 &&

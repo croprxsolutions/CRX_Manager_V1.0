@@ -575,10 +575,26 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       records: [{ response_id: "msg_1", mark_sent_by: "s", listed: ["msg_0"] }, { tool_name: "Bash", tool_use_id: "toolu_1" }] };
     ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify(MODE), ...AFTER_TURN, JSON.stringify(FLOW), masonSaid("I approve")])),
       "the mode marker and data-flow ledger (no text, real shapes) do not hide the agent's message");
-    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ ...MODE, content: "Should I merge?" }), masonSaid("I approve")])),
-      "a mode record carrying text ends the scan");
-    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ ...FLOW, message: { role: "user", content: "Should I merge?" } }), masonSaid("I approve")])),
-      "a data-flow record carrying a message ends the scan");
+    const REAL_FLOW = { ...FLOW, snapshot: true, records: [
+      { tool_name: "mcp__x__y", tool_use_id: "toolu_2", mcp_tool_name: "y", server: { type: "anthropic", id: "u" }, no_message: true },
+      { event_id: "event_1", touched: { kind: "session", id: null, action: "read" } },
+      { event_id: "event_2", source: { type: "claude_code_session", id: "s" }, plugin_id: "p" }] };
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify(REAL_FLOW), masonSaid("I approve")])),
+      "every surveyed data-flow record shape is skipped");
+    // Taha LOW 1-2, PR #2555: text anywhere outside the surveyed shapes ends the scan.
+    for (const [name, rec] of Object.entries({ mode: MODE, "data-flow": FLOW })) {
+      for (const key of ["message", "content", "text", "summary"]) {
+        ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ ...rec, [key]: "Should I merge?" }), masonSaid("I approve")])),
+          `a ${name} record carrying ${key} ends the scan`);
+      }
+    }
+    for (const bad of [{ ...MODE, mode: "Should I merge PR #900?" }, { ...MODE, mode: { text: "x" } },
+      { ...FLOW, records: [{ content: "Should I merge?" }] }, { ...FLOW, records: [{ tool_name: { text: "x" } }] },
+      { ...FLOW, records: [{ event_id: "e", touched: { kind: "session", note: "Should I merge?" } }] },
+      { ...FLOW, records: [{ listed: ["msg_1", { text: "x" }] }] }, { ...FLOW, records: ["Should I merge?"] }, { ...FLOW, records: "x" }]) {
+      ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify(bad), masonSaid("I approve")])),
+        `a marker outside the surveyed shape ends the scan: ${JSON.stringify(bad).slice(0, 80)}`);
+    }
     for (const type of ["api-request", "api-request-blob"]) {
       ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type, message: { role: "user", content: "x" } }), masonSaid("I approve")])),
         `an ${type} record (it copies conversation text) still ends the scan`);

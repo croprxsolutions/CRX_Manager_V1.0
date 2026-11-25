@@ -589,39 +589,47 @@ export interface NearCostProduct {
  * covers margin-driven, price-driven and cost-only changes alike. Below cost is the database's
  * PRICE_BELOW_COST warning, not this.
  */
+function toCents(value: bigint | number | null | undefined): bigint | null {
+  // BigInt() so a plain-number cents value (as in some test previews) never throws on mixed types.
+  return value == null ? null : BigInt(value);
+}
+
+/** The tiers of one ready row priced within 2% of cost or at a margin under 1%. */
+function nearCostTiers(effect: PricingEffect, cost: bigint): NearCostTier[] {
+  const tiers: NearCostTier[] = [];
+  for (const tier of [1, 2, 3] as const) {
+    const price = toCents(effect[`tier${tier}_price_cents`]);
+    if (price === null) continue;
+    const margin = effect[`tier${tier}_margin`];
+    const fraction = margin != null && margin > 0 && margin < 0.01;
+    if (!fraction && !(price >= cost && price * 100n <= cost * 102n)) continue;
+    tiers.push({
+      tier, price_cents: price, cost_cents: cost,
+      fraction_margin_percent: fraction ? (effect[`tier${tier}_margin_percent`] ?? formatPricingMarginPercent(margin)) : null,
+    });
+  }
+  return tiers;
+}
+
 export function nearCostProducts(rows: readonly PricingPreviewRow[]): NearCostProduct[] {
-  const found: NearCostProduct[] = [];
+  const found = new Map<string, NearCostProduct>();
   for (const row of rows) {
     const effect = row.effect;
     if (row.row_status !== 'ready' || !effect || !row.product_id || effect.pricing_changed === false) continue;
-    // BigInt() so a plain-number cents value (as in some test previews) never throws on mixed types.
-    const cost = effect.cost_cents == null ? null : BigInt(effect.cost_cents);
-    if (cost === null || cost <= 0n) continue;
-    const tiers: NearCostTier[] = [];
-    for (const tier of [1, 2, 3] as const) {
-      const raw = effect[`tier${tier}_price_cents`];
-      const price = raw == null ? null : BigInt(raw);
-      const margin = effect[`tier${tier}_margin`];
-      const fraction = margin != null && margin > 0 && margin < 0.01;
-      if (price !== null && (fraction || (price >= cost && price * 100n <= cost * 102n))) {
-        tiers.push({
-          tier, price_cents: price, cost_cents: cost,
-          fraction_margin_percent: fraction ? (effect[`tier${tier}_margin_percent`] ?? formatPricingMarginPercent(margin)) : null,
-        });
-      }
-    }
+    const cost = toCents(effect.cost_cents);
+    const tiers = cost !== null && cost > 0n ? nearCostTiers(effect, cost) : [];
     if (tiers.length === 0) continue;
     // One entry (and one tick) per product, even if a sheet lists it twice.
-    const existing = found.find((product) => product.product_id === row.product_id);
+    const existing = found.get(row.product_id);
     if (existing) { existing.tiers.push(...tiers); continue; }
     const name = effect.product_name ?? row.submitted_row.product_name;
-    found.push({
+    found.set(row.product_id, {
       product_id: row.product_id,
       product_name: typeof name === 'string' && name.trim() ? name : row.product_id,
       tiers,
     });
   }
-  return found;
+  return [...found.values()];
 }
 
 /** The database's limit on an acknowledgement reason (approve_pricing_change_set). */

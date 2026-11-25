@@ -51,7 +51,7 @@ import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { digestIntentPayload, fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { isValidDeliveredOn, isValidNoProofReason, MAX_PAPER_TICKET_PHOTOS, NO_PROOF_REASON_MAX_CHARS, NO_PROOF_REASON_MIN_CHARS, NO_PROOF_SIGNER, noProofReasonLength, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
-import { buildLinesSeen, COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, sameLinesSeen, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, mergePhotosById, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadEvidencePhoto, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, countTicketPhotosForLoad, COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, sameLinesSeen, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, mergePhotosById, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadEvidencePhoto, uploadSignatureImage } from '../lib/deliveryEvidence';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
 import { useLoadBoundSignature } from '../hooks/useLoadBoundSignature';
 import { notifyDeliveryCompleted } from '../lib/notificationTriggers';
@@ -2332,7 +2332,7 @@ export default function Deliveries() {
                   // The lines on screen at the shutter, saved with the photo (20270305110000).
                   const linesAtPhoto = currentCompleteLinesRef.current;
                   if (!file || !target || !profile || !linesAtPhoto) return;
-                  if (currentTicketPhotos.length >= MAX_PAPER_TICKET_PHOTOS) {
+                  if (countTicketPhotosForLoad(currentTicketPhotos, currentCompleteLines) >= MAX_PAPER_TICKET_PHOTOS) {
                     toast('error', `Maximum ${MAX_PAPER_TICKET_PHOTOS} ticket photos per delivery`);
                     return;
                   }
@@ -2369,7 +2369,7 @@ export default function Deliveries() {
                 variant="secondary"
                 onClick={() => ticketInputRef.current?.click()}
                 loading={uploadingTicket}
-                disabled={!isOnline || !currentCompleteLines || currentTicketPhotos.length >= MAX_PAPER_TICKET_PHOTOS}
+                disabled={!isOnline || !currentCompleteLines || countTicketPhotosForLoad(currentTicketPhotos, currentCompleteLines) >= MAX_PAPER_TICKET_PHOTOS}
               >
                 Add Photo of Signed Ticket
               </Button>

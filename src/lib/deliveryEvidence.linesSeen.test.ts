@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildLinesSeen, hasDeliveredAmount, isLoadProofRefusal, LINES_LOADING_MESSAGE, loadProofProblem, NOTHING_DELIVERED_MESSAGE,
+  buildLinesSeen, countTicketPhotosForLoad, hasDeliveredAmount, isLoadProofRefusal, LINES_LOADING_MESSAGE, loadProofProblem, NOTHING_DELIVERED_MESSAGE,
   sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE,
 } from './deliveryEvidence';
+import { PAPER_TICKET_PHOTO_CAPTION } from './paperTicket';
 
 // Mirrors the server's _delivery_lines_match (migration 20270305110000): a multiset of
 // (order line, product, quantity, delivered), delivered kept between 0 and the quantity.
@@ -43,6 +44,19 @@ describe('proof bound to the load', () => {
     const a = buildLinesSeen(items);
     expect(sameLinesSeen([{ ...a[0], delivered: 0.1234564 }], [{ ...a[0], delivered: 0.12345649 }])).toBe(true);
     expect(sameLinesSeen([{ ...a[0], delivered: 0.123456 }], [{ ...a[0], delivered: 0.123457 }])).toBe(false);
+  });
+
+  it('counts only ticket photos taken for the current load toward the cap', () => {
+    const a = buildLinesSeen(items);
+    const stale = [{ ...a[0], delivered: 1 }, a[1]];
+    const photos = [
+      { caption: PAPER_TICKET_PHOTO_CAPTION, lines_seen: stale },
+      { caption: PAPER_TICKET_PHOTO_CAPTION, lines_seen: null },
+      { caption: PAPER_TICKET_PHOTO_CAPTION, lines_seen: a },
+      { caption: 'Delivery photo', lines_seen: a },
+    ];
+    expect(countTicketPhotosForLoad(photos, a)).toBe(1);
+    expect(countTicketPhotosForLoad(photos, null)).toBe(0);
   });
 
   it('clamps delivered to [0, quantity] on both sides', () => {

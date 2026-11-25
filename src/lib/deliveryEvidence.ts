@@ -14,7 +14,7 @@
 import { supabase, assertRpcResult, checkMutationResult } from './db';
 import { compressImage } from './imageCompression';
 import { Sentry } from './sentry';
-import { normalizeNoProofReason } from './paperTicket';
+import { normalizeNoProofReason, PAPER_TICKET_PHOTO_CAPTION } from './paperTicket';
 import type { DeliveryEvidencePhoto, ReceiptRecipient } from '../types';
 
 /**
@@ -291,6 +291,15 @@ function lineSeenKey(line: LineSeen): string {
   const quantity = Number(line.quantity);
   const delivered = Math.max(0, Math.min(Number(line.delivered), quantity));
   return `${String(line.order_item_id).toLowerCase()}|${String(line.product_id).toLowerCase()}|${quantity.toFixed(6)}|${delivered.toFixed(6)}`;
+}
+
+/** Ticket photos taken for these lines: only they count toward the photo cap, so a photo of an older load never
+ * blocks the photo the current load needs (Luna). */
+export function countTicketPhotosForLoad(
+  photos: ReadonlyArray<{ caption?: string | null; lines_seen?: ReadonlyArray<LineSeen> | null }>,
+  lines: ReadonlyArray<LineSeen> | null | undefined,
+): number {
+  return photos.filter((photo) => photo.caption === PAPER_TICKET_PHOTO_CAPTION && sameLinesSeen(photo.lines_seen, lines)).length;
 }
 
 /** True when both lists hold the same entries, each as many times (the server's _delivery_lines_match). */

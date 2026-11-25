@@ -569,6 +569,20 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       "the turn timer record (no text, real shape) does not hide the agent's message");
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ ...TIMER, content: "Should I merge?" }), masonSaid("I approve")])),
       "a turn timer record carrying text ends the scan");
+    // Real shapes from a 2026-11-25 transcript where "skip" was refused.
+    const MODE = { type: "mode", mode: "normal", sessionId: "s" };
+    const FLOW = { type: "data-flow-records", v: 1, sessionId: "s",
+      records: [{ response_id: "msg_1", mark_sent_by: "s", listed: ["msg_0"] }, { tool_name: "Bash", tool_use_id: "toolu_1" }] };
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify(MODE), ...AFTER_TURN, JSON.stringify(FLOW), masonSaid("I approve")])),
+      "the mode marker and data-flow ledger (no text, real shapes) do not hide the agent's message");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ ...MODE, content: "Should I merge?" }), masonSaid("I approve")])),
+      "a mode record carrying text ends the scan");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ ...FLOW, message: { role: "user", content: "Should I merge?" } }), masonSaid("I approve")])),
+      "a data-flow record carrying a message ends the scan");
+    for (const type of ["api-request", "api-request-blob"]) {
+      ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type, message: { role: "user", content: "x" } }), masonSaid("I approve")])),
+        `an ${type} record (it copies conversation text) still ends the scan`);
+    }
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "system", subtype: "compact_boundary" })])),
       "a compaction after the agent's message ends the scan");
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "system", subtype: "informational", content: "Should I merge?" })])),

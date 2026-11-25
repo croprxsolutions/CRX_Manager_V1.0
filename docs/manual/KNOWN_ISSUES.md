@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-23 for the live ledger only (latest live row `20261121061349`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates. Triage 2026-11-22: see changelog.d.
+**Last verified:** 2026-11-25 for the live ledger only (latest live row `20261124070916`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates. Triage 2026-11-22: see changelog.d.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -1548,7 +1548,10 @@ improvement candidates" table. To-Do section 17; decisions 34 and 35.
   uninvoiced order.
 - Purchasing: show ordered cost, receipt snapshot, corrected PO cost and current product cost distinctly, and the
   effect of a correction before it is applied.
-- Pricing workbook: point at the invalid row when Apply is disabled; tell an already-applied replay from a bad file.
+- Pricing workbook: point at the invalid row when Apply is disabled. (A refused upload now names its one reason, already used,
+  another user's, expired or not on record, when the reason lookup answers within 5 seconds; otherwise it keeps the
+  general message: `docs/plans/2026-11-24-price-sheet-refusal-reason-CONTRACT.md`. A real
+  v1 sheet still stops at the parser's "format is not supported" before any lookup.)
 - Pricing history: label current tier, last charged and quoted amounts with their scope, date and source.
 - Office exceptions and documents: an end-to-end dashboard-to-fix check by role, and one quote-to-statement trail
   that highlights differences.

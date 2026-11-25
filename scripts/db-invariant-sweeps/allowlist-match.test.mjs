@@ -41,7 +41,9 @@ try {
   // 45 after 2026-11-19 (20270201100000, KI-119): get_sales_summary_report gains a candidate entry beside its live one
   //    (page access guard added first; prune the live one after the apply).
   // 48 after 2026-11-24: +2 for the two blend invoice predicates and +1 for the live PO variant.
-  equal(actorEntries.length, 48, '48 reviewed actor contract sets');
+  // 49 after 2026-11-24 (field FP-1): save_field gains a candidate entry beside its live one
+  //    (its impl body is replaced; prune the live one after the apply).
+  equal(actorEntries.length, 49, '49 reviewed actor contract sets (save_field has a live and an FP-1 candidate entry)');
   check(!allowlist.entries.some((entry) => entry.predicate === 'audit-log-completeness' &&
     entry.violation_key === 'financial_audit_log:actor-contract'), 'audit actor configuration drift must stay unallowlisted');
   const blendEntries = actorEntries.filter((entry) => entry.violation_key.startsWith('create_invoice_from_blend_ticket('));

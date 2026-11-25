@@ -10,6 +10,7 @@ const { mockRpc, mockAssertRpcResult } = vi.hoisted(() => ({
 
 vi.mock('./db', () => ({
   supabase: { rpc: mockRpc },
+  supabaseUntyped: { rpc: mockRpc },
   assertRpcResult: mockAssertRpcResult,
 }));
 
@@ -21,6 +22,8 @@ import {
   createPricingWorkbookExport,
   defaultPricingMode,
   formatPricingMarginPercent,
+  getPricingWorkbookExportRefusalReason,
+  REFUSAL_REASON_TIMEOUT_MS,
   pricingDollarInputToCents,
   pricingMarginTextIsValid,
   previewProductPricingChanges,
@@ -223,6 +226,56 @@ describe('assertPricingPreviewRowsSafe', () => {
       new_cost: '0.00',
       product_name: 'Price-driven Product',
     }])).not.toThrow();
+  });
+});
+
+describe('getPricingWorkbookExportRefusalReason', () => {
+  const answers = (response: Promise<unknown>) => {
+    const abortSignal = vi.fn(() => response);
+    mockRpc.mockReturnValueOnce({ abortSignal });
+    return abortSignal;
+  };
+  beforeEach(() => mockRpc.mockReset());
+
+  it('asks for one export by id, with a time limit, and returns the code', async () => {
+    const abortSignal = answers(Promise.resolve({ data: 'ALREADY_APPLIED', error: null }));
+    await expect(getPricingWorkbookExportRefusalReason('export-1')).resolves.toBe('ALREADY_APPLIED');
+    expect(mockRpc).toHaveBeenCalledWith('get_pricing_workbook_export_refusal_reason', { p_export_id: 'export-1' });
+    expect(abortSignal).toHaveBeenCalledWith(expect.any(AbortSignal));
+  });
+
+  it('throws on an error or on no data (a silent denial)', async () => {
+    answers(Promise.resolve({ data: null, error: { message: 'ADMIN_REQUIRED' } }));
+    await expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toMatchObject({ message: 'ADMIN_REQUIRED' });
+    answers(Promise.resolve({ data: null, error: null }));
+    await expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toThrow(/returned no data/);
+  });
+
+  it('arms no timer when the request cannot even be built', async () => {
+    vi.useFakeTimers();
+    try {
+      mockRpc.mockImplementationOnce(() => { throw new Error('client not ready'); });
+      await expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toThrow('client not ready');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up when the database never answers, so the screen keeps the general message', async () => {
+    vi.useFakeTimers();
+    try {
+      const abortSignal = answers(new Promise(() => undefined));
+      const lookup = expect(getPricingWorkbookExportRefusalReason('export-1')).rejects.toMatchObject({ name: 'TimeoutError' });
+      const signal = (abortSignal.mock.calls[0] as unknown as [AbortSignal])[0];
+      expect(signal.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(REFUSAL_REASON_TIMEOUT_MS + 1);
+      await lookup;
+      // The stalled request itself is cancelled, not just abandoned.
+      expect(signal.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -65,7 +65,8 @@ const ROW_ERROR_MESSAGES: Record<string, string> = {
   PRICE_UNIT_REQUIRED: 'Enter the supplier price unit.',
   COST_INVALID: 'The cost is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34.',
   COST_MUST_BE_POSITIVE: 'The cost must be more than $0.',
-  PACKAGE_QUANTITY_INVALID: 'Package quantity must be a number above 0.',
+  COST_TOO_LARGE: 'The cost is over $10,000,000 for one line. Check the amount.',
+  PACKAGE_QUANTITY_INVALID: 'Package quantity must be a number of at least 0.001.',
   EFFECTIVE_DATE_INVALID: 'The effective date is not a valid date.',
   EFFECTIVE_RANGE_INVALID: 'The end date is before the effective date.',
   FORMULA_NOT_ALLOWED: 'This row has an Excel formula. Replace it with a plain value.',
@@ -910,6 +911,14 @@ export default function SupplierPricing() {
           <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-900">
             You are adding {selectedRowIds.size} supplier observations. You are changing ZERO sell prices.
           </div>
+          {/* Mason, 2026-11-24: an archived supplier's quote stays approvable, with a warning. The workspace lists only
+              suppliers that are not archived, and evidence and cost basis skip archived suppliers. */}
+          {review.status === 'needs_review' && workspace && !workspace.vendors.some((vendor) => vendor.id === review.vendor_id) && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              This supplier is archived. Approving saves the price, but it won&apos;t show in supplier evidence or cost basis
+              unless the supplier is restored.
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className="border-b border-gray-200 text-xs uppercase text-secondary">

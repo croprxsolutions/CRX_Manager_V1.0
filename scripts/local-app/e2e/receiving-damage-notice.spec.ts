@@ -26,10 +26,13 @@ test('Purchase Order Detail and Quick Receive send damage notices for saved item
   const detail = fixture('PO Detail');
   const quick = fixture('Quick');
   const detailExtraName = `${detail.productName} Extra`;
+  const unmatchedName = `Invented Unmatched Receiving ${randomUUID().slice(0, 8)}`;
   const extraProduct = randomUUID();
   localSql(`BEGIN;
     INSERT INTO public.products (id, product_name, category, product_form, inventory_unit)
       VALUES ('${extraProduct}', '${detailExtraName}', 'Herbicide', 'liquid', 'Gal');
+    INSERT INTO public.products (product_name, category, product_form, inventory_unit)
+      VALUES ('${unmatchedName}', 'Herbicide', 'liquid', 'Gal');
     INSERT INTO public.purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received, unit_cost, unit_size)
       VALUES ('${detail.po}', '${extraProduct}', 10, 0, 1.00, 'gal');
     COMMIT;`);
@@ -73,13 +76,19 @@ test('Purchase Order Detail and Quick Receive send damage notices for saved item
 
   await page.goto('/receiving?tab=quick');
   await page.getByRole('button', { name: 'Add First Product' }).click();
-  await page.getByRole('button', { name: /select product/i }).click();
-  await page.getByPlaceholder('Search by name, SKU, or vendor...').fill(quick.productName);
-  await page.getByRole('button', { name: new RegExp(quick.productName) }).click();
-  await page.getByRole('spinbutton', { name: /quantity received/i }).fill('2');
-  await page.getByRole('button', { name: 'Expand details' }).click();
+  const chooseProduct = async (name: string, quantity: string) => {
+    await page.getByRole('button', { name: /select product/i }).last().click();
+    await page.getByPlaceholder('Search by name, SKU, or vendor...').fill(name);
+    await page.getByRole('button', { name: new RegExp(name) }).click();
+    await page.getByRole('spinbutton', { name: /quantity received/i }).last().fill(quantity);
+  };
+  await chooseProduct(unmatchedName, '1');
+  await page.getByRole('button', { name: 'Add Product', exact: true }).click();
+  await chooseProduct(quick.productName, '2');
+  await page.getByRole('button', { name: 'Expand details' }).last().click();
   await conditionPicker.selectOption('damaged');
-  await page.getByRole('button', { name: /review & match \(1 item\)/i }).click();
+  await page.getByRole('button', { name: /review & match \(2 items\)/i }).click();
+  await page.getByRole('radio', { name: 'Skip this product entirely' }).check();
   await page.getByRole('button', { name: /confirm & receive/i }).click();
   await expect(page.getByRole('button', { name: 'Receive Another Shipment' })).toBeVisible();
   await checkNotice(quick);

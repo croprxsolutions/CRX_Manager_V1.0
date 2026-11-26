@@ -477,11 +477,13 @@ These RPCs are called from `src/` but had no entry in this file. Each purpose wa
 
 ### Watchdog and label data
 
+Browser writes to Watchdog flags and dismissals go through `refresh_watchdog_flags` and `dismiss_watchdog_flag`. The table grants are read-only for browser roles.
+
 | RPC | Latest definition | Purpose |
 |-----|-------------------|---------|
-| `get_watchdog_flags` | `20260629220000` | `(p_job_id, p_invoice_id, p_flag_type, p_include_dismissed)`. Read the advisory watchdog flags. |
+| `get_watchdog_flags` | `20261113110000` | `(p_job_id, p_invoice_id, p_flag_type, p_include_dismissed)`. Read the advisory watchdog flags. |
 | `refresh_watchdog_flags` | `20260630170000` | `(p_job_id, p_acre_divergence_threshold, p_rate_fallback_multiple)` → jsonb. Admin/sales_rep. Recomputes the four watchdog flag types. Takes no idempotency key. |
-| `dismiss_watchdog_flag` | `20260629220000` | `(p_flag_id, p_resolution, p_note, p_performed_by, p_idempotency_key)` → jsonb. Admin/sales_rep, strict actor; resolution is `looks_fine` or `needs_fix`. |
+| `dismiss_watchdog_flag` | `20261114200000` | `(p_flag_id, p_resolution, p_note, p_performed_by, p_idempotency_key)` → jsonb. Admin/sales_rep with a bound actor. Resolution is `looks_fine` or `needs_fix`. |
 | `create_label_draft` | `20260629210000` | Admin-only. Stages a product label-data draft for review. |
 | `commit_label_draft` | `20260629210000` | Admin-only. Accepts, edits, or rejects a pending label draft; accepted values fill only empty product fields unless the caller passes an explicit force-overwrite. |
 | `get_label_coverage_report` | `20260629210000`, `20270304110000` (candidate) | Read-only label-field coverage across products. REI/PHI count as covered with a number or the "label gives no REI/PHI" tick (#2500). |

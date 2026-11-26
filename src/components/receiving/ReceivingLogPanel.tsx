@@ -47,7 +47,8 @@ export default function ReceivingLogPanel() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const reverseRecIdem = useIdempotencyKey('reverse_receiving_record', profile?.id || '');
-  const canBulkAction = role === 'admin' || role === 'sales_rep';
+  const isAdmin = role === 'admin';
+  const canBulkAction = isAdmin || role === 'sales_rep';
 
   const [records, setRecords] = useState<ReceivingRecord[]>([]);
   const [summary, setSummary] = useState<ReceivingSummary | null>(null);
@@ -203,6 +204,7 @@ export default function ReceivingLogPanel() {
   };
 
   const handleBulkDelete = async () => {
+    if (!isAdmin) return;
     await runCriticalAction({
       action: async () => {
         const ids = selectedRows.map((r) => r.id);
@@ -274,7 +276,9 @@ export default function ReceivingLogPanel() {
   const bulkActions = [
     { key: 'csv', label: 'Export CSV', icon: <Download className="w-4 h-4" />, onClick: handleExportCSV },
     { key: 'pdf', label: 'Download PDF', icon: <FileText className="w-4 h-4" />, onClick: handleExportPDF, loading: exporting },
-    { key: 'delete', label: 'Delete', icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeleteModalOpen(true), variant: 'danger' as const },
+    ...(isAdmin ? [
+      { key: 'delete', label: 'Delete', icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeleteModalOpen(true), variant: 'danger' as const },
+    ] : []),
   ];
 
   /* ─── Columns ─── */
@@ -657,7 +661,7 @@ export default function ReceivingLogPanel() {
       </Card>
 
       <BulkDeleteConfirmModal
-        open={deleteModalOpen}
+        open={isAdmin && deleteModalOpen}
         onClose={() => setDeleteModalOpen(false)}
         count={selectedCount}
         entityName="receiving record"

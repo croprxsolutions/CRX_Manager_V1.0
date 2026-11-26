@@ -162,8 +162,9 @@ list exactly. Trying that path for real needed these additions, all in the throw
 - **Each file gets one transaction,** as a live apply does. Some files assume it.
 - **Files keep the name live's ledger uses,** because later migrations look for it. The CLI stores what
   follows the version, so a workdir file is named `<version>_<whole file name>`.
-- **The baseline is decoded with `--with-live-rows`,** as the real-schema proofs do, so a migration whose
-  postcondition needs a live row (KI-85's active Main Warehouse) replays. Never use that flag for a real restore.
+- **The walkthrough restores the schema and invented reference fixtures.** KI-85 still needs an active row
+  named Main Warehouse. The walkthrough provides its own ID and code. The older local profiles decode the
+  baseline with `--with-live-rows` for their migration prerequisites. Never use that flag for a real restore.
 - **One-shot data fixes are recorded, never run.** They target live rows and this database has no other
   business rows. Each is recorded at its place in the order, because later migrations check for it and earlier ones
   check that nothing newer exists.

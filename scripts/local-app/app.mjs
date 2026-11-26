@@ -227,15 +227,20 @@ async function startServices(state) {
 
 function restoreBaseline() {
   const { restore_order: order } = JSON.parse(readFileSync(path.join(BASELINE, 'manifest.json'), 'utf8'));
+  const decoderArgs = ['scripts/decompress-schema-baseline.mjs'];
+  if (!IS_SCREEN_WALK) decoderArgs.push('--with-live-rows');
   for (const name of order) {
     // A hosted project already has this ledger table; a local one gets the same shape first.
     if (name.includes('migration_history')) {
       psql('CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, name text NOT NULL, statements text[]);');
     }
     const sql = name.endsWith('.br')
-      ? run(process.execPath, ['scripts/decompress-schema-baseline.mjs', '--with-live-rows']).stdout
+      ? run(process.execPath, decoderArgs).stdout
       : readFileSync(path.join(BASELINE, name));
     psql(sql, { user: name.includes('platform_overlay') ? 'supabase_admin' : 'postgres' });
+    if (IS_SCREEN_WALK && name.endsWith('.br')) {
+      psql(readFileSync(path.join(HERE, 'walkthrough-reference-fixtures.sql')));
+    }
   }
 }
 

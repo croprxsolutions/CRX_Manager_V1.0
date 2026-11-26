@@ -48,20 +48,20 @@ describe('role audit controls', () => {
     const view = render(<CropPrograms />);
     await screen.findByRole('heading', { name: cropProgram.name });
     fireEvent.click(screen.getByRole('button', { name: 'Expand program' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(screen.getByRole('dialog', { name: 'Delete Program?' })).toBeInTheDocument();
 
     mocks.role = 'sales_rep';
     view.rerender(<CropPrograms />);
     expect(screen.getByText('Invented Product')).toBeInTheDocument();
     for (const name of ['New Program', 'Edit', 'Duplicate', 'Delete', 'Deactivate Program']) {
-      expect(screen.queryByRole('button', { name, exact: true })).toBeNull();
+      expect(screen.queryByRole('button', { name })).toBeNull();
     }
     expect(screen.queryByRole('dialog')).toBeNull();
 
     mocks.role = 'admin';
     view.rerender(<CropPrograms />);
-    expect(screen.getByRole('button', { name: 'Delete', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
@@ -79,7 +79,7 @@ describe('role audit controls', () => {
     const panel = () => <MemoryRouter><ReceivingLogPanel /></MemoryRouter>;
     const view = render(panel());
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Select Invented Product' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     const confirmation = { name: 'Delete 1 receiving record?' };
     expect(screen.getByRole('heading', confirmation)).toBeInTheDocument();
 
@@ -87,12 +87,12 @@ describe('role audit controls', () => {
     view.rerender(panel());
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download PDF' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Delete', exact: true })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
     expect(screen.queryByRole('heading', confirmation)).toBeNull();
 
     mocks.role = 'admin';
     view.rerender(panel());
-    expect(screen.getByRole('button', { name: 'Delete', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', confirmation)).toBeNull();
     expect(mocks.rpc).not.toHaveBeenCalledWith('reverse_receiving_record', expect.anything());
   });
@@ -107,7 +107,7 @@ describe('role audit controls', () => {
       select: () => ({ eq: () => ({ maybeSingle: async () => result }), order: async () => ({ data: [], error: null }) }),
     });
     render(<CropPrograms />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit', exact: true }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
     const save = screen.getByRole('button', { name: 'Save Changes' });
     fireEvent.click(save);
     await waitFor(() => expect(mocks.logActivity).toHaveBeenCalledTimes(1));

@@ -105,6 +105,37 @@ try {
   r = validate(b);
   assert.notEqual(r.status, 0, "renamed migration onto a used stamp must block\n" + r.stdout + r.stderr);
   pass++;
+
+  // Merging staging stages its landed migrations as ADDED; a stale draft in another worktree must not block them.
+  git(b, "reset", "-q", "--hard");
+  const landed = "20261102270000_landed.sql";
+  write(main, landed, "select 'final';\n");
+  git(main, "add", "-A");
+  git(main, "commit", "-q", "-m", "landed");
+  git(main, "update-ref", "refs/remotes/origin/staging", "HEAD");
+  write(a, landed, "select 'old draft';\n");
+  write(b, landed, "select 'final';\r\n");
+  git(b, "add", `supabase/migrations/${landed}`);
+  r = validate(b);
+  assert.equal(r.status, 0, "migration identical to origin/staging must pass\n" + r.stdout + r.stderr);
+  pass++;
+
+  // The same name with content that differs from origin/staging is still checked.
+  git(b, "reset", "-q");
+  write(b, landed, "select 'rewritten';\n");
+  git(b, "add", `supabase/migrations/${landed}`);
+  r = validate(b);
+  assert.notEqual(r.status, 0, "changed copy of a landed migration must still block\n" + r.stdout);
+  pass++;
+
+  // A NEW file reusing a landed stamp is still blocked.
+  git(b, "reset", "-q");
+  rmSync(join(b, "supabase/migrations", landed));
+  write(b, "20261102270000_new.sql", "select 'new';\n");
+  git(b, "add", "supabase/migrations/20261102270000_new.sql");
+  r = validate(b);
+  assert.notEqual(r.status, 0, "new file reusing a landed stamp must block\n" + r.stdout);
+  pass++;
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

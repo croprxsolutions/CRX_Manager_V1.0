@@ -32,7 +32,13 @@ if (added === null || top === null || porcelain === null) {
 const mine = added.split("\n").map((p) => p.trim())
   .filter((p) => STAMP.test(p.slice(DIR.length + 1)))
   // An unreadable staged blob stays null, so it never matches and is refused.
-  .map((p) => ({ name: p.slice(DIR.length + 1), content: git(["show", `:${p}`])?.replace(/\r\n/g, "\n") ?? null }));
+  .map((p) => ({ name: p.slice(DIR.length + 1), content: git(["show", `:${p}`])?.replace(/\r\n/g, "\n") ?? null }))
+  // Merging staging stages its migrations as ADDED; one identical to staging/main has already landed,
+  // so an old draft in a stale worktree must not block it. Unreadable refs fall through to the check.
+  .filter((m) => m.content === null || !["origin/staging", "origin/main"].some((ref) => {
+    const landed = git(["show", `${ref}:${DIR}/${m.name}`]);
+    return landed !== null && lf(landed) === m.content;
+  }));
 if (mine.length === 0) process.exit(0);
 
 const self = normPath(top.trim());

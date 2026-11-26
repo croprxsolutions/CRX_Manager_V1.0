@@ -7,11 +7,14 @@
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container, replays
  * every post-baseline migration before the candidate (staging's current transfer body), then runs completed jobs
  * through the app's own transfer_job_to_invoice as a signed-in admin, each case rolled back.
- *   BEFORE:   a $100.00 line split 50.01% / 50.00% bills $100.01; 10 Gal at $12.34 in thirds bills $123.39.
- *   AFTER:    every priced line's owner amounts add up to the line to the cent (one and two products, two and three
- *             owners); quantities, unit prices, per-unit costs, booked costs, member headers and shares, the anchor,
- *             single-owner and customer-supplied invoices are unchanged; the body differs from the pinned one only
- *             in the line amount; grants unchanged; a second apply stops at the preflight.
+ *   BEFORE:   a $100.00 line split 50.01% / 50.00% bills $100.01; 10 Gal at $12.34 in thirds bills $123.39; a 3-cent
+ *             line in three bills 4 cents; 1 Gal at $9,999.99 in three bills $10,000.00.
+ *   AFTER:    every priced line's owner amounts add up to the line to the cent, split by acre share (one and two
+ *             products, two and three owners), and an owner with a quantity bills at least 1 cent when the line has
+ *             enough cents (else the line is refused by name, as before); quantities, unit prices, per-unit costs,
+ *             booked costs, member headers and shares, the anchor, single-owner and customer-supplied invoices are
+ *             unchanged; the body differs from the pinned one only in the line amount; grants unchanged; a second
+ *             apply stops at the preflight.
  *   ROLLBACK: re-emitting the 20270303100000 body restores its md5 and the old amounts.
  *
  * Run: node scripts/smoke/prove-job-invoice-split-cents-real-schema.mjs   (needs Docker)
@@ -252,11 +255,11 @@ function okProbe(sql, uid) { const r = probe(sql, uid); assert.equal(r.status, 0
 const id = (s) => `c3c3c3c3-1126-4000-8000-${String(s).padStart(12, '0')}`;
 // Farms A < B < C by id (owners are ordered by id, so ties go to A first).
 const ADMIN = id('a1'), A = id('c1'), B = id('c2'), C = id('c3');
-const G = id('f1'), F2 = id('f2'), F3A = id('f3a'), F3B = id('f3b'), F3C = id('f3c');
+const G = id('f1'), F2 = id('f2'), F3A = id('f3a'), F3B = id('f3b'), F3C = id('f3c'), F4 = id('f4');
 const X = id('d1'), Y = id('d2'), Z = id('d3');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const OLD_IMPL = '53ecf1279da3aa7ea1590f440c6eb225';  // 20270303100000 (staging's current body)
-const NEW_IMPL = '0474c1e7dfd148226e376c6335c7fadf';
+const NEW_IMPL = '2714b8df71f9e191c5d11e41f205473d';
 const md5Of = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 const meta = (sig) => scalar(`SELECT concat_ws('|', prosecdef, proowner::regrole, proconfig::text, coalesce(proacl::text, '-')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 
@@ -275,11 +278,12 @@ function seed() {
       ('${Z}', '[PROVER] JC Z', 'JC-Z', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 5, 9, 9, 9, true, false, NULL);
     INSERT INTO public.fields (id, customer_id, field_name, total_acres, is_active) VALUES
       ('${G}', '${A}', '[PROVER] JC field A', 100, true), ('${F2}', '${A}', '[PROVER] JC field A+B', 100, true),
-      ('${F3A}', '${A}', '[PROVER] JC third A', 100, true), ('${F3B}', '${B}', '[PROVER] JC third B', 100, true),
-      ('${F3C}', '${C}', '[PROVER] JC third C', 100, true);
+      ('${F3A}', '${A}', '[PROVER] JC third A', 1000, true), ('${F3B}', '${B}', '[PROVER] JC third B', 1000, true),
+      ('${F3C}', '${C}', '[PROVER] JC third C', 1000, true), ('${F4}', '${A}', '[PROVER] JC field A+B+C', 100, true);
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary, price_override_cents) VALUES
       ('${G}', '${A}', 100, true, NULL), ('${F2}', '${A}', 50.01, true, NULL), ('${F2}', '${B}', 50.00, false, NULL),
-      ('${F3A}', '${A}', 100, true, NULL), ('${F3B}', '${B}', 100, true, NULL), ('${F3C}', '${C}', 100, true, NULL);`);
+      ('${F3A}', '${A}', 100, true, NULL), ('${F3B}', '${B}', 100, true, NULL), ('${F3C}', '${C}', 100, true, NULL),
+      ('${F4}', '${A}', 16.67, true, NULL), ('${F4}', '${B}', 23.33, false, NULL), ('${F4}', '${C}', 60.00, false, NULL);`);
   // Test-only helpers (prover database only), callable by the signed-in admin so each case runs as the real caller.
   psql(`CREATE SCHEMA jx AUTHORIZATION supabase_admin;
     -- A completed job for farm A on p_fields (p_acres each); p_lines: [{"p": product, "q": Gal, "c": price cents, "s": grower's own}].
@@ -316,13 +320,18 @@ function seed() {
                x.cost_cents, public.safe_cents_qty(x.cost_cents, x.quantity), x.acres, x.sort_order), ' ' ORDER BY c.farm_name, x.sort_order)
         FROM invoices i JOIN customers c ON c.id = i.customer_id JOIN invoice_items x ON x.invoice_id = i.id
        WHERE i.job_id = p_job AND i.deleted_at IS NULL $f$;
-    -- What every reader relies on: each header bills its lines and books their cost, its share(s) carry the header, the
-    -- job points at the primary owner's invoice (the anchor), and the invoices are unposted.
+    -- What every reader relies on: each header bills its lines and books their cost (a fee line's cost is its total), its
+    -- share carries the header, the job points at the primary owner's invoice (the anchor), and the invoices are unposted.
+    -- Sol r1: a member with no lines or no share compares as 0 (never NULL, which bool_and would skip), and has a share.
     CREATE FUNCTION jx.ties(p_job uuid) RETURNS text LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $f$
-      SELECT CASE WHEN bool_and(i.total_amount_cents = (SELECT sum(x.extended_cents) FROM invoice_items x WHERE x.invoice_id = i.id)
-                    AND i.total_cost_cents = (SELECT sum(public.safe_cents_qty(x.cost_cents, x.quantity)) FROM invoice_items x WHERE x.invoice_id = i.id)
-                    AND i.total_amount_cents = (SELECT sum(s.amount_cents) FROM invoice_shares s WHERE s.invoice_id = i.id)
-                    AND i.status = 'unposted')
+      SELECT CASE WHEN count(*) > 0 AND bool_and(COALESCE(
+                    i.total_amount_cents = (SELECT COALESCE(sum(x.extended_cents), 0) FROM invoice_items x WHERE x.invoice_id = i.id)
+                    AND i.total_cost_cents = (SELECT COALESCE(sum(CASE WHEN x.is_application_fee THEN COALESCE(x.cost_cents, 0)
+                                                     ELSE public.safe_cents_qty(x.cost_cents, x.quantity) END), 0)
+                                                FROM invoice_items x WHERE x.invoice_id = i.id)
+                    AND i.total_amount_cents = (SELECT COALESCE(sum(s.amount_cents), 0) FROM invoice_shares s WHERE s.invoice_id = i.id)
+                    AND EXISTS (SELECT 1 FROM invoice_shares s WHERE s.invoice_id = i.id)
+                    AND i.status = 'unposted', false))
               THEN 'ties' ELSE 'BROKEN' END
           || ' anchor=' || (SELECT right(c.farm_name, 1) FROM jobs j JOIN invoices i2 ON i2.id = j.invoice_id
                               JOIN customers c ON c.id = i2.customer_id WHERE j.id = p_job)
@@ -352,6 +361,12 @@ const CASES = {
   twoProductsThirds: invoiceCase(...THIRDS, [L(X, 10, 1000), L(Y, 10, 1234)]),
   // Two products and a grower's own product, two owners.
   twoProductsHalves: invoiceCase([F2], [10], [L(X, 10, 1000), L(Y, 3, 1234), L(Z, 2, 0, true)]),
+  // Sol r1 HIGH: 0.003 Gal at $10 (3 cents) split 16.67/23.33/60%. Old body bills 1 + 1 + 2 = 4 cents; the remainder
+  // alone would leave A at $0 (refused), so A takes a cent from C: 1 + 1 + 1.
+  tiny: invoiceCase([F4], [10], [L(X, 0.003, 1000)]),
+  // Sol r1 MED: 1 Gal at $9,999.99 on 40.23 / 100.61 / 60.36 acres. Split by acre share, each owner within a cent of its
+  // exact share (a split by quantity, 0.2 / 0.5 / 0.3, would put B 50.2 cents under and be refused).
+  bigEdge: invoiceCase([F3A, F3B, F3C], [40.23, 100.61, 60.36], [L(X, 1, 999999)]),
   // One owner: the single-invoice path, untouched.
   single: invoiceCase([G], [10], [L(X, 10, 1000), L(Y, 10, 1234)]),
   // Grower's own product only, two owners: $0 lines, untouched.
@@ -365,13 +380,26 @@ const EXPECT_BEFORE = {
   thirds: 'A=4113/2333 B=4113/2333 C=4113/2333 | Y=12339/12340',
   twoProductsThirds: 'A=7446/4333 B=7446/4333 C=7446/4333 | X=9999/10000 Y=12339/12340',
   twoProductsHalves: 'A=6852/4050 B=6851/4050 | X=10001/10000 Y=3702/3702',
+  tiny: 'A=1/0 B=1/0 C=2/1 | X=4/3',
+  bigEdge: 'A=200000/120 B=500000/300 C=300000/180 | X=1000000/999999',
 };
 const EXPECT_AFTER = {
-  halves: 'A=5001/3000 B=4999/3000 | X=10000/10000',
+  halves: 'A=5000/3000 B=5000/3000 | X=10000/10000',  // exact shares 5000.4999 / 4999.5000
   thirds: 'A=4114/2333 B=4113/2333 C=4113/2333 | Y=12340/12340',
   twoProductsThirds: 'A=7448/4333 B=7446/4333 C=7446/4333 | X=10000/10000 Y=12340/12340',
-  twoProductsHalves: 'A=6852/4050 B=6850/4050 | X=10000/10000 Y=3702/3702',
+  twoProductsHalves: 'A=6851/4050 B=6851/4050 | X=10000/10000 Y=3702/3702',
+  tiny: 'A=1/0 B=1/0 C=1/1 | X=3/3',
+  bigEdge: 'A=199950/120 B=500049/300 C=300000/180 | X=999999/999999',
 };
+// Fewer cents than owners with a quantity (0.002 Gal at $10 = 2 cents, three owners): one owner would bill $0, so the
+// line is refused by name, before and after (Mason, 2026-11-22, "never $0").
+const TOO_TINY = invoiceCase([F4], [10], [L(X, 0.002, 1000)]);
+function refusedTooTiny(label) {
+  const r = probe(TOO_TINY);
+  assert.notEqual(r.status, 0, `${label}: a 2-cent line across three owners is refused\n${r.output}`);
+  assert.match(r.output, /JOB_LINE_ROUNDING: \[PROVER\] JC X can't be split between this job's owners/);
+  console.log(`[${label}] tooTiny: 2 cents across three owners is refused (JOB_LINE_ROUNDING, never $0)`);
+}
 function runCases(label) {
   const out = {};
   for (const [k, sql] of Object.entries(CASES)) {
@@ -381,8 +409,8 @@ function runCases(label) {
   }
   return out;
 }
-function priced(sums) {  // [[product, billed, line], ...]
-  return [...sums.split(' | ')[1].matchAll(/([A-Z])=(\d+)\/(\d+)/g)].map((m) => [m[1], Number(m[2]), Number(m[3])]);
+function priced(sums) {  // [[product, billed, line], ...] as exact integers (Sol r1: never Number)
+  return [...sums.split(' | ')[1].matchAll(/([A-Z])=(\d+)\/(\d+)/g)].map((m) => [m[1], BigInt(m[2]), BigInt(m[3])]);
 }
 function reverseSql() {
   // ROLLBACK as the migration states it: re-emit the 20270303100000 transfer body exactly as that file has it.
@@ -401,7 +429,8 @@ function main() {
 
   const before = runCases('before');
   for (const [k, want] of Object.entries(EXPECT_BEFORE)) assert.equal(before[k].sums, want, `before: ${k}`);
-  console.log('[before] the bug: $100.00 bills $100.01 (50.01/50.00); $123.40 bills $123.39 (thirds); $100.00 bills $99.99 (thirds)');
+  refusedTooTiny('before');
+  console.log('[before] the bug: $100.00 bills $100.01 (50.01/50.00); $123.40 bills $123.39 (thirds); $100.00 bills $99.99 (thirds); 3 cents bill 4; $9,999.99 bills $10,000.00');
 
   stageText('candidate.sql', lf(CANDIDATE));
   const first = apply('candidate.sql');
@@ -423,16 +452,17 @@ function main() {
     assert.deepEqual(after[k].sums.split(' | ')[0].replace(/=\d+\//g, '='), before[k].sums.split(' | ')[0].replace(/=\d+\//g, '='), `after: ${k} costs unchanged`);
   }
   for (const k of ['single', 'suppliedOnly']) assert.equal(after[k].sums, before[k].sums, `after: ${k} is unchanged`);
+  refusedTooTiny('after');
   console.log('[after] every priced line: owners add up to the line to the cent; quantities, prices, costs, headers, shares and anchor tie; single-owner and grower-supplied invoices unchanged');
 
   // Negative control: the new body is the pinned one with only the line amount changed.
   const body = Buffer.from(scalar(`SELECT translate(encode(convert_to(replace(prosrc, chr(13), ''), 'UTF8'), 'base64'), E'\\n', '') FROM pg_proc WHERE oid = '${IMPL}'::regprocedure;`), 'base64').toString('utf8');
   const swap = (text, from, to) => { assert.equal(text.split(from).length, 2, `exactly one: ${from.slice(0, 60)}`); return text.replace(from, to); };
-  const ALLOC = / {8}-- Mason, 2026-11-26 [\s\S]*?v_cents := public\._job_transfer_split_qty_20270207\([^\n]*\n/;
+  const ALLOC = / {8}-- Mason, 2026-11-26 [\s\S]*?\n {8}END LOOP;\n/;
   assert.equal(body.match(new RegExp(ALLOC.source, 'g'))?.length, 1, 'the allocation step is in the body once');
   let old = body.replace(ALLOC, '');
-  old = swap(old, '  v_qtys numeric[];\n  v_cents numeric[];\n', '  v_qtys numeric[];\n');
-  old = swap(old, '          v_owner_ext := round(v_cents[v_oidx] * 10000)::bigint;\n',
+  old = swap(old, '  v_qtys numeric[];\n  v_line_cents bigint;\n  v_owner_cents bigint[];\n  v_take integer;\n  v_give integer;\n', '  v_qtys numeric[];\n');
+  old = swap(old, '          v_owner_ext := v_owner_cents[v_oidx];\n',
     '          v_owner_ext := safe_cents_qty(v_line.o_unit_price_cents, v_qtys[v_oidx]);\n');
   assert.equal(createHash('md5').update(old).digest('hex'), OLD_IMPL,
     'apart from the line amount, the transfer body (quantities, price, cost, checks, fee, shares, anchor, commissions) is the pinned one');
@@ -445,6 +475,7 @@ function main() {
   assert.equal(meta(IMPL), implMeta, 'rollback keeps owner, settings and grants');
   const rolled = runCases('rollback');
   for (const k of Object.keys(CASES)) assert.equal(rolled[k].sums, before[k].sums, `rollback: ${k} bills as before`);
+  refusedTooTiny('rollback');
   console.log('[rollback] re-emitting the 20270303100000 body restores its md5 and the old amounts ($100.01, $123.39)');
   console.log('JOB_INVOICE_SPLIT_CENTS_PROOF_PASS');
 }

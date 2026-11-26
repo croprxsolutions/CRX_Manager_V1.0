@@ -14,12 +14,17 @@
 --
 -- WHAT: _transfer_job_to_invoice_intent_impl_20260908 (re-emitted from 20270303100000, md5 pinned). In the owner-group
 --   path each priced chemical line's amount is rounded once, round(price x the line's quantity), exactly as a single
---   invoice bills it, and those cents are allocated to the owners by their allocated quantities with the existing
---   largest-remainder helper _job_transfer_split_qty_20270207 (ties to the earlier owner, owners ordered by id). The
---   owners' amounts always add up to the line, and each stays within about a cent of its own quantity x price. Every
---   other part of the body is byte-for-byte the pinned one: quantities, unit price, the per-unit cost on the line, the
---   two 50-cent checks (now on the allocated amounts), customer-supplied $0 lines, the per-acre fee, member totals,
---   shares, the anchor (primary owner's invoice), commissions, the single-owner path, locks and who may invoice.
+--   invoice bills it, and those cents are allocated to the owners by acre share with the existing largest-remainder
+--   helper _job_transfer_split_qty_20270207 (ties to the earlier owner, owners ordered by id; Taha, 2026-11-26: "A").
+--   The owners' amounts always add up to the line and each is within a cent of its exact share, so the 50-cent owner
+--   check passes wherever rounding is the only difference. Mason's "never $0" (2026-11-22): an owner with a quantity
+--   that the remainder left at 0 cents takes one cent from the owner furthest above its exact share that has two or
+--   more (0.003 Gal at $10 split 16.67/23.33/60% bills 1 + 1 + 1 cents); only a line with fewer cents than such
+--   owners keeps an owner at $0 and is refused by the existing JOB_LINE_ROUNDING check, as before. Everything else in
+--   the body is byte-for-byte the pinned one: quantities, unit price, the per-unit cost on the line, both 50-cent
+--   checks (now on the allocated amounts), customer-supplied $0 lines, the per-acre fee, member totals, shares, the
+--   anchor (primary owner's invoice), the commission code, the single-owner path, locks and who may invoice. An
+--   owner's commission base is its amount less its booked cost, so it follows the amount and can move by a cent.
 --   Owner, SECURITY DEFINER, search_path and grants unchanged. No row changes.
 --
 -- NOT CHANGED: a line's booked cost. invoice_items.cost_cents is a cost per sold unit and every reader books
@@ -83,7 +88,10 @@ DECLARE
   v_total_applied numeric;
   v_line RECORD;
   v_qtys numeric[];
-  v_cents numeric[];
+  v_line_cents bigint;
+  v_owner_cents bigint[];
+  v_take integer;
+  v_give integer;
   v_line_sum bigint := 0;
   v_owner_ext bigint;
   v_owners_ext bigint;
@@ -337,11 +345,28 @@ BEGIN
         SELECT * INTO v_line FROM public._job_transfer_line_price_20270207(
           v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit, v_chem.job_price);
         v_qtys := public._job_transfer_split_qty_20270207(v_line.o_quantity, v_acre_pcts);
-        -- Mason, 2026-11-26 ("Job-invoice cents: yes please, fix it before Dec 15"): the line's amount
-        -- is rounded once, as a single invoice bills it, and those cents are allocated to the owners by their
-        -- quantities (largest remainder, ties to the earlier owner; the helper's 0.0001 steps are whole cents here), so
-        -- the owners' lines add up to the line exactly. A line's booked cost stays its cost x quantity.
-        v_cents := public._job_transfer_split_qty_20270207(safe_cents_qty(v_line.o_unit_price_cents, v_line.o_quantity) / 10000.0, v_qtys);
+        -- Mason, 2026-11-26 ("Job-invoice cents: yes please, fix it before Dec 15"; Taha: split by acre share): the
+        -- line's amount is rounded once, as a single invoice bills it, and those cents are allocated to the owners by
+        -- acre share (largest remainder, ties to the earlier owner; the helper's 0.0001 steps are whole cents here), so
+        -- the owners' lines add up to the line exactly. An owner with a quantity but no cent then takes one from the
+        -- owner furthest above its exact share that has two or more; with fewer cents than such owners, one stays at $0
+        -- and the check below refuses the line, as before. A line's booked cost stays its cost x quantity.
+        v_line_cents := safe_cents_qty(v_line.o_unit_price_cents, v_line.o_quantity);
+        v_owner_cents := ARRAY(SELECT round(u.c * 10000)::bigint
+          FROM unnest(public._job_transfer_split_qty_20270207(v_line_cents / 10000.0, v_acre_pcts)) WITH ORDINALITY AS u(c, ord)
+          ORDER BY u.ord);
+        LOOP
+          v_take := NULL;
+          v_give := NULL;
+          SELECT u.ord INTO v_take FROM unnest(v_owner_cents) WITH ORDINALITY AS u(c, ord)
+           WHERE u.c = 0 AND v_qtys[u.ord] > 0 ORDER BY u.ord LIMIT 1;
+          EXIT WHEN v_take IS NULL;
+          SELECT u.ord INTO v_give FROM unnest(v_owner_cents) WITH ORDINALITY AS u(c, ord)
+           WHERE u.c >= 2 ORDER BY u.c - v_line_cents * v_acre_pcts[u.ord] / 100 DESC, u.ord LIMIT 1;
+          EXIT WHEN v_give IS NULL;
+          v_owner_cents[v_give] := v_owner_cents[v_give] - 1;
+          v_owner_cents[v_take] := v_owner_cents[v_take] + 1;
+        END LOOP;
       END IF;
       v_owners_ext := 0;
       v_owners_cost := 0;
@@ -373,7 +398,7 @@ BEGIN
             v_chem.epa_registration, v_chem.product_form, false, 'manual'
           );
         ELSE
-          v_owner_ext := round(v_cents[v_oidx] * 10000)::bigint;
+          v_owner_ext := v_owner_cents[v_oidx];
           -- Mason, 2026-11-22 ("Allow up to 50c"): each owner's line within 50 cents of its exact share, never $0.
           IF v_acre_pcts[v_oidx] > 0 AND (
                v_qtys[v_oidx] <= 0
@@ -865,7 +890,7 @@ $function$;
 DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '0474c1e7dfd148226e376c6335c7fadf' THEN
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '2714b8df71f9e191c5d11e41f205473d' THEN
     RAISE EXCEPTION 'JOB_INVOICE_SPLIT_CENTS_POSTFLIGHT: the re-emitted body is not this file''s';
   END IF;
   IF NOT COALESCE((SELECT p.prosecdef AND p.proowner = 'postgres'::regrole

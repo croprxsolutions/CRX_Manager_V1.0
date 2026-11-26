@@ -1,8 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
+import { localSql } from './local-db';
+
+const fixture = 'Invented register vehicle ' + randomUUID().slice(0, 8);
+
+test.afterEach(() => {
+  localSql(`DELETE FROM public.vehicles WHERE vehicle_name = '${fixture}';`);
+});
 
 test('the admin register reads and saves a vehicle through the supported screens', async ({ page }) => {
-  const fixture = 'Invented register vehicle ' + randomUUID().slice(0, 8);
   const registration = 'INVENTED-REGISTER';
   const notes = 'Invented registration proof';
   const changedNotes = 'Invented note after save';

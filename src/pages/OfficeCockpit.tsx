@@ -13,7 +13,8 @@
  *   (d) Upcoming scheduled jobs in the next 7 days (no DB-stored weather-blocked
  *       state exists; weather risk is a UI overlay per Job Detail, not a stored flag)
  *   (e) Applicator licenses / buyer certs expiring within 30 days
- *   (f) Overdue field-app AR (posted invoices, balance > 0, due_date < today)
+ *   (f) Overdue AR (posted/overdue invoices of every type the AR Aging page ages —
+ *       field-app, chemical sale, misc charge — balance > 0, due_date < today)
  *   (g) Inventory shortfalls — deferred follow-on (would require per-job-chemical
  *       x current-inventory join across many rows, i.e. N+1 risk; noted below tile)
  *
@@ -141,6 +142,7 @@ interface ExpiringLicenseRow {
 interface OverdueARRow {
   id: string;
   invoice_number: string;
+  invoice_type: string;
   due_date: string;
   balance_cents: number;
   customer_name: string;
@@ -314,6 +316,7 @@ type RawLicense = {
 type RawOverdueAR = {
   id: string;
   invoice_number: string;
+  invoice_type: string;
   due_date: string;
   balance_cents: number;
   customer: { farm_name: string } | null;
@@ -350,6 +353,20 @@ type RawProductName = {
 };
 
 const TILE_LIMIT = 50;
+
+// The AR Aging page ages every invoice type but credit memos (get_ar_aging), so the overdue
+// tile lists the same types. Field-app invoices open in Field Invoices; the rest in Invoices.
+const OVERDUE_AR_INVOICE_TYPES = ['field_application', 'chemical_sale', 'misc_charge'];
+
+function overdueInvoicePath(row: Pick<OverdueARRow, 'id' | 'invoice_type'>): string {
+  return row.invoice_type === 'field_application' ? `/field-invoices/${row.id}` : `/invoices/${row.id}`;
+}
+
+function overdueInvoiceKind(invoiceType: string): string {
+  if (invoiceType === 'field_application') return 'Field app';
+  if (invoiceType === 'chemical_sale') return 'Chemical';
+  return 'Misc charge';
+}
 // "Delivered, not invoiced" pages back through completed deliveries at most this many times.
 const DELIVERY_SCAN_PAGE_CAP = 20;
 
@@ -655,13 +672,15 @@ export default function OfficeCockpit() {
         .order('expiry_date', { ascending: true })
         .limit(TILE_LIMIT),
 
-      // (f) Overdue field-app AR: balance > 0, past due_date. Include BOTH 'posted'
+      // (f) Overdue AR: balance > 0, past due_date. Include BOTH 'posted'
       // (past due but not yet swept) AND 'overdue' (already marked by mark_overdue_invoices)
       // — filtering to 'posted' alone hides the invoices that are actually overdue.
+      // Every invoice type the AR Aging page ages (get_ar_aging: all but credit memos), so
+      // chemical-sale and misc-charge invoices show here too once they are billed in the app.
       supabase
         .from('invoices')
-        .select('id, invoice_number, due_date, balance_cents, customer:customers(farm_name)', { count: 'exact' })
-        .eq('invoice_type', 'field_application')
+        .select('id, invoice_number, invoice_type, due_date, balance_cents, customer:customers(farm_name)', { count: 'exact' })
+        .in('invoice_type', OVERDUE_AR_INVOICE_TYPES)
         .in('status', ['posted', 'overdue'])
         .lt('due_date', today)
         .gt('balance_cents', 0)
@@ -910,6 +929,7 @@ export default function OfficeCockpit() {
     const overdueAR: OverdueARRow[] = ((overdueARRes.data || []) as RawOverdueAR[]).map((r) => ({
       id: r.id,
       invoice_number: r.invoice_number,
+      invoice_type: r.invoice_type,
       due_date: r.due_date,
       balance_cents: r.balance_cents,
       customer_name: r.customer?.farm_name ?? 'Unknown',
@@ -1716,11 +1736,11 @@ export default function OfficeCockpit() {
           )}
         </Card>
 
-        {/* (f) Overdue field-app AR */}
+        {/* (f) Overdue AR (field-app, chemical sale and misc charge) */}
         <Card>
           <TileHeader
             icon={<DollarSign className="w-5 h-5 text-red-500" />}
-            title="Overdue Field-App AR"
+            title="Overdue AR"
             count={data.failedTiles.overdueAR ? null : data.tileCounts.overdueAR}
             countColor="text-red-600"
             linkLabel={isAdmin ? 'AR Aging' : undefined}
@@ -1729,18 +1749,19 @@ export default function OfficeCockpit() {
           {data.failedTiles.overdueAR ? (
             <LoadFailedState title="Overdue receivables could not be loaded" onRetry={() => { void fetchAll(); }} />
           ) : data.overdueAR.length === 0 ? (
-            <AllClear label="No overdue field-app receivables." />
+            <AllClear label="No overdue receivables." />
           ) : (
             <div className="divide-y divide-gray-100">
               {data.overdueAR.slice(0, 6).map((row) => (
                 <button
                   key={row.id}
-                  onClick={() => navigate(`/field-invoices/${row.id}`)}
+                  onClick={() => navigate(overdueInvoicePath(row))}
                   className="flex min-h-[44px] w-full flex-col items-start justify-between gap-2 rounded py-2 text-left text-sm transition-colors hover:bg-gray-50 sm:min-h-0 sm:flex-row sm:items-center"
                 >
                   <div>
                     <span className="font-medium text-nav-dark">{row.customer_name}</span>
                     <span className="ml-2 text-gray-500">#{row.invoice_number}</span>
+                    <span className="ml-2 text-xs text-gray-400">{overdueInvoiceKind(row.invoice_type)}</span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-red-600 font-medium text-xs">{formatCents(row.balance_cents)}</span>

@@ -28,6 +28,7 @@ import { SkeletonCard } from '../components/ui/Skeleton';
 import { useToast } from '../components/ui/Toast';
 import { supabase, assertRpcResult } from '../lib/db';
 import { Sentry } from '../lib/sentry';
+import { AR_AGING_LABELS } from '../lib/arAging';
 import type { BottomProduct, BottomCustomer, MonthlyMargin } from '../types';
 
 // --- Types ---
@@ -264,11 +265,11 @@ export default function FinancialDashboard() {
 
   // AR Aging bar calculations
   const agingBuckets = [
-    { label: 'Current', value: data.arAgingBuckets.current, color: 'bg-emerald-500' },
+    { label: AR_AGING_LABELS.current, value: data.arAgingBuckets.current, color: 'bg-emerald-500' },
     // Days past due, the same ranges as the AR Aging page (KI-18); the keys keep their old names.
-    { label: '30-59', value: data.arAgingBuckets.days_31_60, color: 'bg-amber-500' },
-    { label: '60-89', value: data.arAgingBuckets.days_61_90, color: 'bg-orange-500' },
-    { label: '90+', value: data.arAgingBuckets.days_90_plus, color: 'bg-red-500' },
+    { label: AR_AGING_LABELS.days30, value: data.arAgingBuckets.days_31_60, color: 'bg-amber-500' },
+    { label: AR_AGING_LABELS.days60, value: data.arAgingBuckets.days_61_90, color: 'bg-orange-500' },
+    { label: AR_AGING_LABELS.days90plus, value: data.arAgingBuckets.days_90_plus, color: 'bg-red-500' },
   ];
   const maxAgingBucket = Math.max(...agingBuckets.map((b) => b.value), 1);
 
@@ -376,7 +377,7 @@ export default function FinancialDashboard() {
           <div className="space-y-2">
             {agingBuckets.map((bucket) => (
               <div key={bucket.label} className="flex items-center gap-2">
-                <span className="text-xs text-secondary w-12 shrink-0">{bucket.label}</span>
+                <span className="text-xs text-secondary w-20 shrink-0">{bucket.label}</span>
                 <div className="flex-1 bg-gray-100 rounded-full h-2.5">
                   <div
                     className={`${bucket.color} h-2.5 rounded-full transition-all`}

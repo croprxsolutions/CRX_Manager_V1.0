@@ -7,7 +7,7 @@ Keep the existing office-only dispatch and removal behavior. Move the Wizard and
 - A Board removal covers one location and notifies the previous applicator only if an active dispatch actually becomes cancelled.
 - A notice failure leaves the dispatch saved and records the failed send where possible. The signed-in dispatcher remains the sender.
 
-Check role and the original actor-bound receipt before locking. Return a saved receipt without sending another notice. A fresh call locks the affected jobs and checks field membership, locks active incoming recipients and covers concurrent deletion of outgoing recipients, then locks and reads the existing dispatch rows. The existing dispatch operations apply their own validation and store the result.
+Check role and the original actor-bound receipt before locking. A key identifies the assignment change across both screens and the existing operations. The first committed call determines the notices. A retry from another screen or an older client returns the saved result and sends nothing. A fresh call locks the affected jobs and checks field membership, locks active incoming recipients and covers concurrent deletion of outgoing recipients, then locks and reads the existing dispatch rows. The existing dispatch operations apply their own validation and store the result.
 
 Existing clients keep their current operations and notifications during staging and release. Deploy the new operation before switching the two location dispatch clients. Restore the old app before removing the new operation if rollback is needed. Wider notification permissions and whole-job notification delivery need separate changes.
 

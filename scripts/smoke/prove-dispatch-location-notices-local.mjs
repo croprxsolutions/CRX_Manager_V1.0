@@ -100,8 +100,9 @@ async function proveDispatchAndDeactivationOrder(deactivateFirst) {
     COMMIT;`);
   // Attach the rejection handler before polling the barrier.
   first.catch(() => {});
+  const startDeadline = Date.now() + 10_000;
   let ready = false;
-  for (let i = 0; i < 12 && !ready; i++) {
+  while (!ready && Date.now() < startDeadline) {
     ready = localSql(`SELECT EXISTS (SELECT FROM pg_stat_activity WHERE application_name = '${firstClient}'
       AND wait_event = 'PgSleep');`) === 't';
     if (!ready) await new Promise(resolve => setTimeout(resolve, 100));

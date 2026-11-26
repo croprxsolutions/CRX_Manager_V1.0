@@ -18,6 +18,8 @@ DECLARE
   location_c uuid := gen_random_uuid();
   wizard_key text := gen_random_uuid()::text;
   old_key text := gen_random_uuid()::text;
+  old_remove_key text := gen_random_uuid()::text;
+  board_key text := gen_random_uuid()::text;
   wizard_payload jsonb;
   old_payload jsonb;
   take_over jsonb;
@@ -76,6 +78,13 @@ BEGIN
   EXCEPTION WHEN SQLSTATE '22023' THEN
     IF SQLERRM <> 'INVALID_LICENSE_OVERRIDE' THEN RAISE; END IF;
   END;
+  BEGIN
+    PERFORM public.dispatch_location_with_notices('wizard', wizard_payload,
+      p_license_override => true, p_idempotency_key => gen_random_uuid()::text);
+    RAISE EXCEPTION 'Sales rep was allowed to override a license';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'OVERRIDE_REQUIRES_ADMIN' THEN RAISE; END IF;
+  END;
   first_result := public.dispatch_location_with_notices('wizard', wizard_payload, p_idempotency_key => wizard_key);
   IF first_result IS DISTINCT FROM public.dispatch_location_with_notices('wizard', wizard_payload, p_idempotency_key => wizard_key)
   THEN RAISE EXCEPTION 'Wizard replay changed its result'; END IF;
@@ -90,7 +99,9 @@ BEGIN
 
   SET LOCAL ROLE authenticated;
   PERFORM public.dispatch_location_with_notices('wizard', take_over, p_idempotency_key => gen_random_uuid()::text);
-  PERFORM public.dispatch_location_with_notices('reassign', replace_location, p_idempotency_key => gen_random_uuid()::text);
+  first_result := public.dispatch_location_with_notices('reassign', replace_location, p_idempotency_key => board_key);
+  IF first_result IS DISTINCT FROM public.dispatch_location_with_notices('wizard', replace_location, p_idempotency_key => board_key)
+  THEN RAISE EXCEPTION 'A retry from another screen changed the saved result'; END IF;
   PERFORM public.dispatch_location_with_notices('reassign', replace_location, p_idempotency_key => gen_random_uuid()::text);
   RESET ROLE;
   IF (SELECT count(*) FROM public.notifications WHERE related_entity_id = job AND user_id = app_b
@@ -104,6 +115,11 @@ BEGIN
     p_idempotency_key => gen_random_uuid()::text);
   PERFORM public.dispatch_location_with_notices('remove', p_job_field_ids => ARRAY[location_a],
     p_idempotency_key => gen_random_uuid()::text);
+  first_result := public.undispatch_job_locations(ARRAY[location_c], NULL, old_remove_key);
+  IF first_result IS DISTINCT FROM jsonb_build_object('undispatched', 1)
+    OR first_result IS DISTINCT FROM public.dispatch_location_with_notices('remove',
+      p_job_field_ids => ARRAY[location_c], p_idempotency_key => old_remove_key)
+  THEN RAISE EXCEPTION 'Removal replay from the old operation changed its result'; END IF;
   PERFORM public.dispatch_location_with_notices('reassign', crew_payload, p_idempotency_key => gen_random_uuid()::text);
   RESET ROLE;
   IF (SELECT count(*) FROM public.notifications WHERE related_entity_id = job) <> 6

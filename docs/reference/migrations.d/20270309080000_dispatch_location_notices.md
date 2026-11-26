@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270309080000_dispatch_location_notices.sql` (SQL sha256: `062219c460457f5d12c8c218beb41ba5e31449949f6e2cb28be724ce2814c4b7`) adds an office dispatch operation that sends location notices using the saved assignment and the signed-in dispatcher.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270309080000_dispatch_location_notices.sql` (SQL sha256: `ec7cb8c7a3c577fa4b477d33d6cb2cf2708dc7d7c4809510fe2b1bb0ed29b526`) adds an office dispatch operation that sends location notices using the saved assignment and the signed-in dispatcher.
 
 The Wizard sends one incoming notice per applicator and job. The Board uses the saved assignment to notify the incoming or outgoing applicator on a real change. The existing operations stay available during rollout. An exact retry uses their existing receipt and sends no new notice.
 

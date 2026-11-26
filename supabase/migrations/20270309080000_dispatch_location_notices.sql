@@ -114,7 +114,8 @@ BEGIN
       'actor_id', v_actor, 'p_assignments', p_assignments, 'p_license_override', p_license_override));
   END IF;
 
-  -- Use the old operations' receipt scope, including their exact fingerprint.
+  -- A key identifies the assignment change across both screens and the old API.
+  -- The first committed call determines the notices; changing modes on retry must not send new ones.
   v_replay := public.check_idempotency_intent(p_idempotency_key, v_operation, v_actor, v_fingerprint);
   IF v_replay IS NOT NULL THEN RETURN v_replay -> 'result'; END IF;
 

@@ -94,7 +94,7 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import RelatedNotes from '../components/team/RelatedNotes';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows } from '../lib/pagedRead';
-import type { JobStatus, Customer, Product, Field, Vehicle, Profile, BlendRecipe, BlendRecipeItem, LinkedEntityType, JobNotification, UnitConversion } from '../types';
+import type { JobStatus, Customer, Product, Field, JobVehicle, Profile, BlendRecipe, BlendRecipeItem, LinkedEntityType, JobNotification, UnitConversion } from '../types';
 import type { Json } from '../types/supabase';
 import type { ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { JobChemicalProductPicker } from '../components/jobs/JobChemicalProductPicker';
@@ -551,7 +551,7 @@ export default function JobDetail() {
   // True until the newest lookup load has finished: a job edited or saved before its
   // customer, field and product lists arrive would use partial reference data (Luna, #1017).
   const [lookupsLoading, setLookupsLoading] = useState(true);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [vehicles, setVehicles] = useState<JobVehicle[]>([]);
   const [applicators, setApplicators] = useState<Profile[]>([]);
   // Staff-held license rows per profile (B5 license gates)
   const [licensesByProfile, setLicensesByProfile] = useState<Record<string, { expiry_date: string; is_active: boolean }[]>>({});
@@ -1935,7 +1935,7 @@ export default function JobDetail() {
       fetchAllRows((from, to) => supabase.from('customers').select('*', { count: 'exact' }).eq('is_active', true).order('farm_name').order('id').range(from, to)),
       fetchAllRows((from, to) => supabase.from('fields').select('*', { count: 'exact' }).order('field_name').order('id').range(from, to)),
       fetchAllRows((from, to) => supabase.from('products').select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`, { count: 'exact' }).eq('is_active', true).order('product_name').order('id').range(from, to)),
-      supabase.from('vehicles').select('*').eq('status', 'active').order('vehicle_name'),
+      supabase.from('vehicles').select('id, vehicle_name, vehicle_type, category, capacity_gallons, capacity_unit, status').eq('status', 'active').order('vehicle_name'),
       // PR-07 follow-up: applicator picker only uses a.id + a.full_name + a.role; safe via view.
       supabase.from('profile_public_view').select('id, full_name, role, is_active').in('role', ['applicator', 'admin', 'sales_rep']).eq('is_active', true).order('full_name'),
       supabase.from('blend_recipes').select('*').eq('is_active', true).order('name'),
@@ -1976,10 +1976,15 @@ export default function JobDetail() {
       if (!failures.includes('products')) failures.push('products');
     }
     if (superseded()) return;
+    if (vehicleResult.error) {
+      Sentry.captureException(vehicleResult.error, { tags: { source: 'fetch', action: 'load_job_vehicles' } });
+      toast('error', 'Failed to load Vehicles. Retry before editing this job.');
+      failures.push('vehicles');
+    }
     setAllProducts(productRows);
     setLookupLoadFailures(failures);
     setLookupsLoading(false);
-    setVehicles((vehicleResult.data || []) as Vehicle[]);
+    setVehicles(vehicleResult.error ? [] : (vehicleResult.data ?? []));
     setApplicators((appResult.data || []) as Profile[]);
     setRecipes((recipeResult.data || []) as BlendRecipe[]);
 

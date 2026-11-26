@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { stagingLiquidDensityMigration } from './db-apply.mjs';
 import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff, applyUserProblem, realStamp, planRestamps, restampPairs, restampSql, unmatchedRestamps, migrationChanges, renameTargetProblem, oneShotListProblems, oneShotStops, ONE_SHOT_STOPS } from './db-apply.mjs';
 
 const f = (stems) => stems.map((s) => `${s}.sql`);
@@ -53,6 +54,31 @@ test('wrapperSql: file, same-transaction check, ledger row with the exact text, 
   assert.equal(recordOnly.split('\n')[2].startsWith('DO $crx_check$'), true);
   assert.throws(() => wrapperSql({ stem: "x'); drop table y; --", text, run: true, sha }), /bad migration name/);
   assert.throws(() => wrapperSql({ stem: '20261110120000_add_t', text, run: true, sha: "x' or 1=1" }), /bad sha256/);
+});
+
+test('only the verified staging transaction for the activation sets context before writing its ledger row', () => {
+  const stem = '20270308110000_enable_liquid_density_review';
+  const restamped = '20270310120000_enable_liquid_density_review';
+  const targetRef = 'fsnjredpmakbmhwowjjt';
+  const text = 'SELECT 1;\n';
+  const { marker } = stagingLiquidDensityMigration([stem], () => text);
+  assert.equal(marker, "SET LOCAL crx.liquid_weight_staging_project = 'fsnjredpmakbmhwowjjt';");
+  const args = { stem, text, run: true, sha: 'a'.repeat(64), targetRef, tag: '$file$' };
+  for (const name of [stem, restamped]) {
+    const sql = wrapperSql({ ...args, stem: name });
+    const check = sql.indexOf('LIQUID_DENSITY_STAGING_ACTIVATION_DID_NOT_OPEN');
+    assert.ok(sql.includes(`\n${marker}\n${text}`));
+    assert.ok(check > sql.indexOf(text) && check < sql.indexOf('INSERT INTO supabase_migrations'));
+    assert.ok(sql.includes(`ARRAY[$file$${text}$file$]`));
+  }
+  for (const overrides of [
+    { run: false }, { stem: stem + '_extra' }, { targetRef: undefined },
+    { targetRef: 'rhyzpcqhnizqbxphqdkr' }, { targetRef: 'dyxaxsjrqprvxzxkfooi' },
+    { targetRef: 'local' }, { targetRef: 'unknown' },
+  ]) assert.ok(!wrapperSql({ ...args, ...overrides }).includes(marker));
+  assert.throws(() => stagingLiquidDensityMigration([stem, restamped], () => text), /more than one/);
+  assert.throws(() => stagingLiquidDensityMigration([stem], () => '-- crx: no-transaction'), /must run in its ledger transaction/);
+  assert.throws(() => stagingLiquidDensityMigration([stem], () => text, new Set([stem])), /must run in its ledger transaction/);
 });
 
 test('fileProblems: UTF-8 only, no BOM, no own transaction control, no psql backslash commands', () => {

@@ -45,7 +45,7 @@ describe('BelowCostApprovalModal — every below-cost line in the save (pricing 
     expect(rows).toEqual([
       ['Atrazine 4L', '$3.00', '$5.00', '10', '$20.00'],
       ['Roundup', '$10.00', '$10.50', '2.5005', '$1.25'], // all 4 stored decimals
-      ['Application fee (line total)', '$40.00', '$45.00', '—', '$5.00'],
+      ['Application fee (line total)', '$40.00', '$45.00', '—priced as a line total', '$5.00'],
     ]);
     expect(within(dialog).getByText('Total shortfall for this save: $26.25')).toBeInTheDocument();
     expect(within(dialog).queryByText(/reported this line first/)).not.toBeInTheDocument();

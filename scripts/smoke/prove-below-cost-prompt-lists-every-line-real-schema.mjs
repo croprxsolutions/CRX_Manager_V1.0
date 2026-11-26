@@ -15,8 +15,7 @@
  * Prints BELOW_COST_LIST_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import path from 'node:path';
@@ -63,7 +62,7 @@ const LIVE_AUTH_UID_MD5 = 'cdef18c69c4f4cbbced2eaf81e628b49';
 const LIVE_UNIT_ROWS = "('3f5c3827-8523-4b42-9913-ad479588ff95'::uuid, 'Dry oz', 1, 'dry', '1 dry ounce'), ('5ed18e4b-c4d9-42fc-b85e-22babd3fc098'::uuid, 'Ea', 1, 'both', 'Each / unit'), ('f9e10e66-5027-464e-bb9e-ed9800875256'::uuid, 'fl oz', 1, 'liquid', '1 fluid ounce'), ('4406cacd-a7fe-42db-8c84-694e61bb937b'::uuid, 'g', 0.03527396, 'dry', '1 gram = 0.03527396 dry ounces (1000 mg)'), ('29d05e43-cb40-461b-a969-88ee299faca8'::uuid, 'Gal', 128, 'liquid', '1 gallon = 128 fluid ounces'), ('53997e31-d152-4ab6-b768-d1aa81b657bf'::uuid, 'Lb', 16, 'dry', '1 pound = 16 dry ounces'), ('fc5d349f-b58c-48f1-991d-fa0161fd3d01'::uuid, 'LB', 16, 'dry', '1 pound (capitalized alias)'), ('ddde7daf-8090-492b-aed9-c0b7f8ecfd34'::uuid, 'MG', 0.00003527396, 'dry', '1 milligram = 0.00003527396 dry ounces'), ('438d5f7b-f015-4319-b2b7-4f9a672cb350'::uuid, 'oz', 1, 'liquid', '1 fluid ounce (alias for fl oz)'), ('b69ddac6-68ed-4f1d-8e09-e63a7fa6635a'::uuid, 'Oz', 1, 'liquid', '1 fluid ounce (capitalized alias)'), ('a31f95a0-df80-4025-977f-f1fb4e5c8d53'::uuid, 'Pt', 16, 'liquid', '1 pint = 16 fluid ounces'), ('35532f45-2fd0-4400-87d8-3509a58377c0'::uuid, 'qt', 32, 'liquid', '1 quart lowercase (alias for Qt)'), ('915f25ff-8876-4a49-a375-940047e38313'::uuid, 'Qt', 32, 'liquid', '1 quart = 32 fluid ounces'), ('722e8d86-8e68-47d8-a940-209fad38c70e'::uuid, 'Unit', 1, 'both', 'Each / unit (alias for Ea)')";
 
 function docker(args, options = {}) {
-  const r = spawnSync('docker', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...options });
+  const r = spawnSync('docker', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: 300_000, ...options }); // a hung docker call fails, not waits
   if (r.error || (!options.allowFailure && r.status !== 0)) throw new Error(`${r.error?.message ?? ''}\n${r.stderr || r.stdout}`.trim());
   return r;
 }
@@ -72,11 +71,8 @@ function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
 function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
 function stageText(name, text) {
-  const staged = path.join(tmpdir(), `${NAME}-${name}`);
-  writeFileSync(staged, text, 'utf8');
-  try { docker(['cp', staged, `${NAME}:/tmp/${name}`]); } finally {
-    try { unlinkSync(staged); } catch (e) { if (e.code !== 'ENOENT') console.error(`could not remove ${staged}: ${e.message}`); }
-  }
+  // Piped in, not `docker cp`: cp hung for 25+ minutes under load on 2026-11-26 (Docker Desktop, Windows).
+  docker(['exec', '-i', NAME, 'sh', '-c', `cat > /tmp/${name}`], { input: text });
 }
 function apply(name) {
   const r = docker([...psqlArgs(), '-1', '-f', `/tmp/${name}`], { allowFailure: true });
@@ -289,7 +285,7 @@ const body = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
 const grants = () => scalar(`SELECT COALESCE(string_agg(g, ',' ORDER BY g), '-') FROM (SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END AS g
   FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = '${GUARD}'::regprocedure AND a.privilege_type = 'EXECUTE') x;`);
 const OLD_BODY = '5fa0a5f975dc2a84b3c6599a84b8cc55';
-const NEW_BODY = process.env.CRX_BCL_NEW_BODY || '02478f868d1ec7319f5bdb7986a20ed9';
+const NEW_BODY = process.env.CRX_BCL_NEW_BODY || '791f79c3c69bf917e5f910d81c578076';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -438,12 +434,12 @@ UPDATE public.order_items SET price_per_unit = 7 WHERE id = current_setting('bcl
   assert.equal(lineCount(), String(Number(startLines) + 1));
   console.log('[case 6] in one save: a below-cost line raised to cost saves with no prompt; one deleted saves with no prompt; one written twice (8.00 then 7.00) is listed once at $7.00 ($6.00 short)');
 
-  // Case 7: 300 below-cost lines are all listed (no cap), total = 300 x $4.00.
+  // Case 7: 300 below-cost lines: the first 200 are listed, the other 100 counted, the total covers all 300 (300 x $4.00).
   const many = refusedAtCommit(asAdminWrite(`${copyLine(src, 300, 8)};`));
-  assert.equal(many.lines.length, 300); assert.equal(many.line_count, 300); assert.equal(many.more_count, 0);
+  assert.equal(many.lines.length, 200); assert.equal(many.line_count, 300); assert.equal(many.more_count, 100);
   assert.equal(many.total_shortfall_cents, 300 * 400);
   assert.equal(lineCount(), String(Number(startLines) + 1));
-  console.log(`[case 7] 300 below-cost lines in one save: all 300 listed, total $1,200.00; nothing saved (error ${many.lines.length} lines, ${JSON.stringify(many).length} bytes)`);
+  console.log(`[case 7] 300 below-cost lines in one save: first 200 listed, 100 more counted (line_count 300), total $1,200.00 for all 300; nothing saved (error ${many.lines.length} lines, ${JSON.stringify(many).length} bytes)`);
 
   // Case 8: no context still fails at once, inside the statement.
   const noContext = committed(`SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
@@ -485,6 +481,15 @@ UPDATE public.invoice_items SET unit_price_cents = ${invoiceCents}, extended_cen
   assert.equal(both.lines.length, 2, JSON.stringify(both)); assert.equal(both.total_shortfall_cents, 1800);
   assert.equal(scalar(`SELECT string_agg(id::text || ':' || unit_price_cents, ',') FROM public.invoice_items WHERE invoice_id = '${INV}';`), `${INV_LINE}:700`);
   console.log('[case 12d] pricing an order line and its linked invoice line at the same $6.00: one line, $8.00 short (not $16.00); at different prices both are listed ($18.00)');
+  // Case 13: a line written below cost, then touched by an exempt bookkeeping write (same product, price, cost, order
+  // line, fee flag; quantity not raised) in the same save, keeps its note: the save is still refused. (A reviewer found
+  // the exempt write used to wipe the note, so the save went through with no reason.)
+  const noted = refusedAtCommit(asAdminWrite(`UPDATE public.invoice_items SET unit_price_cents = 600, extended_cents = 1200 WHERE id = '${INV_LINE}';
+UPDATE public.invoice_items SET quantity = 1, extended_cents = 600 WHERE id = '${INV_LINE}';`, 'save_invoice'));
+  assert.equal(noted.lines.length, 1, JSON.stringify(noted));
+  assert.equal(noted.lines[0].line_id, INV_LINE); assert.equal(noted.lines[0].unit_price_cents, 600);
+  assert.equal(scalar(`SELECT string_agg(id::text || ':' || unit_price_cents, ',') FROM public.invoice_items WHERE invoice_id = '${INV}';`), `${INV_LINE}:700`);
+  console.log(`[case 13] a line written below cost ($6.00), then given an exempt bookkeeping write (quantity cut to 1) in the same save: still refused at COMMIT, listing that line ($${(noted.total_shortfall_cents / 100).toFixed(2)} short); the invoice is unchanged`);
   // Case 12b: in one save_invoice write, a line written below cost whose id is then changed AND whose price is raised to
   // cost leaves no note behind: the save goes through with no prompt (as case 6a, for a row whose id changes).
   const raisedNewId = asAdminWrite(`DELETE FROM public.invoice_items WHERE id = '${INV_LINE}';
@@ -494,6 +499,33 @@ UPDATE public.invoice_items SET id = '${INV_LINE}', unit_price_cents = 1000, ext
   assert.equal(raisedNewId.status, 0, raisedNewId.output);
   assert.equal(scalar(`SELECT string_agg(id::text || ':' || unit_price_cents, ',') FROM public.invoice_items WHERE invoice_id = '${INV}';`), `${INV_LINE}:1000`);
   console.log('[case 12b] a line written below cost, then given another id and raised to cost in the same save: saves with no prompt');
+
+  // Case 14: the real save_quote. Two below-cost lines and one above cost, no reason: refused once at COMMIT, no quote saved.
+  const quoteLine = (product, name, price, qty, sort) => ({ product_id: product, sort_order: sort, calc_mode: 'units_direct',
+    total_units_needed: qty, price_override: price, price_per_unit: price, current_cost: 10, unit_size: 'Gal', acres: 0, product_name: name });
+  const quoteSql = (tag) => `SELECT public.save_quote(NULL::uuid, ${lit(JSON.stringify({ quote_number: `[PROVER] BCL ${tag}`, customer_id: C, status: 'draft', tier: 1, commission_split: { splits: [] } }))}::jsonb,
+  ${lit(JSON.stringify([{ section_name: 'North', sort_order: 0, items: [quoteLine(P1, '[PROVER] BCL one', 8, 2, 0), quoteLine(P2, '[PROVER] BCL two', 9.5, 3, 1), quoteLine(P3, '[PROVER] BCL three', 12, 1, 2)] }]))}::jsonb,
+  ${lit(ADMIN)}::uuid, 'bcl-${tag}');`;
+  const quoted = refusedAtCommit(committed(quoteSql('quote'), ADMIN));
+  assert.equal(quoted.operation, 'save_quote');
+  assert.deepEqual(quoted.lines.map((l) => l.product_name).sort(), ['[PROVER] BCL one', '[PROVER] BCL two']);
+  assert.equal(quoted.line_count, 2); assert.equal(quoted.more_count, 0); assert.equal(quoted.total_shortfall_cents, 550);
+  assert.equal(scalar("SELECT count(*) FROM public.quotes WHERE quote_number = '[PROVER] BCL quote';"), '0', 'no quote survives the refusal');
+  console.log('[case 14] the real save_quote with two below-cost lines and one above cost, no reason: refused ONCE at COMMIT listing exactly the two ($5.50 short); no quote saved');
+
+  // Case 15: the real create_rush_order then price_order. Pricing both lines below cost with no reason: refused once at COMMIT.
+  const rush = committed(`SELECT public.create_rush_order(${lit(C)}::uuid, ${lit(JSON.stringify([{ product_id: P1, qty: 2 }, { product_id: P2, qty: 3 }]))}::jsonb, 'bcl rush', NULL, ${lit(ADMIN)}::uuid, 'bcl-rush');`, ADMIN);
+  assert.equal(rush.status, 0, rush.output);
+  const RUSH = scalar("SELECT id FROM public.orders WHERE notes = 'bcl rush' ORDER BY created_at DESC LIMIT 1;");
+  const rushLine = (p) => scalar(`SELECT id FROM public.order_items WHERE order_id = '${RUSH}' AND product_id = '${p}';`);
+  const rushState = () => scalar(`SELECT o.pricing_status || ':' || string_agg(oi.price_per_unit::text, ',' ORDER BY oi.product_id) FROM public.orders o JOIN public.order_items oi ON oi.order_id = o.id WHERE o.id = '${RUSH}' GROUP BY o.pricing_status;`);
+  assert.equal(rushState(), 'needs_pricing:0,0');
+  const pricedRush = refusedAtCommit(committed(`SELECT public.price_order(${lit(RUSH)}::uuid, ${lit(JSON.stringify([{ order_item_id: rushLine(P1), price: 8 }, { order_item_id: rushLine(P2), price: 9.5 }]))}::jsonb, ${lit(ADMIN)}::uuid, 'bcl-price');`, ADMIN));
+  assert.equal(pricedRush.operation, 'price_order');
+  assert.deepEqual(pricedRush.lines.map((l) => l.line_id).sort(), [rushLine(P1), rushLine(P2)].sort());
+  assert.equal(pricedRush.line_count, 2); assert.equal(pricedRush.total_shortfall_cents, 550);
+  assert.equal(rushState(), 'needs_pricing:0,0', 'the order is still unpriced');
+  console.log('[case 15] the real create_rush_order, then the real price_order pricing both lines below cost with no reason: refused ONCE at COMMIT listing both ($5.50 short); the order is still unpriced');
 
   // Case 11: the real HTTP path. PostgREST commits after the function returns; the client sees the commit-time refusal.
   const secret = 'bcl-prover-jwt-secret-0123456789abcdef';

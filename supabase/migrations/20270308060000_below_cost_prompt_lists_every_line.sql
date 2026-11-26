@@ -9,8 +9,9 @@
 -- both directions (server re-pricing, exempt order-linked lines, total-cost fee lines, restore and draw-down rows).
 --
 -- WHAT:
--- 1. _enforce_below_cost_line is re-created from the 20270201180000 body with two additions. (a) At the top: forget any
---    earlier note of this row, since it is judged afresh. (b) In the admin "no reason" branch only: instead of raising,
+-- 1. _enforce_below_cost_line is re-created from the 20270201180000 body with three additions. (a) At the top: a row
+--    whose id changes takes its note to the new id. (b) A row judged at or above cost forgets its note; an exempt
+--    write (bookkeeping, restores) keeps it, so it still asks. (c) In the admin "no reason" branch only: instead of raising,
 --    note the row's detail (today's detail plus quantity, line shortfall = the approval log's formula, and per =
 --    unit|line) in the transaction-local setting app.crx_below_cost_pending, keyed by table and line id, and let the row
 --    write. Every other branch (exemptions, context, admin-only, grower share, approval logging) is unchanged.
@@ -18,13 +19,15 @@
 --    INITIALLY DEFERRED, on order_items, quote_items and invoice_items, queued only while that setting is set. At commit
 --    (after the RPC returns) it keeps the noted lines whose row still exists and raises ONE BELOW_COST_REASON_REQUIRED
 --    whose JSON keeps today's top-level fields (the first line written, so the deployed screen still works) and adds
---    lines (every one, in the order written), line_count, more_count (always 0) and total_shortfall_cents.
+--    lines (the first 200, in the order written), line_count, more_count (the rest) and total_shortfall_cents (all).
 --    The save rolls back, as before. A rep still gets BELOW_COST_ADMIN_REQUIRED at once; no context still fails at once.
 --    Another error the save hits before commit (stock, validation) is shown first, with no prompt, as a rollback.
 -- No row, column, grant or approval-row change. The blend-ticket RPC's own $0-line prompt is unchanged.
 --
 -- ROLLBACK: scripts/smoke/below-cost-prompt-lists-every-line-reverse.sql drops the three triggers and the new function and
 -- restores the 20270201180000 body, proven by scripts/smoke/prove-below-cost-prompt-lists-every-line-real-schema.mjs.
+
+SET LOCAL lock_timeout = '5s';
 
 DO $preflight$
 BEGIN
@@ -82,35 +85,31 @@ DECLARE
   v_carried jsonb;
   v_shortfall_cents bigint;
 BEGIN
-  -- Pricing audit fix 1: this row is judged afresh below, so forget any earlier note of it. A line raised to cost or
-  -- made exempt later in the same save then no longer asks for a reason; a line still below cost is noted again.
-  -- A row whose id changes leaves its old note behind too, except one case: save_invoice re-inserts a kept invoice
-  -- product line under a new id, then restores its saved id with the same product, price, cost and no more quantity
-  -- (#13). Before this fix that insert refused the save, so that line's note moves to the restored id and stays, with
-  -- the restored quantity and its shortfall. A non-product line is always judged afresh below, so it carries nothing.
-  IF COALESCE(current_setting('app.crx_below_cost_pending', true), '') <> '' THEN
-    v_pending := current_setting('app.crx_below_cost_pending', true)::jsonb
-      #- ARRAY['lines', TG_TABLE_NAME || ':' || COALESCE(NEW.id::text, '')];
-    IF TG_OP = 'UPDATE' AND NEW.id IS DISTINCT FROM OLD.id THEN
-      v_carried := v_pending -> 'lines' -> (TG_TABLE_NAME || ':' || COALESCE(OLD.id::text, ''));
+  -- Pricing audit fix 1: a noted row keeps its note until it is judged at or above cost (forgotten at that RETURN
+  -- below) or noted again (replaced). An exempt write (bookkeeping, a quantity cut, a restore) returns early and keeps
+  -- it, so the save still asks. A row whose id changes (save_invoice restoring a kept line's saved id, #13) takes its
+  -- note to the new id; an invoice product line's note takes the new quantity and its shortfall. A carried order or
+  -- quote line exempted with less quantity keeps its old, larger shortfall: the prompt can only overstate.
+  IF TG_OP = 'UPDATE' AND NEW.id IS DISTINCT FROM OLD.id
+     AND COALESCE(current_setting('app.crx_below_cost_pending', true), '') <> '' THEN
+    v_pending := current_setting('app.crx_below_cost_pending', true)::jsonb;
+    v_carried := v_pending -> 'lines' -> (TG_TABLE_NAME || ':' || COALESCE(OLD.id::text, ''));
+    IF v_carried IS NOT NULL THEN
       v_pending := v_pending #- ARRAY['lines', TG_TABLE_NAME || ':' || COALESCE(OLD.id::text, '')];
+      v_carried := v_carried || jsonb_build_object('line_id', NEW.id);
       -- Nested so NEW's invoice columns are read only on an invoice_items row.
-      IF v_carried IS NOT NULL AND TG_TABLE_NAME = 'invoice_items' THEN
-        IF NEW.product_id IS NOT NULL
-           AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id
-           AND NEW.unit_price_cents IS NOT DISTINCT FROM OLD.unit_price_cents
-           AND NEW.cost_cents IS NOT DISTINCT FROM OLD.cost_cents
-           AND COALESCE(NEW.is_application_fee, false) IS NOT DISTINCT FROM COALESCE(OLD.is_application_fee, false)
-           AND COALESCE(NEW.quantity, 0) <= COALESCE(OLD.quantity, 0) THEN
-          v_pending := jsonb_set(v_pending, ARRAY['lines', TG_TABLE_NAME || ':' || COALESCE(NEW.id::text, '')],
-            v_carried || jsonb_build_object('line_id', NEW.id, 'quantity', NEW.quantity,
-              'line_shortfall_cents', round(((v_carried ->> 'locked_unit_cost_cents')::numeric
-                - (v_carried ->> 'unit_price_cents')::numeric) * NEW.quantity)::bigint));
+      IF TG_TABLE_NAME = 'invoice_items' THEN
+        IF v_carried ->> 'per' = 'unit' THEN
+          v_carried := v_carried || jsonb_build_object('quantity', COALESCE(NEW.quantity, 0),
+            'line_shortfall_cents', round(((v_carried ->> 'locked_unit_cost_cents')::numeric
+              - (v_carried ->> 'unit_price_cents')::numeric) * COALESCE(NEW.quantity, 0))::bigint);
         END IF;
       END IF;
+      v_pending := jsonb_set(v_pending, ARRAY['lines', TG_TABLE_NAME || ':' || COALESCE(NEW.id::text, '')], v_carried);
+      PERFORM set_config('app.crx_below_cost_pending', v_pending::text, true);
     END IF;
-    PERFORM set_config('app.crx_below_cost_pending', v_pending::text, true);
     v_pending := NULL;
+    v_carried := NULL;
   END IF;
 
   -- KI-156 (Mason, 2026-11-15: "Admins and reps"): _save_field_app_invoice_impl_20260714 declares
@@ -318,6 +317,11 @@ BEGIN
   END IF;
 
   IF v_price_cents >= v_cost_cents THEN
+    -- Pricing audit fix 1: judged at or above cost, so forget any earlier note of this row.
+    IF COALESCE(current_setting('app.crx_below_cost_pending', true), '') <> '' THEN
+      PERFORM set_config('app.crx_below_cost_pending', (current_setting('app.crx_below_cost_pending', true)::jsonb
+        #- ARRAY['lines', TG_TABLE_NAME || ':' || COALESCE(NEW.id::text, '')])::text, true);
+    END IF;
     RETURN NEW;
   END IF;
 
@@ -416,15 +420,15 @@ BEGIN
     -- let the save write on. _raise_below_cost_reason_list (a deferred trigger) then refuses the
     -- save ONCE, after the RPC returns, listing every below-cost line it wrote; the whole save rolls
     -- back as before. Only an active admin reaches this branch, so the noted detail may carry cost.
-    -- A line written twice in one save is noted once, with its latest values (the note was dropped
-    -- at the top of this function). Every line is listed; the shortfall is the approval log's.
-    v_shortfall_cents := round((v_cost_cents - v_price_cents) * v_quantity)::bigint;
+    -- A line written twice in one save is noted once, with its latest values (this note replaces the
+    -- earlier one). The shortfall is the approval log's formula; a missing quantity counts as 0.
+    v_shortfall_cents := round((v_cost_cents - v_price_cents) * COALESCE(v_quantity, 0))::bigint;
     v_pending := COALESCE(
       NULLIF(current_setting('app.crx_below_cost_pending', true), '')::jsonb,
       '{"seq": 0, "lines": {}}'::jsonb);
     v_pending_key := TG_TABLE_NAME || ':' || COALESCE(v_line_id::text, '');
     v_pending := jsonb_set(v_pending, ARRAY['lines', v_pending_key], v_detail || jsonb_build_object(
-      'quantity', v_quantity,
+      'quantity', COALESCE(v_quantity, 0),
       'line_shortfall_cents', v_shortfall_cents,
       'per', CASE WHEN TG_TABLE_NAME = 'invoice_items' AND v_product_id IS NULL THEN 'line' ELSE 'unit' END,
       'order_item_id', to_jsonb(NEW) -> 'order_item_id',
@@ -462,14 +466,19 @@ AS $function$
 DECLARE
   v_pending jsonb := NULLIF(current_setting('app.crx_below_cost_pending', true), '')::jsonb;
   v_lines jsonb;
+  v_count bigint;
   v_total_cents bigint;
 BEGIN
   IF v_pending IS NULL THEN
     RETURN NULL;
   END IF;
-  SELECT jsonb_agg(e.value - 'seq' ORDER BY (e.value ->> 'seq')::bigint),
-         sum((e.value ->> 'line_shortfall_cents')::bigint)
-    INTO v_lines, v_total_cents
+  -- The first 200 lines are listed (the error stays small); the rest are counted, and the total covers every line.
+  SELECT jsonb_agg(k.value - 'seq' ORDER BY k.rn) FILTER (WHERE k.rn <= 200),
+         count(*),
+         sum((k.value ->> 'line_shortfall_cents')::bigint)
+    INTO v_lines, v_count, v_total_cents
+    FROM (
+  SELECT e.value, row_number() OVER (ORDER BY (e.value ->> 'seq')::bigint) AS rn
     FROM jsonb_each(v_pending -> 'lines') AS e
    WHERE (split_part(e.key, ':', 2) = ''
       OR CASE split_part(e.key, ':', 1)
@@ -478,15 +487,17 @@ BEGIN
            WHEN 'invoice_items' THEN EXISTS (SELECT 1 FROM public.invoice_items x WHERE x.id = split_part(e.key, ':', 2)::uuid)
            ELSE true
          END)
-     -- An invoice line billing an order line listed in this same save at the same price and cost is that sale
+     -- An invoice line billing an order line listed in this same save at the same price, cost and quantity is that sale
      -- (price_order on a delivered rush order writes both): list it once, under the order line.
      AND NOT (split_part(e.key, ':', 1) = 'invoice_items'
               AND COALESCE((
                 SELECT o.value -> 'unit_price_cents' = e.value -> 'unit_price_cents'
                        AND o.value -> 'locked_unit_cost_cents' = e.value -> 'locked_unit_cost_cents'
+                       AND o.value -> 'quantity' = e.value -> 'quantity'
                        AND EXISTS (SELECT 1 FROM public.order_items x WHERE x.id = (e.value ->> 'order_item_id')::uuid)
                   FROM jsonb_each(v_pending -> 'lines') AS o
-                 WHERE o.key = 'order_items:' || (e.value ->> 'order_item_id')), false));
+                 WHERE o.key = 'order_items:' || (e.value ->> 'order_item_id')), false))
+    ) AS k;
   IF v_lines IS NULL THEN
     PERFORM set_config('app.crx_below_cost_pending', '', true);
     RETURN NULL;
@@ -497,8 +508,8 @@ BEGIN
       ((v_lines -> 0) - 'quantity' - 'line_shortfall_cents' - 'per' - 'order_item_id')
       || jsonb_build_object(
            'lines', v_lines,
-           'line_count', jsonb_array_length(v_lines),
-           'more_count', 0,
+           'line_count', v_count,
+           'more_count', v_count - jsonb_array_length(v_lines),
            'total_shortfall_cents', v_total_cents)
     )::text;
 END;
@@ -537,7 +548,7 @@ BEGIN
      WHERE p.oid = to_regprocedure('public._enforce_below_cost_line()')
        AND ((SELECT count(*) FROM pg_proc o
               WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_enforce_below_cost_line') <> 1
-        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '02478f868d1ec7319f5bdb7986a20ed9'
+        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '791f79c3c69bf917e5f910d81c578076'
         OR p.proowner <> 'postgres'::regrole
         OR NOT p.prosecdef
         OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]

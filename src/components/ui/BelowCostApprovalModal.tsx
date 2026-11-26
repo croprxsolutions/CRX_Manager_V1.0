@@ -76,7 +76,7 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
               {lineCount === 1 ? '1 line in this save is' : `${lineCount} lines in this save are`} priced below today&apos;s cost.
               Your reason applies to every one.
             </p>
-            <div className="mt-2 overflow-x-auto">
+            <div className="mt-2 overflow-x-auto" role="region" aria-label="Below-cost lines" tabIndex={0}>
               <table className="w-full text-left tabular-nums">
                 <thead>
                   <tr className="border-b border-amber-200">
@@ -93,7 +93,7 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
                       <td className="py-1 pr-3">{line.product_name || 'Unnamed line'}{line.per === 'line' ? ' (line total)' : ''}</td>
                       <td className="py-1 pr-3 text-right">{formatCents(line.unit_price_cents)}</td>
                       <td className="py-1 pr-3 text-right">{formatCents(line.locked_unit_cost_cents)}</td>
-                      <td className="py-1 pr-3 text-right">{line.per === 'line' ? '—' : line.quantity.toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
+                      <td className="py-1 pr-3 text-right">{line.per === 'line' ? <><span aria-hidden="true">—</span><span className="sr-only">priced as a line total</span></> : line.quantity.toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
                       <td className="py-1 text-right">{formatCents(line.line_shortfall_cents)}</td>
                     </tr>
                   ))}

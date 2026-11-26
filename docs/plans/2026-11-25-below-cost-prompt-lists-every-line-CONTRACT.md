@@ -129,3 +129,17 @@ Not proven in the container (named in the PR): `save_quote` server re-pricing an
 ## Open business decisions
 
 None for this PR. The follow-up "retry bound to what was shown" is Mason's call when he wants it.
+
+## Peer review (Opus, from the price-import audit session, 2026-11-25)
+
+- **HIGH, fixed:** an exempt same-row write after a below-cost write dropped the note, so the save committed with no reason. Now a note is forgotten only when the row is judged at or above cost, or replaced by a new note; an id change moves it. Proof case 13.
+- **MED, fixed:** unbounded list. The first 200 lines are listed, `more_count` counts the rest, the total covers all. Proof case 7 (300 lines).
+- **MED, fixed:** count-once matched on price and cost only. It now also needs equal quantity. Proof case 12d.
+- **LOW, fixed:** a NULL quantity made the shortfall NULL. It counts as 0.
+- **LOW, fixed:** no lock timeout. `SET LOCAL lock_timeout = '5s'` in the migration and the reverse.
+- **LOW, fixed:** screen reader and keyboard access to the line table (the "—" cell and the scrolling table).
+- **Refuted:** the dialog's description reading the whole table. This prompt uses the default dialog, which has no `aria-describedby`.
+- **Checked:** a below-cost refusal is a normal prompt, not an error sent to Sentry; the context shows the prompt and does not report it.
+- **Added, real RPCs:** case 14 (`save_quote`) and case 15 (`create_rush_order` then `price_order`) each refuse once at commit with the full list.
+- **LOW, known and deferred:** a note kept through an exempt write keeps the quantity it was noted at. Case 13 shows a line noted at quantity 2 then cut to 1 as $8.00 short, not $4.00. The prompt can overstate the shortfall and never understates it. The approval rows logged on the retry come from the retry's own writes, so they are exact.
+- **Proof harness:** the prover now pipes staged SQL into the container instead of using `docker cp`, which hung for 25+ minutes under load on 2026-11-26. Every docker call times out at 5 minutes.

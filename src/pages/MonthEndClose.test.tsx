@@ -676,6 +676,19 @@ describe('MonthEndClose', () => {
     expect(screen.queryByRole('link', { name: 'Open orders' })).toBeNull();
   });
 
+  it('choosing the month already shown keeps the page (no blank, no stuck loading)', async () => {
+    mockCleanCloseableSummary();
+    renderMonthEnd();
+    expect(await screen.findByText('Period Summary')).toBeInTheDocument();
+    const changeMonth = getReactSelectChangeHandler(screen.getByLabelText('Month to review'));
+    act(() => {
+      changeMonth({ target: { value: String((screen.getByLabelText('Month to review') as HTMLSelectElement).value) } });
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByText('Period Summary')).toBeInTheDocument();
+    expect(screen.getByLabelText('Month to review')).not.toBeDisabled();
+  });
+
   describe('M9: prepay balances tie', () => {
     const off = (name: string, stored: number, credits: number) => ({
       customer_id: `id-${name}`, farm_name: name, stored_cents: stored, credits_cents: credits, expected_cents: credits,

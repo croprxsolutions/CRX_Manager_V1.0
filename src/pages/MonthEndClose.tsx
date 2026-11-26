@@ -174,6 +174,9 @@ export default function MonthEndClose() {
   // synchronous update, so no render ever treats the prior period's checklist/summary as
   // valid for the newly selected month (closes the one-render-frame stale-state window).
   const changePeriod = (year: number, month: number) => {
+    // The period already shown: nothing to reload, and the fetch below would never re-run for it, so the page
+    // would stay on its loading state (e2e, M9).
+    if (year === selectedYear && month === selectedMonth) return;
     // A9 (Codex R5): invalidate any in-flight fetch for the OLD period SYNCHRONOUSLY, the
     // instant the period changes — otherwise a stale response resolving in the gap before
     // fetchData's own token bump could still set the old summary under the new period.

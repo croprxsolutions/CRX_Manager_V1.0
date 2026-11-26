@@ -3826,6 +3826,10 @@ export interface Vehicle {
   updated_at: string;
 }
 
+// Equipment fields used by Job Detail and its worksheets.
+export type JobVehicle = Pick<Database['public']['Tables']['vehicles']['Row'],
+  'id' | 'vehicle_name' | 'vehicle_type' | 'category' | 'capacity_gallons' | 'capacity_unit' | 'status'>;
+
 // Application Services (custom application pricing per vehicle/service)
 
 // cost_per_acre_cents is NOT on this interface. Migration 20260729015706 revoked

@@ -88,7 +88,7 @@ function seedProduct() {
   // Pricing writes go through a governed change set; this disposable container seeds one product directly.
   psql(`BEGIN; ALTER TABLE public.products DISABLE TRIGGER trigger_y_require_governed_product_pricing;
     INSERT INTO public.products (id, product_name, unit_size, current_cost, tier1_price, inventory_unit, product_form)
-      VALUES ('${product}', '[JDV] Herbicide', 'gal', 3.00, 12.00, 'Gal', 'liquid');
+      VALUES ('${product}', '[JDV ${RUN}] Herbicide', 'gal', 3.00, 12.00, 'Gal', 'liquid');
     ALTER TABLE public.products ENABLE TRIGGER trigger_y_require_governed_product_pricing; COMMIT;`);
 }
 
@@ -98,14 +98,18 @@ function booking(tag) {
   psql(`BEGIN; ${claims(ADMIN)}
     INSERT INTO public.customers (id, farm_name) VALUES ('${ids.c}', '[JDV ${tag}] Farm');
     INSERT INTO public.quotes (id, quote_number, customer_id, created_by, salesman_id, status, is_planned, commission_split, expires_at)
-      VALUES ('${ids.q}', 'QJDV-${tag}', '${ids.c}', '${REP}', '${REP}', 'sent', true, '{"splits": []}'::jsonb, CURRENT_DATE + 60);
-    INSERT INTO public.quote_versions (quote_id, sent_by, snapshot_data) VALUES ('${ids.q}', '${REP}', '{}'::jsonb);
+      VALUES ('${ids.q}', 'QJDV-${tag}', '${ids.c}', '${REP}', '${REP}', 'draft', true, '{"splits": []}'::jsonb, CURRENT_DATE + 60);
     INSERT INTO public.quote_sections (id, quote_id, section_name, sort_order) VALUES
       ('${ids.a}', '${ids.q}', 'Field A', 0), ('${ids.b}', '${ids.q}', 'Field B', 1);
     INSERT INTO public.quote_items (quote_id, section_id, product_id, sort_order, price_per_unit, current_cost, total_units_needed, unit_size)
       VALUES ('${ids.q}', '${ids.a}', '${product}', 0, 10.00, 3.00, 60, 'gal'),
              ('${ids.q}', '${ids.b}', '${product}', 0, 10.00, 3.00, 40, 'gal');
     COMMIT;`);
+  // The rep sends it (the screen's Send), which records the sent prices a job and a Partial Order check.
+  const sent = psql(`${as(REP)} SELECT public.create_quote_version('${ids.q}', '${REP}', 'presented', 'jdv-send-${tag}',
+    (SELECT row_version FROM public.quotes WHERE id = '${ids.q}')); COMMIT;`, { allowFailure: true });
+  assert.equal(sent.status, 0, sent.stderr);
+  assert.equal(scalar(`SELECT status FROM public.quotes WHERE id = '${ids.q}';`), 'sent');
   return ids;
 }
 const version = (q) => scalar(`SELECT row_version FROM public.quotes WHERE id = '${q}';`);
@@ -115,10 +119,13 @@ const partialOrder = (ids, qty, v, key) => `SELECT public.draw_down_quote('${ids
 /** What the rep's order became: booked units drawn and extra units at today's price, or the refusal. */
 function outcome(ids, out, status = 0) {
   if (STALE.test(out)) return { result: 'QUOTE_STALE_WRITE', orders: scalar(`SELECT count(*) FROM public.orders WHERE quote_id = '${ids.q}';`) };
-  const json = JSON.parse(out.split(/\r?\n/).find((l) => l.startsWith('{')) ?? 'null');
+  // The RPC's own row (the session also prints the claims set_config returns).
+  const json = JSON.parse(out.split(/\r?\n/).map((l) => l.trim()).find((l) => l.startsWith('{') && l.includes('"order_id"')) ?? 'null');
   assert.ok(json, `the Partial Order neither went through nor was refused:\n${out}`);
   assert.equal(status, 0, `the Partial Order's transaction did not commit:\n${out}`);
-  assert.ok(Number(scalar(`SELECT count(*) FROM public.orders WHERE id = '${json.order_id}';`)) === 1, 'its order was not committed');
+  const orders = [json.order_id, json.extra_order_id].filter(Boolean);
+  assert.equal(scalar(`SELECT count(*) FROM public.orders WHERE id IN ('${orders.join("','")}');`),
+    String(orders.length), 'its orders were not committed');
   return {
     result: 'ordered',
     booked: Number(json.lines?.[0]?.drawn ?? 0),

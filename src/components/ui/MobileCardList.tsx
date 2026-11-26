@@ -16,6 +16,8 @@ interface MobileCardListProps<T> {
   /** Lets a screen retain its own visual system (for example Dispatch's dark cards). */
   cardClassName?: string;
   className?: string;
+  /** Optional control beside each card, outside its button (for example a row's tick box). */
+  renderLeading?: (row: T) => ReactNode;
 }
 
 /**
@@ -31,21 +33,32 @@ export default function MobileCardList<T>({
   onRowClick,
   cardClassName = '',
   className = '',
+  renderLeading,
 }: MobileCardListProps<T>) {
   return (
     <>
       <div className={`space-y-3 md:hidden ${className}`.trim()}>
-        {rows.map((row) => (
-          <button
-            key={getRowKey(row)}
-            type="button"
-            onClick={() => onRowClick(row)}
-            aria-label={getRowLabel(row)}
-            className={`block min-h-[44px] w-full rounded-xl border border-gray-200 bg-white p-4 text-left shadow-card transition-colors hover:bg-crx-green-tint focus:outline-none focus:ring-2 focus:ring-crx-green/40 ${cardClassName}`}
-          >
-            {renderCard(row)}
-          </button>
-        ))}
+        {rows.map((row) => {
+          const card = (
+            <button
+              key={getRowKey(row)}
+              type="button"
+              onClick={() => onRowClick(row)}
+              aria-label={getRowLabel(row)}
+              className={`block min-h-[44px] w-full rounded-xl border border-gray-200 bg-white p-4 text-left shadow-card transition-colors hover:bg-crx-green-tint focus:outline-none focus:ring-2 focus:ring-crx-green/40 ${cardClassName}`}
+            >
+              {renderCard(row)}
+            </button>
+          );
+          if (!renderLeading) return card;
+          // A control inside the card's button would also open the row, so it sits beside it.
+          return (
+            <div key={getRowKey(row)} className="flex items-start gap-1">
+              {renderLeading(row)}
+              <div className="min-w-0 flex-1">{card}</div>
+            </div>
+          );
+        })}
       </div>
       <div className="hidden md:block">{desktop}</div>
     </>

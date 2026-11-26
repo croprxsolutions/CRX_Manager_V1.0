@@ -28,6 +28,7 @@ import { formatCents as fmt } from '../../lib/money';
 import { isCurrentSeason, openOrInSeasonFilter } from '../../lib/invoiceSeasonWindow';
 import { computeSeason, seasonStartDate } from '../../utils/season';
 import SeasonTag from '../invoices/SeasonTag';
+import { DueDate, InvoiceStatusBadge } from '../invoices/InvoiceListCells';
 import { SkeletonTable } from '../ui/Skeleton';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../../lib/pagedRead';
 import { LoadFailedState } from '../ui/EmptyState';
@@ -686,8 +687,9 @@ export default function FieldInvoicesPostedPanel() {
                 </p>
                 <p className="mt-1 text-xs text-secondary">
                   {new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()} · {row.total_acres.toLocaleString()} ac
+                  {row.due_date && <> · Due <DueDate date={row.due_date} /></>}
                 </p>
-                <div className="mt-1"><SeasonTag season={row.season} /></div>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5"><InvoiceStatusBadge status={row.status} /><SeasonTag season={row.season} /></div>
               </div>
               <div className="shrink-0 text-right">
                 <p className="font-semibold text-nav-dark">{fmt(row.total_amount_cents)}</p>
@@ -703,25 +705,28 @@ export default function FieldInvoicesPostedPanel() {
           desktop={<div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
+              {/* The same leading columns as the Chemical Invoices list: Invoice #, Customer, Date, Due, Total, Status. */}
               <tr className="border-b border-gray-100 text-left text-xs text-secondary uppercase tracking-wide">
-                <th className="px-3 py-2 font-medium">Job #</th>
                 <th className="px-3 py-2 font-medium">Invoice #</th>
                 <th className="px-3 py-2 font-medium">Customer</th>
+                <th className="px-3 py-2 font-medium">Date</th>
+                <th className="px-3 py-2 font-medium">Due</th>
+                <th className="px-3 py-2 font-medium text-right">Total</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium text-right">Balance</th>
+                <th className="px-3 py-2 font-medium">Job #</th>
                 <th className="px-3 py-2 font-medium">Locations</th>
                 <th className="px-3 py-2 font-medium">Crops</th>
                 <th className="px-3 py-2 font-medium">Applicators</th>
                 <th className="px-3 py-2 font-medium">Chemicals</th>
                 <th className="px-3 py-2 font-medium text-right">Acres</th>
-                <th className="px-3 py-2 font-medium text-right">Total</th>
-                <th className="px-3 py-2 font-medium text-right">Balance</th>
-                <th className="px-3 py-2 font-medium">Transaction</th>
                 <th className="px-3 py-2 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-3 py-10 text-center text-secondary">
+                  <td colSpan={14} className="px-3 py-10 text-center text-secondary">
                     No posted field invoices{hasFilters ? ' match these filters' : ''}.
                   </td>
                 </tr>
@@ -732,7 +737,6 @@ export default function FieldInvoicesPostedPanel() {
                     className="border-b border-gray-50 hover:bg-gray-50/60 cursor-pointer"
                     onClick={() => navigate(viewPath(row))}
                   >
-                    <td className="px-3 py-2 text-gray-700">{row.job_number || '—'}</td>
                     <td className="px-3 py-2">
                       <span className="inline-flex items-center gap-1.5 font-medium text-nav-dark">
                         <FileText className="w-3.5 h-3.5 text-crx-green shrink-0" />
@@ -740,21 +744,24 @@ export default function FieldInvoicesPostedPanel() {
                       </span>
                     </td>
                     <td className="px-3 py-2 text-gray-700">{row.customer_name}</td>
-                    <td className="px-3 py-2">{chips(row.locations)}</td>
-                    <td className="px-3 py-2">{chips(row.crops)}</td>
-                    <td className="px-3 py-2">{chips(row.applicators)}</td>
-                    <td className="px-3 py-2">{chips(row.chemicals)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gray-700">{row.total_acres.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
+                      {new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}
+                      <div className="mt-0.5"><SeasonTag season={row.season} /></div>
+                    </td>
+                    <td className="px-3 py-2 text-gray-700"><DueDate date={row.due_date} /></td>
                     <td className="px-3 py-2 text-right tabular-nums font-medium">{fmt(row.total_amount_cents)}</td>
+                    <td className="px-3 py-2"><InvoiceStatusBadge status={row.status} /></td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       <span className={row.balance_cents > 0 ? 'text-red-600 font-semibold' : 'text-crx-green'}>
                         {fmt(row.balance_cents)}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
-                      {new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}
-                      <div className="mt-0.5"><SeasonTag season={row.season} /></div>
-                    </td>
+                    <td className="px-3 py-2 text-gray-700">{row.job_number || '—'}</td>
+                    <td className="px-3 py-2">{chips(row.locations)}</td>
+                    <td className="px-3 py-2">{chips(row.crops)}</td>
+                    <td className="px-3 py-2">{chips(row.applicators)}</td>
+                    <td className="px-3 py-2">{chips(row.chemicals)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-700">{row.total_acres.toLocaleString()}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center justify-end gap-1">
                         <button
@@ -806,12 +813,13 @@ export default function FieldInvoicesPostedPanel() {
             {visible.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-gray-200 bg-gray-50/60 font-semibold text-nav-dark">
-                  <td className="px-3 py-2" colSpan={7}>
+                  <td className="px-3 py-2" colSpan={4}>
                     Invoices Displayed: {totals.count}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{totals.totalAcres.toLocaleString()}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt(totals.totalAmountCents)}</td>
-                  <td className="px-3 py-2" colSpan={3}></td>
+                  <td className="px-3 py-2" colSpan={7}></td>
+                  <td className="px-3 py-2 text-right tabular-nums">{totals.totalAcres.toLocaleString()}</td>
+                  <td className="px-3 py-2"></td>
                 </tr>
               </tfoot>
             )}

@@ -4,7 +4,7 @@
  * "No … found", zero totals, or the previous item's rows; Try again shows the list.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { buildInMemoryQuery, pagedRpcReply } from '../test-utils/inMemoryQuery';
 
@@ -21,14 +21,11 @@ const H = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 
-// A query that ignores its filters and answers with the given rows.
-function fixedQuery(rows: Row[]): Record<string, unknown> {
-  const q: Record<string, unknown> = new Proxy({}, {
-    get(_t, prop) {
-      if (prop === 'then') return (resolve: (v: unknown) => unknown) => resolve({ data: rows, error: null, count: rows.length });
-      return () => q;
-    },
-  });
+// The customer box's name search: ignores the typed text and answers with every active row;
+// its other filters (and a read by id) still apply.
+function nameSearchQuery(rows: Row[]): Record<string, unknown> {
+  const q = buildInMemoryQuery(rows);
+  q.or = () => q;
   return q;
 }
 
@@ -54,8 +51,7 @@ vi.mock('../lib/db', async () => {
       from: (table: string) => {
         const mode = H.failing.get(table);
         if (mode) return failingQuery(mode);
-        // The payment screen's name search: answer with every row of the table.
-        if (H.searchTables.has(table)) return fixedQuery(H.tables[table] ?? []);
+        if (H.searchTables.has(table)) return nameSearchQuery(H.tables[table] ?? []);
         return buildInMemoryQuery(H.tables[table] ?? []);
       },
       rpc: (name: string) => {
@@ -73,6 +69,8 @@ vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({ profile: { id: 'user-1', role: 'admin', full_name: 'Admin' }, role: 'admin', deniedPages: [] }),
 }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) }));
+// Leaving with typed amounts asks first (useBlocker), which needs the app's data router; not under test here.
+vi.mock('../hooks/useUnsavedChanges', () => ({ useUnsavedChanges: () => ({ state: 'unblocked' }) }));
 vi.mock('../hooks/useIdempotencyKey', () => ({ useIdempotencyKey: () => ({ getKey: () => 'idem', resetKey: vi.fn() }) }));
 
 import ARaging from './ARaging';
@@ -176,27 +174,40 @@ describe('A/R Workspace money summary', () => {
   });
 });
 
+const customerBox = () => screen.getByRole('combobox', { name: 'Select customer' });
+
+// Chooses a customer in the shared customer box the way a user does: type, then pick.
+async function pickCustomer(box: HTMLElement, typed: string, name: RegExp) {
+  fireEvent.change(box, { target: { value: typed } });
+  fireEvent.click(await screen.findByRole('option', { name }));
+}
+
 describe('Customer Transactions', () => {
-  it('a failed customer list says so with Try again instead of an empty dropdown', async () => {
+  beforeEach(() => { H.searchTables.add('customers'); });
+
+  it('a failed customer search says so with Retry instead of "no matches"', async () => {
     H.failing.set('customers', 'error');
     at('/customer-transactions', <CustomerTransactionReview />);
+    fireEvent.change(customerBox(), { target: { value: 'Big' } });
 
-    expect(await screen.findByText(/The customer list could not be loaded/)).toBeInTheDocument();
+    expect(await screen.findByText(/Customer search failed/)).toBeInTheDocument();
+    expect(screen.queryByText(/No matching/)).not.toBeInTheDocument();
 
     H.failing.delete('customers');
-    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByRole('option', { name: 'Big Farm' })).toBeInTheDocument();
-    expect(screen.queryByText(/The customer list could not be loaded/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('option', { name: /Big Farm/ })).toBeInTheDocument();
   });
 });
 
 describe('Customer Transactions totals', () => {
   const ledger = [{ transaction_date: '2026-10-01', transaction_type: 'invoice', reference_number: 'INV-A', description: 'Big Farm invoice', debit_cents: 4321, credit_cents: 0, running_balance_cents: 4321 }];
 
+  beforeEach(() => { H.searchTables.add('customers'); });
+
   async function loadBigFarm() {
     H.functions.get_customer_transaction_review = ledger;
     at('/customer-transactions?customer=c1', <CustomerTransactionReview />);
-    await screen.findByRole('option', { name: 'Small Farm' });
+    await waitFor(() => expect(customerBox()).toHaveValue('Big Farm'));
     fireEvent.click(screen.getByRole('button', { name: 'Last 90d' }));
     expect(await screen.findByText('INV-A')).toBeInTheDocument();
     expect(screen.getByText('Total Debits').parentElement!).toHaveTextContent('$43.21');
@@ -206,7 +217,7 @@ describe('Customer Transactions totals', () => {
     await loadBigFarm();
     let release!: (v: unknown) => void;
     H.pending.set('get_customer_transaction_review', new Promise((r) => { release = r; }));
-    fireEvent.change(screen.getByLabelText('Select customer'), { target: { value: 'c2' } });
+    await pickCustomer(customerBox(), 'Small', /Small Farm/);
 
     expect(screen.queryByText('Total Debits')).not.toBeInTheDocument();
     expect(screen.queryByText('INV-A')).not.toBeInTheDocument();
@@ -217,11 +228,11 @@ describe('Customer Transactions totals', () => {
   it('clearing the customer clears the rows and a failed state, with no Try again that cannot work', async () => {
     H.failing.set('get_customer_transaction_review', 'error');
     at('/customer-transactions?customer=c1', <CustomerTransactionReview />);
-    await screen.findByRole('option', { name: 'Small Farm' });
+    await waitFor(() => expect(customerBox()).toHaveValue('Big Farm'));
     fireEvent.click(screen.getByRole('button', { name: 'Last 90d' }));
     expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Select customer'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear customer' }));
     expect(screen.queryByText('This list could not be loaded')).not.toBeInTheDocument();
     expect(screen.getByText('Select a customer and date range')).toBeInTheDocument();
   });
@@ -254,10 +265,10 @@ describe('Customer Transactions cleared mid-read', () => {
     let release!: (v: unknown) => void;
     H.pending.set('get_customer_transaction_review', new Promise((r) => { release = r; }));
     at('/customer-transactions?customer=c1', <CustomerTransactionReview />);
-    await screen.findByRole('option', { name: 'Small Farm' });
+    await waitFor(() => expect(customerBox()).toHaveValue('Big Farm'));
     fireEvent.click(screen.getByRole('button', { name: 'Last 90d' }));
 
-    fireEvent.change(screen.getByLabelText('Select customer'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear customer' }));
     release({ data: [{ transaction_date: '2026-10-01', transaction_type: 'invoice', reference_number: 'INV-LATE', description: null, debit_cents: 100, credit_cents: 0, running_balance_cents: 100 }], error: null });
     expect(await screen.findByText('Select a customer and date range')).toBeInTheDocument();
     expect(screen.queryByText('INV-LATE')).not.toBeInTheDocument();
@@ -303,24 +314,23 @@ describe('Payment History after a failed refresh', () => {
 describe('Record Payments customer search', () => {
   beforeEach(() => { H.searchTables.add('customers'); });
 
-  it('a failed search says it failed, not "No customers found", and Try again searches again', async () => {
+  it('a failed search says it failed, not "No matching customers", and Retry searches again', async () => {
     H.failing.set('customers', 'error');
     at('/payments', <PaymentAllocation />);
     fireEvent.change(screen.getByPlaceholderText('Search by name or account #...'), { target: { value: 'Big' } });
 
     expect(await screen.findByText(/Customer search failed/)).toBeInTheDocument();
-    expect(screen.queryByText('No customers found')).not.toBeInTheDocument();
+    expect(screen.queryByText(/No matching/)).not.toBeInTheDocument();
 
     H.failing.delete('customers');
-    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByRole('button', { name: /Big Farm/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('option', { name: /Big Farm/ })).toBeInTheDocument();
   });
 
   it('failed open invoices offer Try again, which loads them', async () => {
     H.failing.set('invoices', 'error');
     at('/payments', <PaymentAllocation />);
-    fireEvent.change(screen.getByPlaceholderText('Search by name or account #...'), { target: { value: 'Big' } });
-    fireEvent.click(await screen.findByRole('button', { name: /Big Farm/ }));
+    await pickCustomer(screen.getByPlaceholderText('Search by name or account #...'), 'Big', /Big Farm/);
 
     expect(await screen.findByText(/Open invoices could not be loaded/)).toBeInTheDocument();
 

@@ -55,6 +55,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useLatestRef } from '../hooks/useLatestRef';
+import { useSaveShortcut } from '../hooks/useSaveShortcut';
 import { sanitizeError, supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpcCode, rpcAuthErrorMessage, rpcCodeDetail, RpcErrorCodes } from '../lib/db';
 import {
   convertQuoteToOrderWithRowVersion,
@@ -567,6 +568,8 @@ export default function QuoteBuilder() {
   const tierInputsRef = useRef('');
   // The id a new quote's first save opens: its tick carries over; opening any other quote clears it.
   const keepTierChoiceForRef = useRef<string | null>(null);
+  // The id a new quote's first save opens: the PDF layout picked in the preview carries over too.
+  const keepPdfLayoutForRef = useRef<string | null>(null);
   useEffect(() => { tierInputsRef.current = `${customerId}|${tier}|${tierChoice}`; }, [customerId, tier, tierChoice]);
   // The expiry date the rep picked; null = season end (Mason 2026-10-26/27). The database
   // applies it at each send (20261029100000).
@@ -624,6 +627,8 @@ export default function QuoteBuilder() {
   // The saved quote whose snapshot is on screen. `quoteId` starts as the URL's id
   // before anything loads, so it cannot tell a loaded quote from a failed first load.
   const [installedQuoteId, setInstalledQuoteId] = useState<string | null>(null);
+  // Counts quotes loaded from the database: an open preview rebuilds from the loaded (saved) prices.
+  const [quoteLoadCount, setQuoteLoadCount] = useState(0);
   const [loadedQuoteOwner, setLoadedQuoteOwner] = useState<{ quoteId: string; createdBy: string | null } | null>(null);
   // Scoped by the quote this save actually TARGETS. F1 makes an ambiguous reply
   // RETAIN this key, and QuoteBuilder does not remount when only `:id` changes (no
@@ -800,6 +805,8 @@ export default function QuoteBuilder() {
   const [markingPresented, setMarkingPresented] = useState(false);
   // The columns the shown preview was drawn with; the effect below redraws when the chips change.
   const previewColumnsKeyRef = useRef<string | null>(null);
+  // The key the preview on screen was built for (state, so Email can wait for a rebuild).
+  const [previewBuiltKey, setPreviewBuiltKey] = useState<string | null>(null);
   const [previewRebuild, setPreviewRebuild] = useState<'idle' | 'updating' | 'failed'>('idle');
   // Bumped per Preview click and on a move to another quote, so a late first build never opens or
   // replaces the preview. A layout effect, so it moves on commit with routeQuoteIdRef.
@@ -1535,6 +1542,7 @@ export default function QuoteBuilder() {
     }
     setQuoteId(q.id);
     setInstalledQuoteId(q.id);
+    setQuoteLoadCount((n) => n + 1);
     setLoadedQuoteOwner({ quoteId: q.id, createdBy: q.created_by ?? null });
     setQuoteLoadFailedId(null);
     setQuoteNumber(q.quote_number);
@@ -1703,13 +1711,20 @@ export default function QuoteBuilder() {
 
   useEffect(() => {
     fetchReferenceData();
+    // Saving a new quote from the preview opens its saved page; the layout the rep picked stays.
+    const keepPdfLayout = !!id && keepPdfLayoutForRef.current === id;
+    keepPdfLayoutForRef.current = null;
     // Fetch PDF templates (non-critical, inline to avoid TDZ issue with useCallback ordering)
     supabase.from('quote_pdf_templates').select('*').order('is_default', { ascending: false })
       .then(({ data }) => {
         if (data) {
-          setPdfTemplates(data as QuotePdfTemplate[]);
-          const defaultTemplate = (data as QuotePdfTemplate[]).find((t) => t.is_default);
-          if (defaultTemplate) setSelectedTemplateId(defaultTemplate.id);
+          const templates = data as QuotePdfTemplate[];
+          setPdfTemplates(templates);
+          const defaultTemplate = templates.find((t) => t.is_default);
+          if (defaultTemplate) {
+            setSelectedTemplateId((current) => (keepPdfLayout && current && templates.some((t) => t.id === current)
+              ? current : defaultTemplate.id));
+          }
         }
       });
     // Fetch quote templates for new quotes
@@ -2944,6 +2959,7 @@ export default function QuoteBuilder() {
           // The new quote's tier tick (KI-105) stays with it once it has an id.
           setTierChoice((choice) => (choice.startsWith('new:') ? `${result}${choice.slice(3)}` : choice));
       keepTierChoiceForRef.current = result;
+          keepPdfLayoutForRef.current = result;
           navigate(`/quotes/${result}`, { replace: true });
         }
       }
@@ -3314,7 +3330,8 @@ export default function QuoteBuilder() {
         const run = ++previewRunRef.current;
         const doc = await generateQuotePdf(buildQuotePdfData(), columns);
         if (run !== previewRunRef.current) return;
-        previewColumnsKeyRef.current = columns.join(',');
+        previewColumnsKeyRef.current = `${columns.join(',')}|${quoteLoadCount}`;
+        setPreviewBuiltKey(previewColumnsKeyRef.current);
         setPreviewPdfBlob(doc.output('blob'));
         setShowPreviewModal(true);
       },
@@ -3583,9 +3600,11 @@ export default function QuoteBuilder() {
   // The preview follows the chosen layout and columns (display only: nothing sends or saves this blob).
   const activePdfColumns = customColumns || getTemplateColumns(selectedTemplateId);
   const activePdfColumnsKey = activePdfColumns.join(',');
+  // Saving from the preview reloads the saved quote, whose prices can differ: that rebuilds it too.
+  const activePreviewKey = `${activePdfColumnsKey}|${quoteLoadCount}`;
   const buildQuotePdfDataRef = useLatestRef(buildQuotePdfData);
   useEffect(() => {
-    if (!showPreviewModal || previewColumnsKeyRef.current === activePdfColumnsKey) {
+    if (!showPreviewModal || previewColumnsKeyRef.current === activePreviewKey) {
       setPreviewRebuild('idle');
       return;
     }
@@ -3595,7 +3614,8 @@ export default function QuoteBuilder() {
       try {
         const doc = await generateQuotePdf(buildQuotePdfDataRef.current(), activePdfColumnsKey ? activePdfColumnsKey.split(',') : []);
         if (stale) return;
-        previewColumnsKeyRef.current = activePdfColumnsKey;
+        previewColumnsKeyRef.current = activePreviewKey;
+        setPreviewBuiltKey(activePreviewKey);
         setPreviewPdfBlob(doc.output('blob'));
         setPreviewRebuild('idle');
       } catch (err) {
@@ -3605,7 +3625,7 @@ export default function QuoteBuilder() {
       }
     }, 200);
     return () => { stale = true; clearTimeout(timer); };
-  }, [showPreviewModal, activePdfColumnsKey, buildQuotePdfDataRef]);
+  }, [showPreviewModal, activePdfColumnsKey, activePreviewKey, buildQuotePdfDataRef]);
 
   const fetchVersions = useCallback(async () => {
     if (!quoteId) return;
@@ -4482,6 +4502,12 @@ export default function QuoteBuilder() {
 
   const pct = (n: number) => `${n.toFixed(1)}%`; // net_margin is already stored as percentage
 
+  // Save draft's disabled state, shared by the page's Save buttons, the preview's Save quote and Ctrl+S.
+  const saveDraftDisabled = (!canEdit && isEditing) || (!isEditing && quoteNumberLoading) || (!isDirty && !saving);
+  // Ctrl+S / Cmd+S presses Save draft, only while that button is on screen and can be clicked.
+  useSaveShortcut(handleSaveDraft, !loading && !(isEditing && id && installedQuoteId !== id && quoteLoadFailedId === id)
+    && (!isEditing || canEdit) && !saveDraftDisabled && !saving && !converting);
+
   if (loading) {
     return (
       <div className="animate-pulse space-y-4">
@@ -4586,13 +4612,24 @@ export default function QuoteBuilder() {
       onClick={handleSaveDraft}
       loading={saving}
       // Nothing to save until something changes: repeated clicks would only resend the same quote.
-      disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading) || (!isDirty && !saving)}
+      disabled={saveDraftDisabled}
       title={!isDirty && !saving ? 'No changes to save' : undefined}
       className={`${tall} ${className}`}
     >
       {saving ? 'Saving…' : savesAsRevised ? 'Save changes' : 'Save draft'}
     </Button>
   );
+  // The preview's send panel: an unsaved quote offers Save quote first, and Email says why it is off.
+  const quoteUnsaved = !quoteId || isDirty;
+  const previewNeedsSave = quoteUnsaved && showSaveDraft;
+  // A new quote with no customer picked yet is told to save (which asks for the customer), not that an email is missing.
+  const emailBlockedReason = (selectedCustomer || !quoteUnsaved) && !selectedCustomer?.email
+    ? 'No email on file for this customer'
+    : quoteUnsaved ? 'Save the quote before emailing it.'
+      // After a save the preview rebuilds with the saved prices; Email waits so it never sits beside old ones.
+      // A failed rebuild keeps the old preview with its warning, and Email builds its own PDF.
+      : showPreviewModal && previewRebuild !== 'failed' && previewBuiltKey !== activePreviewKey ? 'Updating the preview…'
+        : null;
   const previewButton = (variant: 'primary' | 'secondary') => (
     <Button variant={variant} icon={<Eye className="w-4 h-4" />} onClick={handlePreviewQuote} className={tall}>
       Preview &amp; send
@@ -6267,15 +6304,31 @@ export default function QuoteBuilder() {
             </div>
           </div>
           <div className="flex shrink-0 flex-col gap-2.5 border-t border-gray-200 bg-white px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:border-l md:px-6 md:pb-5">
+            {/* An unsaved quote can't be emailed: Save quote runs the page's own Save draft, then Email turns on. */}
+            {previewNeedsSave && (
+              <Button
+                variant="primary"
+                icon={<Save className="w-4 h-4" />}
+                onClick={handleSaveDraft}
+                loading={saving}
+                disabled={saveDraftDisabled}
+                className="h-11 w-full"
+              >
+                {saving ? 'Saving…' : 'Save quote'}
+              </Button>
+            )}
             <Button
-              variant="primary"
+              variant={previewNeedsSave ? 'secondary' : 'primary'}
               icon={<Send className="w-4 h-4" />}
               onClick={handleEmailToGrower}
               loading={emailingGrower}
+              disabled={emailBlockedReason !== null}
+              aria-describedby={emailBlockedReason ? 'quote-email-blocked-reason' : undefined}
               className="h-11 w-full"
             >
               {emailingGrower ? 'Sending…' : 'Email to grower'}
             </Button>
+            {emailBlockedReason && <p id="quote-email-blocked-reason" className="-mt-1 text-xs text-secondary">{emailBlockedReason}</p>}
             <div className="flex gap-2.5">
               <Button
                 variant="secondary"

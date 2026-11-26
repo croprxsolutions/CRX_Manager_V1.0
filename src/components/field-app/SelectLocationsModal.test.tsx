@@ -46,6 +46,7 @@ vi.mock('../map/CRXMap', () => ({ default: ({ children }: { children?: ReactNode
 vi.mock('../map/FieldBoundaryLayer', () => ({ default: () => <div /> }));
 
 import SelectLocationsModal from './SelectLocationsModal';
+import { isModalOpen } from '../../hooks/useSaveShortcut';
 
 const field = {
   id: 'field-1',
@@ -99,5 +100,13 @@ describe('SelectLocationsModal field list', () => {
     expect(screen.queryByText('North 40')).not.toBeInTheDocument();
     expect(toast).toHaveBeenCalledWith('error', 'Failed to load fields');
     await waitFor(() => expect(screen.getByRole('button', { name: /^Select/ })).toBeDisabled());
+  });
+});
+
+describe('SelectLocationsModal as a dialog', () => {
+  it('is an open dialog, so Ctrl+S cannot save the invoice behind it', () => {
+    render(<SelectLocationsModal isOpen onClose={vi.fn()} onSelect={vi.fn()} initialSelectedIds={[]} />);
+    expect(screen.getByRole('dialog', { name: 'Select Locations' })).toBeInTheDocument();
+    expect(isModalOpen()).toBe(true);
   });
 });

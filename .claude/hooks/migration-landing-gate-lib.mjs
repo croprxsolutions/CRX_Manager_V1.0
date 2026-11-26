@@ -101,8 +101,10 @@ export function readyToMergeProblem({ comments, head, now = Date.now() }) {
 export const TAHA_UNAVAILABLE_LABEL = "taha-unavailable";
 export function tahaUnavailableLabelled({ events, labels, head, now = Date.now() }) {
   if (!Array.isArray(events) || !Array.isArray(labels) || !labels.some((l) => l?.name === TAHA_UNAVAILABLE_LABEL)) return false;
-  const headAt = events.findIndex((e) => e?.event === "committed" && String(e?.sha ?? "").toLowerCase() === String(head ?? "").toLowerCase());
-  if (headAt < 0) return false;
+  // The head's LAST arrival: a force-push back to an older head is a new push, so a label from before it does not count (Luna, PR 3).
+  const arrived = events.findLastIndex((e) => e?.event === "committed" && String(e?.sha ?? "").toLowerCase() === String(head ?? "").toLowerCase());
+  if (arrived < 0) return false;
+  const headAt = Math.max(arrived, events.findLastIndex((e) => e?.event === "head_ref_force_pushed"));
   const last = events.slice(headAt + 1).filter((e) => e?.label?.name === TAHA_UNAVAILABLE_LABEL && (e.event === "labeled" || e.event === "unlabeled")).pop();
   const at = Date.parse(String(last?.created_at ?? ""));
   return last?.event === "labeled" && String(last?.actor?.login ?? "").trim().toLowerCase() === TAHA_LOGIN &&

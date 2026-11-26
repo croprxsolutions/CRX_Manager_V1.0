@@ -2,9 +2,24 @@ import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { localSql } from './local-db';
 
+const [first, second, farm, job, fieldA, fieldB, locationA, locationB] = Array.from({ length: 8 }, randomUUID);
+
+test.afterEach(() => {
+  localSql(`BEGIN;
+    DELETE FROM public.notifications WHERE related_entity_type = 'job' AND related_entity_id = '${job}';
+    DELETE FROM public.job_location_dispatches WHERE job_id = '${job}';
+    DELETE FROM public.job_fields WHERE id IN ('${locationA}', '${locationB}');
+    DELETE FROM public.jobs WHERE id = '${job}';
+    DELETE FROM public.fields WHERE id IN ('${fieldA}', '${fieldB}');
+    DELETE FROM public.customers WHERE id = '${farm}';
+    DELETE FROM public.profile_public_directory WHERE id IN ('${first}', '${second}');
+    DELETE FROM public.profiles WHERE id IN ('${first}', '${second}');
+    DELETE FROM auth.users WHERE id IN ('${first}', '${second}');
+    COMMIT;`);
+});
+
 test('Location dispatch saves notices once without a browser notification write', async ({ page }) => {
   test.setTimeout(120_000);
-  const [first, second, farm, job, fieldA, fieldB, locationA, locationB] = Array.from({ length: 8 }, randomUUID);
   const tag = job.slice(0, 8);
   const jobNumber = `Local-Dispatch-${tag}`;
   const fieldName = `Invented North ${tag}`;

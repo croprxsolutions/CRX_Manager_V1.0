@@ -218,11 +218,17 @@ function FieldMapReadWarning({ jobsFailed, fieldsFailed, mapAssignmentFailed, sa
   );
 }
 
+// Whole-job assignments for FieldView's legacy tail; crew read the price-free view.
+function selectLegacyAssignedJobs(office: boolean) {
+  const columns = 'id, job_number, job_date, status, total_acres, applied_acres, customer_id, customer:customers(farm_name)';
+  return office ? supabase.from('jobs').select(columns) : supabase.from('jobs_crew').select(columns);
+}
+
 export default function FieldView() {
   usePageMeta();
   const { toast } = useToast();
-  const { profile } = useAuth();
-  const office = usesOfficeJobReads(profile?.role);
+  const { profile, role } = useAuth();
+  const office = usesOfficeJobReads(role);
   const isOnline = useOnlineStatus();
   const startIdem = useIdempotencyKey('start_job', profile?.id || '');
   const completeIdem = useIdempotencyKey('complete_job', profile?.id || '');
@@ -311,9 +317,7 @@ export default function FieldView() {
       // linger for legacy jobs is harmless.
       if (profile?.id) {
         const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-        const columns = 'id, job_number, job_date, status, total_acres, applied_acres, customer_id, customer:customers(farm_name)';
-        const legacyQuery = office ? supabase.from('jobs').select(columns) : supabase.from('jobs_crew').select(columns);
-        const legacyRes = await legacyQuery
+        const legacyRes = await selectLegacyAssignedJobs(office)
           .eq('applicator_id', profile.id)
           .is('deleted_at', null)
           .or(`status.in.(scheduled,in_progress),and(status.in.(completed,invoiced),updated_at.gte.${sevenDaysAgoIso})`);

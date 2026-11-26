@@ -5,6 +5,7 @@ override on the gate's own files goes back to one head, as agreed on #2303.
 
 - **Live applies** (`migration-landing-gate-lib.mjs`): a plain `taha override #<PR> <code>` no longer stands in for
   Taha's `Ready to merge:` go-ahead or the 4-hour hold. Only `taha override #<PR> <code> unavailable: <reason>`
-  does; Mason decides when Taha is unavailable. Staging merges are unchanged: any override covers the PR for 24 hours.
+  does, only at the head it was issued for; Mason decides when Taha is unavailable. When it lets a live apply through,
+  the landing gate now posts the PR comment tagging Taha (it never did; only the merge gate did), or refuses. Staging merges are unchanged: any override covers the PR for 24 hours.
 - **The gate's own files** (`taha-lane-lib.mjs` `BLOCK_FILES_RE`, now including `migration-landing-gate-lib.mjs`):
   an override on a PR that changes them covers only the head it was issued for; a later push needs a new code.

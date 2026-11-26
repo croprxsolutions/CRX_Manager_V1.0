@@ -567,16 +567,20 @@ export function findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead = fal
   return null;
 }
 
-/** The override a live apply may use in place of Taha: only one where Mason said Taha is unavailable (Mason, 2026-11-25). */
-export function findTahaUnavailableOverride({ dirs, pullRequest, now = Date.now() }) {
-  const data = findTahaLaneOverride({ dirs, pullRequest, now });
+/**
+ * The override a live apply may use in place of Taha: only one where Mason said Taha is unavailable (Mason, 2026-11-25),
+ * and only for the head it was issued for (the 24-hour carry over pushes is for staging merges; Luna, PR 1 round 1).
+ */
+export function findTahaUnavailableOverride({ dirs, pullRequest, headSha, now = Date.now() }) {
+  const data = findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead: true, now });
   return typeof data?.tahaUnavailable === "string" && data.tahaUnavailable.trim() ? data : null;
 }
 
-function markTahaTold({ dirs, override }) {
+/** Records on the override that Taha was told (`field`: tahaToldAt for a merge, tahaToldApplyAt for a live apply). */
+export function markTahaTold({ dirs, override, field = "tahaToldAt" }) {
   for (const dir of dirs || []) {
     const file = path.join(dir, overrideName(override.pullRequest));
-    try { if (existsSync(file)) writeFileSync(file, `${JSON.stringify({ ...override, tahaToldAt: new Date().toISOString() }, null, 2)}\n`, "utf8"); } catch { /* the next try posts again */ }
+    try { if (existsSync(file)) writeFileSync(file, `${JSON.stringify({ ...override, [field]: new Date().toISOString() }, null, 2)}\n`, "utf8"); } catch { /* the next try posts again */ }
   }
 }
 

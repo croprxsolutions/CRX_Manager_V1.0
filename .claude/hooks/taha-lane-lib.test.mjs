@@ -317,14 +317,15 @@ ok(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW + 3600e3
 ok(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: B, now: NOW + 3600e3 }), "a later push is covered too (one message per PR)");
 eq(findTahaLaneOverride({ dirs, pullRequest: 2243, headSha: A, now: NOW + 3600e3 }), null, "no other PR is covered");
 eq(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW + 60e3 + 24 * 3600e3 }), null, "the override ends after 24 hours");
-eq(findTahaUnavailableOverride({ dirs, pullRequest: 2242, now: NOW + 3600e3 }), null, "a plain override does not say Taha is unavailable (no live apply)");
+eq(findTahaUnavailableOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW + 3600e3 }), null, "a plain override does not say Taha is unavailable (no live apply)");
 {
   const c = issueTahaLaneCode({ dirs, pullRequest: 2250, headSha: A, now: NOW, newCode: () => "515151" });
   const r = recordTahaLaneOverride({ dirs, pullRequest: 2250, code: c, tahaUnavailable: "  away all week  ", now: NOW + 60e3 });
   ok(r.ok && r.payload.tahaUnavailable === "away all week", "the unavailable reason is recorded");
-  ok(findTahaUnavailableOverride({ dirs, pullRequest: 2250, now: NOW + 3600e3 }), "an unavailable override is found for the live apply");
-  ok(findTahaLaneOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 3600e3 }), "and works as a plain override for staging too");
-  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, now: NOW + 60e3 + 24 * 3600e3 }), null, "it ends after 24 hours too");
+  ok(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: A, now: NOW + 3600e3 }), "an unavailable override is found for the live apply");
+  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 3600e3 }), null, "a live apply at a later push is not covered");
+  ok(findTahaLaneOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 3600e3 }), "but it works as a plain override for staging merges at any head");
+  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: A, now: NOW + 60e3 + 24 * 3600e3 }), null, "it ends after 24 hours too");
 }
 
 // ── the gate the merge guards call ──────────────────────────────────────────

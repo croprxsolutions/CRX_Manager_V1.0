@@ -43,7 +43,7 @@ import {
 import { findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 import { ownerAcceptedForPr, usesCarriedSkip } from "./sol-accept-lib.mjs";
 import { readTeammateComments, teammateCommentsDenial, READY_TO_MERGE_LINE } from "./teammate-comments-lib.mjs";
-import { findTahaUnavailableOverride, issueTahaLaneCode } from "./taha-lane-lib.mjs";
+import { findTahaUnavailableOverride, issueTahaLaneCode, markTahaTold } from "./taha-lane-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
 // A live apply accepts the same 24-hour exact-head Sol proof as the merge gates
@@ -277,20 +277,19 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   // Mason, 2026-11-25: his `taha override #<PR> <code> unavailable: <reason>` (taha-lane-lib.mjs, 24 hours, this PR
   // only) stands in for Taha's hold and go-ahead when he has said Taha is unavailable; a plain override does not
   // (it is for staging merges). The weekly release skips the 4-hour hold (its migrations already sat on staging).
-  // Every other check below still runs.
+  // Every other check below still runs. It covers only the head it was issued for (Luna, PR 1 round 1).
   let stateCommon = "";
   try { stateCommon = String(git(["rev-parse", "--path-format=absolute", "--git-common-dir"])).trim(); } catch (error) { if (OUT(error)) throw error; }
   const stateDirs = skipStateDirs([dir], () => stateCommon);
-  if (!findTahaUnavailableOverride({ dirs: stateDirs, pullRequest: Number(pr?.number), now })) {
-    const orMason = () => {
-      const code = issueTahaLaneCode({ dirs: stateDirs, pullRequest: Number(pr?.number), headSha: head, now });
-      return code ? ` Or, only if Mason says Taha is unavailable and he will merge it himself, ask him to send as a message of its own: taha override #${pr.number} ${code} unavailable: <why Taha can't>` : "";
-    };
-    const hold = headRef === "release/next" ? null : tahaHoldProblem(pr, now);
-    if (hold) return refuse(`${number}: ${hold}${orMason()}`);
-    const ready = readyToMergeProblem({ comments: pr?.comments, head, now });
-    if (ready) return refuse(`${number}: ${ready}${orMason()}`);
+  const override = findTahaUnavailableOverride({ dirs: stateDirs, pullRequest: Number(pr?.number), headSha: head, now });
+  const hold = headRef === "release/next" ? null : tahaHoldProblem(pr, now);
+  const ready = hold ? null : readyToMergeProblem({ comments: pr?.comments, head, now });
+  if ((hold || ready) && !override) {
+    const code = issueTahaLaneCode({ dirs: stateDirs, pullRequest: Number(pr?.number), headSha: head, now });
+    return refuse(`${number}: ${hold || ready}` + (code ? ` Or, only if Mason says Taha is unavailable and he will merge it himself, ask him to send as a message of its own: taha override #${pr.number} ${code} unavailable: <why Taha can't>` : ""));
   }
+  // The override is what lets this apply through: Taha is told on the PR once every other check has passed (below).
+  const tellTahaOfOverride = Boolean(hold || ready) && !override.tahaToldApplyAt;
   if (pullRequestReviewBlocked(pr)) return refuse(`${number} has an unresolved CHANGES_REQUESTED review.`);
   if (!pullRequestChecksGreen(pr)) {
     return refuse(`${number} is not merge-ready: mergeStateStatus must be CLEAN and the newest run of every check green.`);
@@ -468,6 +467,15 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
     && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead: String(data.head_sha).toLowerCase() === String(head).toLowerCase(), proofs, nowMs: now }));
   if (!proven) {
     return refuse(`no fresh gpt-6.2-sol/high proof is bound to ${number}'s head ${head.slice(0, 12)} and base ${baseSha.slice(0, 12)}.`);
+  }
+  // Taha's audit, 2026-11-25: an override-allowed live apply must tag him on the PR, as the merge gate does; if it can't, refuse.
+  if (tellTahaOfOverride) {
+    const body = `@TahaKhanAbdalli Mason's override let a LIVE apply of migration \`${migName}\` go ahead on this PR at \`${String(head).toLowerCase()}\` ` +
+      `without your go-ahead or 4-hour hold (his code ${override.code}; he says you are unavailable: ${override.tahaUnavailable}). Every other apply check passed.`;
+    let posted = false;
+    try { posted = /^\d+$/.test(String(gh(["api", "-X", "POST", `repos/{owner}/{repo}/issues/${pr.number}/comments`, "-f", `body=${body}`, "--jq", ".id"])).trim()); } catch (error) { if (OUT(error)) throw error; }
+    if (!posted) return refuse(`${number}: Mason's override is valid, but the PR comment telling Taha could not be posted, so the apply is refused. Retry.`);
+    markTahaTold({ dirs: stateDirs, override, field: "tahaToldApplyAt" });
   }
   return { ok: true, pullRequest: pr.number, head, ...(skip ? { coderabbitSkippedBy: skip } : {}) };
 }

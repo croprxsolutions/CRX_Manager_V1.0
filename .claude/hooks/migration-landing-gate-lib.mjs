@@ -96,21 +96,18 @@ export function readyToMergeProblem({ comments, head, now = Date.now() }) {
 
 // Taha, 2026-11-26 (Mason agreed on Slack): his own `taha-unavailable` label on the PR stands in for his go-ahead and
 // the 4-hour hold, "so the signal comes from me". Like hotfix-backport (release-flow.mjs backportAllowed): it counts
-// only while on the PR, when his account added it after the head commit arrived (a later push needs it again), and
+// only while on the PR, when his account added it after the head's latest push (a later push needs it again), and
 // for 30 minutes (READY_WINDOW_MS). events: the PR's issue timeline, oldest first; labels: its current labels.
 export const TAHA_UNAVAILABLE_LABEL = "taha-unavailable";
-// pushes: the branch's push activity (GET /activity: after, timestamp). The timeline lists commits by commit date, not
-// push time, so an older commit pushed after his label would look covered; the label must be newer than the head's
-// latest push (Taha's review of #2668, HIGH 1). Unreadable, or no push of this head: it does not count.
+// pushes: the branch's push activity (GET /activity: after, timestamp; force-pushes included). Push time decides, never
+// timeline position: the timeline lists commits by commit date, so an older commit pushed after his label would look
+// covered (Taha's review of #2668, HIGH 1), and a future-dated one would hide a real label (Luna, PR 3 round 4).
+// Unreadable, or no push of this head: it does not count.
 export function tahaUnavailableLabelled({ events, labels, pushes, head, now = Date.now() }) {
   if (!Array.isArray(events) || !Array.isArray(labels) || !Array.isArray(pushes) || !labels.some((l) => l?.name === TAHA_UNAVAILABLE_LABEL)) return false;
   const pushedAt = Math.max(...pushes.filter((p) => String(p?.after ?? "").toLowerCase() === String(head ?? "").toLowerCase())
     .map((p) => Date.parse(String(p?.timestamp ?? ""))));
-  // The head's LAST arrival: a force-push back to an older head is a new push, so a label from before it does not count (Luna, PR 3).
-  const arrived = events.findLastIndex((e) => e?.event === "committed" && String(e?.sha ?? "").toLowerCase() === String(head ?? "").toLowerCase());
-  if (arrived < 0) return false;
-  const headAt = Math.max(arrived, events.findLastIndex((e) => e?.event === "head_ref_force_pushed"));
-  const last = events.slice(headAt + 1).filter((e) => e?.label?.name === TAHA_UNAVAILABLE_LABEL && (e.event === "labeled" || e.event === "unlabeled")).pop();
+  const last = events.filter((e) => e?.label?.name === TAHA_UNAVAILABLE_LABEL && (e.event === "labeled" || e.event === "unlabeled")).pop();
   const at = Date.parse(String(last?.created_at ?? ""));
   // Matched by his account number, not his renamable login (Luna, PR 3).
   return last?.event === "labeled" && String(last?.actor?.id ?? "") === TAHA_ID && Number.isFinite(pushedAt) && at > pushedAt &&

@@ -1946,16 +1946,16 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "TahaKhanAbdalli", id: 999 } })])) === false, "another account under Taha's old login doesn't count (Luna, PR 3)");
     ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "taha-renamed", id: 50602678 } })])) === true, "his account after a rename still counts");
     ok(tahaUnavailableLabelled(t([commit, added({ created_at: new Date(now - 31 * 60_000).toISOString() })])) === false, "older than 30 minutes doesn't count");
-    ok(tahaUnavailableLabelled(t([added(), commit])) === false, "a label added before the latest push doesn't count");
+    ok(tahaUnavailableLabelled(t([added(), commit], [label], [pushed(2)])) === false, "a label added before the latest push doesn't count");
     ok(tahaUnavailableLabelled(t([commit, added()], [])) === false, "a label since removed doesn't count");
     // Luna, PR 3: head A, label, push B, force-push back to A.
     const other = { event: "committed", sha: "b".repeat(40) };
-    ok(tahaUnavailableLabelled(t([commit, added(), other, { event: "head_ref_force_pushed" }])) === false, "a force-push back to an older head needs the label again");
-    ok(tahaUnavailableLabelled(t([commit, added(), other, commit])) === false, "the head's latest arrival is what counts");
-    ok(tahaUnavailableLabelled(t([commit, other, { event: "head_ref_force_pushed" }, added()])) === true, "a label after the force-push counts");
+    ok(tahaUnavailableLabelled(t([commit, added(), other, { event: "head_ref_force_pushed" }], [label], [pushed(2), pushed(8, "b".repeat(40)), pushed(20)])) === false, "a force-push back to an older head needs the label again");
+    ok(tahaUnavailableLabelled(t([commit, added(), other, commit], [label], [pushed(2), pushed(20)])) === false, "the head's latest arrival is what counts");
+    ok(tahaUnavailableLabelled(t([commit, other, { event: "head_ref_force_pushed" }, added()], [label], [pushed(10), pushed(15, "b".repeat(40))])) === true, "a label after the force-push counts");
     ok(tahaUnavailableLabelled(t([commit, added(), added({ event: "unlabeled" })])) === false, "an unlabel after it voids it");
     ok(tahaUnavailableLabelled(t([commit, added({ label: { name: "hotfix-backport" } })])) === false, "another label doesn't count");
-    ok(tahaUnavailableLabelled(t([added()])) === false, "no head commit in the timeline doesn't count");
+    ok(tahaUnavailableLabelled(t([added(), commit])) === true, "a future-dated commit listed after the label doesn't hide it: push time decides (Luna, PR 3 round 4)");
     ok(tahaUnavailableLabelled({ events: undefined, labels: [label], head: HEAD_SHA, now }) === false, "an unreadable timeline fails closed");
     // Taha's review of #2668, HIGH 1: the timeline orders commits by commit date; a commit made before his label but
     // pushed after it sits before the label there, so push time decides.

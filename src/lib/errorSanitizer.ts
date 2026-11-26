@@ -5,6 +5,7 @@
  */
 
 const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
+  [/^PRODUCT_WEIGHT_REVIEW_NOT_OPEN\b/, 'Nothing was saved. Weight review changed. Check the current Weight card before trying again'],
   // M9 (20270301180000): a Prepayment Manager check's amount is locked; a check with an application is not deleted.
   [/^PREPAY_CHECK_AMOUNT_LOCKED\b/, "Nothing was saved. A prepayment check's amount cannot be edited. To correct a mistyped check, delete the whole check and enter it again"],
   [/^PREPAY_OVERPAYMENT_LOCKED\b/, "Nothing was saved. An overpayment's amount comes from its payment, so it cannot be edited or deleted here. To undo it, void the payment"],
@@ -13,11 +14,26 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. Stock can go only into Main Warehouse until transfers between warehouses exist. Choose Main Warehouse and try again'],
   // #2000 (20270201120000): an inactive customer gets no new orders, deliveries, holds or spray jobs.
   [/^CUSTOMER_INACTIVE_NEW_WORK\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added'],
+  // 20270226213000 (#2331): a delivery line's quantities must be finite numbers.
+  [/violates check constraint "delivery_items_quantity(_delivered)?_finite_chk"/, 'Nothing was saved. Delivery quantities must be ordinary numbers. Reload the delivery and enter them again'],
   [/violates check constraint "inventory_holds_source_needs_customer"/, 'Nothing was saved. A stock hold for a spray job or quote must name its customer'],
   [/^WORK_CUSTOMER_MOVE_NOT_ALLOWED\b/, 'Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery'],
   // Product price sheet: the server refuses a used, expired or someone else's sheet, or a sheet listing a product twice.
   [/^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/,
    'No prices were changed. This price sheet can no longer be used: it was already applied, is more than 7 days old, came from an older template, or was downloaded by another user. Download a fresh price sheet and make your changes in it'],
+  // Supplier Pricing (phase 1b upsert_product_supplier_link): a link needs SKU, price unit and pack description.
+  [/^SUPPLIER_LINK_REUSE_FIELDS_REQUIRED\b/,
+   'Nothing was saved. Fill in Supplier SKU, Supplier price unit and Supplier pack description, then save the link again'],
+  [/^SUPPLIER_PRODUCT_NAME_REQUIRED\b/, 'Nothing was saved. Fill in Supplier Product name, then save the link again'],
+  // Supplier Pricing (20270305200000): bounds that keep the converted cost per inventory unit a sane number.
+  [/^SUPPLIER_CONVERSION_INVALID\b|violates check constraint "product_supplier_links_conversion_floor"/,
+   'Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals'],
+  [/violates check constraint "supplier_price_observations_package_quantity_floor"/,
+   'Nothing was saved. Package quantity must be 0.001 or more'],
+  [/violates check constraint "supplier_price_observations_cost_ceiling"/,
+   'Nothing was saved. A supplier cost cannot be more than $10,000,000 for one line. Check the amount'],
+  [/violates check constraint "supplier_price_import_rows_pending_bounds"/,
+   'Nothing was saved. A quote line needs a package quantity of 0.001 or more and a cost of $10,000,000 or less. Check the line and try again'],
   [/^PRICING_DUPLICATE_PRODUCT_ID\b/, 'No prices were changed. The same product appears on more than one row of the price sheet. Download a fresh price sheet and make your changes in it, without copying or pasting product rows'],
   [/^PRODUCT_CATEGORY_RETIRED\b/, 'This category is retired. Choose an active category'],
   [/^PRODUCT_CATEGORY_NAME_REQUIRED\b/, 'Enter a category name'],
@@ -369,6 +385,11 @@ export function sanitizeError(error: unknown): string {
     return message.slice('PRODUCT_INACTIVE'.length).replace(/^:\s*/, '').trim()
       || 'This product is turned off. Ask an admin to reactivate it.';
   }
+  if (/^BRAND_(?:DOCUMENT_)?CHANGED:/.test(message)) return 'This brand or link changed. Review it and try again.';
+  if (/^BRAND_DOCUMENT_(?:URL_INVALID|URL_BLOCKED|REASON_REQUIRED|GROUP_CONFLICT|MOVE_CONFLICT|IDENTITY_CHANGED):/.test(message)) {
+    return message.slice(message.indexOf(':') + 1).replace(/\p{Cc}+/gu, ' ').trim();
+  }
+  if (message === 'BRAND_DOCUMENT_INVALID') return 'Check the document link, state and expiration date, then try again.';
   if (/^PRODUCT_DEACTIVATION_BLOCKED(?::|$)/.test(message)) {
     return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
       || 'This product cannot be turned off while required work is open. Review its blockers.';
@@ -520,8 +541,14 @@ export function sanitizeError(error: unknown): string {
     return `Nothing was saved. Other open deliveries for this order already hold ${overActive[1]} of this product, so only ${overActive[2]} more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.`;
   }
   // Partial completion figures (20270203120000, #1942) and completing past the order (F05): the server sentence says what to do.
-  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER):\s*(.+)$/s);
-  if (deliveryQuantities) return `The delivery was not completed. ${deliveryQuantities[1].trim()}`;
+  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER|DELIVERY_NOTHING_DELIVERED):\s*(.+)$/s);
+  if (deliveryQuantities) {
+    // The server sentences start lowercase (they follow the token); start the second sentence with a capital,
+    // unless it starts with a mixed-case product name such as "pH Plus" (Sol r5 LOW).
+    const sentence = deliveryQuantities[1].trim();
+    const capital = /^[a-z](?![A-Z])/.test(sentence) ? sentence.charAt(0).toUpperCase() : sentence.charAt(0);
+    return `The delivery was not completed. ${capital}${sentence.slice(1)}`;
+  }
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.
   const countRule = message.match(/^(?:CYCLE_COUNT_ROW_ALREADY_OPEN|CYCLE_COUNT_ROW_WRONG_PLACE|CYCLE_COUNT_REOPEN_FORBIDDEN|CYCLE_COUNT_REVERSE_BLOCKED|CYCLE_COUNT_QTY_INVALID):\s*(.+)$/s);
   if (countRule) return `Nothing was saved. ${countRule[1].trim()}`;

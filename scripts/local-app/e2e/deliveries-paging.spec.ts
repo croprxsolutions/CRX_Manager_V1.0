@@ -84,5 +84,5 @@ test('Deliveries list: a delivery removed from page one does not make Next skip 
   await expect(page.getByText(`Page 2 · 50 shown of ${COUNT - 1}`, { exact: false })).toBeVisible({ timeout: 15000 });
   // A row count would have moved page two's first delivery onto page one; the bookmark keeps page two whole.
   expect(await deliveryNumbers()).toEqual(pageTwo);
-  await page.screenshot({ path: 'scripts/local-app/.state/test-results/deliveries-page-two-after-removal.png', fullPage: true });
+  await page.screenshot({ path: test.info().outputPath('deliveries-page-two-after-removal.png'), fullPage: true });
 });

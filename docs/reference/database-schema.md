@@ -12,6 +12,7 @@
 - `fields` - Farm fields (customer_id, field_name, county, acres, FSA numbers, Mapbox polygon geometry)
 - `field_obstacles` - Point markers pinned to fields (kind, optional label, GeoJSON Point, author, dates). Migration `20270305130000` is pending. It adds the optional entrance number and lets applicators add pins on fields in their marker read scope and edit or remove the pins they created. Admins and sales reps retain office access.
 - `field_entrance_counters` (pending migration `20270305130000`) - Internal per-field entrance sequence (field_id, last_number, created_at, updated_at), written by the marker trigger. The sequence advances when a pin becomes an entrance and does not reuse retired numbers.
+- `field_marker_create_receipts` (pending migration `20270307060000`) - One create receipt per marker ID (id, field_id, created_by, created_at, updated_at). The receipt keeps the ID reserved after a pin is deleted and follows the field-delete cascade. The original author can read it only while authorized for the field. The receipt holds no note or location.
 - `job_loader_worksheets` - Saved loader/tank scenarios per job (capacity, balancing mode, per-load acres, loads-done, one selected per job). Reads follow job visibility; office-only writes.
 - `field_billing_defaults` - Per-field billing splits (field_id, customer_id, split_pct)
 - `field_polygons` - Multi-polygon support per field (field_id, polygon_geojson jsonb, label, acres, sort_order). Sibling to `fields.parent_field_id` grouping; migration 20260334900000 (Field Management V3)
@@ -164,6 +165,12 @@ Columns below are from `.claude/schema-registry.json`; read the named migrations
 ### Product brands (`20261022086500_product_brands.sql`, applied live 2026-10-23 as ledger `20261023193816`)
 
 `product_brands`: the real brands that may fill a (usually generic) product, one row per brand. Columns: `product_id` (RESTRICT), `brand_name` (trimmed, ≤200, unique per product ignoring case), `epa_registration` (nullable; `524-475` / `100-1234-5905` shape), `manufacturer`, `is_currently_sourced`, `is_rup` (nullable = not yet confirmed; restricted use belongs to the registration, so brands of one generic can differ), `signal_word` (`Danger`/`Warning`/`Caution`/NULL), `row_version`, `created_by`/`updated_by` (profiles, RESTRICT), `created_at`/`updated_at` (trigger). `UNIQUE (product_id, id)` lets a later table bind a brand to its own product. RLS: SELECT for active profiles only; no API role can write (writes go through `upsert_product_brand`, admin only); service_role and metabase_ro have no access. Rows are retired, never deleted. Quotes, prices and cost stay on the product; delivery capture comes in PR B (`docs/plans/2026-10-22-product-brands-step1-PLAN.md`).
+
+### Brand documents (`20270306170000_brand_document_links.sql`, local candidate)
+
+`brand_document_links` belongs to one standalone or parent brand. It stores the document kind, HTTPS address, optional state and expiry for supplemental links, version, hidden date, report and timestamps. Active staff can read visible links for current brands. Active admins can also read past records and report metadata. Only the database workflows write links and reports.
+
+`brand_document_link_events` stores the link, action, actor, reason, before and after values and timestamps. Admins can read the history. Application users have no direct write grants.
 
 ### Product change history (`20261102100000_product_change_history.sql`, applied live 2026-11-02)
 

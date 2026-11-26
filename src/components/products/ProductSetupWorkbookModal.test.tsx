@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { Workbook } from 'exceljs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const H = vi.hoisted(() => ({
@@ -140,6 +141,52 @@ describe('ProductSetupWorkbookModal parent rates', () => {
     expect(H.chemistryWeightsPreview).not.toHaveBeenCalled();
     expect(H.chemistryIngredientsPreview).not.toHaveBeenCalled();
     expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each(['unavailable links', 'same-name archived product'])('downloads a safe workbook with %s', async (scenario) => {
+    const unavailable = scenario === 'unavailable links';
+    if (unavailable) H.rpc.mockResolvedValueOnce({ data: null, error: { message: 'Brand Links unavailable' } });
+    else {
+      const product = { product_name: 'Atrazine 4L', use_timings: [] };
+      H.loadExport.mockResolvedValue({ rates_locked: false, rows: [
+        { ...product, product_id: SIZE, is_active: true },
+        { ...product, product_id: 'archived-size', is_active: false },
+      ] });
+      H.rpc.mockResolvedValueOnce({ error: null, data: [SIZE, 'archived-size'].map((id) => ({
+        id, product_id: id, parent_brand: false, brand_version: 1,
+        brand_name: 'Same brand', owner_name: product.product_name, links: [],
+      })) });
+    }
+    const downloadUrl = vi.fn((_blob: Blob) => 'blob:setup-test');
+    vi.stubGlobal('URL', Object.assign(class extends URL {}, {
+      createObjectURL: downloadUrl, revokeObjectURL: vi.fn(),
+    }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    try {
+      render(<ProductSetupWorkbookModal open profileId="u1" onClose={vi.fn()} onSaved={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Download setup workbook' }));
+      await waitFor(() => expect(click).toHaveBeenCalledOnce(), { timeout: 5000 });
+      const workbook = new Workbook();
+      await workbook.xlsx.load(await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsArrayBuffer(downloadUrl.mock.calls[0][0]);
+      }));
+      expect(workbook.getWorksheet('Setup')).toBeDefined();
+      expect(workbook.getWorksheet('Rates')).toBeDefined();
+      const brandSheet = workbook.getWorksheet('Brand Links');
+      if (unavailable) {
+        expect(H.toast).toHaveBeenCalledWith('warning', expect.stringContaining('Downloaded without Brand Links.'));
+        expect(brandSheet).toBeUndefined();
+      } else {
+        expect(brandSheet?.rowCount).toBe(2);
+        expect(brandSheet?.getCell('H2').value).toContain(SIZE);
+      }
+    } finally {
+      click.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it.each(['Weights', 'Ingredients'] as const)('refuses a %s download that exceeds the upload parser limit', async (sheet) => {

@@ -831,7 +831,7 @@ function ordersEmptyProps(filtering: boolean, onClear: () => void, navigate: (to
   if (filtering) return filteredEmptyProps('orders', onClear);
   return {
     emptyTitle: 'No orders yet',
-    emptyDescription: 'Start by creating a quote in Sales → Quotes, then convert it to an order. Or create a direct order below.',
+    emptyDescription: 'Start by creating a quote in Sales → Quotes and sending it to book it, then draw orders from the booking. Or create a direct order below.',
     emptyAction: (
       <div className="flex gap-2">
         <Button variant="secondary" icon={<FileText className="w-4 h-4" />} onClick={() => navigate('/quotes/new')}>

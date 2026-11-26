@@ -1,21 +1,27 @@
 // The safety checks every local-app command runs before it touches anything.
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { connect } from 'node:net';
+import path from 'node:path';
 
 // doc-bytes: a third, separate stack for the customer-document byte proof (KI-113); never the other two.
 const PROFILE = process.env.CRX_LOCAL_APP_PROFILE;
-if (PROFILE && PROFILE !== 'sales-gauntlet' && PROFILE !== 'doc-bytes') {
+if (PROFILE && PROFILE !== 'sales-gauntlet' && PROFILE !== 'doc-bytes' && PROFILE !== 'screen-walk') {
   throw new Error('LOCAL_APP_REFUSED: Unknown local test profile.');
 }
 export const IS_SALES_GAUNTLET = PROFILE === 'sales-gauntlet';
 export const IS_DOC_BYTES = PROFILE === 'doc-bytes';
+export const IS_SCREEN_WALK = PROFILE === 'screen-walk';
 export const PROFILE_NAME = PROFILE ?? '';
-const pick = (normal, sales, docBytes) => (IS_SALES_GAUNTLET ? sales : IS_DOC_BYTES ? docBytes : normal);
-export const STATE_FOLDER = pick('.state', '.state/sales-gauntlet', '.state/doc-bytes');
-export const PROJECT = pick('crx-local-app', 'crx-sales-gauntlet', 'crx-doc-bytes-proof');
-export const API_PORT = pick(54721, 54821, 54831);
-export const DB_PORT = pick(54722, 54822, 54832);
-export const APP_PORT = pick(5199, 5209, 5219);
+const screenLane = process.env.CRX_LOCAL_APP_LANE;
+if (IS_SCREEN_WALK && !/^[a-f0-9]{8}$/.test(screenLane ?? '')) throw new Error('LOCAL_APP_REFUSED: Invalid screen-walk lane.');
+// Keep feature lanes clear of common low service ports; 10,000 slots make accidental collisions rare.
+const laneOffset = IS_SCREEN_WALK ? Number.parseInt(screenLane, 16) % 10000 : 0;
+const pick = (normal, sales, docBytes, screenWalk) => (IS_SALES_GAUNTLET ? sales : IS_DOC_BYTES ? docBytes : IS_SCREEN_WALK ? screenWalk : normal);
+export const STATE_FOLDER = pick('.state', '.state/sales-gauntlet', '.state/doc-bytes', '.state/screen-walk');
+export const PROJECT = IS_SCREEN_WALK ? `crx-screen-${screenLane}` : pick('crx-local-app', 'crx-sales-gauntlet', 'crx-doc-bytes-proof', '');
+export const API_PORT = pick(54721, 54821, 54831, 24000 + laneOffset);
+export const DB_PORT = pick(54722, 54822, 54832, 34000 + laneOffset);
+export const APP_PORT = pick(5199, 5209, 5219, 10000 + laneOffset);
 export const API_URL = `http://127.0.0.1:${API_PORT}`;
 export const APP_URL = `http://127.0.0.1:${APP_PORT}`;
 export const DB_URL_PREFIX = `postgresql://postgres:`;
@@ -158,10 +164,10 @@ export function portIsOpen(port) {
  * running frontend will really talk to rather than trusting a pid or a port number.
  */
 /** Refuses a frontend open beyond this computer. Takes the output of `netstat -ano -p tcp`. */
-export function assertAppPortIsLoopback(netstat) {
-  const listeners = netstat.split(/\r?\n/).filter((line) => line.includes(`:${APP_PORT} `) && /LISTENING/.test(line));
+export function assertAppPortIsLoopback(netstat, port = APP_PORT) {
+  const listeners = netstat.split(/\r?\n/).filter((line) => line.includes(`:${port} `) && /LISTENING/.test(line));
   if (listeners.some((line) => !line.trim().split(/\s+/)[1].startsWith('127.0.0.1:'))) {
-    throw new Refused(`Port ${APP_PORT} is open beyond this computer.`);
+    throw new Refused(`Port ${port} is open beyond this computer.`);
   }
 }
 
@@ -195,10 +201,55 @@ export async function assertFrontendIsOurs(anonKey, { isOpen = portIsOpen, fetch
  */
 export function assertExtraAppPort(port) {
   const number = /^\d{4,5}$/.test(String(port ?? '')) ? Number(port) : NaN;
-  if (!(number >= 1024 && number <= 65535) || [5199, 54721, 54722, 5209, 54821, 54822, 5219, 54831, 54832].includes(number)) {
-    throw new Refused('--port needs a port from 1024 to 65535 outside both test profiles\' reserved ports.');
+  if (!(number >= 1024 && number <= 65535) || [5199, 54721, 54722, 5209, 54821, 54822, 5219, 54831, 54832, APP_PORT, API_PORT, DB_PORT].includes(number)) {
+    throw new Refused('--port needs a port from 1024 to 65535 outside every test profile\'s reserved ports.');
   }
   return number;
+}
+
+export function assertWalkthroughLaneResourcesAreEmpty({ containers, volumes, networks, netstat }) {
+  for (const [kind, resources] of [['container', containers], ['volume', volumes], ['network', networks]]) {
+    if (resources) throw new Refused(`This walkthrough ${kind} exists but its local credentials are missing. Nothing was changed. Start a new uniquely named checkout to get a fresh lane; the old Docker data is preserved.`);
+  }
+  for (const port of [APP_PORT, API_PORT, DB_PORT]) {
+    if (netstat.split(/\r?\n/).some((line) => line.includes(`:${port} `) && /LISTENING/.test(line))) {
+      throw new Refused(`Walkthrough port ${port} is already listening on this computer. (Ports Windows has blocked are not checked; Docker will report those.) Nothing was changed. Start a new uniquely named checkout to get another lane; do not stop another service.`);
+    }
+  }
+}
+
+export function assertFinishedBuild(build, migrations, schemaFingerprint, recoveryCommand = 'node scripts/local-app/app.mjs rebuild') {
+  if (!Array.isArray(build?.migrations)) throw new Refused(`The last rebuild did not finish. Run: ${recoveryCommand}`);
+  if (build.migrations.join() !== migrations.join()) throw new Refused(`This checkout has different migrations from the test database. Run: ${recoveryCommand}`);
+  if (schemaFingerprint && build.schemaFingerprint !== schemaFingerprint) throw new Refused(`The local schema or migration contents changed after this database was built. Run: ${recoveryCommand}`);
+  return build;
+}
+
+export function assertOwnedApiDbListeners(netstat, gatewayBindings) {
+  const listens = [API_PORT, DB_PORT].filter((port) => netstat.split(/\r?\n/).some((line) => line.includes(`:${port} `) && /LISTENING/.test(line)));
+  for (const port of listens) {
+    // Every real listener must be loopback, whatever address the gateway binding claims.
+    assertAppPortIsLoopback(netstat, port);
+    if (!gatewayBindings.some((binding) => Number(binding.HostPort) === port && binding.HostIp === '127.0.0.1')) {
+      throw new Refused(`Port ${port} has a listener that is not owned by this checkout's local gateway. Nothing was changed.`);
+    }
+  }
+}
+
+/** Same file? Windows paths differ only by capitals (the lane id is built from the lowercased path). */
+export function sameComposePath(a, b, platform = process.platform) {
+  const [x, y] = [path.resolve(a), path.resolve(b)];
+  return platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+
+export function assertWalkthroughGatewayIdentity(container, project, composeFile) {
+  const labels = container?.Config?.Labels ?? {};
+  if (container?.State?.Running !== true || labels['com.docker.compose.project'] !== project
+    || labels['com.docker.compose.service'] !== 'gateway'
+    || !sameComposePath(labels['com.docker.compose.project.config_files'] ?? '', composeFile)) {
+    throw new Refused('The running gateway identity or checkout does not match this walkthrough lane. Nothing was changed.');
+  }
+  return Object.values(container.HostConfig?.PortBindings ?? {}).flat();
 }
 
 /** Refuses a running gateway that publishes anywhere but loopback. */

@@ -2,6 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('keeps document-link errors actionable and strips control characters', () => {
+    expect(sanitizeError({ message: 'BRAND_DOCUMENT_URL_BLOCKED: Use a manufacturer link.\tChoose another URL.' }))
+      .toBe('Use a manufacturer link. Choose another URL.');
+    expect(sanitizeError({ message: 'BRAND_DOCUMENT_INVALID' }))
+      .toBe('Check the document link, state and expiration date, then try again.');
+  });
   it('explains a refused product price sheet without its code', () => {
     for (const code of ['WORKBOOK_V2_EXPORT_REQUIRED', 'WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED']) {
       expect(sanitizeError({ message: code })).toMatch(/^No prices were changed\. This price sheet can no longer be used: it was already applied/);
@@ -67,6 +73,8 @@ describe('sanitizeError', () => {
       'Nothing was saved. Weight per gallon must be above 0 and at most 20 lb/gal (this is 30.0000 lb/gal)'],
     ['PRODUCT_WEIGHT_STALE: the weight of "TEST UAN" changed since you opened it; reload',
       'Nothing was saved. The weight of "TEST UAN" changed since you opened it; reload'],
+    ['PRODUCT_WEIGHT_REVIEW_NOT_OPEN',
+      'Nothing was saved. Weight review changed. Check the current Weight card before trying again'],
   ])('explains the parent refusal %s by name', (raw, expected) => {
     expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
   });
@@ -106,8 +114,14 @@ describe('sanitizeError', () => {
   it.each([
     ['DELIVERY_QUANTITIES_STALE', "this delivery's lines changed since the screen loaded them; reload it and enter the quantities again."],
     ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
+    ['DELIVERY_NOTHING_DELIVERED', 'every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'],
   ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
-    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` }))
+      .toBe(`The delivery was not completed. ${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}`);
+  });
+  it('starts the explained refusal with a capital letter (Taha, #2324)', () => {
+    expect(sanitizeError({ code: '23514', message: 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero.' }))
+      .toBe('The delivery was not completed. Every product on it has a delivered quantity of zero.');
   });
   it.each([
     ['DELIVERY_OVER_ORDER', 'Atrazine 4L — only 0 left to schedule (ordered 10, delivered 10, on other open deliveries 0: none). Cancel another delivery for this order, or reduce one that has not started, first.'],
@@ -122,6 +136,14 @@ describe('sanitizeError', () => {
     const shown = sanitizeError({ code: 'P0001', message });
     expect(shown).toBe('Nothing was saved. Other open deliveries for this order already hold 2 of this product, so only 0 more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.');
     expect(shown).not.toMatch(/ITEM_OVER|2b680d4a/);
+  });
+  it.each(['delivery_items_quantity_finite_chk', 'delivery_items_quantity_delivered_finite_chk'])('explains the finite-quantity check %s on delivery lines in plain words', (name) => {
+    const shown = sanitizeError({ code: '23514', message: `new row for relation "delivery_items" violates check constraint "${name}"` });
+    expect(shown).toBe('Nothing was saved. Delivery quantities must be ordinary numbers. Reload the delivery and enter them again');
+  });
+  it('keeps a mixed-case product name as written (Sol r5 LOW)', () => {
+    const sentence = 'pH Plus — this would deliver more than was ordered. Call the office before completing this delivery.';
+    expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
   });
   it('explains a completion past the order (F05) without the raw token', () => {
     const sentence = 'Atrazine 4L — this would deliver more than was ordered. Call the office before completing this delivery.';
@@ -421,6 +443,21 @@ describe('sanitizeError', () => {
       .toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
     expect(sanitizeError({ message: 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery' }))
       .toBe('Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery');
+    // Supplier Pricing bounds (20270305200000): the database refusal reads as the rule, never the constraint name.
+    expect(sanitizeError({ message: 'new row for relation "product_supplier_links" violates check constraint "product_supplier_links_conversion_floor"' }))
+      .toBe('Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals');
+    expect(sanitizeError({ message: 'SUPPLIER_LINK_REUSE_FIELDS_REQUIRED' }))
+      .toBe('Nothing was saved. Fill in Supplier SKU, Supplier price unit and Supplier pack description, then save the link again');
+    expect(sanitizeError({ message: 'SUPPLIER_PRODUCT_NAME_REQUIRED' }))
+      .toBe('Nothing was saved. Fill in Supplier Product name, then save the link again');
+    expect(sanitizeError('SUPPLIER_CONVERSION_INVALID'))
+      .toBe('Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals');
+    expect(sanitizeError({ message: 'new row for relation "supplier_price_observations" violates check constraint "supplier_price_observations_package_quantity_floor"' }))
+      .toBe('Nothing was saved. Package quantity must be 0.001 or more');
+    expect(sanitizeError({ message: 'new row for relation "supplier_price_observations" violates check constraint "supplier_price_observations_cost_ceiling"' }))
+      .toBe('Nothing was saved. A supplier cost cannot be more than $10,000,000 for one line. Check the amount');
+    expect(sanitizeError({ message: 'new row for relation "supplier_price_import_rows" violates check constraint "supplier_price_import_rows_pending_bounds"' }))
+      .toBe('Nothing was saved. A quote line needs a package quantity of 0.001 or more and a cost of $10,000,000 or less. Check the line and try again');
     // The hold-rule name inside some other message is not mistaken for the rule.
     expect(sanitizeError({ message: 'Product inventory_holds_source_needs_customer not found' }))
       .not.toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');

@@ -39,6 +39,7 @@ import UnitSelect from '../components/blendtickets/UnitSelect';
 import { useTicketWeights } from '../components/blendtickets/useTicketWeights';
 import { warnWeightsChangedWhileSaving } from '../lib/blendTicketWeights';
 import QuotePriceChoiceModal from '../components/blendtickets/QuotePriceChoiceModal';
+import { BlendTicketPrintButton } from '../components/blendtickets/BlendTicketPrintButton';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
 
@@ -1818,7 +1819,9 @@ export function BlendTicketDetail() {
         </div>
       )}
 
-      <div className="flex justify-end gap-3">
+      <div className="flex flex-wrap justify-end gap-3">
+        <BlendTicketPrintButton ticketId={ticket.id} pageRead={weightPageRead}
+          disabled={hasUnsavedChanges || saving || savingFields || savingQuotePrices || reprocessing} />
         {ticket.source === 'ocr' && (
           <Button
             variant="secondary"

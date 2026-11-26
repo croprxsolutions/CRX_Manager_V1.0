@@ -2,9 +2,10 @@
 
 **Rule (Mason, 2026-10-30; cut to three areas 2026-11-01):** a pull request needs one
 clean Sol review only when it changes, deletes, renames or moves a file below: the
-database, logins and permissions, or money and inventory. Every other change merges on
-green checks, with the head pinned by `--match-head-commit`. That includes dependencies,
-deployment files, and the hooks, guards and scripts themselves. This replaces the
+database, logins and permissions, money and inventory, or the locked agent-safety lines
+(added 2026-11-25). Every other change merges on green checks, with the head pinned by
+`--match-head-commit`. That includes dependencies, deployment files, and the other hooks,
+guards and scripts. This replaces the
 2026-10-07 documentation exemption and the 2026-10-29 "every code change" rule, which cost
 more review time than they repaid.
 
@@ -42,6 +43,10 @@ Folders end in `/`. The match ignores case, from the repository root.
 `src/lib/jobChemicalPayload.ts`, `src/lib/recipeHelpers.ts`, `src/hooks/useGuardrails.ts`,
 `src/components/products/BulkProductImport.tsx`, `src/components/products/bulkProductImportSafety.ts`,
 `src/components/receiving/`, `src/components/integrity/`, `src/components/field-app/`
+
+**Locked agent-safety lines (Mason, 2026-11-25):** `scripts/agent-guidance-locks.json` holds the
+`AGENTS.md` and `ship.md` safety rules locked word for word, and `scripts/check-agent-guidance.mjs`
+enforces them, so weakening a locked rule or its check needs a Sol review.
 
 ## What stays separate
 

@@ -186,6 +186,7 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
   );
   const persistedAttemptRef = useRef<PersistedUncertainManualTicket | null>(null);
   const loadedUserIdRef = useRef<string | null | undefined>(undefined);
+  const customerPickerRef = useRef<HTMLDivElement>(null);
   const [ticketAttemptId, setTicketAttemptId] = useState<string>(() => crypto.randomUUID());
 
   const [formData, setFormData] = useState(initialManualFormData);
@@ -201,6 +202,10 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
   const [attemptUncertain, setAttemptUncertain] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<BlendMathWarning[]>([]);
+
+  useEffect(() => {
+    customerPickerRef.current?.querySelector<HTMLInputElement>('input[role="combobox"]')?.focus();
+  }, []);
 
   const clearPersistedAttempt = () => {
     persistedAttemptRef.current = null;
@@ -576,7 +581,7 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="md:col-span-2">
+          <div ref={customerPickerRef} className="md:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-1">Customer</label>
             <SearchableSelect
               options={customers.map((customer) => ({ value: customer.id, label: customer.farm_name }))}

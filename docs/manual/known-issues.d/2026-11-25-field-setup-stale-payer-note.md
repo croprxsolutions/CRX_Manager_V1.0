@@ -1,0 +1,33 @@
+## 2026-11-25 — Field Setup: an old tab can overwrite a newer payer note; nested Split Evenly button
+
+**Severity:** MED (note overwrite), LOW (nested button). **Area:** Field Setup (who-pays split and payer notes, FP-1). **Status:** PARTIAL (the warning and the button are fixed; a database compare waits for Mason's call).
+**Owner:** Mason decision. **Tracked:** found in the sales-rep role check on #2498 (results comment 7167925342).
+
+Both found on a local test copy built from staging at 8e1828690, signed in as a sales rep, with invented data.
+
+- **A stale tab silently replaces a newer payer note (MED).** Open the same field in two tabs. Tab 1 changes a
+  payer's note and saves. Tab 2, opened earlier, types a different note for the same payer and saves. Tab 2's note
+  replaces tab 1's, and both saves show "Field updated" with no warning. A name-only save from the old tab does NOT
+  wipe the newer note; only an edit to the same note does. This is the same "later save wins" pattern as the
+  two-reps-same-split item in #2498's follow-ups. Per the field rule (flag and note, never add steps), the likely
+  fix is a warning that the note changed since the page opened, not a block.
+- **The Split Evenly button sits inside another button (LOW).** On Field Setup, "Split Evenly" is placed inside
+  the Default Billing header's open/close button. The browser logs "button cannot contain a nested button".
+  Clicking works today; it is invalid page structure and can confuse screen readers and keyboard focus.
+
+**Fixed:** before a save that changes a payer note, Field Setup re-reads the stored notes. If someone else changed
+that payer's note after the page opened, it shows "Note changed since you opened this field" with the newer text;
+"Save mine anyway" saves, Cancel keeps the newer note (reload to see it). A failed re-read never stops the save.
+"Split Evenly" now sits in the open Default Billing panel, not inside its open/close button. Proved on a local test
+copy as a sales rep: the two-tab repro warns, Split Evenly gives 33.33/33.33/33.33 = 100.00%, and no nested-button
+warning.
+
+**Still open (named, not fixed):**
+- LOW: the Default Billing open/close button wraps the section heading (block content in a button), as the FSA
+  section does.
+- MED (Sol and Luna, 2026-11-25): the warning is a screen-side check, so it is best-effort. A note saved by someone
+  else in the moment between the re-read and the save, or during a failed re-read, can still be overwritten without
+  the warning. (A split or note someone else saved during a failed save does warn on the retry, after Taha's review
+  of #2585.) Closing that fully needs the database save to compare the note the
+  user saw, which would refuse a stale save; that conflicts with the "flag, never block" field rule, so it waits for
+  Mason's call. Field edits typed during the short re-read follow the existing save-time lock rules.

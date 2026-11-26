@@ -46,6 +46,7 @@ import {
 import { daysSinceBusinessDate, parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { isDefinitiveRpcRejection } from '../lib/idempotency';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { hasPageAccess } from '../lib/pagePermissions';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
@@ -556,10 +557,10 @@ export default function PaymentAllocation() {
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'allocate_payment' } });
       const retryRefused = hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_ARGUMENT_MISMATCH);
-      // A database error code (SQLSTATE) on a first attempt means it rolled back: nothing was saved. Any other
-      // failure (a lost reply) may have saved, and so may an earlier attempt still unanswered.
-      const code = (err as { code?: unknown } | null)?.code;
-      if (!earlierAttemptUnresolved && !retryRefused && typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) {
+      // A definite refusal of a first attempt means it rolled back: nothing was saved. Any other failure (a lost
+      // reply, a connection ended mid-statement) may have saved, and so may an earlier attempt still unanswered.
+      // The mismatch refusal arrives as P0001 but says an earlier attempt may have saved, so it is kept out.
+      if (!earlierAttemptUnresolved && !retryRefused && isDefinitiveRpcRejection(err)) {
         saveUnresolvedRef.current = false;
       }
       const dateRefusal = paymentDateRefusal(err, payment.paymentDate);

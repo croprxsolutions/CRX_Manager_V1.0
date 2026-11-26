@@ -815,6 +815,21 @@ describe('Record Payments: payment date and check number', () => {
     expect(rpcCalls()).toHaveLength(1);
   });
 
+  it('a connection dropped mid-save is treated as maybe saved: the retry still reaches it', async () => {
+    const replies = [
+      () => Promise.resolve({ data: null, error: { code: '08006', message: 'connection failure' } }),
+      () => Promise.resolve(saved),
+    ];
+    mockRpc.mockImplementation(() => replies.shift()!());
+    await fillPayment();
+    apply();
+    await waitFor(() => expect(rpcCalls()).toHaveLength(1));
+    closedPeriods = [{ period_start: '2026-11-01', period_end: '2026-11-30' }];
+    apply();
+    await waitFor(() => expect(rpcCalls()).toHaveLength(2));
+    expect(rpcCalls()[1][1].p_idempotency_key).toBe(rpcCalls()[0][1].p_idempotency_key);
+  });
+
   it('asks before paying an invoice dated after the payment', async () => {
     mockFrom.mockImplementation((table: string) => buildChain(
       table === 'customers' ? { data: [customer], error: null }

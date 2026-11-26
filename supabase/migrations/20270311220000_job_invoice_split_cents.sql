@@ -4,7 +4,7 @@
 -- and its actor binding and p_idempotency_key are unchanged.
 --
 -- Written 2026-11-26. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270311200000_job_invoice_split_cents.md. Re-read the live ledger before applying.
+-- docs/reference/migrations.d/20270311220000_job_invoice_split_cents.md. Re-read the live ledger before applying.
 --
 -- WHY: since the 2026-11-22 redesign (20270226150000) each owner's line is priced on its own, round(price x the owner's
 --   quantity), and only a 50-cent check looks at the sum. Rounding each owner separately makes the owners' lines
@@ -26,18 +26,23 @@
 --   are now refused. Everything else in the body is byte-for-byte the pinned one: quantities, unit price, the per-unit
 --   cost on the line, both 50-cent checks (now on the allocated amounts), customer-supplied $0 lines, the per-acre fee,
 --   member totals, shares, the anchor (primary owner's invoice), the commission code, the single-owner path, locks and
---   who may invoice. An owner's commission base is its amount less its own booked cost, so it follows the owner's
---   amount, and the owners' bases together can differ from a single invoice's base by the owners' cost rounding.
+--   who may invoice. The commission comment is reworded only: an owner's commission base is its amount less its own
+--   booked cost, so it follows the owner's amount, and the owners' bases together can differ from a single invoice's
+--   base by the owners' cost rounding.
 --   Owner, SECURITY DEFINER, search_path and grants unchanged. No row changes.
 --
--- KNOWN LIMITS (Taha, 2026-11-27, option B): a line's booked cost is not changed. invoice_items.cost_cents is a cost
---   per sold unit and every reader books cost x quantity (20270226150000), so each owner's cost is its own quantity's
---   cost, and the owners' costs can differ from the whole line's by under a cent each (tying them needs a stored
---   booked cost per line, a schema change). Because an owner's amount follows its acre share while its cost follows
---   its quantity (rounded to 0.0001 of a unit), an owner on a line priced at or near cost can bill slightly under its
---   own booked cost: 1 Gal at a $200.00 price and $200.00 cost split in thirds bills A $66.67 against $66.68 booked
---   cost (about a cent, plus 0.0001 of a unit's cost at most). safe_cents_qty (its comment says "banker's" rounding;
---   ROUND on numeric rounds half away from zero) is not touched.
+-- KNOWN LIMITS (Taha, 2026-11-27, option B; both accepted): a line's booked cost is not changed. invoice_items.cost_cents
+--   is a cost per sold unit and every reader books cost x quantity (20270226150000), so each owner's cost is its own
+--   quantity's cost and the owners' costs can differ from the whole line's by under a cent each (tying them needs a
+--   stored booked cost per line, a schema change). An owner's amount follows its acre share while its quantity is
+--   rounded to 0.0001 of a unit, so:
+--   1. On a line priced at or near cost an owner can bill under its own booked cost: under a cent at normal prices,
+--      at most $0.50 (the 50-cent check). 1 Gal at a $200.00 price and $200.00 cost in thirds bills A $66.67 against
+--      $66.68 booked cost.
+--   2. An owner's amount can differ from its quantity x unit price: under a cent at normal prices. The 50-cent check
+--      does not hold this gap: it is at most 0.0001 of the unit price plus a cent (about $0.50 at $5,000 a unit).
+--      1 Gal at $9,999.99 in thirds shows A 0.3334 Gal ($3,334.00 at the unit price) and bills $3,333.33.
+--   safe_cents_qty (its comment says "banker's" rounding; ROUND on numeric rounds half away from zero) is not touched.
 --
 -- ROLLBACK (its own reviewed migration): re-emit the transfer body from 20270303100000 (md5
 --   53ecf1279da3aa7ea1590f440c6eb225, pinned below). Invoices written meanwhile keep their exact owner amounts.
@@ -517,7 +522,8 @@ BEGIN
     UPDATE application_records SET invoice_id = v_anchor_id WHERE source_type = 'job' AND source_id = p_job_id;
 
     -- Per-member commission: on THAT member's chemical-line profit (product lines only,
-    -- excludes the per-acre fee). Sum across members == the whole job's chemical profit.
+    -- excludes the per-acre fee). Each member's base is its amount less its own booked cost (cost x quantity), so the
+    -- members' bases together can differ from the whole job's chemical profit by the owners' cost rounding.
     FOR v_oidx IN 1 .. array_length(v_member_ids, 1) LOOP
       v_member_id := v_member_ids[v_oidx];
       SELECT COALESCE(SUM(COALESCE(ii.extended_cents, 0) - safe_cents_qty(COALESCE(ii.cost_cents, 0), COALESCE(ii.quantity, 1))), 0)
@@ -897,7 +903,7 @@ $function$;
 DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '8ef697686af9473ae9891e4bf9d57693' THEN
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '90141e27397d1766be19d280bb9a046f' THEN
     RAISE EXCEPTION 'JOB_INVOICE_SPLIT_CENTS_POSTFLIGHT: the re-emitted body is not this file''s';
   END IF;
   IF NOT COALESCE((SELECT p.prosecdef AND p.proowner = 'postgres'::regrole

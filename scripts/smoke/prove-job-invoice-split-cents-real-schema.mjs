@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270311200000_job_invoice_split_cents.sql (Mason, 2026-11-26: "Job-invoice cents: yes please,
+ * Real-schema proof for 20270311220000_job_invoice_split_cents.sql (Mason, 2026-11-26: "Job-invoice cents: yes please,
  * fix it before Dec 15"). Harness copied from prove-tiny-line-counts-as-zero-real-schema.mjs; seed and cases follow
  * prove-job-invoice-kept-epa-real-schema.mjs.
  *
@@ -37,7 +37,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270311200000_job_invoice_split_cents.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270311220000_job_invoice_split_cents.sql');
 const PINNED = path.join(MIGRATIONS, '20270303100000_job_invoice_kept_epa.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
@@ -260,7 +260,7 @@ const G = id('f1'), F2 = id('f2'), F3A = id('f3a'), F3B = id('f3b'), F3C = id('f
 const X = id('d1'), Y = id('d2'), Z = id('d3'), W = id('d4');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const OLD_IMPL = '53ecf1279da3aa7ea1590f440c6eb225';  // 20270303100000 (staging's current body)
-const NEW_IMPL = '8ef697686af9473ae9891e4bf9d57693';
+const NEW_IMPL = '90141e27397d1766be19d280bb9a046f';
 const md5Of = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 const meta = (sig) => scalar(`SELECT concat_ws('|', prosecdef, proowner::regrole, proconfig::text, coalesce(proacl::text, '-')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 
@@ -406,6 +406,22 @@ const EXPECT_AFTER = {
 // Fewer cents than owners with a quantity (0.002 Gal at $10 = 2 cents, three owners): one owner would bill $0, so the
 // line is refused by name, before and after (Mason, 2026-11-22, "never $0").
 const TOO_TINY = invoiceCase([F4], [10], [L(X, 0.002, 1000)]);
+// Sol r3: the refusal is new for some lines. 0.002 Gal at $10 in exact thirds: the old body billed 1 + 1 + 1 cents for a
+// 2-cent line; the candidate refuses it by name (an owner would bill $0); rollback bills it again.
+const EQUAL_THIRDS_TOO_TINY = invoiceCase(...THIRDS, [L(X, 0.002, 1000)]);
+const EQUAL_THIRDS_OLD = 'A=1/0 B=1/0 C=1/0 | X=3/2';
+function equalThirdsTooTiny(label) {
+  const r = probe(EQUAL_THIRDS_TOO_TINY);
+  if (label === 'after') {
+    assert.notEqual(r.status, 0, `after: 2 cents in exact thirds is refused\n${r.output}`);
+    assert.match(r.output, /JOB_LINE_ROUNDING: \[PROVER\] JC X can't be split between this job's owners/);
+    console.log('[after] equalThirdsTooTiny: 2 cents in exact thirds is now refused (JOB_LINE_ROUNDING, never $0)');
+  } else {
+    assert.equal(r.status, 0, r.output);
+    assert.equal(split(r.last).sums, EQUAL_THIRDS_OLD, `${label}: the old body bills 3 cents for the 2-cent line`);
+    console.log(`[${label}] equalThirdsTooTiny: ${EQUAL_THIRDS_OLD} (3 cents billed for a 2-cent line)`);
+  }
+}
 function refusedTooTiny(label) {
   const r = probe(TOO_TINY);
   assert.notEqual(r.status, 0, `${label}: a 2-cent line across three owners is refused\n${r.output}`);
@@ -442,6 +458,7 @@ function main() {
   const before = runCases('before');
   for (const [k, want] of Object.entries(EXPECT_BEFORE)) assert.equal(before[k].sums, want, `before: ${k}`);
   refusedTooTiny('before');
+  equalThirdsTooTiny('before');
   console.log('[before] the bug: $100.00 bills $100.01 (50.01/50.00); $123.40 bills $123.39 (thirds); $100.00 bills $99.99 (thirds); 3 cents bill 4; $9,999.99 bills $10,000.00');
 
   stageText('candidate.sql', lf(CANDIDATE));
@@ -465,6 +482,7 @@ function main() {
   }
   for (const k of ['single', 'suppliedOnly']) assert.equal(after[k].sums, before[k].sums, `after: ${k} is unchanged`);
   refusedTooTiny('after');
+  equalThirdsTooTiny('after');
   console.log('[after] every priced line: owners add up to the line to the cent; quantities, prices, costs, headers, shares and anchor tie; single-owner and grower-supplied invoices unchanged');
 
   // Negative control: the new body is the pinned one with only the line amount changed.
@@ -474,11 +492,14 @@ function main() {
   assert.equal(body.match(new RegExp(ALLOC.source, 'g'))?.length, 1, 'the allocation step is in the body once');
   let old = body.replace(ALLOC, '');
   old = swap(old, '  v_qtys numeric[];\n  v_line_cents bigint;\n  v_owner_cents bigint[];\n  v_take integer;\n  v_give integer;\n', '  v_qtys numeric[];\n');
+  old = swap(old, "    -- excludes the per-acre fee). Each member's base is its amount less its own booked cost (cost x quantity), so the\n"
+    + "    -- members' bases together can differ from the whole job's chemical profit by the owners' cost rounding.\n",
+    "    -- excludes the per-acre fee). Sum across members == the whole job's chemical profit.\n");
   old = swap(old, '          v_owner_ext := v_owner_cents[v_oidx];\n',
     '          v_owner_ext := safe_cents_qty(v_line.o_unit_price_cents, v_qtys[v_oidx]);\n');
   assert.equal(createHash('md5').update(old).digest('hex'), OLD_IMPL,
     'apart from the line amount, the transfer body (quantities, price, cost, checks, fee, shares, anchor, commissions) is the pinned one');
-  console.log('[after] transfer body = pinned body with only the owner line amount changed');
+  console.log('[after] transfer body = pinned body with only the owner line amount (and one commission comment) changed');
 
   stageText('reverse.sql', reverseSql());
   const back = apply('reverse.sql');
@@ -488,6 +509,7 @@ function main() {
   const rolled = runCases('rollback');
   for (const k of Object.keys(CASES)) assert.equal(rolled[k].sums, before[k].sums, `rollback: ${k} bills as before`);
   refusedTooTiny('rollback');
+  equalThirdsTooTiny('rollback');
   console.log('[rollback] re-emitting the 20270303100000 body restores its md5 and the old amounts ($100.01, $123.39)');
   console.log('JOB_INVOICE_SPLIT_CENTS_PROOF_PASS');
 }

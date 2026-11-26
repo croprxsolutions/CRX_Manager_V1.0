@@ -1,0 +1,11 @@
+**LOCAL CANDIDATE — NOT APPLIED.** #2579 (2026-11-25): `20270309140000_parent_epa_correction_refuses_open_work.sql` (SQL sha256: `9b678a5ec69a70b27fd3a2cd1a4e76baf4dd07430eb7a1f499cb8eed254e565d`). Contract: `docs/plans/2026-11-25-par1-epa-refuse-open-work-CONTRACT.md` (Astra cold challenge settled there). Applying it is a live change and needs Mason's explicit yes.
+
+What it does (no rows written): re-emits `_product_parent_identity_after` from the `20270307180000` body with one added check, last in the EPA-change branch: `PRODUCT_PARENT_EPA_OPEN_WORK` while any size of the parent has a job (not deleted) scheduled, in progress, or completed with no live (not deleted, voided or cancelled) invoice of its own or on a blend ticket tied to it; a blend ticket (not deleted, not rejected) unbilled or with no application record, unless the line's product is also on the ticket's live, not-cancelled job (the job counts it); or an invoice (not deleted) in draft or unposted. Lists up to 10, then "and N more". Preview and save both call it. Same signature, owner, volatility, `search_path`, no grants.
+
+Preflight (`PARENT_EPA_OPEN_WORK_PREFLIGHT` / `_NOT_IN_TRANSACTION`): one transaction; the helper is the `20270307180000` body (md5 `b97145311af25c6ac873f78aa44bf2ac`, owner `postgres`, not SECURITY DEFINER, volatile, `search_path=public, pg_temp`); a second apply stops here. Postflight (`PARENT_EPA_OPEN_WORK_POSTFLIGHT`): body md5 `1ce88f15dc79e7baa2a7538d40379470`, same attributes, ACL exactly `{postgres=X/postgres}`.
+
+Ordering: right after `20270307180000_parent_epa_correction_on`, in the same release and the same apply session (if this one fails, switch the correction off before anything else), so the correction is never switched on in production without this rule. Re-run the open-work query read-only before applying, including blend tickets with no application record whatever their billing (zero on production 2026-11-25); if not zero, decide what those tickets need first (Taha, #2613).
+
+Rollback (its own reviewed migration): switch the correction off (`_product_parent_epa_correction_enabled()` as `SELECT false`, `20270307180000`'s rollback). Never re-emit the `20270307180000` helper while the switch is on.
+
+Proof: `node scripts/smoke/prove-parent-epa-open-work-real-schema.mjs` (`PARENT_EPA_OPEN_WORK_PROOF_PASS`).

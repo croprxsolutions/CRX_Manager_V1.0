@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeError } from './errorSanitizer';
+import { isCommissionPayoutsOff, sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
   it('keeps document-link errors actionable and strips control characters', () => {
@@ -62,6 +62,9 @@ describe('sanitizeError', () => {
       'Nothing was saved. Parent "Atrazine 4L" changed since you opened it; reload and try again'],
     ['PRODUCT_PARENT_EPA_CORRECTION_OFF: EPA number correction is switched off until registrations (REG-1) are built',
       'Nothing was saved. EPA number correction is switched off until registrations (REG-1) are built'],
+    // RAISE text of 20270309140000_parent_epa_correction_refuses_open_work.sql (#2579).
+    ['PRODUCT_PARENT_EPA_OPEN_WORK: finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete it and invoice it or its blend ticket; if it will not be sprayed, cancel it or take this product off it; a blend ticket not tied to a job: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): job 1042 (scheduled), invoice INV-7 (draft)',
+      'Nothing was saved. Finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete it and invoice it or its blend ticket; if it will not be sprayed, cancel it or take this product off it; a blend ticket not tied to a job: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): job 1042 (scheduled), invoice INV-7 (draft)'],
     ['EVIDENCE_REQUIRED: say what shows it', 'Nothing was saved. Say what shows it'],
     // RAISE texts of 20261117130000_tote_fill_from_bulk.sql (BLK-1a).
     ['TOTE_FILL_STOCK_MOVED: stock of the tote or its bulk has moved since this fill; adjust stock instead',
@@ -377,6 +380,14 @@ describe('sanitizeError', () => {
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
+    // 20270309010000: payouts are off until M16 (Mason, 2026-11-25).
+    const off = 'COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.';
+    expect(sanitizeError(off)).toBe('Nothing was created or paid. Commission payouts are switched off until commission-on-payment (M16) is live. Voiding an existing payment still works');
+    expect(sanitizeError({ message: off })).toBe(sanitizeError(off));
+    expect(isCommissionPayoutsOff({ message: off })).toBe(true);
+    expect(isCommissionPayoutsOff(new Error(off))).toBe(true);
+    expect(isCommissionPayoutsOff('note mentions COMMISSION_PAYOUTS_OFF_UNTIL_M16')).toBe(false);
+    expect(isCommissionPayoutsOff(null)).toBe(false);
     expect(sanitizeError('TIER_ADMIN_ONLY: only an admin can change a customer\'s price tier'))
       .toBe("Only an admin can set or change a customer's price tier");
     expect(sanitizeError('CREDIT_LIMIT_ADMIN_ONLY: only an admin can change a customer\'s credit limit'))

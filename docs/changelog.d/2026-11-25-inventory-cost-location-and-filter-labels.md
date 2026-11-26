@@ -7,4 +7,4 @@
   this report." Other report tabs keep their dates.
 - Sales Reports (Start Date, End Date, Sales Rep, Category, Season) and Program Tracker (Season, Customer, Status)
   filters announce their captions to screen readers.
-- Source: free-screens audit `C:\CRX_wt\codex-reports\free-screens-crawl.md` (2026-11-25).
+- Source: the 2026-11-25 free-screens audit (local Codex crawl; findings reproduced in PR #2659).

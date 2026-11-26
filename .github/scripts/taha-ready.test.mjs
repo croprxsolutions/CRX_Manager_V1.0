@@ -304,7 +304,7 @@ test('a backport ping lists what the hotfix brings to live: PRs, bare commits, m
     'Files changed (2): `src/a.ts`, `src/&lt;b&gt;.ts`',
   ].join('\n'));
   const h = hotfix({});
-  assert.match(pingText(h, null, { backport: true, brings: list }), /\(head aaaaaaa\)\nBrings to live \(2 changes\):/);
+  assert.match(pingText(h, null, { backport: true, brings: list }), /\(head aaaaaaa\)\nBrings to live \(4 commits main does not have\):/);
   // Only a backport ask carries the list.
   assert.doesNotMatch(pingText(h, null, { backport: false, brings: list }), /Brings to live/);
 });

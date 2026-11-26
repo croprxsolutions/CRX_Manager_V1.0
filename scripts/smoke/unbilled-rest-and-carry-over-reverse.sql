@@ -1,6 +1,5 @@
 -- Reverse of 20270308170000_unbilled_rest_and_delivery_price_carry_over.sql. Run as one transaction (psql -1).
--- Refuses unless that file's bodies are installed; then drops the allocation trigger, its function, the view and the
--- allocation records (derived data: nothing else reads them), puts back the three-argument Create Invoice chain and the
+-- Refuses unless that file's bodies are installed; then drops the view, puts back the three-argument Create Invoice chain and the
 -- earlier _allocated_delivery_cents and get_dashboard_action_items bodies byte for byte, with their grants. Invoices
 -- drafted meanwhile keep their cents. Proven by scripts/smoke/prove-unbilled-rest-and-carry-over-real-schema.mjs.
 
@@ -14,13 +13,12 @@ BEGIN
   IF to_regclass('pg_temp.unbilled_rest_reverse_tx') IS NULL THEN
     RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: run this file as one transaction (psql -1)';
   END IF;
-  IF to_regclass('public.delivery_billing_remainders') IS NULL OR to_regclass('public.invoice_order_line_allocations') IS NULL THEN
+  IF to_regclass('public.delivery_billing_remainders') IS NULL THEN
     RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: 20270308170000 is not what is installed';
   END IF;
   FOR v_pin IN SELECT * FROM (VALUES
-      ('public._allocated_delivery_cents(uuid,numeric,uuid)', '01eb25c376e2c472e55bed7ff9dcaebf'),
-      ('public._record_invoice_line_allocation()', '81474bdb9170f847f324cac4ce87e090'),
-      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', 'e2566c18809f11f2029121674ecab7f9'),
+      ('public._allocated_delivery_cents(uuid,numeric,uuid)', '6fce7a52bc300c843416ce5196443e15'),
+      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', 'fea8e1fa560727ed3c1c8c1d53f2a7ce'),
       ('public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text)', '4f18fe996393549ebf7d4ee76570188d'),
       ('public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text)', 'ee18d8501f94a4c34bb71831c767f0a2'),
       ('public.get_dashboard_action_items(integer)', 'eb96aacf4dfc840a22df32d6bb549aeb')) t(sig, md5)
@@ -32,10 +30,7 @@ BEGIN
 END;
 $reverse_preflight$;
 
-DROP TRIGGER zz_record_invoice_line_allocation ON public.invoice_items;
-DROP FUNCTION public._record_invoice_line_allocation();
 DROP VIEW public.delivery_billing_remainders;
-DROP TABLE public.invoice_order_line_allocations;
 DROP FUNCTION public.create_invoice_for_unbilled_delivery(uuid, uuid, text, text);
 DROP FUNCTION public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid, uuid, text, text);
 DROP FUNCTION public._create_invoice_for_unbilled_delivery_impl_20260718(uuid, uuid, text, text);

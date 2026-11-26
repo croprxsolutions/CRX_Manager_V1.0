@@ -139,8 +139,16 @@ describe('the client predicate still matches the shipped server guard', () => {
     // redefine unrelated functions alongside it — 20260827041200 also re-emits
     // _complete_delivery_authorized_impl — so requiring the guard in every
     // definition in the file would false-alarm.
-    const targets = functionDefinitions(sql)
+    const family = functionDefinitions(sql)
       .filter((d) => /create_invoice_for_unbilled_delivery/i.test(d.name));
+    // A4 (20270308170000) re-emits the public wrapper and its idempotency layer only to carry p_expected_scope.
+    // Those layers write no invoice and must reach the guarded body; every definition that writes an invoice
+    // must carry the guard.
+    const targets = family.filter((d) => /INSERT INTO\s+(public\.)?invoices\b/i.test(d.body));
+    for (const def of family.filter((d) => !targets.includes(d))) {
+      expect(def.body, `${newest} → ${def.name} must delegate to the guarded body`)
+        .toMatch(/_create_invoice_for_unbilled_delivery_(idem_)?impl_\d{8}\(/);
+    }
 
     expect(targets.length, `newest function emitter: ${newest}`).toBeGreaterThan(0);
 

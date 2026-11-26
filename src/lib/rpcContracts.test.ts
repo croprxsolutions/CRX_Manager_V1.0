@@ -2984,9 +2984,6 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _sync_product_vendor_copy:
     "private product-copy synchronizer called by sync_product_vendor_from_links trigger; live catalog denies EXECUTE to anon, authenticated, and service_role",
 
-  // A4 carry-over (local candidate 20270308170000): trigger function, never an RPC.
-  _record_invoice_line_allocation:
-    'AFTER INSERT / UPDATE OF quantity row trigger on invoice_items: records a chemical sale invoice\'s order-line allocation in the drafting transaction (ON CONFLICT adds only within that transaction) or re-records it on a quantity re-price, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   // M4a sales tax (local candidate 20270109100200): trigger function, never an RPC.
   _sales_tax_record_rate_20261231:
     'AFTER INSERT / UPDATE OF invoice_type row trigger on invoices: records a taxed sale\'s draft at the Settings rate once (ON CONFLICT DO NOTHING), and re-records only when a draft really switches type, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',

@@ -1,22 +1,23 @@
--- A4 + delivery price carry-over (Mason, Slack 25 Nov; Taha's calls 26 Nov; plan
+-- A4 + delivery price carry-over (Mason, Slack 25 Nov; Taha's call 26 Nov: option c; plan
 -- docs/research/2026-11-25-chemical-sales-final-plan.md, "Billing what was delivered" and "Multi-delivery price").
 --
 -- 1. Carry-over. _allocated_delivery_cents priced a delivery's units as the line's allocation through every billed
 --    unit MINUS the cents already billed, so a price change on one delivery's invoice was charged back on the next:
---    10 at $40, the first 6 billed at $35 ($210), the last 4 drafted at $190, not $160. Each chemical sale invoice now
---    records what the order line allocated to its units when it was drafted (invoice_order_line_allocations, filled by a
---    trigger on invoice_items; existing invoices backfilled from today's figures, totals checked unchanged), and the
---    telescoping counts that record instead of the billed cents. A price edit never moves another delivery's price;
---    voids and re-bills still sum to the line total exactly. Every caller is fixed at once: completion's auto-draft
---    and partial refresh, Create Invoice on a delivery and the Bill Split drafts.
+--    10 at $40, the first 6 billed at $35 ($210), the last 4 drafted at $190, not $160. It now telescopes on billed
+--    QUANTITY: allocation through (billed + these) minus allocation through billed. Each delivery's units carry their
+--    own share of the order line; repeated partial deliveries still sum to the line total, and nothing is caught up
+--    from another invoice, up or down. Every caller is fixed at once: completion's auto-draft and partial refresh,
+--    Create Invoice on a delivery and the Bill Split drafts.
+--    KNOWN LIMIT (Taha, 2026-11-26): when a draft is cancelled or voided and billed again after a later delivery, a
+--    line whose total does not divide evenly can end 1 cent over (3 units for $100.00: 33.34 + 33.34 + 33.33). The
+--    follow-up PR records each invoice's allocation (stored cents, its own design).
 -- 2. A4. The Unbilled list counted a delivery billed once any active invoice touched it: 10 delivered, the line
 --    lowered to 6, and 4 units were never billed. delivery_billing_remainders compares delivered and billed units per
 --    delivery and order line (product lines on active non-credit invoices bill, as the invoice caps count them; lines
---    naming the order line first, then editor-added
---    lines by product; whole-order lines cover the order's deliveries in completion order). Units of a received,
---    uncredited return are not owed (default until Mason rules). get_dashboard_action_items lists a delivery while
---    any unit is unbilled, and Create Invoice on such a delivery drafts exactly the rest on a new draft, at the order
---    line's allocation for the units after those already billed: on the delivery, or, when a whole-order invoice
+--    naming the order line first, then editor-added lines by product; whole-order lines cover the order's deliveries
+--    in completion order). get_dashboard_action_items lists a delivery while any unit is unbilled, and Create Invoice
+--    on such a delivery drafts exactly the rest on a new draft, at the order line's allocation for the units after
+--    those already billed: on the delivery, or, when a whole-order invoice
 --    covers the order, every unbilled unit on the order. A Bill Split sale is refused (BILL_SPLIT_REST_NOT_SUPPORTED);
 --    a field split stays refused (ORDER_NEEDS_SPLIT_BILLING).
 -- 3. Scope. create_invoice_for_unbilled_delivery takes p_expected_scope (new, rest_delivery or rest_order): the scope
@@ -53,7 +54,7 @@ BEGIN
   IF (SELECT transaction_id FROM pg_temp.unbilled_rest_carry_over_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: run this file as one transaction (psql -1 or the apply script)';
   END IF;
-  IF to_regclass('public.delivery_billing_remainders') IS NOT NULL OR to_regclass('public.invoice_order_line_allocations') IS NOT NULL
+  IF to_regclass('public.delivery_billing_remainders') IS NOT NULL
      OR to_regprocedure('public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text)') IS NOT NULL THEN
     RAISE EXCEPTION 'UNBILLED_REST_BASELINE_DRIFT: already applied';
   END IF;
@@ -72,115 +73,16 @@ BEGIN
 END;
 $preflight$;
 
--- 1. What the order line allocated to each chemical sale invoice's units of it, recorded when the invoice was drafted.
--- One row per invoice and order line. The invoice editor rebuilds a draft line by line (delete, then insert), so
--- the record is keyed by invoice and order line, not by the line row, and a later save never rewrites it; a save
--- that changes the quantity is counted pro rata by _allocated_delivery_cents. A database re-price of a line's
--- quantity (completing a delivery refreshes its pre-made draft) records the new figures.
-CREATE TABLE public.invoice_order_line_allocations (
-  invoice_id uuid NOT NULL REFERENCES public.invoices(id) ON DELETE CASCADE,
-  order_item_id uuid NOT NULL REFERENCES public.order_items(id) ON DELETE CASCADE,
-  quantity numeric NOT NULL,
-  allocated_cents bigint NOT NULL,
-  -- The transaction that drafted the lines; only it adds to the record.
-  created_xid xid8 NOT NULL DEFAULT pg_current_xact_id(),
-  PRIMARY KEY (invoice_id, order_item_id)
-);
-CREATE INDEX invoice_order_line_allocations_order_item_idx ON public.invoice_order_line_allocations (order_item_id);
-ALTER TABLE public.invoice_order_line_allocations ENABLE ROW LEVEL SECURITY;
--- Readable with the invoice (the invoices policies decide); written only by the trigger below.
-CREATE POLICY invoice_order_line_allocations_select ON public.invoice_order_line_allocations
-  FOR SELECT TO authenticated
-  USING (EXISTS (SELECT 1 FROM public.invoices i WHERE i.id = invoice_order_line_allocations.invoice_id));
-REVOKE ALL ON public.invoice_order_line_allocations FROM PUBLIC, anon, authenticated, service_role;
-GRANT SELECT ON public.invoice_order_line_allocations TO authenticated, service_role;
-COMMENT ON TABLE public.invoice_order_line_allocations IS
-  'A4 carry-over: the order line''s allocation (units, cents) for each chemical sale invoice, recorded when it was drafted. _allocated_delivery_cents telescopes on it, so an edited invoice price never moves the next delivery''s price.';
-
-CREATE FUNCTION public._record_invoice_line_allocation()
- RETURNS trigger
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path = public, pg_temp
-AS $function$
-BEGIN
-  IF NEW.order_item_id IS NULL
-     OR (SELECT i.invoice_type FROM public.invoices i WHERE i.id = NEW.invoice_id) IS DISTINCT FROM 'chemical_sale' THEN
-    RETURN NULL;
-  END IF;
-  IF TG_OP = 'INSERT' THEN
-    -- The drafting transaction adds each line it writes; a later save (delete + insert) leaves the record alone.
-    INSERT INTO public.invoice_order_line_allocations AS a (invoice_id, order_item_id, quantity, allocated_cents)
-    VALUES (NEW.invoice_id, NEW.order_item_id, COALESCE(NEW.quantity, 0), COALESCE(NEW.extended_cents, 0))
-    ON CONFLICT (invoice_id, order_item_id) DO UPDATE
-      SET quantity = a.quantity + EXCLUDED.quantity,
-          allocated_cents = a.allocated_cents + EXCLUDED.allocated_cents
-      WHERE a.created_xid = pg_current_xact_id();
-  ELSIF NEW.quantity IS DISTINCT FROM OLD.quantity THEN
-    -- A database re-price of the quantity (the editor never updates a line in place): record the line as it is now.
-    INSERT INTO public.invoice_order_line_allocations AS a (invoice_id, order_item_id, quantity, allocated_cents)
-    SELECT ii.invoice_id, ii.order_item_id, COALESCE(sum(ii.quantity), 0), COALESCE(sum(ii.extended_cents), 0)
-      FROM public.invoice_items ii
-     WHERE ii.invoice_id = NEW.invoice_id AND ii.order_item_id = NEW.order_item_id
-     GROUP BY ii.invoice_id, ii.order_item_id
-    ON CONFLICT (invoice_id, order_item_id) DO UPDATE
-      SET quantity = EXCLUDED.quantity, allocated_cents = EXCLUDED.allocated_cents;
-  END IF;
-  RETURN NULL;
-END;
-$function$;
-REVOKE ALL ON FUNCTION public._record_invoice_line_allocation() FROM PUBLIC, anon, authenticated, service_role;
-CREATE TRIGGER zz_record_invoice_line_allocation
-  AFTER INSERT OR UPDATE OF quantity ON public.invoice_items
-  FOR EACH ROW EXECUTE FUNCTION public._record_invoice_line_allocation();
-
--- Backfill from today's figures: every existing chemical sale invoice records what its lines bill now, which is
--- what the old rule telescoped on, so no future draft changes for it. Nothing else is written; the check below
--- proves the invoice and line totals are untouched and the records add up to the lines' cents.
-DO $backfill$
-DECLARE
-  v_before text;
-  v_after text;
-  v_lines bigint;
-  v_cents numeric;
-BEGIN
-  SELECT md5(COALESCE(string_agg(i.id::text || ':' || i.total_amount_cents, ',' ORDER BY i.id), '')) || '/'
-         || (SELECT md5(COALESCE(string_agg(ii.id::text || ':' || ii.quantity || ':' || ii.extended_cents, ',' ORDER BY ii.id), ''))
-               FROM public.invoice_items ii)
-    INTO v_before FROM public.invoices i;
-  SELECT count(*), COALESCE(sum(ii.extended_cents), 0) INTO v_lines, v_cents
-    FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
-   WHERE ii.order_item_id IS NOT NULL AND i.invoice_type = 'chemical_sale';
-
-  INSERT INTO public.invoice_order_line_allocations (invoice_id, order_item_id, quantity, allocated_cents, created_xid)
-  SELECT ii.invoice_id, ii.order_item_id, COALESCE(sum(ii.quantity), 0), COALESCE(sum(ii.extended_cents), 0), '0'::xid8
-    FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
-   WHERE ii.order_item_id IS NOT NULL AND i.invoice_type = 'chemical_sale'
-   GROUP BY ii.invoice_id, ii.order_item_id;
-
-  SELECT md5(COALESCE(string_agg(i.id::text || ':' || i.total_amount_cents, ',' ORDER BY i.id), '')) || '/'
-         || (SELECT md5(COALESCE(string_agg(ii.id::text || ':' || ii.quantity || ':' || ii.extended_cents, ',' ORDER BY ii.id), ''))
-               FROM public.invoice_items ii)
-    INTO v_after FROM public.invoices i;
-  IF v_after IS DISTINCT FROM v_before
-     OR (SELECT COALESCE(sum(allocated_cents), 0) FROM public.invoice_order_line_allocations) IS DISTINCT FROM v_cents THEN
-    RAISE EXCEPTION 'UNBILLED_REST_BACKFILL_FAIL: invoice totals moved or the records do not add up';
-  END IF;
-  RAISE NOTICE 'UNBILLED_REST_BACKFILL_OK lines=% cents=%', v_lines, v_cents;
-END;
-$backfill$;
-
--- 2. One row per completed delivery, order line and product: units delivered, billed, returned before billing and
--- not billed yet, and the cents billing the rest would add. Product lines on active invoices bill, credit memos never:
--- a miscellaneous charge naming a product counts, as the invoice caps count it (_order_invoice_overbilling), so the
--- list never shows units the caps would refuse to bill again. Billed units are attributed in four steps: the delivery's own lines naming the
--- order line; its own lines with no order line (the invoice editor adds those), by product; then the order's
--- whole-order lines naming the order line; then its whole-order lines with no order line, by product; the last two
--- cover the order's deliveries in completion order. A line naming an order line but no product counts as that order
--- line's product. Units of a received return that no credit memo has credited (returned before billing) are not owed
--- (A4 default, to confirm with Mason). line_linked_qty / line_linked_cents (allocation recorded per invoice, as
--- _allocated_delivery_cents counts it) and line_unlinked_qty describe the order line's billing so far; the cents use
--- the order line's allocation (_allocated_cumulative_cents, inlined so a reader needs no EXECUTE on it).
+-- One row per completed delivery, order line and product: units delivered, billed and not billed yet, the units billed
+-- on that order line across the order (line_billed_qty) and the cents billing the rest would add. Product lines on
+-- active invoices bill, credit memos never: a miscellaneous charge naming a product counts, as the invoice caps count
+-- it (_order_invoice_overbilling), so the list never shows units the caps would refuse to bill again. A line naming an
+-- order line but no product counts as that order line's product. Billed units are attributed in four steps: the
+-- delivery's own lines naming the order line; its own lines with no order line (the invoice editor adds those), by
+-- product; then the order's whole-order lines naming the order line; then its whole-order lines with no order line, by
+-- product; the last two cover the order's deliveries in completion order. The cents use the order line's allocation
+-- (_allocated_cumulative_cents, inlined so a reader needs no EXECUTE on it) for the units after line_billed_qty, as
+-- Create Invoice prices the rest.
 -- security_invoker: each reader sees only the rows the policies on these tables let them read.
 CREATE VIEW public.delivery_billing_remainders WITH (security_invoker = true) AS
 WITH delivered AS (
@@ -203,20 +105,6 @@ WITH delivered AS (
 ), pools AS (
   SELECT s.order_id, s.delivery_id, s.order_item_id, s.product_id, sum(s.quantity) AS qty
     FROM sale_lines s GROUP BY s.order_id, s.delivery_id, s.order_item_id, s.product_id
-), linked AS (  -- per order line: units billed on lines naming it, and the allocation they count
-  SELECT l.order_item_id, sum(l.qty) AS qty,
-         sum(CASE WHEN a.invoice_id IS NULL OR a.quantity <= 0 THEN l.cents
-                  WHEN l.qty = a.quantity THEN a.allocated_cents
-                  ELSE round(a.allocated_cents * l.qty / a.quantity) END) AS cents
-    FROM (SELECT s.invoice_id, s.order_item_id, sum(s.quantity) AS qty, sum(s.extended_cents) AS cents
-            FROM sale_lines s WHERE s.order_item_id IS NOT NULL GROUP BY s.invoice_id, s.order_item_id) l
-    LEFT JOIN public.invoice_order_line_allocations a ON a.invoice_id = l.invoice_id AND a.order_item_id = l.order_item_id
-   GROUP BY l.order_item_id
-), returned AS (  -- received, not credited: these units came back before they were billed
-  SELECT ri.order_item_id, sum(ri.quantity) AS qty
-    FROM public.return_items ri JOIN public.returns r ON r.id = ri.return_id
-   WHERE r.status = 'received' AND r.deleted_at IS NULL AND r.credit_invoice_id IS NULL AND ri.order_item_id IS NOT NULL
-   GROUP BY ri.order_item_id
 ), step1 AS (
   SELECT dl.*, LEAST(dl.delivered_qty, COALESCE((SELECT sum(p.qty) FROM pools p
            WHERE p.delivery_id = dl.delivery_id AND p.order_item_id = dl.order_item_id AND p.product_id = dl.product_id), 0)) AS b1
@@ -239,42 +127,28 @@ WITH delivered AS (
          - COALESCE(sum(s.delivered_qty - s.b1 - s.b2 - s.b3) OVER (PARTITION BY s.order_id, s.product_id
              ORDER BY s.completed_at, s.delivery_id, s.order_item_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0), 0)) AS b4
     FROM step3 s
-), step5 AS (
-  SELECT s.*, LEAST(s.delivered_qty - s.b1 - s.b2 - s.b3 - s.b4, GREATEST(COALESCE((SELECT rt.qty FROM returned rt
-           WHERE rt.order_item_id = s.order_item_id), 0)
-         - COALESCE(sum(s.delivered_qty - s.b1 - s.b2 - s.b3 - s.b4) OVER (PARTITION BY s.order_item_id
-             ORDER BY s.completed_at, s.delivery_id, s.product_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0), 0)) AS r5
-    FROM step4 s
 ), covered AS (
   SELECT s.delivery_id, s.order_id, s.order_item_id, s.product_id, s.delivered_qty,
-         s.b1 + s.b2 + s.b3 + s.b4 AS billed_qty, s.r5 AS returned_qty,
-         COALESCE(lk.qty, 0) AS line_linked_qty, COALESCE(lk.cents, 0)::bigint AS line_linked_cents,
-         sum(s.b2 + s.b4) OVER (PARTITION BY s.order_item_id) AS line_unlinked_qty
-    FROM step5 s
-    LEFT JOIN linked lk ON lk.order_item_id = s.order_item_id
+         s.b1 + s.b2 + s.b3 + s.b4 AS billed_qty,
+         sum(s.b1 + s.b2 + s.b3 + s.b4) OVER (PARTITION BY s.order_item_id) AS line_billed_qty
+    FROM step4 s
 )
-SELECT c.delivery_id, c.order_id, c.order_item_id, c.product_id, c.delivered_qty, c.billed_qty, c.returned_qty,
-       c.delivered_qty - c.billed_qty - c.returned_qty AS unbilled_qty,
-       c.line_linked_qty, c.line_linked_cents, c.line_unlinked_qty,
-       GREATEST(x.after_rest - c.line_linked_cents - (x.after_unlinked - x.after_linked), 0) AS unbilled_cents
+SELECT c.delivery_id, c.order_id, c.order_item_id, c.product_id, c.delivered_qty, c.billed_qty,
+       c.delivered_qty - c.billed_qty AS unbilled_qty, c.line_billed_qty,
+       GREATEST(x.cents, 0) AS unbilled_cents
   FROM covered c
   JOIN public.order_items oi ON oi.id = c.order_item_id
   CROSS JOIN LATERAL (
-    SELECT max(v.cents) FILTER (WHERE v.k = 1) AS after_rest,
-           max(v.cents) FILTER (WHERE v.k = 2) AS after_unlinked,
-           max(v.cents) FILTER (WHERE v.k = 3) AS after_linked
-      FROM (SELECT q.k, CASE
-                     WHEN COALESCE(oi.total_units_needed, 0) <= 0 THEN round(GREATEST(q.qty, 0) * COALESCE(oi.price_per_unit, 0) * 100)
-                     ELSE round(round(COALESCE(oi.total_price, 0) * 100) * LEAST(GREATEST(q.qty, 0), oi.total_units_needed) / oi.total_units_needed)
-                   END::bigint AS cents
-              FROM (VALUES (1, c.line_linked_qty + c.line_unlinked_qty + c.delivered_qty - c.billed_qty - c.returned_qty),
-                           (2, c.line_linked_qty + c.line_unlinked_qty),
-                           (3, c.line_linked_qty)) q(k, qty)) v
+    SELECT sum(v.sign * CASE
+             WHEN COALESCE(oi.total_units_needed, 0) <= 0 THEN round(GREATEST(v.qty, 0) * COALESCE(oi.price_per_unit, 0) * 100)
+             ELSE round(round(COALESCE(oi.total_price, 0) * 100) * LEAST(GREATEST(v.qty, 0), oi.total_units_needed) / oi.total_units_needed)
+           END)::bigint AS cents
+      FROM (VALUES (c.line_billed_qty + c.delivered_qty - c.billed_qty, 1), (c.line_billed_qty, -1)) v(qty, sign)
   ) x;
 REVOKE ALL ON public.delivery_billing_remainders FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON public.delivery_billing_remainders TO authenticated, service_role;
 COMMENT ON VIEW public.delivery_billing_remainders IS
-  'A4: per completed delivery, order line and product, units delivered, billed (active non-credit invoices), returned before billing and not billed, with the cents billing the rest would add. Read under the reader''s own row policies (security_invoker).';
+  'A4: per completed delivery, order line and product, units delivered, billed (product lines on active non-credit invoices) and not billed, with the cents billing the rest would add. Read under the reader''s own row policies (security_invoker).';
 
 CREATE OR REPLACE FUNCTION public._allocated_delivery_cents(p_order_item_id uuid, p_quantity numeric, p_exclude_invoice_id uuid DEFAULT NULL::uuid)
  RETURNS bigint
@@ -284,40 +158,31 @@ CREATE OR REPLACE FUNCTION public._allocated_delivery_cents(p_order_item_id uuid
 AS $function$
 DECLARE
   v_prior_qty numeric := 0;
-  v_prior_cents bigint := 0;
 BEGIN
   IF p_order_item_id IS NULL THEN
     RETURN 0;
   END IF;
 
-  -- A4 carry-over (Mason, 2026-11-25): each earlier invoice counts the cents the order line ALLOCATED to its units
-  -- (invoice_order_line_allocations, recorded when the line was drafted; pro rata when its quantity was changed later), not
-  -- the cents it bills, so a price changed on one invoice is never charged back on the next delivery. An invoice with
-  -- no recorded allocation counts its billed cents, as before.
-  SELECT COALESCE(SUM(l.qty), 0),
-         COALESCE(SUM(CASE
-           WHEN a.invoice_id IS NULL OR a.quantity <= 0 THEN l.cents
-           WHEN l.qty = a.quantity THEN a.allocated_cents
-           ELSE ROUND(a.allocated_cents * l.qty / a.quantity)
-         END), 0)
-    INTO v_prior_qty, v_prior_cents
-    FROM (SELECT ii.invoice_id, SUM(ii.quantity) AS qty, SUM(ii.extended_cents) AS cents
-            FROM public.invoice_items ii
-            JOIN public.invoices inv ON inv.id = ii.invoice_id
-           WHERE ii.order_item_id = p_order_item_id
-             AND inv.invoice_type <> 'credit_memo'
-             AND inv.deleted_at IS NULL
-             AND inv.status NOT IN ('voided', 'cancelled')
-             AND (p_exclude_invoice_id IS NULL OR inv.id <> p_exclude_invoice_id)
-           GROUP BY ii.invoice_id) l
-    LEFT JOIN public.invoice_order_line_allocations a
-      ON a.invoice_id = l.invoice_id AND a.order_item_id = p_order_item_id;
+  SELECT COALESCE(SUM(ii.quantity), 0)
+    INTO v_prior_qty
+    FROM public.invoice_items ii
+    JOIN public.invoices inv ON inv.id = ii.invoice_id
+   WHERE ii.order_item_id = p_order_item_id
+     AND inv.invoice_type <> 'credit_memo'
+     AND inv.deleted_at IS NULL
+     AND inv.status NOT IN ('voided', 'cancelled')
+     AND (p_exclude_invoice_id IS NULL OR inv.id <> p_exclude_invoice_id);
 
+  -- A4 carry-over (Mason, 2026-11-25): these units' share of the order line is the allocation through the units
+  -- billed so far plus these, minus the allocation through the units billed so far. Telescoping on billed QUANTITY
+  -- keeps partial deliveries summing to the line total; a price changed on another invoice stays on that invoice,
+  -- up or down. Known limit: after a draft is voided and billed again out of order, a fractional line can end 1 cent
+  -- off its total (follow-up: record each invoice's allocation, its own PR).
   RETURN GREATEST(
     public._allocated_cumulative_cents(
       p_order_item_id,
       v_prior_qty + GREATEST(COALESCE(p_quantity, 0), 0)
-    ) - v_prior_cents,
+    ) - public._allocated_cumulative_cents(p_order_item_id, v_prior_qty),
     0);
 END;
 $function$;
@@ -453,16 +318,12 @@ BEGIN
     status, invoice_date, total_amount_cents, total_cost_cents, created_by)
   VALUES (v_invoice_number, 'chemical_sale', v_delivery.order_id, v_delivery.customer_id,
     CASE WHEN v_order_level THEN NULL ELSE p_delivery_id END, 'draft', (now() AT TIME ZONE 'America/Chicago')::date, 0, 0, v_actor) RETURNING id INTO v_invoice_id;
-  -- A4: the rest is drafted from delivery_billing_remainders, one line per order line and product. Its cents are the
-  -- order line's allocation for these units, counted after the units already billed on the line: invoice lines that
-  -- name the order line count their recorded allocation (as _allocated_delivery_cents does), editor-added lines with
-  -- no order line count at the line's allocation for their position. On a whole-order invoice it bills every
-  -- unbilled unit on the order.
+  -- A4: the rest is drafted from delivery_billing_remainders, one line per order line and product, priced at the order
+  -- line's allocation for these units after every unit already billed on that line (editor-added lines included). On
+  -- a whole-order invoice it bills every unbilled unit on the order.
   IF v_rest THEN
     FOR v_item IN
-      SELECT r.order_item_id, r.product_id, sum(r.unbilled_qty) AS quantity,
-             max(r.line_linked_qty) AS linked_qty, max(r.line_linked_cents) AS linked_cents,
-             max(r.line_unlinked_qty) AS unlinked_qty,
+      SELECT r.order_item_id, r.product_id, sum(r.unbilled_qty) AS quantity, max(r.line_billed_qty) AS line_billed,
              oi.price_per_unit, oi.cost_per_unit, oi.product_name AS oi_product_name, p.product_name AS p_name,
              (SELECT di.unit_size FROM delivery_items di
                WHERE di.order_item_id = r.order_item_id AND di.product_id = r.product_id
@@ -477,10 +338,8 @@ BEGIN
        ORDER BY r.order_item_id, r.product_id
     LOOP
       v_line_alloc_cents := GREATEST(
-        public._allocated_cumulative_cents(v_item.order_item_id, v_item.linked_qty + v_item.unlinked_qty + v_item.quantity)
-        - v_item.linked_cents
-        - (public._allocated_cumulative_cents(v_item.order_item_id, v_item.linked_qty + v_item.unlinked_qty)
-           - public._allocated_cumulative_cents(v_item.order_item_id, v_item.linked_qty)), 0);
+        public._allocated_cumulative_cents(v_item.order_item_id, v_item.line_billed + v_item.quantity)
+        - public._allocated_cumulative_cents(v_item.order_item_id, v_item.line_billed), 0);
       v_total_cents := v_total_cents + v_line_alloc_cents;
       v_cost_cents := v_cost_cents + ROUND(v_item.quantity * COALESCE(v_item.cost_per_unit, 0) * 100)::bigint;
       INSERT INTO invoice_items (invoice_id, order_item_id, product_id, description,
@@ -948,9 +807,8 @@ DECLARE
   v_pin record;
 BEGIN
   FOR v_pin IN SELECT * FROM (VALUES
-      ('public._allocated_delivery_cents(uuid,numeric,uuid)', '01eb25c376e2c472e55bed7ff9dcaebf', false),
-      ('public._record_invoice_line_allocation()', '81474bdb9170f847f324cac4ce87e090', true),
-      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', 'e2566c18809f11f2029121674ecab7f9', true),
+      ('public._allocated_delivery_cents(uuid,numeric,uuid)', '6fce7a52bc300c843416ce5196443e15', false),
+      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', 'fea8e1fa560727ed3c1c8c1d53f2a7ce', true),
       ('public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text)', '4f18fe996393549ebf7d4ee76570188d', true),
       ('public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text)', 'ee18d8501f94a4c34bb71831c767f0a2', true),
       ('public.get_dashboard_action_items(integer)', 'eb96aacf4dfc840a22df32d6bb549aeb', true)) t(sig, md5, definer)
@@ -971,7 +829,6 @@ BEGIN
      OR has_function_privilege('service_role', 'public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', 'EXECUTE')
      OR has_function_privilege('service_role', 'public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public._record_invoice_line_allocation()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._allocated_delivery_cents(uuid,numeric,uuid)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.get_dashboard_action_items(integer)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.get_dashboard_action_items(integer)', 'EXECUTE') THEN
@@ -979,17 +836,10 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_class c WHERE c.oid = 'public.delivery_billing_remainders'::regclass
                   AND c.reloptions @> ARRAY['security_invoker=true'])
-     OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.invoice_order_line_allocations'::regclass)
-     OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'zz_record_invoice_line_allocation'
-                     AND tgrelid = 'public.invoice_items'::regclass AND tgenabled = 'O')
      OR has_table_privilege('anon', 'public.delivery_billing_remainders', 'SELECT')
-     OR has_table_privilege('anon', 'public.invoice_order_line_allocations', 'SELECT')
      OR NOT has_table_privilege('authenticated', 'public.delivery_billing_remainders', 'SELECT')
-     OR has_table_privilege('authenticated', 'public.delivery_billing_remainders', 'INSERT')
-     OR has_table_privilege('authenticated', 'public.invoice_order_line_allocations', 'INSERT')
-     OR has_table_privilege('authenticated', 'public.invoice_order_line_allocations', 'UPDATE')
-     OR has_table_privilege('authenticated', 'public.invoice_order_line_allocations', 'DELETE') THEN
-    RAISE EXCEPTION 'POSTFLIGHT_FAIL: view, table, trigger or table grants drifted';
+     OR has_table_privilege('authenticated', 'public.delivery_billing_remainders', 'INSERT') THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: view or view grants drifted';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK';
 END;

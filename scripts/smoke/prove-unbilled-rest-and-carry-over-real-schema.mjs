@@ -22,13 +22,12 @@
  *               the order ($560.00) and neither delivery stays listed
  *   editor_line 2 units for $80.01; a whole-order editor line (no order line) bills the first at $40.01: the rest is
  *               $40.00, so the order bills $80.01 exactly
- *   void_rebill $100 for 3 in three deliveries, the first draft cancelled and billed again last: $100.00 exactly
+ *   void_rebill $100 for 3 in three deliveries, the first draft cancelled and billed again last: staging $100.00;
+ *               KNOWN LIMIT after (Taha's option c): $100.01, pinned; the stored-cents follow-up PR makes it exact
  *   carry_void  the carry-over sale with delivery 2's draft cancelled and billed again: still $160.00
- *   returned    10 delivered, billed 6, 2 received back before billing: Bill the rest drafts 2 ($80.00) (default, to
- *               confirm with Mason)
  *   scope       Create Invoice refuses a scope other than the one the screen showed (UNBILLED_SCOPE_CHANGED)
  *   misc        a miscellaneous charge naming the product bills those units, as the order cap counts it (unchanged)
- * BEFORE (old bodies) the A4 and carry-over cases fail, AFTER they pass and rounding, void and void_rebill are identical; autocommit, a second
+ * BEFORE (old bodies) the A4 and carry-over cases fail, AFTER they pass, rounding, void and misc are identical and void_rebill shows its known 1-cent limit; autocommit, a second
  * apply and a drifted reverse are refused; the reverse (scripts/smoke/unbilled-rest-and-carry-over-reverse.sql)
  * restores the old bodies byte for byte and every case gives its BEFORE result again; the candidate re-applies.
  *
@@ -50,7 +49,7 @@ const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-
 const run = (sql, flags = []) => docker([...PSQL, ...flags], { input: sql, allowFailure: true });
 const ADMIN = USERS.admin;
 // Every function the candidate replaces, adds or drops, by name: signature and body, so a changed argument list counts.
-const FNS = ['_allocated_delivery_cents', '_record_invoice_line_allocation', '_create_invoice_for_unbilled_delivery_impl_20260718',
+const FNS = ['_allocated_delivery_cents', '_create_invoice_for_unbilled_delivery_impl_20260718',
   '_create_invoice_for_unbilled_delivery_idem_impl_20260721', 'create_invoice_for_unbilled_delivery', 'get_dashboard_action_items'];
 const reuse = process.env.A4CARRY_PROOF_REUSE === '1';
 if (reuse && !/^(crx-undo-paths|a4carry)-/.test(process.env.UNDO_PATHS_CONTAINER || '')) {
@@ -81,8 +80,6 @@ const ORDERS = {
   void_rebill: [uid('a4ea'), [[uid('a4fb'), 3, '100.00', '33.33']], [[uid('a4ba1'), [[0, 1]]], [uid('a4ba2'), [[0, 1]]], [uid('a4ba3'), [[0, 1]]]]],
   // Taha r2: a price edit, then a void and re-bill of the edited delivery's sibling.
   carry_void: [uid('a4eb'), [[uid('a4fc'), 10, '400.00', '40.00']], [[uid('a4bb1'), [[0, 6]]], [uid('a4bb2'), [[0, 4]]]]],
-  // Taha r2 (default, to confirm with Mason): 10 delivered, billed 6, 2 received back before billing: 2 are owed.
-  returned: [uid('a4ec'), [[uid('a4fd'), 10, '400.00', '40.00']], [[uid('a4bc1'), [[0, 10]]]]],
   // Taha r2: the server refuses a scope other than the one the screen showed.
   scope: [uid('a4ed'), [[uid('a4fe'), 10, '400.00', '40.00']], [[uid('a4bd1'), [[0, 10]]]]],
   // Sol r2: a miscellaneous charge naming the product. The order cap counts it as billing those units, so the list must
@@ -203,13 +200,6 @@ const CASES = {
     UPDATE public.invoices SET status = 'cancelled' WHERE id = ${invoiceOf(d2)};
     ${billRest(d2, 'cv')}
     v := ${cents(d1)} || ' then ' || ${cents(d2)} || ' billed=' || ${orderBilled(o)};`; },
-  returned: () => { const [o, [[l]], [[d]]] = ORDERS.returned; return `${complete(d)} ${edit(invoiceOf(d), 6, 4000, 'rt')}
-    INSERT INTO public.returns (id, return_number, order_id, customer_id, status, received_at)
-      VALUES ('${uid('a4cc1')}', '[A4] RET-1', '${o}', '${CUST}', 'received', now());
-    INSERT INTO public.return_items (return_id, order_item_id, product_id, product_name, quantity, unit)
-      VALUES ('${uid('a4cc1')}', '${l}', '${PROD}', '[A4] product', 2, 'Gal');
-    v := '';
-    ${restSteps(o, d, 'rt')}`; },
   scope: () => { const [o, , [[d]]] = ORDERS.scope; return `${complete(d)} ${edit(invoiceOf(d), 6, 4000, 'sc')}
     BEGIN ${asUser(`r := public.create_invoice_for_unbilled_delivery(p_delivery_id => '${d}', p_performed_by => '${ADMIN}',
       p_idempotency_key => 'a4carry-s-1', p_expected_scope => 'rest_order');`)} t := 'NOT REFUSED';
@@ -259,11 +249,11 @@ const EXPECT = {
   whole_two: 'ok|listed=true | drafted 56000 qty=14.00 on=order | billed=80000/20.00 listed1=false listed2=false | again refused: This delivery already has an active invoice (or an order-lev',
   // The second unit of $80.01 is $40.00 (8001 - 4001), so the order bills $80.01 exactly, not $80.02.
   editor_line: 'ok|listed=true | drafted 4000 qty=1.00 on=order | billed=8001/2.00 listed=false | again refused: This delivery already has an active invoice (or an order-lev',
-  // $100.00 exactly after a cancel and re-bill: 3334 + 3333 + 3333.
-  void_rebill: 'ok|3334+3333+3333 billed=10000/3.00',
+  // KNOWN LIMIT (Taha, 2026-11-26, option c): billing by units, a cancel and re-bill out of order can end 1 cent over
+  // on a line that does not divide evenly. Pinned so it cannot grow unseen; the stored-cents follow-up makes it $100.00.
+  void_rebill: 'ok|3334+3334+3333 billed=10001/3.00',
   // Delivery 2 re-billed after its draft was cancelled still prices its own 4 at $160.00.
   carry_void: 'ok|21000 then 16000 billed=37000/10.00',
-  returned: 'ok|listed=true | drafted 8000 qty=2.00 on=delivery | billed=32000/8.00 listed=false | again refused: This delivery already has an active invoice (or an order-lev',
   scope: 'ok|order: UNBILLED_SCOPE_CHANGED: delivery [A4] sc | new: UNBILLED_SCOPE_CHANGED: delivery [A4] sc | delivery: drafted 16000 rest_delivery billed=40000/10.00',
 };
 
@@ -278,7 +268,7 @@ try {
   assert.match(before.short, /^ok\|listed=false \| refused: This delivery already has an active invoice/, 'A4 must reproduce: off the list, refused');
   assert.match(before.short, /billed=24000\/6\.00/, 'A4: 4 units left unbilled on the old body');
   assert.match(before.whole, /^ok\|whole=24000 on order listed=false \| refused:/, 'A4 whole-order must reproduce');
-  for (const name of ['two_lines', 'whole_two', 'editor_line', 'returned']) {
+  for (const name of ['two_lines', 'whole_two', 'editor_line']) {
     assert.match(before[name], /^ok\|listed=false \| refused: This delivery already has an active invoice/, `${name}: A4 must reproduce`);
   }
   assert.match(before.rounding, /^ok\|3333\+3334\+3333 billed=10000\/3\.00$/);

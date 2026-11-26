@@ -1,14 +1,17 @@
-
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 process.env.CRX_LOCAL_APP_PROFILE = 'screen-walk';
-process.env.CRX_LOCAL_APP_LANE = createHash('sha256').update(process.cwd().toLowerCase()).digest('hex').slice(0, 8);
+const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
+const lanePath = process.platform === 'win32' ? root.toLowerCase() : root;
+process.env.CRX_LOCAL_APP_LANE = createHash('sha256').update(lanePath).digest('hex').slice(0, 8);
 const target = await import('./target.mjs');
 const raw = readFileSync(new URL('./.state/screen-walk/local.env', import.meta.url), 'utf8');
-const state = Object.fromEntries(raw.trim().split(/\r?\n/).map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+const state = Object.fromEntries(raw.trim().split(/\r?\n/).filter(line => line.includes('=') && !line.startsWith('#')).map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
 target.assertCleanEnvironment();
 target.assertLocalState(state);
 assert(await target.portIsOpen(target.APP_PORT), 'The owned local walkthrough is stopped');
@@ -68,4 +71,3 @@ docker(['exec', '-i', container, 'psql', '-Xq', '-v', 'ON_ERROR_STOP=1', '-U', '
   ROLLBACK;
 `);
 console.log('VEHICLE_ADMIN_REGISTER_ROLE_PROOF_PASS');
-

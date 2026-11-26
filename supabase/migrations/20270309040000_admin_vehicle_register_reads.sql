@@ -1,7 +1,29 @@
--- Add a checked read path for the admin registry before clients move to it.
--- Existing vehicle policies and workflows stay compatible during the transition.
+-- Step 1 of docs/plans/2026-11-26-vehicle-register-access-CONTRACT.md.
+-- Add a separate admin read path before the app moves to it. Base-table reads remain open.
 -- Roll back with a reviewed view removal after restoring any dependent client.
 SET LOCAL lock_timeout = '5s';
+
+CREATE TEMP TABLE admin_vehicle_register_tx ON COMMIT DROP AS
+  SELECT pg_current_xact_id() AS transaction_id;
+
+DO $preflight$
+BEGIN
+  IF to_regclass('pg_temp.admin_vehicle_register_tx') IS NULL THEN
+    RAISE EXCEPTION 'ADMIN_VEHICLE_REGISTER_NEEDS_TRANSACTION';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public' AND tablename = 'vehicles' AND policyname = 'vehicles_select'
+      AND cmd = 'SELECT' AND permissive = 'PERMISSIVE' AND roles = ARRAY['authenticated']::name[]
+      AND regexp_replace(replace(qual, 'public.', ''), '\s+', '', 'g') = '(SELECTis_active_profile()ASis_active_profile)'
+  ) OR EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public' AND tablename = 'vehicles' AND policyname <> 'vehicles_select'
+      AND cmd IN ('SELECT', 'ALL')
+  ) THEN RAISE EXCEPTION 'ADMIN_VEHICLE_REGISTER_BASE_POLICY_CHANGED'; END IF;
+END
+$preflight$;
 
 CREATE VIEW public.admin_vehicle_register
 WITH (security_barrier = true) AS

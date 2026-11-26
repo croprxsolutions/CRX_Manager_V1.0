@@ -35,7 +35,9 @@ try {
   res = { ok: false, reason: `the override hook failed (${error?.message || error})` };
 }
 if (!res.ok) emit(`TAHA LANE OVERRIDE NOT RECORDED — Mason sent #${command.pullRequest} ${command.code}, but ${res.reason}. Nothing was overridden. Tell him in one line; retrying the merge issues a fresh code.`);
-emit(`TAHA LANE OVERRIDE RECORDED — Mason let PR #${res.payload.pullRequest} past Taha's checks until ${res.payload.expiresAt}: ` +
-  "the lane block, and for a release or hotfix PR Taha's live-apply go-ahead and 4-hour hold " +
+const applyUntil = new Date(Date.parse(res.payload.issuedAt) + 30 * 60_000).toISOString();
+emit(`TAHA LANE OVERRIDE RECORDED — Mason let PR #${res.payload.pullRequest} past Taha's checks: ` +
+  `the lane block until ${res.payload.expiresAt}, and for a release or hotfix PR Taha's live-apply go-ahead and 4-hour hold ` +
+  `only until ${applyUntil} (30 minutes, migration-landing-gate-lib.mjs) ` +
   "(this PR only, later pushes included; every other gate still applies). " +
   "Confirm to him in one line and retry; on a staging merge the lane gate posts the PR comment telling Taha.");

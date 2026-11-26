@@ -326,8 +326,8 @@ export function tahaApprovedCommit(rows, baseChangedAt = "") {
 // now. Pushes that only catch up with staging, change only files under docs/, or restamp a migration (only its
 // own migration stamp changed, old -> new, in names and text; Luna r1) leave it so; any other change needs him again.
 // shortcut: a staging catch-up that changes how the PR's unchanged code behaves is not seen (Mason accepted, 2026-11-25).
-// A file whose git mode alone changes keeps its blob sha and is not seen. Accepted (Sol r2 LOW): only the executable
-// bit can change that way, which changes nothing the app does; a symlink's blob is its target path, so its sha changes.
+// shortcut: a file whose git mode alone changes keeps its blob sha and is not seen: the executable bit, or a file
+// turned into a symlink whose target path equals the file's old text. Accepted honest-mistake gap (Sol r2 LOW, Sol on the follow-ups).
 // Date-shaped (YYYYMMDDhhmmss, 2000-2099), never part of a decimal. Not \b: a stamp is followed by "_" in names.
 const STAMP_RE = /(?<!\d|\d\.)20\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:[01]\d|2[0-3])[0-5]\d[0-5]\d(?!\d|\.\d)/g;
 const unstamped = (text) => String(text ?? "").replace(STAMP_RE, "<stamp>");

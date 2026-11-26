@@ -127,13 +127,18 @@ try {
   seed(`INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST}', '[PROVER] Count Once Farm', true);
     INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD}', '${CUST}', '[PROVER] Count Once Field');`);
   for (let n = 0; n <= 9; n += 1) product(n);
-  for (const n of ['a', 'b', 'c', 'd', 'e', 'f']) product(n);
+  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21]) product(n);
   const wrapperAcl = WRAPPERS.map(acl);
 
   // BEFORE: the bug. Ticket 6 on an in-progress job, then the job's 10: 16 out.
   job(0, [[0, 10]]); ticket(0, 0, [[0, 6]]);
   file(T(0)); complete(J(0));
   balance(0, 16, 'BEFORE the fix, ticket 6 then its job 10 (the double count)');
+
+  // Halves posted BEFORE the migration, finished after it (Luna r1): a ticket filed on a job still open, and a job
+  // completed while its linked ticket is not yet filed.
+  job(20, [[20, 10]]); ticket(20, 20, [[20, 6]]); file(T(20));
+  job(21, [[21, 10]]); ticket(21, 21, [[21, 7]]); complete(J(21));
 
   // APPLY (case 11: over a database that already has an old linked pair).
   docker(['exec', '-i', NAME, 'sh', '-c', 'cat > /tmp/candidate.sql'], {
@@ -157,6 +162,15 @@ try {
   assert.deepEqual(WRAPPERS.map(acl), wrapperAcl, 'wrapper grants unchanged');
   assert.equal(scalar(`SELECT has_function_privilege('authenticated', '${SIG.rev}', 'EXECUTE')::text || '/' || has_function_privilege('anon', '${SIG.rev}', 'EXECUTE')::text;`), 'true/false');
   console.log('[COUNT-ONCE] GRANTS: the group helper is owner-only; wrapper and reversal grants unchanged');
+
+  // Straddling the migration: the earlier half carries no link and is still counted.
+  complete(J(20));
+  assert.equal(rows(20), '6/-/false/none 4/6/true/job');
+  balance(20, 10, 'straddle, ticket 6 filed before the migration, job 10 completed after');
+  file(T(21));
+  assert.equal(rows(21), '10/-/false/none 0/7/true/blend_ticket');
+  balance(21, 10, 'straddle, job 10 completed before the migration, ticket 7 filed after');
+  refused(USERS.admin, reverseSql(T(20)), /APPLICATION_RECORD_COUNTED_WITH_JOB/);
 
   // 1. Ticket 6 then job 10: job moves 4, already_counted 6, flagged.
   job(1, [[1, 10]]); ticket(1, 1, [[1, 6]]);

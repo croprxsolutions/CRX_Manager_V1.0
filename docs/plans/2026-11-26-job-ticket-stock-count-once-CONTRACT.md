@@ -23,7 +23,7 @@ Mechanism (stored facts, nothing re-derived):
 - For each line, in a fixed order (`sort_order`/`sequence_order`, then id): read the group's job claims `CJ`, ticket claims `CT` and amount taken `T` (rows already inserted earlier in the same posting are visible). With this line's claim `c`: job line moves `max(0, max(CJ + c, CT) − T)`; ticket line moves `max(0, max(CJ, CT + c) − T)`. Moved is capped at `c` (a line never takes more than it claims, even if an older group left a gap). `already_counted = c − moved`; its CHECK (> 0 or NULL) makes any arithmetic slip fail loudly instead of posting. An unlinked ticket moves its full claim as today.
 - Any line with `already_counted > 0` gets `requires_review = true` and a note ("N already counted by job X / blend ticket(s)"). The short-stock flag only counts lines that moved something.
 - Conversion, the ticket's unconvertible-unit refusal, the job's raw fallback and its flag, customer-supplied skip, holds, receipts and both legal records are unchanged. Ticket lines are always company stock (as today).
-- Existing rows: cannot be backfilled (write-once ledger), so rows posted before this migration have no link and are not in any group. Production has no jobs or application records (2026-11-26) and old jobs are deleted before go-live (Mason D12), so no real group straddles the cutover. The migration prints a NOTICE with the count of jobs that already have both a job record and a linked ticket record (staging test data), and does not fail on them.
+- Existing rows: cannot be backfilled (write-once ledger), so rows posted before this migration have no link. The group still counts them, found the way they always were: a job's rows by `job_id`, a ticket's rows by the application record named in their note (as `reverse_application_record` does). A job or ticket half posted before the migration and its other half after therefore still counts once (Luna r1 HIGH). The migration prints a NOTICE with the count of jobs whose both halves were posted before it (left as they are).
 
 Files: one migration (two columns + index, re-emitted job body, ticket body and reversal, pre/postflight pins), changelog ledger record, rollback script, real-schema prover, `src/types/supabase.ts` columns. No screen change.
 
@@ -52,6 +52,7 @@ Database only, one PR to `staging`. The deployed app calls the same RPCs with th
 9. A filed ticket cannot change job (existing header lock); an unfiled ticket moved from open job A (2) to open job B (10) then filed: 12 out.
 10. Reversal refused for a counted ticket; allowed for an unlinked one; reversed ticket leaves the group (job completed afterwards moves its full claim).
 11. Migration applies over a database that already has an unlinked old pair, printing the NOTICE; immutability guard untouched.
+11b. Straddles: a ticket filed before the migration and its job completed after (job moves 4 of 10); a job completed before and its ticket filed after (ticket moves 0 of 7).
 12. After every case, independently: warehouse change from its opening balance equals the expected total, and equals ledger history. Grants: the group helper is not executable by API roles; wrappers' grants unchanged.
 
 ## Challenge (Astra gpt-6.2-astra high, 2026-11-26, 39 findings) disposition
@@ -66,7 +67,7 @@ Database only, one PR to `staging`. The deployed app calls the same RPCs with th
 - Wrong job link discovered after completion: the filed ticket cannot be moved; the office corrects stock with an adjustment (existing route). A proper "fix the link" route is a follow-up.
 - A product whose inventory unit changes between the two postings compares claims in different units; rare, already flagged by both postings' review lines. Follow-up if units become editable on stocked products.
 - Two legal application records (job and ticket) still exist for the same spray; billing unchanged. Follow-up.
-- Rows posted before this migration have no link and stay outside the rule (write-once ledger; production has none).
+- Pairs whose both halves were posted before this migration stay as they are (write-once ledger; production has none).
 
 ## Challenge re-check (Astra, 12 findings) disposition
 - 4 (a line could move more than it claims): fixed, `LEAST(c, …)` cap in both bodies. Hard ticket delete is not reachable from the app (no DELETE policy on `blend_tickets`).
@@ -78,3 +79,6 @@ Database only, one PR to `staging`. The deployed app calls the same RPCs with th
 
 ## Open business decisions
 None left (Mason answered A on 2026-11-26).
+
+## Luna round 1 (2026-11-26)
+- HIGH: a half posted before the migration was invisible to the group, so its other half took the full amount. Fixed: the group also finds unlinked rows by `job_id` / note; prover straddle cases.

@@ -16,9 +16,10 @@
 -- now refuses a ticket record whose job already has its job record (crediting it back would leave the job short); it takes
 -- the application-record number lock first, the lock completion and filing already take before any stock row.
 --
--- Rows posted before this migration carry no link and are outside the rule (the ledger is write-once:
--- trg_guard_inventory_transactions_immutable refuses UPDATE, so they cannot be backfilled and the link has no foreign key).
--- Production had no jobs or application records on 2026-11-26.
+-- Rows posted before this migration carry no link (the ledger is write-once: trg_guard_inventory_transactions_immutable
+-- refuses UPDATE, so they cannot be backfilled and the link has no foreign key). The group still counts them, found the way
+-- they were always found: a job's rows by job_id, a ticket's rows by the application record named in their note (as
+-- reverse_application_record does). So a pair that straddles this migration also counts once.
 --
 -- idempotency-body-check: complete_job and create_application_record_from_blend_ticket wrappers (key check, fingerprint,
 --   receipt binding) are not re-emitted; only their private bodies change, after the key checks. reverse_application_record
@@ -63,7 +64,7 @@ BEGIN
      OR to_regprocedure('public._job_stock_group_20270310(uuid, uuid)') IS NOT NULL THEN
     RAISE EXCEPTION 'COUNT_ONCE_PREFLIGHT: already applied';
   END IF;
-  -- Old pairs (posted before this rule) are left as they are; say how many so staging data is visible.
+  -- Old pairs (both posted before this rule) are left as they are; say how many so staging data is visible.
   SELECT count(DISTINCT jr.source_id) INTO v_overlap
     FROM public.application_records jr
     JOIN public.blend_tickets bt ON bt.job_id = jr.source_id
@@ -84,6 +85,8 @@ CREATE INDEX idx_inv_tx_application_record ON public.inventory_transactions (app
   WHERE application_record_id IS NOT NULL;
 
 -- The job/ticket group for one job and one product: the job record's claims, the linked tickets' claims, and what they took.
+-- A row joins its record by application_record_id; a row posted before this migration (no link) joins by job_id for the
+-- job record, or by the record id in its note for a ticket record.
 CREATE FUNCTION public._job_stock_group_20270310(p_job_id uuid, p_product_id uuid,
   OUT job_claim numeric, OUT ticket_claim numeric, OUT taken numeric)
  LANGUAGE sql
@@ -95,9 +98,13 @@ AS $fn$
          COALESCE(sum(it.quantity), 0)
     FROM public.application_records ar
     JOIN public.inventory_transactions it
-      ON it.application_record_id = ar.id
-     AND it.product_id = p_product_id
+      ON it.product_id = p_product_id
      AND it.transaction_type = 'job_applied'
+     AND (it.application_record_id = ar.id
+          OR (it.application_record_id IS NULL AND ar.source_type = 'job' AND it.job_id = p_job_id)
+          OR (it.application_record_id IS NULL AND ar.source_type = 'blend_ticket'
+              AND it.notes LIKE 'Blend ticket application:%'
+              AND strpos(it.notes, '(application record ' || ar.id::text || ')') > 0))
    WHERE (ar.source_type = 'job' AND ar.source_id = p_job_id)
       OR (ar.source_type = 'blend_ticket'
           AND ar.source_id IN (SELECT bt.id FROM public.blend_tickets bt WHERE bt.job_id = p_job_id));

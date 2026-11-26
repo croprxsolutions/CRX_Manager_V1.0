@@ -400,9 +400,9 @@ toolbar.querySelector('#start-polygon')!.addEventListener('click', () => {
 pictureAButton.addEventListener('click', () => proof.switchPicture('A'));
 pictureBButton.addEventListener('click', () => proof.switchPicture('B'));
 livePicturesButton.addEventListener('click', () => {
-  if (!proof.ready || !livePicturesEnabled) return;
-  livePictures = !livePictures;
-  livePicturesButton.textContent = livePictures ? 'Use synthetic pictures' : 'Use live USDA and Mapbox';
+  if (!proof.ready || !livePicturesEnabled || livePictures) return;
+  livePictures = true;
+  livePicturesButton.hidden = true;
   pictureAButton.textContent = pictureName('A');
   pictureBButton.textContent = pictureName('B');
   proof.switchPicture(chosenPicture);

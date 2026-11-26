@@ -31,6 +31,7 @@ import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
 import ProductRateLockControl from '../components/products/ProductRateLockControl';
 import ProductSetupWorkbookModal from '../components/products/ProductSetupWorkbookModal';
+import BrandDocumentFixList from '../components/products/BrandDocumentFixList';
 import RateReviewWorkbookModal from '../components/products/RateReviewWorkbookModal';
 import { loadProductRateLock } from '../lib/productRateLock';
 import type { Product, ProductCategory, ProductRateLock, SalesSheetFormat } from '../types';
@@ -1456,6 +1457,7 @@ export default function Products() {
               >
                 Setup Workbook
               </Button>
+              <BrandDocumentFixList />
               <Button
                 variant="secondary"
                 icon={<FileSpreadsheet className="w-4 h-4" />}

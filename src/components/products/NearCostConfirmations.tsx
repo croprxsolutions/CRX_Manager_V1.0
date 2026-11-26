@@ -2,9 +2,10 @@ import { AlertTriangle } from 'lucide-react';
 import { formatExactCents } from '../../lib/money';
 import type { NearCostProduct } from '../../lib/nearCostPricing';
 
-/** "0.35" -> "35"; toFixed keeps float noise (0.29 * 100) out of the hint. */
-function wholePercent(text: string): string {
-  return String(Number((Number(text) * 100).toFixed(6)));
+/** "0.35" -> "35"; toFixed keeps float noise out and rejects rounded suggestions of 100 or more. */
+function wholePercent(text: string): string | null {
+  const percent = Number((Number(text) * 100).toFixed(6));
+  return Number.isFinite(percent) && percent < 100 ? String(percent) : null;
 }
 
 interface NearCostConfirmationsProps {
@@ -41,16 +42,23 @@ export default function NearCostConfirmations({ products, ticked, disabled, onTi
             <li key={product.product_id} className="rounded-lg border border-amber-200 bg-white p-3">
               <div id={`${inputId}-name`} className="text-sm font-semibold text-nav-dark">{product.product_name}</div>
               <ul id={`${inputId}-tiers`} className="mt-1 space-y-0.5 text-xs tabular-nums text-amber-900">
-                {product.tiers.map((tier) => (
-                  <li key={tier.tier}>
-                    Tier {tier.tier} {formatExactCents(tier.price_cents)} on a cost of {formatExactCents(tier.cost_cents)}
-                    {tier.fraction_margin_percent !== null && (
-                      <span className="font-semibold">
-                        {` (margin ${tier.fraction_margin_percent}%: did you mean ${wholePercent(tier.fraction_margin_percent)} for ${wholePercent(tier.fraction_margin_percent)}%?)`}
-                      </span>
-                    )}
-                  </li>
-                ))}
+                {product.tiers.map((tier) => {
+                  const suggestedPercent = tier.margin_driven && tier.fraction_margin_percent !== null
+                    ? wholePercent(tier.fraction_margin_percent)
+                    : null;
+                  return (
+                    <li key={tier.tier}>
+                      Tier {tier.tier} {formatExactCents(tier.price_cents)} on a cost of {formatExactCents(tier.cost_cents)}
+                      {tier.fraction_margin_percent !== null && (
+                        <span className="font-semibold">
+                          {` (margin ${tier.fraction_margin_percent}%`}
+                          {suggestedPercent !== null && `: did you mean ${suggestedPercent} for ${suggestedPercent}%?`}
+                          {')'}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
               <label htmlFor={inputId} className="mt-2 flex min-h-11 items-center gap-2 text-sm text-nav-dark">
                 <input

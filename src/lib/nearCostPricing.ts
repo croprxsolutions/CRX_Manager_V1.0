@@ -4,6 +4,7 @@ export interface NearCostTier {
   tier: 1 | 2 | 3;
   price_cents: bigint;
   cost_cents: bigint;
+  margin_driven: boolean;
   /** Set when the tier's margin is above 0% and under 1%: likely 0.35 typed for 35% (Mason Q2: warn, not block). */
   fraction_margin_percent: string | null;
 }
@@ -29,7 +30,7 @@ function nearCostTiers(effect: PricingEffect, cost: bigint): NearCostTier[] {
     const fraction = margin != null && margin > 0 && margin < 0.01;
     if (!fraction && !(price >= cost && price * 100n <= cost * 102n)) continue;
     tiers.push({
-      tier, price_cents: price, cost_cents: cost,
+      tier, price_cents: price, cost_cents: cost, margin_driven: effect.pricing_mode === 'margin_driven',
       fraction_margin_percent: fraction ? (effect[`tier${tier}_margin_percent`] ?? formatPricingMarginPercent(margin)) : null,
     });
   }

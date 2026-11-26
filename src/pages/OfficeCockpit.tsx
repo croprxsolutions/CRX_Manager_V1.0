@@ -418,13 +418,10 @@ async function loadDeliveredNotInvoiced(): Promise<{
       );
       for (const row of candidates) {
         if (billedOutsideCrx.has(row.id)) continue;
-        const short = remaindersRes.data?.get(row.id);
-        if (activeInvoices.some((invoiceRow) => activeInvoiceCoversDelivery(invoiceRow, row.id, row.order_id))) {
-          if (!short) continue;
-          actionable.push({ ...row, unbilled_label: unbilledRemainderLabel(short) });
-          continue;
-        }
-        actionable.push(row);
+        const covered = activeInvoices.some((invoiceRow) => activeInvoiceCoversDelivery(invoiceRow, row.id, row.order_id));
+        const short = covered ? remaindersRes.data?.get(row.id) : undefined;
+        if (covered && !short) continue;
+        actionable.push(short ? { ...row, unbilled_label: unbilledRemainderLabel(short) } : row);
       }
       if (actionable.length >= TILE_LIMIT) return { rows: actionable.slice(0, TILE_LIMIT), hitLimit: true, error: null };
     }

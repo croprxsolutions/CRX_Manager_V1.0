@@ -352,6 +352,15 @@ export default function DeliveryDetail() {
   // not see every invoice (invoices RLS), so their remainder could count billed units as unbilled.
   const shortBilled = isAdmin && hasActiveRelatedInvoice && billingRemainder !== null;
   const needsBilling = !hasActiveRelatedInvoice || shortBilled;
+  // Re-read after every invoice load (a Create Invoice reloads them), only where the note can show.
+  const remainderDeliveryId = isAdmin && invoicesLoaded && delivery?.status === 'completed' && hasActiveRelatedInvoice ? delivery.id : null;
+  useEffect(() => {
+    setBillingRemainder(null);
+    if (!remainderDeliveryId) return undefined;
+    let live = true;
+    void loadBillingRemainder(remainderDeliveryId).then((r) => { if (live) setBillingRemainder(r); });
+    return () => { live = false; };
+  }, [remainderDeliveryId, relatedInvoices]);
   // RPC is admin-only (finding #78's backfill twin); sales_reps bill jobs, not stray deliveries.
   // H5: also mirror the server's ORDER_NEEDS_SPLIT_BILLING refusal via the shared
   // predicate, so this surface and IntegrityCleanupPanel cannot drift apart.
@@ -530,15 +539,6 @@ export default function DeliveryDetail() {
             });
             setOrderItemContext(ctx);
           }
-          // Fail open: without it the page shows the invoices as before; Create Invoice still bills only the rest.
-          const remainderRes = del.status === 'completed'
-            ? await fetchDeliveryBillingRemainders([del.id])
-            : { data: null, error: null };
-          if (isStale()) return;
-          if (remainderRes.error) {
-            Sentry.captureException(remainderRes.error, { extra: { context: 'load_delivery_billing_remainder', deliveryId: del.id } });
-          }
-          setBillingRemainder(remainderRes.data?.get(del.id) ?? null);
           setParentOrder(orderRes.data as { id: string; order_number: string } | null);
           setRelatedInvoices(mergeRelatedInvoices(invRes.data, byDelivery));
           setInvoicesLoaded(true);
@@ -571,7 +571,6 @@ export default function DeliveryDetail() {
           // sibling deliveries or quote to carry over from a previously viewed delivery.
           setOrderNeedsSplitBilling(false);
           setBilledOutsideCrxReason(null);
-          setBillingRemainder(null);
           setParentOrder(null);
           setRelatedInvoices(mergeRelatedInvoices([], byDelivery));
           setInvoicesLoaded(true);
@@ -3207,6 +3206,13 @@ function toRelatedInvoice(inv: Record<string, unknown>): RelatedInvoice {
     deleted_at: inv.deleted_at as string | null,
     bill_to: (inv.customer as { farm_name?: string | null } | null)?.farm_name ?? null,
   };
+}
+
+/** A4: what an invoice leaves unbilled on this delivery. Fails open (null): the page then shows the invoices as before. */
+async function loadBillingRemainder(deliveryId: string): Promise<DeliveryBillingRemainder | null> {
+  const { data, error } = await fetchDeliveryBillingRemainders([deliveryId]);
+  if (error) Sentry.captureException(error, { extra: { context: 'load_delivery_billing_remainder', deliveryId } });
+  return data?.get(deliveryId) ?? null;
 }
 
 /**

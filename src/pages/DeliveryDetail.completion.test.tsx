@@ -490,6 +490,28 @@ describe('Invoices on this sale card', () => {
     expect(within(dialog).getByRole('button', { name: 'Create invoice' })).toBeInTheDocument();
   });
 
+  // A4: an invoice bills 6 of the 10 delivered; the card keeps the delivery unbilled and offers Bill the rest.
+  it('short-billed: an admin sees what is left to bill and Bill the rest… opens its confirm', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    tables.data.delivery_billing_remainders = [{ delivery_id: 'del-1', delivered_qty: 10, unbilled_qty: 4, unbilled_cents: 16000 }];
+    await renderPage();
+    await screen.findByText(paragraph('Not fully billed. 4 of 10 not billed ($160.00): the invoice bills fewer units than were delivered.'));
+    fireEvent.click(screen.getByRole('button', { name: 'Bill the rest…' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Bill the rest of this delivery?' });
+    expect(within(dialog).getByText('This makes a draft invoice for the units of delivery DEL-1 not billed yet: 4 of 10 not billed ($160.00).')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Bill the rest' })).toBeInTheDocument();
+  });
+
+  it('fully billed: no note and no button', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    tables.data.delivery_billing_remainders = [];
+    await renderPage();
+    await screen.findByRole('link', { name: /CS-2026-0005-1/ });
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('delivery_billing_remainders'));
+    expect(screen.queryByText(/Not fully billed/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Bill the rest|Create invoice/ })).not.toBeInTheDocument();
+  });
+
   // Review MED 1: an invoice linked by delivery_id on a delivery with no order was never found.
   it('finds an invoice linked by delivery_id on a delivery with no order (no false "No invoice yet")', async () => {
     tables.data.deliveries = [{ ...OPEN_DELIVERY, status: 'completed', order_id: null }];

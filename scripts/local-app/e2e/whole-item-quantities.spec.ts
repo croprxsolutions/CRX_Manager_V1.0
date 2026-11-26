@@ -52,6 +52,10 @@ test.afterAll(() => {
 
 test('Delivery: 0.5 on a whole-item (Ea) line is refused on screen and the load stays in progress', async ({ page }) => {
   test.setTimeout(120000);
+  await page.addLocatorHandler(
+    page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: /What's new/i }) }),
+    async (dialog) => { await dialog.getByRole('button', { name: 'Close' }).click(); },
+  );
   await page.goto('/login');
   await page.fill('#email', process.env.LOCAL_TEST_EMAIL!);
   await page.fill('#password', process.env.LOCAL_TEST_PASSWORD!);

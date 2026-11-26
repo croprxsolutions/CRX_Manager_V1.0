@@ -491,7 +491,10 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   ok(isTahaLaneSql("CREATE OR REPLACE FUNCTION public.check_period_open() AS $$ SELECT 1 $$;"), "month-end still is");
   // 2. #2267: a product-unit fix may convert that product's order and quote lines.
   eq(tahaLaneProblem({ files: [real("20270303180000_piksi_mg_to_grams")], now: NOW }), null, "#2267 (Piksi mg→grams) is not Taha's");
-  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.quote_items SET quantity = quantity * 16;")], now: NOW }), null, "a unit fix of quote lines is not his");
+  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.quote_items SET quantity = quantity * 16 WHERE product_id = 7;")], now: NOW }), null, "a unit fix of quote lines is not his");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.quote_items SET quantity = quantity * 16;")], now: NOW }), "an unscoped unit UPDATE of every quote line is his (Luna, PR 2 round 5)");
+  eq(isTextOnlyPatch("@@ -1 +1 @@\n-<div data-label=\"quotes\">\n+<div data-label=\"invoices\">"), false, "data-label is code, not a label (Luna, PR 2 round 5)");
+  eq(isTextOnlyPatch("@@ -1 +1 @@\n-<input aria-label=\"Quotes\" />\n+<input aria-label=\"Quote list\" />"), true, "aria-label is still a label");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.invoice_items SET quantity = quantity * 16;")], now: NOW }), "a unit fix that writes invoices still is");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "CREATE OR REPLACE FUNCTION public.complete_delivery() AS $$ SELECT 1 $$;")], now: NOW }), "a unit fix that rewrites delivery completion still is");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_fix_line_quantities.sql", "UPDATE public.order_items SET quantity = 1;")], now: NOW }), "order lines without a unit name still are");
@@ -501,7 +504,7 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "CREATE POLICY p ON public.quote_items USING (true);")], now: NOW }), "a unit fix adding a policy on quote lines is his");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "DELETE FROM public.order_items WHERE id = 1;")], now: NOW }), "a unit fix deleting order lines is his");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "ALTER TABLE public.order_items ADD COLUMN g int;")], now: NOW }), "a unit fix changing the order-lines table is his");
-  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "LOCK TABLE public.order_items, public.invoices; UPDATE public.order_items SET unit_size = 'g';")], now: NOW }), null,
+  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "LOCK TABLE public.order_items, public.invoices; UPDATE public.order_items SET unit_size = 'g' WHERE product_id = 7;")], now: NOW }), null,
     "its locks alone change nothing of his (#2267 locks invoices so nothing moves while it converts)");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "LOCK TABLE public.order_items; UPDATE public.invoice_items SET q = 1;")], now: NOW }), "an invoice write in a unit fix is still his");
   // Luna, PR 2 round 3: only the unit and quantity columns.

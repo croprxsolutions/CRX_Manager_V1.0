@@ -78,7 +78,7 @@ export const isTahaGateWiring = (name) => BLOCK_FILES_RE.test(String(name ?? "")
 // in place, so code moved from one spot to another is a change (Luna, PR 2 rounds 1–2).
 // A missing patch (GitHub leaves it out of big diffs) is not text-only.
 // shortcut: pattern matching, not a parser; an honest-mistake net like the SQL check, not a security boundary.
-const TEXT_TOKEN_RE = /(\b(?:label|title|subtitle|placeholder|description|aria-label|alt|tooltip|helperText|emptyText|emptyMessage|heading)\s*[:=]\s*\{?\s*)(?:'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\$])*`)|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?<=[\w"'}])>([^<>{}\n]*)(?=<\/)/g;
+const TEXT_TOKEN_RE = /((?<![\w$-])(?:label|title|subtitle|placeholder|description|aria-label|alt|tooltip|helperText|emptyText|emptyMessage|heading)\s*[:=]\s*\{?\s*)(?:'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\$])*`)|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?<=[\w"'}])>([^<>{}\n]*)(?=<\/)/g;
 const TOOL_COMMENT_RE = /@|#__|\b(?:eslint|prettier|istanbul|webpack|vite|jsx|c8|v8|ts-)/i;
 function codeOnly(lines) {
   const kept = [];
@@ -196,7 +196,8 @@ const maskStrings = (text) => text.replace(/'(?:[^']|'')*'/g, (s) => `'${" ".rep
 const withoutUnitFix = (text) => {
   const masked = maskStrings(text);
   const cuts = [...masked.matchAll(UNIT_FIX_LOCK_RE)].map((m) => [m.index, m.index + m[0].length]);
-  for (const m of masked.matchAll(UNIT_LINE_UPDATE_RE)) if (unitOnlySet(m[1])) cuts.push([m.index, m.index + m[0].length]);
+  // An unscoped UPDATE converts every line, not one product's (Luna, PR 2 round 5): it needs a WHERE.
+  for (const m of masked.matchAll(UNIT_LINE_UPDATE_RE)) if (unitOnlySet(m[1]) && /\bwhere\b/i.test(m[0])) cuts.push([m.index, m.index + m[0].length]);
   cuts.sort((a, b) => a[0] - b[0]);
   let out = "", at = 0;
   for (const [start, end] of cuts) { if (start >= at) out += text.slice(at, start); at = Math.max(at, end); }

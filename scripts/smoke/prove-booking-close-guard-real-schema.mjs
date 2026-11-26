@@ -150,6 +150,8 @@ ROLLBACK;`);
   assert.match(r.out, /PREFLIGHT_BOOKING_CLOSE_GUARD_ISOLATION/, 'an apply at REPEATABLE READ must be refused');
   r = run(`BEGIN;\nALTER TABLE public.jobs DISABLE TRIGGER jobs_live_on_open_booking;\n${candidate}\nROLLBACK;`);
   assert.match(r.out, /PREFLIGHT_BOOKING_CLOSE_GUARD_JOBS_TRIGGER/, 'a disabled jobs trigger must stop the apply');
+  r = run(`BEGIN;\nALTER TABLE public.quote_sections DISABLE TRIGGER quote_sections_live_job_stays;\n${candidate}\nROLLBACK;`);
+  assert.match(r.out, /PREFLIGHT_BOOKING_CLOSE_GUARD_SECTIONS_TRIGGER/, 'a disabled sections trigger must stop the apply');
   assert.equal(bodyMd5(), OLD_MD5);
   r = run(candidate, ['-1']);
   assert.equal(r.status, 0, `the candidate must apply:\n${r.out}`);
@@ -157,7 +159,7 @@ ROLLBACK;`);
   r = run(candidate, ['-1']);
   assert.match(r.out, /PREFLIGHT_BOOKING_CLOSE_GUARD_DRIFT/, 'a second apply must be refused');
   assert.equal(bodyMd5(), NEW_MD5);
-  console.log('[apply] autocommit, REPEATABLE READ and a disabled jobs trigger refused; postflight refused an applied booking with a live job; applied once; re-apply refused');
+  console.log('[apply] autocommit, REPEATABLE READ and a disabled jobs or sections trigger refused; postflight refused an applied booking with a live job; applied once; re-apply refused');
 
   // 3. AFTER.
   assert.match(probe(REP_A, closeApplied(Q_JOB, REP_A)),
@@ -180,6 +182,19 @@ ${claims(REP_A)}
 SET LOCAL ROLE authenticated;
 SELECT public.close_quote_as_applied('${Q_FREE}', '${REP_A}', 'bcg-legacy-${Date.now()}');
 ROLLBACK;`).out, /BOOKING_HAS_JOB: spray job PRV-BCG-LEGACY /, 'a section-only job blocks the close');
+  // Sol r3 HIGH: a section with a live job cannot move onto a booking already closed as applied (by quote_id job,
+  // and a legacy section-only job), so the closed booking never gains a live job that way.
+  assert.match(run(`BEGIN;
+UPDATE public.quotes SET status = 'closed_by_application' WHERE id = '${Q_FREE}';
+UPDATE public.quote_sections SET quote_id = '${Q_FREE}' WHERE id = '${S_JOB}';
+ROLLBACK;`).out, /BOOKING_HAS_JOB: spray job PRV-BCG-1 was made from this section, so the section cannot move to another booking\./);
+  assert.match(run(`BEGIN;
+ALTER TABLE public.jobs DISABLE TRIGGER jobs_live_on_open_booking;
+INSERT INTO public.jobs (job_number, customer_id, job_date, quote_section_id)
+  VALUES ('PRV-BCG-LEGACY2', '${CUSTOMER}', (now() AT TIME ZONE 'America/Chicago')::date + 7, '${S_FREE}');
+UPDATE public.quote_sections SET quote_id = '${Q_JOB}' WHERE id = '${S_FREE}';
+ROLLBACK;`).out, /BOOKING_HAS_JOB: spray job PRV-BCG-LEGACY2 was made from this section, so the section cannot move to another booking\./,
+    'a legacy section-only job keeps its section on its booking');
   // Luna r3: no auth.uid() is exempt from the owner rule, so anon must not reach either close.
   for (const fn of ['close_quote_as_applied', 'close_quote_as_short']) {
     assert.match(run(`BEGIN; SET LOCAL ROLE anon; SELECT public.${fn}('${Q_FREE}', '${REP_A}', 'bcg-anon-${fn}'); ROLLBACK;`).out,
@@ -225,6 +240,7 @@ ROLLBACK;`).out, /BOOKING_HAS_JOB: spray job PRV-BCG-LEGACY /, 'a section-only j
   const chains = ['smoke-booking-close-guard.sql', 'smoke-booking-guard-rep-and-delete.sql'];
   for (const chain of chains) assert.match(smoke(chain), PASS, `${chain} must pass after the candidate`);
   for (const chain of SAME) assert.equal(smoke(chain), before[chain], `${chain} must end exactly as before`);
+  console.log('[after] a section with a live job (booking-linked or legacy) cannot move to another booking');
   console.log('[after] close as applied refused with a live job (rep and admin); rep B refused closing short and as applied; owner/admin/no-job closes go through; anon and no-user calls refused; REPEATABLE READ and SERIALIZABLE refused');
   console.log(`[after] ${chains.join(', ')} pass; ${SAME.map((c) => `${c} ends exactly as before (${(/ERROR:\s+([A-Z_]+)/.exec(before[c]) ?? ['', 'pass'])[1]})`).join('; ')}`);
 

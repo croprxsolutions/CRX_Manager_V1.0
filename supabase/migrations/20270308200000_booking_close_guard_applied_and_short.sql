@@ -42,7 +42,7 @@
 --   scripts/smoke/booking-close-guard-reverse.sql. That reopens both gaps.
 --
 -- ORDERING: after 20270129150000. Not re-runnable (the preflight refuses a second apply). Apply at READ COMMITTED
---   (the preflight refuses another level). The preflight also pins the jobs trigger this rule relies on.
+--   (the preflight refuses another level). The preflight also pins the jobs and sections triggers this rule relies on.
 
 SET LOCAL lock_timeout = '5s';
 -- Hold off booking and job writes for the apply (a few hundred ms), so a close in flight under the old body
@@ -82,6 +82,20 @@ BEGIN
                             WHERE a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr))
                           = ARRAY['customer_id', 'deleted_at', 'quote_id', 'quote_section_id', 'status']) THEN
     RAISE EXCEPTION 'PREFLIGHT_BOOKING_CLOSE_GUARD_JOBS_TRIGGER: jobs_live_on_open_booking is not the reviewed 20270129150000 trigger (BEFORE INSERT OR UPDATE OF quote_id, quote_section_id, customer_id, status, deleted_at, enabled, no WHEN clause); re-read live first';
+  END IF;
+  -- Sol r3 HIGH: the job check reaches section-linked jobs through quote_sections.quote_id, so a section with a live
+  -- job must not move to another booking (a closed one included). quote_sections_live_job_stays refuses that move;
+  -- pinned as 20270127120000 made it.
+  IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._enforce_section_with_live_job_stays()'))
+       IS DISTINCT FROM 'c5618a112f035d08972359aa289ac0db'
+     OR NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = to_regprocedure('public._enforce_section_with_live_job_stays()')
+                      AND p.prosecdef AND p.proowner = 'postgres'::regrole)
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.quote_sections'::regclass AND t.tgname = 'quote_sections_live_job_stays'
+                      AND t.tgtype = 23 AND t.tgenabled = 'O' AND t.tgqual IS NULL
+                      AND t.tgfoid = 'public._enforce_section_with_live_job_stays()'::regprocedure
+                      AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a
+                            WHERE a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr)) = ARRAY['id', 'quote_id']) THEN
+    RAISE EXCEPTION 'PREFLIGHT_BOOKING_CLOSE_GUARD_SECTIONS_TRIGGER: quote_sections_live_job_stays is not the reviewed 20270127120000 trigger (BEFORE INSERT OR UPDATE OF id, quote_id, enabled, no WHEN clause); re-read live first';
   END IF;
 END
 $preflight$;

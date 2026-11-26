@@ -1,5 +1,5 @@
 import { toSentryError } from '../lib/sentryError';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Plus, Trash2 } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -41,6 +41,10 @@ import { computeSeason } from '../utils/season';
 // "permission denied for column"; admins reach the cost through the two
 // admin-gated RPCs below instead.
 const SERVICE_COLUMNS = 'id, name, vehicle_id, default_rate_per_acre_cents, is_active, sort_order';
+const EMPTY_FORM = {
+  name: '', vehicle_id: '', default_rate_per_acre: '', cost_per_acre: '', is_active: true, sort_order: '0',
+  bills_customer: true, outside_vendor_id: '',
+};
 
 // Money safety: all pricing stored as bigint cents, display divided by 100.
 // parseDollarsToCents now comes from the hardened canonical lib/parseCents
@@ -51,16 +55,14 @@ function formatCentsToDollars(cents: number): string {
 
 export default function ApplicationServiceDetail() {
   const { id } = useParams();
+  const routeGenerationRef = useRef(0);
   const navigate = useNavigate();
   const { toast } = useToast();
   const { role, profile } = useAuth();
   const isNew = id === 'new';
   const isAdmin = role === 'admin';
 
-  const [form, setForm] = useState({
-    name: '', vehicle_id: '', default_rate_per_acre: '', cost_per_acre: '', is_active: true, sort_order: '0',
-    bills_customer: true, outside_vendor_id: '',
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
 
   const [vehicles, setVehicles] = useState<Pick<Vehicle, 'id' | 'vehicle_name'>[]>([]);
   const [billingReadAvailable, setBillingReadAvailable] = useState(false);
@@ -166,11 +168,27 @@ export default function ApplicationServiceDetail() {
     setOverrides((data || []) as (CustomerApplicationRate & { _dirty?: boolean })[]);
   }, [id, isNew]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     let cancelled = false;
     const isCurrent = () => !cancelled;
+    routeGenerationRef.current += 1;
+    initialLoadDone.current = false;
+    loadedFormRef.current = null;
+    setLoading(!isNew && Boolean(id));
+    setSaving(false);
+    setIsDirty(false);
+    setForm({ ...EMPTY_FORM });
+    setCostKnown(isNew);
+    setOverrides([]);
+    setBillingReadAvailable(false);
+    setActiveVendors(null);
+    setExistingOutsideVendor(null);
+    setNewOverride({ customer_id: '', rate: '', season: computeSeason().toString(), notes: '' });
+    setNewOverrideCustomerName('');
+    setDeleteOverrideId(null);
     if (!isNew && id) { fetchService(isCurrent); fetchOverrides(isCurrent); }
     else {
+      setLoading(false);
       setTimeout(() => { if (isCurrent()) initialLoadDone.current = true; }, 0);
       setBillingReadAvailable(APPLICATION_SERVICE_BILLING_DB_READY);
       setActiveVendors(null);
@@ -180,7 +198,10 @@ export default function ApplicationServiceDetail() {
         });
       }
     }
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      routeGenerationRef.current += 1;
+    };
   }, [id, isNew, fetchService, fetchOverrides]);
 
   // ONE call writes the whole service, cost_per_acre_cents included, inside a
@@ -238,6 +259,8 @@ export default function ApplicationServiceDetail() {
   };
 
   const handleSave = async () => {
+    const saveRouteGeneration = routeGenerationRef.current;
+    const isCurrent = () => routeGenerationRef.current === saveRouteGeneration;
     if (!form.name.trim()) { toast('error', 'Service name is required'); return; }
     if (!isAdmin) { toast('error', 'Only admins can manage application services'); return; }
     // Both money fields are refused (null) on more than two decimals. Neither may
@@ -267,18 +290,25 @@ export default function ApplicationServiceDetail() {
         p_cost_per_acre_cents: costCents,
         p_service_id: isNew ? null : id!,
       });
+      // The audit entry is written even if the user has already left this service.
       if (isNew) {
         if (profile) logActivity({ event: 'app_service_created', description: `Application service "${form.name}" created`, performedBy: profile.id, entityType: 'application_service', entityId: saved.service_id });
-        toast('success', 'Application service created'); setIsDirty(false); skipUnsavedPromptRef.current = true; navigate(`/application-services/${saved.service_id}`);
       } else {
         if (profile) logActivity({ event: 'app_service_updated', description: `Application service "${form.name}" updated`, performedBy: profile.id, entityType: 'application_service', entityId: id! });
+      }
+      if (!isCurrent()) return;
+      if (isNew) {
+        toast('success', 'Application service created'); setIsDirty(false); skipUnsavedPromptRef.current = true; navigate(`/application-services/${saved.service_id}`);
+      } else {
         toast('success', costKnown ? 'Service saved' : 'Service saved — cost/acre left unchanged (it could not be loaded)'); setIsDirty(false);
       }
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'save_application_service' } });
+      if (!isCurrent()) return;
       toast('error', sanitizeError(err));
+    } finally {
+      if (isCurrent()) setSaving(false);
     }
-    setSaving(false);
   };
 
   const handleAddOverride = async () => {

@@ -713,6 +713,20 @@ describe('MonthEndClose', () => {
       expect(screen.getByText('Resolve all checklist items before closing the period.')).toBeInTheDocument();
     });
 
+    it('a month whose only money event is a returned check or an outside refund still needs the payments review (audit X2)', async () => {
+      mockRpc.mockImplementation((name: string) => (name === 'get_monthly_summary'
+        ? Promise.resolve({ data: { ...cleanSummary(), payments: { count: 0, total_cents: -170000 }, refunds: { count: 1, total_cents: 12000 }, returned_checks: { count: 1, total_cents: 170000 } }, error: null })
+        : Promise.resolve({ data: null, error: null })));
+      renderMonthEnd();
+      await switchToMonth(5);
+      expect(await screen.findByText(/1 returned check \(\$1,700\.00\) and 1 refund paid outside CRX \(\$120\.00\)/)).toBeInTheDocument();
+      expect(screen.queryByText('No payments this period')).not.toBeInTheDocument();
+      expect(screen.getByText('Resolve all checklist items before closing the period.')).toBeInTheDocument();
+      const tick = screen.getAllByRole('checkbox', { name: /I have reviewed this and confirm it is correct/ })[0];
+      fireEvent.click(tick);
+      await waitFor(() => expect(screen.queryByText('Resolve all checklist items before closing the period.')).not.toBeInTheDocument());
+    });
+
     it('shows prepay refunded and checks returned in the Period Summary', async () => {
       mockRpc.mockImplementation((name: string) => (name === 'get_monthly_summary'
         ? Promise.resolve({ data: { ...cleanSummary(), refunds: { count: 2, total_cents: 45000 }, returned_checks: { count: 1, total_cents: 40000 } }, error: null })

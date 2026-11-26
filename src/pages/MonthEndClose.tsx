@@ -67,6 +67,20 @@ function closeRefusal(err: unknown): 'changed' | 'review' | 'reload' | 'reopened
 }
 
 
+/** Money moved this month: payments received, returned checks or refunds paid outside CRX (M9, audit X2). */
+const moneyMoved = (m: MonthlySummary) => m.payments.count > 0 || (m.returned_checks?.count ?? 0) > 0 || (m.refunds?.count ?? 0) > 0;
+
+function paymentsReviewDetail(m: MonthlySummary): string {
+  if (!moneyMoved(m)) return 'No payments this period';
+  const parts = [
+    // The count includes checks entered on Prepay Credits, which Payment History's list does not show.
+    m.payments.count > 0 ? `${m.payments.count} payments totaling ${fmt(m.payments.total_cents)} (includes checks entered on Prepay Credits)` : '',
+    m.returned_checks?.count ? `${m.returned_checks.count} returned check${m.returned_checks.count === 1 ? '' : 's'} (${fmt(m.returned_checks.total_cents)})` : '',
+    m.refunds?.count ? `${m.refunds.count} refund${m.refunds.count === 1 ? '' : 's'} paid outside CRX (${fmt(m.refunds.total_cents)})` : '',
+  ].filter(Boolean);
+  return `${parts.join(' and ')} — verify and check box to confirm`;
+}
+
 // A9: period for an arbitrary (year, month) so month-end can view/close ANY month,
 // not just the current one. `month` is 0-indexed (JS Date convention).
 function getPeriodForMonth(year: number, month: number): { start: string; end: string; label: string } {
@@ -283,14 +297,12 @@ export default function MonthEndClose() {
         },
         {
           label: 'Payments reconciled',
-          // M1: require explicit confirmation when payments exist (not trivially satisfied)
-          done: summary.payments.count === 0 || reviewedPayments,
-          detail: summary.payments.count === 0
-            ? 'No payments this period'
-            // The count includes checks entered on Prepay Credits, which Payment History's list does not show.
-            : `${summary.payments.count} payments totaling ${fmt(summary.payments.total_cents)} (includes checks entered on Prepay Credits) — verify and check box to confirm`,
-          reviewKey: summary.payments.count > 0 ? 'payments' : undefined,
-          links: summary.payments.count > 0 ? links.payments : undefined,
+          // M1: require explicit confirmation when money moved (not trivially satisfied). M9 (audit X2): a returned
+          // check or a refund paid outside CRX is money moved too, even in a month with no payment received.
+          done: !moneyMoved(summary) || reviewedPayments,
+          detail: paymentsReviewDetail(summary),
+          reviewKey: moneyMoved(summary) ? 'payments' : undefined,
+          links: moneyMoved(summary) ? links.payments : undefined,
         },
         {
           label: 'Deliveries completed',

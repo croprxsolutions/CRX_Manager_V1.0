@@ -354,6 +354,9 @@ eq(tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: f("src/page
   ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: B, files: wiringFiles, dirs, now: NOW + 180e3, tellTaha: () => true })), "a later push voids it");
   ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: B, files: f(".claude/hooks/migration-landing-gate-lib.mjs"), dirs, now: NOW + 180e3, tellTaha: () => true })),
     "the migration landing gate counts as the block's own file");
+  for (const wire of [".claude/hooks/migration-apply-lib.mjs", ".claude/hooks/migration-apply-guard.mjs", "scripts/apply-migration-file.mjs"]) {
+    ok(isTahaLanePath(wire), `${wire}, which calls the live-apply gate, counts too (Luna, round 2)`);
+  }
   ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: B, files: null, dirs, now: NOW + 180e3, tellTaha: () => true })), "an unreadable list gets the one-head rule");
   eq(tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha: B, files: lane, dirs, now: NOW + 3600e3, tellTaha: () => true }), null, "an ordinary lane PR still carries the override over pushes");
 }

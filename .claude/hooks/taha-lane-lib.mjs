@@ -69,7 +69,7 @@ const LANE_FILE_PREFIXES = [
 const STRONG_LANE_WORDS = new Set(["quote", "quotes", "hold", "holds", "prepay", "prepayment", "prepayments", "booking", "bookings", "booked"]);
 
 // The block's own wiring: a PR that edits or unhooks it needs Mason's code too (Taha's review of #2303).
-const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router|sol-risk-lib|migration-landing-gate-lib)\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
+const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router|sol-risk-lib|migration-landing-gate-lib|migration-apply-lib|migration-apply-guard)\.mjs|scripts\/apply-migration-file\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
 
 /** True when this changed file is app or database code in Taha's lane (and not field billing), or the block itself. */
 export function isTahaLanePath(name) {
@@ -576,11 +576,11 @@ export function findTahaUnavailableOverride({ dirs, pullRequest, headSha, now = 
   return typeof data?.tahaUnavailable === "string" && data.tahaUnavailable.trim() ? data : null;
 }
 
-/** Records on the override that Taha was told (`field`: tahaToldAt for a merge, tahaToldApplyAt for a live apply). */
-export function markTahaTold({ dirs, override, field = "tahaToldAt" }) {
+/** Records on the override that Taha was told (tahaToldAt for a merge; tahaToldApplyFor, the migrations, for a live apply). */
+export function markTahaTold({ dirs, override, field = "tahaToldAt", value = new Date().toISOString() }) {
   for (const dir of dirs || []) {
     const file = path.join(dir, overrideName(override.pullRequest));
-    try { if (existsSync(file)) writeFileSync(file, `${JSON.stringify({ ...override, [field]: new Date().toISOString() }, null, 2)}\n`, "utf8"); } catch { /* the next try posts again */ }
+    try { if (existsSync(file)) writeFileSync(file, `${JSON.stringify({ ...override, [field]: value }, null, 2)}\n`, "utf8"); } catch { /* the next try posts again */ }
   }
 }
 

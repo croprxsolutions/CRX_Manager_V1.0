@@ -289,7 +289,9 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
     return refuse(`${number}: ${hold || ready}` + (code ? ` Or, only if Mason says Taha is unavailable and he will merge it himself, ask him to send as a message of its own: taha override #${pr.number} ${code} unavailable: <why Taha can't>` : ""));
   }
   // The override is what lets this apply through: Taha is told on the PR once every other check has passed (below).
-  const tellTahaOfOverride = Boolean(hold || ready) && !override.tahaToldApplyAt;
+  // Once per migration (Luna, PR 1 round 2): a head with two migrations tells him about each.
+  const toldFor = Array.isArray(override?.tahaToldApplyFor) ? override.tahaToldApplyFor : [];
+  const tellTahaOfOverride = Boolean(hold || ready) && !toldFor.includes(migName);
   if (pullRequestReviewBlocked(pr)) return refuse(`${number} has an unresolved CHANGES_REQUESTED review.`);
   if (!pullRequestChecksGreen(pr)) {
     return refuse(`${number} is not merge-ready: mergeStateStatus must be CLEAN and the newest run of every check green.`);
@@ -475,7 +477,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
     let posted = false;
     try { posted = /^\d+$/.test(String(gh(["api", "-X", "POST", `repos/{owner}/{repo}/issues/${pr.number}/comments`, "-f", `body=${body}`, "--jq", ".id"])).trim()); } catch (error) { if (OUT(error)) throw error; }
     if (!posted) return refuse(`${number}: Mason's override is valid, but the PR comment telling Taha could not be posted, so the apply is refused. Retry.`);
-    markTahaTold({ dirs: stateDirs, override, field: "tahaToldApplyAt" });
+    markTahaTold({ dirs: stateDirs, override, field: "tahaToldApplyFor", value: [...toldFor, migName] });
   }
   return { ok: true, pullRequest: pr.number, head, ...(skip ? { coderabbitSkippedBy: skip } : {}) };
 }

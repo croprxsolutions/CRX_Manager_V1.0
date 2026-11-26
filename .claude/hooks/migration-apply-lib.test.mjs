@@ -1904,7 +1904,9 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       ok(posts.length === 1 && posts[0].includes("repos/{owner}/{repo}/issues/900/comments")
         && posts[0].some((a) => a.startsWith("body=@TahaKhanAbdalli") && a.includes(HEAD_SHA) && a.includes("out sick today")), "and tags Taha on the PR, naming the head and the reason");
       ok(gate({ pr: { headRefName: "release/next", comments: [] }, posts }).ok === true, "and on the release");
-      ok(posts.length === 1, "Taha is told once per override, not on every retry");
+      ok(posts.length === 1, "Taha is told once per migration, not on every retry");
+      ok(gate({ pr: { comments: [] }, migName: "20260101000001_second", posts }).ok === true, "a second migration on the same head applies");
+      ok(posts.length === 2 && posts[1].some((a) => a.includes("20260101000001_second")), "is told to Taha too, by name (Luna, round 2)");
       const quiet = [];
       ok(gate({ posts: quiet }).ok === true && quiet.length === 0, "when Taha's own go-ahead lets it through, no override comment");
       ok(gate({ pr: { comments: [] }, git: { "rev-parse HEAD": `${"e".repeat(40)}\n` } }).ok === false, "but never the other gates");

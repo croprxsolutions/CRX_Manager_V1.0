@@ -428,7 +428,7 @@ Live postflight: catalog 604 Products → `no_return`=21, `returnable`=2, `unkno
 | team_note_attachments | All authenticated | Own uploaded_by | - (no UPDATE policy) | Own uploaded_by / Admin |
 | team_note_comments | All authenticated | Own created_by | Own created_by / Admin | Own created_by / Admin |
 | activity_feed | All authenticated | Own performed_by | - | - |
-| notifications | Own user_id | Admin / Sales Rep / own user_id | Own user_id | Admin |
+| notifications | Own user_id | Admin / Sales Rep / own user_id. Receiving damage notices use the receipt workflow. | Own user_id, `is_read` only | Admin |
 | app_settings | All authenticated | Admin | Admin | - |
 | blend_tickets | Admin / Sales Rep | - (no INSERT policy) | Admin / Sales Rep | - |
 | ingredient_map | All authenticated | Admin | Admin | Admin |

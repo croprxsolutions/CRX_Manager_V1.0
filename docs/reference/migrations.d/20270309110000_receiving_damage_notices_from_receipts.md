@@ -4,4 +4,6 @@ The current purchase-order and Quick Receive callers keep their existing functio
 
 The local walkthrough confirmed that both screens send notices from saved receipts. The local database proof exercised a multi-order batch, both legacy references, role refusals, a send failure, and reversal before retry. The Quick Receive fix also works with the previous database version.
 
+The repository stamp allocator placed this migration after the highest stamp already in the queue. The preflight refuses to run if another migration changes the notice function first.
+
 Roll back in a new migration by restoring the previous function and policies and the prior notification update grant.

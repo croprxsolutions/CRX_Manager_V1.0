@@ -18,7 +18,12 @@ function installProbe(config) {
     const payload = await response.json().catch(() => null);
     const details = Array.isArray(payload?.error?.details) ? payload.error.details : [];
     const candidates = [payload?.error?.status, ...details.map((detail) => detail?.reason)];
-    return candidates.filter((value) => typeof value === 'string' && /^[A-Z_]{3,64}$/.test(value));
+    const legacy = Array.isArray(payload?.error?.errors) ? payload.error.errors : [];
+    const safeLegacyReasons = ['accessNotConfigured', 'dailyLimitExceeded', 'forbidden', 'ipRefererBlocked', 'keyInvalid', 'rateLimitExceeded'];
+    return [...new Set([
+      ...candidates.filter((value) => typeof value === 'string' && /^[A-Z_]{3,64}$/.test(value)),
+      ...legacy.map((detail) => detail?.reason).filter((value) => safeLegacyReasons.includes(value)),
+    ])];
   }
 
   async function dimensions(response) {
@@ -27,6 +32,21 @@ function installProbe(config) {
     const result = { width: image.width, height: image.height, bytes: blob.size };
     image.close();
     return result;
+  }
+
+  async function imageOnlyDimensions(url) {
+    const image = new Image();
+    const signal = AbortSignal.timeout(12000);
+    const cancel = () => image.removeAttribute('src');
+    signal.addEventListener('abort', cancel, { once: true });
+    try {
+      image.src = url.toString();
+      await image.decode();
+      return { width: image.naturalWidth, height: image.naturalHeight };
+    } finally {
+      signal.removeEventListener('abort', cancel);
+      cancel();
+    }
   }
 
   async function checkTiles(result) {
@@ -65,8 +85,19 @@ function installProbe(config) {
     }
     result.step = 'fetch Static Maps response';
     result.imageRequests = 1;
-    const response = await providerFetch(url);
+    let response;
+    try {
+      response = await providerFetch(url);
+    } catch (error) {
+      if (error?.name !== 'TypeError') throw error;
+      result.browserReadable = false;
+      result.fetchErrorType = 'TypeError';
+      result.step = 'load Static Maps as an image';
+      result.imageRequests = 2;
+      return { imageOnly: await imageOnlyDimensions(url) };
+    }
     result.status = response.status;
+    result.browserReadable = true;
     result.contentType = response.headers.get('content-type');
     if (!response.ok || !result.contentType?.startsWith('image/')) return {};
     result.step = 'decode Static Maps image';
@@ -128,6 +159,7 @@ export default function handler(request, response) {
     "default-src 'none'",
     "script-src 'nonce-" + nonce + "'",
     'connect-src https://tile.googleapis.com https://maps.googleapis.com',
+    'img-src https://maps.googleapis.com',
     "frame-ancestors 'none'",
     "base-uri 'none'",
     "form-action 'none'",

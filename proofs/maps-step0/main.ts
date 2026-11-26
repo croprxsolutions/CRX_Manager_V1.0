@@ -163,6 +163,9 @@ let chosenPicture: Picture = 'A';
 let showingPicture: Picture | undefined = 'A';
 let pictureAttempt = 0;
 let liveAttemptWithImage = 0;
+let liveRequestsPending = 0;
+let liveBatchHasImage = false;
+let liveBatchHasError = false;
 let creditsPending = false;
 let outagePicture: Picture | undefined;
 let outageAttempt = 0;
@@ -190,6 +193,7 @@ function updateCredits(picture: Picture | undefined): void {
 function setPictureTiles(picture: Picture | `${Picture}-outage`): void {
   const source = map.getSource(PICTURE_SOURCE_ID) as RasterTileSource;
   pictureAttempt += 1;
+  liveRequestsPending = 0;
   if (picture === 'A' || picture === 'B') {
     showingPicture = picture;
     creditsPending = livePictures;
@@ -223,6 +227,12 @@ if (livePicturesEnabled) {
     const picture = tile.hostname === 'a' ? 'A' : 'B';
     const [, attempt, zoom, column, row] = tile.pathname.split('/');
     const stillCurrent = () => !controller.signal.aborted && Number(attempt) === pictureAttempt;
+    if (!stillCurrent()) throw new DOMException('Tile belongs to an earlier picture', 'AbortError');
+    if (liveRequestsPending === 0) {
+      liveBatchHasImage = false;
+      liveBatchHasError = false;
+    }
+    liveRequestsPending += 1;
     const providerUrl = picture === 'A'
       ? `https://${USDA_HOST}/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${zoom}/${row}/${column}`
       : `https://${MAPBOX_HOST}/styles/v1/mapbox/satellite-streets-v12/tiles/256/${zoom}/${column}/${row}?access_token=${encodeURIComponent(mapboxToken ?? '')}`;
@@ -231,7 +241,6 @@ if (livePicturesEnabled) {
     controller.signal.addEventListener('abort', cancelTile, { once: true });
     const timeout = window.setTimeout(cancelTile, 8000);
     try {
-      if (!stillCurrent()) throw new Error('Tile belongs to an earlier picture');
       const response = await fetch(providerUrl, { signal: tileRequest.signal });
       if (!response.ok || !response.headers.get('Content-Type')?.startsWith('image/')) {
         throw new Error('Picture provider returned no image');
@@ -239,19 +248,24 @@ if (livePicturesEnabled) {
       const data = await response.arrayBuffer();
       if (!stillCurrent()) throw new Error('Tile belongs to an earlier picture');
       liveAttemptWithImage = pictureAttempt;
+      liveBatchHasImage = true;
       return {
         data,
         cacheControl: response.headers.get('Cache-Control') ?? undefined,
         expires: response.headers.get('Expires') ?? undefined,
       };
     } catch {
-      if (stillCurrent()) recoverPicture(picture);
+      if (stillCurrent()) liveBatchHasError = true;
       const error = new Error('Live picture tile unavailable');
       error.name = 'ProofPictureTileUnavailable';
       throw error;
     } finally {
       window.clearTimeout(timeout);
       controller.signal.removeEventListener('abort', cancelTile);
+      if (Number(attempt) === pictureAttempt) {
+        liveRequestsPending -= 1;
+        if (liveRequestsPending === 0 && liveBatchHasError && !liveBatchHasImage) recoverPicture(picture);
+      }
     }
   });
   map.on('sourcedata', (event) => {

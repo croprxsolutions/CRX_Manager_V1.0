@@ -19,7 +19,7 @@
  * rather than a stub of it.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { act, render, screen, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
@@ -37,6 +37,7 @@ const SERVICE_ROW = {
 };
 
 const H = vi.hoisted(() => ({
+  from: vi.fn(),
   rpc: vi.fn(),
   role: { current: 'admin' as string | null },
   toast: vi.fn(),
@@ -47,20 +48,16 @@ const H = vi.hoisted(() => ({
 // Chainable stub: .from().select().order() awaits to the service list.
 vi.mock('../lib/db', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  const rows = [SERVICE_ROW];
-  const builder: Record<string, unknown> = {};
-  for (const m of ['select', 'order', 'eq', 'in']) builder[m] = () => builder;
-  builder.then = (resolve: (v: unknown) => unknown) => resolve({ data: rows, error: null });
   return {
     ...actual, // keeps the REAL assertRpcResult — its throw is what case 2 tests
-    supabase: { from: () => builder, rpc: H.rpc },
-    supabaseUntyped: { from: () => builder, rpc: H.rpc },
+    supabase: { from: H.from, rpc: H.rpc },
+    supabaseUntyped: { from: H.from, rpc: H.rpc },
   };
 });
 
 vi.mock('../lib/applicationServiceBilling', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, readApplicationServiceBilling: H.billingRead };
+  return { ...actual, readApplicationServiceBillingIfReady: H.billingRead };
 });
 
 vi.mock('../contexts/AuthContext', () => ({
@@ -85,10 +82,19 @@ async function renderPage() {
 }
 
 beforeEach(() => {
+  H.from.mockReset();
+  H.from.mockImplementation(() => {
+    const builder: Record<string, unknown> = {};
+    for (const m of ['select', 'order', 'eq', 'in']) builder[m] = () => builder;
+    builder.then = (resolve: (v: unknown) => unknown) => resolve({ data: [SERVICE_ROW], error: null });
+    return builder;
+  });
   H.rpc.mockReset();
   H.toast.mockReset();
   H.captureException.mockReset();
   H.role.current = 'admin';
+  H.billingRead.mockReset();
+  H.billingRead.mockResolvedValue(null);
 });
 afterEach(cleanup);
 
@@ -105,6 +111,46 @@ describe('ApplicationServices cost gating', () => {
     expect(H.captureException).not.toHaveBeenCalled();
     // …and the permanently-blank Cost/Acre column is not advertised to them.
     expect(screen.queryByText('Cost/Acre')).toBeNull();
+  });
+
+  it('keeps the newest rows when an older overlapping list request resolves last', async () => {
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((complete) => { resolve = complete; });
+      return { promise, resolve };
+    }
+
+    const olderRequest = deferred<{ data: typeof SERVICE_ROW[]; error: null }>();
+    const newerRequest = deferred<{ data: typeof SERVICE_ROW[]; error: null }>();
+    const requests = [olderRequest, newerRequest];
+    let requestIndex = 0;
+    H.from.mockImplementation(() => {
+      const builder: Record<string, unknown> = {};
+      for (const m of ['select', 'order', 'eq', 'in']) builder[m] = () => builder;
+      builder.then = (resolve: (v: unknown) => unknown) => requests[requestIndex++].promise.then(resolve);
+      return builder;
+    });
+
+    const { default: ApplicationServices } = await import('./ApplicationServices');
+    const view = render(<ApplicationServices />, { wrapper });
+    await waitFor(() => expect(requestIndex).toBe(1));
+
+    H.role.current = 'driver';
+    view.rerender(<ApplicationServices />);
+    await waitFor(() => expect(requestIndex).toBe(2));
+
+    const newerRow = { ...SERVICE_ROW, id: 'svc-new', name: 'Newer Service' };
+    await act(async () => {
+      newerRequest.resolve({ data: [newerRow], error: null });
+    });
+    expect(await screen.findByText('Newer Service')).toBeTruthy();
+
+    const olderRow = { ...SERVICE_ROW, id: 'svc-old', name: 'Older Service' };
+    await act(async () => {
+      olderRequest.resolve({ data: [olderRow], error: null });
+    });
+    expect(screen.getByText('Newer Service')).toBeTruthy();
+    expect(screen.queryByText('Older Service')).toBeNull();
   });
 
   it('calls the cost RPC for an admin and merges the cents into the table', async () => {
@@ -139,6 +185,6 @@ describe('ApplicationServices cost gating', () => {
     expect(screen.getByText('Outside Company')).toBeTruthy();
     expect(screen.getAllByText('Not available yet')).toHaveLength(2);
     expect(H.toast).not.toHaveBeenCalled();
-    expect(H.billingRead).not.toHaveBeenCalled();
+    expect(H.billingRead).toHaveBeenCalledWith(['svc-1'], false);
   });
 });

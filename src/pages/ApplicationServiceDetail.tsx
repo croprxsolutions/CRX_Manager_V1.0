@@ -214,6 +214,7 @@ export default function ApplicationServiceDetail() {
   // Migration 20260729035923 collapsed both writes into
   // admin_save_application_service so they land together or not at all.
   const saveService = async (args: ApplicationServiceSaveArgs) => {
+    const serviceScope = id ?? 'new';
     const attempt = async () => {
       const billing = billingControlsAvailable
         ? {
@@ -222,7 +223,7 @@ export default function ApplicationServiceDetail() {
           clearOutsideVendor: form.outside_vendor_id === '' && Boolean(loadedFormRef.current?.outside_vendor_id),
         }
         : null;
-      return saveApplicationService(args, billing, saveIdem.getKey());
+      return saveApplicationService(args, billing, saveIdem.getKeyFor(serviceScope));
     };
     let result: { success: boolean; service_id: string; created: boolean };
     try {
@@ -251,10 +252,10 @@ export default function ApplicationServiceDetail() {
       // already been spent on some other operation, which cannot happen for a
       // freshly mounted new-service form — so surface it rather than paper over it.
       if (args.p_service_id === null) throw err;
-      saveIdem.resetKey();
+      saveIdem.resetKeyFor(serviceScope);
       result = await attempt();
     }
-    saveIdem.resetKey();
+    saveIdem.resetKeyFor(serviceScope);
     return result;
   };
 

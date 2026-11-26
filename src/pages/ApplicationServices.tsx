@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Wrench, Download, FileText, Trash2 } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -53,17 +53,21 @@ export default function ApplicationServices() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const fetchRequestRef = useRef(0);
 
   const isAdmin = role === 'admin';
   const canBulkAction = isAdmin;
 
   const fetchServices = useCallback(async () => {
+    const requestId = ++fetchRequestRef.current;
+    const isLatestRequest = () => fetchRequestRef.current === requestId;
     setLoading(true);
     const { data, error } = await supabase
       .from('application_services')
       .select(`${SERVICE_COLUMNS}, vehicle:vehicles(vehicle_name)`)
       .order('sort_order');
 
+    if (!isLatestRequest()) return;
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_application_services' } });
       toast('error', 'Failed to load application services');
@@ -98,6 +102,7 @@ export default function ApplicationServices() {
       // No p_service_id -> the RPC's DEFAULT NULL, meaning "every service".
       const { data: costRows, error: costError } = await supabase
         .rpc('admin_get_application_service_costs', {});
+      if (!isLatestRequest()) return;
       try {
         if (costError) throw costError;
         for (const row of assertRpcResult<{ service_id: string; cost_per_acre_cents: unknown }[]>(
@@ -114,6 +119,7 @@ export default function ApplicationServices() {
     const billingRead = await readApplicationServiceBillingIfReady(
       (data || []).map((service) => service.id), APPLICATION_SERVICE_BILLING_DB_READY,
     );
+    if (!isLatestRequest()) return;
     setServices(((data || []) as unknown as ApplicationServiceWithCost[]).map((s) => {
       const billing = billingRead?.byServiceId.get(s.id);
       return {

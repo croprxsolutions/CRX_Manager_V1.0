@@ -64,7 +64,10 @@ vi.mock('../hooks/useUnsavedChanges', () => ({
   useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
 }));
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'retry-key-1', resetKey: vi.fn() }),
+  useIdempotencyKey: () => ({
+    getKeyFor: (scope: string) => `retry-key-${scope}`,
+    resetKeyFor: vi.fn(),
+  }),
 }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../components/customers/CustomerSearchPicker', () => ({
@@ -229,6 +232,7 @@ describe('ApplicationServiceDetail route changes', () => {
       ['service-b', deferred<{ data: Array<{ id: string; customer: { farm_name: string }; rate_per_acre_cents: number; season: number }>; error: null }>()],
     ]);
     const pendingSave = deferred<{ success: true; service_id: string; created: false }>();
+    const pendingSaveB = deferred<{ success: true; service_id: string; created: false }>();
     mocks.from.mockImplementation((table: string) => routeOverrides(table, serviceReads, overrideReads));
     mocks.loadBilling.mockResolvedValue({
       available: true,
@@ -243,7 +247,7 @@ describe('ApplicationServiceDetail route changes', () => {
       }
       return Promise.resolve({ data: { success: true, service_id: args?.p_service_id, created: false }, error: null });
     });
-    mocks.save.mockReturnValueOnce(pendingSave.promise);
+    mocks.save.mockReturnValueOnce(pendingSave.promise).mockReturnValueOnce(pendingSaveB.promise);
 
     const { default: ApplicationServiceDetail } = await import('./ApplicationServiceDetail');
     renderDetail(<ApplicationServiceDetail />);
@@ -261,12 +265,22 @@ describe('ApplicationServiceDetail route changes', () => {
       overrideReads.get('service-b')?.resolve({ data: [], error: null });
     });
     expect(await screen.findByLabelText(/Service Name/)).toHaveValue('Service B');
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(2));
+    const serviceAKey = mocks.save.mock.calls[0][2];
+    const serviceBKey = mocks.save.mock.calls[1][2];
+    expect(serviceBKey).not.toBe(serviceAKey);
+
+    await act(async () => {
+      pendingSaveB.resolve({ success: true, service_id: 'service-b', created: false });
+    });
+    const successToastCount = mocks.toast.mock.calls.filter(([type]) => type === 'success').length;
 
     await act(async () => {
       pendingSave.resolve({ success: true, service_id: 'service-a', created: false });
     });
     expect(screen.getByLabelText(/Service Name/)).toHaveValue('Service B');
-    expect(mocks.toast).not.toHaveBeenCalledWith('success', 'Service saved');
+    expect(mocks.toast.mock.calls.filter(([type]) => type === 'success')).toHaveLength(successToastCount);
   });
 
   it('ignores late service and override reads and saves the current service values', async () => {
@@ -340,6 +354,6 @@ describe('ApplicationServiceDetail route changes', () => {
       billsCustomer: false,
       outsideVendorId: 'vendor-b',
       clearOutsideVendor: false,
-    }, 'retry-key-1'));
+    }, 'retry-key-service-b'));
   });
 });

@@ -48,7 +48,7 @@ vi.mock('../hooks/useUnsavedChanges', () => ({
   useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
 }));
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'retry-key-1', resetKey: vi.fn() }),
+  useIdempotencyKey: () => ({ getKeyFor: () => 'retry-key-1', resetKeyFor: vi.fn() }),
 }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../components/customers/CustomerSearchPicker', () => ({

@@ -801,7 +801,7 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
       return buildChain({ data: [], error: null });
     });
     mockRpc.mockImplementation((name: string) => name === 'create_application_record_from_blend_ticket'
-      ? Promise.resolve({ data: { success: true }, error: null })
+      ? Promise.resolve({ data: ['app-record-new'], error: null })
       : Promise.resolve({ data: null, error: null }));
 
     renderTicket();
@@ -817,6 +817,8 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     });
     fireEvent.change(fieldSelect, { target: { value: '' } });
     expect(screen.queryByRole('button', { name: 'Save Fields' })).not.toBeInTheDocument();
+    // The new record's id comes back as uuid[], so Undo Filing is offered without a reload.
+    expect(screen.getByRole('button', { name: 'Undo Filing' })).toBeInTheDocument();
   });
 
   it('keeps application fields editable for a linked-only ticket with no downstream record', async () => {

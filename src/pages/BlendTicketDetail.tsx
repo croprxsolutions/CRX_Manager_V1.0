@@ -1024,7 +1024,8 @@ export function BlendTicketDetail() {
       // downstream lock immediately and do not allow a newly dirty field draft
       // that the database trigger would reject.
       setHasApplicationRecord(true);
-      const createdRecordId = (appRecData as { application_record_id?: unknown } | null)?.application_record_id;
+      // The RPC returns the new record ids (uuid[]); a ticket files one record.
+      const createdRecordId = Array.isArray(appRecData) ? appRecData[0] : null;
       setApplicationRecordId(typeof createdRecordId === 'string' ? createdRecordId : null);
       logActivity({ event: 'application_record_created', description: `Application record created from blend ticket ${ticket.ticket_number}`, performedBy: profile.id, entityType: 'blend_ticket', entityId: ticket.id, customerId: ticket.customer_id || undefined });
       toast('success', 'Application record created successfully');
@@ -1060,7 +1061,7 @@ export function BlendTicketDetail() {
       undoFilingIdem.resetKey();
       const result = data as { kept_on_job_lines?: number; over_taken_lines?: number } | null;
       const review = (result?.kept_on_job_lines ?? 0) + (result?.over_taken_lines ?? 0) > 0;
-      logActivity({ event: 'application_record_reversed', description: `Application record filing undone for blend ticket ${ticket.ticket_number}`, performedBy: profile.id, entityType: 'blend_ticket', entityId: ticket.id, customerId: ticket.customer_id || undefined });
+      // reverse_application_record writes its own application_record_reversed activity entry.
       toast('success', review
         ? 'Filing undone. Some stock stays with the linked job; the lines are flagged for review in inventory.'
         : 'Filing undone. The ticket’s stock is back in Main Warehouse.');

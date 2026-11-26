@@ -1,4 +1,4 @@
--- ROLLBACK for 20270307100000_below_cost_prompt_lists_every_line.sql. Drops the three deferred list triggers and
+-- ROLLBACK for 20270308060000_below_cost_prompt_lists_every_line.sql. Drops the three deferred list triggers and
 -- _raise_below_cost_reason_list, and restores _enforce_below_cost_line to its 20270201180000 body
 -- (md5 5fa0a5f975dc2a84b3c6599a84b8cc55): an admin's save without a reason again stops at the first below-cost line.
 -- No rows change. Apply as ONE transaction (psql -1).
@@ -22,7 +22,7 @@ BEGIN
                    FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS DISTINCT FROM ARRAY['postgres', 'service_role'])
   ) OR to_regprocedure('public._enforce_below_cost_line()') IS NULL THEN
-    RAISE EXCEPTION 'BELOW_COST_LIST_REVERSE: _enforce_below_cost_line is not the 20270307100000 body, or its header or grants changed';
+    RAISE EXCEPTION 'BELOW_COST_LIST_REVERSE: _enforce_below_cost_line is not the 20270308060000 body, or its header or grants changed';
   END IF;
   IF (SELECT count(*) FROM pg_trigger WHERE tgname = 'zzz_crx_below_cost_reason_list') <> 3
      OR to_regprocedure('public._raise_below_cost_reason_list()') IS NULL THEN
@@ -39,7 +39,7 @@ BEGIN
             AND t.tgconstraint <> 0 AND t.tgdeferrable AND t.tginitdeferred AND t.tgenabled = 'O'
             AND t.tgtype = 21 -- ROW, AFTER, INSERT OR UPDATE
             AND pg_get_triggerdef(t.oid) LIKE '%WHEN ((COALESCE(current_setting(''app.crx_below_cost_pending''::text, true), ''''::text) <> ''''::text)) EXECUTE FUNCTION %_raise_below_cost_reason_list()') <> 3 THEN
-    RAISE EXCEPTION 'BELOW_COST_LIST_REVERSE: _raise_below_cost_reason_list or a list trigger is not the 20270307100000 definition';
+    RAISE EXCEPTION 'BELOW_COST_LIST_REVERSE: _raise_below_cost_reason_list or a list trigger is not the 20270308060000 definition';
   END IF;
   PERFORM set_config('crx.bclr_xid', pg_current_xact_id()::text, true);
   PERFORM set_config('crx.bclr_acl', (SELECT coalesce(proacl::text, '') FROM pg_proc WHERE oid = 'public._enforce_below_cost_line()'::regprocedure), true);

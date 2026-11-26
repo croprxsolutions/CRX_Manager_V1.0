@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270307100000_below_cost_prompt_lists_every_line (pricing audit fix 1, Mason 2026-11-25).
+ * Real-schema proof for 20270308060000_below_cost_prompt_lists_every_line (pricing audit fix 1, Mason 2026-11-25).
  * Container setup and replay copied from prove-grower-share-rep-cover-real-schema.mjs. Products P1, P2, P3 cost $10.00.
  * An admin's direct order: P1 2 @ $8.00 ($4.00 short), P2 3 @ $9.50 ($1.50 short), P3 1 @ $12.00 (above cost).
  *   BEFORE: the save stops at P1 with BELOW_COST_REASON_REQUIRED naming P1 only.
@@ -33,7 +33,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270307100000_below_cost_prompt_lists_every_line.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270308060000_below_cost_prompt_lists_every_line.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([
@@ -535,7 +535,7 @@ UPDATE public.invoice_items SET id = '${INV_LINE}', unit_price_cents = 1000, ext
   stageText('drift-reverse.sql', `ALTER TABLE public.order_items DISABLE TRIGGER zzz_crx_below_cost_reason_list;\n${lf(REVERSE)}`);
   const drift = apply('drift-reverse.sql');
   assert.notEqual(drift.status, 0, drift.output);
-  assert.match(drift.output, /BELOW_COST_LIST_REVERSE: _raise_below_cost_reason_list or a list trigger is not the 20270307100000 definition/);
+  assert.match(drift.output, /BELOW_COST_LIST_REVERSE: _raise_below_cost_reason_list or a list trigger is not the 20270308060000 definition/);
   assert.equal(body(), NEW_BODY, 'a refused reverse changes nothing');
   stageText('reverse.sql', lf(REVERSE));
   const rev = apply('reverse.sql');

@@ -237,12 +237,13 @@ export function changelogMarkdown(g) {
   return sections.map(([h, items]) => `#### ${h}\n${items.map((e) => `* ${e.text} (#${e.number})`).join('\n')}`).join('\n\n');
 }
 
-// "None", "None (CI only).", "Nothing. Agent tooling only." and "N/A" all mean nothing users see.
-const NOTHING = /^(?:none\b|nothing\b|n\/a\b|-\.?$)/i;
+// "None", "None (CI only).", "None on production.", "Nothing. Agent tooling only." and "N/A" all mean nothing
+// users see; "None of the invoices need rounding now." is a real note and stays.
+const NOTHING = /^(?:none|nothing|n\/a|-)(?:[\s.,;:!—–-]*$|[.,;:!—–(]|\s+[—–(]|\s+-\s|\s+(?:on|for|in|here|yet|visible|user)\b)/i;
 // A heading, a rule or the PR's "🤖 Generated with …" footer ends the list.
-const SECTION_END = /^[ ]{0,3}(?:#|---|🤖)|generated with \[claude code\]/i;
+const SECTION_END = /^[ ]{0,3}(?:#|---|🤖|generated with \[claude code\])/i;
 // The dialog shows plain text, so "[text](url)" becomes "text".
-const plain = (s) => s.replace(/\[([^\]]+)\]\([^)\s]+\)/g, '$1');
+const plain = (s) => s.replace(/\[([^\]]+)\]\((?:[^()\s]|\([^()\s]*\))+(?:\s+"[^"]*")?\)/g, '$1');
 
 // What a PR says users will notice: a "What users see: …" line, or a "## What users see" list.
 // "None" means nothing; the template's "<…>" placeholder counts as not filled in.

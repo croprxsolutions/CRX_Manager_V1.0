@@ -215,6 +215,11 @@ test('usersSee drops "nothing" notes and the PR footer, and shows links as plain
   }
   assert.deepEqual(usersSee('## What users see\n- See the [price list](https://x.test/p) tab\n---\n- footer'), ['See the price list tab']);
   assert.deepEqual(usersSee('What users see: Invoices show the [quote](/quotes/1) price.'), ['Invoices show the quote price.']);
+  // Real notes that only look like the junk stay (Terra review).
+  assert.deepEqual(usersSee('What users see: None of the invoices need rounding now.'), ['None of the invoices need rounding now.']);
+  assert.deepEqual(usersSee('## What users see\n- Reports generated with [Claude Code](https://x.test) now cite sources\n- Second'),
+    ['Reports generated with Claude Code now cite sources', 'Second']);
+  assert.deepEqual(usersSee('What users see: Read the [guide](https://x.test/guide_(v2)) first.'), ['Read the guide first.']);
 });
 
 test('prState: held-off needs its reason even when also verified', () => {

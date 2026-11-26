@@ -604,6 +604,21 @@ describe('Record Payments: payment date and check number', () => {
     expect(rpcCalls()[0][1]).toMatchObject({ p_payment_date: '2026-11-21' });
   });
 
+  it('keeps the form locked while the save is in flight, so no edit can be made that the save would drop', async () => {
+    let finishSave!: (result: typeof saved) => void;
+    mockRpc.mockImplementation(() => new Promise((resolve) => { finishSave = resolve; }));
+    await fillPayment('1234');
+    apply();
+    await waitFor(() => expect(rpcCalls()).toHaveLength(1));
+    expect(screen.getByLabelText('Check Amount')).toBeDisabled();
+    expect(screen.getByLabelText('Check #')).toBeDisabled();
+    expect(screen.getByLabelText('Method')).toBeDisabled();
+    stepDate('day', 'ArrowDown');
+    expect(shownDate()).toBe('11/24/2026');
+    await act(async () => { finishSave(saved); });
+    expect(rpcCalls()[0][1]).toMatchObject({ p_payment_date: '2026-11-24', p_total_cents: 50000 });
+  });
+
   it('another method sends a reference number, not a check number', async () => {
     await fillPayment('');
     fireEvent.change(screen.getByLabelText('Method'), { target: { value: 'ach' } });

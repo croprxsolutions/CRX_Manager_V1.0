@@ -21,7 +21,7 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { isTahaGateWiring, prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneProblem } from '../../.claude/hooks/taha-lane-lib.mjs';
+import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneProblem, wiringOnly } from '../../.claude/hooks/taha-lane-lib.mjs';
 import { solRiskOnGitHub } from '../../.claude/hooks/sol-risk-lib.mjs';
 import { TAHA_LOGIN } from '../../.claude/hooks/migration-landing-gate-lib.mjs';
 import { esc, link, slack } from './release-slack.mjs';
@@ -50,11 +50,7 @@ export const tahaReviewedHead = (pr) => (pr.reviews ?? []).some((r) => isTaha(r.
 // hotfix-backport label (backport()); red for anything else, it holds the ask like any check (Taha, 2026-11-25).
 // A back-merge of main is judged like any PR: main needs no review, so a hotfix Mason merged by hand may not have
 // reached Taha (Taha's review of #2639, LOW 4).
-// Only the lane block's launchers and settings are not his work (Taha's review of #2639, MED 2); its libraries define his
-// lane and his live-apply hold, so they still go to him (advisory Sol on #2639, MED 18). pr-merge-guard and the Codex
-// production-action-guard call his lane gate themselves, so they go to him too (Taha's delta at a9143eb27, MED 2).
-const wiringOnly = (file) => isTahaGateWiring(file) &&
-  /(?:^|\/)(?:merge-guard-launcher|prompt-router|migration-apply-guard)\.mjs$|(?:^|\/)(?:settings|hooks)\.json$/.test(file);
+// Only the lane block's launchers and settings are not his work: wiringOnly, shared from taha-lane-lib.mjs.
 export const isMainHotfix = (pr) => pr.baseRefName === 'main' && /^hotfix\//.test(pr.headRefName ?? '');
 const GATE_CHECKS = ['Release flow guard (main)', 'release-gate'];
 // A pending guard still waits: it may yet ask for the label, and the ping is sent once per head (Codex on #2589).

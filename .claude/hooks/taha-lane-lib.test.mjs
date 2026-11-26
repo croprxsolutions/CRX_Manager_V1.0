@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
   findTahaLaneOverride, findTahaUnavailableOverride, isTahaGateWiring, isTahaLanePath, isTahaLaneSql, isTextOnlyPatch, prFilesOnGitHub, issueTahaLaneCode, markTahaTold, recordTahaLaneOverride,
-  pushDismissedApprovals, tahaApprovedHead, tahaApprovedOnGitHub, tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
+  pushDismissedApprovals, tahaApprovedHead, tahaApprovedOnGitHub, tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub, wiringOnly,
 } from "./taha-lane-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -570,6 +570,9 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   ok(isTahaLaneSql("CREATE OR REPLACE FUNCTION public.check_period_open() AS $$ SELECT 1 $$;"), "month-end still is");
   // 2. #2267: a product-unit fix may convert that product's order and quote lines.
   eq(tahaLaneProblem({ files: [real("20270303180000_piksi_mg_to_grams")], now: NOW }), null, "#2267 (Piksi mg→grams) is not Taha's");
+  // Taha's delta at 979ddf01a, LOW 8: a '$$' string must not open a dollar literal that hides the invoices write.
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_mg_to_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; UPDATE public.order_items SET unit_size = '$$' WHERE product_id = 7; UPDATE public.invoices SET status = 'void' WHERE id = 42; UPDATE public.quote_items SET unit_size = '$$' WHERE product_id = 7;")], now: NOW }), "a write between two '$$' strings is still read (LOW 8)");
+  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_mg_to_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; UPDATE public.order_items SET unit_size = '$$' WHERE product_id = 7; UPDATE public.quote_items SET unit_size = '$$' WHERE product_id = 7;")], now: NOW }), null, "'$$' unit strings alone stay a unit fix");
   eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.products SET unit_size = 'oz' WHERE id = 7; UPDATE public.quote_items SET unit_size = 'oz' WHERE product_id = 7;")], now: NOW }), null, "a unit fix of a product and its quote lines is not his");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.products SET unit_size = 'oz' WHERE id = 7; UPDATE public.quote_items SET unit_size = 'oz';")], now: NOW }), "an unscoped unit UPDATE of every quote line is his (Luna, PR 2 round 5)");
   // Taha's review of #2639.
@@ -657,7 +660,8 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   for (const f of ["src/components/orders/SaleMoneySummary.tsx", "src/components/orders/WhoPaysCard.tsx", "src/components/orders/SaleInvoicesCard.tsx", "src/pages/InvoiceDetail.tsx", "src/pages/Invoices.tsx",
     "src/pages/PaymentAllocation.tsx", "src/pages/PaymentHistory.tsx", "src/pages/Prepay.tsx", "src/pages/ARaging.tsx", "src/pages/AccountsReceivable.tsx", "src/pages/OrderDetail.tsx",
     "src/components/prepay/PrepaymentManagerPanel.tsx", "src/components/statements/StatementPrintDialog.tsx", "src/lib/customerStatement.ts",
-    "src/pages/CommissionPayments.tsx", "src/pages/MonthEndClose.tsx"]) { // the last two: his delta at 82ef25520, MED 1
+    "src/pages/CommissionPayments.tsx", "src/pages/MonthEndClose.tsx", // these two: his delta at 82ef25520, MED 1
+    "src/components/orders/LineBillSplit.tsx", "src/components/ui/CommissionSplitEditor.tsx"]) { // these two: his delta at 979ddf01a, MED 1
     ok(tahaLaneProblem({ files: [withPatch(f, paidSwap)], now: NOW }), `${f}: a money label swap is his (delta MED 1)`);
   }
   eq(tahaLaneProblem({ files: [withPatch("src/pages/quotes/QuoteList.tsx", paidSwap)], now: NOW }), null, "a lane screen that is not a money screen keeps the words-only pass");
@@ -689,6 +693,9 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   // 5. Gate wiring is recognised (the bot skips it).
   ok(isTahaGateWiring(".claude/hooks/taha-lane-lib.mjs") && isTahaGateWiring(".claude\\hooks\\pr-merge-guard.mjs"), "the block's own files are wiring");
   ok(!isTahaGateWiring("src/pages/Quotes.tsx"), "a lane screen is not wiring");
+  // Taha's delta at 979ddf01a: wiringOnly is shared, so the bot and #2660's labeller skip the same files.
+  ok(wiringOnly(".claude/hooks/merge-guard-launcher.mjs") && wiringOnly(".claude\\settings.json") && wiringOnly(".codex/hooks.json"), "launchers and settings are wiring only");
+  ok(!wiringOnly(".claude/hooks/taha-lane-lib.mjs") && !wiringOnly(".claude/hooks/pr-merge-guard.mjs") && !wiringOnly("src/pages/Quotes.tsx"), "his gate's libraries and lane screens still go to him");
 }
 
 console.log(`taha-lane-lib tests: ${pass} passed`);

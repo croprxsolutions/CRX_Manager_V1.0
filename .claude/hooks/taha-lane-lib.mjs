@@ -72,6 +72,12 @@ const STRONG_LANE_WORDS = new Set(["quote", "quotes", "hold", "holds", "prepay",
 const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router|sol-risk-lib|migration-landing-gate-lib|migration-apply-lib|migration-apply-guard|teammate-comments-lib)\.mjs|scripts\/apply-migration-file\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
 /** The block's own wiring: needs Mason's code, but is not Taha's work to review (Mason, 2026-11-26). */
 export const isTahaGateWiring = (name) => BLOCK_FILES_RE.test(String(name ?? "").replace(/\\/g, "/"));
+// Only the lane block's launchers and settings are not his work (Taha's review of #2639, MED 2); its libraries define his
+// lane and his live-apply hold, so they still go to him (advisory Sol on #2639, MED 18). pr-merge-guard and the Codex
+// production-action-guard call his lane gate themselves, so they go to him too (Taha's delta at a9143eb27, MED 2).
+// Exported so the Taha ready bot and #2660's after-Sol labeller share one rule (Taha's delta at 979ddf01a).
+export const wiringOnly = (file) => isTahaGateWiring(file) &&
+  /(?:^|\/)(?:merge-guard-launcher|prompt-router|migration-apply-guard)\.mjs$|(?:^|\/)(?:settings|hooks)\.json$/.test(String(file ?? "").replace(/\\/g, "/"));
 
 // Mason, 2026-11-26 (#2451): a change to one of Taha's screens that only edits words people read (strings, JSX text,
 // comments) is not his work. True only when the changed lines, with those stripped, are the same code before and after.
@@ -115,8 +121,8 @@ export function isTextOnlyPatch(patch) {
 
 // Money screens and customer documents: their wording is Taha's too (Taha's review of #2639, MED 1, and his
 // delta at a9143eb27: every money screen in his lane, so the named lane files below get no words-only pass either;
-// his delta at 82ef25520 added the commission and month-end pages).
-const MONEY_DOC_RE = /^src\/(?:components\/(?:invoices|prepay|statements)\/|components\/orders\/(?:Sale|WhoPays)|lib\/(?:invoice|statement|customerStatement)|pages\/(?:Invoice|Payment|Prepay|AR|AccountsReceivable|CommissionPayments|MonthEndClose))|(?:Pdf|Email)\.[jt]sx?$/i;
+// his delta at 82ef25520 added the commission and month-end pages; his delta at 979ddf01a the bill and commission split editors).
+const MONEY_DOC_RE = /^src\/(?:components\/(?:invoices|prepay|statements)\/|components\/orders\/(?:Sale|WhoPays|LineBillSplit)|components\/ui\/CommissionSplit|lib\/(?:invoice|statement|customerStatement)|pages\/(?:Invoice|Payment|Prepay|AR|AccountsReceivable|CommissionPayments|MonthEndClose))|(?:Pdf|Email)\.[jt]sx?$/i;
 const isMoneyScreen = (file) => MONEY_DOC_RE.test(file) || LANE_FILE_PREFIXES.some((p) => file.startsWith(p));
 
 /** True when this changed file is app or database code in Taha's lane (and not field billing), or the block itself. */
@@ -239,21 +245,27 @@ const unitOnlySet = (set) => { const cols = setColumns(set); return cols.length 
 // (Taha's delta at a9143eb27, LOW 5: E'g\'' must not run on into the next statement).
 // $tag$…$tag$ literals are blanked too, except a DO or AS body: that is code (the real #2267 unit fix runs inside
 // DO $$), so it is scanned, with its own inner literals blanked (Taha's delta at 82ef25520, LOW 7).
-const maskDollar = (text) => {
-  const re = /(?<![\w$])\$(?:[A-Za-z_]\w*)?\$/g;
+// One left-to-right pass: whichever of ', E' or $tag$ opens first is blanked to its own end, so a '$$' string can't
+// open a dollar literal that hides the statements after it (Taha's delta at 979ddf01a, LOW 8).
+const maskStrings = (text) => {
+  const re = /(?<![\w$])\$(?:[A-Za-z_]\w*)?\$|(?<![\w$])[eE]'(?:\\[\s\S]|[^'\\]|'')*'|'(?:[^']|'')*'/g;
   let out = "", at = 0, m;
   while ((m = re.exec(text))) {
+    if (m[0].endsWith("'")) {
+      const q = m[0].indexOf("'");
+      out += text.slice(at, m.index) + `${m[0].slice(0, q)}'${" ".repeat(m[0].length - q - 2)}'`;
+      at = re.lastIndex;
+      continue;
+    }
     const open = m.index + m[0].length, close = text.indexOf(m[0], open);
-    if (close < 0) break;
+    if (close < 0) continue; // an unclosed tag stays; literals after it are still blanked
     const body = text.slice(open, close);
     const code = /\b(?:do|as)\s*$/i.test(text.slice(Math.max(0, m.index - 12), m.index));
-    out += text.slice(at, open) + (code ? maskDollar(body) : " ".repeat(body.length));
+    out += text.slice(at, open) + (code ? maskStrings(body) : " ".repeat(body.length));
     at = close; re.lastIndex = close + m[0].length;
   }
   return out + text.slice(at);
 };
-const maskStrings = (text) => maskDollar(text).replace(/(?<![\w$])[eE]'(?:\\[\s\S]|[^'\\]|'')*'|'(?:[^']|'')*'/g,
-  (s) => { const q = s.indexOf("'"); return `${s.slice(0, q)}'${" ".repeat(s.length - q - 2)}'`; });
 // …and "quoted" names too, for the clause scanner (advisory Sol on #2639, HIGH 6: src."from").
 const maskNames = (text) => text.replace(/"(?:[^"]|"")*"/g, (s) => `"${"x".repeat(s.length - 2)}"`);
 const withoutUnitFix = (text) => {

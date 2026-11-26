@@ -446,11 +446,11 @@ export default function FieldStop() {
     // A ticket or drop-location photo is bound to the lines on screen, so it waits until they are loaded (Luna).
     if ((caption === PAPER_TICKET_PHOTO_CAPTION || caption === LEFT_AT_SITE_PHOTO_CAPTION) && !currentLinesSeen) { toast('error', LINES_LOADING_MESSAGE); return; }
     if (caption === PAPER_TICKET_PHOTO_CAPTION && countTicketPhotosForLoad(photos, currentLinesSeen) + files.length > MAX_PAPER_TICKET_PHOTOS) {
-      toast('error', 'Maximum 2 ticket photos per delivery');
+      toast('error', 'Maximum 2 ticket photos for these products and amounts');
       return;
     }
     if (caption === LEFT_AT_SITE_PHOTO_CAPTION && countTicketPhotosForLoad(photos, currentLinesSeen, LEFT_AT_SITE_PHOTO_CAPTION) + files.length > MAX_LEFT_AT_SITE_PHOTOS) {
-      toast('error', 'Maximum 2 drop-location photos per delivery');
+      toast('error', 'Maximum 2 drop-location photos for these products and amounts');
       return;
     }
     setUploadingPhoto(true);

@@ -2347,7 +2347,7 @@ export default function Deliveries() {
                   const linesAtPhoto = currentCompleteLinesRef.current;
                   if (!file || !target || !profile || !linesAtPhoto) return;
                   if (countTicketPhotosForLoad(currentTicketPhotos, currentCompleteLines) >= MAX_PAPER_TICKET_PHOTOS) {
-                    toast('error', `Maximum ${MAX_PAPER_TICKET_PHOTOS} ticket photos per delivery`);
+                    toast('error', `Maximum ${MAX_PAPER_TICKET_PHOTOS} ticket photos for these products and amounts`);
                     return;
                   }
                   setUploadingTicketGen(dialogGen);

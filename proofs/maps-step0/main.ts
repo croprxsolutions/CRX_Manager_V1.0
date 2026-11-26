@@ -165,7 +165,14 @@ let liveAttemptWithImage = 0;
 let creditsPending = false;
 let outagePicture: Picture | undefined;
 let outageAttempt = 0;
+let outageTimeout: number | undefined;
 let livePictures = false;
+
+function clearOutage(): void {
+  outagePicture = undefined;
+  window.clearTimeout(outageTimeout);
+  outageTimeout = undefined;
+}
 
 function pictureName(picture: Picture): string {
   if (!livePictures) return `Picture ${picture}`;
@@ -258,7 +265,7 @@ const proof: ProofApi = {
   switchPicture: (picture) => {
     if (!proof.ready) return;
     chosenPicture = picture;
-    outagePicture = undefined;
+    clearOutage();
     retryButton.disabled = true;
     setPictureTiles(picture);
     status.value = pictureName(picture);
@@ -310,14 +317,10 @@ map.on('load', () => {
 
   proof.ready = true;
   livePicturesButton.hidden = !livePicturesEnabled;
-  const savedDraft = sessionStorage.getItem(saveKey);
-  if (!savedDraft) {
-    status.value = 'Picture A';
-    return;
-  }
   try {
-    draw.set(JSON.parse(savedDraft));
-    status.value = 'Reopened synthetic draft · picture A';
+    const savedDraft = sessionStorage.getItem(saveKey);
+    if (savedDraft) draw.set(JSON.parse(savedDraft));
+    status.value = savedDraft ? 'Reopened synthetic draft · picture A' : 'Picture A';
   } catch {
     status.value = 'Saved synthetic draft could not be reopened · picture A';
   }
@@ -334,7 +337,11 @@ map.on('error', (event) => {
       ? url.pathname === '/api/maps-step0' && url.searchParams.get('drawingOutage') === '1'
       : /^\/tiles\/[AB]-outage\.png$/.test(url.pathname));
     if (failedFixture) {
-      if (outagePicture && url.searchParams.get('attempt') === String(outageAttempt)) recoverPicture(outagePicture);
+      const failedPicture = outagePicture;
+      if (failedPicture && url.searchParams.get('attempt') === String(outageAttempt)) {
+        clearOutage();
+        recoverPicture(failedPicture);
+      }
       return;
     }
   }
@@ -359,10 +366,15 @@ map.on('moveend', () => {
   if (!mapboxCredit.hidden) updateCredits('B');
 });
 toolbar.querySelector('#fail-picture')!.addEventListener('click', () => {
-  if (!proof.ready || !retryButton.disabled) return;
+  if (!proof.ready || outagePicture || !retryButton.disabled) return;
   outagePicture = chosenPicture;
   outageAttempt += 1;
-  retryButton.disabled = false;
+  status.value = `Testing ${pictureName(chosenPicture)} outage`;
+  outageTimeout = window.setTimeout(() => {
+    clearOutage();
+    retryButton.disabled = false;
+    status.value = 'Outage check timed out · choose Retry';
+  }, 12000);
   setPictureTiles(`${outagePicture}-outage`);
 });
 retryButton.addEventListener('click', () => proof.switchPicture(chosenPicture));
@@ -373,7 +385,11 @@ toolbar.querySelector('#save-draft')!.addEventListener('click', () => {
     status.value = 'Finish a polygon before saving';
     return;
   }
-  sessionStorage.setItem(saveKey, JSON.stringify(draft));
-  status.value = 'Saved synthetic draft in this tab';
+  try {
+    sessionStorage.setItem(saveKey, JSON.stringify(draft));
+    status.value = 'Saved synthetic draft in this tab';
+  } catch {
+    status.value = 'This tab could not save the synthetic draft';
+  }
 });
 toolbar.querySelector('#reopen-draft')!.addEventListener('click', () => location.reload());

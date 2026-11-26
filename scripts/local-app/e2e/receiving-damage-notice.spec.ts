@@ -34,6 +34,14 @@ test('Purchase Order Detail and Quick Receive send damage notices for saved item
       VALUES ('${detail.po}', '${extraProduct}', 10, 0, 1.00, 'gal');
     COMMIT;`);
   const conditionPicker = page.locator('select').filter({ has: page.locator('option[value="damaged"]') });
+  let successfulNoticePairs = 0;
+  await page.route('**/rest/v1/rpc/notify_damaged_receiving', async route => {
+    const [notice, retry] = await Promise.all([route.fetch(), route.fetch()]);
+    expect(notice.ok()).toBe(true);
+    expect(retry.ok()).toBe(true);
+    successfulNoticePairs += 1;
+    await route.fulfill({ response: notice });
+  });
   const checkNotice = async ({ po, line, productName, poNumber }: ReturnType<typeof fixture>) => {
     await expect.poll(() => localSql(`SELECT count(*) FROM public.notifications
       WHERE related_entity_id = '${po}' AND notification_type = 'po_damaged_received'
@@ -75,4 +83,5 @@ test('Purchase Order Detail and Quick Receive send damage notices for saved item
   await page.getByRole('button', { name: /confirm & receive/i }).click();
   await expect(page.getByRole('button', { name: 'Receive Another Shipment' })).toBeVisible();
   await checkNotice(quick);
+  expect(successfulNoticePairs).toBe(2);
 });

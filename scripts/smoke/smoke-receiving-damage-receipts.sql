@@ -17,6 +17,7 @@ DECLARE
   fallback_key text;
   count_admins bigint;
   items jsonb;
+  reversed uuid;
 BEGIN
   SELECT id INTO STRICT admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY id LIMIT 1;
   SELECT count(*) INTO count_admins FROM public.profiles WHERE role = 'admin' AND is_active;
@@ -93,6 +94,39 @@ BEGIN
   THEN RAISE EXCEPTION 'Marking a saved damage notice read stopped working'; END IF;
   IF (SELECT quantity_available FROM public.inventory WHERE product_id = product AND location = 'Main Warehouse') <> 5
   THEN RAISE EXCEPTION 'Damage notices changed inventory'; END IF;
+
+  receive_key := gen_random_uuid()::text;
+  SET LOCAL ROLE authenticated;
+  receipt := public.receive_po_items(items, admin, receive_key, false);
+  reversed := (receipt -> 'receiving_record_ids' ->> 0)::uuid;
+  PERFORM public.reverse_receiving_record(reversed, 'Invented receipt correction', admin, gen_random_uuid()::text);
+  RESET ROLE;
+  notice_key := 'damaged-receiving:' || po_a || ':' || encode(extensions.digest(convert_to(
+    '[' || to_json(receive_key)::text || ']', 'UTF8'), 'sha256'), 'hex');
+
+  ALTER TABLE public.notifications ADD CONSTRAINT local_damage_notice_refused
+    CHECK (notification_type <> 'po_damaged_received') NOT VALID;
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    PERFORM public.notify_damaged_receiving('Old label','Old summary',po_a,notice_key);
+    RAISE EXCEPTION 'The simulated notification failure was not observed';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  RESET ROLE;
+  ALTER TABLE public.notifications DROP CONSTRAINT local_damage_notice_refused;
+  IF (SELECT count(*) FROM public.notifications WHERE related_entity_id IN (po_a,po_b)
+      AND notification_type = 'po_damaged_received') <> count_admins
+    OR (SELECT quantity_available FROM public.inventory WHERE product_id = product AND location = 'Main Warehouse') <> 8
+    OR EXISTS (SELECT FROM public.idempotency_keys WHERE idempotency_key = notice_key AND operation = 'notify_damaged_receiving')
+  THEN RAISE EXCEPTION 'The failed notice changed receipt or notice state'; END IF;
+
+  SET LOCAL ROLE authenticated;
+  PERFORM public.notify_damaged_receiving('Old label','Old summary',po_a,notice_key);
+  RESET ROLE;
+  IF (SELECT count(*) FROM public.notifications WHERE related_entity_id = po_b
+      AND notification_type = 'po_damaged_received' AND message NOT LIKE '%INVENTED-DAMAGE-A%') <> count_admins
+    OR (SELECT quantity_available FROM public.inventory WHERE product_id = product AND location = 'Main Warehouse') <> 8
+  THEN RAISE EXCEPTION 'Notice retry included a reversed line or changed stock'; END IF;
 END
 $proof$;
 ROLLBACK;

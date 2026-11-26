@@ -79,7 +79,10 @@ export default defineConfig({
           },
         ],
       },
-      workbox: workboxOptions,
+      workbox: stagingMapsProof ? {
+        ...workboxOptions,
+        globIgnores: [...(workboxOptions.globIgnores ?? []), 'api/maps-step0-draw/**'],
+      } : workboxOptions,
     }),
     stagingMapsProof && {
       name: 'staging-maps-drawing-proof',

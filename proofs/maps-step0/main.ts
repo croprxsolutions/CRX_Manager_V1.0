@@ -96,6 +96,7 @@ function addScopedStyles(): void {
     #proof-toolbar { position: absolute; top: 12px; left: 12px; right: 60px; width: fit-content; max-width: calc(100% - 88px); z-index: 3; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px; border-radius: 6px; background: white; box-shadow: 0 1px 5px #0003; font: 14px sans-serif; }
     #proof-toolbar button { min-height: 44px; padding: 0 10px; }
     #proof-draw-control { border-radius: 4px; }
+    #proof-draw-control button { width: 44px; height: 44px; }
     #proof-credits { position: absolute; z-index: 3; bottom: 0; right: 0; background: white; font: 12px sans-serif; }
     #proof-credits span:not([hidden]) { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 6px; }
     #proof-credits .mapboxgl-ctrl-logo { margin: 0; }`;
@@ -223,9 +224,9 @@ function recoverPicture(failed: Picture): void {
 
 if (livePicturesEnabled) {
   maplibregl.addProtocol('proof-live', async (request, controller) => {
-    const tile = new URL(request.url);
-    const picture = tile.hostname === 'a' ? 'A' : 'B';
-    const [, attempt, zoom, column, row] = tile.pathname.split('/');
+    const [, , provider, attempt, zoom, column, row] = request.url.split('/');
+    if (provider !== 'a' && provider !== 'b') throw new Error('Unknown proof picture');
+    const picture = provider === 'a' ? 'A' : 'B';
     const stillCurrent = () => !controller.signal.aborted && Number(attempt) === pictureAttempt;
     if (!stillCurrent()) throw new DOMException('Tile belongs to an earlier picture', 'AbortError');
     if (liveRequestsPending === 0) {

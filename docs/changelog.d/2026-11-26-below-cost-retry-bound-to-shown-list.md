@@ -1,0 +1,6 @@
+## 2026-11-26 — An approved below-cost retry is bound to the lines the prompt showed (#2617, database part)
+
+- New migration `20270311200000_below_cost_retry_bound_to_shown_list.sql` (not applied live; record in `docs/reference/migrations.d/`). Re-creates `_enforce_below_cost_line` and `_raise_below_cost_reason_list` from `20270310210000`.
+- The below-cost refusal now carries `shown`, a fingerprint of the listed lines. A reason sent with ` [shown:<fingerprint>]` saves only if the lines are still the same at commit (product, price, cost, quantity, shortfall, document type); if a cost, price, quantity or line changed after the prompt, the retry is refused with the new list and nothing is saved. Approvals are written once at commit, only for lines that survive the save, without the marker.
+- A reason without the marker (the app deployed today) behaves exactly as before; the screen part (PR 2) starts sending the marker after this is applied on staging.
+- Plan: `docs/plans/2026-11-26-below-cost-retry-binding-CONTRACT.md` (Astra challenge dispositions included). Proof: container prover `scripts/smoke/prove-below-cost-retry-bound-to-shown-list-real-schema.mjs` (before and after, every #2610 case again, cases N1-N12, rollback `scripts/smoke/below-cost-retry-bound-to-shown-list-reverse.sql`). Not yet verified on staging.

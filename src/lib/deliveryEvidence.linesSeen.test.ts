@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildLinesSeen, keptQuantity, countTicketPhotosForLoad, hasDeliveredAmount, isLoadProofRefusal, LINES_LOADING_MESSAGE, loadProofProblem, NOTHING_DELIVERED_MESSAGE,
+  buildLinesSeen, evidencePhotoForLoad, keptQuantity, countTicketPhotosForLoad, hasDeliveredAmount, isLoadProofRefusal, LINES_LOADING_MESSAGE, loadProofProblem, NOTHING_DELIVERED_MESSAGE,
   LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE,
 } from './deliveryEvidence';
 import { LEFT_AT_SITE_PHOTO_CAPTION, PAPER_TICKET_PHOTO_CAPTION } from './paperTicket';
@@ -122,5 +122,23 @@ describe('keptQuantity', () => {
     expect(keptQuantity({ d1: -1 }, 'd1', 10)).toBe(0);
     expect(keptQuantity({ d1: 4 }, 'd2', 10)).toBe(10);
     expect(keptQuantity(undefined, 'd1', 10)).toBe(10);
+  });
+  it('sends the newest photo taken for the current load, not a newer one of another load (Codex on #2614)', () => {
+    const items = [
+      { id: 'd1', order_item_id: 'OI-1', product_id: 'P-1', quantity: 10 },
+      { id: 'd2', order_item_id: 'oi-2', product_id: 'p-2', quantity: 2.5 },
+    ];
+    const full = buildLinesSeen(items);
+    const partial = buildLinesSeen(items, (it) => (it.id === 'd1' ? 4 : it.quantity));
+    const photos = [
+      { id: 'full-1', caption: PAPER_TICKET_PHOTO_CAPTION, uploaded_at: '2026-11-26T10:00:00Z', lines_seen: full },
+      { id: 'full-2', caption: PAPER_TICKET_PHOTO_CAPTION, uploaded_at: '2026-11-26T10:01:00Z', lines_seen: full },
+      { id: 'partial', caption: PAPER_TICKET_PHOTO_CAPTION, uploaded_at: '2026-11-26T10:02:00Z', lines_seen: partial },
+    ];
+    expect(evidencePhotoForLoad(photos, PAPER_TICKET_PHOTO_CAPTION, full)?.id).toBe('full-2');
+    expect(evidencePhotoForLoad(photos, PAPER_TICKET_PHOTO_CAPTION, partial)?.id).toBe('partial');
+    // No photo of this load: the newest is returned so the screen can say it is stale.
+    expect(evidencePhotoForLoad(photos, PAPER_TICKET_PHOTO_CAPTION, buildLinesSeen(items, () => 1))?.id).toBe('partial');
+    expect(evidencePhotoForLoad(photos, LEFT_AT_SITE_PHOTO_CAPTION, full)).toBeUndefined();
   });
 });

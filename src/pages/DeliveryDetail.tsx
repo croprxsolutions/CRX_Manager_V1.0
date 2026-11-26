@@ -34,7 +34,7 @@ import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail, EmailUnconfirmedError } from '../lib/emailService';
 import { buildDeliveryReceiptHtml } from '../lib/deliveryReceiptEmail';
 import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
-import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, keptQuantity, LINES_LOADING_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, keptQuantity, LINES_LOADING_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, evidencePhotoForLoad, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
@@ -695,8 +695,8 @@ export default function DeliveryDetail() {
     [items, deliveryQtys],
   );
   const currentLinesSeenRef = useLatestRef(currentLinesSeen);
-  const currentTicketPhoto = latestEvidencePhoto(photos, PAPER_TICKET_PHOTO_CAPTION);
-  // The newest ticket photo counts only when it was taken for these lines and amounts (one without lines never does).
+  const currentTicketPhoto = evidencePhotoForLoad(photos, PAPER_TICKET_PHOTO_CAPTION, currentLinesSeen);
+  // The ticket photo sent (the newest taken for these lines, else the newest) counts only when it was taken for these lines and amounts (one without lines never does).
   const ticketPhotoMatchesLoad = !!currentTicketPhoto && sameLinesSeen(currentTicketPhoto.lines_seen, currentLinesSeen);
   const sig = useLoadBoundSignature(signatureDataUrl, setSignatureDataUrl, currentLinesSeen);
 
@@ -1265,7 +1265,7 @@ export default function DeliveryDetail() {
       ? Object.fromEntries(items.map((item) => [item.id, deliveryQtys[item.id] ?? item.quantity]))
       : null;
 
-    const ticketPhoto = usePaperTicket ? latestEvidencePhoto(photos, PAPER_TICKET_PHOTO_CAPTION) : undefined;
+    const ticketPhoto = usePaperTicket ? currentTicketPhoto : undefined;
     const intentParams = {
       p_delivery_id: deliveryId,
       p_signed_by: completionSignedBy,

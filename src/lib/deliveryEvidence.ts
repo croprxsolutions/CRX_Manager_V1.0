@@ -123,6 +123,16 @@ export function latestEvidencePhoto<T extends { id: string; caption?: string | n
   return latest;
 }
 
+/** The evidence photo to send for these lines: the newest one taken for them, so an older photo of the current load
+ * still counts after an amount is changed and changed back; otherwise the newest overall (the screen says it is stale). */
+export function evidencePhotoForLoad<T extends { id: string; caption?: string | null; uploaded_at?: string | null; lines_seen?: ReadonlyArray<LineSeen> | null }>(
+  photos: ReadonlyArray<T>,
+  caption: string,
+  lines: ReadonlyArray<LineSeen> | null | undefined,
+): T | undefined {
+  return latestEvidencePhoto(photos.filter((photo) => sameLinesSeen(photo.lines_seen, lines)), caption) ?? latestEvidencePhoto(photos, caption);
+}
+
 /** Merges two photo lists by id (later entries replace earlier ones with the same id). */
 export function mergePhotosById<T extends { id: string }>(first: ReadonlyArray<T>, second: ReadonlyArray<T>): T[] {
   const byId = new Map<string, T>();

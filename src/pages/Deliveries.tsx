@@ -51,7 +51,7 @@ import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { digestIntentPayload, fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { isValidDeliveredOn, isValidNoProofReason, MAX_PAPER_TICKET_PHOTOS, NO_PROOF_REASON_MAX_CHARS, NO_PROOF_REASON_MIN_CHARS, NO_PROOF_SIGNER, noProofReasonLength, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
-import { buildLinesSeen, countTicketPhotosForLoad, COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, sameLinesSeen, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, mergePhotosById, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadEvidencePhoto, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, countTicketPhotosForLoad, COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, sameLinesSeen, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, evidencePhotoForLoad, mergePhotosById, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadEvidencePhoto, uploadSignatureImage } from '../lib/deliveryEvidence';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
 import { useLoadBoundSignature } from '../hooks/useLoadBoundSignature';
 import { notifyDeliveryCompleted } from '../lib/notificationTriggers';
@@ -301,19 +301,22 @@ export default function Deliveries() {
   };
   // The delivery's lines (full delivery: delivered = scheduled quantity), read when the dialog opens and
   // after a refusal. The customer signs, or the ticket photo is taken, only once they are loaded (20270308100000).
-  const [completeLines, setCompleteLines] = useState<{ deliveryId: string; lines: LineSeen[] } | null>(null);
+  const [completeLines, setCompleteLines] = useState<{ deliveryId: string; lines: LineSeen[]; shown: Array<{ id: string; name: string; quantity: number }> } | null>(null);
   const loadCompleteLines = async (deliveryId: string, dialogGen: number) => {
     // The old lines stop counting at once: a failed reload must not leave proof controls bound to them (Luna).
     setCompleteLines(null);
     const { data, error } = await supabase.from('delivery_items')
-      .select('id, order_item_id, product_id, quantity').eq('delivery_id', deliveryId);
+      .select('id, order_item_id, product_id, quantity, product:products(product_name)').eq('delivery_id', deliveryId);
     if (completeDialogGenRef.current !== dialogGen) return;
     if (error || !data) {
       Sentry.captureException(error ?? new Error('delivery_items read returned no list'), { extra: { context: 'Load delivery lines for Mark Delivered' } });
       toast('error', 'The products on this delivery could not be loaded. Close and reopen this dialog to try again.');
       return;
     }
-    setCompleteLines({ deliveryId, lines: buildLinesSeen(data as Array<{ id: string; order_item_id: string; product_id: string; quantity: number }>) });
+    const rows = data as unknown as Array<{ id: string; order_item_id: string; product_id: string; quantity: number; product: { product_name: string } | null }>;
+    // The products shown beside the proof controls are the ones the proof is bound to (Codex review on #2614).
+    const shown = rows.map((row) => ({ id: row.id, name: row.product?.product_name ?? 'Unknown product', quantity: Number(row.quantity) }));
+    setCompleteLines({ deliveryId, lines: buildLinesSeen(rows), shown });
   };
   const loadTicketPhotos = async (deliveryId: string, dialogGen: number) => {
     const seq = ++ticketPhotoSeqRef.current;
@@ -333,10 +336,11 @@ export default function Deliveries() {
     setTicketPhotos({ deliveryId, photos: (data || []) as DeliveryEvidencePhoto[] });
   };
   const currentTicketPhotos = ticketPhotos && ticketPhotos.deliveryId === completeTarget?.id ? ticketPhotos.photos : [];
-  const currentTicketPhoto = latestEvidencePhoto(currentTicketPhotos, PAPER_TICKET_PHOTO_CAPTION);
   const currentCompleteLines = completeLines && completeLines.deliveryId === completeTarget?.id ? completeLines.lines : null;
+  const currentCompleteShown = completeLines && completeLines.deliveryId === completeTarget?.id ? completeLines.shown : null;
+  const currentTicketPhoto = evidencePhotoForLoad(currentTicketPhotos, PAPER_TICKET_PHOTO_CAPTION, currentCompleteLines);
   const currentCompleteLinesRef = useLatestRef(currentCompleteLines);
-  // The newest ticket photo counts only when it was taken for these lines (a photo without lines never does).
+  // The ticket photo sent (the newest taken for these lines, else the newest) counts only when it was taken for these lines (a photo without lines never does).
   const ticketPhotoMatchesLoad = !!currentTicketPhoto && sameLinesSeen(currentTicketPhoto.lines_seen, currentCompleteLines);
   const completeSig = useLoadBoundSignature(completeSignature, setCompleteSignature, currentCompleteLines);
   const canRecordWithoutProof = role === 'admin';
@@ -2292,6 +2296,16 @@ export default function Deliveries() {
                 Record without proof (admin only)
               </label>
               <HelpTip text="Only when there is no signature and no ticket photo, for example a delivery confirmed by phone. Your name, the time and your written reason are saved with the delivery. No receipt is emailed." className="ml-1" />
+            </div>
+          )}
+          {currentCompleteShown && completeEvidence !== 'no_proof' && (
+            <div className="text-sm border border-gray-200 rounded-lg p-3 bg-gray-50">
+              <p className="font-medium text-gray-700 mb-1">The signature or ticket photo covers these products:</p>
+              <ul className="space-y-0.5">
+                {currentCompleteShown.map((line) => (
+                  <li key={line.id} className="flex justify-between gap-3"><span>{line.name}</span><span className="tabular-nums">{line.quantity}</span></li>
+                ))}
+              </ul>
             </div>
           )}
           {completeEvidence === 'no_proof' ? (

@@ -30,7 +30,7 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
-import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, keptQuantity, LINES_LOADING_MESSAGE, LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, keptQuantity, LINES_LOADING_MESSAGE, LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, evidencePhotoForLoad, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
 import type { DeliveryCompletionEvidence, DeliveryIssueType, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
@@ -413,11 +413,13 @@ export default function FieldStop() {
     [items, deliveryQtys],
   );
   const currentLinesSeenRef = useLatestRef(currentLinesSeen);
-  // The newest ticket photo counts only when it was taken for these lines and amounts (one without lines never does).
-  const ticketPhotoLines = latestEvidencePhoto(photos, PAPER_TICKET_PHOTO_CAPTION)?.lines_seen;
+  // The ticket photo sent (the newest taken for these lines, else the newest) counts only when it was taken for these lines and amounts (one without lines never does).
+  const ticketPhoto = evidencePhotoForLoad(photos, PAPER_TICKET_PHOTO_CAPTION, currentLinesSeen);
+  const ticketPhotoLines = ticketPhoto?.lines_seen;
   const ticketPhotoMatchesLoad = sameLinesSeen(ticketPhotoLines, currentLinesSeen);
   // The drop-location photo is bound the same way (Mason, 2026-11-25).
-  const leftPhotoLines = latestEvidencePhoto(photos, LEFT_AT_SITE_PHOTO_CAPTION)?.lines_seen;
+  const leftPhoto = evidencePhotoForLoad(photos, LEFT_AT_SITE_PHOTO_CAPTION, currentLinesSeen);
+  const leftPhotoLines = leftPhoto?.lines_seen;
   const leftPhotoMatchesLoad = sameLinesSeen(leftPhotoLines, currentLinesSeen);
   const evidencePhotoLines = completionEvidence === 'left_at_site' ? leftPhotoLines : ticketPhotoLines;
   const sig = useLoadBoundSignature(signatureDataUrl, setSignatureDataUrl, currentLinesSeen);
@@ -555,8 +557,8 @@ export default function FieldStop() {
       ? Object.fromEntries(items.map((it) => [it.id, deliveryQtys[it.id] ?? it.quantity]))
       : null;
     const evidencePhoto = completionEvidence === 'paper_ticket'
-      ? latestEvidencePhoto(photos, PAPER_TICKET_PHOTO_CAPTION)
-      : completionEvidence === 'left_at_site' ? latestEvidencePhoto(photos, LEFT_AT_SITE_PHOTO_CAPTION) : undefined;
+      ? ticketPhoto
+      : completionEvidence === 'left_at_site' ? leftPhoto : undefined;
     const intentParams = {
       p_delivery_id: id,
       p_signed_by: signedBy,

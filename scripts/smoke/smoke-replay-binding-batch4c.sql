@@ -462,6 +462,7 @@ BEGIN
       OR (SELECT count(*) FROM public.failed_notifications WHERE entity_id = v_id
         AND notification_type = 'delivery_assigned' AND error_message LIKE '%23514%') <> 1
     THEN RAISE EXCEPTION 'SMOKE_FAIL: delivery did not survive the failed notice or the failure was lost'; END IF;
+    RAISE NOTICE 'SMOKE_DELIVERY_ASSIGNMENT_CASES_RAN';
   END IF;
 
   -- --------------------------------------------------------------------------------------------

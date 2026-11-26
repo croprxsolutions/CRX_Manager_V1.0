@@ -43,6 +43,9 @@ function installProbe(config) {
       image.src = url.toString();
       await image.decode();
       return { width: image.naturalWidth, height: image.naturalHeight };
+    } catch (error) {
+      if (signal.aborted) throw signal.reason;
+      throw error;
     } finally {
       signal.removeEventListener('abort', cancel);
       cancel();
@@ -99,7 +102,8 @@ function installProbe(config) {
     result.status = response.status;
     result.browserReadable = true;
     result.contentType = response.headers.get('content-type');
-    if (!response.ok || !result.contentType?.startsWith('image/')) return {};
+    if (!response.ok) return { reasons: await googleError(response) };
+    if (!result.contentType?.startsWith('image/')) return {};
     result.step = 'decode Static Maps image';
     return {
       visibleWarningHeader: response.headers.has('x-staticmap-api-warning'),

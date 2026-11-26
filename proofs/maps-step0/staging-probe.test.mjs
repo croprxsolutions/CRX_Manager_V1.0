@@ -93,3 +93,35 @@ test('reserves only the probe route from the standard app rewrite and headers', 
     }
   }
 });
+
+test('reports safe reasons and omits credential-bearing provider details', async () => {
+  const body = run({}).body;
+  const source = body.match(/<script nonce="[^"]+">([\s\S]+)<\/script>/)?.[1];
+  assert.ok(source);
+  const status = { textContent: '' };
+  const buttons = {};
+  const clicks = {};
+  const document = {
+    querySelectorAll() { return Object.values(buttons); },
+    querySelector(id) {
+      if (id === '#status') return status;
+      return buttons[id] ??= { addEventListener(_, callback) { clicks[id] = callback; } };
+    },
+  };
+  new Script(source).runInNewContext({
+    document, URL, AbortSignal,
+    fetch: async () => Response.json({
+      error: {
+        status: 'PERMISSION_DENIED',
+        message: 'Provider diagnostic includes ' + staticKey,
+        errors: [{ reason: 'keyInvalid' }, { reason: staticKey }],
+      },
+    }, { status: 403 }),
+  });
+  await clicks['#static']();
+  const evidence = JSON.parse(status.textContent);
+  assert.equal(evidence.status, 403);
+  assert.deepEqual(evidence.reasons, ['PERMISSION_DENIED', 'keyInvalid']);
+  assert.ok(!status.textContent.includes(staticKey));
+  assert.ok(!status.textContent.includes('googleapis.com'));
+});

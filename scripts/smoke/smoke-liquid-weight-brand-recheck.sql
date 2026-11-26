@@ -12,6 +12,7 @@ DECLARE
   v_customer uuid := gen_random_uuid();
   v_ticket uuid := gen_random_uuid();
   v_tag text := gen_random_uuid()::text;
+  v_change text;
   v_result jsonb;
 BEGIN
   SELECT id INTO STRICT v_admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY id LIMIT 1;
@@ -63,17 +64,22 @@ BEGIN
   IF (v_result->'weight'->>'lb_per_unit')::numeric IS DISTINCT FROM 9.5 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a rechecked weight must be available for new paperwork';
   END IF;
-  BEGIN
-    EXECUTE 'RESET ROLE';
-    UPDATE public.product_parents SET is_active = false WHERE id = v_parent;
-    UPDATE public.product_parent_brands SET brand_name = 'Inactive Brand Correction' WHERE id = v_brand;
-    IF (SELECT review_state FROM public.product_parent_density_values WHERE id = v_approved) IS DISTINCT FROM 'draft' THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: a substantive rename must also withdraw an inactive group approval';
-    END IF;
-    RAISE EXCEPTION 'SMOKE_INACTIVE_ROLLBACK';
-  EXCEPTION WHEN raise_exception THEN
-    IF SQLERRM <> 'SMOKE_INACTIVE_ROLLBACK' THEN RAISE; END IF;
-  END;
+  FOREACH v_change IN ARRAY ARRAY['name', 'EPA registration'] LOOP
+    BEGIN
+      EXECUTE 'RESET ROLE';
+      UPDATE public.product_parents SET is_active = false WHERE id = v_parent;
+      UPDATE public.product_parent_brands
+         SET brand_name = CASE WHEN v_change = 'name' THEN 'Inactive Brand Correction' ELSE brand_name END,
+             epa_registration = CASE WHEN v_change = 'EPA registration' THEN '12345-2' ELSE epa_registration END
+       WHERE id = v_brand;
+      IF (SELECT review_state FROM public.product_parent_density_values WHERE id = v_approved) IS DISTINCT FROM 'draft' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: a % change must withdraw an inactive group approval', v_change;
+      END IF;
+      RAISE EXCEPTION 'SMOKE_INACTIVE_ROLLBACK';
+    EXCEPTION WHEN raise_exception THEN
+      IF SQLERRM <> 'SMOKE_INACTIVE_ROLLBACK' THEN RAISE; END IF;
+    END;
+  END LOOP;
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   v_result := public.submit_liquid_density_draft(v_parent, 4, 9.8, 'lb_per_gal', 'sds', NULL, NULL, NULL, 'rename-waiting-' || v_tag);
   v_draft := (v_result->>'value_id')::uuid;

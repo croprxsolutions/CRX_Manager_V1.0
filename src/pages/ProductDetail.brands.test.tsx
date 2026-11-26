@@ -236,7 +236,9 @@ vi.mock('../components/products/ProductParentPanel', () => ({
 }));
 
 vi.mock('../components/products/ProductChemistrySection', () => ({
-  default: ({ refreshKey }: { refreshKey: string }) => <output data-testid="chemistry-refresh-key">{refreshKey}</output>,
+  default: ({ weightReviewRevision }: { weightReviewRevision: number }) => (
+    <output data-testid="chemistry-weight-revision">{weightReviewRevision}</output>
+  ),
 }));
 
 vi.mock('../lib/epaProposals', async (importOriginal) => ({
@@ -361,12 +363,12 @@ describe('ProductDetail brands section', () => {
     };
     render(<ProductDetail />);
     await screen.findByTestId('brands-section');
-    const chemistry = await screen.findByTestId('chemistry-refresh-key');
-    const previousKey = chemistry.textContent;
+    const chemistry = await screen.findByTestId('chemistry-weight-revision');
+    expect(chemistry).toHaveTextContent('0');
     const props = H.brandSection.mock.lastCall?.[0] as { onWeightReviewChange: () => void };
     await act(async () => props.onWeightReviewChange());
 
-    expect(chemistry.textContent).not.toBe(previousKey);
+    expect(chemistry).toHaveTextContent('1');
   });
 
   it('after switching products, the previous brands never show under the new one', async () => {

@@ -2,5 +2,5 @@
 
 - A substantive active-brand rename withdraws the prior liquid group approval while review is open. Case and ordinary whitespace edits keep the approval, including tabs and repeated internal spaces. EPA and manufacturer checks still apply. Stored tickets, existing events, and waiting drafts are preserved.
 - The legacy bulk approval checks the switch after taking its liquid parent locks. The later cutover can refuse while those locks are held. The security mode, owner and grants of both functions are retained.
-- Run `node scripts/smoke/prove-liquid-weight-brand-recheck-real-schema.mjs` for the before/after rename, saved ticket, and closed/open review paths in disposable PostgreSQL.
+- Run `node scripts/smoke/prove-liquid-weight-brand-recheck-real-schema.mjs` for the before/after rename, saved ticket, and closed/open review paths in disposable PostgreSQL. The separate staged activation proof exercises both concurrent lock orders with the real bulk approval.
 - Rollback is a new reviewed migration restoring the `approve_weights` function, private brand trigger function, and trigger columns from `20270307210000_liquid_density_review.sql`. Close review before rolling back its preparation. Review history and snapshots stay intact.

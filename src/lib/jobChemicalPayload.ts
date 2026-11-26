@@ -1,4 +1,9 @@
-import { FIELD_SOURCED_FROM_DB_READY } from './jobSourcedFrom';
+import {
+  FIELD_SOURCED_FROM_DB_READY,
+  isJobChemicalNonBillable,
+  type JobStockPathRead,
+} from './jobSourcedFrom';
+import { centsTimesQuantity } from './money';
 
 export interface JobChemicalPayloadSource {
   product_id: string;
@@ -17,6 +22,29 @@ export interface JobChemicalPayloadSource {
   source_vendor_id?: string | null;
   /** F06: which field the operator typed ('rate' | 'qty'); undefined = unknown. */
   driver?: 'rate' | 'qty';
+}
+
+export function calculateJobChemicalTotals(
+  rows: JobChemicalPayloadSource[],
+  featureReady: boolean,
+  stockPath: JobStockPathRead,
+): { totalCostCents: number; totalPriceCents: number } {
+  return rows.reduce((totals, row) => {
+    const isNonBillable = isJobChemicalNonBillable(
+      featureReady,
+      stockPath,
+      row.customer_supplied,
+      row.source_vendor_id,
+    );
+    return {
+      totalCostCents: totals.totalCostCents + (isNonBillable
+        ? 0
+        : centsTimesQuantity(parseInt(row.cost_per_unit_cents) || 0, row.quantity)),
+      totalPriceCents: totals.totalPriceCents + (isNonBillable
+        ? 0
+        : centsTimesQuantity(parseInt(row.price_per_unit_cents) || 0, row.quantity)),
+    };
+  }, { totalCostCents: 0, totalPriceCents: 0 });
 }
 
 export function buildJobChemicalsPayload(

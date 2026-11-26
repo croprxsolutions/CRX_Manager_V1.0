@@ -6,6 +6,9 @@ vi.mock('./db', () => ({ supabaseUntyped: { from: mockFrom } }));
 import {
   FIELD_SOURCED_FROM_DB_READY,
   batchCustomerSuppliedLineNeedsVendor,
+  isBatchVendorSourcedLine,
+  isJobChemicalNonBillable,
+  jobSupportsVendorSourcing,
   loadSavedJobSourceVendors,
   loadJobChemicalSources,
   loadJobStockPath,
@@ -34,11 +37,56 @@ describe('job sourced-from readiness', () => {
     expect(batchCustomerSuppliedLineNeedsVendor({ available: true, path: 'batch' }, true, 'vendor-1')).toBe(false);
   });
 
+  it('supports vendor sourcing only for an office batch job with a known stock path', () => {
+    expect(jobSupportsVendorSourcing(true, true, { available: true, path: 'batch' })).toBe(true);
+    expect(jobSupportsVendorSourcing(true, true, { available: true, path: 'at_completion' })).toBe(false);
+    expect(jobSupportsVendorSourcing(true, true, { available: false, path: null })).toBe(false);
+    expect(jobSupportsVendorSourcing(false, true, { available: true, path: 'batch' })).toBe(false);
+    expect(jobSupportsVendorSourcing(true, false, { available: true, path: 'batch' })).toBe(false);
+  });
+
+  it('counts a vendor-sourced chemical as non-billable only on a ready batch job', () => {
+    const batch = { available: true, path: 'batch' } as const;
+    const atCompletion = { available: true, path: 'at_completion' } as const;
+    const unknown = { available: false, path: null } as const;
+    expect(isBatchVendorSourcedLine(true, batch, 'vendor-1')).toBe(true);
+    expect(isBatchVendorSourcedLine(true, atCompletion, 'vendor-1')).toBe(false);
+    expect(isBatchVendorSourcedLine(true, unknown, 'vendor-1')).toBe(false);
+    expect(isBatchVendorSourcedLine(false, batch, 'vendor-1')).toBe(false);
+    expect(isJobChemicalNonBillable(true, atCompletion, true, null)).toBe(true);
+  });
+
   it('blocks save when office source data could not be read, but leaves disabled/crew paths alone', () => {
-    expect(sourceReadBlocksJobSave(true, true, false)).toBe(true);
-    expect(sourceReadBlocksJobSave(true, true, true)).toBe(false);
-    expect(sourceReadBlocksJobSave(false, true, false)).toBe(false);
-    expect(sourceReadBlocksJobSave(true, false, false)).toBe(false);
+    expect(sourceReadBlocksJobSave(true, true, {
+      chemicalSourcesAvailable: false,
+      isExistingJob: true,
+      stockPathAvailable: true,
+    })).toBe(true);
+    expect(sourceReadBlocksJobSave(true, true, {
+      chemicalSourcesAvailable: true,
+      isExistingJob: true,
+      stockPathAvailable: true,
+    })).toBe(false);
+    expect(sourceReadBlocksJobSave(true, true, {
+      chemicalSourcesAvailable: true,
+      isExistingJob: true,
+      stockPathAvailable: false,
+    })).toBe(true);
+    expect(sourceReadBlocksJobSave(true, true, {
+      chemicalSourcesAvailable: true,
+      isExistingJob: false,
+      stockPathAvailable: false,
+    })).toBe(false);
+    expect(sourceReadBlocksJobSave(false, true, {
+      chemicalSourcesAvailable: false,
+      isExistingJob: true,
+      stockPathAvailable: false,
+    })).toBe(false);
+    expect(sourceReadBlocksJobSave(true, false, {
+      chemicalSourcesAvailable: false,
+      isExistingJob: true,
+      stockPathAvailable: false,
+    })).toBe(false);
   });
 
   it('reports an unavailable stock path when the column read fails', async () => {

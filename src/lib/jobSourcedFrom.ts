@@ -30,8 +30,39 @@ export function batchCustomerSuppliedLineNeedsVendor(
   return stockPath.available && stockPath.path === 'batch' && customerSupplied && !sourceVendorId;
 }
 
-export function sourceReadBlocksJobSave(featureReady: boolean, isOffice: boolean, readAvailable: boolean): boolean {
-  return featureReady && isOffice && !readAvailable;
+export function jobSupportsVendorSourcing(
+  featureReady: boolean,
+  isOffice: boolean,
+  stockPath: JobStockPathRead,
+): boolean {
+  return featureReady && isOffice && stockPath.available && stockPath.path === 'batch';
+}
+
+export function isBatchVendorSourcedLine(
+  featureReady: boolean,
+  stockPath: JobStockPathRead,
+  sourceVendorId: string | null | undefined,
+): boolean {
+  return jobSupportsVendorSourcing(featureReady, true, stockPath) && Boolean(sourceVendorId);
+}
+
+export function isJobChemicalNonBillable(
+  featureReady: boolean,
+  stockPath: JobStockPathRead,
+  customerSupplied: boolean,
+  sourceVendorId: string | null | undefined,
+): boolean {
+  return customerSupplied || isBatchVendorSourcedLine(featureReady, stockPath, sourceVendorId);
+}
+
+export function sourceReadBlocksJobSave(
+  featureReady: boolean,
+  isOffice: boolean,
+  reads: { chemicalSourcesAvailable: boolean; isExistingJob: boolean; stockPathAvailable: boolean },
+): boolean {
+  return featureReady && isOffice && (
+    !reads.chemicalSourcesAvailable || (reads.isExistingJob && !reads.stockPathAvailable)
+  );
 }
 
 const unavailableStockPath: JobStockPathRead = { available: false, path: null };

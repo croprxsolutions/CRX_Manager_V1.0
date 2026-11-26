@@ -1,7 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../lib/jobSourcedFrom', () => ({ FIELD_SOURCED_FROM_DB_READY: true }));
+vi.mock('../../lib/jobSourcedFrom', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/jobSourcedFrom')>()),
+  FIELD_SOURCED_FROM_DB_READY: true,
+}));
 vi.mock('../../lib/vehicleCarrierDefaults', () => ({ VEHICLE_CARRIER_DEFAULT_DB_READY: true }));
 vi.mock('../../lib/jobServiceBillingSummary', () => ({ APPLICATION_SERVICE_BILLING_DB_READY: true }));
 
@@ -16,13 +19,29 @@ describe('Job Detail office additions', () => {
     const onChange = vi.fn();
     const vendors = [{ id: 'vendor-1', name: 'Spray Partner' }];
     const { rerender } = render(
-      <SourcedFromControl isOffice available={false} canEdit sourceVendorId={null} vendors={[]} onChange={onChange} />,
+      <SourcedFromControl
+        isOffice
+        stockPath={{ available: true, path: 'batch' }}
+        available={false}
+        canEdit
+        sourceVendorId={null}
+        vendors={[]}
+        onChange={onChange}
+      />,
     );
     expect(screen.getByLabelText('Sourced from')).toBeDisabled();
     expect(screen.getByRole('option', { name: 'Not available yet' })).toBeInTheDocument();
 
     rerender(
-      <SourcedFromControl isOffice available canEdit sourceVendorId={null} vendors={vendors} onChange={onChange} />,
+      <SourcedFromControl
+        isOffice
+        stockPath={{ available: true, path: 'batch' }}
+        available
+        canEdit
+        sourceVendorId={null}
+        vendors={vendors}
+        onChange={onChange}
+      />,
     );
     const picker = screen.getByLabelText('Sourced from');
     expect(picker).toBeEnabled();
@@ -30,9 +49,44 @@ describe('Job Detail office additions', () => {
     fireEvent.change(picker, { target: { value: 'vendor-1' } });
     expect(onChange).toHaveBeenCalledWith('vendor-1');
     rerender(
-      <SourcedFromControl isOffice available canEdit sourceVendorId="vendor-1" vendors={vendors} onChange={onChange} />,
+      <SourcedFromControl
+        isOffice
+        stockPath={{ available: true, path: 'batch' }}
+        available
+        canEdit
+        sourceVendorId="vendor-1"
+        vendors={vendors}
+        onChange={onChange}
+      />,
     );
     expect(screen.getByText('Vendor-sourced: no CRX stock, $0')).toBeInTheDocument();
+  });
+
+  it('hides sourced-from for old-path and unknown-path jobs', () => {
+    const { rerender, container } = render(
+      <SourcedFromControl
+        isOffice
+        stockPath={{ available: true, path: 'at_completion' }}
+        available
+        canEdit
+        sourceVendorId={null}
+        vendors={[]}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText('Sourced from')).not.toBeInTheDocument();
+    rerender(
+      <SourcedFromControl
+        isOffice
+        stockPath={{ available: false, path: null }}
+        available
+        canEdit
+        sourceVendorId={null}
+        vendors={[]}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('labels a rig default or a job-specific carrier value', () => {
@@ -52,6 +106,7 @@ describe('Job Detail office additions', () => {
     render(
       <SourcedFromControl
         isOffice
+        stockPath={{ available: true, path: 'batch' }}
         available
         canEdit
         sourceVendorId="vendor-old"
@@ -65,7 +120,15 @@ describe('Job Detail office additions', () => {
   it('hides the office-only details from crew when readiness flags are enabled', () => {
     const { container } = render(
       <>
-        <SourcedFromControl isOffice={false} available canEdit sourceVendorId="vendor-1" vendors={[]} onChange={vi.fn()} />
+        <SourcedFromControl
+          isOffice={false}
+          stockPath={{ available: true, path: 'batch' }}
+          available
+          canEdit
+          sourceVendorId="vendor-1"
+          vendors={[]}
+          onChange={vi.fn()}
+        />
         <RigCarrierSourceHint isOffice={false} label="(rig default)" />
         <ApplicationServiceBillingSummary
           isOffice={false}

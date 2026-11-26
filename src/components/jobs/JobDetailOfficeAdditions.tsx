@@ -2,11 +2,17 @@ import {
   APPLICATION_SERVICE_BILLING_DB_READY,
   type ApplicationServiceBilling,
 } from '../../lib/jobServiceBillingSummary';
-import { FIELD_SOURCED_FROM_DB_READY, type JobSourceVendor } from '../../lib/jobSourcedFrom';
+import {
+  FIELD_SOURCED_FROM_DB_READY,
+  jobSupportsVendorSourcing,
+  type JobSourceVendor,
+  type JobStockPathRead,
+} from '../../lib/jobSourcedFrom';
 import { VEHICLE_CARRIER_DEFAULT_DB_READY } from '../../lib/vehicleCarrierDefaults';
 
 interface SourcedFromControlProps {
   isOffice: boolean;
+  stockPath: JobStockPathRead;
   available: boolean;
   canEdit: boolean;
   sourceVendorId: string | null;
@@ -17,6 +23,7 @@ interface SourcedFromControlProps {
 
 export function SourcedFromControl({
   isOffice,
+  stockPath,
   available,
   canEdit,
   sourceVendorId,
@@ -24,7 +31,7 @@ export function SourcedFromControl({
   batchVendorRequired = false,
   onChange,
 }: SourcedFromControlProps) {
-  if (!isOffice) return null;
+  if (!jobSupportsVendorSourcing(FIELD_SOURCED_FROM_DB_READY, isOffice, stockPath)) return null;
   const canChooseSource = FIELD_SOURCED_FROM_DB_READY && available;
   return (
     <div className="pt-1">

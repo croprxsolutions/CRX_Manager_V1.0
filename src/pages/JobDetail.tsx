@@ -51,7 +51,7 @@ import Breadcrumbs from '../components/ui/Breadcrumbs';
 import SectionCard from '../components/ui/SectionCard';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
 import { parseLocalDate, todayInBusinessTz, BUSINESS_TIMEZONE } from '../lib/dateUtils';
-import { centsTimesQuantity, isExactDecimalText, quantitySurvivesSave } from '../lib/money';
+import { isExactDecimalText, quantitySurvivesSave } from '../lib/money';
 import { applyChemEdit, autofillPriceText, priceTextInLineUnit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, unitHasCharacterSaveJobRefuses, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
 import { compareToMaxRate, normalizeRateUnit, phiHarvestWarning } from '../lib/labelGuardrails';
 import { rateUnitOptionsForProduct, asProductForm } from '../lib/units';
@@ -76,6 +76,9 @@ import { APPLICATION_SERVICE_BILLING_DB_READY, loadApplicationServiceBilling } f
 import {
   FIELD_SOURCED_FROM_DB_READY,
   batchCustomerSuppliedLineNeedsVendor,
+  isBatchVendorSourcedLine,
+  isJobChemicalNonBillable,
+  jobSupportsVendorSourcing,
   loadActiveJobSourceVendors,
   loadJobChemicalSources,
   loadJobStockPath,
@@ -119,7 +122,7 @@ import type { Json } from '../types/supabase';
 import type { ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { JobChemicalProductPicker } from '../components/jobs/JobChemicalProductPicker';
 import JobLabelCorrectionsNotice from '../components/jobs/JobLabelCorrectionsNotice';
-import { buildJobChemicalsPayload } from '../lib/jobChemicalPayload';
+import { buildJobChemicalsPayload, calculateJobChemicalTotals } from '../lib/jobChemicalPayload';
 import {
   FIELD_BILLING_DEFAULT_CREW_COLUMNS, JOB_CHEMICAL_COLUMNS, JOB_CHEMICAL_CREW_COLUMNS,
   JOB_COLUMNS, JOB_CREW_COLUMNS, JOB_FIELD_SHARE_CREW_COLUMNS, PRODUCT_COLUMNS, withAdminCosts,
@@ -1858,12 +1861,12 @@ export default function JobDetail() {
     const acres = sumAcresExact(fieldRows) ?? '0';
     chemRows.forEach((c, i) => {
       if (!c.product_id) return;
-      if (FIELD_SOURCED_FROM_DB_READY && c.source_vendor_id) return;
+      if (isBatchVendorSourcedLine(FIELD_SOURCED_FROM_DB_READY, jobStockPath, c.source_vendor_id)) return;
       const h = chemLineBillingHazard(c, acres, productFormFor(c.product_id), !isCrew);
       if (h.hazard) byIndex.set(i, h);
     });
     return byIndex;
-  }, [isCrew, chemRows, fieldRows, productFormFor]);
+  }, [isCrew, chemRows, fieldRows, productFormFor, jobStockPath]);
 
   // Rows whose numbers are not fit to save at all, for reasons the billing-hazard guard
   // does not cover. Both fail closed rather than being silently coerced:
@@ -1881,8 +1884,12 @@ export default function JobDetail() {
     const exactAcres = sumAcresExact(fieldRows);
     chemRows.forEach((c, i) => {
       if (!c.product_id) return;
-      const customerSuppliedForBilling = c.customer_supplied
-        || (FIELD_SOURCED_FROM_DB_READY && Boolean(c.source_vendor_id));
+      const customerSuppliedForBilling = isJobChemicalNonBillable(
+        FIELD_SOURCED_FROM_DB_READY,
+        jobStockPath,
+        c.customer_supplied,
+        c.source_vendor_id,
+      );
       if (FIELD_SOURCED_FROM_DB_READY && batchCustomerSuppliedLineNeedsVendor(jobStockPath, c.customer_supplied, c.source_vendor_id)) {
         byIndex.set(i, 'choose a vendor for this customer-supplied line on a batch job');
         return;
@@ -1904,7 +1911,7 @@ export default function JobDetail() {
       // unit an off switch for the guard: the warning vanished while the same quantity ×
       // price still billed (Codex High, 2026-08-24). Mirrors the server's
       // CHEM_UNIT_UNSPECIFIED refusal (PR #446), including its exemptions: a
-      // customer-supplied line and a line with neither a cost nor a price contribute
+      // customer-supplied or batch vendor-sourced line and a line with neither a cost nor a price contribute
       // nothing to either total, and a zero quantity bills nothing — a line that cannot
       // bill cannot bill wrongly. parseFloat('') is NaN, which fails the ≠ 0 test toward
       // BLOCKING, so an unparseable quantity stays gated (the grammar rule below also
@@ -1996,7 +2003,8 @@ export default function JobDetail() {
       // that has already lost precision before any arithmetic runs. Refusing above 2^53
       // keeps every cents amount that reaches the total exactly representable.
       ] as const).find(([side, raw]) => {
-        // A customer-supplied line is never billed, so a blank price there (a picked product that
+        // A customer-supplied or batch vendor-sourced line is never billed, so a blank price there
+        // (a picked product that
         // states no price) saves as 0 instead of blocking the save.
         if (side === 'price' && raw === '' && customerSuppliedForBilling) return false;
         return !isExactDecimalText(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) < 0;
@@ -2664,18 +2672,19 @@ export default function JobDetail() {
     [allFields],
   );
   const totalAcres = sumAcres(fieldRows);
-  // #53/#54: a customer-supplied product is applied but not billed and cost us
-  // nothing — it contributes 0 to both job totals (mirrors the server's $0 line).
+  // #53/#54: a customer-supplied product, or a batch vendor-sourced product when enabled,
+  // contributes 0 to both job totals (mirrors the server's $0 line).
   // EXACT MONEY. These two totals are SAVED (jobs.total_cost_cents / total_price_cents at
   // the save_job call below), so they are authoritative, not display. They previously
   // multiplied in binary floating point, which disagrees with the server's exact numeric
   // `safe_cents_qty` whenever the true product lands on a half cent — e.g. 25c x 0.58 is
   // exactly 14.50, which the server rounds to 15c while Math.round(0.58 * 25) gives 14c.
   // centsTimesQuantity reproduces safe_cents_qty exactly (see money.ts).
-  const totalCostCents = chemRows.reduce((sum, c) => sum + (c.customer_supplied ? 0 : centsTimesQuantity(parseInt(c.cost_per_unit_cents) || 0, c.quantity)), 0);
-  const totalPriceCents = chemRows.reduce((sum, c) => sum + (c.customer_supplied || (FIELD_SOURCED_FROM_DB_READY && Boolean(c.source_vendor_id))
-    ? 0
-    : centsTimesQuantity(parseInt(c.price_per_unit_cents) || 0, c.quantity)), 0);
+  const { totalCostCents, totalPriceCents } = calculateJobChemicalTotals(
+    chemRows,
+    FIELD_SOURCED_FROM_DB_READY,
+    jobStockPath,
+  );
 
   // Loader worksheet (#10) — the spray tank is sized by SPRAY VOLUME, not by the
   // sum of chemical gallons. Spray volume = total acres × the carrier rate (gal/
@@ -2934,7 +2943,11 @@ export default function JobDetail() {
   };
 
   const runJobSave = async (overrideReasonForAudit?: string) => {
-    if (sourceReadBlocksJobSave(FIELD_SOURCED_FROM_DB_READY, !isCrew, chemicalSourceDataAvailable)) {
+    if (sourceReadBlocksJobSave(FIELD_SOURCED_FROM_DB_READY, !isCrew, {
+      chemicalSourcesAvailable: chemicalSourceDataAvailable,
+      isExistingJob: !isNew,
+      stockPathAvailable: jobStockPath.available,
+    })) {
       toast('error', 'The job sourcing details could not be loaded. Nothing was saved. Reload the job before saving again.');
       return;
     }
@@ -3120,7 +3133,11 @@ export default function JobDetail() {
   };
 
   const performSave = async (licenseOverride: boolean, overrideReasonForAudit?: string) => {
-    if (sourceReadBlocksJobSave(FIELD_SOURCED_FROM_DB_READY, !isCrew, chemicalSourceDataAvailable)) {
+    if (sourceReadBlocksJobSave(FIELD_SOURCED_FROM_DB_READY, !isCrew, {
+      chemicalSourcesAvailable: chemicalSourceDataAvailable,
+      isExistingJob: !isNew,
+      stockPathAvailable: jobStockPath.available,
+    })) {
       toast('error', 'The job sourcing details could not be loaded. Nothing was saved. Reload the job before saving again.');
       return;
     }
@@ -3207,7 +3224,11 @@ export default function JobDetail() {
         sort_order: i,
       }));
 
-      const chemsPayload = buildJobChemicalsPayload(chemRows, FIELD_SOURCED_FROM_DB_READY && !isCrew && chemicalSourceDataAvailable);
+      const chemsPayload = buildJobChemicalsPayload(
+        chemRows,
+        jobSupportsVendorSourcing(FIELD_SOURCED_FROM_DB_READY, !isCrew, jobStockPath)
+          && chemicalSourceDataAvailable,
+      );
 
       const newAssigneeIsApplicator = applicators.some((p) => p.id === applicatorId && p.role === 'applicator');
       // Mirrors the trigger's role='applicator' + active guard; the picker is active-only, so we never notify about a displacement that didn't happen.
@@ -5093,9 +5114,11 @@ export default function JobDetail() {
                       </div>
                       )}
                     </div>
+                    {/* New jobs have no stock path until the first save. */}
                     {!isCrew && (
                       <SourcedFromControl
                         isOffice={!isCrew}
+                        stockPath={jobStockPath}
                         available={chemicalSourceDataAvailable && sourceVendorsAvailable}
                         canEdit={canEdit}
                         sourceVendorId={c.source_vendor_id ?? null}

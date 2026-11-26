@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildJobChemicalsPayload, type JobChemicalPayloadSource } from './jobChemicalPayload';
+import { buildJobChemicalsPayload, calculateJobChemicalTotals, type JobChemicalPayloadSource } from './jobChemicalPayload';
 
 /**
  * buildJobChemicalsPayload turns free-text form rows into the payload written for
@@ -185,5 +185,39 @@ describe('buildJobChemicalsPayload', () => {
   it('customer_supplied defaults to false and preserves true', () => {
     expect(buildJobChemicalsPayload([row({ customer_supplied: true })])[0].customer_supplied).toBe(true);
     expect(buildJobChemicalsPayload([row({ customer_supplied: false })])[0].customer_supplied).toBe(false);
+  });
+
+  describe('job chemical totals', () => {
+    const batchPath = { available: true, path: 'batch' } as const;
+
+    it('excludes a batch vendor-sourced line from both price and cost totals', () => {
+      const vendorLine = row({
+        quantity: '1',
+        cost_per_unit_cents: '10000',
+        price_per_unit_cents: '7500',
+        source_vendor_id: 'vendor-1',
+      });
+      expect(calculateJobChemicalTotals([vendorLine], true, batchPath)).toEqual({
+        totalCostCents: 0,
+        totalPriceCents: 0,
+      });
+    });
+
+    it('leaves vendor-line totals unchanged when sourcing is disabled or the path is old', () => {
+      const vendorLine = row({
+        quantity: '1',
+        cost_per_unit_cents: '10000',
+        price_per_unit_cents: '7500',
+        source_vendor_id: 'vendor-1',
+      });
+      expect(calculateJobChemicalTotals([vendorLine], false, batchPath)).toEqual({
+        totalCostCents: 10000,
+        totalPriceCents: 7500,
+      });
+      expect(calculateJobChemicalTotals([vendorLine], true, { available: true, path: 'at_completion' })).toEqual({
+        totalCostCents: 10000,
+        totalPriceCents: 7500,
+      });
+    });
   });
 });

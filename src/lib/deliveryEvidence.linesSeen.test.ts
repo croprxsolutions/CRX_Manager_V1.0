@@ -68,7 +68,7 @@ describe('proof bound to the load', () => {
     expect(sameLinesSeen([{ ...a[0], delivered: -1 }], [{ ...a[0], delivered: 0 }])).toBe(true);
   });
 
-  it('counts a delivered amount under 0.01 as 0 on both sides (20270310120000)', () => {
+  it('counts a delivered amount under 0.01 as 0 on both sides (20270309180000, #2562)', () => {
     const a = buildLinesSeen(items);
     expect(sameLinesSeen([{ ...a[0], delivered: 0 }], [{ ...a[0], delivered: 0.005 }])).toBe(true);
     expect(sameLinesSeen([{ ...a[0], delivered: 0.004 }], [{ ...a[0], delivered: 0.009 }])).toBe(true);

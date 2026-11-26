@@ -296,7 +296,7 @@ export function buildLinesSeen<T extends { id: string; order_item_id?: string | 
 }
 
 // One entry as the server compares it: ids lower-cased, delivered kept between 0 and the quantity, an amount under
-// 0.01 counted as 0 (20270310120000, the required-proof migration), amounts to 6 decimal places (the server's round(…, 6);
+// 0.01 counted as 0 (20270309180000, #2562), amounts to 6 decimal places (the server's round(…, 6);
 // this is a screen hint, the server decides).
 function lineSeenKey(line: LineSeen): string {
   const quantity = Number(line.quantity);

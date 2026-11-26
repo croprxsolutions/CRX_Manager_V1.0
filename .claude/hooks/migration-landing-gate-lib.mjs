@@ -276,17 +276,14 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   }
   // Mason, 2026-11-25: his `taha override #<PR> <code>` (taha-lane-lib.mjs, 24 hours, this PR only) stands in
   // for Taha's hold and go-ahead when Mason merges it himself; the weekly release skips the 4-hour hold (its
-  // migrations already sat on staging). Every other check below still runs. For the live apply it must have been
-  // sent in the last 30 minutes, like Taha's go-ahead, so it shows Mason is about to merge (Mason, 2026-11-25; Sol r2).
+  // migrations already sat on staging). Every other check below still runs.
   let stateCommon = "";
   try { stateCommon = String(git(["rev-parse", "--path-format=absolute", "--git-common-dir"])).trim(); } catch (error) { if (OUT(error)) throw error; }
   const stateDirs = skipStateDirs([dir], () => stateCommon);
-  const override = findTahaLaneOverride({ dirs: stateDirs, pullRequest: Number(pr?.number), now });
-  if (!(override && now - Date.parse(override.issuedAt) <= READY_WINDOW_MS)) {
+  if (!findTahaLaneOverride({ dirs: stateDirs, pullRequest: Number(pr?.number), now })) {
     const orMason = () => {
       const code = issueTahaLaneCode({ dirs: stateDirs, pullRequest: Number(pr?.number), headSha: head, now });
-      return code ? ` Or, if Mason will merge it himself, ask him to send as a message of its own, right before he merges: taha override #${pr.number} ${code}` +
-        ` (for this live apply it counts for 30 minutes${override ? "; his earlier override for this PR is older than that" : ""})` : "";
+      return code ? ` Or, if Mason will merge it himself, ask him to send as a message of its own: taha override #${pr.number} ${code}` : "";
     };
     const hold = headRef === "release/next" ? null : tahaHoldProblem(pr, now);
     if (hold) return refuse(`${number}: ${hold}${orMason()}`);

@@ -11,8 +11,7 @@
 // Mason can still let ONE named PR through: the merge refusal issues a 6-digit
 // code for that PR at its current head, and his chat message `taha override #<PR> <code>`
 // (taha-lane-prompt.mjs) turns it into a 24-hour override for that PR, later pushes
-// included (Mason, 2026-11-25; it was one head only after Taha's review of #2303); a live apply honours it only for its
-// first 30 minutes (migration-landing-gate-lib.mjs). When it is used the
+// included (Mason, 2026-11-25; it was one head only after Taha's review of #2303). When it is used the
 // gate itself tells Taha on the PR, or refuses. An agent cannot mint a
 // working code: only a request this guard wrote counts. Same accepted residual as
 // coderabbit-skip-lib.mjs: an agent that runs the prompt hook by hand with a forged

@@ -89,6 +89,7 @@ never on in production without this rule (`20270307180000` is not applied live).
   (Mason 2026-11-23).
 - A blend ticket whose OCR line is not yet matched to a product has no product to count, so it does not block until staff match it (Sol r1 MED; follow-up).
 - The refusal shows in the usual short toast; a longer list stays readable via Preview, which re-shows it (Sol r1 LOW; follow-up if staff miss it).
+- A completed job counts as billed once a live invoice is linked to it or to its blend ticket, even if that invoice has no line for the size; a line for the size added to it after a correction takes the corrected number. Rare (an invoice made from a job copies its lines); no amount changes. Accepted by Mason 2026-11-25 ("Ship, name the gap") after the same "already billed" check drew a new HIGH in three rounds (Sol r1, Luna r5, Luna r6).
 - Year-end return-credit attribution and first-number assignment of historical blank lines (the issue's out-of-scope items).
 
 ## Cold challenge (Astra gpt-6.2-astra high, 2026-11-25, packet-only, 53 findings) — settled

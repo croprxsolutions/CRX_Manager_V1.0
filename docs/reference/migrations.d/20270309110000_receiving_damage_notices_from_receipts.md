@@ -2,4 +2,6 @@
 
 The current purchase-order and Quick Receive callers keep their existing function signature. Active admins remain the recipients, and app users can still mark notices read.
 
+The local walkthrough confirmed that both screens send notices from saved receipts. The local database proof exercised a multi-order batch, both legacy references, role refusals, a send failure, and reversal before retry. The Quick Receive fix also works with the previous database version.
+
 Roll back in a new migration by restoring the previous function and policies and the prior notification update grant.

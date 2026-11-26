@@ -52,6 +52,8 @@ BEGIN
   PERFORM public.notify_damaged_receiving('Old label','Old summary',po_a,notice_key);
   PERFORM public.notify_damaged_receiving('Old label','Old summary',po_a,notice_key);
   PERFORM public.notify_damaged_receiving('Other allocation','Other summary',po_b,fallback_key);
+  INSERT INTO public.notifications (user_id,title,message,notification_type)
+    VALUES (rep,'Local general notice','Local policy proof','general');
   RESET ROLE;
 
   IF (SELECT count(*) FROM public.notifications WHERE related_entity_id IN (po_a,po_b)

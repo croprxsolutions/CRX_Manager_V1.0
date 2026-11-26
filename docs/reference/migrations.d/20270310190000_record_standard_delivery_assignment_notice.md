@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270309060000_record_standard_delivery_assignment_notice.sql` (SQL sha256: `1483534e38846b84c245df20c83211528e1ecad1030a328c6c162137cb8edba2`) records the standard delivery's existing assignment notice when a new delivery saves. It retains the stored recipient and caller, and supports older browser sessions without duplicate notices.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270310190000_record_standard_delivery_assignment_notice.sql` (SQL sha256: `1483534e38846b84c245df20c83211528e1ecad1030a328c6c162137cb8edba2`) records the standard delivery's existing assignment notice when a new delivery saves. It retains the stored recipient and caller, and supports older browser sessions without duplicate notices.
 
 This is database support for the later client transition. The compatibility bridge matches the standard new-delivery title and type only. Edit, reassignment and follow-up notices keep their existing workflows. Before rollback after a client transition, restore the compatible client sender, then restore the prior delivery creation function and remove the compatibility trigger through a reviewed migration.
 

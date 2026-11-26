@@ -138,5 +138,6 @@ export function costBasisSourceLabel(
   const source = basisType === 'manual_override' && typeof changeSetId === 'string'
     ? priceSources?.get(changeSetId)
     : undefined;
-  return source || basisType.replace(/_/g, ' ');
+  // Keep the recorded basis visible: the source explains it, it does not replace it.
+  return source ? `${source} (recorded as manual override)` : basisType.replace(/_/g, ' ');
 }

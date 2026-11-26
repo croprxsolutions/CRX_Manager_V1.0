@@ -203,7 +203,7 @@ describe('NewPurchaseOrder save and submit workflow', () => {
     expect(costInput).toHaveValue(cost);
     fireEvent.click(screen.getByRole('button', { name: 'Save as Draft' }));
 
-    expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Enter a non-negative unit cost for "Test Herbicide"'));
+    expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('unit cost for "Test Herbicide"'));
     expect(mockRpc).not.toHaveBeenCalledWith('save_purchase_order', expect.anything());
   });
 

@@ -64,6 +64,12 @@ DECLARE
   v_snapshot jsonb;
   v_section_id uuid;
 BEGIN
+  -- Since 20270309020000 the price trail is append-only. This rolled-back fixture removes trail rows to
+  -- prove the lock on a price nothing vouches for, so it switches off only that guard (rollback restores it).
+  IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.quote_price_changes'::regclass
+               AND tgname = 'trigger_quote_price_changes_append_only') THEN
+    ALTER TABLE public.quote_price_changes DISABLE TRIGGER trigger_quote_price_changes_append_only;
+  END IF;
   SELECT id INTO v_admin FROM profiles
   WHERE role = 'admin' AND is_active = true
   ORDER BY created_at LIMIT 1;

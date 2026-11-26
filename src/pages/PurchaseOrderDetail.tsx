@@ -9,7 +9,7 @@ import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, sanitizeError, assertRpcResult } from '../lib/db';
+import { supabase, sanitizeError, assertRpcResult, hasRpcCode } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useActiveWarehouses, warehouseOptions } from '../hooks/useActiveWarehouses';
@@ -1346,7 +1346,10 @@ export default function PurchaseOrderDetail() {
   // and the purchase order total; never inventory or the product's catalog cost.
   const handleSaveCosts = async () => {
     if (!po || !profile || !isAdmin) return;
-    if (costItems.some((item) => item.purchase_order_id !== id)) return;
+    if (costItems.some((item) => item.purchase_order_id !== id)) {
+      toast('error', 'Reload the purchase order and try again');
+      return;
+    }
     const invalid = costItems.some((item) => {
       const draft = costDrafts[item.id];
       if (draft === undefined || draft.trim() === '') return false;
@@ -1400,6 +1403,11 @@ export default function PurchaseOrderDetail() {
       } else {
         Sentry.captureException(err, { tags: { source: 'write', action: 'set_purchase_order_item_costs' } });
         toast('error', sanitizeError(err));
+        // A stale screen: reload so reopening the modal shows (and expects) the current costs.
+        if (hasRpcCode(err, 'PO_COST_CHANGED_SINCE_LOADED')) {
+          setCostOpen(false);
+          fetchPO();
+        }
       }
     }
     setSaving(false);

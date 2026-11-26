@@ -4,7 +4,7 @@ import { sanitizeError } from './errorSanitizer';
 describe('sanitizeError', () => {
   it('tells the admin to reload after a stale purchase order cost correction', () => {
     expect(sanitizeError({ code: 'P0001', message: 'PO_COST_CHANGED_SINCE_LOADED: stale line' }))
-      .toBe('A line’s cost or product changed since you opened this purchase order. Reload it and review the lines before saving again');
+      .toBe('A line’s cost or product changed since you opened this purchase order. Nothing was saved. Review the reloaded lines and save again');
   });
 
   it.each(['COST_INVALID', 'PRODUCT_INVALID', 'PAIR_REQUIRED'])('maps the PO_EXPECTED_%s error', (code) => {

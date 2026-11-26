@@ -97,7 +97,8 @@ export default function NewPurchaseOrder() {
   const poIntentHash = [
     vendor, expectedDate, notes, savedPoId || '',
     items
-      .map((i) => `${i.product_id}:${i.quantity_ordered}:${i.unit_cost}:${i.unit_size || ''}`)
+      // The parsed cost, so a format-only edit (12.5 -> 12.50) keeps the retry key of a lost-response save.
+      .map((i) => `${i.product_id}:${i.quantity_ordered}:${parsePurchaseOrderUnitCostDollars(i.unit_cost) ?? i.unit_cost}:${i.unit_size || ''}`)
       .sort()
       .join(','),
   ].join('|');
@@ -268,7 +269,9 @@ export default function NewPurchaseOrder() {
     if (invalidCost) {
       const productName = products.find((p) => p.id === invalidCost.product_id)?.product_name;
       const line = productName ? `"${productName}"` : `line ${items.indexOf(invalidCost) + 1}`;
-      toast('error', `Enter a non-negative unit cost for ${line}. ${MONEY_PRECISION_MESSAGE}`);
+      toast('error', invalidCost.unit_cost.trim() === ''
+        ? `Enter a unit cost for ${line} (type 0 if it is free).`
+        : `Check the unit cost for ${line}: it must be a dollar amount of zero or more. ${MONEY_PRECISION_MESSAGE}`);
       return;
     }
 

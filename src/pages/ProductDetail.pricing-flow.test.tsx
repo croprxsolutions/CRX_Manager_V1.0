@@ -465,7 +465,7 @@ describe('ProductDetail governed pricing flow', () => {
   });
 
   it.each([
-    ['vendor-change-set', 'Vendor price list'],
+    ['vendor-change-set', 'Vendor price list (recorded as manual override)'],
     ['newer-manual-change-set', 'manual override'],
   ])('shows the current basis source from its own change set (%s)', async (changeSetId, label) => {
     const workspace = await mockGetCostBasisWorkspace();

@@ -140,7 +140,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^PO_COST_REASON_TOO_LONG\b/i,
    'Keep the reason to 500 characters'],
   [/^PO_COST_CHANGED_SINCE_LOADED\b/i,
-   'A line’s cost or product changed since you opened this purchase order. Reload it and review the lines before saving again'],
+   'A line’s cost or product changed since you opened this purchase order. Nothing was saved. Review the reloaded lines and save again'],
   [/^PO_EXPECTED_(?:COST_INVALID|PRODUCT_INVALID|PAIR_REQUIRED)\b/i,
    'The purchase order line details could not be verified. Reload the purchase order and try again'],
   [/^PO_CANCELLED\b/i,

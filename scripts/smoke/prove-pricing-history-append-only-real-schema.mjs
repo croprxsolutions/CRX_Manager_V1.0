@@ -34,7 +34,8 @@ function psql(input, user = 'postgres') {
 }
 
 function ddl(file, pattern, count = 1) {
-  const statements = read(`supabase/migrations/${file}`).match(pattern) ?? [];
+  // Drop line comments first: a ';' inside a comment would otherwise end a statement early.
+  const statements = read(`supabase/migrations/${file}`).replace(/--[^\n]*/g, '').match(pattern) ?? [];
   assert.equal(statements.length, count, `history DDL in ${file} changed`);
   return statements.join('\n');
 }

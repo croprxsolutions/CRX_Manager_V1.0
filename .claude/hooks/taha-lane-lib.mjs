@@ -10,8 +10,8 @@
 //
 // Mason can still let ONE named PR through: the merge refusal issues a 6-digit
 // code for that PR at its current head, and his chat message `taha override #<PR> <code>`
-// (taha-lane-prompt.mjs) turns it into an override for that PR (24 hours for a staging merge, 30 minutes for a live apply), later pushes
-// included (Mason, 2026-11-25), except on a PR that changes the block's own wiring
+// (taha-lane-prompt.mjs) turns it into an override for that PR: 24 hours for a staging merge, later pushes included
+// (Mason, 2026-11-25); 30 minutes for a live apply, at the head it was issued for only. Except on a PR that changes the block's own wiring
 // (BLOCK_FILES_RE): there it covers only the head it was issued for, as agreed on #2303.
 // On a live apply it stands in for Taha only when Mason's line also says Taha is
 // unavailable (`... unavailable: <reason>`, Mason 2026-11-25). When it is used the
@@ -567,7 +567,8 @@ export function recordTahaLaneOverride({ dirs, pullRequest, code, tahaUnavailabl
 }
 
 /**
- * Mason's live override for this PR, or null. It covers every later push to the PR for its 24 hours (a staging merge; a live apply's lasts 30 minutes)
+ * Mason's live override for this PR, or null. For a staging merge it covers every later push to the PR for its 24 hours
+ * (a live apply's lasts 30 minutes and covers one head; see findTahaUnavailableOverride)
  * (Mason, 2026-11-25: one message per PR, not per commit), unless `oneHead`: then only `headSha`.
  */
 export function findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead = false, accept = () => true, now = Date.now() }) {

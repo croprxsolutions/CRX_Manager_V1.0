@@ -34,8 +34,9 @@ test('authorized logbooks keep aircraft registration', async ({ page }) => {
     await expect(page).not.toHaveURL(/login/);
     await page.goto('/reports');
     await page.getByRole('button', { name: 'Application Logbook', exact: true }).click();
-    const faaResponse = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/rpc/get_logbook_faa'));
     await page.getByRole('button', { name: 'FAA Aerial', exact: true }).click();
+    const faaResponse = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/rpc/get_logbook_faa'));
+    await page.getByRole('button', { name: 'Last 30d', exact: true }).click();
     const response = await faaResponse;
     expect(response.ok()).toBe(true);
     await expect(page.getByRole('cell', { name: registration, exact: true })).toBeVisible();

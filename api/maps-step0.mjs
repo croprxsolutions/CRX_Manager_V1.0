@@ -102,8 +102,8 @@ function installProbe(config) {
     result.status = response.status;
     result.browserReadable = true;
     result.contentType = response.headers.get('content-type');
-    if (!response.ok) return { reasons: await googleError(response) };
-    if (!result.contentType?.startsWith('image/')) return {};
+    if (!response.ok) return { state: 'provider rejected request', reasons: await googleError(response) };
+    if (!result.contentType?.startsWith('image/')) return { state: 'unexpected response type' };
     result.step = 'decode Static Maps image';
     return {
       visibleWarningHeader: response.headers.has('x-staticmap-api-warning'),

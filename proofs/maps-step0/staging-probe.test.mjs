@@ -108,20 +108,21 @@ test('reports safe reasons and omits credential-bearing provider details', async
       return buttons[id] ??= { addEventListener(_, callback) { clicks[id] = callback; } };
     },
   };
-  new Script(source).runInNewContext({
-    document, URL, AbortSignal,
-    fetch: async () => Response.json({
-      error: {
-        status: 'PERMISSION_DENIED',
-        message: 'Provider diagnostic includes ' + staticKey,
-        errors: [{ reason: 'keyInvalid' }, { reason: staticKey }],
-      },
-    }, { status: 403 }),
-  });
+  let providerResponse = Response.json({
+    error: {
+      status: 'PERMISSION_DENIED',
+      message: 'Provider diagnostic includes ' + staticKey,
+      errors: [{ reason: 'keyInvalid' }, { reason: staticKey }],
+    },
+  }, { status: 403 });
+  new Script(source).runInNewContext({ document, URL, AbortSignal, fetch: async () => providerResponse });
   await clicks['#static']();
   const evidence = JSON.parse(status.textContent);
   assert.equal(evidence.status, 403);
   assert.deepEqual(evidence.reasons, ['PERMISSION_DENIED', 'keyInvalid']);
   assert.ok(!status.textContent.includes(staticKey));
   assert.ok(!status.textContent.includes('googleapis.com'));
+  providerResponse = new Response('<html></html>', { headers: { 'Content-Type': 'text/html' } });
+  await clicks['#static']();
+  assert.equal(JSON.parse(status.textContent).state, 'unexpected response type');
 });

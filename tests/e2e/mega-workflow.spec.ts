@@ -559,9 +559,10 @@ test.describe.serial('Mega Workflow (95 Steps)', () => {
       r => r.url().includes('/rpc/convert_quote_to_order'), { timeout: 20000 }
     ).catch(() => null);
 
-    const convertBtn = page.getByRole('button', { name: /Convert to Order/i }).first();
+    const convertBtn = page.getByRole('button', { name: /Draw from booking/i }).first();
     if (await convertBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await convertBtn.click();
+      await page.getByRole('menuitem', { name: 'Whole booking' }).click().catch(() => {});
       await waitForPageStable(page, 1000);
 
       const dialogBtn = page.getByRole('dialog').getByRole('button', { name: /Create Order/i }).first();

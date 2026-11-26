@@ -333,7 +333,7 @@ export default function FinancialDashboard() {
           <p className="text-2xl font-semibold font-heading text-nav-dark">{fmt(data.quotePipelineValue)}</p>
           <div className="flex gap-2 mt-1">
             <Badge variant="draft">{data.quoteCounts.draft} draft</Badge>
-            <Badge variant="sent">{data.quoteCounts.sent} sent</Badge>
+            <Badge variant="sent">{data.quoteCounts.sent} booked</Badge>
             <Badge variant="accepted">{data.quoteCounts.accepted} accepted</Badge>
           </div>
         </Card>

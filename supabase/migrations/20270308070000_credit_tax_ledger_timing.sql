@@ -1,5 +1,5 @@
 -- Written 2026-11-26. STATUS: NOT APPLIED (staging candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270308040000_credit_tax_ledger_timing.md.
+-- docs/reference/migrations.d/20270308070000_credit_tax_ledger_timing.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (#2091, a release #1990 follow-up; Mason 20 Nov, Taha agreed): the return-credit tax ledger

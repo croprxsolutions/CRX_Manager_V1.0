@@ -1,14 +1,14 @@
 /**
- * Contract for 20270308040000_credit_tax_ledger_timing (#2091). The behaviour is proven on the real schema by
+ * Contract for 20270308070000_credit_tax_ledger_timing (#2091). The behaviour is proven on the real schema by
  * scripts/smoke/prove-credit-tax-ledger-timing-real-schema.mjs; this pins the shape the proof relies on.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const MIGRATION = readFileSync('supabase/migrations/20270308040000_credit_tax_ledger_timing.sql', 'utf8');
+const MIGRATION = readFileSync('supabase/migrations/20270308070000_credit_tax_ledger_timing.sql', 'utf8');
 const BODY = MIGRATION.slice(MIGRATION.indexOf('AS $function$'), MIGRATION.indexOf('$function$;'));
 
-describe('20270308040000 credit tax ledger timing', () => {
+describe('20270308070000 credit tax ledger timing', () => {
   it('runs as one transaction and pins the one body it re-emits', () => {
     expect(MIGRATION).toContain('CREDIT_TAX_LEDGER_TIMING_NOT_IN_TRANSACTION');
     expect(MIGRATION).toContain("'6b175becb29ac202c5b1983ddc6686a5'");

@@ -35,6 +35,8 @@ const FOLLOW_UPS = [path.join(MIGRATIONS, '20270310120000_proof_binding_required
 // #2562 (Taha's review, LOW 3): it wraps _complete_delivery_authorized_impl_20270122, the body this proof's step calls
 // by name, and leaves the step, the wrappers and the helper alone.
 const LATER_READ_ONLY = new Set(['20270309180000_tiny_line_counts_as_zero.sql']);
+// Live applies #2562 between the candidate and step 4, so the step-4 cases replay it first (Codex on #2671).
+const TINY = path.join(MIGRATIONS, '20270309180000_tiny_line_counts_as_zero.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -618,8 +620,11 @@ function afterCases() {
 const MATCH_MD5 = "SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._delivery_lines_match(uuid,jsonb,jsonb)'::regprocedure;";
 const STEP_MD5 = "SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure;";
 function requiredCases() {
+  stageText('tiny.sql', lf(TINY));
+  let r = apply('tiny.sql');
+  assert.equal(r.status, 0, r.output);
   stageText('required.sql', lf(FOLLOW_UPS[0]));
-  let r = apply('required.sql');
+  r = apply('required.sql');
   assert.equal(r.status, 0, r.output);
   assert.equal(scalar(STEP_MD5), '1e279ff87bba48d7317d873a09ec79d3');
   assert.equal(scalar(MATCH_MD5), '7b7eea07bc4c838aee30aef601d0be19');
@@ -628,14 +633,20 @@ function requiredCases() {
   let tiny = (key, seen, figure) => {
     const t = delivery(TWO(2), 'in_progress');
     const [l1, l2] = scalar(`SELECT string_agg(id::text, ',' ORDER BY order_item_id = '${OI}' DESC) FROM public.delivery_items WHERE delivery_id = '${t}';`).split(',');
-    return [t, completeSig(t, key, seen).replace(', p_lines_seen', `, p_quantities => ${J({ [l1]: 2, [l2]: figure })}, p_lines_seen`)];
+    return [t, completeSig(t, key, seen).replace(', p_lines_seen', `, p_quantities => ${J({ [l1]: 2, [l2]: figure })}, p_lines_seen`), l2];
   };
-  let [t, sql] = tiny('pbl-qt1', TWO(0), 0.005); ok(sql); assert.equal(status(t), 'completed');
-  [t, sql] = tiny('pbl-qt2', TWO(0.004), 0.009); ok(sql); assert.equal(status(t), 'completed');
-  [t, sql] = tiny('pbl-qt3', TWO(0.005), 0); ok(sql); assert.equal(status(t), 'completed');
+  // The tiny line is recorded as 0 (#2562's wrapper): nothing delivered on it and no stock moved for its product.
+  const recordedZero = (t, l2) => {
+    assert.equal(Number(scalar(`SELECT quantity_delivered FROM public.delivery_items WHERE id = '${l2}';`)), 0, `${l2} recorded a tiny amount`);
+    assert.equal(scalar(`SELECT count(*) FROM public.inventory_transactions WHERE delivery_id = '${t}'
+      AND product_id = (SELECT product_id FROM public.delivery_items WHERE id = '${l2}');`), '0', `${l2} moved stock`);
+  };
+  let [t, sql, l2] = tiny('pbl-qt1', TWO(0), 0.005); ok(sql); assert.equal(status(t), 'completed'); recordedZero(t, l2);
+  [t, sql, l2] = tiny('pbl-qt2', TWO(0.004), 0.009); ok(sql); assert.equal(status(t), 'completed'); recordedZero(t, l2);
+  [t, sql, l2] = tiny('pbl-qt3', TWO(0.005), 0); ok(sql); assert.equal(status(t), 'completed'); recordedZero(t, l2);
   [t, sql] = tiny('pbl-qt4', TWO(0.005), 0.05); refused(sql, LOAD); assert.equal(status(t), 'in_progress');
   [t, sql] = tiny('pbl-qt5', TWO(0), 0.01); refused(sql, LOAD); assert.equal(status(t), 'in_progress');
-  console.log('[required tiny] an amount above 0 and under 0.01 counts as 0 on both sides: signed 0 / sent 0.005, signed 0.004 / sent 0.009 and signed 0.005 / sent 0 complete; signed 0.005 / sent 0.05 and signed 0 / sent 0.01 are refused');
+  console.log('[required tiny] an amount above 0 and under 0.01 counts as 0 on both sides: signed 0 / sent 0.005, signed 0.004 / sent 0.009 and signed 0.005 / sent 0 complete, each recording the tiny line as 0 with no stock moved (#2562 replayed first); signed 0.005 / sent 0.05 and signed 0 / sent 0.01 are refused');
   let d = delivery(A(), 'in_progress');
   refused(completeSig(d, 'pbl-q1', undefined), LOAD);
   assert.equal(status(d), 'in_progress');

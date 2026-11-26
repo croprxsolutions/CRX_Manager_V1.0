@@ -27,13 +27,14 @@ import { prepareApplicatorSheetPrintData, printApplicatorMapPages } from '../lib
 import PrintOptionsDialog, { type ApplicatorPrintSelection } from '../components/jobs/PrintOptionsDialog';
 import {
   buildApplicatorSheetData,
+  requireApplicatorSheetPayers,
   parseCustomConfig,
   SHEET_FORMAT_LABELS,
   type ApplicatorSheetData,
   type ApplicatorSheetFormat,
 } from '../lib/applicatorSheetData';
 import { generateChemicalApplicationReportPdf } from '../lib/chemicalApplicationReportPdf';
-import { resolveBilledCustomers } from '../lib/billedCustomersResolver';
+import { fetchJobBilledCustomerRows, resolveBilledCustomers } from '../lib/billedCustomersResolver';
 import { generateLoaderWorksheetPdf } from '../lib/loaderWorksheetPdf';
 import { fetchLoaderWorksheetData } from '../lib/loaderWorksheetFetch';
 import { newJobLoaderPrint } from '../lib/newJobLoaderPrint';
@@ -93,13 +94,16 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import RelatedNotes from '../components/team/RelatedNotes';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows } from '../lib/pagedRead';
-import type { JobStatus, Customer, Product, Field, Vehicle, Profile, BlendRecipe, BlendRecipeItem, LinkedEntityType, JobNotification, UnitConversion } from '../types';
+import type { JobStatus, Customer, Product, Field, JobVehicle, Profile, BlendRecipe, BlendRecipeItem, LinkedEntityType, JobNotification, UnitConversion } from '../types';
 import type { Json } from '../types/supabase';
 import type { ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { JobChemicalProductPicker } from '../components/jobs/JobChemicalProductPicker';
 import JobLabelCorrectionsNotice from '../components/jobs/JobLabelCorrectionsNotice';
 import { buildJobChemicalsPayload } from '../lib/jobChemicalPayload';
-import { JOB_CHEMICAL_COLUMNS, JOB_COLUMNS, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
+import {
+  FIELD_BILLING_DEFAULT_CREW_COLUMNS, JOB_CHEMICAL_COLUMNS, JOB_CHEMICAL_CREW_COLUMNS,
+  JOB_COLUMNS, JOB_CREW_COLUMNS, JOB_FIELD_SHARE_CREW_COLUMNS, PRODUCT_COLUMNS, withAdminCosts,
+} from '../lib/costFields';
 import { JOB_CHANGED_SINCE_LOADED_MESSAGE, readJobEditVersion, withOwnDispatches, type JobEditVersion } from '../lib/jobStaleEdit';
 import { sendEmail } from '../lib/emailService';
 import {
@@ -132,6 +136,7 @@ interface JobDbRow {
   recipe_id?: string | null;
   /** U3 (#52): drives the per-acre service fee on transfer_job_to_invoice. */
   application_service_id?: string | null;
+  application_service?: { name: string } | null;
   notes?: string | null;
   batch_id?: string | null;
   // Field-app parity #1: scheduling + memo fields.
@@ -185,7 +190,7 @@ interface JobDbRow {
   job_field_shares?: Array<{
     field_id: string;
     customer_id: string;
-    split_pct: number;
+    split_pct?: number;
     is_primary: boolean;
   }>;
   applied_info?: Array<{
@@ -299,6 +304,142 @@ interface ShareRow {
   customer_id: string;
   split_pct: string;
   is_primary: boolean;
+  payerLabel?: string;
+}
+
+function fetchJobDetailRecord(jobId: string, office: boolean) {
+  const query = office
+    ? supabase.from('jobs').select(`
+        ${JOB_COLUMNS},
+        customer:customers(farm_name),
+        vehicle:vehicles(vehicle_name, capacity_gallons, capacity_unit),
+        quote:quotes!jobs_quote_id_fkey(quote_number),
+        quote_section:quote_sections!jobs_quote_section_id_fkey(section_name),
+        job_fields(*, field:fields(field_name)),
+        job_chemicals(${JOB_CHEMICAL_COLUMNS}, product:products(product_name)),
+        job_field_shares(*),
+        job_location_dispatches(job_field_id, applicator_id, crew_id, dispatch_status),
+        applied_info:job_applied_info(*)
+      `)
+    : supabase.from('jobs_crew').select(`
+        ${JOB_CREW_COLUMNS},
+        customer:customers(farm_name),
+        vehicle:vehicles(vehicle_name, capacity_gallons, capacity_unit),
+        quote:quotes!jobs_quote_id_fkey(quote_number),
+        quote_section:quote_sections!jobs_quote_section_id_fkey(section_name),
+        job_fields(*, field:fields(field_name)),
+        job_location_dispatches(job_field_id, applicator_id, crew_id, dispatch_status),
+        applied_info:job_applied_info(*),
+        application_service:application_services(name)
+      `);
+  return query.eq('id', jobId).single();
+}
+
+async function fetchCrewJobDetailRows(jobId: string) {
+  const [chemicals, shares, payers] = await Promise.all([
+    supabase.from('job_chemicals_crew')
+      .select(`${JOB_CHEMICAL_CREW_COLUMNS}, product:products(product_name)`)
+      .eq('job_id', jobId),
+    supabase.from('job_field_shares_crew')
+      .select(JOB_FIELD_SHARE_CREW_COLUMNS)
+      .eq('job_id', jobId),
+    fetchJobBilledCustomerRows(jobId).catch((error: unknown) => {
+      Sentry.captureException(toSentryError(error), { extra: { context: 'job_detail_crew_payers' } });
+      return null;
+    }),
+  ]);
+  const payerLabels = new Map<string, string>();
+  for (const payer of payers ?? []) {
+    if (!payer.farm_name) continue;
+    payerLabels.set(payer.customer_id, payer.account_number
+      ? `${payer.farm_name} (${payer.account_number})`
+      : payer.farm_name);
+  }
+  return { chemicals, shares, payerLabels: payers === null ? null : payerLabels };
+}
+
+async function fetchJobDetailShares(job: JobDbRow, office: boolean) {
+  const shares: ShareRow[] = (job.job_field_shares || []).map((share) => ({
+    field_id: share.field_id,
+    customer_id: share.customer_id,
+    split_pct: share.split_pct?.toString() || '',
+    is_primary: share.is_primary,
+  }));
+  const fieldsWithShares = new Set(shares.map((share) => share.field_id));
+  const fieldsNeedingSeed = (job.job_fields || [])
+    .map((field) => field.field_id)
+    .filter((fieldId) => fieldId && !fieldsWithShares.has(fieldId));
+  if (fieldsNeedingSeed.length === 0) return { shares, defaultsError: null };
+
+  // Older jobs may lack saved shares. Use defaults for those fields, with the
+  // primary customer as the fallback when a field has no defaults.
+  const query = office
+    ? supabase.from('field_billing_defaults').select('field_id, customer_id, split_pct, is_primary')
+    : supabase.from('field_billing_defaults_crew').select(FIELD_BILLING_DEFAULT_CREW_COLUMNS);
+  const { data: defaults, error: defaultsError } = await query.in('field_id', fieldsNeedingSeed);
+  if (defaultsError && !office) return { shares, defaultsError };
+  type FieldDefault = { field_id: string; customer_id: string; split_pct?: number; is_primary: boolean };
+  const defaultsByField = new Map<string, FieldDefault[]>();
+  const entries: FieldDefault[] = defaults ?? [];
+  for (const entry of entries) {
+    const list = defaultsByField.get(entry.field_id) ?? [];
+    list.push(entry);
+    defaultsByField.set(entry.field_id, list);
+  }
+  for (const fieldId of fieldsNeedingSeed) {
+    const entries = defaultsByField.get(fieldId);
+    if (entries?.length) {
+      entries.forEach((entry) => shares.push({
+        field_id: fieldId, customer_id: entry.customer_id,
+        split_pct: entry.split_pct?.toString() ?? '', is_primary: entry.is_primary,
+      }));
+    } else if (job.customer_id) {
+      shares.push({ field_id: fieldId, customer_id: job.customer_id, split_pct: office ? '100' : '', is_primary: true });
+    }
+  }
+  return { shares, defaultsError };
+}
+
+function ChemicalLineWarnings({ rowDefect, hazard, isCrew, rateUnit, unit, totalApplied }: {
+  rowDefect?: string;
+  hazard?: ChemBillingHazard;
+  isCrew: boolean;
+  rateUnit: string;
+  unit: string;
+  totalApplied: number;
+}) {
+  return (
+    <>
+      {rowDefect && (
+        <div className="flex items-start gap-2 text-sm text-red-800 bg-red-100 border border-red-300 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span><strong>{isCrew ? 'Check this chemical line' : 'This line cannot be saved'}</strong> because {rowDefect}.</span>
+        </div>
+      )}
+      {hazard && (
+        <div className="flex items-start gap-2 text-sm text-red-800 bg-red-100 border border-red-300 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          {isCrew ? (
+            <span><strong>Check the rate and total applied units.</strong> The rate unit ({rateUnit}) and total applied ({totalApplied} {unit}) do not agree.</span>
+          ) : (
+            <span>
+              <strong>This line cannot be saved.</strong> Its quantity ({totalApplied}) is counted in{' '}
+              <strong>{hazard.quantityUnit}</strong>, but its cost and price are quoted per{' '}
+              <strong>{hazard.priceUnit}</strong>
+              {hazard.billedRatio && hazard.billedRatio > 1
+                ? <> — invoicing it would charge about <strong>{fmt4(hazard.billedRatio)}×</strong> too much</>
+                : null}
+              . Set <strong>Unit</strong> to {hazard.quantityUnit} and quote cost/price per{' '}
+              {hazard.quantityUnit} — or, if the rate really is in {hazard.priceUnit},
+              change the rate unit to {hazard.priceUnit}/ac <strong>and re-enter the rate</strong>{' '}
+              so the quantity is recalculated. Relabelling the unit on its own does not change
+              the amount, and would leave this line billing the same wrong total silently.
+            </span>
+          )}
+        </div>
+      )}
+    </>
+  );
 }
 
 export default function JobDetail() {
@@ -322,6 +463,8 @@ export default function JobDetail() {
   const isEditable = role === 'admin' || role === 'sales_rep';
   // Cost is admin-only (Mason, 2026-10-15): the server works it out for everyone else's saves.
   const isAdmin = role === 'admin';
+  // Mason 2026-11-25 ("Yes, hide them"): crews see payers, never selling prices, fees or the internal memo.
+  const isCrew = !isEditable;
 
   const [loading, setLoading] = useState(!isNew);
   // An admin's job-chemical cost read failed: show a retry panel instead of a cost-less form.
@@ -408,7 +551,7 @@ export default function JobDetail() {
   // True until the newest lookup load has finished: a job edited or saved before its
   // customer, field and product lists arrive would use partial reference data (Luna, #1017).
   const [lookupsLoading, setLookupsLoading] = useState(true);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [vehicles, setVehicles] = useState<JobVehicle[]>([]);
   const [applicators, setApplicators] = useState<Profile[]>([]);
   // Staff-held license rows per profile (B5 license gates)
   const [licensesByProfile, setLicensesByProfile] = useState<Record<string, { expiry_date: string; is_active: boolean }[]>>({});
@@ -986,7 +1129,7 @@ export default function JobDetail() {
           return;
         }
         // KI-195: a sprayed job prints the EPA number it kept (a failed read lands in the catch below).
-        if (!isNew && id) await applyKeptEpa(id, labelById);
+        if (!isNew && id) await applyKeptEpa(id, labelById, isEditable);
       }
       await generateWpsNoticePdf({
         job_number: jobNumber || 'draft',
@@ -1040,11 +1183,9 @@ export default function JobDetail() {
   // product-label lookup (caller toasts + aborts). Caller must have already
   // verified the job is saved (not dirty).
   // `strict` (default) = COMPLIANCE mode (#11 chemical report): billed customers are
-  // resolved via the SECURITY DEFINER RPC and an INCOMPLETE resolution ABORTS (returns
-  // null → caller toasts, no PDF, no printed_at). `strict = false` = the #9 field sheet:
-  // it still resolves via the RPC, but on an incomplete/empty result it falls back to
-  // the shipped #9 semantics (a null-named billed customer prints as "Customer", and an
-  // empty customer set falls back to the primary customer) rather than refusing.
+  // resolved via the SECURITY DEFINER RPC and an incomplete resolution stops the
+  // report. All crew prints require a complete payer list. Office field sheets
+  // retain their existing placeholder and primary-customer fallbacks.
   const buildSheetDataFromState = async (strict = true): Promise<ApplicatorSheetData | null> => {
     // Pull REI/PHI/EPA/product_form for EVERY product on the job, including any
     // since-deactivated ones (allProducts is is_active=true only) — mirrors the
@@ -1067,7 +1208,7 @@ export default function JobDetail() {
       // with missing label data (Codex P2; mirrors the WPS-notice path).
       if (pids.some((pid) => !labelById.has(pid))) return null;
       // KI-195: the EPA number the job kept; a failed read throws to the caller's catch (no PDF).
-      if (!isNew && id) await applyKeptEpa(id, labelById);
+      if (!isNew && id) await applyKeptEpa(id, labelById, isEditable);
     }
 
     // Billed customers via the SECURITY DEFINER RPC (saved job_field_shares →
@@ -1079,7 +1220,7 @@ export default function JobDetail() {
     let resolveComplete = false;
     if (!isNew && id) {
       const resolved = await resolveBilledCustomers(id);
-      billedCustomers = resolved.customers;
+      billedCustomers = isCrew ? requireApplicatorSheetPayers(resolved.customers, resolved.complete) : resolved.customers;
       resolveComplete = resolved.complete;
     }
 
@@ -1185,8 +1326,7 @@ export default function JobDetail() {
     }
     setGeneratingSheet(format);
     try {
-      // #9 FIELD SHEET: non-strict — fall back to "Customer"/primary if billed-customer
-      // resolution is incomplete (it's an internal crew sheet, not a compliance record).
+      // The crew path requires all payer identities even in field-sheet mode.
       const sheetData = await buildSheetDataFromState(false);
       if (!sheetData) {
         toast('error', 'Could not load product data — try again before printing the field sheet.');
@@ -1207,10 +1347,10 @@ export default function JobDetail() {
       }
 
       const printableData = !isNew && id
-        ? await prepareApplicatorSheetPrintData(id, sheetData, options)
+        ? await prepareApplicatorSheetPrintData(id, sheetData, options, isEditable)
         : sheetData;
       await generateApplicatorSheetPdf(printableData, format, customCfg, {
-        includeBillingSplits: options.includeBillingSplits,
+        includeBillingSplits: isEditable && options.includeBillingSplits,
         blankSections: options.blankSections,
         includePreviousApplications: options.includePreviousApplications,
         showBanner: options.showBanner,
@@ -1301,7 +1441,7 @@ export default function JobDetail() {
       // saved worksheet first (or the untouched legacy fields when none is
       // selected), so the detail print and Jobs-list bulk print cannot diverge.
       if (!isNew && id) {
-        const [savedWorksheetData] = await fetchLoaderWorksheetData([id]);
+        const [savedWorksheetData] = await fetchLoaderWorksheetData([id], isEditable);
         if (!savedWorksheetData) {
           toast('error', 'Could not load the saved loader worksheet for printing.');
           setPrintingLoader(false);
@@ -1359,6 +1499,7 @@ export default function JobDetail() {
   const [recipeId, setRecipeId] = useState('');
   // U3 (#52): optional per-acre machine fee (e.g. Hagie Y-Drop). NULL = no service fee.
   const [applicationServiceId, setApplicationServiceId] = useState<string | null>(null);
+  const [crewApplicationServiceName, setCrewApplicationServiceName] = useState<string | null>(null);
   // U3 follow-up (Codex P2): true only while the current applicationServiceId came
   // from a customer's default, not the user's hand. An auto-filled value must be
   // RE-evaluated when the customer changes (a manual pick is never clobbered).
@@ -1592,11 +1733,11 @@ export default function JobDetail() {
     const acres = sumAcresExact(fieldRows) ?? '0';
     chemRows.forEach((c, i) => {
       if (!c.product_id) return;
-      const h = chemLineBillingHazard(c, acres, productFormFor(c.product_id));
+      const h = chemLineBillingHazard(c, acres, productFormFor(c.product_id), !isCrew);
       if (h.hazard) byIndex.set(i, h);
     });
     return byIndex;
-  }, [chemRows, fieldRows, productFormFor]);
+  }, [isCrew, chemRows, fieldRows, productFormFor]);
 
   // Rows whose numbers are not fit to save at all, for reasons the billing-hazard guard
   // does not cover. Both fail closed rather than being silently coerced:
@@ -1619,9 +1760,11 @@ export default function JobDetail() {
         return;
       }
       // save_job refuses a priced line whose units carry a character it cannot read; say so before Save.
-      if ((parseInt(c.price_per_unit_cents) || 0) !== 0
+      if ((isCrew || (parseInt(c.price_per_unit_cents) || 0) !== 0)
           && (unitHasCharacterSaveJobRefuses(c.rate_unit) || unitHasCharacterSaveJobRefuses(c.unit))) {
-        byIndex.set(i, 'its Unit or rate unit contains a character this system cannot read, usually from a copy-and-paste; re-type both using plain letters');
+        byIndex.set(i, isCrew
+          ? 'its Unit or rate unit contains an unrecognized character'
+          : 'its Unit or rate unit contains a character this system cannot read, usually from a copy-and-paste; re-type both using plain letters');
         return;
       }
       // BLANK UNIT on a line that BILLS. chemLineBillingHazard can only flag a PROVEN
@@ -1636,15 +1779,17 @@ export default function JobDetail() {
       // refuses it on its own).
       const blankSides = chemUnitUnspecifiedSides(c.rate_unit, c.unit);
       if (blankSides
-          && !(c.customer_supplied ?? false)
           && parseFloat(c.quantity) !== 0
-          && ((parseInt(c.cost_per_unit_cents) || 0) !== 0 || (parseInt(c.price_per_unit_cents) || 0) !== 0)) {
+          && (isCrew || (!(c.customer_supplied ?? false)
+            && ((parseInt(c.cost_per_unit_cents) || 0) !== 0 || (parseInt(c.price_per_unit_cents) || 0) !== 0)))) {
         const side = blankSides.stockBlank && blankSides.rateBlank
           ? 'its Unit and its rate unit are both blank'
           : blankSides.stockBlank
             ? 'its Unit is blank'
             : 'its rate unit names no unit';
-        byIndex.set(i, `${side} while the line still carries a cost or price, so there is no way to know what the quantity would be billed per — pick the unit, or clear the cost and price if the line should not bill`);
+        byIndex.set(i, isCrew
+          ? `${side}, so the total applied cannot be checked against the rate`
+          : `${side} while the line still carries a cost or price, so there is no way to know what the quantity would be billed per — pick the unit, or clear the cost and price if the line should not bill`);
         return;
       }
       // Gate on the money helper's OWN grammar, not on Number.isFinite. They are not the
@@ -1654,7 +1799,9 @@ export default function JobDetail() {
       // nonzero line behind a zero total. `<input type="number">` accepts '1e3', so this
       // is reachable by typing. One grammar, one gate. (Codex P2)
       if (!isExactDecimalText(c.quantity)) {
-        byIndex.set(i, 'its quantity is blank, or is not written as a plain number, and would not be billed correctly');
+        byIndex.set(i, isCrew
+          ? 'its total applied is blank or is not a valid number'
+          : 'its quantity is blank, or is not written as a plain number, and would not be billed correctly');
         return;
       }
       // The totals above multiply the exact decimal TEXT, but buildJobChemicalsPayload
@@ -1662,7 +1809,9 @@ export default function JobDetail() {
       // than a double can hold means those two are different numbers, so the stored total
       // and the stored line disagree by a cent. Refused, not rounded. (Codex P2, 2026-08-23)
       if (!quantitySurvivesSave(c.quantity)) {
-        byIndex.set(i, 'its quantity has more decimal places than can be saved exactly, so the line total and the job total would not agree — round it to 4 decimal places or fewer');
+        byIndex.set(i, isCrew
+          ? 'its total applied has more decimal places than the system can store exactly'
+          : 'its quantity has more decimal places than can be saved exactly, so the line total and the job total would not agree — round it to 4 decimal places or fewer');
         return;
       }
       // NEGATIVE amounts are refused outright (Codex High, 2026-08-25). The decimal and
@@ -1673,7 +1822,9 @@ export default function JobDetail() {
       // (CHEM_QUANTITY_NOT_FINITE covers sign), so the mirror must too — a mirror more
       // lenient than the SQL is how a hard server failure ships with no on-screen warning.
       if (parseFloat(c.quantity) < 0) {
-        byIndex.set(i, 'its quantity is negative — a line cannot apply or bill a negative amount; use a credit memo or a return for corrections');
+        byIndex.set(i, isCrew
+          ? 'its total applied is negative'
+          : 'its quantity is negative — a line cannot apply or bill a negative amount; use a credit memo or a return for corrections');
         return;
       }
       // F06 (2026-09-03): mirror of CHEM_QUANTITY_NOT_DERIVED on the units-equal path, with
@@ -1687,9 +1838,12 @@ export default function JobDetail() {
         ? null
         : chemQuantityDisagreesWithRate(c, exactAcres);
       if (expectedQty != null) {
-        byIndex.set(i, `its rate (${c.rate_per_acre}/ac over ${fmt4(acres)} acres = ${fmt4(expectedQty)}) and its quantity (${c.quantity}) no longer agree — usually because the acres changed after the line was saved. Re-type the rate per acre to refill the quantity, or re-type the quantity to refill the rate`);
+        byIndex.set(i, isCrew
+          ? `its rate (${c.rate_per_acre} ${c.rate_unit}) over ${fmt4(acres)} acres gives ${fmt4(expectedQty)} ${c.unit}, but Total Applied is ${c.quantity} ${c.unit}`
+          : `its rate (${c.rate_per_acre}/ac over ${fmt4(acres)} acres = ${fmt4(expectedQty)}) and its quantity (${c.quantity}) no longer agree — usually because the acres changed after the line was saved. Re-type the rate per acre to refill the quantity, or re-type the quantity to refill the rate`);
         return;
       }
+      if (isCrew) return;
       // Mirror of CHEM_QUANTITY_ZERO_BUT_EXPECTED: priced, a positive quantity was derivable,
       // and the line records 0. The invoice bills the quantity, so this would charge nothing.
       const expectedNonZero = chemQuantityExpectedButZero(c, acres);
@@ -1731,7 +1885,7 @@ export default function JobDetail() {
       }
     });
     return byIndex;
-  }, [chemRows, fieldRows, allProducts, customerPricingTier]);
+  }, [isCrew, chemRows, fieldRows, allProducts, customerPricingTier]);
 
   // SAFE-SCOPE U7: a job is "multi-owner" when its fields' billed shares span more
   // than one distinct customer — the same customer set transfer_job_to_invoice
@@ -1781,7 +1935,7 @@ export default function JobDetail() {
       fetchAllRows((from, to) => supabase.from('customers').select('*', { count: 'exact' }).eq('is_active', true).order('farm_name').order('id').range(from, to)),
       fetchAllRows((from, to) => supabase.from('fields').select('*', { count: 'exact' }).order('field_name').order('id').range(from, to)),
       fetchAllRows((from, to) => supabase.from('products').select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`, { count: 'exact' }).eq('is_active', true).order('product_name').order('id').range(from, to)),
-      supabase.from('vehicles').select('*').eq('status', 'active').order('vehicle_name'),
+      supabase.from('vehicles').select('id, vehicle_name, vehicle_type, category, capacity_gallons, capacity_unit, status').eq('status', 'active').order('vehicle_name'),
       // PR-07 follow-up: applicator picker only uses a.id + a.full_name + a.role; safe via view.
       supabase.from('profile_public_view').select('id, full_name, role, is_active').in('role', ['applicator', 'admin', 'sales_rep']).eq('is_active', true).order('full_name'),
       supabase.from('blend_recipes').select('*').eq('is_active', true).order('name'),
@@ -1822,10 +1976,15 @@ export default function JobDetail() {
       if (!failures.includes('products')) failures.push('products');
     }
     if (superseded()) return;
+    if (vehicleResult.error) {
+      Sentry.captureException(vehicleResult.error, { tags: { source: 'fetch', action: 'load_job_vehicles' } });
+      toast('error', 'Failed to load Vehicles. Retry before editing this job.');
+      failures.push('vehicles');
+    }
     setAllProducts(productRows);
     setLookupLoadFailures(failures);
     setLookupsLoading(false);
-    setVehicles((vehicleResult.data || []) as Vehicle[]);
+    setVehicles(vehicleResult.error ? [] : (vehicleResult.data ?? []));
     setApplicators((appResult.data || []) as Profile[]);
     setRecipes((recipeResult.data || []) as BlendRecipe[]);
 
@@ -1937,26 +2096,8 @@ export default function JobDetail() {
         return null;
       }
     };
-    const selectJob = () => supabase
-      // PR-07 follow-up: dropped applicator FK embed — full_name isn't read
-      // anywhere in this page; only applicator_id is consumed (line 235).
-      .from('jobs')
-      .select(`
-        ${JOB_COLUMNS},
-        customer:customers(farm_name),
-        vehicle:vehicles(vehicle_name, capacity_gallons, capacity_unit),
-        quote:quotes!jobs_quote_id_fkey(quote_number),
-        quote_section:quote_sections!jobs_quote_section_id_fkey(section_name),
-        job_fields(*, field:fields(field_name)),
-        job_chemicals(${JOB_CHEMICAL_COLUMNS}, product:products(product_name)),
-        job_field_shares(*),
-        job_location_dispatches(job_field_id, applicator_id, crew_id, dispatch_status),
-        applied_info:job_applied_info(*)
-      `)
-      .eq('id', id!)
-      .single();
     let before = await readVersion();
-    let loaded = await selectJob();
+    let loaded = await fetchJobDetailRecord(id!, isEditable);
     let loadedVersion: JobEditVersion | null = null;
     // Read again after the select: if rev moved, something wrote the job while the form loaded (maybe changing a value
     // and putting it back), so the form may not be the state the version describes. Reload, up to 3 tries; after
@@ -1966,7 +2107,7 @@ export default function JobDetail() {
       if (after && after.rev === before.rev) { loadedVersion = before; break; }
       if (tries >= 3) break;
       before = await readVersion();
-      loaded = await selectJob();
+      loaded = await fetchJobDetailRecord(id!, isEditable);
     }
     const { data, error } = loaded;
 
@@ -1984,6 +2125,21 @@ export default function JobDetail() {
     }
 
     const j = data as unknown as JobDbRow;
+    let crewPayerLabels: Map<string, string> | null | undefined;
+    if (isCrew) {
+      const { chemicals, shares, payerLabels } = await fetchCrewJobDetailRows(id!);
+      if (!isCurrentLoad()) return false;
+      if (chemicals.error || shares.error) {
+        baselineSettleGuardRef.current = false;
+        Sentry.captureException(chemicals.error ?? shares.error, { tags: { source: 'fetch', page: 'job-detail' } });
+        toast('error', 'Could not load job details');
+        navigate('/jobs');
+        return false;
+      }
+      j.job_chemicals = chemicals.data?.map((chemical) => ({ ...chemical, sort_order: chemical.sort_order ?? 0 }));
+      j.job_field_shares = shares.data ?? [];
+      crewPayerLabels = payerLabels;
+    }
 
     // Cost is admin-only (Mason, 2026-10-15): only an admin's form carries the chemical cost.
     // A failed cost read installs nothing, so an admin can never save a zero cost by accident.
@@ -2019,43 +2175,12 @@ export default function JobDetail() {
     // The last isCurrentLoad() check is therefore the real commit point. (Codex PR thread
     // at JobDetail.tsx:1813, original_commit_id 9cee23cc7.)
     //
-    // Load saved shares; then SEED defaults for any field that has no saved
-    // shares (existing jobs created before this migration, or a field never
-    // touched), so the list/#26 split don't collapse to the primary customer
-    // (Codex). Defaults come from field_billing_defaults, else field owner 100%.
-    const savedShares: ShareRow[] = (j.job_field_shares || []).map((s) => ({
-      field_id: s.field_id,
-      customer_id: s.customer_id,
-      split_pct: s.split_pct?.toString() || '',
-      is_primary: s.is_primary,
-    }));
-    const fieldsWithShares = new Set(savedShares.map((s) => s.field_id));
-    const fieldsNeedingSeed = (j.job_fields || [])
-      .map((f) => f.field_id)
-      .filter((fid) => fid && !fieldsWithShares.has(fid));
-    if (fieldsNeedingSeed.length > 0) {
-      const { data: fbd } = await supabase
-        .from('field_billing_defaults')
-        .select('field_id, customer_id, split_pct, is_primary')
-        .in('field_id', fieldsNeedingSeed);
-      if (!isCurrentLoad()) return false;
-      const fbdByField = new Map<string, { customer_id: string; split_pct: number; is_primary: boolean }[]>();
-      ((fbd || []) as { field_id: string; customer_id: string; split_pct: number; is_primary: boolean }[])
-        .forEach((d) => {
-          const list = fbdByField.get(d.field_id) ?? [];
-          list.push(d);
-          fbdByField.set(d.field_id, list);
-        });
-      for (const fid of fieldsNeedingSeed) {
-        const defs = fbdByField.get(fid);
-        if (defs && defs.length > 0) {
-          defs.forEach((d) => savedShares.push({ field_id: fid, customer_id: d.customer_id, split_pct: d.split_pct.toString(), is_primary: d.is_primary }));
-        } else if (j.customer_id) {
-          // No billing default on file — fall back to the job's customer at 100%
-          // (matches the server's derive_customer_shares_from_fields fallback).
-          savedShares.push({ field_id: fid, customer_id: j.customer_id, split_pct: '100', is_primary: true });
-        }
-      }
+    const { shares: savedShares, defaultsError } = await fetchJobDetailShares(j, isEditable);
+    if (!isCurrentLoad()) return false;
+    if (defaultsError) Sentry.captureException(defaultsError, { tags: { source: 'fetch', page: 'job-detail', context: 'field_billing_defaults' } });
+    if (crewPayerLabels === null || defaultsError) toast('error', 'Could not load payer names');
+    if (crewPayerLabels) {
+      for (const share of savedShares) share.payerLabel = crewPayerLabels.get(share.customer_id);
     }
 
     // ---- Phase 2: install. NOTHING below this line may await. ----
@@ -2077,6 +2202,7 @@ export default function JobDetail() {
     setSavedVehicleCapacity(j.vehicle ? { name: j.vehicle.vehicle_name ?? null, gallons: j.vehicle.capacity_gallons ?? null, unit: j.vehicle.capacity_unit ?? null } : null);
     setRecipeId(j.recipe_id || '');
     setApplicationServiceId(j.application_service_id || null);
+    setCrewApplicationServiceName(j.application_service?.name ?? null);
     setNotes(j.notes || '');
     setBatchId(j.batch_id || '');
     setCallDate(j.call_date || '');
@@ -2180,7 +2306,7 @@ export default function JobDetail() {
     setBaselineSettleTick((t) => t + 1);
     // initialLoadDone is armed by the loading-settle effect (rAF after loading=false).
     return true;
-  }, [id, toast, navigate, isAdmin, isEditable]);
+  }, [id, toast, navigate, isAdmin, isEditable, isCrew]);
 
   // Route invalidation runs in a LAYOUT effect, not the passive one below. Passive
   // effects are deferred: React commits the new route's render and can yield to the
@@ -3701,7 +3827,7 @@ export default function JobDetail() {
   /** Default a field's customer shares from field_billing_defaults (the canonical
    *  per-field owner shares); fall back to the field owner at 100%. */
   const seedSharesForField = async (fieldId: string) => {
-    if (!fieldId) return;
+    if (!isEditable || !fieldId) return;
     // Don't clobber shares already set for this field.
     if (shareRows.some((s) => s.field_id === fieldId)) return;
     // FIX 3: mark this field as "shares loading" so handleSave/sharesValid block a
@@ -4303,6 +4429,14 @@ export default function JobDetail() {
               ))}
             </select>
           </div>
+          {isCrew ? (
+            applicationServiceId && (
+              <div>
+                <p className="text-sm font-medium text-nav-dark mb-1">Application Service</p>
+                <p className="text-sm">{crewApplicationServiceName ?? 'Service unavailable'}</p>
+              </div>
+            )
+          ) : (
           <div>
             <label className="block text-sm font-medium text-nav-dark mb-1">Application Service</label>
             <ApplicationServicePicker
@@ -4317,6 +4451,7 @@ export default function JobDetail() {
             />
             <p className="mt-1 text-xs text-gray-500">Adds a per-acre machine fee to this job's invoice.</p>
           </div>
+          )}
           <Input
             label="Batch ID"
             value={batchId}
@@ -4528,27 +4663,35 @@ export default function JobDetail() {
                         <div className="bg-gray-50 rounded-lg p-2.5">
                           <div className="flex items-center justify-between mb-1.5">
                             <span className="text-xs font-semibold text-nav-dark">Customer Shares</span>
-                            <span className={`text-xs font-medium ${shareOk ? 'text-secondary' : 'text-red-600'}`}>
-                              Total: {shareSum.toFixed(1)}%{!shareOk && ' — must equal 100%'}
-                            </span>
+                            {!isCrew && (
+                              <span className={`text-xs font-medium ${shareOk ? 'text-secondary' : 'text-red-600'}`}>
+                                Total: {shareSum.toFixed(1)}%{!shareOk && ' — must equal 100%'}
+                              </span>
+                            )}
                           </div>
                           <div className="space-y-1.5">
                             {fieldShares.map((s) => (
                               <div key={s.idx} className="flex items-center gap-2">
-                                <SearchableSelect
-                                  options={customers.map((c) => ({ value: c.id, label: c.farm_name }))}
-                                  value={s.customer_id}
-                                  onChange={(value) => updateShareRow(s.idx, 'customer_id', value)}
-                                  disabled={!canEdit}
-                                  placeholder="Select customer..."
-                                />
-                                <input
-                                  type="number" min={0} max={100} step="0.01"
-                                  value={s.split_pct}
-                                  onChange={(e) => updateShareRow(s.idx, 'split_pct', e.target.value)}
-                                  disabled={!canEdit} placeholder="%"
-                                  className="w-20 px-2 py-1 text-sm border border-gray-200 rounded text-right disabled:bg-gray-50"
-                                />
+                                {isCrew ? (
+                                  <span className="text-sm">{s.payerLabel ?? 'Customer'}</span>
+                                ) : (
+                                  <SearchableSelect
+                                    options={customers.map((c) => ({ value: c.id, label: c.farm_name }))}
+                                    value={s.customer_id}
+                                    onChange={(value) => updateShareRow(s.idx, 'customer_id', value)}
+                                    disabled={!canEdit}
+                                    placeholder="Select customer..."
+                                  />
+                                )}
+                                {!isCrew && (
+                                  <input
+                                    type="number" min={0} max={100} step="0.01"
+                                    value={s.split_pct}
+                                    onChange={(e) => updateShareRow(s.idx, 'split_pct', e.target.value)}
+                                    disabled={!canEdit} placeholder="%"
+                                    className="w-20 px-2 py-1 text-sm border border-gray-200 rounded text-right disabled:bg-gray-50"
+                                  />
+                                )}
                                 <label className="flex items-center gap-1 text-xs text-secondary whitespace-nowrap">
                                   <input type="checkbox" checked={s.is_primary} disabled={!canEdit}
                                     onChange={(e) => updateShareRow(s.idx, 'is_primary', e.target.checked)} />
@@ -4595,7 +4738,7 @@ export default function JobDetail() {
         <SectionCard
           id="job-chemicals"
           icon={<Beaker className="w-5 h-5" />}
-          title={`Chemicals / Charges (${chemRows.length})`}
+          title={`${isCrew ? 'Chemicals' : 'Chemicals / Charges'} (${chemRows.length})`}
           action={canEdit && (
             <div className="flex gap-2 flex-wrap">
               {canEdit && (
@@ -4660,30 +4803,7 @@ export default function JobDetail() {
                 const rowDefect = chemRowDefects.get(i);
                 return (
                   <div key={i} className={`border rounded-lg p-3 space-y-2 ${hazard || rowDefect ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}>
-                    {rowDefect && (
-                      <div className="flex items-start gap-2 text-sm text-red-800 bg-red-100 border border-red-300 rounded-lg px-3 py-2">
-                        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                        <span><strong>This line cannot be saved</strong> because {rowDefect}.</span>
-                      </div>
-                    )}
-                    {hazard && (
-                      <div className="flex items-start gap-2 text-sm text-red-800 bg-red-100 border border-red-300 rounded-lg px-3 py-2">
-                        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                        <span>
-                          <strong>This line cannot be saved.</strong> Its quantity ({totalApplied}) is counted in{' '}
-                          <strong>{hazard.quantityUnit}</strong>, but its cost and price are quoted per{' '}
-                          <strong>{hazard.priceUnit}</strong>
-                          {hazard.billedRatio && hazard.billedRatio > 1
-                            ? <> — invoicing it would charge about <strong>{fmt4(hazard.billedRatio)}×</strong> too much</>
-                            : null}
-                          . Set <strong>Unit</strong> to {hazard.quantityUnit} and quote cost/price per{' '}
-                          {hazard.quantityUnit} — or, if the rate really is in {hazard.priceUnit},
-                          change the rate unit to {hazard.priceUnit}/ac <strong>and re-enter the rate</strong>{' '}
-                          so the quantity is recalculated. Relabelling the unit on its own does not change
-                          the amount, and would leave this line billing the same wrong total silently.
-                        </span>
-                      </div>
-                    )}
+                    <ChemicalLineWarnings rowDefect={rowDefect} hazard={hazard} isCrew={isCrew} rateUnit={c.rate_unit} unit={c.unit} totalApplied={totalApplied} />
                     <div className="grid grid-cols-12 gap-2 items-end">
                       <div className="col-span-12 md:col-span-3">
                         <label className="block text-xs font-medium text-secondary mb-1">Chemical</label>
@@ -4786,11 +4906,13 @@ export default function JobDetail() {
                           disabled={!canEdit} step="1" className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50" />
                       </div>
                       )}
+                      {!isCrew && (
                       <div className="col-span-6 md:col-span-2">
                         <label className="block text-xs font-medium text-secondary mb-1">Price ¢/unit</label>
                         <input type="number" value={c.price_per_unit_cents} onChange={(e) => updateChemRow(i, 'price_per_unit_cents', e.target.value)}
                           disabled={!canEdit} step="1" className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50" />
                       </div>
+                      )}
                     </div>
                     {/* #53/#54: grower-supplied product — applied but not deducted or billed. */}
                     <div className="flex items-center gap-2 pt-1">
@@ -4803,7 +4925,9 @@ export default function JobDetail() {
                         className="h-4 w-4 rounded border-gray-300 text-crx-green focus:ring-crx-green disabled:opacity-50"
                       />
                       <label htmlFor={`cust-supp-${i}`} className="text-xs font-medium text-secondary select-none">
-                        Customer supplied &mdash; apply it, but don&rsquo;t deduct our inventory or bill for this product
+                        {isCrew
+                          ? 'Customer supplied — apply it without deducting from our inventory'
+                          : 'Customer supplied — apply it, but don’t deduct our inventory or bill for this product'}
                       </label>
                     </div>
                     {/* §5 Label-Rate Guardrails: rate-vs-max + PHI-vs-harvest on the job mix
@@ -4845,7 +4969,7 @@ export default function JobDetail() {
               })}
               <div className="flex justify-between text-sm text-secondary pt-2">
                 {isAdmin ? <span>Total Cost: ${(totalCostCents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> : <span />}
-                <span>Total Price: ${(totalPriceCents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                {!isCrew && <span>Total Price: ${(totalPriceCents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>}
               </div>
             </div>
           )}
@@ -5221,7 +5345,9 @@ export default function JobDetail() {
             </div>
           )}
           <p className="mt-3 text-xs text-secondary">
-            The pre- and post-notification messages are configured in Settings (editable wording) and go to the job&apos;s billed customer(s) by email. This history carries over to the job&apos;s field-application invoice.
+            {isCrew
+              ? 'Pre- and post-application notifications are sent to the job’s payers by email.'
+              : "The pre- and post-notification messages are configured in Settings (editable wording) and go to the job's billed customer(s) by email. This history carries over to the job's field-application invoice."}
           </p>
           </div>
         </SectionCard>
@@ -5241,6 +5367,7 @@ export default function JobDetail() {
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-none disabled:bg-gray-50"
                 placeholder="Gate codes, directions, customer requests..." />
             </div>
+            {!isCrew && (
             <div>
               <label className="block text-sm font-medium text-nav-dark mb-1">
                 Internal Job/Invoice Memo
@@ -5250,6 +5377,7 @@ export default function JobDetail() {
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-none disabled:bg-gray-50"
                 placeholder="Internal only — never appears on customer-facing documents." />
             </div>
+            )}
             {!isNew && !isDeleted && (
               <p className="text-xs text-secondary">
                 Print status: {' '}

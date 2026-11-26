@@ -56,6 +56,16 @@ python3 -I "$REPO/.github/scripts/rebuild/reference-data.py" "$REPO" "$W/referen
 psqlq -f "$W/reference-data.sql"
 
 ONESHOTS=" $(node -p "Object.keys(require('$B/one-shot-migrations.json').one_shot).join(' ')") "
+activation="$(cd "$REPO" && node --input-type=module -e '
+  import { readFileSync, readdirSync } from "node:fs";
+  import { stagingLiquidDensityMigration } from "./.github/scripts/db-apply.mjs";
+  const dir = "supabase/migrations";
+  const stems = readdirSync(dir).filter((name) => name.endsWith(".sql")).map((name) => name.slice(0, -4));
+  const oneShots = new Set(Object.keys(JSON.parse(readFileSync("supabase/baselines/one-shot-migrations.json", "utf8")).one_shot));
+  const activation = stagingLiquidDensityMigration(stems, (stem) => readFileSync(dir + "/" + stem + ".sql", "utf8"), oneShots);
+  if (activation) console.log(activation.stem + "|" + activation.marker);
+')"
+IFS='|' read -r activation_stem activation_marker <<< "$activation"
 n=0
 for f in "$REPO"/supabase/migrations/*.sql; do   # glob order = stamp order
   b="$(basename "$f" .sql)"; v="${b%%_*}"
@@ -80,9 +90,11 @@ for f in "$REPO"/supabase/migrations/*.sql; do   # glob order = stamp order
   fi
   tx=(--single-transaction)   # a first line "-- crx: no-transaction" runs outside one, as db-apply does
   head -n 1 "$f" | tr -d '\r' | grep -Eiq '^--[[:space:]]*crx:[[:space:]]*no-transaction[[:space:]]*$' && tx=()
+  context=()
+  if [[ "$b" == "$activation_stem" ]]; then context=(-c "$activation_marker"); fi
   ok=0
   for try in 1 2 3 4 5; do   # DRAW_DOWN_CUTOVER_NOT_QUIET: wait out background service transactions
-    if psql "$DB" -X -q "${tx[@]}" -v ON_ERROR_STOP=1 -f "$f" >"$W/last.log" 2>&1; then ok=1; break; fi
+    if psql "$DB" -X -q "${tx[@]}" -v ON_ERROR_STOP=1 "${context[@]}" -f "$f" >"$W/last.log" 2>&1; then ok=1; break; fi
     grep -q NOT_QUIET "$W/last.log" || break; sleep 2
   done
   [ $ok = 1 ] || { echo "::error::rebuild failed at $b"; grep -E 'ERROR|CONTEXT' "$W/last.log" | head -20; exit 1; }

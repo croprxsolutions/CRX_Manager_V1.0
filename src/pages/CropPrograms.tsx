@@ -2,9 +2,8 @@
  * CropPrograms.tsx — Reusable crop program templates
  * GAP FIX #19: Crop Program Templates
  *
- * Lets admins/sales reps create standard "programs" (e.g. "2026 Corn Program")
- * that contain a predefined set of products and rates. When creating a new quote,
- * they can "Apply Program" to auto-fill sections and items.
+ * Admins maintain templates of products and rates. Office staff can apply
+ * templates to fill sections and items on a quote.
  *
  * Stored in app_settings as JSON (no new table needed).
  */
@@ -85,8 +84,16 @@ export default function CropPrograms() {
   const [formSeason, setFormSeason] = useState(SEASONS[1]);
   const [formItems, setFormItems] = useState<ProgramItem[]>([]);
   const [saving, setSaving] = useState(false);
+  const [formSaving, setFormSaving] = useState(false);
+  const savingRef = useRef(false);
+  const writeBusy = saving || formSaving;
 
   const isAdmin = role === 'admin';
+  useEffect(() => {
+    if (isAdmin) return;
+    setModalOpen(false);
+    setDeleteConfirm(null);
+  }, [isAdmin]);
 
   // Only the newest read may change the list or its error state: saving rewrites the whole
   // list, so a slow older read must never replace a newer one.
@@ -139,30 +146,40 @@ export default function CropPrograms() {
   };
 
   const savePrograms = async (updated: CropProgram[]) => {
-    const { data: existing } = await supabase
-      .from('app_settings')
-      .select('id')
-      .eq('setting_key', 'crop_programs')
-      .maybeSingle();
-
-    const value = JSON.stringify(updated);
-
-    if (existing) {
-      const updateResult = await supabase
+    if (!isAdmin) throw new Error('Administrator access is required to change crop programs');
+    if (savingRef.current) throw new Error('A crop program change is already saving');
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const { data: existing, error } = await supabase
         .from('app_settings')
-        .update({ setting_value: value, updated_by: profile?.id, updated_at: new Date().toISOString() })
-        .eq('id', existing.id)
-        .select();
-      checkMutationResult(updateResult, 'Update crop programs setting');
-    } else {
-      const insertResult = await supabase.from('app_settings').insert({
-        setting_key: 'crop_programs',
-        setting_value: value,
-        updated_by: profile?.id,
-      }).select();
-      checkMutationResult(insertResult, 'Create crop programs setting');
+        .select('id')
+        .eq('setting_key', 'crop_programs')
+        .maybeSingle();
+      if (error) throw error;
+
+      const value = JSON.stringify(updated);
+
+      if (existing) {
+        const updateResult = await supabase
+          .from('app_settings')
+          .update({ setting_value: value, updated_by: profile?.id, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+          .select();
+        checkMutationResult(updateResult, 'Update crop programs setting');
+      } else {
+        const insertResult = await supabase.from('app_settings').insert({
+          setting_key: 'crop_programs',
+          setting_value: value,
+          updated_by: profile?.id,
+        }).select();
+        checkMutationResult(insertResult, 'Create crop programs setting');
+      }
+      setPrograms(updated);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
-    setPrograms(updated);
   };
 
   const openNew = () => {
@@ -185,7 +202,7 @@ export default function CropPrograms() {
     setModalOpen(true);
   };
 
-  const handleDuplicate = (prog: CropProgram) => {
+  const handleDuplicate = async (prog: CropProgram) => {
     const dup: CropProgram = {
       ...prog,
       id: crypto.randomUUID(),
@@ -195,15 +212,23 @@ export default function CropPrograms() {
       updated_at: new Date().toISOString(),
       items: prog.items.map((item) => ({ ...item })),
     };
-    savePrograms([...programs, dup]);
-    toast('success', `Program duplicated as "${dup.name}"`);
+    await runCriticalAction({
+      action: () => savePrograms([...programs, dup]),
+      toast,
+      successMessage: `Program duplicated as "${dup.name}"`,
+      sentryTag: 'duplicate_crop_program',
+    });
   };
 
   const handleDelete = async (progId: string) => {
     const updated = programs.filter((p) => p.id !== progId);
-    await savePrograms(updated);
-    setDeleteConfirm(null);
-    toast('success', 'Program deleted');
+    await runCriticalAction({
+      action: () => savePrograms(updated),
+      toast,
+      successMessage: 'Program deleted',
+      sentryTag: 'delete_crop_program',
+      onSuccess: () => setDeleteConfirm(null),
+    });
   };
 
   const addItem = () => {
@@ -272,7 +297,7 @@ export default function CropPrograms() {
         }
       },
       toast,
-      setLoading: setSaving,
+      setLoading: setFormSaving,
       successMessage: editingProgram ? 'Program updated' : 'Program created',
       sentryTag: editingProgram ? 'update_crop_program' : 'create_crop_program',
       onSuccess: () => {
@@ -285,7 +310,11 @@ export default function CropPrograms() {
     const updated = programs.map((p) =>
       p.id === progId ? { ...p, is_active: !p.is_active, updated_at: new Date().toISOString() } : p
     );
-    await savePrograms(updated);
+    await runCriticalAction({
+      action: () => savePrograms(updated),
+      toast,
+      sentryTag: 'toggle_crop_program',
+    });
   };
 
   const filtered = programs.sort((a, b) => {
@@ -312,8 +341,8 @@ export default function CropPrograms() {
         </span>
         {/* Saving rewrites the whole program list, so it must never start from a list that failed to load.
             (Until a read finishes, the page renders only the loading skeleton above, so no save can start early.) */}
-        {!loadError && (
-          <Button icon={<Plus className="w-4 h-4" />} onClick={openNew}>
+        {isAdmin && !loadError && (
+          <Button icon={<Plus className="w-4 h-4" />} onClick={openNew} disabled={writeBusy}>
             New Program
           </Button>
         )}
@@ -328,12 +357,16 @@ export default function CropPrograms() {
           <div className="text-center py-12">
             <Sprout className="w-12 h-12 text-gray-300 mx-auto mb-3" />
             <p className="text-secondary text-sm">No crop programs yet</p>
-            <p className="text-xs text-gray-400 mt-1">
-              Create a program template to quickly build quotes for common crop applications
-            </p>
-            <Button className="mt-4" icon={<Plus className="w-4 h-4" />} onClick={openNew}>
-              Create First Program
-            </Button>
+            {isAdmin && (
+              <>
+                <p className="text-xs text-gray-400 mt-1">
+                  Create a program template to quickly build quotes for common crop applications
+                </p>
+                <Button className="mt-4" icon={<Plus className="w-4 h-4" />} onClick={openNew} disabled={writeBusy}>
+                  Create First Program
+                </Button>
+              </>
+            )}
           </div>
         </Card>
       ) : (
@@ -376,31 +409,36 @@ export default function CropPrograms() {
                   >
                     {expandedId === prog.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </button>
-                  <button
-                    onClick={() => openEdit(prog)}
-                    className="p-1.5 rounded-lg text-gray-400 hover:text-crx-green hover:bg-crx-green-light transition-colors"
-                    title="Edit"
-                    aria-label="Edit"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDuplicate(prog)}
-                    className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                    title="Duplicate"
-                    aria-label="Duplicate"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
                   {isAdmin && (
-                    <button
-                      onClick={() => setDeleteConfirm(prog.id)}
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                      title="Delete"
-                      aria-label="Delete"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <>
+                      <button
+                        onClick={() => openEdit(prog)}
+                        disabled={writeBusy}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-crx-green hover:bg-crx-green-light transition-colors"
+                        title="Edit"
+                        aria-label="Edit"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDuplicate(prog)}
+                        disabled={writeBusy}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                        title="Duplicate"
+                        aria-label="Duplicate"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirm(prog.id)}
+                        disabled={writeBusy}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        title="Delete"
+                        aria-label="Delete"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -430,14 +468,17 @@ export default function CropPrograms() {
                       ))}
                     </tbody>
                   </table>
-                  <div className="flex justify-end mt-3">
-                    <button
-                      onClick={() => toggleActive(prog.id)}
-                      className="text-xs text-secondary hover:text-crx-green underline"
-                    >
-                      {prog.is_active ? 'Deactivate' : 'Activate'} Program
-                    </button>
-                  </div>
+                  {isAdmin && (
+                    <div className="flex justify-end mt-3">
+                      <button
+                        onClick={() => toggleActive(prog.id)}
+                        disabled={writeBusy}
+                        className="text-xs text-secondary hover:text-crx-green underline"
+                      >
+                        {prog.is_active ? 'Deactivate' : 'Activate'} Program
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </Card>
@@ -446,21 +487,21 @@ export default function CropPrograms() {
       )}
 
       {/* Delete confirmation */}
-      <Modal open={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Delete Program?">
+      <Modal open={isAdmin && !!deleteConfirm} onClose={() => { if (!writeBusy) setDeleteConfirm(null); }} title="Delete Program?">
         <p className="text-sm text-secondary">
           This will permanently delete this crop program template. This action cannot be undone.
         </p>
         <div className="flex justify-end gap-3 mt-6">
-          <Button variant="ghost" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
-          <Button variant="secondary" onClick={() => deleteConfirm && handleDelete(deleteConfirm)}>
+          <Button variant="ghost" onClick={() => setDeleteConfirm(null)} disabled={writeBusy}>Cancel</Button>
+          <Button variant="secondary" onClick={() => deleteConfirm && handleDelete(deleteConfirm)} loading={writeBusy}>
             Delete
           </Button>
         </div>
       </Modal>
 
       {/* Create/Edit Modal */}
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editingProgram ? 'Edit Program' : 'New Crop Program'} maxWidth="lg">
-        <div className="space-y-4 max-h-[70vh] overflow-y-auto">
+      <Modal open={isAdmin && modalOpen} onClose={() => { if (!writeBusy) setModalOpen(false); }} title={editingProgram ? 'Edit Program' : 'New Crop Program'} maxWidth="lg">
+        <fieldset disabled={writeBusy} className="space-y-4 max-h-[70vh] overflow-y-auto">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input label="Program Name" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. 2026 Corn Program" />
             <Input label="Description" value={formDesc} onChange={(e) => setFormDesc(e.target.value)} placeholder="Optional description" />
@@ -563,11 +604,11 @@ export default function CropPrograms() {
               ))}
             </div>
           </div>
-        </div>
+        </fieldset>
 
         <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
-          <Button variant="ghost" onClick={() => setModalOpen(false)}>Cancel</Button>
-          <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>
+          <Button variant="ghost" onClick={() => setModalOpen(false)} disabled={writeBusy}>Cancel</Button>
+          <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={writeBusy}>
             {editingProgram ? 'Save Changes' : 'Create Program'}
           </Button>
         </div>

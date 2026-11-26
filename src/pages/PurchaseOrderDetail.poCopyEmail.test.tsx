@@ -96,7 +96,6 @@ vi.mock('../lib/purchaseOrderPdf', async () => ({
 vi.mock('../lib/activityLogger', () => ({ logActivity: mocks.logActivity }));
 vi.mock('../lib/notificationTriggers', () => ({
   notifyDamagedReceiving: vi.fn(),
-  notifyOverReceive: vi.fn(),
 }));
 
 function renderPage() {

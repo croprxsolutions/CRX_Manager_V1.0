@@ -1,4 +1,5 @@
-import { supabase } from './db';
+import { supabase, supabaseUntyped } from './db';
+import { formatCents } from './money';
 import { chunkIds } from './dispatchDisplay';
 import { PAGE_RETURNED_NO_LIST } from './pagedRead';
 
@@ -16,6 +17,8 @@ export interface DeliveryInvoiceCoverage extends InvoiceBillingCoverage {
 export interface ActiveInvoiceCoverageRow extends DeliveryInvoiceCoverage {
   id: string;
   total_amount_cents: number;
+  /** Set on a Bill Split (or field split) group's invoices. */
+  invoice_group_id?: string | null;
 }
 
 const INVOICE_COVERAGE_PAGE_SIZE = 1000;
@@ -37,7 +40,7 @@ export async function fetchActiveInvoiceCoveragePages(orderIds: string[]) {
     for (let from = 0; ;) {
       const { data, error } = await supabase
         .from('invoices')
-        .select('id, order_id, delivery_id, total_amount_cents, invoice_type, status, deleted_at')
+        .select('id, order_id, delivery_id, total_amount_cents, invoice_type, status, deleted_at, invoice_group_id')
         .in('order_id', orderIdChunk)
         .not('status', 'in', '("voided","cancelled")')
         .is('deleted_at', null)
@@ -91,4 +94,73 @@ export function activeInvoiceCoversDelivery(
 ): boolean {
   return activeInvoiceCoversOrder(invoice, orderId)
     && (invoice.delivery_id === deliveryId || invoice.delivery_id === null);
+}
+
+export interface DeliveryBillingRemainder {
+  /** Units delivered on the lines that are not fully billed. */
+  deliveredQty: number;
+  unbilledQty: number;
+  /** What Create Invoice would draft for those units. */
+  unbilledCents: number;
+}
+
+/**
+ * A4: completed deliveries an active invoice bills only in part (delivery_billing_remainders: delivered vs billed
+ * units per order line; whole-order invoices count too). Returns only deliveries with units still unbilled, summed
+ * over their short lines. Such a delivery stays on Unbilled even though an invoice covers it.
+ */
+export async function fetchDeliveryBillingRemainders(deliveryIds: string[]) {
+  const remainders = new Map<string, DeliveryBillingRemainder>();
+  for (const idChunk of chunkIds([...new Set(deliveryIds)], INVOICE_COVERAGE_ID_CHUNK_SIZE)) {
+    // Paged by the rows returned, like the invoice read above: a server row cap must not drop short lines.
+    for (let from = 0; ;) {
+      const { data, error } = await supabaseUntyped
+        .from('delivery_billing_remainders')
+        .select('delivery_id, order_item_id, product_id, delivered_qty, unbilled_qty, unbilled_cents')
+        .in('delivery_id', idChunk)
+        .gt('unbilled_qty', 0)
+        .order('delivery_id', { ascending: true })
+        .order('order_item_id', { ascending: true })
+        .order('product_id', { ascending: true })
+        .range(from, from + INVOICE_COVERAGE_PAGE_SIZE - 1);
+      if (error) return { data: null, error };
+      if (!data) return { data: null, error: { message: PAGE_RETURNED_NO_LIST } };
+      const page = data as Array<{ delivery_id: string; delivered_qty: number; unbilled_qty: number; unbilled_cents: number }>;
+      if (page.length === 0) break;
+      for (const row of page) {
+        const sum = remainders.get(row.delivery_id) ?? { deliveredQty: 0, unbilledQty: 0, unbilledCents: 0 };
+        sum.deliveredQty += Number(row.delivered_qty);
+        sum.unbilledQty += Number(row.unbilled_qty);
+        sum.unbilledCents += Number(row.unbilled_cents);
+        remainders.set(row.delivery_id, sum);
+      }
+      from += page.length;
+    }
+  }
+  return { data: remainders, error: null };
+}
+
+/** A4: everything an order's whole-order invoice leaves unbilled, over all its completed deliveries; null on a failed read. */
+export async function fetchOrderBillingRemainder(orderId: string): Promise<DeliveryBillingRemainder | null> {
+  const { data, error } = await supabaseUntyped
+    .from('delivery_billing_remainders')
+    .select('delivered_qty, unbilled_qty, unbilled_cents')
+    .eq('order_id', orderId)
+    .gt('unbilled_qty', 0);
+  if (error || !data) return null;
+  return (data as Array<{ delivered_qty: number; unbilled_qty: number; unbilled_cents: number }>).reduce(
+    (sum, row) => ({
+      deliveredQty: sum.deliveredQty + Number(row.delivered_qty),
+      unbilledQty: sum.unbilledQty + Number(row.unbilled_qty),
+      unbilledCents: sum.unbilledCents + Number(row.unbilled_cents),
+    }),
+    { deliveredQty: 0, unbilledQty: 0, unbilledCents: 0 },
+  );
+}
+
+const qty = (n: number) => String(Number(n.toFixed(4)));
+
+/** "4 of 10 not billed ($160.00)" */
+export function unbilledRemainderLabel(r: DeliveryBillingRemainder): string {
+  return `${qty(r.unbilledQty)} of ${qty(r.deliveredQty)} not billed (${formatCents(r.unbilledCents)})`;
 }

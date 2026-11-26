@@ -334,6 +334,10 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // receipts (it is the only layer the wrapper's key reaches). 20261022021000 re-emits its live body
   // only to add the field-split refusal; changing the literal would orphan every existing receipt.
   _create_invoice_from_order_idem_impl_20260721: ['create_invoice_from_order'],
+  // Direct EXECUTE is revoked (postgres-only). 20260721145936 renamed the governed public body to this name, so it
+  // kept the public operation literal and owns the wrapper's receipts. 20270311010000 (A4) re-emits it only to carry
+  // p_expected_scope into its request binding; changing the literal would orphan every existing receipt.
+  _create_invoice_for_unbilled_delivery_idem_impl_20260721: ['create_invoice_for_unbilled_delivery'],
   // Direct EXECUTE is revoked (postgres-only). 20261016140000 renamed the original
   // create_order_from_blend_ticket body to this name behind a same-signature wrapper (ALTER
   // FUNCTION ... RENAME TO), so the body kept the public operation literal and both layers share
@@ -367,6 +371,10 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _section9_record_vendor_payment_intent_impl_20260831: ['record_vendor_payment'],
   _section9_void_vendor_bill_intent_impl_20260831: ['void_vendor_bill'],
   _section9_receive_po_items_intent_impl_20260831: ['receive_po_items'],
+  // Old and new PO Detail clients share the receipt and the same input fingerprint during rollout.
+  receive_po_items_with_excess_notice: ['receive_po_items'],
+  // 20270310150000 reads the receiver's receipt as notice evidence. Only its own operation stores or returns a notice receipt.
+  notify_damaged_receiving: ['receive_po_items'],
   // Direct EXECUTE is revoked (postgres-only). Batch 4a (20261102180000) renamed the live
   // update_field_app_invoice_billing body to this name, so it kept the public literal the wrapper binds.
   // 20261120100000 (KI-14) re-creates it with one more trailing argument (per-invoice terms); changing

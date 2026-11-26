@@ -6,9 +6,12 @@
 import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { DollarSign, XCircle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { loadReturnedCheckCredits, loadReturnedPayments } from '../lib/m9Reversals';
+import { PaymentActions, PaymentMobileRow, PaymentStatus, ReturnCheckDialog } from '../components/prepay/PaymentHistoryParts';
+import { Sentry } from '../lib/sentry';
+import { toSentryError } from '../lib/sentryError';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
-import Badge from '../components/ui/Badge';
 import Input from '../components/ui/Input';
 import DatePicker from '../components/ui/DatePicker';
 import DataTable, { type Column } from '../components/ui/DataTable';
@@ -122,6 +125,8 @@ function PaymentDateFilter({ customerBox, fromDate, toDate, onChange }: {
   );
 }
 
+const isAdminProfile = (p: { role?: string | null } | null | undefined) => p?.role === 'admin';
+
 // What the empty list says, by which filters are set.
 function emptyListText(customerChosen: boolean, datesChosen: boolean): { title: string; description: string } {
   if (customerChosen) {
@@ -161,6 +166,12 @@ export default function PaymentHistory() {
   const [voidReason, setVoidReason] = useState('');
   const [savingVoid, setSavingVoid] = useState(false);
 
+  // M9: returned checks (payment id -> the day the return was recorded) and the one being marked returned.
+  const [returnedOn, setReturnedOn] = useState<Map<string, string>>(new Map());
+  // Prepay Credits check buckets that were returned (M9): they leave the received totals too.
+  const [returnedCredits, setReturnedCredits] = useState<ReadonlySet<string>>(new Set());
+  const [returnPayment, setReturnPayment] = useState<AllocationSet | null>(null);
+  const isAdmin = isAdminProfile(profile);
   // Date filter (Chicago business days, inclusive). Empty = all dates, as before. A link may
   // open the page on a range (?from=YYYY-MM-DD&to=YYYY-MM-DD, e.g. from Month-End Close).
   const [searchParams] = useSearchParams();
@@ -208,17 +219,38 @@ export default function PaymentHistory() {
       setLoading(false);
       return;
     }
-    setLoadFailed(false);
-
     const mapped: AllocationSet[] = data.map((row: Record<string, unknown>) => ({
       ...(row as AllocationSet),
       farm_name: (row.customers as { farm_name: string } | null)?.farm_name || 'Unknown',
     }));
 
+    // Which of them came back (admin read), before the list shows: a returned check must never show as Active
+    // with Void and Return offered (Sol r1 MED 7). A failed read fails the list, as the list read does.
+    let returned = new Map<string, string>();
+    let returnedCreditIds: ReadonlySet<string> = new Set();
+    if (isAdmin) {
+      try {
+        returned = await loadReturnedPayments(mapped.map((p) => p.id));
+        returnedCreditIds = await loadReturnedCheckCredits();
+      } catch (err) {
+        Sentry.captureException(toSentryError(err), { extra: { context: 'payment_history_returned' } });
+        if (seq !== fetchSeq.current) return;
+        toast('error', 'Failed to load payment history');
+        setPayments([]);
+        setLoadFailed(true);
+        setVoidPayment(null);
+        setLoading(false);
+        return;
+      }
+    }
+    if (seq !== fetchSeq.current) return;
+    setLoadFailed(false);
+    setReturnedOn(returned);
+    setReturnedCredits(returnedCreditIds);
     setPayments(mapped);
     setPrepayChecks(prepayRows);
     setLoading(false);
-  }, [toast]);
+  }, [toast, isAdmin]);
 
   useEffect(() => {
     fetchPayments();
@@ -341,13 +373,21 @@ export default function PaymentHistory() {
   const rangeCaption = dateRangeCaption(fromDate, toDate) + customerCaption;
   const emptyText = emptyListText(!!customerId, isFiltered);
 
-  const shownPrepayChecks = prepayChecksShown(prepayChecks, customerId, fromDate, toDate);
+  // Money received in the range, as Month-End Close counts it: Record Payments plus Prepay Credits checks. A
+  // returned check never brought money in (M9), so it is not an active payment, whichever way it was entered.
+  const shownPrepayChecks = prepayChecksShown(prepayChecks, customerId, fromDate, toDate)
+    .filter((c) => !c.ids.some((id) => returnedCredits.has(id)));
   const prepayCheckCents = shownPrepayChecks.reduce((s, c) => s + c.cents, 0);
-  // Money received in the range: Record Payments plus Prepay Credits checks, as Month-End Close counts it.
-  const totalPayments = shownPayments.filter((p) => p.is_active).reduce((s, p) => s + (p.total_payment_cents || 0), 0)
-    + prepayCheckCents;
-  const activeCount = shownPayments.filter((p) => p.is_active).length + shownPrepayChecks.length;
+  const counted = shownPayments.filter((p) => p.is_active && !returnedOn.has(p.id));
+  const totalPayments = counted.reduce((s, p) => s + (p.total_payment_cents || 0), 0) + prepayCheckCents;
+  const activeCount = counted.length + shownPrepayChecks.length;
   const voidedCount = shownPayments.filter((p) => !p.is_active).length;
+
+  // M9: the ⋯ menu (Mark check as returned, then Void payment last), the status and the phone card.
+  const actionsFor = (r: AllocationSet) => (isAdmin
+    ? <PaymentActions r={r} returnedOn={returnedOn.get(r.id)} onReturn={setReturnPayment} onVoid={openVoid} /> : null);
+  const statusBadge = (r: AllocationSet) => <PaymentStatus r={r} returned={returnedOn.has(r.id)} />;
+  const mobileRow = (r: AllocationSet) => <PaymentMobileRow r={r} status={statusBadge(r)} actions={actionsFor(r)} />;
 
   const columns: Column<AllocationSet>[] = [
     {
@@ -378,32 +418,18 @@ export default function PaymentHistory() {
     {
       key: 'total_allocated_cents',
       header: 'Allocated',
-      render: (r) => <span>{fmt(r.total_allocated_cents || 0)}</span>,
+      // A returned check's invoice payments were reversed, so nothing of it is allocated any more.
+      render: (r) => <span>{fmt(returnedOn.has(r.id) ? 0 : r.total_allocated_cents || 0)}</span>,
     },
     {
       key: 'is_active',
       header: 'Status',
-      render: (r) => r.is_active
-        ? <Badge variant="success">Active</Badge>
-        : <Badge variant="danger">Voided</Badge>,
+      render: (r) => statusBadge(r),
     },
     {
       key: 'id',
       header: '',
-      render: (r) => (
-        r.is_active && profile?.role === 'admin' ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<XCircle className="w-3 h-3" />}
-            onClick={(e: React.MouseEvent) => { e.stopPropagation(); openVoid(r); }}
-            showChevron={false}
-            className="text-red-600 hover:bg-red-50"
-          >
-            Void
-          </Button>
-        ) : null
-      ),
+      render: (r) => actionsFor(r),
     },
   ];
 
@@ -413,7 +439,7 @@ export default function PaymentHistory() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold font-heading text-nav-dark">Payment History</h2>
-          <p className="text-sm text-secondary mt-1">View past payments and void incorrect entries</p>
+          <p className="text-sm text-secondary mt-1">View payments, mark returned checks and void incorrect entries</p>
         </div>
         <div className="flex gap-2">
           <Button
@@ -527,7 +553,8 @@ export default function PaymentHistory() {
             data={shownPayments as unknown as Record<string, unknown>[]}
             columns={columns as unknown as Column<Record<string, unknown>>[]}
             searchable
-            searchPlaceholder="Search payments..."
+            searchPlaceholder="Search by customer or check #"
+            mobileRow={mobileRow as unknown as (row: Record<string, unknown>) => React.ReactNode}
             searchKeys={['farm_name', 'check_number', 'reference_number', 'payment_method']}
             emptyTitle={emptyText.title}
             emptyDescription={emptyText.description}
@@ -574,6 +601,8 @@ export default function PaymentHistory() {
           )}
         </div>
       </Card>
+
+      <ReturnCheckDialog payment={returnPayment} onClose={() => setReturnPayment(null)} onRecorded={() => { void fetchPayments(); }} />
 
       {/* Void Payment Modal */}
       <Modal open={!!voidPayment} onClose={() => setVoidPayment(null)} title="Void Payment">

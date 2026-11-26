@@ -44,6 +44,7 @@ type ProofApi = {
   getCamera: () => number[];
   moveCamera: () => void;
   getRasterPixel: () => number[];
+  hasRenderedVertex: (x: number, y: number) => boolean;
   project: (coordinate: Coordinate) => { x: number; y: number };
   trash: () => void;
   mapInstanceId: string;
@@ -96,7 +97,7 @@ function addScopedStyles(): void {
     #proof-toolbar { position: absolute; top: 12px; left: 12px; right: 60px; width: fit-content; max-width: calc(100% - 88px); z-index: 3; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px; border-radius: 6px; background: white; box-shadow: 0 1px 5px #0003; font: 14px sans-serif; }
     #proof-toolbar button { min-height: 44px; padding: 0 10px; }
     #proof-draw-control { border-radius: 4px; }
-    #proof-draw-control button { width: 44px; height: 44px; }
+    #proof-draw-control button { min-width: 44px; min-height: 44px; }
     #proof-credits { position: absolute; z-index: 3; bottom: 0; right: 0; background: white; font: 12px sans-serif; }
     #proof-credits span:not([hidden]) { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 6px; }
     #proof-credits .mapboxgl-ctrl-logo { margin: 0; }`;
@@ -165,8 +166,8 @@ let showingPicture: Picture | undefined = 'A';
 let pictureAttempt = 0;
 let liveAttemptWithImage = 0;
 let liveRequestsPending = 0;
-let liveBatchHasImage = false;
-let liveBatchHasError = false;
+let liveBatchImages = 0;
+let liveBatchErrors = 0;
 let creditsPending = false;
 let outagePicture: Picture | undefined;
 let outageAttempt = 0;
@@ -222,6 +223,14 @@ function recoverPicture(failed: Picture): void {
   status.value = `${pictureName(failed)} unavailable · showing ${livePictures ? pictureName(fallback) : fallback}`;
 }
 
+function revealLivePicture(): void {
+  if (!creditsPending || liveAttemptWithImage !== pictureAttempt || !showingPicture
+    || !map.isSourceLoaded(PICTURE_SOURCE_ID)) return;
+  creditsPending = false;
+  updateCredits(showingPicture);
+  map.setPaintProperty(PICTURE_LAYER_ID, 'raster-opacity', 1);
+}
+
 if (livePicturesEnabled) {
   maplibregl.addProtocol('proof-live', async (request, controller) => {
     const [, , provider, attempt, zoom, column, row] = request.url.split('/');
@@ -230,8 +239,8 @@ if (livePicturesEnabled) {
     const stillCurrent = () => !controller.signal.aborted && Number(attempt) === pictureAttempt;
     if (!stillCurrent()) throw new DOMException('Tile belongs to an earlier picture', 'AbortError');
     if (liveRequestsPending === 0) {
-      liveBatchHasImage = false;
-      liveBatchHasError = false;
+      liveBatchImages = 0;
+      liveBatchErrors = 0;
     }
     liveRequestsPending += 1;
     const providerUrl = picture === 'A'
@@ -249,14 +258,14 @@ if (livePicturesEnabled) {
       const data = await response.arrayBuffer();
       if (!stillCurrent()) throw new Error('Tile belongs to an earlier picture');
       liveAttemptWithImage = pictureAttempt;
-      liveBatchHasImage = true;
+      liveBatchImages += 1;
       return {
         data,
         cacheControl: response.headers.get('Cache-Control') ?? undefined,
         expires: response.headers.get('Expires') ?? undefined,
       };
     } catch {
-      if (stillCurrent()) liveBatchHasError = true;
+      if (stillCurrent()) liveBatchErrors += 1;
       const error = new Error('Live picture tile unavailable');
       error.name = 'ProofPictureTileUnavailable';
       throw error;
@@ -265,16 +274,14 @@ if (livePicturesEnabled) {
       controller.signal.removeEventListener('abort', cancelTile);
       if (Number(attempt) === pictureAttempt) {
         liveRequestsPending -= 1;
-        if (liveRequestsPending === 0 && liveBatchHasError && !liveBatchHasImage) recoverPicture(picture);
+        // Keep the usable picture when a small pan encounters one or two missing tiles.
+        if (liveRequestsPending === 0 && liveBatchErrors > liveBatchImages
+          && (creditsPending || liveBatchErrors > 2)) recoverPicture(picture);
       }
     }
   });
   map.on('sourcedata', (event) => {
-    if (!creditsPending || event.sourceId !== PICTURE_SOURCE_ID || !event.isSourceLoaded
-      || liveAttemptWithImage !== pictureAttempt || !showingPicture) return;
-    creditsPending = false;
-    updateCredits(showingPicture);
-    map.setPaintProperty(PICTURE_LAYER_ID, 'raster-opacity', 1);
+    if (event.sourceId === PICTURE_SOURCE_ID) revealLivePicture();
   });
 }
 
@@ -311,6 +318,8 @@ const proof: ProofApi = {
     context.drawImage(mapCanvas, 40, mapCanvas.height - 40, 1, 1, 0, 0, 1, 1);
     return Array.from(context.getImageData(0, 0, 1, 1).data);
   },
+  hasRenderedVertex: (x, y) => map.queryRenderedFeatures([x, y])
+    .some((feature) => feature.properties?.meta === 'vertex'),
   project: (coordinate) => map.project(coordinate),
   trash: () => draw.trash(),
   mapInstanceId,
@@ -357,9 +366,18 @@ map.on('error', (event) => {
   const error = event.error;
   if (!error) return;
   const name = 'name' in error && typeof error.name === 'string' ? error.name : 'Error';
-  if (name === 'AbortError' || name === 'ProofPictureTileUnavailable') return;
+  if (name === 'AbortError') return;
+  if (name === 'ProofPictureTileUnavailable') {
+    revealLivePicture();
+    return;
+  }
   if ('status' in error && 'url' in error && typeof error.url === 'string') {
-    const url = new URL(error.url);
+    let url: URL;
+    try {
+      url = new URL(error.url, location.href);
+    } catch {
+      return;
+    }
     const failedFixture = url.origin === location.origin && (stagingProof
       ? url.pathname === '/api/maps-step0' && url.searchParams.get('drawingOutage') === '1'
       : /^\/tiles\/[AB]-outage\.png$/.test(url.pathname));

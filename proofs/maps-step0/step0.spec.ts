@@ -17,6 +17,7 @@ type ProofApi = {
   getCamera: () => number[];
   moveCamera: () => void;
   getRasterPixel: () => number[];
+  hasRenderedVertex: (x: number, y: number) => boolean;
   project: (coordinate: [number, number]) => { x: number; y: number };
   trash: () => void;
   mapInstanceId: string;
@@ -104,6 +105,7 @@ async function openProof(page: Page): Promise<{
   const polygonButton = page.locator('#proof-draw-control .mapbox-gl-draw_polygon');
   await expect(polygonButton).toBeVisible();
   expect(await polygonButton.evaluate((button) => getComputedStyle(button).backgroundImage)).toContain('data:image/svg+xml');
+  expect(await polygonButton.evaluate((button) => button.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
   await expect(page.locator('#proof-map.maplibregl-map canvas.maplibregl-canvas')).toHaveCount(1);
   await expect.poll(() => tileRequests.includes('/tiles/A.png')).toBe(true);
   await expectRaster(page, 'A');
@@ -284,6 +286,10 @@ test('manual switch, automatic fallback and Retry preserve an active vertex drag
   const secondVertex = await callProof<{ x: number; y: number }>(page, 'projectSecondVertex');
   await callProof(page, 'startDirectSelect');
   expect(await callProof<string>(page, 'getMode')).toBe('direct_select');
+  await page.waitForFunction(({ x, y }) => {
+    const proof = (window as Window & { __proof?: ProofApi }).__proof;
+    return proof?.hasRenderedVertex(x, y);
+  }, secondVertex);
 
   const releasePoint = { x: secondVertex.x + 55, y: secondVertex.y + 32 };
   const beforeDrag = await drawingState(page);

@@ -4,7 +4,7 @@ import { test } from 'vitest';
 import { Script } from 'node:vm';
 import { readFileSync } from 'node:fs';
 import handler from '../../api/maps-step0.mjs';
-import appViteConfig, { stagingMapsProofPlugin } from '../../vite.config.ts';
+import { createAppViteConfig, mapsProofWorkboxOptions } from '../../vite.config.ts';
 
 const host = 'staging.croprxsolutions.app';
 const tilesKey = 'AIza' + 'a'.repeat(35);
@@ -101,13 +101,10 @@ test.each([
   ['production', 'main', false],
   ['', '', false],
 ])('adds the drawing bundle only to staging builds of staging (%s, %s)', (target, branch, expected) => {
-  const plugin = stagingMapsProofPlugin({ VERCEL_TARGET_ENV: target, VERCEL_GIT_COMMIT_REF: branch });
-  assert.equal(plugin?.name === 'staging-maps-drawing-proof', expected);
-});
-
-test('wires the environment-scoped drawing plugin into the actual build', () => {
-  const plugin = appViteConfig.plugins.find((entry) => entry?.name === 'staging-maps-drawing-proof');
-  assert.equal(plugin?.name, stagingMapsProofPlugin()?.name);
+  const environment = { VERCEL_TARGET_ENV: target, VERCEL_GIT_COMMIT_REF: branch };
+  const config = createAppViteConfig(environment);
+  assert.equal(config.plugins.some((plugin) => plugin?.name === 'staging-maps-drawing-proof'), expected);
+  assert.equal(mapsProofWorkboxOptions(environment).globIgnores.includes('api/maps-step0-draw/**'), expected);
 });
 
 test('reserves both proof routes from the normal app rewrite and policy', () => {

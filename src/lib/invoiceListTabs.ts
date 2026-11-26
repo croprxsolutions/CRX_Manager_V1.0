@@ -21,7 +21,7 @@ export const INVOICE_TAB_LABELS: Record<InvoiceListTab, string> = {
 };
 
 /** Every ?tab= value either list has ever used, old names included, so saved links keep working. */
-export const INVOICE_TAB_ALIASES: Record<string, InvoiceListTab> = {
+const INVOICE_TAB_ALIASES: Record<string, InvoiceListTab> = {
   unbilled: 'unbilled',
   drafts: 'drafts',
   unposted: 'drafts',

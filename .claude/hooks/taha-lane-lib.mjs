@@ -114,8 +114,9 @@ export function isTextOnlyPatch(patch) {
 }
 
 // Money screens and customer documents: their wording is Taha's too (Taha's review of #2639, MED 1, and his
-// delta at a9143eb27: every money screen in his lane, so the named lane files below get no words-only pass either).
-const MONEY_DOC_RE = /^src\/(?:components\/(?:invoices|prepay|statements)\/|components\/orders\/(?:Sale|WhoPays)|lib\/(?:invoice|statement|customerStatement)|pages\/(?:Invoice|Payment|Prepay|AR|AccountsReceivable))|(?:Pdf|Email)\.[jt]sx?$/i;
+// delta at a9143eb27: every money screen in his lane, so the named lane files below get no words-only pass either;
+// his delta at 82ef25520 added the commission and month-end pages).
+const MONEY_DOC_RE = /^src\/(?:components\/(?:invoices|prepay|statements)\/|components\/orders\/(?:Sale|WhoPays)|lib\/(?:invoice|statement|customerStatement)|pages\/(?:Invoice|Payment|Prepay|AR|AccountsReceivable|CommissionPayments|MonthEndClose))|(?:Pdf|Email)\.[jt]sx?$/i;
 const isMoneyScreen = (file) => MONEY_DOC_RE.test(file) || LANE_FILE_PREFIXES.some((p) => file.startsWith(p));
 
 /** True when this changed file is app or database code in Taha's lane (and not field billing), or the block itself. */
@@ -236,9 +237,22 @@ const unitOnlySet = (set) => { const cols = setColumns(set); return cols.length 
 // Blank out '...' literal contents (same length) so a WHERE or ; inside a string is not read as SQL (Luna, PR 2 round 4).
 // E'…' strings take backslash escapes, by the same rule withoutComments uses (an E not after a word character)
 // (Taha's delta at a9143eb27, LOW 5: E'g\'' must not run on into the next statement).
-// shortcut: $tag$ text is not masked (the real #2267 unit fix runs inside a DO $$ body), so a bracket inside an inline
-// $$…$$ literal can still mislead the scanner; accepted with the rest of this net (advisory Sol on #2639's delta, HIGH 1).
-const maskStrings = (text) => text.replace(/(?<![\w$])[eE]'(?:\\[\s\S]|[^'\\]|'')*'|'(?:[^']|'')*'/g,
+// $tag$…$tag$ literals are blanked too, except a DO or AS body: that is code (the real #2267 unit fix runs inside
+// DO $$), so it is scanned, with its own inner literals blanked (Taha's delta at 82ef25520, LOW 7).
+const maskDollar = (text) => {
+  const re = /(?<![\w$])\$(?:[A-Za-z_]\w*)?\$/g;
+  let out = "", at = 0, m;
+  while ((m = re.exec(text))) {
+    const open = m.index + m[0].length, close = text.indexOf(m[0], open);
+    if (close < 0) break;
+    const body = text.slice(open, close);
+    const code = /\b(?:do|as)\s*$/i.test(text.slice(Math.max(0, m.index - 12), m.index));
+    out += text.slice(at, open) + (code ? maskDollar(body) : " ".repeat(body.length));
+    at = close; re.lastIndex = close + m[0].length;
+  }
+  return out + text.slice(at);
+};
+const maskStrings = (text) => maskDollar(text).replace(/(?<![\w$])[eE]'(?:\\[\s\S]|[^'\\]|'')*'|'(?:[^']|'')*'/g,
   (s) => { const q = s.indexOf("'"); return `${s.slice(0, q)}'${" ".repeat(s.length - q - 2)}'`; });
 // …and "quoted" names too, for the clause scanner (advisory Sol on #2639, HIGH 6: src."from").
 const maskNames = (text) => text.replace(/"(?:[^"]|"")*"/g, (s) => `"${"x".repeat(s.length - 2)}"`);

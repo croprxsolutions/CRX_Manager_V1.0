@@ -796,6 +796,14 @@ describe('Record Payments: payment date and check number', () => {
     await waitFor(() => expect(shownDate()).toBe('11/24/2026'));
   });
 
+  it('clearing the customer before saving drops a picked date too', async () => {
+    await fillPayment();
+    stepDate('day', 'ArrowDown', 3);
+    expect(shownDate()).toBe('11/21/2026');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear customer' }));
+    await waitFor(() => expect(shownDate()).toBe('11/24/2026'));
+  });
+
   it('a save the database refused is not treated as maybe saved: the closed-month check still runs', async () => {
     mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: { code: 'P0001', message: 'Invoice balance changed' } }));
     await fillPayment();

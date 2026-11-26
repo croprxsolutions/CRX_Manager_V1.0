@@ -309,9 +309,14 @@ export default function PaymentAllocation() {
     setCheckAmountInput('');
     setReferenceNumber('');
     setNotes('');
+    // An unsaved check's picked date goes with it; a saved check's date is kept for the next one.
+    if (!lastResult) {
+      setPaymentDateInput(startingPaymentDate);
+      setPaymentDateRefused(null);
+    }
     setLastResult(null);
     setRetryRefused(false);
-  }, []);
+  }, [lastResult, startingPaymentDate]);
 
   // The customer changes only when one is picked from the list. A stray keystroke keeps the
   // chosen customer and the typed allocations; Escape or "keep" puts the name back. While a search

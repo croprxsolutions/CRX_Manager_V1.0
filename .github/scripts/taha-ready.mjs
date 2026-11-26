@@ -46,11 +46,11 @@ export const tahaReviewedHead = (pr) => (pr.reviews ?? []).some((r) => isTaha(r.
 
 // A hotfix into main (Mason, 2026-11-25): Taha is a code owner of .github/, and the release guard and
 // release-gate wait on his approval or hotfix-backport label, so those two can't hold back asking him.
-// A back-merge of main into staging carries only code already reviewed for main (Mason, 2026-11-26).
-// Only main itself (protected, so nothing unreviewed is on it); a hand-made back-merge branch can carry other edits
-// and is judged like any PR (Luna, PR 2).
-export const isBackMerge = (pr) => pr.baseRefName === 'staging' && pr.headRefName === 'main' && !pr.isCrossRepository;
-export const isMainHotfix = (pr) => pr.baseRefName === 'main' && /^hotfix\//.test(pr.headRefName ?? '');
+// A back-merge of main is judged like any PR: main needs no review, so a hotfix Mason merged by hand may not have
+// reached Taha (Taha's review of #2639, LOW 4).
+// Only the lane block's launchers and settings are not his work; taha-lane-lib.mjs defines his lane (#2639, MED 2).
+const wiringOnly = (file) => isTahaGateWiring(file) && !/(?:^|\/)taha-lane-lib\.mjs$/.test(file);
+export const isMainHotfix =(pr) => pr.baseRefName === 'main' && /^hotfix\//.test(pr.headRefName ?? '');
 const GATE_CHECKS = ['Release flow guard (main)', 'release-gate'];
 // A pending guard still waits: it may yet ask for the label, and the ping is sent once per head (Codex on #2589).
 const checksFor = (pr, checks) => (isMainHotfix(pr) && Array.isArray(checks)
@@ -75,7 +75,6 @@ export function decide(pr, { checks, lane, sol, carried }) {
   if (pr.isDraft) return skip('draft');
   if (isTahasPr(pr)) return skip("Taha's own PR");
   if (pr.isCrossRepository) return skip('from a fork (not our team)');
-  if (isBackMerge(pr)) return skip('a back-merge of main: nothing new for Taha');
   if (hasLabel(pr) && tahaRequested(pr)) return skip('already labelled and waiting on Taha');
   if (tahaReviewedHead(pr)) return skip('Taha already reviewed this head');
   if (tahaVerdict(pr, carried) === APPROVED) return skip("Taha's Approve carries over to this head");
@@ -86,7 +85,7 @@ export function decide(pr, { checks, lane, sol, carried }) {
   // Unreadable or cut-short file lists block a merge, but never label: no named lane file, no label.
   if (!inLane.files?.length) return skip(`lane unclear: ${inLane.reason}`);
   // Only the lane block's own files: Mason's code lets it merge; it is not Taha's work (Mason, 2026-11-26).
-  if (inLane.files.every(isTahaGateWiring)) return skip("only the lane block's own files: needs Mason's code, not Taha's review");
+  if (inLane.files.every(wiringOnly)) return skip("only the lane block's own files: needs Mason's code, not Taha's review");
   const risk = sol();
   if (risk?.risky !== false) return skip(`Sol needed (${risk?.reason ?? 'unknown'}): the bot cannot see Sol proofs; the agent labels it after Sol`);
   return { act: true, why: `${hasLabel(pr) ? 're-request Taha' : 'label + request Taha'}: ${inLane.reason}; ${risk.reason}; required checks green` };
@@ -139,8 +138,6 @@ export function askedAfterPush(pushTimes, askTimes) {
 // Returns { ping, why, backport }.
 export function needsPing(pr, comments, { checks, lane, sol, asked, carried, backport = () => false }) {
   const no = (why) => ({ ping: false, why });
-  // Same skips as decide(), for a PR someone labelled by hand (advisory Sol on PR 2, MED 11).
-  if (isBackMerge(pr)) return no('a back-merge of main: nothing new for Taha');
   // His approval survives a merge from main, but the label must follow the latest push: ask for the label alone.
   if (isMainHotfix(pr) && !pr.isDraft && !isTahasPr(pr) && !pr.isCrossRepository && tahaVerdict(pr, carried) === APPROVED) {
     if (pinged(comments, pr.headRefOid).length) return no('already pinged for this head');
@@ -154,7 +151,8 @@ export function needsPing(pr, comments, { checks, lane, sol, asked, carried, bac
   const checkProblem = requiredChecksProblem(checksFor(pr, checks()));
   if (checkProblem) return no(checkProblem);
   const inLane = lane?.();
-  if (inLane?.files?.length && inLane.files.every(isTahaGateWiring)) return no("only the lane block's own files: needs Mason's code, not Taha's review");
+  // Same skip as decide(), for a PR someone labelled by hand (advisory Sol on PR 2, MED 11).
+  if (inLane?.files?.length && inLane.files.every(wiringOnly)) return no("only the lane block's own files: needs Mason's code, not Taha's review");
   const yes = (why) => ({ ping: true, why, backport: isMainHotfix(pr) && Boolean(backport()) });
   if (sol()?.risky === false) return yes('no Sol needed, checks green');
   if (asked()) return yes('Sol-list PR labelled or re-requested after its latest push');

@@ -227,8 +227,8 @@ for (const fn of ["create_direct_order", "_create_rush_order_below_cost_impl_202
   "generate_finance_charges", "create_delivery_with_items", "_create_quick_delivery_intent_impl_20260802", "edit_delivery", "fix_delivery",
   "correct_delivery_brands", "batch_cancel_deliveries", "_delivery_line_matches_order_line", "_enforce_delivery_items_parent_lock",
   "_prebook_quick_delivery_inventory",
-  // Taha's review of #2408, LOW 1 and LOW 2 (the year-end summaries came off: Mason, 2026-11-26, tested below).
-  "check_period_open", "preview_finance_charges",
+  // Taha's review of #2408, LOW 1 and LOW 2; the year-end summaries stay (Taha's review of #2639, HIGH 2).
+  "check_period_open", "preview_finance_charges", "get_customer_year_end_summary", "get_batch_year_end_summaries",
   "get_sales_summary_report", "get_sales_detail_report", "get_gross_sales_report", "get_profitability_report",
   "financial_dashboard_summary", "bump_order_edit_version", "prevent_oifa_edit_after_post", "guard_order_reopen_inactive_product"]) {
   ok(isTahaLaneSql(`CREATE OR REPLACE FUNCTION public.${fn}() RETURNS void AS $$ SELECT 1 $$;`), `redefining ${fn} is Taha's`);
@@ -564,15 +564,21 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
 // ── Mason's false-tag answers (2026-11-26) ──────────────────────────────────
 {
   const real = (name) => mig(`supabase/migrations/${name}.sql`, readFileSync(path.join(MIGS, `${name}.sql`), "utf8"));
-  // 1. #2381: the customer year-end summary is no longer on his function list.
-  eq(tahaLaneProblem({ files: [real("20270307180000_parent_epa_correction_on")], now: NOW }), null, "#2381 (parent EPA, rewrites the year-end summary) is not Taha's");
-  ok(!isTahaLaneSql("CREATE OR REPLACE FUNCTION public.get_customer_year_end_summary() AS $$ SELECT 1 $$;"), "the year-end summary alone is not his");
+  // 1. #2381: the customer year-end summary stays his (Taha's review of #2639, HIGH 2); #2381 goes through on Mason's code.
+  ok(tahaLaneProblem({ files: [real("20270307180000_parent_epa_correction_on")], now: NOW }), "#2381 (parent EPA, rewrites the year-end summary) is Taha's");
   ok(isTahaLaneSql("CREATE OR REPLACE FUNCTION public.get_ar_aging() AS $$ SELECT 1 $$;"), "A/R functions still are");
   ok(isTahaLaneSql("CREATE OR REPLACE FUNCTION public.check_period_open() AS $$ SELECT 1 $$;"), "month-end still is");
   // 2. #2267: a product-unit fix may convert that product's order and quote lines.
   eq(tahaLaneProblem({ files: [real("20270303180000_piksi_mg_to_grams")], now: NOW }), null, "#2267 (Piksi mg→grams) is not Taha's");
-  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.quote_items SET quantity = quantity * 16 WHERE product_id = 7;")], now: NOW }), null, "a unit fix of quote lines is not his");
-  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.quote_items SET quantity = quantity * 16;")], now: NOW }), "an unscoped unit UPDATE of every quote line is his (Luna, PR 2 round 5)");
+  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.products SET unit_size = 'oz' WHERE id = 7; UPDATE public.quote_items SET unit_size = 'oz' WHERE product_id = 7;")], now: NOW }), null, "a unit fix of a product and its quote lines is not his");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.products SET unit_size = 'oz' WHERE id = 7; UPDATE public.quote_items SET unit_size = 'oz';")], now: NOW }), "an unscoped unit UPDATE of every quote line is his (Luna, PR 2 round 5)");
+  // Taha's review of #2639.
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_fix_gallons_lines.sql", "UPDATE public.quote_items SET unit_size = 'gal' WHERE unit_size = 'qt';")], now: NOW }), "relabelling quote lines with no product conversion is his (MED 3)");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'oz' WHERE id = 7; UPDATE public.order_items SET total_units_needed = total_units_needed * 16 WHERE product_id = 7;")], now: NOW }), "a line quantity in a unit fix is his (LOW 1)");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'oz' WHERE id = 7; UPDATE public.order_items SET quantity = 1 WHERE product_id = 7;")], now: NOW }), "quantity is not a unit column (LOW 1)");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'oz' WHERE id = 7; UPDATE public.order_items x SET unit_size = CASE WHEN x.a IS DISTINCT FROM x.b THEN 'g' END, unit_price = 0 WHERE product_id = 7;")], now: NOW }), "IS DISTINCT FROM does not end the SET list");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'oz' WHERE id = 7; UPDATE public.order_items x SET unit_size = CASE WHEN EXTRACT(year FROM now()) > 0 THEN 'g' END, unit_price = 0 WHERE product_id = 7;")], now: NOW }), "EXTRACT(… FROM …) does not end the SET list");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'oz' WHERE id = 7; CREATE POLICY \"lock posted invoices\" ON public.invoices FOR UPDATE USING (false);")], now: NOW }), "a policy named lock is not a LOCK statement (LOW 2)");
   eq(isTextOnlyPatch("@@ -1 +1 @@\n-<div data-label=\"quotes\">\n+<div data-label=\"invoices\">"), false, "data-label is code, not a label (Luna, PR 2 round 5)");
   eq(isTextOnlyPatch("@@ -1 +1 @@\n-<input aria-label=\"Quotes\" />\n+<input aria-label=\"Quote list\" />"), true, "aria-label is still a label");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.invoice_items SET quantity = quantity * 16;")], now: NOW }), "a unit fix that writes invoices still is");
@@ -584,7 +590,7 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "CREATE POLICY p ON public.quote_items USING (true);")], now: NOW }), "a unit fix adding a policy on quote lines is his");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "DELETE FROM public.order_items WHERE id = 1;")], now: NOW }), "a unit fix deleting order lines is his");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "ALTER TABLE public.order_items ADD COLUMN g int;")], now: NOW }), "a unit fix changing the order-lines table is his");
-  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "LOCK TABLE public.order_items, public.invoices; UPDATE public.order_items SET unit_size = 'g' WHERE product_id = 7;")], now: NOW }), null,
+  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; LOCK TABLE public.order_items, public.invoices; UPDATE public.order_items SET unit_size = 'g' WHERE product_id = 7;")], now: NOW }), null,
     "its locks alone change nothing of his (#2267 locks invoices so nothing moves while it converts)");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "LOCK TABLE public.order_items; UPDATE public.invoice_items SET q = 1;")], now: NOW }), "an invoice write in a unit fix is still his");
   // Luna, PR 2 round 3: only the unit and quantity columns.
@@ -592,13 +598,13 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   // Luna, PR 2 round 4: tuple assignments and clause words inside strings.
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET quantity = quantity * 16, (unit_size, unit_price) = ('g', 0) WHERE product_id = 7;")], now: NOW }), "a price inside a tuple SET is his");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET quantity = CASE WHEN unit = 'where' THEN quantity / 1000 ELSE quantity END, status = 'cancelled' WHERE product_id = 7;")], now: NOW }), "a WHERE inside a string does not end the SET");
-  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET (unit_size, quantity) = ('g', quantity / 1000) WHERE unit = 'mg; where';")], now: NOW }), null, "a unit-only tuple SET is a unit fix");
+  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; UPDATE public.order_items SET (unit_size, rate_unit) = ('g', 'g') WHERE unit_size = 'mg; where';")], now: NOW }), null, "a unit-only tuple SET is a unit fix");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.quote_items q SET unit_size = 'g', unit_price = 0 WHERE q.product_id = 7;")], now: NOW }), "a unit fix that also sets prices is his");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET quantity = (SELECT 1 FROM invoices) WHERE product_id = 7;")], now: NOW }), "a quantity copied from a subquery is his");
   // Advisory Sol on PR 2.
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "DO $$ BEGIN IF lock THEN UPDATE public.invoices SET status = 'void' WHERE id = 42; END IF; END $$;")], now: NOW }), "a variable named lock is not a LOCK statement");
-  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "DO $$ BEGIN LOCK TABLE public.invoices IN SHARE MODE; END $$;")], now: NOW }), null, "a LOCK inside a block still is");
-  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items AS x SET unit_size = 'g', quantity = x.quantity / 1000 FROM r WHERE x.id = r.id;")], now: NOW }), null, "unit and quantity with an alias and FROM are a unit fix");
+  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; DO $$ BEGIN LOCK TABLE public.invoices IN SHARE MODE; END $$;")], now: NOW }), null, "a LOCK inside a block still is");
+  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; UPDATE public.order_items AS x SET unit_size = 'g', rate_unit = r.unit FROM r WHERE x.id = r.id;")], now: NOW }), null, "unit columns with an alias and FROM are a unit fix");
   // 3. Delivery completion stays his (Mason: don't change without Taha).
   ok(isTahaLaneSql("CREATE OR REPLACE FUNCTION public._complete_delivery_authorized_impl() AS $$ SELECT 1 $$;"), "delivery completion is still Taha's");
   // 4. #2451: a label-only edit of his screens is not his; the A/R tab move is.
@@ -622,6 +628,16 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   ok(!isTextOnlyPatch(patch(["  return", "    { a: 1 };"], ["  return { a: 1 };"])), "a line break after return is kept");
   ok(!isTextOnlyPatch(patch(["  const ok = value > threshold < cap;"], ["  const ok = value > limit < cap;"])), "a comparison is not JSX text");
   ok(isTextOnlyPatch(patch(["  <Field label={'Old'} placeholder=\"Type here\" />"], ["  <Field label={'New'} placeholder=\"Type a name\" />"])), "label-like props are words");
+  // Taha's review of #2639.
+  ok(!isTextOnlyPatch(patch(["  const [splits, setSplits] = useState([{ label: '', amount: '' }]);"], ["  const [splits, setSplits] = useState([{ label: 'General', amount: '' }]);"])), "a saved split's default label is code (HIGH 1)");
+  ok(!isTextOnlyPatch(patch(["  const row = { title: 'Paid', cents };"], ["  const row = { title: 'Prepay applied', cents };"])), "an object title off a menu or tab entry is code (HIGH 1)");
+  ok(!isTextOnlyPatch(patch(["  label = 'Paid';"], ["  label = 'Prepay applied';"])), "a variable named label is code (HIGH 1)");
+  ok(isTextOnlyPatch(patch(["  { to: '/prepay', label: 'Prepay' },"], ["  { to: '/prepay', label: 'Prepayments' },"])), "a nav entry's label is words");
+  const swap = patch(["        <Row label=\"Paid\" cents={paid} />", "        <Row label=\"Prepay applied\" cents={prepay} />"], ["        <Row label=\"Prepay applied\" cents={paid} />", "        <Row label=\"Paid\" cents={prepay} />"]);
+  ok(tahaLaneProblem({ files: [withPatch("src/components/invoices/InvoiceAmountDue.tsx", swap)], now: NOW }), "a label swap on a money screen is his (MED 1)");
+  for (const f of ["src/lib/statementEmail.ts", "src/lib/invoiceTotals.ts", "src/lib/quotePdf.ts","src/pages/quotes/QuoteEmail.tsx"]) {
+    ok(tahaLaneProblem({ files: [withPatch(f, patch(["  // old"], ["  // new"]))], now: NOW }), `${f}: customer documents get no words-only pass (MED 1)`);
+  }
   // Luna, PR 2 round 2.
   const twoBlocks = ["@@ -1,6 +1,6 @@", " if (approved) {", "-  commit();", "+  log();", " }", "-log();", "+commit();"].join(String.fromCharCode(10));
   ok(!isTextOnlyPatch(twoBlocks), "code moved out of an if is a change");

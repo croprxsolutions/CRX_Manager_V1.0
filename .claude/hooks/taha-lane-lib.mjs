@@ -81,13 +81,19 @@ export const isTahaGateWiring = (name) => BLOCK_FILES_RE.test(String(name ?? "")
 // in place, so code moved from one spot to another is a change (Luna, PR 2 rounds 1–2).
 // A missing patch (GitHub leaves it out of big diffs) is not text-only.
 // shortcut: pattern matching, not a parser; an honest-mistake net like the SQL check, not a security boundary.
-const TEXT_TOKEN_RE = /((?<![\w$-])(?:label|title|subtitle|placeholder|description|aria-label|alt|tooltip|helperText|emptyText|emptyMessage|heading)\s*[:=]\s*\{?\s*)(?:'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\$])*`)|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?<=[\w"'}])(?<!<option\b[^<>]*)>([^<>{}\n]*)(?=<\/)/g;
-const TOOL_COMMENT_RE = /^\/\/\/|@|#__|\b(?:eslint|prettier|istanbul|webpack|vite|jsx|c8|v8|ts-)/i;
+const TEXT_TOKEN_RE = /((?<![\w$.-])(?:label|title|subtitle|placeholder|description|aria-label|alt|tooltip|helperText|emptyText|emptyMessage|heading)(?:=(?!=)|\s*:)\s*\{?\s*)(?:'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\$])*`)|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?<=[\w"'}])(?<!<option\b[^<>]*)>([^<>{}\n]*)(?=<\/)/g;
+// A JSX attribute (`label="…"`, no space before `=`) is words. An object's `label: '…'` is words only on a menu or
+// tab entry (a `path`, `to`, `href` or `key` on the same line); elsewhere it may be data the app saves
+// (Taha's review of #2639, HIGH 1: the prepay split default `{ label: '' }`).
+const NAV_ENTRY_RE = /(?<![\w$.-])(?:path|to|href|key)\s*:/;
+const lineAt = (text, at) => text.slice(text.lastIndexOf("\n", at) + 1).split("\n")[0];
+const TOOL_COMMENT_RE =/^\/\/\/|@|#__|\b(?:eslint|prettier|istanbul|webpack|vite|jsx|c8|v8|ts-)/i;
 function codeOnly(lines) {
   const kept = [];
   const keep = (m) => `\u0001${kept.push(m) - 1}\u0001`;
-  return lines.join("\n")
-    .replace(TEXT_TOKEN_RE, (m, key, jsx) => key !== undefined ? `${key.replace(/\s+/g, "")}S` : jsx !== undefined ? ">"
+  const text = lines.join("\n");
+  return text
+    .replace(TEXT_TOKEN_RE, (m, key, jsx, at) => key !== undefined ? (key.includes(":") && !NAV_ENTRY_RE.test(lineAt(text, at)) ? keep(m) : `${key.replace(/\s+/g, "")}S`) : jsx !== undefined ? ">"
       : m.startsWith("/") ? (TOOL_COMMENT_RE.test(m) ? keep(m) : "") : keep(m))
     .split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean).join("\n")
     .replace(/\u0001(\d+)\u0001/g, (_, i) => kept[Number(i)]);
@@ -105,6 +111,9 @@ export function isTextOnlyPatch(patch) {
   }
   return blocks.length > 0 && blocks.every((b) => codeOnly(b.removed) === codeOnly(b.added));
 }
+
+// Money screens and customer documents: their wording is Taha's too (Taha's review of #2639, MED 1).
+const MONEY_DOC_RE = /^src\/(?:components\/invoices\/|lib\/(?:invoice|statement))|(?:Pdf|Email)\.[jt]sx?$/i;
 
 /** True when this changed file is app or database code in Taha's lane (and not field billing), or the block itself. */
 export function isTahaLanePath(name) {
@@ -149,8 +158,8 @@ const TAHA_LANE_FUNCTIONS_RE = new RegExp("^_?(?:complete_delivery|start_and_com
   "|edit_delivery|fix_delivery|correct_delivery_brands|batch_cancel_deliveries|delivery_line_matches_order_line" +
   "|enforce_delivery_items_parent_lock|prebook_quick_delivery_inventory" +
   // Taha's review of #2408: read-only billing reports, the month lock, and NEW-setting triggers the write sweep missed.
-  // The customer year-end summaries came off (Mason, 2026-11-26: #2381, a product change, was caught by one).
-  "|check_period_open|preview_finance_charges" +
+  // The customer year-end summaries are money statements and stay his (Taha's review of #2639, HIGH 2).
+  "|check_period_open|preview_finance_charges|get_customer_year_end_summary|get_batch_year_end_summaries" +
   "|get_sales_summary_report|get_sales_detail_report|get_gross_sales_report|get_profitability_report|financial_dashboard_summary" +
   "|bump_order_edit_version|prevent_oifa_edit_after_post|guard_order_reopen_inactive_product" +
   ")(?=_|$)|^_?get_ar_|accounting_period|credit_memo", "i");
@@ -181,14 +190,33 @@ export const TAHA_LANE_TABLES = [
 // writes the shared invoice tables). Every other lane table still counts there (Taha's review of #2382, HIGH 1);
 // "commissions" is here because Taha asked that #2260, which deletes a field invoice's commissions, keep passing.
 const FIELD_BILLING_TABLES = new Set(["invoices", "invoice_items", "invoice_shares", "invoice_line_shares", "commissions"]);
-// A migration named for a product's units may take table locks and UPDATE only the unit and quantity columns of order
-// and quote lines (Mason, 2026-11-26: #2267 converted one product from mg to grams, its lines included, and locked what
+// A migration named for a product's units that also converts the product's own units may take table locks and UPDATE
+// only the unit columns (unit_size, rate_unit) of order and quote lines, scoped by a WHERE (Mason, 2026-11-26: #2267 converted one product from mg to grams, its lines included, and locked what
 // it re-checks so nothing moved under it; a unit fix is not Taha's). Any other write to those tables (a status, a price,
 // a policy, a column, a delete) and every other lane table still count (Luna, PR 2 rounds 1 and 3).
 // A LOCK statement starts a statement; `IF lock THEN` is a variable (advisory Sol on PR 2, HIGH 4).
 const UNIT_FIX_LOCK_RE = /(?<=(?:^|;|\b(?:begin|then|else|loop)\b|\$\$)\s*)lock\s+(?:table\s+)?[^;]*/gi;
-const UNIT_LINE_UPDATE_RE = /\bupdate\s+(?:only\s+)?(?:"?public"?\s*\.\s*)?"?(?:order_items|quote_items)"?(?![\w$])(?:\s+(?:as\s+)?(?!set\b)\w+)?\s+set\s+([^;]*?)(?=\bfrom\b|\bwhere\b|\breturning\b|;|$)[^;]*/gi;
-const UNIT_COLUMN_RE = /^(?:unit|unit_size|uom|rate_unit|container_unit|inventory_unit|quantity|qty)$/i;
+const UNIT_LINE_UPDATE_RE = /\bupdate\s+(?:only\s+)?(?:"?public"?\s*\.\s*)?"?(?:order_items|quote_items)"?(?![\w$])(?:\s+(?:as\s+)?(?!set\b)\w+)?\s+set\s+/gi;
+// Only the unit labels; the line quantity (total_units_needed) and prices stay his (Taha's review of #2639, LOW 1).
+const UNIT_COLUMN_RE = /^(?:unit_size|rate_unit)$/i;
+// The fix must convert the product itself in the same SQL, as #2267 did (Taha's review of #2639, MED 3).
+const PRODUCT_UNIT_UPDATE_RE = /\bupdate\s+(?:only\s+)?(?:"?public"?\s*\.\s*)?"?products"?(?![\w$])[^;]*?\bset\b[^;]*?\b(?:unit_size|rate_unit)\b/i;
+// Where a SET list ends: a top-level WHERE, RETURNING, FROM or `;`. A FROM inside brackets (EXTRACT(… FROM …)) or after
+// DISTINCT (IS DISTINCT FROM) does not end it (Taha's review of #2639).
+const setEnd = (s, i) => {
+  for (let depth = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "(") depth++;
+    else if (c === ")") { if (!depth) return i; depth--; }
+    else if (c === ";" && !depth) return i;
+    else if (!depth && /[a-z_]/i.test(c) && !/[\w$]/.test(s[i - 1] ?? "")) {
+      const word = /^\w+/.exec(s.slice(i, i + 40))[0];
+      if (/^(?:where|returning)$/i.test(word) || (/^from$/i.test(word) && !/\bdistinct\s+$/i.test(s.slice(Math.max(0, i - 40), i)))) return i;
+      i += word.length - 1;
+    }
+  }
+  return i;
+};
 const unitOnlySet = (set) => {
   const cols = [...set.matchAll(/(?:^|,)\s*"?(\w+)"?\s*=/g)].map((m) => m[1]);
   // SET (a, b) = (...) tuple assignments (Luna, PR 2 round 4).
@@ -199,9 +227,14 @@ const unitOnlySet = (set) => {
 const maskStrings = (text) => text.replace(/'(?:[^']|'')*'/g, (s) => `'${" ".repeat(s.length - 2)}'`);
 const withoutUnitFix = (text) => {
   const masked = maskStrings(text);
+  if (!PRODUCT_UNIT_UPDATE_RE.test(masked)) return text;
   const cuts = [...masked.matchAll(UNIT_FIX_LOCK_RE)].map((m) => [m.index, m.index + m[0].length]);
   // An unscoped UPDATE converts every line, not one product's (Luna, PR 2 round 5): it needs a WHERE.
-  for (const m of masked.matchAll(UNIT_LINE_UPDATE_RE)) if (unitOnlySet(m[1]) && /\bwhere\b/i.test(m[0])) cuts.push([m.index, m.index + m[0].length]);
+  for (const m of masked.matchAll(UNIT_LINE_UPDATE_RE)) {
+    const from = m.index + m[0].length, set = setEnd(masked, from);
+    const end = masked.indexOf(";", set) < 0 ? masked.length : masked.indexOf(";", set);
+    if (masked[set] !== ")" && unitOnlySet(masked.slice(from, set)) && /\bwhere\b/i.test(masked.slice(set, end))) cuts.push([m.index, end]);
+  }
   cuts.sort((a, b) => a[0] - b[0]);
   let out = "", at = 0;
   for (const [start, end] of cuts) { if (start >= at) out += text.slice(at, start); at = Math.max(at, end); }
@@ -317,7 +350,8 @@ export function tahaLaneProblem({ files }) {
     const name = entry?.filename;
     // A label-only edit of an app file in his lane, not renamed (Mason, 2026-11-26, #2451).
     // Only an edited file: adding or deleting one is code even when it holds only comments (advisory Sol on PR 2, MED 15).
-    const wordsOnly = entry?.status === "modified" && !entry?.previous_filename && typeof name === "string" && /^src\/.+\.[jt]sx?$/i.test(name) && !isTahaGateWiring(name) && isTextOnlyPatch(entry?.patch);
+    const wordsOnly = entry?.status === "modified" && !entry?.previous_filename && typeof name === "string" && /^src\/.+\.[jt]sx?$/i.test(name) &&
+      !isTahaGateWiring(name) && !MONEY_DOC_RE.test(name) && isTextOnlyPatch(entry?.patch);
     for (const n of wordsOnly ? [] : [entry?.filename, entry?.previous_filename]) {
       if (typeof n === "string" && isTahaLanePath(n) && !hits.includes(n)) hits.push(n);
     }
@@ -339,7 +373,9 @@ export function prFilesOnGitHub({ repo, gh, number, headSha }) {
   if (!repoPath || !Number.isInteger(number) || number < 1) return null;
   try {
     const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq",
-      '.[] | [.status, .filename, (.previous_filename // ""), ((.contents_url // "") | ([capture("[?&]ref=(?<r>[0-9a-f]{40})").r][0] // "")), (.patch // "")] | @tsv']))
+      '.[] | [.status, .filename, (.previous_filename // ""), ((.contents_url // "") | ([capture("[?&]ref=(?<r>[0-9a-f]{40})").r][0] // "")), ' +
+      // Only app code files' patches are used; the rest would only fill the buffer (Taha's review of #2639, LOW 3).
+      '(if (.filename | test("^src/.+[.][jt]sx?$"; "i")) then (.patch // "") else "" end)] | @tsv']))
       .split(/\r?\n/).filter(Boolean).map((line) => line.split("\t"));
     if (rows.some((r) => r.length < 2 || r.length > 5 || !r[1])) return null;
     // The whole list must be GitHub's answer for the pinned head, not a later push (advisory Sol on #2382).

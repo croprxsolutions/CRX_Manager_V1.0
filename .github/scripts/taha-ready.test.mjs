@@ -152,12 +152,14 @@ test('the ping asks for the hotfix-backport label only on a hotfix whose guard w
 test('an approved hotfix whose guard still wants the label gets one label-only ping (as on #2573)', () => {
   const approved = hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: HEAD } }] });
   const lazy = { checks: never, sol: never, asked: never };
-  const p = needsPing(approved, [], { ...lazy, backport: () => true });
+  const gate = { ...lazy, carried: () => true }; // the merge gate accepts his Approve of this head
+  assert.equal(needsPing(approved, [], { ...lazy, carried: () => false, backport: () => true }).ping, false, 'retargeted since his Approve: no label-only ping');
+  const p = needsPing(approved, [], { ...gate, backport: () => true });
   assert.equal(p.ping, true);
   assert.match(pingText(approved, null, p), /waiting on your `hotfix-backport` label \(add it after the latest push\) \(head/);
   assert.doesNotMatch(pingText(approved, null, p), /Approve/);
-  assert.equal(needsPing(approved, [bot(HEAD)], { ...lazy, backport: () => true }).ping, false);
-  assert.equal(needsPing(approved, [], { ...lazy, backport: () => false }).ping, false);
+  assert.equal(needsPing(approved, [bot(HEAD)], { ...gate, backport: () => true }).ping, false);
+  assert.equal(needsPing(approved, [], { ...gate, backport: () => false }).ping, false);
   // Approved on an older head, or not a hotfix: the normal rules apply.
   assert.equal(needsPing(hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: NEW } }] }), [], { ...lazy, backport: () => true }).ping, false);
   assert.equal(needsPing(pr({ reviews: approved.reviews }), [], { ...lazy, backport: never }).ping, false);

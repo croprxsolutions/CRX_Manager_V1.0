@@ -52,11 +52,16 @@ test('the admin register reads and saves a vehicle through the supported screens
   const row = page.getByRole('row').filter({ has: page.getByRole('button', { name: fixture }) });
   await expect(row.getByText(registration, { exact: true })).toBeVisible();
   await row.getByRole('checkbox').check();
-  await page.getByRole('region', { name: 'Bulk actions' }).getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await page.getByRole('button', { name: 'Delete 1 vehicle', exact: true }).click();
   await expect(row).toHaveCount(0);
+  const refreshedRegister = page.waitForResponse(response =>
+    response.ok()
+    && response.request().method() === 'GET'
+    && new URL(response.url()).pathname.endsWith('/rest/v1/admin_vehicle_register'));
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Add Vehicle' })).toBeVisible();
+  const vehicles = await (await refreshedRegister).json();
+  expect(vehicles).not.toContainEqual(expect.objectContaining({ vehicle_name: fixture }));
   await expect(row).toHaveCount(0);
 
   expect(registerReads).toContain('list');

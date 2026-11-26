@@ -8,7 +8,7 @@ Taha's idea, agreed by Mason on Slack (2026-11-26): the signal that Taha is unav
   the label's actor is read from the PR's timeline; an unreadable timeline does not count. Every other apply check
   still runs, and no override comment is posted (the signal came from him).
 - Mason's `taha override #<PR> <code> unavailable: <reason>` stays as the backup for when he cannot reach Taha at all
-  (Taha's review asked for it to count only with his label; Mason chose to keep it, and it tags Taha on the PR every
-  time it is used). It now counts for 30 minutes from Mason's message, not 24 hours (`TAHA_APPLY_OVERRIDE_MAX_AGE_MS`,
+  (Taha's review asked for it to count only with his label; Mason chose to keep it, and it tags Taha on the PR once
+  for each migration it lets through). It now counts for 30 minutes from Mason's message, not 24 hours (`TAHA_APPLY_OVERRIDE_MAX_AGE_MS`,
   matching `READY_WINDOW_MS`); staging-merge overrides keep 24 hours.
 - Wording: "Mason decides Taha is unavailable" now reads "only for when Mason cannot reach Taha at all".

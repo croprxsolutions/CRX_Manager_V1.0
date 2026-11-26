@@ -1933,11 +1933,13 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     const young = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const now = Date.now();
     const label = { name: "taha-unavailable" };
-    const added = (over = {}) => ({ event: "labeled", label, actor: { login: "TahaKhanAbdalli" }, created_at: new Date(now - 5 * 60_000).toISOString(), ...over });
+    const added = (over = {}) => ({ event: "labeled", label, actor: { login: "TahaKhanAbdalli", id: 50602678 }, created_at: new Date(now - 5 * 60_000).toISOString(), ...over });
     const commit = { event: "committed", sha: HEAD_SHA };
     const t = (events, labels = [label]) => ({ events, labels, head: HEAD_SHA, now });
     ok(tahaUnavailableLabelled(t([commit, added()])) === true, "Taha's fresh label after the head counts");
-    ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "MasonWells1" } })])) === false, "Mason's shared account doesn't count");
+    ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "MasonWells1", id: 1 } })])) === false, "Mason's shared account doesn't count");
+    ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "TahaKhanAbdalli", id: 999 } })])) === false, "another account under Taha's old login doesn't count (Luna, PR 3)");
+    ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "taha-renamed", id: 50602678 } })])) === true, "his account after a rename still counts");
     ok(tahaUnavailableLabelled(t([commit, added({ created_at: new Date(now - 31 * 60_000).toISOString() })])) === false, "older than 30 minutes doesn't count");
     ok(tahaUnavailableLabelled(t([added(), commit])) === false, "a label added before the latest push doesn't count");
     ok(tahaUnavailableLabelled(t([commit, added()], [])) === false, "a label since removed doesn't count");

@@ -43,7 +43,7 @@ import {
 import { findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 import { ownerAcceptedForPr, usesCarriedSkip } from "./sol-accept-lib.mjs";
 import { readTeammateComments, teammateCommentsDenial, READY_TO_MERGE_LINE } from "./teammate-comments-lib.mjs";
-import { findTahaUnavailableOverride, issueTahaLaneCode, markTahaTold } from "./taha-lane-lib.mjs";
+import { findTahaUnavailableOverride, issueTahaLaneCode, markTahaTold, TAHA_ID } from "./taha-lane-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
 // A live apply accepts the same 24-hour exact-head Sol proof as the merge gates
@@ -107,7 +107,8 @@ export function tahaUnavailableLabelled({ events, labels, head, now = Date.now()
   const headAt = Math.max(arrived, events.findLastIndex((e) => e?.event === "head_ref_force_pushed"));
   const last = events.slice(headAt + 1).filter((e) => e?.label?.name === TAHA_UNAVAILABLE_LABEL && (e.event === "labeled" || e.event === "unlabeled")).pop();
   const at = Date.parse(String(last?.created_at ?? ""));
-  return last?.event === "labeled" && String(last?.actor?.login ?? "").trim().toLowerCase() === TAHA_LOGIN &&
+  // Matched by his account number, not his renamable login (Luna, PR 3).
+  return last?.event === "labeled" && String(last?.actor?.id ?? "") === TAHA_ID &&
     Number.isFinite(at) && now - at <= READY_WINDOW_MS && at - now <= 60_000;
 }
 

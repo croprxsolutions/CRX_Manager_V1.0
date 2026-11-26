@@ -3141,6 +3141,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'AFTER INSERT/DELETE trigger on prepay_applications: recomputes one credit balance from its rows, now including M9 reversal lines (convergent, so a replay writes the same value); the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function and M9 revokes API-role EXECUTE. Prune once the candidate is in the generated snapshot',
   _recompute_po_on_order_for_products:
     'internal convergent PO-cache recomputation helper; trigger parents own the transaction and direct browser EXECUTE is revoked',
+  _record_standard_delivery_assignment_notice:
+    'internal notice writer called only by create_delivery_with_items after it binds a fresh actor-specific receipt; every API-role EXECUTE is revoked',
   // Trigger-only helpers whose migrations are now at or below the live registry
   // high-water are absent from generated client types and this inventory. Keeping
   // dead exemptions would silently pre-suppress any future RPC reusing a name.

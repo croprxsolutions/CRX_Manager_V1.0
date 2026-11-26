@@ -20,6 +20,15 @@ BEGIN
       AND prosecdef AND proowner = 'postgres'::regrole
       AND proconfig = ARRAY['search_path=public, pg_temp']
   ) THEN RAISE EXCEPTION 'DELIVERY_ASSIGNMENT_NOTICE_PREFLIGHT_MISMATCH'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_attribute
+    WHERE attrelid = 'public.notifications'::regclass AND attname = 'created_by'
+      AND atttypid = 'uuid'::regtype AND NOT attisdropped
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_trigger
+    WHERE tgrelid = 'public.notifications'::regclass AND tgname = 'notifications_stamp_sender'
+      AND tgfoid = to_regprocedure('public.stamp_notification_sender()') AND tgenabled = 'O'
+  ) THEN RAISE EXCEPTION 'DELIVERY_ASSIGNMENT_NOTICE_SENDER_CHANGED'; END IF;
 END
 $preflight$;
 
@@ -62,6 +71,40 @@ WHEN (
   AND NEW.related_entity_type = 'delivery'
 )
 EXECUTE FUNCTION public.skip_repeated_delivery_assignment_notice();
+
+-- Called by the owner from the fresh, actor-bound delivery save only.
+CREATE FUNCTION public._record_standard_delivery_assignment_notice(p_delivery_id uuid, p_actor uuid)
+RETURNS void
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $notice$
+BEGIN
+  INSERT INTO public.notifications
+    (user_id, title, message, notification_type, related_entity_type, related_entity_id, created_by)
+  SELECT d.assigned_driver, 'New Delivery Assigned',
+    format('You''ve been assigned delivery %s for %s on %s', d.delivery_number,
+      COALESCE(NULLIF(c.farm_name, ''), 'customer'), to_char(d.scheduled_date, 'FMMM/FMDD/YYYY')),
+    'delivery_assigned', 'delivery', d.id, p_actor
+  FROM public.deliveries AS d
+  LEFT JOIN public.customers AS c ON c.id = d.customer_id
+  WHERE d.id = p_delivery_id AND d.assigned_driver IS NOT NULL;
+EXCEPTION WHEN OTHERS THEN
+  -- A notice failure must not invalidate a saved delivery.
+  BEGIN
+    INSERT INTO public.failed_notifications (notification_type, entity_type, entity_id, error_message, payload)
+    SELECT 'delivery_assigned', 'delivery', d.id,
+      'Database could not send the assignment notice (SQLSTATE ' || SQLSTATE || ')',
+      jsonb_build_object('driverId', d.assigned_driver)
+    FROM public.deliveries AS d
+    WHERE d.id = p_delivery_id;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'Failed to record delivery assignment notice failure (SQLSTATE %)', SQLSTATE;
+  END;
+END;
+$notice$;
+
+REVOKE ALL ON FUNCTION public._record_standard_delivery_assignment_notice(uuid, uuid)
+  FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.create_delivery_with_items(
   p_order_id uuid,
@@ -113,27 +156,7 @@ BEGIN
     PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'create_delivery_with_items', v_fingerprint);
 
     IF p_assigned_driver IS NOT NULL THEN
-      -- A notice failure must not invalidate a saved delivery.
-      BEGIN
-        INSERT INTO public.notifications
-          (user_id, title, message, notification_type, related_entity_type, related_entity_id, created_by)
-        SELECT d.assigned_driver, 'New Delivery Assigned',
-          format('You''ve been assigned delivery %s for %s on %s', d.delivery_number,
-            COALESCE(NULLIF(c.farm_name, ''), 'customer'), to_char(d.scheduled_date, 'FMMM/FMDD/YYYY')),
-          'delivery_assigned', 'delivery', d.id, v_actor
-        FROM public.deliveries AS d
-        LEFT JOIN public.customers AS c ON c.id = d.customer_id
-        WHERE d.id = (v_result ->> 'delivery_id')::uuid AND d.assigned_driver IS NOT NULL;
-      EXCEPTION WHEN OTHERS THEN
-        BEGIN
-          INSERT INTO public.failed_notifications (notification_type, entity_type, entity_id, error_message, payload)
-          VALUES ('delivery_assigned', 'delivery', (v_result ->> 'delivery_id')::uuid,
-            'Database could not send the assignment notice (SQLSTATE ' || SQLSTATE || ')',
-            jsonb_build_object('driverId', p_assigned_driver));
-        EXCEPTION WHEN OTHERS THEN
-          RAISE WARNING 'Failed to record delivery assignment notice failure (SQLSTATE %)', SQLSTATE;
-        END;
-      END;
+      PERFORM public._record_standard_delivery_assignment_notice((v_result ->> 'delivery_id')::uuid, v_actor);
     END IF;
   END IF;
   RETURN v_result;
@@ -157,14 +180,22 @@ BEGIN
   ) OR NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_proc
     WHERE oid = 'public.create_delivery_with_items(uuid,uuid,date,jsonb,uuid,uuid,text,text,text)'::regprocedure
-      AND md5(replace(prosrc, chr(13), '')) = '33d1ed3790f5034831fee03afb447fb0'
+      AND md5(replace(prosrc, chr(13), '')) = '5249e088b4c427801c3243d2e1e4e371'
       AND prosecdef AND proowner = 'postgres'::regrole
+      AND proconfig = ARRAY['search_path=public, pg_temp']
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc
+    WHERE oid = 'public._record_standard_delivery_assignment_notice(uuid,uuid)'::regprocedure
+      AND NOT prosecdef AND proowner = 'postgres'::regrole
       AND proconfig = ARRAY['search_path=public, pg_temp']
   ) THEN RAISE EXCEPTION 'DELIVERY_ASSIGNMENT_NOTICE_POSTFLIGHT_MISMATCH'; END IF;
 
   IF has_function_privilege('anon', 'public.skip_repeated_delivery_assignment_notice()', 'EXECUTE')
     OR has_function_privilege('authenticated', 'public.skip_repeated_delivery_assignment_notice()', 'EXECUTE')
     OR has_function_privilege('service_role', 'public.skip_repeated_delivery_assignment_notice()', 'EXECUTE')
+    OR has_function_privilege('anon', 'public._record_standard_delivery_assignment_notice(uuid,uuid)', 'EXECUTE')
+    OR has_function_privilege('authenticated', 'public._record_standard_delivery_assignment_notice(uuid,uuid)', 'EXECUTE')
+    OR has_function_privilege('service_role', 'public._record_standard_delivery_assignment_notice(uuid,uuid)', 'EXECUTE')
     OR has_function_privilege('anon', 'public.create_delivery_with_items(uuid,uuid,date,jsonb,uuid,uuid,text,text,text)', 'EXECUTE')
     OR NOT has_function_privilege('authenticated', 'public.create_delivery_with_items(uuid,uuid,date,jsonb,uuid,uuid,text,text,text)', 'EXECUTE')
     OR NOT has_function_privilege('service_role', 'public.create_delivery_with_items(uuid,uuid,date,jsonb,uuid,uuid,text,text,text)', 'EXECUTE')

@@ -11,10 +11,11 @@ describe('standard delivery assignment notice boundary', () => {
   it('does not create a notice on a replay or take its actor from the client payload', () => {
     const fresh = sql.slice(sql.indexOf('IF v_replay IS NULL THEN'), sql.indexOf('RETURN v_result;'));
     expect(fresh).toContain('_bind_replay_receipt_20261015(');
-    expect(fresh).toContain('INSERT INTO public.notifications');
-    expect(fresh).toContain("'delivery_assigned', 'delivery', d.id, v_actor");
-    expect(fresh).toContain("FROM public.deliveries AS d");
-    expect(fresh).toContain('EXCEPTION WHEN OTHERS');
+    expect(fresh).toContain("public._record_standard_delivery_assignment_notice((v_result ->> 'delivery_id')::uuid, v_actor)");
+    expect(sql).toContain("'delivery_assigned', 'delivery', d.id, p_actor");
+    expect(sql).toContain('FROM public.deliveries AS d');
+    expect(sql).toContain('EXCEPTION WHEN OTHERS');
+    expect(sql).toMatch(/REVOKE ALL ON FUNCTION public\._record_standard_delivery_assignment_notice\(uuid, uuid\)\s+FROM PUBLIC, anon, authenticated, service_role;/);
   });
 
   it('silently skips the same legacy notice only from the original actor', () => {

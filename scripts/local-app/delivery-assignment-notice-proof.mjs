@@ -29,6 +29,7 @@ assert(historical, 'Expected delivery wrapper missing from the historical migrat
 const restore = `
   DROP TRIGGER IF EXISTS notifications_skip_repeated_delivery_assignment ON public.notifications;
   DROP FUNCTION IF EXISTS public.skip_repeated_delivery_assignment_notice();
+  DROP FUNCTION IF EXISTS public._record_standard_delivery_assignment_notice(uuid, uuid);
   ${historical.replace('CREATE FUNCTION', 'CREATE OR REPLACE FUNCTION')}
 `;
 
@@ -42,6 +43,8 @@ function expectSqlStop(sql, ...signals) {
 expectSqlStop(candidate, 'DELIVERY_ASSIGNMENT_NOTICE_NEEDS_TRANSACTION');
 expectSqlStop(`BEGIN;\n${restore.replace('DECLARE', 'DECLARE\n  -- Invented body drift for the local proof.')}\n${candidate}\nROLLBACK;`,
   'DELIVERY_ASSIGNMENT_NOTICE_PREFLIGHT_MISMATCH');
+expectSqlStop(`BEGIN;\n${restore}\nALTER TABLE public.notifications DISABLE TRIGGER notifications_stamp_sender;\n${candidate}\nROLLBACK;`,
+  'DELIVERY_ASSIGNMENT_NOTICE_SENDER_CHANGED');
 expectSqlStop(`BEGIN;\n${restore}\n${candidate}\nDROP TABLE pg_temp.delivery_assignment_notice_tx;\n${candidate}\nROLLBACK;`,
   'DELIVERY_ASSIGNMENT_NOTICE_PREFLIGHT_MISMATCH');
 

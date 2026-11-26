@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270309060000_record_standard_delivery_assignment_notice.sql` (SQL sha256: `cae97049ef9c48b287842fa8e23e37f9dbecad7012430a3ed792251fb7679145`) records the standard delivery's existing assignment notice when a new delivery saves. It retains the stored recipient and caller, and supports older browser sessions without duplicate notices.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270309060000_record_standard_delivery_assignment_notice.sql` (SQL sha256: `1483534e38846b84c245df20c83211528e1ecad1030a328c6c162137cb8edba2`) records the standard delivery's existing assignment notice when a new delivery saves. It retains the stored recipient and caller, and supports older browser sessions without duplicate notices.
 
 This is database support for the later client transition. The compatibility bridge matches the standard new-delivery title and type only. Edit, reassignment and follow-up notices keep their existing workflows. Before rollback after a client transition, restore the compatible client sender, then restore the prior delivery creation function and remove the compatibility trigger through a reviewed migration.
 
@@ -6,4 +6,6 @@ Local invented-data proof passed the full container-only batch 4c replay chain, 
 
 During the client transition, an old tab can still send after a server notice fails. In that case a failure record can remain for a notice the browser ultimately delivered. The release owner removes the compatibility trigger after the app no longer sends this notice and supported cached clients have moved off the old sender.
 
-Repeat the database proof on a running local walkthrough with node scripts/local-app/delivery-assignment-notice-proof.mjs. It applies this exact candidate in a rollback-only transaction, checks all three refusal paths, and requires the new assignment tests in the full delivery replay chain to have run.
+Repeat the database proof on a running local walkthrough with node scripts/local-app/delivery-assignment-notice-proof.mjs. It applies this exact candidate in a rollback-only transaction, checks unsafe transaction, wrapper, sender and repeat-apply states, and requires the new assignment tests in the full delivery replay chain to have run.
+
+The local walkthrough is the execution target for the notice-chain extension. Shared-database smoke runs are unsafe here because delivery numbers use sequences. CI checks the source boundary and migration contracts.

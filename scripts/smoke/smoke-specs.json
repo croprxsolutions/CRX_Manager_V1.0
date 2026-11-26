@@ -171,6 +171,14 @@
       "covers": ["approve_liquid_density_draft", "submit_liquid_density_draft", "get_liquid_density_review", "approve_weights", "_write_parent_density", "liquid_density_review_open"],
       "area": ["inventory", "security", "idempotency"]
     },
+    "liquid_density_brand_rename": {
+      "chain": "smoke-liquid-density-brand-rename.sql",
+      "container_only": true,
+      "container_prover": "prove-liquid-density-cutover-real-schema.mjs",
+      "description": "With staging review open, cosmetic active-brand name edits preserve approval. A substantive rename returns it to draft or preserves the draft already waiting, and a previously saved ticket keeps its captured weight.",
+      "covers": ["return_liquid_density_to_draft_for_brand"],
+      "area": ["inventory", "security"]
+    },
     "apply_product_setup": {
       "chain": "smoke-product_setup_workbook.sql",
       "container_prover": "prove-product-setup-workbook-real-schema.mjs",

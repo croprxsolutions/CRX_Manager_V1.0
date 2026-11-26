@@ -20,7 +20,7 @@ Read at `origin/staging` c8f9f8e77 (2026-11-25). Parent audit: `docs/plans/2026-
 **Smallest change.** One new migration, `20270308060000_below_cost_prompt_lists_every_line.sql`:
 1. `_enforce_below_cost_line` re-created from the `5fa0a5f9…` body with two additions. (a) At the top: if a note exists, drop this row's entry (the row is judged afresh). (b) In the admin "no reason" branch only: instead of raising, note the row's detail (today's detail plus `quantity`, `line_shortfall_cents` and `per` = `unit` or `line`) in the transaction-local setting `app.crx_below_cost_pending`, keyed `<table>:<line id>`, with a write sequence number, and let the row write. Every other branch is unchanged.
 2. A new trigger function `_raise_below_cost_reason_list()` (SECURITY DEFINER, `search_path = public, pg_temp`, owner postgres, EXECUTE only postgres and service_role) and one `CONSTRAINT TRIGGER zzz_crx_below_cost_reason_list AFTER INSERT OR UPDATE … DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (pending setting is not empty)` on each of the three tables. At commit (after the RPC has returned) the first queued event keeps the noted lines whose row still exists. If any remain, it raises ONE `BELOW_COST_REASON_REQUIRED:` error; the whole save rolls back, as today. If none remain, it clears the note and the commit proceeds.
-3. No cap. Every line is listed.
+3. The first 200 lines are listed in the order written; `more_count` counts the rest and the total covers every line (peer review, 2026-11-25; superseded the earlier no-cap rule).
 
 **Wire format (Astra #27).** The JSON keeps today's top-level fields, taken from the first line written (lowest sequence), so the already-deployed screen still shows that line. It adds `lines` (every listed line in write order; each: operation, entity type and id, line id, product id/name, `unit_price_cents`, `locked_unit_cost_cents`, `quantity`, `line_shortfall_cents`, `per`), `line_count` (= number of listed lines), `more_count` (always 0; kept so the parser has one shape) and `total_shortfall_cents` (= the sum of the listed lines).
 
@@ -143,3 +143,11 @@ None for this PR. The follow-up "retry bound to what was shown" is Mason's call 
 - **Added, real RPCs:** case 14 (`save_quote`) and case 15 (`create_rush_order` then `price_order`) each refuse once at commit with the full list.
 - **LOW, known and deferred:** a note kept through an exempt write keeps the quantity it was noted at. Case 13 shows a line noted at quantity 2 then cut to 1 as $8.00 short, not $4.00. The prompt can overstate the shortfall and never understates it. The approval rows logged on the retry come from the retry's own writes, so they are exact.
 - **Proof harness:** the prover now pipes staged SQL into the container instead of using `docker cp`, which hung for 25+ minutes under load on 2026-11-26. Every docker call times out at 5 minutes.
+
+## Luna round 5 (gpt-6-luna xhigh, head 0afedc3d2: 0 BLOCKER/HIGH, 3 MED, 2 LOW)
+
+1. **MED, fixed:** a line turned into a zero-cost non-product line in the same save kept its note. That return now forgets it. Proof case 13b.
+2. **MED, deferred (existing follow-up #2618):** overlapping saves share one prompt. Unchanged by this PR.
+3. **MED, refuted:** a total above JavaScript's safe-integer limit (about $90 trillion) shows no total. No real save reaches that size; this is the same display-rounding note Sol round 2 deferred.
+4. **LOW, deferred:** a note kept through an exempt quantity cut keeps the old quantity (see the peer-review section).
+5. **LOW, fixed:** contract rule 3 now states the 200-line cap.

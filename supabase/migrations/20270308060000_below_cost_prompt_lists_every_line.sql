@@ -216,6 +216,11 @@ BEGIN
         RAISE EXCEPTION 'INVALID_QUANTITY';
       END IF;
       IF COALESCE(NEW.cost_cents, 0) = 0 THEN
+        -- Pricing audit fix 1: a zero-cost line is not below cost, so forget any earlier note of this row.
+        IF COALESCE(current_setting('app.crx_below_cost_pending', true), '') <> '' THEN
+          PERFORM set_config('app.crx_below_cost_pending', (current_setting('app.crx_below_cost_pending', true)::jsonb
+            #- ARRAY['lines', TG_TABLE_NAME || ':' || COALESCE(NEW.id::text, '')])::text, true);
+        END IF;
         RETURN NEW;
       END IF;
       v_product_name := COALESCE(
@@ -548,7 +553,7 @@ BEGIN
      WHERE p.oid = to_regprocedure('public._enforce_below_cost_line()')
        AND ((SELECT count(*) FROM pg_proc o
               WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_enforce_below_cost_line') <> 1
-        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '791f79c3c69bf917e5f910d81c578076'
+        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '8e47fc957cc31a810f235216daebdc4d'
         OR p.proowner <> 'postgres'::regrole
         OR NOT p.prosecdef
         OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]

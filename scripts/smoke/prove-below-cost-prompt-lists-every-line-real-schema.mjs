@@ -285,7 +285,7 @@ const body = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
 const grants = () => scalar(`SELECT COALESCE(string_agg(g, ',' ORDER BY g), '-') FROM (SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END AS g
   FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = '${GUARD}'::regprocedure AND a.privilege_type = 'EXECUTE') x;`);
 const OLD_BODY = '5fa0a5f975dc2a84b3c6599a84b8cc55';
-const NEW_BODY = process.env.CRX_BCL_NEW_BODY || '791f79c3c69bf917e5f910d81c578076';
+const NEW_BODY = process.env.CRX_BCL_NEW_BODY || '8e47fc957cc31a810f235216daebdc4d';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -499,6 +499,17 @@ UPDATE public.invoice_items SET id = '${INV_LINE}', unit_price_cents = 1000, ext
   assert.equal(raisedNewId.status, 0, raisedNewId.output);
   assert.equal(scalar(`SELECT string_agg(id::text || ':' || unit_price_cents, ',') FROM public.invoice_items WHERE invoice_id = '${INV}';`), `${INV_LINE}:1000`);
   console.log('[case 12b] a line written below cost, then given another id and raised to cost in the same save: saves with no prompt');
+  // Case 13b: a product line written below cost, then turned into a zero-cost charge line (no product) in the same save,
+  // is no longer below cost: its note is forgotten and the save goes through with no prompt (Luna r5). The delivered-goods
+  // check runs per row, so the product line is written at quantity 0 (no units billed).
+  const toFee = asAdminWrite(`INSERT INTO public.invoice_items (id, invoice_id, order_item_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, sort_order)
+  VALUES ('${id('e5')}', '${INV}', NULL, '${P2}', '[PROVER] BCL two', 0, 600, 0, 1000, 1);
+UPDATE public.invoice_items SET product_id = NULL, charge_type = 'service', description = '[PROVER] BCL fee', quantity = 1, extended_cents = 600, cost_cents = 0 WHERE id = '${id('e5')}';`, 'save_invoice');
+  assert.equal(toFee.status, 0, toFee.output);
+  assert.equal(scalar(`SELECT count(*) FROM public.invoice_items WHERE id = '${id('e5')}' AND product_id IS NULL AND cost_cents = 0;`), '1');
+  const dropFee = asAdminWrite(`DELETE FROM public.invoice_items WHERE id = '${id('e5')}';`, 'save_invoice');
+  assert.equal(dropFee.status, 0, dropFee.output);
+  console.log('[case 13b] a product line written below cost, then turned into a zero-cost charge line in the same save: saves with no prompt');
 
   // Case 14: the real save_quote. Two below-cost lines and one above cost, no reason: refused once at COMMIT, no quote saved.
   const quoteLine = (product, name, price, qty, sort) => ({ product_id: product, sort_order: sort, calc_mode: 'units_direct',

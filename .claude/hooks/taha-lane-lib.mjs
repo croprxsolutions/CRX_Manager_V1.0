@@ -328,7 +328,8 @@ export function tahaApprovedCommit(rows, baseChangedAt = "") {
 // now. Pushes that only catch up with staging, change only files under docs/, or restamp a migration (only its
 // own migration stamp changed, old -> new, in names and text; Luna r1) leave it so; any other change needs him again.
 // shortcut: a staging catch-up that changes how the PR's unchanged code behaves is not seen (Mason accepted, 2026-11-25).
-// shortcut: a file whose git mode alone changes (e.g. to a symlink) is not seen; same honest-mistake net (Luna r1, deferred).
+// shortcut: a file whose git mode alone changes keeps its blob sha and is not seen: the executable bit, or a file
+// turned into a symlink whose target path equals the file's old text. Accepted honest-mistake gap (Sol r2 LOW, Sol on the follow-ups).
 // Date-shaped (YYYYMMDDhhmmss, 2000-2099), never part of a decimal. Not \b: a stamp is followed by "_" in names.
 const STAMP_RE = /(?<!\d|\d\.)20\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:[01]\d|2[0-3])[0-5]\d[0-5]\d(?!\d|\.\d)/g;
 const unstamped = (text) => String(text ?? "").replace(STAMP_RE, "<stamp>");
@@ -359,6 +360,7 @@ export function ownChanges(files) {
 export function restampMap(before, after) {
   if (!before || !after) return null;
   const map = new Map();
+  const moves = []; // [old, new] for every stamp in the PR's migration names, unchanged ones included
   for (const [key, a] of before) {
     const b = after.get(key);
     // Only a migration file names a restamp (Luna r3: any other renamed file with a date in its name does not).
@@ -366,11 +368,15 @@ export function restampMap(before, after) {
     const [x, y] = [String(a.name ?? "").match(STAMP_RE) || [], String(b.name ?? "").match(STAMP_RE) || []];
     if (x.length !== y.length) return null;
     for (let i = 0; i < x.length; i++) {
+      moves.push([x[i], y[i]]);
       if (x[i] === y[i]) continue;
       if (map.has(x[i]) && map.get(x[i]) !== y[i]) return null;
       map.set(x[i], y[i]);
     }
   }
+  // A restamp that changes the order the PR's own migrations run in is a real change (restamp-migration.mjs refuses one; Sol r2).
+  const cmp = (p, q) => (p < q ? -1 : p > q ? 1 : 0);
+  if (moves.some(([x1, y1]) => moves.some(([x2, y2]) => cmp(x1, x2) !== cmp(y1, y2)))) return null;
   return map;
 }
 
@@ -418,7 +424,8 @@ function sameOwnChange({ repoPath, gh, pullRequest, from, to }) {
   const bytes = (sha) => Buffer.from(String(gh(["api", `${repoPath}/git/blobs/${sha}`, "--jq", ".content"])).replace(/\s+/g, ""), "base64");
   // Only the PR's own restamp may differ in text (Luna r1: any other date-shaped number is a real change),
   // and only in real UTF-8 text; anything else must match byte for byte.
-  const text = (buf) => { try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch { return null; } };
+  // ignoreBOM keeps a byte-order mark in the text, so adding or dropping one is a change like any other byte (Sol r2).
+  const text = (buf) => { try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(buf); } catch { return null; } };
   // shortcut: a code value equal to the PR's own migration stamp, moved in step with the restamp, carries over;
   // real restamps rewrite bare stamp mentions in src/ and scripts/ comments (#2557), so all files are normalized
   // (Luna r2, refuted; tighten only if a real code value ever matches a migration stamp).

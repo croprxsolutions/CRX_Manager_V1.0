@@ -142,15 +142,13 @@ describe('fetchJobMapImages', () => {
       features: Array<{ geometry: { type: string }; properties: Record<string, string> }>;
     };
     const marker = overlay.features.find((feature) => feature.geometry.type === 'Point');
-    expect(marker?.properties).toMatchObject({
-      kind: 'oil_well',
-      label: 'West well',
+    expect(marker?.properties).toEqual({
       'marker-color': '#dc2626',
       'marker-size': 'small',
     });
   });
 
-  it('drops oversized obstacle points before dropping the field fill', async () => {
+  it('keeps an obstacle and the field fill even if private text would exceed the URL limit', async () => {
     setupRpc();
     mockObstacleIn.mockResolvedValue({
       data: [{
@@ -179,7 +177,8 @@ describe('fetchJobMapImages', () => {
     const overlay = JSON.parse(decodeURIComponent(encodedOverlay?.[1] ?? '')) as {
       features: Array<{ geometry: { type: string }; properties: Record<string, string | number> }>;
     };
-    expect(overlay.features.some((feature) => feature.geometry.type === 'Point')).toBe(false);
+    expect(overlay.features.some((feature) => feature.geometry.type === 'Point')).toBe(true);
+    expect(JSON.stringify(overlay)).not.toContain('x'.repeat(100));
     expect(overlay.features[0].properties).toMatchObject({
       fill: '#FFD700',
       'fill-opacity': 0.15,

@@ -4,11 +4,11 @@ DO $preflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
-     IS DISTINCT FROM '1e279ff87bba48d7317d873a09ec79d3' THEN
+     IS DISTINCT FROM '85f7bbe5eb3e9a6507fd0922fdd2506f' THEN
     RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _complete_delivery_authorized_impl is not the 20270310120000 body';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._delivery_lines_match(uuid,jsonb,jsonb)'))
-     IS DISTINCT FROM '7b7eea07bc4c838aee30aef601d0be19' THEN
+     IS DISTINCT FROM '0fa6b8c0d10033f1374f192d17641bb7' THEN
     RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _delivery_lines_match is not the 20270310120000 body';
   END IF;
 END

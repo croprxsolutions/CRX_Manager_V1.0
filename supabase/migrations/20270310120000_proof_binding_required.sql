@@ -17,6 +17,7 @@
 --     LEFT_AT_SITE_LOAD_CHANGED  for a drop-location photo (no one present) saved with no lines_seen, one it cannot
 --                                read, or one taken for another load (Mason, 2026-11-25: bound like a ticket photo;
 --                                Taha's review of #2557, #2527 HIGH 4).
+--   With no list the message says this app copy is out of date: reload it, then take the proof again (Taha, #2671).
 --   The screens treat these refusals as "clear the proof, reload the lines, get new proof".
 --   _delivery_lines_match counts a delivered amount above 0 and under 0.01 as 0 on both sides (Taha's review of #2562,
 --   LOW 1), so a proof taken while the screen showed 0.005 is the same load as one showing 0, as #2562 records it.
@@ -60,8 +61,8 @@ DECLARE
   v_status text;
   v_bad_figures boolean;
   v_product record;
-  v_binding jsonb;  -- 20270307030000
-  v_ticket_lines jsonb;  -- 20270307030000
+  v_binding jsonb;  -- proof bound to load
+  v_ticket_lines jsonb;  -- proof bound to load
 BEGIN
   -- KI-150: the delivery first (as the body does), then every stock row its lines can move, in product order, so two
   -- completions sharing products wait for each other instead of deadlocking. The body re-takes these locks.
@@ -116,20 +117,23 @@ BEGIN
     RAISE EXCEPTION 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'
       USING ERRCODE = 'check_violation';
   END IF;
-  -- 20270307030000: the customer's proof covers the load the screen showed when it was taken. Here, after the delivery
+  -- Proof bound to load: the customer's proof covers the load the screen showed when it was taken. Here, after the delivery
   -- and line locks and every earlier rule (who may complete it, the replay decision, the evidence checks, nothing delivered), so
   -- the lines cannot change under it and every existing message comes first. Only the public wrappers set the binding,
-  -- for this delivery; left at site and no proof are not checked.
+  -- for this delivery; no proof is not checked.
   IF v_status = 'in_progress' THEN
     v_binding := NULLIF(current_setting('crx.proof_binding', true), '')::jsonb;
     IF v_binding ->> 'delivery_id' IS DISTINCT FROM p_delivery_id::text THEN
       v_binding := NULL;
     END IF;
-    -- 20270310120000: required. A signature sent with no list (an old app copy, a queued call) is not proof of
-    -- this load either.
+    -- Proof binding required: a signature sent with no list (an old app copy, a queued call) is not proof of this
+    -- load either. The no-list message says how to fix it: reload the app (Taha, #2671).
+    IF v_binding ->> 'evidence' = 'signature' AND NOT v_binding ? 'lines_seen' THEN
+      RAISE EXCEPTION 'DELIVERY_LOAD_CHANGED: this copy of CRX is out of date and did not send the products the customer signed for. Tap Reload on the new-version notice (or close CRX and open it again), then get the signature again.'
+        USING ERRCODE = 'check_violation';
+    END IF;
     IF v_binding ->> 'evidence' = 'signature'
-       AND (NOT v_binding ? 'lines_seen'
-            OR NOT public._delivery_lines_match(p_delivery_id, v_binding -> 'lines_seen', p_quantities)) THEN
+       AND NOT public._delivery_lines_match(p_delivery_id, v_binding -> 'lines_seen', p_quantities) THEN
       RAISE EXCEPTION 'DELIVERY_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the customer signed. Reload the delivery, check the products and amounts with the customer and get a new signature. If the customer already has the goods, call the office.'
         USING ERRCODE = 'check_violation';
     END IF;
@@ -140,15 +144,23 @@ BEGIN
           FROM public.delivery_photos ph
          WHERE ph.id = (v_binding ->> 'evidence_ref')::uuid AND ph.delivery_id = p_delivery_id;
       END IF;
-      -- 20270310120000: required. A photo saved with no list (before the screen fix), or one this step cannot
-      -- read, is not proof of this load (Luna). The drop-location photo of a no-one-present stop is bound the same way
+      -- Proof binding required: a photo saved with no list (before the screen fix), or one this step cannot
+      -- read, is not proof of this load (Luna); the no-list message says to reload the app (Taha, #2671). The drop-location photo of a no-one-present stop is bound the same way
       -- (Mason, 2026-11-25, Taha's review of #2557: #2527 HIGH 4).
+      IF v_binding ->> 'evidence' = 'left_at_site' AND v_ticket_lines IS NULL THEN
+        RAISE EXCEPTION 'LEFT_AT_SITE_LOAD_CHANGED: this copy of CRX is out of date and did not save the products with the drop-location photo. Tap Reload on the new-version notice (or close CRX and open it again), then take the photo again.'
+          USING ERRCODE = 'check_violation';
+      END IF;
       IF v_binding ->> 'evidence' = 'left_at_site'
-         AND (v_ticket_lines IS NULL OR NOT public._delivery_lines_match(p_delivery_id, v_ticket_lines, p_quantities)) THEN
+         AND NOT public._delivery_lines_match(p_delivery_id, v_ticket_lines, p_quantities) THEN
         RAISE EXCEPTION 'LEFT_AT_SITE_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the drop-location photo was taken. Take a new photo of where the delivery was left, for the current products and amounts.'
           USING ERRCODE = 'check_violation';
       END IF;
-      IF v_ticket_lines IS NULL OR NOT public._delivery_lines_match(p_delivery_id, v_ticket_lines, p_quantities) THEN
+      IF v_ticket_lines IS NULL THEN
+        RAISE EXCEPTION 'PAPER_TICKET_LOAD_CHANGED: this copy of CRX is out of date and did not save the products with the ticket photo. Tap Reload on the new-version notice (or close CRX and open it again), then take the photo again.'
+          USING ERRCODE = 'check_violation';
+      END IF;
+      IF NOT public._delivery_lines_match(p_delivery_id, v_ticket_lines, p_quantities) THEN
         RAISE EXCEPTION 'PAPER_TICKET_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the ticket photo was taken. Get the ticket signed for the current products and amounts and add a new photo of it. If the customer already has the goods, call the office.'
           USING ERRCODE = 'check_violation';
       END IF;
@@ -215,7 +227,7 @@ BEGIN
     RETURN false;
   END IF;
   -- Each side's delivered amount is kept between 0 and the scheduled quantity, then an amount above 0 and under 0.01
-  -- counts as 0 (20270310120000; the rule #2562 records a delivery by, and #2324's under-0.01 "nothing delivered").
+  -- counts as 0 (proof binding required; the rule #2562 records a delivery by, and #2324's under-0.01 "nothing delivered").
   RETURN NOT EXISTS (
     WITH seen AS (
       SELECT lower(e ->> 'order_item_id') AS oi, lower(e ->> 'product_id') AS pr, round((e ->> 'quantity')::numeric, 6) AS q,
@@ -241,7 +253,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = '1e279ff87bba48d7317d873a09ec79d3'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '85f7bbe5eb3e9a6507fd0922fdd2506f'
                     AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
@@ -250,7 +262,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._delivery_lines_match(uuid,jsonb,jsonb)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = '7b7eea07bc4c838aee30aef601d0be19'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '0fa6b8c0d10033f1374f192d17641bb7'
                     AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')

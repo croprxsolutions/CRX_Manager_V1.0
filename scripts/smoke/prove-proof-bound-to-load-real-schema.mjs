@@ -381,6 +381,11 @@ const keySaved = (key) => scalar(`SELECT count(*) FROM public.idempotency_keys W
 const LEFT = /LEFT_AT_SITE_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the drop-location photo was taken\. Take a new photo of where the delivery was left, for the current products and amounts\./;
 const LOAD = /DELIVERY_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the customer signed\. Reload the delivery, check the products and amounts with the customer and get a new signature\. If the customer already has the goods, call the office\./;
 const TICKET = /PAPER_TICKET_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the ticket photo was taken\. Get the ticket signed for the current products and amounts and add a new photo of it\. If the customer already has the goods, call the office\./;
+// Proof binding required: with no list the message says the app copy is out of date (Taha, #2671).
+const OUTDATED = 'this copy of CRX is out of date and did not s[a-z]+ the products ';
+const NOLIST_LOAD = new RegExp(String.raw`DELIVERY_LOAD_CHANGED: ${OUTDATED}the customer signed for\. Tap Reload on the new-version notice \(or close CRX and open it again\), then get the signature again\.`);
+const NOLIST_TICKET = new RegExp(String.raw`PAPER_TICKET_LOAD_CHANGED: ${OUTDATED}with the ticket photo\. Tap Reload on the new-version notice \(or close CRX and open it again\), then take the photo again\.`);
+const NOLIST_LEFT = new RegExp(String.raw`LEFT_AT_SITE_LOAD_CHANGED: ${OUTDATED}with the drop-location photo\. Tap Reload on the new-version notice \(or close CRX and open it again\), then take the photo again\.`);
 
 let GAP;
 function beforeCases() {
@@ -626,8 +631,8 @@ function requiredCases() {
   stageText('required.sql', lf(FOLLOW_UPS[0]));
   r = apply('required.sql');
   assert.equal(r.status, 0, r.output);
-  assert.equal(scalar(STEP_MD5), '1e279ff87bba48d7317d873a09ec79d3');
-  assert.equal(scalar(MATCH_MD5), '7b7eea07bc4c838aee30aef601d0be19');
+  assert.equal(scalar(STEP_MD5), '85f7bbe5eb3e9a6507fd0922fdd2506f');
+  assert.equal(scalar(MATCH_MD5), '0fa6b8c0d10033f1374f192d17641bb7');
   // Taha's review of #2562 (LOW 1): a delivered amount above 0 and under 0.01 counts as 0 on both sides.
   const TWO = (d2) => [A(2)[0], B(2, d2)[0]];
   let tiny = (key, seen, figure) => {
@@ -648,7 +653,7 @@ function requiredCases() {
   [t, sql] = tiny('pbl-qt5', TWO(0), 0.01); refused(sql, LOAD); assert.equal(status(t), 'in_progress');
   console.log('[required tiny] an amount above 0 and under 0.01 counts as 0 on both sides: signed 0 / sent 0.005, signed 0.004 / sent 0.009 and signed 0.005 / sent 0 complete, each recording the tiny line as 0 with no stock moved (#2562 replayed first); signed 0.005 / sent 0.05 and signed 0 / sent 0.01 are refused');
   let d = delivery(A(), 'in_progress');
-  refused(completeSig(d, 'pbl-q1', undefined), LOAD);
+  refused(completeSig(d, 'pbl-q1', undefined), NOLIST_LOAD);
   assert.equal(status(d), 'in_progress');
   const receipt = (out) => out.split(/\r?\n/).filter((l) => l.includes('"delivery_id"')).at(-1);
   const first = receipt(ok(completeSig(d, 'pbl-q1b', A())));
@@ -659,24 +664,24 @@ function requiredCases() {
   assert.ok(first);
   assert.equal(again, first);
   d = delivery(A());
-  refused(startSig(d, 'pbl-q2', undefined), LOAD);
+  refused(startSig(d, 'pbl-q2', undefined), NOLIST_LOAD);
   assert.equal(status(d), 'scheduled');
   d = delivery(A(), 'in_progress');
-  refused(completeTicket(d, 'pbl-q3', photo(d, undefined)), TICKET);
-  refused(completeTicket(d, 'pbl-q3n', photo(d, null)), TICKET);
+  refused(completeTicket(d, 'pbl-q3', photo(d, undefined)), NOLIST_TICKET);
+  refused(completeTicket(d, 'pbl-q3n', photo(d, null)), NOLIST_TICKET);
   assert.equal(status(d), 'in_progress');
-  refused(completeTicket(d, 'pbl-q3u', photo(d, undefined).toUpperCase()), /PAPER_TICKET_PHOTO_MISSING|PAPER_TICKET_LOAD_CHANGED/);
+  refused(completeTicket(d, 'pbl-q3u', photo(d, undefined).toUpperCase()), /PAPER_TICKET_PHOTO_MISSING|PAPER_TICKET_LOAD_CHANGED: this copy of CRX is out of date/);
   ok(completeTicket(d, 'pbl-q3b', photo(d, A())));
   assert.equal(status(d), 'completed');
   d = delivery(A());
-  refused(startTicket(d, 'pbl-q4', photo(d, undefined)), TICKET);
+  refused(startTicket(d, 'pbl-q4', photo(d, undefined)), NOLIST_TICKET);
   assert.equal(status(d), 'scheduled');
   // Mason 2026-11-25: the drop-location photo of a no-one-present stop is bound to the load like a ticket photo.
   d = delivery(A(), 'in_progress');
-  refused(completeLeft(d, 'pbl-q5', photo(d, undefined, 'Left at site — drop location')), LEFT);
-  refused(completeLeft(d, 'pbl-q5n', photo(d, null, 'Left at site — drop location')), LEFT);
+  refused(completeLeft(d, 'pbl-q5', photo(d, undefined, 'Left at site — drop location')), NOLIST_LEFT);
+  refused(completeLeft(d, 'pbl-q5n', photo(d, null, 'Left at site — drop location')), NOLIST_LEFT);
   refused(completeLeft(d, 'pbl-q5b', photo(d, B(), 'Left at site — drop location')), LEFT);
-  refused(completeLeft(d, 'pbl-q5s', photo(d, null, 'Left at site — drop location'), A()), LEFT);
+  refused(completeLeft(d, 'pbl-q5s', photo(d, null, 'Left at site — drop location'), A()), NOLIST_LEFT);
   assert.equal(status(d), 'in_progress');
   ok(completeLeft(d, 'pbl-q5a', photo(d, A(), 'Left at site — drop location')));
   assert.equal(status(d), 'completed');
@@ -686,7 +691,7 @@ function requiredCases() {
   ok(startLeft(d, 'pbl-q5ma', photo(d, A(), 'Left at site — drop location')));
   assert.equal(status(d), 'completed');
   d = delivery(A(), 'in_progress'); ok(completeNoProof(d, 'pbl-q6')); assert.equal(status(d), 'completed');
-  console.log('[required] a signature with no list and a ticket photo saved with no list are refused (complete and Mark Delivered; the photo id in capitals too), nothing changes; with the list they complete; a replay with no list returns its receipt; a drop-location photo saved with no list or for another load is refused LEFT_AT_SITE_LOAD_CHANGED (complete and Mark Delivered, even when the call sends the right list), one for this load completes; no proof still completes');
+  console.log('[required] a signature with no list and a ticket photo saved with no list are refused with the reload-the-app message (complete and Mark Delivered; the photo id in capitals too), nothing changes; with the list they complete; a replay with no list returns its receipt; a drop-location photo saved with no list (reload message) or for another load is refused LEFT_AT_SITE_LOAD_CHANGED (complete and Mark Delivered, even when the call sends the right list), one for this load completes; no proof still completes');
   stageText('required-reverse.sql', lf(REQUIRED_REVERSE));
   r = apply('required-reverse.sql');
   assert.equal(r.status, 0, r.output);

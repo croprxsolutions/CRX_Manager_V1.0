@@ -175,9 +175,18 @@ function crewMarkerScope(profile: Profile | null, loading: boolean, assignmentsC
   return { mapChecking, markerUser };
 }
 
+/** Sign-in or permission refusals: the crew member may have lost access, so a loaded list must not survive them. */
+function isAccessRefusal(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const { code, status } = error as { code?: unknown; status?: unknown };
+  return status === 401 || status === 403
+    || (typeof code === 'string' && (code === '42501' || /^PGRST30[1-3]$/.test(code.trim().toUpperCase())));
+}
+
 function jobLoadFallback(error: unknown, actorId: string | undefined, forMap: boolean) {
   const lostSignal = isNetworkFailure(error);
-  if (forMap && lostSignal) return { kind: 'keep-current' } as const;
+  // A map recheck keeps the loaded list through any temporary failure; the map-check warning still blocks new pins.
+  if (forMap && !isAccessRefusal(error)) return { kind: 'keep-current' } as const;
   const saved = savedCopyAfterFailure<FieldViewJobCard[]>(MY_DAY_SNAPSHOT, actorId, lostSignal);
   return saved && Array.isArray(saved.data) ? { kind: 'saved', saved } as const : { kind: 'unavailable' } as const;
 }

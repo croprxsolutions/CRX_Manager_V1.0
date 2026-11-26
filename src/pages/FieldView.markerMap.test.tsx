@@ -10,7 +10,7 @@ const fixtures = vi.hoisted(() => ({
   locationGate: null as Promise<void> | null,
   geometryError: null as { message: string } | null,
   locationsError: null as { message: string } | null,
-  dispatchError: null as { message: string } | null,
+  dispatchError: null as { message: string; code?: string } | null,
   wholeJobStatus: 'scheduled',
   omitGeometry: false,
   omitLocation: false,
@@ -289,6 +289,35 @@ it.each([false, true])('keeps offline job completion available after a map reche
   } finally {
     onlineState.mockRestore();
   }
+});
+
+it('keeps the loaded job list when a map recheck hits a temporary server error', async () => {
+  fixtures.wholeJobStatus = 'in_progress';
+  render(fieldView());
+  const map = await openMap();
+  await map.findByRole('heading', { name: 'Whole-job field' });
+  fixtures.dispatchError = { message: 'Service Unavailable', code: '503' };
+  fireEvent.click(screen.getByRole('button', { name: 'List' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Map' }));
+  await screen.findByText(/Couldn't check all assigned fields/);
+  expect(map.getByRole('button', { name: 'Add marker' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'List' }));
+  expect(await screen.findByRole('button', { name: 'Complete Job' })).toBeEnabled();
+  expect(screen.queryByText("Couldn't load your jobs")).not.toBeInTheDocument();
+  expect(fixtures.toast).not.toHaveBeenCalledWith('error', 'Failed to load your jobs');
+});
+
+it('clears the job list when a map recheck is refused for lost access', async () => {
+  localStorage.clear();
+  render(fieldView());
+  const map = await openMap();
+  await map.findByRole('heading', { name: 'Whole-job field' });
+  fixtures.dispatchError = { message: 'permission denied', code: '42501' };
+  fireEvent.click(screen.getByRole('button', { name: 'List' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Map' }));
+  fireEvent.click(screen.getByRole('button', { name: 'List' }));
+  expect(await screen.findByText("Couldn't load your jobs")).toBeInTheDocument();
+  expect(screen.queryByText('J-100')).not.toBeInTheDocument();
 });
 
 it('ignores an older map assignment response after a newer job reload removes its field', async () => {

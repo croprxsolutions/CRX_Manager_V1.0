@@ -1,15 +1,15 @@
 -- idempotency-body-check: exempt -- _complete_delivery_authorized_impl only reads check_idempotency to skip a replay
 -- (#2324's body, unchanged); the key is saved by _complete_delivery_authorized_impl_20270122 and the evidence step.
 -- Written 2026-11-25. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270308140000_proof_binding_required.md.
+-- docs/reference/migrations.d/20270308233000_proof_binding_required.md.
 --
--- WHY: 20270308100000 checks the customer's proof against the load only when the proof carries a list of the lines
+-- WHY: 20270308230000 checks the customer's proof against the load only when the proof carries a list of the lines
 --   the screen showed. An old app copy (or a call queued before the screen fix) sends a signature with no list, and a
 --   ticket photo saved before the screen fix has none: both are still accepted, so Sol round 11 findings 1 and 2 on
 --   #2324 stay open for them. Mason (2026-11-24, contract Q2): make the binding required in the same release as the
 --   screen fix. Contract: docs/plans/2026-11-23-proof-bound-to-load-CONTRACT.md (step 4).
 --
--- WHAT: _complete_delivery_authorized_impl (20270308100000's body) changes three conditions, nothing else: a fresh
+-- WHAT: _complete_delivery_authorized_impl (20270308230000's body) changes three conditions, nothing else: a fresh
 --   completion is refused
 --     DELIVERY_LOAD_CHANGED      for a signature sent with no p_lines_seen (as for one that is not the same load);
 --     PAPER_TICKET_LOAD_CHANGED  for a ticket photo saved with no lines_seen, or one it cannot read (as for one that
@@ -32,11 +32,11 @@ BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
      IS DISTINCT FROM '92e373301409583f2f7fec1f0cb207ee' THEN
-    RAISE EXCEPTION 'PROOF_REQUIRED_PREFLIGHT: _complete_delivery_authorized_impl is not the reviewed 20270308100000 body';
+    RAISE EXCEPTION 'PROOF_REQUIRED_PREFLIGHT: _complete_delivery_authorized_impl is not the reviewed 20270308230000 body';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._delivery_lines_match(uuid,jsonb,jsonb)'))
      IS DISTINCT FROM 'd622480ec89eb193526533db0475a643' THEN
-    RAISE EXCEPTION 'PROOF_REQUIRED_PREFLIGHT: _delivery_lines_match is not the reviewed 20270308100000 body';
+    RAISE EXCEPTION 'PROOF_REQUIRED_PREFLIGHT: _delivery_lines_match is not the reviewed 20270308230000 body';
   END IF;
 END
 $preflight$;
@@ -125,7 +125,7 @@ BEGIN
     IF v_binding ->> 'delivery_id' IS DISTINCT FROM p_delivery_id::text THEN
       v_binding := NULL;
     END IF;
-    -- 20270308140000: required. A signature sent with no list (an old app copy, a queued call) is not proof of
+    -- 20270308233000: required. A signature sent with no list (an old app copy, a queued call) is not proof of
     -- this load either.
     IF v_binding ->> 'evidence' = 'signature'
        AND (NOT v_binding ? 'lines_seen'
@@ -140,7 +140,7 @@ BEGIN
           FROM public.delivery_photos ph
          WHERE ph.id = (v_binding ->> 'evidence_ref')::uuid AND ph.delivery_id = p_delivery_id;
       END IF;
-      -- 20270308140000: required. A photo saved with no list (before the screen fix), or one this step cannot
+      -- 20270308233000: required. A photo saved with no list (before the screen fix), or one this step cannot
       -- read, is not proof of this load (Luna). The drop-location photo of a no-one-present stop is bound the same way
       -- (Mason, 2026-11-25, Taha's review of #2557: #2527 HIGH 4).
       IF v_binding ->> 'evidence' = 'left_at_site'
@@ -215,7 +215,7 @@ BEGIN
     RETURN false;
   END IF;
   -- Each side's delivered amount is kept between 0 and the scheduled quantity, then an amount above 0 and under 0.01
-  -- counts as 0 (20270308140000; the rule #2562 records a delivery by, and #2324's under-0.01 "nothing delivered").
+  -- counts as 0 (20270308233000; the rule #2562 records a delivery by, and #2324's under-0.01 "nothing delivered").
   RETURN NOT EXISTS (
     WITH seen AS (
       SELECT lower(e ->> 'order_item_id') AS oi, lower(e ->> 'product_id') AS pr, round((e ->> 'quantity')::numeric, 6) AS q,

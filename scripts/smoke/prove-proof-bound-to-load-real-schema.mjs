@@ -31,7 +31,7 @@ const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270308230000_proof_bound_to_load.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-bound-to-load-reverse.sql');
 const REQUIRED_REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-binding-required-reverse.sql');
-const FOLLOW_UPS = [path.join(MIGRATIONS, '20270308140000_proof_binding_required.sql')];  // step 4: the binding is required
+const FOLLOW_UPS = [path.join(MIGRATIONS, '20270308233000_proof_binding_required.sql')];  // step 4: the binding is required
 // #2562 (Taha's review, LOW 3): it wraps _complete_delivery_authorized_impl_20270122, the body this proof's step calls
 // by name, and leaves the step, the wrappers and the helper alone.
 const LATER_READ_ONLY = new Set(['20270307200000_tiny_line_counts_as_zero.sql']);
@@ -614,7 +614,7 @@ function afterCases() {
   console.log('[case 9] anon cannot call either completion; no client role can call the renamed bodies, the helper or the trigger function');
 }
 
-// Step 4 (20270308140000): proof with no list is refused like proof for another load; nothing else changes.
+// Step 4 (20270308233000): proof with no list is refused like proof for another load; nothing else changes.
 const MATCH_MD5 = "SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._delivery_lines_match(uuid,jsonb,jsonb)'::regprocedure;";
 const STEP_MD5 = "SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure;";
 function requiredCases() {
@@ -685,7 +685,7 @@ function requiredCases() {
   d = delivery(A(), 'in_progress'); ok(completeSig(d, 'pbl-q7', undefined)); assert.equal(status(d), 'completed');
   d = delivery(A(), 'in_progress'); ok(completeTicket(d, 'pbl-q8', photo(d, undefined))); assert.equal(status(d), 'completed');
   d = delivery(A(), 'in_progress'); ok(completeLeft(d, 'pbl-q9', photo(d, B(), 'Left at site — drop location'))); assert.equal(status(d), 'completed');
-  console.log('[required rollback] its reverse script restores 20270308100000\'s step and comparison: proof with no list completes again, signed 0 / sent 0.005 is refused again');
+  console.log('[required rollback] its reverse script restores 20270308230000\'s step and comparison: proof with no list completes again, signed 0 / sent 0.005 is refused again');
 }
 
 function rollbackCases() {

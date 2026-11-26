@@ -13135,6 +13135,7 @@ export type Database = {
           id: string
           notes: string | null
           order_item_id: string | null
+          priced_from: string
           product_id: string
           product_name: string
           quantity: number
@@ -13153,6 +13154,7 @@ export type Database = {
           id?: string
           notes?: string | null
           order_item_id?: string | null
+          priced_from?: string
           product_id: string
           product_name?: string
           quantity?: number
@@ -13171,6 +13173,7 @@ export type Database = {
           id?: string
           notes?: string | null
           order_item_id?: string | null
+          priced_from?: string
           product_id?: string
           product_name?: string
           quantity?: number

@@ -41,6 +41,7 @@ for (const p of [
   ".claude/hooks/taha-lane-lib.mjs", ".claude/hooks/taha-lane-prompt.mjs", ".claude/hooks/pr-merge-guard.mjs",
   ".claude/hooks/prompt-router.mjs", ".codex/hooks/production-action-guard.mjs", ".claude/settings.json", ".codex/hooks.json",
   ".claude/hooks/sol-risk-lib.mjs", // holds GATED_MERGE_BASES; dropping staging there would turn the block off
+  ".claude/hooks/migration-landing-gate-lib.mjs", // reads Mason's override for the live apply (Sol r2)
 ]) ok(isTahaLanePath(p), `${p} is Taha's`);
 for (const p of [
   "src/pages/FieldApplicationInvoice.tsx", "src/components/field-invoices/Row.tsx", "src/pages/FieldInvoices.tsx",
@@ -404,6 +405,17 @@ ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: {
   "a 14-digit number that is not a date stamp is a real change (security review LOW)");
 ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "x = 100.00000000000001", [D]: "x = 100.20270304160000" } }),
   "digits after a decimal point are never a stamp");
+// Sol r2: a hand restamp that swaps the order of the PR's own migrations is a real change (restamp-migration.mjs refuses it).
+const migX = fl("supabase/migrations/20270301160000_x.sql", C, "added");
+const migY = fl("supabase/migrations/20270302160000_y.sql", D, "added");
+ok(carried({ before: [migX, migY], after: [fl("supabase/migrations/20270304160000_x.sql", C, "added"), fl("supabase/migrations/20270305160000_y.sql", D, "added")] }),
+  "restamping two migrations in their order carries it");
+ok(!carried({ before: [migX, migY], after: [fl("supabase/migrations/20270306160000_x.sql", C, "added"), fl("supabase/migrations/20270305160000_y.sql", D, "added")] }),
+  "restamping x past y changes the run order: needs him again");
+ok(!carried({ before: [migX, migY], after: [fl("supabase/migrations/20270303160000_x.sql", C, "added"), migY] }),
+  "restamping x past an unchanged y changes the run order too");
+ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "a = 1", [D]: "﻿a = 1" } }),
+  "adding a byte-order mark is a change like any other byte (Sol r2)");
 const mig19 = fl("supabase/migrations/20270306190000_proof.sql", E, "added");
 const mig03 = fl("supabase/migrations/20270307030000_proof.sql", E, "added");
 ok(carried({ before: [quotes, mig19], after: [fl("src/pages/Quotes.tsx", D), mig03], blobs: { [C]: "// see 20270306190000.\n-- 20270306190000.sql", [D]: "// see 20270307030000.\n-- 20270307030000.sql" } }),

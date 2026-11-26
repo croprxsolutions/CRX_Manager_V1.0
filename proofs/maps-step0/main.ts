@@ -158,6 +158,7 @@ const usdaCredit = document.querySelector<HTMLElement>('#usda-credit')!;
 const mapboxCredit = document.querySelector<HTMLElement>('#mapbox-credit')!;
 const mapboxFeedback = document.querySelector<HTMLAnchorElement>('#mapbox-feedback')!;
 const saveKey = 'maps-step0-synthetic-draft';
+let savedDraftJson: string | null = null;
 let chosenPicture: Picture = 'A';
 let showingPicture: Picture | undefined = 'A';
 let pictureAttempt = 0;
@@ -225,8 +226,13 @@ if (livePicturesEnabled) {
     const providerUrl = picture === 'A'
       ? `https://${USDA_HOST}/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${zoom}/${row}/${column}`
       : `https://${MAPBOX_HOST}/styles/v1/mapbox/satellite-streets-v12/tiles/256/${zoom}/${column}/${row}?access_token=${encodeURIComponent(mapboxToken ?? '')}`;
+    const tileRequest = new AbortController();
+    const cancelTile = () => tileRequest.abort();
+    controller.signal.addEventListener('abort', cancelTile, { once: true });
+    const timeout = window.setTimeout(cancelTile, 8000);
     try {
-      const response = await fetch(providerUrl, { signal: controller.signal });
+      if (!stillCurrent()) throw new Error('Tile belongs to an earlier picture');
+      const response = await fetch(providerUrl, { signal: tileRequest.signal });
       if (!response.ok || !response.headers.get('Content-Type')?.startsWith('image/')) {
         throw new Error('Picture provider returned no image');
       }
@@ -243,6 +249,9 @@ if (livePicturesEnabled) {
       const error = new Error('Live picture tile unavailable');
       error.name = 'ProofPictureTileUnavailable';
       throw error;
+    } finally {
+      window.clearTimeout(timeout);
+      controller.signal.removeEventListener('abort', cancelTile);
     }
   });
   map.on('sourcedata', (event) => {
@@ -319,7 +328,10 @@ map.on('load', () => {
   livePicturesButton.hidden = !livePicturesEnabled;
   try {
     const savedDraft = sessionStorage.getItem(saveKey);
-    if (savedDraft) draw.set(JSON.parse(savedDraft));
+    if (savedDraft) {
+      draw.set(JSON.parse(savedDraft));
+      savedDraftJson = JSON.stringify(draw.getAll());
+    }
     status.value = savedDraft ? 'Reopened synthetic draft · picture A' : 'Picture A';
   } catch {
     status.value = 'Saved synthetic draft could not be reopened · picture A';
@@ -386,10 +398,20 @@ toolbar.querySelector('#save-draft')!.addEventListener('click', () => {
     return;
   }
   try {
-    sessionStorage.setItem(saveKey, JSON.stringify(draft));
+    const draftJson = JSON.stringify(draft);
+    sessionStorage.setItem(saveKey, draftJson);
+    savedDraftJson = draftJson;
     status.value = 'Saved synthetic draft in this tab';
   } catch {
     status.value = 'This tab could not save the synthetic draft';
   }
 });
-toolbar.querySelector('#reopen-draft')!.addEventListener('click', () => location.reload());
+toolbar.querySelector('#reopen-draft')!.addEventListener('click', () => {
+  if (!proof.ready) return;
+  const draft = draw.getAll();
+  if (draw.getMode() === 'draw_polygon' || (draft.features.length && JSON.stringify(draft) !== savedDraftJson)) {
+    status.value = 'Save or clear the current sketch before reopening';
+    return;
+  }
+  location.reload();
+});

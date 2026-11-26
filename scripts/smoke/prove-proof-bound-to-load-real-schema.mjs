@@ -34,7 +34,7 @@ const REQUIRED_REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-binding-requ
 const FOLLOW_UPS = [path.join(MIGRATIONS, '20270310120000_proof_binding_required.sql')];  // step 4: the binding is required
 // #2562 (Taha's review, LOW 3): it wraps _complete_delivery_authorized_impl_20270122, the body this proof's step calls
 // by name, and leaves the step, the wrappers and the helper alone.
-const LATER_READ_ONLY = new Set(['20270307200000_tiny_line_counts_as_zero.sql']);
+const LATER_READ_ONLY = new Set(['20270309180000_tiny_line_counts_as_zero.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

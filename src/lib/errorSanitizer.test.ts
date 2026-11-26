@@ -62,6 +62,9 @@ describe('sanitizeError', () => {
       'Nothing was saved. Parent "Atrazine 4L" changed since you opened it; reload and try again'],
     ['PRODUCT_PARENT_EPA_CORRECTION_OFF: EPA number correction is switched off until registrations (REG-1) are built',
       'Nothing was saved. EPA number correction is switched off until registrations (REG-1) are built'],
+    // RAISE text of 20270309140000_parent_epa_correction_refuses_open_work.sql (#2579).
+    ['PRODUCT_PARENT_EPA_OPEN_WORK: finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete it and invoice it or its blend ticket; if it will not be sprayed, cancel it or take this product off it; a blend ticket not tied to a job: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): job 1042 (scheduled), invoice INV-7 (draft)',
+      'Nothing was saved. Finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete it and invoice it or its blend ticket; if it will not be sprayed, cancel it or take this product off it; a blend ticket not tied to a job: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): job 1042 (scheduled), invoice INV-7 (draft)'],
     ['EVIDENCE_REQUIRED: say what shows it', 'Nothing was saved. Say what shows it'],
     // RAISE texts of 20261117130000_tote_fill_from_bulk.sql (BLK-1a).
     ['TOTE_FILL_STOCK_MOVED: stock of the tote or its bulk has moved since this fill; adjust stock instead',
@@ -115,6 +118,8 @@ describe('sanitizeError', () => {
     ['DELIVERY_QUANTITIES_STALE', "this delivery's lines changed since the screen loaded them; reload it and enter the quantities again."],
     ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
     ['DELIVERY_NOTHING_DELIVERED', 'every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'],
+    ['DELIVERY_LOAD_CHANGED', 'the products or delivered amounts on this delivery changed after the customer signed. Reload the delivery, check the products and amounts with the customer and get a new signature. If the customer already has the goods, call the office.'],
+    ['PAPER_TICKET_LOAD_CHANGED', 'the products or delivered amounts on this delivery changed after the ticket photo was taken. Get the ticket signed for the current products and amounts and add a new photo of it. If the customer already has the goods, call the office.'],
   ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` }))
       .toBe(`The delivery was not completed. ${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}`);
@@ -143,6 +148,10 @@ describe('sanitizeError', () => {
   });
   it('keeps a mixed-case product name as written (Sol r5 LOW)', () => {
     const sentence = 'pH Plus — this would deliver more than was ordered. Call the office before completing this delivery.';
+    expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
+  });
+  it('keeps a lower-case product name as written (Sol r11 LOW on #2324)', () => {
+    const sentence = 'acme Plus — this would deliver more than was ordered. Call the office before completing this delivery.';
     expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
   });
   it('explains a completion past the order (F05) without the raw token', () => {

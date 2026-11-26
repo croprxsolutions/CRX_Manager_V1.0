@@ -142,10 +142,11 @@ Used on: `cost_history`. Re-read against live on 2026-08-19 UTC: that is the onl
 `rebate_programs` and `rebate_claims` all read as `is_admin() OR is_sales_rep()`.
 
 `cycle_count_items` is not carried in this file's matrix at all; its row lives in
-`docs/reference/database-schema.md`. Their *writes*
-are mostly admin-only but not uniformly: `rebate_claims` INSERT is `is_admin() OR
-is_sales_rep()`, and the three `cycle_count_items` write policies are `is_admin() AND EXISTS
-(… cycle_counts.status = 'in_progress')`, so even an admin cannot edit a closed count.
+`docs/reference/database-schema.md`. The three `cycle_count_items` write policies are
+`is_admin() AND EXISTS (… cycle_counts.status = 'in_progress')`, so an admin cannot
+edit a closed count. Migration `20270310130000` makes rebate claim creation
+and status changes use their checked functions. Admins and sales reps can call
+`create_rebate_claim`. Only admins can call `transition_rebate_claim`.
 
 ### Pattern 2: Any active profile can read
 ```sql
@@ -366,7 +367,7 @@ to show was stale: live also pins the actor.
 | team_notes | All authenticated | Own created_by (active profile) | Own created_by / Admin | Admin |
 | team_note_comments | All authenticated | Own created_by | Own created_by / Admin | Own created_by / Admin |
 | activity_feed | All authenticated | Own performed_by | - | - |
-| notifications | Own user_id | Admin / Sales Rep / own user_id | Own user_id | Admin |
+| notifications | Own user_id | Admin / Sales Rep / own user_id. Receiving damage notices use the receipt workflow. | Own user_id, `is_read` only | Admin |
 | invoices | Admin / Own created_by / Assigned salesman | Admin / Sales Rep | Admin | Admin |
 | invoice_items | Any visible invoice (inherits `invoices` RLS) | Admin / Sales Rep | Admin | Admin |
 | financial_audit_log | Admin | Admin / own actor_user_id | - | - |
@@ -376,7 +377,7 @@ to show was stale: live also pins the actor.
 | returns | Admin / Sales Rep / requester | - (RPC only, since `20260715203911`) | Admin / requester | Admin |
 | return_items | Admin / Sales Rep / return requester | - (RPC only, since `20260715203911`) | - (RPC only) | - (RPC only) |
 | rebate_programs | Admin / Sales Rep | Admin | Admin | Admin |
-| rebate_claims | Admin / Sales Rep | Admin / Sales Rep | Admin | Admin |
+| rebate_claims | Admin / Sales Rep | RPC only (Admin / Sales Rep) | RPC only (Admin) | Admin |
 
 ---
 

@@ -1639,7 +1639,7 @@
       "chain": "smoke-dispatch-location-notices.sql",
       "container_only": true,
       "container_prover": "prove-dispatch-location-notices-local.mjs",
-      "description": "CONTAINER ONLY: use the screen walkthrough's invented fixtures to prove saved notice recipients, role checks, exact replay across old and new callers, notice failure isolation, and dispatch racing assignee deactivation.",
+      "description": "CONTAINER ONLY: use the screen walkthrough's invented fixtures to prove saved notice recipients, role checks, exact replay across old and new callers, notice failure isolation, dispatch racing assignee deactivation, and no removal notice while the applicator still holds another location on the job (20270311190000).",
       "covers": ["dispatch_location_with_notices"],
       "area": ["lifecycle", "security", "idempotency", "regression"]
     },
@@ -2305,6 +2305,13 @@
       "chain": "smoke-page-access-locks-reports.sql",
       "description": "REQUIRES 20270201100000 (KI-119). As real active profiles under RLS: an admin (even with a stale hidden list) and a rep with nothing hidden run every Reports Library and Sales Reports function; a rep with reports hidden is refused PAGE_ACCESS_DENIED: reports on the balance listing, chemical history, batch year-end and the four logbooks but keeps Sales Reports and the one-customer year-end summary, which is refused (PAGE_ACCESS_DENIED: reports, customers) only when Customers is hidden too; sales-reports hidden refuses both sales reports only; drivers, applicators and a signed-in user with no profile are refused (the container prover checks a seeded inactive rep); a rep's own commission rows disappear while reports is hidden (not for sales-reports) and the admin still sees them; clearing the list lets the next call through; anon and PUBLIC cannot execute the helper or the logbooks. Fails before the migration. Terminal rollback.",
       "covers": ["_require_page_access", "get_customer_balance_listing", "get_chemical_history", "get_batch_year_end_summaries", "get_customer_year_end_summary", "get_logbook_faa", "get_logbook_by_field", "get_logbook_by_customer", "get_logbook_by_applicator", "get_sales_summary_report", "get_sales_detail_report"],
+      "area": ["regression"]
+    },
+    "vehicle_logbook_registration": {
+      "chain": "smoke-vehicle-logbook-registration.sql",
+      "psql_only": true,
+      "description": "Invented local screen-walk database only. The four existing logbooks keep registrations with the proposed narrow vehicle grants. Reports-enabled admins and reps can read the registration helper. Denied office accounts and field roles cannot read it, and anon cannot execute it. Run through the vehicle-logbook-registration local browser proof. Terminal rollback.",
+      "covers": ["_logbook_vehicle_registrations"],
       "area": ["regression"]
     }
   }

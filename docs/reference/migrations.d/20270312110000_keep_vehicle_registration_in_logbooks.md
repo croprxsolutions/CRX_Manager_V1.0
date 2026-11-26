@@ -1,0 +1,5 @@
+**LOCAL CANDIDATE — NOT APPLIED.** `20270312110000_keep_vehicle_registration_in_logbooks.sql` (SQL sha256: `4c4c33ad5fcba8c61cafb995f88a284b0a2034d5e10e9afa7b7e3c45c460cbae`) keeps stored registrations available in the four existing application logbooks when vehicle reads are narrowed later.
+
+The logbooks keep their existing active admin or Reports-enabled sales rep gate and caller row security. The internal `_logbook_vehicle_registrations()` helper reads the registration only for vehicles used on application records. It requires the same Reports access. The ordinary vehicle grants, report parameters and returned columns are unchanged.
+
+Apply the existing Reports access and Purchasing Plan migrations first. The final vehicle permission change must verify all four installed report bodies and the helper before reducing grants. Before rollback, restore the previous access to `vehicles.registration`. The local reversal checks that grant, restores the four report definitions and removes their helper last.

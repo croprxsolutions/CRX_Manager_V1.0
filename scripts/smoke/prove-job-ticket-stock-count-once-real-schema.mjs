@@ -9,7 +9,7 @@
  *     multi-product ticket, a ticket moved between open jobs before filing, and two races (filing and reversing while
  *     a completion holds the lock). A filed ticket's job link stays frozen by the existing header lock. After every case each warehouse balance equals the expected total and the ledger.
  *   A job moved to another customer after a ticket was linked: both take their full claims (Sol r1).
- *   GRANTS and ROLLBACK: the helpers are owner-only; wrapper grants unchanged; the rollback script refuses once counted
+ *   GRANTS and ROLLBACK: the helpers are owner-only; wrapper grants unchanged; the rollback script refuses once any posting ran under the new rule (Luna r5)
  *     rows exist, and otherwise restores the previous bodies.
  *
  * Run: node scripts/smoke/prove-job-ticket-stock-count-once-real-schema.mjs   (needs Docker)
@@ -333,14 +333,19 @@ try {
   assert.match(b.text, /"kept_on_job_lines": 1/);
   balance('f', 10, 'race, ticket reversed while its job completes: the job keeps its 10');
 
-  // ROLLBACK: refused while counted rows exist; on a database with none it restores the previous bodies.
+  // ROLLBACK: refused once any posting ran under the new rule; on a database with none it restores the previous bodies.
   const rollback = fs.readFileSync(ROLLBACK, 'utf8').replaceAll('\r\n', '\n');
   docker(['exec', '-i', NAME, 'sh', '-c', 'cat > /tmp/rollback.sql'], { input: rollback });
   r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/rollback.sql'], { allowFailure: true });
-  assert.notEqual(r.status, 0); assert.match(out(r), /COUNT_ONCE_ROLLBACK_REFUSED: counted postings exist/);
+  assert.notEqual(r.status, 0); assert.match(out(r), /COUNT_ONCE_ROLLBACK_REFUSED: postings under the count-once rule exist/);
+  // Luna r5: with every counted row gone, a plain linked posting (a ticket that took its full claim) still refuses it.
+  docker(['exec', '-i', NAME, 'sh', '-c', `cat > /tmp/rollback-uncounted.sql`], {
+    input: `SET session_replication_role = replica; DELETE FROM public.inventory_transactions WHERE already_counted IS NOT NULL; SET session_replication_role = origin;\n${rollback}` });
+  r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/rollback-uncounted.sql'], { allowFailure: true });
+  assert.notEqual(r.status, 0, 'an uncounted linked posting refuses the rollback'); assert.match(out(r), /COUNT_ONCE_ROLLBACK_REFUSED: postings under the count-once rule exist/);
   // Prover-only: clear the counted rows (triggers off) in the same transaction as the rollback, as if none had posted yet.
   docker(['exec', '-i', NAME, 'sh', '-c', `cat > /tmp/rollback-clean.sql`], {
-    input: `SET session_replication_role = replica; DELETE FROM public.inventory_transactions WHERE already_counted IS NOT NULL; SET session_replication_role = origin;\n${rollback}` });
+    input: `SET session_replication_role = replica; DELETE FROM public.inventory_transactions WHERE application_record_id IS NOT NULL OR already_counted IS NOT NULL; SET session_replication_role = origin;\n${rollback}` });
   r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/rollback-clean.sql'], { allowFailure: true });
   assert.equal(r.status, 0, `rollback applies: ${out(r)}`);
   assert.deepEqual([md5(SIG.job), md5(SIG.bt), md5(SIG.rev)], [PRE.job, PRE.bt, PRE.rev], 'previous bodies restored');

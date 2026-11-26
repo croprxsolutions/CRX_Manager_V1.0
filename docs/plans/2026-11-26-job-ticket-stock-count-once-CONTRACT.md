@@ -106,3 +106,6 @@ None left (Mason answered A on 2026-11-26).
 - MED in-flight old body across deployment: accepted residual (settled, round 1).
 - LOW race proof: the second session starts only after the completion holds the number lock; a stall after that still runs inside the window the overlap assertion checks.
 - LOW contract said rollback drops a trigger: fixed (drops the two helpers).
+
+## Luna round 5 (2026-11-26, head fb3a81610)
+- HIGH (fixed): the rollback guard looked only at counted rows, so a ticket that took its full claim under the new rule did not block it, and the restored old job body could then take that stock again. The guard now refuses once any row carries `application_record_id` (every posting under the new bodies). Prover: an uncounted linked posting alone refuses the rollback.

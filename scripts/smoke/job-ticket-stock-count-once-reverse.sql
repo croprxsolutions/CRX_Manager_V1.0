@@ -1,5 +1,5 @@
--- Rollback for 20270311100000_job_ticket_stock_count_once.sql, BEFORE the first counted posting only.
--- After any job_applied row has already_counted set, fix forward instead: the old bodies ignore stored credits.
+-- Rollback for 20270311100000_job_ticket_stock_count_once.sql, BEFORE the first posting under it only.
+-- After any job_applied row carries application_record_id (every posting under the new bodies), fix forward instead.
 -- Restores the three previous bodies and drops the group helper. The two ledger columns and their
 -- index stay (the ledger is write-once; unused columns are harmless).
 -- Run in one transaction: psql -1 -f scripts/smoke/job-ticket-stock-count-once-reverse.sql
@@ -11,8 +11,8 @@ SELECT pg_advisory_xact_lock(hashtext('next_application_record_number'));
 
 DO $guard$
 BEGIN
-  IF EXISTS (SELECT 1 FROM public.inventory_transactions WHERE already_counted IS NOT NULL) THEN
-    RAISE EXCEPTION 'COUNT_ONCE_ROLLBACK_REFUSED: counted postings exist; fix forward with a new migration';
+  IF EXISTS (SELECT 1 FROM public.inventory_transactions WHERE application_record_id IS NOT NULL OR already_counted IS NOT NULL) THEN
+    RAISE EXCEPTION 'COUNT_ONCE_ROLLBACK_REFUSED: postings under the count-once rule exist; fix forward with a new migration';
   END IF;
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)')), chr(13), '')) IS DISTINCT FROM '5df6e9533702ab6ab857fe4c9784fc04'
      OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)')), chr(13), '')) IS DISTINCT FROM '03b74676ffbc1852613b8f668a6ad2f3'

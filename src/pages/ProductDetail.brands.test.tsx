@@ -244,6 +244,30 @@ describe('ProductDetail brands section', () => {
     expect(await screen.findByTestId('cancelled-registration-banner')).toHaveTextContent('Brand Slam 5.4: EPA Reg. No. 524-475, cancelled (date not recorded).');
   });
 
+  it('refreshes the Weight card SDS after the Brands section reloads its documents', async () => {
+    let sdsUrl = 'https://manufacturer.example/original-sds.pdf';
+    H.rpc.mockImplementation(async (name: string) => {
+      if (name === 'get_product_weights') {
+        return { data: { products: { 'product-1': {
+          found: true, product_form: 'liquid', subject: { kind: 'density', subject_id: 'parent-1', version: 1 },
+        } } }, error: null };
+      }
+      if (name === 'get_liquid_density_review') {
+        return { data: { review_open: false, brands: [{ brand_id: 'brand-1', brand_name: 'Test Brand', sds_url: sdsUrl }] }, error: null };
+      }
+      return { data: null, error: null };
+    });
+    render(<ProductDetail />);
+    await screen.findByTestId('brands-section');
+    expect(await screen.findByRole('link', { name: 'Open SDS for Test Brand' })).toHaveAttribute('href', sdsUrl);
+
+    sdsUrl = 'https://manufacturer.example/replacement-sds.pdf';
+    const props = H.brandSection.mock.lastCall?.[0] as { onWeightReviewChange?: () => void };
+    act(() => props.onWeightReviewChange?.());
+
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Open SDS for Test Brand' })).toHaveAttribute('href', sdsUrl));
+  });
+
   it('after switching products, the previous brands never show under the new one', async () => {
     H.rpc.mockImplementation(async (name: string) => (name === 'get_epa_registrations'
       ? { data: [{ epa_registration: '524-475', registration_status: 'cancelled', cancelled_on: null }], error: null }

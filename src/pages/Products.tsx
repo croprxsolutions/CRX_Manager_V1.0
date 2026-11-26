@@ -31,6 +31,7 @@ import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
 import ProductRateLockControl from '../components/products/ProductRateLockControl';
 import ProductSetupWorkbookModal from '../components/products/ProductSetupWorkbookModal';
+import BrandDocumentFixList from '../components/products/BrandDocumentFixList';
 import RateReviewWorkbookModal from '../components/products/RateReviewWorkbookModal';
 import { loadProductRateLock } from '../lib/productRateLock';
 import type { Product, ProductCategory, ProductRateLock, SalesSheetFormat } from '../types';
@@ -151,6 +152,7 @@ function storedMarginPercent(value: number | null | undefined): string | null {
 }
 
 const NO_ROWS: never[] = [];
+const NO_IDS: ReadonlySet<string> = new Set();
 
 /** A read that failed, or whose last refresh failed (its data may be out of date). */
 function readFailed(read: LoadState<unknown>): boolean {
@@ -248,10 +250,11 @@ export default function Products() {
   const loadedFloors = floorsRead.status === 'loaded' && !floorsRead.stale ? floorsRead.data : null;
   const categoryChoices = categoriesRead.status === 'loaded' ? categoriesRead.data : NO_ROWS;
   const parents = parentsRead.status === 'loaded' ? parentsRead.data : NO_ROWS;
+  const brandEpaData = brandEpaRead.status === 'loaded' ? brandEpaRead.data : null;
 
   const epaCovered = useMemo(() => epaCoveredProductIds(parents, loadedProducts,
-    brandEpaRead.status === 'loaded' ? brandEpaRead.data.parentIds : new Set(),
-    brandEpaRead.status === 'loaded' ? brandEpaRead.data.productIds : new Set()), [parents, loadedProducts, brandEpaRead]);
+    brandEpaData?.parentIds ?? NO_IDS,
+    brandEpaData?.productIds ?? NO_IDS), [parents, loadedProducts, brandEpaData]);
   const setupIncomplete = useCallback((row: Product) => isSetupIncomplete(row, epaCovered), [epaCovered]);
 
   const { parentByProduct, parentIndex } = useMemo(() => {
@@ -607,12 +610,14 @@ export default function Products() {
     floorsFailed && 'margin floors',
     readFailed(categoriesRead) && 'product categories',
     readFailed(parentsRead) && 'product groups',
+    readFailed(brandEpaRead) && 'brand EPA numbers',
   ].filter(Boolean);
   const retryFailedReads = () => {
     if (listStale) void reloadProducts();
     if (floorsFailed) void reloadFloors();
     if (readFailed(categoriesRead)) void categoriesRead.reload();
     if (readFailed(parentsRead)) void parentsRead.reload();
+    if (readFailed(brandEpaRead)) void brandEpaRead.reload();
   };
 
   const applyActiveReview = async () => {
@@ -1456,6 +1461,7 @@ export default function Products() {
               >
                 Setup Workbook
               </Button>
+              <BrandDocumentFixList />
               <Button
                 variant="secondary"
                 icon={<FileSpreadsheet className="w-4 h-4" />}

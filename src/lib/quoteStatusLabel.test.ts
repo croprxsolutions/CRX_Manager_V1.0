@@ -4,7 +4,7 @@ import { quoteStatusLabel, quoteBadgeVariant } from './quoteStatusLabel';
 describe('quoteStatusLabel', () => {
   it.each([
     ['draft', 'Draft'],
-    ['sent', 'Sent'],
+    ['sent', 'Booked'],
     ['revised', 'Revised'],
     ['accepted', 'Accepted'],
     ['declined', 'Declined'],

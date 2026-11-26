@@ -84,7 +84,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 <div id="header">
   <h1>⬡ CRX Manager — Architecture Map</h1>
   <!-- __STATS_START__ -->
-  <span id="stat-line" style="color:var(--muted);font-size:.8rem">101 routes · 372 RPC calls · 5 issues · Updated Nov 25, 2026</span>
+  <span id="stat-line" style="color:var(--muted);font-size:.8rem">101 routes · 379 RPC calls · 5 issues · Updated Nov 25, 2026</span>
   <!-- __STATS_END__ -->
   <div id="tabs">
     <button class="tab active" onclick="showTab('graph')">Graph</button>
@@ -1408,22 +1408,22 @@ const EDGES = [
     },
     {
       "s": "customer-detail",
-      "t": "customers",
-      "type": "nav"
-    },
-    {
-      "s": "customer-detail",
-      "t": "field-setup",
-      "type": "nav"
-    },
-    {
-      "s": "customer-detail",
       "t": "quote-builder",
       "type": "nav"
     },
     {
       "s": "customer-detail",
+      "t": "customers",
+      "type": "nav"
+    },
+    {
+      "s": "customer-detail",
       "t": "order-detail",
+      "type": "nav"
+    },
+    {
+      "s": "customer-detail",
+      "t": "field-setup",
       "type": "nav"
     },
     {
@@ -1714,11 +1714,6 @@ const EDGES = [
     {
       "s": "new-order",
       "t": "orders",
-      "type": "nav"
-    },
-    {
-      "s": "new-order",
-      "t": "quote-builder",
       "type": "nav"
     },
     {

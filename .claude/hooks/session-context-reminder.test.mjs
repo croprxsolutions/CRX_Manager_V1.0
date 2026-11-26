@@ -99,8 +99,10 @@ try {
     return JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
   };
 
-  assert.match(reminder(sessionRepo), /WARNING: this session's guards and skills run from .*old-checkout, not this worktree/);
-  assert.match(reminder(sessionRepo), /Follow the gate anyway/);
+  // One output for both phrases: the warning is all-or-nothing, so two spawns only doubled the timing exposure.
+  const staleWarning = reminder(sessionRepo);
+  assert.match(staleWarning, /WARNING: this session's guards and skills run from .*old-checkout, not this worktree/);
+  assert.match(staleWarning, /Follow the gate anyway/);
   assert.doesNotMatch(reminder(guardsRepo), /WARNING/, "guards loaded from the session's own folder are not this problem");
   assert.doesNotMatch(reminder(path.join(scratch, "missing")), /WARNING/, "a bad cwd stays silent");
 

@@ -94,20 +94,28 @@ test('reserves only the probe route from the standard app rewrite and headers', 
   }
 });
 
-test('reports safe reasons and omits credential-bearing provider details', async () => {
+function startBrowserProbe(fetch, Image) {
   const body = run({}).body;
   const source = body.match(/<script nonce="[^"]+">([\s\S]+)<\/script>/)?.[1];
   assert.ok(source);
   const status = { textContent: '' };
-  const buttons = {};
   const clicks = {};
+  const buttons = Object.fromEntries(['tiles', 'static'].map((id) => [id, {
+    disabled: false,
+    addEventListener(_, callback) { clicks[id] = callback; },
+  }]));
   const document = {
     querySelectorAll() { return Object.values(buttons); },
     querySelector(id) {
       if (id === '#status') return status;
-      return buttons[id] ??= { addEventListener(_, callback) { clicks[id] = callback; } };
+      return buttons[id.slice(1)];
     },
   };
+  new Script(source).runInNewContext({ document, URL, AbortSignal, fetch, Image });
+  return { status, buttons, click(id) { return clicks[id](); } };
+}
+
+test('reports safe reasons and omits credential-bearing provider details', async () => {
   let providerResponse = Response.json({
     error: {
       status: 'PERMISSION_DENIED',
@@ -115,14 +123,59 @@ test('reports safe reasons and omits credential-bearing provider details', async
       errors: [{ reason: 'keyInvalid' }, { reason: staticKey }],
     },
   }, { status: 403 });
-  new Script(source).runInNewContext({ document, URL, AbortSignal, fetch: async () => providerResponse });
-  await clicks['#static']();
-  const evidence = JSON.parse(status.textContent);
+  const probe = startBrowserProbe(async () => providerResponse);
+  await probe.click('static');
+  const evidence = JSON.parse(probe.status.textContent);
   assert.equal(evidence.status, 403);
   assert.deepEqual(evidence.reasons, ['PERMISSION_DENIED', 'keyInvalid']);
-  assert.ok(!status.textContent.includes(staticKey));
-  assert.ok(!status.textContent.includes('googleapis.com'));
+  assert.ok(!probe.status.textContent.includes(staticKey));
+  assert.ok(!probe.status.textContent.includes('googleapis.com'));
   providerResponse = new Response('<html></html>', { headers: { 'Content-Type': 'text/html' } });
-  await clicks['#static']();
-  assert.equal(JSON.parse(status.textContent).state, 'unexpected response type');
+  await probe.click('static');
+  assert.equal(JSON.parse(probe.status.textContent).state, 'unexpected response type');
+});
+
+test('keeps successful Tiles session evidence through a rejected tile without exposing key or session', async () => {
+  const session = 'synthetic-session-fixture';
+  const denial = () => Response.json({
+    error: { status: 'PERMISSION_DENIED', message: session + tilesKey, details: [{ reason: 'API_KEY_HTTP_REFERRER_BLOCKED' }] },
+  }, { status: 403 });
+  const rejectedSession = startBrowserProbe(async () => denial());
+  await rejectedSession.click('tiles');
+  assert.equal(JSON.parse(rejectedSession.status.textContent).tileRequests, 0);
+  assert.ok(!rejectedSession.status.textContent.includes(tilesKey));
+
+  const calls = [];
+  const rejectedTile = startBrowserProbe(async (url, options) => {
+    calls.push(url.pathname);
+    if (options.method === 'POST') return Response.json({ session });
+    assert.equal(url.searchParams.get('session'), session);
+    return denial();
+  });
+  const pending = rejectedTile.click('tiles');
+  assert.ok(rejectedTile.buttons.tiles.disabled && rejectedTile.buttons.static.disabled);
+  await pending;
+  assert.equal(calls.length, 2);
+  assert.deepEqual(JSON.parse(rejectedTile.status.textContent), {
+    check: 'tiles', tileRequests: 1, sessionStatus: 200, tileStatus: 403,
+    reasons: ['PERMISSION_DENIED', 'API_KEY_HTTP_REFERRER_BLOCKED'],
+  });
+  assert.ok(!rejectedTile.status.textContent.includes(session));
+  assert.ok(!rejectedTile.status.textContent.includes(tilesKey));
+  assert.ok(!rejectedTile.buttons.tiles.disabled && !rejectedTile.buttons.static.disabled);
+});
+
+test('reports a second image-only request without marking its bytes browser readable', async () => {
+  class ImageFixture {
+    naturalWidth = 1280;
+    naturalHeight = 1280;
+    async decode() { assert.match(this.src, /^https:\/\/maps\.googleapis\.com\//); }
+    removeAttribute(name) { if (name === 'src') this.src = ''; }
+  }
+  const probe = startBrowserProbe(async () => { throw new TypeError('fetch failed'); }, ImageFixture);
+  await probe.click('static');
+  assert.deepEqual(JSON.parse(probe.status.textContent), {
+    check: 'static', imageRequests: 2, browserReadable: false, fetchErrorType: 'TypeError',
+    imageOnly: { width: 1280, height: 1280 },
+  });
 });

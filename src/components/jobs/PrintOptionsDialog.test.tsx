@@ -9,7 +9,6 @@ const {
   mockUpsertSelect,
   mockToast,
   mockCheckMutationResult,
-  auth,
 } = vi.hoisted(() => {
   const mockMaybeSingle = vi.fn();
   const mockEq = vi.fn(() => ({ maybeSingle: mockMaybeSingle }));
@@ -19,8 +18,7 @@ const {
   const mockFrom = vi.fn(() => ({ select: mockSelect, upsert: mockUpsert }));
   const mockToast = vi.fn();
   const mockCheckMutationResult = vi.fn();
-  const auth = { role: 'admin' };
-  return { mockFrom, mockSelect, mockEq, mockMaybeSingle, mockUpsert, mockUpsertSelect, mockToast, mockCheckMutationResult, auth };
+  return { mockFrom, mockSelect, mockEq, mockMaybeSingle, mockUpsert, mockUpsertSelect, mockToast, mockCheckMutationResult };
 });
 
 vi.mock('../../lib/db', () => ({
@@ -31,14 +29,14 @@ vi.mock('../../lib/db', () => ({
 vi.mock('../ui/Toast', () => ({
   useToast: () => ({ toast: mockToast }),
 }));
-vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => auth }));
+const authRole = vi.hoisted(() => ({ current: 'admin' }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ role: authRole.current }) }));
 
 import PrintOptionsDialog from './PrintOptionsDialog';
 
 describe('PrintOptionsDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    auth.role = 'admin';
     mockMaybeSingle.mockResolvedValue({
       data: {
         setting_value: JSON.stringify({
@@ -53,6 +51,45 @@ describe('PrintOptionsDialog', () => {
       error: null,
     });
     mockUpsertSelect.mockResolvedValue({ data: [{ setting_key: 'applicator_print_options' }], error: null });
+  });
+
+  it.each(['applicator', 'driver'])('%s cannot enable billing splits even when the saved default is on', async (role) => {
+    mockMaybeSingle.mockResolvedValue({ data: { setting_value: JSON.stringify({ includeBillingSplits: true }) }, error: null });
+    authRole.current = role;
+    const onPrint = vi.fn().mockResolvedValue(undefined);
+    try {
+      render(<PrintOptionsDialog open onClose={vi.fn()} onPrint={onPrint} />);
+      await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('app_settings'));
+      expect(screen.queryByText('Show billing-split table')).toBeNull();
+      expect(screen.queryByRole('button', { name: /save as default/i })).toBeNull();
+      const print = await screen.findByRole('button', { name: /^print/i });
+      await waitFor(() => expect(print).not.toBeDisabled());
+      fireEvent.click(print);
+      await waitFor(() => expect(onPrint).toHaveBeenCalledTimes(1));
+      expect(onPrint.mock.calls[0][0].options.includeBillingSplits).toBe(false);
+    } finally {
+      authRole.current = 'admin';
+    }
+  });
+
+  it.each(['admin', 'sales_rep'])('%s still sees the billing-split toggle', async (role) => {
+    mockMaybeSingle.mockResolvedValue({ data: { setting_value: JSON.stringify({ includeBillingSplits: true }) }, error: null });
+    authRole.current = role;
+    const onPrint = vi.fn().mockResolvedValue(undefined);
+    try {
+      render(<PrintOptionsDialog open onClose={vi.fn()} onPrint={onPrint} />);
+      expect(await screen.findByText('Show billing-split table')).toBeInTheDocument();
+      // Shared defaults are admin-only in the database, so only admins get the button.
+      expect(screen.queryAllByRole('button', { name: /save as default/i })).toHaveLength(role === 'admin' ? 1 : 0);
+      const print = screen.getByRole('button', { name: /^print/i });
+      await waitFor(() => expect(print).not.toBeDisabled());
+      fireEvent.click(print);
+      await waitFor(() => expect(onPrint).toHaveBeenCalledWith(expect.objectContaining({
+        options: expect.objectContaining({ includeBillingSplits: true }),
+      })));
+    } finally {
+      authRole.current = 'admin';
+    }
   });
 
   it('loads saved print defaults when opened', async () => {
@@ -93,16 +130,5 @@ describe('PrintOptionsDialog', () => {
       expect.objectContaining({ data: [{ setting_key: 'applicator_print_options' }], error: null }),
       'Save applicator print options',
     );
-  });
-
-  it('lets applicators print with shared defaults without saving changes to them', async () => {
-    auth.role = 'applicator';
-    const print = vi.fn();
-    render(<PrintOptionsDialog open onClose={vi.fn()} onPrint={print} />);
-    await waitFor(() => expect(screen.getAllByRole('combobox')[1]).toHaveValue('per-field'));
-    expect(screen.queryByRole('button', { name: /save as default/i })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /^print$/i }));
-    await waitFor(() => expect(print).toHaveBeenCalledOnce());
-    expect(mockUpsert).not.toHaveBeenCalled();
   });
 });

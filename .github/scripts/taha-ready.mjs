@@ -4,7 +4,7 @@
 //          (b) it needs no Sol (sol-risk-lib.mjs, the merge gate's own classifier) and
 //          (c) every required check is green. It takes the label off once Taha has decided the head. A hotfix
 //          into main also counts .github/ (Taha is a code owner) and skips the guard and release-gate, which wait
-//          on him; once he approved, a hotfix whose guard still wants the hotfix-backport label gets one label-only ping.
+//          on him; once he approved, a hotfix whose guard still wants the hotfix-backport label gets one label-only ping. A backport ask lists what the hotfix brings to live.
 //          It also mirrors Taha's verdict on the current head as `taha-approved` / `taha-changes`; an Approve
 //          the merge gate carries over (staging catch-up, docs/ notes, restamps; Mason 2026-11-25) shows as approved
 //          (display only: the merge gates read his review from GitHub themselves).
@@ -92,7 +92,8 @@ export function decide(pr, { checks, lane, sol, carried }) {
 export function tahaVerdict(pr, carried = () => false) {
   const state = (pr.reviews ?? []).filter((r) => isTaha(r.author?.login) && sameSha(r.commit?.oid, pr.headRefOid)
     && !['COMMENTED', 'PENDING'].includes(r.state)).at(-1)?.state;
-  if (state) return state === 'APPROVED' ? APPROVED : state === 'CHANGES_REQUESTED' ? CHANGES : null;
+  // An Approve of this head still asks the gate's own check, which also voids it after a base retarget (Sol r2).
+  if (state) return state === 'APPROVED' ? (carried() ? APPROVED : null) : state === 'CHANGES_REQUESTED' ? CHANGES : null;
   // Ask GitHub only when he approved some commit of this PR (pushes dismiss it, so DISMISSED counts here; each
   // carry check costs several calls and reads whether that dismissed review was an Approve).
   const approvedEarlier = (pr.reviews ?? []).some((r) => isTaha(r.author?.login) && ['APPROVED', 'DISMISSED'].includes(r.state));
@@ -165,9 +166,34 @@ export function needsReminder(pr, comments, now, { checks, carried }) {
   return { remind: true, why: 'waiting on Taha over 24 h since the ping' };
 }
 
+// What a backport hotfix brings to live (Taha, 2026-11-26): from GitHub's compare of main...head, one line per
+// commit main lacks, `#<PR> title` (squash subjects end in "(#N)") or short SHA + subject, then the changed files.
+// Every commit is listed, merge commits too (flagged: a conflict fix can add code of its own; Terra on this PR).
+// Both lists are GitHub's compare from where the hotfix branched, so work already cherry-picked onto main can still show.
+// compare = { commits: [{ sha, message, parents }], files: [filename], total } | null (unreadable).
+export const BRING_CAP = 10;
+export const FILE_CAP = 10;
+export function backportList(compare) {
+  if (!compare) return "Could not read what this brings to live; see the PR's Commits and Files tabs.";
+  const changes = (compare.commits ?? []).map((c) => {
+    const subject = String(c.message ?? '').split('\n')[0].trim();
+    const pr = subject.match(/\s*\(#(\d+)\)$/);
+    const title = esc(cutAtSentence(pr ? subject.slice(0, pr.index) : subject, 90)) + (c.parents > 1 ? ' _(merge: check any conflict fixes)_' : '');
+    return pr ? `• ${link(`https://github.com/${REPO}/pull/${pr[1]}`, `#${pr[1]}`)} ${title}` : `• \`${String(c.sha).slice(0, 7)}\` ${title}`;
+  });
+  // Commits GitHub did not list (it returns at most 250) count as "more".
+  const count = Math.max(changes.length, compare.total ?? 0);
+  const files = compare.files ?? [];
+  // GitHub's compare lists at most 300 files, so 300 reads as "300+".
+  return [`Brings to live (${count} commit${count === 1 ? '' : 's'} main does not have):`, ...changes.slice(0, BRING_CAP),
+    ...(count > BRING_CAP ? [`• …and ${count - BRING_CAP} more`] : []),
+    `Files changed (${files.length}${files.length >= 300 ? '+' : ''}): ${files.slice(0, FILE_CAP).map((f) => `\`${esc(f)}\``).join(', ')}${files.length > FILE_CAP ? ` and ${files.length - FILE_CAP} more` : ''}`].join('\n');
+}
+
 const headTag = (pr) => `(head ${String(pr.headRefOid).slice(0, 7)})`;
-export const pingText = (pr, summary, { backport = false, labelOnly = false } = {}) => `<@${TAHA_SLACK}> ${link(pr.url, `#${pr.number}`)} ${esc(pr.title)} is waiting on your `
+export const pingText = (pr, summary, { backport = false, labelOnly = false, brings = null } = {}) => `<@${TAHA_SLACK}> ${link(pr.url, `#${pr.number}`)} ${esc(pr.title)} is waiting on your `
   + (labelOnly ? '' : 'Approve') + (backport ? `${labelOnly ? '' : ' + '}\`${BACKPORT_LABEL}\` label (add it after the latest push)` : '') + ` ${headTag(pr)}`
+  + (backport && brings ? `\n${brings}` : '')
   + (summary ? `\n> AI summary of the author's description, not checked: ${summary}` : '');
 export const remindText = (pr) => `<@${TAHA_SLACK}> reminder: ${link(pr.url, `#${pr.number}`)} ${esc(pr.title)} has waited over a day for your Approve ${headTag(pr)}`;
 
@@ -242,6 +268,11 @@ const fileNames = (n) => gh(['api', '--paginate', `repos/${REPO}/pulls/${n}/file
 const addLabels = (n, names) => gh(['api', `repos/${REPO}/issues/${n}/labels`, ...names.flatMap((l) => ['-f', `labels[]=${l}`])]);
 const removeLabel = (n, name) => gh(['api', '-X', 'DELETE', `repos/${REPO}/issues/${n}/labels/${encodeURIComponent(name)}`]);
 const currentHead = (n) => tryGh(['pr', 'view', String(n), '--repo', REPO, '--json', 'headRefOid,state', '--jq', 'select(.state=="OPEN") | .headRefOid'])?.trim();
+export const readCompare = (pr) => {
+  const out = tryGh(['api', `repos/${REPO}/compare/${pr.baseRefOid}...${pr.headRefOid}`, '--jq',
+    '{commits: [.commits[] | {sha, message: .commit.message, parents: (.parents | length)}], files: [.files[]?.filename], total: .total_commits}']);
+  try { return out ? JSON.parse(out) : null; } catch { return null; }
+};
 function requiredChecks(n) {
   // gh exits non-zero while checks are pending or failing, but still prints the JSON.
   const run = spawnSync('gh', ['pr', 'checks', String(n), '--repo', REPO, '--required', '--json', 'name,bucket'], { encoding: 'utf8' });
@@ -304,6 +335,8 @@ async function handle(pr, mode, dry) {
   const p = needsPing(pr, pr.comments, facts);
   const r = p.ping ? { remind: false } : needsReminder(pr, pr.comments, Date.now(), facts);
   if (!p.ping && !r.remind) return 0;
+  // A backport ask lists what the hotfix brings to live; an unreadable compare still pings, saying so.
+  if (p.ping && p.backport) p.brings = backportList(readCompare(pr));
   const kind = p.ping ? 'ping' : 'remind';
   const why = p.ping ? p.why : r.why;
   if (mode === 'label' || dry) return console.log(`#${pr.number} ${kind.toUpperCase()} due (${why}): ${p.ping ? pingText(pr, null, p) : remindText(pr)}`), 1;

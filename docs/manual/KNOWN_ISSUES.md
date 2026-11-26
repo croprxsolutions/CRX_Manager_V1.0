@@ -74,7 +74,7 @@ Each item's full entry is in its area section below. "Severity unsure" marks a r
 | Guards and release | SOL-12 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A release-pass command naming an invalid PR number counts as approval for the open release. | None (closed) |
 | Guards and release | KI-48 | HIGH (severity unsure) | Open | Some protections around applying live database changes have known gaps; the live migration ledger is the backstop. | Mason decision |
 | Reports | SOL-7 | HIGH | Fixed on staging (#2201, merged 2026-11-22), not live | A broken or absurd order total would distort the commission in profit reports. | Agent (release) |
-| Reports | KI-129 (+#2195) | HIGH | Payments part fixed on staging (#2242, merged 2026-11-22), not live | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. Fix: migration `20270224120000` (with the #2175 close re-check). | Lane B agent |
+| Reports | KI-129 (+#2195) | HIGH | Fixed on staging (count #2149, payments #2242; re-proved 2026-11-26), not live | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. Fix: migration `20270224120000` (with the #2175 close re-check). | Lane B agent |
 | Reports | KI-125 | HIGH | Fixed on staging, not live | Profit reports showed a fake large loss because commission was counted on sales billed elsewhere. | Taha (release) |
 | Field applications | #2196 | HIGH | Fixed on staging (#2222, merged 2026-11-22), not live | A sales rep may still be able to delete a completed, billable job outside the screens, so it drops out of Unbilled Jobs. | Mason (field-app billing) |
 | Field applications | KI-185 | HIGH | Open | A job sprayed on 80 acres but planned at 100 bills for 100, and deducts stock for 100. | Mason (field-app billing) |
@@ -866,6 +866,15 @@ click, correct focus and Escape, exactly one approval, Approved after reload.
 
 ## Payments and receivables
 
+### KI-207 — Payment History's day and month totals leave out checks entered on Prepay Credits
+
+**MED · FIXED ON BRANCH (PR #2438) · money/reporting · found 2026-11-25 (Sol review of PR #2438)**
+Payment History read Record Payments only (`allocation_sets`), so a check entered through Prepay Credits > New
+Check (`prepay_credits`) was missing from its Today / date-range total while Month-End Close counted it. Fixed:
+the totals, count and CSV export now include those checks, grouped one per check the way Month-End Close's
+`_month_payments_received` groups them; a line under the cards says how many (each is in the CSV export).
+Mason asked to fix it rather than log it (2026-11-25).
+
 ### KI-120 — Any rep can change a customer's payment terms and finance-charge settings
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Accepted · MED · Mason decision.
@@ -1007,6 +1016,8 @@ invoice records: plan it with Taha (billing until 2026-12-15). Commission rows t
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** On staging, not live · MED · Agent (unassigned) · plan R-11 · #2149.
 
+> **Re-checked 2026-11-26 on staging `e48d4a2d3`:** fixed on staging, not live. On a test database built from the staging migrations, 100 acres of fee at $200 total cost plus $30 of chemical cost show $230 cost of goods on both Month-End and the P&L (the old formula gave $20,030). [2026-11-26 proof](../audits/2026-11-26-report-bugs-ki126-129-130-proof.md).
+
 **MED (latent) · OPEN (fixed on staging with KI-125 (#2149; both reports use the fee-cost case, `20270206110000` get_monthly_summary ~L207 and the P&L cost function ~L249; awaiting the production release) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2)**
 Fee lines store cost already extended by acres, with quantity = acres; both reports compute `cost_cents x quantity`.
 100 acres at $2/acre cost would show $20,000 COGS instead of $200. Latent: every live application service costs $0
@@ -1016,9 +1027,11 @@ today. Fix: use the `is_application_fee` case `save_invoice` already uses, plus 
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · HIGH · Agent (unassigned) · plan W1-01 · #2149 (count part), #2195 (payments part). Invoice count fixed on staging (#2149). Payments received still totals the old payments table, counts deleted payments and misses allocation-set receipts (#2195, Sol on #2189), so a month paid through allocations can show $0 received.
 
+> **Re-checked 2026-11-26 on staging `e48d4a2d3`:** fixed on staging (count #2149, payments #2242), not live. Test month: payments received $2,090 on Month-End and the close receipt, matching the hand count (old formula $50 / $127 with a deleted payment); 4 invoices counted, including one paid and one overdue (old count 2). [2026-11-26 proof](../audits/2026-11-26-report-bugs-ki126-129-130-proof.md).
+
 > **2026-11-22:** payments part fixed on staging by #2242 (merged 2026-11-23 UTC, `20270224120000_month_close_payments_received_recheck.sql`, with #2175; awaiting the production release): Record Payment checks + prepayment checks (month entered, current amount) + live legacy payments; the close re-checks the reviewed figures.
 
-**MED · PARTIAL (the close receipt's invoice count is fixed on staging with KI-125 (#2149), awaiting the production release; payments received is OPEN, a follow-up: it needs a rule for prepayment checks, which can be edited or deleted later, and a re-check at close that the figures still match what the admin reviewed) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6)**
+**MED · FIXED ON STAGING (invoice count #2149, payments received #2242; awaiting the production release) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6)**
 Both read the legacy `payments` table (0 rows; payments now live in `allocation_sets`), so the one July 2026 customer
 payment shows as $0. The close summary also counts only invoices still `posted`, missing ones since paid or overdue.
 Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`. Fix: sum active payment
@@ -1027,6 +1040,8 @@ Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`
 ### KI-130 — Monthly Summary's "AR balance" is always today's AR
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** On staging, not live · LOW · Agent (unassigned) · plan R-14 · #2149.
+
+> **Re-checked 2026-11-26 on staging `e48d4a2d3`:** fixed on staging by the label (screen says "Current AR (today)"), not live. The figure is still today's open receivables, by design: a true month-end balance cannot be rebuilt for a customer who has paid since (`get_ar_aging` as of a past date leaves those customers out), so reusing it would quietly under-report. AR as of a past date stays on the AR Aging tab. Showing month-end AR here would be a new feature and needs Mason's go-ahead. [2026-11-26 proof](../audits/2026-11-26-report-bugs-ki126-129-130-proof.md).
 
 **LOW · OPEN (fixed on staging with KI-125: #2149, screen label only, "Current AR (today)"; awaiting the production release) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #7)**
 `get_monthly_summary.ar_balance_cents` has no date filter, so a past month shows today's receivables. The AR Aging tab

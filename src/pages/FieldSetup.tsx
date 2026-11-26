@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Trash2, MapPin, ChevronDown, ChevronUp, AlertTriangle, Eye, EyeOff, MapPinned, MousePointerSquareDashed, Plus, X } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, MapPin, ChevronDown, ChevronUp, AlertTriangle, Eye, EyeOff, MapPinned, MousePointerSquareDashed, X } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { LoadFailedState } from '../components/ui/EmptyState';
@@ -13,11 +13,15 @@ import DrawLayer, { type DrawnPolygon } from '../components/map/DrawLayer';
 import AddressSearch from '../components/map/AddressSearch';
 import FieldBoundaryLayer from '../components/map/FieldBoundaryLayer';
 import FieldObstacleLayer from '../components/map/FieldObstacleLayer';
+import FieldMarkerPanel, { MarkerTypeFilter } from '../components/map/FieldMarkerPanel';
+import FieldMarkerEditor from '../components/map/FieldMarkerEditor';
 import { Layer, Source } from 'react-map-gl/mapbox';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
-import { supabase, assertRpcResult, checkMutationResult, rpcAuthErrorMessage } from '../lib/db';
+import { useFieldMarkers } from '../hooks/useFieldMarkers';
+import { useFieldMarkerEditor } from '../hooks/useFieldMarkerEditor';
+import { supabase, assertRpcResult, rpcAuthErrorMessage } from '../lib/db';
 import { getCachedFieldsGeojson, type FieldsGeojsonRow } from '../lib/fieldsGeojsonCache';
 import { lookupPlss, type PlssLookupResult } from '../lib/plssLookup';
 import { CsbLookupError, findCsbFeatureAt, type CsbFeature } from '../lib/csbLookup';
@@ -39,14 +43,9 @@ import {
 import turfCentroid from '@turf/centroid';
 import turfArea from '@turf/area';
 import { JOB_FIELD_PICKER_MAP_LIMIT, mapFieldsForJobPicker } from '../components/jobs/jobFieldPicker';
-import {
-  canEnterObstacleMode,
-  FIELD_OBSTACLE_KINDS,
-  FIELD_OBSTACLE_KIND_LABELS,
-  fieldObstacleKindLabel,
-} from '../lib/fieldObstacles';
+import { canEnterObstacleMode } from '../lib/fieldObstacles';
 import type { Feature, MultiPolygon, Polygon } from 'geojson';
-import type { Field, FieldObstacle, FieldObstacleKind } from '../types';
+import type { Field } from '../types';
 import type { Json } from '../types/supabase';
 import { toSentryError } from '../lib/sentryError';
 import { localToday } from '../lib/dateUtils';
@@ -153,7 +152,8 @@ function boundaryPartsFromGeometry(geometry: Polygon | MultiPolygon, fieldId: st
 // the whole form and split list.
 export default function FieldSetup() {
   const { id } = useParams();
-  return <FieldSetupPage key={id ?? 'none'} />;
+  const { profile } = useAuth();
+  return <FieldSetupPage key={(profile?.id ?? '') + ':' + (id ?? 'none')} />;
 }
 
 function FieldSetupPage() {
@@ -242,18 +242,11 @@ function FieldSetupPage() {
   const [partPendingDelete, setPartPendingDelete] = useState<DrawnPolygon | null>(null);
   const [legalLookupLoading, setLegalLookupLoading] = useState(false);
   const [pendingLegalLookup, setPendingLegalLookup] = useState<PlssLookupResult | null>(null);
-  const [obstacles, setObstacles] = useState<FieldObstacle[]>([]);
-  const [addObstacleMode, setAddObstacleMode] = useState(false);
+  const [markerFilter, setMarkerFilter] = useState('');
   const [adoptCsbMode, setAdoptCsbMode] = useState(false);
   const [csbLookupLoading, setCsbLookupLoading] = useState(false);
   const [pendingCsbFeature, setPendingCsbFeature] = useState<CsbFeature | null>(null);
   const [isBoundaryDrawing, setIsBoundaryDrawing] = useState(false);
-  const [pendingObstaclePoint, setPendingObstaclePoint] = useState<[number, number] | null>(null);
-  const [obstacleKind, setObstacleKind] = useState<FieldObstacleKind>('oil_well');
-  const [obstacleLabel, setObstacleLabel] = useState('');
-  const [savingObstacle, setSavingObstacle] = useState(false);
-  const [deletingObstacle, setDeletingObstacle] = useState(false);
-  const [obstaclePendingDelete, setObstaclePendingDelete] = useState<FieldObstacle | null>(null);
   const csbLookupRequestRef = useRef(0);
 
   // Owner (customer) name shown by the owner search picker
@@ -295,20 +288,16 @@ function FieldSetupPage() {
   );
 
   const canManageObstacles = profile?.role === 'admin' || profile?.role === 'sales_rep';
-  const obstaclesForMap = useMemo(() => {
-    if (!pendingObstaclePoint || !id || isNew) return obstacles;
-    const pending: FieldObstacle = {
-      id: 'pending-obstacle',
-      field_id: id,
-      kind: obstacleKind,
-      label: obstacleLabel.trim() || 'New obstacle',
-      point_geojson: { type: 'Point', coordinates: pendingObstaclePoint },
-      created_by: profile?.id ?? null,
-      created_at: '',
-      updated_at: '',
-    };
-    return [...obstacles, pending];
-  }, [id, isNew, obstacleKind, obstacleLabel, obstacles, pendingObstaclePoint, profile?.id]);
+  const markerPlacementAllowed = canManageObstacles && canEnterObstacleMode(isBoundaryDrawing) && !adoptCsbMode && !saving;
+  const markerField = id && !isNew && field.id === id ? { id, name: field.field_name || 'this field' } : null;
+  const { forField, refresh: refreshMarkers, revokeField, forgetDeletedMarker } = useFieldMarkers(profile?.id, markerField ? [markerField.id] : []);
+  const editor = useFieldMarkerEditor(profile?.id ?? '', canManageObstacles, forField, refreshMarkers,
+    { scope: `${profile?.id ?? ''}:${id ?? ''}`, placementAllowed: markerPlacementAllowed, onAccessDenied: revokeField, onDeleted: forgetDeletedMarker });
+  const read = forField(id ?? '');
+  const markersReady = read.status === 'complete';
+  const visibleMarkers = markerFilter ? read.markers.filter((marker) => marker.kind === markerFilter) : read.markers;
+  // Keep the unsaved placement visible even when saved symbols are filtered.
+  const obstaclesForMap = markersReady && editor.preview ? [...visibleMarkers, editor.preview] : visibleMarkers;
 
   // Mapbox also emits move-end for zooms whose center did not change. Preserve the existing
   // center tuple for those events so the field-drawing subtree keeps its stable inputs.
@@ -332,14 +321,15 @@ function FieldSetupPage() {
   const skipUnsavedPromptRef = useRef(false);
   // Set by a save that synced acres: what that save sent (null for a new field, which reloads after create).
   const adoptSavedBaselineRef = useRef<{ field: typeof field; splits: typeof billingSplits } | null | false>(false);
-  const blocker = useUnsavedChanges(isDirty || saving, skipUnsavedPromptRef);
-  // Locked while saving: leaving mid-save is refused, not offered.
+  const writingMarker = editor.saving && !!(editor.draft || editor.target);
+  const writingField = saving || writingMarker;
+  const blocker = useUnsavedChanges(isDirty || writingField || !!editor.draft, skipUnsavedPromptRef);
   useEffect(() => {
-    if (saving && blocker.state === 'blocked') {
+    if (writingField && blocker.state === 'blocked') {
       blocker.reset?.();
-      toast('warning', 'Saving. Wait a moment, then try again.');
+      toast('warning', writingMarker ? 'A marker change is in progress. Wait a moment, then try again.' : 'Saving. Wait a moment, then try again.');
     }
-  }, [saving, blocker, toast]);
+  }, [writingField, writingMarker, blocker, toast]);
   // Post-create navigation happens via this state so it fires on a render where
   // isDirty=false has committed — see the comment at the setter in handleSave.
   const [postSaveNavTarget, setPostSaveNavTarget] = useState<string | null>(null);
@@ -533,30 +523,6 @@ function FieldSetupPage() {
   // Each field route mounts a fresh page, so a read still in flight when this one unmounts
   // must not toast "Failed to load field" over the next field.
   useEffect(() => () => { fieldLoadSeqRef.current += 1; }, []);
-
-  useEffect(() => {
-    if (isNew || !id) {
-      setObstacles([]);
-      return;
-    }
-    let active = true;
-    const loadObstacles = async () => {
-      const { data, error } = await supabase
-        .from('field_obstacles')
-        .select('*')
-        .eq('field_id', id)
-        .order('created_at');
-      if (!active) return;
-      if (error) {
-        setObstacles([]);
-        toast('error', 'Could not load field obstacles.');
-        return;
-      }
-      setObstacles((data ?? []) as unknown as FieldObstacle[]);
-    };
-    void loadObstacles();
-    return () => { active = false; };
-  }, [id, isNew, toast]);
 
   useEffect(() => {
     try {
@@ -1086,12 +1052,6 @@ function FieldSetupPage() {
     setMapZoom(16);
   }, []);
 
-  const resetObstacleDraft = useCallback(() => {
-    setPendingObstaclePoint(null);
-    setObstacleKind('oil_well');
-    setObstacleLabel('');
-  }, []);
-
   const clearCsbPreview = useCallback(() => {
     csbLookupRequestRef.current += 1;
     setPendingCsbFeature(null);
@@ -1141,12 +1101,10 @@ function FieldSetupPage() {
       finishCsbAdopt();
       return;
     }
-    if (isBoundaryDrawing) return;
-    setAddObstacleMode(false);
-    resetObstacleDraft();
+    if (isBoundaryDrawing || editor.draft) return;
     clearCsbPreview();
     setAdoptCsbMode(true);
-  }, [adoptCsbMode, clearCsbPreview, finishCsbAdopt, isBoundaryDrawing, resetObstacleDraft]);
+  }, [adoptCsbMode, clearCsbPreview, editor.draft, finishCsbAdopt, isBoundaryDrawing]);
 
   const handleAddCsbBoundary = useCallback(() => {
     // Save snapshots the polygon list when it starts and clears the dirty flag
@@ -1169,83 +1127,12 @@ function FieldSetupPage() {
     }
   }, [checkCsbOverlap, clearCsbPreview, drawnPolygons, handlePolygonsChange, pendingCsbFeature, saving, toast]);
 
-  const handleMapClick = useCallback((longitude: number, latitude: number) => {
+  const handleMapClick = (longitude: number, latitude: number) => {
     if (adoptCsbMode) {
       void handleCsbMapClick(longitude, latitude);
       return;
     }
-    if (!addObstacleMode || !canManageObstacles || isNew) return;
-    setPendingObstaclePoint([longitude, latitude]);
-  }, [adoptCsbMode, addObstacleMode, canManageObstacles, handleCsbMapClick, isNew]);
-
-  const handleObstacleModeToggle = useCallback(() => {
-    if (addObstacleMode) {
-      setAddObstacleMode(false);
-      resetObstacleDraft();
-      return;
-    }
-
-    if (!canEnterObstacleMode(isBoundaryDrawing)) {
-      toast('error', 'Finish or cancel the boundary before adding an obstacle.');
-      return;
-    }
-
-    finishCsbAdopt();
-    resetObstacleDraft();
-    setAddObstacleMode(true);
-  }, [addObstacleMode, finishCsbAdopt, isBoundaryDrawing, resetObstacleDraft, toast]);
-
-  const handleAddObstacle = async () => {
-    if (!id || isNew || !profile || !canManageObstacles || !pendingObstaclePoint) return;
-    setSavingObstacle(true);
-    try {
-      const result = await supabase
-        .from('field_obstacles')
-        .insert({
-          field_id: id,
-          kind: obstacleKind,
-          label: obstacleLabel.trim() || null,
-          point_geojson: { type: 'Point', coordinates: pendingObstaclePoint },
-          created_by: profile.id,
-        })
-        .select('*')
-        .single();
-      checkMutationResult(result, 'Add field obstacle');
-      setObstacles((current) => [...current, result.data as unknown as FieldObstacle]);
-      resetObstacleDraft();
-      setAddObstacleMode(false);
-      toast('success', 'Obstacle added');
-    } catch (error: unknown) {
-      Sentry.captureException(toSentryError(error), {
-        tags: { component: 'FieldSetup', action: 'add_field_obstacle' },
-      });
-      toast('error', 'Could not add obstacle.');
-    } finally {
-      setSavingObstacle(false);
-    }
-  };
-
-  const handleDeleteObstacle = async () => {
-    if (!obstaclePendingDelete || !canManageObstacles) return;
-    setDeletingObstacle(true);
-    try {
-      const result = await supabase
-        .from('field_obstacles')
-        .delete()
-        .eq('id', obstaclePendingDelete.id)
-        .select('id');
-      checkMutationResult(result, 'Delete field obstacle');
-      setObstacles((current) => current.filter((obstacle) => obstacle.id !== obstaclePendingDelete.id));
-      setObstaclePendingDelete(null);
-      toast('success', 'Obstacle deleted');
-    } catch (error: unknown) {
-      Sentry.captureException(toSentryError(error), {
-        tags: { component: 'FieldSetup', action: 'delete_field_obstacle' },
-      });
-      toast('error', 'Could not delete obstacle.');
-    } finally {
-      setDeletingObstacle(false);
-    }
+    if (markersReady) editor.place(longitude, latitude);
   };
 
   // A new field has nothing to load: a superseded read for the field open before may leave `loading` set.
@@ -1690,7 +1577,8 @@ function FieldSetupPage() {
                         size="sm"
                         icon={adoptCsbMode ? <X className="h-4 w-4" /> : <MousePointerSquareDashed className="h-4 w-4" />}
                         onClick={handleCsbModeToggle}
-                        disabled={isBoundaryDrawing}
+                        disabled={isBoundaryDrawing || !!editor.draft}
+                        title={editor.draft ? 'Close the marker editor to adopt a boundary' : undefined}
                       >
                         {adoptCsbMode ? 'Cancel USDA' : 'Adopt USDA boundary'}
                       </Button>
@@ -1713,6 +1601,7 @@ function FieldSetupPage() {
                 ? 'Use Redraw boundary or Add another section below the map. Remove a section from its confirmed list.'
                 : 'Use the polygon tool (top-left of map) to draw this field\'s boundary.'}
             </p>
+            {markerField && <MarkerTypeFilter value={markerFilter} onChange={setMarkerFilter} />}
             <CRXMap
               center={mapCenter}
               zoom={mapZoom}
@@ -1721,7 +1610,7 @@ function FieldSetupPage() {
               showLayerToggle
               onMapMoveEnd={handleMapMoveEnd}
               onMapClick={handleMapClick}
-              className={`h-[400px] w-full ${addObstacleMode || adoptCsbMode ? 'cursor-crosshair' : ''}`}
+              className={`h-[400px] w-full ${editor.placing || adoptCsbMode ? 'cursor-crosshair' : ''}`}
             >
               {showOtherFieldBoundaries && (
                 <FieldBoundaryLayer fields={nearbyOverlayFields} showLabels />
@@ -1746,10 +1635,10 @@ function FieldSetupPage() {
                 initialPolygons={drawnPolygons}
                 onPolygonsChange={handlePolygonsChange}
                 allowRemoveSinglePart={canRemoveSingleBoundary(hasSavedBoundary)}
-                disabled={addObstacleMode || adoptCsbMode}
+                disabled={!!editor.draft || adoptCsbMode}
                 onDrawingStateChange={setIsBoundaryDrawing}
               />
-              <FieldObstacleLayer obstacles={obstaclesForMap} interactive={!addObstacleMode && !adoptCsbMode && !isBoundaryDrawing} />
+              <FieldObstacleLayer obstacles={obstaclesForMap} interactive={!editor.placing && !adoptCsbMode && !isBoundaryDrawing} />
             </CRXMap>
             {adoptCsbMode && (
               <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
@@ -1768,50 +1657,7 @@ function FieldSetupPage() {
                 )}
               </div>
             )}
-            {addObstacleMode && (
-              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                {!pendingObstaclePoint ? (
-                  <p className="text-sm text-amber-800">Click the map where the obstacle is located.</p>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div>
-                        <label htmlFor="field-obstacle-kind" className="mb-1 block text-xs font-medium text-secondary">
-                          Obstacle type
-                        </label>
-                        <select
-                          id="field-obstacle-kind"
-                          value={obstacleKind}
-                          onChange={(event) => setObstacleKind(event.target.value as FieldObstacleKind)}
-                          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
-                        >
-                          {FIELD_OBSTACLE_KINDS.map((kind) => (
-                            <option key={kind} value={kind}>{FIELD_OBSTACLE_KIND_LABELS[kind]}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label htmlFor="field-obstacle-label" className="mb-1 block text-xs font-medium text-secondary">
-                          Obstacle label (optional)
-                        </label>
-                        <input
-                          id="field-obstacle-label"
-                          type="text"
-                          value={obstacleLabel}
-                          onChange={(event) => setObstacleLabel(event.target.value)}
-                          placeholder="e.g. North windmill"
-                          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button type="button" variant="ghost" size="sm" onClick={resetObstacleDraft}>Choose another point</Button>
-                      <Button type="button" size="sm" onClick={() => void handleAddObstacle()} loading={savingObstacle}>Save obstacle</Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+            <FieldMarkerEditor editor={editor} ready={markersReady && markerPlacementAllowed} unavailable={read.status === 'unavailable'} />
             {/* Polygon list panel */}
             {drawnPolygons.length > 1 && (
               <div className="mt-3 space-y-2">
@@ -1840,53 +1686,16 @@ function FieldSetupPage() {
               </div>
             )}
             <div className="mt-4 border-t border-gray-100 pt-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-nav-dark">Obstacles</h3>
-                  <p className="text-xs text-secondary">Pins shown to the field crew and on printed close-up maps.</p>
-                </div>
-                {canManageObstacles && !isNew && (
-                  <Button
-                    type="button"
-                    variant={addObstacleMode ? 'ghost' : 'secondary'}
-                    size="sm"
-                    icon={addObstacleMode ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                    onClick={handleObstacleModeToggle}
-                  >
-                    {addObstacleMode ? 'Cancel obstacle' : 'Add obstacle'}
-                  </Button>
-                )}
-              </div>
-              {isNew ? (
-                <p className="mt-3 text-xs text-secondary">Save this field before adding obstacle pins.</p>
-              ) : obstacles.length === 0 ? (
-                <p className="mt-3 text-xs text-secondary">No obstacles marked for this field.</p>
+              {markerField ? (
+                <FieldMarkerPanel name="Field markers" read={read} refresh={refreshMarkers}
+                  actions={markerPlacementAllowed && markersReady && !editor.draft && !editor.target && !editor.saving ? {
+                    add: () => editor.begin(markerField),
+                    edit: (marker) => editor.begin(markerField, marker),
+                    remove: editor.setTarget,
+                    canEdit: editor.canEdit,
+                  } : undefined} />
               ) : (
-                <ul className="mt-3 space-y-2">
-                  {obstacles.map((obstacle) => {
-                    const kindLabel = fieldObstacleKindLabel(obstacle.kind);
-                    const displayLabel = obstacle.label?.trim() || kindLabel;
-                    return (
-                      <li key={obstacle.id} className="flex items-center gap-2 rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2">
-                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-600 ring-2 ring-red-100" />
-                        <span className="min-w-0 flex-1 truncate text-sm text-nav-dark">
-                          {displayLabel}{displayLabel !== kindLabel ? <> &mdash; <span className="text-secondary">{kindLabel}</span></> : null}
-                        </span>
-                        {canManageObstacles && (
-                          <button
-                            type="button"
-                            onClick={() => setObstaclePendingDelete(obstacle)}
-                            title={`Delete ${displayLabel}`}
-                            aria-label={`Delete obstacle ${displayLabel}`}
-                            className="rounded p-1 text-gray-400 hover:bg-white hover:text-red-600"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
+                <p className="text-sm text-secondary">Save this field before adding marker pins.</p>
               )}
             </div>
           </Card>
@@ -1894,7 +1703,7 @@ function FieldSetupPage() {
       </div>
 
       <UnsavedChangesModal
-        open={blocker.state === 'blocked'}
+        open={blocker.state === 'blocked' && !writingField}
         onStay={() => blocker.reset?.()}
         onLeave={() => blocker.proceed?.()}
       />
@@ -1952,17 +1761,6 @@ function FieldSetupPage() {
         message="Legal lookup found a new Section, Township, and Range. Replace the legal description you entered?"
         confirmLabel="Replace description"
         variant="warning"
-      />
-
-      <ConfirmModal
-        open={obstaclePendingDelete !== null}
-        onClose={() => setObstaclePendingDelete(null)}
-        onConfirm={() => void handleDeleteObstacle()}
-        title="Delete obstacle?"
-        message="This removes the obstacle pin from field maps and future printed close-up pages."
-        confirmLabel="Delete obstacle"
-        variant="danger"
-        loading={deletingObstacle}
       />
     </div>
   );

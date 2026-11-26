@@ -449,6 +449,40 @@ describe('JobDetail cross-record binding', () => {
     expect(carrierRate.value).toBe('');
   });
 
+  it('keeps a carrier rate the user cleared while the rig default was still loading', async () => {
+    let resolveCarrierDefault: (read: { available: boolean; defaultGpa: number | null }) => void = () => {};
+    const carrierDefaultReply = new Promise<{ available: boolean; defaultGpa: number | null }>((resolve) => {
+      resolveCarrierDefault = resolve;
+    });
+    mockLoadVehicleCarrierDefault.mockReturnValue(carrierDefaultReply);
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'jobs') return buildChain({ data: makeJob({ ...JOB_A, carrier_rate_gpa: 9 }), error: null });
+      if (table === 'vehicles') {
+        return buildChain({ data: [{ id: 'rig-b', vehicle_name: 'Rig B', vehicle_type: 'sprayer', status: 'active' }], error: null });
+      }
+      return buildChain({ data: [], error: null });
+    });
+
+    mountAt('/jobs/job-a');
+    await screen.findByRole('heading', { name: 'J-AAAA-1001' });
+    await waitFor(() => expect(document.querySelector('#job-loader input[type="number"]')).not.toBeNull());
+    const carrierRate = document.querySelector('#job-loader input[type="number"]') as HTMLInputElement;
+    const vehiclePicker = screen.getByText('Vehicle').parentElement?.querySelector('select') as HTMLSelectElement;
+    await screen.findByRole('option', { name: /Rig B/ });
+    fireEvent.change(vehiclePicker, { target: { value: 'rig-b' } });
+    await waitFor(() => expect(mockLoadVehicleCarrierDefault).toHaveBeenCalledWith('rig-b'));
+
+    fireEvent.change(carrierRate, { target: { value: '' } });
+    expect(carrierRate.value).toBe('');
+
+    await act(async () => {
+      resolveCarrierDefault({ available: true, defaultGpa: 4 });
+      await carrierDefaultReply;
+    });
+
+    expect(carrierRate.value).toBe('');
+  });
+
   it('uses the sourcing read save blocker when a batch job vendor list fails', async () => {
     mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'get_admin_cost_fields'
       ? { data: {}, error: null }

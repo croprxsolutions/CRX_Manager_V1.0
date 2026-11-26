@@ -658,6 +658,8 @@ export default function JobDetail() {
   const [vehicleDefaultCarrierGpa, setVehicleDefaultCarrierGpa] = useState<number | null>(null);
   const carrierRateAutoFilledRef = useRef(false);
   const carrierDefaultToApplyRef = useRef<string | null>(null);
+  // Bumped on every hand edit, so a rig-default reply that arrives after the user typed (or cleared) never overwrites it.
+  const carrierRateEditCountRef = useRef(0);
   const carrierRateValueRef = useLatestRef(carrierRateGpa);
   const carrierRateOriginRef = useLatestRef(carrierRateOrigin);
   const [tankCapacity, setTankCapacity] = useState('');
@@ -1552,11 +1554,12 @@ export default function JobDetail() {
     const stillOnThisJob = captureRouteEpoch();
     const applyToCurrentJob = carrierDefaultToApplyRef.current === vehicleId;
     if (applyToCurrentJob) carrierDefaultToApplyRef.current = null;
+    const editCountAtRequest = carrierRateEditCountRef.current;
     void loadVehicleCarrierDefault(vehicleId).then((read) => {
       if (cancelled || !stillOnThisJob()) return;
       const defaultGpa = read.available ? read.defaultGpa : null;
       setVehicleDefaultCarrierGpa(defaultGpa);
-      if (!applyToCurrentJob) return;
+      if (!applyToCurrentJob || carrierRateEditCountRef.current !== editCountAtRequest) return;
 
       const currentValue = carrierRateValueRef.current;
       const result = applyRigCarrierDefault(currentValue, carrierRateAutoFilledRef.current, defaultGpa);
@@ -1568,6 +1571,13 @@ export default function JobDetail() {
     });
     return () => { cancelled = true; };
   }, [id, vehicleId, isCrew, carrierRateValueRef, carrierRateOriginRef, captureRouteEpoch]);
+
+  const handleCarrierRateEdit = (nextValue: string) => {
+    carrierRateEditCountRef.current += 1;
+    carrierRateAutoFilledRef.current = false;
+    setCarrierRateOrigin(nextValue.trim() ? 'manual' : null);
+    setCarrierRateGpa(nextValue);
+  };
 
   useEffect(() => {
     if (!APPLICATION_SERVICE_BILLING_DB_READY || isCrew || !applicationServiceId) {
@@ -5260,12 +5270,7 @@ export default function JobDetail() {
               <input
                 type="number"
                 value={carrierRateGpa}
-                onChange={(e) => {
-                  const nextValue = e.target.value;
-                  carrierRateAutoFilledRef.current = false;
-                  setCarrierRateOrigin(nextValue.trim() ? 'manual' : null);
-                  setCarrierRateGpa(nextValue);
-                }}
+                onChange={(e) => handleCarrierRateEdit(e.target.value)}
                 disabled={!canEdit}
                 step="0.1"
                 min="0"
@@ -5403,7 +5408,7 @@ export default function JobDetail() {
               legacyContent={
                 <LegacyLoaderWorksheet
                   carrierRateGpa={carrierRateGpa}
-                  onCarrierRateChange={setCarrierRateGpa}
+                  onCarrierRateChange={handleCarrierRateEdit}
                   loaderVesselId={loaderVesselId}
                   loaderVesselOptions={loaderVesselOptions}
                   onVesselChange={(selectedVesselId) => {

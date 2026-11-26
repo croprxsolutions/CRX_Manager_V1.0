@@ -90,7 +90,8 @@ function staleGuardsWarning(cwd) {
   if (!cwd) return "";
   // One shared budget, not 1s per call: on a loaded PC a single git call took 1.3s and
   // silently dropped the warning (2026-11-26). Three calls still fit Codex's 5-second hook limit.
-  const deadline = Date.now() + 3_000;
+  // Tests raise it: under load one git call measured 3.2s, so a fixed budget cannot make them deterministic.
+  const deadline = Date.now() + (Number(process.env.CRX_SESSION_REMINDER_GIT_BUDGET_MS) || 3_000);
   const git = (dir, ...args) => execFileSync("git", ["-C", dir, ...args], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],

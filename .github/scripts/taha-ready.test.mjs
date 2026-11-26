@@ -161,6 +161,11 @@ test('an approved hotfix whose guard still wants the label gets one label-only p
   // Approved on an older head, or not a hotfix: the normal rules apply.
   assert.equal(needsPing(hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: NEW } }] }), [], { ...lazy, backport: () => true }).ping, false);
   assert.equal(needsPing(pr({ reviews: approved.reviews }), [], { ...lazy, backport: never }).ping, false);
+  // An older-head Approve the merge gate carries over (#2605) still gets the label-only ping after a push.
+  const carriedOver = hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: NEW } }] });
+  const c = needsPing(carriedOver, [], { ...lazy, carried: () => true, backport: () => true });
+  assert.equal(c.ping, true);
+  assert.equal(c.labelOnly, true);
 });
 
 // ── Taha's verdict labels, reminder, Haiku (Mason, 2026-11-24) ─────────────────────────────────
@@ -185,6 +190,27 @@ test('review labels: exactly one of approved / changes, or neither after a push'
   assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('CHANGES_REQUESTED')], labels: L('taha-approved') })), { add: ['taha-changes'], remove: ['taha-approved'] });
   assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED', NEW)], labels: L('taha-approved', 'taha-changes') })), { add: [], remove: ['taha-approved', 'taha-changes'] });
   assert.deepEqual(reviewLabelChanges(pr({ author: { login: 'TahaKhanAbdalli' }, reviews: [rv('APPROVED')] })), { add: [], remove: [] }, "Taha's own PR untouched");
+});
+
+test("carried-over Approve (Mason, 2026-11-25): shows as approved, takes ready-for-taha off, stops re-labels and pings", () => {
+  const yes = () => true;
+  const old = pr({ reviews: [rv('APPROVED', NEW)], labels: L('ready-for-taha'), reviewRequests: [{ login: 'TahaKhanAbdalli' }] });
+  assert.equal(tahaVerdict(old, yes), 'taha-approved');
+  assert.equal(tahaVerdict(old, () => false), null, 'not carried: no verdict');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('DISMISSED', NEW)] }), yes), 'taha-approved', 'a push-dismissed Approve is checked too (Luna r3)');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('CHANGES_REQUESTED', NEW)] }), never), null, 'no earlier Approve: GitHub is not asked');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED', NEW), rv('CHANGES_REQUESTED')] }), never), 'taha-changes', 'a verdict on this head wins without asking');
+  assert.deepEqual(reviewLabelChanges(old, yes), { add: ['taha-approved'], remove: ['ready-for-taha'] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('CHANGES_REQUESTED')], labels: L('ready-for-taha') })), { add: ['taha-changes'], remove: [] },
+    'changes requested keeps it, so the fixed head is pinged again (Sol)');
+  assert.deepEqual(reviewLabelChanges(old, () => false), { add: [], remove: [] }, 'a real change keeps it waiting');
+  assert.match(decide(pr({ reviews: [rv('APPROVED', NEW)] }), { checks: never, lane: never, sol: never, carried: yes }).why, /carries over/);
+  assert.equal(decide(pr({ reviews: [rv('APPROVED', NEW)] }), { ...ok, carried: () => false }).act, true, 'not carried: asked again');
+  assert.equal(needsPing(old, [], { ...ok, asked: never, carried: yes }).ping, false);
+  const day = Date.parse('2026-11-26T00:00:00Z');
+  const pingedAt = [{ author: { login: 'github-actions' }, body: pingMarker(HEAD), createdAt: '2026-11-24T00:00:00Z' }];
+  assert.equal(needsReminder(old, pingedAt, day, { checks: never, carried: yes }).remind, false);
+  assert.equal(needsReminder(old, pingedAt, day, { checks: green, carried: () => false }).remind, true);
 });
 
 test('reminder: once per head, 24 h after the first ping, while Taha has not decided', () => {
@@ -218,11 +244,19 @@ test('summary: only title, description and file names go out; the answer is esca
   const s = await summarize(pr({ body: 'desc' }), ['src/a.ts'], { key: 'k', fetchImpl });
   assert.equal(sent.url, 'https://api.anthropic.com/v1/messages');
   assert.equal(sent.body.model, 'claude-haiku-5-5');
+  assert.deepEqual(sent.body.thinking, { type: 'disabled' }, 'thinking off, or it eats the small max_tokens');
   assert.match(sent.body.messages[0].content, /Title: fix: <!channel> quotes\nDescription:\ndesc\nChanged files:\nsrc\/a\.ts$/);
   assert.ok(!s.includes('<') && s.length <= 400 && !s.includes('\n'), 'no Slack control text, no newlines, capped');
   assert.equal(await summarize(pr(), [], { key: '', fetchImpl: never }), null, 'no key, no call');
   assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false }) }), null, 'API error');
   assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: async () => { throw new Error('timeout'); } }), null, 'network error');
+  const logged = [];
+  const log = console.log;
+  console.log = (m) => logged.push(m);
+  try {
+    await summarize(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({ error: { type: 'authentication_error', message: 'invalid x-api-key' } }) }) });
+  } finally { console.log = log; }
+  assert.deepEqual(logged, ['::warning::Haiku call failed: HTTP 401 authentication_error invalid x-api-key'], 'the API reason reaches the run log');
   assert.match(pingText(pr(), s), /\n> AI summary of the author's description, not checked: Hi &lt;!channel&gt;/);
   assert.doesNotMatch(pingText(pr(), null), /\n/);
   const reply = (text) => async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text }] }) });
@@ -235,6 +269,12 @@ test('topics: an outage is retried (null), only a real but unusable answer becom
   const { pickTopics } = await import('./taha-ready.mjs');
   const reply = (text) => async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text }] }) });
   assert.equal(await pickTopics(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false }) }), null, 'API error');
+  const log = console.log;
+  console.log = () => {};
+  try {
+    const noText = async () => ({ ok: true, json: async () => ({ stop_reason: 'max_tokens', content: [{ type: 'thinking', thinking: '' }] }) });
+    assert.equal(await pickTopics(pr(), [], { key: 'k', fetchImpl: noText }), null, 'no text means retry, not topic:none');
+  } finally { console.log = log; }
   assert.equal(await pickTopics(pr(), [], { key: 'k', fetchImpl: async () => { throw new Error('timeout'); } }), null, 'timeout');
   assert.deepEqual(await pickTopics(pr(), [], { key: 'k', fetchImpl: reply('nothing fits') }), [], 'answered, nothing usable');
   assert.deepEqual(await pickTopics(pr(), [], { key: 'k', fetchImpl: reply('billing') }), ['topic:billing']);

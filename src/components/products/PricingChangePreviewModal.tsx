@@ -6,10 +6,12 @@ import {
   type PricingPreviewResult,
   type PricingPreviewRow,
 } from '../../lib/productPricing';
+import { nearCostProducts } from '../../lib/nearCostPricing';
 import type { ProductCostBasisType } from '../../types';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import PricingWarningAcknowledgements from './PricingWarningAcknowledgements';
+import NearCostConfirmations from './NearCostConfirmations';
 
 interface PricingChangePreviewModalProps {
   open: boolean;
@@ -420,11 +422,19 @@ export default function PricingChangePreviewModal({
   const reasonsByProduct = reasons.changeSetId === changeSetId ? reasons.byProduct : {};
   const warnings = preview?.warnings ?? [];
   const acknowledgements = pricingAcknowledgements(warnings, reasonsByProduct);
+  // Near-cost ticks belong to one preview, like the reasons: a new preview starts unticked.
+  const [nearCostTicks, setNearCostTicks] = useState<{ changeSetId: string | null; products: ReadonlySet<string> }>(
+    { changeSetId: null, products: new Set() },
+  );
+  const tickedNearCost = nearCostTicks.changeSetId === changeSetId ? nearCostTicks.products : new Set<string>();
+  const nearCost = preview ? nearCostProducts(preview.rows) : [];
+  const nearCostConfirmed = nearCost.every((product) => tickedNearCost.has(product.product_id));
   const canApprove = Boolean(
     preview?.apply_allowed
       && (preview.status === 'previewed' || preview.status === 'no_changes')
       && (preview.ready_count > 0 || (preview.basis_change_count ?? 0) > 0)
-      && acknowledgements !== null,
+      && acknowledgements !== null
+      && nearCostConfirmed,
   );
   const orderedRows = preview ? [...preview.rows].sort((a, b) => a.sequence - b.sequence) : [];
   // A full price sheet has ~1,200 rows: problems first, then ready rows; plain unchanged rows fold away.
@@ -452,7 +462,7 @@ export default function PricingChangePreviewModal({
           </Button>
           {(preview?.status === 'previewed'
             || (preview?.status === 'no_changes' && (preview.basis_change_count ?? 0) > 0)) && (
-            <Button onClick={() => acknowledgements && onApprove(acknowledgements)} disabled={!canApprove} loading={applying}>
+            <Button onClick={() => canApprove && acknowledgements && onApprove(acknowledgements)} disabled={!canApprove} loading={applying}>
               Apply approved changes
             </Button>
           )}
@@ -514,6 +524,19 @@ export default function PricingChangePreviewModal({
                 changeSetId,
                 byProduct: { ...reasonsByProduct, [productId]: reason },
               })}
+            />
+          )}
+
+          {preview.status === 'previewed' && (
+            <NearCostConfirmations
+              products={nearCost}
+              ticked={tickedNearCost}
+              disabled={applying}
+              onTickChange={(productId, ticked) => {
+                const next = new Set(tickedNearCost);
+                if (ticked) next.add(productId); else next.delete(productId);
+                setNearCostTicks({ changeSetId, products: next });
+              }}
             />
           )}
 

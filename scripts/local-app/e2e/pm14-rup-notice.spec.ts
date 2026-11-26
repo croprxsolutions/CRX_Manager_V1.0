@@ -11,9 +11,9 @@ test('the RUP Products and RUP Sales Register tabs say the list is known incompl
   await page.goto('/compliance');
   await page.getByRole('button', { name: /RUP Products/ }).click();
   await expect(page.getByRole('note').filter({ hasText: 'Known incomplete.' })).toBeVisible();
-  await page.screenshot({ path: 'scripts/local-app/.state/pm14-rup-products.png' });
+  await page.screenshot({ path: test.info().outputPath('pm14-rup-products.png') });
 
   await page.getByRole('button', { name: /RUP Sales Register/ }).click();
   await expect(page.getByRole('note').filter({ hasText: 'Known incomplete.' })).toBeVisible();
-  await page.screenshot({ path: 'scripts/local-app/.state/pm14-rup-register.png' });
+  await page.screenshot({ path: test.info().outputPath('pm14-rup-register.png') });
 });

@@ -264,7 +264,7 @@ const assertWordsAlone = (content) => {
 // shown to Mason as something to answer. Any OTHER entry between the agent's
 // message and his reply (a message of his, image-only included; text Claude Code
 // injects such as a Stop hook's feedback; a notification; a compaction; an error
-// or synthetic message; a record type not listed here) ends the scan, so "I
+// or synthetic message; a record type not listed here that carries any text) ends the scan, so "I
 // approve" is never carried past it (Luna rounds 1 and 3). A queue record that
 // carries a message (one waiting to be delivered, or withdrawn) is not
 // bookkeeping either, unless it is Mason's current message itself (Luna round 4).
@@ -297,7 +297,21 @@ const isContentFreeMarker = (e) =>
     (e.v === undefined || Number.isInteger(e.v)) && (e.snapshot === undefined || typeof e.snapshot === "boolean") &&
     (e.sessionId === undefined || isId(e.sessionId)) &&
     e.records.every((r) => isPlainObject(r) && Object.entries(r).every(([k, v]) => isFlowValue(k, v))));
-const isBookkeeping = (e, currentPrompt) => BOOKKEEPING_TYPES.has(e?.type) ||
+// Any other record type that holds only identifiers, numbers, booleans and nulls (no string
+// with a space, so no sentence) cannot show Mason a question. Claude Code keeps adding such
+// types (`mode`, `data-flow-records`, then `api-request`, `tools-used`, `cost-state`,
+// `session-owner`, `permission-mode`, `derived-from`: ~7,000 real records, 2026-11-25), and
+// each new one used to refuse his reply until listed. Conversation types never qualify, and
+// a record with any free text (`api-request-blob`, `ai-title`) still ends the scan. `mode`
+// and `data-flow-records` keep their stricter surveyed shapes above.
+const CONVERSATION_TYPES = new Set(["user", "assistant", "system", "queue-operation", "summary", "mode", "data-flow-records"]);
+const TEXT_KEYS = new Set(["message", "content", "text", "summary", "prompt"]);
+const idsOnly = (v, depth = 0) => depth <= 8 && (v === null || typeof v === "number" || typeof v === "boolean" || isId(v) ||
+  (Array.isArray(v) && v.length <= 1000 && v.every((x) => idsOnly(x, depth + 1))) ||
+  (isPlainObject(v) && Object.keys(v).length <= 200 &&
+    Object.entries(v).every(([k, x]) => isId(k) && !TEXT_KEYS.has(k) && idsOnly(x, depth + 1))));
+const isTextlessRecord = (e) => isPlainObject(e) && isId(e.type) && !CONVERSATION_TYPES.has(e.type) && idsOnly(e);
+const isBookkeeping = (e, currentPrompt) => BOOKKEEPING_TYPES.has(e?.type) || isTextlessRecord(e) ||
   (e?.type === "system" && e.subtype === "stop_hook_summary") ||
   // The turn timer (no content in 267 real records, 2026-11-22); one carrying text still ends the scan.
   (e?.type === "system" && e.subtype === "turn_duration" && (e.content == null || String(e.content).trim() === "")) ||

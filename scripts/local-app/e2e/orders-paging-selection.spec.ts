@@ -174,5 +174,5 @@ test('Orders list: true totals, selection cleared on every read, Select All grey
   await expect(page.getByText(`Page 2 · 50 shown of ${(G4O_IN_SEASON - 1).toLocaleString('en-US')} orders`, { exact: false })).toBeVisible({ timeout: 15000 });
   // A row count would have moved page two's first order onto page one; the bookmark keeps page two whole.
   expect(await orderNumbers()).toEqual(pageTwo);
-  await page.screenshot({ path: 'scripts/local-app/.state/test-results/orders-page-two-after-removal.png', fullPage: true });
+  await page.screenshot({ path: test.info().outputPath('orders-page-two-after-removal.png'), fullPage: true });
 });

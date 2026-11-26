@@ -643,4 +643,33 @@ describe('MonthEndClose', () => {
     expect(keys[1]).toBe(keys[0]);
     expect(keys[2]).not.toBe(keys[1]);
   });
+
+  it('checklist lines that need work link to the lists holding those items', async () => {
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'get_monthly_summary') {
+        return Promise.resolve({
+          data: {
+            ...cleanSummary(),
+            invoices: { ...cleanSummary().invoices, draft_count: 3 },
+            payments: { count: 2, total_cents: 5000 },
+            deliveries: { count: 4, completed_count: 3 },
+          },
+          error: null,
+        });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    renderMonthEnd();
+    expect(await screen.findByText('3 unposted invoice(s) remain')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open chemical invoices' })).toHaveAttribute('href', '/invoices');
+    expect(screen.getByRole('link', { name: 'Open field invoice drafts' })).toHaveAttribute('href', '/field-invoices?tab=drafts');
+    expect(screen.getByRole('link', { name: 'Open payment history' }))
+      .toHaveAttribute('href', '/payment-history?from=2026-07-01&to=2026-07-31');
+    expect(screen.getByText(/includes checks entered on Prepay Credits/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open deliveries' })).toHaveAttribute('href', '/deliveries');
+    expect(screen.getByRole('link', { name: 'Open AR Aging' })).toHaveAttribute('href', '/ar-aging');
+    // Nothing to open where nothing is left: no commissions and no unpriced rush orders this month.
+    expect(screen.queryByRole('link', { name: 'Open commission payments' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Open orders' })).toBeNull();
+  });
 });

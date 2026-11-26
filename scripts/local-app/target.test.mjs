@@ -3,17 +3,20 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, Refused,
-  IS_SALES_GAUNTLET, PROJECT,
-  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings,
+  IS_SALES_GAUNTLET, IS_SCREEN_WALK, PROJECT,
+  sameComposePath, assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFinishedBuild, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, assertWalkthroughLaneResourcesAreEmpty, assertOwnedApiDbListeners, assertWalkthroughGatewayIdentity,
   denyInsideCheckout,
 } from './target.mjs';
+import { acquireLaneLock } from './lane-lock.mjs';
+import { schemaFingerprint } from './schema-fingerprint.mjs';
 import { isFileLoadingAllowed, resolveConfig } from 'vite';
 import { tempDir } from "../lib/test-temp-dir.mjs";
 
@@ -23,6 +26,9 @@ const PROD_URL = 'https://rhyzpcqhnizqbxphqdkr.supabase.co';
 const PROD_DB = 'postgresql://postgres:x@db.rhyzpcqhnizqbxphqdkr.supabase.co:5432/postgres';
 // Everything below assumes a shell with nothing live in it, the Docker calls here included.
 assertCleanEnvironment();
+
+// A child must pick its own profile, lane and state folder, never the ones this runner was started with.
+const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^CRX_LOCAL_APP_(PROFILE|LANE|STATE_DIR)$/.test(name)));
 
 const COMMANDS = ['rebuild', 'seed', 'start', 'frontend', 'stop', 'status', 'test'];
 
@@ -64,6 +70,51 @@ describe('isolated sales profile', () => {
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), ['crx-sales-gauntlet', 5209, 54821, 54822, 'crx-sales-gauntlet', '.state/sales-gauntlet']);
   });
+  it('selects a deterministic, separate walkthrough stack for a feature checkout', () => {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import * as target from ${JSON.stringify(new URL('./target.mjs', import.meta.url).href)};
+      console.log(JSON.stringify([target.PROJECT, target.APP_PORT, target.API_PORT, target.DB_PORT, target.ISSUER, target.STATE_FOLDER]));
+    `], { encoding: 'utf8', env: { ...process.env, CRX_LOCAL_APP_PROFILE: 'screen-walk', CRX_LOCAL_APP_LANE: '89abcdef' } });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), ['crx-screen-89abcdef', 17967, 31967, 41967, 'crx-screen-89abcdef', '.state/screen-walk']);
+  });
+  it('refuses a walkthrough profile with no checkout identity', () => {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `import './scripts/local-app/target.mjs'`], {
+      cwd: path.resolve(HERE, '..', '..'), encoding: 'utf8', env: { ...process.env, CRX_LOCAL_APP_PROFILE: 'screen-walk', CRX_LOCAL_APP_LANE: '' },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Invalid screen-walk lane/);
+  });
+  it('allows a new walkthrough lane only when its project resources and ports are unused', () => {
+    assert.doesNotThrow(() => assertWalkthroughLaneResourcesAreEmpty({ containers: '', volumes: '', networks: '', netstat: '' }));
+    assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: 'container-id', volumes: '', networks: '', netstat: '' }), /container exists/);
+    assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: '', volumes: 'volume-id', networks: '', netstat: '' }), /volume exists/);
+    assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: '', volumes: '', networks: 'network-id', netstat: '' }), /network exists/);
+    assert.throws(() => assertWalkthroughLaneResourcesAreEmpty({ containers: '', volumes: '', networks: '', netstat: `TCP 127.0.0.1:${APP_PORT} 0.0.0.0:0 LISTENING 123` }), /new uniquely named checkout/);
+  });
+  it('refuses API or database listeners not bound by this walkthrough gateway', () => {
+    assert.throws(() => assertOwnedApiDbListeners(`TCP 127.0.0.1:${API_PORT} 0.0.0.0:0 LISTENING 123`, []), /not owned by this checkout/);
+    assert.doesNotThrow(() => assertOwnedApiDbListeners(`TCP 127.0.0.1:${API_PORT} 0.0.0.0:0 LISTENING 123`, [{ HostIp: '127.0.0.1', HostPort: String(API_PORT) }]));
+    for (const address of ['0.0.0.0', '192.168.1.5', '[::]']) {
+      assert.throws(() => assertOwnedApiDbListeners(`TCP ${address}:${DB_PORT} 0.0.0.0:0 LISTENING 123`, [{ HostIp: '127.0.0.1', HostPort: String(DB_PORT) }]), /open beyond this computer/);
+    }
+  });
+  it('requires a running gateway from this checkout before trusting its published ports', () => {
+    const composeFile = path.join(HERE, 'compose.yaml');
+    const container = { State: { Running: true }, Config: { Labels: {
+      'com.docker.compose.project': PROJECT,
+      'com.docker.compose.service': 'gateway',
+      'com.docker.compose.project.config_files': composeFile,
+    } }, HostConfig: { PortBindings: { '8000/tcp': [{ HostIp: '127.0.0.1', HostPort: String(API_PORT) }] } } };
+    assert.equal(assertWalkthroughGatewayIdentity(container, PROJECT, composeFile).length, 1);
+    assert.throws(() => assertWalkthroughGatewayIdentity({ ...container, State: { Running: false } }, PROJECT, composeFile), /gateway identity/);
+    assert.throws(() => assertWalkthroughGatewayIdentity({ ...container, Config: { Labels: { ...container.Config.Labels, 'com.docker.compose.project.config_files': 'other-compose.yaml' } } }, PROJECT, composeFile), /gateway identity/);
+  });
+  it('compares compose paths without regard to capitals on Windows only', () => {
+    assert.equal(sameComposePath('C:\\CRX_wt\\a\\compose.yaml', 'c:\\crx_wt\\a\\compose.yaml', 'win32'), true);
+    assert.equal(sameComposePath('/srv/A/compose.yaml', '/srv/a/compose.yaml', 'linux'), false);
+    assert.equal(sameComposePath('/srv/a/compose.yaml', '/srv/b/compose.yaml', 'linux'), false);
+  });
   it('refuses a state file from the other profile', () => {
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
       import assert from 'node:assert/strict';
@@ -83,8 +134,131 @@ describe('isolated sales profile', () => {
     assert.equal(result.status, 3);
     assert.match(result.stderr, /Unsupported test-app arguments/);
   });
-  it('reserves every port in both profiles', () => {
-    for (const port of [5199, 54721, 54722, 5209, 54821, 54822]) assert.throws(() => assertExtraAppPort(String(port)), Refused);
+  it('reserves every fixed port and the current checkout ports', () => {
+    for (const port of [5199, 54721, 54722, 5209, 54821, 54822, 5219, 54831, 54832, APP_PORT, API_PORT, DB_PORT]) assert.throws(() => assertExtraAppPort(String(port)), Refused);
+  });
+});
+
+describe('walkthrough build manifest', () => {
+  it('fingerprints every path from the real approved migration list', () => {
+    const root = path.resolve(HERE, '..', '..');
+    const listed = spawnSync(process.execPath, ['scripts/list-post-baseline-migrations.mjs'], { cwd: root, encoding: 'utf8' });
+    assert.equal(listed.status, 0, listed.stderr);
+    const migrations = listed.stdout.trim().split(/\r?\n/).filter(Boolean);
+    assert.ok(migrations.length > 0);
+    assert.ok(migrations.every((name) => name.startsWith('supabase/migrations/')));
+    for (const name of migrations) assert.equal(existsSync(path.join(root, name)), true, name);
+    assert.match(schemaFingerprint(root, migrations), /^[a-f0-9]{64}$/);
+  });
+  it('refuses a missing or incomplete build manifest', () => {
+    assert.throws(() => assertFinishedBuild(null, ['one.sql']), /last rebuild did not finish/);
+    assert.throws(() => assertFinishedBuild({ migrations: [] }, ['one.sql']), /different migrations/);
+  });
+  it('refuses same-named migrations with changed contents', () => {
+    assert.throws(() => assertFinishedBuild({ migrations: ['one.sql'], schemaFingerprint: 'old' }, ['one.sql'], 'new'), /contents changed/);
+    assert.doesNotThrow(() => assertFinishedBuild({ migrations: ['one.sql'], schemaFingerprint: 'new' }, ['one.sql'], 'new'));
+  });
+  it('uses the recovery command for the active profile', () => {
+    assert.throws(() => assertFinishedBuild(null, ['one.sql'], undefined, 'node scripts/local-app/walkthrough.mjs rebuild'), /walkthrough\.mjs rebuild/);
+    assert.throws(() => assertFinishedBuild(null, ['one.sql'], undefined, 'node scripts/local-app/sales.mjs rebuild'), /sales\.mjs rebuild/);
+  });
+  it('rejects a missing spec selection before it asks Docker to start', () => {
+    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'test', 'missing.spec.ts'], { encoding: 'utf8', timeout: 30000, env: cleanEnv() });
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /existing, non-sales spec/);
+  });
+  it('accepts a spec argument only on the walkthrough lane', () => {
+    for (const profile of ['', 'sales-gauntlet', 'doc-bytes']) {
+      const result = spawnSync(process.execPath, [APP, 'test', 'product-unit.spec.ts'], { encoding: 'utf8', timeout: 30000, env: { ...cleanEnv(), CRX_LOCAL_APP_PROFILE: profile } });
+      assert.equal(result.status, 3, profile);
+      assert.match(result.stderr, /Unsupported test-app arguments/, profile);
+    }
+  });
+  it('refuses a bad state folder before it writes a lock or folder', () => {
+    const bad = path.join(HERE, '.state-private-lock-check');
+    const result = spawnSync(process.execPath, [APP, 'start'], { encoding: 'utf8', timeout: 30000, env: { ...cleanEnv(), CRX_LOCAL_APP_PROFILE: 'screen-walk', CRX_LOCAL_APP_LANE: '89abcdef', CRX_LOCAL_APP_STATE_DIR: bad } });
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /temp folder/);
+    assert.equal(existsSync(bad), false);
+  });
+  it('the public walkthrough command takes no alternate state folder', () => {
+    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'status'], { encoding: 'utf8', timeout: 30000, env: { ...cleanEnv(), CRX_LOCAL_APP_STATE_DIR: tmpdir() } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /does not accept CRX_LOCAL_APP_STATE_DIR/);
+  });
+  it('requires a feature spec on the walkthrough lane', () => {
+    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'test'], { encoding: 'utf8', timeout: 30000, env: cleanEnv() });
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /Choose one feature proof/);
+  });
+});
+
+describe('walkthrough lane lock', () => {
+  // A throwaway copy of the scripts: its canonical lock is the fixture's own, so no developer lock is touched.
+  const fixture = () => {
+    const root = tempDir('crx-lock-fixture-');
+    const dir = path.join(root, 'scripts', 'local-app');
+    mkdirSync(dir, { recursive: true });
+    for (const file of readdirSync(HERE).filter((name) => /\.mjs$/.test(name) && !/\.test\./.test(name))) copyFileSync(path.join(HERE, file), path.join(dir, file));
+    mkdirSync(path.join(dir, 'e2e'), { recursive: true });
+    writeFileSync(path.join(dir, 'e2e', 'product-unit.spec.ts'), '');
+    return { root, dir, lock: path.join(dir, '.state', 'screen-walk', 'first-start.lock') };
+  };
+  const hold = (lock) => { mkdirSync(path.dirname(lock), { recursive: true }); writeFileSync(lock, `${process.pid}
+`); };
+  const screen = (dir, args, stateDir, profile = 'screen-walk') => spawnSync(process.execPath, [path.join(dir, 'app.mjs'), ...args], {
+    encoding: 'utf8', timeout: 30000, env: { ...cleanEnv(), CRX_LOCAL_APP_PROFILE: profile, CRX_LOCAL_APP_LANE: '89abcdef', ...(stateDir ? { CRX_LOCAL_APP_STATE_DIR: stateDir } : {}) },
+  });
+  it('every screen command, including status, contends on the one canonical lock whatever state folder is set', () => {
+    const { root, dir, lock } = fixture();
+    const alternates = [tempDir('crx-alt-a-'), tempDir('crx-alt-b-')];
+    hold(lock);
+    try {
+      for (const args of [['start'], ['rebuild'], ['stop'], ['seed'], ['status'], ['test', 'product-unit.spec.ts']]) {
+        for (const stateDir of [undefined, ...alternates]) {
+          const result = screen(dir, args, stateDir);
+          assert.equal(result.status, 3, `${args[0]}: ${result.stdout}${result.stderr}`);
+          assert.match(result.stderr, /owns this lane/, args[0]);
+          assert.equal(readFileSync(lock, 'utf8').trim(), String(process.pid));
+        }
+      }
+      for (const alt of alternates) assert.equal(existsSync(path.join(alt, 'first-start.lock')), false);
+    } finally {
+      for (const folder of [root, ...alternates]) rmSync(folder, { recursive: true, force: true });
+    }
+  });
+  it('the other three profiles take no lane lock', () => {
+    const { root, dir, lock } = fixture();
+    hold(lock);
+    try {
+      for (const profile of ['', 'sales-gauntlet', 'doc-bytes']) {
+        const result = screen(dir, ['status'], tempDir('crx-alt-'), profile);
+        assert.match(result.stderr, /No test app here yet/, profile);
+        assert.doesNotMatch(result.stderr, /owns this lane/, profile);
+      }
+      assert.equal(readFileSync(lock, 'utf8').trim(), String(process.pid));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it('the walkthrough lane refuses a loose frontend command, which would run unlocked', () => {
+    const result = spawnSync(process.execPath, [path.join(HERE, 'walkthrough.mjs'), 'frontend'], { encoding: 'utf8', timeout: 30000, env: cleanEnv() });
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /starts its own frontend/);
+  });
+  it('serializes concurrent first-start and rebuild commands', () => {
+    const lockPath = path.join(tempDir('lane-lock-'), 'first-start.lock');
+    const release = acquireLaneLock(lockPath);
+    assert.throws(() => acquireLaneLock(lockPath), /owns this lane/);
+    release();
+    assert.equal(existsSync(lockPath), false);
+  });
+  it('preserves a lock whose recorded process is gone for manual recovery', () => {
+    const lockPath = path.join(tempDir('lane-lock-'), 'first-start.lock');
+    writeFileSync(lockPath, '987654321\n');
+    assert.throws(() => acquireLaneLock(lockPath), /process 987654321.*Nothing was changed/);
+    assert.equal(existsSync(lockPath), true);
+    assert.equal(readFileSync(lockPath, 'utf8').trim(), '987654321');
   });
 });
 
@@ -220,7 +394,7 @@ describe('network exposure', () => {
   it('frontend --port refuses the shared copy\'s port before anything starts', () => {
     const result = spawnSync(process.execPath, [APP, 'frontend', '--port', String(APP_PORT)], { encoding: 'utf8', timeout: 30000 });
     assert.equal(result.status, 3);
-    assert.match(result.stderr, /--port needs a port/);
+    assert.match(result.stderr, IS_SCREEN_WALK ? /starts its own frontend/ : /--port needs a port/);
   });
   it('accepts this computer\'s Docker', () => {
     assert.doesNotThrow(() => assertLocalDockerEndpoint('npipe:////./pipe/dockerDesktopLinuxEngine'));
@@ -270,24 +444,25 @@ describe('every command refuses before it changes anything', () => {
     }).join();
   };
 
-  function refused(command, { state = goodState(), env = {} }) {
+  function refused(command, { state = goodState(), env = {}, reason }) {
     const dir = tempDir('crx-local-app-test-');
     try {
       writeFileSync(path.join(dir, 'local.env'), `${Object.entries(state).map(([k, v]) => `${k}=${v}`).join('\n')}\n`);
       const before = containers();
-      const result = spawnSync(process.execPath, [APP, command], { encoding: 'utf8', timeout: 30000, env: { ...process.env, CRX_LOCAL_APP_STATE_DIR: dir, ...env } });
+      const args = IS_SCREEN_WALK && command === 'test' ? ['product-unit.spec.ts'] : [];
+      const result = spawnSync(process.execPath, [APP, command, ...args], { encoding: 'utf8', timeout: 30000, env: { ...process.env, CRX_LOCAL_APP_STATE_DIR: dir, ...env } });
       assert.equal(result.status, 3, `${command} did not refuse: ${result.stdout}${result.stderr}`);
-      assert.match(result.stderr, /LOCAL_APP_REFUSED/);
+      assert.match(result.stderr, reason);
       assert.equal(containers(), before, `${command} changed a container`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   }
 
-  for (const command of COMMANDS) {
-    it(`${command}: a production address`, () => refused(command, { state: { ...goodState(), LOCAL_API_URL: NO_ROUTE_URL } }));
-    it(`${command}: a production database`, () => refused(command, { state: { ...goodState(), LOCAL_DB_URL: NO_ROUTE_DB } }));
-    it(`${command}: an inherited live credential`, () => refused(command, { env: { SUPABASE_SERVICE_ROLE_KEY: liveKey } }));
+  for (const command of COMMANDS.filter((name) => !IS_SCREEN_WALK || name !== 'frontend')) {
+    it(`${command}: a production address`, () => refused(command, { state: { ...goodState(), LOCAL_API_URL: NO_ROUTE_URL }, reason: /LOCAL_APP_REFUSED: LOCAL_API_URL is not this computer's test gateway/ }));
+    it(`${command}: a production database`, () => refused(command, { state: { ...goodState(), LOCAL_DB_URL: NO_ROUTE_DB }, reason: /LOCAL_APP_REFUSED: LOCAL_DB_URL is not this computer's test database/ }));
+    it(`${command}: an inherited live credential`, () => refused(command, { env: { SUPABASE_SERVICE_ROLE_KEY: liveKey }, reason: /LOCAL_APP_REFUSED: SUPABASE_SERVICE_ROLE_KEY (?:is set in this shell|holds a production address or credential)/ }));
   }
 
   for (const folder of [path.join(HERE, '..', '..', 'public'), path.join(HERE, '.state-private')]) {
@@ -313,9 +488,9 @@ describe('every command refuses before it changes anything', () => {
         try {
           writeFileSync(path.join(dir, 'local.env'), `${Object.entries(goodState()).map(([k, v]) => `${k}=${v}`).join('\n')}\n`);
           const before = containers();
-          const child = await runAsync(command, dir);
+          const child = await runAsync(command, dir, IS_SCREEN_WALK && command === 'test' ? ['product-unit.spec.ts'] : []);
           assert.equal(child.status, 3, `${command} did not refuse: ${child.output}`);
-          assert.match(child.output, /unknown frontend/);
+          assert.match(child.output, IS_SCREEN_WALK && command === 'frontend' ? /starts its own frontend/ : /unknown frontend/);
           assert.equal(containers(), before);
         } finally {
           rmSync(dir, { recursive: true, force: true });
@@ -328,9 +503,9 @@ describe('every command refuses before it changes anything', () => {
 });
 
 // The server above lives in this process, so the child cannot block it.
-async function runAsync(command, dir) {
+async function runAsync(command, dir, args = []) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [APP, command], { timeout: 30000, env: { ...process.env, CRX_LOCAL_APP_STATE_DIR: dir } });
+    const child = spawn(process.execPath, [APP, command, ...args], { timeout: 30000, env: { ...process.env, CRX_LOCAL_APP_STATE_DIR: dir } });
     let output = '';
     child.stdout.on('data', (data) => { output += data; });
     child.stderr.on('data', (data) => { output += data; });

@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Save,
@@ -69,6 +69,7 @@ import { clearPendingRetry, loadPendingRetry, markPendingRetryForCheck, savePend
 import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
+import BookingDrawLines, { type DrawRow } from '../components/quotes/BookingDrawLines';
 import { BelowCostApprovalHandledError, isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import { catalogPricePerAcre, computeQuoteTotals, getQuoteTierPrice, isTierPriceMissing, recalcItem as recalcQuoteLine, validateCommissionSplits } from '../lib/quoteCalc';
 import { buildCommissionSplitPatch, nextLoadedSplitSnapshot } from '../lib/commissionSplitConcurrency';
@@ -279,21 +280,6 @@ function priceRaise(
   const fromCents = Math.round(saved.price * 100);
   const toCents = Math.round(item.price_per_unit * 100);
   return toCents > fromCents ? { fromCents, toCents } : null;
-}
-
-interface DrawRow {
-  product_id: string;
-  product_name: string;
-  booked: number;
-  drawn: number;
-  remaining: number;
-  qty: string;
-  unit: string | null;
-  // Item 10: a quantity over `remaining` is allowed; the extra is its own order at the price the
-  // rep picks (20261029110000). The booked price is the last booked line's, as the server uses.
-  bookedPrice: number | null;
-  todayPrice: number | null;
-  extraPrice: 'today' | 'booked';
 }
 
 type DrawRequestLine = { product_id: string; quantity: number; extra_price?: 'today' | 'booked' };
@@ -3126,7 +3112,7 @@ export default function QuoteBuilder() {
       if (orderDrawsRes.error) throw orderDrawsRes.error;
       if (jobDrawsRes.error) throw jobDrawsRes.error;
       if ((orderDrawsRes.data && orderDrawsRes.data.length > 0) || (jobDrawsRes.data && jobDrawsRes.data.length > 0)) {
-        toast('warning', `This booking has partial draw-downs or job reservations. Close it from its orders or jobs (draw or cancel the remaining balance) before you ${verb} the quote.`);
+        toast('warning', `This booking has already been partly drawn or has job reservations. Close it from its orders or jobs (draw or cancel the remaining balance) before you ${verb} the quote.`);
         return;
       }
       const previousRowVersion = quoteRowVersionRef.current;
@@ -3856,6 +3842,22 @@ export default function QuoteBuilder() {
     return loaded;
   };
 
+  // A "Draw from booking" link (the New Order page's open-booking notice) arrives with ?draw=1.
+  // Once this booking and the product list have loaded, open the draw window once and drop the
+  // flag, so a refresh or Back does not open it again. The window works exactly as from the menu.
+  const drawRequested = new URLSearchParams(location.search).get('draw') === '1';
+  const openDrawDownModalRef = useLatestRef(openDrawDownModal);
+  const autoDrawHandledForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!drawRequested || !id || loading || installedLoadGeneration === 0 || !referenceDataReady) return;
+    if (autoDrawHandledForRef.current === id) return;
+    autoDrawHandledForRef.current = id;
+    const otherParams = new URLSearchParams([...new URLSearchParams(location.search)].filter(([name]) => name !== 'draw')).toString();
+    navigate({ pathname: location.pathname, search: otherParams ? `?${otherParams}` : '' }, { replace: true });
+    if (canDraw) void openDrawDownModalRef.current();
+    else toast('info', 'This quote is not an open booking, so there is nothing to draw from it.');
+  }, [drawRequested, id, loading, installedLoadGeneration, referenceDataReady, canDraw, location.pathname, location.search, navigate, toast, openDrawDownModalRef]);
+
   // KI-190: close the draw dialog and ask for a reload of the whole booking.
   const openDrawReloadPrompt = (message: string) => {
     setShowDrawModal(false);
@@ -3936,7 +3938,7 @@ export default function QuoteBuilder() {
     if (kept?.expired || (resume && kept?.key !== resume.key)) {
       setPendingDraw(kept);
       setDrawing(false);
-      toast('error', 'An earlier Partial Order here did not finish, may have gone through, and can no longer be finished safely. Check the orders on this booking first.');
+      toast('error', 'An earlier draw from this booking did not finish, may have gone through, and can no longer be finished safely. Check the orders on this booking first.');
       return;
     }
     const drawKey = resume?.key ?? kept?.key ?? drawDownIdem.getKeyFor(drawScope);
@@ -3956,7 +3958,7 @@ export default function QuoteBuilder() {
     // Without the note, a lost reply could not be finished after a reload, and a fresh key could draw twice.
     if (!savePendingRetry(drawPendingName, drawKey, drawPayload)) {
       setDrawing(false);
-      toast('error', 'This browser could not keep a safety note for the Partial Order, so it was not sent. Allow this site to store data, or use another browser, then try again.');
+      toast('error', 'This browser could not keep a safety note for the draw from booking, so it was not sent. Allow this site to store data, or use another browser, then try again.');
       return;
     }
     // The version this send carries: a fresh draw's dialog version, or the version kept with
@@ -3971,7 +3973,7 @@ export default function QuoteBuilder() {
       // Without it a lost reply could only be resent with no version: don't send.
       clearDrawNotes(drawKey);
       setDrawing(false);
-      toast('error', 'This browser could not keep a safety note for the Partial Order, so it was not sent. Allow this site to store data, or use another browser, then try again.');
+      toast('error', 'This browser could not keep a safety note for the draw from booking, so it was not sent. Allow this site to store data, or use another browser, then try again.');
       return;
     }
     try {
@@ -4090,7 +4092,7 @@ export default function QuoteBuilder() {
       const errMsg = (error instanceof Error ? error.message : null)
         || (errObj && typeof errObj.message === 'string' ? errObj.message : null)
         || (errObj && typeof errObj.details === 'string' ? errObj.details : null)
-        || 'Failed to create order from booking';
+        || 'Could not draw from booking';
       // Friendly mapping for the booking guards — UX parity with the convert
       // path (2026-06-10 error-prevention review §3 LOW). BOOKING_PARTIALLY_DRAWN
       // can't fire here: draw_down_quote IS the partial path.
@@ -4098,13 +4100,13 @@ export default function QuoteBuilder() {
       if (authError) {
         toast('error', authError);
       } else if (hasRpcCode(error, RpcErrorCodes.INSUFFICIENT_ROLE)) {
-        toast('error', 'Only active administrators and sales representatives can draw down bookings.');
+        toast('error', 'Only active administrators and sales representatives can draw from bookings.');
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_OVERDRAWN)) {
         // The server message already names the product and remaining balance
         // (e.g. another draw landed from a second tab) — surface it as-is.
         toast('error', errMsg);
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_CLOSED)) {
-        toast('error', 'This booking is closed. Only sent or revised quotes can be drawn down.');
+        toast('error', 'This booking is closed. You can draw only from a booked or revised quote.');
       } else if (hasRpcCode(error, RpcErrorCodes.EMPTY_DRAW)) {
         toast('warning', 'Enter a quantity for at least one product');
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_QUANTITY_INVALID)) {
@@ -4125,7 +4127,7 @@ export default function QuoteBuilder() {
         // is stamped from the product when a line is inserted and is immutable
         // after that, so the repair is to fix the product, then rebuild the
         // line (CodeRabbit PR #404 — a reload alone changes nothing).
-        toast('error', 'A booked product on this quote has no cost recorded. Set the cost on the product under Products, then remove and re-add that line on this quote and save it, then draw down again.');
+        toast('error', 'A booked product on this quote has no cost recorded. Set the cost on the product under Products, then remove and re-add that line on this quote and save it, then draw from booking again.');
       } else if (hasRpcCode(error, RpcErrorCodes.DRAW_ALLOCATION_MISMATCH)) {
         // Safety net, not an operator mistake: the draw refused rather than
         // billing units it could not match to a booked price.
@@ -4141,7 +4143,7 @@ export default function QuoteBuilder() {
     if (quoteVersionRecoveryRequiredRef.current) {
       staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
       setStaleSaveOpen(true);
-      toast('error', 'The order was not created. Reload the quote, then try Convert to Order again.');
+      toast('error', 'The order was not created. Reload the quote, then draw the whole booking again.');
       return;
     }
     // Guardrail: check for stale quote before converting
@@ -4211,7 +4213,7 @@ export default function QuoteBuilder() {
         if (orderDrawRes.error) throw orderDrawRes.error;
         if (jobDrawRes.error) throw jobDrawRes.error;
         if ((orderDrawRes.data && orderDrawRes.data.length > 0) || (jobDrawRes.data && jobDrawRes.data.length > 0)) {
-          toast('warning', 'This booking has partial draw-downs or job reservations. Use "Partial Order" to draw the remaining balance instead of converting.');
+          toast('warning', 'This booking has already been partly drawn or has job reservations. Use "Choose amounts" under Draw from booking for what is left instead of drawing the whole booking.');
           setConverting(false);
           return;
         }
@@ -4261,7 +4263,7 @@ export default function QuoteBuilder() {
       }
       const alreadyConverted = result.status === 'already_converted';
       if (alreadyConverted) {
-        toast('info', 'This booking was already converted. Opening the existing order.');
+        toast('info', 'The whole booking was already drawn. Opening the existing order.');
       } else {
         toast('success', `Order ${result.order_number || ''} created`);
       }
@@ -4388,15 +4390,15 @@ export default function QuoteBuilder() {
       // Friendly mapping for the booking guards (server-side backstop for the
       // pre-check above — e.g. a draw landed from another tab mid-convert).
       if (hasRpcCode(error, RpcErrorCodes.BOOKING_PARTIALLY_DRAWN)) {
-        toast('warning', 'This booking has partial draw-downs. Use "Partial Order" to draw the remaining balance instead of converting.');
+        toast('warning', 'This booking has already been partly drawn. Use "Choose amounts" under Draw from booking for what is left instead of drawing the whole booking.');
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_CLOSED)) {
-        toast('error', 'This booking is closed. Only sent or revised quotes can be converted.');
+        toast('error', 'This booking is closed. You can draw only from a booked or revised quote.');
       } else if (hasRpcCode(error, RpcErrorCodes.QUOTE_RESEND_REQUIRED)) {
         toast('error', resendRequiredMessage(error));
       } else if (hasRpcCode(error, RpcErrorCodes.COST_BASIS_REQUIRED)) {
         // A line saved before quote-time costs were recorded has none. Convert no longer
         // re-saves the quote, so it is no longer stamped on the way (KI-12).
-        toast('error', 'A line on this quote has no recorded cost. Revise the quote and save it, then convert it again.');
+        toast('error', 'A line on this quote has no recorded cost. Revise the quote and save it, then draw the whole booking again.');
       } else {
       // Bug #30 fix: Extract error message from Supabase RPC error objects
       const errObj = error as Record<string, unknown> | null;
@@ -4423,7 +4425,7 @@ export default function QuoteBuilder() {
       if (quoteVersionRecoveryRequiredRef.current) {
         staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
         setStaleSaveOpen(true);
-        toast('error', 'The order was not created. Reload the quote, then try Book as Order again.');
+        toast('error', 'The order was not created. Reload the quote, then try Book and draw all again.');
         return;
       }
       // A lost mark-sent response leaves the DB sent while the UI thinks draft —
@@ -4523,16 +4525,16 @@ export default function QuoteBuilder() {
   const pdfVisible = primary === null && !isPhone; // closed quotes: Download PDF is the visible action
   const createOrderItems: ActionMenuItem[] = [
     {
-      id: 'convert', label: 'Convert whole booking', icon: <ShoppingCart className="w-4 h-4" />,
+      id: 'convert', label: 'Whole booking', icon: <ShoppingCart className="w-4 h-4" />,
       onAction: () => setConfirmConvertOpen(true),
       disabled: !canConvert || converting,
-      disabledReason: canConvert ? undefined : 'Whole-booking conversion is available after the quote is sent or revised.',
+      disabledReason: canConvert ? undefined : 'Drawing the whole booking is available once the quote is booked (sent) or revised.',
     },
     {
-      id: 'draw', label: 'Draw part of booking…', icon: <PackageOpen className="w-4 h-4" />,
+      id: 'draw', label: 'Choose amounts…', icon: <PackageOpen className="w-4 h-4" />,
       onAction: () => { openDrawDownModal(); },
       disabled: !canDraw || drawLoading,
-      disabledReason: canDraw ? undefined : 'Partial draw-down is available after the quote is sent or revised.',
+      disabledReason: canDraw ? undefined : 'Draw from booking is available once the quote is booked (sent) or revised.',
     },
   ];
   const moreItems: ActionMenuItem[] = [
@@ -4545,7 +4547,7 @@ export default function QuoteBuilder() {
     ...(quoteId ? [{ id: 'template', label: 'Save as template', icon: <Copy className="w-4 h-4" />, onAction: () => setShowSaveTemplateModal(true) }] : []),
     ...(quoteId ? [{ id: 'rollover', label: 'Roll over to next season', icon: <RotateCcw className="w-4 h-4" />, onAction: () => setShowRolloverModal(true) }] : []),
     ...(isEditing && !!quoteId && currentStatus === 'draft' && !draftEditLocked && !isDirty ? [{
-      id: 'book', label: 'Book as order', icon: <ShoppingCart className="w-4 h-4" />,
+      id: 'book', label: 'Book and draw all', icon: <ShoppingCart className="w-4 h-4" />,
       onAction: () => setConfirmBookAsOrderOpen(true), disabled: bookingAsOrder,
     }] : []),
     ...(canRevert ? [{
@@ -4554,7 +4556,7 @@ export default function QuoteBuilder() {
     }] : []),
     // The phone top bar has no room for secondaries, so they join the menu there.
     ...(isPhone && showRevise ? [{ id: 'revise', label: revising ? 'Revising…' : 'Revise quote', icon: <Pencil className="w-4 h-4" />, onAction: handleReviseQuote, disabled: revising }] : []),
-    ...(isPhone && showCreateOrder && primary !== 'createOrder' ? createOrderItems.map((item) => ({ ...item, group: 'Create order' })) : []),
+    ...(isPhone && showCreateOrder && primary !== 'createOrder' ? createOrderItems.map((item) => ({ ...item, group: 'Draw from booking' })) : []),
     ...(canCloseApplied ? [{
       id: 'close-applied', label: 'Close as applied (we applied the product)', icon: <CheckCircle className="w-4 h-4" />, group: 'Close this booking',
       onAction: () => setConfirmCloseAppliedOpen(true), disabled: closingApplied,
@@ -4574,7 +4576,7 @@ export default function QuoteBuilder() {
   ];
   const moreMenu = <ActionMenu label="More actions" items={moreItems} />;
   const createOrderMenu = (variant: 'primary' | 'secondary') => (
-    <ActionMenu label="Create order" items={createOrderItems} trigger={{ text: 'Create order', variant, icon: <ShoppingCart className="w-4 h-4" /> }} />
+    <ActionMenu label="Draw from booking" items={createOrderItems} trigger={{ text: 'Draw from booking', variant, icon: <ShoppingCart className="w-4 h-4" /> }} />
   );
   const tall = 'h-11 md:h-10';
   const saveDraftButton = (className = '') => (
@@ -4789,7 +4791,7 @@ export default function QuoteBuilder() {
 
       {isEditing && currentStatus === 'sent' && !canEdit && (
         <Notice tone="info" icon={<Lock className="h-4.5 w-4.5" aria-hidden="true" />}>
-          <span>This quote has been sent. Click <strong>Revise quote</strong> to make changes, then re-send.</span>
+          <span>This quote is booked (sent to the customer). Click <strong>Revise quote</strong> to make changes, then re-send.</span>
         </Notice>
       )}
 
@@ -5482,7 +5484,7 @@ export default function QuoteBuilder() {
                   <span className="inline-flex items-center gap-1 text-xs text-secondary">
                     <XCircle className="w-3 h-3 text-orange-500" />
                     Sold, make a standalone job
-                    <HelpTip text="This booking was accepted and converted to a chemical sale (order). To do field work, create a standalone job from the Jobs page. Scheduling from a sold booking would double-count the product." />
+                    <HelpTip text="This whole booking was drawn into a chemical sale (order). To do field work, create a standalone job from the Jobs page. Scheduling from a sold booking would double-count the product." />
                   </span>
                 )}
               </div>
@@ -6166,7 +6168,7 @@ export default function QuoteBuilder() {
       <Modal
         open={confirmConvertOpen}
         onClose={() => { if (!converting) setConfirmConvertOpen(false); }}
-        title="Convert to order?"
+        title="Draw the whole booking?"
         footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <Button
@@ -6298,7 +6300,7 @@ export default function QuoteBuilder() {
                 Download
               </Button>
             </div>
-            <p className="text-xs text-secondary">Mark as presented records the quote as sent without emailing, for quotes you hand over in person.</p>
+            <p className="text-xs text-secondary">Mark as presented books the quote as sent without emailing, for quotes you hand over in person.</p>
           </div>
         </div>
       </Modal>
@@ -6345,7 +6347,7 @@ export default function QuoteBuilder() {
       )}
 
       {showDrawModal && (
-        <Modal open={showDrawModal} onClose={() => setShowDrawModal(false)} title="Create order from booking" footer={
+        <Modal open={showDrawModal} onClose={() => setShowDrawModal(false)} title="Draw from booking" footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <Button variant="secondary" onClick={() => setShowDrawModal(false)} className="min-h-11 w-full sm:w-auto">
               Cancel
@@ -6368,7 +6370,7 @@ export default function QuoteBuilder() {
             {pendingDraw?.expired && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm flex items-start justify-between gap-3">
                 <p>
-                  Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}) did not finish
+                  Your last draw from this booking ({new Date(pendingDraw.sentAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}) did not finish
                   and may have gone through, but it can no longer be finished safely. Check the orders on this booking before drawing again.
                 </p>
                 <Button
@@ -6386,7 +6388,7 @@ export default function QuoteBuilder() {
             {pendingDraw && !pendingDraw.expired && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm flex items-start justify-between gap-3">
                 <p>
-                  Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}) got no reply,
+                  Your last draw from this booking ({new Date(pendingDraw.sentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}) got no reply,
                   so it may already have gone through. Finish it to get that order: it is made once, never twice.
                 </p>
                 <Button
@@ -6402,79 +6404,7 @@ export default function QuoteBuilder() {
             {drawLoading ? (
               <p className="text-sm text-secondary">Loading booking balance…</p>
             ) : (
-              <div className="max-h-80 overflow-y-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-secondary border-b">
-                      <th className="py-2 pr-2">Product</th>
-                      <th className="py-2 pr-2 text-right">Booked</th>
-                      <th className="py-2 pr-2 text-right">Drawn</th>
-                      <th className="py-2 pr-2 text-right">Remaining</th>
-                      <th className="py-2 text-right">Send now</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {drawRows.map((row, idx) => {
-                      const over = Math.round(((parseFloat(row.qty) || 0) - row.remaining) * 100) / 100;
-                      const setRow = (patch: Partial<DrawRow>) => {
-                        const next = [...drawRows];
-                        next[idx] = { ...row, ...patch };
-                        setDrawRows(next);
-                      };
-                      return (
-                      <Fragment key={row.product_id}>
-                      <tr className={over > 0 && row.remaining > 0 ? '' : 'border-b last:border-0'}>
-                        <td className="py-2 pr-2">{row.product_name}</td>
-                        <td className="py-2 pr-2 text-right">{row.booked}{row.unit ? ` ${row.unit}` : ''}</td>
-                        <td className="py-2 pr-2 text-right">{row.drawn}{row.unit ? ` ${row.unit}` : ''}</td>
-                        <td className="py-2 pr-2 text-right font-medium">{row.remaining}{row.unit ? ` ${row.unit}` : ''}</td>
-                        <td className="py-2 text-right">
-                          <div className="inline-flex items-center gap-1">
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={row.qty}
-                              // Locked while the order is created: a later change would not be in it.
-                              disabled={drawing || row.remaining <= 0}
-                              onChange={(e) => setRow({ qty: e.target.value })}
-                              aria-label={`Quantity to draw for ${row.product_name}`}
-                              className="w-24 px-2 py-1 text-sm text-right border border-gray-200 rounded-lg disabled:bg-gray-50"
-                            />
-                            {row.unit && <span className="text-xs text-secondary">{row.unit}</span>}
-                          </div>
-                        </td>
-                      </tr>
-                      {over > 0 && row.remaining > 0 && (
-                        <tr className="border-b last:border-0">
-                          <td colSpan={5} className="pb-2 text-xs text-secondary">
-                            <p>
-                              {over}{row.unit ? ` ${row.unit}` : ''} over the booking. Booked {row.bookedPrice != null ? formatUSD(row.bookedPrice) : 'not set'},
-                              {' '}today {row.todayPrice != null ? formatUSD(row.todayPrice) : 'not set'}. The extra goes on its own order at:
-                            </p>
-                            <div className="mt-1 flex gap-4">
-                              {(['today', 'booked'] as const).map((choice) => (
-                                <label key={choice} className="inline-flex items-center gap-1 text-nav-dark">
-                                  <input
-                                    type="radio"
-                                    name={`extra-price-${row.product_id}`}
-                                    checked={row.extraPrice === choice}
-                                    disabled={drawing}
-                                    onChange={() => setRow({ extraPrice: choice })}
-                                  />
-                                  {choice === 'today' ? "Today's price" : 'Booked price'}
-                                </label>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                      </Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <BookingDrawLines rows={drawRows} onChange={setDrawRows} drawing={drawing} stacked={isPhone} />
             )}
           </div>
         </Modal>
@@ -6571,9 +6501,9 @@ export default function QuoteBuilder() {
         open={confirmBookAsOrderOpen}
         onClose={() => setConfirmBookAsOrderOpen(false)}
         onConfirm={handleBookAsOrder}
-        title="Book as order?"
-        message="Mark this quote as sent and convert it to an order now?"
-        confirmLabel="Book as order"
+        title="Book and draw all?"
+        message="Mark this quote as sent (booked) and draw the whole booking into one order now?"
+        confirmLabel="Book and draw all"
         variant="info"
         icon={ShoppingCart}
         loading={bookingAsOrder || converting}
@@ -6658,8 +6588,8 @@ export default function QuoteBuilder() {
         }>
           <div className="space-y-4">
             <p className="text-sm text-secondary">
-              Reopens quote {quoteNumber} back to <strong>sent</strong> so it can be edited,
-              re-sent, or converted again.{' '}
+              Reopens quote {quoteNumber} back to <strong>Booked</strong> so it can be edited,
+              re-sent, or drawn from again.{' '}
               {currentStatus === 'accepted'
                 ? 'Blocked if an order has already been created from this quote.'
                 : 'The quote re-enters the active pipeline.'}
@@ -6686,9 +6616,9 @@ export default function QuoteBuilder() {
         open={duplicateOrderConfirmOpen}
         onClose={() => setDuplicateOrderConfirmOpen(false)}
         onConfirm={executeConvertToOrder}
-        title="Convert anyway?"
+        title="Draw the whole booking anyway?"
         message={duplicateOrderMsg}
-        confirmLabel="Convert anyway"
+        confirmLabel="Create order anyway"
         variant="warning"
       />
 

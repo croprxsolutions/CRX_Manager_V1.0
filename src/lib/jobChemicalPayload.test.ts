@@ -141,6 +141,25 @@ describe('buildJobChemicalsPayload', () => {
     );
   });
 
+  it('preserves zero REI and PHI values', () => {
+    const textZero = buildJobChemicalsPayload([row({ rei_hours: '0', phi_days: '0' })])[0];
+    expect(textZero.rei_hours).toBe('0');
+    expect(textZero.phi_days).toBe('0');
+
+    // The payload boundary must also preserve a numeric zero instead of treating it as blank.
+    const numericZeroRow = Object.assign(row(), { rei_hours: 0, phi_days: 0 });
+    const numericZero = buildJobChemicalsPayload([numericZeroRow])[0];
+    expect(numericZero.rei_hours).toBe(0);
+    expect(numericZero.phi_days).toBe(0);
+  });
+
+  it('maps null and undefined REI/PHI values to null', () => {
+    const nullishRow = Object.assign(row(), { rei_hours: null, phi_days: undefined });
+    const payload = buildJobChemicalsPayload([nullishRow])[0];
+    expect(payload.rei_hours).toBeNull();
+    expect(payload.phi_days).toBeNull();
+  });
+
   it('customer_supplied defaults to false and preserves true', () => {
     expect(buildJobChemicalsPayload([row({ customer_supplied: true })])[0].customer_supplied).toBe(true);
     expect(buildJobChemicalsPayload([row({ customer_supplied: false })])[0].customer_supplied).toBe(false);

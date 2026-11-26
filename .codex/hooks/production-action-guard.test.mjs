@@ -619,7 +619,7 @@ try {
   });
   assert.match(afterDec15.reason ?? "", /TAHA LANE BLOCK/, "the lane block has no end date (Mason, 2026-11-24)");
   // Taha's Approve on this exact head lets it on to the next gate, with no code (Mason, 2026-11-24).
-  // Reviews come back as "account id, state, commit, time"; the timeline read lists base-branch changes.
+  // Reviews come back as "account id, state, commit, time"; the timeline read lists base-branch changes (event, time, …).
   const tahaGh = (commit, baseChanges = "") => (args) => {
     if (args.some((a) => /\/reviews/.test(a))) return `50602678\tAPPROVED\t${commit}\t2026-11-24T15:00:00Z\n`;
     if (args.some((a) => /\/timeline/.test(a))) return baseChanges;
@@ -633,7 +633,7 @@ try {
   assert.doesNotMatch(tahaApprovedMerge.reason ?? "", /TAHA LANE/, "Taha's Approve on the head clears the lane block");
   const tahaApprovedRetargeted = evaluateProductionAction({
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo, nowMs: laneNow, prFiles: quoteFiles,
-    runGh: tahaGh(ordinaryHead, "2026-11-24T16:00:00Z\n"),
+    runGh: tahaGh(ordinaryHead, "base_ref_changed\t2026-11-24T16:00:00Z\t\t\t\t\n"),
   });
   assert.match(tahaApprovedRetargeted.reason ?? "", /TAHA LANE BLOCK/, "a base-branch change after his Approve refuses");
   const tahaApprovedOld = evaluateProductionAction({

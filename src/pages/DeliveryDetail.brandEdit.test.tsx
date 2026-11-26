@@ -17,14 +17,17 @@ const { auth, brand, mockFrom, mockRpc, mockToast, mockSendEmail, mockUpload, ro
 
 function buildChain(table: string): Record<string, unknown> {
   const self: Record<string, unknown> = {};
+  const equalities: Array<[string, unknown]> = [];
   const method = (..._args: unknown[]) => self;
   for (const m of [
-    'select', 'insert', 'update', 'upsert', 'delete', 'eq', 'neq', 'gt', 'gte',
+    'select', 'insert', 'update', 'upsert', 'delete', 'neq', 'gt', 'gte',
     'lt', 'lte', 'like', 'ilike', 'is', 'in', 'not', 'or', 'and', 'match',
     'order', 'limit', 'offset', 'returns', 'abortSignal', 'range',
   ]) self[m] = method;
+  self.eq = (column: string, value: unknown) => { equalities.push([column, value]); return self; };
   // Read the table when the query resolves, so a test can change it between calls.
-  const rows = () => tables.data[table] ?? [];
+  const rows = () => (tables.data[table] ?? []).filter((row) =>
+    equalities.every(([column, value]) => (row as Record<string, unknown>)[column] === value));
   self.single = () => Promise.resolve({ data: rows()[0] ?? null, error: null });
   self.maybeSingle = () => Promise.resolve({ data: rows()[0] ?? null, error: null });
   self.then = (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) =>
@@ -176,12 +179,15 @@ describe('DeliveryDetail edit: the driver choice (Mason 2026-11-23: the office m
   });
 
   it('an inactive current driver stays selectable after another pick', async () => {
-    tables.data.profile_public_view = [];
+    tables.data.profile_public_view = [
+      { id: 'user-1', full_name: 'Dana Driver', role: 'driver', is_active: false },
+    ];
     render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
-    const select = (await screen.findByRole('option', { name: 'Unassigned' })).closest('select')!;
+    await screen.findByRole('option', { name: 'Current driver: Dana Driver' });
+    const select = screen.getByRole('option', { name: 'Unassigned' }).closest('select')!;
     fireEvent.change(select, { target: { value: '' } });
-    expect(screen.getByRole('option', { name: 'Current driver (not in list)' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Current driver: Dana Driver' })).toBeTruthy();
   });
 });
 

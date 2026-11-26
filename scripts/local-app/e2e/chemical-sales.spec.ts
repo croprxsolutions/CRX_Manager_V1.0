@@ -146,8 +146,8 @@ test.describe.serial('chemical sales quote to invoice gauntlet (local invented r
       WHERE q.id=${sqlText(quoteId)}::uuid GROUP BY q.id, q.status`);
     expect(sentFacts.split('|')).toEqual(['sent', '1', '1']);
 
-    await page.getByRole('button', { name: /Create Order/i }).click();
-    await page.getByRole('menuitem', { name: 'Convert whole booking', exact: true }).click();
+    await page.getByRole('button', { name: 'Draw from booking', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Whole booking', exact: true }).click();
     const converted = page.waitForResponse((response) => response.url().endsWith('/rpc/convert_quote_to_order'));
     await page.getByRole('button', { name: 'Create Order', exact: true }).last().click();
     const convertedResponse = await converted;
@@ -277,10 +277,10 @@ test.describe.serial('chemical sales quote to invoice gauntlet (local invented r
     await page.getByRole('button', { name: 'Preview Quote', exact: true }).click();
     await page.getByRole('button', { name: 'Mark as Presented', exact: true }).click();
     await expect(page.getByText(/marked as presented/i)).toBeVisible({ timeout: 20_000 });
-    await page.getByRole('button', { name: /Create Order/i }).click();
-    await page.getByRole('menuitem', { name: 'Convert whole booking', exact: true }).click();
+    await page.getByRole('button', { name: 'Draw from booking', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Whole booking', exact: true }).click();
     await page.getByRole('button', { name: 'Create Order', exact: true }).last().click();
-    await page.getByRole('button', { name: 'Convert Anyway', exact: true }).click();
+    await page.getByRole('button', { name: 'Create order anyway', exact: true }).click();
     await expect(page).toHaveURL(/\/orders\/[0-9a-f-]+/i, { timeout: 25_000 });
     const draftOrderId = page.url().split('/').at(-1)!;
     await page.getByRole('button', { name: 'Schedule Delivery', exact: true }).click();

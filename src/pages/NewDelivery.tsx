@@ -16,7 +16,6 @@ import { logActivity } from '../lib/activityLogger';
 import { useOverloadedDriverCheck } from '../hooks/useGuardrails';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
-import { notifyDriverAssigned } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import { localToday } from '../lib/dateUtils';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
@@ -202,7 +201,7 @@ export default function NewDelivery() {
       Sentry.captureException(itemsRes.error, { tags: { source: 'fetch', action: 'load_order_items' } });
       toast('error', 'Failed to load order items.');
     }
-    // Without its items and customer (RUP and inventory checks, driver notice) the order cannot be delivered.
+    // Without its items and customer (RUP and inventory checks) the order cannot be delivered.
     // A lines read that answers with no list is failed too: it would read as "nothing left to deliver".
     if (custRes.error || itemsRes.error || !custRes.data || !itemsRes.data) {
       setOrderProblem(custRes.error || itemsRes.error || !itemsRes.data
@@ -443,7 +442,6 @@ export default function NewDelivery() {
     if (!profile) return;
     const activeItems = deliveryItems.filter((item) => item.quantity > 0);
     setSaving(true);
-    // No idempotency key — see comment at top of component
 
     const order = selectedOrder?.id === selectedOrderId ? selectedOrder : null;
     if (!order) {
@@ -488,12 +486,6 @@ export default function NewDelivery() {
     createDeliveryKey.resetKey();
     toast('success', `Delivery ${deliveryNumber} scheduled`);
     logActivity({ event: 'delivery_created', description: `Delivery ${deliveryNumber} created for order ${order.order_number}`, performedBy: profile.id, entityType: 'delivery', entityId: deliveryId, customerId: order.customer_id });
-
-    // GAP FIX #17: Notify the assigned driver
-    if (selectedDriverId) {
-      const custName = customer?.farm_name || 'customer';
-      await notifyDriverAssigned(selectedDriverId, deliveryNumber, custName, scheduledDate, deliveryId);
-    }
 
     skipUnsavedPromptRef.current = true;
     navigate(`/deliveries/${deliveryId}`);

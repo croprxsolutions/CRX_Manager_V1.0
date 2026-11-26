@@ -40,7 +40,7 @@ BEGIN
     '[]'::jsonb, false, v_reviewer, 'rename-ticket-' || v_tag);
 
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-  PERFORM public.upsert_parent_brand(v_parent, v_size, '  sMOKE BRAND A  ', '12345-1', 'Smoke Maker', true,
+  PERFORM public.upsert_parent_brand(v_parent, v_size, E'  sMOKE\t  BRAND A  ', '12345-1', 'Smoke Maker', true,
     NULL, NULL, v_brand, 1, p_idempotency_key => 'rename-cosmetic-' || v_tag);
   v_result := public.get_product_weights(ARRAY[v_size])->'products'->v_size::text;
   IF (v_result->'weight'->>'lb_per_unit')::numeric IS DISTINCT FROM 9.5 OR

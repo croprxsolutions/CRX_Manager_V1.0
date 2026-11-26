@@ -12,7 +12,8 @@ DECLARE
 BEGIN
   IF NOT public.liquid_density_review_open() OR NEW.status <> 'active' THEN RETURN NULL; END IF;
   IF TG_OP = 'UPDATE' AND OLD.status = 'active' AND OLD.parent_id = NEW.parent_id THEN
-    IF lower(btrim(OLD.brand_name)) IS DISTINCT FROM lower(btrim(NEW.brand_name)) THEN
+    IF lower(btrim(regexp_replace(OLD.brand_name, '[[:space:]]+', ' ', 'g')))
+        IS DISTINCT FROM lower(btrim(regexp_replace(NEW.brand_name, '[[:space:]]+', ' ', 'g'))) THEN
       v_reason := 'An active brand changed its name';
     ELSIF (OLD.epa_registration, OLD.manufacturer) IS DISTINCT FROM (NEW.epa_registration, NEW.manufacturer) THEN
       v_reason := 'An active brand changed its EPA registration or manufacturer';

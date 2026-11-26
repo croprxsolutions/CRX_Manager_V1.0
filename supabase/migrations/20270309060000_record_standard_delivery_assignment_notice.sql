@@ -38,6 +38,7 @@ BEGIN
     SELECT 1
     FROM public.notifications AS notice
     WHERE notice.notification_type = 'delivery_assigned'
+      AND notice.title = 'New Delivery Assigned'
       AND notice.related_entity_type = 'delivery'
       AND notice.related_entity_id = NEW.related_entity_id
       AND notice.user_id = NEW.user_id
@@ -57,6 +58,7 @@ FOR EACH ROW
 WHEN (
   current_user = 'authenticated'
   AND NEW.notification_type = 'delivery_assigned'
+  AND NEW.title = 'New Delivery Assigned'
   AND NEW.related_entity_type = 'delivery'
 )
 EXECUTE FUNCTION public.skip_repeated_delivery_assignment_notice();
@@ -138,8 +140,6 @@ BEGIN
 END;
 $function$;
 
-REVOKE ALL ON FUNCTION public.create_delivery_with_items(uuid, uuid, date, jsonb, uuid, uuid, text, text, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.create_delivery_with_items(uuid, uuid, date, jsonb, uuid, uuid, text, text, text) TO authenticated, service_role;
 
 DO $postflight$
 BEGIN
@@ -165,7 +165,9 @@ BEGIN
   IF has_function_privilege('anon', 'public.skip_repeated_delivery_assignment_notice()', 'EXECUTE')
     OR has_function_privilege('authenticated', 'public.skip_repeated_delivery_assignment_notice()', 'EXECUTE')
     OR has_function_privilege('service_role', 'public.skip_repeated_delivery_assignment_notice()', 'EXECUTE')
+    OR has_function_privilege('anon', 'public.create_delivery_with_items(uuid,uuid,date,jsonb,uuid,uuid,text,text,text)', 'EXECUTE')
     OR NOT has_function_privilege('authenticated', 'public.create_delivery_with_items(uuid,uuid,date,jsonb,uuid,uuid,text,text,text)', 'EXECUTE')
+    OR NOT has_function_privilege('service_role', 'public.create_delivery_with_items(uuid,uuid,date,jsonb,uuid,uuid,text,text,text)', 'EXECUTE')
   THEN RAISE EXCEPTION 'DELIVERY_ASSIGNMENT_NOTICE_GRANT_MISMATCH'; END IF;
 END
 $postflight$;

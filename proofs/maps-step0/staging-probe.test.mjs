@@ -1,5 +1,6 @@
+// @vitest-environment node
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { Script } from 'node:vm';
 import { readFileSync } from 'node:fs';
 import handler from '../../api/maps-step0.mjs';

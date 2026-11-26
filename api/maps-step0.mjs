@@ -29,8 +29,10 @@ function installProbe(config) {
     return result;
   }
 
-  async function checkTiles() {
+  async function checkTiles(result) {
     if (!config.tilesKey) return { state: 'staging key binding missing' };
+    result.step = 'fetch session';
+    result.tileRequests = 0;
     const sessionUrl = new URL('https://tile.googleapis.com/v1/createSession');
     sessionUrl.searchParams.set('key', config.tilesKey);
     const response = await providerFetch(sessionUrl, {
@@ -38,48 +40,57 @@ function installProbe(config) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mapType: 'satellite', layerTypes: ['layerRoadmap'], overlay: false, language: 'en-US', region: 'US' }),
     });
-    if (!response.ok) return { sessionStatus: response.status, reasons: await googleError(response), tileRequests: 0 };
+    result.sessionStatus = response.status;
+    if (!response.ok) return { reasons: await googleError(response) };
+    result.step = 'read session response';
     const { session } = await response.json();
-    if (typeof session !== 'string' || !session) return { sessionStatus: response.status, state: 'unexpected session response', tileRequests: 0 };
+    if (typeof session !== 'string' || !session) return { state: 'unexpected session response' };
     const tileUrl = new URL('https://tile.googleapis.com/v1/2dtiles/12/989/1535');
     tileUrl.searchParams.set('key', config.tilesKey);
     tileUrl.searchParams.set('session', session);
+    result.step = 'fetch tile';
+    result.tileRequests = 1;
     const tile = await providerFetch(tileUrl);
-    return {
-      sessionStatus: response.status,
-      tileStatus: tile.status,
-      tileRequests: 1,
-      ...(tile.ok ? { decodedImage: await dimensions(tile) } : { reasons: await googleError(tile) }),
-    };
+    result.tileStatus = tile.status;
+    if (!tile.ok) return { reasons: await googleError(tile) };
+    result.step = 'decode tile image';
+    return { decodedImage: await dimensions(tile) };
   }
 
-  async function checkStatic() {
+  async function checkStatic(result) {
     if (!config.staticKey) return { state: 'staging key binding missing' };
     const url = new URL('https://maps.googleapis.com/maps/api/staticmap');
     for (const [key, value] of Object.entries({ center: '41,-93', zoom: '13', size: '640x640', scale: '2', maptype: 'satellite', key: config.staticKey })) {
       url.searchParams.set(key, value);
     }
+    result.step = 'fetch Static Maps response';
+    result.imageRequests = 1;
     const response = await providerFetch(url);
-    const result = { status: response.status, imageRequests: 1, contentType: response.headers.get('content-type') };
-    if (!response.ok || !result.contentType?.startsWith('image/')) return result;
+    result.status = response.status;
+    result.contentType = response.headers.get('content-type');
+    if (!response.ok || !result.contentType?.startsWith('image/')) return {};
+    result.step = 'decode Static Maps image';
     return {
-      ...result,
       visibleWarningHeader: response.headers.has('x-staticmap-api-warning'),
       decodedImage: await dimensions(response),
     };
   }
 
+  const buttons = document.querySelectorAll('button');
   for (const [id, check] of Object.entries({ tiles: checkTiles, static: checkStatic })) {
-    document.querySelector('#' + id).addEventListener('click', async (event) => {
-      const button = event.currentTarget;
-      button.disabled = true;
+    document.querySelector('#' + id).addEventListener('click', async () => {
+      buttons.forEach((button) => { button.disabled = true; });
       setStatus({ check: id, state: 'running' });
+      const result = { check: id };
       try {
-        setStatus({ check: id, ...await check() });
+        const details = await check(result);
+        delete result.step;
+        setStatus({ ...result, ...details });
       } catch (error) {
-        setStatus({ check: id, state: error.name === 'TimeoutError' ? 'timed out' : 'browser fetch or image decode failed' });
+        const errorType = /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(error?.name ?? '') ? error.name : 'Error';
+        setStatus({ ...result, state: 'failed', errorType });
       } finally {
-        button.disabled = false;
+        buttons.forEach((button) => { button.disabled = false; });
       }
     });
   }

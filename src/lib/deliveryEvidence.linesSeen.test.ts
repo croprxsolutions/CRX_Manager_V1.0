@@ -5,7 +5,7 @@ import {
 } from './deliveryEvidence';
 import { LEFT_AT_SITE_PHOTO_CAPTION, PAPER_TICKET_PHOTO_CAPTION } from './paperTicket';
 
-// Mirrors the server's _delivery_lines_match (migration 20270308000000): a multiset of
+// Mirrors the server's _delivery_lines_match (migration 20270308100000): a multiset of
 // (order line, product, quantity, delivered), delivered kept between 0 and the quantity.
 describe('proof bound to the load', () => {
   const items = [
@@ -68,7 +68,7 @@ describe('proof bound to the load', () => {
     expect(sameLinesSeen([{ ...a[0], delivered: -1 }], [{ ...a[0], delivered: 0 }])).toBe(true);
   });
 
-  it('counts a delivered amount under 0.01 as 0 on both sides (20270308010000)', () => {
+  it('counts a delivered amount under 0.01 as 0 on both sides (20270308140000)', () => {
     const a = buildLinesSeen(items);
     expect(sameLinesSeen([{ ...a[0], delivered: 0 }], [{ ...a[0], delivered: 0.005 }])).toBe(true);
     expect(sameLinesSeen([{ ...a[0], delivered: 0.004 }], [{ ...a[0], delivered: 0.009 }])).toBe(true);

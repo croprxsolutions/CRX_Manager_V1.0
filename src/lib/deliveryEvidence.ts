@@ -162,7 +162,7 @@ export async function uploadEvidencePhoto(
     file_size: file.size,
     sort_order: count ?? 0,
     caption,
-    // A signed-ticket photo carries the lines the screen showed when it was taken (20270308000000).
+    // A signed-ticket photo carries the lines the screen showed when it was taken (20270308100000).
     ...(linesSeen ? { lines_seen: linesSeen } : {}),
   }).select('id, storage_path, image_url, caption, uploaded_at, lines_seen');
   checkMutationResult(result, 'Insert delivery photo');
@@ -260,7 +260,7 @@ export async function storedNoProofReason(deliveryId: string, typedReason: strin
 }
 
 /**
- * Proof bound to the load (migration 20270308000000). One delivery line as the screen showed it when
+ * Proof bound to the load (migration 20270308100000). One delivery line as the screen showed it when
  * the customer signed or the ticket photo was taken: its order line, product, scheduled quantity and
  * the delivered amount on screen (the scheduled quantity for a full delivery).
  */
@@ -286,7 +286,7 @@ export function buildLinesSeen<T extends { id: string; order_item_id?: string | 
 }
 
 // One entry as the server compares it: ids lower-cased, delivered kept between 0 and the quantity, an amount under
-// 0.01 counted as 0 (20270308010000, as #2562 records it), amounts to 6 decimal places (the server's round(…, 6);
+// 0.01 counted as 0 (20270308140000, as #2562 records it), amounts to 6 decimal places (the server's round(…, 6);
 // this is a screen hint, the server decides).
 function lineSeenKey(line: LineSeen): string {
   const quantity = Number(line.quantity);

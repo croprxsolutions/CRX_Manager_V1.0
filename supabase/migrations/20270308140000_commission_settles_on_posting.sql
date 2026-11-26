@@ -1,5 +1,5 @@
 -- Written 2026-11-25. STATUS: NOT APPLIED (staging candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270308020000_commission_settles_on_posting.md.
+-- docs/reference/migrations.d/20270308140000_commission_settles_on_posting.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (M4; Mason 2026-11-09, #crx-work: "commission on the profit after discounts"; KNOWN_ISSUES "Commission basis

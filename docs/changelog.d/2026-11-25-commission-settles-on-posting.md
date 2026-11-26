@@ -1,5 +1,5 @@
 ## 2026-11-25 — Commission settles on the profit after the standing discount when an invoice is posted
 
-- New migration `20270308020000_commission_settles_on_posting.sql` (not applied live; record in `docs/reference/migrations.d/`).
+- New migration `20270308140000_commission_settles_on_posting.sql` (not applied live; record in `docs/reference/migrations.d/`).
 - When a chemical-sale invoice is posted, voided or unposted, the sale's pending commission is put on its profit after the standing grower discount (the same profit the invoice and the P&L show), never on sales tax. Drafts never move it. While a sale is only part-posted, the posted invoices' discount rate carries across the rest of the sale, so the P&L earns about the posted profit after its discount (within its own per-row rounding of a cent), except where a payout already froze an amount: paid or batched commission doesn't move. New column `commissions.discount_settled_at` marks rows put on a discounted base. Sales with no discount are unchanged.
 - Cancel Remaining now locks a sale's whole-order invoices before the sale, the order posting, unposting and voiding take them in, so the two can't deadlock. When some of a sale's commission rows are frozen, the rows that move never add up to more than the sale's commission total.

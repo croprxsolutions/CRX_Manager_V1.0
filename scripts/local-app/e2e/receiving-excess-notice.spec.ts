@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test } from '@playwright/test';
+import { expect, test, type APIResponse } from '@playwright/test';
 import { localSql } from './local-db';
 
 test('A saved excess receipt survives a lost response without sending a second notice', async ({ page }) => {
@@ -21,6 +21,7 @@ test('A saved excess receipt survives a lost response without sending a second n
 
   const browserNotices: string[] = [];
   const attempts: string[] = [];
+  const concurrentResponses: APIResponse[] = [];
   page.on('request', request => {
     const path = new URL(request.url()).pathname;
     if (request.method() === 'POST' && path.endsWith('/rest/v1/notifications')) browserNotices.push(path);
@@ -30,18 +31,19 @@ test('A saved excess receipt survives a lost response without sending a second n
     if (attempts.length > 1) return route.continue();
     const [response, duplicate] = await Promise.all([route.fetch(), route.fetch()]);
     if (!response.ok()) return route.fulfill({ response });
-    expect(duplicate.ok()).toBe(true);
-    expect(await duplicate.json()).toEqual(await response.json());
+    concurrentResponses.push(response, duplicate);
     await route.abort('failed');
   });
 
+  await page.addLocatorHandler(page.getByRole('dialog', { name: /what's new/i }), async dialog => {
+    await dialog.getByRole('button', { name: 'Got it' }).click();
+  });
   await page.goto('/login');
   await page.fill('#email', process.env.LOCAL_TEST_EMAIL!);
   await page.fill('#password', process.env.LOCAL_TEST_PASSWORD!);
   await page.getByRole('button', { name: /sign in/i }).click();
   await expect(page).not.toHaveURL(/login/);
   await page.goto(`/purchase-orders/${po}`);
-  await page.getByRole('dialog', { name: /what's new/i }).getByRole('button', { name: 'Got it' }).click();
   await page.getByRole('button', { name: 'Receive Items', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Receive Items' });
   await dialog.getByRole('spinbutton').fill('11');
@@ -52,6 +54,9 @@ test('A saved excess receipt survives a lost response without sending a second n
 
   const retry = dialog.getByRole('button', { name: 'Retry Exact Receiving' });
   await expect(retry).toBeEnabled();
+  expect(concurrentResponses).toHaveLength(2);
+  expect(concurrentResponses[1].ok()).toBe(true);
+  expect(await concurrentResponses[1].json()).toEqual(await concurrentResponses[0].json());
   const saved = () => localSql(`SELECT concat_ws('|', trim_scale(l.quantity_received),
     (SELECT count(*) FROM public.receiving_records WHERE po_item_id = l.id),
     (SELECT count(*) FROM public.notifications WHERE related_entity_id = l.purchase_order_id

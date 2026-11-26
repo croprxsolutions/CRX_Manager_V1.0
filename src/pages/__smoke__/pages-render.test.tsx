@@ -200,6 +200,7 @@ const COVERED = new Set<string>([
   'ApplicationRecords',
   'ApplicationServiceDetail',
   'ApplicationServices',
+  'ApplicatorPhone',
   'BlendRecipes',
   'BlendTickets',
   'BrandVsGeneric',

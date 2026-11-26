@@ -158,6 +158,22 @@
         "driver, application-services denied": "/ shows / (index)"
       }
     },
+    "/applicator-phone": {
+      "url": "/applicator-phone",
+      "pageKey": "applicator-phone",
+      "page": {
+        "type": "lazy pages/ApplicatorPhone"
+      },
+      "access": {
+        "admin": "/ shows / (index)",
+        "sales_rep": "/ shows / (index)",
+        "sales_rep, applicator-phone denied": "/ shows / (index)",
+        "applicator": "/applicator-phone shows /applicator-phone",
+        "applicator, applicator-phone denied": "/ shows / (index)",
+        "driver": "/ shows / (index)",
+        "driver, applicator-phone denied": "/ shows / (index)"
+      }
+    },
     "/ar-aging": {
       "url": "/ar-aging",
       "pageKey": "ar-aging",
@@ -3895,6 +3911,16 @@
         ]
       },
       {
+        "key": "applicator-phone",
+        "path": "/applicator-phone",
+        "label": "Applicator Phone",
+        "category": "Spray Fields",
+        "roles": [
+          "admin",
+          "applicator"
+        ]
+      },
+      {
         "key": "customers",
         "path": "/customers",
         "label": "Customers",
@@ -4322,6 +4348,7 @@
           "program-tracker",
           "recipes",
           "field",
+          "applicator-phone",
           "customers",
           "call-lists",
           "fields",
@@ -4432,6 +4459,7 @@
           "dispatch",
           "application-records",
           "field",
+          "applicator-phone",
           "getting-started"
         ],
         "categories": [

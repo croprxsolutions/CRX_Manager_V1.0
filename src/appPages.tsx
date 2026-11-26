@@ -102,6 +102,7 @@ const Jobs = lazy(() => import('./pages/Jobs'));
 const JobDetailRoute = lazy(() => import('./components/JobDetailRoute'));
 const DispatchBoard = lazy(() => import('./pages/DispatchBoard'));
 const FieldView = lazy(() => import('./pages/FieldView'));
+const ApplicatorPhone = lazy(() => import('./pages/ApplicatorPhone'));
 const MonthEndClose = lazy(() => import('./pages/MonthEndClose'));
 const CommissionPayments = lazy(() => import('./pages/CommissionPayments'));
 const CustomerTransactionReview = lazy(() => import('./pages/CustomerTransactionReview'));
@@ -253,6 +254,10 @@ export const APP_PAGES = [
     // Phone/mobile applicator field view (#38) — read-only "my jobs" cards.
     key: 'field', label: 'Field Crew View', category: 'Spray Fields', roles: ['admin', 'sales_rep', 'applicator'],
     routes: [{ path: 'field', element: <FieldView /> }],
+  },
+  {
+    key: 'applicator-phone', label: 'Applicator Phone', category: 'Spray Fields', roles: ['admin', 'applicator'],
+    routes: [{ path: 'applicator-phone', element: <ApplicatorPhone />, roles: ['applicator'] }],
   },
 
   // Customers & Fields

@@ -1528,11 +1528,11 @@ export default function Reports() {
         ) : (<>
         <div>
           <label className="block text-xs font-medium text-secondary mb-1">Start Date</label>
-          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
+          <input type="date" aria-label="Start Date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
         </div>
         <div>
           <label className="block text-xs font-medium text-secondary mb-1">End Date</label>
-          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
+          <input type="date" aria-label="End Date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
         </div>
         <div className="flex gap-1.5">
           {[
@@ -1802,6 +1802,7 @@ export default function Reports() {
 
           {/* Inventory cost total */}
           {isAdmin && operationalTab === 'inventory_cost' && inventoryCostData.length > 0 && (() => {
+            const belowReorder = inventoryCostData.filter((r) => r.below_reorder);
             const valuation = summarizeInventoryValue(inventoryCostData.map((r) => ({ quantity: r.quantity_available, unitCost: r.unit_cost, rowValue: r.total_cost_value })));
             const note = inventoryValueNote(valuation);
             return (
@@ -1816,7 +1817,8 @@ export default function Reports() {
                 {' '}({inventoryCostData.length} stock {inventoryCostData.length === 1 ? 'row' : 'rows'})
               </span>
               <span className="text-sm text-red-600">
-                <span className="font-semibold">Below Reorder:</span> {inventoryCostData.filter((r) => r.below_reorder).length}
+                <span className="font-semibold">Below Reorder:</span> {new Set(belowReorder.map((r) => r.product_id)).size}
+                {' '}({belowReorder.length} stock {belowReorder.length === 1 ? 'row' : 'rows'})
               </span>
             </div>
             );

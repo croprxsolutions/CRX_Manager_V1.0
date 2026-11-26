@@ -575,6 +575,7 @@ export default function SalesReports() {
               <label className="block text-xs font-medium text-secondary mb-1">Customer</label>
               <input
                 type="text"
+                aria-label="Customer"
                 placeholder={selectedCustomerIds.length > 0 ? `${selectedCustomerIds.length} selected` : 'Search customers...'}
                 value={customerSearch}
                 onChange={e => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }}

@@ -7,6 +7,7 @@ type RpcHandler = (name: string, args: Record<string, unknown>) => Promise<RpcRe
 
 const H = vi.hoisted(() => ({
   rpc: [] as Array<{ name: string; args: Record<string, unknown> }>,
+  rpcOrders: [] as Array<{ name: string; column: string }>,
   toast: vi.fn(),
   auth: {
     role: 'admin' as 'admin' | 'sales_rep',
@@ -61,7 +62,7 @@ vi.mock('../lib/db', () => ({
       // more than 1,000 rows) with the exact count of every row.
       const pageable = (response: Promise<RpcResponse>) => {
         const paged = Object.assign(response, {
-          order: () => paged,
+          order: (column: string) => { H.rpcOrders.push({ name, column }); return paged; },
           range: (from: number, to: number) => response.then((r) => (Array.isArray(r.data)
             ? { ...r, data: r.data.slice(from, to + 1).slice(0, 1000), count: r.data.length }
             : r)),
@@ -136,6 +137,7 @@ const renderReports = () => render(<MemoryRouter><Reports /></MemoryRouter>);
 beforeEach(() => {
   cleanup();
   H.rpc = [];
+  H.rpcOrders = [];
   H.selects = [];
   H.filters = [];
   H.toast.mockReset();
@@ -272,6 +274,38 @@ describe('Reports commission history', () => {
     expect(screen.getByRole('button', { name: 'Gross Sales' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Operational' }));
     expect(screen.getByRole('button', { name: 'Inventory Cost' })).toBeInTheDocument();
+  });
+
+  it('Inventory Cost names each barn, counts products once and shows no date range', async () => {
+    const row = (product_id: string, product_name: string, location: string | null, qty: number, below: boolean) => ({
+      product_id, product_name, sku: null, category: null, vendor: null, location,
+      quantity_available: qty, quantity_prebooked: 0, net_available: qty, unit_cost: null,
+      total_cost_value: null, reorder_point: 0, below_reorder: below,
+    });
+    H.rpcHandler = (name) => Promise.resolve({
+      data: name === 'get_inventory_cost_report'
+        ? [row('p-1', 'Test Stocked', 'North Barn', 12.5, true), row('p-1', 'Test Stocked', 'South Barn', 0.25, true),
+          row('p-2', 'Test Herbicide', null, 0, false)]
+        : [],
+      error: null,
+    });
+    const { container } = renderReports();
+    fireEvent.click(screen.getByRole('button', { name: 'Operational' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Inventory Cost' }));
+
+    expect(await screen.findByText('North Barn')).toBeInTheDocument();
+    expect(screen.getByText('South Barn')).toBeInTheDocument();
+    expect(screen.getByText('No stock record')).toBeInTheDocument();
+    expect(screen.getByText('Products:').parentElement?.textContent).toMatch(/Products:\s*2\s*\(3 stock rows\)/);
+    expect(screen.getByText('Below Reorder:').parentElement?.textContent).toMatch(/Below Reorder:\s*1\s*\(2 stock rows\)/);
+    expect(screen.getByText(/Current stock as of now/)).toBeInTheDocument();
+    expect(container.querySelectorAll('input[type="date"]')).toHaveLength(0);
+    expect(H.rpcOrders.filter((o) => o.name === 'get_inventory_cost_report').map((o) => o.column))
+      .toEqual(expect.arrayContaining(['product_name', 'product_id', 'location']));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chemical History' }));
+    expect(screen.getByLabelText('Start Date')).toHaveAttribute('type', 'date');
+    expect(screen.getByLabelText('End Date')).toHaveAttribute('type', 'date');
   });
 
   it('calls one snapshot RPC and renders both balance and payment-detail fields', async () => {

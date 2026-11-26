@@ -72,4 +72,10 @@ describe('SalesReports farm group', () => {
     expect(screen.getByText('Include 1 linked farm')).toBeInTheDocument();
     expect(screen.queryByText(/Include 2 linked farms/)).not.toBeInTheDocument();
   });
+  it('names every filter for screen readers', () => {
+    render(<MemoryRouter><SalesReports /></MemoryRouter>);
+    for (const name of ['Start Date', 'End Date']) expect(screen.getByLabelText(name)).toHaveAttribute('type', 'date');
+    expect(screen.getByRole('textbox', { name: 'Customer' })).toBeInTheDocument();
+    for (const name of ['Sales Rep', 'Category', 'Season']) expect(screen.getByRole('combobox', { name })).toBeInTheDocument();
+  });
 });

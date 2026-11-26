@@ -9,7 +9,7 @@ import { promptModulesFor } from "./prompt-router.mjs";
 import { postToolModulesFor } from "./posttool-router.mjs";
 import { dirtyWarning, pushDir, pushTargets } from "./post-push-dirty-warning.mjs";
 import { dedupeContextBlocks } from "./hook-router-runtime.mjs";
-import { askTahaAfterSol } from "./taha-ready-after-sol.mjs";
+import { askTahaAfterSol, solCoversHead } from "./taha-ready-after-sol.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -255,6 +255,24 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
   const failed = attempt({ fail: "requested_reviewers" });
   ok(failed.note.includes("could not label") && failed.note.includes("gh pr edit 7 --add-label ready-for-taha --add-reviewer TahaKhanAbdalli"), "a gh failure prints one line with the manual command, never throws");
   ok(askTahaAfterSol({ cwd: ".", headSha: HEAD, gh: () => { throw new Error("no PR"); }, hasCleanSol: () => true }) === "", "no PR yet: silent");
+
+  // "Covers" follows the merge gate: a clean Sol of this head or of an earlier commit of this PR.
+  const BASE = "b".repeat(40), EARLIER = "c".repeat(40), OTHER = "d".repeat(40);
+  const now = Date.parse("2026-11-26T12:00:00Z");
+  const proof = (head, extra = {}) => ({ codex_ran: true, verdict: "clean", head_sha: head, base_sha: BASE, timestamp: "2026-11-26T10:00:00Z", model: "gpt-6.2-sol", reasoning_effort: "high", ...extra });
+  const pr = { headRefOid: HEAD, baseRefOid: BASE, baseRefName: "staging", commits: [{ oid: EARLIER }, { oid: HEAD }] };
+  // History: BASE <- EARLIER <- HEAD; OTHER is unrelated.
+  const chain = [BASE, EARLIER, HEAD];
+  const isAncestor = (a, b) => (chain.includes(a) && chain.includes(b) ? chain.indexOf(a) <= chain.indexOf(b) : false);
+  const covers = (proofs) => solCoversHead({ pr, readProof: (sha) => proofs[sha] ?? null, isAncestor, mergeBase: () => BASE, now });
+  ok(covers({ [HEAD]: proof(HEAD) }), "a clean Sol of the current head covers it");
+  ok(covers({ [EARLIER]: proof(EARLIER) }), "a clean Sol of an earlier commit of this PR covers a fix pushed after it");
+  ok(!covers({ [OTHER]: proof(OTHER) }), "a proof of a commit outside this PR does not");
+  ok(!covers({ [EARLIER]: proof(EARLIER, { owner_accepted: [{ code: "1" }] }) }), "a Sol with findings Mason accepted is not clean here");
+  ok(!covers({ [EARLIER]: proof(EARLIER, { model: "gpt-6-luna" }) }), "a Luna review is not Sol");
+  ok(!covers({ [EARLIER]: proof(EARLIER, { timestamp: "2026-11-25T08:00:00Z" }) }), "a Sol older than 24 hours does not");
+  ok(!covers({ [EARLIER]: proof(EARLIER, { review_ref: "origin/main" }) }), "a review against main does not cover a PR into staging");
+  ok(!covers({}), "no proof: not covered");
 }
 
 console.log(`hook-router: ${pass} assertions passed`);

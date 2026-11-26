@@ -236,6 +236,8 @@ const unitOnlySet = (set) => { const cols = setColumns(set); return cols.length 
 // Blank out '...' literal contents (same length) so a WHERE or ; inside a string is not read as SQL (Luna, PR 2 round 4).
 // E'…' strings take backslash escapes, by the same rule withoutComments uses (an E not after a word character)
 // (Taha's delta at a9143eb27, LOW 5: E'g\'' must not run on into the next statement).
+// shortcut: $tag$ text is not masked (the real #2267 unit fix runs inside a DO $$ body), so a bracket inside an inline
+// $$…$$ literal can still mislead the scanner; accepted with the rest of this net (advisory Sol on #2639's delta, HIGH 1).
 const maskStrings = (text) => text.replace(/(?<![\w$])[eE]'(?:\\[\s\S]|[^'\\]|'')*'|'(?:[^']|'')*'/g,
   (s) => { const q = s.indexOf("'"); return `${s.slice(0, q)}'${" ".repeat(s.length - q - 2)}'`; });
 // …and "quoted" names too, for the clause scanner (advisory Sol on #2639, HIGH 6: src."from").

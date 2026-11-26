@@ -159,7 +159,8 @@ const CONTRACT_IN_DIFF_RE = /^diff --git a\/\S+ b\/(docs\/plans\/[^\s/]+-CONTRAC
 const SETTLED_HEADING_RE = /^## Settled for Luna[ \t]*$/i;
 
 export function contractSettled(text) {
-  return text.replace(/\r/g, "").split(/^(?=## )/m)
+  // Any heading ends the section, so an "### Open" subsection under it is never sent as settled.
+  return text.replace(/\r/g, "").split(/^(?=#{1,6} )/m)
     .filter((section) => SETTLED_HEADING_RE.test(section.split("\n", 1)[0]))
     .flatMap((section) => section.split("\n").slice(1).filter((line) => line.trim()))
     .join("\n");

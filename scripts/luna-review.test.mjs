@@ -486,6 +486,8 @@ assert.equal(nextStepHint("- BLOCKER: a.sql:3 — grants anon\n- MED: b.ts:2\nLU
     "- Refuted: the dialog description reads the whole table (it reads one row).",
     "",
     "- Deferred: a total above the safe-integer limit shows no total (follow-up #1).",
+    "### Open findings",
+    "- HIGH: invoices can be duplicated",
     "## Questions for Mason — ANSWERED",
     "- open question text",
     "",
@@ -539,7 +541,7 @@ assert.equal(nextStepHint("- BLOCKER: a.sql:3 — grants anon\n- MED: b.ts:2\nLU
   const section = (input) => input.slice(input.indexOf("===== SETTLED FINDINGS"), input.indexOf("===== END SETTLED FINDINGS"));
   assert.match(section(inputs[0]), /From docs\/plans\/2026-11-25-x-CONTRACT\.md \(from the plan contract; same rules as the settled list\)/);
   assert.ok(section(inputs[0]).includes("a total above the safe-integer limit"));
-  for (const absent of ["cap hides lines", "exempt write", "billing gaps", "open question", "UNCOMMITTED-LINE"]) assert.ok(!section(inputs[0]).includes(absent), absent);
+  for (const absent of ["invoices can be duplicated", "cap hides lines", "exempt write", "billing gaps", "open question", "UNCOMMITTED-LINE"]) assert.ok(!section(inputs[0]).includes(absent), absent);
   assert.ok(section(inputs[3]).includes("UNCOMMITTED-LINE"), "--uncommitted reads the contract on disk");
   assert.ok(section(inputs[1]).includes("my own settled item") && !section(inputs[1]).includes("From docs/plans"));
   assert.ok(!inputs[2].includes("SETTLED FINDINGS"), "Sol never sees the contract's settled list");

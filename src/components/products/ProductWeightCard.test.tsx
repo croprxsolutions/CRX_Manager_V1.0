@@ -294,12 +294,17 @@ describe('ProductWeightCard', () => {
       actor_kind: 'user', changed_by_name: 'Pat Admin', changed_at: '2026-11-07T15:00:00Z' };
     mocks.fetchWeightEvents.mockResolvedValue([
       { ...event, id: 1, after_value: [{ value_id: 'old', review_state: 'superseded', value: 8 }] },
-      { ...event, id: 2, after_value: [{ value_id: 'old', review_state: 'draft', value: 9 }] },
+      { ...event, id: 2, after_value: [
+        { value_id: 'discarded-draft', review_state: 'superseded', value: 7 },
+        { value_id: 'old', review_state: 'draft', value: 9 },
+      ] },
+      { ...event, id: 3, value_id: null, after_value: [{ value_id: 'discarded-draft', review_state: 'superseded' }] },
     ]);
     show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation,
       weight: { kind: 'none', none_reason: 'no_approved_weight' } });
     expect(await screen.findByText('Approval withdrawn: 8 lb/gal')).toBeInTheDocument();
     expect(screen.getByText('Returned to draft: 9 lb/gal')).toBeInTheDocument();
+    expect(screen.getByText('Returned to draft', { exact: true })).toBeInTheDocument();
   });
 
   it('loads 25 more history rows on Show older', async () => {

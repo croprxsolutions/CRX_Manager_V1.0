@@ -63,6 +63,17 @@ BEGIN
   IF (v_result->'weight'->>'lb_per_unit')::numeric IS DISTINCT FROM 9.5 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a rechecked weight must be available for new paperwork';
   END IF;
+  BEGIN
+    EXECUTE 'RESET ROLE';
+    UPDATE public.product_parents SET is_active = false WHERE id = v_parent;
+    UPDATE public.product_parent_brands SET brand_name = 'Inactive Brand Correction' WHERE id = v_brand;
+    IF (SELECT review_state FROM public.product_parent_density_values WHERE id = v_approved) IS DISTINCT FROM 'draft' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: a substantive rename must also withdraw an inactive group approval';
+    END IF;
+    RAISE EXCEPTION 'SMOKE_INACTIVE_ROLLBACK';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'SMOKE_INACTIVE_ROLLBACK' THEN RAISE; END IF;
+  END;
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   v_result := public.submit_liquid_density_draft(v_parent, 4, 9.8, 'lb_per_gal', 'sds', NULL, NULL, NULL, 'rename-waiting-' || v_tag);
   v_draft := (v_result->>'value_id')::uuid;
@@ -79,6 +90,10 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM public.product_weight_events WHERE parent_id = v_parent AND event_type = 'returned_to_draft'
       AND reason = 'An active brand changed its name' AND after_value->0->>'review_state' = 'superseded'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM public.product_weight_events WHERE parent_id = v_parent AND value_id = v_approved
+      AND event_type = 'returned_to_draft' AND reason = 'An active brand changed its name'
+      AND before_value->0->>'review_state' = 'approved' AND after_value->0->>'review_state' = 'draft'
   ) OR NOT EXISTS (
     SELECT 1 FROM public.blend_ticket_product_weights
      WHERE blend_ticket_id = v_ticket AND product_id = v_size AND weight_kind = 'density' AND lb_per_unit = 9.5

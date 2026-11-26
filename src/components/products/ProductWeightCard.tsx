@@ -31,11 +31,14 @@ const EVENT_LABELS: Record<string, string> = {
   corrected: 'Corrected', returned_to_draft: 'Returned to draft', draft_rejected: 'Draft rejected',
 };
 
-/** The value of the row an event left in use (its `value_id`), from the event's after/before arrays. */
-function eventValue(event: ProductWeightEvent): string | null {
-  const rows = [...(event.after_value ?? []), ...(event.before_value ?? [])] as Array<{ value_id?: string; value?: unknown }>;
-  const row = rows.find((item) => item?.value_id === event.value_id);
-  return row?.value == null ? null : String(row.value);
+/** The row this event changed and its resulting state, if a weight row is recorded. */
+function eventValue(event: ProductWeightEvent): { value: string | null; afterState?: string } {
+  if (!event.value_id) return { value: null };
+  type HistoryValue = { value_id?: string; value?: unknown; review_state?: string };
+  const after = (event.after_value as HistoryValue[] | null)?.find((item) => item?.value_id === event.value_id);
+  const before = (event.before_value as HistoryValue[] | null)?.find((item) => item?.value_id === event.value_id);
+  const value = (after ?? before)?.value;
+  return { value: value == null ? null : String(value), afterState: after?.review_state };
 }
 
 function introText(subject: WeightSubject, entry: ProductWeightEntry): string {
@@ -221,9 +224,8 @@ function WeightHistory({ subject, stockUnit, reloadToken }: { subject: WeightSub
       <summary className="cursor-pointer text-secondary">Weight history</summary>
       <ul className="mt-2 space-y-2">
         {rows.map((row) => {
-          const value = eventValue(row);
-          const result = row.after_value?.[0] as { review_state?: string } | undefined;
-          const label = row.event_type === 'returned_to_draft' && result?.review_state === 'superseded'
+          const { value, afterState } = eventValue(row);
+          const label = row.event_type === 'returned_to_draft' && afterState === 'superseded'
             ? 'Approval withdrawn' : EVENT_LABELS[row.event_type] ?? row.event_type;
           return (
             <li key={row.id} className="border-b border-gray-100 pb-2 last:border-0">

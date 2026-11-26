@@ -857,6 +857,14 @@
         "lifecycle"
       ]
     },
+    "receiving_damage_receipts": {
+      "chain": "smoke-receiving-damage-receipts.sql",
+      "container_only": true,
+      "container_prover": "prove-receiving-damage-receipts-local.mjs",
+      "description": "CONTAINER ONLY: one saved multi-order receipt sends one damage notice per active admin, keeps the inbox read action, handles legacy references and refuses unauthorized sends.",
+      "covers": ["notify_damaged_receiving"],
+      "area": ["inventory", "lifecycle", "idempotency", "security"]
+    },
     "remaining_money_inventory_hardening": {
       "chain": "smoke-remaining-money-inventory-hardening.sql",
       "description": "Final money/inventory audit chain: voided orders disappear from detail, summary, gross-sales, and finance-dashboard revenue; inactive sales/admin profiles are rejected; only an active admin can use the PO over-receive flag, NULL cannot bypass the quantity ceiling, and a real admin 11-against-10 receipt succeeds; anonymous gross-sales execution and authenticated direct payment-table writes are absent. Self-contained fixtures and terminal rollback.",

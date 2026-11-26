@@ -4,6 +4,8 @@ import { ClipboardList, Printer, Save } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
+import { useAuth } from '../../contexts/AuthContext';
+import { usesOfficeJobReads } from '../../lib/costFields';
 import { sanitizeError, checkMutationResult, supabase } from '../../lib/db';
 import {
   APPLICATOR_PRINT_OPTIONS_KEY,
@@ -57,6 +59,8 @@ function ToggleSelect({
 
 export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOptionsDialogProps) {
   const { toast } = useToast();
+  const { role } = useAuth();
+  const isOffice = usesOfficeJobReads(role);
   const [format, setFormat] = useState<ApplicatorSheetFormat>('original');
   const [options, setOptions] = useState<ApplicatorPrintOptions>({ ...DEFAULT_APPLICATOR_PRINT_OPTIONS });
   const [loadingDefaults, setLoadingDefaults] = useState(false);
@@ -67,15 +71,15 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
     if (!open) return;
     let current = true;
     setFormat('original');
-    setOptions({ ...DEFAULT_APPLICATOR_PRINT_OPTIONS });
+    setOptions({ ...DEFAULT_APPLICATOR_PRINT_OPTIONS, includeBillingSplits: isOffice });
     setLoadingDefaults(true);
-    void loadApplicatorPrintOptions().then((saved) => {
+    void loadApplicatorPrintOptions(role).then((saved) => {
       if (current) setOptions(saved);
     }).finally(() => {
       if (current) setLoadingDefaults(false);
     });
     return () => { current = false; };
-  }, [open]);
+  }, [open, role, isOffice]);
 
   const updateOption = <Key extends keyof ApplicatorPrintOptions>(key: Key, value: ApplicatorPrintOptions[Key]) => {
     setOptions((current) => ({ ...current, [key]: value }));
@@ -124,9 +128,12 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
       footer={(
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button variant="secondary" onClick={handleSaveDefault} loading={savingDefault} disabled={loadingDefaults || printing}>
-            <Save className="h-4 w-4" /> Save as default
-          </Button>
+          {/* Shared defaults are admin-only in the database (is_admin()); others would only get an error. */}
+          {role === 'admin' && (
+            <Button variant="secondary" onClick={handleSaveDefault} loading={savingDefault} disabled={loadingDefaults || printing}>
+              <Save className="h-4 w-4" /> Save as default
+            </Button>
+          )}
           <Button onClick={handlePrint} loading={printing} disabled={loadingDefaults || savingDefault}>
             <Printer className="h-4 w-4" /> Print
           </Button>
@@ -135,7 +142,7 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
     >
       <div className="space-y-5">
         <p className="text-sm text-secondary">
-          Choose the packet contents for this print. Save as default remembers these options for future sheets; the sheet format stays a per-print choice.
+          Choose the packet contents for this print.{role === 'admin' && ' Save as default remembers these options for future sheets; the sheet format stays a per-print choice.'}
         </p>
 
         <div>
@@ -203,12 +210,14 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
             </select>
           </label>
 
-          <ToggleSelect
-            label="Show billing-split table"
-            value={options.includeBillingSplits}
-            onChange={(value) => updateOption('includeBillingSplits', value)}
-            disabled={busy}
-          />
+          {isOffice && (
+            <ToggleSelect
+              label="Show billing-split table"
+              value={options.includeBillingSplits}
+              onChange={(value) => updateOption('includeBillingSplits', value)}
+              disabled={busy}
+            />
+          )}
 
           <ToggleSelect
             label="Show company banner/header"

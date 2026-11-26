@@ -2935,7 +2935,6 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 // names are present in the full snapshot, and the pending M4 functions are
 // explicitly retained in the staging schema overlay.
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
-  'receive_po_items_with_excess_notice', // 20270311110000. Prune once generated types cover this RPC.
   'change_brand_document_links', // 20270306170000. Prune once generated types cover this RPC.
   'reject_liquid_density_draft', // 20270307205900. Prune once generated types cover this RPC.
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through

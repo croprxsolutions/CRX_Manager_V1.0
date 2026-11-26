@@ -15021,6 +15021,23 @@ export type Database = {
       }
     }
     Views: {
+      admin_vehicle_register: {
+        Row: {
+          capacity_gallons: number | null
+          capacity_unit: string | null
+          category: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string | null
+          notes: string | null
+          registration: string | null
+          status: string | null
+          updated_at: string | null
+          vehicle_name: string | null
+          vehicle_type: string | null
+        }
+        Relationships: []
+      }
       field_billing_defaults_crew: {
         Row: {
           created_at: string
@@ -21687,6 +21704,15 @@ export type Database = {
           p_idempotency_key?: string
           p_items: Json
           p_performed_by: string
+        }
+        Returns: Json
+      }
+      receive_po_items_with_excess_notice: {
+        Args: {
+          p_allow_over_receive?: boolean
+          p_idempotency_key?: string
+          p_items: Json
+          p_performed_by?: string
         }
         Returns: Json
       }

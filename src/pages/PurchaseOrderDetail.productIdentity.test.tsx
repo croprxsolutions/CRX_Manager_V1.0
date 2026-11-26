@@ -141,7 +141,6 @@ vi.mock('../lib/criticalAction', () => ({
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/notificationTriggers', () => ({
   notifyDamagedReceiving: vi.fn(),
-  notifyOverReceive: vi.fn(),
 }));
 
 describe('PurchaseOrderDetail Product identity edit', () => {

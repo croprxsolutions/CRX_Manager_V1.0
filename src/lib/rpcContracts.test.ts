@@ -2935,8 +2935,6 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 // names are present in the full snapshot, and the pending M4 functions are
 // explicitly retained in the staging schema overlay.
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
-  'receive_po_items_with_excess_notice', // 20270311110000. Prune once generated types cover this RPC.
-  'dispatch_location_with_notices', // 20270310180000. Prune once generated types cover this RPC.
   'change_brand_document_links', // 20270306170000. Prune once generated types cover this RPC.
   'reject_liquid_density_draft', // 20270307205900. Prune once generated types cover this RPC.
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
@@ -3139,6 +3137,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'AFTER INSERT/DELETE trigger on prepay_applications: recomputes one credit balance from its rows, now including M9 reversal lines (convergent, so a replay writes the same value); the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function and M9 revokes API-role EXECUTE. Prune once the candidate is in the generated snapshot',
   _recompute_po_on_order_for_products:
     'internal convergent PO-cache recomputation helper; trigger parents own the transaction and direct browser EXECUTE is revoked',
+  _record_standard_delivery_assignment_notice:
+    'internal notice writer called only by create_delivery_with_items after it binds a fresh actor-specific receipt; every API-role EXECUTE is revoked',
   // Trigger-only helpers whose migrations are now at or below the live registry
   // high-water are absent from generated client types and this inventory. Keeping
   // dead exemptions would silently pre-suppress any future RPC reusing a name.

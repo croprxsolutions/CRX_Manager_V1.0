@@ -7,7 +7,7 @@ const read = (path: string) => readFileSync(join(root, path), 'utf8');
 const migrations = 'supabase/migrations';
 const migration = readdirSync(join(root, migrations)).find((name) => name.endsWith('_scope_app_settings_browser_reads.sql'));
 if (!migration) throw new Error('Settings access migration is missing');
-const policy = read(join(migrations, migration));
+const policy = read(join(migrations, migration)).replaceAll('\r\n', '\n');
 const policyKeys = new Set([...policy.matchAll(/'([a-z][a-z0-9_]+)'/g)].map((match) => match[1]));
 
 describe('staff settings access', () => {

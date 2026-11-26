@@ -398,38 +398,6 @@ export async function notifyDeliveryRemainder(
 }
 
 /**
- * Notify admins when PO items are received beyond the ordered quantity.
- * Call this from PurchaseOrderDetail after receive_po_items() completes
- * with over-received items.
- */
-export async function notifyOverReceive(
-  poNumber: string,
-  overItems: Array<{ productName: string; quantityOrdered: number; quantityReceived: number }>,
-  poId: string
-) {
-  if (!overItems || overItems.length === 0) return;
-
-  try {
-    const summary = overItems
-      .map((i) => `${i.productName} (received ${i.quantityReceived}, ordered ${i.quantityOrdered})`)
-      .join(', ');
-
-    await notifyAdmins(
-      'Over-Receive Alert',
-      `PO ${poNumber} has items received beyond ordered quantity: ${summary}`,
-      'over_receive',
-      'purchase_order',
-      poId
-    );
-  } catch (err) {
-    await logNotificationFailure('over_receive', err, 'purchase_order', poId, {
-      context: 'notifyOverReceive',
-      poNumber,
-    });
-  }
-}
-
-/**
  * Notify driver, admins, and sales rep when a delivery is completed.
  * Call this from DeliveryDetail after completing a delivery.
  */

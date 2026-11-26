@@ -303,9 +303,41 @@ describe('Reports commission history', () => {
     expect(H.rpcOrders.filter((o) => o.name === 'get_inventory_cost_report').map((o) => o.column))
       .toEqual(expect.arrayContaining(['product_name', 'product_id', 'location']));
 
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    const [csvRows, csvCols] = vi.mocked(exportToCSV).mock.calls[0] as unknown as [Array<Record<string, unknown>>, Array<{ key: string; header: string }>];
+    expect(csvCols).toEqual(expect.arrayContaining([{ key: 'location', header: 'Location' }]));
+    expect(csvRows.map((r) => r.location)).toEqual(['North Barn', 'South Barn', null]);
+
     fireEvent.click(screen.getByRole('button', { name: 'Chemical History' }));
     expect(screen.getByLabelText('Start Date')).toHaveAttribute('type', 'date');
     expect(screen.getByLabelText('End Date')).toHaveAttribute('type', 'date');
+  });
+
+  it('Inventory Cost hides the value strip and blocks CSV while a reload runs', async () => {
+    const row = { product_id: 'p-1', product_name: 'Test Stocked', sku: null, category: null, vendor: null, location: 'North Barn',
+      quantity_available: 100, quantity_prebooked: 0, net_available: 100, unit_cost: null, total_cost_value: null,
+      reorder_point: 0, below_reorder: false };
+    let release: (v: { data: unknown; error: null }) => void = () => {};
+    let calls = 0;
+    H.rpcHandler = (name) => {
+      if (name !== 'get_inventory_cost_report') return Promise.resolve({ data: [], error: null });
+      calls += 1;
+      return calls === 1 ? Promise.resolve({ data: [row], error: null }) : new Promise((res) => { release = res; });
+    };
+    renderReports();
+    fireEvent.click(screen.getByRole('button', { name: 'Operational' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Inventory Cost' }));
+    expect(await screen.findByText('Products:')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chemical History' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Inventory Cost' }));
+    await waitFor(() => expect(calls).toBe(2));
+    expect(screen.queryByText('Products:')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export CSV' })).toBeDisabled();
+
+    release({ data: [{ ...row, quantity_available: 60, net_available: 60 }], error: null });
+    expect(await screen.findByText('Products:')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export CSV' })).toBeEnabled();
   });
 
   it('calls one snapshot RPC and renders both balance and payment-detail fields', async () => {

@@ -1785,7 +1785,7 @@ export default function Reports() {
             ))}
           </div>
 
-          {dateFilterBar(handleOperationalCSV, reportFailed || (operationalTab === 'price_list' && !priceListExportReady))}
+          {dateFilterBar(handleOperationalCSV, reportFailed || (operationalTab === 'price_list' && !priceListExportReady) || (operationalTab === 'inventory_cost' && loading))}
 
           {reportFailedBanner}
 
@@ -1801,7 +1801,8 @@ export default function Reports() {
           )}
 
           {/* Inventory cost total */}
-          {isAdmin && operationalTab === 'inventory_cost' && inventoryCostData.length > 0 && (() => {
+          {/* Hidden while loading so the strip never shows the previous load's stock. */}
+          {isAdmin && operationalTab === 'inventory_cost' && !loading && inventoryCostData.length > 0 && (() => {
             // A row with no location is an active product with no stock record, not a stock row.
             const stockRows = (rows: InventoryCostRow[]) => rows.filter((r) => r.location != null).length;
             const stockRowsLabel = (n: number) => `${n} stock ${n === 1 ? 'row' : 'rows'}`;

@@ -386,3 +386,49 @@ describe('FieldStop: saved copy in a dead spot', () => {
     expect(mockToast).toHaveBeenCalledWith('error', 'Could not load this stop');
   });
 });
+
+// Taha's review of #2614 (LOW 1): Field Mode's wiring of "proof bound to the load".
+describe('FieldStop: proof bound to the load', () => {
+  const LINE = { id: 'item-1', order_item_id: 'oi-1', quantity: 2, product_id: 'prod-1', product: { product_name: 'Test Chem' } };
+  const completeCalls = () => mockRpc.mock.calls.filter(([name]) => name === 'complete_delivery');
+  async function signAndReview() {
+    tables.data.delivery_items = [{ ...LINE }];
+    await reachSign();
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use J. Hollow' }));
+    fireEvent.click(screen.getByRole('button', { name: /Continue to Review/ }));
+  }
+
+  it('sends the lines shown when the customer signed as p_lines_seen', async () => {
+    await signAndReview();
+    fireEvent.click(await screen.findByRole('button', { name: /Complete Delivery/ }));
+    await screen.findByText('Delivery complete');
+    expect(completeCalls()[0][1].p_lines_seen).toEqual([{ order_item_id: 'oi-1', product_id: 'prod-1', quantity: 2, delivered: 2 }]);
+  });
+
+  it('never sends the completion when the office changed the lines; it reloads them, keeps the entered amounts and returns to the quantities', async () => {
+    await signAndReview();
+    tables.data.delivery_items = [{ ...LINE, quantity: 10 }];
+    fireEvent.click(await screen.findByRole('button', { name: /Complete Delivery/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/changed by the office/)));
+    expect(completeCalls()).toHaveLength(0);
+    // Back on the quantities with the 2 the driver saw kept against the office's 10 (kept amounts), so it reads as partial.
+    expect(await screen.findByRole('button', { name: /Continue with Partial/ })).toBeInTheDocument();
+  });
+
+  it('a DELIVERY_LOAD_CHANGED refusal clears the signature, reloads the lines and returns to the quantities', async () => {
+    mockRpc.mockImplementation((name: string) => Promise.resolve(
+      name === 'get_delivery_receipt_recipient'
+        ? { data: { farm_name: 'Maple Hollow Farms', contact_name: env.contact, email: 'farm@example.test' }, error: null }
+        : name === 'complete_delivery'
+        ? { data: null, error: { message: 'DELIVERY_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the customer signed.' } }
+        : { data: null, error: null },
+    ));
+    await signAndReview();
+    const itemReadsBefore = mockFrom.mock.calls.filter(([t]) => t === 'delivery_items').length;
+    fireEvent.click(await screen.findByRole('button', { name: /Complete Delivery/ }));
+    await waitFor(() => expect(completeCalls()).toHaveLength(1));
+    await waitFor(() => expect(mockFrom.mock.calls.filter(([t]) => t === 'delivery_items').length).toBeGreaterThan(itemReadsBefore + 1));
+    expect(await screen.findByRole('button', { name: /All Full/ })).toBeInTheDocument();
+  });
+});

@@ -781,3 +781,49 @@ describe('Email Confirmation warning belongs to its own delivery', () => {
   });
 
 });
+
+// Taha's review of #2614 (LOW 1): the page wiring of "proof bound to the load", not only the helpers.
+describe('proof bound to the load (page wiring)', () => {
+  const LINE = { id: 'item-1', delivery_id: 'del-1', order_item_id: 'oi-1', product_id: 'prod-1', quantity: 2, product: { product_name: 'Test Chem' } };
+  beforeEach(() => { tables.data.delivery_items = [{ ...LINE }]; });
+
+  it('sends the lines shown when the customer signed as p_lines_seen', async () => {
+    mockRpc.mockResolvedValue({ data: COMPLETE_RESULT, error: null });
+    await renderPage();
+    await signAndFillSigner();
+    await completeAndConfirm();
+    await waitFor(() => expect(completeRpcCalls()).toHaveLength(1));
+    expect(completeRpcCalls()[0][1].p_lines_seen).toEqual([{ order_item_id: 'oi-1', product_id: 'prod-1', quantity: 2, delivered: 2 }]);
+  });
+
+  it('never sends the completion when the office changed the lines since the page loaded; it reloads them', async () => {
+    mockRpc.mockResolvedValue({ data: COMPLETE_RESULT, error: null });
+    await renderPage();
+    await signAndFillSigner();
+    tables.data.delivery_items = [{ ...LINE, quantity: 10 }];
+    const itemReadsBefore = mockFrom.mock.calls.filter(([t]) => t === 'delivery_items').length;
+    await completeAndConfirm();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/changed by the office/)));
+    expect(completeRpcCalls()).toHaveLength(0);
+    // The line check, then the reload of the lines.
+    await waitFor(() => expect(mockFrom.mock.calls.filter(([t]) => t === 'delivery_items').length).toBeGreaterThanOrEqual(itemReadsBefore + 2));
+  });
+
+  it('a DELIVERY_LOAD_CHANGED refusal clears the signature and reloads the lines (no automatic retry)', async () => {
+    mockRpc.mockImplementation((name: string) => (name === 'complete_delivery'
+      ? Promise.resolve({ data: null, error: { message: 'DELIVERY_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the customer signed.' } })
+      : Promise.resolve({ data: COMPLETE_RESULT, error: null })));
+    await renderPage();
+    await signAndFillSigner();
+    const itemReadsBefore = mockFrom.mock.calls.filter(([t]) => t === 'delivery_items').length;
+    await completeAndConfirm();
+    await waitFor(() => expect(completeRpcCalls()).toHaveLength(1));
+    await waitFor(() => expect(mockFrom.mock.calls.filter(([t]) => t === 'delivery_items').length).toBeGreaterThanOrEqual(itemReadsBefore + 2));
+    // The cleared signature: completing again is refused on screen before any second call.
+    mockToast.mockClear();
+    const [pageButton] = await screen.findAllByRole('button', { name: /^Complete Delivery$/ });
+    fireEvent.click(pageButton);
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/sign/i)));
+    expect(completeRpcCalls()).toHaveLength(1);
+  });
+});

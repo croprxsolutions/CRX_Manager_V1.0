@@ -29,6 +29,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useSaveShortcut } from '../hooks/useSaveShortcut';
 import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
@@ -1322,6 +1323,9 @@ export default function OrderDetail() {
       setPricingOrder(false);
     }
   };
+
+  // Ctrl+S / Cmd+S presses Save changes, only while editing items and that button can be clicked.
+  useSaveShortcut(handleSaveEdits, editing && !saving && !loading && !loadFailed && !!order);
 
   if (loading) {
     return (

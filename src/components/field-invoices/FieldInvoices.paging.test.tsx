@@ -94,13 +94,14 @@ afterEach(() => {
 const renderInRouter = (ui: React.ReactElement) => render(<MemoryRouter>{ui}</MemoryRouter>);
 
 describe('Field Invoices past the 1,000-row server cap', () => {
-  it('Unposted: lists and totals every draft, and Post All posts every one', async () => {
+  it('Unposted: lists and totals every draft, and Select All + Post posts every one', async () => {
     rows = Array.from({ length: TOTAL }, (_, i) => fieldInvoice(i, 'draft'));
     renderInRouter(<FieldInvoicesUnpostedPanel />);
 
     expect(await screen.findByText(`Invoices Displayed: ${TOTAL}`)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Post All/ }));
-    fireEvent.click(await screen.findByRole('button', { name: `Post ${TOTAL} invoice(s)` }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+    fireEvent.click(screen.getByRole('button', { name: `Post ${TOTAL} invoices…` }));
+    fireEvent.click(await screen.findByRole('button', { name: `Post ${TOTAL} invoices` }));
 
     await waitFor(() => expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')).toHaveLength(TOTAL));
     // The oldest draft, past the first 1,000, is posted too.
@@ -123,7 +124,7 @@ describe('Field Invoices past the 1,000-row server cap', () => {
     await waitFor(() => expect(screen.getByText(String(TOTAL))).toBeInTheDocument());
   });
 
-  it('a failed page shows an error, never a short list or Post All', async () => {
+  it('a failed page shows an error, never a short list or a way to post', async () => {
     rows = Array.from({ length: TOTAL }, (_, i) => fieldInvoice(i, 'draft'));
     // The second page fails, like a dropped connection.
     mockFrom.mockImplementation((table: string) => {
@@ -138,7 +139,8 @@ describe('Field Invoices past the 1,000-row server cap', () => {
     renderInRouter(<FieldInvoicesUnpostedPanel />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Unposted field invoices could not be loaded');
-    expect(screen.queryByRole('button', { name: /Post All/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Select All|^Post / })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(screen.queryByText(/Invoices Displayed/)).not.toBeInTheDocument();
   });
 });

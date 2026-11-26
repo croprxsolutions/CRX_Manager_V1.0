@@ -185,7 +185,7 @@ const rows = selected.size > 0 ? selectedRows : filtered;
 Products, Customers, Jobs, Quotes, PurchaseOrders, BlendTickets, Orders, Vehicles, Fields, Returns, ApplicationServices, plus the Receiving hub's `ReceivingLogPanel` and `JobMassEditModal` (check `grep -rl useRowSelection src` for the current list)
 
 ### Exceptions
-- **Invoices and Deliveries** use hand-rolled `Set<string>` selection (pre-existing pattern, kept for stability)
+- **Invoices and Deliveries** use hand-rolled `Set<string>` selection (pre-existing pattern, kept for stability). The two invoice lists (Chemical Invoices and the Field Invoices Drafts tab) share one tick-and-post bar, row tick box and Select All: `src/components/invoices/InvoiceSelection.tsx`. Each screen still decides which rows can be ticked and posts through its own handler; their shared tab set is `src/lib/invoiceListTabs.ts`
 - **InventoryPage** uses `EditableDataTable` (inline editing) — no checkbox column
 
 ---

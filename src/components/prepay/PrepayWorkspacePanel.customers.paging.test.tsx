@@ -7,8 +7,8 @@
  * it must keep the "has a prepay balance" condition. The fake server caps replies at 1,000 rows.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { buildInMemoryQuery, SERVER_ROW_CAP } from '../../test-utils/inMemoryQuery';
 
 type Row = Record<string, unknown>;
@@ -85,4 +85,22 @@ describe('Prepay Workspace customer list', () => {
     expect(screen.getByLabelText('Customer')).toBeDisabled();
     expect(H.toast).toHaveBeenCalledWith('error', 'Failed to load customers with prepay balances');
   });
+});
+
+function Address() {
+  const { search } = useLocation();
+  return <p data-testid="address">{search}</p>;
+}
+
+describe('Prepay Workspace customer choice', () => {
+  it('keeps the chosen customer in the address, so it carries to the other tabs', async () => {
+    render(<MemoryRouter initialEntries={['/prepay?tab=workspace&customer=c0001']}><PrepayWorkspacePanel /><Address /></MemoryRouter>);
+    const select = screen.getByLabelText('Customer');
+    await waitFor(() => expect(select).toHaveValue('c0001'), { timeout: 15000 });
+
+    fireEvent.change(select, { target: { value: 'c0002' } });
+    expect(screen.getByTestId('address')).toHaveTextContent('?tab=workspace&customer=c0002');
+    fireEvent.change(select, { target: { value: '' } });
+    expect(screen.getByTestId('address')).toHaveTextContent(/^\?tab=workspace$/);
+  }, 30000);
 });

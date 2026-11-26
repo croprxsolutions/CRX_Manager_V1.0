@@ -76,3 +76,18 @@ describe('Payment History: returned checks and Void in the ⋯ menu', () => {
     expect(items[0]).toHaveTextContent('Already returned Nov 3');
   });
 });
+
+describe('Payment History totals with returned checks', () => {
+  it('count active payments and Prepay Credits checks, minus every returned check however it was entered', async () => {
+    H.tables.prepay_credits = [
+      { id: 'k1', customer_id: 'c1', created_at: '2026-11-11T15:00:00Z', source_reference: 'P1', reference_number: 'P1', original_amount_cents: 25000, source_type: 'check', allocation_set_id: null, customers: { farm_name: 'Prairie Ridge Farms' } },
+      { id: 'k2', customer_id: 'c1', created_at: '2026-11-12T15:00:00Z', source_reference: 'P2', reference_number: 'P2', original_amount_cents: 40000, source_type: 'check', allocation_set_id: null, customers: { farm_name: 'Prairie Ridge Farms' } },
+    ];
+    H.tables.money_reversals = [{ id: 'm2', kind: 'returned_check', entry_date: '2026-11-20', allocation_set_id: null, prepay_credit_id: 'k2' }];
+    H.tables.money_reversal_lines = [{ id: 'l2', reversal_id: 'm2', line_kind: 'prepay_credit', prepay_credit_id: 'k2' }];
+    render(<MemoryRouter><PaymentHistory /></MemoryRouter>);
+    // $900 check + $900 ACH + $250 Prepay Credits check; the returned $1,700 check and the returned $400 Prepay Credits check are out.
+    expect(await screen.findByText('$2,050.00')).toBeInTheDocument();
+    expect(screen.getByText(/^3 payment\(s\)/)).toBeInTheDocument();
+  });
+});

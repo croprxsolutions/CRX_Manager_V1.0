@@ -866,6 +866,15 @@ click, correct focus and Escape, exactly one approval, Approved after reload.
 
 ## Payments and receivables
 
+### KI-207 — Payment History's day and month totals leave out checks entered on Prepay Credits
+
+**MED · FIXED ON BRANCH (PR #2438) · money/reporting · found 2026-11-25 (Sol review of PR #2438)**
+Payment History read Record Payments only (`allocation_sets`), so a check entered through Prepay Credits > New
+Check (`prepay_credits`) was missing from its Today / date-range total while Month-End Close counted it. Fixed:
+the totals, count and CSV export now include those checks, grouped one per check the way Month-End Close's
+`_month_payments_received` groups them; a line under the cards says how many (each is in the CSV export).
+Mason asked to fix it rather than log it (2026-11-25).
+
 ### KI-120 — Any rep can change a customer's payment terms and finance-charge settings
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Accepted · MED · Mason decision.
@@ -1044,7 +1053,7 @@ order's invoices or payments. Also unsettled: how partial deliveries, partial pa
 credits move a commission (returns are KI-13). Decided 2026-11-13 (DECISION_LOG): commission counts in profit when its sale
 is invoiced (by share billed, KI-125) and becomes payable only when the customer pays, a partial payment releasing the
 same share. Fix later: enforce the payable rule, per sale and per paid share, in the payout function.
-- **Commission basis ignores the standing discount (re-verified 2026-11-21, [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)).** Order commission is figured from `orders.total_profit` before the standing grower discount (`20270117130000_standing_discount_in_order_profit.sql` ~L21 says "commission after the discount is its own planned change"), while the invoice and profit reports subtract the discount. Not tracked elsewhere; latent on production while the billing switch is off. Separate from the payout gap above (payout checks pending status ~L1154-1183 and header-to-items balance ~L744-761 in `20261204100000`, but no customer-payment eligibility). To-Do 8.5 needs two distinct acceptance checks: commission is figured on profit after the standing discount, and it is released in proportion to customer payments.
+- **Commission basis ignores the standing discount: fix pending (`20270308140000_commission_settles_on_posting`, staging candidate, 2026-11-25: when a chemical-sale invoice is posted, voided or unposted, commission settles on the profit after its standing discount and never tax; drafts never move it; paid or batched rows keep their amount; new column `commissions.discount_settled_at`).** Re-verified 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)): order commission is figured from `orders.total_profit` before the standing grower discount (`20270117130000_standing_discount_in_order_profit.sql` ~L21 says "commission after the discount is its own planned change"), while the invoice and profit reports subtract the discount. Not tracked elsewhere; latent on production while the billing switch is off. Separate from the payout gap above (payout checks pending status ~L1154-1183 and header-to-items balance ~L744-761 in `20261204100000`, but no customer-payment eligibility). To-Do 8.5 needs two distinct acceptance checks: commission is figured on profit after the standing discount, and it is released in proportion to customer payments.
 
 ### Also open in this area (tracked as GitHub issues or parked fixes; plain-English detail in [the plan](MASTER_FIX_PLAN.md))
 

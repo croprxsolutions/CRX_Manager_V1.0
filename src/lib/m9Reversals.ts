@@ -179,6 +179,19 @@ export async function loadReturnedPayments(setIds: string[]): Promise<Map<string
   return new Map(rows.filter((r) => r.allocation_set_id && wanted.has(r.allocation_set_id)).map((r) => [r.allocation_set_id as string, r.entry_date]));
 }
 
+/** Every Prepay Credits check bucket a returned check took back (any customer): Payment History's totals. */
+export async function loadReturnedCheckCredits(): Promise<ReadonlySet<string>> {
+  const returns = await all<ReturnedRecord>((from, to) => supabase.from('money_reversals')
+    .select('id, entry_date, allocation_set_id, prepay_credit_id', { count: 'exact' })
+    .eq('kind', 'returned_check').order('id').range(from, to));
+  const pmReturns = returns.filter((r) => r.prepay_credit_id);
+  if (!pmReturns.length) return new Set();
+  const lines = await all<{ id: string; prepay_credit_id: string | null }>((from, to) => supabase.from('money_reversal_lines')
+    .select('id, prepay_credit_id', { count: 'exact' })
+    .in('reversal_id', pmReturns.map((r) => r.id)).eq('line_kind', 'prepay_credit').order('id').range(from, to));
+  return new Set([...pmReturns.map((r) => r.prepay_credit_id as string), ...lines.map((l) => l.prepay_credit_id).filter(Boolean) as string[]]);
+}
+
 const sumBy = (rows: Row[], key: string, value: string) => {
   const m = new Map<string, number>();
   for (const r of rows) m.set(r[key] as string, (m.get(r[key] as string) ?? 0) + Number(r[value] ?? 0));

@@ -41,6 +41,7 @@ for (const p of [
   ".claude/hooks/taha-lane-lib.mjs", ".claude/hooks/taha-lane-prompt.mjs", ".claude/hooks/pr-merge-guard.mjs",
   ".claude/hooks/prompt-router.mjs", ".codex/hooks/production-action-guard.mjs", ".claude/settings.json", ".codex/hooks.json",
   ".claude/hooks/sol-risk-lib.mjs", // holds GATED_MERGE_BASES; dropping staging there would turn the block off
+  ".claude/hooks/migration-landing-gate-lib.mjs", // reads Mason's override for the live apply (Sol r2)
 ]) ok(isTahaLanePath(p), `${p} is Taha's`);
 for (const p of [
   "src/pages/FieldApplicationInvoice.tsx", "src/components/field-invoices/Row.tsx", "src/pages/FieldInvoices.tsx",
@@ -359,10 +360,24 @@ eq(tahaOverrideCommand("taha override #2242 123456 unavailable: sick and more"
   const c = issueTahaLaneCode({ dirs, pullRequest: 2250, headSha: A, kind: "apply", now: NOW, newCode: () => "515151" });
   const r = recordTahaLaneOverride({ dirs, pullRequest: 2250, code: c, tahaUnavailable: "  away all week  ", now: NOW + 60e3 });
   ok(r.ok && r.payload.tahaUnavailable === "away all week", "the unavailable reason is recorded");
-  ok(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: A, now: NOW + 3600e3 }), "an unavailable override is found for the live apply");
-  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 3600e3 }), null, "a live apply at a later push is not covered");
-  ok(findTahaLaneOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 3600e3 }), "but it works as a plain override for staging merges at any head");
-  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: A, now: NOW + 60e3 + 24 * 3600e3 }), null, "it ends after 24 hours too");
+  eq(Date.parse(r.payload.expiresAt) - Date.parse(r.payload.issuedAt), 30 * 60e3, "a live-apply override is written for 30 minutes (Taha, PR 3)");
+  ok(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: A, now: NOW + 60e3 + 29 * 60e3 }), "an unavailable override is found for the live apply inside 30 minutes");
+  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: A, now: NOW + 60e3 + 31 * 60e3 }), null, "it no longer counts after 30 minutes");
+  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 20 * 60e3 }), null, "a live apply at a later push is not covered");
+  ok(findTahaLaneOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 20 * 60e3 }), "but it works as a plain override for staging merges at any head while it lasts");
+}
+{
+  // An older file written with a 24-hour life still counts for only 30 minutes on a live apply.
+  const dir = tempDir("taha-lane-old-");
+  writeFileSync(path.join(dir, "taha-lane-override-pr2251.json"), JSON.stringify({ pullRequest: 2251, headSha: A, code: "525252", kind: "apply", tahaUnavailable: "away",
+    issuedAt: new Date(NOW).toISOString(), expiresAt: new Date(NOW + 24 * 3600e3).toISOString() }));
+  eq(findTahaUnavailableOverride({ dirs: [dir], pullRequest: 2251, headSha: A, now: NOW + 3600e3 }), null, "a 24-hour apply override file does not count for a live apply");
+}
+{
+  const c = issueTahaLaneCode({ dirs, pullRequest: 2254, headSha: A, now: NOW, newCode: () => "535353" });
+  const r = recordTahaLaneOverride({ dirs, pullRequest: 2254, code: c, now: NOW });
+  eq(Date.parse(r.payload.expiresAt) - Date.parse(r.payload.issuedAt), 24 * 3600e3, "a staging-merge override still lasts 24 hours");
+  ok(findTahaLaneOverride({ dirs, pullRequest: 2254, headSha: B, now: NOW + 23 * 3600e3 }), "and is found 23 hours later");
 }
 
 // ── the gate the merge guards call ──────────────────────────────────────────
@@ -472,6 +487,17 @@ ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: {
   "a 14-digit number that is not a date stamp is a real change (security review LOW)");
 ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "x = 100.00000000000001", [D]: "x = 100.20270304160000" } }),
   "digits after a decimal point are never a stamp");
+// Sol r2: a hand restamp that swaps the order of the PR's own migrations is a real change (restamp-migration.mjs refuses it).
+const migX = fl("supabase/migrations/20270301160000_x.sql", C, "added");
+const migY = fl("supabase/migrations/20270302160000_y.sql", D, "added");
+ok(carried({ before: [migX, migY], after: [fl("supabase/migrations/20270304160000_x.sql", C, "added"), fl("supabase/migrations/20270305160000_y.sql", D, "added")] }),
+  "restamping two migrations in their order carries it");
+ok(!carried({ before: [migX, migY], after: [fl("supabase/migrations/20270306160000_x.sql", C, "added"), fl("supabase/migrations/20270305160000_y.sql", D, "added")] }),
+  "restamping x past y changes the run order: needs him again");
+ok(!carried({ before: [migX, migY], after: [fl("supabase/migrations/20270303160000_x.sql", C, "added"), migY] }),
+  "restamping x past an unchanged y changes the run order too");
+ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "a = 1", [D]: "﻿a = 1" } }),
+  "adding a byte-order mark is a change like any other byte (Sol r2)");
 const mig19 = fl("supabase/migrations/20270306190000_proof.sql", E, "added");
 const mig03 = fl("supabase/migrations/20270307030000_proof.sql", E, "added");
 ok(carried({ before: [quotes, mig19], after: [fl("src/pages/Quotes.tsx", D), mig03], blobs: { [C]: "// see 20270306190000.\n-- 20270306190000.sql", [D]: "// see 20270307030000.\n-- 20270307030000.sql" } }),

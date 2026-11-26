@@ -289,8 +289,8 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   if (String(pr?.headRefOid || "").toLowerCase() !== head.toLowerCase()) {
     return refuse(`${number}'s head on GitHub (${String(pr?.headRefOid || "?").slice(0, 12)}) is not this checkout's HEAD (${head.slice(0, 12)}) — push, or pull, so the reviewed commit is the one applied.`);
   }
-  // Mason, 2026-11-25: his `taha override #<PR> <code> unavailable: <reason>` (taha-lane-lib.mjs, 24 hours, this PR
-  // only) stands in for Taha's hold and go-ahead when he has said Taha is unavailable; a plain override does not
+  // Mason, 2026-11-25: his `taha override #<PR> <code> unavailable: <reason>` (taha-lane-lib.mjs, 30 minutes, this PR
+  // only) stands in for Taha's hold and go-ahead when Mason cannot reach Taha at all; a plain override does not
   // (it is for staging merges). The weekly release skips the 4-hour hold (its migrations already sat on staging).
   // Every other check below still runs. It covers only the head it was issued for (Luna, PR 1 round 1).
   let stateCommon = "";

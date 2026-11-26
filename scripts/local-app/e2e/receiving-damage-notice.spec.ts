@@ -64,6 +64,7 @@ test('Purchase Order Detail and Quick Receive send damage notices for saved item
     AND related_entity_id = '${detail.po}' AND message LIKE '%${detailExtraName}%';`)).toBe(String(activeAdmins));
 
   await page.goto('/receiving?tab=quick');
+  await page.getByRole('button', { name: 'Add First Product' }).click();
   await page.getByRole('button', { name: /select product/i }).click();
   await page.getByPlaceholder('Search by name, SKU, or vendor...').fill(quick.productName);
   await page.getByRole('button', { name: new RegExp(quick.productName) }).click();

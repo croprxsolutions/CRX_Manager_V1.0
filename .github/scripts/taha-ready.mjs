@@ -168,7 +168,7 @@ export function needsReminder(pr, comments, now, { checks, carried }) {
 // What a backport hotfix brings to live (Taha, 2026-11-26): from GitHub's compare of main...head, one line per
 // commit main lacks, `#<PR> title` (squash subjects end in "(#N)") or short SHA + subject, then the changed files.
 // Every commit is listed, merge commits too (flagged: a conflict fix can add code of its own; Terra on this PR).
-// Commits come by history, so one already cherry-picked onto main still shows; the file list is the diff.
+// Both lists are GitHub's compare from where the hotfix branched, so work already cherry-picked onto main can still show.
 // compare = { commits: [{ sha, message, parents }], files: [filename], total } | null (unreadable).
 export const BRING_CAP = 10;
 export const FILE_CAP = 10;

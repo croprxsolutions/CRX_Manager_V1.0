@@ -2278,8 +2278,8 @@
     "vehicle_logbook_registration": {
       "chain": "smoke-vehicle-logbook-registration.sql",
       "psql_only": true,
-      "description": "Invented local screen-walk database only. The four existing logbooks keep registrations with the proposed narrow vehicle grants. A Reports-enabled rep and admin see the fixture; denied office, driver, applicator and anonymous access remains refused. Run through the vehicle-logbook-registration local browser proof. Terminal rollback.",
-      "covers": ["_logbook_vehicle_registrations", "get_logbook_faa", "get_logbook_by_field", "get_logbook_by_customer", "get_logbook_by_applicator"],
+      "description": "Invented local screen-walk database only. The four existing logbooks keep registrations with the proposed narrow vehicle grants. Reports-enabled admins and reps can read the registration helper. Denied office accounts and field roles cannot read it, and anon cannot execute it. Run through the vehicle-logbook-registration local browser proof. Terminal rollback.",
+      "covers": ["_logbook_vehicle_registrations"],
       "area": ["regression"]
     }
   }

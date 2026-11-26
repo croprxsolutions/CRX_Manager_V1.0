@@ -14,6 +14,9 @@ FROM (VALUES
   ('unlinked', 'air', 'active', 'INVENTED-UNLINKED'),
   ('no vehicle', 'ground', 'active', NULL)
 ) AS fixture(label, kind, state, registration);
+INSERT INTO logbook_fixture (label, kind, state, registration, vehicle_id, record_id)
+SELECT 'second active application', kind, state, registration, vehicle_id, gen_random_uuid()
+FROM logbook_fixture WHERE label = 'active aircraft';
 GRANT SELECT ON logbook_fixture TO authenticated;
 
 SET LOCAL session_replication_role = replica;
@@ -21,7 +24,7 @@ INSERT INTO public.customers (id, farm_name) VALUES (:'farm', 'Invented Logbook 
 INSERT INTO public.fields (id, field_name, customer_id) VALUES (:'field', 'Invented Logbook Smoke Field', :'farm');
 INSERT INTO public.vehicles (id, vehicle_name, vehicle_type, status, registration)
 SELECT vehicle_id, 'Invented Logbook ' || label, kind, state, registration
-FROM logbook_fixture WHERE label <> 'no vehicle';
+FROM logbook_fixture WHERE label NOT IN ('no vehicle', 'second active application');
 INSERT INTO public.application_records (id, record_number, source_type, source_id,
     customer_id, field_id, applicator_id, application_date, vehicle_id)
 SELECT record_id, 'INVENTED-LOGBOOK-' || record_id, 'job', gen_random_uuid(),
@@ -67,7 +70,8 @@ BEGIN
 
   IF EXISTS (SELECT 1 FROM public.get_logbook_faa(current_date, current_date) log
       JOIN logbook_fixture f USING (record_id) WHERE f.kind <> 'air')
-     OR (SELECT count(*) FROM public._logbook_vehicle_registrations() r JOIN logbook_fixture f USING (vehicle_id)) <> 3
+     OR (SELECT count(*) FROM public._logbook_vehicle_registrations() r
+       WHERE EXISTS (SELECT 1 FROM logbook_fixture f WHERE f.vehicle_id = r.vehicle_id)) <> 3
      OR EXISTS (SELECT 1 FROM public._logbook_vehicle_registrations() r JOIN logbook_fixture f USING (vehicle_id)
        WHERE label = 'unlinked' OR r.registration IS DISTINCT FROM f.registration) THEN
     RAISE EXCEPTION 'Unexpected vehicle or registration in the logbooks';
@@ -111,8 +115,6 @@ BEGIN
      OR has_function_privilege('service_role', 'public._logbook_vehicle_registrations()', 'EXECUTE') THEN
     RAISE EXCEPTION 'The registration lookup has an unexpected grant';
   END IF;
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';
 END;
 $denied$;
-
-ROLLBACK;
-SELECT 'SMOKE_PASS_ROLLBACK';

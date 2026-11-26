@@ -1,24 +1,37 @@
 -- Restore the report bodies before retiring their registration helper.
--- Run in one transaction. Restore the prior vehicle grant before this reversal.
+-- Run with psql -1 and ON_ERROR_STOP, or inside an explicit transaction.
+-- Restore the prior vehicle grant before this reversal.
+CREATE TEMP TABLE logbook_reverse_pin ON COMMIT DROP AS
+SELECT *, pg_current_xact_id()::text AS transaction_id
+FROM (VALUES
+  ('get_logbook_faa', 'date,date', '9302f0a0cc8b2e90d08763d65b2d6ad2', 'ed749b3d8e621e7b43d22801a9f04a6e'),
+  ('get_logbook_by_field', 'uuid,date,date', '61aa511789de5de1d2f4a9f96dda854e', '04aea37b07a3c0463e129bc995234f1f'),
+  ('get_logbook_by_customer', 'uuid,date,date', '388ae0991aaff234820ab0aaf1b0c39b', 'be23c3fca31b00a2db4d5409d19415ba'),
+  ('get_logbook_by_applicator', 'uuid,date,date', '437813dedcab1c72526dd7c5341fe131', 'f9ef04a194268b3ce6f9c528488b0ea7')
+) AS pin(name, args, installed_md5, restored_md5);
+
 DO $preflight$
 DECLARE
   v_report record;
   v_oid regprocedure;
 BEGIN
+  IF to_regclass('pg_temp.logbook_reverse_pin') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM pg_temp.logbook_reverse_pin WHERE transaction_id = pg_current_xact_id()::text) THEN
+    RAISE EXCEPTION 'LOGBOOK_REGISTRATION_REVERSE_REQUIRES_ONE_TRANSACTION';
+  END IF;
   IF NOT has_column_privilege('authenticated', 'public.vehicles', 'registration', 'SELECT') THEN
     RAISE EXCEPTION 'LOGBOOK_REGISTRATION_REVERSE_NEEDS_PRIOR_VEHICLE_GRANT';
   END IF;
-  FOR v_report IN
-    SELECT * FROM (VALUES
-      ('get_logbook_faa', 'date,date', '9302f0a0cc8b2e90d08763d65b2d6ad2', 'ed749b3d8e621e7b43d22801a9f04a6e'),
-      ('get_logbook_by_field', 'uuid,date,date', '61aa511789de5de1d2f4a9f96dda854e', '04aea37b07a3c0463e129bc995234f1f'),
-      ('get_logbook_by_customer', 'uuid,date,date', '388ae0991aaff234820ab0aaf1b0c39b', 'be23c3fca31b00a2db4d5409d19415ba'),
-      ('get_logbook_by_applicator', 'uuid,date,date', '437813dedcab1c72526dd7c5341fe131', 'f9ef04a194268b3ce6f9c528488b0ea7')
-    ) AS pin(name, args, installed_md5, restored_md5)
-  LOOP
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('public._logbook_vehicle_registrations()')
+    AND md5(replace(prosrc, chr(13), '')) = '19e779b58d05914e39764448916916e1'
+    AND prosecdef AND provolatile = 's' AND proconfig = ARRAY['search_path=public, pg_temp']) THEN
+    RAISE EXCEPTION 'LOGBOOK_REGISTRATION_REVERSE_HELPER_CHANGED';
+  END IF;
+  FOR v_report IN SELECT * FROM pg_temp.logbook_reverse_pin LOOP
     v_oid := to_regprocedure(format('public.%I(%s)', v_report.name, v_report.args));
     IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = v_oid
-      AND md5(replace(prosrc, chr(13), '')) = v_report.installed_md5 AND NOT prosecdef) THEN
+      AND md5(replace(prosrc, chr(13), '')) = v_report.installed_md5 AND NOT prosecdef
+      AND proconfig = ARRAY['search_path=public, pg_temp']) THEN
       RAISE EXCEPTION 'LOGBOOK_REGISTRATION_REVERSE_REPORT_CHANGED: %', v_report.name;
     END IF;
   END LOOP;
@@ -145,4 +158,18 @@ BEGIN
 END;
 $function$;
 
-DROP FUNCTION public._logbook_vehicle_registrations();
+DO $postflight$
+DECLARE
+  v_report record;
+BEGIN
+  FOR v_report IN SELECT * FROM pg_temp.logbook_reverse_pin LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_proc
+      WHERE oid = to_regprocedure(format('public.%I(%s)', v_report.name, v_report.args))
+        AND md5(replace(prosrc, chr(13), '')) = v_report.restored_md5 AND NOT prosecdef
+        AND proconfig = ARRAY['search_path=public, pg_temp']) THEN
+      RAISE EXCEPTION 'LOGBOOK_REGISTRATION_REVERSE_REPORT_MISMATCH: %', v_report.name;
+    END IF;
+  END LOOP;
+  DROP FUNCTION public._logbook_vehicle_registrations();
+END;
+$postflight$;

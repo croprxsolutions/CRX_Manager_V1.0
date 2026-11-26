@@ -5,18 +5,30 @@ import { localSql } from './local-db';
 
 test('authorized logbooks keep aircraft registration', async ({ page }) => {
   const smoke = readFileSync(new URL('../../smoke/smoke-vehicle-logbook-registration.sql', import.meta.url), 'utf8');
-  expect(localSql(smoke)).toMatch(/SMOKE_PASS_ROLLBACK$/);
+  let smokeResult: unknown;
+  try {
+    localSql(smoke);
+  } catch (error) {
+    smokeResult = error;
+  }
+  expect(smokeResult).toMatchObject({ stderr: expect.stringMatching(/ERROR:\s+SMOKE_PASS_ROLLBACK\b/) });
 
   const email = process.env.LOCAL_TEST_EMAIL!;
-  const actor = localSql(`SELECT id FROM public.profiles WHERE email = '${email.replaceAll("'", "''")}' AND role = 'admin';`);
+  const admin: { id: string; denied_pages: string[] | null } = JSON.parse(localSql(`
+    SELECT jsonb_build_object('id', id, 'denied_pages', denied_pages)
+    FROM public.profiles WHERE email = '${email.replaceAll("'", "''")}' AND role = 'admin';`));
+  const actor = admin.id;
   expect(actor).toMatch(/^[0-9a-f-]{36}$/i);
+  const previousDeniedPages = admin.denied_pages
+    ? `ARRAY[${admin.denied_pages.map(name => `'${name.replaceAll("'", "''")}'`).join(', ')}]::text[]`
+    : 'NULL';
   const [customer, aircraft, record, source] = Array.from({ length: 4 }, randomUUID);
   const tag = record.slice(0, 8);
   const registration = `INVENTED-FAA-${tag}`;
   try {
     localSql(`BEGIN;
       SET LOCAL session_replication_role = replica;
-      UPDATE public.profiles SET role = 'sales_rep' WHERE id = '${actor}';
+      UPDATE public.profiles SET role = 'sales_rep', denied_pages = '{}' WHERE id = '${actor}';
       INSERT INTO public.customers (id, farm_name) VALUES ('${customer}', 'Invented FAA Farm ${tag}');
       INSERT INTO public.vehicles (id, vehicle_name, vehicle_type, category, registration, status)
         VALUES ('${aircraft}', 'Invented FAA Aircraft ${tag}', 'air', 'Airplane', '${registration}', 'inactive');
@@ -43,7 +55,7 @@ test('authorized logbooks keep aircraft registration', async ({ page }) => {
   } finally {
     localSql(`BEGIN;
       SET LOCAL session_replication_role = replica;
-      UPDATE public.profiles SET role = 'admin' WHERE id = '${actor}';
+      UPDATE public.profiles SET role = 'admin', denied_pages = ${previousDeniedPages} WHERE id = '${actor}';
       DELETE FROM public.application_records WHERE id = '${record}';
       DELETE FROM public.vehicles WHERE id = '${aircraft}';
       DELETE FROM public.customers WHERE id = '${customer}';

@@ -667,7 +667,7 @@ describe('Record Payments: payment date and check number', () => {
     stepDate('month', 'ArrowDown');
     apply();
     const message = '10/24/2026 is in a closed month (10/1/2026 to 10/31/2026). Nothing was saved. '
-      + 'Date the payment in an open month, or ask an admin to reopen that month in Month-End Close.';
+      + 'Keep the day it was received: ask an admin to reopen that month in Month-End Close, then save again.';
     expect(await screen.findByText(message)).toBeInTheDocument();
     expect(mockToast).toHaveBeenCalledWith('error', message);
     expect(rpcCalls()).toHaveLength(0);
@@ -677,11 +677,19 @@ describe('Record Payments: payment date and check number', () => {
   });
 
   it("the database's closed-month refusal is put in plain words (a rep cannot read closed months first)", async () => {
-    mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: { message: 'Date 2026-10-24 falls in closed accounting period (2026-10-01 to 2026-10-31)' } }));
-    await fillPayment();
-    stepDate('month', 'ArrowDown');
-    apply();
-    expect(await screen.findByText(/10\/24\/2026 is in a closed month \(10\/1\/2026 to 10\/31\/2026\)\. Nothing was saved\./)).toBeInTheDocument();
+    mockAuth.role = 'sales_rep';
+    try {
+      // A rep reads no closed months (RLS), so only the database's refusal can name it.
+      closedPeriods = [];
+      mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: { code: 'P0001', message: 'Date 2026-10-24 falls in closed accounting period (2026-10-01 to 2026-10-31)' } }));
+      await fillPayment();
+      stepDate('month', 'ArrowDown');
+      apply();
+      expect(await screen.findByText(/10\/24\/2026 is in a closed month \(10\/1\/2026 to 10\/31\/2026\)\. Nothing was saved\./)).toBeInTheDocument();
+      expect(rpcCalls()).toHaveLength(1);
+    } finally {
+      mockAuth.role = 'admin';
+    }
   });
 
   it('a retry with a changed date is not taken as the same payment', async () => {
@@ -712,9 +720,17 @@ describe('Record Payments: payment date and check number', () => {
     expect(screen.queryByText('Payment Applied Successfully')).not.toBeInTheDocument();
   });
 
-  it('a retry after a lost reply past midnight sends the day the first attempt sent', async () => {
+  it('a retry after a lost reply past midnight sends the day the first attempt sent, and replays the save', async () => {
+    // The server's retry check: one key, one set of arguments (allocate_payment's request fingerprint).
+    const firstArgs = new Map<string, unknown>();
     let replyLost = true;
-    mockRpc.mockImplementation(() => {
+    mockRpc.mockImplementation((_name: string, args: Record<string, unknown>) => {
+      const { p_idempotency_key: key, ...request } = args;
+      const known = firstArgs.get(String(key));
+      if (known && JSON.stringify(known) !== JSON.stringify(request)) {
+        return Promise.resolve({ data: null, error: { message: 'IDEMPOTENCY_ARGUMENT_MISMATCH: key was already used for different allocate_payment arguments' } });
+      }
+      firstArgs.set(String(key), request);
       if (replyLost) { replyLost = false; return Promise.reject(new Error('Failed to fetch')); }
       return Promise.resolve(saved);
     });
@@ -722,15 +738,52 @@ describe('Record Payments: payment date and check number', () => {
     apply();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to fetch'));
 
-    // 12:30 AM on Nov 25 in Chicago; typing a note re-renders the page on the new day.
+    // 12:30 AM on Nov 25 in Chicago. Typing and clearing a note re-renders the page on the new day
+    // and leaves the request as it was.
     vi.setSystemTime(new Date('2026-11-25T06:30:00Z'));
-    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'retry' } });
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'x' } });
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: '' } });
     expect(shownDate()).toBe('11/24/2026');
     apply();
     await waitFor(() => expect(rpcCalls()).toHaveLength(2));
     const [first, second] = rpcCalls().map(([, args]) => args);
-    expect(second.p_idempotency_key).toBe(first.p_idempotency_key);
-    expect(second.p_payment_date).toBe('2026-11-24');
+    expect(second).toEqual(first);
+    expect(await screen.findByText('Payment Applied Successfully')).toBeInTheDocument();
+  });
+
+  it('an untouched date is today as of the click, even with no redraw since midnight', async () => {
+    await fillPayment();
+    vi.setSystemTime(new Date('2026-11-25T06:30:00Z'));
+    apply();
+    await waitFor(() => expect(rpcCalls()).toHaveLength(1));
+    expect(rpcCalls()[0][1]).toMatchObject({ p_payment_date: '2026-11-25' });
+  });
+
+  it('a save the database refused is not treated as maybe saved: the closed-month check still runs', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: { code: 'P0001', message: 'Invoice balance changed' } }));
+    await fillPayment();
+    apply();
+    await waitFor(() => expect(rpcCalls()).toHaveLength(1));
+    closedPeriods = [{ period_start: '2026-11-01', period_end: '2026-11-30' }];
+    apply();
+    expect(await screen.findAllByText(/11\/24\/2026 is in a closed month/)).not.toHaveLength(0);
+    expect(rpcCalls()).toHaveLength(1);
+  });
+
+  it('asks before paying an invoice dated after the payment', async () => {
+    mockFrom.mockImplementation((table: string) => buildChain(
+      table === 'customers' ? { data: [customer], error: null }
+        : table === 'invoices' ? { data: [{ ...openInvoice, invoice_date: '2026-11-24' }], error: null, count: 1 } as { data: unknown; error: unknown }
+          : { data: [], error: null },
+    ));
+    await fillPayment();
+    stepDate('day', 'ArrowDown');
+    apply();
+    expect(await screen.findByText(/INV-1 is dated after this payment \(11\/23\/2026\)\. Check the payment date before saving\./)).toBeInTheDocument();
+    expect(rpcCalls()).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: /^Record payment/ }));
+    await waitFor(() => expect(rpcCalls()).toHaveLength(1));
+    expect(rpcCalls()[0][1]).toMatchObject({ p_payment_date: '2026-11-23' });
   });
 
   it('a retry after a lost reply still reaches the save when the month has since been closed', async () => {
@@ -764,6 +817,8 @@ describe('Record Payments: payment date and check number', () => {
     apply();
     fireEvent.click(await screen.findByRole('button', { name: /Next Check/ }));
     expect(shownDate()).toBe('11/21/2026');
+    // Said plainly, so a carried date is not missed on the next customer's check.
+    expect(screen.getByText(/Kept from the last check: 3 days before today/)).toBeInTheDocument();
     await act(async () => { await router.navigate('/elsewhere'); });
     expect(await screen.findByText('Somewhere else')).toBeInTheDocument();
   });

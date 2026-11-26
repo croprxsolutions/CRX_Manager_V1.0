@@ -39,7 +39,7 @@ export interface ClosedPeriod {
 
 export function closedPeriodMessage(day: string, period: ClosedPeriod): string {
   return `${showDay(day)} is in a closed month (${showDay(period.period_start)} to ${showDay(period.period_end)}). `
-    + 'Nothing was saved. Date the payment in an open month, or ask an admin to reopen that month in Month-End Close.';
+    + 'Nothing was saved. Keep the day it was received: ask an admin to reopen that month in Month-End Close, then save again.';
 }
 
 /**

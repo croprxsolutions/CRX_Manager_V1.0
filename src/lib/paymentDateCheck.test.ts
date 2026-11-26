@@ -88,7 +88,7 @@ describe('paymentDateRefusal', () => {
   it("puts the database's closed-period refusal in plain words", () => {
     expect(paymentDateRefusal({ message: 'Date 2026-10-30 falls in closed accounting period (2026-10-01 to 2026-10-31)' }, '2026-10-30'))
       .toBe('10/30/2026 is in a closed month (10/1/2026 to 10/31/2026). Nothing was saved. '
-        + 'Date the payment in an open month, or ask an admin to reopen that month in Month-End Close.');
+        + 'Keep the day it was received: ask an admin to reopen that month in Month-End Close, then save again.');
   });
 
   it('names a future-date refusal', () => {

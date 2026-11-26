@@ -43,7 +43,7 @@ import {
   paymentDateProblem,
   paymentDateRefusal,
 } from '../lib/paymentDateCheck';
-import { daysSinceBusinessDate, todayInBusinessTz } from '../lib/dateUtils';
+import { daysSinceBusinessDate, parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -107,39 +107,49 @@ interface PaymentEntry {
   allocations: { invoice_id: string; amount_cents: number }[];
 }
 
-/** A validated payment waiting on one warning that names every question it raises (a duplicate, an old date, all prepay). */
+/** A validated payment waiting on one warning that names every question it raises (a duplicate, an old date,
+ * invoices dated after the payment, all prepay). */
 interface PaymentToConfirm {
   payment: PaymentEntry;
   match: DuplicatePayment | null;
   oldDays: number | null;
+  laterInvoices: string[];
 }
 
 const prepayMessage = (cents: number): string =>
   `No invoices allocated. ${fmt(cents)} will be added as prepay credit. Continue?`;
 
-function confirmTitle({ match, oldDays }: PaymentToConfirm): string {
+// A payment received before its invoice existed is usually a wrong date: the statement would show it first.
+const laterInvoiceMessage = (numbers: string[], day: string): string =>
+  `${numbers.join(', ')} ${numbers.length === 1 ? 'is' : 'are'} dated after this payment `
+  + `(${parseLocalDate(day).toLocaleDateString('en-US')}). Check the payment date before saving.`;
+
+function confirmTitle({ match, oldDays, laterInvoices }: PaymentToConfirm): string {
   if (match) return 'Possible Duplicate Payment';
-  return oldDays !== null ? `Record a payment dated ${oldDays} days ago?` : 'Full Prepay Credit';
+  if (oldDays !== null) return `Record a payment dated ${oldDays} days ago?`;
+  return laterInvoices.length > 0 ? 'Pay an invoice dated after this payment?' : 'Full Prepay Credit';
 }
 
-function confirmMessage({ payment, match, oldDays }: PaymentToConfirm): string {
+function confirmMessage({ payment, match, oldDays, laterInvoices }: PaymentToConfirm): string {
   return [
     ...(match ? [duplicatePaymentMessage(match, payment.cents)] : []),
     ...(oldDays !== null ? [oldPaymentDateMessage(payment.paymentDate, oldDays)] : []),
+    ...(laterInvoices.length > 0 ? [laterInvoiceMessage(laterInvoices, payment.paymentDate)] : []),
     ...(payment.allocations.length === 0 ? [prepayMessage(payment.cents)] : []),
   ].join(' ');
 }
 
-function confirmLabel({ match, oldDays }: PaymentToConfirm): string {
+function confirmLabel({ match, oldDays, laterInvoices }: PaymentToConfirm): string {
   if (match) return 'Record Anyway';
-  return oldDays !== null ? 'Record payment' : 'Continue';
+  return oldDays !== null || laterInvoices.length > 0 ? 'Record payment' : 'Continue';
 }
 
 /** The short line under the payment date: how far back it is, so a carried-over date is noticed. */
-function paymentDateHelper(day: string, today: string): string {
+function paymentDateHelper(day: string, today: string, keptFromLastCheck: boolean): string {
   if (day === today) return 'The day the payment was received';
   const days = daysSinceBusinessDate(day);
-  return days === 1 ? '1 day before today' : `${days} days before today`;
+  const back = days === 1 ? '1 day before today' : `${days} days before today`;
+  return keptFromLastCheck ? `Kept from the last check: ${back}. Change it if this one came another day.` : back;
 }
 
 /* ─── Component ────────────────────────────────────────────────────────── */
@@ -426,7 +436,9 @@ export default function PaymentAllocation() {
   const handleSubmit = async () => {
     if (!selectedCustomer || !profile || customerBeingChanged) return;
     const problem = entryProblem();
-    if (problem || !paymentDate) {
+    // An untouched date is today as of this click, not as of the last render (a page left open past midnight).
+    const day = paymentDateInput === undefined ? todayInBusinessTz() : paymentDateInput;
+    if (problem || !day) {
       toast('error', problem ?? 'Enter the payment date');
       return;
     }
@@ -436,7 +448,7 @@ export default function PaymentAllocation() {
       method: paymentMethod,
       checkNumber: isCheck ? referenceNumber : '',
       reference: isCheck ? '' : referenceNumber,
-      paymentDate,
+      paymentDate: day,
       notes,
       allocations: invoices
         .filter((inv) => inv.allocated_cents > 0)
@@ -468,10 +480,14 @@ export default function PaymentAllocation() {
       refuseDate(closedPeriodMessage(payment.paymentDate, closedPeriod));
       return;
     }
-    // Ask first for a likely duplicate, an old date, or a check going 100% to prepay (no invoice allocations).
+    // Ask first for a likely duplicate, an old date, an invoice dated after the payment, or a check going
+    // 100% to prepay (no invoice allocations).
     const oldDays = oldPaymentDateDays(payment.paymentDate);
-    if (match || oldDays !== null || payment.allocations.length === 0) {
-      setPaymentToConfirm({ payment, match, oldDays });
+    const laterInvoices = invoices
+      .filter((inv) => inv.allocated_cents > 0 && inv.invoice_date > payment.paymentDate)
+      .map((inv) => inv.invoice_number);
+    if (match || oldDays !== null || laterInvoices.length > 0 || payment.allocations.length === 0) {
+      setPaymentToConfirm({ payment, match, oldDays, laterInvoices });
       return;
     }
 
@@ -526,10 +542,15 @@ export default function PaymentAllocation() {
       toast('success', parts.join('. '));
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'allocate_payment' } });
-      // The save may have gone through: a retry after midnight must still send the day this attempt sent.
-      if (paymentDateInput === undefined) setPaymentDateInput(payment.paymentDate);
+      const retryRefused = hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_ARGUMENT_MISMATCH);
+      // A database error code (SQLSTATE) means the transaction rolled back: nothing was saved. Any other
+      // failure (a lost reply) may have saved, and a refused retry says an earlier attempt may have.
+      const code = (err as { code?: unknown } | null)?.code;
+      if (!retryRefused && typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) saveUnresolvedRef.current = false;
+      // While the save may have gone through, a retry after midnight must still send the day this attempt sent.
+      else if (paymentDateInput === undefined) setPaymentDateInput(payment.paymentDate);
       const dateRefusal = paymentDateRefusal(err, payment.paymentDate);
-      if (hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_ARGUMENT_MISMATCH)) setRetryRefused(true);
+      if (retryRefused) setRetryRefused(true);
       else if (dateRefusal) refuseDate(dateRefusal);
       else toast('error', rpcAuthErrorMessage(err) ?? sanitizeError(err));
     }
@@ -740,7 +761,9 @@ export default function PaymentAllocation() {
                   presets={[{ label: 'Today', value: businessToday }]}
                   disabled={submitting}
                   error={paymentDateError ?? paymentDateRefused ?? undefined}
-                  helper={paymentDate ? paymentDateHelper(paymentDate, businessToday) : undefined}
+                  helper={paymentDate
+                    ? paymentDateHelper(paymentDate, businessToday, startingPaymentDate !== undefined && !paymentDateChanged)
+                    : undefined}
                 />
               </div>
 

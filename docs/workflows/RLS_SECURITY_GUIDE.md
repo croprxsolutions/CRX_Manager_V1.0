@@ -367,7 +367,7 @@ to show was stale: live also pins the actor.
 | team_notes | All authenticated | Own created_by (active profile) | Own created_by / Admin | Admin |
 | team_note_comments | All authenticated | Own created_by | Own created_by / Admin | Own created_by / Admin |
 | activity_feed | All authenticated | Own performed_by | - | - |
-| notifications | Own user_id | Admin / Sales Rep / own user_id | Own user_id | Admin |
+| notifications | Own user_id | Admin / Sales Rep / own user_id. Receiving damage notices use the receipt workflow. | Own user_id, `is_read` only | Admin |
 | invoices | Admin / Own created_by / Assigned salesman | Admin / Sales Rep | Admin | Admin |
 | invoice_items | Any visible invoice (inherits `invoices` RLS) | Admin / Sales Rep | Admin | Admin |
 | financial_audit_log | Admin | Admin / own actor_user_id | - | - |

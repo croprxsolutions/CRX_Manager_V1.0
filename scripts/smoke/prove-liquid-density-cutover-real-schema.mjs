@@ -5,7 +5,7 @@ import path from 'node:path';
 import { wrapperSql } from '../../.github/scripts/db-apply.mjs';
 import { buildContainer, removeContainer, psql, scalar, seedUsers, ROOT } from './undo-paths/harness.mjs';
 
-const migration = '20270308110000_enable_liquid_density_review.sql';
+const migration = '20270309050000_enable_liquid_density_review.sql';
 const stagingRef = 'fsnjredpmakbmhwowjjt';
 const stagingContext = `SET LOCAL crx.liquid_weight_staging_project = '${stagingRef}';`;
 const read = (...parts) => readFileSync(path.join(ROOT, ...parts), 'utf8').replaceAll('\r\n', '\n');

@@ -391,9 +391,16 @@ describe('FieldStop: saved copy in a dead spot', () => {
 describe('FieldStop: proof bound to the load', () => {
   const LINE = { id: 'item-1', order_item_id: 'oi-1', quantity: 2, product_id: 'prod-1', product: { product_name: 'Test Chem' } };
   const completeCalls = () => mockRpc.mock.calls.filter(([name]) => name === 'complete_delivery');
-  async function signAndReview() {
+  async function signAndReview(partial = false) {
     tables.data.delivery_items = [{ ...LINE }];
-    await reachSign();
+    if (partial) {
+      tables.data.deliveries = [{ ...baseStop, status: 'in_progress' }];
+      render(<MemoryRouter><FieldStop /></MemoryRouter>);
+      fireEvent.click(await screen.findByRole('button', { name: 'Decrease quantity' }));
+      fireEvent.click(await screen.findByRole('button', { name: /Continue with Partial/ }));
+    } else {
+      await reachSign();
+    }
     fireEvent.click(await screen.findByRole('button', { name: 'Sign here' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Use J. Hollow' }));
     fireEvent.click(screen.getByRole('button', { name: /Continue to Review/ }));
@@ -416,7 +423,7 @@ describe('FieldStop: proof bound to the load', () => {
     expect(await screen.findByRole('button', { name: /Continue with Partial/ })).toBeInTheDocument();
   });
 
-  it('a DELIVERY_LOAD_CHANGED refusal clears the signature, reloads the lines and returns to the quantities', async () => {
+  it('a DELIVERY_LOAD_CHANGED refusal clears the signature, reloads the lines and returns to the quantities with the entered amounts kept', async () => {
     mockRpc.mockImplementation((name: string) => Promise.resolve(
       name === 'get_delivery_receipt_recipient'
         ? { data: { farm_name: 'Maple Hollow Farms', contact_name: env.contact, email: 'farm@example.test' }, error: null }
@@ -424,11 +431,13 @@ describe('FieldStop: proof bound to the load', () => {
         ? { data: null, error: { message: 'DELIVERY_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the customer signed.' } }
         : { data: null, error: null },
     ));
-    await signAndReview();
+    await signAndReview(true);
     const itemReadsBefore = mockFrom.mock.calls.filter(([t]) => t === 'delivery_items').length;
     fireEvent.click(await screen.findByRole('button', { name: /Complete Delivery/ }));
     await waitFor(() => expect(completeCalls()).toHaveLength(1));
     await waitFor(() => expect(mockFrom.mock.calls.filter(([t]) => t === 'delivery_items').length).toBeGreaterThan(itemReadsBefore + 1));
-    expect(await screen.findByRole('button', { name: /All Full/ })).toBeInTheDocument();
+    // The entered 1 of 2 survives the reload, so it still reads as partial (a reset would read All Full).
+    expect(await screen.findByRole('button', { name: /Continue with Partial/ })).toBeInTheDocument();
+    expect(screen.getByLabelText('Delivered quantity for Test Chem')).toHaveValue(1);
   });
 });

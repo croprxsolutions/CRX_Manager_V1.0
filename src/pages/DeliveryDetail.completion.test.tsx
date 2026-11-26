@@ -786,6 +786,14 @@ describe('Email Confirmation warning belongs to its own delivery', () => {
 describe('proof bound to the load (page wiring)', () => {
   const LINE = { id: 'item-1', delivery_id: 'del-1', order_item_id: 'oi-1', product_id: 'prod-1', quantity: 2, product: { product_name: 'Test Chem' } };
   beforeEach(() => { tables.data.delivery_items = [{ ...LINE }]; });
+  // The completion box's only amount field (the office layout has no label on it).
+  /** A partial delivery's page button reads "Complete (Partial)"; the confirm box's reads "Complete Delivery". */
+  async function completePartialAndConfirm() {
+    fireEvent.click(await screen.findByRole('button', { name: /^Complete \(Partial\)$/ }));
+    const confirm = await screen.findByRole('button', { name: /^Complete Delivery$/ });
+    fireEvent.click(confirm);
+  }
+  const qtyBox = async () => { await screen.findByText(/^Planned: 2/); return screen.getByRole('spinbutton'); };
 
   it('sends the lines shown when the customer signed as p_lines_seen', async () => {
     mockRpc.mockResolvedValue({ data: COMPLETE_RESULT, error: null });
@@ -799,14 +807,17 @@ describe('proof bound to the load (page wiring)', () => {
   it('never sends the completion when the office changed the lines since the page loaded; it reloads them', async () => {
     mockRpc.mockResolvedValue({ data: COMPLETE_RESULT, error: null });
     await renderPage();
+    fireEvent.change(await qtyBox(), { target: { value: '1' } });
     await signAndFillSigner();
     tables.data.delivery_items = [{ ...LINE, quantity: 10 }];
     const itemReadsBefore = mockFrom.mock.calls.filter(([t]) => t === 'delivery_items').length;
-    await completeAndConfirm();
+    await completePartialAndConfirm();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/changed by the office/)));
     expect(completeRpcCalls()).toHaveLength(0);
     // The line check, then the reload of the lines.
     await waitFor(() => expect(mockFrom.mock.calls.filter(([t]) => t === 'delivery_items').length).toBeGreaterThanOrEqual(itemReadsBefore + 2));
+    // The driver's 1 is kept against the office's 10, not reset to full.
+    await waitFor(() => expect(screen.getByRole('spinbutton')).toHaveValue(1));
   });
 
   it('a DELIVERY_LOAD_CHANGED refusal clears the signature and reloads the lines (no automatic retry)', async () => {
@@ -814,15 +825,17 @@ describe('proof bound to the load (page wiring)', () => {
       ? Promise.resolve({ data: null, error: { message: 'DELIVERY_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the customer signed.' } })
       : Promise.resolve({ data: COMPLETE_RESULT, error: null })));
     await renderPage();
+    fireEvent.change(await qtyBox(), { target: { value: '1' } });
     await signAndFillSigner();
     const itemReadsBefore = mockFrom.mock.calls.filter(([t]) => t === 'delivery_items').length;
-    await completeAndConfirm();
+    await completePartialAndConfirm();
     await waitFor(() => expect(completeRpcCalls()).toHaveLength(1));
     await waitFor(() => expect(mockFrom.mock.calls.filter(([t]) => t === 'delivery_items').length).toBeGreaterThanOrEqual(itemReadsBefore + 2));
+    // The entered 1 of 2 survives the reload (not reset to full).
+    await waitFor(() => expect(screen.getByRole('spinbutton')).toHaveValue(1));
     // The cleared signature: completing again is refused on screen before any second call.
     mockToast.mockClear();
-    const [pageButton] = await screen.findAllByRole('button', { name: /^Complete Delivery$/ });
-    fireEvent.click(pageButton);
+    fireEvent.click(await screen.findByRole('button', { name: /^Complete \(Partial\)$/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/sign/i)));
     expect(completeRpcCalls()).toHaveLength(1);
   });

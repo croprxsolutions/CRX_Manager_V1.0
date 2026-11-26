@@ -1665,7 +1665,8 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false, threadsHead = HEAD_SHA,
     crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false,
     trees = { main: ['20260101000000_old.sql'], staging: ['20260101000000_old.sql'] }, treesError = null,
-    workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40), stagingTip = "d".repeat(40), stagingBehind = "0", openStaging = [] } = {}) => evaluateLandingGate({
+    workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40), stagingTip = "d".repeat(40), stagingBehind = "0", openStaging = [],
+    posts = null } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
       const key = args.join(" ");
@@ -1680,6 +1681,12 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       throw new Error(`unexpected git ${key}`);
     },
     runGh: (args) => {
+      // The PR comment telling Taha an override let the apply through: `posts` records it, or (null) the post fails.
+      if (args[0] === "api" && args[1] === "-X" && args[2] === "POST") {
+        if (!posts) throw new Error("HTTP 502");
+        posts.push(args);
+        return "4242\n";
+      }
       if (args[0] === "api" && args[1] === "graphql" && args.some((a) => /pullRequests\(baseRefName:\\?"staging/.test(String(a)))) {
         if (openStaging instanceof Error) throw openStaging;
         return JSON.stringify({ data: { repository: { pullRequests: { totalCount: openStaging.length, nodes: openStaging.map((paths) => ({ files: { totalCount: paths.length, nodes: paths.map((p) => ({ path: p })) } })) } } } });
@@ -1870,7 +1877,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
   ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");
   // Mason, 2026-11-25: release/next skips the 4-hour hold (its changes were each held on staging),
-  // and his `taha override #<PR> <code>` stands in for Taha's go-ahead and the hold.
+  // and his `taha override #<PR> <code> unavailable: <reason>` stands in for Taha's go-ahead and the hold; a plain override does not.
   {
     const young = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     refused(gate({ pr: { headRefName: "release/next", createdAt: young, comments: [] } }), "Taha hasn't given the go-ahead",
@@ -1881,12 +1888,37 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     ok(Boolean(code), "the refusal hands Mason an override code for this PR");
     const stateDir = path.join(gateDir, ".claude", "session-state");
     const overrideFile = path.join(stateDir, "taha-lane-override-pr900.json");
-    ok(recordTahaLaneOverride({ dirs: [stateDir], pullRequest: 900, code }).ok === true, "Mason's override records");
+    ok(/unavailable: <why Taha can't>/.test(String(asked.reason)), "and says it needs Taha to be unavailable");
+    ok(recordTahaLaneOverride({ dirs: [stateDir], pullRequest: 900, code }).ok === true, "Mason's plain override records");
     try {
-      ok(gate({ pr: { createdAt: young, comments: [] } }).ok === true, "Mason's override lifts the hold and the go-ahead on a hotfix");
-      ok(gate({ pr: { headRefName: "release/next", comments: [] } }).ok === true, "and on the release");
+      refused(gate({ pr: { createdAt: young, comments: [] } }), "4-hour review hold", "a plain override does not lift the hold on a live apply");
+      refused(gate({ pr: { headRefName: "release/next", comments: [] } }), "Taha hasn't given the go-ahead", "nor Taha's go-ahead on the release");
+    } finally { rmSync(overrideFile, { force: true }); }
+    const code2 = /taha override #900 (\d{6})/.exec(String(gate({ pr: { createdAt: young, comments: [] } }).reason))?.[1];
+    ok(recordTahaLaneOverride({ dirs: [stateDir], pullRequest: 900, code: code2, tahaUnavailable: "out sick today" }).ok === true, "Mason's unavailable override records");
+    try {
+      // Taha's audit (2026-11-25): an override-allowed live apply tags him on the PR, or is refused.
+      refused(gate({ pr: { createdAt: young, comments: [] } }), "comment telling Taha could not be posted", "no comment posted → the apply is refused");
+      const posts = [];
+      ok(gate({ pr: { createdAt: young, comments: [] }, posts }).ok === true, "Mason's override lifts the hold and the go-ahead on a hotfix");
+      ok(posts.length === 1 && posts[0].includes("repos/{owner}/{repo}/issues/900/comments")
+        && posts[0].some((a) => a.startsWith("body=@TahaKhanAbdalli") && a.includes(HEAD_SHA) && !a.includes("out sick today")), "and tags Taha on the PR, naming the head but not Mason's private reason (Sol)");
+      ok(gate({ pr: { createdAt: young, comments: [] }, posts }).ok === true && posts.length === 1, "Taha is told once per migration, not on every retry");
+      // The release gets its own first post (Sol): clear the hotfix's receipt.
+      const saved = JSON.parse(readFileSync(overrideFile, "utf8"));
+      writeFileSync(overrideFile, JSON.stringify({ ...saved, tahaToldApplyFor: [] }));
+      ok(gate({ pr: { headRefName: "release/next", comments: [] }, posts }).ok === true, "and on the release");
+      ok(posts.length === 2 && posts[1].some((a) => a.startsWith("body=@TahaKhanAbdalli")), "which tags Taha too");
+      ok(gate({ pr: { comments: [] }, migName: "20260101000001_second", posts }).ok === true, "a second migration on the same head applies");
+      ok(posts.length === 3 && posts[2].some((a) => a.includes("20260101000001_second")), "is told to Taha too, by name (Luna, round 2)");
+      ok(JSON.parse(readFileSync(overrideFile, "utf8")).kind === "apply", "the override came from the apply refusal's code (Sol)");
+      const quiet = [];
+      ok(gate({ posts: quiet }).ok === true && quiet.length === 0, "when Taha's own go-ahead lets it through, no override comment");
       ok(gate({ pr: { comments: [] }, git: { "rev-parse HEAD": `${"e".repeat(40)}\n` } }).ok === false, "but never the other gates");
       refused(gate({ pr: { number: 901, comments: [] } }), "Taha hasn't given the go-ahead", "another PR is not covered");
+      // Live applies: the override covers only the head it was issued for (Luna, PR 1 round 1).
+      const pushed = "f".repeat(40);
+      refused(gate({ pr: { comments: [], headRefOid: pushed }, git: { "rev-parse HEAD": `${pushed}\n` }, posts }), "Taha hasn't given the go-ahead", "a later push needs a new code");
     } finally { rmSync(overrideFile, { force: true }); }
     refused(gate({ pr: { comments: [] } }), "Taha hasn't given the go-ahead", "without the override the go-ahead is needed again");
   }

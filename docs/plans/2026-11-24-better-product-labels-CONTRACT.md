@@ -40,6 +40,10 @@ In the staging browser, submit a conflicting grouping through the ordinary appro
 
 Proof in local migrated SQL and staging browser: separate entry and approval, stale group and stale density refusal, duplicate submission does not replace the draft, brand insertion and reactivation invalidate within the same transaction, an approved value plus pending draft retains the draft on invalidation, concurrent approval and brand changes leave a consistent result, and the normal print proof uses the correct captured weight or an explicit missing-weight reason.
 
+Mason approved staging-only activation. Taha or Mason lands the staging database job preparation first. That job supplies a transaction-local marker for the activation migration, verifies the switch opened before recording it, and keeps the original migration bytes in the ledger. The staging schema comparison mirrors this. A replay without the verified staging marker keeps the switch closed. A future production activation needs its own approval after the previously approved groups are checked.
+
+Before activation, verify the closed Weight card and workbook paths, legacy approval, and both PDF outputs. After activation, verify that a different admin can approve, stale and duplicate submissions are refused, and the old direct and bulk routes cannot bypass review. Check both staged PDFs for approved, missing and rechecked weights, then compare the pre-activation saved ticket. Reconcile the switch difference before restoring staging from production or refreshing the schema baseline.
+
 ## Owner decisions
 
 - Mason confirmed on 24 November 2026 that only admins enter links and draft weights. A different admin approves a draft.

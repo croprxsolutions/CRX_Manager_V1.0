@@ -1,8 +1,10 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270308110000_enable_liquid_density_review.sql` (SQL sha256: `0698cb66be0556f748417faa442486fe87f3da97c20bbc0982a83cc3afc48f39`). Opens the liquid weight review switch after the staging Weight card is verified.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270308110000_enable_liquid_density_review.sql` (SQL sha256: `c0a77db1e565ab0c0a0056e06bdec41a743df63ea147f2ee8c554008d768ce63`). Opens the liquid weight review switch only in the verified staging database job.
 
 The migration checks that the prior manufacturer-link columns, review reads and actions, brand trigger, and legacy guards match the tested database definitions and function permissions before opening the switch. The reject action comes from `20270307205900_reject_liquid_density_draft.sql` (#2521). The Weight card must ship with or before this migration. Verify it on staging before approving this candidate there. Run `node scripts/smoke/prove-liquid-density-cutover-real-schema.mjs` after the prerequisites are in the checkout. The staging proof covers two-admin review, workbook draft protection, brand joins, active EPA or manufacturer changes, and both saved paperwork outputs. Existing approvals carry forward until changed by an approved review action or a change in the active brands or their identity.
 
-The local cutover test verifies failed prerequisites, draft and approval rules, and draft rejection. Verify the blend ticket and loader PDF on staging for approved, missing, and rechecked weights. Reprint a ticket saved before activation to verify its captured weight is unchanged.
+Before applying, land the separate staging database job preparation. The migration leaves the switch closed without the job's transaction marker. The local cutover test verifies that unmarked and wrongly marked replays stay closed, the staging wrapper rejects an activation that fails to open, and the successful apply has the exact ledger hash and the same function as the staging schema rebuild. It also checks failed prerequisites, draft and approval rules, and draft rejection.
+
+Verify the blend ticket and loader PDF on staging for approved, missing, and rechecked weights. Reprint a ticket saved before activation to verify its captured weight is unchanged.
 
 The [production release hold](../../manual/known-issues.d/2026-11-25-liquid-weight-production-hold.md) stays open until the previously approved multi-brand groups are reviewed and any confirmed mismatches are split and reapproved.
 

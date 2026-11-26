@@ -1,8 +1,11 @@
--- Enable the reviewed liquid weight workflow after its Weight card is available.
--- The guard and trigger functions ship closed in the earlier migration.
+-- Staging activation after the Weight card is available.
+-- Only the verified staging migration transaction supplies this marker.
 
 DO $preflight$
 BEGIN
+  IF current_setting('crx.liquid_weight_staging_project', true) IS DISTINCT FROM 'fsnjredpmakbmhwowjjt' THEN
+    RETURN;
+  END IF;
   IF to_regclass('public.brand_document_links') IS NULL
      OR (SELECT count(*) FROM pg_attribute
          WHERE attrelid = to_regclass('public.brand_document_links')
@@ -55,10 +58,9 @@ BEGIN
   IF public.liquid_density_review_open() IS DISTINCT FROM false THEN
     RAISE EXCEPTION 'PREFLIGHT_LIQUID_DENSITY_REVIEW: expected the review switch to be closed';
   END IF;
+  CREATE OR REPLACE FUNCTION public.liquid_density_review_open() RETURNS boolean
+  LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $function$
+  SELECT true;
+  $function$;
 END;
 $preflight$;
-
-CREATE OR REPLACE FUNCTION public.liquid_density_review_open() RETURNS boolean
-LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $function$
-  SELECT true;
-$function$;

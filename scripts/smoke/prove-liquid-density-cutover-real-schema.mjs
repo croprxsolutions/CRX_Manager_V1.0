@@ -1,17 +1,26 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { wrapperSql } from '../../.github/scripts/db-apply.mjs';
 import { buildContainer, removeContainer, psql, scalar, seedUsers, ROOT } from './undo-paths/harness.mjs';
 
 const migration = '20270308110000_enable_liquid_density_review.sql';
+const stagingRef = 'fsnjredpmakbmhwowjjt';
+const stagingContext = `SET LOCAL crx.liquid_weight_staging_project = '${stagingRef}';`;
 const read = (...parts) => readFileSync(path.join(ROOT, ...parts), 'utf8').replaceAll('\r\n', '\n');
 
 try {
   buildContainer({ stopBefore: migration });
   assert.equal(scalar('SELECT public.liquid_density_review_open();'), 'f');
   const cutover = read('supabase', 'migrations', migration);
+  for (const context of ['', "SET LOCAL crx.liquid_weight_staging_project = 'wrong_project';"]) {
+    psql(`BEGIN;\n${context}\n${cutover}\nCOMMIT;`);
+    assert.equal(scalar('SELECT public.liquid_density_review_open();'), 'f');
+  }
+
   function expectPreflightRefusal(change) {
-    const result = psql(`BEGIN;\n${change}\n${cutover}\nCOMMIT;`, { allowFailure: true });
+    const result = psql(`BEGIN;\n${stagingContext}\n${change}\n${cutover}\nCOMMIT;`, { allowFailure: true });
     assert.equal(result.status, 3, result.stderr + result.stdout);
     assert.match(result.stderr, /PREFLIGHT_LIQUID_DENSITY_REVIEW/);
     assert.equal(scalar('SELECT public.liquid_density_review_open();'), 'f');
@@ -42,8 +51,29 @@ try {
     RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path = public, pg_temp
     AS $$ BEGIN RETURN '{"review_open":false,"brands":[]}'::jsonb; END; $$;`);
 
-  psql(`BEGIN;\n${cutover}\nCOMMIT;`);
+  const stem = migration.slice(0, -4);
+  const wrapped = (text) => wrapperSql({
+    stem, text, run: true, targetRef: stagingRef,
+    sha: createHash('sha256').update(text).digest('hex'),
+  });
+  const failedApply = psql(wrapped('SELECT 1;'), { allowFailure: true });
+  assert.equal(failedApply.status, 3, failedApply.stderr + failedApply.stdout);
+  assert.match(failedApply.stderr, /LIQUID_DENSITY_STAGING_ACTIVATION_DID_NOT_OPEN/);
+  assert.equal(scalar(`SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '${stem}';`), '0');
+
+  const definitionHash = "SELECT md5(pg_get_functiondef('public.liquid_density_review_open()'::regprocedure));";
+  const rebuildDefinition = psql(
+    `BEGIN;\n${stagingContext}\n${cutover}\n${definitionHash}\nROLLBACK;`,
+  ).stdout.match(/\b[0-9a-f]{32}\b/)?.[0];
+  assert.ok(rebuildDefinition);
+  const sql = wrapped(cutover);
+  assert.ok(sql.includes(stagingContext), 'The staging runner preparation must be in the base branch');
+  psql(sql);
   assert.equal(scalar('SELECT public.liquid_density_review_open();'), 't');
+  assert.equal(scalar(definitionHash), rebuildDefinition);
+  assert.equal(scalar(`SELECT encode(sha256(convert_to(statements[1], 'UTF8')), 'hex')
+    FROM supabase_migrations.schema_migrations WHERE name = '${stem}';`),
+  createHash('sha256').update(cutover).digest('hex'));
   seedUsers();
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data)
         VALUES (gen_random_uuid(), 'density-reviewer@example.invalid', '{"full_name":"Density Reviewer","role":"admin"}');`);

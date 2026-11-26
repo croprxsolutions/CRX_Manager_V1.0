@@ -15,6 +15,16 @@ CREATE TRIGGER _local_credit_proof_cancel_notice BEFORE INSERT ON public.notific
   FOR EACH ROW WHEN (NEW.notification_type = 'credit_limit_exceeded')
   EXECUTE FUNCTION public._local_credit_proof_cancel_notice();
 
+CREATE FUNCTION public._local_credit_proof_cancel_marker()
+RETURNS trigger LANGUAGE plpgsql SET search_path = public, pg_temp AS $cancel_marker$
+BEGIN
+  RAISE EXCEPTION 'Invented cancelled marker query' USING ERRCODE = '57014';
+END;
+$cancel_marker$;
+CREATE TRIGGER _local_credit_proof_cancel_marker BEFORE UPDATE ON public.idempotency_keys
+  FOR EACH ROW WHEN (NEW.idempotency_key LIKE '%-marker-cancelled' AND NEW.result ? '_direct_order_credit_notice')
+  EXECUTE FUNCTION public._local_credit_proof_cancel_marker();
+
 DO $proof$
 DECLARE
   admin_id uuid := gen_random_uuid();
@@ -336,6 +346,20 @@ BEGIN
      OR EXISTS (SELECT 1 FROM public.notifications WHERE notification_type='credit_limit_exceeded'
        AND related_entity_id=other_farm_id) THEN
     RAISE EXCEPTION 'A notice went to the relinked order customer';
+  END IF;
+  SET LOCAL ROLE authenticated;
+  result := public.create_direct_order_with_credit_notice(farm_id,business_date,'Invented Cancelled Marker Order',NULL,items,admin_id,base_key || '-marker-cancelled',NULL);
+  IF (result->>'notice_marker_failed')::boolean IS DISTINCT FROM true
+     OR public.send_direct_order_credit_notice(base_key || '-marker-cancelled') IS NOT NULL THEN
+    RAISE EXCEPTION 'A cancelled marker did not preserve the marker failure outcome';
+  END IF;
+  replay := public.create_direct_order_with_credit_notice(farm_id,business_date,'Invented Cancelled Marker Order',NULL,items,admin_id,base_key || '-marker-cancelled',NULL);
+  IF replay->>'order_id' IS DISTINCT FROM result->>'order_id' THEN
+    RAISE EXCEPTION 'A cancelled marker prevented replay of the saved order';
+  END IF;
+  RESET ROLE;
+  IF NOT EXISTS (SELECT 1 FROM public.orders WHERE id=(result->>'order_id')::uuid AND customer_id=farm_id) THEN
+    RAISE EXCEPTION 'A cancelled marker rolled back the order';
   END IF;
 END;
 $proof$;

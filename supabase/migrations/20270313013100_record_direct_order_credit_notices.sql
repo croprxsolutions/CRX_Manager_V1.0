@@ -70,7 +70,7 @@ BEGIN
         AND result->>'order_id' = v_result->>'order_id';
 
       IF NOT FOUND THEN RAISE EXCEPTION 'DIRECT_ORDER_CREDIT_NOTICE_RECEIPT_MISSING'; END IF;
-    EXCEPTION WHEN OTHERS THEN
+    EXCEPTION WHEN query_canceled OR OTHERS THEN
       RAISE LOG 'Could not authorize a direct order credit notice (SQLSTATE %)', SQLSTATE;
       RETURN v_result || jsonb_build_object('notice_marker_failed', true);
     END;

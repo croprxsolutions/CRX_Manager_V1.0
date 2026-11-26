@@ -209,8 +209,10 @@ export default function PaymentAllocation() {
   }, [toast]);
 
   const selectCustomer = useCallback((c: CustomerOption) => {
-    focusAmountAfterPick.current = true;
     setCustomerBoxText(null);
+    // Re-picking the farm already chosen keeps its invoices and typed allocations (a failed load or a saved check still reloads).
+    if (selectedCustomer?.id === c.id && !invoicesFailed && !lastResult) return;
+    focusAmountAfterPick.current = true;
     // Switching to another farm starts a fresh check, so one farm's check can't be posted to another (Mason, 2026-11-25).
     if (selectedCustomer && selectedCustomer.id !== c.id) {
       setCheckAmountInput('');
@@ -223,7 +225,7 @@ export default function PaymentAllocation() {
     setLastResult(null);
     setRetryRefused(false);
     fetchInvoices(c.id);
-  }, [fetchInvoices, selectedCustomer]);
+  }, [fetchInvoices, selectedCustomer, invoicesFailed, lastResult]);
 
   const clearCustomer = useCallback(() => {
     // A load still running for the cleared customer must not refill the list.
@@ -538,6 +540,8 @@ export default function PaymentAllocation() {
                   selectedLabel={selectedCustomer?.farm_name ?? ''}
                   onSelect={(customer) => {
                     if (customer) selectCustomer(customer);
+                    // An emptied box keeps a typed check: the name comes back and posting waits for a pick or "keep".
+                    else if (hasUnsavedPayment) return false;
                     else clearCustomer();
                   }}
                   select={PAYMENT_CUSTOMER_SELECT}

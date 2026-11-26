@@ -296,7 +296,7 @@ describe('Reports commission history', () => {
     expect(await screen.findByText('North Barn')).toBeInTheDocument();
     expect(screen.getByText('South Barn')).toBeInTheDocument();
     expect(screen.getByText('No stock record')).toBeInTheDocument();
-    expect(screen.getByText('Products:').parentElement?.textContent).toMatch(/Products:\s*2\s*\(3 stock rows\)/);
+    expect(screen.getByText('Products:').parentElement?.textContent).toMatch(/Products:\s*2\s*\(2 stock rows\)/);
     expect(screen.getByText('Below Reorder:').parentElement?.textContent).toMatch(/Below Reorder:\s*1\s*\(2 stock rows\)/);
     expect(screen.getByText(/Current stock as of now/)).toBeInTheDocument();
     expect(container.querySelectorAll('input[type="date"]')).toHaveLength(0);

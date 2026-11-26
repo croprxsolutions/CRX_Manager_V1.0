@@ -1802,6 +1802,9 @@ export default function Reports() {
 
           {/* Inventory cost total */}
           {isAdmin && operationalTab === 'inventory_cost' && inventoryCostData.length > 0 && (() => {
+            // A row with no location is an active product with no stock record, not a stock row.
+            const stockRows = (rows: InventoryCostRow[]) => rows.filter((r) => r.location != null).length;
+            const stockRowsLabel = (n: number) => `${n} stock ${n === 1 ? 'row' : 'rows'}`;
             const belowReorder = inventoryCostData.filter((r) => r.below_reorder);
             const valuation = summarizeInventoryValue(inventoryCostData.map((r) => ({ quantity: r.quantity_available, unitCost: r.unit_cost, rowValue: r.total_cost_value })));
             const note = inventoryValueNote(valuation);
@@ -1814,11 +1817,11 @@ export default function Reports() {
               </span>
               <span className="text-sm text-blue-800">
                 <span className="font-semibold">Products:</span> {new Set(inventoryCostData.map((r) => r.product_id)).size}
-                {' '}({inventoryCostData.length} stock {inventoryCostData.length === 1 ? 'row' : 'rows'})
+                {' '}({stockRowsLabel(stockRows(inventoryCostData))})
               </span>
               <span className="text-sm text-red-600">
                 <span className="font-semibold">Below Reorder:</span> {new Set(belowReorder.map((r) => r.product_id)).size}
-                {' '}({belowReorder.length} stock {belowReorder.length === 1 ? 'row' : 'rows'})
+                {' '}({stockRowsLabel(stockRows(belowReorder))})
               </span>
             </div>
             );

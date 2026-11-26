@@ -1,3 +1,3 @@
 ## 2026-11-25 - Rebate claim creation
 
-New rebate claims use the existing checked creation process. Sales reps can create pending claims and view claim amounts across all customers. Approval and payment stay with admins.
+Rebate claims use the existing checked creation and status-change processes. The database still allows office claim reads and keeps approvals and payments with admins.

@@ -9,6 +9,7 @@ const {
   mockProductEq,
   mockToast,
   mockGetCostBasisWorkspace,
+  mockGetProductPriceHistory,
   mockNavigate,
 } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
@@ -19,6 +20,7 @@ const {
   mockProductEq: vi.fn(),
   mockToast: vi.fn(),
   mockGetCostBasisWorkspace: vi.fn(),
+  mockGetProductPriceHistory: vi.fn(),
 }));
 
 const product = {
@@ -185,10 +187,14 @@ vi.mock('../lib/productCostBasis', async (importOriginal) => {
   return { ...actual, getProductCostBasisWorkspace: mockGetCostBasisWorkspace };
 });
 
+vi.mock('../lib/supplierPricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/supplierPricing')>();
+  return { ...actual, getProductPriceHistory: mockGetProductPriceHistory };
+});
+
 vi.mock('../components/products/ProductPriceHistory', () => ({
-  default: ({ costBasisWorkspace, costBasisBusy, reloadToken, onSelectSupplierBasis, onSelectPurchaseBasis }: {
+  default: ({ costBasisWorkspace, costBasisBusy, onSelectSupplierBasis, onSelectPurchaseBasis }: {
     costBasisBusy?: boolean;
-    reloadToken?: number;
     costBasisWorkspace?: {
       supplier_candidates: Array<{ supplier_price_observation_id: string }>;
       purchase_candidates: Array<{ purchase_order_item_id: string }>;
@@ -196,7 +202,7 @@ vi.mock('../components/products/ProductPriceHistory', () => ({
     onSelectSupplierBasis?: (candidate: unknown) => void;
     onSelectPurchaseBasis?: (candidate: unknown) => void;
   }) => (
-    <div data-testid="price-history" data-token={reloadToken} data-busy={String(Boolean(costBasisBusy))}>
+    <div data-testid="price-history" data-busy={String(Boolean(costBasisBusy))}>
       {costBasisWorkspace?.supplier_candidates.map((candidate) => (
         <button key={candidate.supplier_price_observation_id} type="button" onClick={() => onSelectSupplierBasis?.(candidate)}>
           Select supplier evidence
@@ -264,6 +270,7 @@ describe('ProductDetail governed pricing flow', () => {
     routeState = null;
     productLoadResults = [];
     costHistoryLoadResult = { data: [], error: null };
+    mockGetProductPriceHistory.mockResolvedValue({ product_id: product.id, points: [] });
     productMutationResult = { data: [product], error: null };
     mockPreviewPricing.mockResolvedValue({
       change_set_id: '22222222-2222-4222-8222-222222222222',
@@ -441,6 +448,9 @@ describe('ProductDetail governed pricing flow', () => {
         old_cost: 49,
         new_cost: 50,
         change_note: 'Legacy cost update',
+        change_source: 'product_page',
+        price_source: 'Vendor price list',
+        changer: { full_name: 'Casey Green' },
         changed_at: '2026-08-04T12:00:00Z',
       }],
       error: null,
@@ -450,7 +460,33 @@ describe('ProductDetail governed pricing flow', () => {
     render(<ProductDetail />);
 
     expect(await screen.findByText('Legacy cost update')).toBeInTheDocument();
+    expect(screen.getByText('Casey Green · Product page · Vendor price list')).toBeInTheDocument();
     expect(screen.queryByText('Loading cost history…')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['vendor-change-set', 'Vendor price list'],
+    ['newer-manual-change-set', 'manual override'],
+  ])('shows the current basis source from its own change set (%s)', async (changeSetId, label) => {
+    const workspace = await mockGetCostBasisWorkspace();
+    mockGetCostBasisWorkspace.mockResolvedValue({
+      ...workspace,
+      current_basis: {
+        id: 'current-basis', basis_type: 'manual_override', cost_cents: 5000n, reason: 'Updated cost',
+        selection_source: 'product_page', selected_at: '2026-08-05T12:00:00Z',
+      },
+    });
+    mockGetProductPriceHistory.mockResolvedValue({ product_id: product.id, points: [
+      { stream: 'selected_cost_basis', source_id: 'current-basis', provenance: { pricing_change_set_id: changeSetId } },
+    ] });
+    costHistoryLoadResult = { error: null, data: [
+      { id: 'vendor-history', change_set_id: 'vendor-change-set', old_cost: 49, new_cost: 50,
+        price_source: 'Vendor price list', change_source: 'product_page', changed_at: '2026-08-04T12:00:00Z' },
+    ] };
+
+    render(<ProductDetail />);
+    const basis = await screen.findByText('Current selected basis');
+    expect(await within(basis.parentElement!).findByText(label)).toBeInTheDocument();
   });
 
   it('Cost History lists only real cost changes, the newest 20, with No cost for a blank side and business-day dates', async () => {
@@ -1367,7 +1403,7 @@ describe('ProductDetail governed pricing flow', () => {
   it('after a pricing apply the history cards refresh at once and cost-basis selection waits for the new options', async () => {
     render(<ProductDetail />);
     await screen.findByRole('button', { name: 'Select supplier evidence' });
-    expect(screen.getByTestId('price-history')).toHaveAttribute('data-token', '0');
+    expect(mockGetProductPriceHistory).toHaveBeenCalledTimes(1);
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
     fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
@@ -1377,7 +1413,7 @@ describe('ProductDetail governed pricing flow', () => {
     // The cost-basis re-read never answers: the cards must not wait for it (Sol r2 #29).
     mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise(() => {}));
     fireEvent.click(screen.getByRole('button', { name: 'Apply approved changes' }));
-    await waitFor(() => expect(screen.getByTestId('price-history')).toHaveAttribute('data-token', '1'));
+    await waitFor(() => expect(mockGetProductPriceHistory).toHaveBeenCalledTimes(2));
     expect(screen.getByTestId('price-history')).toHaveAttribute('data-busy', 'true');
     expect(screen.getByText('Refreshing the cost-basis options…')).toBeInTheDocument();
   });

@@ -41,7 +41,7 @@ function makePreview(overrides: Partial<PricingPreviewResult> = {}): PricingPrev
             cost_cents: 1000n,
             tier1_margin_percent: '20', tier1_margin: 0.2, tier1_price: '12.50', tier1_price_cents: 1250n,
             tier2_margin_percent: '25', tier2_margin: 0.25, tier2_price: '13.33', tier2_price_cents: 1333n,
-            tier3_margin_percent: '30', tier3_margin: 0.3, tier3_price: '14.29', tier3_price_cents: 1429n,
+            tier3_margin_percent: '30.020153', tier3_margin: 0.30020153, tier3_price: '14.29', tier3_price_cents: 1429n,
             tier1_price_per_acre_cents: 625n,
             tier2_price_per_acre_cents: null,
             tier3_price_per_acre_cents: null,
@@ -58,8 +58,8 @@ function makePreview(overrides: Partial<PricingPreviewResult> = {}): PricingPrev
           tier2_gross_margin: 0.25,
           tier2_price: '15.00',
           tier2_price_cents: 1500n,
-          tier3_margin_percent: '25',
-           tier3_margin: 0.25,
+          tier3_margin_percent: '25.003267',
+           tier3_margin: 0.25003267,
           tier3_gross_margin: 0.33333333,
           tier3_price: '16.00',
           tier3_price_cents: 1600n,
@@ -311,6 +311,10 @@ describe('PricingChangePreviewModal', () => {
     expect(within(rows[1]).getByText('$12.50')).toBeInTheDocument();
     expect(within(rows[1]).getByText('$5.75 / acre')).toBeInTheDocument();
     expect(within(rows[1]).getByText('Markup %: 25%')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Markup %: 33.33%')).toBeInTheDocument();
+    const tierThree = within(rows[1]).getByText('Tier 3').parentElement!;
+    expect(within(tierThree).getByText('30.02%')).toBeInTheDocument();
+    expect(within(tierThree).getByText('25%')).toBeInTheDocument();
     expect(within(rows[1]).getByText('Warning: this price is below cost.')).toBeInTheDocument();
 
     expect(within(rows[0]).getByText('Later Product')).toBeInTheDocument();

@@ -2,6 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('tells the admin to reload after a stale purchase order cost correction', () => {
+    expect(sanitizeError({ code: 'P0001', message: 'PO_COST_CHANGED_SINCE_LOADED: stale line' }))
+      .toBe('A line’s cost or product changed since you opened this purchase order. Reload it and review the lines before saving again');
+  });
+
+  it.each(['COST_INVALID', 'PRODUCT_INVALID', 'PAIR_REQUIRED'])('maps the PO_EXPECTED_%s error', (code) => {
+    expect(sanitizeError(`PO_EXPECTED_${code}: invalid details`))
+      .toBe('The purchase order line details could not be verified. Reload the purchase order and try again');
+  });
+
   it('keeps document-link errors actionable and strips control characters', () => {
     expect(sanitizeError({ message: 'BRAND_DOCUMENT_URL_BLOCKED: Use a manufacturer link.\tChoose another URL.' }))
       .toBe('Use a manufacturer link. Choose another URL.');

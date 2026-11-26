@@ -192,6 +192,7 @@ export default function PurchaseOrderDetail() {
 
   /* Admin unit-cost entry, correction and confirmation (Option B, Mason 2026-10-20: reps order and receive without cost) */
   const [costOpen, setCostOpen] = useState(false);
+  const [costItems, setCostItems] = useState<PurchaseOrderItem[]>([]);
   const [costDrafts, setCostDrafts] = useState<Record<string, string>>({});
   const [costReason, setCostReason] = useState('');
   /* Admin-only cost history (purchase_order_item_cost_changes; RLS returns nothing to anyone else) */
@@ -1300,6 +1301,7 @@ export default function PurchaseOrderDetail() {
   };
 
   const openCostModal = () => {
+    setCostItems(items);
     setCostDrafts(Object.fromEntries(items.map((item) => [item.id, String(item.unit_cost ?? 0)])));
     setCostReason('');
     setCostOpen(true);
@@ -1322,7 +1324,7 @@ export default function PurchaseOrderDetail() {
   // A line with any receiving record counts as received even after a reversal took its quantity back
   // to zero: the server requires a reason for those too (Luna).
   const receivedLineIds = new Set(receivingHistory.map((r) => r.po_item_id));
-  const costChanges = items.flatMap((item) => {
+  const costChanges = costItems.flatMap((item) => {
     const draft = costDrafts[item.id];
     if (draft === undefined || draft.trim() === '') return [];
     const cents = parseCostDraft(draft);
@@ -1330,9 +1332,13 @@ export default function PurchaseOrderDetail() {
     const currentCents = purchaseOrderUnitCostCents(item.unit_cost ?? 0);
     const changed = cents !== currentCents;
     return changed || item.cost_needs_review
-      ? [{ id: item.id, unit_cost_cents: cents, changed, lowered: cents < currentCents, received: item.quantity_received > 0 || receivedLineIds.has(item.id) }]
+      ? [{
+        // The server compares COALESCE(unit_cost_cents, 0) on the locked row, so send the stored cents the screen loaded.
+        line: { id: item.id, unit_cost_cents: cents, expected_unit_cost_cents: item.unit_cost_cents === undefined ? currentCents : (item.unit_cost_cents ?? 0), expected_product_id: item.product_id },
+        changed, lowered: cents < currentCents, received: item.quantity_received > 0 || receivedLineIds.has(item.id),
+      }]
       : [];
-  }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }).sort((a, b) => (a.line.id < b.line.id ? -1 : a.line.id > b.line.id ? 1 : 0));
   // A change to a received line must say why (Mason, 2026-10-20); the server refuses it otherwise.
   const costReasonRequired = costChanges.some((c) => c.changed && c.received);
 
@@ -1340,7 +1346,8 @@ export default function PurchaseOrderDetail() {
   // and the purchase order total; never inventory or the product's catalog cost.
   const handleSaveCosts = async () => {
     if (!po || !profile || !isAdmin) return;
-    const invalid = items.some((item) => {
+    if (costItems.some((item) => item.purchase_order_id !== id)) return;
+    const invalid = costItems.some((item) => {
       const draft = costDrafts[item.id];
       if (draft === undefined || draft.trim() === '') return false;
       return parseCostDraft(draft) === null;
@@ -1367,7 +1374,7 @@ export default function PurchaseOrderDetail() {
       toast('error', 'Keep the reason to 500 characters');
       return;
     }
-    const lines = costChanges.map(({ id: lineId, unit_cost_cents }) => ({ id: lineId, unit_cost_cents }));
+    const lines = costChanges.map(({ line }) => line);
     setSaving(true);
     const costScope = `set-po-costs:${id}:${fingerprintIntentPayload([lines, reason])}`;
     try {
@@ -2335,7 +2342,7 @@ export default function PurchaseOrderDetail() {
 
       {/* Unit cost: set, correct or confirm (admins only) */}
       {/* Gated on isAdmin too: a role change mid-session must not leave loaded costs on screen. */}
-      <Modal open={isAdmin && costOpen} onClose={() => setCostOpen(false)} title="Unit" accent="Cost">
+      <Modal open={isAdmin && costOpen && costItems[0]?.purchase_order_id === id} onClose={() => setCostOpen(false)} title="Unit" accent="Cost">
         <div className="space-y-4">
           <p className="text-sm text-secondary">
             Unit cost per line, received lines included. This changes only the purchase order&apos;s cost and total:
@@ -2348,7 +2355,7 @@ export default function PurchaseOrderDetail() {
               bill or with a vendor credit.
             </p>
           )}
-          {items.map((item) => (
+          {costItems.map((item) => (
             <div key={item.id} className="grid grid-cols-3 items-center gap-3">
               <span className="col-span-2 text-sm text-nav-dark">
                 {(item.product as unknown as { product_name: string })?.product_name || item.product_name || 'Unknown'}

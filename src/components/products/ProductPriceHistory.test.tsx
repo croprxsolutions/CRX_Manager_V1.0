@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useLoad } from '../../hooks/useLoad';
+import { getProductPriceHistory } from '../../lib/supplierPricing';
 
 const { mockGetHistory, captureException } = vi.hoisted(() => ({ mockGetHistory: vi.fn(), captureException: vi.fn() }));
 
@@ -12,7 +14,19 @@ vi.mock('../../lib/supplierPricing', async () => {
   return { ...actual, getProductPriceHistory: mockGetHistory };
 });
 
-import ProductPriceHistory from './ProductPriceHistory';
+import ProductPriceHistoryCard from './ProductPriceHistory';
+
+function ProductPriceHistory({ reloadToken, ...props }: Omit<React.ComponentProps<typeof ProductPriceHistoryCard>, 'read'> & { reloadToken?: number }) {
+  const read = useLoad(props.productId, async () => {
+    const result = await getProductPriceHistory(props.productId);
+    if (result.product_id !== props.productId) throw new Error('Price history returned the wrong Product.');
+    return result;
+  }, {
+    refreshToken: reloadToken,
+    report: { extra: { context: 'product_price_history' } },
+  });
+  return <ProductPriceHistoryCard {...props} read={read} />;
+}
 
 describe('ProductPriceHistory', () => {
   it('shows all evidence streams, supplier unknown, and filters supplier-specific points', async () => {
@@ -43,7 +57,7 @@ describe('ProductPriceHistory', () => {
         {
           stream: 'selected_cost_basis', source_id: 'cost-1', vendor_id: null,
           supplier_name: null, cost_cents: 2_100n, normalized_cost_cents: 2_100n,
-          occurred_at: '2026-07-03T12:00:00Z', detail: 'pricing_worksheet', provenance: {},
+          occurred_at: '2026-07-03T12:00:00Z', detail: 'manual_override', provenance: { pricing_change_set_id: 'set-vendor' },
         },
         {
           stream: 'actual_purchase', source_id: 'po-1', vendor_id: null,
@@ -58,6 +72,7 @@ describe('ProductPriceHistory', () => {
     render(
       <ProductPriceHistory
         productId="product-1"
+        costHistoryPriceSources={new Map([['set-vendor', 'Vendor price list']])}
         costBasisWorkspace={{
           enabled: true,
           product: {
@@ -86,6 +101,7 @@ describe('ProductPriceHistory', () => {
     expect(screen.getAllByText('The Andersons')).toHaveLength(2);
     expect(screen.getAllByText('Van Diest')).toHaveLength(2);
     expect(screen.getByText('CRX selected basis')).toBeInTheDocument();
+    expect(screen.getByText(/Vendor price list/)).toBeInTheDocument();
     expect(screen.getAllByText('Received PO cost').length).toBeGreaterThan(0);
     const chart = screen.getByRole('img', { name: 'Product supplier price history chart' });
     // Audit 2026-11-24 #2: only per-inventory-unit costs share the chart; the two package-unit

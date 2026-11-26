@@ -4,11 +4,11 @@ import Button from '../ui/Button';
 import Card, { CardHeader } from '../ui/Card';
 import { LoadFailedState } from '../ui/EmptyState';
 import Select from '../ui/Select';
-import { useLoad } from '../../hooks/useLoad';
-import { timeFraction } from '../../lib/sellPriceHistory';
+import type { useLoad } from '../../hooks/useLoad';
+import { costBasisSourceLabel, timeFraction } from '../../lib/sellPriceHistory';
 import {
   formatSupplierCents,
-  getProductPriceHistory,
+  type SupplierPriceHistory,
   type SupplierPriceHistoryPoint,
 } from '../../lib/supplierPricing';
 import type {
@@ -57,29 +57,23 @@ function chartPosition(
 
 interface ProductPriceHistoryProps {
   productId: string;
+  read: ReturnType<typeof useLoad<SupplierPriceHistory>>;
+  costHistoryPriceSources?: ReadonlyMap<string, string>;
   costBasisWorkspace?: ProductCostBasisWorkspace | null;
   costBasisBusy?: boolean;
-  reloadToken?: number;
   onSelectSupplierBasis?: (candidate: SupplierCostBasisCandidate) => void;
   onSelectPurchaseBasis?: (candidate: PurchaseCostBasisCandidate) => void;
 }
 
 export default function ProductPriceHistory({
   productId,
+  read,
+  costHistoryPriceSources,
   costBasisWorkspace,
   costBasisBusy = false,
-  reloadToken = 0,
   onSelectSupplierBasis,
   onSelectPurchaseBasis,
 }: ProductPriceHistoryProps) {
-  const read = useLoad(`supplier-price-history:${productId}`, async () => {
-    const result = await getProductPriceHistory(productId);
-    if (result.product_id !== productId) throw new Error('Price history returned the wrong Product.');
-    return result;
-  }, {
-    refreshToken: reloadToken,
-    report: { extra: { context: 'product_price_history' } },
-  });
   const history = read.status === 'loaded' ? read.data : null;
   // Shown evidence that is being re-read, or whose last re-read failed, is not acted on.
   const outdated = read.status === 'loaded' && (read.refreshing || read.stale);
@@ -274,7 +268,7 @@ export default function ProductPriceHistory({
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-secondary">
-                  {formatBusinessDate(point.occurred_at)} · {point.detail.replace(/_/g, ' ')}
+                  {formatBusinessDate(point.occurred_at)} · {costBasisSourceLabel(point.detail, point.provenance.pricing_change_set_id, costHistoryPriceSources)}
                   {point.normalized_cost_cents === null ? ' · not charted: cannot be converted to the inventory unit' : ''}
                 </p>
                 {point.stream === 'supplier_observation' && (() => {

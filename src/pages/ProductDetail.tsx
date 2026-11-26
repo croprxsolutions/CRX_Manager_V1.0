@@ -44,6 +44,8 @@ import { sanitizeError, assertRpcResult, checkMutationResult, hasRpcCode, RpcErr
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { BUSINESS_TIMEZONE, localToday } from '../lib/dateUtils';
 import { formatExactUSD } from '../lib/money';
+import { costBasisSourceLabel, sourceLabel } from '../lib/sellPriceHistory';
+import { getProductPriceHistory } from '../lib/supplierPricing';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
 import { Sentry } from '../lib/sentry';
 import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, PRODUCT_FORM_OPTIONS } from '../lib/units';
@@ -51,7 +53,7 @@ import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { useLoad } from '../hooks/useLoad';
 import { usePhoneSections } from '../hooks/usePhoneSections';
-import type { CostHistory, EpaLookupResult, Product, ProductBrand, ProductRateLock, UnitConversion } from '../types';
+import type { EpaLookupResult, Product, ProductBrand, ProductRateLock, UnitConversion } from '../types';
 import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
@@ -479,12 +481,12 @@ export default function ProductDetail() {
   const productStale = productRead.status === 'loaded' && productRead.stale;
   const reloadRequired = pricingReloadRequired || productStale;
   // cost_history is admin-only under RLS (the panel only renders for admins).
-  const costHistoryRead = useLoad<CostHistory[]>(isAdmin && !isNew && id ? `cost-history:${id}` : null, async () => {
+  const costHistoryRead = useLoad(isAdmin && !isNew && id ? `cost-history:${id}` : null, async () => {
     // cost_history also logs price-only changes (cost unchanged) for Sell Price History. PostgREST cannot
     // compare two columns, so read every row and keep the newest 20 whose cost really changed.
     const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('cost_history')
-      .select('*', { count: 'exact' })
+      .select('id, old_cost, new_cost, change_note, changed_at, change_source, change_set_id, price_source, changer:profiles!cost_history_changed_by_fkey(full_name)', { count: 'exact' })
       .eq('product_id', id!)
       // The starting snapshot (20261026140000) records no change; the Sell Price History card shows it.
       .neq('change_source', 'starting_snapshot')
@@ -493,10 +495,21 @@ export default function ProductDetail() {
       .range(from, to)));
     if (error) throw error;
     if (!Array.isArray(data)) throw new Error('cost history read returned no list');
-    return (data as CostHistory[]).filter((row) => row.old_cost !== row.new_cost).slice(0, 20);
+    const priceSources = new Map<string, string>();
+    for (const row of data) {
+      const source = row.price_source?.trim();
+      if (row.change_set_id && source && !priceSources.has(row.change_set_id)) priceSources.set(row.change_set_id, source);
+    }
+    return { changes: data.filter((row) => row.old_cost !== row.new_cost).slice(0, 20), priceSources };
   }, { report: { tags: { read: 'product_detail_cost_history' } } });
   const reloadCostHistory = costHistoryRead.reload;
-  const costHistory = costHistoryRead.status === 'loaded' ? costHistoryRead.data : NO_ROWS;
+  const costHistory = costHistoryRead.status === 'loaded' ? costHistoryRead.data.changes : NO_ROWS;
+  const costHistoryPriceSources = costHistoryRead.status === 'loaded' ? costHistoryRead.data.priceSources : undefined;
+  const supplierHistoryRead = useLoad(isAdmin && !isNew && id ? `supplier-price-history:${id}` : null, async () => {
+    const result = await getProductPriceHistory(id!);
+    if (result.product_id !== id) throw new Error('Price history returned the wrong Product.');
+    return result;
+  }, { refreshToken: priceHistoryReloadToken, report: { extra: { context: 'product_price_history' } } });
   const costBasisRead = useLoad<ProductCostBasisWorkspace>(isAdmin && !isNew && id ? `cost-basis:${id}` : null, async () => {
     const workspace = await getProductCostBasisWorkspace(id!);
     if (workspace.product.id !== id) throw new Error('Cost-basis workspace returned the wrong Product.');
@@ -504,6 +517,13 @@ export default function ProductDetail() {
   }, { report: { tags: { read: 'product_detail_cost_basis' } } });
   const reloadCostBasis = costBasisRead.reload;
   const costBasisWorkspace = costBasisRead.status === 'loaded' ? costBasisRead.data : null;
+  const currentBasis = costBasisWorkspace?.current_basis;
+  const currentBasisPoint = currentBasis && supplierHistoryRead.status === 'loaded'
+    ? supplierHistoryRead.data.points.find((point) => point.stream === 'selected_cost_basis' && point.source_id === currentBasis.id)
+    : undefined;
+  const currentBasisLabel = currentBasis
+    ? costBasisSourceLabel(currentBasis.basis_type, currentBasisPoint?.provenance.pricing_change_set_id, costHistoryPriceSources)
+    : 'No baseline';
   const costBasisLoading = costBasisRead.status === 'loading';
   const costBasisLoadFailed = costBasisRead.status === 'failed';
   // Refreshing or out of date: the options shown may be from before a pricing change, so no selection.
@@ -2428,7 +2448,7 @@ export default function ProductDetail() {
                     <div className="grid gap-3 rounded-lg border border-gray-200 p-4 sm:grid-cols-3">
                       <div>
                         <p className="text-xs text-secondary">Current selected basis</p>
-                        <p className="font-semibold">{costBasisWorkspace.current_basis?.basis_type.replace(/_/g, ' ') ?? 'No baseline'}</p>
+                        <p className="font-semibold">{currentBasisLabel}</p>
                       </div>
                       <div>
                         <p className="text-xs text-secondary">Selected cost</p>
@@ -2505,9 +2525,10 @@ export default function ProductDetail() {
               <PhoneSection title="Price & Cost History" {...sectionProps('history')}>
               <ProductPriceHistory
                 productId={id}
+                read={supplierHistoryRead}
+                costHistoryPriceSources={costHistoryPriceSources}
                 costBasisWorkspace={costBasisWorkspace}
                 costBasisBusy={costBasisBusy || costBasisUnsure || reloadRequired}
-                reloadToken={priceHistoryReloadToken}
                 onSelectSupplierBasis={(candidate) => void handleSupplierBasisSelection(candidate)}
                 onSelectPurchaseBasis={(candidate) => void handlePurchaseBasisSelection(candidate)}
               />
@@ -2537,6 +2558,10 @@ export default function ProductDetail() {
                           <span className="text-crx-green font-medium">{ch.new_cost == null ? 'No cost' : formatExactUSD(ch.new_cost)}</span>
                         </div>
                         {ch.change_note && <p className="text-xs text-secondary mt-1">{ch.change_note}</p>}
+                        <p className="text-xs text-secondary mt-1">
+                          {ch.changer?.full_name?.trim() || 'Unknown user'} · {sourceLabel(ch.change_source)}
+                          {ch.price_source?.trim() && ` · ${ch.price_source.trim()}`}
+                        </p>
                         <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString('en-US', { timeZone: BUSINESS_TIMEZONE })}</p>
                       </div>
                     ))}
@@ -2571,7 +2596,7 @@ export default function ProductDetail() {
                           <strong className="text-nav-dark">
                             ${formatCostBasisDollars(costBasisWorkspace.current_basis.cost_cents)}
                           </strong>{' '}
-                          ({costBasisWorkspace.current_basis.basis_type.replace(/_/g, ' ')}) selected on{' '}
+                          ({currentBasisLabel}) selected on{' '}
                           {new Date(costBasisWorkspace.current_basis.selected_at).toLocaleDateString()}. This is
                           current cost provenance, not a backfilled historical price-change event.
                         </p>

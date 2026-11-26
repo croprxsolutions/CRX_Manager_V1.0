@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PurchaseOrderDetail from './PurchaseOrderDetail';
+import { fingerprintIntentPayload } from '../lib/idempotency';
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -203,5 +204,33 @@ describe('PurchaseOrderDetail Product identity edit', () => {
         ]),
       }),
     ));
+  });
+
+  it('sends each loaded cost and product in the correction and retry scope', async () => {
+    render(
+      <MemoryRouter initialEntries={['/purchase-orders/po-1']}>
+        <Routes>
+          <Route path="/purchase-orders/:id" element={<PurchaseOrderDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Correct Unit Cost' }));
+    const dialog = screen.getByRole('dialog', { name: /unit\s*cost/i });
+    const [receivedCost, editableCost] = within(dialog).getAllByRole('spinbutton');
+    fireEvent.change(receivedCost, { target: { value: '102.15' } });
+    fireEvent.change(editableCost, { target: { value: '24.80' } });
+    const reason = 'Vendor invoice correction';
+    fireEvent.change(within(dialog).getByLabelText(/reason/i), { target: { value: reason } });
+
+    const lines = [
+      { id: 'editable-line', unit_cost_cents: 2480, expected_unit_cost_cents: 2000, expected_product_id: 'product-a' },
+      { id: 'received-line', unit_cost_cents: 10215, expected_unit_cost_cents: 10000, expected_product_id: 'product-a' },
+    ];
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Cost' }));
+
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('set_purchase_order_item_costs', expect.objectContaining({
+      p_items: lines, p_reason: reason,
+    })));
+    expect(mocks.resetKey).toHaveBeenCalledWith(`set-po-costs:po-1:${fingerprintIntentPayload([lines, reason])}`);
   });
 });

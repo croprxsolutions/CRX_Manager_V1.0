@@ -113,6 +113,9 @@ describe('NewPurchaseOrder save and submit workflow', () => {
       calls.push(name);
       if (name === 'save_purchase_order') {
         expect(args?.p_po_payload).toEqual(expect.objectContaining({ status: 'draft' }));
+        expect(args?.p_items).toEqual([
+          { product_id: 'product-1', product_name: 'Test Herbicide', quantity_ordered: 5, unit_size: 'Gallon', quantity_received: 0 },
+        ]);
         return { data: { po_id: 'po-1', po_number: 'PO-TEST-1' }, error: null };
       }
       if (name === 'submit_purchase_order') {
@@ -188,6 +191,38 @@ describe('NewPurchaseOrder save and submit workflow', () => {
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_purchase_order', expect.anything()));
     const [, args] = mockRpc.mock.calls.find(([name]) => name === 'save_purchase_order')!;
     expect(args.p_items).toEqual([expect.objectContaining({ unit_cost_cents: 1250, unit_cost: 12.5 })]);
+  });
+
+  it.each(['', '12oops', '-1', '1.005', '1e2', '1e308'])('refuses the admin cost %j and names the product', async (cost) => {
+    mockAuth.role = 'admin';
+    mockRpc.mockResolvedValue({ data: [], error: null });
+    await fillValidPurchaseOrder();
+
+    const costInput = screen.getByRole('textbox', { name: 'Unit cost for Test Herbicide' });
+    fireEvent.change(costInput, { target: { value: cost } });
+    expect(costInput).toHaveValue(cost);
+    fireEvent.click(screen.getByRole('button', { name: 'Save as Draft' }));
+
+    expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Enter a non-negative unit cost for "Test Herbicide"'));
+    expect(mockRpc).not.toHaveBeenCalledWith('save_purchase_order', expect.anything());
+  });
+
+  it('saves an explicitly entered zero with the free goods warning', async () => {
+    mockAuth.role = 'admin';
+    mockRpc.mockImplementation(async (name: string) => name === 'save_purchase_order'
+      ? { data: { po_id: 'po-free', po_number: 'PO-FREE' }, error: null }
+      : { data: [], error: null });
+    await fillValidPurchaseOrder();
+
+    const costInput = screen.getByRole('textbox', { name: 'Unit cost for Test Herbicide' });
+    fireEvent.change(costInput, { target: { value: '0' } });
+    expect(costInput).toHaveValue('0');
+    fireEvent.click(screen.getByRole('button', { name: 'Save as Draft' }));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_purchase_order', expect.objectContaining({
+      p_items: [expect.objectContaining({ unit_cost: 0, unit_cost_cents: 0 })],
+    })));
+    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('has $0 unit cost'));
   });
 
   it('suggests the preferred vendor cost on the Reorder deep link too', async () => {

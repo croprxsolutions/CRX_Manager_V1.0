@@ -10,7 +10,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import {
-  isWholeCentPurchaseOrderCost,
+  parsePurchaseOrderUnitCostDollars,
   purchaseOrderCentsToDollars,
   purchaseOrderLineTotalCents,
   purchaseOrderUnitCostCents,
@@ -34,10 +34,9 @@ interface POItemDraft {
   key: string;
   product_id: string;
   quantity_ordered: number;
-  unit_cost: number;
+  unit_cost: string;
   unit_size: string;
-  /** True once unit_cost came from an admin's costed catalog or an admin's typing. A rep's line holds a
-   * placeholder 0 that must never be sent as an admin's cost if the session is promoted (Codex). */
+  /** True once unit_cost came from an admin's costed catalog or an admin's typing. */
   costFromAdmin?: boolean;
   /** The user typed this line's unit cost, so no suggestion replaces it. */
   costEdited?: boolean;
@@ -66,7 +65,7 @@ export default function NewPurchaseOrder() {
   const [expectedDate, setExpectedDate] = useState('');
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<POItemDraft[]>([
-    { key: nextKey(), product_id: '', quantity_ordered: 0, unit_cost: 0, unit_size: '' },
+    { key: nextKey(), product_id: '', quantity_ordered: 0, unit_cost: '', unit_size: '' },
   ]);
   const [products, setProducts] = useState<PickerProduct[]>([]);
   const [vendors, setVendors] = useState<string[]>([]);
@@ -146,7 +145,7 @@ export default function NewPurchaseOrder() {
       const byId = new Map(prods.map((p) => [p.id, p]));
       setItems((prev) => prev.map((i) => {
         const prod = i.product_id && !i.costFromAdmin ? byId.get(i.product_id) : undefined;
-        return prod ? { ...i, unit_cost: prod.current_cost || 0, costFromAdmin: true } : i;
+        return prod ? { ...i, unit_cost: String(prod.current_cost || ''), costFromAdmin: true } : i;
       }));
       if (savedPoIdRef.current) setIsDirty(true);
     }
@@ -168,8 +167,8 @@ export default function NewPurchaseOrder() {
     const suggestion = await fetchPreferredVendorCost(product.id);
     if (!suggestion) return;
     const unitCost = costForVendor(suggestion, vendorRef.current, catalog); // the vendor on the form now, not at selection
-    setItems((prev) => prev.map((i) => (i.key === itemKey && i.product_id === product.id && !i.costEdited && i.unit_cost === catalog
-      ? { ...i, suggestion, unit_cost: unitCost, ...(unitCost !== catalog ? { costFromAdmin: true } : {}) } : i)));
+    setItems((prev) => prev.map((i) => (i.key === itemKey && i.product_id === product.id && !i.costEdited && Number(i.unit_cost) === catalog
+      ? { ...i, suggestion, unit_cost: String(unitCost || ''), ...(unitCost !== catalog ? { costFromAdmin: true } : {}) } : i)));
     if (savedPoIdRef.current) setIsDirty(true);
   }, []);
 
@@ -183,7 +182,7 @@ export default function NewPurchaseOrder() {
     if (!prod) return;
     preselectApplied.current = true;
     setItems((prev) => prev.map((i, idx) => (idx === 0
-      ? { ...i, product_id: prod.id, unit_cost: prod.current_cost || 0, unit_size: prod.unit_size || '', costFromAdmin: isAdmin } : i)));
+      ? { ...i, product_id: prod.id, unit_cost: String(prod.current_cost || ''), unit_size: prod.unit_size || '', costFromAdmin: isAdmin } : i)));
     if (prod.vendor && !vendorRef.current) setVendor(vendorRef.current = prod.vendor);
     if (isAdmin) void suggestPreferredVendorCost(firstItemKey, prod);
   }, [products, preselectProductId, isAdmin, firstItemKey, suggestPreferredVendorCost]);
@@ -194,7 +193,7 @@ export default function NewPurchaseOrder() {
   const addItem = () => {
     editItems((prev) => [
       ...prev,
-      { key: nextKey(), product_id: '', quantity_ordered: 0, unit_cost: 0, unit_size: '' },
+      { key: nextKey(), product_id: '', quantity_ordered: 0, unit_cost: '', unit_size: '' },
     ]);
   };
 
@@ -217,7 +216,7 @@ export default function NewPurchaseOrder() {
           ? {
               ...i,
               product_id: product.id,
-              unit_cost: product.current_cost || 0,
+              unit_cost: String(product.current_cost || ''),
               unit_size: product.unit_size || '',
               costFromAdmin: isAdmin,
               costEdited: false, suggestion: undefined,
@@ -235,11 +234,11 @@ export default function NewPurchaseOrder() {
   const changeVendor = (next: string) => {
     setVendor(next);
     editItems((prev) => prev.map((i) => (i.suggestion && !i.costEdited ? { ...i,
-      unit_cost: costForVendor(i.suggestion, next, products.find((p) => p.id === i.product_id)?.current_cost || 0) } : i)));
+      unit_cost: String(costForVendor(i.suggestion, next, products.find((p) => p.id === i.product_id)?.current_cost || 0) || '') } : i)));
   };
 
   const totalCostCents = items.reduce(
-    (sum, i) => sum + purchaseOrderLineTotalCents(i.quantity_ordered, i.unit_cost),
+    (sum, i) => sum + purchaseOrderLineTotalCents(i.quantity_ordered, parsePurchaseOrderUnitCostDollars(i.unit_cost) ?? 0),
     0,
   );
   const totalCost = purchaseOrderCentsToDollars(totalCostCents);
@@ -259,20 +258,22 @@ export default function NewPurchaseOrder() {
       return;
     }
 
-    // A line still holding a pre-promotion placeholder waits for the costed catalog; never send its 0.
+    // A line still holding a pre-promotion placeholder waits for the costed catalog.
     if (isAdmin && validItems.some((i) => !i.costFromAdmin)) {
       toast('error', 'Unit costs are still loading. Check each unit cost, then save again.');
       return;
     }
 
-    // An admin's typed cost must be exact whole cents: more than two decimals is refused, never rounded.
-    if (isAdmin && validItems.some((i) => !isWholeCentPurchaseOrderCost(i.unit_cost))) {
-      toast('error', `Check each unit cost. ${MONEY_PRECISION_MESSAGE}`);
+    const invalidCost = isAdmin && validItems.find((item) => parsePurchaseOrderUnitCostDollars(item.unit_cost) === null);
+    if (invalidCost) {
+      const productName = products.find((p) => p.id === invalidCost.product_id)?.product_name;
+      const line = productName ? `"${productName}"` : `line ${items.indexOf(invalidCost) + 1}`;
+      toast('error', `Enter a non-negative unit cost for ${line}. ${MONEY_PRECISION_MESSAGE}`);
       return;
     }
 
     // Warn about items with zero cost (an admin enters cost; a rep's lines start without it)
-    const zeroCostItems = validItems.filter((i) => i.unit_cost === 0);
+    const zeroCostItems = validItems.filter((i) => Number(i.unit_cost) === 0);
     if (isAdmin && zeroCostItems.length > 0) {
       const prod = products.find((p) => p.id === zeroCostItems[0].product_id);
       toast('warning', `"${prod?.product_name || 'An item'}" has $0 unit cost — verify this is intentional`);
@@ -319,7 +320,7 @@ export default function NewPurchaseOrder() {
             };
             // A non-admin sends no cost; save_purchase_order ignores one anyway.
             if (!isAdmin) return line;
-            const unitCostCents = purchaseOrderUnitCostCents(i.unit_cost);
+            const unitCostCents = purchaseOrderUnitCostCents(Number(i.unit_cost));
             return {
               ...line,
               unit_cost: purchaseOrderCentsToDollars(unitCostCents),
@@ -507,6 +508,7 @@ export default function NewPurchaseOrder() {
                 <tbody>
                   {items.map((item) => {
                     const prod = products.find((p) => p.id === item.product_id);
+                    const unitCost = parsePurchaseOrderUnitCostDollars(item.unit_cost);
                     return (
                       <tr key={item.key} className="border-b border-gray-50 hover:bg-crx-green-tint transition-colors">
                         <td className="px-4 py-3">
@@ -548,13 +550,11 @@ export default function NewPurchaseOrder() {
                         {isAdmin && (
                         <td className="px-4 py-3">
                           <input
-                            type="number"
-                            value={item.unit_cost || ''}
-                            onChange={(e) =>
-                              updateItem(item.key, 'unit_cost', parseFloat(e.target.value) || 0)
-                            }
-                            min="0"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
+                            aria-label={`Unit cost for ${prod?.product_name || 'line'}`}
+                            value={item.unit_cost}
+                            onChange={(e) => updateItem(item.key, 'unit_cost', e.target.value)}
                             className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
                           />
                         </td>
@@ -570,9 +570,8 @@ export default function NewPurchaseOrder() {
                         </td>
                         {isAdmin && (
                         <td className="px-4 py-3 font-mono text-nav-dark">
-                          {fmt(purchaseOrderCentsToDollars(
-                            purchaseOrderLineTotalCents(item.quantity_ordered, item.unit_cost),
-                          ))}
+                          {unitCost === null ? '—' : fmt(purchaseOrderCentsToDollars(
+                            purchaseOrderLineTotalCents(item.quantity_ordered, unitCost)))}
                         </td>
                         )}
                         <td className="px-4 py-3">

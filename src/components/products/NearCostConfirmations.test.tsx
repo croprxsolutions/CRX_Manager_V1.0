@@ -28,7 +28,7 @@ describe('NearCostConfirmations', () => {
     render(
       <NearCostConfirmations
         products={[{ product_id: 'p1', product_name: 'Roundup', tiers: [
-          { tier: 1, price_cents: 642n, cost_cents: 640n, fraction_margin_percent: '0.35', margin_driven: false },
+          { tier: 1, price_cents: 642n, cost_cents: 640n, fraction_margin_percent: '0.326797', margin_driven: false },
         ] }]}
         ticked={new Set()}
         disabled={false}
@@ -36,8 +36,8 @@ describe('NearCostConfirmations', () => {
       />,
     );
 
-    expect(screen.getByText(/margin 0.35%/)).toBeInTheDocument();
-    expect(screen.queryByText(/did you mean 35 for 35%/)).not.toBeInTheDocument();
+    expect(screen.getByText(/margin 0.33%/)).toBeInTheDocument();
+    expect(screen.queryByText(/did you mean/)).not.toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /this price and margin are what I meant/ })).toBeInTheDocument();
   });
 
@@ -45,7 +45,7 @@ describe('NearCostConfirmations', () => {
     render(
       <NearCostConfirmations
         products={[{ product_id: 'p1', product_name: 'Roundup', tiers: [
-          { tier: 1, price_cents: 641n, cost_cents: 640n, fraction_margin_percent: '0.999999999', margin_driven: true },
+          { tier: 1, price_cents: 641n, cost_cents: 640n, fraction_margin_percent: '0.9999999', margin_driven: true },
         ] }]}
         ticked={new Set()}
         disabled={false}
@@ -53,7 +53,7 @@ describe('NearCostConfirmations', () => {
       />,
     );
 
-    expect(screen.getByText(/margin 0.999999999%/)).toBeInTheDocument();
+    expect(screen.getByText(/margin 1%/)).toBeInTheDocument();
     expect(screen.queryByText(/did you mean 100 for 100%/)).not.toBeInTheDocument();
   });
 });

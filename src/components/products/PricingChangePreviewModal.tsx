@@ -173,7 +173,7 @@ function displayDollars(value: string | null): string {
 }
 
 function displayMargin(value: string | null): string {
-  return value === null ? '—' : `${value}%`;
+  return value === null ? '—' : `${Number(Number(value).toFixed(2))}%`;
 }
 
 function displayPerAcre(value: bigint | null | undefined): string | null {
@@ -240,7 +240,7 @@ function PricingEffectDetails({ effect }: { effect: PricingEffect }) {
           const oldPerAcre = displayPerAcre(tier.oldPerAcreCents);
           const grossMargin = tier.grossMargin == null
             ? null
-            : `${Number((tier.grossMargin * 100).toFixed(8))}%`;
+            : displayMargin(String(tier.grossMargin * 100));
 
           return (
             <div

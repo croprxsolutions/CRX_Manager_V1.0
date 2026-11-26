@@ -1,6 +1,27 @@
--- The standard new-delivery operation records its existing driver notice.
--- Older browser sessions can keep their existing send path during the rollout.
+-- STATUS: local candidate. See its record in docs/reference/migrations.d/.
+-- WHY: preserve the assigned-driver notice as its sender moves to the saved-delivery operation.
+-- NOT CHANGED: delivery authorization, recipients or behavior of other notification paths.
+-- ROLLBACK: restore the old client sender if removed, then restore the old wrapper and remove the bridge.
+-- ORDERING: needs the existing actor-bound delivery replay wrapper.
 SET LOCAL lock_timeout = '5s';
+
+CREATE TEMP TABLE delivery_assignment_notice_tx ON COMMIT DROP AS
+  SELECT pg_current_xact_id() AS transaction_id;
+
+DO $preflight$
+BEGIN
+  IF to_regclass('pg_temp.delivery_assignment_notice_tx') IS NULL THEN
+    RAISE EXCEPTION 'DELIVERY_ASSIGNMENT_NOTICE_NEEDS_TRANSACTION';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc
+    WHERE oid = to_regprocedure('public.create_delivery_with_items(uuid,uuid,date,jsonb,uuid,uuid,text,text,text)')
+      AND md5(replace(prosrc, chr(13), '')) = '35495c4b1e79f5fa3b615dadca6f1cfd'
+      AND prosecdef AND proowner = 'postgres'::regrole
+      AND proconfig = ARRAY['search_path=public, pg_temp']
+  ) THEN RAISE EXCEPTION 'DELIVERY_ASSIGNMENT_NOTICE_PREFLIGHT_MISMATCH'; END IF;
+END
+$preflight$;
 
 CREATE FUNCTION public.skip_repeated_delivery_assignment_notice()
 RETURNS trigger
@@ -9,6 +30,10 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
 BEGIN
+  -- Let a waiting legacy send see the first one's committed notice.
+  PERFORM pg_advisory_xact_lock(hashtextextended(
+    'crx:delivery-assignment-notice:' || NEW.related_entity_id::text || ':' || NEW.user_id::text || ':' || auth.uid()::text, 0
+  ));
   IF EXISTS (
     SELECT 1
     FROM public.notifications AS notice
@@ -98,7 +123,14 @@ BEGIN
         LEFT JOIN public.customers AS c ON c.id = d.customer_id
         WHERE d.id = (v_result ->> 'delivery_id')::uuid AND d.assigned_driver IS NOT NULL;
       EXCEPTION WHEN OTHERS THEN
-        RAISE WARNING 'Failed to record delivery assignment notice (SQLSTATE %)', SQLSTATE;
+        BEGIN
+          INSERT INTO public.failed_notifications (notification_type, entity_type, entity_id, error_message, payload)
+          VALUES ('delivery_assigned', 'delivery', (v_result ->> 'delivery_id')::uuid,
+            'Database could not send the assignment notice (SQLSTATE ' || SQLSTATE || ')',
+            jsonb_build_object('driverId', p_assigned_driver));
+        EXCEPTION WHEN OTHERS THEN
+          RAISE WARNING 'Failed to record delivery assignment notice failure (SQLSTATE %)', SQLSTATE;
+        END;
       END;
     END IF;
   END IF;
@@ -111,6 +143,25 @@ GRANT EXECUTE ON FUNCTION public.create_delivery_with_items(uuid, uuid, date, js
 
 DO $postflight$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_trigger
+    WHERE tgrelid = 'public.notifications'::regclass
+      AND tgname = 'notifications_skip_repeated_delivery_assignment'
+      AND tgfoid = 'public.skip_repeated_delivery_assignment_notice()'::regprocedure
+      AND tgenabled = 'O'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc
+    WHERE oid = 'public.skip_repeated_delivery_assignment_notice()'::regprocedure
+      AND prosecdef AND proowner = 'postgres'::regrole
+      AND proconfig = ARRAY['search_path=public, pg_temp']
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc
+    WHERE oid = 'public.create_delivery_with_items(uuid,uuid,date,jsonb,uuid,uuid,text,text,text)'::regprocedure
+      AND md5(replace(prosrc, chr(13), '')) = '33d1ed3790f5034831fee03afb447fb0'
+      AND prosecdef AND proowner = 'postgres'::regrole
+      AND proconfig = ARRAY['search_path=public, pg_temp']
+  ) THEN RAISE EXCEPTION 'DELIVERY_ASSIGNMENT_NOTICE_POSTFLIGHT_MISMATCH'; END IF;
+
   IF has_function_privilege('anon', 'public.skip_repeated_delivery_assignment_notice()', 'EXECUTE')
     OR has_function_privilege('authenticated', 'public.skip_repeated_delivery_assignment_notice()', 'EXECUTE')
     OR has_function_privilege('service_role', 'public.skip_repeated_delivery_assignment_notice()', 'EXECUTE')

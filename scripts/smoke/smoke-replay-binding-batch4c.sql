@@ -172,8 +172,8 @@ BEGIN
     VALUES (v_del[v_i], v_order, v_oi[v_i - 8], v_customer, v_product, 1, 'Gal', 'pending');
   END LOOP;
   FOR v_i IN 1..2 LOOP
-    INSERT INTO public.cycle_counts (count_number, status, initiated_by)
-    VALUES ('[SMOKE] RB4C-CC-' || v_i || '-' || v_suffix, 'in_progress', v_admin)
+    INSERT INTO public.cycle_counts (count_number, status, initiated_by, warehouse)
+    VALUES ('[SMOKE] RB4C-CC-' || v_i || '-' || v_suffix, 'in_progress', v_admin, '[SMOKE] Replay 4c Warehouse ' || v_suffix || '-' || v_i)
     RETURNING id INTO v_id;
     v_cc := v_cc || v_id;
     INSERT INTO public.blend_tickets (ticket_number, uploaded_by, customer_id, review_status, reviewed_by, reviewed_at)
@@ -419,6 +419,51 @@ BEGIN
       jsonb_build_array(jsonb_build_object('order_item_id', v_oi[2], 'product_id', v_product, 'quantity', 1, 'unit_size', 'Gal'))),
     'IDEMPOTENCY_KEY_REQUIRED%', '22023');
 
+  -- Prove the standard delivery's assignment send and the old-client bridge.
+  -- Keep the original receipt chain runnable on historical migration snapshots.
+  IF to_regprocedure('public.skip_repeated_delivery_assignment_notice()') IS NOT NULL THEN
+    v_key := v_prefix || 'create-delivery-assigned'; v_keys := v_keys || v_key;
+    v_sql := format('SELECT public.create_delivery_with_items(%L, %L, %L::date, %L::jsonb, p_assigned_driver => %L, p_idempotency_key => %L)',
+      v_order, v_customer, v_date,
+      jsonb_build_array(jsonb_build_object('order_item_id', v_oi[1], 'product_id', v_product, 'quantity', 1)),
+      v_driver, v_key);
+    EXECUTE v_sql INTO v_res;
+    v_id := (v_res->>'delivery_id')::uuid;
+    PERFORM pg_temp.b4c_replays('create assigned delivery', v_sql, v_res);
+    IF v_id IS NULL OR (SELECT count(*) FROM public.notifications WHERE related_entity_id = v_id
+      AND notification_type = 'delivery_assigned' AND user_id = v_driver AND created_by = v_admin
+      AND message LIKE '%[SMOKE] Replay 4c Farm ' || v_suffix || '%') <> 1
+    THEN RAISE EXCEPTION 'SMOKE_FAIL: assigned delivery notice or replay'; END IF;
+
+    SET LOCAL ROLE authenticated;
+    INSERT INTO public.notifications (user_id, title, message, notification_type, related_entity_type, related_entity_id)
+    VALUES (v_driver, 'New Delivery Assigned', 'Old browser follow-up', 'delivery_assigned', 'delivery', v_id);
+    RESET ROLE;
+    PERFORM pg_temp.b4c_as(v_admin_b);
+    SET LOCAL ROLE authenticated;
+    INSERT INTO public.notifications (user_id, title, message, notification_type, related_entity_type, related_entity_id)
+    VALUES (v_driver, 'New Delivery Assigned', 'A different office sender', 'delivery_assigned', 'delivery', v_id);
+    RESET ROLE;
+    IF (SELECT count(*) FROM public.notifications WHERE related_entity_id = v_id AND notification_type = 'delivery_assigned'
+      AND user_id = v_driver) <> 2 OR NOT EXISTS (SELECT 1 FROM public.notifications WHERE related_entity_id = v_id
+      AND notification_type = 'delivery_assigned' AND user_id = v_driver AND created_by = v_admin_b)
+    THEN RAISE EXCEPTION 'SMOKE_FAIL: legacy assignment notice was duplicated or the other sender was suppressed'; END IF;
+
+    PERFORM pg_temp.b4c_as(v_admin);
+    ALTER TABLE public.notifications ADD CONSTRAINT smoke_reject_delivery_assignment_notice
+      CHECK (notification_type <> 'delivery_assigned') NOT VALID;
+    v_key := v_prefix || 'create-delivery-notice-failure'; v_keys := v_keys || v_key;
+    v_res := public.create_delivery_with_items(v_order, v_customer, v_date,
+      jsonb_build_array(jsonb_build_object('order_item_id', v_oi[2], 'product_id', v_product, 'quantity', 1)),
+      p_assigned_driver => v_driver, p_idempotency_key => v_key);
+    ALTER TABLE public.notifications DROP CONSTRAINT smoke_reject_delivery_assignment_notice;
+    v_id := (v_res->>'delivery_id')::uuid;
+    IF v_id IS NULL OR NOT EXISTS (SELECT 1 FROM public.deliveries WHERE id = v_id AND assigned_driver = v_driver)
+      OR (SELECT count(*) FROM public.failed_notifications WHERE entity_id = v_id
+        AND notification_type = 'delivery_assigned' AND error_message LIKE '%23514%') <> 1
+    THEN RAISE EXCEPTION 'SMOKE_FAIL: delivery did not survive the failed notice or the failure was lost'; END IF;
+  END IF;
+
   -- --------------------------------------------------------------------------------------------
   -- j. create_followup_delivery.
   -- --------------------------------------------------------------------------------------------
@@ -499,8 +544,8 @@ BEGIN
    WHERE idempotency_key = ANY (v_keys)
      AND request_actor_id = CASE WHEN idempotency_key = v_prefix || 'confirm' THEN v_driver ELSE v_admin END
      AND request_fingerprint ~ '^[0-9a-f]{64}$';
-  IF v_n <> 12 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: % of 12 fresh receipts are bound to the caller', v_n;
+  IF v_n <> cardinality(v_keys) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: % of % fresh receipts are bound to the caller', v_n, cardinality(v_keys);
   END IF;
 
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';

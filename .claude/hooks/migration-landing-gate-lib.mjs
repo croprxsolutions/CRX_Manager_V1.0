@@ -43,6 +43,7 @@ import {
 import { findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 import { ownerAcceptedForPr, usesCarriedSkip } from "./sol-accept-lib.mjs";
 import { readTeammateComments, teammateCommentsDenial, READY_TO_MERGE_LINE } from "./teammate-comments-lib.mjs";
+import { findTahaLaneOverride, issueTahaLaneCode } from "./taha-lane-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
 // A live apply accepts the same 24-hour exact-head Sol proof as the merge gates
@@ -74,7 +75,7 @@ export function tahaHoldProblem(pr, now = Date.now()) {
   if (pr.comments.some(isTaha)) return null;
   const waitMin = Math.ceil((TAHA_HOLD_MS - Math.max(0, now - opened)) / 60_000);
   return `Taha's 4-hour review hold is still on (ship.md Step 8 item 4a): the PR opened ${Math.floor(Math.max(0, now - opened) / 60_000)} minutes ago and Taha (TahaKhanAbdalli) has not posted a review or comment on it. ` +
-    `Wait about ${waitMin} more minutes or for his review, then re-run. Mason's chat approval does not lift this hold.`;
+    `Wait about ${waitMin} more minutes or for his review, then re-run. Mason's \`taha override\` for this PR lifts it; his plain chat approval does not.`;
 }
 
 // #1838 (Taha's choice, 13 Nov 2026): an agent applies a release or hotfix migration live only while Taha is there
@@ -273,10 +274,22 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   if (String(pr?.headRefOid || "").toLowerCase() !== head.toLowerCase()) {
     return refuse(`${number}'s head on GitHub (${String(pr?.headRefOid || "?").slice(0, 12)}) is not this checkout's HEAD (${head.slice(0, 12)}) — push, or pull, so the reviewed commit is the one applied.`);
   }
-  const hold = tahaHoldProblem(pr, now);
-  if (hold) return refuse(`${number}: ${hold}`);
-  const ready = readyToMergeProblem({ comments: pr?.comments, head, now });
-  if (ready) return refuse(`${number}: ${ready}`);
+  // Mason, 2026-11-25: his `taha override #<PR> <code>` (taha-lane-lib.mjs, 24 hours, this PR only) stands in
+  // for Taha's hold and go-ahead when Mason merges it himself; the weekly release skips the 4-hour hold (its
+  // migrations already sat on staging). Every other check below still runs.
+  let stateCommon = "";
+  try { stateCommon = String(git(["rev-parse", "--path-format=absolute", "--git-common-dir"])).trim(); } catch (error) { if (OUT(error)) throw error; }
+  const stateDirs = skipStateDirs([dir], () => stateCommon);
+  if (!findTahaLaneOverride({ dirs: stateDirs, pullRequest: Number(pr?.number), now })) {
+    const orMason = () => {
+      const code = issueTahaLaneCode({ dirs: stateDirs, pullRequest: Number(pr?.number), headSha: head, now });
+      return code ? ` Or, if Mason will merge it himself, ask him to send as a message of its own: taha override #${pr.number} ${code}` : "";
+    };
+    const hold = headRef === "release/next" ? null : tahaHoldProblem(pr, now);
+    if (hold) return refuse(`${number}: ${hold}${orMason()}`);
+    const ready = readyToMergeProblem({ comments: pr?.comments, head, now });
+    if (ready) return refuse(`${number}: ${ready}${orMason()}`);
+  }
   if (pullRequestReviewBlocked(pr)) return refuse(`${number} has an unresolved CHANGES_REQUESTED review.`);
   if (!pullRequestChecksGreen(pr)) {
     return refuse(`${number} is not merge-ready: mergeStateStatus must be CLEAN and the newest run of every check green.`);

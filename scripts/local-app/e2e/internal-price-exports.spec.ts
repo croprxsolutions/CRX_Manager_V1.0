@@ -1,5 +1,5 @@
 import { expect, test, type Download, type Page } from '@playwright/test';
-import { copyFileSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 // Proof: the staff exports that carry every tier say "internal", and a product with no price shows blank, not $0.00.
@@ -24,8 +24,9 @@ async function addUnpricedProduct(page: Page) {
 }
 
 // Keeps a copy of each file for the PR's proof, then returns the product's CSV row.
-function keepAndReadRow(file: string, saveAs: string) {
-  copyFileSync(file, `scripts/local-app/.state/${saveAs}`);
+async function keepAndReadRow(download: Download) {
+  const file = test.info().outputPath(download.suggestedFilename());
+  await download.saveAs(file);
   const row = readFileSync(file, 'utf8').split(/\r?\n/).find((line) => line.includes(productName));
   expect(row).toBeTruthy();
   return row!;
@@ -51,14 +52,14 @@ test('tier exports are labeled internal and leave a missing price blank', async 
   await page.getByRole('button', { name: 'Export CSV' }).filter({ visible: true }).click();
   const productsCsv = await started;
   expect(productsCsv.suggestedFilename()).toMatch(/^products-internal_/);
-  const productsRow = keepAndReadRow(await productsCsv.path(), productsCsv.suggestedFilename());
+  const productsRow = await keepAndReadRow(productsCsv);
   expect(productsRow).not.toContain('$0.00');
   expect(productsRow).toContain('"","","","Active"'); // T1, T2, T3 blank
 
   started = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download PDF' }).filter({ visible: true }).click();
   const productsPdf = await started;
-  copyFileSync(await productsPdf.path(), `scripts/local-app/.state/${productsPdf.suggestedFilename()}`);
+  await productsPdf.saveAs(test.info().outputPath(productsPdf.suggestedFilename()));
   expect(await pdfText(productsPdf)).toContain('Products — Internal');
 
   await page.goto('/reports');
@@ -69,7 +70,7 @@ test('tier exports are labeled internal and leave a missing price blank', async 
   await page.getByRole('button', { name: 'Export CSV' }).filter({ visible: true }).click();
   const priceList = await started;
   expect(priceList.suggestedFilename()).toMatch(/^price_list_internal_/);
-  const priceRow = keepAndReadRow(await priceList.path(), priceList.suggestedFilename());
+  const priceRow = await keepAndReadRow(priceList);
   expect(priceRow).not.toContain('$0.00');
   expect(priceRow).toMatch(/"","",""$/); // Tier 1, 2, 3 blank
 });

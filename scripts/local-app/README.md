@@ -7,6 +7,35 @@ production, and nothing outside this computer can reach it. The rules are in the
 
 ## Commands
 
+### Feature-screen walkthroughs
+
+Run `node scripts/local-app/walkthrough.mjs start` from a feature checkout that includes the runner. On first use
+it creates that worktree's isolated Docker database, login and storage. Open the printed URL in your browser.
+Later starts reuse that checkout's saved database. Each worktree gets a stable Docker project and three loopback ports derived
+from its path (10,000 lane slots), so different feature branches can walk through screens side by side. The
+launcher checks for port conflicts before changing anything and refuses any API/database listener not bound by
+that checkout's gateway. If its saved credentials are missing but Docker data remains, it preserves that data
+and recommends a different uniquely named checkout path to request a fresh lane. If the new path still collides,
+choose another name. Do not run `docker compose down -v` to recover another checkout. Keep one owner per
+walkthrough checkout until the owner runs `stop`, including during a manual browser check. `rebuild` refuses
+while the walkthrough frontend is running. With the frontend stopped, it checks the Supabase CLI pair before
+resetting the verified test database and regenerates the gateway settings from the current checkout. Stop the lane
+before retiring its checkout. If a checkout was moved, use a fresh, uniquely named worktree. Its old settings
+still belong to the lane at the original path, where Docker keeps the saved data.
+
+Run the focused localhost-only feature proof with, for example,
+`node scripts/local-app/walkthrough.mjs test product-unit.spec.ts`. The command accepts one existing
+`*.spec.ts` file from `scripts/local-app/e2e/` and checks the checkout's recorded migrations match its test DB.
+It refuses the sales-only scenario. The product unit proof signs in, creates a liquid product with a gallon
+inventory unit, and verifies those choices after reloading it. Close the app with
+`node scripts/local-app/walkthrough.mjs stop`. `status` shows the database build and the last browser test separately.
+The shared `app.mjs` copy, sales gauntlet and document-proof stack retain their existing names, ports, volumes and state.
+Each walkthrough's generated login, local keys and browser evidence stay under its ignored
+`scripts/local-app/.state/screen-walk/` folder. `last-test.json` records the spec, tested commit, whether there
+were uncommitted changes, database build, result and the checkout-relative path to the run's evidence folder.
+At least one browser test must actually pass for the run to count. Use a passed record from a clean checkout
+at the candidate commit for PR proof. Keep credentials out of the handoff.
+
 ### Customer-document byte proof (separate test copy, KI-113)
 
 `node scripts/local-app/doc-bytes.mjs rebuild` (about 15 minutes), then
@@ -36,12 +65,29 @@ this isolated copy sends no actual email. Stop the task-owned copy afterwards wi
 The Supabase 2.109.1 installation needs both release executables, `supabase` and `supabase-go`.
 A shim reporting 2.109.1 beside an older Go executable is insufficient. Put the complete official
 release folder first on this task's PATH, or set `SUPABASE_GO_BINARY` to its matching companion;
-the runner rejects a mismatched override. Before the invoice-brand migration, rebuild initializes
+the runner rejects a mismatched override. A `SUPABASE_GO_BINARY` already set in your shell wins over
+PATH, so point it at the matching companion too (Mason's shell sets it to an older one). On Mason's Windows host, the verified pair is in
+`C:\Codex\sales-tools`; other hosts must use their own matching 2.109.1 pair. Before the invoice-brand migration, rebuild initializes
 the empty registration catalog through the real generated-admin seed workflow. No numbered business
 product is present at that point; business fixtures are seeded after all migrations finish.
 
 Historical migration provers are separate from this latest-schema browser proof: passing a historical
 candidate's before/after checks alone does not establish that today's sales workflow passes.
+
+Walkthrough commands (`start`, `rebuild`, `stop`, `seed`, `status`, `test`) share one lock per checkout:
+`scripts/local-app/.state/screen-walk/first-start.lock`. It is always that path, because the Docker project is fixed
+per checkout; `CRX_LOCAL_APP_STATE_DIR` cannot move it, and `walkthrough.mjs` refuses that variable outright.
+`status` is locked too, because it re-seals a running gateway. The other three profiles take no lock.
+
+If a command is interrupted, the lock stays in place because Docker, Supabase, or Playwright subprocesses may still
+be running. Confirm the original CLI job and its subprocesses for this checkout have finished before renaming only
+`first-start.lock` to a dated `.stale` name. If you cannot establish that, use a fresh checkout and leave the old
+lane intact. After clearing a stale lock, run `status` and try `start` when resuming the walkthrough. The launcher
+requires `rebuild` only if the build record is missing or mismatched. If its frontend is still running, have the
+owner run `stop` first. A malformed lock is left intact for inspection. A brand-new checkout is
+safe only in a new, uniquely named folder: its lane (and Docker project) is derived from the folder path, so it has
+its own lock and resources. If the same folder was deleted and recreated while its Docker resources remain, use a new
+folder instead; the old lane is preserved for deliberate manual recovery.
 
 Run these from the root of a checkout. They need Docker running, `npm ci` done and Supabase CLI 2.109.1,
 the version these steps are proven on.

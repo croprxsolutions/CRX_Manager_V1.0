@@ -50,6 +50,7 @@ Pick the worker's model and effort from `docs/reference/claude-model-tuning.md` 
 | Both agents review and reconcile | `agent-pair-review` |
 | Durable continuation packet | `codex-to-claude-handoff` |
 | Agent/tooling health | `agent-health` |
+| Screen work from either app, local Docker walkthrough and acknowledged Claude staging handoff | `screen-walkthrough` |
 | PR comment preview or post | `agent-pr-comment` |
 
 Direct reviews are read-only. PR comments default to dry-run. Production and delivery authority comes from `AGENTS.md` and the selected workflow.

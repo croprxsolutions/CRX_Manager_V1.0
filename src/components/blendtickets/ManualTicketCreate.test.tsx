@@ -137,6 +137,12 @@ describe('ManualTicketCreate retry-safe atomic creation', () => {
 
   afterEach(() => vi.restoreAllMocks());
 
+  it('focuses the customer field when the manual form opens', async () => {
+    render(<ManualTicketCreate {...defaultProps} />);
+
+    await waitFor(() => expect(screen.getByPlaceholderText('Select Customer')).toHaveFocus());
+  });
+
   // The banner itself had NO coverage before this: both caller test files mock the
   // validator away, so nothing verified that a warning ever reached the screen.
   // These two render the real component and check that the tiers stay visually

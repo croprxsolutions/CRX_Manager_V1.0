@@ -118,6 +118,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Reps work with any customer (2026-10-13, migration 20261013220000) with these exceptions.
   [/^REP_CANNOT_REASSIGN\b/i,
    'Only an admin can change which sales rep a customer is assigned to'],
+  // Mason 2026-11-25 (20270309010000): no commission payout batch is created or paid until M16 is live.
+  [/^COMMISSION_PAYOUTS_OFF_UNTIL_M16\b/,
+   'Nothing was created or paid. Commission payouts are switched off until commission-on-payment (M16) is live. Voiding an existing payment still works'],
   // Admin-only since 2026-10-14 (migration 20261027080200).
   [/^COMMISSION_SPLIT_ADMIN_ONLY\b/i,
    "Only an admin can set or change a customer's default commission split"],
@@ -371,6 +374,12 @@ function deliveryCapReason(message: string): string | null {
   return null;
 }
 
+/** create/post_commission_payment refused: payouts are off until M16 (20270309010000); nothing was created or paid. */
+export function isCommissionPayoutsOff(error: unknown): boolean {
+  const message = typeof error === 'string' ? error : (error as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && /^COMMISSION_PAYOUTS_OFF_UNTIL_M16\b/.test(message);
+}
+
 export function sanitizeError(error: unknown): string {
   if (!error) return 'An unexpected error occurred';
 
@@ -542,13 +551,16 @@ export function sanitizeError(error: unknown): string {
   if (overActive) {
     return `Nothing was saved. Other open deliveries for this order already hold ${overActive[1]} of this product, so only ${overActive[2]} more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.`;
   }
-  // Partial completion figures (20270203120000, #1942) and completing past the order (F05): the server sentence says what to do.
-  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER|DELIVERY_NOTHING_DELIVERED):\s*(.+)$/s);
+  // Partial completion figures (20270203120000, #1942), completing past the order (F05) and proof taken for another
+  // load (20270309170000): the server sentence says what to do.
+  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER|DELIVERY_NOTHING_DELIVERED|DELIVERY_LOAD_CHANGED|PAPER_TICKET_LOAD_CHANGED):\s*(.+)$/s);
   if (deliveryQuantities) {
     // The server sentences start lowercase (they follow the token); start the second sentence with a capital,
-    // unless it starts with a mixed-case product name such as "pH Plus" (Sol r5 LOW).
+    // unless it starts with a mixed-case product name such as "pH Plus" (Sol r5 LOW). DELIVERY_EXCEEDS_ORDER always
+    // starts with the product name, kept exactly as written ("acme Plus": Sol r11 LOW on #2324).
     const sentence = deliveryQuantities[1].trim();
-    const capital = /^[a-z](?![A-Z])/.test(sentence) ? sentence.charAt(0).toUpperCase() : sentence.charAt(0);
+    const keepName = message.startsWith('DELIVERY_EXCEEDS_ORDER:');
+    const capital = !keepName && /^[a-z](?![A-Z])/.test(sentence) ? sentence.charAt(0).toUpperCase() : sentence.charAt(0);
     return `The delivery was not completed. ${capital}${sentence.slice(1)}`;
   }
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.

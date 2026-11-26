@@ -4,12 +4,12 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
-  findTahaLaneOverride, isTahaGateWiring, isTahaLanePath, isTahaLaneSql, isTextOnlyPatch, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
+  findTahaLaneOverride, findTahaUnavailableOverride, isTahaGateWiring, isTahaLanePath, isTahaLaneSql, isTextOnlyPatch, prFilesOnGitHub, issueTahaLaneCode, markTahaTold, recordTahaLaneOverride,
   pushDismissedApprovals, tahaApprovedHead, tahaApprovedOnGitHub, tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
 } from "./taha-lane-lib.mjs";
 
@@ -41,6 +41,7 @@ for (const p of [
   ".claude/hooks/taha-lane-lib.mjs", ".claude/hooks/taha-lane-prompt.mjs", ".claude/hooks/pr-merge-guard.mjs",
   ".claude/hooks/prompt-router.mjs", ".codex/hooks/production-action-guard.mjs", ".claude/settings.json", ".codex/hooks.json",
   ".claude/hooks/sol-risk-lib.mjs", // holds GATED_MERGE_BASES; dropping staging there would turn the block off
+  ".claude/hooks/migration-landing-gate-lib.mjs", // reads Mason's override for the live apply (Sol r2)
 ]) ok(isTahaLanePath(p), `${p} is Taha's`);
 for (const p of [
   "src/pages/FieldApplicationInvoice.tsx", "src/components/field-invoices/Row.tsx", "src/pages/FieldInvoices.tsx",
@@ -287,6 +288,10 @@ eq(tahaOverrideCommand("taha override 123456"), null, "a code without the PR is 
 eq(tahaOverrideCommand("taha override #2242 12345"), null, "five digits is not a code");
 eq(tahaOverrideCommand("please taha override #2242 123456"), null, "other words before it");
 eq(tahaOverrideCommand("taha override #2242 123456 now"), null, "other words after it");
+eq(tahaOverrideCommand("taha override #2242 123456 unavailable: on a plane until Monday."), { pullRequest: 2242, code: "123456", tahaUnavailable: "on a plane until Monday" },
+  "Mason can say Taha is unavailable, with a reason");
+eq(tahaOverrideCommand("taha override #2242 123456 unavailable:"), null, "unavailable needs a reason");
+eq(tahaOverrideCommand("taha override #2242 123456 unavailable: sick\nand more"), null, "the reason is one line");
 ok(tahaOverrideAttempt("taha override 123456"), "the old form is noticed and refused");
 ok(!tahaOverrideAttempt("hello"), "ordinary chat is not an attempt");
 
@@ -313,6 +318,53 @@ ok(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW + 3600e3
 ok(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: B, now: NOW + 3600e3 }), "a later push is covered too (one message per PR)");
 eq(findTahaLaneOverride({ dirs, pullRequest: 2243, headSha: A, now: NOW + 3600e3 }), null, "no other PR is covered");
 eq(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW + 60e3 + 24 * 3600e3 }), null, "the override ends after 24 hours");
+eq(findTahaUnavailableOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW + 3600e3 }), null, "a plain override does not say Taha is unavailable (no live apply)");
+eq(tahaOverrideCommand("taha override #2242 123456 unavailable: ..."), null, "a reason of punctuation alone says nothing (Sol)");
+eq(tahaOverrideCommand("taha override #2242 123456 unavailable: sick and more"), null, "a Unicode line break does not sneak a second line in (Sol)");
+{
+  // Sol (PR 1): a code a merge refusal issued cannot become a live-apply override.
+  const m = issueTahaLaneCode({ dirs, pullRequest: 2251, headSha: A, now: NOW, newCode: () => "616161" });
+  const r = recordTahaLaneOverride({ dirs, pullRequest: 2251, code: m, tahaUnavailable: "away", now: NOW + 60e3 });
+  ok(!r.ok && /live-apply refusal/.test(r.reason), "a merge code with unavailable: records nothing");
+  eq(issueTahaLaneCode({ dirs, pullRequest: 2251, headSha: A, kind: "apply", now: NOW + 1000, newCode: () => "626262" }), "626262",
+    "a live apply gets its own code, not the merge one");
+  eq(issueTahaLaneCode({ dirs, pullRequest: 2251, headSha: A, now: NOW + 2000, newCode: () => "999999" }), "616161", "the merge code is still reused for merges");
+  // A forged override file that says unavailable but came from a merge code does not count.
+  const forged = path.join(dir, "taha-lane-override-pr2252.json");
+  writeFileSync(forged, JSON.stringify({ pullRequest: 2252, headSha: A, code: "717171", kind: "merge", tahaUnavailable: "away",
+    issuedAt: new Date(NOW).toISOString(), expiresAt: new Date(NOW + 24 * 3600e3).toISOString() }));
+  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2252, headSha: A, now: NOW + 1000 }), null, "an unavailable override needs an apply code");
+  rmSync(forged, { force: true });
+}
+{
+  // Sol (PR 1): a plain override in the first folder does not hide an unavailable one in the second.
+  const dirB = path.join(tempDir("taha-lane-b-"), ".claude", "session-" + "state");
+  mkdirSync(dirB, { recursive: true });
+  const two = [dir, dirB];
+  const p = issueTahaLaneCode({ dirs: [dir], pullRequest: 2253, headSha: A, now: NOW, newCode: () => "818181" });
+  ok(recordTahaLaneOverride({ dirs: [dir], pullRequest: 2253, code: p, now: NOW + 1000 }).ok, "plain override in folder 1");
+  const u = issueTahaLaneCode({ dirs: [dirB], pullRequest: 2253, headSha: A, kind: "apply", now: NOW, newCode: () => "828282" });
+  ok(recordTahaLaneOverride({ dirs: [dirB], pullRequest: 2253, code: u, tahaUnavailable: "away", now: NOW + 2000 }).ok, "unavailable override in folder 2");
+  ok(findTahaUnavailableOverride({ dirs: two, pullRequest: 2253, headSha: A, now: NOW + 3000 })?.code === "828282", "the unavailable one is still found");
+  // Sol (PR 1): a receipt never overwrites a newer override, and receipts add up.
+  const old = findTahaUnavailableOverride({ dirs: [dirB], pullRequest: 2253, headSha: A, now: NOW + 3000 });
+  markTahaTold({ dirs: [dirB], override: old, field: "tahaToldApplyFor", value: ["m1"] });
+  markTahaTold({ dirs: [dirB], override: old, field: "tahaToldApplyFor", value: ["m2"] });
+  eq(findTahaUnavailableOverride({ dirs: [dirB], pullRequest: 2253, headSha: A, now: NOW + 3000 }).tahaToldApplyFor, ["m1", "m2"], "receipts add up");
+  const n = issueTahaLaneCode({ dirs: [dirB], pullRequest: 2253, headSha: B, kind: "apply", now: NOW + 4000, newCode: () => "838383" });
+  ok(recordTahaLaneOverride({ dirs: [dirB], pullRequest: 2253, code: n, tahaUnavailable: "still away", now: NOW + 5000 }).ok, "a newer override at a new head");
+  markTahaTold({ dirs: [dirB], override: old, field: "tahaToldApplyFor", value: ["m3"] });
+  ok(findTahaUnavailableOverride({ dirs: [dirB], pullRequest: 2253, headSha: B, now: NOW + 6000 })?.code === "838383", "a late receipt for the old one leaves the newer override alone");
+}
+{
+  const c = issueTahaLaneCode({ dirs, pullRequest: 2250, headSha: A, kind: "apply", now: NOW, newCode: () => "515151" });
+  const r = recordTahaLaneOverride({ dirs, pullRequest: 2250, code: c, tahaUnavailable: "  away all week  ", now: NOW + 60e3 });
+  ok(r.ok && r.payload.tahaUnavailable === "away all week", "the unavailable reason is recorded");
+  ok(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: A, now: NOW + 3600e3 }), "an unavailable override is found for the live apply");
+  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 3600e3 }), null, "a live apply at a later push is not covered");
+  ok(findTahaLaneOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 3600e3 }), "but it works as a plain override for staging merges at any head");
+  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: A, now: NOW + 60e3 + 24 * 3600e3 }), null, "it ends after 24 hours too");
+}
 
 // ── the gate the merge guards call ──────────────────────────────────────────
 const lane = f("src/pages/Quotes.tsx");
@@ -329,6 +381,23 @@ ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha
 const refusal = tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: lane, dirs, now: NOW });
 ok(/TAHA LANE BLOCK/.test(refusal) && /taha override #2300 \d{6}/.test(refusal), "a refusal gives Mason the exact line, PR included");
 eq(tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: f("src/pages/Deliveries.tsx"), dirs, now: NOW }), null, "outside the lane, nothing to do");
+// A PR that changes the block's own files: the override covers only the head it was issued for (#2303).
+{
+  const wiringFiles = f(".claude/hooks/taha-lane-lib.mjs");
+  const asked = tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: A, files: wiringFiles, dirs, now: NOW });
+  const c = /taha override #2310 (\d{6})/.exec(asked)?.[1];
+  ok(c && /at this commit only/.test(asked), "a wiring PR's refusal says the code covers this commit only");
+  ok(recordTahaLaneOverride({ dirs, pullRequest: 2310, code: c, now: NOW + 60e3 }).ok, "Mason's override records");
+  eq(tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: A, files: wiringFiles, dirs, now: NOW + 120e3, tellTaha: () => true }), null, "it lets that head through");
+  ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: B, files: wiringFiles, dirs, now: NOW + 180e3, tellTaha: () => true })), "a later push voids it");
+  ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: B, files: f(".claude/hooks/migration-landing-gate-lib.mjs"), dirs, now: NOW + 180e3, tellTaha: () => true })),
+    "the migration landing gate counts as the block's own file");
+  for (const wire of [".claude/hooks/migration-apply-lib.mjs", ".claude/hooks/migration-apply-guard.mjs", "scripts/apply-migration-file.mjs", ".claude/hooks/teammate-comments-lib.mjs"]) {
+    ok(isTahaLanePath(wire), `${wire}, which calls the live-apply gate, counts too (Luna, round 2)`);
+  }
+  ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: B, files: null, dirs, now: NOW + 180e3, tellTaha: () => true })), "an unreadable list gets the one-head rule");
+  eq(tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha: B, files: lane, dirs, now: NOW + 3600e3, tellTaha: () => true }), null, "an ordinary lane PR still carries the override over pushes");
+}
 // Taha's Approve on the exact head (Mason, 2026-11-24).
 const rv = (state, commit, id = "50602678", at = "2026-11-24T15:00:00Z") => ({ id, state, commit, at });
 ok(tahaApprovedHead([rv("APPROVED", A)], A), "Taha approved this head");
@@ -404,6 +473,17 @@ ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: {
   "a 14-digit number that is not a date stamp is a real change (security review LOW)");
 ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "x = 100.00000000000001", [D]: "x = 100.20270304160000" } }),
   "digits after a decimal point are never a stamp");
+// Sol r2: a hand restamp that swaps the order of the PR's own migrations is a real change (restamp-migration.mjs refuses it).
+const migX = fl("supabase/migrations/20270301160000_x.sql", C, "added");
+const migY = fl("supabase/migrations/20270302160000_y.sql", D, "added");
+ok(carried({ before: [migX, migY], after: [fl("supabase/migrations/20270304160000_x.sql", C, "added"), fl("supabase/migrations/20270305160000_y.sql", D, "added")] }),
+  "restamping two migrations in their order carries it");
+ok(!carried({ before: [migX, migY], after: [fl("supabase/migrations/20270306160000_x.sql", C, "added"), fl("supabase/migrations/20270305160000_y.sql", D, "added")] }),
+  "restamping x past y changes the run order: needs him again");
+ok(!carried({ before: [migX, migY], after: [fl("supabase/migrations/20270303160000_x.sql", C, "added"), migY] }),
+  "restamping x past an unchanged y changes the run order too");
+ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "a = 1", [D]: "﻿a = 1" } }),
+  "adding a byte-order mark is a change like any other byte (Sol r2)");
 const mig19 = fl("supabase/migrations/20270306190000_proof.sql", E, "added");
 const mig03 = fl("supabase/migrations/20270307030000_proof.sql", E, "added");
 ok(carried({ before: [quotes, mig19], after: [fl("src/pages/Quotes.tsx", D), mig03], blobs: { [C]: "// see 20270306190000.\n-- 20270306190000.sql", [D]: "// see 20270307030000.\n-- 20270307030000.sql" } }),

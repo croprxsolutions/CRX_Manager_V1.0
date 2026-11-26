@@ -139,6 +139,9 @@ describe('SettingsPage — phone controls', () => {
     fireEvent.change(reminder, { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Fewer reminder days' }));
     expect(reminder).toHaveValue(1);
+    fireEvent.change(reminder, { target: { value: '1e3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'More reminder days' }));
+    expect(reminder).toHaveValue(1001);
     fireEvent.change(reminder, { target: { value: '3650' } });
     fireEvent.click(screen.getByRole('button', { name: 'More reminder days' }));
     expect(reminder).toHaveValue(3650);

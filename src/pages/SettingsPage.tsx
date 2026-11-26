@@ -99,7 +99,8 @@ function PhoneStepper({ label, value, min, max, onChange, children }: {
   children: ReactNode;
 }) {
   const bump = (delta: number) => {
-    const n = parseInt(value, 10);
+    // Number, not parseInt: a number box also accepts 1e3.
+    const n = value.trim() === '' ? NaN : Math.trunc(Number(value));
     const next = (Number.isFinite(n) ? n : min) + delta;
     onChange(String(Math.min(Math.max(next, min), max ?? next)));
   };

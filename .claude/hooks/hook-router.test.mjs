@@ -9,7 +9,7 @@ import { promptModulesFor } from "./prompt-router.mjs";
 import { postToolModulesFor } from "./posttool-router.mjs";
 import { dirtyWarning, pushDir, pushTargets } from "./post-push-dirty-warning.mjs";
 import { dedupeContextBlocks } from "./hook-router-runtime.mjs";
-import { askTahaAfterSol, githubAncestry, proofReader, readyTarget, solCoversHead } from "./taha-ready-after-sol.mjs";
+import { askTahaAfterSol, ghCommandCwd, githubAncestry, proofReader, readyTarget, solCoversHead } from "./taha-ready-after-sol.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -268,7 +268,19 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
   // Taha LOW 2 / Codex bot: an unreadable file list is not "not in the lane".
   const noFiles = attempt({ fail: "/files" });
   ok(noFiles.wrote.length === 0 && noFiles.note.includes("not labelled for Taha yet") && noFiles.note.includes("changed files"), "file list unreadable: one line with the manual command");
+  // Taha LOW 7: the lane is unknown then, so the command is conditional, and no sign-off of his is claimed.
+  ok(noFiles.note.includes("could not tell whether it changes Taha's areas") && noFiles.note.includes("Only if it does, run: gh pr edit 7") && !noFiles.note.includes("signed off"), "unknown lane: the command is only for a PR in his areas");
+  const MIG = "supabase/migrations/20270101000000_field_x.sql";
+  const migFiles = ["added", MIG, "", HEAD].join("\t") + "\n";
+  const unreadSql = attempt({ files: migFiles, fail: "/contents/" });
+  ok(unreadSql.wrote.length === 0 && unreadSql.note.includes("migrations' SQL") && unreadSql.note.includes("Only if it does") && !unreadSql.note.includes("signed off"), "only unreadable migration SQL: lane unknown, conditional line, no sign-off claimed");
+  const slowSql = attempt({ files: migFiles, budgetMs: 200, delayOn: "/files", delayMs: 300 });
+  ok(slowSql.wrote.length === 0 && !slowSql.note.includes("signed off"), "out of time in the lane check with no sign-off of his: never says he signed off");
   // Codex bot: `gh pr ready <n>` from another branch asks about PR n, judged on its own head.
+  // Taha LOW 8 / Codex bot: a literal `cd <dir> &&` before gh pr create|ready is followed.
+  const here = path.resolve("C:/base");
+  eq([ghCommandCwd("cd C:/wt/lane && gh pr create --base staging --fill", here), ghCommandCwd(`cd "C:/wt/my lane" && gh pr ready`, here), ghCommandCwd("gh pr ready", here), ghCommandCwd("cd $W && gh pr ready", here), ghCommandCwd("cd ../x && gh pr ready", here)],
+    [path.resolve("C:/wt/lane"), path.resolve("C:/wt/my lane"), here, here, path.resolve(here, "../x")], "the folder a gh pr create/ready runs in");
   eq([readyTarget("gh pr ready 2643"), readyTarget("gh pr ready --undo"), readyTarget("gh pr ready"), readyTarget("gh pr create --fill")], ["2643", null, null, null], "the PR a gh pr ready names");
   const named = (() => { const calls = []; const note = askTahaAfterSol({ cwd: ".", pr: "7", gh: (args) => { calls.push(args.join(" ")); return args[0] === "pr" ? JSON.stringify(basePr) : args.some((a) => a.includes("/files")) ? laneFiles : "0"; }, readProof: (sha) => (sha === HEAD ? proof(HEAD) : null), now }); return { note, calls }; })();
   ok(named.calls[0].startsWith("pr view 7 ") && named.note.includes("Taha is asked"), "gh pr ready <n>: that PR is asked about and labelled");

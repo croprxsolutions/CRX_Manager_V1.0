@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_REPO_NAME } from "./app-repo-identity.mjs";
-import { gitPushCwd, headContainsBaseOnGitHub, isGitPush, mergeBaseOnGitHub, proofSearchDirs, proofValid, proofValidForMerge } from "./codex-push-lib.mjs";
+import { gitPushCwd, headContainsBaseOnGitHub, isGitPush, mergeBaseOnGitHub, nativeFolder, proofSearchDirs, proofValid, proofValidForMerge } from "./codex-push-lib.mjs";
 import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneProblem, TAHA_LOGIN } from "./taha-lane-lib.mjs";
 
 const LABEL = "ready-for-taha";
@@ -28,6 +28,8 @@ const isTaha = (login) => String(login ?? "").trim().toLowerCase() === TAHA_LOGI
 const lower = (sha) => String(sha ?? "").toLowerCase();
 const manual = (n) => `gh pr edit ${n ? `${n} ` : ""}--add-label ${LABEL} --add-reviewer TahaKhanAbdalli`;
 const FILES_UNREADABLE = "GitHub did not return the PR's changed files";
+const LANE_UNKNOWN = "GitHub did not return its migrations' SQL";
+const UNREAD_SQL = "(its SQL could not be read)"; // tahaLaneProblem's marker
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** Why this PR should NOT be labelled now, or null when it should. `files()` (GitHub calls) is asked last. */
@@ -41,7 +43,10 @@ export function tahaReadyAfterSolProblem({ pr, proofClean, files }) {
   if ((pr.reviews ?? []).some((r) => isTaha(r.author?.login) && lower(r.commit?.oid) === head)) return "Taha already reviewed this head";
   const list = files();
   if (list === null) return FILES_UNREADABLE;
-  if (!tahaLaneProblem({ files: list })?.files?.length) return "not in Taha's lane";
+  const hits = tahaLaneProblem({ files: list })?.files ?? [];
+  if (!hits.length) return "not in Taha's lane";
+  // A migration whose SQL could not be read counts as lane for the merge gates, but here it only means "unknown".
+  if (hits.every((hit) => hit.endsWith(UNREAD_SQL))) return LANE_UNKNOWN;
   return null;
 }
 
@@ -139,14 +144,18 @@ export function askTahaAfterSol({ cwd, headSha = null, pr: target = null, gh = d
     const files = () => prFilesOnGitHub({ repo: undefined, gh: call, number: pr.number, headSha: pr.headRefOid });
     const problem = tahaReadyAfterSolProblem({ pr, proofClean: covered !== false, files });
     // An unreadable list is not "not lane" (Taha LOW 2, Codex bot): say so, as the other unfinished paths do.
-    if (problem === FILES_UNREADABLE) return `PR #${pr.number}: not labelled for Taha yet (${FILES_UNREADABLE}); run: ${manual(pr.number)}`;
+    // The lane is unknown then, so the command is conditional (Taha LOW 7): never a bare ask on a PR that may not be his.
+    if (problem === FILES_UNREADABLE || problem === LANE_UNKNOWN) {
+      return `PR #${pr.number}: not labelled for Taha yet (${problem}, so it could not tell whether it changes Taha's areas). `
+        + `Only if it does, run: ${manual(pr.number)}`;
+    }
     if (problem) return "";
     // His Approve of an earlier commit still counts after a staging catch-up, docs/ note or restamp (taha-ready.mjs
     // tahaVerdict; Taha MED 1). Asked only when he approved some commit (a push dismisses it): it costs several calls.
     const approvedEarlier = (pr.reviews ?? []).some((r) => isTaha(r.author?.login) && ["APPROVED", "DISMISSED"].includes(r.state));
     if (approvedEarlier && tahaApprovedOnGitHub({ repo: undefined, gh: call, pullRequest: pr.number, headSha: pr.headRefOid })) return "";
     // Unfinished carry check: never a plain re-ask, since his sign-off may still stand (Taha MED 1, delta).
-    if (Date.now() >= deadline) {
+    if (approvedEarlier && Date.now() >= deadline) {
       return `PR #${pr.number}: not labelled for Taha yet. Taha signed off an earlier commit and there was no time to check whether it carries over. `
         + `Only if this push changed code (not just a staging catch-up, docs/ notes or a migration restamp), run: ${manual(pr.number)}`;
     }
@@ -170,6 +179,15 @@ export function readyTarget(command) {
   return m ? m[1].replace(/^["']|["']$/g, "") : null;
 }
 
+/**
+ * The folder a `gh pr create|ready` runs in: a literal `cd <dir> &&` right before it wins over the tool's folder
+ * (Taha LOW 8, Codex bot), the way `git -C` is followed for a push. A `cd` to a variable is not followed.
+ */
+export function ghCommandCwd(command, base) {
+  const m = /(?:^|&&|;)\s*cd\s+("[^"$`]+"|'[^']+'|[^\s;&|$`"']+)\s*&&\s*gh\s+pr\s+(?:create|ready)\b/.exec(String(command || ""));
+  return path.resolve(base, m ? nativeFolder(m[1].replace(/^(["'])(.*)\1$/, "$2")) : ".");
+}
+
 function routedPayload() {
   if (globalThis.__CRX_ROUTED_HOOK_PAYLOAD) return globalThis.__CRX_ROUTED_HOOK_PAYLOAD;
   if (!process.argv[1] || path.resolve(process.argv[1]) !== fileURLToPath(import.meta.url)) return null;
@@ -180,7 +198,7 @@ const input = routedPayload();
 const command = String(input?.tool_input?.command || "");
 if (command) {
   const base = input.cwd || input.tool_input?.cwd || process.cwd();
-  const cwd = isGitPush(command) ? gitPushCwd(command, base, command) : path.resolve(base);
+  const cwd = isGitPush(command) ? gitPushCwd(command, base, command) : ghCommandCwd(command, base);
   const target = readyTarget(command);
   // The local HEAD, so a PR GitHub has not yet moved to the pushed commit is not judged on its old head. A PR named
   // by `gh pr ready <n>` need not be this checkout's branch (Codex bot), so its own head is judged instead.

@@ -5,6 +5,11 @@ actor="$1"
 farm="$2"
 product="$3"
 tag="$4"
+for id in "$actor" "$farm" "$product"; do
+  case "$id" in ''|*[!a-f0-9-]*) exit 2;; esac
+  test "${#id}" -eq 36 || exit 2
+done
+test "$tag" = "local-credit-race-$farm" || exit 2
 psqlq() { psql -U supabase_admin -d postgres -XqAt -v ON_ERROR_STOP=1 "$@"; }
 scratch=$(mktemp -d)
 trap 'rm -f "$scratch/first" "$scratch/second"; rmdir "$scratch"' EXIT

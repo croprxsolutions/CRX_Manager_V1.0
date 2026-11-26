@@ -62,6 +62,9 @@ try {
     DELETE FROM public.notifications WHERE notification_type='credit_limit_exceeded' AND related_entity_id='${farm}';
     DELETE FROM public.activity_feed WHERE customer_id='${farm}';
     DELETE FROM public.idempotency_keys WHERE operation='create_direct_order' AND idempotency_key IN ('${tag}-old','${tag}-new');
+    DELETE FROM public.inventory_transactions WHERE product_id='${product}';
+    DELETE FROM public.inventory WHERE product_id='${product}';
+    DELETE FROM public.commissions WHERE customer_id='${farm}';
     DELETE FROM public.order_items WHERE order_id IN (SELECT id FROM public.orders WHERE customer_id='${farm}');
     DELETE FROM public.orders WHERE customer_id='${farm}';
     DELETE FROM public.invoices WHERE customer_id='${farm}';
@@ -77,6 +80,12 @@ const cleared = localSql(`SELECT
   AND NOT EXISTS (SELECT 1 FROM public.notifications WHERE related_entity_id='${farm}')
   AND NOT EXISTS (SELECT 1 FROM public.products WHERE id='${product}')
   AND NOT EXISTS (SELECT 1 FROM public.customers WHERE id='${farm}')
+  AND NOT EXISTS (SELECT 1 FROM public.inventory_transactions WHERE product_id='${product}')
+  AND NOT EXISTS (SELECT 1 FROM public.inventory WHERE product_id='${product}')
+  AND NOT EXISTS (SELECT 1 FROM public.commissions WHERE customer_id='${farm}')
+  AND NOT EXISTS (SELECT 1 FROM public.activity_feed WHERE customer_id='${farm}')
+  AND NOT EXISTS (SELECT 1 FROM public.idempotency_keys WHERE idempotency_key IN ('${tag}-new','${tag}-old'))
+  AND NOT EXISTS (SELECT 1 FROM public.profiles WHERE id IN ('${actor}','${admin}'))
   AND NOT EXISTS (SELECT 1 FROM auth.users WHERE id IN ('${actor}','${admin}'));`);
 assert.equal(cleared, 't');
 console.log('LOCAL_CREDIT_RACE_FIXTURES_CLEANUP_PASS');

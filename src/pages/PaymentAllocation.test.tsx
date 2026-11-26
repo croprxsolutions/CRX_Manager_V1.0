@@ -712,6 +712,27 @@ describe('Record Payments: payment date and check number', () => {
     expect(screen.queryByText('Payment Applied Successfully')).not.toBeInTheDocument();
   });
 
+  it('a retry after a lost reply past midnight sends the day the first attempt sent', async () => {
+    let replyLost = true;
+    mockRpc.mockImplementation(() => {
+      if (replyLost) { replyLost = false; return Promise.reject(new Error('Failed to fetch')); }
+      return Promise.resolve(saved);
+    });
+    await fillPayment();
+    apply();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to fetch'));
+
+    // 12:30 AM on Nov 25 in Chicago; typing a note re-renders the page on the new day.
+    vi.setSystemTime(new Date('2026-11-25T06:30:00Z'));
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'retry' } });
+    expect(shownDate()).toBe('11/24/2026');
+    apply();
+    await waitFor(() => expect(rpcCalls()).toHaveLength(2));
+    const [first, second] = rpcCalls().map(([, args]) => args);
+    expect(second.p_idempotency_key).toBe(first.p_idempotency_key);
+    expect(second.p_payment_date).toBe('2026-11-24');
+  });
+
   it('a retry after a lost reply still reaches the save when the month has since been closed', async () => {
     let replyLost = true;
     mockRpc.mockImplementation(() => {

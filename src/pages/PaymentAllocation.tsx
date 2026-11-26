@@ -526,6 +526,8 @@ export default function PaymentAllocation() {
       toast('success', parts.join('. '));
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'allocate_payment' } });
+      // The save may have gone through: a retry after midnight must still send the day this attempt sent.
+      if (paymentDateInput === undefined) setPaymentDateInput(payment.paymentDate);
       const dateRefusal = paymentDateRefusal(err, payment.paymentDate);
       if (hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_ARGUMENT_MISMATCH)) setRetryRefused(true);
       else if (dateRefusal) refuseDate(dateRefusal);

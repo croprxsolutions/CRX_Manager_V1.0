@@ -23,8 +23,8 @@
 --   2. Closing as applied joins the closes refused at REPEATABLE READ or SERIALIZABLE (BOOKING_NEEDS_READ_COMMITTED),
 --      where the job check would read a stale snapshot. The app runs READ COMMITTED.
 --   3. Closing short or as applied (status -> closed_short, closed_by_application) by a signed-in user who is neither
---      an admin nor the booking's rep (OLD.created_by, the owner the quotes row policy and the #2026 job rule use)
---      is refused BOOKING_NOT_YOURS. System sessions (no auth.uid()) stay exempt.
+--      an active admin nor the booking's rep (OLD.created_by, the owner the quotes row policy and the #2026 job rule
+--      use) as an active sales rep is refused BOOKING_NOT_YOURS. System sessions (no auth.uid()) stay exempt.
 --   Both closes run through this trigger whether they come from the RPC or a direct update, and the RPC's whole call
 --   rolls back on a refusal (nothing released, no activity row).
 --   Concurrency (READ COMMITTED): a job scheduled, linked or reopened on a booking locks that booking FOR SHARE and
@@ -39,7 +39,8 @@
 --   20270129150000 body (md5 9beb84454834da47d80e2c2a05a8a25d) after checking live still has this file's body. Text:
 --   scripts/smoke/booking-close-guard-reverse.sql. That reopens both gaps.
 --
--- ORDERING: after 20270129150000. Not re-runnable (the preflight refuses a second apply).
+-- ORDERING: after 20270129150000. Not re-runnable (the preflight refuses a second apply). Apply at READ COMMITTED
+--   (the preflight refuses another level). The preflight also pins the jobs trigger this rule relies on.
 
 SET LOCAL lock_timeout = '5s';
 -- Hold off booking and job writes for the apply (a few hundred ms), so a close in flight under the old body
@@ -48,6 +49,11 @@ LOCK TABLE public.quotes, public.jobs IN SHARE ROW EXCLUSIVE MODE;
 
 DO $preflight$
 BEGIN
+  -- Sol r1 MED 2: at REPEATABLE READ the checks below would read the snapshot taken before the locks above.
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'PREFLIGHT_BOOKING_CLOSE_GUARD_ISOLATION: apply this migration at READ COMMITTED (the default), not %',
+      current_setting('transaction_isolation');
+  END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._enforce_booking_live_job_rules()'))
        IS DISTINCT FROM '9beb84454834da47d80e2c2a05a8a25d' THEN
     RAISE EXCEPTION 'PREFLIGHT_BOOKING_CLOSE_GUARD_DRIFT: _enforce_booking_live_job_rules() is not the reviewed 20270129150000 body (missing, drifted or already replaced); re-read live first';
@@ -58,6 +64,18 @@ BEGIN
                    AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a
                          WHERE a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr)) = ARRAY['customer_id', 'deleted_at', 'status']) THEN
     RAISE EXCEPTION 'PREFLIGHT_BOOKING_CLOSE_GUARD_TRIGGER: quotes_booking_live_job_rules is not BEFORE UPDATE OF status, customer_id, deleted_at on quotes, enabled, with no WHEN clause';
+  END IF;
+  -- Sol r1 HIGH: the other half of the rule is the jobs trigger, which locks the booking and refuses a closed one
+  -- (closed_by_application included) when a job is scheduled, linked or reopened. Pinned as 20270129150000 left it.
+  IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._enforce_job_live_on_open_booking()'))
+       IS DISTINCT FROM '08a8fed5fb807e1763cf40886078fc4c'
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.jobs'::regclass AND t.tgname = 'jobs_live_on_open_booking'
+                      AND t.tgtype = 23 AND t.tgenabled = 'O' AND t.tgqual IS NULL
+                      AND t.tgfoid = 'public._enforce_job_live_on_open_booking()'::regprocedure
+                      AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a
+                            WHERE a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr))
+                          = ARRAY['customer_id', 'deleted_at', 'quote_id', 'quote_section_id', 'status']) THEN
+    RAISE EXCEPTION 'PREFLIGHT_BOOKING_CLOSE_GUARD_JOBS_TRIGGER: jobs_live_on_open_booking is not the reviewed 20270129150000 trigger (BEFORE INSERT OR UPDATE OF quote_id, quote_section_id, customer_id, status, deleted_at, enabled, no WHEN clause); re-read live first';
   END IF;
 END
 $preflight$;
@@ -102,10 +120,11 @@ BEGIN
   -- #2065 (Mason 2026-11-21): a booking is closed short only by its own rep (quotes.created_by, the owner the quotes
   -- row policy uses) or an admin; closing as applied releases the same holds, so it follows the same rule (Taha
   -- 2026-11-25). close_quote_as_short and close_quote_as_applied are SECURITY DEFINER and let any sales rep close any
-  -- booking. The owner is read from OLD, so changing it in the same update does not count. System sessions (no
-  -- auth.uid()) stay exempt.
+  -- booking. The owner is read from OLD, so changing it in the same update does not count, and must still be an
+  -- active sales rep (Sol r1 MED 3). System sessions (no auth.uid()) stay exempt.
   IF NEW.status IS DISTINCT FROM OLD.status AND NEW.status IN ('closed_short', 'closed_by_application')
-     AND auth.uid() IS NOT NULL AND NOT public.is_admin() AND OLD.created_by IS DISTINCT FROM auth.uid() THEN
+     AND auth.uid() IS NOT NULL AND NOT public.is_admin()
+     AND (NOT public.is_sales_rep() OR OLD.created_by IS DISTINCT FROM auth.uid()) THEN
     RAISE EXCEPTION 'BOOKING_NOT_YOURS: booking % is another rep''s, so only that rep or an admin can close it %.',
       NEW.quote_number, CASE NEW.status WHEN 'closed_short' THEN 'short' ELSE 'as applied' END
       USING ERRCODE = 'P0001';
@@ -184,14 +203,18 @@ BEGIN
   IF v_p.proowner <> 'postgres'::regrole OR NOT v_p.prosecdef
      OR v_p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
      OR EXISTS (SELECT 1 FROM aclexplode(v_p.proacl) a WHERE a.privilege_type = 'EXECUTE' AND a.grantee <> 'postgres'::regrole)
-     OR md5(replace(v_p.prosrc, chr(13), '')) <> 'c95e156c09d9b8258ce4b5d92520abb3' THEN
+     OR md5(replace(v_p.prosrc, chr(13), '')) <> '02d3233a58743b0f0b892d2cc1996c3b' THEN
     RAISE EXCEPTION 'POSTFLIGHT_BOOKING_CLOSE_GUARD: _enforce_booking_live_job_rules() is not the new body, postgres-owned, definer, pinned search_path, no outside EXECUTE';
   END IF;
   -- No booking closed as applied before this migration may still have a scheduled or in-progress spray job (quotes is
-  -- locked above, so none closes in between); if one exists, re-read live and settle it with Mason first.
-  IF EXISTS (SELECT 1 FROM public.jobs j JOIN public.quotes q
-               ON q.id = j.quote_id OR q.id = (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = j.quote_section_id)
-             WHERE q.status = 'closed_by_application' AND j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')) THEN
+  -- locked above, so none closes in between); if one exists, re-read live and settle it with Mason first. The scan
+  -- starts from the bookings closed as applied (Sol r1 MED 5: it runs under the write lock); live holds a few hundred.
+  IF EXISTS (SELECT 1 FROM public.quotes q
+             WHERE q.status = 'closed_by_application'
+               AND EXISTS (SELECT 1 FROM public.jobs j
+                           WHERE (j.quote_id = q.id
+                                  OR j.quote_section_id IN (SELECT qs.id FROM public.quote_sections qs WHERE qs.quote_id = q.id))
+                             AND j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress'))) THEN
     RAISE EXCEPTION 'POSTFLIGHT_APPLIED_BOOKING_LIVE_JOB: a booking closed as applied still has a scheduled or in-progress spray job; re-read live first';
   END IF;
 END

@@ -28,7 +28,7 @@ import { buildContainer, removeContainer, seedUsers, attempt, asUser, refuse, id
 
 const CANDIDATE = '20270307120000_booking_close_guard_applied_and_short.sql';
 const OLD_MD5 = '9beb84454834da47d80e2c2a05a8a25d';
-const NEW_MD5 = 'c95e156c09d9b8258ce4b5d92520abb3';
+const NEW_MD5 = '02d3233a58743b0f0b892d2cc1996c3b';
 const text = (file) => readFileSync(path.join(ROOT, file), 'utf8').replaceAll('\r\n', '\n');
 const candidate = text(`supabase/migrations/${CANDIDATE}`);
 const reverse = text('scripts/smoke/booking-close-guard-reverse.sql');
@@ -45,6 +45,7 @@ const CUSTOMER = id('b1');
 const Q_JOB = id('c1'); // rep A's planned booking with a scheduled job
 const Q_FREE = id('c2'); // rep A's booking with no job
 const S_JOB = id('d1');
+const S_FREE = id('d2'); // a section of the no-job booking, for a legacy section-only job
 const JOB = id('e1');
 let key = 0;
 const closeApplied = (q, uid) => refuse(`r := public.close_quote_as_applied('${q}', '${uid}', 'bcg-prover-${(key += 1)}');`);
@@ -71,16 +72,25 @@ SET LOCAL ROLE authenticated;
 SELECT public.close_quote_as_applied('${Q_FREE}', '${REP_A}', 'bcg-race-${Date.now()}-${hold}');
 ${hold ? 'SELECT pg_sleep(3);' : ''}
 COMMIT;`;
-const resetRace = () => psql(`SET session_replication_role = replica;
+const resetRace = () => psql(`BEGIN;
+  SET CONSTRAINTS ALL IMMEDIATE;
+  ALTER TABLE public.jobs DISABLE TRIGGER USER;
+  ALTER TABLE public.quotes DISABLE TRIGGER USER;
   DELETE FROM public.jobs WHERE id = '${JOB_RACE}';
-  UPDATE public.quotes SET status = 'sent' WHERE id = '${Q_FREE}';`);
+  UPDATE public.quotes SET status = 'sent' WHERE id = '${Q_FREE}';
+  ALTER TABLE public.jobs ENABLE TRIGGER USER;
+  ALTER TABLE public.quotes ENABLE TRIGGER USER;
+  COMMIT;`);
 
 /** A direct close as applied by rep A at the given isolation level; returns the error text, or 'ok'. */
 const directApplied = (level) => {
   const r = run(`BEGIN ISOLATION LEVEL ${level};
 ${claims(REP_A)}
 SET LOCAL ROLE authenticated;
-UPDATE public.quotes SET status = 'closed_by_application' WHERE id = '${Q_FREE}';
+DO $direct$ BEGIN
+  UPDATE public.quotes SET status = 'closed_by_application' WHERE id = '${Q_FREE}';
+  IF NOT FOUND THEN RAISE EXCEPTION 'NO_ROW_UPDATED: the row policy hid the booking'; END IF;
+END $direct$;
 ROLLBACK;`);
   return r.status === 0 ? 'ok' : r.out.trim();
 };
@@ -97,7 +107,8 @@ try {
     INSERT INTO public.quotes (id, quote_number, customer_id, status, tier, created_by, is_planned) VALUES
       ('${Q_JOB}', '[PROVER] BCG-JOB', '${CUSTOMER}', 'draft', 1, '${REP_A}', true),
       ('${Q_FREE}', '[PROVER] BCG-FREE', '${CUSTOMER}', 'draft', 1, '${REP_A}', true);
-    INSERT INTO public.quote_sections (id, quote_id, section_name, sort_order) VALUES ('${S_JOB}', '${Q_JOB}', 'North', 0);
+    INSERT INTO public.quote_sections (id, quote_id, section_name, sort_order) VALUES ('${S_JOB}', '${Q_JOB}', 'North', 0),
+      ('${S_FREE}', '${Q_FREE}', 'South', 0);
     INSERT INTO public.quote_versions (quote_id, sent_by, snapshot_data) VALUES ('${Q_JOB}', '${ADMIN}', '{}'), ('${Q_FREE}', '${ADMIN}', '{}');
     UPDATE public.quotes SET status = 'sent' WHERE id IN ('${Q_JOB}', '${Q_FREE}');
     INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, quote_section_id)
@@ -133,13 +144,18 @@ ${candidate}
 ROLLBACK;`);
   assert.notEqual(r.status, 0);
   assert.match(r.out, /POSTFLIGHT_APPLIED_BOOKING_LIVE_JOB/, 'a booking already closed as applied with a live job must stop the apply');
+  r = run(`BEGIN ISOLATION LEVEL REPEATABLE READ;\n${candidate}\nROLLBACK;`);
+  assert.match(r.out, /PREFLIGHT_BOOKING_CLOSE_GUARD_ISOLATION/, 'an apply at REPEATABLE READ must be refused');
+  r = run(`BEGIN;\nALTER TABLE public.jobs DISABLE TRIGGER jobs_live_on_open_booking;\n${candidate}\nROLLBACK;`);
+  assert.match(r.out, /PREFLIGHT_BOOKING_CLOSE_GUARD_JOBS_TRIGGER/, 'a disabled jobs trigger must stop the apply');
+  assert.equal(bodyMd5(), OLD_MD5);
   r = run(candidate, ['-1']);
   assert.equal(r.status, 0, `the candidate must apply:\n${r.out}`);
   assert.equal(bodyMd5(), NEW_MD5);
   r = run(candidate, ['-1']);
   assert.match(r.out, /PREFLIGHT_BOOKING_CLOSE_GUARD_DRIFT/, 'a second apply must be refused');
   assert.equal(bodyMd5(), NEW_MD5);
-  console.log('[apply] autocommit refused; postflight refused an applied booking with a live job; applied once; re-apply refused');
+  console.log('[apply] autocommit, REPEATABLE READ and a disabled jobs trigger refused; postflight refused an applied booking with a live job; applied once; re-apply refused');
 
   // 3. AFTER.
   assert.match(probe(REP_A, closeApplied(Q_JOB, REP_A)),
@@ -152,6 +168,16 @@ ROLLBACK;`);
   assert.equal(probe(REP_A, closeShort(Q_FREE, REP_A)), 'ok|NOT REFUSED', 'rep A closes their own booking short');
   assert.equal(probe(ADMIN, closeShort(Q_FREE, ADMIN)), 'ok|NOT REFUSED', 'an admin closes it short');
   assert.equal(probe(REP_A, closeApplied(Q_FREE, REP_A)), 'ok|NOT REFUSED', 'a booking with no job closes as applied');
+  // A legacy job linked only through a section (new ones must also name the booking, JOB_NEEDS_BOOKING) still blocks.
+  assert.match(run(`BEGIN;
+ALTER TABLE public.jobs DISABLE TRIGGER jobs_live_on_open_booking;
+INSERT INTO public.jobs (job_number, customer_id, job_date, quote_section_id)
+  VALUES ('PRV-BCG-LEGACY', '${CUSTOMER}', (now() AT TIME ZONE 'America/Chicago')::date + 7, '${S_FREE}');
+-- The jobs trigger stays off until the ROLLBACK below restores it; the close fires only the quotes trigger.
+${claims(REP_A)}
+SET LOCAL ROLE authenticated;
+SELECT public.close_quote_as_applied('${Q_FREE}', '${REP_A}', 'bcg-legacy-${Date.now()}');
+ROLLBACK;`).out, /BOOKING_HAS_JOB: spray job PRV-BCG-LEGACY /, 'a section-only job blocks the close');
   assert.match(directApplied('REPEATABLE READ'), /BOOKING_NEEDS_READ_COMMITTED/);
   assert.match(directApplied('SERIALIZABLE'), /BOOKING_NEEDS_READ_COMMITTED/);
   assert.equal(directApplied('READ COMMITTED'), 'ok');
@@ -159,17 +185,34 @@ ROLLBACK;`);
   // Two sessions at READ COMMITTED (Luna r1): a job scheduled on the booking holds it FOR SHARE until commit
   // (_enforce_job_live_on_open_booking), so a close as applied started meanwhile waits, then sees the job; and a
   // close holding the booking makes a job insert wait, then see the closed booking.
-  let [first, second] = await Promise.all([session(insertJobHeld), session(closeAppliedAsRepA(false), 1000)]);
+  // Sol r1 MED 4: the second session must be seen waiting on a lock while the first still holds the booking.
+  const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+  const waitsOnLock = (needle) => {
+    for (let i = 0; i < 15; i += 1) {
+      if (scalar(`SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%${needle}%' AND pid <> pg_backend_pid();`) === '1') return true;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+    return false;
+  };
+  const race = async (firstSql, secondSql, needle) => {
+    const one = session(firstSql);
+    await sleep(800);
+    const two = session(secondSql);
+    await sleep(400);
+    assert.ok(waitsOnLock(needle), `the second session (${needle}) never waited on the first's lock`);
+    return Promise.all([one, two]);
+  };
+  let [first, second] = await race(insertJobHeld, closeAppliedAsRepA(false), 'close_quote_as_applied');
   assert.equal(first.status, 0, `the job insert must commit:\n${first.out}`);
   assert.match(second.out, /BOOKING_HAS_JOB: spray job PRV-BCG-RACE .*cannot be closed as applied/, `the close must wait for the job and refuse:\n${second.out}`);
   assert.equal(scalar(`SELECT status FROM public.quotes WHERE id = '${Q_FREE}';`), 'sent');
   resetRace();
-  [first, second] = await Promise.all([session(closeAppliedAsRepA(true)), session(insertJobHeld, 1000)]);
+  [first, second] = await race(closeAppliedAsRepA(true), insertJobHeld, 'PRV-BCG-RACE');
   assert.equal(first.status, 0, `the close must commit:\n${first.out}`);
   assert.match(second.out, /BOOKING_CLOSED: booking \[PROVER\] BCG-FREE is closed_by_application, so a spray job cannot be scheduled from it\./, `the job insert must wait for the close and refuse:\n${second.out}`);
   assert.equal(scalar(`SELECT count(*) FROM public.jobs WHERE id = '${JOB_RACE}';`), '0');
   resetRace();
-  console.log('[race] job insert then close: the close waits and is refused; close then job insert: the insert waits and is refused');
+  console.log('[race] job insert then close: the close is seen waiting, then refused; close then job insert: the insert is seen waiting, then refused');
   const chains = ['smoke-booking-close-guard.sql', 'smoke-booking-guard-rep-and-delete.sql'];
   for (const chain of chains) assert.match(smoke(chain), /SMOKE_PASS_ROLLBACK/, `${chain} must pass after the candidate`);
   for (const chain of SAME) assert.equal(smoke(chain), before[chain], `${chain} must end exactly as before`);
@@ -180,6 +223,7 @@ ROLLBACK;`);
   r = run(reverse, ['-1']);
   assert.equal(r.status, 0, `the rollback text must apply:\n${r.out}`);
   assert.equal(bodyMd5(), OLD_MD5);
+  assert.match(run(reverse, ['-1']).out, /ROLLBACK_BOOKING_CLOSE_GUARD_DRIFT/, 'the rollback text runs only over this migration\'s body');
   gaps('rollback');
   console.log('[rollback] the 20270129150000 body is back and both gaps reproduce');
 

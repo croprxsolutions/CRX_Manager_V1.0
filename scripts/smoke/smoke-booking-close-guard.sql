@@ -9,6 +9,7 @@
 --       a DO block cannot change its own isolation level)
 --   S1  rep B cannot close rep A's booking short (close_quote_as_short) or as applied (close_quote_as_applied):
 --       BOOKING_NOT_YOURS
+--   S1c rep A, once no longer an active sales rep, cannot close their own booking (the trigger alone, no row policy)
 --   S2  rep A, an admin and a system session (no auth.uid()) can each close it short
 --   S3  close_quote_as_short still refuses a booking with a scheduled job, and other closes are unchanged
 --
@@ -127,6 +128,27 @@ BEGIN
   IF (SELECT status FROM quotes WHERE id = v_q[4]) <> 'sent' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (S1) a refused close changed the booking';
   END IF;
+
+  -- S1c. Rep A's profile deactivated: a direct close of their own booking is refused by the trigger itself.
+  BEGIN
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    UPDATE profiles SET is_active = false WHERE id = v_rep_a;
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep_a, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_rep_a::text, true);
+    v_err := NULL;
+    BEGIN
+      UPDATE quotes SET status = 'closed_short' WHERE id = v_q[4];
+    EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+    END;
+    IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_NOT_YOURS: booking [SMOKE] BCG-4-%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (S1c) a deactivated owner closing their booking short was not refused BOOKING_NOT_YOURS: %', v_err;
+    END IF;
+    RAISE EXCEPTION 'BCG_UNDO';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'BCG_UNDO' THEN RAISE; END IF;
+  END;
+  v_n := v_n + 1;
 
   -- S2. Rep A, an admin and a system session can each close it short (each undone).
   FOREACH v_who IN ARRAY ARRAY[v_rep_a, v_admin, NULL] LOOP

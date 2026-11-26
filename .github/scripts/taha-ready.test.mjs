@@ -104,20 +104,43 @@ test('ping text escapes PR titles and names the short head', () => {
 });
 
 // ── Hotfixes into main (Mason, 2026-11-25) ─────────────────────────────────────────────────────
-import { cutAtSentence, githubOwned, isMainHotfix } from './taha-ready.mjs';
+import { cutAtSentence, githubOwned, isMainHotfix, onlyBackportReason } from './taha-ready.mjs';
 
 const hotfix = (o) => pr({ baseRefName: 'main', headRefName: 'hotfix/q', ...o });
 const gateWaiting = () => [...green(), { name: 'Release flow guard (main)', bucket: 'fail' }, { name: 'release-gate', bucket: 'pending' }];
 
 test('a hotfix into main is asked for even while the guard and release-gate wait on Taha; other checks still count', () => {
+  const wantsLabel = { ...ok, checks: gateWaiting, backport: () => true };
   assert.equal(isMainHotfix(hotfix()), true);
   assert.equal(isMainHotfix(pr({ baseRefName: 'staging', headRefName: 'hotfix/q' })), false);
   assert.equal(isMainHotfix(pr({ baseRefName: 'main', headRefName: 'release/next' })), false);
-  assert.equal(decide(hotfix(), { ...ok, checks: gateWaiting }).act, true);
-  assert.equal(decide(hotfix(), { ...ok, checks: () => [...gateWaiting(), { name: 'CI', bucket: 'fail' }] }).act, false);
+  assert.equal(decide(hotfix(), wantsLabel).act, true);
+  assert.equal(decide(hotfix(), { ...wantsLabel, checks: () => [...gateWaiting(), { name: 'CI', bucket: 'fail' }] }).act, false);
   // Not a hotfix: the guard still blocks.
-  assert.equal(decide(pr({ baseRefName: 'main', headRefName: 'release/next' }), { ...ok, checks: gateWaiting }).act, false);
-  assert.equal(P(labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' }), [], { ...ok, checks: gateWaiting }), true);
+  assert.equal(decide(pr({ baseRefName: 'main', headRefName: 'release/next' }), wantsLabel).act, false);
+  assert.equal(P(labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' }), [], wantsLabel), true);
+});
+
+test('a hotfix whose guard is red for any other reason is held: no label, ping or reminder (Taha, 2026-11-25)', () => {
+  const otherReason = { ...ok, checks: gateWaiting, backport: () => false };
+  assert.match(decide(hotfix(), otherReason).why, /Release flow guard \(main\): fail/);
+  assert.equal(decide(hotfix(), { ...ok, checks: gateWaiting }).act, false, 'no backport() answer: held');
+  assert.equal(P(labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' }), [], otherReason), false);
+  // Green guard: backport() is never asked (it costs GitHub calls).
+  assert.equal(decide(hotfix(), { ...ok, checks: () => [...green(), { name: 'Release flow guard (main)', bucket: 'pass' }], backport: never }).act, true);
+});
+
+test("the guard's reason is read from its failure annotations: only the hotfix-backport ask counts (as on #2573)", () => {
+  const exit = { annotation_level: 'failure', message: 'Process completed with exit code 1.' };
+  const label = { annotation_level: 'failure', message: "This hotfix carries work staging has that main hasn't released (commit 99d9872f3). Cut hotfix/<name> from main with only the fix; a deliberate backport needs Taha's hotfix-backport label, added after the latest push." };
+  const behind = { annotation_level: 'failure', message: 'This branch is missing commits that are on main. Merge main into it (merge commit), then push.' };
+  assert.equal(onlyBackportReason([exit, label]), true);
+  assert.equal(onlyBackportReason([label, { annotation_level: 'notice', message: 'Release flow not switched on yet' }]), true);
+  assert.equal(onlyBackportReason([exit, behind]), false);
+  assert.equal(onlyBackportReason([exit, label, behind]), false);
+  assert.equal(onlyBackportReason([exit]), false, 'no reason given: held');
+  assert.equal(onlyBackportReason([]), false);
+  assert.equal(onlyBackportReason(null), false);
 });
 
 test('a hotfix waits while the guard is still running: it may yet ask for the label (Codex on #2589)', () => {

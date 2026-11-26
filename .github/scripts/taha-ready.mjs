@@ -4,7 +4,8 @@
 //          (b) it needs no Sol (sol-risk-lib.mjs, the merge gate's own classifier) and
 //          (c) every required check is green. It takes the label off once Taha has decided the head. A hotfix
 //          into main also counts .github/ (Taha is a code owner) and skips the guard and release-gate, which wait
-//          on him; once he approved, a hotfix whose guard still wants the hotfix-backport label gets one label-only ping. A backport ask lists what the hotfix brings to live.
+//          on him, but only while the guard's one failure is the missing hotfix-backport label (Taha, 2026-11-25); once he
+//          approved, a hotfix whose guard still wants that label gets one label-only ping. A backport ask lists what the hotfix brings to live.
 //          It also mirrors Taha's verdict on the current head as `taha-approved` / `taha-changes`; an Approve
 //          the merge gate carries over (staging catch-up, docs/ notes, restamps; Mason 2026-11-25) shows as approved
 //          (display only: the merge gates read his review from GitHub themselves).
@@ -44,13 +45,21 @@ export const tahaRequested = (pr) => (pr.reviewRequests ?? []).some((r) => isTah
 // the next move is his Approve or our fix, not another nudge.
 export const tahaReviewedHead = (pr) => (pr.reviews ?? []).some((r) => isTaha(r.author?.login) && !['PENDING', 'DISMISSED'].includes(r.state) && sameSha(r.commit?.oid, pr.headRefOid));
 
-// A hotfix into main (Mason, 2026-11-25): Taha is a code owner of .github/, and the release guard and
-// release-gate wait on his approval or hotfix-backport label, so those two can't hold back asking him.
+// A hotfix into main (Mason, 2026-11-25): Taha is a code owner of .github/, and release-gate waits on his approval,
+// so it can't hold back asking him. A failed release guard is skipped only when its one reason is the missing
+// hotfix-backport label (backport()); red for anything else, it holds the ask like any check (Taha, 2026-11-25).
 export const isMainHotfix = (pr) => pr.baseRefName === 'main' && /^hotfix\//.test(pr.headRefName ?? '');
 const GATE_CHECKS = ['Release flow guard (main)', 'release-gate'];
 // A pending guard still waits: it may yet ask for the label, and the ping is sent once per head (Codex on #2589).
-const checksFor = (pr, checks) => (isMainHotfix(pr) && Array.isArray(checks)
-  ? checks.filter((c) => !(c.name === GATE_CHECKS[1] || (c.name === GATE_CHECKS[0] && c.bucket === 'fail'))) : checks);
+const checksFor = (pr, checks, backport = () => false) => (isMainHotfix(pr) && Array.isArray(checks)
+  ? checks.filter((c) => !(c.name === GATE_CHECKS[1] || (c.name === GATE_CHECKS[0] && c.bucket === 'fail' && backport()))) : checks);
+// True when the guard run's failure annotations ask only for the hotfix-backport label (GitHub adds its own
+// "Process completed with exit code" line to every failed step). Anything else, or nothing readable, is false.
+export function onlyBackportReason(annotations) {
+  const errors = (Array.isArray(annotations) ? annotations : []).filter((a) => a?.annotation_level === 'failure')
+    .map((a) => String(a.message ?? '')).filter((m) => !/^Process completed with exit code \d+\.?$/.test(m.trim()));
+  return errors.length > 0 && errors.every((m) => m.includes(BACKPORT_LABEL));
+}
 export function githubOwned(files) {
   const hits = (files ?? []).map((f) => f?.filename).filter((n) => typeof n === 'string' && n.startsWith('.github/'));
   return hits.length ? { files: hits, reason: `Taha is a code owner of ${hits.slice(0, 5).join(', ')}` } : null;
@@ -66,7 +75,7 @@ export function requiredChecksProblem(checks) {
 
 // What to do with one PR. checks/lane/sol are called only when needed (each costs GitHub calls):
 // checks() -> [{name,bucket}] | null; lane() -> tahaLaneProblem result; sol() -> solRiskOnGitHub result.
-export function decide(pr, { checks, lane, sol, carried }) {
+export function decide(pr, { checks, lane, sol, carried, backport }) {
   const skip = (why) => ({ act: false, why });
   if (pr.isDraft) return skip('draft');
   if (isTahasPr(pr)) return skip("Taha's own PR");
@@ -74,7 +83,7 @@ export function decide(pr, { checks, lane, sol, carried }) {
   if (hasLabel(pr) && tahaRequested(pr)) return skip('already labelled and waiting on Taha');
   if (tahaReviewedHead(pr)) return skip('Taha already reviewed this head');
   if (tahaVerdict(pr, carried) === APPROVED) return skip("Taha's Approve carries over to this head");
-  const checkProblem = requiredChecksProblem(checksFor(pr, checks()));
+  const checkProblem = requiredChecksProblem(checksFor(pr, checks(), backport));
   if (checkProblem) return skip(checkProblem);
   const inLane = lane();
   if (!inLane) return skip("not in Taha's lane");
@@ -142,7 +151,7 @@ export function needsPing(pr, comments, { checks, sol, asked, carried, backport 
   if (pinged(comments, pr.headRefOid).length) return no('already pinged for this head');
   if (tahaVerdict(pr, carried) === APPROVED) return no("Taha's Approve carries over to this head");
   if (!tahaRequested(pr)) return no('Taha is not requested');
-  const checkProblem = requiredChecksProblem(checksFor(pr, checks()));
+  const checkProblem = requiredChecksProblem(checksFor(pr, checks(), backport));
   if (checkProblem) return no(checkProblem);
   const yes = (why) => ({ ping: true, why, backport: isMainHotfix(pr) && Boolean(backport()) });
   if (sol()?.risky === false) return yes('no Sol needed, checks green');
@@ -152,7 +161,7 @@ export function needsPing(pr, comments, { checks, sol, asked, carried, backport 
 
 // One reminder per head, 24 h after its first ping, while Taha is still requested, has not decided this head
 // (a comment alone still counts as waiting) and required checks are green. The clock is the ping comment's time.
-export function needsReminder(pr, comments, now, { checks, carried }) {
+export function needsReminder(pr, comments, now, { checks, carried, backport }) {
   const no = (why) => ({ remind: false, why });
   if (!hasLabel(pr) || pr.isDraft || isTahasPr(pr) || pr.isCrossRepository || !tahaRequested(pr)) return no('not a labelled PR waiting on Taha');
   if (tahaVerdict(pr)) return no('Taha decided this head');
@@ -161,7 +170,7 @@ export function needsReminder(pr, comments, now, { checks, carried }) {
   if (!(now - Date.parse(first.createdAt) >= REMIND_AFTER_MS)) return no('pinged under 24 h ago');
   if (marked(comments, 'remind', pr.headRefOid).length) return no('already reminded for this head');
   if (tahaVerdict(pr, carried)) return no('Taha decided this head (his Approve carries over)');
-  const checkProblem = requiredChecksProblem(checksFor(pr, checks()));
+  const checkProblem = requiredChecksProblem(checksFor(pr, checks(), backport));
   if (checkProblem) return no(checkProblem);
   return { remind: true, why: 'waiting on Taha over 24 h since the ping' };
 }
@@ -282,18 +291,21 @@ function requiredChecks(n) {
 async function handle(pr, mode, dry) {
   Object.assign(pr, viewMore(pr.number));
   let carriedMemo;
+  let backportMemo;
   const facts = {
     checks: () => requiredChecks(pr.number),
     lane: () => {
       const files = prFilesOnGitHub({ repo: REPO, gh, number: pr.number, headSha: pr.headRefOid });
       return tahaLaneProblem({ files }) ?? (isMainHotfix(pr) ? githubOwned(files) : null);
     },
-    // The guard's latest run on this head failed asking for the label (its ::error:: line is an annotation).
-    backport: () => {
+    // The guard's latest run on this head failed only for the label (its ::error:: lines are annotations). Memoized:
+    // the check filter, ping and reminder all ask.
+    backport: () => (backportMemo ??= (() => {
       const id = tryGh(['api', `repos/${REPO}/commits/${pr.headRefOid}/check-runs?check_name=${encodeURIComponent(GATE_CHECKS[0])}`,
         '--jq', '.check_runs[0] | select(.conclusion == "failure") | .id'])?.trim();
-      return Boolean(id) && (tryGh(['api', `repos/${REPO}/check-runs/${id}/annotations`, '--jq', '.[].message']) ?? '').includes(BACKPORT_LABEL);
-    },
+      if (!id) return false;
+      try { return onlyBackportReason(JSON.parse(tryGh(['api', '--paginate', '--slurp', `repos/${REPO}/check-runs/${id}/annotations?per_page=100`]) ?? 'null')?.flat()); } catch { return false; }
+    })()),
     sol: () => solRiskOnGitHub({ baseSha: pr.baseRefOid, headSha: pr.headRefOid, repo: REPO, gh }),
     // Memoized: label, ping and reminder all ask, and each answer costs several GitHub reads.
     carried: () => (carriedMemo ??= tahaApprovedOnGitHub({ repo: REPO, gh, pullRequest: pr.number, headSha: pr.headRefOid })),

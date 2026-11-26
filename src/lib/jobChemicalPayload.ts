@@ -1,3 +1,5 @@
+import { FIELD_SOURCED_FROM_DB_READY } from './jobSourcedFrom';
+
 export interface JobChemicalPayloadSource {
   product_id: string;
   quantity: string;
@@ -12,11 +14,15 @@ export interface JobChemicalPayloadSource {
   warehouse: string;
   vendor: string;
   customer_supplied: boolean;
+  source_vendor_id?: string | null;
   /** F06: which field the operator typed ('rate' | 'qty'); undefined = unknown. */
   driver?: 'rate' | 'qty';
 }
 
-export function buildJobChemicalsPayload(rows: JobChemicalPayloadSource[]) {
+export function buildJobChemicalsPayload(
+  rows: JobChemicalPayloadSource[],
+  includeSourceVendor = FIELD_SOURCED_FROM_DB_READY,
+) {
   return rows.map((row, index) => {
     const parsedRatePerAcre = Number.parseFloat(row.rate_per_acre);
     return {
@@ -40,6 +46,7 @@ export function buildJobChemicalsPayload(rows: JobChemicalPayloadSource[]) {
     // client leaves exactly as saved. save_job refuses any other string
     // (CHEM_DRIVER_INVALID), so this narrowing is what keeps a stale tab from being refused.
     driver: row.driver === 'rate' || row.driver === 'qty' ? row.driver : null,
+    ...(includeSourceVendor ? { source_vendor_id: row.source_vendor_id || null } : {}),
     };
   });
 }

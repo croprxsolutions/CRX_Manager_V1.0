@@ -48,6 +48,28 @@ describe('buildJobChemicalsPayload', () => {
     });
   });
 
+  it('keeps the serialized legacy payload byte-for-byte unchanged while sourcing is not ready', () => {
+    const legacyPayload = [{
+      product_id: 'prod-1',
+      quantity: 10,
+      unit: 'gal',
+      rate_per_acre: 2.5,
+      rate_unit: 'oz/ac',
+      cost_per_unit_cents: 1500,
+      price_per_unit_cents: 2000,
+      diluent_rate: '5',
+      rei_hours: '12',
+      phi_days: '7',
+      warehouse: 'main',
+      vendor: 'acme',
+      customer_supplied: false,
+      sort_order: 0,
+      driver: null,
+    }];
+    const actual = buildJobChemicalsPayload([row({ source_vendor_id: 'vendor-1' })]);
+    expect(JSON.stringify(actual)).toBe(JSON.stringify(legacyPayload));
+  });
+
   describe('F06: driver is persisted so a reloaded line knows which field was typed', () => {
     it.each(['rate', 'qty'] as const)('sends %j through unchanged', (driver) => {
       expect(buildJobChemicalsPayload([row({ driver })])[0].driver).toBe(driver);

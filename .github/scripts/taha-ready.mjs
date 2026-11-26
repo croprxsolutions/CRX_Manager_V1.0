@@ -166,32 +166,27 @@ export function needsReminder(pr, comments, now, { checks, carried }) {
 }
 
 // What a backport hotfix brings to live (Taha, 2026-11-26): from GitHub's compare of main...head, one line per
-// change, `#<PR> title` (squash subjects end in "(#N)") or short SHA + subject, then the changed files.
-// Merge commits are left out: they add no change of their own and their files are in the file list.
+// commit main lacks, `#<PR> title` (squash subjects end in "(#N)") or short SHA + subject, then the changed files.
+// Every commit is listed, merge commits too (flagged: a conflict fix can add code of its own; Terra on this PR).
+// Commits come by history, so one already cherry-picked onto main still shows; the file list is the diff.
 // compare = { commits: [{ sha, message, parents }], files: [filename], total } | null (unreadable).
 export const BRING_CAP = 10;
 export const FILE_CAP = 10;
 export function backportList(compare) {
-  if (!compare) return 'Could not read what this brings to live; see the PR\'s Commits and Files tabs.';
-  const seen = new Set();
-  const changes = [];
-  for (const c of compare.commits ?? []) {
-    if (c.parents > 1) continue;
+  if (!compare) return "Could not read what this brings to live; see the PR's Commits and Files tabs.";
+  const changes = (compare.commits ?? []).map((c) => {
     const subject = String(c.message ?? '').split('\n')[0].trim();
     const pr = subject.match(/\s*\(#(\d+)\)$/);
-    const key = pr ? `#${pr[1]}` : c.sha;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const title = esc(cutAtSentence(pr ? subject.slice(0, pr.index) : subject, 90));
-    changes.push(pr ? `• ${link(`https://github.com/${REPO}/pull/${pr[1]}`, key)} ${title}` : `• \`${String(c.sha).slice(0, 7)}\` ${title}`);
-  }
-  // Commits GitHub did not list (it returns at most 250) count as "more"; they may include merge commits.
-  const count = changes.length + Math.max(0, (compare.total ?? 0) - (compare.commits ?? []).length);
+    const title = esc(cutAtSentence(pr ? subject.slice(0, pr.index) : subject, 90)) + (c.parents > 1 ? ' _(merge: check any conflict fixes)_' : '');
+    return pr ? `• ${link(`https://github.com/${REPO}/pull/${pr[1]}`, `#${pr[1]}`)} ${title}` : `• \`${String(c.sha).slice(0, 7)}\` ${title}`;
+  });
+  // Commits GitHub did not list (it returns at most 250) count as "more".
+  const count = Math.max(changes.length, compare.total ?? 0);
   const files = compare.files ?? [];
   // GitHub's compare lists at most 300 files, so 300 reads as "300+".
-  return [`Brings to live (${count} change${count === 1 ? '' : 's'}):`, ...changes.slice(0, BRING_CAP),
+  return [`Brings to live (${count} commit${count === 1 ? '' : 's'} main does not have):`, ...changes.slice(0, BRING_CAP),
     ...(count > BRING_CAP ? [`• …and ${count - BRING_CAP} more`] : []),
-    `Files (${files.length}${files.length >= 300 ? '+' : ''}): ${files.slice(0, FILE_CAP).map((f) => `\`${esc(f)}\``).join(', ')}${files.length > FILE_CAP ? ` and ${files.length - FILE_CAP} more` : ''}`].join('\n');
+    `Files changed (${files.length}${files.length >= 300 ? '+' : ''}): ${files.slice(0, FILE_CAP).map((f) => `\`${esc(f)}\``).join(', ')}${files.length > FILE_CAP ? ` and ${files.length - FILE_CAP} more` : ''}`].join('\n');
 }
 
 const headTag = (pr) => `(head ${String(pr.headRefOid).slice(0, 7)})`;

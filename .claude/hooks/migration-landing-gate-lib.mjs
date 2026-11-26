@@ -105,8 +105,10 @@ export const TAHA_UNAVAILABLE_LABEL = "taha-unavailable";
 // Unreadable, or no push of this head: it does not count.
 export function tahaUnavailableLabelled({ events, labels, pushes, head, now = Date.now() }) {
   if (!Array.isArray(events) || !Array.isArray(labels) || !Array.isArray(pushes) || !labels.some((l) => l?.name === TAHA_UNAVAILABLE_LABEL)) return false;
-  const pushedAt = Math.max(...pushes.filter((p) => String(p?.after ?? "").toLowerCase() === String(head ?? "").toLowerCase())
-    .map((p) => Date.parse(String(p?.timestamp ?? ""))));
+  // The newest activity must be this head: a later push of another head means the branch has moved on (advisory Sol, PR 3).
+  const newest = pushes.map((p) => ({ after: String(p?.after ?? "").toLowerCase(), at: Date.parse(String(p?.timestamp ?? "")) }))
+    .filter((p) => Number.isFinite(p.at)).sort((a, b) => b.at - a.at)[0];
+  const pushedAt = newest?.after === String(head ?? "").toLowerCase() ? newest.at : NaN;
   const last = events.filter((e) => e?.label?.name === TAHA_UNAVAILABLE_LABEL && (e.event === "labeled" || e.event === "unlabeled")).pop();
   const at = Date.parse(String(last?.created_at ?? ""));
   // Matched by his account number, not his renamable login (Luna, PR 3).
@@ -309,6 +311,8 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   let labelled = false;
   if (hold || ready) {
     try {
+      // Current labels first, then the timeline: a remove and re-add in between shows up as the newer event (advisory Sol, PR 3).
+      const labels = JSON.parse(String(gh(["api", `repos/{owner}/{repo}/issues/${pr.number}/labels?per_page=100`])));
       const events = [];
       let complete = false;
       for (let page = 1; page <= 10; page++) {
@@ -317,10 +321,10 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
         events.push(...batch);
         if (batch.length < 100) { complete = true; break; }
       }
-      const labels = JSON.parse(String(gh(["api", `repos/{owner}/{repo}/issues/${pr.number}/labels?per_page=100`])));
-      // Newest first; the head is the branch tip, so its latest push is on the first page.
-      const pushes = JSON.parse(String(gh(["api", `repos/{owner}/{repo}/activity?ref=${encodeURIComponent(`refs/heads/${headRef}`)}&activity_type=push,force_push,branch_creation&per_page=100`])));
-      labelled = complete && Boolean(headRef) && tahaUnavailableLabelled({ events, labels, pushes, head, now });
+      // Every activity type (a PR merge moves a branch too); newest first, so the branch tip's push is on the first page.
+      const pushes = JSON.parse(String(gh(["api", `repos/{owner}/{repo}/activity?ref=${encodeURIComponent(`refs/heads/${headRef}`)}&per_page=100`])));
+      // The clock after the reads, so a slow read cannot stretch the 30 minutes (advisory Sol, PR 3).
+      labelled = complete && Boolean(headRef) && tahaUnavailableLabelled({ events, labels, pushes, head, now: Date.now() });
     } catch (error) { if (OUT(error)) throw error; }
   }
   const tahaGap = Boolean(hold || ready) && !labelled;

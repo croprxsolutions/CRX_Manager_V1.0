@@ -1961,7 +1961,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     // pushed after it sits before the label there, so push time decides.
     ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2)])) === false, "a head pushed after his label doesn't count, whatever the timeline order");
     ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2), pushed(20)])) === false, "the head's latest push decides");
-    ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2, "b".repeat(40)), pushed(20)])) === true, "another head's push doesn't");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2, "b".repeat(40)), pushed(20)])) === false, "a newer push of another head: the branch moved on, so it doesn't count (advisory Sol, PR 3)");
     ok(tahaUnavailableLabelled(t([commit, added()], [label], [])) === false, "no push of this head found doesn't count");
     ok(tahaUnavailableLabelled(t([commit, added()], [label], null)) === false, "unreadable push activity fails closed");
 

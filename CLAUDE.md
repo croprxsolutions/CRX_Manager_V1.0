@@ -23,6 +23,7 @@ Route Mason's plain-English requests; he should not need workflow names.
 | Durable handoff | `codex-to-claude-handoff` |
 | PR review comment | `agent-pr-comment` (dry-run by default) |
 | Agent/tooling health | `agent-health` |
+| Feature screen, local Docker walkthrough and staging handoff | `screen-walkthrough` |
 | Pre-ship verification and delivery | `preflight` or `ship` |
 | Migration work | `migration-review`, `create-migration`, or `explain-migration` |
 

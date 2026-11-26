@@ -2760,10 +2760,12 @@ function registryMigrationHighWater(): string {
 // the staging-only M4 candidates below the applied-name high-water; production
 // has not applied these definitions, so their staging overlay stays explicit.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
+  '20270307205900', // Liquid-weight draft rejection.
   '20270109100100',
   '20270109100200',
   '20270109100300',
   '20270109100400',
+  '20270307210000', // Whole-group liquid weight review.
   '20270110110000', // Inactive rate-history cleanup: optional read argument, pending apply/type regeneration.
 ]);
 
@@ -2934,12 +2936,15 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 // explicitly retained in the staging schema overlay.
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'change_brand_document_links', // 20270306170000. Prune once generated types cover this RPC.
+  'reject_liquid_density_draft', // 20270307205900. Prune once generated types cover this RPC.
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
   'set_registration_adjuvants',
   // 20270130100000 (#1976, local candidate): the EPA batch fill's save; replays through _product_parent_replay and
   // commit_epa_proposal saves the receipt. Prune once the generated types carry it.
   'commit_epa_proposal_batch',
+  'approve_liquid_density_draft', // 20270307210000. Prune once generated types cover this RPC.
+  'submit_liquid_density_draft',
   // 20270203120000 (#1942, local candidate): re-emits the private completion body under its current name
   // (20270126110000 renamed it, so no generated type carries it yet); keyed by complete_delivery's p_idempotency_key.
   // Prune once the generated types carry it.
@@ -2961,6 +2966,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'read-only workbook validation (20270306170000): invokes the private helper with the preview flag fixed to true, skipping every lock and write',
   carry_grouped_brand_document_links:
     'constraint trigger only (20270306170000): it runs on the protected mapping writes of the keyed grouping approval, with API-role EXECUTE revoked',
+  return_liquid_density_to_draft_for_brand:
+    'private trigger (20270307210000): changes density only inside the parent brand transaction, with API-role EXECUTE revoked',
   // Generated public-schema functions are not necessarily app-callable RPCs.
   _delivery_brand_event:
     "private SECURITY DEFINER delivery-brand history writer called within keyed brand workflows; live catalog denies EXECUTE to anon, authenticated, and service_role",
@@ -3181,6 +3188,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _set_field_billing_split_20270303: 'internal FP-1 split writer (20270305190000): called only by set_field_billing_split and save_field after their own replay checks (and by the one-time import); binds p_actor to auth.uid(); every API-role EXECUTE is revoked',
   _refresh_field_billing_defaults_copy_20270303: 'internal FP-1 helper (20270305190000): rewrites the read-only field_billing_defaults copy of one field only when it differs from the version in force, so a replay changes nothing; every API-role EXECUTE is revoked',
   _refresh_all_field_billing_copies_20270303: 'internal FP-1 pg_cron job (20270305190000): rewrites only stale copies, so a rerun changes nothing; every API-role EXECUTE is revoked',
+  _fields_owner_change_refresh_copy_20270305: 'FP-1 follow-up trigger function (20270307150000): RETURNS trigger, fires only on an actual fields.customer_id change and calls the copy refresh, which changes nothing on a replay; every API-role EXECUTE is revoked',
 };
 
 

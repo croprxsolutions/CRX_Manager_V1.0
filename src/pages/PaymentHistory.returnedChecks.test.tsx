@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { buildInMemoryQuery } from '../test-utils/inMemoryQuery';
 
 type Row = Record<string, unknown>;
@@ -44,7 +45,7 @@ const menu = async (name: string) => {
 
 describe('Payment History: returned checks and Void in the ⋯ menu', () => {
   it('moves Void into the menu as the last item, after Mark check as returned', async () => {
-    render(<PaymentHistory />);
+    render(<MemoryRouter><PaymentHistory /></MemoryRouter>);
     expect(await screen.findByText('View payments, mark returned checks and void incorrect entries')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Void$/ })).not.toBeInTheDocument();
     const items = await menu('More actions for check 6311');
@@ -56,7 +57,7 @@ describe('Payment History: returned checks and Void in the ⋯ menu', () => {
   });
 
   it('a non-check payment says why it cannot come back; Void stays', async () => {
-    render(<PaymentHistory />);
+    render(<MemoryRouter><PaymentHistory /></MemoryRouter>);
     const items = await menu('More actions for ach REF-7781');
     expect(items[0]).toHaveAttribute('aria-disabled', 'true');
     expect(items[0]).toHaveTextContent('Not a check (ACH). Only checks can come back.');
@@ -64,7 +65,7 @@ describe('Payment History: returned checks and Void in the ⋯ menu', () => {
   });
 
   it('a returned check shows Returned, $0.00 allocated, no Void', async () => {
-    render(<PaymentHistory />);
+    render(<MemoryRouter><PaymentHistory /></MemoryRouter>);
     expect(await screen.findByText('Returned')).toBeInTheDocument();
     const row = screen.getByText('Returned').closest('tr')!;
     expect(row).toHaveTextContent('$1,700.00');

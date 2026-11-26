@@ -33,5 +33,5 @@ test('the product page and brand rows link to EPA for their own number', async (
 
   await epa.fill('100-1070');
   await expect(page.getByRole('link', { name: 'Search EPA labels for 100-1070' })).toHaveAttribute('href', `${SEARCH}100-1070`);
-  await page.screenshot({ path: 'scripts/local-app/.state/pm16-product-link.png' });
+  await page.screenshot({ path: test.info().outputPath('pm16-product-link.png') });
 });

@@ -9,7 +9,8 @@
 //   node scripts/luna-review.mjs --sol --reason "..." advisory Sol escalation (never a gate pass)
 //   node scripts/luna-review.mjs --terra               one Terra final review of ordinary code (off
 //                                                     the Sol list; advisory, never a gate pass)
-//   node scripts/luna-review.mjs --settled <file>     findings already refuted or deferred (Luna only)
+//   node scripts/luna-review.mjs --settled <file>     findings already refuted or deferred (Luna only;
+//                                                      without it, a plan contract in the diff supplies them)
 //   node scripts/luna-review.mjs --after-simplify "..."   past the 6-round cap (also --after-rebase,
 //                                                         --after-new-approach); see "round caps"
 //
@@ -147,6 +148,32 @@ export function readSettled(file) {
   const text = bytes.toString("utf8").replace(/\r/g, "").trim();
   if (!text) throw new Error("--settled file is empty.");
   return text;
+}
+
+// Retro (Mason, 2026-11-26): on PR #2610 Luna rounds 3 and 4 re-raised findings its plan contract
+// had already refuted, because nobody passed --settled. A Luna round with no --settled now gets the
+// review sections of every docs/plans/*-CONTRACT.md in the diff. Lines marked fixed are dropped:
+// the code shows those, so re-raising one is a real finding.
+const CONTRACT_IN_DIFF_RE = /^diff --git a\/\S+ b\/(docs\/plans\/[^\s/]+-CONTRACT\.md)$/gm;
+const REVIEW_HEADING_RE = /^## .*(?:challenge|review|round|refut|settled|answered|decided)/i;
+const FIXED_LINE_RE = /^(?:\|[^|]*\|\s*|[-*]\s*\*\*[^*]*?|\d+\.\s*\*\*[^*]*?)fixed\b/i;
+
+export function contractSettled(text) {
+  return text.replace(/\r/g, "").split(/^(?=## )/m)
+    .filter((section) => REVIEW_HEADING_RE.test(section))
+    .map((section) => section.split("\n").filter((line) => !FIXED_LINE_RE.test(line)).join("\n").trim())
+    .join("\n\n");
+}
+
+export function contractSettledFromDiff(diff, rootDir) {
+  const paths = [...new Set([...diff.matchAll(CONTRACT_IN_DIFF_RE)].map((m) => m[1]))]
+    .filter((p) => existsSync(path.join(rootDir, p)));
+  const text = paths
+    .map((p) => [p, contractSettled(readFileSync(path.join(rootDir, p), "utf8"))])
+    .filter(([, settled]) => settled)
+    .map(([p, settled]) => `From ${p} (already decided; do not re-raise unless the code changed):\n${settled}`)
+    .join("\n\n");
+  return text ? { text, paths } : null;
 }
 
 // With no settled list the prompt is byte-identical to the one before --settled existed.
@@ -563,7 +590,17 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
       );
     }
     const frozen = freezeDiff(git, opts);
-    const settled = opts.settled ? readSettled(opts.settled) : null;
+    let settled = opts.settled ? readSettled(opts.settled) : null;
+    let settledNote = settled
+      ? `Settled list: ${opts.settled} (${settled.split("\n").filter((line) => line.trim()).length} line(s)) was given to Luna; it never goes to Sol.`
+      : null;
+    const fromContract = settled || opts.sol || opts.terra ? null : contractSettledFromDiff(frozen.diff, rootDir);
+    if (fromContract && Buffer.byteLength(fromContract.text) > SETTLED_MAX_BYTES) {
+      settledNote = `Settled list: NOT given to Luna; the review sections of ${fromContract.paths.join(", ")} are over ${SETTLED_MAX_BYTES} bytes. Pass a short --settled file.`;
+    } else if (fromContract) {
+      settled = fromContract.text;
+      settledNote = `Settled list: refuted and deferred findings from ${fromContract.paths.join(", ")} were given to Luna; it never goes to Sol.`;
+    }
     const refused = opts.terra && frozen.diff.trim() ? terraRefusal(frozen.diff, codexDeps.now ?? Date.now()) : null;
     if (refused) return reportDidNotRun(`Not ordinary code, so Terra may not give the final review: ${refused}.`);
 
@@ -622,9 +659,6 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
     }
     if (run.kind === "output-limit") run.advice = oversizedAdvice(git, frozen);
     const dirty = gitOutput(git, ["status", "--porcelain"]).trim() !== "";
-    const settledNote = settled
-      ? `Settled list: ${opts.settled} (${settled.split("\n").filter((line) => line.trim()).length} line(s)) was given to Luna; it never goes to Sol.`
-      : null;
     return report(run, { label: frozen.label, defaultBase: frozen.defaultBase, diffLines, files, model, effort, dirty, healthNote, settledNote });
   } catch (error) {
     return reportDidNotRun(error.message);

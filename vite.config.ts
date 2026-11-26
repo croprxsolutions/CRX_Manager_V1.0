@@ -1,4 +1,5 @@
-import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
+import { build, defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -10,6 +11,7 @@ const liveSchemaUrl = process.env.VITE_SUPABASE_URL?.trim();
 const liveSchemaServiceRoleKey =
   process.env.CRX_LIVE_SCHEMA_SERVICE_ROLE_KEY?.trim();
 const liveSchemaProductionUrl = 'https://rhyzpcqhnizqbxphqdkr.supabase.co';
+const stagingMapsProof = process.env.VERCEL_TARGET_ENV === 'staging' && process.env.VERCEL_GIT_COMMIT_REF === 'staging';
 
 // Unit tests are deliberately isolated from Supabase. A trusted live-schema
 // run must opt in explicitly and provide both credentials; otherwise a typo or
@@ -79,6 +81,24 @@ export default defineConfig({
       },
       workbox: workboxOptions,
     }),
+    stagingMapsProof && {
+      name: 'staging-maps-drawing-proof',
+      apply: 'build',
+      closeBundle: {
+        order: 'post',
+        sequential: true,
+        handler: async () => {
+          await build({
+            configFile: fileURLToPath(new URL('./proofs/maps-step0/vite.config.ts', import.meta.url)),
+            base: '/api/maps-step0-draw/',
+            build: {
+              outDir: fileURLToPath(new URL('./dist/api/maps-step0-draw', import.meta.url)),
+              emptyOutDir: false,
+            },
+          });
+        },
+      },
+    },
   ],
   optimizeDeps: {
     exclude: ['lucide-react'],

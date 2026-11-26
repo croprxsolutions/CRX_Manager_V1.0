@@ -150,6 +150,9 @@ export default function handler(request, response) {
     response.setHeader('Allow', 'GET');
     return response.status(405).end();
   }
+  if (request.query?.drawingOutage === '1') {
+    return response.status(503).end();
+  }
 
   const nonce = randomBytes(18).toString('base64');
   const tilesKey = process.env.CRX_STEP0_GOOGLE_MAP_TILES_KEY ?? '';

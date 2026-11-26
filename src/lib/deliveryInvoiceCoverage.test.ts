@@ -189,10 +189,10 @@ describe('activeInvoiceCoversDelivery', () => {
   });
 
   describe('fetchDeliveryBillingRemainders (A4)', () => {
-    function remainderQuery(result: unknown) {
+    function remainderQuery(result: { data: unknown[] | null; error: unknown }) {
       const q: Record<string, unknown> = {};
-      for (const m of ['select', 'in']) q[m] = vi.fn(() => q);
-      q.gt = vi.fn(async () => result);
+      for (const m of ['select', 'in', 'gt', 'order']) q[m] = vi.fn(() => q);
+      q.range = vi.fn(async (from: number) => (from > 0 && result.data ? { data: [], error: null } : result));
       return q;
     }
 

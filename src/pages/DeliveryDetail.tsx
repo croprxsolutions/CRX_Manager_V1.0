@@ -352,6 +352,8 @@ export default function DeliveryDetail() {
   // not see every invoice (invoices RLS), so their remainder could count billed units as unbilled.
   const shortBilled = isAdmin && hasActiveRelatedInvoice && billingRemainder !== null;
   const needsBilling = !hasActiveRelatedInvoice || shortBilled;
+  // A whole-order invoice covers the order, so Bill the rest drafts every unbilled unit on the order.
+  const wholeOrderInvoiced = relatedInvoices.some((invoice) => invoice.delivery_id === null && activeInvoiceCountsTowardBilling(invoice));
   // Re-read after every invoice load (a Create Invoice reloads them), only where the note can show.
   const remainderDeliveryId = isAdmin && invoicesLoaded && delivery?.status === 'completed' && hasActiveRelatedInvoice ? delivery.id : null;
   useEffect(() => {
@@ -3101,7 +3103,7 @@ export default function DeliveryDetail() {
         onConfirm={() => { void handleCreateInvoice(); }}
         title={shortBilled ? 'Bill the rest of this delivery?' : 'Create an invoice for this delivery?'}
         message={shortBilled && billingRemainder
-          ? `This makes a draft invoice for the units of delivery ${delivery.delivery_number} not billed yet: ${unbilledRemainderLabel(billingRemainder)}.`
+          ? `This makes a draft invoice for whatever of delivery ${delivery.delivery_number} is still not billed when you confirm (now ${unbilledRemainderLabel(billingRemainder)}).${wholeOrderInvoiced ? ' This order has a whole-order invoice, so the draft bills every unbilled unit on the order.' : ''}`
           : `This makes a draft invoice for completed delivery ${delivery.delivery_number}.`}
         confirmLabel={shortBilled ? 'Bill the rest' : 'Create invoice'}
         variant="info"

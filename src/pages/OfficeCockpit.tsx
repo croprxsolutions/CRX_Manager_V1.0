@@ -380,7 +380,8 @@ type CompletedOrderDelivery = RawCompletedDelivery & { order_id: string; unbille
  * limit, so a page of covered or Chem-Man-billed deliveries cannot hide an older unbilled one.
  * `hitLimit` means more may exist than were checked or shown.
  */
-async function loadDeliveredNotInvoiced(): Promise<{
+// A4: only an admin reads remainders; other roles may not see every invoice, so theirs could show billed units as unbilled.
+async function loadDeliveredNotInvoiced(isAdmin: boolean): Promise<{
   rows: CompletedOrderDelivery[];
   hitLimit: boolean;
   error: { message?: string } | null;
@@ -408,7 +409,7 @@ async function loadDeliveredNotInvoiced(): Promise<{
           .from('delivery_external_billings')
           .select('delivery_id')
           .in('delivery_id', candidates.map((row) => row.id)),
-        fetchDeliveryBillingRemainders(candidates.map((row) => row.id)),
+        isAdmin ? fetchDeliveryBillingRemainders(candidates.map((row) => row.id)) : Promise.resolve({ data: null, error: null }),
       ]);
       const coverageError = invoiceCoverageRes.error ?? externalBillingRes.error ?? remaindersRes.error;
       if (coverageError) return { rows: [], hitLimit: false, error: coverageError };
@@ -654,7 +655,7 @@ export default function OfficeCockpit() {
         .limit(TILE_LIMIT),
 
       // (b3) Completed deliveries that still need invoicing (paged and filtered before the limit).
-      loadDeliveredNotInvoiced(),
+      loadDeliveredNotInvoiced(isAdmin),
 
       // (d) Upcoming scheduled jobs (next 7 days) — proxy for weather-at-risk
       supabase
@@ -1049,7 +1050,7 @@ export default function OfficeCockpit() {
     setMorningSummaryLoadOk(nextMorningSummaryLoadOk);
     setLastRefreshed(new Date());
     setLoading(false);
-  }, [toast]);
+  }, [toast, isAdmin]);
 
   useEffect(() => {
     void fetchAll();

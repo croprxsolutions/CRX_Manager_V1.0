@@ -109,20 +109,30 @@ export interface DeliveryBillingRemainder {
  */
 export async function fetchDeliveryBillingRemainders(deliveryIds: string[]) {
   const remainders = new Map<string, DeliveryBillingRemainder>();
-  for (const idChunk of chunkIds([...new Set(deliveryIds)], 100)) {
-    const { data, error } = await supabaseUntyped
-      .from('delivery_billing_remainders')
-      .select('delivery_id, delivered_qty, unbilled_qty, unbilled_cents')
-      .in('delivery_id', idChunk)
-      .gt('unbilled_qty', 0);
-    if (error) return { data: null, error };
-    if (!data) return { data: null, error: { message: PAGE_RETURNED_NO_LIST } };
-    for (const row of data as Array<{ delivery_id: string; delivered_qty: number; unbilled_qty: number; unbilled_cents: number }>) {
-      const sum = remainders.get(row.delivery_id) ?? { deliveredQty: 0, unbilledQty: 0, unbilledCents: 0 };
-      sum.deliveredQty += Number(row.delivered_qty);
-      sum.unbilledQty += Number(row.unbilled_qty);
-      sum.unbilledCents += Number(row.unbilled_cents);
-      remainders.set(row.delivery_id, sum);
+  for (const idChunk of chunkIds([...new Set(deliveryIds)], INVOICE_COVERAGE_ID_CHUNK_SIZE)) {
+    // Paged by the rows returned, like the invoice read above: a server row cap must not drop short lines.
+    for (let from = 0; ;) {
+      const { data, error } = await supabaseUntyped
+        .from('delivery_billing_remainders')
+        .select('delivery_id, order_item_id, product_id, delivered_qty, unbilled_qty, unbilled_cents')
+        .in('delivery_id', idChunk)
+        .gt('unbilled_qty', 0)
+        .order('delivery_id', { ascending: true })
+        .order('order_item_id', { ascending: true })
+        .order('product_id', { ascending: true })
+        .range(from, from + INVOICE_COVERAGE_PAGE_SIZE - 1);
+      if (error) return { data: null, error };
+      if (!data) return { data: null, error: { message: PAGE_RETURNED_NO_LIST } };
+      const page = data as Array<{ delivery_id: string; delivered_qty: number; unbilled_qty: number; unbilled_cents: number }>;
+      if (page.length === 0) break;
+      for (const row of page) {
+        const sum = remainders.get(row.delivery_id) ?? { deliveredQty: 0, unbilledQty: 0, unbilledCents: 0 };
+        sum.deliveredQty += Number(row.delivered_qty);
+        sum.unbilledQty += Number(row.unbilled_qty);
+        sum.unbilledCents += Number(row.unbilled_cents);
+        remainders.set(row.delivery_id, sum);
+      }
+      from += page.length;
     }
   }
   return { data: remainders, error: null };

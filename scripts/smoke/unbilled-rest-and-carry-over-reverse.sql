@@ -4,13 +4,19 @@
 -- 20261215110000, get_dashboard_action_items from 20261109120000) and drops delivery_billing_remainders.
 -- Invoices drafted meanwhile keep their cents. Proven by scripts/smoke/prove-unbilled-rest-and-carry-over-real-schema.mjs.
 
+CREATE TEMP TABLE unbilled_rest_reverse_tx ON COMMIT DROP AS SELECT pg_current_xact_id()::text AS transaction_id;
+
 DO $reverse_preflight$
 BEGIN
+  -- Under autocommit the ON COMMIT DROP marker is already gone here: refuse before any change.
+  IF to_regclass('pg_temp.unbilled_rest_reverse_tx') IS NULL THEN
+    RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: run this file as one transaction (psql -1)';
+  END IF;
   IF to_regclass('public.delivery_billing_remainders') IS NULL
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._allocated_delivery_cents(uuid,numeric,uuid)'))
           IS DISTINCT FROM '280399d95c5581d3114e1673580d3fba'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)'))
-          IS DISTINCT FROM '82345065b9453bd66bf70de59e66bed4'
+          IS DISTINCT FROM 'e42c3cce1e7a74f65c1e1400ee5633ef'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public.get_dashboard_action_items(integer)'))
           IS DISTINCT FROM 'eb96aacf4dfc840a22df32d6bb549aeb' THEN
     RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: 20270308170000 is not what is installed';

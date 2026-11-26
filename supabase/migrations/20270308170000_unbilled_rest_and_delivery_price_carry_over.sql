@@ -10,17 +10,23 @@
 --    completion's auto-draft, its partial refresh, Create Invoice on a delivery and the Bill Split drafts.
 -- 2. A4. The Unbilled list counted a delivery billed once any active invoice touched it: 10 delivered, the line
 --    lowered to 6, and 4 units were never billed. delivery_billing_remainders compares delivered and billed units
---    per delivery and order line, matched by product as the invoice caps match (whole-order invoice lines cover the
---    order's deliveries in completion order). get_dashboard_action_items lists a delivery while any of its units is
---    unbilled, and Create Invoice on such a delivery drafts exactly the rest (units, and cents through _allocated_delivery_cents) on a new draft: on the
---    delivery, or on the order when a whole-order invoice covers it (a delivery invoice beside it is refused).
+--    per delivery and order line (lines naming the order line first, then editor-added lines by product; whole-order
+--    lines cover the order's deliveries in completion order). get_dashboard_action_items lists a delivery while any of
+--    its units is unbilled, and Create Invoice on such a delivery drafts exactly the rest on a new draft, priced at the
+--    order line's allocation for the units after those already billed on the line: on the delivery, or, when a
+--    whole-order invoice covers the order, on the order for every unbilled unit on it (a delivery invoice beside a
+--    whole-order one is refused, and its lines cover the order, not one delivery).
 --    A Bill Split sale is refused with BILL_SPLIT_REST_NOT_SUPPORTED (redraft it by voiding its group); a field
 --    split stays refused as before (ORDER_NEEDS_SPLIT_BILLING).
 -- Nothing is rewritten: invoices drafted before this file keep their cents.
 --
--- actor-binding-check: exempt -- _create_invoice_for_unbilled_delivery_impl_20260718 is an internal _impl with
---   EXECUTE revoked from every client role; it still binds p_performed_by to auth.uid() itself (unchanged lines).
--- idempotency-body-check: exempt -- the key handling (check_idempotency / save_idempotency) is unchanged.
+-- actor-binding-check: exempt -- the repo hook's marker, not a waiver: _create_invoice_for_unbilled_delivery_impl_20260718
+--   is an internal _impl with EXECUTE revoked from every client role, and it still refuses a p_performed_by other than
+--   auth.uid() (unchanged lines); the public create_invoice_for_unbilled_delivery refuses it first (ACTOR_MISMATCH).
+-- idempotency-body-check: exempt -- the repo hook's marker, not a waiver: the key handling is unchanged. The only
+--   caller chain, create_invoice_for_unbilled_delivery -> _create_invoice_for_unbilled_delivery_idem_impl_20260721,
+--   binds the key to the delivery and actor before this body runs (IDEMPOTENCY_ARGUMENT_MISMATCH,
+--   20260721014858), so a key used for one delivery cannot answer for another.
 -- caller-analysis: _allocated_delivery_cents :: same signature, result and grants; callers
 --   _complete_delivery_authorized_impl_20270122, _create_invoice_for_unbilled_delivery_impl_20260718,
 --   _create_bill_split_delivery_invoices get the same cents unless an earlier invoice's line price was changed.
@@ -48,6 +54,11 @@ BEGIN
      IS DISTINCT FROM '401b886a577bd0d6ded65a54b74ac759' THEN
     RAISE EXCEPTION 'UNBILLED_REST_BASELINE_DRIFT: _allocated_delivery_cents is not the 20260827041100 body';
   END IF;
+  -- The view inlines this helper's arithmetic and the rest is priced with it.
+  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._allocated_cumulative_cents(uuid,numeric)'))
+     IS DISTINCT FROM 'ebe035d44594445026e12d26dcee6f06' THEN
+    RAISE EXCEPTION 'UNBILLED_REST_BASELINE_DRIFT: _allocated_cumulative_cents is not the 20260817120000 body';
+  END IF;
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)'))
      IS DISTINCT FROM '41d6ec7fd81c96b8ab9bc1c1ae679245' THEN
     RAISE EXCEPTION 'UNBILLED_REST_BASELINE_DRIFT: _create_invoice_for_unbilled_delivery_impl_20260718 is not the 20261215110000 body';
@@ -59,13 +70,14 @@ BEGIN
 END;
 $preflight$;
 
--- One row per completed delivery and order line: units delivered, units billed, the units not billed yet and the
--- cents billing them would add. Billing is matched by product, as the invoice caps do (_delivery_invoice_overbilling,
--- _order_invoice_overbilling): a line the invoice editor adds carries no order line. A delivery's own active sale
--- lines cover its order lines of that product first; the order's whole-order sale lines then cover its deliveries of
--- that product in completion order. Credit memos never count as billing. The cents use the order line's allocation
--- (_allocated_cumulative_cents, inlined so a reader needs no EXECUTE on it), counted from the units already billed on
--- that order line, the way _allocated_delivery_cents prices the draft.
+-- One row per completed delivery, order line and product: units delivered, units billed, the units not billed yet,
+-- the units billed on that order line across the order (line_billed_qty) and the cents billing the rest would add.
+-- Billed units are attributed in four steps: the delivery's own active sale lines that name the order line; its own
+-- lines with no order line (the invoice editor adds those), by product; then the order's whole-order lines that name
+-- the order line, and last its whole-order lines with no order line, by product, each covering the order's
+-- deliveries in completion order. Credit memos never count as billing. The cents use the order line's allocation
+-- (_allocated_cumulative_cents, inlined so a reader needs no EXECUTE on it) for the units after line_billed_qty,
+-- as Create Invoice prices the rest.
 -- security_invoker: each reader sees only the rows the policies on these tables let them read.
 CREATE VIEW public.delivery_billing_remainders WITH (security_invoker = true) AS
 WITH delivered AS (
@@ -83,44 +95,48 @@ WITH delivered AS (
    WHERE i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
      AND i.status NOT IN ('voided', 'cancelled')
      AND ii.product_id IS NOT NULL AND i.order_id IS NOT NULL
-), own_pool AS (
-  SELECT s.delivery_id, s.product_id, sum(s.quantity) AS qty
-    FROM sale_lines s WHERE s.delivery_id IS NOT NULL GROUP BY s.delivery_id, s.product_id
-), order_pool AS (
-  SELECT s.order_id, s.product_id, sum(s.quantity) AS qty
-    FROM sale_lines s WHERE s.delivery_id IS NULL GROUP BY s.order_id, s.product_id
-), own AS (
-  SELECT dl.delivery_id, dl.order_id, dl.completed_at, dl.order_item_id, dl.product_id, dl.delivered_qty,
-         LEAST(dl.delivered_qty, GREATEST(COALESCE(op.qty, 0) - COALESCE(sum(dl.delivered_qty)
-           OVER (PARTITION BY dl.delivery_id, dl.product_id ORDER BY dl.order_item_id
-                 ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0), 0)) AS own_billed,
-         COALESCE(wp.qty, 0) AS order_level_billed
+), pools AS (
+  SELECT s.order_id, s.delivery_id, s.order_item_id, s.product_id, sum(s.quantity) AS qty
+    FROM sale_lines s GROUP BY s.order_id, s.delivery_id, s.order_item_id, s.product_id
+), step1 AS (  -- the delivery's own lines naming the order line
+  SELECT dl.*, LEAST(dl.delivered_qty, COALESCE((SELECT sum(p.qty) FROM pools p
+           WHERE p.delivery_id = dl.delivery_id AND p.order_item_id = dl.order_item_id AND p.product_id = dl.product_id), 0)) AS b1
     FROM delivered dl
-    LEFT JOIN own_pool op ON op.delivery_id = dl.delivery_id AND op.product_id = dl.product_id
-    LEFT JOIN order_pool wp ON wp.order_id = dl.order_id AND wp.product_id = dl.product_id
+), step2 AS (  -- the delivery's own lines with no order line, by product
+  SELECT s.*, LEAST(s.delivered_qty - s.b1, GREATEST(COALESCE((SELECT sum(p.qty) FROM pools p
+           WHERE p.delivery_id = s.delivery_id AND p.order_item_id IS NULL AND p.product_id = s.product_id), 0)
+         - COALESCE(sum(s.delivered_qty - s.b1) OVER (PARTITION BY s.delivery_id, s.product_id ORDER BY s.order_item_id
+             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0), 0)) AS b2
+    FROM step1 s
+), step3 AS (  -- whole-order lines naming the order line, in completion order
+  SELECT s.*, LEAST(s.delivered_qty - s.b1 - s.b2, GREATEST(COALESCE((SELECT sum(p.qty) FROM pools p
+           WHERE p.delivery_id IS NULL AND p.order_id = s.order_id AND p.order_item_id = s.order_item_id AND p.product_id = s.product_id), 0)
+         - COALESCE(sum(s.delivered_qty - s.b1 - s.b2) OVER (PARTITION BY s.order_id, s.order_item_id, s.product_id
+             ORDER BY s.completed_at, s.delivery_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0), 0)) AS b3
+    FROM step2 s
+), step4 AS (  -- whole-order lines with no order line, by product, in completion order
+  SELECT s.*, LEAST(s.delivered_qty - s.b1 - s.b2 - s.b3, GREATEST(COALESCE((SELECT sum(p.qty) FROM pools p
+           WHERE p.delivery_id IS NULL AND p.order_id = s.order_id AND p.order_item_id IS NULL AND p.product_id = s.product_id), 0)
+         - COALESCE(sum(s.delivered_qty - s.b1 - s.b2 - s.b3) OVER (PARTITION BY s.order_id, s.product_id
+             ORDER BY s.completed_at, s.delivery_id, s.order_item_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0), 0)) AS b4
+    FROM step3 s
 ), covered AS (
-  SELECT o.delivery_id, o.order_id, o.order_item_id, o.delivered_qty,
-         o.own_billed + LEAST(o.delivered_qty - o.own_billed, GREATEST(o.order_level_billed - COALESCE(sum(o.delivered_qty - o.own_billed)
-           OVER (PARTITION BY o.order_id, o.product_id ORDER BY o.completed_at, o.delivery_id, o.order_item_id
-                 ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0), 0)) AS billed_qty
-    FROM own o
-), line_billed AS (
-  SELECT s.order_item_id, sum(s.quantity) AS billed_qty
-    FROM sale_lines s WHERE s.order_item_id IS NOT NULL GROUP BY s.order_item_id
+  SELECT s.delivery_id, s.order_id, s.order_item_id, s.product_id, s.delivered_qty,
+         s.b1 + s.b2 + s.b3 + s.b4 AS billed_qty,
+         sum(s.b1 + s.b2 + s.b3 + s.b4) OVER (PARTITION BY s.order_item_id) AS line_billed_qty
+    FROM step4 s
 )
-SELECT c.delivery_id, c.order_id, c.order_item_id, c.delivered_qty, c.billed_qty,
-       c.delivered_qty - c.billed_qty AS unbilled_qty,
+SELECT c.delivery_id, c.order_id, c.order_item_id, c.product_id, c.delivered_qty, c.billed_qty,
+       c.delivered_qty - c.billed_qty AS unbilled_qty, c.line_billed_qty,
        GREATEST(x.cents, 0) AS unbilled_cents
   FROM covered c
   JOIN public.order_items oi ON oi.id = c.order_item_id
-  LEFT JOIN line_billed lb ON lb.order_item_id = c.order_item_id
   CROSS JOIN LATERAL (
     SELECT sum(v.sign * CASE
              WHEN COALESCE(oi.total_units_needed, 0) <= 0 THEN round(GREATEST(v.qty, 0) * COALESCE(oi.price_per_unit, 0) * 100)
              ELSE round(round(COALESCE(oi.total_price, 0) * 100) * LEAST(GREATEST(v.qty, 0), oi.total_units_needed) / oi.total_units_needed)
            END)::bigint AS cents
-      FROM (VALUES (COALESCE(lb.billed_qty, 0) + c.delivered_qty - c.billed_qty, 1),
-                   (COALESCE(lb.billed_qty, 0), -1)) v(qty, sign)
+      FROM (VALUES (c.line_billed_qty + c.delivered_qty - c.billed_qty, 1), (c.line_billed_qty, -1)) v(qty, sign)
   ) x;
 REVOKE ALL ON public.delivery_billing_remainders FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON public.delivery_billing_remainders TO authenticated, service_role;
@@ -282,21 +298,47 @@ BEGIN
     status, invoice_date, total_amount_cents, total_cost_cents, created_by)
   VALUES (v_invoice_number, 'chemical_sale', v_delivery.order_id, v_delivery.customer_id,
     CASE WHEN v_order_level THEN NULL ELSE p_delivery_id END, 'draft', (now() AT TIME ZONE 'America/Chicago')::date, 0, 0, v_actor) RETURNING id INTO v_invoice_id;
+  -- A4: the rest is drafted from delivery_billing_remainders, one line per order line and product, priced at the
+  -- order line's allocation for the units after every unit already billed on that line (editor-added lines included).
+  -- On a whole-order invoice it bills every unbilled unit on the order: the whole-order lines cover the order, not
+  -- one delivery, so billing only this delivery's share could leave the rest showing on another delivery.
+  IF v_rest THEN
+    FOR v_item IN
+      SELECT r.order_item_id, r.product_id, sum(r.unbilled_qty) AS quantity, max(r.line_billed_qty) AS line_billed,
+             oi.price_per_unit, oi.cost_per_unit, oi.product_name AS oi_product_name, p.product_name AS p_name,
+             (SELECT di.unit_size FROM delivery_items di
+               WHERE di.order_item_id = r.order_item_id AND di.product_id = r.product_id
+                 AND (v_order_level OR di.delivery_id = p_delivery_id)
+               ORDER BY di.id LIMIT 1) AS unit_size
+        FROM public.delivery_billing_remainders r
+        JOIN order_items oi ON oi.id = r.order_item_id
+        JOIN products p ON p.id = r.product_id
+       WHERE r.unbilled_qty > 0
+         AND (r.delivery_id = p_delivery_id OR (v_order_level AND r.order_id = v_delivery.order_id))
+       GROUP BY r.order_item_id, r.product_id, oi.price_per_unit, oi.cost_per_unit, oi.product_name, p.product_name
+       ORDER BY r.order_item_id, r.product_id
+    LOOP
+      v_line_alloc_cents := GREATEST(
+        public._allocated_cumulative_cents(v_item.order_item_id, v_item.line_billed + v_item.quantity)
+        - public._allocated_cumulative_cents(v_item.order_item_id, v_item.line_billed), 0);
+      v_total_cents := v_total_cents + v_line_alloc_cents;
+      v_cost_cents := v_cost_cents + ROUND(v_item.quantity * COALESCE(v_item.cost_per_unit, 0) * 100)::bigint;
+      INSERT INTO invoice_items (invoice_id, order_item_id, product_id, description,
+        quantity, unit_price_cents, extended_cents, cost_cents, unit_size)
+      VALUES (v_invoice_id, v_item.order_item_id, v_item.product_id,
+        COALESCE(v_item.oi_product_name, v_item.p_name), v_item.quantity,
+        ROUND(v_item.price_per_unit * 100)::bigint,
+        v_line_alloc_cents,
+        ROUND(COALESCE(v_item.cost_per_unit, 0) * 100)::bigint, v_item.unit_size);
+    END LOOP;
+  END IF;
   FOR v_item IN
-    SELECT di.product_id,
-      CASE WHEN v_rest THEN r.unbilled_qty ELSE di.quantity_delivered END AS quantity_delivered,
-      di.unit_size, di.order_item_id,
+    SELECT di.product_id, di.quantity_delivered, di.unit_size, di.order_item_id,
       oi.price_per_unit, oi.cost_per_unit, oi.product_name AS oi_product_name, p.product_name AS p_name
     FROM delivery_items di JOIN order_items oi ON oi.id = di.order_item_id
     JOIN products p ON p.id = di.product_id
-    LEFT JOIN public.delivery_billing_remainders r
-      ON v_rest AND r.delivery_id = di.delivery_id AND r.order_item_id = di.order_item_id
-    WHERE di.delivery_id = p_delivery_id
-      AND COALESCE(CASE WHEN v_rest THEN r.unbilled_qty ELSE di.quantity_delivered END, 0) > 0
-      -- The rest is one line per order line, on the delivery's first row for it.
-      AND (NOT v_rest OR di.id = (SELECT d2.id FROM delivery_items d2
-                                   WHERE d2.delivery_id = p_delivery_id AND d2.order_item_id = di.order_item_id
-                                   ORDER BY d2.id LIMIT 1))
+    WHERE di.delivery_id = p_delivery_id AND COALESCE(di.quantity_delivered, 0) > 0
+      AND NOT v_rest
   LOOP
     v_line_alloc_cents := public._allocated_delivery_cents(
                             v_item.order_item_id, v_item.quantity_delivered, NULL);
@@ -605,7 +647,7 @@ BEGIN
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._allocated_delivery_cents(uuid,numeric,uuid)'::regprocedure)
        IS DISTINCT FROM '280399d95c5581d3114e1673580d3fba'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)'::regprocedure)
-       IS DISTINCT FROM '82345065b9453bd66bf70de59e66bed4'
+       IS DISTINCT FROM 'e42c3cce1e7a74f65c1e1400ee5633ef'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.get_dashboard_action_items(integer)'::regprocedure)
        IS DISTINCT FROM 'eb96aacf4dfc840a22df32d6bb549aeb' THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: a function is not this file''s body';

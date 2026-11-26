@@ -16,7 +16,13 @@
  *               order (no delivery id), $160.00
  *   rounding    3 units for $100.00 ($33.33 each) in three deliveries: 3333 + 3334 + 3333 cents (unchanged)
  *   void        a cancelled delivery draft frees its units: the next delivery bills $40.00 (unchanged)
- * BEFORE (old bodies) the first four fail, AFTER they pass and the last two are identical; autocommit, a second
+ *   two_lines   two order lines of one product ($30 x 5, $40 x 5); the office lowers line A to 1: the rest is
+ *               line A's 4, $120.00 (line B's invoice line never counts for A)
+ *   whole_two   two deliveries of 10 under a whole-order invoice for 6: Bill the rest on delivery 2 drafts all 14 on
+ *               the order ($560.00) and neither delivery stays listed
+ *   editor_line 2 units for $80.01; a whole-order editor line (no order line) bills the first at $40.01: the rest is
+ *               $40.00, so the order bills $80.01 exactly
+ * BEFORE (old bodies) the A4 and carry-over cases fail, AFTER they pass and rounding and void are identical; autocommit, a second
  * apply and a drifted reverse are refused; the reverse (scripts/smoke/unbilled-rest-and-carry-over-reverse.sql)
  * restores the old bodies byte for byte and every case gives its BEFORE result again; the candidate re-applies.
  *
@@ -48,14 +54,21 @@ const md5s = () => FNS.map((f) => scalar(`SELECT md5(replace(prosrc, chr(13), ''
 // Invented ids (tag 'a4..'; the harness's users use 'a1'..'a4' in the last places, so these sit higher).
 const uid = (n) => `7c7a0000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const CUST = uid('a4c1'); const PROD = uid('a4d1');
-// order -> [line, units, total $, deliveries [id, units]]
+// order -> [order id, lines [id, units, total $, unit price $], deliveries [id, [[line index, units]]]]. Prices are
+// written as decimal text, never derived by binary division.
 const ORDERS = {
-  carry_down: [uid('a4e1'), uid('a4f1'), 10, 400, [[uid('a4b11'), 6], [uid('a4b12'), 4]]],
-  carry_up: [uid('a4e2'), uid('a4f2'), 10, 400, [[uid('a4b21'), 6], [uid('a4b22'), 4]]],
-  short: [uid('a4e3'), uid('a4f3'), 10, 400, [[uid('a4b31'), 10]]],
-  whole: [uid('a4e4'), uid('a4f4'), 10, 400, [[uid('a4b41'), 10]]],
-  rounding: [uid('a4e5'), uid('a4f5'), 3, 100, [[uid('a4b51'), 1], [uid('a4b52'), 1], [uid('a4b53'), 1]]],
-  void: [uid('a4e6'), uid('a4f6'), 2, 80, [[uid('a4b61'), 1], [uid('a4b62'), 1]]],
+  carry_down: [uid('a4e1'), [[uid('a4f1'), 10, '400.00', '40.00']], [[uid('a4b11'), [[0, 6]]], [uid('a4b12'), [[0, 4]]]]],
+  carry_up: [uid('a4e2'), [[uid('a4f2'), 10, '400.00', '40.00']], [[uid('a4b21'), [[0, 6]]], [uid('a4b22'), [[0, 4]]]]],
+  short: [uid('a4e3'), [[uid('a4f3'), 10, '400.00', '40.00']], [[uid('a4b31'), [[0, 10]]]]],
+  whole: [uid('a4e4'), [[uid('a4f4'), 10, '400.00', '40.00']], [[uid('a4b41'), [[0, 10]]]]],
+  rounding: [uid('a4e5'), [[uid('a4f5'), 3, '100.00', '33.33']], [[uid('a4b51'), [[0, 1]]], [uid('a4b52'), [[0, 1]]], [uid('a4b53'), [[0, 1]]]]],
+  void: [uid('a4e6'), [[uid('a4f6'), 2, '80.00', '40.00']], [[uid('a4b61'), [[0, 1]]], [uid('a4b62'), [[0, 1]]]]],
+  // Sol r1: two order lines of one product; the invoice names line B only.
+  two_lines: [uid('a4e7'), [[uid('a4f7'), 5, '150.00', '30.00'], [uid('a4f8'), 5, '200.00', '40.00']], [[uid('a4b71'), [[0, 5], [1, 5]]]]],
+  // Sol r1: two deliveries under one whole-order invoice.
+  whole_two: [uid('a4e8'), [[uid('a4f9'), 20, '800.00', '40.00']], [[uid('a4b81'), [[0, 10]]], [uid('a4b82'), [[0, 10]]]]],
+  // Sol r1: an editor-added line (no order line) bills the first unit of two allocated $80.01.
+  editor_line: [uid('a4e9'), [[uid('a4fa'), 2, '80.01', '40.01']], [[uid('a4b91'), [[0, 2]]]]],
 };
 
 function seedAll() {
@@ -65,15 +78,15 @@ function seedAll() {
           'new_cost', '20.00', 'tier1_price', '40.00', 'tier2_price', '40.00', 'tier3_price', '40.00')), '${ADMIN}', 'a4carry-preview');
       PERFORM public.apply_product_pricing_change_set((v->>'change_set_id')::uuid, v->>'request_fingerprint', '${ADMIN}', 'a4carry-apply');
     END $price$;`;
-  const orders = Object.entries(ORDERS).map(([k, [o, l, units, total, dels]]) => `
+  const orders = Object.entries(ORDERS).map(([k, [o, lines, dels]]) => `
     INSERT INTO public.orders (id, order_number, customer_id, status, booking_draw) VALUES ('${o}', '[A4] ${k}', '${CUST}', 'confirmed', false);
-    INSERT INTO public.order_items (id, order_id, product_id, product_name, price_per_unit, cost_per_unit,
+    ${lines.map(([l, units, total, ppu]) => `INSERT INTO public.order_items (id, order_id, product_id, product_name, price_per_unit, cost_per_unit,
         total_units_needed, total_price, profit, net_margin, quantity_delivered, quantity_remaining, unit_size)
-      VALUES ('${l}', '${o}', '${PROD}', '[A4] product', ${(total / units).toFixed(2)}, 20, ${units}, ${total}, ${total - units * 20}, 50, 0, ${units}, 'Gal');
-    ${dels.map(([d, q], i) => `INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, scheduled_date, status, created_by)
+      VALUES ('${l}', '${o}', '${PROD}', '[A4] product', ${ppu}, 20, ${units}, ${total}, ${total} - ${units * 20}, 50, 0, ${units}, 'Gal');`).join('\n    ')}
+    ${dels.map(([d, items], i) => `INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, scheduled_date, status, created_by)
         VALUES ('${d}', '[A4] ${k}-${i + 1}', '${o}', '${CUST}', CURRENT_DATE, 'scheduled', '${ADMIN}');
       INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-        VALUES ('${d}', '${l}', '${PROD}', ${q}, 0, 'Gal');`).join('\n    ')}`).join('\n');
+        VALUES ${items.map(([li, q]) => `('${d}', '${lines[li][0]}', '${PROD}', ${q}, 0, 'Gal')`).join(', ')};`).join('\n    ')}`).join('\n');
   seed('a4carry', `INSERT INTO public.customers (id, farm_name, account_number) VALUES ('${CUST}', '[A4] Farm', '[A4]-1');
     INSERT INTO public.products (id, product_name, unit_size, epa_registration, product_form, inventory_unit)
       VALUES ('${PROD}', '[A4] product', 'Gal', '999999-99991', 'liquid', 'Gal');
@@ -109,16 +122,29 @@ const billRest = (del, key) => `BEGIN
       || ' on=' || COALESCE((SELECT CASE WHEN delivery_id IS NULL THEN 'order' ELSE 'delivery' END FROM public.invoices WHERE id = (r->>'invoice_id')::uuid), '?');
   EXCEPTION WHEN OTHERS THEN t := 'refused: ' || left(SQLERRM, 60); END;`;
 
+// Bill the rest on delivery d of order o, then: what was drafted, the order's billed cents/units, whether each
+// delivery in `watch` is still listed, and a second try.
+const restSteps = (o, d, key, watch = [d]) => `${listed(d)} v := v || 'listed=' || t2;
+    ${billRest(d, `${key}1`)} v := v || ' | ' || t || ' | billed=' || ${orderBilled(o)};
+    ${watch.map((w, i) => `${listed(w)} v := v || ' listed${watch.length > 1 ? i + 1 : ''}=' || t2;`).join('\n    ')}
+    ${billRest(d, `${key}2`)} v := v || ' | again ' || t;`;
+// Replace a delivery's draft with one whole-order invoice (save_invoice, no delivery: the editor adds lines without
+// an order line) billing `q` units at `cents` each.
+const wholeOrder = (o, dels, q, cents, key) => `${dels.map((d) => `UPDATE public.invoices SET status = 'cancelled' WHERE id = ${invoiceOf(d)};`).join(' ')}
+    ${asUser(`u := public.save_invoice(jsonb_build_object('order_id', '${o}', 'customer_id', '${CUST}', 'invoice_type', 'chemical_sale'),
+      jsonb_build_array(jsonb_build_object('product_id', '${PROD}', 'description', '[A4] product',
+        'quantity', ${q}, 'unit_price_cents', ${cents}, 'extended_cents', ${q} * ${cents}, 'cost_cents', 2000, 'unit_size', 'Gal')), 'a4carry-w-${key}');`)}`;
+
 const CASES = {
-  carry_down: () => { const [, , , , [[d1], [d2]]] = ORDERS.carry_down; return `${complete(d1)} ${edit(invoiceOf(d1), 6, 3500, 'cd')} ${complete(d2)}
+  carry_down: () => { const [, , [[d1], [d2]]] = ORDERS.carry_down; return `${complete(d1)} ${edit(invoiceOf(d1), 6, 3500, 'cd')} ${complete(d2)}
     v := ${cents(d1)} || ' then ' || ${cents(d2)};`; },
-  carry_up: () => { const [, , , , [[d1], [d2]]] = ORDERS.carry_up; return `${complete(d1)} ${edit(invoiceOf(d1), 6, 4500, 'cu')} ${complete(d2)}
+  carry_up: () => { const [, , [[d1], [d2]]] = ORDERS.carry_up; return `${complete(d1)} ${edit(invoiceOf(d1), 6, 4500, 'cu')} ${complete(d2)}
     v := ${cents(d1)} || ' then ' || ${cents(d2)};`; },
-  short: () => { const [o, , , , [[d]]] = ORDERS.short; return `${complete(d)} ${edit(invoiceOf(d), 6, 4000, 'sh')}
+  short: () => { const [o, , [[d]]] = ORDERS.short; return `${complete(d)} ${edit(invoiceOf(d), 6, 4000, 'sh')}
     ${listed(d)} v := 'listed=' || t2;
     ${billRest(d, 'sh1')} ${listed(d)} v := v || ' | ' || t || ' | billed=' || ${orderBilled(o)} || ' listed=' || t2;
     ${billRest(d, 'sh2')} v := v || ' | again ' || t;`; },
-  whole: () => { const [o, l, , , [[d]]] = ORDERS.whole; return `${complete(d)}
+  whole: () => { const [o, [[l]], [[d]]] = ORDERS.whole; return `${complete(d)}
     -- The office replaces the delivery's draft with one whole-order invoice (save_invoice, no delivery) for 6.
     UPDATE public.invoices SET status = 'cancelled' WHERE id = ${invoiceOf(d)};
     ${asUser(`u := public.save_invoice(jsonb_build_object('order_id', '${o}', 'customer_id', '${CUST}', 'invoice_type', 'chemical_sale'),
@@ -129,9 +155,28 @@ const CASES = {
       || ' listed=' || t2;
     ${billRest(d, 'wh1')} ${listed(d)} v := v || ' | ' || t || ' | billed=' || ${orderBilled(o)} || ' listed=' || t2;
     ${billRest(d, 'wh2')} v := v || ' | again ' || t;`; },
-  rounding: () => { const [o, , , , dels] = ORDERS.rounding; return `${dels.map(([d]) => complete(d)).join('\n')}
+  two_lines: () => { const [o, [[la]], [[d]]] = ORDERS.two_lines; return `${complete(d)}
+    -- The office lowers line A to 1 unit ($30.00) and keeps line B's 5.
+    u := ${invoiceOf(d)};
+    r3 := (SELECT jsonb_agg(jsonb_build_object('id', ii.id, 'order_item_id', ii.order_item_id, 'product_id', ii.product_id,
+       'description', ii.description, 'quantity', CASE WHEN ii.order_item_id = '${la}' THEN 1 ELSE ii.quantity END,
+       'unit_price_cents', ii.unit_price_cents,
+       'extended_cents', CASE WHEN ii.order_item_id = '${la}' THEN ii.unit_price_cents ELSE ii.extended_cents END,
+       'cost_cents', ii.cost_cents, 'unit_size', ii.unit_size)) FROM public.invoice_items ii WHERE ii.invoice_id = u);
+    ${asUser(`u := public.save_invoice(jsonb_build_object('id', u, 'customer_id', '${CUST}', 'invoice_type', 'chemical_sale'), r3, 'a4carry-e-tl');`)}
+    v := '';
+    ${restSteps(o, d, 'tl')}`; },
+  whole_two: () => { const [o, , [[d1], [d2]]] = ORDERS.whole_two; return `${complete(d1)} ${complete(d2)}
+    ${wholeOrder(o, [d1, d2], 6, 4000, 'w2')}
+    v := '';
+    ${restSteps(o, d2, 'w2', [d1, d2])}`; },
+  editor_line: () => { const [o, , [[d]]] = ORDERS.editor_line; return `${complete(d)}
+    ${wholeOrder(o, [d], 1, 4001, 'el')}
+    v := '';
+    ${restSteps(o, d, 'el')}`; },
+  rounding: () => { const [o, , dels] = ORDERS.rounding; return `${dels.map(([d]) => complete(d)).join('\n')}
     v := ${dels.map(([d]) => cents(d)).join(" || '+' || ")} || ' billed=' || ${orderBilled(o)};`; },
-  void: () => { const [o, , , , [[d1], [d2]]] = ORDERS.void; return `${complete(d1)}
+  void: () => { const [o, , [[d1], [d2]]] = ORDERS.void; return `${complete(d1)}
     UPDATE public.invoices SET status = 'cancelled' WHERE id = ${invoiceOf(d1)};
     ${complete(d2)} v := ${cents(d2)} || ' billed=' || ${orderBilled(o)};`; },
 };
@@ -150,6 +195,12 @@ const EXPECT = {
   carry_up: 'ok|27000 then 16000',
   short: 'ok|listed=true | drafted 16000 qty=4.00 on=delivery | billed=40000/10.00 listed=false | again refused: This delivery already has an active invoice (or an order-lev',
   whole: 'ok|whole=24000 on order listed=true | drafted 16000 qty=4.00 on=order | billed=40000/10.00 listed=false | again refused: This delivery already has an active invoice (or an order-lev',
+  // Line A's other 4 ($120.00) are drafted; line B's 5 on the invoice never count for A.
+  two_lines: 'ok|listed=true | drafted 12000 qty=4.00 on=delivery | billed=35000/10.00 listed=false | again refused: This delivery already has an active invoice (or an order-lev',
+  // The whole-order invoice covers the order: the rest is every unbilled unit on it, and neither delivery stays listed.
+  whole_two: 'ok|listed=true | drafted 56000 qty=14.00 on=order | billed=80000/20.00 listed1=false listed2=false | again refused: This delivery already has an active invoice (or an order-lev',
+  // The second unit of $80.01 is $40.00 (8001 - 4001), so the order bills $80.01 exactly, not $80.02.
+  editor_line: 'ok|listed=true | drafted 4000 qty=1.00 on=order | billed=8001/2.00 listed=false | again refused: This delivery already has an active invoice (or an order-lev',
 };
 
 try {
@@ -163,6 +214,9 @@ try {
   assert.match(before.short, /^ok\|listed=false \| refused: This delivery already has an active invoice/, 'A4 must reproduce: off the list, refused');
   assert.match(before.short, /billed=24000\/6\.00/, 'A4: 4 units left unbilled on the old body');
   assert.match(before.whole, /^ok\|whole=24000 on order listed=false \| refused:/, 'A4 whole-order must reproduce');
+  for (const name of ['two_lines', 'whole_two', 'editor_line']) {
+    assert.match(before[name], /^ok\|listed=false \| refused: This delivery already has an active invoice/, `${name}: A4 must reproduce`);
+  }
   assert.match(before.rounding, /^ok\|3333\+3334\+3333 billed=10000\/3\.00$/);
   assert.match(before.void, /^ok\|4000 billed=4000\/1\.00$/);
 
@@ -181,7 +235,7 @@ try {
   assert.equal(after.rounding, before.rounding, 'rounding across partial deliveries must not change');
   assert.equal(after.void, before.void, 'a void must still free its units');
   // What the screens read: the short bill's rest, as the signed-in admin (row policies on).
-  const [, , , , [[shortDel]]] = ORDERS.short;
+  const [, , [[shortDel]]] = ORDERS.short;
   const viewRow = attempt(ADMIN, `${complete(shortDel)} ${edit(invoiceOf(shortDel), 6, 4000, 'sv')}
     ${asUser(`v := (SELECT string_agg(delivered_qty::numeric(12,2) || ' delivered, ' || billed_qty::numeric(12,2) || ' billed, '
       || unbilled_qty::numeric(12,2) || ' unbilled, ' || unbilled_cents || ' cents', '; ')
@@ -193,6 +247,8 @@ try {
   assert.equal(scalar("SELECT reloptions::text FROM pg_class WHERE oid = 'public.delivery_billing_remainders'::regclass;"), '{security_invoker=true}');
 
   console.log('Reverse:');
+  assert.match(run(reverse).stderr, /UNBILLED_REST_REVERSE_DRIFT: run this file as one transaction/, 'autocommit reverse must refuse');
+  assert.equal(md5s(), newMd5, 'a refused reverse changes nothing');
   const back = run(reverse, ['-1']);
   assert.equal(back.status, 0, `${back.stdout}${back.stderr}`);
   assert.match(`${back.stdout}${back.stderr}`, /REVERSE_OK/);

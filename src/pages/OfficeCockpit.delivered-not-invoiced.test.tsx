@@ -53,7 +53,7 @@ function query(table: string) {
       if (cappedEmptyScan) data = makeBilledPage(range[0]);
       else data = range[0] === 0 ? BILLED_PAGE : range[0] === 50 ? OLDER_PAGE : [];
     }
-    if (table === 'delivery_billing_remainders') data = shortRows;
+    if (table === 'delivery_billing_remainders') data = range && range[0] > 0 ? [] : shortRows;
     if (table === 'delivery_external_billings') {
       data = requestedDeliveryIds.filter((id) => id.startsWith('billed-')).map((delivery_id) => ({ delivery_id }));
     }

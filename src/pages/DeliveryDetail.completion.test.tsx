@@ -40,8 +40,11 @@ function buildChain(table: string): Record<string, unknown> {
     'lt', 'lte', 'like', 'ilike', 'is', 'in', 'not', 'or', 'and', 'match',
     'order', 'limit', 'offset', 'returns', 'abortSignal', 'range',
   ]) self[m] = method;
+  // A paged read past its first page gets no more rows.
+  let from = 0;
+  self.range = (start: number) => { from = start; return self; };
   // Read the table when the query resolves, so a test can change it between calls.
-  const rows = () => tables.data[table] ?? [];
+  const rows = () => (from > 0 ? [] : tables.data[table] ?? []);
   self.single = () => Promise.resolve({ data: rows()[0] ?? null, error: null });
   self.maybeSingle = () => Promise.resolve({ data: rows()[0] ?? null, error: null });
   self.then = (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) =>
@@ -498,7 +501,7 @@ describe('Invoices on this sale card', () => {
     await screen.findByText(paragraph('Not fully billed. 4 of 10 not billed ($160.00): the invoice bills fewer units than were delivered.'));
     fireEvent.click(screen.getByRole('button', { name: 'Bill the rest…' }));
     const dialog = await screen.findByRole('alertdialog', { name: 'Bill the rest of this delivery?' });
-    expect(within(dialog).getByText('This makes a draft invoice for the units of delivery DEL-1 not billed yet: 4 of 10 not billed ($160.00).')).toBeInTheDocument();
+    expect(within(dialog).getByText('This makes a draft invoice for whatever of delivery DEL-1 is still not billed when you confirm (now 4 of 10 not billed ($160.00)).')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Bill the rest' })).toBeInTheDocument();
   });
 

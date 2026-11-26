@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // UserPromptSubmit half of the Taha lane block (taha-lane-lib.mjs, Mason 2026-11-22).
 // Mason's whole message `taha override #<PR> <code>` turns the code a merge refusal
-// issued for that PR into a 24-hour override for that PR at the commit it was refused at.
+// issued for that PR into a 24-hour override for that PR (later pushes included, Mason 2026-11-25).
+// The migration landing gate honours it too, in place of Taha's go-ahead on a release or hotfix.
 // Anything else: silent, except a message that mentions the command but is not
 // exactly it, which is refused out loud.
 
@@ -34,6 +35,7 @@ try {
   res = { ok: false, reason: `the override hook failed (${error?.message || error})` };
 }
 if (!res.ok) emit(`TAHA LANE OVERRIDE NOT RECORDED — Mason sent #${command.pullRequest} ${command.code}, but ${res.reason}. Nothing was overridden. Tell him in one line; retrying the merge issues a fresh code.`);
-emit(`TAHA LANE OVERRIDE RECORDED — Mason let PR #${res.payload.pullRequest} at ${res.payload.headSha.slice(0, 9)} past the Taha lane block until ${res.payload.expiresAt} ` +
-  "(this PR at this commit only; a new push needs a new code; every other merge gate still applies). " +
-  "Confirm to him in one line and retry the merge; the gate posts the PR comment telling Taha.");
+emit(`TAHA LANE OVERRIDE RECORDED — Mason let PR #${res.payload.pullRequest} past Taha's checks until ${res.payload.expiresAt}: ` +
+  "the lane block, and for a release or hotfix PR Taha's live-apply go-ahead and 4-hour hold " +
+  "(this PR only, later pushes included; every other gate still applies). " +
+  "Confirm to him in one line and retry; on a staging merge the lane gate posts the PR comment telling Taha.");

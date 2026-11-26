@@ -98,7 +98,7 @@ test('product page dropdowns show the full list, mark the saved choice, and save
   await expect(vendor).toHaveValue(last.trim());
   await expect(page.getByRole('listbox')).toHaveCount(0);
 
-  await page.screenshot({ path: 'scripts/local-app/.state/pm1-product-page.png' });
+  await page.screenshot({ path: test.info().outputPath('pm1-product-page.png') });
 });
 
 test('the list scrolls by wheel and hovering does not move it', async ({ page }) => {

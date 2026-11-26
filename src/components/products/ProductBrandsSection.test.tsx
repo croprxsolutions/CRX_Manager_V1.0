@@ -7,12 +7,21 @@ const mocks = vi.hoisted(() => ({
   saveProductBrand: vi.fn(),
   lookupEpaRegistration: vi.fn(),
   logActivity: vi.fn(),
+  readBrandDocumentLinks: vi.fn(),
+  readBrandDocumentWorkspace: vi.fn(),
+  changeBrandDocumentLinks: vi.fn(),
   parentOf: vi.fn((_id: string): { parentId?: string; parentName?: string } => ({})),
 }));
 
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
 vi.mock('../../lib/activityLogger', () => ({ logActivity: mocks.logActivity }));
 vi.mock('../../lib/epaLookupClient', () => ({ lookupEpaRegistration: mocks.lookupEpaRegistration }));
+vi.mock('../../lib/brandDocuments', async (actual) => ({
+  ...await actual<typeof import('../../lib/brandDocuments')>(),
+  readBrandDocumentLinks: mocks.readBrandDocumentLinks,
+  readBrandDocumentWorkspace: mocks.readBrandDocumentWorkspace,
+  changeBrandDocumentLinks: mocks.changeBrandDocumentLinks,
+}));
 vi.mock('./ProductSearchPicker', () => ({
   default: ({ onSelect, disabled }: { onSelect: (product: { id: string; product_name: string }) => void; disabled?: boolean }) => (
     <>
@@ -50,6 +59,8 @@ describe('ProductBrandsSection', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.listProductBrands.mockResolvedValue([slam]);
+    mocks.readBrandDocumentLinks.mockResolvedValue([]);
+    mocks.readBrandDocumentWorkspace.mockResolvedValue([]);
   });
 
   it('shows brands read-only to a non-admin', async () => {
@@ -67,6 +78,61 @@ describe('ProductBrandsSection', () => {
 
     expect(await screen.findByRole('link', { name: 'Search EPA labels for 524-475' }))
       .toHaveAttribute('href', 'https://ordspub.epa.gov/ords/pesticides/f?p=PPLS:102:::NO::P102_REG_NUM:524-475');
+  });
+
+  it('loads report status only through the admin workspace for the displayed brands', async () => {
+    const sds = {
+      id: 'link-1', legacy_brand_id: slam.id, parent_brand_id: null, document_kind: 'sds',
+      url: 'https://manufacturer.example/sds', expires_on: null, row_version: 2, reported_at: '2026-11-24T10:00:00Z',
+    };
+    mocks.readBrandDocumentWorkspace.mockResolvedValue([{ id: slam.id, parent_brand: false, links: [sds] }]);
+    mocks.readBrandDocumentLinks.mockResolvedValue([{ ...sds, reported_at: null }]);
+    const { rerender } = render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="admin" />);
+    expect(await screen.findByText('Reported')).toBeVisible();
+    expect(mocks.readBrandDocumentWorkspace).toHaveBeenCalledWith(false, [slam.id]);
+
+    rerender(<ProductBrandsSection productId="p1" productName={productName} isAdmin={false} userId="staff" />);
+    expect(await screen.findByRole('button', { name: 'Report broken link for Slam 5.4 SDS' })).toBeVisible();
+    expect(screen.queryByText('Reported')).not.toBeInTheDocument();
+    expect(mocks.readBrandDocumentLinks).toHaveBeenCalledWith([slam.id], false);
+    expect(mocks.readBrandDocumentWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it('reloads a stale link even when the brand version is unchanged', async () => {
+    const sds = {
+      id: 'link-1', legacy_brand_id: slam.id, parent_brand_id: null, document_kind: 'sds',
+      url: 'https://manufacturer.example/old', expires_on: null, row_version: 2, reported_at: null,
+    };
+    mocks.readBrandDocumentLinks.mockResolvedValue([sds]);
+    mocks.changeBrandDocumentLinks.mockRejectedValueOnce({ message: 'BRAND_DOCUMENT_CHANGED: reload this link' });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin={false} userId="staff" />);
+    expect(await screen.findByRole('link', { name: 'SDS' })).toHaveAttribute('href', sds.url);
+
+    const currentUrl = 'https://manufacturer.example/current';
+    mocks.readBrandDocumentLinks.mockResolvedValue([{ ...sds, url: currentUrl, row_version: 3 }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Report broken link for Slam 5.4 SDS' }));
+    await waitFor(() => expect(screen.getByRole('link', { name: 'SDS' })).toHaveAttribute('href', currentUrl));
+    expect(mocks.listProductBrands).toHaveBeenCalledTimes(2);
+  });
+
+  it('notifies the Weight card after an SDS replacement saves', async () => {
+    const sds = {
+      id: 'link-1', legacy_brand_id: slam.id, parent_brand_id: null, document_kind: 'sds',
+      url: 'https://manufacturer.example/old', expires_on: null, row_version: 2, reported_at: null,
+    };
+    mocks.readBrandDocumentWorkspace.mockResolvedValue([{ id: slam.id, parent_brand: false, links: [sds] }]);
+    mocks.changeBrandDocumentLinks.mockResolvedValue(undefined);
+    const onWeightReviewChange = vi.fn();
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="admin"
+      onWeightReviewChange={onWeightReviewChange} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage documents for Slam 5.4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit link' }));
+    fireEvent.change(screen.getByLabelText('SDS link'), { target: { value: 'https://manufacturer.example/current' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save link' }));
+
+    await waitFor(() => expect(onWeightReviewChange).toHaveBeenCalledOnce());
+    expect(mocks.changeBrandDocumentLinks).toHaveBeenCalledOnce();
   });
 
   it('does not show an EPA label search link for a brand without a registration', async () => {
@@ -462,7 +528,7 @@ describe('ProductBrandsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pick bulk size' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Copy 2 brands' }));
     expect(await screen.findByText(/no brands this one doesn’t already list/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/Mad Dog/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /Mad Dog/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy 0 brands' })).toBeDisabled();
   });
 

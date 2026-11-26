@@ -1,7 +1,9 @@
 import type { BadgeVariant } from '../components/ui/Badge';
 
 // Plain-English label for a quote status. Values stay unchanged; only display differs.
+// A sent quote is a booking (prices locked, ready to draw from), so it reads "Booked" (Mason, 2026-11-24).
 const SPECIAL: Record<string, string> = {
+  sent: 'Booked',
   closed_by_application: 'Fulfilled',
   closed_short: 'Closed short',
 };

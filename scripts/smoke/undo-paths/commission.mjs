@@ -1,7 +1,7 @@
 /**
  * Commission: create_commission_payment (a payout batch claims pending commissions once), and
  * void_commission_payment (a posted payout is undone and its commissions are pending again).
- * Payouts are switched off until M16 (20270308180000): creating one is refused, voiding still works. The seed and
+ * Payouts are switched off until M16 (20270309010000): creating one is refused, voiding still works. The seed and
  * the create probe turn the switch on inside their own transaction to keep covering the payout path itself.
  */
 import assert from 'node:assert/strict';
@@ -38,7 +38,7 @@ function seedCommission() {
     DO $restore$ BEGIN EXECUTE (SELECT def FROM pg_temp.undo_payout_switch); END $restore$;`);
 }
 
-// The switch returning `on` (same attributes as 20270308180000); owner, grants and comment are kept.
+// The switch returning `on` (same attributes as 20270309010000); owner, grants and comment are kept.
 const payoutSwitch = (on) => `CREATE OR REPLACE FUNCTION public._commission_payouts_enabled() RETURNS boolean LANGUAGE sql STABLE
   SET search_path TO 'pg_catalog', 'pg_temp' AS $switch$ SELECT ${on} $switch$;`;
 

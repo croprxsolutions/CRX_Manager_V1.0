@@ -510,7 +510,7 @@ export default function CommissionPayments() {
         toast('success', `Commission payment ${createdSummary.paymentNumber} created: ${fmt(createdSummary.totalAmount)}`);
       }
     } catch (err: unknown) {
-      // Payouts are off until M16 (20270308180000): a definite refusal, nothing was created or paid.
+      // Payouts are off until M16 (20270309010000): a definite refusal, nothing was created or paid.
       if (isCommissionPayoutsOff(err)) {
         toast('error', sanitizeError(err));
         return;
@@ -623,7 +623,7 @@ export default function CommissionPayments() {
         toast('success', 'Commission payment posted');
       }
     } catch (err: unknown) {
-      // Payouts are off until M16 (20270308180000): a definite refusal, nothing was created or paid.
+      // Payouts are off until M16 (20270309010000): a definite refusal, nothing was created or paid.
       if (isCommissionPayoutsOff(err)) {
         toast('error', sanitizeError(err));
         return;

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270308180000_commission_payouts_off_until_m16.sql (Mason, 2026-11-25: "make sure no
+ * Real-schema proof for 20270309010000_commission_payouts_off_until_m16.sql (Mason, 2026-11-25: "make sure no
  * payout batch can run until it's live"). Builds the checked-in baseline plus every migration before the candidate
  * in a network-disabled PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), commits one posted and one
  * unposted payout batch, then as the signed-in admin:
@@ -25,7 +25,7 @@ process.env.UNDO_PATHS_CONTAINER ||= `crx-payoutguard-${process.pid}-${Date.now(
 const { buildContainer, removeContainer, seedUsers, seed, scalar, attempt, asUser, refuse, signIn, ref, id, USERS, ROOT, NAME, docker } =
   await import('./undo-paths/harness.mjs');
 
-const MIGRATION = '20270308180000_commission_payouts_off_until_m16.sql';
+const MIGRATION = '20270309010000_commission_payouts_off_until_m16.sql';
 const read = (...parts) => readFileSync(path.join(ROOT, ...parts), 'utf8').replaceAll('\r\n', '\n');
 const OFF = 'COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.';
 const CREATE_SIG = 'public.create_commission_payment(uuid[],text,text,date,text,uuid,text)';

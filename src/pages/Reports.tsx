@@ -1053,7 +1053,7 @@ export default function Reports() {
         logActivity({ event: 'commission_payment_batch_created', description: `${totalBatched} commission(s) added to unposted payment batches via Reports`, performedBy: actor.id });
       }
     } catch (err: unknown) {
-      // Payouts are off until M16 (20270308180000): a definite refusal, nothing was created or paid.
+      // Payouts are off until M16 (20270309010000): a definite refusal, nothing was created or paid.
       if (totalBatched === 0 && isCommissionPayoutsOff(err)) {
         toast('error', sanitizeError(err));
         return;

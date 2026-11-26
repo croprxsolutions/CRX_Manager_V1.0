@@ -377,7 +377,7 @@ describe('sanitizeError', () => {
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
-    // 20270308180000: payouts are off until M16 (Mason, 2026-11-25).
+    // 20270309010000: payouts are off until M16 (Mason, 2026-11-25).
     const off = 'COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.';
     expect(sanitizeError(off)).toBe('Nothing was created or paid. Commission payouts are switched off until commission-on-payment (M16) is live. Voiding an existing payment still works');
     expect(sanitizeError({ message: off })).toBe(sanitizeError(off));

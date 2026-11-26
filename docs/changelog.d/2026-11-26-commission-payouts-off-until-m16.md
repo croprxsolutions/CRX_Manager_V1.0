@@ -6,5 +6,5 @@
   switched off until commission-on-payment (M16) is live. Voiding an existing payment still works".
 - Voiding an existing payout batch still works. Commission reports and exports are unchanged.
 - A retry of a payout created or posted before the switch went off still returns its original result.
-- Migration `20270308180000_commission_payouts_off_until_m16.sql` (one switch, `_commission_payouts_enabled()`, false, plus
+- Migration `20270309010000_commission_payouts_off_until_m16.sql` (one switch, `_commission_payouts_enabled()`, false, plus
   a `commission_payments` trigger backstop); M16 turns it back on with its own migration.

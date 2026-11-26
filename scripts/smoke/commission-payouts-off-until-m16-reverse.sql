@@ -1,4 +1,4 @@
--- Reverse of 20270308180000_commission_payouts_off_until_m16.sql (run as one transaction: psql -1).
+-- Reverse of 20270309010000_commission_payouts_off_until_m16.sql (run as one transaction: psql -1).
 -- Turns commission payouts back on exactly as staging had them: removes the switch check from
 -- create_commission_payment and post_commission_payment (each body back to its pinned staging md5) and drops
 -- the commission_payments trigger, its function and public._commission_payouts_enabled(). CREATE OR REPLACE keeps owner,

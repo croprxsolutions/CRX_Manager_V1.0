@@ -1,5 +1,5 @@
--- 20270308180000_commission_payouts_off_until_m16.sql
--- Record: docs/reference/migrations.d/20270308180000_commission_payouts_off_until_m16.md
+-- 20270309010000_commission_payouts_off_until_m16.sql
+-- Record: docs/reference/migrations.d/20270309010000_commission_payouts_off_until_m16.md
 --
 -- WHY: Mason, Slack 2026-11-25: "Move M16 to January, and please make sure no payout batch can run until it's live."
 --   M16 = commission is earned only when the customer's money lands. Until then no commission payout batch may be

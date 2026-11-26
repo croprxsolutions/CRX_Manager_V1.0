@@ -80,7 +80,7 @@ export interface NextLoadProposal {
   resumeNote: string | null;
 }
 
-export const APPLICATOR_PHONE_CONTRACT_TODOS = {
+const APPLICATOR_PHONE_CONTRACT_TODOS = {
   workEntryRead: 'TODO_WORK_ENTRY_READ_RPC: the safe read function, arguments, returned columns, and duplicate-warning result are not named.',
   loadRevisionRead: 'TODO_LOAD_REVISION_READ_PATH: the applicator load/revision choice path and returned columns are not named.',
   workEntryWrite: 'TODO_WORK_ENTRY_WRITE_RPC: the save function and exact argument names for entries, segments, gauge, weather, restricted-use values, and pause are not named.',

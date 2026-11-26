@@ -51,8 +51,9 @@ Who may act: unchanged; the trigger only narrows what any writer may store.
 - Rule that always holds: a new or changed quantity on an Ea/Unit product line is a whole number. The refusal
   aborts the whole statement/transaction, so nothing partial is saved (a completion moves no stock).
 - Automatic record changes: none. Nothing is rounded.
-- Existing rows: none fractional (query in Facts), and the migration's preflight refuses to apply while any exist,
-  naming the first ten documents (Taha's review LOW 2). An untouched legacy order or delivery figure would still save.
+- Existing rows: none fractional (query in Facts), and the migration refuses to apply while any exist,
+  naming the first ten documents (Taha's review LOW 2). It scans after creating the triggers, whose lock waits out
+  in-flight writers and holds off new ones, so no line can slip in between (Luna r3). An untouched legacy order or delivery figure would still save.
 - Timing: retries replay saved receipts before any write; a refused call saved nothing, so a retry is refused the same.
 - Undo: cancel and Cancel remaining quantity set whole figures from whole figures.
 - Product unit changed to Ea later: order and delivery lines must be closed first (existing rule). Quote lines are not
@@ -62,7 +63,7 @@ Who may act: unchanged; the trigger only narrows what any writer may store.
 
 ## Delivery
 Database and screens ship in one PR: no screen depends on the new trigger (the delivery screen check is local), and
-the trigger only refuses figures on products with no lines today, and the preflight re-checks that at apply time, so
+the trigger only refuses figures on products with no lines today, and the migration re-checks that at apply time, so
 no open document or in-progress completion can hit it at rollout. `lock_timeout` 5s; triggers take a brief lock on the three tables. Rollback:
 `scripts/smoke/whole-item-quantities-reverse.sql`. Touches Taha's lane
 (quote and order lines): needs his Approve (`ready-for-taha`) after Sol.
@@ -108,5 +109,5 @@ products; whole-container selling for gallon products
 ## Extra proof case
 8. A Gal line at 2.5 re-pointed to an Ea product is refused; a line with no product getting an Ea product at 2.5 is
    refused.
-9. The preflight refuses the apply while a fractional line exists on an Ea/Unit product, naming the document.
+9. The migration refuses the apply while a fractional line exists on an Ea/Unit product, naming the document.
 10. The real `save_quote` refuses a 2.5 Unit line and saves a 3 Unit line (every save re-inserts every line).

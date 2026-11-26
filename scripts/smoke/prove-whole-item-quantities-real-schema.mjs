@@ -318,17 +318,17 @@ function beforeCases() {
 
 function applyCandidate() {
   stageText('candidate.sql', lf(CANDIDATE));
-  // 9 (Taha LOW 2). The seeded legacy 2.5 Ea line makes the preflight refuse, naming its order, with nothing installed.
+  // 9 (Taha LOW 2). The seeded legacy 2.5 Ea line makes the postflight scan (after the triggers lock the tables) refuse, naming its order; the rollback leaves nothing installed.
   const blocked = apply('candidate.sql');
   assert.notEqual(blocked.status, 0, 'the apply must be refused while a fractional Ea line exists');
-  assert.match(blocked.output, /WHOLE_ITEMS_PREFLIGHT: fractional quantities already exist on Ea\/Unit products \(first ten: order WHOLE-O1\)/, blocked.output);
+  assert.match(blocked.output, /WHOLE_ITEMS_POSTFLIGHT: fractional quantities already exist on Ea\/Unit products \(first ten: order WHOLE-O1\)/, blocked.output);
   assert.equal(scalar("SELECT to_regprocedure('public._enforce_whole_item_quantity()') IS NULL;"), 't');
   raw(`UPDATE public.order_items SET total_units_needed = 3, quantity_remaining = 3 WHERE id = '${OL}';`);
   const r = apply('candidate.sql');
   assert.equal(r.status, 0, r.output);
   // Back to a legacy fraction (triggers off), as a row made before a later unit change would be.
   raw(`UPDATE public.order_items SET total_units_needed = 2.5, quantity_remaining = 2.5 WHERE id = '${OL}';`);
-  console.log('[case 9] the preflight refuses the apply while order WHOLE-O1 holds 2.5 Ea, naming it; once whole, it applies');
+  console.log('[case 9] the apply is refused while order WHOLE-O1 holds 2.5 Ea, naming it; once whole, it applies');
   const again = apply('candidate.sql');
   assert.notEqual(again.status, 0, 'a second apply must be refused');
   assert.match(again.output, /WHOLE_ITEMS_PREFLIGHT/);

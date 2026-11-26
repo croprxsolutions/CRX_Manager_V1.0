@@ -19,32 +19,9 @@
 SET LOCAL lock_timeout = '5s';
 
 DO $preflight$
-DECLARE
-  v_docs text;
 BEGIN
   IF to_regprocedure('public._enforce_whole_item_quantity()') IS NOT NULL THEN
     RAISE EXCEPTION 'WHOLE_ITEMS_PREFLIGHT: _enforce_whole_item_quantity already exists';
-  END IF;
-  -- Lines that already hold a fraction on an Ea/Unit product would be refused on their next save: sort them out first.
-  WITH whole_items AS (
-    SELECT p.id FROM public.products p
-     WHERE lower(COALESCE(NULLIF(btrim(p.inventory_unit, E' \t\r\n' || chr(160)), ''),
-                          NULLIF(btrim(p.unit_size, E' \t\r\n' || chr(160)), ''), '')) IN ('ea', 'unit')
-  ), bad AS (
-    SELECT 'quote ' || q.quote_number AS doc FROM public.quote_items qi JOIN public.quotes q ON q.id = qi.quote_id
-     WHERE qi.product_id IN (SELECT id FROM whole_items) AND qi.total_units_needed <> trunc(qi.total_units_needed)
-    UNION
-    SELECT 'order ' || o.order_number FROM public.order_items oi JOIN public.orders o ON o.id = oi.order_id
-     WHERE oi.product_id IN (SELECT id FROM whole_items)
-       AND (oi.total_units_needed <> trunc(oi.total_units_needed) OR oi.quantity_delivered <> trunc(oi.quantity_delivered))
-    UNION
-    SELECT 'delivery ' || d.delivery_number FROM public.delivery_items di JOIN public.deliveries d ON d.id = di.delivery_id
-     WHERE di.product_id IN (SELECT id FROM whole_items)
-       AND (di.quantity <> trunc(di.quantity) OR di.quantity_delivered <> trunc(di.quantity_delivered))
-  )
-  SELECT string_agg(doc, ', ' ORDER BY doc) INTO v_docs FROM (SELECT doc FROM bad ORDER BY doc LIMIT 10) first_ten;
-  IF v_docs IS NOT NULL THEN
-    RAISE EXCEPTION 'WHOLE_ITEMS_PREFLIGHT: fractional quantities already exist on Ea/Unit products (first ten: %); make them whole or close them before applying', v_docs;
   END IF;
 END;
 $preflight$;
@@ -109,7 +86,32 @@ CREATE TRIGGER a3_whole_item_quantity
   FOR EACH ROW EXECUTE FUNCTION public._enforce_whole_item_quantity();
 
 DO $postflight$
+DECLARE
+  v_docs text;
 BEGIN
+  -- Scanned after CREATE TRIGGER: its lock waits out in-flight writers and holds off new ones until commit,
+  -- so no fractional line can land between this scan and the triggers. A legacy fraction would be refused
+  -- on its next save: sort it out first.
+  WITH whole_items AS (
+    SELECT p.id FROM public.products p
+     WHERE lower(COALESCE(NULLIF(btrim(p.inventory_unit, E' \t\r\n' || chr(160)), ''),
+                          NULLIF(btrim(p.unit_size, E' \t\r\n' || chr(160)), ''), '')) IN ('ea', 'unit')
+  ), bad AS (
+    SELECT 'quote ' || q.quote_number AS doc FROM public.quote_items qi JOIN public.quotes q ON q.id = qi.quote_id
+     WHERE qi.product_id IN (SELECT id FROM whole_items) AND qi.total_units_needed <> trunc(qi.total_units_needed)
+    UNION
+    SELECT 'order ' || o.order_number FROM public.order_items oi JOIN public.orders o ON o.id = oi.order_id
+     WHERE oi.product_id IN (SELECT id FROM whole_items)
+       AND (oi.total_units_needed <> trunc(oi.total_units_needed) OR oi.quantity_delivered <> trunc(oi.quantity_delivered))
+    UNION
+    SELECT 'delivery ' || d.delivery_number FROM public.delivery_items di JOIN public.deliveries d ON d.id = di.delivery_id
+     WHERE di.product_id IN (SELECT id FROM whole_items)
+       AND (di.quantity <> trunc(di.quantity) OR di.quantity_delivered <> trunc(di.quantity_delivered))
+  )
+  SELECT string_agg(doc, ', ' ORDER BY doc) INTO v_docs FROM (SELECT doc FROM bad ORDER BY doc LIMIT 10) first_ten;
+  IF v_docs IS NOT NULL THEN
+    RAISE EXCEPTION 'WHOLE_ITEMS_POSTFLIGHT: fractional quantities already exist on Ea/Unit products (first ten: %); make them whole or close them before applying', v_docs;
+  END IF;
   IF (SELECT count(*) FROM pg_trigger WHERE tgname = 'a3_whole_item_quantity' AND NOT tgisinternal
         AND tgfoid = 'public._enforce_whole_item_quantity()'::regprocedure) <> 3 THEN
     RAISE EXCEPTION 'WHOLE_ITEMS_POSTFLIGHT: expected three a3_whole_item_quantity triggers';

@@ -74,7 +74,7 @@ test('Delivery: 0.5 on a whole-item (Ea) line is refused on screen and the load 
   await section.locator('#no-proof-reason').fill('Customer confirmed by phone that the bags arrived.');
   const rpc = page.waitForRequest((r) => r.url().includes('/rpc/complete_delivery'), { timeout: 3000 }).then(() => true, () => false);
   await section.getByRole('button', { name: /Complete \(Partial\)|Complete Delivery/ }).click();
-  await page.getByRole('dialog').getByRole('button', { name: /Complete/ }).click();
+  await page.getByRole('button', { name: 'Complete Delivery', exact: true }).click();
 
   await expect(page.getByText(/The delivery was not completed\. \[WIQ\] Seed Bag is sold by the whole item \(Ea\), so 0\.5 can't be used\. Enter a whole number\./))
     .toBeVisible({ timeout: 10000 });

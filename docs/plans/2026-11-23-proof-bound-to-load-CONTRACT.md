@@ -20,7 +20,7 @@ Read at `origin/staging` 015566676 and PR #2324 head bd06a4d1a (2026-11-23). Fol
   3. **Screen PR (merges after the database is live):** each screen freezes the lines it shows with the signature or photo; a reload that changes them clears that proof with a message; the photo row is saved with them; Mark Delivered loads the delivery's lines before it lets the customer sign; `errorSanitizer` maps both codes; a refusal clears the stale proof and reloads the delivery (no automatic retry).
   4. **Required (later, Mason decision 2):** a small migration refuses a fresh signature or paper-ticket completion with no binding.
 - **Who may act:** unchanged. The wrappers do no checks of their own; EXECUTE grants copy today's (`complete_delivery`: authenticated, service_role; `start_and_complete_delivery`: authenticated). The renamed bodies and the trigger function have no client EXECUTE. `lines_seen` is readable by whoever may read the photo row (the same people who may read the delivery's lines).
-- **Files:** `supabase/migrations/20270308100000_proof_bound_to_load.sql`, `docs/reference/migrations.d/` record, `docs/changelog.d/` note, `scripts/smoke/prove-proof-bound-to-load-real-schema.mjs`, reverse script, `src/lib/errorSanitizer.ts` (+test, both codes; harmless before the screens send anything).
+- **Files:** `supabase/migrations/20270308230000_proof_bound_to_load.sql`, `docs/reference/migrations.d/` record, `docs/changelog.d/` note, `scripts/smoke/prove-proof-bound-to-load-real-schema.mjs`, reverse script, `src/lib/errorSanitizer.ts` (+test, both codes; harmless before the screens send anything).
 
 ## State and failure
 
@@ -67,7 +67,7 @@ Read at `origin/staging` 015566676 and PR #2324 head bd06a4d1a (2026-11-23). Fol
 
 ## Round 3: delivered amounts and the round-11 findings (2026-11-24)
 
-Sol round 11 on #2324 (Mason chose to fix them here, not in #2324). Branch `claude/proof-bound-to-load-r2`, on top of #2324 head c397782fd (its migration is now `20270306230000`, with the under-0.01 rule); this migration is restamped `20270308100000`.
+Sol round 11 on #2324 (Mason chose to fix them here, not in #2324). Branch `claude/proof-bound-to-load-r2`, on top of #2324 head c397782fd (its migration is now `20270306230000`, with the under-0.01 rule); this migration is restamped `20270308230000`.
 
 | Sol r11 | What closes it |
 |---|---|

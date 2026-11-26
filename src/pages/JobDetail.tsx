@@ -1822,10 +1822,15 @@ export default function JobDetail() {
       if (!failures.includes('products')) failures.push('products');
     }
     if (superseded()) return;
+    if (vehicleResult.error) {
+      Sentry.captureException(vehicleResult.error, { tags: { source: 'fetch', action: 'load_job_vehicles' } });
+      toast('error', 'Failed to load Vehicles. Retry before editing this job.');
+      failures.push('vehicles');
+    }
     setAllProducts(productRows);
     setLookupLoadFailures(failures);
     setLookupsLoading(false);
-    setVehicles(vehicleResult.data ?? []);
+    setVehicles(vehicleResult.error ? [] : (vehicleResult.data ?? []));
     setApplicators((appResult.data || []) as Profile[]);
     setRecipes((recipeResult.data || []) as BlendRecipe[]);
 

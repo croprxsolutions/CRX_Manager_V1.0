@@ -456,7 +456,7 @@ Live postflight: catalog 604 Products → `no_return`=21, `returnable`=2, `unkno
 | return_items | Admin / Sales Rep / return requester | - (RPC only, since `20260715203911`) | - (RPC only) | - (RPC only) |
 | applicator_licenses | All authenticated | Admin / Sales Rep | Admin / Sales Rep | Admin |
 | rebate_programs | Admin / Sales Rep | Admin | Admin | Admin |
-| rebate_claims | Admin / Sales Rep | Admin / Sales Rep | Admin | Admin |
+| rebate_claims | Admin / Sales Rep | RPC only (Admin / Sales Rep) | RPC only (Admin) | Admin |
 | vendors | Admin / Sales Rep (not soft-deleted) / Admin (soft-deleted) | - (no write policy) | - (no write policy) | - (no write policy) |
 | vendor_bills | Admin (not soft-deleted) | Admin | Admin | Admin |
 | vendor_payments | Admin | Admin | - | Admin |

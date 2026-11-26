@@ -2,7 +2,6 @@
 -- Existing clients use those functions and retain reads and admin deletion.
 -- No data changes. A rollback needs a reviewed migration restoring only the prior
 -- creation and update policies and the corresponding grants.
-BEGIN;
 SET LOCAL lock_timeout = '5s';
 
 REVOKE INSERT, UPDATE, TRUNCATE ON TABLE public.rebate_claims FROM PUBLIC, anon, authenticated;
@@ -28,5 +27,3 @@ BEGIN
   END IF;
 END
 $postflight$;
-
-COMMIT;

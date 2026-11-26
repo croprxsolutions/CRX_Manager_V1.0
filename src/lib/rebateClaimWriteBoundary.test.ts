@@ -20,7 +20,7 @@ describe('rebate claim creation and status changes', () => {
       for (const grant of grants) {
         const target = grant.match(/\bON\s+(?:TABLE\s+)?(.+?)\s+TO\s+(.+)/i);
         if (!target || !/\brebate_claims\b|^ALL TABLES IN SCHEMA (?:[^;]+,\s*)?public\b/i.test(target[1])
-          || !/\b(PUBLIC|anon|authenticated)\b/i.test(target[2])) continue;
+          || /^\s*(service_role|postgres|supabase_admin)(\s*,\s*(service_role|postgres|supabase_admin))*\s*$/i.test(target[2])) continue;
         expect(grant, name).not.toMatch(/^GRANT\b.*\b(INSERT|UPDATE|TRUNCATE|ALL)\b.*\bON\b/i);
       }
     }

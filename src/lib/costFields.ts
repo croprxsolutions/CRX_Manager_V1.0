@@ -54,7 +54,7 @@ export const JOB_CHEMICAL_COLUMNS = 'id, job_id, product_id, quantity, unit, rat
 export const JOB_CREW_COLUMNS = 'id, job_number, customer_id, status, job_date, scheduled_time, applicator_id, vehicle_id, recipe_id, notes, tags, batch_id, season, total_acres, invoice_id, created_by, deleted_at, created_at, updated_at, priority, estimated_hours, quote_id, quote_section_id, application_service_id, call_date, date_proposed, time_proposed, schedule_date, date_expires, consultant_id, loader_comment, additional_info, applied_acres, updated_by, printed_at, remaining_acres, ground_crew_id, batch_ref, last_printed_by, carrier_rate_gpa, loader_tank_capacity, completed_at' as const;
 export const JOB_CHEMICAL_CREW_COLUMNS = 'id, job_id, product_id, quantity, unit, rate_per_acre, rate_unit, sort_order, diluent_rate, rei_hours, phi_days, warehouse, vendor, customer_supplied, driver' as const;
 export const JOB_FIELD_SHARE_CREW_COLUMNS = 'id, job_id, field_id, customer_id, is_primary, created_at' as const;
-export const FIELD_BILLING_DEFAULT_CREW_COLUMNS = 'id, field_id, customer_id, is_primary, notes, created_at, updated_at, source_split_version_id' as const;
+export const FIELD_BILLING_DEFAULT_CREW_COLUMNS = 'field_id, customer_id, is_primary' as const;
 
 export function usesOfficeJobReads(role: UserRole | null | undefined): boolean {
   return role === 'admin' || role === 'sales_rep';

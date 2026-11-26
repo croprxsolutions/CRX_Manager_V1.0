@@ -21,7 +21,8 @@ export function jobEpaText(kept: KeptEpa | undefined, catalog: string | null): s
 }
 
 async function assertJobVisible(jobId: string, office: boolean): Promise<void> {
-  const { data: job, error } = await supabase.from(office ? 'jobs' : 'jobs_crew').select('id').eq('id', jobId).maybeSingle();
+  const query = office ? supabase.from('jobs').select('id') : supabase.from('jobs_crew').select('id');
+  const { data: job, error } = await query.eq('id', jobId).maybeSingle();
   if (error || !job) throw (error ?? new Error('This job can no longer be opened, so its EPA numbers cannot be printed'));
 }
 

@@ -98,27 +98,31 @@ export async function fetchChemicalApplicationReportData(
   jobId: string,
   { strict = true, keptEpa = true, office = true }: ReportFetchOptions = {},
 ): Promise<ApplicatorSheetData | null> {
-  const chemicalColumns = 'product_id, quantity, unit, rate_per_acre, rate_unit, rei_hours, phi_days, sort_order';
-  const { data, error } = await supabase
-    .from(office ? 'jobs' : 'jobs_crew')
-    .select(`
+  const query = office
+    ? supabase.from('jobs').select(`
       id, job_number, job_date, scheduled_time, applicator_id, loader_comment,
       customer:customers(farm_name, account_number),
       vehicle:vehicles(vehicle_name),
       job_fields(field_id, acres_to_treat, crop, pests, sort_order,
-        field:fields(field_name, county, state, crop_type))${office ? `,
-      job_chemicals(${chemicalColumns},
-        product:products(product_name))` : ''}
+        field:fields(field_name, county, state, crop_type)),
+      job_chemicals(product_id, quantity, unit, rate_per_acre, rate_unit, rei_hours, phi_days, sort_order,
+        product:products(product_name))
     `)
-    .eq('id', jobId)
-    .maybeSingle();
+    : supabase.from('jobs_crew').select(`
+      id, job_number, job_date, scheduled_time, applicator_id, loader_comment,
+      customer:customers(farm_name, account_number),
+      vehicle:vehicles(vehicle_name),
+      job_fields(field_id, acres_to_treat, crop, pests, sort_order,
+        field:fields(field_name, county, state, crop_type))
+    `);
+  const { data, error } = await query.eq('id', jobId).maybeSingle();
   if (error) throw error;
   if (!data) return null;
   const r = data as unknown as ReportJobRow;
   if (!office) {
     const { data: chemicals, error: chemicalError } = await supabase
       .from('job_chemicals_crew')
-      .select(`${chemicalColumns}, product:products(product_name)`)
+      .select('product_id, quantity, unit, rate_per_acre, rate_unit, rei_hours, phi_days, sort_order, product:products(product_name)')
       .eq('job_id', jobId);
     if (chemicalError) throw chemicalError;
     r.job_chemicals = chemicals;

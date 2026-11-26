@@ -136,6 +136,7 @@ interface JobDbRow {
   recipe_id?: string | null;
   /** U3 (#52): drives the per-acre service fee on transfer_job_to_invoice. */
   application_service_id?: string | null;
+  application_service?: { name: string } | null;
   notes?: string | null;
   batch_id?: string | null;
   // Field-app parity #1: scheduling + memo fields.
@@ -306,6 +307,34 @@ interface ShareRow {
   payerLabel?: string;
 }
 
+function fetchJobDetailRecord(jobId: string, office: boolean) {
+  const query = office
+    ? supabase.from('jobs').select(`
+        ${JOB_COLUMNS},
+        customer:customers(farm_name),
+        vehicle:vehicles(vehicle_name, capacity_gallons, capacity_unit),
+        quote:quotes!jobs_quote_id_fkey(quote_number),
+        quote_section:quote_sections!jobs_quote_section_id_fkey(section_name),
+        job_fields(*, field:fields(field_name)),
+        job_chemicals(${JOB_CHEMICAL_COLUMNS}, product:products(product_name)),
+        job_field_shares(*),
+        job_location_dispatches(job_field_id, applicator_id, crew_id, dispatch_status),
+        applied_info:job_applied_info(*)
+      `)
+    : supabase.from('jobs_crew').select(`
+        ${JOB_CREW_COLUMNS},
+        customer:customers(farm_name),
+        vehicle:vehicles(vehicle_name, capacity_gallons, capacity_unit),
+        quote:quotes!jobs_quote_id_fkey(quote_number),
+        quote_section:quote_sections!jobs_quote_section_id_fkey(section_name),
+        job_fields(*, field:fields(field_name)),
+        job_location_dispatches(job_field_id, applicator_id, crew_id, dispatch_status),
+        applied_info:job_applied_info(*),
+        application_service:application_services(name)
+      `);
+  return query.eq('id', jobId).single();
+}
+
 async function fetchCrewJobDetailRows(jobId: string) {
   const [chemicals, shares, payers] = await Promise.all([
     supabase.from('job_chemicals_crew')
@@ -329,7 +358,7 @@ async function fetchCrewJobDetailRows(jobId: string) {
   return { chemicals, shares, payerLabels: payers === null ? null : payerLabels };
 }
 
-async function fetchJobDetailShares(job: JobDbRow, office: boolean): Promise<ShareRow[]> {
+async function fetchJobDetailShares(job: JobDbRow, office: boolean) {
   const shares: ShareRow[] = (job.job_field_shares || []).map((share) => ({
     field_id: share.field_id,
     customer_id: share.customer_id,
@@ -340,17 +369,19 @@ async function fetchJobDetailShares(job: JobDbRow, office: boolean): Promise<Sha
   const fieldsNeedingSeed = (job.job_fields || [])
     .map((field) => field.field_id)
     .filter((fieldId) => fieldId && !fieldsWithShares.has(fieldId));
-  if (fieldsNeedingSeed.length === 0) return shares;
+  if (fieldsNeedingSeed.length === 0) return { shares, defaultsError: null };
 
   // Older jobs may lack saved shares. Use defaults for those fields, with the
   // primary customer as the fallback when a field has no defaults.
-  const { data: defaults } = await supabase
-    .from(office ? 'field_billing_defaults' : 'field_billing_defaults_crew')
-    .select(office ? 'field_id, customer_id, split_pct, is_primary' : FIELD_BILLING_DEFAULT_CREW_COLUMNS)
-    .in('field_id', fieldsNeedingSeed);
+  const query = office
+    ? supabase.from('field_billing_defaults').select('field_id, customer_id, split_pct, is_primary')
+    : supabase.from('field_billing_defaults_crew').select(FIELD_BILLING_DEFAULT_CREW_COLUMNS);
+  const { data: defaults, error: defaultsError } = await query.in('field_id', fieldsNeedingSeed);
+  if (defaultsError && !office) return { shares, defaultsError };
   type FieldDefault = { field_id: string; customer_id: string; split_pct?: number; is_primary: boolean };
   const defaultsByField = new Map<string, FieldDefault[]>();
-  for (const entry of (defaults || []) as FieldDefault[]) {
+  const entries: FieldDefault[] = defaults ?? [];
+  for (const entry of entries) {
     const list = defaultsByField.get(entry.field_id) ?? [];
     list.push(entry);
     defaultsByField.set(entry.field_id, list);
@@ -366,7 +397,49 @@ async function fetchJobDetailShares(job: JobDbRow, office: boolean): Promise<Sha
       shares.push({ field_id: fieldId, customer_id: job.customer_id, split_pct: office ? '100' : '', is_primary: true });
     }
   }
-  return shares;
+  return { shares, defaultsError };
+}
+
+function ChemicalLineWarnings({ rowDefect, hazard, isCrew, rateUnit, unit, totalApplied }: {
+  rowDefect?: string;
+  hazard?: ChemBillingHazard;
+  isCrew: boolean;
+  rateUnit: string;
+  unit: string;
+  totalApplied: number;
+}) {
+  return (
+    <>
+      {rowDefect && (
+        <div className="flex items-start gap-2 text-sm text-red-800 bg-red-100 border border-red-300 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span><strong>{isCrew ? 'Check this chemical line' : 'This line cannot be saved'}</strong> because {rowDefect}.</span>
+        </div>
+      )}
+      {hazard && (
+        <div className="flex items-start gap-2 text-sm text-red-800 bg-red-100 border border-red-300 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          {isCrew ? (
+            <span><strong>Check the rate and total applied units.</strong> The rate unit ({rateUnit}) and total applied ({totalApplied} {unit}) do not agree.</span>
+          ) : (
+            <span>
+              <strong>This line cannot be saved.</strong> Its quantity ({totalApplied}) is counted in{' '}
+              <strong>{hazard.quantityUnit}</strong>, but its cost and price are quoted per{' '}
+              <strong>{hazard.priceUnit}</strong>
+              {hazard.billedRatio && hazard.billedRatio > 1
+                ? <> — invoicing it would charge about <strong>{fmt4(hazard.billedRatio)}×</strong> too much</>
+                : null}
+              . Set <strong>Unit</strong> to {hazard.quantityUnit} and quote cost/price per{' '}
+              {hazard.quantityUnit} — or, if the rate really is in {hazard.priceUnit},
+              change the rate unit to {hazard.priceUnit}/ac <strong>and re-enter the rate</strong>{' '}
+              so the quantity is recalculated. Relabelling the unit on its own does not change
+              the amount, and would leave this line billing the same wrong total silently.
+            </span>
+          )}
+        </div>
+      )}
+    </>
+  );
 }
 
 export default function JobDetail() {
@@ -1426,6 +1499,7 @@ export default function JobDetail() {
   const [recipeId, setRecipeId] = useState('');
   // U3 (#52): optional per-acre machine fee (e.g. Hagie Y-Drop). NULL = no service fee.
   const [applicationServiceId, setApplicationServiceId] = useState<string | null>(null);
+  const [crewApplicationServiceName, setCrewApplicationServiceName] = useState<string | null>(null);
   // U3 follow-up (Codex P2): true only while the current applicationServiceId came
   // from a customer's default, not the user's hand. An auto-filled value must be
   // RE-evaluated when the customer changes (a manual pick is never clobbered).
@@ -1656,11 +1730,10 @@ export default function JobDetail() {
   // Keyed by row index so the grid can mark the exact offending line.
   const chemBillingHazards = useMemo(() => {
     const byIndex = new Map<number, ChemBillingHazard>();
-    if (isCrew) return byIndex;
     const acres = sumAcresExact(fieldRows) ?? '0';
     chemRows.forEach((c, i) => {
       if (!c.product_id) return;
-      const h = chemLineBillingHazard(c, acres, productFormFor(c.product_id));
+      const h = chemLineBillingHazard(c, acres, productFormFor(c.product_id), !isCrew);
       if (h.hazard) byIndex.set(i, h);
     });
     return byIndex;
@@ -1677,7 +1750,6 @@ export default function JobDetail() {
   //    saves a ZERO quantity or a ZERO price — a line that bills nothing and deducts nothing.
   const chemRowDefects = useMemo(() => {
     const byIndex = new Map<number, string>();
-    if (isCrew) return byIndex;
     // The acreage the server checks against: the sum over the fields being saved.
     const acres = sumAcres(fieldRows);
     const exactAcres = sumAcresExact(fieldRows);
@@ -1688,9 +1760,11 @@ export default function JobDetail() {
         return;
       }
       // save_job refuses a priced line whose units carry a character it cannot read; say so before Save.
-      if ((parseInt(c.price_per_unit_cents) || 0) !== 0
+      if ((isCrew || (parseInt(c.price_per_unit_cents) || 0) !== 0)
           && (unitHasCharacterSaveJobRefuses(c.rate_unit) || unitHasCharacterSaveJobRefuses(c.unit))) {
-        byIndex.set(i, 'its Unit or rate unit contains a character this system cannot read, usually from a copy-and-paste; re-type both using plain letters');
+        byIndex.set(i, isCrew
+          ? 'its Unit or rate unit contains an unrecognized character'
+          : 'its Unit or rate unit contains a character this system cannot read, usually from a copy-and-paste; re-type both using plain letters');
         return;
       }
       // BLANK UNIT on a line that BILLS. chemLineBillingHazard can only flag a PROVEN
@@ -1705,15 +1779,17 @@ export default function JobDetail() {
       // refuses it on its own).
       const blankSides = chemUnitUnspecifiedSides(c.rate_unit, c.unit);
       if (blankSides
-          && !(c.customer_supplied ?? false)
           && parseFloat(c.quantity) !== 0
-          && ((parseInt(c.cost_per_unit_cents) || 0) !== 0 || (parseInt(c.price_per_unit_cents) || 0) !== 0)) {
+          && (isCrew || (!(c.customer_supplied ?? false)
+            && ((parseInt(c.cost_per_unit_cents) || 0) !== 0 || (parseInt(c.price_per_unit_cents) || 0) !== 0)))) {
         const side = blankSides.stockBlank && blankSides.rateBlank
           ? 'its Unit and its rate unit are both blank'
           : blankSides.stockBlank
             ? 'its Unit is blank'
             : 'its rate unit names no unit';
-        byIndex.set(i, `${side} while the line still carries a cost or price, so there is no way to know what the quantity would be billed per — pick the unit, or clear the cost and price if the line should not bill`);
+        byIndex.set(i, isCrew
+          ? `${side}, so the total applied cannot be checked against the rate`
+          : `${side} while the line still carries a cost or price, so there is no way to know what the quantity would be billed per — pick the unit, or clear the cost and price if the line should not bill`);
         return;
       }
       // Gate on the money helper's OWN grammar, not on Number.isFinite. They are not the
@@ -1723,7 +1799,9 @@ export default function JobDetail() {
       // nonzero line behind a zero total. `<input type="number">` accepts '1e3', so this
       // is reachable by typing. One grammar, one gate. (Codex P2)
       if (!isExactDecimalText(c.quantity)) {
-        byIndex.set(i, 'its quantity is blank, or is not written as a plain number, and would not be billed correctly');
+        byIndex.set(i, isCrew
+          ? 'its total applied is blank or is not a valid number'
+          : 'its quantity is blank, or is not written as a plain number, and would not be billed correctly');
         return;
       }
       // The totals above multiply the exact decimal TEXT, but buildJobChemicalsPayload
@@ -1731,7 +1809,9 @@ export default function JobDetail() {
       // than a double can hold means those two are different numbers, so the stored total
       // and the stored line disagree by a cent. Refused, not rounded. (Codex P2, 2026-08-23)
       if (!quantitySurvivesSave(c.quantity)) {
-        byIndex.set(i, 'its quantity has more decimal places than can be saved exactly, so the line total and the job total would not agree — round it to 4 decimal places or fewer');
+        byIndex.set(i, isCrew
+          ? 'its total applied has more decimal places than the system can store exactly'
+          : 'its quantity has more decimal places than can be saved exactly, so the line total and the job total would not agree — round it to 4 decimal places or fewer');
         return;
       }
       // NEGATIVE amounts are refused outright (Codex High, 2026-08-25). The decimal and
@@ -1742,7 +1822,9 @@ export default function JobDetail() {
       // (CHEM_QUANTITY_NOT_FINITE covers sign), so the mirror must too — a mirror more
       // lenient than the SQL is how a hard server failure ships with no on-screen warning.
       if (parseFloat(c.quantity) < 0) {
-        byIndex.set(i, 'its quantity is negative — a line cannot apply or bill a negative amount; use a credit memo or a return for corrections');
+        byIndex.set(i, isCrew
+          ? 'its total applied is negative'
+          : 'its quantity is negative — a line cannot apply or bill a negative amount; use a credit memo or a return for corrections');
         return;
       }
       // F06 (2026-09-03): mirror of CHEM_QUANTITY_NOT_DERIVED on the units-equal path, with
@@ -1756,9 +1838,12 @@ export default function JobDetail() {
         ? null
         : chemQuantityDisagreesWithRate(c, exactAcres);
       if (expectedQty != null) {
-        byIndex.set(i, `its rate (${c.rate_per_acre}/ac over ${fmt4(acres)} acres = ${fmt4(expectedQty)}) and its quantity (${c.quantity}) no longer agree — usually because the acres changed after the line was saved. Re-type the rate per acre to refill the quantity, or re-type the quantity to refill the rate`);
+        byIndex.set(i, isCrew
+          ? `its rate (${c.rate_per_acre} ${c.rate_unit}) over ${fmt4(acres)} acres gives ${fmt4(expectedQty)} ${c.unit}, but Total Applied is ${c.quantity} ${c.unit}`
+          : `its rate (${c.rate_per_acre}/ac over ${fmt4(acres)} acres = ${fmt4(expectedQty)}) and its quantity (${c.quantity}) no longer agree — usually because the acres changed after the line was saved. Re-type the rate per acre to refill the quantity, or re-type the quantity to refill the rate`);
         return;
       }
+      if (isCrew) return;
       // Mirror of CHEM_QUANTITY_ZERO_BUT_EXPECTED: priced, a positive quantity was derivable,
       // and the line records 0. The invoice bills the quantity, so this would charge nothing.
       const expectedNonZero = chemQuantityExpectedButZero(c, acres);
@@ -2006,26 +2091,8 @@ export default function JobDetail() {
         return null;
       }
     };
-    const selectJob = () => supabase
-      // PR-07 follow-up: dropped applicator FK embed — full_name isn't read
-      // anywhere in this page; only applicator_id is consumed (line 235).
-      .from(isEditable ? 'jobs' : 'jobs_crew')
-      .select(`
-        ${isEditable ? JOB_COLUMNS : JOB_CREW_COLUMNS},
-        customer:customers(farm_name),
-        vehicle:vehicles(vehicle_name, capacity_gallons, capacity_unit),
-        quote:quotes!jobs_quote_id_fkey(quote_number),
-        quote_section:quote_sections!jobs_quote_section_id_fkey(section_name),
-        job_fields(*, field:fields(field_name))${isEditable ? `,
-        job_chemicals(${JOB_CHEMICAL_COLUMNS}, product:products(product_name)),
-        job_field_shares(*)` : ''},
-        job_location_dispatches(job_field_id, applicator_id, crew_id, dispatch_status),
-        applied_info:job_applied_info(*)
-      `)
-      .eq('id', id!)
-      .single();
     let before = await readVersion();
-    let loaded = await selectJob();
+    let loaded = await fetchJobDetailRecord(id!, isEditable);
     let loadedVersion: JobEditVersion | null = null;
     // Read again after the select: if rev moved, something wrote the job while the form loaded (maybe changing a value
     // and putting it back), so the form may not be the state the version describes. Reload, up to 3 tries; after
@@ -2035,7 +2102,7 @@ export default function JobDetail() {
       if (after && after.rev === before.rev) { loadedVersion = before; break; }
       if (tries >= 3) break;
       before = await readVersion();
-      loaded = await selectJob();
+      loaded = await fetchJobDetailRecord(id!, isEditable);
     }
     const { data, error } = loaded;
 
@@ -2103,9 +2170,10 @@ export default function JobDetail() {
     // The last isCurrentLoad() check is therefore the real commit point. (Codex PR thread
     // at JobDetail.tsx:1813, original_commit_id 9cee23cc7.)
     //
-    const savedShares = await fetchJobDetailShares(j, isEditable);
+    const { shares: savedShares, defaultsError } = await fetchJobDetailShares(j, isEditable);
     if (!isCurrentLoad()) return false;
-    if (crewPayerLabels === null) toast('error', 'Could not load payer names');
+    if (defaultsError) Sentry.captureException(defaultsError, { tags: { source: 'fetch', page: 'job-detail', context: 'field_billing_defaults' } });
+    if (crewPayerLabels === null || defaultsError) toast('error', 'Could not load payer names');
     if (crewPayerLabels) {
       for (const share of savedShares) share.payerLabel = crewPayerLabels.get(share.customer_id);
     }
@@ -2129,6 +2197,7 @@ export default function JobDetail() {
     setSavedVehicleCapacity(j.vehicle ? { name: j.vehicle.vehicle_name ?? null, gallons: j.vehicle.capacity_gallons ?? null, unit: j.vehicle.capacity_unit ?? null } : null);
     setRecipeId(j.recipe_id || '');
     setApplicationServiceId(j.application_service_id || null);
+    setCrewApplicationServiceName(j.application_service?.name ?? null);
     setNotes(j.notes || '');
     setBatchId(j.batch_id || '');
     setCallDate(j.call_date || '');
@@ -4355,7 +4424,14 @@ export default function JobDetail() {
               ))}
             </select>
           </div>
-          {!isCrew && (
+          {isCrew ? (
+            applicationServiceId && (
+              <div>
+                <p className="text-sm font-medium text-nav-dark mb-1">Application Service</p>
+                <p className="text-sm">{crewApplicationServiceName ?? 'Service unavailable'}</p>
+              </div>
+            )
+          ) : (
           <div>
             <label className="block text-sm font-medium text-nav-dark mb-1">Application Service</label>
             <ApplicationServicePicker
@@ -4722,30 +4798,7 @@ export default function JobDetail() {
                 const rowDefect = chemRowDefects.get(i);
                 return (
                   <div key={i} className={`border rounded-lg p-3 space-y-2 ${hazard || rowDefect ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}>
-                    {rowDefect && (
-                      <div className="flex items-start gap-2 text-sm text-red-800 bg-red-100 border border-red-300 rounded-lg px-3 py-2">
-                        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                        <span><strong>This line cannot be saved</strong> because {rowDefect}.</span>
-                      </div>
-                    )}
-                    {hazard && (
-                      <div className="flex items-start gap-2 text-sm text-red-800 bg-red-100 border border-red-300 rounded-lg px-3 py-2">
-                        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                        <span>
-                          <strong>This line cannot be saved.</strong> Its quantity ({totalApplied}) is counted in{' '}
-                          <strong>{hazard.quantityUnit}</strong>, but its cost and price are quoted per{' '}
-                          <strong>{hazard.priceUnit}</strong>
-                          {hazard.billedRatio && hazard.billedRatio > 1
-                            ? <> — invoicing it would charge about <strong>{fmt4(hazard.billedRatio)}×</strong> too much</>
-                            : null}
-                          . Set <strong>Unit</strong> to {hazard.quantityUnit} and quote cost/price per{' '}
-                          {hazard.quantityUnit} — or, if the rate really is in {hazard.priceUnit},
-                          change the rate unit to {hazard.priceUnit}/ac <strong>and re-enter the rate</strong>{' '}
-                          so the quantity is recalculated. Relabelling the unit on its own does not change
-                          the amount, and would leave this line billing the same wrong total silently.
-                        </span>
-                      </div>
-                    )}
+                    <ChemicalLineWarnings rowDefect={rowDefect} hazard={hazard} isCrew={isCrew} rateUnit={c.rate_unit} unit={c.unit} totalApplied={totalApplied} />
                     <div className="grid grid-cols-12 gap-2 items-end">
                       <div className="col-span-12 md:col-span-3">
                         <label className="block text-xs font-medium text-secondary mb-1">Chemical</label>

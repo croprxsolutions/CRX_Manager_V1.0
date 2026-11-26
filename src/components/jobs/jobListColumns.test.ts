@@ -198,4 +198,9 @@ describe('Price column by role', () => {
   it.each(['admin', 'sales_rep'] as const)('keeps Price for %s', (role) => {
     expect(orderedVisibleColumnIds(withPrice, role)).toEqual(['job_number', 'total_price_cents']);
   });
+  it('falls back to default crew columns when a saved layout only shows Price', () => {
+    const priceOnly = { visibleColumns: ['total_price_cents'] as JobColumnId[], showCompleted: true };
+    expect(orderedVisibleColumnIds(priceOnly, 'applicator')).toEqual(defaultJobListSettings().visibleColumns);
+    expect(orderedVisibleColumnIds(priceOnly, 'admin')).toEqual(['total_price_cents']);
+  });
 });

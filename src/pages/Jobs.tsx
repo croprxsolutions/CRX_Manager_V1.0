@@ -461,19 +461,27 @@ export default function Jobs() {
     // client-side County/State filters can read them.
     // A fresh query per page: fetchAllRows reads every job, page by page (KI-32).
     const baseQuery = (options: { count: 'exact' }) => {
-      let query = supabase
-        .from(office ? 'jobs' : 'jobs_crew')
-        .select(`
-          ${office ? JOB_COLUMNS : JOB_CREW_COLUMNS},
+      const selection = office
+        ? supabase.from('jobs').select(`
+          ${JOB_COLUMNS},
           customer:customers(farm_name, account_number, phone),
           vehicle:vehicles(vehicle_name),
-          job_fields(crop, field:fields(field_name, crop_type, county, state)),${office ? `
-          job_chemicals(rate_per_acre, rate_unit, product:products(product_name)),` : ''}
+          job_fields(crop, field:fields(field_name, crop_type, county, state)),
+          job_chemicals(rate_per_acre, rate_unit, product:products(product_name)),
           job_tag_assignments(tag:job_tags(id, name, color, created_by, created_at, updated_at)),
           batch:job_batches(name),
           job_location_dispatches(applicator_id, crew_id, dispatch_status)
         `, options)
-        .is('deleted_at', null);
+        : supabase.from('jobs_crew').select(`
+          ${JOB_CREW_COLUMNS},
+          customer:customers(farm_name, account_number, phone),
+          vehicle:vehicles(vehicle_name),
+          job_fields(crop, field:fields(field_name, crop_type, county, state)),
+          job_tag_assignments(tag:job_tags(id, name, color, created_by, created_at, updated_at)),
+          batch:job_batches(name),
+          job_location_dispatches(applicator_id, crew_id, dispatch_status)
+        `, options);
+      let query = selection.is('deleted_at', null);
 
       // ---- SERVER-side filters (indexed scalar columns on jobs) ----
       if (applied.statuses.length > 0) query = query.in('status', applied.statuses);
@@ -536,12 +544,19 @@ export default function Jobs() {
     // dropped (Codex). Pull the share job_ids first, then match either one.
     if (applied.customerIds.length > 0) {
       // Every matching share, page by page; a failed read stops the load (Goal 4 N5).
-      const { data: shareJobs, error: shareError } = await fetchAllRows((from, to) => supabase
-        .from(office ? 'job_field_shares' : 'job_field_shares_crew')
-        .select('id, job_id', { count: 'exact' })
-        .in('customer_id', applied.customerIds)
-        .order('id')
-        .range(from, to));
+      const { data: shareJobs, error: shareError } = office
+        ? await fetchAllRows((from, to) => supabase
+          .from('job_field_shares')
+          .select('id, job_id', { count: 'exact' })
+          .in('customer_id', applied.customerIds)
+          .order('id')
+          .range(from, to))
+        : await fetchAllRows((from, to) => supabase
+          .from('job_field_shares_crew')
+          .select('id, job_id', { count: 'exact' })
+          .in('customer_id', applied.customerIds)
+          .order('id')
+          .range(from, to));
       if (superseded()) return;
       if (shareError) {
         Sentry.captureException(shareError, { tags: { source: 'fetch', action: 'load_jobs_customer_filter' } });
@@ -562,7 +577,7 @@ export default function Jobs() {
       }
     }
 
-    const read = await fetchAllRows((from, to) => pageWithList(
+    const read = await fetchAllRows((from, to) => pageWithList<FilterRow>(
       serverFilters.reduce((q, filter) => filter(q), baseQuery({ count: 'exact' }))
         .order('job_date', { ascending: false })
         .order('id')
@@ -571,7 +586,7 @@ export default function Jobs() {
     if (superseded()) return;
     const { error } = read;
     const data = Array.isArray(read.data)
-      ? (read.data as FilterRow[]).filter((row) => localFilters.every((keep) => keep(row)))
+      ? read.data.filter((row) => localFilters.every((keep) => keep(row)))
       : null;
 
     // No list is not "No jobs found": treat it as a failed read.

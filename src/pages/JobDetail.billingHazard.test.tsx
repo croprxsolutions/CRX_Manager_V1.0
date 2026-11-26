@@ -257,6 +257,7 @@ function mountWith(
     savedApplicatorId?: string | null;
   },
   product: Record<string, unknown> = DRY_PRODUCT,
+  fixture?: { defaultsError?: boolean; serviceName?: string },
 ) {
   // One gate per mount, created BEFORE render so the by-id effect can only ever
   // observe the pending promise. `from('products')` is called more than once, so the
@@ -269,15 +270,28 @@ function mountWith(
   mockFrom.mockImplementation((table: string) => {
     if (table === 'jobs' || table === 'jobs_crew') {
       const job = makeJob(chem, acres, licenseFixture?.savedApplicatorId ?? null);
+      const hasFields = table === 'jobs_crew' || fixture?.defaultsError;
       const query = buildChain({
-        data: table === 'jobs' ? job : {
+        data: {
           ...job,
-          job_fields: job.job_fields.map((field) => ({ ...field, field_id: field.id })),
-          job_chemicals: undefined,
-          job_field_shares: undefined,
+          job_fields: hasFields ? job.job_fields.map((field) => ({ ...field, field_id: field.id })) : job.job_fields,
+          job_chemicals: table === 'jobs' ? job.job_chemicals : undefined,
+          job_field_shares: table === 'jobs' ? job.job_field_shares : undefined,
+          ...(fixture?.serviceName && {
+            application_service_id: 'service-1',
+            application_service: { name: fixture.serviceName },
+          }),
         },
         error: null,
       });
+      query.select = (columns: unknown) => {
+        jobSelects.push({ table, columns });
+        return query;
+      };
+      return query;
+    }
+    if (fixture?.defaultsError && (table === 'field_billing_defaults' || table === 'field_billing_defaults_crew')) {
+      const query = buildChain({ data: null, error: { message: 'Field defaults lookup failed' } });
       query.select = (columns: unknown) => {
         jobSelects.push({ table, columns });
         return query;
@@ -411,7 +425,7 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
     releaseLabelLookup = () => {};
   });
 
-  it('omits save-validation warnings and billing language for crew and still flags an office line with no price', async () => {
+  it('omits missing-price warnings and billing language for crew and still flags an office line with no price', async () => {
     const unpricedProduct = { ...DRY_PRODUCT, tier1_price: null, tier1_price_cents: null };
     const unpricedLine = {
       ...HAZARD_CHEM, quantity: 200, rate_per_acre: 2, rate_unit: 'Lb/ac', price_per_unit_cents: 0,
@@ -437,11 +451,64 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
     mountWith(unpricedLine, 100, undefined, unpricedProduct);
     await screen.findByText(/This line cannot be saved/i, {}, { timeout: 15000 });
     expect(screen.getByText(/has no price for this customer's tier, so it would bill \$0/i)).toBeTruthy();
-    expect(jobSelects.at(-1)).toEqual({ table: 'jobs', columns: expect.stringMatching(/total_price_cents[\s\S]+job_chemicals\([^)]*price_per_unit_cents[\s\S]+job_field_shares\(\*\)/) });
+    expect(jobSelects[jobSelects.length - 1]).toEqual({ table: 'jobs', columns: expect.stringMatching(/total_price_cents[\s\S]+job_chemicals\([^)]*price_per_unit_cents[\s\S]+job_field_shares\(\*\)/) });
     for (const text of [/Price ¢\/unit/, /Total Price/, /Internal Job\/Invoice Memo/, /Application Service/]) {
       expect(screen.getAllByText(text).length).toBeGreaterThan(0);
     }
   }, 30000);
+
+  it.each([
+    { line: { ...HAZARD_CHEM, quantity: 80, unit: 'Gal', rate_per_acre: 1, rate_unit: 'Gal/ac' }, warning: /over 100 acres gives 100 Gal, but Total Applied is 80 Gal/ },
+    { line: { ...HAZARD_CHEM, rate_unit: 'oz/cwt' }, warning: /measured per something other than acres/ },
+    { line: HAZARD_CHEM, warning: /Check the rate and total applied units/ },
+  ])('shows operational crew warnings for $line.rate_unit', async ({ line, warning }) => {
+    authRole.current = 'applicator';
+    mockRpc.mockResolvedValue({ data: [], error: null });
+    try {
+      mountWith(line);
+      expect(await screen.findByText(warning)).toBeInTheDocument();
+      expect(screen.queryByText(/cannot be saved|would bill|cost and price|\$0/i)).toBeNull();
+    } finally {
+      authRole.current = 'admin';
+    }
+  });
+
+  it.each(['applicator', 'admin'] as const)('reports failed legacy payer defaults for %s', async (role) => {
+    authRole.current = role;
+    mockRpc.mockResolvedValue({
+      data: [{ customer_id: 'cust-1', farm_name: 'Proof Primary', account_number: 'PROOF-1', is_primary: true }],
+      error: null,
+    });
+    try {
+      mountWith(HAZARD_CHEM, 100, undefined, DRY_PRODUCT, { defaultsError: true });
+      await screen.findByRole('heading', { name: role === 'admin' ? 'Chemicals / Charges (1)' : 'Chemicals (1)' });
+      expect(mockToast).toHaveBeenCalledWith('error', 'Could not load payer names');
+      if (role === 'applicator') {
+        expect(screen.queryByText('Proof Primary (PROOF-1)')).toBeNull();
+        expect(jobSelects).toContainEqual({ table: 'field_billing_defaults_crew', columns: 'field_id, customer_id, is_primary' });
+      } else {
+        expect(screen.getByPlaceholderText('%')).toHaveValue(100);
+      }
+    } finally {
+      authRole.current = 'admin';
+    }
+  });
+
+  it('shows the crew application service using a name-only projection', async () => {
+    authRole.current = 'applicator';
+    mockRpc.mockResolvedValue({ data: [], error: null });
+    try {
+      mountWith(HAZARD_CHEM, 100, undefined, DRY_PRODUCT, { serviceName: 'Ground spray' });
+      expect(await screen.findByText('Ground spray')).toBeInTheDocument();
+      expect(screen.getByText('Application Service')).toBeInTheDocument();
+      expect(screen.queryByText(/per-acre machine fee|Price ¢\/unit/i)).toBeNull();
+      const crewJob = jobSelects.find((select) => select.table === 'jobs_crew');
+      expect(crewJob?.columns).toMatch(/application_service:application_services\(name\)/);
+      expect(mockFrom).not.toHaveBeenCalledWith('application_services');
+    } finally {
+      authRole.current = 'admin';
+    }
+  });
 
   it('keeps crew Job Detail open and shows an error when the payer names fail to load', async () => {
     authRole.current = 'applicator';
@@ -471,11 +538,10 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
       releaseLabelLookup();
       fireEvent.click(await screen.findByRole('button', { name: 'Field Sheet' }));
       await waitFor(() => {
-        const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Print', exact: true });
-        expect(button.disabled).toBe(false);
+        expect(screen.getByRole('button', { name: /^Print$/ })).not.toBeDisabled();
       });
-      const payerReads = mockRpc.mock.calls.filter(([name]) => name === 'get_job_billed_customers').length;
-      fireEvent.click(screen.getByRole('button', { name: 'Print', exact: true }));
+      const payerReads = mockRpc.mock.calls.filter((call) => call[0] === 'get_job_billed_customers').length;
+      fireEvent.click(screen.getByRole('button', { name: /^Print$/ }));
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to generate field sheet'));
       expect(mockRpc.mock.calls.filter(([name]) => name === 'get_job_billed_customers')).toHaveLength(payerReads + 1);
       expect(mockGenerateSheet).not.toHaveBeenCalled();

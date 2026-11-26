@@ -217,13 +217,18 @@ export default function DispatchBoard() {
       // The unfiltered (no applicator) path keeps the direct jobs query; the filtered
       // path uses the RPC rows above. Both share the SAME downstream shape.
       const isOffice = usesOfficeJobReads(profile?.role);
-      const jobsQuery = supabase
-        .from(isOffice ? 'jobs' : 'jobs_crew')
-        .select(`
-          ${isOffice ? JOB_COLUMNS : JOB_CREW_COLUMNS},
+      const query = isOffice
+        ? supabase.from('jobs').select(`
+          ${JOB_COLUMNS},
           customer:customers(farm_name),
           job_fields(id, field_id, acres_to_treat, sort_order, field:fields(id, field_name))
         `, { count: 'exact' })
+        : supabase.from('jobs_crew').select(`
+          ${JOB_CREW_COLUMNS},
+          customer:customers(farm_name),
+          job_fields(id, field_id, acres_to_treat, sort_order, field:fields(id, field_name))
+        `, { count: 'exact' });
+      const jobsQuery = query
         .is('deleted_at', null)
         .order('job_date', { ascending: false, nullsFirst: false })
         .order('id', { ascending: false })

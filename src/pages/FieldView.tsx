@@ -247,9 +247,9 @@ export default function FieldView() {
       // linger for legacy jobs is harmless.
       if (profile?.id) {
         const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-        const legacyRes = await supabase
-          .from(office ? 'jobs' : 'jobs_crew')
-          .select('id, job_number, job_date, status, total_acres, applied_acres, customer_id, customer:customers(farm_name)')
+        const columns = 'id, job_number, job_date, status, total_acres, applied_acres, customer_id, customer:customers(farm_name)';
+        const legacyQuery = office ? supabase.from('jobs').select(columns) : supabase.from('jobs_crew').select(columns);
+        const legacyRes = await legacyQuery
           .eq('applicator_id', profile.id)
           .is('deleted_at', null)
           .or(`status.in.(scheduled,in_progress),and(status.in.(completed,invoiced),updated_at.gte.${sevenDaysAgoIso})`);
@@ -394,9 +394,10 @@ export default function FieldView() {
     try {
       // updated_at is the offline-conflict snapshot for a queued Complete — must be
       // captured HERE (while online) so a later offline Complete has a value to send.
-      const jobRes = await supabase
-        .from(office ? 'jobs' : 'jobs_crew')
-        .select('job_date, updated_at')
+      const jobQuery = office
+        ? supabase.from('jobs').select('job_date, updated_at')
+        : supabase.from('jobs_crew').select('job_date, updated_at');
+      const jobRes = await jobQuery
         .eq('id', card.job_id)
         .maybeSingle();
       if (jobRes.error) throw jobRes.error;
@@ -430,9 +431,9 @@ export default function FieldView() {
 
       // Chemicals (job_chemicals) — rate/quantity + REI/PHI only, NO pricing on this
       // screen (owner decision, U12). Readable via job_chemicals_select_location_dispatchee.
-      const chemRes = await supabase
-        .from(office ? 'job_chemicals' : 'job_chemicals_crew')
-        .select('id, quantity, unit, rate_per_acre, rate_unit, sort_order, product:products(product_name, rei_hours, phi_days)')
+      const columns = 'id, quantity, unit, rate_per_acre, rate_unit, sort_order, product:products(product_name, rei_hours, phi_days)';
+      const chemQuery = office ? supabase.from('job_chemicals').select(columns) : supabase.from('job_chemicals_crew').select(columns);
+      const chemRes = await chemQuery
         .eq('job_id', card.job_id)
         .order('sort_order', { ascending: true, nullsFirst: false });
       if (chemRes.error) throw chemRes.error;

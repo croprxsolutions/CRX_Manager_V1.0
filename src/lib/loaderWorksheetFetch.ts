@@ -50,16 +50,21 @@ interface WorksheetVehicleRow {
 }
 
 async function fetchLoaderJobs(jobIds: string[], office: boolean): Promise<LoaderJobRow[]> {
-  const { data, error } = await supabase
-    .from(office ? 'jobs' : 'jobs_crew')
-    .select(`
+  const query = office
+    ? supabase.from('jobs').select(`
       id, job_number, job_date, scheduled_time, applicator_id,
       carrier_rate_gpa, loader_tank_capacity, loader_comment,
       vehicle:vehicles(vehicle_name, capacity_gallons, capacity_unit),
-      job_fields(field_id, acres_to_treat)${office ? `,
-      job_chemicals(id, product_id, quantity, unit, product:products(product_name))` : ''}
+      job_fields(field_id, acres_to_treat),
+      job_chemicals(id, product_id, quantity, unit, product:products(product_name))
     `)
-    .in('id', jobIds);
+    : supabase.from('jobs_crew').select(`
+      id, job_number, job_date, scheduled_time, applicator_id,
+      carrier_rate_gpa, loader_tank_capacity, loader_comment,
+      vehicle:vehicles(vehicle_name, capacity_gallons, capacity_unit),
+      job_fields(field_id, acres_to_treat)
+    `);
+  const { data, error } = await query.in('id', jobIds);
   if (error) throw error;
 
   const rows = (data || []) as unknown as LoaderJobRow[];

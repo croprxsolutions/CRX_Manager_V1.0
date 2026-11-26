@@ -156,7 +156,12 @@ export function jobColumnsForRole(role?: UserRole | null) {
 
 export function orderedVisibleColumnIds(settings: JobListSettings, role?: UserRole | null): JobColumnId[] {
   const want = new Set(settings.visibleColumns);
-  return jobColumnsForRole(role).filter((c) => want.has(c.id)).map((c) => c.id);
+  const registry = jobColumnsForRole(role);
+  const visible = registry.filter((c) => want.has(c.id));
+  const columns = visible.length === 0 && !usesOfficeJobReads(role)
+    ? registry.filter((c) => c.defaultVisible)
+    : visible;
+  return columns.map((c) => c.id);
 }
 
 /**

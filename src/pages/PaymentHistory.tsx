@@ -121,6 +121,17 @@ function PaymentDateFilter({ fromDate, toDate, onChange }: {
   );
 }
 
+const isAdminProfile = (p: { role?: string | null } | null | undefined) => p?.role === 'admin';
+
+/** "Mark check as returned" from a payment row: the returned-check form with this payment picked (M9). */
+function ReturnCheckDialog({ payment, onClose, onRecorded }: { payment: AllocationSet | null; onClose: () => void; onRecorded: () => void }) {
+  if (!payment) return null;
+  return (
+    <RefundOrReturnDialog key={payment.id} open onClose={onClose} onRecorded={onRecorded} customerId={payment.customer_id}
+      farmName={payment.farm_name} allocationSetId={payment.id} fromLabel="Payment History" />
+  );
+}
+
 export default function PaymentHistory() {
   const { profile } = useAuth();
   const { toast } = useToast();
@@ -147,7 +158,7 @@ export default function PaymentHistory() {
   // M9: returned checks (payment id -> the day the return was recorded) and the one being marked returned.
   const [returnedOn, setReturnedOn] = useState<Map<string, string>>(new Map());
   const [returnPayment, setReturnPayment] = useState<AllocationSet | null>(null);
-  const isAdmin = profile?.role === 'admin';
+  const isAdmin = isAdminProfile(profile);
   // Date filter (Chicago business days, inclusive). Empty = all dates, as before. A link may
   // open the page on a range (?from=YYYY-MM-DD&to=YYYY-MM-DD, e.g. from Month-End Close).
   const [searchParams] = useSearchParams();
@@ -567,18 +578,7 @@ export default function PaymentHistory() {
         </div>
       </Card>
 
-      {returnPayment && (
-        <RefundOrReturnDialog
-          key={returnPayment.id}
-          open
-          onClose={() => setReturnPayment(null)}
-          onRecorded={() => { void fetchPayments(); }}
-          customerId={returnPayment.customer_id}
-          farmName={returnPayment.farm_name}
-          allocationSetId={returnPayment.id}
-          fromLabel="Payment History"
-        />
-      )}
+      <ReturnCheckDialog payment={returnPayment} onClose={() => setReturnPayment(null)} onRecorded={() => { void fetchPayments(); }} />
 
       {/* Void Payment Modal */}
       <Modal open={!!voidPayment} onClose={() => setVoidPayment(null)} title="Void Payment">

@@ -136,7 +136,7 @@ try {
     INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD}', '${CUST}', '[PROVER] Count Once Field');
     INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST2}', '[PROVER] Count Once Other Farm', true);`);
   for (let n = 0; n <= 9; n += 1) product(n);
-  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22, 23, 24, 25, 26]) product(n);
+  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22, 23, 24, 25, 26, 27]) product(n);
   const wrapperAcl = WRAPPERS.map(acl);
 
   // BEFORE: the bug. Ticket 6 on an in-progress job, then the job's 10: 16 out.
@@ -332,6 +332,21 @@ try {
   assert.equal(b.code, 0, b.text);
   assert.match(b.text, /"kept_on_job_lines": 1/);
   balance('f', 10, 'race, ticket reversed while its job completes: the job keeps its 10');
+
+  // Luna r6: two reversals with the same key at once both return the first one's receipt.
+  ticket(27, null, [[27, 5]]); file(T(27));
+  const sameKey = key();
+  const firstRun = session(USERS.admin, `BEGIN; SELECT public.reverse_application_record(${recordOf(T(27))}, '${sameKey}'); SELECT pg_sleep(2); COMMIT;`);
+  for (let i = 0; !numberLockHeld(); i += 1) {
+    assert.ok(i < 200, 'the first reversal never took the number lock');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const recordId = scalar(`SELECT id FROM public.application_records WHERE source_type = 'blend_ticket' AND source_id = '${T(27)}';`);
+  const [first, second] = await Promise.all([firstRun,
+    session(USERS.admin, `SELECT public.reverse_application_record('${recordId}', '${sameKey}');`)]);
+  assert.equal(first.code, 0, first.text); assert.equal(second.code, 0, second.text);
+  assert.match(second.text, /"status": "reversed"/, `the second same-key reversal replays the first: ${second.text}`);
+  balance(27, 0, 'race, two same-key reversals: one credit, the same answer twice');
 
   // ROLLBACK: refused once any posting ran under the new rule; on a database with none it restores the previous bodies.
   const rollback = fs.readFileSync(ROLLBACK, 'utf8').replaceAll('\r\n', '\n');

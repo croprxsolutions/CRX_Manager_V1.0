@@ -50,7 +50,7 @@ Database only, one PR to `staging`. The deployed app calls the same RPCs with th
 7. Pints on a gallons product: claims in gallons.
 8. Customer-supplied job line: no row, no credit used.
 9. A filed ticket cannot change job (existing header lock); an unfiled ticket moved from open job A (2) to open job B (10) then filed: 12 out.
-10. Reversal refused for a counted ticket; allowed for an unlinked one; reversed ticket leaves the group (job completed afterwards moves its full claim).
+10. Smart undo: a counted ticket reverses and the job keeps what it still needs (ticket 6, job 10: nothing comes back; re-filing takes nothing more); an unlinked one reverses in full; a reversed ticket leaves the group (job completed afterwards moves its full claim). Sol's 10 + 12 example ends at 22 out.
 11. Migration applies over a database that already has an unlinked old pair, printing the NOTICE; immutability guard untouched.
 11b. Straddles: a ticket filed before the migration and its job completed after (job moves 4 of 10); a job completed before and its ticket filed after (ticket moves 0 of 7).
 12. After every case, independently: warehouse change from its opening balance equals the expected total, and equals ledger history. Grants: the group helper is not executable by API roles; wrappers' grants unchanged.
@@ -109,3 +109,7 @@ None left (Mason answered A on 2026-11-26).
 
 ## Luna round 5 (2026-11-26, head fb3a81610)
 - HIGH (fixed): the rollback guard looked only at counted rows, so a ticket that took its full claim under the new rule did not block it, and the restored old job body could then take that stock again. The guard now refuses once any row carries `application_record_id` (every posting under the new bodies). Prover: an uncounted linked posting alone refuses the rollback.
+
+## Luna round 6 (2026-11-26, head f5e8765f9)
+- MED (fixed): two same-key reversals at once: the second missed the first's uncommitted receipt, waited on the number lock, then answered differently. The reversal re-reads its receipt after taking the lock (READ COMMITTED: the first has committed) and replays it. Prover: two same-key reversals race and return the same answer.
+- LOW (fixed): proof case 10 above described the old refusal.

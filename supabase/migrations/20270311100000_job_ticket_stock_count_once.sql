@@ -987,6 +987,18 @@ BEGIN
   -- read, so the job's stock group below is settled.
   PERFORM pg_advisory_xact_lock(hashtext('next_application_record_number'));
 
+  -- A same-key request that held the lock first has committed its receipt by now: replay it.
+  IF p_idempotency_key IS NOT NULL THEN
+    v_cached := check_idempotency(p_idempotency_key, 'reverse_application_record');
+    IF v_cached IS NOT NULL THEN
+      IF (v_cached->>'application_record_id')::uuid IS DISTINCT FROM p_application_record_id THEN
+        RAISE EXCEPTION 'IDEMPOTENCY_ARGUMENT_MISMATCH: key % was already used to reverse a different application record',
+          p_idempotency_key;
+      END IF;
+      RETURN v_cached;
+    END IF;
+  END IF;
+
   -- Serializes concurrent reversals of the same record. After the first caller
   -- commits its DELETE, a waiting caller observes no row and returns a no-op.
   SELECT ar.*
@@ -1241,7 +1253,7 @@ BEGIN
       FROM (VALUES
         ('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)', '5df6e9533702ab6ab857fe4c9784fc04', false),
         ('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)', '03b74676ffbc1852613b8f668a6ad2f3', false),
-        ('public.reverse_application_record(uuid, text)', 'f0ec9eef747698b7cea2bd620fe5f812', true)
+        ('public.reverse_application_record(uuid, text)', 'b9bb5b47eabd4aace061542f9289cbfd', true)
       ) AS x(sig, md5, api)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(x.sig)
   LOOP

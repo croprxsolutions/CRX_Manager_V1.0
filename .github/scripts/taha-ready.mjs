@@ -49,9 +49,10 @@ export const tahaReviewedHead = (pr) => (pr.reviews ?? []).some((r) => isTaha(r.
 // A back-merge of main is judged like any PR: main needs no review, so a hotfix Mason merged by hand may not have
 // reached Taha (Taha's review of #2639, LOW 4).
 // Only the lane block's launchers and settings are not his work (Taha's review of #2639, MED 2); its libraries define his
-// lane and his live-apply hold, so they still go to him (advisory Sol on #2639, MED 18).
+// lane and his live-apply hold, so they still go to him (advisory Sol on #2639, MED 18). pr-merge-guard and the Codex
+// production-action-guard call his lane gate themselves, so they go to him too (Taha's delta at a9143eb27, MED 2).
 const wiringOnly = (file) => isTahaGateWiring(file) &&
-  /(?:^|\/)(?:pr-merge-guard|merge-guard-launcher|prompt-router|migration-apply-guard|production-action-guard)\.mjs$|(?:^|\/)(?:settings|hooks)\.json$/.test(file);
+  /(?:^|\/)(?:merge-guard-launcher|prompt-router|migration-apply-guard)\.mjs$|(?:^|\/)(?:settings|hooks)\.json$/.test(file);
 export const isMainHotfix =(pr) => pr.baseRefName === 'main' && /^hotfix\//.test(pr.headRefName ?? '');
 const GATE_CHECKS = ['Release flow guard (main)', 'release-gate'];
 // A pending guard still waits: it may yet ask for the label, and the ping is sent once per head (Codex on #2589).

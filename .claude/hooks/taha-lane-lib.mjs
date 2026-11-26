@@ -113,8 +113,10 @@ export function isTextOnlyPatch(patch) {
   return blocks.length > 0 && blocks.every((b) => codeOnly(b.removed) === codeOnly(b.added));
 }
 
-// Money screens and customer documents: their wording is Taha's too (Taha's review of #2639, MED 1).
-const MONEY_DOC_RE = /^src\/(?:components\/invoices\/|lib\/(?:invoice|statement))|(?:Pdf|Email)\.[jt]sx?$/i;
+// Money screens and customer documents: their wording is Taha's too (Taha's review of #2639, MED 1, and his
+// delta at a9143eb27: every money screen in his lane, so the named lane files below get no words-only pass either).
+const MONEY_DOC_RE = /^src\/(?:components\/(?:invoices|prepay|statements)\/|components\/orders\/(?:Sale|WhoPays)|lib\/(?:invoice|statement|customerStatement)|pages\/(?:Invoice|Payment|Prepay|AR|AccountsReceivable))|(?:Pdf|Email)\.[jt]sx?$/i;
+const isMoneyScreen = (file) => MONEY_DOC_RE.test(file) || LANE_FILE_PREFIXES.some((p) => file.startsWith(p));
 
 /** True when this changed file is app or database code in Taha's lane (and not field billing), or the block itself. */
 export function isTahaLanePath(name) {
@@ -232,7 +234,10 @@ const setColumns = (set) => {
 };
 const unitOnlySet = (set) => { const cols = setColumns(set); return cols.length > 0 && cols.every((c) => UNIT_COLUMN_RE.test(c)) && !/\(\s*select\b/i.test(set); };
 // Blank out '...' literal contents (same length) so a WHERE or ; inside a string is not read as SQL (Luna, PR 2 round 4).
-const maskStrings = (text) => text.replace(/'(?:[^']|'')*'/g, (s) => `'${" ".repeat(s.length - 2)}'`);
+// E'…' strings take backslash escapes, by the same rule withoutComments uses (an E not after a word character)
+// (Taha's delta at a9143eb27, LOW 5: E'g\'' must not run on into the next statement).
+const maskStrings = (text) => text.replace(/(?<![\w$])[eE]'(?:\\[\s\S]|[^'\\]|'')*'|'(?:[^']|'')*'/g,
+  (s) => { const q = s.indexOf("'"); return `${s.slice(0, q)}'${" ".repeat(s.length - q - 2)}'`; });
 // …and "quoted" names too, for the clause scanner (advisory Sol on #2639, HIGH 6: src."from").
 const maskNames = (text) => text.replace(/"(?:[^"]|"")*"/g, (s) => `"${"x".repeat(s.length - 2)}"`);
 const withoutUnitFix = (text) => {
@@ -365,7 +370,7 @@ export function tahaLaneProblem({ files }) {
     // A label-only edit of an app file in his lane, not renamed (Mason, 2026-11-26, #2451).
     // Only an edited file: adding or deleting one is code even when it holds only comments (advisory Sol on PR 2, MED 15).
     const wordsOnly = entry?.status === "modified" && !entry?.previous_filename && typeof name === "string" && /^src\/.+\.[jt]sx?$/i.test(name) &&
-      !isTahaGateWiring(name) && !MONEY_DOC_RE.test(name) && isTextOnlyPatch(entry?.patch);
+      !isTahaGateWiring(name) && !isMoneyScreen(name.replace(/\\/g, "/")) && isTextOnlyPatch(entry?.patch);
     for (const n of wordsOnly ? [] : [entry?.filename, entry?.previous_filename]) {
       if (typeof n === "string" && isTahaLanePath(n) && !hits.includes(n)) hits.push(n);
     }

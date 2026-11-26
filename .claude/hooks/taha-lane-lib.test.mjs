@@ -602,12 +602,13 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; LOCK TABLE public.order_items, public.invoices; UPDATE public.order_items SET unit_size = 'g' WHERE product_id = 7;")], now: NOW }), null,
     "its locks alone change nothing of his (#2267 locks invoices so nothing moves while it converts)");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "LOCK TABLE public.order_items; UPDATE public.invoice_items SET q = 1;")], now: NOW }), "an invoice write in a unit fix is still his");
-  // Luna, PR 2 round 3: only the unit and quantity columns.
+  // Luna, PR 2 round 3: a unit fix may set only unit columns (unit_size, rate_unit; Taha LOW 1 dropped quantity).
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; UPDATE public.order_items SET status = 'cancelled' WHERE product_id = 1;")], now: NOW }), "a unit-named migration setting order statuses is his");
   // Luna, PR 2 round 4: tuple assignments and clause words inside strings.
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; UPDATE public.order_items SET quantity = quantity * 16, (unit_size, unit_price) = ('g', 0) WHERE product_id = 7;")], now: NOW }), "a price inside a tuple SET is his");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; UPDATE public.order_items SET quantity = CASE WHEN unit = 'where' THEN quantity / 1000 ELSE quantity END, status = 'cancelled' WHERE product_id = 7;")], now: NOW }), "a WHERE inside a string does not end the SET");
   eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; UPDATE public.order_items SET (unit_size, rate_unit) = ('g', 'g') WHERE unit_size = 'mg; where';")], now: NOW }), null, "a unit-only tuple SET is a unit fix");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_mg_to_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; UPDATE public.order_items SET unit_size = E'g\\'' WHERE product_id = 7; UPDATE public.invoices SET total_amount_cents = 0, notes = 'x' WHERE id = 1;")], now: NOW }), "an E'...' escape does not hide a later invoice write (delta LOW 5)");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; UPDATE public.quote_items q SET unit_size = 'g', unit_price = 0 WHERE q.product_id = 7;")], now: NOW }), "a unit fix that also sets prices is his");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.products SET unit_size = 'g' WHERE id = 7; UPDATE public.order_items SET quantity = (SELECT 1 FROM invoices) WHERE product_id = 7;")], now: NOW }), "a quantity copied from a subquery is his");
   // Advisory Sol on PR 2.
@@ -625,7 +626,7 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   const ar = patch(["  { key: 'prepayments', label: 'Prepayments' },", "        {tab === 'prepayments' && <PrepaymentManagerPanel />}"],
     ["  if (raw === 'prepayments') return <Navigate to=\"/prepay?tab=manager\" replace />;"]);
   const withPatch = (filename, p) => ({ filename, status: "modified", patch: p });
-  eq(tahaLaneProblem({ files: [withPatch("src/pages/FinancialDashboard.tsx", dash), withPatch("src/pages/Prepay.tsx", prepay)], now: NOW }), null, "#2451's menu-label edits are not Taha's");
+  ok(tahaLaneProblem({ files: [withPatch("src/pages/FinancialDashboard.tsx", dash), withPatch("src/pages/Prepay.tsx", prepay)], now: NOW }), "#2451's menu-label edits are on money screens, so Taha's (his delta at a9143eb27, MED 1)");
   eq(tahaLaneProblem({ files: [withPatch("src/pages/AccountsReceivable.tsx", ar)], now: NOW })?.files, ["src/pages/AccountsReceivable.tsx"], "#2451's A/R tab move and redirect still are");
   ok(isTextOnlyPatch(patch(["  // old note", "  <h2>Prepay Manager</h2>"], ["  // a new note, Taha's", "  <h2>Prepay Credits — today</h2>"])), "comments and JSX text are words");
   ok(!isTextOnlyPatch(patch(["  const x = 'a';"], ["  const x = b;"])), "a string turned into code is a change");
@@ -649,6 +650,14 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   for (const f of ["src/lib/statementEmail.ts", "src/lib/invoiceTotals.ts", "src/lib/quotePdf.ts","src/pages/quotes/QuoteEmail.tsx"]) {
     ok(tahaLaneProblem({ files: [withPatch(f, patch(["  // old"], ["  // new"]))], now: NOW }), `${f}: customer documents get no words-only pass (MED 1)`);
   }
+  // Taha's delta at a9143eb27, MED 1 (his call): no money screen in his lane gets a words-only pass.
+  const paidSwap = patch(['      <MoneyRow label="Paid" cents={paid} />', '      <MoneyRow label="Balance due" cents={due} />'], ['      <MoneyRow label="Balance due" cents={paid} />', '      <MoneyRow label="Paid" cents={due} />']);
+  for (const f of ["src/components/orders/SaleMoneySummary.tsx", "src/components/orders/WhoPaysCard.tsx", "src/components/orders/SaleInvoicesCard.tsx", "src/pages/InvoiceDetail.tsx", "src/pages/Invoices.tsx",
+    "src/pages/PaymentAllocation.tsx", "src/pages/PaymentHistory.tsx", "src/pages/Prepay.tsx", "src/pages/ARaging.tsx", "src/pages/AccountsReceivable.tsx", "src/pages/OrderDetail.tsx",
+    "src/components/prepay/PrepaymentManagerPanel.tsx", "src/components/statements/StatementPrintDialog.tsx", "src/lib/customerStatement.ts"]) {
+    ok(tahaLaneProblem({ files: [withPatch(f, paidSwap)], now: NOW }), `${f}: a money label swap is his (delta MED 1)`);
+  }
+  eq(tahaLaneProblem({ files: [withPatch("src/pages/quotes/QuoteList.tsx", paidSwap)], now: NOW }), null, "a lane screen that is not a money screen keeps the words-only pass");
   // Luna, PR 2 round 2.
   const twoBlocks = ["@@ -1,6 +1,6 @@", " if (approved) {", "-  commit();", "+  log();", " }", "-log();", "+commit();"].join(String.fromCharCode(10));
   ok(!isTextOnlyPatch(twoBlocks), "code moved out of an if is a change");

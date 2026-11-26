@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, blockedUnitSaveMessage, FORM_UNIT_RULES, asProductForm } from './units';
+import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, blockedUnitSaveMessage, FORM_UNIT_RULES, asProductForm, isWholeItemUnit, wholeItemMessage } from './units';
 import type { UnitConversion } from '../types';
 
 const CONV = [
@@ -114,5 +114,17 @@ describe('blockedUnitSaveMessage', () => {
     expect(blockedUnitSaveMessage('loaded', [], true)).toBe(
       'No units are set up yet, so a unit is still blank. Add unit conversions before saving.',
     );
+  });
+});
+
+describe('whole-item units (20270311000000)', () => {
+  it('treats Ea and Unit as whole items, ignoring case and spaces', () => {
+    expect([' EA ', 'ea', 'Unit', 'unit'].every(isWholeItemUnit)).toBe(true);
+    expect(['Gal', 'Lb', 'Dry oz', '', null, undefined].some(isWholeItemUnit)).toBe(false);
+  });
+  it('refuses a fraction only on a whole-item line', () => {
+    expect(wholeItemMessage('Seed Corn', 'Unit', 1.5)).toBe("Seed Corn is sold by the whole item (Unit), so 1.5 can't be used. Enter a whole number.");
+    expect(wholeItemMessage('Seed Corn', 'Unit', 2)).toBeNull();
+    expect(wholeItemMessage('Roundup', 'Gal', 2.5)).toBeNull();
   });
 });

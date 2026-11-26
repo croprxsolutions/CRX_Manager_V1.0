@@ -557,8 +557,8 @@ export function sanitizeError(error: unknown): string {
   // The server sentence names the product and says what to do, so it is kept.
   const chemPriceRequired = message.match(/^CHEM_PRICE_REQUIRED:\s*(.+)$/s);
   if (chemPriceRequired) return `Nothing was saved. ${chemPriceRequired[1].trim()}`;
-  // Unit rules (20270121110000): the server sentence names the unit and what to do, so it is kept.
-  const unitRule = message.match(/^(?:LINE_UNIT_NOT_STOCK_UNIT|PRODUCT_UNIT_HAS_OPEN_LINES|PRODUCT_UNIT_HAS_STOCK|PRODUCT_UNIT_HAS_HISTORY|STOCK_ROW_UNIT_NOT_STOCK_UNIT|PRODUCT_STOCK_UNIT_UNKNOWN|QUOTE_RATE_UNIT_UNKNOWN|QUOTE_STOCK_UNIT_UNKNOWN):\s*(.+)$/s);
+  // Unit rules (20270121110000) and whole-item quantities (20270311000000): the server sentence names the unit and what to do, so it is kept.
+  const unitRule = message.match(/^(?:LINE_UNIT_NOT_STOCK_UNIT|PRODUCT_UNIT_HAS_OPEN_LINES|PRODUCT_UNIT_HAS_STOCK|PRODUCT_UNIT_HAS_HISTORY|STOCK_ROW_UNIT_NOT_STOCK_UNIT|PRODUCT_STOCK_UNIT_UNKNOWN|QUOTE_RATE_UNIT_UNKNOWN|QUOTE_STOCK_UNIT_UNKNOWN|WHOLE_ITEMS_ONLY):\s*(.+)$/s);
   if (unitRule) return `Nothing was saved. ${unitRule[1].trim()}`;
   // Delivery lines match their order lines (20270126110000, KI-161) and fit what was ordered (F05,
   // 20270224100000): the server sentence says what is wrong.

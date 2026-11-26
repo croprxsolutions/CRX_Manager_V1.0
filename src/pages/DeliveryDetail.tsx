@@ -18,6 +18,7 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import CompletionProofFields, { ProofOption } from '../components/deliveries/CompletionProofFields';
 import { ISSUE_TYPE_LABELS } from '../lib/deliveryIssueTypes';
 import { useToast } from '../components/ui/Toast';
+import { isWholeItemUnit, wholeItemMessage } from '../lib/units';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -876,6 +877,12 @@ export default function DeliveryDetail() {
       return;
     }
 
+    const editFraction = activeEditItems.map((i) => wholeItemMessage(i.product_name, i.unit_size || '', i.quantity)).find(Boolean);
+    if (editFraction) {
+      toast('error', `Nothing was saved. ${editFraction}`);
+      return;
+    }
+
     setSavingEdit(true);
 
     const itemsPayload = editItemsPayload(isScheduled, activeEditItems);
@@ -1277,6 +1284,15 @@ export default function DeliveryDetail() {
     }
     if (submittedEvidence === 'no_proof' && !isValidNoProofReason(noProofReason)) {
       toast('error', `Write why there is no proof (${NO_PROOF_REASON_MIN_CHARS} to ${NO_PROOF_REASON_MAX_CHARS} characters)`);
+      return;
+    }
+    // Products sold by the whole item (Ea, Unit) take whole figures; the server refuses a fraction too (WHOLE_ITEMS_ONLY).
+    const fraction = items.map((item) => wholeItemMessage(
+      (item.product as unknown as { product_name?: string } | null)?.product_name || 'This product',
+      item.unit_size || '', deliveryQtys[item.id] ?? item.quantity,
+    )).find(Boolean);
+    if (fraction) {
+      toast('error', `The delivery was not completed. ${fraction}`);
       return;
     }
     setCompleting(true);
@@ -1958,7 +1974,7 @@ export default function DeliveryDetail() {
                           onChange={(e) => updateDeliveryQty(item.id, parseFloat(e.target.value) || 0, item.quantity)}
                           className="h-12 w-0 min-w-0 flex-1 rounded-xl border border-gray-300 bg-white text-center font-heading text-[1.75rem]! font-bold tabular-nums text-nav-dark focus:outline-none focus:ring-2 focus:ring-crx-green focus:border-crx-green"
                           min="0"
-                          step="any"
+                          step={isWholeItemUnit(item.unit_size) ? 1 : 'any'}
                           aria-label={`Quantity for ${productName || 'item'}`}
                         />
                         <button
@@ -2540,7 +2556,7 @@ export default function DeliveryDetail() {
                           className="w-20 text-center px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                           min="0"
                           max={item.max_quantity}
-                          step="any"
+                          step={isWholeItemUnit(item.unit_size) ? 1 : 'any'}
                         />
                         <button
                           onClick={() => setEditItems((prev) =>
@@ -2812,7 +2828,7 @@ export default function DeliveryDetail() {
                       onChange={(e) => updateDeliveryQty(item.id, parseFloat(e.target.value) || 0, item.quantity)}
                       className="w-20 text-center px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                       min="0"
-                      step="any"
+                      step={isWholeItemUnit(item.unit_size) ? 1 : 'any'}
                     />
                     <button
                       onClick={() => updateDeliveryQty(item.id, currentQty + 1, item.quantity)}

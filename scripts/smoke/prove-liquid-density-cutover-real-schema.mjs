@@ -34,7 +34,7 @@ try {
       EXECUTE FUNCTION public.return_liquid_density_to_draft_for_brand();`);
 
   expectPreflightRefusal('ALTER FUNCTION public.approve_weights(jsonb, text) RESET search_path;');
-  expectPreflightRefusal('GRANT EXECUTE ON FUNCTION public.approve_weights(jsonb, text) TO anon;');
+  expectPreflightRefusal('GRANT EXECUTE ON FUNCTION public.liquid_density_review_open() TO anon;');
   expectPreflightRefusal(`
     CREATE OR REPLACE FUNCTION public.get_liquid_density_review(p_parent_id uuid)
     RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path = public, pg_temp

@@ -11,6 +11,7 @@ BEGIN
      OR EXISTS (
        SELECT 1
        FROM (VALUES
+         ('liquid_density_review_open()', '7d69bbf21ad55293e15c24da50eaaa11', false, true),
          ('get_liquid_density_review(uuid)', '08f4067e9483ef8ac042e2e2a2827570', false, true),
          ('submit_liquid_density_draft(uuid,bigint,numeric,text,text,text,text,text,text)', 'dcb15229da1628f89b1436a19e38844f', true, true),
          ('approve_liquid_density_draft(uuid,uuid,bigint,jsonb,boolean,text)', '2cecbd479f006dd668a898426a59b078', true, true),

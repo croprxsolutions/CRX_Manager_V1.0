@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { buildInMemoryQuery } from '../test-utils/inMemoryQuery';
 
 const {
@@ -490,5 +490,94 @@ describe('Customers list filters', () => {
         if (otherFarm !== visibleFarm) expect(screen.queryByText(otherFarm)).not.toBeInTheDocument();
       }
     }
+  });
+
+  it('an empty list says the search or filters hide the customers, and Clear filters restores the default view', async () => {
+    renderCustomers();
+    await screen.findByText('Active Assigned Farm');
+
+    fireEvent.change(screen.getByLabelText('Filter by tier'), { target: { value: '3' } });
+    fireEvent.change(screen.getByPlaceholderText('Search customers...'), { target: { value: 'Active' } });
+    expect(await screen.findByText('No customers match your search or filters')).toBeInTheDocument();
+    expect(screen.queryByText('No customers yet')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(await screen.findByText('Active Assigned Farm')).toBeInTheDocument();
+    expect(screen.getByText('Active Unassigned Farm')).toBeInTheDocument();
+    // The default view stays the active book.
+    expect(screen.queryByText('Retired Farm')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by tier')).toHaveValue('');
+    expect(screen.getByPlaceholderText('Search customers...')).toHaveValue('');
+  });
+
+  it('says "No customers yet" only when there are none on file', async () => {
+    mockTables([]);
+    renderCustomers();
+    expect(await screen.findByText('No customers yet')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument();
+  });
+
+  it('Back from a customer brings back the search, filters and sort', async () => {
+    function CustomerPage() {
+      const navigate = useNavigate();
+      return <button type="button" onClick={() => navigate(-1)}>Back to list</button>;
+    }
+    render(
+      <MemoryRouter initialEntries={['/customers']}>
+        <Routes>
+          <Route path="/customers" element={<Customers />} />
+          <Route path="/customers/:id" element={<CustomerPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText('Active Assigned Farm');
+    fireEvent.change(screen.getByLabelText('Filter by status'), { target: { value: 'all' } });
+    fireEvent.change(screen.getByPlaceholderText('Search customers...'), { target: { value: 'Farm' } });
+    fireEvent.click(screen.getByRole('button', { name: /Sort by Farm Name/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Sort by Farm Name/ }));
+
+    fireEvent.click(await screen.findByText('Retired Farm'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to list' }));
+
+    expect(await screen.findByText('Retired Farm')).toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by status')).toHaveValue('all');
+    expect(screen.getByPlaceholderText('Search customers...')).toHaveValue('Farm');
+    expect(screen.getByRole('button', { name: /Sort by Farm Name, sorted descending/ })).toBeInTheDocument();
+    const farms = screen.getAllByText(/ Farm$/).map((el) => el.textContent);
+    expect(farms).toEqual(['Retired Farm', 'Active Unassigned Farm', 'Active Assigned Farm']);
+  });
+
+  it('opens with the filters a link or Back put in the address', async () => {
+    render(<MemoryRouter initialEntries={['/customers?status=inactive']}><Customers /></MemoryRouter>);
+    expect(await screen.findByText('Retired Farm')).toBeInTheDocument();
+    expect(screen.queryByText('Active Assigned Farm')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by status')).toHaveValue('inactive');
+  });
+
+  it('a phone number dials when tapped, without opening the customer', async () => {
+    renderCustomers();
+    await screen.findByText('Active Assigned Farm');
+    const links = screen.getAllByRole('link', { name: '555-0000' });
+    expect(links[0]).toHaveAttribute('href', 'tel:5550000');
+  });
+
+  describe('on a phone', () => {
+    beforeEach(() => {
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query === '(max-width: 767px)', media: query, onchange: null,
+        addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
+      }));
+    });
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it('shows each customer as a card with the phone one tap away, not a wide table', async () => {
+      renderCustomers();
+      const name = await screen.findByText('Active Assigned Farm');
+      expect(screen.queryByRole('table')).not.toBeInTheDocument();
+      const card = name.closest('li')!;
+      expect(within(card).getByText('Dana Rep')).toBeInTheDocument();
+      expect(within(card).getByText('Tier 1')).toBeInTheDocument();
+      expect(within(card).getByRole('link', { name: '555-0000' })).toHaveAttribute('href', 'tel:5550000');
+    });
   });
 });

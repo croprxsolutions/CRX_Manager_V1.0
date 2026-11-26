@@ -38,7 +38,7 @@
 | `/vehicles` | Vehicles | Admin-only. Vehicle CRUD (ground/air), capacity, registration |
 | `/vehicles/:id` | VehicleDetail | Admin-only. Single vehicle edit form |
 | `/application-records` | ApplicationRecords | Read-only list of all chemical applications (from jobs + blend tickets). Roles: admin/sales_rep/applicator |
-| `/invoices` | Invoices | Invoice list (unposted/posted), batch print, batch void, quick delivery filter |
+| `/invoices` | Invoices | Chemical invoice list with the Field Invoices tabs (`?tab=`): **Drafts** (`drafts`), **Posted** (`posted`: posted, overdue, paid), **By Customer** (`customer`: the same Customer Invoice Summary), **All Invoices** (`all`, the default). Old `?status=` links open the matching tab. Tick-and-post, batch print, email, void, delete, quick delivery filter |
 | `/invoices/:id` | InvoiceDetail | Invoice detail, post/unpost, print PDF, write-off |
 | `/payments` | PaymentAllocation | Unified payment entry — allocate checks to invoices, remainder becomes prepay |
 | `/ar-aging` | ARaging | Admin-only. AR aging report, generate finance charges, Send AR Reminders (admin), Email Batch Statements (PDF attachment) |

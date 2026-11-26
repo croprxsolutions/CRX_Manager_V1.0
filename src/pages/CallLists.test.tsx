@@ -9,6 +9,7 @@ const { mockRpc, mockFrom, mockToast, mockAuth } = vi.hoisted(() => ({
   mockAuth: {
     profile: { id: 'rep-1', role: 'sales_rep' } as { id: string; role: string } | null,
     role: 'sales_rep' as string | null,
+    deniedPages: [] as string[],
   },
 }));
 
@@ -80,6 +81,7 @@ function LocationControls() {
   const navigate = useNavigate();
   return (
     <div>
+      <output data-testid="location-path">{location.pathname}</output>
       <output data-testid="location-search">{location.search}</output>
       <button type="button" onClick={() => navigate(-1)}>Test back</button>
       <button type="button" onClick={() => navigate(1)}>Test forward</button>
@@ -105,6 +107,7 @@ describe('Call Lists adoption workspace', () => {
     vi.clearAllMocks();
     mockAuth.profile = { id: 'rep-1', role: 'sales_rep' };
     mockAuth.role = 'sales_rep';
+    mockAuth.deniedPages = [];
     rpcRows = {};
     rpcImplementations = {};
     customerEnrichment = [{ id: 'customer-1', assigned_tier: 2, crops: ['corn'] }];
@@ -481,5 +484,37 @@ describe('Call Lists adoption workspace', () => {
     expect(await screen.findByText('Prepay Farm')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Test forward' }));
     expect(await screen.findByText('Quote Farm')).toBeInTheDocument();
+  });
+
+  it('a stale-quote row opens the quote itself, and still opens the customer', async () => {
+    rpcRows.get_call_list_stale_quotes = [baseRow({ farm_name: 'Quote Farm', quote_id: 'quote-1', quote_number: 'Q-1', quote_total_cents: 50000, quote_updated_at: '2026-07-01T00:00:00Z', quote_age_days: 20 })];
+    const { unmount } = renderCallLists('/call-lists?list=stale-quotes');
+    expect(await screen.findByText('Quote Farm')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open quote' }));
+    expect(screen.getByTestId('location-path')).toHaveTextContent('/quotes/quote-1');
+    unmount();
+
+    renderCallLists('/call-lists?list=stale-quotes');
+    expect(await screen.findByText('Quote Farm')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open customer' }));
+    expect(screen.getByTestId('location-path')).toHaveTextContent('/customers/customer-1');
+  });
+
+  it('a rep denied Quotes gets no Open quote button, only Open customer', async () => {
+    mockAuth.deniedPages = ['quotes'];
+    rpcRows.get_call_list_stale_quotes = [baseRow({ farm_name: 'Quote Farm', quote_id: 'quote-1', quote_number: 'Q-1', quote_total_cents: 50000, quote_updated_at: '2026-07-01T00:00:00Z', quote_age_days: 20 })];
+    renderCallLists('/call-lists?list=stale-quotes');
+    expect(await screen.findByText('Quote Farm')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open quote' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open customer' })).toBeInTheDocument();
+  });
+
+  it('other lists keep a single Open that goes to the customer', async () => {
+    rpcRows.get_call_list_no_recent_contact = [baseRow({ farm_name: 'Quiet Farm', days_since_last_interaction: 43 })];
+    renderCallLists('/call-lists?list=no-recent-contact');
+    expect(await screen.findByText('Quiet Farm')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open quote' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(screen.getByTestId('location-path')).toHaveTextContent('/customers/customer-1');
   });
 });

@@ -103,15 +103,20 @@ describe('Field Invoices tabs — season window after the Oct 1 rollover', () =>
     expect(screen.getByText('$4,285.78')).toBeInTheDocument();
   });
 
-  it('Post All posts only this season; prior-season invoices are listed but left out, and the confirm says so', async () => {
+  it('Select All + Post posts only this season; prior-season invoices are listed without a tick box, and the confirm says so', async () => {
     renderInRouter(<FieldInvoicesUnpostedPanel />);
     await waitFor(() => expect(screen.getAllByText('FA-OLD-UNPOSTED').length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole('button', { name: /Post All/ }));
     // post_invoice does not check the season (it does refuse a closed accounting period),
-    // so Post All leaves the two Season 2026 invoices out and names them.
+    // so the two Season 2026 invoices get no tick box and are named as left out.
+    const rowOf = (n: string) => screen.getAllByText(n).map((el) => el.closest('tr')).find(Boolean)!;
+    expect(within(rowOf('FA-OLD-UNPOSTED')).queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(within(rowOf('FA-OLD-DRAFT')).queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByText(/2 invoice\(s\) not from this season have no tick box; post each from its invoice page/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post 1 invoice…' }));
     expect(await screen.findByText(/2 invoice\(s\) not from this season \(Season 2026\) are NOT included/)).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: 'Post 1 invoice(s)' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Post 1 invoice' }));
 
     await waitFor(() => expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')).toHaveLength(1));
     const posted = mockRpc.mock.calls
@@ -120,10 +125,10 @@ describe('Field Invoices tabs — season window after the Oct 1 rollover', () =>
     expect(posted).toEqual(['FA-NEW-DRAFT']);
   });
 
-  it('Post All leaves every split group out, even one whose loaded members are all this season', async () => {
+  it('posting leaves every split group out, even one whose loaded members are all this season', async () => {
     // post_invoice_group posts every member, including ones this page cannot see, and a
     // season check in the browser cannot bind what the database then posts (Codex Sol HIGH,
-    // PR #895). So Post All posts only stand-alone invoices; a group posts from its page.
+    // PR #895). So this tab posts only stand-alone invoices; a group posts from its page.
     const groupA = fieldInvoice({ invoice_number: 'FA-GRP-A', status: 'unposted', season: 2027, invoice_group_id: 'grp-1', invoice_date: '2026-10-04', created_at: '2026-10-04T15:00:00+00:00' });
     const groupB = fieldInvoice({ invoice_number: 'FA-GRP-B', status: 'draft', season: 2027, invoice_group_id: 'grp-1', invoice_date: '2026-10-04', created_at: '2026-10-04T16:00:00+00:00' });
     mockFrom.mockImplementation((table: string) => buildInMemoryQuery(table === 'invoices' ? [groupA, groupB, ROWS[6]] : []));
@@ -134,10 +139,14 @@ describe('Field Invoices tabs — season window after the Oct 1 rollover', () =>
     renderInRouter(<FieldInvoicesUnpostedPanel />);
     await waitFor(() => expect(screen.getAllByText('FA-GRP-A').length).toBeGreaterThan(0));
 
-    expect(screen.getByText(/Post All leaves out 1 split group\(s\); post each from its invoice page/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Post All/ }));
+    expect(screen.getByText(/1 split group\(s\) have no tick box; post each from its invoice page/)).toBeInTheDocument();
+    const rowOf = (n: string) => screen.getAllByText(n).map((el) => el.closest('tr')).find(Boolean)!;
+    expect(within(rowOf('FA-GRP-A')).queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(within(rowOf('FA-GRP-A')).getByText('Split invoice · post from its page')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post 1 invoice…' }));
     expect(await screen.findByText(/1 split group\(s\) are NOT included: a split group posts all of its members together/)).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: 'Post 1 invoice(s)' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Post 1 invoice' }));
 
     await waitFor(() => expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')).toHaveLength(1));
     expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')[0][1]).toMatchObject({ p_invoice_id: 'FA-NEW-DRAFT', p_expected_version: 'v1:FA-NEW-DRAFT' });

@@ -50,7 +50,7 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { hasPageAccess } from '../lib/pagePermissions';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
-import { centsToDollarInput, formatCents as fmt } from '../lib/money';
+import { formatCents as fmt } from '../lib/money';
 import type { DuplicatePayment, PaymentAllocationEntry, PaymentAllocationResult, InvoiceType } from '../types';
 import { toSentryError } from '../lib/sentryError';
 
@@ -146,6 +146,9 @@ function paymentDateHelper(day: string, today: string): string {
 
 export default function PaymentAllocation() {
   const { profile, role, deniedPages } = useAuth();
+  // Pay full balance totals the invoices on screen. Only an admin sees all of a customer's
+  // invoices; a sales rep sees only their own, so the total could be short of what the farm owes.
+  const canPayFullBalance = role === 'admin';
   const { toast } = useToast();
   const allocatePaymentIdem = useIdempotencyKey('allocate_payment', profile?.id || '');
   // True from the first save attempt until one is confirmed: a retry must reach allocate_payment, which
@@ -154,6 +157,8 @@ export default function PaymentAllocation() {
 
   // Customer: the shared customer box (type to search, arrow keys, Enter to choose).
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerOption | null>(null);
+  // What the customer box shows while it is being edited; null once a pick, blur or Escape settles it.
+  const [customerBoxText, setCustomerBoxText] = useState<string | null>(null);
   // A customer chosen in the box sends the cursor straight to the check amount.
   const focusAmountAfterPick = useRef(false);
   const amountInputRef = useRef<HTMLInputElement>(null);
@@ -260,13 +265,20 @@ export default function PaymentAllocation() {
 
   const selectCustomer = useCallback((c: CustomerOption) => {
     focusAmountAfterPick.current = true;
+    setCustomerBoxText(null);
+    // Switching to another farm starts a fresh check, so one farm's check can't be posted to another (Mason, 2026-11-25).
+    if (selectedCustomer && selectedCustomer.id !== c.id) {
+      setCheckAmountInput('');
+      setReferenceNumber('');
+      setNotes('');
+    }
     setSelectedCustomer(c);
     prepayReadSeq.current += 1;
     setPrepayBalanceCents(c.prepay_balance_cents);
     setLastResult(null);
     setRetryRefused(false);
     fetchInvoices(c.id);
-  }, [fetchInvoices]);
+  }, [fetchInvoices, selectedCustomer]);
 
   const clearCustomer = useCallback(() => {
     // A load still running for the cleared customer must not refill the list.
@@ -274,6 +286,7 @@ export default function PaymentAllocation() {
     setLoadingInvoices(false);
     setInvoicesFailed(false);
     setSelectedCustomer(null);
+    setCustomerBoxText(null);
     prepayReadSeq.current += 1;
     setPrepayBalanceCents(null);
     setInvoices([]);
@@ -283,6 +296,13 @@ export default function PaymentAllocation() {
     setLastResult(null);
     setRetryRefused(false);
   }, []);
+
+  // The customer changes only when one is picked from the list. A stray keystroke keeps the
+  // chosen customer and the typed allocations; Escape or "keep" puts the name back. While a search
+  // is unfinished, nothing that posts or fills allocations runs, so Apply Payment can never
+  // post to a customer the box is not showing.
+  const customerBeingChanged = selectedCustomer !== null && customerBoxText !== null
+    && customerBoxText !== selectedCustomer.farm_name;
 
   /* ── Allocation helpers ────────────────────────────────────────────── */
 
@@ -325,8 +345,15 @@ export default function PaymentAllocation() {
   // Pays every open invoice in full, in the order and by the rules Auto-Allocate uses. It only
   // fills the screen: nothing is saved until Apply Payment, which checks everything as before.
   const handlePayFullBalance = useCallback(() => {
+    if (!canPayFullBalance) return;
     if (checkAmountRefused) {
       toast('error', MONEY_PRECISION_MESSAGE);
+      return;
+    }
+    // The check amount always comes from the paper check, never from the balance owed (Mason,
+    // 2026-11-25): a filled-in balance could re-book a check already posted for a different amount.
+    if (checkCents <= 0) {
+      toast('error', 'Enter the check amount first.');
       return;
     }
     const owed = invoices.map((inv) => ({ id: inv.invoice_id, balance_cents: inv.balance_cents }));
@@ -336,11 +363,10 @@ export default function PaymentAllocation() {
     );
     if (fullBalanceCents <= 0) return;
     // A typed check smaller than the balance cannot pay it all; its amount is never changed here.
-    if (checkCents > 0 && checkCents < fullBalanceCents) {
+    if (checkCents < fullBalanceCents) {
       toast('error', `This check is ${fmt(fullBalanceCents - checkCents)} short of the full balance of ${fmt(fullBalanceCents)}. Use Auto-Allocate to apply it oldest first.`);
       return;
     }
-    if (checkCents <= 0) setCheckAmountInput(centsToDollarInput(fullBalanceCents));
     const allocMap = autoAllocate(fullBalanceCents, owed);
     setInvoices((prev) =>
       prev.map((inv) => ({
@@ -348,7 +374,7 @@ export default function PaymentAllocation() {
         allocated_cents: allocMap.get(inv.invoice_id) || 0,
       })),
     );
-  }, [checkAmountRefused, checkCents, invoices, toast]);
+  }, [canPayFullBalance, checkAmountRefused, checkCents, invoices, toast]);
 
   const handleClearAllocations = useCallback(() => {
     setInvoices((prev) => prev.map((inv) => ({ ...inv, allocated_cents: 0 })));
@@ -398,7 +424,7 @@ export default function PaymentAllocation() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedCustomer || !profile) return;
+    if (!selectedCustomer || !profile || customerBeingChanged) return;
     const problem = entryProblem();
     if (problem || !paymentDate) {
       toast('error', problem ?? 'Enter the payment date');
@@ -585,7 +611,13 @@ export default function PaymentAllocation() {
           <Card>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Customer: the shared customer box */}
-              <div className="lg:col-span-2">
+              <div
+                className="lg:col-span-2"
+                onChange={(e) => setCustomerBoxText((e.target as HTMLInputElement).value)}
+                // Escape keeps the chosen customer. Leaving the box mid-search does not: posting
+                // stays blocked until a customer is picked or "Keep" is pressed.
+                onKeyDown={(e) => { if (e.key === 'Escape') setCustomerBoxText(null); }}
+              >
                 <label htmlFor="payment-customer" className="block text-sm font-medium text-nav-dark mb-1">Customer</label>
                 <CustomerSearchPicker<CustomerOption>
                   id="payment-customer"
@@ -600,6 +632,19 @@ export default function PaymentAllocation() {
                   placeholder="Search by name or account #..."
                   ariaLabel="Customer"
                 />
+                {/* Two farms can share a name; the account # tells the clerk which one will be paid. */}
+                {selectedCustomer?.account_number && (
+                  <p className="mt-1 text-xs text-secondary">Account #{selectedCustomer.account_number}</p>
+                )}
+                {customerBeingChanged && (
+                  <p className="mt-1 text-xs text-amber-600">
+                    You started a new customer search. Pick a customer from the list to switch, or{' '}
+                    <button type="button" className="underline font-medium" onClick={() => setCustomerBoxText(null)}>
+                      keep {selectedCustomer.farm_name}
+                    </button>
+                    .
+                  </p>
+                )}
                 {selectedCustomer && prepayBalanceCents !== null && prepayBalanceCents > 0 && (
                   <p className="mt-1 text-xs text-secondary">
                     Prepay on account: <span className="font-medium text-crx-green">{fmt(prepayBalanceCents)}</span>
@@ -732,21 +777,23 @@ export default function PaymentAllocation() {
                       size="sm"
                       icon={<Zap className="w-4 h-4" />}
                       onClick={handleAutoAllocate}
-                      disabled={submitting || checkCents <= 0 || invoices.length === 0}
+                      disabled={submitting || customerBeingChanged || checkCents <= 0 || invoices.length === 0}
                     >
                       Auto-Allocate
                     </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      icon={<ListChecks className="w-4 h-4" />}
-                      onClick={handlePayFullBalance}
-                      showChevron={false}
-                      disabled={submitting || invoicesNotReady || invoices.length === 0 || checkAmountRefused}
-                      title="Fill every open invoice with its full balance (fills in the check amount when it is empty). Nothing is saved until Apply Payment."
-                    >
-                      Pay full balance
-                    </Button>
+                    {canPayFullBalance && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<ListChecks className="w-4 h-4" />}
+                        onClick={handlePayFullBalance}
+                        showChevron={false}
+                        disabled={submitting || customerBeingChanged || invoicesNotReady || invoices.length === 0 || checkAmountRefused || checkCents <= 0}
+                        title="Enter the check amount first. Fills every open invoice with its full balance; any extra becomes prepay credit. Nothing is saved until Apply Payment."
+                      >
+                        Pay full balance
+                      </Button>
+                    )}
                     <Button
                       variant="secondary"
                       size="sm"
@@ -894,6 +941,7 @@ export default function PaymentAllocation() {
                     onClick={handleSubmit}
                     loading={submitting}
                     disabled={
+                      customerBeingChanged ||
                       invoicesNotReady ||
                       paymentDateError !== null ||
                       remaining < 0 ||

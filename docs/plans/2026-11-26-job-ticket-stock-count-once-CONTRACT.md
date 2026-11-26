@@ -33,9 +33,9 @@ Unchanged. Same roles, grants, wrappers and idempotency keys. New group helper: 
 ## State and failure
 - Automatic change: the later posting moves less stock and flags the line. Authorized by Mason 2026-11-26 (A).
 - Relink: no new rule. The existing header lock freezes a filed ticket's job; group membership is read at posting time, so an unfiled ticket moved between jobs counts toward the job it is on when filed.
-- Reversal: takes the number lock first, then re-reads; refuses `APPLICATION_RECORD_COUNTED_WITH_JOB` for a ticket record whose job has its `job` record. Correction route there: an admin stock adjustment (existing). Unlinked tickets and open jobs reverse as today; after reversal the record is deleted, so its rows no longer join to a record and leave the group.
+- Reversal (smart undo, Mason 2026-11-26 "Yes, smart undo"; replaces the earlier refusal): takes the number lock first, then re-reads. A ticket counted with its completed job (same customer) reverses: every line is credited in full, then, per product, what the job still needs without this ticket (max(job claims, other tickets' claims) − what the others took, capped at this ticket's take) goes back out as a `job_applied` row on the job record with `already_counted` = −that amount, so the job's claim is unchanged and the stock stays counted. If other tickets took more than the job now needs because of this ticket, that extra stays out (a reversal can only return what this ticket took) and a zero `adjusted` row flags it for review. Unlinked tickets, other customers and open jobs reverse as today; the record is deleted, so its rows leave the group and the ticket can be re-filed or relinked.
 - Timing: the number lock serializes completion, filing and reversal; every group read is a new statement after it (READ COMMITTED, fresh snapshot). Lock order, no cycles: completion = job row, number lock, stock rows; filing = ticket row, number lock, stock rows; reversal = number lock, record and ledger rows, stock rows (never the ticket or job row). Retries return the saved receipt before any lock (unchanged wrappers).
-- Rollback before first use: the rollback script restores the three old bodies and drops the trigger (columns stay, unused). After first use: forward fix only; the old reversal would refuse a zero row safely.
+- Rollback before first use: the rollback script restores the three old bodies and drops the two helpers (columns stay, unused). After first use: forward fix only; the old reversal would refuse a zero row safely.
 
 ## Delivery
 Database only, one PR to `staging`. The deployed app calls the same RPCs with the same arguments.
@@ -99,3 +99,10 @@ None left (Mason answered A on 2026-11-26).
 - MED 6 (fixed): only the two helpers mark the migration applied; the columns and index use IF NOT EXISTS, so it re-applies after a rollback. Proven.
 - LOW 7 (fixed): the rollback file sets ON_ERROR_STOP itself; the prover runs the documented command and sees a non-zero exit.
 - LOW 8 (fixed): the race cases start the second session only after the completion holds the number lock (polled in pg_locks), not after a fixed delay.
+
+## Sol round 2 (2026-11-26, head 1ad95c12a)
+- HIGH (fixed by Mason's decision "Yes, smart undo"): the hand-adjustment correction left a wrongly linked ticket's claim in the job's group. Reversal now undoes a counted ticket and keeps on the job's books only what the job still needs (see Reversal above). Prover: Sol's 10 + 12 example ends at 22 out; ticket 6 + job 10 undone keeps 10; re-filing takes nothing more; the race reverses cleanly.
+- MED reversal blocked for a ticket with a different product: resolved, the refusal is gone.
+- MED in-flight old body across deployment: accepted residual (settled, round 1).
+- LOW race proof: the second session starts only after the completion holds the number lock; a stall after that still runs inside the window the overlap assertion checks.
+- LOW contract said rollback drops a trigger: fixed (drops the two helpers).

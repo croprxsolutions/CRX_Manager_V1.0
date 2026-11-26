@@ -136,7 +136,7 @@ try {
     INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD}', '${CUST}', '[PROVER] Count Once Field');
     INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST2}', '[PROVER] Count Once Other Farm', true);`);
   for (let n = 0; n <= 9; n += 1) product(n);
-  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22, 23, 24]) product(n);
+  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22, 23, 24, 25, 26]) product(n);
   const wrapperAcl = WRAPPERS.map(acl);
 
   // BEFORE: the bug. Ticket 6 on an in-progress job, then the job's 10: 16 out.
@@ -179,7 +179,10 @@ try {
   file(T(21));
   assert.equal(rows(21), '10/-/false/none 0/7/true/blend_ticket');
   balance(21, 10, 'straddle, job 10 completed before the migration, ticket 7 filed after');
-  refused(USERS.admin, reverseSql(T(20)), /APPLICATION_RECORD_COUNTED_WITH_JOB/);
+  // Smart undo of the pre-migration ticket: the job still needs all 10, so the 6 stays out on the job's books.
+  ok(USERS.admin, reverseSql(T(20)));
+  assert.equal(rows(20), '6/-/false/none 4/6/true/job 6/-6/true/job');
+  balance(20, 10, 'straddle ticket reversed; the job keeps its 10');
 
   // 1. Ticket 6 then job 10: job moves 4, already_counted 6, flagged.
   job(1, [[1, 10]]); ticket(1, 1, [[1, 6]]);
@@ -252,9 +255,15 @@ try {
   assert.equal(rows('c'), '6/-/false/blend_ticket 2/-/false/job 4/6/true/job');
   balance('c', 12, 'ticket 6 moved from open job A (2) to open job B (10) before filing');
 
-  // 10. Reversal: refused for a counted ticket; allowed for an unlinked one; a reversed ticket leaves the group.
-  refused(USERS.admin, reverseSql(T(1)), /APPLICATION_RECORD_COUNTED_WITH_JOB/);
-  balance(1, 10, 'case 10, refused reversal changed nothing');
+  // 10. Smart undo (Mason 2026-11-26): a ticket counted with its completed job reverses; the job keeps what it
+  // still needs (ticket 6, job 10: nothing comes back). Re-filing the ticket then takes nothing more.
+  assert.match(ok(USERS.admin, reverseSql(T(1))), /"kept_on_job_lines": 1/);
+  assert.equal(rows(1), '6/-/false/none 4/6/true/job 6/-6/true/job');
+  balance(1, 10, 'case 10, counted ticket 6 reversed; job 10 keeps its stock');
+  assert.notEqual(scalar(`SELECT count(*) FROM public.activity_feed WHERE description LIKE '%1 chemical line(s) kept on its completed job — review%';`), '0');
+  file(T(1));
+  assert.equal(rows(1), '6/-/false/none 4/6/true/job 6/-6/true/job 0/6/true/blend_ticket');
+  balance(1, 10, 'case 10, the same ticket re-filed after the undo');
   ok(USERS.admin, reverseSql(T(6)));
   balance(6, 4, 'case 10, unlinked ticket 5 reversed');
   job(9, [[9, 10]]); ticket(9, 9, [[9, 6]]);
@@ -288,6 +297,28 @@ try {
   assert.equal(rows(24), '10/-/false/job 6/-/false/blend_ticket');
   balance(24, 16, 'farm-A ticket filed against a completed farm-B job');
 
+  // Sol r2: job 10 completed, then a separate 12-gallon spray filed against it by mistake (takes 2). Undo puts the 2
+  // back; re-filed unlinked it takes its 12; the job's real 10-gallon ticket then takes nothing more. 22 in all.
+  job(25, [[25, 10]]); ticket(25, 25, [[25, 12]]); ticket(251, 25, [[25, 10]]);
+  complete(J(25)); file(T(25));
+  balance(25, 12, 'wrong 12-gallon ticket filed against a completed 10-gallon job');
+  ok(USERS.admin, reverseSql(T(25)));
+  balance(25, 10, 'the wrong ticket reversed: its 2 come back');
+  ok(USERS.rep, relinkSql(T(25), null)); file(T(25));
+  file(T(251));
+  assert.equal(rows(25), '10/-/false/job 2/10/true/none 12/-/false/blend_ticket 0/10/true/blend_ticket');
+  balance(25, 22, 'wrong ticket re-filed unlinked, then the job\'s real ticket');
+
+  // A ticket whose claim made another ticket take extra: job 10, ticket 7 (takes 0), ticket 6 (takes 3); undoing the 7
+  // returns nothing (it took nothing); the other ticket's extra 3 stays out and is flagged for review.
+  job(26, [[26, 10]]); ticket(26, 26, [[26, 7]]); ticket(261, 26, [[26, 6]]);
+  complete(J(26)); file(T(26)); file(T(261));
+  balance(26, 13, 'job 10, then tickets 7 and 6');
+  assert.match(ok(USERS.admin, reverseSql(T(26))), /"over_taken_lines": 1/);
+  assert.equal(scalar(`SELECT count(*) FROM public.inventory_transactions WHERE product_id = '${P(26)}' AND transaction_type = 'adjusted'
+    AND quantity = 0 AND requires_review AND notes LIKE 'Review: other blend tickets on this job took 3 more%';`), '1');
+  balance(26, 13, 'ticket 7 reversed: the other ticket\'s extra 3 stays out, flagged');
+
   // Races: each must wait for the completion's lock, then act on the committed job record.
   job(11, [['d', 10]]); ticket(11, 11, [['d', 6]]);
   let b = await whileCompleting(J(11), USERS.rep, fileSql(T(11)));
@@ -298,9 +329,9 @@ try {
   job(14, [['f', 10]]); ticket(14, 14, [['f', 6]]);
   file(T(14));
   b = await whileCompleting(J(14), USERS.admin, reverseSql(T(14)));
-  assert.notEqual(b.code, 0, `the reversal must be refused after waiting: ${b.text}`);
-  assert.match(b.text, /APPLICATION_RECORD_COUNTED_WITH_JOB/);
-  balance('f', 10, 'race, reversal attempted while the job completes (refused)');
+  assert.equal(b.code, 0, b.text);
+  assert.match(b.text, /"kept_on_job_lines": 1/);
+  balance('f', 10, 'race, ticket reversed while its job completes: the job keeps its 10');
 
   // ROLLBACK: refused while counted rows exist; on a database with none it restores the previous bodies.
   const rollback = fs.readFileSync(ROLLBACK, 'utf8').replaceAll('\r\n', '\n');

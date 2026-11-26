@@ -108,11 +108,8 @@ function tileTemplate(picture: Picture | `${Picture}-outage`): string {
   if (stagingProof && picture.endsWith('-outage')) {
     return `${location.origin}/api/maps-step0?drawingOutage=1&picture=${picture[0]}&${tileQuery}${outageQuery}`;
   }
-  if (livePictures && picture === 'A') {
-    return `https://${USDA_HOST}/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}`;
-  }
-  if (livePictures && picture === 'B') {
-    return `https://${MAPBOX_HOST}/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}?access_token=${encodeURIComponent(mapboxToken ?? '')}`;
+  if (livePictures && (picture === 'A' || picture === 'B')) {
+    return `proof-live://${picture.toLowerCase()}/${pictureAttempt}/{z}/{x}/{y}`;
   }
   return `${location.origin}${import.meta.env.BASE_URL}tiles/${picture}.png?${tileQuery}${outageQuery}`;
 }
@@ -163,6 +160,9 @@ const mapboxFeedback = document.querySelector<HTMLAnchorElement>('#mapbox-feedba
 const saveKey = 'maps-step0-synthetic-draft';
 let chosenPicture: Picture = 'A';
 let showingPicture: Picture | undefined = 'A';
+let pictureAttempt = 0;
+let liveAttemptWithImage = 0;
+let creditsPending = false;
 let outagePicture: Picture | undefined;
 let outageAttempt = 0;
 let livePictures = false;
@@ -181,12 +181,16 @@ function updateCredits(picture: Picture | undefined): void {
 
 function setPictureTiles(picture: Picture | `${Picture}-outage`): void {
   const source = map.getSource(PICTURE_SOURCE_ID) as RasterTileSource;
-  source.setTiles([tileTemplate(picture)]);
+  pictureAttempt += 1;
   if (picture === 'A' || picture === 'B') {
     showingPicture = picture;
+    creditsPending = livePictures;
     map.setLayoutProperty(PICTURE_LAYER_ID, 'visibility', 'visible');
-    updateCredits(picture);
+    // Keep old raster pixels and their successor's credit from appearing together.
+    map.setPaintProperty(PICTURE_LAYER_ID, 'raster-opacity', livePictures ? 0 : 1);
+    updateCredits(undefined);
   }
+  source.setTiles([tileTemplate(picture)]);
 }
 
 function recoverPicture(failed: Picture): void {
@@ -194,6 +198,7 @@ function recoverPicture(failed: Picture): void {
   retryButton.disabled = false;
   if (failed !== chosenPicture) {
     showingPicture = undefined;
+    creditsPending = false;
     map.setLayoutProperty(PICTURE_LAYER_ID, 'visibility', 'none');
     updateCredits(undefined);
     status.value = 'Both pictures unavailable · drawing stays open';
@@ -202,6 +207,44 @@ function recoverPicture(failed: Picture): void {
   const fallback = failed === 'A' ? 'B' : 'A';
   setPictureTiles(fallback);
   status.value = `${pictureName(failed)} unavailable · showing ${livePictures ? pictureName(fallback) : fallback}`;
+}
+
+if (livePicturesEnabled) {
+  maplibregl.addProtocol('proof-live', async (request, controller) => {
+    const tile = new URL(request.url);
+    const picture = tile.hostname === 'a' ? 'A' : 'B';
+    const [, attempt, zoom, column, row] = tile.pathname.split('/');
+    const stillCurrent = () => !controller.signal.aborted && Number(attempt) === pictureAttempt;
+    const providerUrl = picture === 'A'
+      ? `https://${USDA_HOST}/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${zoom}/${row}/${column}`
+      : `https://${MAPBOX_HOST}/styles/v1/mapbox/satellite-streets-v12/tiles/256/${zoom}/${column}/${row}?access_token=${encodeURIComponent(mapboxToken ?? '')}`;
+    try {
+      const response = await fetch(providerUrl, { signal: controller.signal });
+      if (!response.ok || !response.headers.get('Content-Type')?.startsWith('image/')) {
+        throw new Error('Picture provider returned no image');
+      }
+      const data = await response.arrayBuffer();
+      if (!stillCurrent()) throw new Error('Tile belongs to an earlier picture');
+      liveAttemptWithImage = pictureAttempt;
+      return {
+        data,
+        cacheControl: response.headers.get('Cache-Control') ?? undefined,
+        expires: response.headers.get('Expires') ?? undefined,
+      };
+    } catch {
+      if (stillCurrent()) recoverPicture(picture);
+      const error = new Error('Live picture tile unavailable');
+      error.name = 'ProofPictureTileUnavailable';
+      throw error;
+    }
+  });
+  map.on('sourcedata', (event) => {
+    if (!creditsPending || event.sourceId !== PICTURE_SOURCE_ID || !event.isSourceLoaded
+      || liveAttemptWithImage !== pictureAttempt || !showingPicture) return;
+    creditsPending = false;
+    updateCredits(showingPicture);
+    map.setPaintProperty(PICTURE_LAYER_ID, 'raster-opacity', 1);
+  });
 }
 
 const proof: ProofApi = {
@@ -282,7 +325,9 @@ map.on('load', () => {
 
 map.on('error', (event) => {
   const error = event.error;
-  if (!error || error.name === 'AbortError') return;
+  if (!error) return;
+  const name = 'name' in error && typeof error.name === 'string' ? error.name : 'Error';
+  if (name === 'AbortError' || name === 'ProofPictureTileUnavailable') return;
   if ('status' in error && 'url' in error && typeof error.url === 'string') {
     const url = new URL(error.url);
     const failedFixture = url.origin === location.origin && (stagingProof
@@ -292,11 +337,9 @@ map.on('error', (event) => {
       if (outagePicture && url.searchParams.get('attempt') === String(outageAttempt)) recoverPicture(outagePicture);
       return;
     }
-    if (livePictures && url.hostname === USDA_HOST) return recoverPicture('A');
-    if (livePictures && url.hostname === MAPBOX_HOST) return recoverPicture('B');
   }
   // eslint-disable-next-line no-console -- the spec fails on any console.error, so map errors must reach it
-  console.error('MapLibre proof error:', error.name);
+  console.error('MapLibre proof error:', name);
 });
 
 toolbar.querySelector('#start-polygon')!.addEventListener('click', () => {
@@ -324,6 +367,7 @@ toolbar.querySelector('#fail-picture')!.addEventListener('click', () => {
 });
 retryButton.addEventListener('click', () => proof.switchPicture(chosenPicture));
 toolbar.querySelector('#save-draft')!.addEventListener('click', () => {
+  if (!proof.ready) return;
   const draft = draw.getAll();
   if (draw.getMode() === 'draw_polygon' || !draft.features.length) {
     status.value = 'Finish a polygon before saving';

@@ -171,9 +171,12 @@ export function needsPing(pr, comments, { checks, lane, sol, asked, carried, bac
 
 // One reminder per head, 24 h after its first ping, while Taha is still requested, has not decided this head
 // (a comment alone still counts as waiting) and required checks are green. The clock is the ping comment's time.
-export function needsReminder(pr, comments, now, { checks, carried }) {
+export function needsReminder(pr, comments, now, { checks, carried, lane }) {
   const no = (why) => ({ remind: false, why });
   if (!hasLabel(pr) || pr.isDraft || isTahasPr(pr) || pr.isCrossRepository || !tahaRequested(pr)) return no('not a labelled PR waiting on Taha');
+  // Same skip as needsPing(), for a wiring-only PR pinged before that skip existed (Codex bot on #2639).
+  const inLane = lane?.();
+  if (inLane?.files?.length && inLane.files.every(wiringOnly)) return no("only the lane block's own files: needs Mason's code, not Taha's review");
   if (tahaVerdict(pr)) return no('Taha decided this head');
   const first = pinged(comments, pr.headRefOid)[0];
   if (!first) return no('not pinged for this head yet');

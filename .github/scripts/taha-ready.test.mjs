@@ -226,6 +226,8 @@ test('reminder: once per head, 24 h after the first ping, while Taha has not dec
   const day = T0 + 24 * 3600e3;
   assert.equal(needsReminder(waiting, pingedAt, day, { checks: green }).remind, true);
   assert.equal(needsReminder(waiting, pingedAt, day - 1, { checks: green }).remind, false, 'under 24 h');
+  assert.equal(needsReminder(waiting, pingedAt, day, { checks: green, lane: () => ({ files: ['.claude/hooks/pr-merge-guard.mjs'] }) }).remind, false, 'wiring-only: no reminder');
+  assert.equal(needsReminder(waiting, pingedAt, day, { checks: green, lane: () => ({ files: ['.claude/hooks/pr-merge-guard.mjs', 'src/pages/Quotes.tsx'] }) }).remind, true, 'wiring plus a lane file: reminded');
   assert.equal(needsReminder(waiting, [], day, { checks: green }).remind, false, 'never pinged');
   assert.equal(needsReminder(waiting, [bot(`x ${pingMarker(NEW)}`)], day, { checks: green }).remind, false, 'pinged for another head only');
   assert.equal(needsReminder(waiting, [...pingedAt, bot(`y ${remindMarker(HEAD)}`)], day, { checks: green }).remind, false, 'already reminded');

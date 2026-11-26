@@ -19,9 +19,10 @@ const stagingSql = wrapped(cutover);
 assert.ok(stagingSql.includes(stagingContext), 'The staging runner preparation must be in the base branch');
 
 const definitionHash = `SELECT md5(concat(
-  pg_get_functiondef('public.liquid_density_review_open()'::regprocedure),
-  pg_get_functiondef('public.return_liquid_density_to_draft_for_brand()'::regprocedure),
-  (SELECT pg_get_triggerdef(oid) FROM pg_trigger
+  (SELECT string_agg(p::text, '' ORDER BY p.proname) FROM pg_proc p
+    WHERE p.oid IN ('public.liquid_density_review_open()'::regprocedure,
+                    'public.return_liquid_density_to_draft_for_brand()'::regprocedure)),
+  (SELECT concat(tgenabled, pg_get_triggerdef(oid)) FROM pg_trigger
     WHERE tgrelid = 'public.product_parent_brands'::regclass AND tgname = 'return_liquid_density_to_draft_for_brand')
 ));`;
 try {

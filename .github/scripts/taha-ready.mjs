@@ -55,10 +55,12 @@ const checksFor = (pr, checks, backport = () => false) => (isMainHotfix(pr) && A
   ? checks.filter((c) => !(c.name === GATE_CHECKS[1] || (c.name === GATE_CHECKS[0] && c.bucket === 'fail' && backport()))) : checks);
 // True when the guard run's failure annotations ask only for the hotfix-backport label (GitHub adds its own
 // "Process completed with exit code" line to every failed step). Anything else, or nothing readable, is false.
+// Matched on check-hotfix-content's own sentence, not the bare label: the bad-name error quotes the branch name (Taha on #2663).
+const BACKPORT_REASON = /^This hotfix carries work staging has that main hasn't released\b/;
 export function onlyBackportReason(annotations) {
   const errors = (Array.isArray(annotations) ? annotations : []).filter((a) => a?.annotation_level === 'failure')
-    .map((a) => String(a.message ?? '')).filter((m) => !/^Process completed with exit code \d+\.?$/.test(m.trim()));
-  return errors.length > 0 && errors.every((m) => m.includes(BACKPORT_LABEL));
+    .map((a) => String(a.message ?? '').trim()).filter((m) => !/^Process completed with exit code \d+\.?$/.test(m));
+  return errors.length > 0 && errors.every((m) => BACKPORT_REASON.test(m) && m.includes(BACKPORT_LABEL));
 }
 export function githubOwned(files) {
   const hits = (files ?? []).map((f) => f?.filename).filter((n) => typeof n === 'string' && n.startsWith('.github/'));
@@ -144,7 +146,11 @@ export function needsPing(pr, comments, { checks, sol, asked, carried, backport 
   // His approval survives a merge from main, but the label must follow the latest push: ask for the label alone.
   if (isMainHotfix(pr) && !pr.isDraft && !isTahasPr(pr) && !pr.isCrossRepository && tahaVerdict(pr, carried) === APPROVED) {
     if (pinged(comments, pr.headRefOid).length) return no('already pinged for this head');
-    return backport() ? { ping: true, why: 'approved hotfix waits on the hotfix-backport label', backport: true, labelOnly: true } : no('Taha approved this head');
+    if (!backport()) return no('Taha approved this head');
+    // A label added before a fix push is wasted (backportAllowed counts only one after the latest push), so other checks go first (Taha on #2663).
+    const checkProblem = requiredChecksProblem(checksFor(pr, checks(), backport));
+    if (checkProblem) return no(checkProblem);
+    return { ping: true, why: 'approved hotfix waits on the hotfix-backport label', backport: true, labelOnly: true };
   }
   if (!hasLabel(pr) || pr.isDraft || isTahasPr(pr) || pr.isCrossRepository) return no('not a labelled, ready PR of ours');
   if (tahaReviewedHead(pr)) return no('Taha already reviewed this head');

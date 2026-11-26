@@ -139,6 +139,9 @@ test("the guard's reason is read from its failure annotations: only the hotfix-b
   assert.equal(onlyBackportReason([exit, behind]), false);
   assert.equal(onlyBackportReason([exit, label, behind]), false);
   assert.equal(onlyBackportReason([exit]), false, 'no reason given: held');
+  // The bad-name error quotes the branch, which can contain the label's text (Taha on #2663, LOW 1).
+  const badName = { annotation_level: 'failure', message: "Only release/next (the weekly release) and hotfix/<name> branches may open a PR into main; 'hotfix/fix/hotfix-backport-note' should target staging." };
+  assert.equal(onlyBackportReason([exit, badName]), false);
   assert.equal(onlyBackportReason([]), false);
   assert.equal(onlyBackportReason(null), false);
 });
@@ -175,7 +178,7 @@ test('the ping asks for the hotfix-backport label only on a hotfix whose guard w
 test('an approved hotfix whose guard still wants the label gets one label-only ping (as on #2573)', () => {
   const approved = hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: HEAD } }] });
   const lazy = { checks: never, sol: never, asked: never };
-  const gate = { ...lazy, carried: () => true }; // the merge gate accepts his Approve of this head
+  const gate = { ...lazy, checks: gateWaiting, carried: () => true }; // the merge gate accepts his Approve of this head
   assert.equal(needsPing(approved, [], { ...lazy, carried: () => false, backport: () => true }).ping, false, 'retargeted since his Approve: no label-only ping');
   const p = needsPing(approved, [], { ...gate, backport: () => true });
   assert.equal(p.ping, true);
@@ -183,12 +186,16 @@ test('an approved hotfix whose guard still wants the label gets one label-only p
   assert.doesNotMatch(pingText(approved, null, p), /Approve/);
   assert.equal(needsPing(approved, [bot(HEAD)], { ...gate, backport: () => true }).ping, false);
   assert.equal(needsPing(approved, [], { ...gate, backport: () => false }).ping, false);
+  // Other required checks red: held, or his label is wasted by the fix push (Taha on #2663, LOW 2).
+  const red = needsPing(approved, [], { ...gate, checks: () => [...gateWaiting(), { name: 'CI', bucket: 'fail' }], backport: () => true });
+  assert.equal(red.ping, false);
+  assert.match(red.why, /CI: fail/);
   // Approved on an older head, or not a hotfix: the normal rules apply.
   assert.equal(needsPing(hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: NEW } }] }), [], { ...lazy, backport: () => true }).ping, false);
   assert.equal(needsPing(pr({ reviews: approved.reviews }), [], { ...lazy, backport: never }).ping, false);
   // An older-head Approve the merge gate carries over (#2605) still gets the label-only ping after a push.
   const carriedOver = hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: NEW } }] });
-  const c = needsPing(carriedOver, [], { ...lazy, carried: () => true, backport: () => true });
+  const c = needsPing(carriedOver, [], { ...gate, backport: () => true });
   assert.equal(c.ping, true);
   assert.equal(c.labelOnly, true);
 });
@@ -257,6 +264,11 @@ test('reminder: once per head, 24 h after the first ping, while Taha has not dec
   assert.equal(needsReminder({ ...waiting, reviews: [rv('COMMENTED')] }, pingedAt, day, { checks: green }).remind, true, 'a comment still waits on his decision');
   assert.equal(needsReminder(waiting, pingedAt, day, { checks: () => [{ name: 'CI', bucket: 'fail' }] }).remind, false, 'checks red');
   assert.equal(needsReminder(waiting, [{ ...pingedAt[0], author: { login: 'someone' } }], day, { checks: green }).remind, false, "a person's copy of the marker doesn't count");
+  // A hotfix: a red guard holds the reminder unless its only reason is the hotfix-backport label (Taha on #2663, LOW 3).
+  const hot = { ...waiting, baseRefName: 'main', headRefName: 'hotfix/q' };
+  const gate = () => [...green(), { name: 'Release flow guard (main)', bucket: 'fail' }, { name: 'release-gate', bucket: 'pending' }];
+  assert.equal(needsReminder(hot, pingedAt, day, { checks: gate, backport: () => false }).remind, false, 'guard red for another reason');
+  assert.equal(needsReminder(hot, pingedAt, day, { checks: gate, backport: () => true }).remind, true, 'guard waits only on the label');
 });
 
 test('topics: only from the fixed list, at most 3, model noise ignored', () => {

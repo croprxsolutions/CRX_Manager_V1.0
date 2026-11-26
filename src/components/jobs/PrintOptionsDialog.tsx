@@ -141,7 +141,7 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
     >
       <div className="space-y-5">
         <p className="text-sm text-secondary">
-          Choose the packet contents for this print. {canSaveDefault && 'Save as default remembers these options for future sheets.'}
+          Choose the packet contents and format for this print. {canSaveDefault && 'Save as default remembers these options for future sheets.'}
         </p>
 
         <div>

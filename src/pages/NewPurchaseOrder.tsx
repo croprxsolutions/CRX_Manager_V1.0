@@ -269,9 +269,7 @@ export default function NewPurchaseOrder() {
     if (invalidCost) {
       const productName = products.find((p) => p.id === invalidCost.product_id)?.product_name;
       const line = productName ? `"${productName}"` : `line ${items.indexOf(invalidCost) + 1}`;
-      toast('error', invalidCost.unit_cost.trim() === ''
-        ? `Enter a unit cost for ${line} (type 0 if it is free).`
-        : `Check the unit cost for ${line}: it must be a dollar amount of zero or more. ${MONEY_PRECISION_MESSAGE}`);
+      toast('error', invalidCost.unit_cost.trim() === '' ? `Enter a unit cost for ${line} (type 0 if it is free).` : `Check the unit cost for ${line}: it must be a dollar amount of zero or more. ${MONEY_PRECISION_MESSAGE}`);
       return;
     }
 

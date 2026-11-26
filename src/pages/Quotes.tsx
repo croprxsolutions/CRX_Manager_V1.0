@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { parseLocalDate, localDatePlusDays, localToday } from '../lib/dateUtils';
 import { Plus, Upload, Copy, Download, FileText, Trash2, ChevronDown, ChevronUp, PackageCheck, AlertTriangle, Check, Search, ArrowUpDown } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -24,6 +24,9 @@ import { QUOTE_COLUMNS } from '../lib/costFields';
 import { quoteStatusLabel, quoteBadgeVariant } from '../lib/quoteStatusLabel';
 import { applyTableSearchSort, type SortDir } from '../lib/tableSearchSort';
 import { useIsPhone } from '../hooks/useIsPhone';
+import { listSortParam, oneOf, parseListSort, useUrlListState } from '../hooks/useUrlListState';
+import { isMyRecord } from '../lib/myRecords';
+import MineToggle from '../components/ui/MineToggle';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
@@ -56,6 +59,11 @@ const SORT_WORDS: Record<string, [string, string, string]> = {
   expires_at: ['Expires', 'soonest first', 'latest first'],
 };
 const quotesWord = (n: number) => (n === 1 ? 'quote' : 'quotes');
+// Search, filters, sort and Mine/All live in the address, so Back from a quote brings the same view back.
+// `filter=planned` is the address the dashboard's planned-programs alert already links to.
+const LIST_DEFAULTS = { q: '', status: '', filter: '', sort: '', mine: '' } as const;
+const STATUS_VALUES = ['', ...STATUSES];
+const SORTABLE_KEYS = ['quote_number', 'status', 'tier', 'total_price', 'created_at', 'expires_at'];
 
 const shortDate = (d: Date, withYear = true) =>
   d.toLocaleDateString('en-US', withYear ? { month: 'short', day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric' });
@@ -63,6 +71,8 @@ const shortDate = (d: Date, withYear = true) =>
 // Row shape with denormalized, searchable strings (F1: search by product/customer).
 interface QuoteRow extends Quote {
   customer_name: string;
+  /** The customer's assigned sales rep, for Mine. */
+  customer_rep_id: string | null;
   product_names: string;
 }
 
@@ -85,17 +95,18 @@ function RowMenu({ row, onConvert, onDuplicate }: { row: QuoteRow; onConvert: (r
 
 export default function Quotes() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [quotes, setQuotes] = useState<QuoteRow[]>([]);
   const [loading, setLoading] = useState(true);
   // The last list read failed: no rows, so it never reads as "No quotes yet".
   const [loadFailed, setLoadFailed] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('');
-  const [plannedFilter, setPlannedFilter] = useState(false);
+  const [list, setList] = useUrlListState(LIST_DEFAULTS);
+  const statusFilter = oneOf(list.status, STATUS_VALUES, '');
+  const plannedFilter = list.filter === 'planned';
   // Held here (not inside the table) so the result count matches the rows shown.
-  const [search, setSearch] = useState('');
+  const search = list.q;
   // Held here too, so the phone Sort chip and the table headers share one sort.
-  const [sort, setSort] = useState<{ key: string | null; dir: SortDir }>({ key: null, dir: 'asc' });
+  const sort = parseListSort(list.sort, SORTABLE_KEYS);
+  const setSort = (next: { key: string | null; dir: SortDir }) => setList({ sort: listSortParam(next) });
   const isPhone = useIsPhone();
   // Right-edge fade while the phone chip row has more to scroll sideways.
   const chipRowRef = useRef<HTMLDivElement>(null);
@@ -107,6 +118,9 @@ export default function Quotes() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const { toast } = useToast();
   const { profile } = useAuth();
+  // Mine / All for a sales rep (a view filter, never a permission). Default All: nothing changes for the office.
+  const myId = profile?.role === 'sales_rep' ? profile.id : null;
+  const mineOnly = myId !== null && list.mine === '1';
   const { runWithBelowCostApproval } = useBelowCostApproval();
   const duplicateQuoteIdem = useIdempotencyKey('duplicate_quote', profile?.id || '');
   // F3 act-from-list: convert a sent/revised quote to an order in place (confirm popup).
@@ -341,7 +355,7 @@ export default function Quotes() {
     // Read every page: a single request is silently cut off at the server's row cap.
     const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('quotes')
-      .select(`${QUOTE_COLUMNS}, customer:customers(farm_name)`, { count: 'exact' })
+      .select(`${QUOTE_COLUMNS}, customer:customers(farm_name, assigned_sales_rep)`, { count: 'exact' })
       .is('deleted_at', null)
       .order('created_at', { ascending: false })
       .order('id')
@@ -358,11 +372,15 @@ export default function Quotes() {
     }
 
     // Seed rows with searchable strings; customer name is denormalized off the join.
-    const quoteList: QuoteRow[] = data.map((q) => ({
-      ...(q as Quote),
-      customer_name: (q as { customer?: { farm_name?: string } | null }).customer?.farm_name || '',
-      product_names: '',
-    }));
+    const quoteList: QuoteRow[] = data.map((q) => {
+      const customer = (q as { customer?: { farm_name?: string; assigned_sales_rep?: string | null } | null }).customer;
+      return {
+        ...(q as Quote),
+        customer_name: customer?.farm_name || '',
+        customer_rep_id: customer?.assigned_sales_rep ?? null,
+        product_names: '',
+      };
+    });
 
     // quote_items only carries product_id, so join through products for the name (F1: search by product).
     const quoteIds = quoteList.map((q) => q.id);
@@ -418,14 +436,12 @@ export default function Quotes() {
 
   useEffect(() => {
     fetchQuotes();
-    // Support ?filter=planned from dashboard alert link
-    const params = new URLSearchParams(location.search);
-    if (params.get('filter') === 'planned') setPlannedFilter(true);
-  }, [fetchQuotes, location.search]);
+  }, [fetchQuotes]);
 
   const filtered = quotes.filter((q) => {
     if (plannedFilter && !q.is_planned) return false;
     if (statusFilter && q.status !== statusFilter) return false;
+    if (mineOnly && !isMyRecord(q, q.customer_rep_id, myId)) return false;
     return true;
   });
 
@@ -460,8 +476,8 @@ export default function Quotes() {
     ),
   };
 
-  const filtersActive = !!statusFilter || plannedFilter;
-  const clearFilters = () => { setStatusFilter(''); setPlannedFilter(false); };
+  const filtersActive = !!statusFilter || plannedFilter || mineOnly;
+  const clearFilters = () => setList({ status: '', filter: '', mine: '' });
   const shownCount = visible.length;
 
   // ─── Bulk action handlers ───────────────────────────────────
@@ -766,7 +782,7 @@ export default function Quotes() {
     const ro = new ResizeObserver(checkChips);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [checkChips, loading, isPhone, statusFilter, plannedFilter, sort]);
+  }, [checkChips, loading, isPhone, statusFilter, plannedFilter, list.sort, mineOnly]);
 
   if (loading) {
     return (
@@ -913,7 +929,7 @@ export default function Quotes() {
               <input
                 type="text"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => setList({ q: e.target.value })}
                 placeholder={isPhone ? 'Quote, customer or product' : SEARCH_LABEL}
                 aria-label={SEARCH_LABEL}
                 className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-9 pr-3 text-base md:h-10 md:text-sm focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors"
@@ -925,12 +941,15 @@ export default function Quotes() {
               onScroll={checkChips}
               className={`-my-1 flex min-w-0 items-center gap-1.5 overflow-x-auto py-1 scrollbar-hide md:shrink-0 md:gap-2 md:overflow-visible ${chipsMore ? 'max-md:[mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]' : ''}`}
             >
+              {myId && (
+                <MineToggle label="Show my quotes or all quotes" mine={mineOnly} onChange={(mine) => setList({ mine: mine ? '1' : '' })} />
+              )}
               <Dropdown
                 inline
                 label="Status"
                 value={statusFilter || ALL}
                 active={!!statusFilter}
-                onChange={(v) => setStatusFilter(v === ALL ? '' : v)}
+                onChange={(v) => setList({ status: v === ALL ? '' : v })}
                 options={STATUS_OPTIONS}
                 className="shrink-0 max-md:[&>button]:gap-1.5 max-md:[&>button]:px-2.5"
               />
@@ -938,7 +957,7 @@ export default function Quotes() {
                 type="button"
                 aria-label="Planned programs"
                 aria-pressed={plannedFilter}
-                onClick={() => setPlannedFilter(!plannedFilter)}
+                onClick={() => setList({ filter: plannedFilter ? '' : 'planned' })}
                 className={`inline-flex h-11 md:h-10 shrink-0 items-center gap-1.5 rounded-full border px-2.5 md:gap-2 md:px-3.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/30 ${plannedFilter ? 'border-crx-green bg-crx-green-light text-crx-green' : 'border-gray-300 bg-white text-nav-dark hover:bg-gray-50'}`}
               >
                 {plannedFilter ? <Check className="w-4 h-4" aria-hidden="true" /> : <Plus className="w-4 h-4" aria-hidden="true" />}
@@ -974,7 +993,7 @@ export default function Quotes() {
             columns={columns}
             searchKeys={SEARCH_KEYS}
             searchValue={search}
-            onSearchChange={setSearch}
+            onSearchChange={(q) => setList({ q })}
             sortState={sort}
             onSortChange={setSort}
             phoneSort={false}

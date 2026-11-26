@@ -68,6 +68,8 @@ export interface FieldInvoiceListRow {
   total_cost_cents: number;
   balance_cents: number;
   invoice_date: string;
+  /** When payment is due (YYYY-MM-DD), shown in the lists' Due column; null when none is set. */
+  due_date?: string | null;
   /** Season the invoice is filed in (Oct 1–Sep 30, named by end year). The lists show
    * open invoices from every season, so a prior-season row is labelled with this. */
   season: number | null;
@@ -188,6 +190,7 @@ export function mapFieldInvoiceRow(raw: RawFieldInvoiceRow): FieldInvoiceListRow
     total_cost_cents: Number(raw.total_cost_cents) || 0,
     balance_cents: raw.balance_cents,
     invoice_date: raw.invoice_date,
+    due_date: raw.due_date ?? null,
     season: raw.season ?? null,
     invoice_group_id: raw.invoice_group_id ?? null,
     // Forward the server-computed send suppression flag so the "don't email a $0 split

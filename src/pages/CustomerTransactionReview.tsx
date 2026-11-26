@@ -4,11 +4,12 @@
  * Sprint 11: Financial Workflows
  */
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import Card from '../components/ui/Card';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import Badge from '../components/ui/Badge';
 import ReportShell from '../components/reports/ReportShell';
+import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
+import { useCustomerParam } from '../hooks/useCustomerParam';
 import { useToast } from '../components/ui/Toast';
 import { supabase, assertRpcResult } from '../lib/db';
 import { fetchAllRows, PAGE_SIZE, pageWithList } from '../lib/pagedRead';
@@ -21,10 +22,8 @@ import { formatCents as fmt } from '../lib/money';
 
 export default function CustomerTransactionReview() {
   const { toast } = useToast();
-  const [searchParams] = useSearchParams();
-
-  const [customers, setCustomers] = useState<{ id: string; farm_name: string }[]>([]);
-  const [customerId, setCustomerId] = useState(searchParams.get('customer') || '');
+  // The A/R screens' shared customer box: the choice lives in ?customer= and carries between tabs.
+  const { customerId, customerName, customerLabel, setCustomer } = useCustomerParam();
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [loadedRows, setData] = useState<CustomerTransactionRow[]>([]);
@@ -33,33 +32,6 @@ export default function CustomerTransactionReview() {
   const [loading, setLoading] = useState(false);
   // A failed read must not look like a customer with no transactions.
   const [loadFailed, setLoadFailed] = useState(false);
-  // The customer list failed to load: say so rather than offer an empty dropdown.
-  const [customersFailed, setCustomersFailed] = useState(false);
-  // Bumped by Try again to read the customer list once more.
-  const [customersAttempt, setCustomersAttempt] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchAllRows<{ id: string; farm_name: string }>((from, to) => pageWithList(supabase
-      .from('customers')
-      .select('id, farm_name', { count: 'exact' })
-      .eq('is_active', true)
-      .order('farm_name')
-      .order('id')
-      .range(from, to)))
-      .then(({ data: rows, error }) => {
-        if (cancelled) return;
-        if (error || !rows) {
-          toast('error', 'Failed to load the customer list');
-          setCustomers([]);
-          setCustomersFailed(true);
-          return;
-        }
-        setCustomers(rows);
-        setCustomersFailed(false);
-      });
-    return () => { cancelled = true; };
-  }, [toast, customersAttempt]);
 
   // A multi-page read can finish after a newer one started for another customer
   // or date range; only the latest request may set the rows and totals.
@@ -142,8 +114,6 @@ export default function CustomerTransactionReview() {
   const current = ready && !loading && loadedKey === `${customerId}|${startDate}|${endDate}`;
   const data = current ? loadedRows : [];
   const failed = current && loadFailed;
-
-  const customerName = customers.find((c) => c.id === customerId)?.farm_name || '';
 
   // Totals
   const totalDebits = data.reduce((s, r) => s + (r.debit_cents || 0), 0);
@@ -242,30 +212,16 @@ export default function CustomerTransactionReview() {
         onExportPDF={data.length > 0 ? handlePDF : undefined}
         extraControls={
           <div>
-            <label className="block text-xs font-medium text-secondary mb-1">Customer</label>
-            <select
+            <label htmlFor="transactions-customer" className="block text-xs font-medium text-secondary mb-1">Customer</label>
+            <CustomerSearchPicker
+              id="transactions-customer"
               value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-              aria-label="Select customer"
-              className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green min-w-[200px]"
-            >
-              <option value="">— Select Customer —</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>{c.farm_name}</option>
-              ))}
-            </select>
-            {customersFailed && (
-              <p role="alert" className="mt-1 text-xs text-red-600">
-                The customer list could not be loaded.{' '}
-                <button
-                  type="button"
-                  className="underline font-medium"
-                  onClick={() => { setCustomersFailed(false); setCustomersAttempt((n) => n + 1); }}
-                >
-                  Try again
-                </button>
-              </p>
-            )}
+              selectedLabel={customerLabel}
+              onSelect={(customer) => setCustomer(customer)}
+              placeholder="Search customers..."
+              ariaLabel="Select customer"
+              className="min-w-[200px]"
+            />
           </div>
         }
       >

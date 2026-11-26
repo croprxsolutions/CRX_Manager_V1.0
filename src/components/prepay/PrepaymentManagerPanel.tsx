@@ -18,6 +18,7 @@ import { useToast } from '../ui/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { sanitizeError, supabase, assertRpcResult } from '../../lib/db';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
+import { useCustomerParam } from '../../hooks/useCustomerParam';
 import { exportToCSV, fmtCSV } from '../../lib/csvExport';
 import { runCriticalAction } from '../../lib/criticalAction';
 import { Sentry } from '../../lib/sentry';
@@ -143,6 +144,10 @@ export default function PrepaymentManagerPanel() {
   const [bucketSplits, setBucketSplits] = useState<BucketSplit[]>([{ label: '', amount: '' }]);
   const [savingCheck, setSavingCheck] = useState(false);
 
+  // The A/R screens' shared customer box (?customer=, carried between tabs): narrows the table to that customer.
+  const { customerId, customerLabel, setCustomer } = useCustomerParam();
+  const shownCustomers = customerId ? customers.filter((c) => c.id === customerId) : customers;
+
   // Only the newest load may set state; a refresh after an apply is several reads.
   const loadSeq = useRef(0);
   const fetchCustomers = useCallback(async () => {
@@ -231,14 +236,24 @@ export default function PrepaymentManagerPanel() {
     setLoadingCredits(false);
   }, [toast]);
 
+  const closeCredits = useCallback(() => {
+    // A read still running for the closed customer must not fill the list.
+    creditsSeq.current += 1;
+    setExpandedCustomer(null);
+    setCustomerCredits([]);
+    setCreditsFailed(false);
+    setLoadingCredits(false);
+  }, []);
+
+  // Another customer picked in the box hides the open one: its credits (with Edit and Delete) must close too.
+  const openCustomer = expandedCustomer && (!customerId || expandedCustomer === customerId) ? expandedCustomer : null;
+  useEffect(() => {
+    if (expandedCustomer && !openCustomer) closeCredits();
+  }, [expandedCustomer, openCustomer, closeCredits]);
+
   const toggleExpand = (customerId: string) => {
     if (expandedCustomer === customerId) {
-      // A read still running for the closed customer must not fill the list.
-      creditsSeq.current += 1;
-      setExpandedCustomer(null);
-      setCustomerCredits([]);
-      setCreditsFailed(false);
-      setLoadingCredits(false);
+      closeCredits();
     } else {
       setExpandedCustomer(customerId);
       fetchCredits(customerId);
@@ -752,7 +767,8 @@ export default function PrepaymentManagerPanel() {
             disabled={loadFailed || loading}
             onClick={() =>
               exportToCSV(
-                customers as unknown as Record<string, unknown>[],
+                // Only the rows on screen: a one-customer view must not export other farms.
+                shownCustomers as unknown as Record<string, unknown>[],
                 [
                   { key: 'farm_name', header: 'Customer' },
                   { key: 'prepay_balance_cents', header: 'Prepay Balance ($)', format: (v: unknown) => fmtCSV((Number(v) || 0) / 100) },
@@ -818,27 +834,38 @@ export default function PrepaymentManagerPanel() {
       {/* Data Table */}
       <Card padding={false}>
         <div className="p-5">
+          <div className="mb-4 w-full sm:w-72">
+            <label htmlFor="prepayments-customer" className="block text-sm font-medium text-nav-dark mb-1">Customer</label>
+            <CustomerSearchPicker
+              id="prepayments-customer"
+              value={customerId}
+              selectedLabel={customerLabel}
+              onSelect={(customer) => setCustomer(customer)}
+              placeholder="All customers"
+              ariaLabel="Prepayments customer"
+            />
+          </div>
           <DataTable
-            data={customers as unknown as Record<string, unknown>[]}
+            data={shownCustomers as unknown as Record<string, unknown>[]}
             columns={columns as unknown as Column<Record<string, unknown>>[]}
             searchable
             searchPlaceholder="Search customers..."
             searchKeys={['farm_name']}
-            emptyTitle="No prepay balances"
-            emptyDescription="No customers currently have prepay credit balances"
+            emptyTitle={customerId ? 'No prepay balance for this customer' : 'No prepay balances'}
+            emptyDescription={customerId ? 'Clear the customer box to see every customer with prepay' : 'No customers currently have prepay credit balances'}
             loading={loading}
           />
 
           {/* Expanded credits for selected customer */}
-          {expandedCustomer && (
+          {openCustomer && (
             <div className="mt-4 border-t border-gray-100 pt-4">
               <h3 className="text-sm font-semibold text-nav-dark mb-3">
-                Individual Credits — {customers.find((c) => c.id === expandedCustomer)?.farm_name}
+                Individual Credits — {customers.find((c) => c.id === openCustomer)?.farm_name}
               </h3>
               {loadingCredits ? (
                 <p className="text-sm text-secondary py-4 text-center">Loading credits...</p>
               ) : creditsFailed ? (
-                <LoadFailedState title="This customer's credits could not be loaded" onRetry={() => { void fetchCredits(expandedCustomer); }} />
+                <LoadFailedState title="This customer's credits could not be loaded" onRetry={() => { void fetchCredits(openCustomer); }} />
               ) : customerCredits.length === 0 ? (
                 <p className="text-sm text-secondary py-4 text-center">No prepay credit records found for this customer</p>
               ) : (

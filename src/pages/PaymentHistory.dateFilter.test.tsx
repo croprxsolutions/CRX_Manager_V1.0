@@ -30,6 +30,7 @@ vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) 
 vi.mock('../hooks/useIdempotencyKey', () => ({ useIdempotencyKey: () => ({ getKey: () => 'idem', resetKey: vi.fn() }) }));
 
 import PaymentHistory from './PaymentHistory';
+import { groupPrepayChecks } from '../lib/prepayChecks';
 
 // 9:30 PM Chicago on Nov 24 is already Nov 25 in UTC: "Today" must still be Nov 24.
 const NOW = new Date('2026-11-25T03:30:00Z');
@@ -82,6 +83,61 @@ describe('Payment History date filter', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'All dates' }));
     expect(activeTotal()).toHaveTextContent('$1,175.00');
+  });
+});
+
+describe('Payment History counts checks entered on Prepay Credits (KI-207)', () => {
+  const credit = (id: string, cents: number, extra: Partial<Row>): Row => ({
+    id, customer_id: 'c1', source_type: 'check', allocation_set_id: null, original_amount_cents: cents,
+    source_reference: 'PRE-1', created_at: '2026-11-24T18:00:00Z', customers: { farm_name: 'Big Farm' }, ...extra,
+  });
+
+  it('adds them to the totals as one check per entry, like Month-End Close', async () => {
+    H.tables.prepay_credits = [
+      // One $300 check split across two buckets: same customer, time and reference.
+      credit('p1', 20000, {}),
+      credit('p2', 10000, {}),
+      // Left over from a Record Payments overpayment: already in allocation_sets, never counted twice.
+      credit('p3', 7000, { allocation_set_id: 'today' }),
+      // Not a check.
+      credit('p4', 4000, { source_type: 'manual_adjustment', source_reference: 'ADJ' }),
+      // Last month.
+      credit('p5', 9900, { created_at: '2026-10-15T18:00:00Z', source_reference: 'PRE-OCT' }),
+    ];
+    render(<MemoryRouter><PaymentHistory /></MemoryRouter>);
+    expect(await screen.findByText('CHK-october')).toBeInTheDocument();
+    expect(activeTotal()).toHaveTextContent('$1,574.00');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Today' }));
+    expect(activeTotal()).toHaveTextContent('$450.00');
+    expect(activeTotal()).toHaveTextContent('3 payment(s) today');
+    expect(screen.getByText(/include 1 check\(s\) entered on Prepay Credits \(\$300\.00\)/)).toHaveTextContent('Export CSV lists each one');
+  });
+
+  it('counts a check entered after 6 PM Chicago on the Chicago day, not the UTC one', async () => {
+    // 8 PM Chicago on Nov 24 is Nov 25 in UTC.
+    H.tables.prepay_credits = [credit('p1', 4000, { created_at: '2026-11-25T02:00:00Z' })];
+    render(<MemoryRouter><PaymentHistory /></MemoryRouter>);
+    expect(await screen.findByText('CHK-october')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Today' }));
+    expect(activeTotal()).toHaveTextContent('$190.00');
+  });
+});
+
+describe('Prepay Credits check grouping', () => {
+  const row = (id: string, cents: number, reference_number: string | null) => ({
+    customer_id: 'c1', created_at: '2026-11-24T18:00:00Z', source_reference: '104', reference_number,
+    original_amount_cents: cents, customers: { farm_name: 'Big Farm' }, id,
+  });
+
+  it('labels a check with its corrected number, not the one first entered', () => {
+    const [check] = groupPrepayChecks([row('p1', 40000, '140'), row('p2', 20000, '140')]);
+    expect(check).toMatchObject({ reference: '140', cents: 60000 });
+  });
+
+  it('falls back to the entered number, and shows both if only one split was corrected', () => {
+    expect(groupPrepayChecks([row('p1', 100, null)])[0].reference).toBe('104');
+    expect(groupPrepayChecks([row('p1', 100, '140'), row('p2', 100, null)])[0].reference).toBe('140, 104');
   });
 });
 
@@ -142,5 +198,30 @@ describe('Payment History opened on a range from a link', () => {
     expect(dayParam('11/01/2026')).toBeNull();
     expect(dayParam(null)).toBeNull();
     expect(dayParam('2026-02-31')).toBeNull();
+  });
+});
+
+describe('Payment History open payment and filters', () => {
+  it('closes an open payment\'s invoice allocations when the filter hides that payment', async () => {
+    H.tables.invoice_line_allocations = [{
+      id: 'a1', allocation_set_id: 'october', invoice_id: 'i1', amount_cents: 100000, split_percentage: 100,
+      bill_to_customer_id: 'c1', created_at: '2026-10-30T15:00:00Z',
+      invoices: { invoice_number: 'INV-OCT' }, customers: { farm_name: 'Big Farm' },
+    }];
+    render(<MemoryRouter><PaymentHistory /></MemoryRouter>);
+    const row = (await screen.findByText('CHK-october')).closest('tr')!;
+    fireEvent.click(row.querySelector('button')!);
+    expect(await screen.findByText('INV-OCT')).toBeInTheDocument();
+    expect(screen.getByText('Invoice Allocations')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Today' }));
+    expect(screen.queryByText('CHK-october')).not.toBeInTheDocument();
+    expect(screen.queryByText('Invoice Allocations')).not.toBeInTheDocument();
+    expect(screen.queryByText('INV-OCT')).not.toBeInTheDocument();
+
+    // Back on all dates the payment is listed again, closed.
+    fireEvent.click(screen.getByRole('button', { name: 'All dates' }));
+    expect(screen.getByText('CHK-october')).toBeInTheDocument();
+    expect(screen.queryByText('Invoice Allocations')).not.toBeInTheDocument();
   });
 });

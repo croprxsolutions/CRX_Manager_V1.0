@@ -7,20 +7,23 @@
  * AR Single Source of Truth: This is now the sole payment entry point.
  */
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import {
   DollarSign,
-  Search,
   Zap,
   RotateCcw,
   CheckCircle,
   AlertTriangle,
   ChevronRight,
+  ListChecks,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import PageHeader from '../components/ui/PageHeader';
+import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
+import CustomerSearchPicker, { CUSTOMER_SEARCH_SELECT, type CustomerSearchResult } from '../components/customers/CustomerSearchPicker';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -31,9 +34,10 @@ import {
   duplicatePaymentMessage,
   findDuplicatePayment,
 } from '../lib/paymentDuplicate';
-import { ilikeOrPattern } from '../lib/recordSearch';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { hasPageAccess } from '../lib/pagePermissions';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import { formatCents as fmt } from '../lib/money';
@@ -73,10 +77,10 @@ export function autoAllocate(
 
 /* ─── Customer Search Result ──────────────────────────────────────────── */
 
-interface CustomerOption {
-  id: string;
-  farm_name: string;
-  account_number: string | null;
+// The shared customer box's columns plus the prepay balance shown beside the chosen customer.
+const PAYMENT_CUSTOMER_SELECT = `${CUSTOMER_SEARCH_SELECT}, prepay_balance_cents`;
+
+interface CustomerOption extends CustomerSearchResult {
   prepay_balance_cents: number;
 }
 
@@ -96,20 +100,24 @@ const prepayMessage = (cents: number): string =>
 /* ─── Component ────────────────────────────────────────────────────────── */
 
 export default function PaymentAllocation() {
-  const { profile } = useAuth();
+  const { profile, role, deniedPages } = useAuth();
+  // Pay full balance totals the invoices on screen. Only an admin sees all of a customer's
+  // invoices; a sales rep sees only their own, so the total could be short of what the farm owes.
+  const canPayFullBalance = role === 'admin';
   const { toast } = useToast();
   const allocatePaymentIdem = useIdempotencyKey('allocate_payment', profile?.id || '');
 
-  // Customer search
-  const [customerSearch, setCustomerSearch] = useState('');
-  const [customerResults, setCustomerResults] = useState<CustomerOption[]>([]);
+  // Customer: the shared customer box (type to search, arrow keys, Enter to choose).
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerOption | null>(null);
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [searchLoading, setSearchLoading] = useState(false);
-  // The last customer search failed: say so rather than show no results at all.
-  const [searchFailed, setSearchFailed] = useState(false);
-  // Bumped by Try again to run the same search once more.
-  const [searchAttempt, setSearchAttempt] = useState(0);
+  // What the customer box shows while it is being edited; null once a pick, blur or Escape settles it.
+  const [customerBoxText, setCustomerBoxText] = useState<string | null>(null);
+  // A customer chosen in the box sends the cursor straight to the check amount.
+  const focusAmountAfterPick = useRef(false);
+  const amountInputRef = useRef<HTMLInputElement>(null);
+  // The chosen customer's prepay balance, shown beside the box; null = not known (hidden).
+  const [prepayBalanceCents, setPrepayBalanceCents] = useState<number | null>(null);
+  // Only the newest prepay read, for the customer still chosen, may set the balance.
+  const prepayReadSeq = useRef(0);
 
   // Payment fields
   const [checkAmountInput, setCheckAmountInput] = useState('');
@@ -143,50 +151,11 @@ export default function PaymentAllocation() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  /* ── Customer search (typeahead) ─────────────────────────────────────── */
-
   useEffect(() => {
-    if (customerSearch.length < 2 || selectedCustomer) {
-      setCustomerResults([]);
-      setShowDropdown(false);
-      setSearchLoading(false);
-      setSearchFailed(false);
-      return;
-    }
-    // L3: cancel flag so a debounced response that resolves after the input
-    // changed (or after unmount) never overwrites the current results, and
-    // unexpected search failures are reported instead of silently swallowed.
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      setSearchLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from('customers')
-          .select('id, farm_name, account_number, prepay_balance_cents')
-          .eq('is_active', true)
-          .or(`farm_name.ilike.${ilikeOrPattern(customerSearch)},account_number.ilike.${ilikeOrPattern(customerSearch)}`)
-          .order('farm_name')
-          .limit(15);
-        if (error) throw error;
-        if (!data) throw new Error('customer search returned no list');
-        if (cancelled) return;
-        setCustomerResults(data as CustomerOption[]);
-        setSearchFailed(false);
-        setShowDropdown(true);
-      } catch (err) {
-        Sentry.captureException(toSentryError(err), { extra: { context: 'payment_customer_search' } });
-        if (!cancelled) {
-          setCustomerResults([]);
-          // Not "No customers found": the search did not run.
-          setSearchFailed(true);
-          setShowDropdown(true);
-        }
-      } finally {
-        if (!cancelled) setSearchLoading(false);
-      }
-    }, 300);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [customerSearch, selectedCustomer, searchAttempt]);
+    if (!selectedCustomer || !focusAmountAfterPick.current) return;
+    focusAmountAfterPick.current = false;
+    amountInputRef.current?.focus();
+  }, [selectedCustomer]);
 
   /* ── Load invoices when customer selected ──────────────────────────── */
 
@@ -240,12 +209,21 @@ export default function PaymentAllocation() {
   }, [toast]);
 
   const selectCustomer = useCallback((c: CustomerOption) => {
+    focusAmountAfterPick.current = true;
+    setCustomerBoxText(null);
+    // Switching to another farm starts a fresh check, so one farm's check can't be posted to another (Mason, 2026-11-25).
+    if (selectedCustomer && selectedCustomer.id !== c.id) {
+      setCheckAmountInput('');
+      setReferenceNumber('');
+      setNotes('');
+    }
     setSelectedCustomer(c);
-    setCustomerSearch(c.farm_name + (c.account_number ? ` (${c.account_number})` : ''));
-    setShowDropdown(false);
+    prepayReadSeq.current += 1;
+    setPrepayBalanceCents(c.prepay_balance_cents);
     setLastResult(null);
+    setRetryRefused(false);
     fetchInvoices(c.id);
-  }, [fetchInvoices]);
+  }, [fetchInvoices, selectedCustomer]);
 
   const clearCustomer = useCallback(() => {
     // A load still running for the cleared customer must not refill the list.
@@ -253,7 +231,9 @@ export default function PaymentAllocation() {
     setLoadingInvoices(false);
     setInvoicesFailed(false);
     setSelectedCustomer(null);
-    setCustomerSearch('');
+    setCustomerBoxText(null);
+    prepayReadSeq.current += 1;
+    setPrepayBalanceCents(null);
     setInvoices([]);
     setCheckAmountInput('');
     setReferenceNumber('');
@@ -261,6 +241,13 @@ export default function PaymentAllocation() {
     setLastResult(null);
     setRetryRefused(false);
   }, []);
+
+  // The customer changes only when one is picked from the list. A stray keystroke keeps the
+  // chosen customer and the typed allocations; Escape or "keep" puts the name back. While a search
+  // is unfinished, nothing that posts or fills allocations runs, so Apply Payment can never
+  // post to a customer the box is not showing.
+  const customerBeingChanged = selectedCustomer !== null && customerBoxText !== null
+    && customerBoxText !== selectedCustomer.farm_name;
 
   /* ── Allocation helpers ────────────────────────────────────────────── */
 
@@ -300,6 +287,40 @@ export default function PaymentAllocation() {
     );
   }, [checkAmountRefused, checkCents, invoices, toast]);
 
+  // Pays every open invoice in full, in the order and by the rules Auto-Allocate uses. It only
+  // fills the screen: nothing is saved until Apply Payment, which checks everything as before.
+  const handlePayFullBalance = useCallback(() => {
+    if (!canPayFullBalance) return;
+    if (checkAmountRefused) {
+      toast('error', MONEY_PRECISION_MESSAGE);
+      return;
+    }
+    // The check amount always comes from the paper check, never from the balance owed (Mason,
+    // 2026-11-25): a filled-in balance could re-book a check already posted for a different amount.
+    if (checkCents <= 0) {
+      toast('error', 'Enter the check amount first.');
+      return;
+    }
+    const owed = invoices.map((inv) => ({ id: inv.invoice_id, balance_cents: inv.balance_cents }));
+    const fullBalanceCents = owed.reduce(
+      (s, inv) => s + (Number.isFinite(inv.balance_cents) && inv.balance_cents > 0 ? inv.balance_cents : 0),
+      0,
+    );
+    if (fullBalanceCents <= 0) return;
+    // A typed check smaller than the balance cannot pay it all; its amount is never changed here.
+    if (checkCents < fullBalanceCents) {
+      toast('error', `This check is ${fmt(fullBalanceCents - checkCents)} short of the full balance of ${fmt(fullBalanceCents)}. Use Auto-Allocate to apply it oldest first.`);
+      return;
+    }
+    const allocMap = autoAllocate(fullBalanceCents, owed);
+    setInvoices((prev) =>
+      prev.map((inv) => ({
+        ...inv,
+        allocated_cents: allocMap.get(inv.invoice_id) || 0,
+      })),
+    );
+  }, [canPayFullBalance, checkAmountRefused, checkCents, invoices, toast]);
+
   const handleClearAllocations = useCallback(() => {
     setInvoices((prev) => prev.map((inv) => ({ ...inv, allocated_cents: 0 })));
   }, []);
@@ -316,6 +337,13 @@ export default function PaymentAllocation() {
     return invoices.some((inv) => inv.allocated_cents > inv.balance_cents);
   }, [invoices]);
 
+  // Typed payment details not yet saved: leaving the page (a link, Back, closing the tab) asks first.
+  const hasUnsavedPayment = !lastResult
+    && (checkAmountInput.trim() !== '' || hasAllocations || referenceNumber.trim() !== '' || notes.trim() !== '');
+  const leaveBlocker = useUnsavedChanges(hasUnsavedPayment);
+  // Where this customer's prepay credit is applied to invoices (Prepay > Apply), for those who may open it.
+  const canApplyPrepay = hasPageAccess(role, deniedPages ?? [], 'prepay');
+
   /* ── Submit payment ──────────────────────────────────────────────── */
 
   // Without the customer's open invoices on screen, a check would go entirely to
@@ -323,7 +351,7 @@ export default function PaymentAllocation() {
   const invoicesNotReady = loadingInvoices || invoicesFailed;
 
   const handleSubmit = async () => {
-    if (!selectedCustomer || !profile) return;
+    if (!selectedCustomer || !profile || customerBeingChanged) return;
     if (invoicesNotReady) {
       toast('error', 'Wait for the open invoices to load before applying the check.');
       return;
@@ -435,7 +463,19 @@ export default function PaymentAllocation() {
     setReferenceNumber('');
     setNotes('');
     setLastResult(null);
-    if (selectedCustomer) fetchInvoices(selectedCustomer.id);
+    if (selectedCustomer) {
+      fetchInvoices(selectedCustomer.id);
+      void refreshPrepayBalance(selectedCustomer.id);
+    }
+  };
+
+  // The saved check may have added prepay credit: show the balance as it is now, or nothing.
+  const refreshPrepayBalance = async (customerId: string) => {
+    const seq = ++prepayReadSeq.current;
+    setPrepayBalanceCents(null);
+    const { data, error } = await supabase.from('customers').select('prepay_balance_cents').eq('id', customerId).maybeSingle();
+    if (!mountedRef.current || seq !== prepayReadSeq.current || error || !data) return;
+    setPrepayBalanceCents(data.prepay_balance_cents);
   };
 
   const handleNewCustomer = () => {
@@ -478,83 +518,96 @@ export default function PaymentAllocation() {
         </Card>
       )}
 
-      {/* Top Bar: Customer + Payment Info */}
+      {/* Top Bar: Customer + Payment Info, in typing order: customer, amount, method, reference, notes */}
       {!lastResult && (
         <>
           <Card>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Customer Search */}
-              <div className="relative lg:col-span-2">
-                <label className="block text-sm font-medium text-nav-dark mb-1">Customer</label>
+              {/* Customer: the shared customer box */}
+              <div
+                className="lg:col-span-2"
+                onChange={(e) => setCustomerBoxText((e.target as HTMLInputElement).value)}
+                // Escape keeps the chosen customer. Leaving the box mid-search does not: posting
+                // stays blocked until a customer is picked or "Keep" is pressed.
+                onKeyDown={(e) => { if (e.key === 'Escape') setCustomerBoxText(null); }}
+              >
+                <label htmlFor="payment-customer" className="block text-sm font-medium text-nav-dark mb-1">Customer</label>
+                <CustomerSearchPicker<CustomerOption>
+                  id="payment-customer"
+                  value={selectedCustomer?.id ?? ''}
+                  selectedLabel={selectedCustomer?.farm_name ?? ''}
+                  onSelect={(customer) => {
+                    if (customer) selectCustomer(customer);
+                    else clearCustomer();
+                  }}
+                  select={PAYMENT_CUSTOMER_SELECT}
+                  disabled={submitting}
+                  placeholder="Search by name or account #..."
+                  ariaLabel="Customer"
+                />
+                {/* Two farms can share a name; the account # tells the clerk which one will be paid. */}
+                {selectedCustomer?.account_number && (
+                  <p className="mt-1 text-xs text-secondary">Account #{selectedCustomer.account_number}</p>
+                )}
+                {customerBeingChanged && (
+                  <p className="mt-1 text-xs text-amber-600">
+                    You started a new customer search. Pick a customer from the list to switch, or{' '}
+                    <button type="button" className="underline font-medium" onClick={() => setCustomerBoxText(null)}>
+                      keep {selectedCustomer.farm_name}
+                    </button>
+                    .
+                  </p>
+                )}
+                {selectedCustomer && prepayBalanceCents !== null && prepayBalanceCents > 0 && (
+                  <p className="mt-1 text-xs text-secondary">
+                    Prepay on account: <span className="font-medium text-crx-green">{fmt(prepayBalanceCents)}</span>
+                    {canApplyPrepay && (
+                      <>
+                        {' · '}
+                        <Link
+                          to={`/prepay?tab=workspace&customer=${encodeURIComponent(selectedCustomer.id)}`}
+                          className="font-medium text-crx-green underline hover:text-crx-green-hover"
+                        >
+                          Apply prepay to invoices
+                        </Link>
+                      </>
+                    )}
+                  </p>
+                )}
+              </div>
+
+              {/* Check Amount */}
+              <div>
+                <label htmlFor="payment-check-amount" className="block text-sm font-medium text-nav-dark mb-1">Check Amount</label>
                 <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <DollarSign className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
+                    id="payment-check-amount"
+                    ref={amountInputRef}
                     type="text"
-                    placeholder="Search by name or account #..."
-                    value={customerSearch}
-                    disabled={submitting}
-                    onChange={(e) => {
-                      setCustomerSearch(e.target.value);
-                      if (selectedCustomer) {
-                        setSelectedCustomer(null);
-                        setInvoices([]);
-                        setLastResult(null);
-                        setRetryRefused(false);
-                      }
-                    }}
-                    className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={checkAmountInput}
+                    // Choose the customer first: the open invoices to pay come from them.
+                    disabled={submitting || !selectedCustomer}
+                    onChange={(e) => setCheckAmountInput(e.target.value)}
+                    aria-invalid={checkAmountRefused}
+                    className={`w-full pl-9 pr-3 py-2 text-sm font-semibold bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50 ${checkAmountRefused ? 'border-red-400' : 'border-gray-200'}`}
                   />
-                  {selectedCustomer && (
-                    <button
-                      onClick={clearCustomer}
-                      disabled={submitting}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                      aria-label="Clear customer"
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                    </button>
-                  )}
                 </div>
-                {showDropdown && customerResults.length > 0 && (
-                  <div className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                    {customerResults.map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => selectCustomer(c)}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex justify-between items-center"
-                      >
-                        <span className="font-medium text-nav-dark">{c.farm_name}</span>
-                        <span className="text-xs text-secondary">
-                          {c.account_number && `#${c.account_number}`}
-                          {c.prepay_balance_cents > 0 && ` · Prepay: ${fmt(c.prepay_balance_cents)}`}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {showDropdown && searchFailed && !searchLoading && customerSearch.length >= 2 && (
-                  <div role="alert" className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-sm text-red-600">
-                    Customer search failed.{' '}
-                    <button
-                      type="button"
-                      className="underline font-medium"
-                      onClick={() => setSearchAttempt((n) => n + 1)}
-                    >
-                      Try again
-                    </button>
-                  </div>
-                )}
-                {showDropdown && !searchFailed && customerResults.length === 0 && !searchLoading && customerSearch.length >= 2 && (
-                  <div className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-sm text-secondary">
-                    No customers found
-                  </div>
+                {/* A refused amount (more than two decimals) parses to null, so checkCents is
+                    0 and both action buttons stay disabled — the handler toasts can never
+                    fire. Say why right under the field instead (CodeRabbit on PR #588). */}
+                {checkAmountRefused && (
+                  <p role="alert" className="mt-1 text-sm text-red-600">{MONEY_PRECISION_MESSAGE}</p>
                 )}
               </div>
 
               {/* Payment Method */}
               <div>
-                <label className="block text-sm font-medium text-nav-dark mb-1">Method</label>
+                <label htmlFor="payment-method" className="block text-sm font-medium text-nav-dark mb-1">Method</label>
                 <select
+                  id="payment-method"
                   value={paymentMethod}
                   disabled={submitting}
                   onChange={(e) => setPaymentMethod(e.target.value)}
@@ -571,8 +624,9 @@ export default function PaymentAllocation() {
 
               {/* Reference */}
               <div>
-                <label className="block text-sm font-medium text-nav-dark mb-1">Reference #</label>
+                <label htmlFor="payment-reference" className="block text-sm font-medium text-nav-dark mb-1">Reference #</label>
                 <input
+                  id="payment-reference"
                   type="text"
                   placeholder="Check # or ref..."
                   value={referenceNumber}
@@ -581,84 +635,71 @@ export default function PaymentAllocation() {
                   className="w-full px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 />
               </div>
-            </div>
 
-            {/* Notes (full width) */}
-            <div className="mt-3">
-              <label className="block text-sm font-medium text-nav-dark mb-1">Notes</label>
-              <input
-                type="text"
-                placeholder="Optional payment notes..."
-                value={notes}
-                disabled={submitting}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-              />
+              {/* Notes, last in the form */}
+              <div className="md:col-span-2 lg:col-span-3">
+                <label htmlFor="payment-notes" className="block text-sm font-medium text-nav-dark mb-1">Notes</label>
+                <input
+                  id="payment-notes"
+                  type="text"
+                  placeholder="Optional payment notes..."
+                  value={notes}
+                  disabled={submitting}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                />
+              </div>
             </div>
           </Card>
-
-          {/* Check Amount */}
-          {selectedCustomer && (
-            <Card>
-              <div className="flex items-center gap-4 flex-wrap">
-                <div className="flex-1 min-w-[200px]">
-                  <label className="block text-sm font-medium text-nav-dark mb-1">Check Amount</label>
-                  <div className="relative">
-                    <DollarSign className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="0.00"
-                      value={checkAmountInput}
-                      disabled={submitting}
-                      onChange={(e) => setCheckAmountInput(e.target.value)}
-                      aria-invalid={checkAmountRefused}
-                      className={`w-full pl-10 pr-3 py-3 text-lg font-semibold bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green ${checkAmountRefused ? 'border-red-400' : 'border-gray-200'}`}
-                    />
-                  </div>
-                  {/* A refused amount (more than two decimals) parses to null, so checkCents is
-                      0 and both action buttons stay disabled — the handler toasts can never
-                      fire. Say why right under the field instead (CodeRabbit on PR #588). */}
-                  {checkAmountRefused && (
-                    <p role="alert" className="mt-1 text-sm text-red-600">{MONEY_PRECISION_MESSAGE}</p>
-                  )}
-                </div>
-                <div className="flex gap-2 pt-6">
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    icon={<Zap className="w-4 h-4" />}
-                    onClick={handleAutoAllocate}
-                    disabled={submitting || checkCents <= 0 || invoices.length === 0}
-                  >
-                    Auto-Allocate
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon={<RotateCcw className="w-4 h-4" />}
-                    onClick={handleClearAllocations}
-                    showChevron={false}
-                    disabled={submitting || !hasAllocations}
-                  >
-                    Clear
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          )}
 
           {/* Invoice Table */}
           {selectedCustomer && (
             <Card padding={false}>
               <div className="p-5">
-                <h2 className="text-sm font-semibold text-nav-dark mb-3">
-                  Open Invoices for {selectedCustomer.farm_name}
-                  {invoices.length > 0 && (
-                    <span className="ml-2 text-secondary font-normal">
-                      ({invoices.length} invoice{invoices.length !== 1 ? 's' : ''}, {fmt(invoices.reduce((s, i) => s + i.balance_cents, 0))} outstanding)
-                    </span>
-                  )}
-                </h2>
+                <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+                  <h2 className="text-sm font-semibold text-nav-dark">
+                    Open Invoices for {selectedCustomer.farm_name}
+                    {invoices.length > 0 && (
+                      <span className="ml-2 text-secondary font-normal">
+                        ({invoices.length} invoice{invoices.length !== 1 ? 's' : ''}, {fmt(invoices.reduce((s, i) => s + i.balance_cents, 0))} outstanding)
+                      </span>
+                    )}
+                  </h2>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={<Zap className="w-4 h-4" />}
+                      onClick={handleAutoAllocate}
+                      disabled={submitting || customerBeingChanged || checkCents <= 0 || invoices.length === 0}
+                    >
+                      Auto-Allocate
+                    </Button>
+                    {canPayFullBalance && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<ListChecks className="w-4 h-4" />}
+                        onClick={handlePayFullBalance}
+                        showChevron={false}
+                        disabled={submitting || customerBeingChanged || invoicesNotReady || invoices.length === 0 || checkAmountRefused || checkCents <= 0}
+                        title="Enter the check amount first. Fills every open invoice with its full balance; any extra becomes prepay credit. Nothing is saved until Apply Payment."
+                      >
+                        Pay full balance
+                      </Button>
+                    )}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={<RotateCcw className="w-4 h-4" />}
+                      onClick={handleClearAllocations}
+                      showChevron={false}
+                      disabled={submitting || !hasAllocations}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                </div>
 
                 {loadingInvoices ? (
                   <div className="flex items-center justify-center py-12">
@@ -748,9 +789,13 @@ export default function PaymentAllocation() {
             <p role="alert" className="text-sm text-red-600">{PAYMENT_RETRY_REFUSED_MESSAGE}</p>
           )}
 
-          {/* Summary Bar */}
+          {/* Summary Bar: stays on screen (above the phone's bottom bar) while a long invoice list scrolls. */}
           {selectedCustomer && checkCents > 0 && (
-            <Card>
+            <Card
+              role="region"
+              aria-label="Payment totals"
+              className="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-0 z-20 shadow-lg"
+            >
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <div className="flex gap-6 text-sm">
                   <div>
@@ -790,6 +835,7 @@ export default function PaymentAllocation() {
                     onClick={handleSubmit}
                     loading={submitting}
                     disabled={
+                      customerBeingChanged ||
                       invoicesNotReady ||
                       remaining < 0 ||
                       hasValidationError ||
@@ -806,6 +852,12 @@ export default function PaymentAllocation() {
           )}
         </>
       )}
+
+      <UnsavedChangesModal
+        open={leaveBlocker.state === 'blocked'}
+        onStay={() => leaveBlocker.reset?.()}
+        onLeave={() => leaveBlocker.proceed?.()}
+      />
 
       <ConfirmModal
         open={prepayPayment !== null}

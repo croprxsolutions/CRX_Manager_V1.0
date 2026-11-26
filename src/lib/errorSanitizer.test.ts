@@ -449,6 +449,8 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'CUSTOMER_INACTIVE_NEW_WORK: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added' }))
       .toBe('Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added');
     expect(sanitizeError('CUSTOMER_INACTIVE_NEW_WORK')).toContain('must reactivate the customer');
+    expect(sanitizeError({ message: 'CUSTOMER_INACTIVE_POSTING: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them' }))
+      .toBe('Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them');
     expect(sanitizeError({ message: 'new row for relation "inventory_holds" violates check constraint "inventory_holds_source_needs_customer"' }))
       .toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
     expect(sanitizeError({ message: 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery' }))

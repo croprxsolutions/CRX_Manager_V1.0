@@ -442,6 +442,34 @@ describe('Record Payments: faster entry', () => {
     expect(box).toHaveValue('');
   });
 
+  it('the X still clears the customer and the typed check (only an emptied box left by blur keeps them)', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear customer' }));
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    await waitFor(() => expect(screen.queryByText('INV-OLD')).not.toBeInTheDocument());
+    expect(box).toHaveValue('');
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('');
+  });
+
+  it('"keep" with nothing typed keeps the customer: pressing it does not blur the emptied box first', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    box.focus();
+    fireEvent.change(box, { target: { value: '' } });
+    const keep = screen.getByRole('button', { name: 'keep Big Farm' });
+    // A browser blurs the focused box on mousedown unless the button prevents it.
+    expect(fireEvent.mouseDown(keep)).toBe(false);
+    fireEvent.click(keep);
+    expect(box).toHaveValue('Big Farm');
+    fireEvent.blur(box);
+    expect(box).toHaveValue('Big Farm');
+    expect(screen.getByText('INV-OLD')).toBeInTheDocument();
+    expect(screen.queryByText(/You started a new customer search/)).not.toBeInTheDocument();
+  });
+
   it('re-picking the customer already chosen keeps the allocations', async () => {
     renderPayments();
     await chooseByKeyboard();

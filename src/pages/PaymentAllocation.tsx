@@ -540,10 +540,11 @@ export default function PaymentAllocation() {
                   selectedLabel={selectedCustomer?.farm_name ?? ''}
                   onSelect={(customer) => {
                     if (customer) selectCustomer(customer);
-                    // An emptied box keeps a typed check: the name comes back and posting waits for a pick or "keep".
-                    else if (hasUnsavedPayment) return false;
                     else clearCustomer();
                   }}
+                  // Leaving an emptied box keeps a typed check: the name comes back and posting waits for a
+                  // pick or "keep". The X still clears on purpose.
+                  keepLabelOnEmptyBlur={hasUnsavedPayment}
                   select={PAYMENT_CUSTOMER_SELECT}
                   disabled={submitting}
                   placeholder="Search by name or account #..."
@@ -556,7 +557,18 @@ export default function PaymentAllocation() {
                 {customerBeingChanged && (
                   <p className="mt-1 text-xs text-amber-600">
                     You started a new customer search. Pick a customer from the list to switch, or{' '}
-                    <button type="button" className="underline font-medium" onClick={() => setCustomerBoxText(null)}>
+                    <button
+                      type="button"
+                      className="underline font-medium"
+                      // No blur first: an emptied box would clear the farm before the click lands. "Keep" is
+                      // Escape in the box, which puts the name back there and here.
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        document.getElementById('payment-customer')
+                          ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                        setCustomerBoxText(null);
+                      }}
+                    >
                       keep {selectedCustomer.farm_name}
                     </button>
                     .

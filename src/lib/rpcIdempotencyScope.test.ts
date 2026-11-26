@@ -367,7 +367,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _section9_record_vendor_payment_intent_impl_20260831: ['record_vendor_payment'],
   _section9_void_vendor_bill_intent_impl_20260831: ['void_vendor_bill'],
   _section9_receive_po_items_intent_impl_20260831: ['receive_po_items'],
-  // 20270309110000 reads the receiver's receipt as notice evidence. Only its own operation stores or returns a notice receipt.
+  // 20270310150000 reads the receiver's receipt as notice evidence. Only its own operation stores or returns a notice receipt.
   notify_damaged_receiving: ['receive_po_items'],
   // Direct EXECUTE is revoked (postgres-only). Batch 4a (20261102180000) renamed the live
   // update_field_app_invoice_billing body to this name, so it kept the public literal the wrapper binds.

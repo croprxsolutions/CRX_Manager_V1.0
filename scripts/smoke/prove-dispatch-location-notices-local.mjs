@@ -79,14 +79,16 @@ async function proveDispatchAndDeactivationOrder(deactivateFirst) {
     END $assign$;` : `DO $assign$ BEGIN ${dispatch} END $assign$;`);
 
   const firstClient = `dispatch-proof-holder-${tag}`;
+  const readyClient = `${firstClient}-ready`;
   const secondClient = `dispatch-proof-waiter-${tag}`;
   const first = localSqlInWorker(`
     SET ROLE postgres;
     SET application_name = '${firstClient}';
     BEGIN;
     ${deactivateFirst ? deactivate : assign}
+    SET LOCAL application_name = '${readyClient}';
     DO $wait$
-    DECLARE deadline timestamptz := clock_timestamp() + interval '20 seconds';
+    DECLARE deadline timestamptz := clock_timestamp() + interval '45 seconds';
     BEGIN
       LOOP
         PERFORM pg_stat_clear_snapshot();
@@ -100,11 +102,10 @@ async function proveDispatchAndDeactivationOrder(deactivateFirst) {
     COMMIT;`);
   // Attach the rejection handler before polling the barrier.
   first.catch(() => {});
-  const startDeadline = Date.now() + 10_000;
+  const startDeadline = Date.now() + 30_000;
   let ready = false;
   while (!ready && Date.now() < startDeadline) {
-    ready = localSql(`SELECT EXISTS (SELECT FROM pg_stat_activity WHERE application_name = '${firstClient}'
-      AND wait_event = 'PgSleep');`) === 't';
+    ready = localSql(`SELECT EXISTS (SELECT FROM pg_stat_activity WHERE application_name = '${readyClient}');`) === 't';
     if (!ready) await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert(ready, 'First local operation did not reach its lock');

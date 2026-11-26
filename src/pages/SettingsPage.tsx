@@ -102,7 +102,7 @@ function PhoneStepper({ label, value, min, max, onChange, children }: {
     // Number, not parseInt: a number box also accepts 1e3.
     const n = value.trim() === '' ? NaN : Math.trunc(Number(value));
     const next = (Number.isFinite(n) ? n : min) + delta;
-    onChange(String(Math.min(Math.max(next, min), max ?? next)));
+    onChange(String(Math.max(min, max === undefined ? next : Math.min(next, max))));
   };
   return (
     <span className="inline-flex items-center gap-2">

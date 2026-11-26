@@ -20,7 +20,9 @@ async function save(page: Page, name: string) {
   const button = page.getByRole('button', { name, exact: true }).first();
   await expect(button).toBeEnabled();
   await button.click();
-  await expect(button).toBeDisabled({ timeout: 15000 });
+  // One section is changed at a time; its Unsaved chip goes only once the write has finished.
+  await expect(page.getByText('Unsaved', { exact: true })).toHaveCount(0, { timeout: 15000 });
+  await expect(button).toBeDisabled();
 }
 
 test('desktop: each Settings section saves and keeps its value after a reload', async ({ page }) => {
@@ -31,7 +33,8 @@ test('desktop: each Settings section saves and keeps its value after a reload', 
   await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
   await shot(page, '01-desktop-before');
   // Fresh values each run so every Save has a change to write.
-  const n = (Date.now() % 50) + 10;
+  // The last run stored n in the reminder box, so this n always differs from it.
+  const n = ((Number(await page.locator('#ar-reminder-days').inputValue()) + 1) % 50) + 10;
   const draftWasOn = await page.locator('#auto-draft-enabled').isChecked();
   const wasBlock = await page.getByRole('radio', { name: /Block/ }).isChecked();
   const mode = wasBlock ? /Warn/ : /Block/;

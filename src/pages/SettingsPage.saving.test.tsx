@@ -149,6 +149,9 @@ describe('SettingsPage — phone controls', () => {
     const valid = screen.getByLabelText('Quotes valid for');
     fireEvent.click(screen.getByRole('button', { name: 'Fewer days quotes are valid' }));
     expect(valid).toHaveValue(29);
+    fireEvent.change(valid, { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Fewer days quotes are valid' }));
+    expect(valid).toHaveValue(1);
     expect(saveButton('Save defaults')).toBeEnabled();
   });
 });

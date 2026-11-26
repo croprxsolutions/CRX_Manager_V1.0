@@ -94,6 +94,21 @@ export function readyToMergeProblem({ comments, head, now = Date.now() }) {
     : `Taha hasn't given the go-ahead for this head: he comments \`Ready to merge: ${String(head).slice(0, 12)}\` on the PR when he's there to merge right after, and an agent applies within 30 minutes of it (ship.md › Staging). Ask him, then retry.`;
 }
 
+// Taha, 2026-11-26 (Mason agreed on Slack): his own `taha-unavailable` label on the PR stands in for his go-ahead and
+// the 4-hour hold, "so the signal comes from me". Like hotfix-backport (release-flow.mjs backportAllowed): it counts
+// only while on the PR, when his account added it after the head commit arrived (a later push needs it again), and
+// for 30 minutes (READY_WINDOW_MS). events: the PR's issue timeline, oldest first; labels: its current labels.
+export const TAHA_UNAVAILABLE_LABEL = "taha-unavailable";
+export function tahaUnavailableLabelled({ events, labels, head, now = Date.now() }) {
+  if (!Array.isArray(events) || !Array.isArray(labels) || !labels.some((l) => l?.name === TAHA_UNAVAILABLE_LABEL)) return false;
+  const headAt = events.findIndex((e) => e?.event === "committed" && String(e?.sha ?? "").toLowerCase() === String(head ?? "").toLowerCase());
+  if (headAt < 0) return false;
+  const last = events.slice(headAt + 1).filter((e) => e?.label?.name === TAHA_UNAVAILABLE_LABEL && (e.event === "labeled" || e.event === "unlabeled")).pop();
+  const at = Date.parse(String(last?.created_at ?? ""));
+  return last?.event === "labeled" && String(last?.actor?.login ?? "").trim().toLowerCase() === TAHA_LOGIN &&
+    Number.isFinite(at) && now - at <= READY_WINDOW_MS && at - now <= 60_000;
+}
+
 function refuse(why) {
   return {
     ok: false,
@@ -284,14 +299,33 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   const override = findTahaUnavailableOverride({ dirs: stateDirs, pullRequest: Number(pr?.number), headSha: head, now });
   const hold = headRef === "release/next" ? null : tahaHoldProblem(pr, now);
   const ready = hold ? null : readyToMergeProblem({ comments: pr?.comments, head, now });
-  if ((hold || ready) && !override) {
+  // Taha's own taha-unavailable label (tahaUnavailableLabelled) lifts both; read only when needed. Unreadable, or
+  // over 1,000 timeline events (the newest label change may be unread): it does not count (fail closed).
+  let labelled = false;
+  if (hold || ready) {
+    try {
+      const events = [];
+      let complete = false;
+      for (let page = 1; page <= 10; page++) {
+        const batch = JSON.parse(String(gh(["api", `repos/{owner}/{repo}/issues/${pr.number}/timeline?per_page=100&page=${page}`])));
+        if (!Array.isArray(batch)) break;
+        events.push(...batch);
+        if (batch.length < 100) { complete = true; break; }
+      }
+      const labels = JSON.parse(String(gh(["api", `repos/{owner}/{repo}/issues/${pr.number}/labels?per_page=100`])));
+      labelled = complete && tahaUnavailableLabelled({ events, labels, head, now });
+    } catch (error) { if (OUT(error)) throw error; }
+  }
+  const tahaGap = Boolean(hold || ready) && !labelled;
+  if (tahaGap && !override) {
     const code = issueTahaLaneCode({ dirs: stateDirs, pullRequest: Number(pr?.number), headSha: head, kind: "apply", now });
-    return refuse(`${number}: ${hold || ready}` + (code ? ` Or, only if Mason says Taha is unavailable and he will merge it himself, ask him to send as a message of its own: taha override #${pr.number} ${code} unavailable: <why Taha can't>` : ""));
+    return refuse(`${number}: ${hold || ready}` + ` Or Taha adds the \`${TAHA_UNAVAILABLE_LABEL}\` label himself (counts for 30 minutes, this head only).` +
+      (code ? ` Or, only if Mason says Taha is unavailable and he will merge it himself, ask him to send as a message of its own: taha override #${pr.number} ${code} unavailable: <why Taha can't>` : ""));
   }
   // The override is what lets this apply through: Taha is told on the PR once every other check has passed (below).
   // Once per migration (Luna, PR 1 round 2): a head with two migrations tells him about each.
   const toldFor = Array.isArray(override?.tahaToldApplyFor) ? override.tahaToldApplyFor : [];
-  const tellTahaOfOverride = Boolean(hold || ready) && !toldFor.includes(migName);
+  const tellTahaOfOverride = tahaGap && !toldFor.includes(migName);
   if (pullRequestReviewBlocked(pr)) return refuse(`${number} has an unresolved CHANGES_REQUESTED review.`);
   if (!pullRequestChecksGreen(pr)) {
     return refuse(`${number} is not merge-ready: mergeStateStatus must be CLEAN and the newest run of every check green.`);

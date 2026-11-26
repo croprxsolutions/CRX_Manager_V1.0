@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { evaluateMigrationApply, normalizeMigName, ownerApprovalNeeded, resolveMigrationSource, originFetchAgeMs } from "./migration-apply-lib.mjs";
 import { checkWrappable } from "./migration-wrappability-lib.mjs";
-import { evaluateLandingGate, hotfixStampProblem, readyToMergeProblem } from "./migration-landing-gate-lib.mjs";
+import { evaluateLandingGate, hotfixStampProblem, readyToMergeProblem, tahaUnavailableLabelled } from "./migration-landing-gate-lib.mjs";
 import { cancelCodeRabbitSkip, recordCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
 import { recordTahaLaneOverride } from "./taha-lane-lib.mjs";
 import { generateKeyPairSync } from "node:crypto";
@@ -1666,7 +1666,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false,
     trees = { main: ['20260101000000_old.sql'], staging: ['20260101000000_old.sql'] }, treesError = null,
     workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40), stagingTip = "d".repeat(40), stagingBehind = "0", openStaging = [],
-    posts = null } = {}) => evaluateLandingGate({
+    posts = null, timeline = [], prLabels = [] } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
       const key = args.join(" ");
@@ -1682,6 +1682,12 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     },
     runGh: (args) => {
       // The PR comment telling Taha an override let the apply through: `posts` records it, or (null) the post fails.
+      // Taha's taha-unavailable label: the PR's issue timeline and current labels.
+      if (args[0] === "api" && String(args[1]).includes(`/issues/${pr.number ?? 900}/timeline?`)) {
+        if (timeline instanceof Error) throw timeline;
+        return JSON.stringify(timeline);
+      }
+      if (args[0] === "api" && String(args[1]).includes(`/issues/${pr.number ?? 900}/labels?`)) return JSON.stringify(prLabels);
       if (args[0] === "api" && args[1] === "-X" && args[2] === "POST") {
         if (!posts) throw new Error("HTTP 502");
         posts.push(args);
@@ -1921,6 +1927,38 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       refused(gate({ pr: { comments: [], headRefOid: pushed }, git: { "rev-parse HEAD": `${pushed}\n` }, posts }), "Taha hasn't given the go-ahead", "a later push needs a new code");
     } finally { rmSync(overrideFile, { force: true }); }
     refused(gate({ pr: { comments: [] } }), "Taha hasn't given the go-ahead", "without the override the go-ahead is needed again");
+  }
+  // Taha, 2026-11-26: his own taha-unavailable label stands in for his go-ahead and the hold, 30 minutes, this head only.
+  {
+    const young = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const now = Date.now();
+    const label = { name: "taha-unavailable" };
+    const added = (over = {}) => ({ event: "labeled", label, actor: { login: "TahaKhanAbdalli" }, created_at: new Date(now - 5 * 60_000).toISOString(), ...over });
+    const commit = { event: "committed", sha: HEAD_SHA };
+    const t = (events, labels = [label]) => ({ events, labels, head: HEAD_SHA, now });
+    ok(tahaUnavailableLabelled(t([commit, added()])) === true, "Taha's fresh label after the head counts");
+    ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "MasonWells1" } })])) === false, "Mason's shared account doesn't count");
+    ok(tahaUnavailableLabelled(t([commit, added({ created_at: new Date(now - 31 * 60_000).toISOString() })])) === false, "older than 30 minutes doesn't count");
+    ok(tahaUnavailableLabelled(t([added(), commit])) === false, "a label added before the latest push doesn't count");
+    ok(tahaUnavailableLabelled(t([commit, added()], [])) === false, "a label since removed doesn't count");
+    ok(tahaUnavailableLabelled(t([commit, added(), added({ event: "unlabeled" })])) === false, "an unlabel after it voids it");
+    ok(tahaUnavailableLabelled(t([commit, added({ label: { name: "hotfix-backport" } })])) === false, "another label doesn't count");
+    ok(tahaUnavailableLabelled(t([added()])) === false, "no head commit in the timeline doesn't count");
+    ok(tahaUnavailableLabelled({ events: undefined, labels: [label], head: HEAD_SHA, now }) === false, "an unreadable timeline fails closed");
+
+    const quiet = [];
+    ok(gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added()], prLabels: [label], posts: quiet }).ok === true,
+      "Taha's label lifts the 4-hour hold and the go-ahead on a hotfix");
+    ok(quiet.length === 0, "and no override comment is posted (the signal came from him)");
+    ok(gate({ pr: { headRefName: "release/next", comments: [] }, timeline: [commit, added()], prLabels: [label] }).ok === true, "and on the release");
+    const asked = gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added({ actor: { login: "masonwells1" } })], prLabels: [label] });
+    refused(asked, "4-hour review hold", "someone else's label does not");
+    ok(/taha-unavailable/.test(String(asked.reason)) && /unavailable: <why Taha can't>/.test(String(asked.reason)), "the refusal names the label and keeps Mason's override as the backup");
+    refused(gate({ pr: { createdAt: young, comments: [] }, timeline: new Error("HTTP 502"), prLabels: [label] }), "4-hour review hold", "an unreadable timeline fails closed");
+    const full = Array.from({ length: 100 }, () => ({ event: "commented" }));
+    refused(gate({ pr: { createdAt: young, comments: [] }, timeline: [...full.slice(0, 98), commit, added()], prLabels: [label] }), "4-hour review hold",
+      "a full first page (more may follow, never ending here) is never read as complete");
+    ok(gate({ pr: { comments: [] }, git: { "rev-parse HEAD": `${"e".repeat(40)}\n` }, timeline: [commit, added()], prLabels: [label] }).ok === false, "but never the other gates");
   }
   // A proof made under the release-only rules proves only the release PR, never a hotfix (Sol r8, #2226).
   {

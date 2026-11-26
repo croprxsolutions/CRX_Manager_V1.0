@@ -339,7 +339,7 @@ export default function CropPrograms() {
         {/* Saving rewrites the whole program list, so it must never start from a list that failed to load.
             (Until a read finishes, the page renders only the loading skeleton above, so no save can start early.) */}
         {isAdmin && !loadError && (
-          <Button icon={<Plus className="w-4 h-4" />} onClick={openNew}>
+          <Button icon={<Plus className="w-4 h-4" />} onClick={openNew} disabled={saving}>
             New Program
           </Button>
         )}
@@ -359,7 +359,7 @@ export default function CropPrograms() {
                 <p className="text-xs text-gray-400 mt-1">
                   Create a program template to quickly build quotes for common crop applications
                 </p>
-                <Button className="mt-4" icon={<Plus className="w-4 h-4" />} onClick={openNew}>
+                <Button className="mt-4" icon={<Plus className="w-4 h-4" />} onClick={openNew} disabled={saving}>
                   Create First Program
                 </Button>
               </>
@@ -410,6 +410,7 @@ export default function CropPrograms() {
                     <>
                       <button
                         onClick={() => openEdit(prog)}
+                        disabled={saving}
                         className="p-1.5 rounded-lg text-gray-400 hover:text-crx-green hover:bg-crx-green-light transition-colors"
                         title="Edit"
                         aria-label="Edit"
@@ -427,6 +428,7 @@ export default function CropPrograms() {
                       </button>
                       <button
                         onClick={() => setDeleteConfirm(prog.id)}
+                        disabled={saving}
                         className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                         title="Delete"
                         aria-label="Delete"

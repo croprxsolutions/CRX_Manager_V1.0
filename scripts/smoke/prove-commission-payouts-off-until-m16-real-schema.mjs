@@ -38,7 +38,7 @@ const COM = { posted: id('16a1'), unposted: id('16a2'), free: id('16a3') };
 const reuse = process.env.PAYOUTGUARD_REUSE === '1';
 
 const sh = (sql, { user = 'postgres', single = true } = {}) => docker(['exec', '-i', NAME, 'psql', '-U', user, '-d', 'postgres', '-X', '-q',
-  '-v', 'ON_ERROR_STOP=1', ...(single ? ['-1'] : [])], { input: sql, allowFailure: true });
+  '-v', 'ON_ERROR_STOP=1', ...(single ? ['-1'] : []), '-f', '-'], { input: sql, allowFailure: true });
 const bodyMd5 = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 /** Like refuse(), but the call runs as postgres (the implementation bodies execute for postgres only). */
 const asPostgres = (stmt) => `BEGIN ${stmt} t := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN t := SQLERRM; END;`;
@@ -146,6 +146,13 @@ try {
   createWorks('reversed: create batch');
   const reapplied = sh(read('supabase', 'migrations', MIGRATION));
   assert.equal(reapplied.status, 0, reapplied.stderr);
+  // Once the switch is changed (as M16 will), the reverse refuses; the whole attempt rolls back.
+  const afterM16 = sh(`CREATE OR REPLACE FUNCTION public._commission_payouts_enabled() RETURNS boolean LANGUAGE sql STABLE
+    SET search_path TO 'pg_catalog', 'pg_temp' AS $on$ SELECT true $on$;
+${read('scripts', 'smoke', 'commission-payouts-off-until-m16-reverse.sql')}`);
+  assert.notEqual(afterM16.status, 0, 'the reverse must refuse a changed switch');
+  assert.match(afterM16.stderr, /PAYOUT_GUARD_M16_REVERSE_DRIFT/);
+  console.log('[payout-guard] the reverse refuses once the switch has been changed');
   reverse();
   console.log('[payout-guard] re-apply after the reverse passed its preflight; reversed again');
   console.log('COMMISSION_PAYOUTS_OFF_PROOF_PASS');

@@ -13,7 +13,8 @@
 --   'posted' while the switch is not true. It also stops a payout call that was already running when this migration
 --   committed (its old body has no check, but the trigger fires on its write).
 --   void_commission_payment is NOT touched and the trigger allows 'voided': voiding an existing batch stays allowed.
---   M16 turns payouts back on with its own migration that makes the switch return true.
+--   M16 turns payouts back on with its own migration, stamped after this one (stamps here only ever increase), that
+--   makes the switch return true with CREATE OR REPLACE.
 -- SAFETY: preflight refuses unless this runs as one transaction, the switch does not exist yet, and both live
 --   bodies are exactly staging's current ones (md5, carriage returns removed). Postflight checks the two new bodies,
 --   that owner, grants, security mode, settings, return type, volatility and arguments did not move, and that the
@@ -25,7 +26,8 @@
 SET LOCAL lock_timeout = '5s';
 
 CREATE TEMP TABLE payoutguard_m16_attrs ON COMMIT DROP AS
-SELECT p.oid AS fn_oid, p.oid::regprocedure::text AS sig, pg_get_userbyid(p.proowner) AS owner,
+-- sig without its schema, so the keys below match whatever search_path the apply session has.
+SELECT p.oid AS fn_oid, regexp_replace(p.oid::regprocedure::text, '^public\.', '') AS sig, pg_get_userbyid(p.proowner) AS owner,
        p.proacl::text AS acl, p.proconfig, p.prorettype, p.provolatile, p.prosecdef,
        pg_get_function_arguments(p.oid) AS args, pg_current_xact_id()::text AS transaction_id
   FROM pg_proc p

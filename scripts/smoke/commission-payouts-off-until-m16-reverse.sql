@@ -18,6 +18,10 @@ $guard$;
   v_fn record;
   v_def text;
 BEGIN
+  -- Only this migration's own state: once M16 has changed the switch, this rollback must not run.
+  IF (SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._commission_payouts_enabled()')) IS DISTINCT FROM ' SELECT false ' THEN
+    RAISE EXCEPTION 'PAYOUT_GUARD_M16_REVERSE_DRIFT: the payout switch is missing or no longer the one this migration created';
+  END IF;
   FOR v_fn IN
     SELECT * FROM (VALUES
       ('public.create_commission_payment(uuid[],text,text,date,text,uuid,text)'::regprocedure,

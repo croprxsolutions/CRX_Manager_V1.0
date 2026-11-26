@@ -150,8 +150,8 @@ export default function handler(request, response) {
     response.setHeader('Allow', 'GET');
     return response.status(405).end();
   }
-  if (request.query?.drawingOutage === '1') {
-    return response.status(503).end();
+  if (request.query?.drawingOutage !== undefined) {
+    return response.status(request.query.drawingOutage === '1' ? 503 : 400).end();
   }
 
   const nonce = randomBytes(18).toString('base64');

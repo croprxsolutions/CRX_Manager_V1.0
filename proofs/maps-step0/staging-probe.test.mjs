@@ -1,6 +1,6 @@
 // @vitest-environment node
 import assert from 'node:assert/strict';
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 import { Script } from 'node:vm';
 import { readFileSync } from 'node:fs';
 import handler from '../../api/maps-step0.mjs';
@@ -89,6 +89,26 @@ test('returns the drawing outage fixture only on the verified staging route', ()
   assert.equal(run({ query, method: 'POST' }).status, 405);
   assert.equal(run({ query }, { VERCEL_TARGET_ENV: 'preview' }).status, 404);
   assert.equal(run({ query, headers: { host: 'croprxsolutions.app' } }).status, 404);
+  assert.equal(run({ query: { drawingOutage: ['1', '1'] } }).status, 400);
+  assert.equal(run({ query: { drawingOutage: ['1', '1'] } }).body, '');
+});
+
+test.each([
+  ['staging', 'staging', true],
+  ['staging', 'codex/test', false],
+  ['preview', 'staging', false],
+  ['production', 'main', false],
+  ['', '', false],
+])('adds the drawing bundle only to staging builds of staging (%s, %s)', async (target, branch, expected) => {
+  vi.stubEnv('VERCEL_TARGET_ENV', target);
+  vi.stubEnv('VERCEL_GIT_COMMIT_REF', branch);
+  vi.resetModules();
+  try {
+    const { default: config } = await import('../../vite.config.ts');
+    assert.equal(config.plugins.some((plugin) => plugin?.name === 'staging-maps-drawing-proof'), expected);
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });
 
 test('reserves both proof routes from the normal app rewrite and policy', () => {

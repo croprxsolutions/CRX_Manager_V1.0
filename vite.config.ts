@@ -87,7 +87,8 @@ export default defineConfig({
       closeBundle: {
         order: 'post',
         sequential: true,
-        handler: async () => {
+        handler: async (error) => {
+          if (error) return;
           await build({
             configFile: fileURLToPath(new URL('./proofs/maps-step0/vite.config.ts', import.meta.url)),
             base: '/api/maps-step0-draw/',

@@ -12,6 +12,8 @@ const PICTURE_SOURCE_ID = 'proof-picture';
 const PICTURE_LAYER_ID = 'proof-picture-layer';
 const DRAW_CONTROL_ID = 'proof-draw-control';
 const STAGING_PROOF_PATH = '/api/maps-step0-draw/';
+const USDA_HOST = 'basemap.nationalmap.gov';
+const MAPBOX_HOST = 'api.mapbox.com';
 const stagingProof = import.meta.env.BASE_URL === STAGING_PROOF_PATH;
 const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
 const livePicturesEnabled = stagingProof && location.hostname === 'staging.croprxsolutions.app'
@@ -101,16 +103,18 @@ function addScopedStyles(): void {
 }
 
 function tileTemplate(picture: Picture | `${Picture}-outage`): string {
+  const tileQuery = 'z={z}&x={x}&y={y}';
+  const outageQuery = picture.endsWith('-outage') ? `&attempt=${outageAttempt}` : '';
   if (stagingProof && picture.endsWith('-outage')) {
-    return `${location.origin}/api/maps-step0?drawingOutage=1&picture=${picture[0]}&z={z}&x={x}&y={y}`;
+    return `${location.origin}/api/maps-step0?drawingOutage=1&picture=${picture[0]}&${tileQuery}${outageQuery}`;
   }
   if (livePictures && picture === 'A') {
-    return 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}';
+    return `https://${USDA_HOST}/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}`;
   }
   if (livePictures && picture === 'B') {
-    return `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}?access_token=${encodeURIComponent(mapboxToken ?? '')}`;
+    return `https://${MAPBOX_HOST}/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}?access_token=${encodeURIComponent(mapboxToken ?? '')}`;
   }
-  return `${location.origin}${import.meta.env.BASE_URL}tiles/${picture}.png?z={z}&x={x}&y={y}`;
+  return `${location.origin}${import.meta.env.BASE_URL}tiles/${picture}.png?${tileQuery}${outageQuery}`;
 }
 
 function getRasterTiles(map: maplibregl.Map): string[] {
@@ -139,7 +143,7 @@ const map = new maplibregl.Map({
   zoom: stagingProof ? 12 : 2,
   attributionControl: false,
   interactive: true,
-  canvasContextAttributes: { preserveDrawingBuffer: true },
+  canvasContextAttributes: { preserveDrawingBuffer: !stagingProof },
 });
 
 const draw = new MapboxDraw({
@@ -158,7 +162,9 @@ const mapboxCredit = document.querySelector<HTMLElement>('#mapbox-credit')!;
 const mapboxFeedback = document.querySelector<HTMLAnchorElement>('#mapbox-feedback')!;
 const saveKey = 'maps-step0-synthetic-draft';
 let chosenPicture: Picture = 'A';
+let showingPicture: Picture | undefined = 'A';
 let outagePicture: Picture | undefined;
+let outageAttempt = 0;
 let livePictures = false;
 
 function pictureName(picture: Picture): string {
@@ -166,7 +172,7 @@ function pictureName(picture: Picture): string {
   return picture === 'A' ? 'USDA' : 'Mapbox';
 }
 
-function updateCredits(picture: Picture): void {
+function updateCredits(picture: Picture | undefined): void {
   usdaCredit.hidden = !livePictures || picture !== 'A';
   mapboxCredit.hidden = !livePictures || picture !== 'B';
   const center = map.getCenter();
@@ -176,7 +182,26 @@ function updateCredits(picture: Picture): void {
 function setPictureTiles(picture: Picture | `${Picture}-outage`): void {
   const source = map.getSource(PICTURE_SOURCE_ID) as RasterTileSource;
   source.setTiles([tileTemplate(picture)]);
-  if (picture === 'A' || picture === 'B') updateCredits(picture);
+  if (picture === 'A' || picture === 'B') {
+    showingPicture = picture;
+    map.setLayoutProperty(PICTURE_LAYER_ID, 'visibility', 'visible');
+    updateCredits(picture);
+  }
+}
+
+function recoverPicture(failed: Picture): void {
+  if (failed !== showingPicture) return;
+  retryButton.disabled = false;
+  if (failed !== chosenPicture) {
+    showingPicture = undefined;
+    map.setLayoutProperty(PICTURE_LAYER_ID, 'visibility', 'none');
+    updateCredits(undefined);
+    status.value = 'Both pictures unavailable · drawing stays open';
+    return;
+  }
+  const fallback = failed === 'A' ? 'B' : 'A';
+  setPictureTiles(fallback);
+  status.value = `${pictureName(failed)} unavailable · showing ${livePictures ? pictureName(fallback) : fallback}`;
 }
 
 const proof: ProofApi = {
@@ -243,24 +268,32 @@ map.on('load', () => {
   proof.ready = true;
   livePicturesButton.hidden = !livePicturesEnabled;
   const savedDraft = sessionStorage.getItem(saveKey);
-  if (savedDraft) draw.set(JSON.parse(savedDraft));
-  status.value = savedDraft ? 'Reopened synthetic draft · picture A' : 'Picture A';
+  if (!savedDraft) {
+    status.value = 'Picture A';
+    return;
+  }
+  try {
+    draw.set(JSON.parse(savedDraft));
+    status.value = 'Reopened synthetic draft · picture A';
+  } catch {
+    status.value = 'Saved synthetic draft could not be reopened · picture A';
+  }
 });
 
 map.on('error', (event) => {
   const error = event.error;
-  if ('status' in error && error.status === 503 && 'url' in error && typeof error.url === 'string') {
+  if (!error || error.name === 'AbortError') return;
+  if ('status' in error && 'url' in error && typeof error.url === 'string') {
     const url = new URL(error.url);
-    const failedPicture = stagingProof && url.pathname === '/api/maps-step0' && url.searchParams.get('drawingOutage') === '1'
-      ? url.searchParams.get('picture')
-      : /^\/tiles\/([AB])-outage\.png$/.exec(url.pathname)?.[1];
-    if (outagePicture && failedPicture === outagePicture && retryButton.disabled) {
-      const fallback = outagePicture === 'A' ? 'B' : 'A';
-      setPictureTiles(fallback);
-      retryButton.disabled = false;
-      status.value = `${pictureName(outagePicture)} unavailable · showing ${livePictures ? pictureName(fallback) : fallback}`;
+    const failedFixture = url.origin === location.origin && (stagingProof
+      ? url.pathname === '/api/maps-step0' && url.searchParams.get('drawingOutage') === '1'
+      : /^\/tiles\/[AB]-outage\.png$/.test(url.pathname));
+    if (failedFixture) {
+      if (outagePicture && url.searchParams.get('attempt') === String(outageAttempt)) recoverPicture(outagePicture);
+      return;
     }
-    if (failedPicture) return;
+    if (livePictures && url.hostname === USDA_HOST) return recoverPicture('A');
+    if (livePictures && url.hostname === MAPBOX_HOST) return recoverPicture('B');
   }
   // eslint-disable-next-line no-console -- the spec fails on any console.error, so map errors must reach it
   console.error('MapLibre proof error:', error.name);
@@ -283,8 +316,10 @@ map.on('moveend', () => {
   if (!mapboxCredit.hidden) updateCredits('B');
 });
 toolbar.querySelector('#fail-picture')!.addEventListener('click', () => {
-  if (!proof.ready || outagePicture) return;
+  if (!proof.ready || !retryButton.disabled) return;
   outagePicture = chosenPicture;
+  outageAttempt += 1;
+  retryButton.disabled = false;
   setPictureTiles(`${outagePicture}-outage`);
 });
 retryButton.addEventListener('click', () => proof.switchPicture(chosenPicture));

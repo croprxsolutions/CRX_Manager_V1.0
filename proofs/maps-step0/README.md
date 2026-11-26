@@ -1,6 +1,6 @@
 # Disposable Maps Step 0 proof
 
-The protected staging drawing page is `https://staging.croprxsolutions.app/api/maps-step0-draw/index.html` when deployed. This bundle is generated only for Vercel's custom staging target from the staging branch. The normal app build contains no drawing page. First verify that the signed-out URL redirects to Vercel and the signed-in page has one route-specific Content Security Policy. Keep real records and non-test geometry out of the proof.
+The protected staging drawing page is `https://staging.croprxsolutions.app/api/maps-step0-draw/index.html` when deployed. This bundle is generated only for Vercel's custom staging target from the staging branch. The normal app build contains no drawing page. The route relies on Vercel Deployment Protection. Before opening the signed-in proof, confirm a signed-out request to the exact URL redirects to Vercel. If it serves the proof to a signed-out request, stop. Then verify the signed-in page has one route-specific Content Security Policy. Keep real records and non-test geometry out of the proof.
 
 In staging, choose **Use live USDA and Mapbox** to enable the live providers. Check that USDA shows the USDA/USGS credit, and Mapbox shows its logo and attribution links. Start a synthetic polygon, place two corners, switch pictures, then select **Fail picture**. The staging fixture returns an intentional HTTP 503. Confirm that the alternate live picture and its credit appear without losing the draft or moving the camera. Select **Retry**, verify that the original picture and credit return, finish the polygon, and use **Save synthetic draft** and **Reopen**. Repeat while holding a vertex in a drag. The oldest-phone check must run in the installed staging app. If it opens the app shell after a weak connection, reconnect and open the exact proof path again.
 
@@ -8,7 +8,7 @@ After Step 0, remove the drawing bundle hook, its routing and policy, and the ou
 
 This local page checks whether one MapLibre map can change raster pictures and recover from a failed tile while Mapbox Draw is still editing a synthetic polygon. The tile server generates two solid-color pictures. Save and Reopen use storage scoped to the current browser tab.
 
-The original local recovery proof at `1c48e0942` was tested against staging `723992d59`. This copy adds a standalone production bundle and was tested against staging `40f75a8fe`. The root lockfile pins Mapbox Draw to 1.5.2. The local proof uses MapLibre GL JS 6.19.0. Its Vite config serves the MapLibre worker from the same origin.
+The original local recovery proof at `1c48e0942` was tested against staging `723992d59`. The root lockfile pins Mapbox Draw to 1.5.2 and MapLibre GL JS to 6.19.0. The proof serves the MapLibre worker from the same origin.
 
 ## Run locally
 
@@ -16,7 +16,6 @@ Run from the worktree root with Chrome installed.
 
 ```powershell
 npm ci
-npm install --prefix proofs/maps-step0 --no-save --no-package-lock maplibre-gl@6.19.0
 npm test -- src/components/map/DrawControl.test.tsx
 npx --no-install playwright test --config=proofs/maps-step0/playwright.config.ts
 ```

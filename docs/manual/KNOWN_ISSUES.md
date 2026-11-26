@@ -353,7 +353,7 @@ with visible quantity, saved units, stock and invoice reconciled.
 |---|---|---|---|---|---|
 | #2018 | LOW | On staging, not live | Drivers saw an empty Available deliveries card; the card now loads open deliveries through get_available_deliveries_for_driver (#2165, on staging). Issue closed. | Agent (unassigned) | R-16 |
 | #2097 | MED | Check first | Stock held for a grower could release early. The expiry job does skip quotes with quantity_drawn > 0, so the described gap was not reproduced. | Taha (to 2026-12-15) | W2-45 |
-| #2065 | MED | Mason decision | Closing short releases holds and purchasing demand; needs Mason's rule (booking's rep or admin only). Guard currently blocks reps only when a live job exists. | Mason decision | D-01 |
+| #2065 | MED | Fix in review | Closing short releases holds and purchasing demand. Mason's rule (2026-11-21): only the booking's rep or an admin closes it short (or as applied). Migration `20270309120000` (not on staging yet) adds that rule, and also refuses closing as applied while a spray job is scheduled or in progress (release #1990 Sol r54 HIGH 2). | Taha (to 2026-12-15) | D-01 |
 | #1960 | LOW | Check first | An old retried save may not get section ids back. | Taha (to 2026-12-15) | W3-50 |
 
 ---

@@ -1,0 +1,6 @@
+## 2026-11-25 — Booking close guard: closing as applied with a live job, and who may close short (#1990 known issues, #2065)
+
+- New migration `20270309120000_booking_close_guard_applied_and_short.sql` (not applied live; record in `docs/reference/migrations.d/`).
+- A booking can't be closed as applied while a spray job made from it (or from one of its sections) is scheduled or in progress: "Cancel or complete the job first." This is the same rule closing short already has. Before, the close went through and released the booking's reserved stock and the purchasing plan's remaining demand while the job still needed the product. A booking whose job is completed or cancelled closes as before.
+- Only the booking's own sales rep or an admin can close a sent booking short (Mason, 2026-11-21) or as applied (same rule, since both release the reserved stock). Before, any sales rep could close another rep's booking either way from the booking screen.
+- Proof: container prover (before: both gaps are real for signed-in users; after: both are refused, the owner, an admin and a booking with no job still close, the other booking guard chains end as before; rollback: both gaps come back). Not yet verified on staging.

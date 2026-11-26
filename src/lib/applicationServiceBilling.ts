@@ -109,7 +109,7 @@ export async function readApplicationServiceBilling(
 
 export async function readApplicationServiceBillingIfReady(
   serviceIds: string[],
-  databaseReady: boolean,
+  databaseReady = APPLICATION_SERVICE_BILLING_DB_READY,
 ): Promise<ApplicationServiceBillingRead | null> {
   if (!databaseReady) return null;
   return readApplicationServiceBilling(serviceIds);
@@ -141,8 +141,11 @@ export interface ApplicationServiceBillingForm {
 
 // Billing values for one existing service's form. `available` is true only when the
 // values were really read, so a failed read can never be saved back as defaults.
-export async function loadApplicationServiceBillingForm(serviceId: string): Promise<ApplicationServiceBillingForm> {
-  const read = await readApplicationServiceBillingIfReady([serviceId], APPLICATION_SERVICE_BILLING_DB_READY);
+export async function loadApplicationServiceBillingForm(
+  serviceId: string,
+  databaseReady = APPLICATION_SERVICE_BILLING_DB_READY,
+): Promise<ApplicationServiceBillingForm> {
+  const read = await readApplicationServiceBillingIfReady([serviceId], databaseReady);
   const billing = read?.byServiceId.get(serviceId);
   const available = read?.available === true && billing !== undefined;
   return {
@@ -160,6 +163,7 @@ export async function saveApplicationService(
   args: ApplicationServiceSaveArgs,
   billing: ApplicationServiceBillingWrite | null,
   idempotencyKey: string,
+  databaseReady = APPLICATION_SERVICE_BILLING_DB_READY,
 ): Promise<{ success: boolean; service_id: string; created: boolean }> {
   const rpcArgs: Record<string, unknown> = {
     ...args,
@@ -170,7 +174,7 @@ export async function saveApplicationService(
   }
   // A non-null billing value means the caller has confirmed it was read for an
   // existing service, or is a known default for a new service, and the DB lane is ready.
-  if (billing !== null) {
+  if (databaseReady && billing !== null) {
     Object.assign(rpcArgs, {
       [TODO_CONFIRM_BILLS_CUSTOMER_RPC_ARGUMENT]: billing.billsCustomer,
       [TODO_CONFIRM_OUTSIDE_VENDOR_ID_RPC_ARGUMENT]: billing.outsideVendorId,

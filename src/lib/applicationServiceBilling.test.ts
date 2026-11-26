@@ -78,7 +78,7 @@ describe('application service billing contract', () => {
     expect(sortKeys.filter((_, index) => index % 2 === 1).every((key) => key === 'id')).toBe(true);
   });
 
-  it('omits billing fields when the caller has no known billing values', async () => {
+  it('omits billing fields until the database lane is ready', async () => {
     mocks.rpc.mockResolvedValue({
       data: { success: true, service_id: 'service-1', created: false },
       error: null,
@@ -93,7 +93,11 @@ describe('application service billing contract', () => {
       p_vehicle_id: null,
       p_cost_per_acre_cents: null,
       p_service_id: 'service-1',
-    }, null, 'retry-key-1');
+    }, {
+      billsCustomer: false,
+      outsideVendorId: null,
+      clearOutsideVendor: false,
+    }, 'retry-key-1');
 
     expect(mocks.rpc).toHaveBeenCalledTimes(1);
     expect(mocks.rpc).toHaveBeenCalledWith('admin_save_application_service', {
@@ -106,6 +110,34 @@ describe('application service billing contract', () => {
       p_service_id: 'service-1',
       p_idempotency_key: 'retry-key-1',
     });
+  });
+
+  it('includes billing fields when the caller confirms the database lane is ready', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: { success: true, service_id: 'service-1', created: false },
+      error: null,
+    });
+
+    await saveApplicationService({
+      p_name: 'Y-Drop Nitrogen',
+      p_default_rate_per_acre_cents: 1200,
+      p_is_active: true,
+      p_sort_order: 4,
+      p_vehicle_id: null,
+      p_cost_per_acre_cents: null,
+      p_service_id: 'service-1',
+    }, {
+      billsCustomer: false,
+      outsideVendorId: 'vendor-1',
+      clearOutsideVendor: false,
+    }, 'retry-key-1', true);
+
+    expect(mocks.rpc).toHaveBeenCalledWith('admin_save_application_service', expect.objectContaining({
+      p_idempotency_key: 'retry-key-1',
+      p_bills_customer: false,
+      p_outside_vendor_id: 'vendor-1',
+      p_clear_outside_vendor: false,
+    }));
   });
 
   it('refuses a vendor ID paired with clear=true before calling the RPC', async () => {
@@ -138,8 +170,21 @@ describe('application service billing contract', () => {
     });
   });
 
-  it('does not query the proposed columns until the database lane is ready', async () => {
-    await expect(readApplicationServiceBillingIfReady(['service-1'], false)).resolves.toBeNull();
+  it('does not query the proposed columns by default until the database lane is ready', async () => {
+    await expect(readApplicationServiceBillingIfReady(['service-1'])).resolves.toBeNull();
     expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it('queries the proposed columns when the caller confirms the database lane is ready', async () => {
+    mocks.from.mockReturnValue(query({
+      data: null,
+      error: { code: '42703', message: 'column application_services.bills_customer does not exist' },
+    }));
+
+    await expect(readApplicationServiceBillingIfReady(['service-1'], true)).resolves.toEqual({
+      available: false,
+      byServiceId: new Map(),
+    });
+    expect(mocks.from).toHaveBeenCalledWith('application_services');
   });
 });

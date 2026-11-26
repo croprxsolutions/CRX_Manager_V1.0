@@ -105,7 +105,7 @@ export default function ApplicationServiceDetail() {
     const { data, error } = await supabase.from('application_services').select(SERVICE_COLUMNS).eq('id', serviceId).single();
     if (!isCurrent()) return;
     if (error || !data) { toast('error', 'Service not found'); navigate('/application-services'); return; }
-    const billingForm = await loadApplicationServiceBillingForm(serviceId);
+    const billingForm = await loadApplicationServiceBillingForm(serviceId, APPLICATION_SERVICE_BILLING_DB_READY);
     if (!isCurrent()) return;
     setBillingReadAvailable(billingForm.available);
     setExistingOutsideVendor(billingForm.existingVendor);
@@ -220,10 +220,10 @@ export default function ApplicationServiceDetail() {
         ? {
           billsCustomer: form.bills_customer,
           outsideVendorId: form.outside_vendor_id || null,
-          clearOutsideVendor: form.outside_vendor_id === '' && Boolean(loadedFormRef.current?.outside_vendor_id),
+          clearOutsideVendor: form.outside_vendor_id === '',
         }
         : null;
-      return saveApplicationService(args, billing, saveIdem.getKeyFor(serviceScope));
+      return saveApplicationService(args, billing, saveIdem.getKeyFor(serviceScope), APPLICATION_SERVICE_BILLING_DB_READY);
     };
     let result: { success: boolean; service_id: string; created: boolean };
     try {

@@ -195,7 +195,7 @@ describe('ApplicationServiceDetail route changes', () => {
         error: null,
       });
     });
-    await waitFor(() => expect(mocks.loadBilling).toHaveBeenCalledWith('service-b'));
+    await waitFor(() => expect(mocks.loadBilling).toHaveBeenCalledWith('service-b', true));
     expect(container.querySelector('.animate-pulse')).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Save Changes' })).toBeNull();
 
@@ -354,6 +354,6 @@ describe('ApplicationServiceDetail route changes', () => {
       billsCustomer: false,
       outsideVendorId: 'vendor-b',
       clearOutsideVendor: false,
-    }, 'retry-key-service-b'));
+    }, 'retry-key-service-b', true));
   });
 });

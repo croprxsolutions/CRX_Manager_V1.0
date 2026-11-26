@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   toast: vi.fn(),
   captureException: vi.fn(),
+  billingReadQuery: vi.fn(),
+  billingReadResult: { data: null as unknown, error: { message: 'network unavailable' } as unknown },
 }));
 
 vi.mock('../lib/db', async (importOriginal) => {
@@ -59,12 +61,16 @@ function queryFor(table: string) {
   let selected = '';
   const builder: Record<string, unknown> = {};
   builder.select = (columns: string) => { selected = columns; return builder; };
-  for (const method of ['eq', 'order', 'is', 'in']) builder[method] = () => builder;
+  for (const method of ['eq', 'order', 'is', 'in', 'range']) builder[method] = () => builder;
   builder.single = () => Promise.resolve({ data: SERVICE_ROW, error: null });
   builder.then = (resolve: (value: unknown) => unknown) => {
-    const result = table === 'application_services' && selected.includes('bills_customer')
-      ? { data: null, error: { message: 'network unavailable' } }
-      : { data: [], error: null };
+    let result: unknown = { data: [], error: null };
+    if (table === 'application_services' && selected.includes('bills_customer')) {
+      mocks.billingReadQuery(table, selected);
+      result = mocks.billingReadResult;
+    } else if (table === 'vendors') {
+      result = { data: [{ id: 'vendor-B', name: 'Company B' }], error: null, count: 1 };
+    }
     return Promise.resolve(result).then(resolve);
   };
   return builder;
@@ -77,6 +83,8 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 );
 
 beforeEach(() => {
+  mocks.billingReadQuery.mockReset();
+  mocks.billingReadResult = { data: null, error: { message: 'network unavailable' } };
   mocks.from.mockImplementation((table: string) => queryFor(table));
   mocks.rpc.mockImplementation((name: string) => {
     if (name === 'admin_get_application_service_costs') {
@@ -103,6 +111,7 @@ describe('ApplicationServiceDetail billing fields', () => {
     expect(billedCheckbox.checked).toBe(true);
     expect(billedCheckbox.disabled).toBe(true);
     expect(outsideCompany.disabled).toBe(true);
+    expect(mocks.billingReadQuery).toHaveBeenCalledWith('application_services', expect.stringContaining('bills_customer'));
     expect(screen.getAllByText('Not available yet')).toHaveLength(2);
     expect(screen.getByText('Acres are always logged. When CRX does not bill this service, invoices carry products only, no service line.')).toBeTruthy();
 
@@ -125,5 +134,42 @@ describe('ApplicationServiceDetail billing fields', () => {
       p_idempotency_key: 'retry-key-1',
     });
     expect(mocks.toast).toHaveBeenCalledWith('success', 'Service saved');
+  });
+
+  it('clears a company selected and saved earlier when the user clears it and saves again', async () => {
+    mocks.billingReadResult = {
+      data: [{
+        id: 'service-1',
+        bills_customer: true,
+        outside_vendor_id: null,
+        outside_vendor: null,
+      }],
+      error: null,
+    };
+    const { default: ApplicationServiceDetail } = await import('./ApplicationServiceDetail');
+    render(<ApplicationServiceDetail />, { wrapper });
+
+    const outsideCompany = await screen.findByLabelText('Outside company') as HTMLSelectElement;
+    await screen.findByRole('option', { name: 'Company B' });
+    expect(outsideCompany.disabled).toBe(false);
+
+    fireEvent.change(outsideCompany, { target: { value: 'vendor-B' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith(
+      'admin_save_application_service',
+      expect.objectContaining({ p_outside_vendor_id: 'vendor-B', p_clear_outside_vendor: false }),
+    ));
+
+    fireEvent.change(outsideCompany, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledTimes(3));
+
+    const saves = mocks.rpc.mock.calls.filter((call) => call[0] === 'admin_save_application_service');
+    expect(saves).toHaveLength(2);
+    expect(saves[1][1]).toEqual(expect.objectContaining({
+      p_outside_vendor_id: null,
+      p_clear_outside_vendor: true,
+      p_idempotency_key: 'retry-key-1',
+    }));
   });
 });

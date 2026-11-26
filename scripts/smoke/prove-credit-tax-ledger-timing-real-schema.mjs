@@ -108,7 +108,15 @@ async function race(qty = 10, finish = 'ROLLBACK') {
     WHERE o.order_number = '${tag}' AND i.invoice_type <> 'credit_memo';`);
   assert.ok(invoice, 'the race sale has no draft');
   // A: starts first (its credit is stamped at this start), waits, then returns and credits the whole sale.
-  const sessionA = `BEGIN;\n${claims(admin)}\nSELECT now();\nSELECT pg_sleep(2);
+  // A and B hand off through the database, not sleeps: A starts its transaction and names itself, B waits for that,
+  // posts and commits, A waits (up to 120 s) until it sees the posted sale.
+  const sessionA = `SET application_name = '${tag}-a';\nBEGIN;\n${claims(admin)}\nSELECT now();
+    DO $w$ BEGIN
+      FOR i IN 1..600 LOOP
+        EXIT WHEN EXISTS (SELECT 1 FROM invoices WHERE id = '${invoice}' AND status IN ('posted', 'overdue', 'paid'));
+        PERFORM pg_sleep(0.2);
+      END LOOP;
+    END $w$;
     DO $a$
     DECLARE v_order uuid; v_ret uuid; v_credit uuid;
     BEGIN
@@ -129,7 +137,12 @@ async function race(qty = 10, finish = 'ROLLBACK') {
         round((SELECT total_amount_cents FROM invoices WHERE id = '${invoice}') * ${qty} / 10.0)::bigint;
     END $a$;
     ${finish};`;
-  const sessionB = `SELECT pg_sleep(0.5);\nBEGIN;\n${claims(admin)}
+  const sessionB = `DO $w$ BEGIN
+      FOR i IN 1..600 LOOP
+        EXIT WHEN EXISTS (SELECT 1 FROM pg_stat_activity WHERE application_name = '${tag}-a' AND xact_start IS NOT NULL);
+        PERFORM pg_sleep(0.2);
+      END LOOP;
+    END $w$;\nBEGIN;\n${claims(admin)}
     SELECT post_invoice('${invoice}', _invoice_post_version('${invoice}'), '${tag}-post');\nCOMMIT;`;
   const run = (sql) => new Promise((resolve) => {
     const child = execFile('docker', [...pgArgs, '-v', 'ON_ERROR_STOP=1'], { maxBuffer: 16 * 1024 * 1024 },

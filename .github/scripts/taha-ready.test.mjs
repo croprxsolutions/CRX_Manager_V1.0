@@ -103,6 +103,71 @@ test('ping text escapes PR titles and names the short head', () => {
   assert.match(t, /<https:\/\/github.com\/x\/y\/pull\/7\|#7>/);
 });
 
+// ── Hotfixes into main (Mason, 2026-11-25) ─────────────────────────────────────────────────────
+import { cutAtSentence, githubOwned, isMainHotfix } from './taha-ready.mjs';
+
+const hotfix = (o) => pr({ baseRefName: 'main', headRefName: 'hotfix/q', ...o });
+const gateWaiting = () => [...green(), { name: 'Release flow guard (main)', bucket: 'fail' }, { name: 'release-gate', bucket: 'pending' }];
+
+test('a hotfix into main is asked for even while the guard and release-gate wait on Taha; other checks still count', () => {
+  assert.equal(isMainHotfix(hotfix()), true);
+  assert.equal(isMainHotfix(pr({ baseRefName: 'staging', headRefName: 'hotfix/q' })), false);
+  assert.equal(isMainHotfix(pr({ baseRefName: 'main', headRefName: 'release/next' })), false);
+  assert.equal(decide(hotfix(), { ...ok, checks: gateWaiting }).act, true);
+  assert.equal(decide(hotfix(), { ...ok, checks: () => [...gateWaiting(), { name: 'CI', bucket: 'fail' }] }).act, false);
+  // Not a hotfix: the guard still blocks.
+  assert.equal(decide(pr({ baseRefName: 'main', headRefName: 'release/next' }), { ...ok, checks: gateWaiting }).act, false);
+  assert.equal(P(labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' }), [], { ...ok, checks: gateWaiting }), true);
+});
+
+test('a hotfix waits while the guard is still running: it may yet ask for the label (Codex on #2589)', () => {
+  const guardPending = () => [...green(), { name: 'Release flow guard (main)', bucket: 'pending' }];
+  assert.equal(decide(hotfix(), { ...ok, checks: guardPending }).act, false);
+  assert.equal(P(labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' }), [], { ...ok, checks: guardPending }), false);
+});
+
+test('summaries end at a sentence, or a whole word with an ellipsis, never mid-word', () => {
+  assert.equal(cutAtSentence('Short.', 350), 'Short.');
+  const two = `${'a'.repeat(200)}. ${'b '.repeat(150)}`;
+  assert.equal(cutAtSentence(two, 350), `${'a'.repeat(200)}.`);
+  assert.equal(cutAtSentence('word '.repeat(100), 350), `${'word '.repeat(70).trim()}…`);
+});
+
+test('.github/ files count as Taha\'s on a hotfix (he is a code owner)', () => {
+  assert.deepEqual(githubOwned([{ filename: '.github/workflows/release-pr.yml' }, { filename: 'README.md' }]).files, ['.github/workflows/release-pr.yml']);
+  assert.equal(githubOwned([{ filename: 'docs/x.md' }]), null);
+  assert.equal(githubOwned(null), null);
+});
+
+test('the ping asks for the hotfix-backport label only on a hotfix whose guard wants it', () => {
+  const h = labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' });
+  const p = needsPing(h, [], { ...ok, asked: () => false, backport: () => true });
+  assert.equal(p.backport, true);
+  assert.match(pingText(h, null, p), /Approve \+ `hotfix-backport` label \(add it after the latest push\) \(head aaaaaaa\)/);
+  assert.equal(needsPing(h, [], { ...ok, asked: () => false, backport: () => false }).backport, false);
+  assert.equal(needsPing(labelled(T), [], { ...ok, asked: () => false, backport: never }).backport, false);
+  assert.doesNotMatch(pingText(pr()), /hotfix-backport/);
+});
+
+test('an approved hotfix whose guard still wants the label gets one label-only ping (as on #2573)', () => {
+  const approved = hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: HEAD } }] });
+  const lazy = { checks: never, sol: never, asked: never };
+  const p = needsPing(approved, [], { ...lazy, backport: () => true });
+  assert.equal(p.ping, true);
+  assert.match(pingText(approved, null, p), /waiting on your `hotfix-backport` label \(add it after the latest push\) \(head/);
+  assert.doesNotMatch(pingText(approved, null, p), /Approve/);
+  assert.equal(needsPing(approved, [bot(HEAD)], { ...lazy, backport: () => true }).ping, false);
+  assert.equal(needsPing(approved, [], { ...lazy, backport: () => false }).ping, false);
+  // Approved on an older head, or not a hotfix: the normal rules apply.
+  assert.equal(needsPing(hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: NEW } }] }), [], { ...lazy, backport: () => true }).ping, false);
+  assert.equal(needsPing(pr({ reviews: approved.reviews }), [], { ...lazy, backport: never }).ping, false);
+  // An older-head Approve the merge gate carries over (#2605) still gets the label-only ping after a push.
+  const carriedOver = hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: NEW } }] });
+  const c = needsPing(carriedOver, [], { ...lazy, carried: () => true, backport: () => true });
+  assert.equal(c.ping, true);
+  assert.equal(c.labelOnly, true);
+});
+
 // ── Taha's verdict labels, reminder, Haiku (Mason, 2026-11-24) ─────────────────────────────────
 import { needsReminder, parseTopics, remindMarker, reviewLabelChanges, summarize, tahaVerdict } from './taha-ready.mjs';
 
@@ -125,6 +190,27 @@ test('review labels: exactly one of approved / changes, or neither after a push'
   assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('CHANGES_REQUESTED')], labels: L('taha-approved') })), { add: ['taha-changes'], remove: ['taha-approved'] });
   assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED', NEW)], labels: L('taha-approved', 'taha-changes') })), { add: [], remove: ['taha-approved', 'taha-changes'] });
   assert.deepEqual(reviewLabelChanges(pr({ author: { login: 'TahaKhanAbdalli' }, reviews: [rv('APPROVED')] })), { add: [], remove: [] }, "Taha's own PR untouched");
+});
+
+test("carried-over Approve (Mason, 2026-11-25): shows as approved, takes ready-for-taha off, stops re-labels and pings", () => {
+  const yes = () => true;
+  const old = pr({ reviews: [rv('APPROVED', NEW)], labels: L('ready-for-taha'), reviewRequests: [{ login: 'TahaKhanAbdalli' }] });
+  assert.equal(tahaVerdict(old, yes), 'taha-approved');
+  assert.equal(tahaVerdict(old, () => false), null, 'not carried: no verdict');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('DISMISSED', NEW)] }), yes), 'taha-approved', 'a push-dismissed Approve is checked too (Luna r3)');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('CHANGES_REQUESTED', NEW)] }), never), null, 'no earlier Approve: GitHub is not asked');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED', NEW), rv('CHANGES_REQUESTED')] }), never), 'taha-changes', 'a verdict on this head wins without asking');
+  assert.deepEqual(reviewLabelChanges(old, yes), { add: ['taha-approved'], remove: ['ready-for-taha'] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('CHANGES_REQUESTED')], labels: L('ready-for-taha') })), { add: ['taha-changes'], remove: [] },
+    'changes requested keeps it, so the fixed head is pinged again (Sol)');
+  assert.deepEqual(reviewLabelChanges(old, () => false), { add: [], remove: [] }, 'a real change keeps it waiting');
+  assert.match(decide(pr({ reviews: [rv('APPROVED', NEW)] }), { checks: never, lane: never, sol: never, carried: yes }).why, /carries over/);
+  assert.equal(decide(pr({ reviews: [rv('APPROVED', NEW)] }), { ...ok, carried: () => false }).act, true, 'not carried: asked again');
+  assert.equal(needsPing(old, [], { ...ok, asked: never, carried: yes }).ping, false);
+  const day = Date.parse('2026-11-26T00:00:00Z');
+  const pingedAt = [{ author: { login: 'github-actions' }, body: pingMarker(HEAD), createdAt: '2026-11-24T00:00:00Z' }];
+  assert.equal(needsReminder(old, pingedAt, day, { checks: never, carried: yes }).remind, false);
+  assert.equal(needsReminder(old, pingedAt, day, { checks: green, carried: () => false }).remind, true);
 });
 
 test('reminder: once per head, 24 h after the first ping, while Taha has not decided', () => {

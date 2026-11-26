@@ -23,6 +23,7 @@ import { evaluateMigrationApply, normalizeMigName, ownerApprovalNeeded, resolveM
 import { checkWrappable } from "./migration-wrappability-lib.mjs";
 import { evaluateLandingGate, hotfixStampProblem, readyToMergeProblem } from "./migration-landing-gate-lib.mjs";
 import { cancelCodeRabbitSkip, recordCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
+import { recordTahaLaneOverride } from "./taha-lane-lib.mjs";
 import { generateKeyPairSync } from "node:crypto";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
@@ -1868,6 +1869,27 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ pr: { headRefName: "release/next", comments: [] } }), "Taha hasn't given the go-ahead", "the release too");
   // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
   ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");
+  // Mason, 2026-11-25: release/next skips the 4-hour hold (its changes were each held on staging),
+  // and his `taha override #<PR> <code>` stands in for Taha's go-ahead and the hold.
+  {
+    const young = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    refused(gate({ pr: { headRefName: "release/next", createdAt: young, comments: [] } }), "Taha hasn't given the go-ahead",
+      "a young release is not refused for the 4-hour hold, only for the go-ahead");
+    const asked = gate({ pr: { createdAt: young, comments: [] } });
+    refused(asked, "4-hour review hold", "a young hotfix is still held");
+    const code = /taha override #900 (\d{6})/.exec(String(asked.reason))?.[1];
+    ok(Boolean(code), "the refusal hands Mason an override code for this PR");
+    const stateDir = path.join(gateDir, ".claude", "session-state");
+    const overrideFile = path.join(stateDir, "taha-lane-override-pr900.json");
+    ok(recordTahaLaneOverride({ dirs: [stateDir], pullRequest: 900, code }).ok === true, "Mason's override records");
+    try {
+      ok(gate({ pr: { createdAt: young, comments: [] } }).ok === true, "Mason's override lifts the hold and the go-ahead on a hotfix");
+      ok(gate({ pr: { headRefName: "release/next", comments: [] } }).ok === true, "and on the release");
+      ok(gate({ pr: { comments: [] }, git: { "rev-parse HEAD": `${"e".repeat(40)}\n` } }).ok === false, "but never the other gates");
+      refused(gate({ pr: { number: 901, comments: [] } }), "Taha hasn't given the go-ahead", "another PR is not covered");
+    } finally { rmSync(overrideFile, { force: true }); }
+    refused(gate({ pr: { comments: [] } }), "Taha hasn't given the go-ahead", "without the override the go-ahead is needed again");
+  }
   // A proof made under the release-only rules proves only the release PR, never a hotfix (Sol r8, #2226).
   {
     const proofFile = path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`);

@@ -248,7 +248,7 @@ const ORD = id('e1'), OE = id('e11'), OG = id('e12'), OL = id('e13');
 const Q = id('91'), QS = id('92');
 // DF: whole-item line + gallon line, completed with a fraction on the whole-item line (refused).
 // DW: whole-item line only, completed whole and partial (1 of 2).
-const DF = id('f1'), DFE = id('f11'), DFG = id('f12'), DW = id('f2'), DWE = id('f21');
+const DF = id('f1'), DFE = id('f11'), DFG = id('f12'), DW = id('f2'), DWE = id('f21'), DS = id('f3'), DSE = id('f31'), DSG = id('f32');
 const product = (pid, name, form, unit) => `('${pid}', '${name}', '${name}', '${form}', '${unit}', '${unit}', '${unit}', '${unit}', 1, 8, 10, 10, 10, 1, true)`;
 
 function seed() {
@@ -270,13 +270,15 @@ function seed() {
       ('${OL}', '${ORD}', '${PE}', '[PROVER] Seed Ea', 'Ea', 2.5, 0, 2.5, 10, 8);
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, assigned_driver, status, is_quick_delivery) VALUES
       ('${DF}', 'WHOLE-DF', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
-      ('${DW}', 'WHOLE-DW', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false);
+      ('${DW}', 'WHOLE-DW', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
+      ('${DS}', 'WHOLE-DS', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'scheduled', false);
     INSERT INTO public.delivery_items (id, delivery_id, order_item_id, product_id, quantity, unit_size) VALUES
       ('${DFE}', '${DF}', '${OE}', '${PE}', 2, 'Ea'), ('${DFG}', '${DF}', '${OG}', '${PG}', 2.5, 'Gal'),
-      ('${DWE}', '${DW}', '${OE}', '${PE}', 2, 'Ea');
+      ('${DWE}', '${DW}', '${OE}', '${PE}', 2, 'Ea'),
+      ('${DSE}', '${DS}', '${OL}', '${PE}', 2, 'Ea'), ('${DSG}', '${DS}', '${OG}', '${PG}', 2.5, 'Gal');
     INSERT INTO public.quotes (id, quote_number, customer_id, created_by) VALUES ('${Q}', 'WHOLE-Q1', '${CUST}', '${ADMIN}');
     INSERT INTO public.quote_sections (id, quote_id) VALUES ('${QS}', '${Q}');`);
-  console.log('[prover] seeded Ea, Unit and Gal products, an order (one legacy 2.5 Ea line), a quote and two loads');
+  console.log('[prover] seeded Ea, Unit and Gal products, an order (one legacy 2.5 Ea line), a quote, two loads in progress and one scheduled');
 }
 
 const AS_ADMIN = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true); SET LOCAL ROLE authenticated;`;
@@ -336,7 +338,7 @@ function afterCases() {
   // 2. Gallon products are unchanged everywhere.
   ok(quoteLine(PG, 2.5), 'a 2.5 Gal quote line');
   ok(orderLine(PG, 2.5, 'Gal'), 'a 2.5 Gal order line');
-  ok(`UPDATE public.delivery_items SET quantity = 1.5 WHERE id = '${DFG}';`, 'a 1.5 Gal delivery line');
+  ok(`UPDATE public.delivery_items SET quantity = 1.5 WHERE id = '${DSG}';`, 'a 1.5 Gal delivery line');
   console.log('[case 2] Gal: 2.5 quote line, 2.5 order line and a 1.5 delivery line save');
 
   // 3. Order lines: insert and update refused on a fraction; whole saves.
@@ -349,7 +351,7 @@ function afterCases() {
 
   // 4. Delivery: a scheduled 1.5 Ea refused; completing with 0.5 on the Ea line is refused and nothing moves;
   //    a whole partial (1 of 2) completes.
-  refused(`UPDATE public.delivery_items SET quantity = 1.5 WHERE id = '${DFE}';`, 'a 1.5 Ea delivery line');
+  refused(`UPDATE public.delivery_items SET quantity = 1.5 WHERE id = '${DSE}';`, 'a 1.5 Ea delivery line');
   const fp = footprint(DF);
   let r = committed(completeCall(DF, { [DFE]: 0.5, [DFG]: 2.5 }, 'whole-4'));
   assert.notEqual(r.status, 0, r.output);

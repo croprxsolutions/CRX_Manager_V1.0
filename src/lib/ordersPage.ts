@@ -1,5 +1,7 @@
 import { assertRpcResult, supabase } from './db';
-import { fetchAllRows, PAGE_RETURNED_NO_LIST } from './pagedRead';
+import { quantityTimesDollarsCents } from './money';
+import { isMyRecord } from './myRecords';
+import { fetchAllRows, pageWithList, PAGE_RETURNED_NO_LIST } from './pagedRead';
 import type { Order } from '../types';
 import type { Json } from '../types/supabase';
 import type { SortDir } from './tableSearchSort';
@@ -112,4 +114,36 @@ export function fetchAllMatchingOrders(query: OrdersQuery) {
     if (error || !data) return { data: null, error: error ?? { message: PAGE_RETURNED_NO_LIST }, count: null };
     return { data: data.rows, error: null, count: data.total_count };
   });
+}
+
+/**
+ * The Orders list's "Mine" view for a sales rep: every order matching the query whose salesman is the rep
+ * or whose customer is assigned to the rep, on one page. The database has no rep filter on the Orders
+ * page read, so this reads every matching order (as "select all" does) and keeps the rep's. A view filter
+ * only: under "All" the rep still sees every order. The count and total cover the orders kept, each total
+ * rounded to whole cents and summed, as the database sums them for the whole list.
+ */
+export async function fetchMyOrders(query: OrdersQuery, userId: string): Promise<PageRead> {
+  const [orders, myCustomers] = await Promise.all([
+    fetchAllMatchingOrders(query),
+    fetchAllRows<{ id: string }>((from, to) => pageWithList(supabase
+      .from('customers')
+      .select('id', { count: 'exact' })
+      .eq('assigned_sales_rep', userId)
+      .order('id')
+      .range(from, to))),
+  ]);
+  const failed = orders.error ?? myCustomers.error;
+  if (failed || !orders.data || !myCustomers.data) return { data: null, error: failed ?? { message: PAGE_RETURNED_NO_LIST } };
+  const myCustomerIds = new Set(myCustomers.data.map((c) => c.id));
+  const rows = orders.data.filter((o) => isMyRecord(o, myCustomerIds.has(o.customer_id) ? userId : null, userId));
+  return {
+    data: {
+      rows,
+      total_count: rows.length,
+      total_price_cents: rows.reduce((sum, o) => sum + quantityTimesDollarsCents(1, o.total_price ?? 0), 0),
+      next_cursor: null,
+    },
+    error: null,
+  };
 }

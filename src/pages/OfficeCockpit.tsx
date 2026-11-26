@@ -1864,7 +1864,7 @@ export default function OfficeCockpit() {
                 </p>
                 <div className="flex gap-2 mt-1">
                   <Badge variant="draft" size="sm">{morningSummary.openQuotesDraft} draft</Badge>
-                  <Badge variant="sent" size="sm">{morningSummary.openQuotesSent} sent</Badge>
+                  <Badge variant="sent" size="sm">{morningSummary.openQuotesSent} booked</Badge>
                 </div>
               </LinkedCard>
 

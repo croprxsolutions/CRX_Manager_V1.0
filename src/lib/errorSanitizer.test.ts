@@ -2,6 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('keeps document-link errors actionable and strips control characters', () => {
+    expect(sanitizeError({ message: 'BRAND_DOCUMENT_URL_BLOCKED: Use a manufacturer link.\tChoose another URL.' }))
+      .toBe('Use a manufacturer link. Choose another URL.');
+    expect(sanitizeError({ message: 'BRAND_DOCUMENT_INVALID' }))
+      .toBe('Check the document link, state and expiration date, then try again.');
+  });
   it('explains a refused product price sheet without its code', () => {
     for (const code of ['WORKBOOK_V2_EXPORT_REQUIRED', 'WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED']) {
       expect(sanitizeError({ message: code })).toMatch(/^No prices were changed\. This price sheet can no longer be used: it was already applied/);
@@ -67,6 +73,8 @@ describe('sanitizeError', () => {
       'Nothing was saved. Weight per gallon must be above 0 and at most 20 lb/gal (this is 30.0000 lb/gal)'],
     ['PRODUCT_WEIGHT_STALE: the weight of "TEST UAN" changed since you opened it; reload',
       'Nothing was saved. The weight of "TEST UAN" changed since you opened it; reload'],
+    ['PRODUCT_WEIGHT_REVIEW_NOT_OPEN',
+      'Nothing was saved. Weight review changed. Check the current Weight card before trying again'],
   ])('explains the parent refusal %s by name', (raw, expected) => {
     expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
   });
@@ -431,6 +439,8 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'CUSTOMER_INACTIVE_NEW_WORK: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added' }))
       .toBe('Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added');
     expect(sanitizeError('CUSTOMER_INACTIVE_NEW_WORK')).toContain('must reactivate the customer');
+    expect(sanitizeError({ message: 'CUSTOMER_INACTIVE_POSTING: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them' }))
+      .toBe('Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them');
     expect(sanitizeError({ message: 'new row for relation "inventory_holds" violates check constraint "inventory_holds_source_needs_customer"' }))
       .toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
     expect(sanitizeError({ message: 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery' }))

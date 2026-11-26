@@ -29,6 +29,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useSaveShortcut } from '../hooks/useSaveShortcut';
 import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
@@ -754,7 +755,7 @@ export default function OrderDetail() {
           // Server-side backstop for the hidden Edit button: a draw-created
           // order's items are locked to the booking ledger (Codex r2 HIGH).
           if (hasRpcCode(error, RpcErrorCodes.BOOKING_DRAW_ORDER_LOCKED)) {
-            toast('error', 'This order was created by a booking draw-down — its items are locked to the booking. Void or cancel the order to return quantity to the booking, then draw again.');
+            toast('error', 'This order was drawn from a booking — its items are locked to the booking. Void or cancel the order to return quantity to the booking, then draw from booking again.');
             setEditing(false);
             setNewItems([]);
             fetchOrder();
@@ -1323,6 +1324,9 @@ export default function OrderDetail() {
     }
   };
 
+  // Ctrl+S / Cmd+S presses Save changes, only while editing items and that button can be clicked.
+  useSaveShortcut(handleSaveEdits, editing && !saving && !loading && !loadFailed && !!order);
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -1553,7 +1557,7 @@ export default function OrderDetail() {
           ) : (
             <>
               {order.booking_draw && (role === 'admin' || role === 'sales_rep') && order.status !== 'cancelled' && order.status !== 'voided' && (
-                <span className="text-xs text-secondary" title="This order was created by a booking draw-down. Its items mirror the booking ledger, so they can't be edited here — void or cancel the order to return quantity to the booking, then draw again.">
+                <span className="text-xs text-secondary" title="This order was drawn from a booking. Its items mirror the booking ledger, so they can't be edited here — void or cancel the order to return quantity to the booking, then draw from booking again.">
                   Booking draw — items locked
                 </span>
               )}

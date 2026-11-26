@@ -158,7 +158,7 @@ describe('AR Aging batch statements: Select All with a search', () => {
     fireEvent.click(box('Big Farm'));
     search('Small');
     fireEvent.click(screen.getByRole('button', { name: 'Select All 1 Shown' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Deselect All' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Deselect 1 Shown' }));
     search('');
     expect(box('Big Farm').checked).toBe(true);
     expect(box('Small Farm').checked).toBe(false);
@@ -183,11 +183,32 @@ describe('AR Aging batch statements: Select All with a search', () => {
     expect(sent.sort()).toEqual([['c1@example.com', 'c1'], ['c2@example.com', 'c2']]);
   });
 
+  it('a ticked customer the search hides is never emailed or printed', async () => {
+    await renderAging();
+    fireEvent.click(box('Small Farm'));
+    search('Big');
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 2 Shown' }));
+    const statementCalls = () => H.rpcCalls.filter((c) => c.name === 'get_detailed_statement_data').map((c) => c.args.p_customer_id);
+
+    fireEvent.click(screen.getByRole('button', { name: /Email 2 statements/ }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Email Statements' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Email 2 statements' }));
+    await waitFor(() => expect(H.sendEmail).toHaveBeenCalledTimes(2));
+    expect(H.sendEmail.mock.calls.map(([arg]) => arg.customer_id).sort()).toEqual(['c1', 'c2']);
+    expect(statementCalls().sort()).toEqual(['c1', 'c2']);
+
+    H.rpcCalls = [];
+    fireEvent.click(screen.getByRole('button', { name: /Batch Print \(2\)/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Generate .* Statement/ }));
+    await waitFor(() => expect(statementCalls()).toHaveLength(2));
+    expect(statementCalls().sort()).toEqual(['c1', 'c2']);
+  });
+
   it('Deselect All clears the selection when every shown customer is selected', async () => {
     await renderAging();
     search('Small');
     fireEvent.click(screen.getByRole('button', { name: 'Select All 1 Shown' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Deselect All' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Deselect 1 Shown' }));
     expect(box('Small Farm').checked).toBe(false);
     expect(screen.queryByRole('button', { name: /Email \d+ statement/ })).toBeNull();
   });

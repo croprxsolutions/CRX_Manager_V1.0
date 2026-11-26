@@ -5,6 +5,7 @@
  */
 
 const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
+  [/^PRODUCT_WEIGHT_REVIEW_NOT_OPEN\b/, 'Nothing was saved. Weight review changed. Check the current Weight card before trying again'],
   // M9 (20270301180000): a Prepayment Manager check's amount is locked; a check with an application is not deleted.
   [/^PREPAY_CHECK_AMOUNT_LOCKED\b/, "Nothing was saved. A prepayment check's amount cannot be edited. To correct a mistyped check, delete the whole check and enter it again"],
   [/^PREPAY_OVERPAYMENT_LOCKED\b/, "Nothing was saved. An overpayment's amount comes from its payment, so it cannot be edited or deleted here. To undo it, void the payment"],
@@ -13,6 +14,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. Stock can go only into Main Warehouse until transfers between warehouses exist. Choose Main Warehouse and try again'],
   // #2000 (20270201120000): an inactive customer gets no new orders, deliveries, holds or spray jobs.
   [/^CUSTOMER_INACTIVE_NEW_WORK\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added'],
+  // #2089 (20270308130000): no sales invoice is created or posted, and no invoice restored or moved, for an inactive customer (credit memos and payment corrections allowed).
+  [/^CUSTOMER_INACTIVE_POSTING\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them'],
   // 20270226213000 (#2331): a delivery line's quantities must be finite numbers.
   [/violates check constraint "delivery_items_quantity(_delivered)?_finite_chk"/, 'Nothing was saved. Delivery quantities must be ordinary numbers. Reload the delivery and enter them again'],
   [/violates check constraint "inventory_holds_source_needs_customer"/, 'Nothing was saved. A stock hold for a spray job or quote must name its customer'],
@@ -384,6 +387,11 @@ export function sanitizeError(error: unknown): string {
     return message.slice('PRODUCT_INACTIVE'.length).replace(/^:\s*/, '').trim()
       || 'This product is turned off. Ask an admin to reactivate it.';
   }
+  if (/^BRAND_(?:DOCUMENT_)?CHANGED:/.test(message)) return 'This brand or link changed. Review it and try again.';
+  if (/^BRAND_DOCUMENT_(?:URL_INVALID|URL_BLOCKED|REASON_REQUIRED|GROUP_CONFLICT|MOVE_CONFLICT|IDENTITY_CHANGED):/.test(message)) {
+    return message.slice(message.indexOf(':') + 1).replace(/\p{Cc}+/gu, ' ').trim();
+  }
+  if (message === 'BRAND_DOCUMENT_INVALID') return 'Check the document link, state and expiration date, then try again.';
   if (/^PRODUCT_DEACTIVATION_BLOCKED(?::|$)/.test(message)) {
     return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
       || 'This product cannot be turned off while required work is open. Review its blockers.';

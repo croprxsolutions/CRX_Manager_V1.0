@@ -4,11 +4,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 
 type Row = Record<string, unknown>;
 
-const H = vi.hoisted(() => ({ tables: {} as Record<string, Row[]> }));
+const H = vi.hoisted(() => ({ tables: {} as Record<string, Row[]>, role: 'admin' }));
 
 // A query that ignores its filters and answers with the table's rows.
 function fixedQuery(rows: unknown): Record<string, unknown> {
@@ -35,7 +35,7 @@ vi.mock('../lib/notificationTriggers', () => ({ notifyLargeOrder: vi.fn(), notif
 vi.mock('../lib/metrics', () => ({ trackBusinessEvent: vi.fn() }));
 vi.mock('../lib/orderConfirmedEmail', () => ({ sendOrderConfirmedEmail: vi.fn() }));
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ profile: { id: 'user-1', role: 'admin', full_name: 'Admin' }, role: 'admin', deniedPages: [] }),
+  useAuth: () => ({ profile: { id: 'user-1', role: H.role, full_name: 'Signed-in user' }, role: H.role, deniedPages: [] }),
 }));
 vi.mock('../contexts/BelowCostApprovalContext', () => ({
   useBelowCostApproval: () => ({ runWithBelowCostApproval: (run: (reason: string | null) => unknown) => run(null) }),
@@ -64,7 +64,7 @@ const quote = (n: number, status: string, over: Row = {}): Row => ({
 
 const at = (path: string) => render(<MemoryRouter initialEntries={[path]}><Quotes /></MemoryRouter>);
 
-beforeEach(() => { H.tables = {}; });
+beforeEach(() => { H.tables = {}; H.role = 'admin'; });
 afterEach(cleanup);
 
 describe('Quotes list', () => {
@@ -93,7 +93,7 @@ describe('Quotes list', () => {
     expect(screen.queryByText('Q-TEST-2')).not.toBeInTheDocument();
   });
 
-  it('row menu offers Convert to order only for sent and revised', async () => {
+  it('row menu offers Draw whole booking only for sent (Booked) and revised', async () => {
     H.tables.quotes = [quote(1, 'draft'), quote(2, 'sent'), quote(3, 'revised'), quote(4, 'accepted')];
     at('/quotes');
     await screen.findByText('Q-TEST-1');
@@ -104,8 +104,8 @@ describe('Quotes list', () => {
       return names;
     };
     expect(itemsFor(1)).toEqual(['Duplicate']);
-    expect(itemsFor(2)).toEqual(['Convert to order', 'Duplicate']);
-    expect(itemsFor(3)).toEqual(['Convert to order', 'Duplicate']);
+    expect(itemsFor(2)).toEqual(['Draw whole booking', 'Duplicate']);
+    expect(itemsFor(3)).toEqual(['Draw whole booking', 'Duplicate']);
     expect(itemsFor(4)).toEqual(['Duplicate']);
   });
 
@@ -201,7 +201,7 @@ describe('Quotes list', () => {
 
     // The status filter counts too.
     fireEvent.click(screen.getByRole('button', { name: 'All Status' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Sent' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Booked' }));
     expect(screen.queryByText('Q-TEST-1')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear filters' })).toBeInTheDocument();
   });
@@ -258,7 +258,7 @@ describe('Quotes list', () => {
     expect(await screen.findByText('Closed short', { selector: 'span' })).not.toHaveClass('capitalize');
     fireEvent.click(screen.getByRole('button', { name: 'All Status' }));
     const options = screen.getAllByRole('option').map((el) => el.textContent);
-    expect(options).toEqual(['All', 'Draft', 'Sent', 'Revised', 'Accepted', 'Declined', 'Expired', 'Cancelled', 'Fulfilled', 'Closed short']);
+    expect(options).toEqual(['All', 'Draft', 'Booked', 'Revised', 'Accepted', 'Declined', 'Expired', 'Cancelled', 'Fulfilled', 'Closed short']);
   });
 
   it('desktop search uses the long board placeholder, and Import quotes is reachable on phone too', async () => {
@@ -278,8 +278,8 @@ describe('Quotes list', () => {
     await screen.findByText('Q-TEST-1');
     expect(screen.getByRole('button', { name: 'All Status' })).not.toHaveClass('bg-crx-green-light');
     fireEvent.click(screen.getByRole('button', { name: 'All Status' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Sent' }));
-    expect(screen.getByRole('button', { name: 'Sent Status' })).toHaveClass('bg-crx-green-light');
+    fireEvent.click(screen.getByRole('option', { name: 'Booked' }));
+    expect(screen.getByRole('button', { name: 'Booked Status' })).toHaveClass('bg-crx-green-light');
   });
 
   it('row badges use the quote palette (Revised violet, Fulfilled teal, Closed short orange)', async () => {
@@ -321,7 +321,7 @@ describe('Quotes list on a phone', () => {
     expect(screen.queryByText('Quote page')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Q-TEST-1' }));
-    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Convert to order', 'Duplicate']);
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Draw whole booking', 'Duplicate']);
     expect(screen.queryByText('Quote page')).not.toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
 
@@ -450,5 +450,80 @@ describe('Quotes list on a phone', () => {
     expect(name).toHaveClass('break-words');
     expect(screen.getByText('Expires Dec 31')).toBeInTheDocument();
     expect(screen.getByText(`Expires Sep 30, ${thisYear + 1}`)).toBeInTheDocument();
+  });
+});
+
+describe('Quotes list remembers the view and offers Mine to a sales rep', () => {
+  function QuotePage() {
+    const navigate = useNavigate();
+    return <button type="button" onClick={() => navigate(-1)}>Back to quotes</button>;
+  }
+  const withQuotePage = () => render(
+    <MemoryRouter initialEntries={['/quotes']}>
+      <Routes>
+        <Route path="/quotes" element={<Quotes />} />
+        <Route path="/quotes/:id" element={<QuotePage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  it('Back from a quote brings back the search and status filter', async () => {
+    H.tables.quotes = [quote(1, 'draft'), quote(2, 'sent'), quote(3, 'sent')];
+    withQuotePage();
+    await screen.findByText('Q-TEST-1');
+    fireEvent.click(screen.getByRole('button', { name: 'All Status' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Booked' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search by quote number, customer or product' }), { target: { value: 'Farm 3' } });
+    expect(screen.queryByText('Q-TEST-2')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Q-TEST-3'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to quotes' }));
+
+    expect(await screen.findByText('Q-TEST-3')).toBeInTheDocument();
+    expect(screen.queryByText('Q-TEST-1')).not.toBeInTheDocument();
+    expect(screen.queryByText('Q-TEST-2')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Search by quote number, customer or product' })).toHaveValue('Farm 3');
+  });
+
+  it('the office sees no Mine / All toggle', async () => {
+    H.tables.quotes = [quote(1, 'draft')];
+    at('/quotes');
+    await screen.findByText('Q-TEST-1');
+    expect(screen.queryByRole('group', { name: 'Show my quotes or all quotes' })).not.toBeInTheDocument();
+  });
+
+  it('a sales rep starts on All; Mine keeps quotes they sell, created, or whose grower is theirs', async () => {
+    H.role = 'sales_rep';
+    H.tables.quotes = [
+      quote(1, 'draft', { salesman_id: 'user-1' }),
+      quote(2, 'draft', { created_by: 'user-1', salesman_id: 'rep-2' }),
+      quote(3, 'draft', { salesman_id: 'rep-2', customer: { farm_name: 'My Grower', assigned_sales_rep: 'user-1' } }),
+      quote(4, 'draft', { salesman_id: 'rep-2', created_by: 'rep-2', customer: { farm_name: 'Their Grower', assigned_sales_rep: 'rep-2' } }),
+    ];
+    at('/quotes');
+    await screen.findByText('Q-TEST-4');
+    const group = screen.getByRole('group', { name: 'Show my quotes or all quotes' });
+    expect(within(group).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Mine' }));
+    expect(within(group).getByRole('button', { name: 'Mine' })).toHaveAttribute('aria-pressed', 'true');
+    for (const n of [1, 2, 3]) expect(screen.getByText(`Q-TEST-${n}`)).toBeInTheDocument();
+    expect(screen.queryByText('Q-TEST-4')).not.toBeInTheDocument();
+
+    fireEvent.click(within(group).getByRole('button', { name: 'All' }));
+    expect(screen.getByText('Q-TEST-4')).toBeInTheDocument();
+  });
+
+  it('?mine=1 opens a sales rep on Mine, and is ignored for the office', async () => {
+    H.role = 'sales_rep';
+    H.tables.quotes = [quote(1, 'draft', { salesman_id: 'user-1' }), quote(2, 'draft', { salesman_id: 'rep-2' })];
+    at('/quotes?mine=1');
+    await screen.findByText('Q-TEST-1');
+    expect(screen.queryByText('Q-TEST-2')).not.toBeInTheDocument();
+    cleanup();
+
+    H.role = 'admin';
+    at('/quotes?mine=1');
+    expect(await screen.findByText('Q-TEST-2')).toBeInTheDocument();
   });
 });

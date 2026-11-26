@@ -1019,9 +1019,9 @@ export default function ARaging() {
                   onClick={toggleAllCustomers}
                   className="text-xs text-crx-green hover:underline ml-2"
                 >
+                  {/* With a search typed, say that only the customers it shows are picked or cleared. */}
                   {allVisibleSelected
-                    ? 'Deselect All'
-                    // With a search typed, say that only the customers it shows are picked.
+                    ? (searchHidesRows ? `Deselect ${visibleAgingRows.length} Shown` : 'Deselect All')
                     : searchHidesRows ? `Select All ${visibleAgingRows.length} Shown` : 'Select All'}
                 </button>
               )}

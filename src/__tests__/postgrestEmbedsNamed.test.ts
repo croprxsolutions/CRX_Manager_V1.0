@@ -15,7 +15,8 @@ const SRC = join(__dirname, '..');
 
 // table -> referenced tables it links to more than once
 function ambiguousLinks(): Map<string, Set<string>> {
-  const types = readFileSync(join(SRC, 'types/supabase.ts'), 'utf8');
+  // A Windows checkout (core.autocrlf) has CRLF line ends; the block pattern below expects LF.
+  const types = readFileSync(join(SRC, 'types/supabase.ts'), 'utf8').replace(/\r\n/g, '\n');
   const out = new Map<string, Set<string>>();
   const block = /\n {6}(\w+): \{\n {8}Row: \{[\s\S]*?Relationships: \[([\s\S]*?)\n {8}\]/g;
   for (const [, table, rels] of types.matchAll(block)) {

@@ -2760,10 +2760,12 @@ function registryMigrationHighWater(): string {
 // the staging-only M4 candidates below the applied-name high-water; production
 // has not applied these definitions, so their staging overlay stays explicit.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
+  '20270307205900', // Liquid-weight draft rejection.
   '20270109100100',
   '20270109100200',
   '20270109100300',
   '20270109100400',
+  '20270307210000', // Whole-group liquid weight review.
   '20270110110000', // Inactive rate-history cleanup: optional read argument, pending apply/type regeneration.
 ]);
 
@@ -2934,12 +2936,15 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 // explicitly retained in the staging schema overlay.
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'change_brand_document_links', // 20270306170000. Prune once generated types cover this RPC.
+  'reject_liquid_density_draft', // 20270307205900. Prune once generated types cover this RPC.
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
   'set_registration_adjuvants',
   // 20270130100000 (#1976, local candidate): the EPA batch fill's save; replays through _product_parent_replay and
   // commit_epa_proposal saves the receipt. Prune once the generated types carry it.
   'commit_epa_proposal_batch',
+  'approve_liquid_density_draft', // 20270307210000. Prune once generated types cover this RPC.
+  'submit_liquid_density_draft',
   // 20270203120000 (#1942, local candidate): re-emits the private completion body under its current name
   // (20270126110000 renamed it, so no generated type carries it yet); keyed by complete_delivery's p_idempotency_key.
   // Prune once the generated types carry it.
@@ -2965,6 +2970,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'read-only workbook validation (20270306170000): invokes the private helper with the preview flag fixed to true, skipping every lock and write',
   carry_grouped_brand_document_links:
     'constraint trigger only (20270306170000): it runs on the protected mapping writes of the keyed grouping approval, with API-role EXECUTE revoked',
+  return_liquid_density_to_draft_for_brand:
+    'private trigger (20270307210000): changes density only inside the parent brand transaction, with API-role EXECUTE revoked',
   // Generated public-schema functions are not necessarily app-callable RPCs.
   _delivery_brand_event:
     "private SECURITY DEFINER delivery-brand history writer called within keyed brand workflows; live catalog denies EXECUTE to anon, authenticated, and service_role",
@@ -2980,6 +2987,13 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // M4a sales tax (local candidate 20270109100200): trigger function, never an RPC.
   _sales_tax_record_rate_20261231:
     'AFTER INSERT / UPDATE OF invoice_type row trigger on invoices: records a taxed sale\'s draft at the Settings rate once (ON CONFLICT DO NOTHING), and re-records only when a draft really switches type, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  // M4 commission settles on posting (local candidate 20270308140000): trigger function and its helper, never RPCs.
+  _settle_order_commission_20270306:
+    'helper of the invoice posting trigger and four commission writers: puts a sale\'s pending, unbatched commission rows whose stored base differs onto its profit after the posted standing discount, writing nothing when they already sit on it, so a replay is a no-op; every API-role EXECUTE is revoked',
+  _invoice_settles_commission_20270306:
+    'AFTER UPDATE OF status, deleted_at row trigger on chemical-sale invoices entering or leaving the posted set: calls _settle_order_commission_20270306, a no-op when the rows are right, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _invoice_lines_settle_commission_20270306:
+    'AFTER INSERT statement trigger on invoice_items: for lines added to a posted chemical-sale or misc-charge invoice, calls _settle_order_commission_20270306, a no-op when the rows are right, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   // M4b standing discount (local candidate 20270109100100): trigger functions and their recompute helper, never RPCs.
   _recompute_standing_discount_20261231:
     'helper of the standing-discount triggers and set_invoice_standing_discount: records a draft\'s rate once (ON CONFLICT DO NOTHING) and rewrites its computed discount line and total, writing nothing when they are already right, so a replay is a no-op; every API-role EXECUTE is revoked',

@@ -295,14 +295,35 @@ export function buildLinesSeen<T extends { id: string; order_item_id?: string | 
   }));
 }
 
-// One entry as the server compares it: ids lower-cased, delivered kept between 0 and the quantity, an amount under
-// 0.01 counted as 0 (20270309180000, #2562), amounts to 6 decimal places (the server's round(…, 6);
-// this is a screen hint, the server decides).
+// A non-negative amount to 6 decimal places, half away from zero, from its decimal text (as PostgreSQL rounds the
+// numeric it parses from the same JSON), not from the binary float as toFixed does (Sol on #2614).
+// shortcut: amounts of 1e21 and above fall back to toFixed; delivery quantities never get near that.
+export function roundAmount6(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return String(value);
+  const text = String(value);
+  if (/e-/.test(text)) return value >= 5e-7 ? '0.000001' : '0.000000';
+  if (/e/.test(text)) return value.toFixed(6);
+  const [whole, fraction = ''] = text.split('.');
+  const padded = (fraction + '0000000').slice(0, 7);
+  let units = BigInt(whole + padded.slice(0, 6));
+  if (Number(padded[6]) >= 5) units += 1n;
+  const digits = units.toString().padStart(7, '0');
+  return `${digits.slice(0, -6)}.${digits.slice(-6)}`;
+}
+
+// One entry as the server compares it: ids lower-cased, delivered kept between 0 and the quantity, amounts to 6
+// decimal places (20270309170000's round(…, 6)). An amount under 0.01 is NOT counted as 0 here: the database
+// that ships first compares it as sent, so the screen is never more lenient than it (Sol on #2614). This is a
+// screen hint, the server decides.
 function lineSeenKey(line: LineSeen): string {
   const quantity = Number(line.quantity);
-  const kept = Math.max(0, Math.min(Number(line.delivered), quantity));
-  const delivered = kept < 0.01 ? 0 : kept;
-  return `${String(line.order_item_id).toLowerCase()}|${String(line.product_id).toLowerCase()}|${quantity.toFixed(6)}|${delivered.toFixed(6)}`;
+  const delivered = Math.max(0, Math.min(Number(line.delivered), quantity));
+  return `${String(line.order_item_id).toLowerCase()}|${String(line.product_id).toLowerCase()}|${roundAmount6(quantity)}|${roundAmount6(delivered)}`;
+}
+
+// A saved list entry the comparison can read (the column accepts any JSON, e.g. [null]).
+function isLineSeen(line: unknown): line is LineSeen {
+  return typeof line === 'object' && line !== null && !Array.isArray(line);
 }
 
 /** Ticket (or, with its caption, drop-location) photos taken for these lines: only they count toward the photo cap,
@@ -318,6 +339,7 @@ export function countTicketPhotosForLoad(
 /** True when both lists hold the same entries, each as many times (the server's _delivery_lines_match). */
 export function sameLinesSeen(a: ReadonlyArray<LineSeen> | null | undefined, b: ReadonlyArray<LineSeen> | null | undefined): boolean {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  if (!a.every(isLineSeen) || !b.every(isLineSeen)) return false;
   const counts = new Map<string, number>();
   for (const line of a) counts.set(lineSeenKey(line), (counts.get(lineSeenKey(line)) ?? 0) + 1);
   for (const line of b) {
@@ -345,8 +367,30 @@ export function hasDeliveredAmount(lines: ReadonlyArray<LineSeen>): boolean {
 export function isLoadProofRefusal(error: unknown): boolean {
   const code = completionRefusalCode(error);
   return code === 'DELIVERY_NOTHING_DELIVERED' || code === 'DELIVERY_LOAD_CHANGED' || code === 'PAPER_TICKET_LOAD_CHANGED'
-    || code === 'LEFT_AT_SITE_LOAD_CHANGED';
+    || code === 'LEFT_AT_SITE_LOAD_CHANGED' || code === 'DELIVERY_QUANTITIES_STALE';
 }
+
+/** The stop's lines on the server differ from the ones on screen (a line added, removed or replaced, or its
+ * quantity changed), read just before completing: an "all full" completion sends no amounts, so the server
+ * would otherwise deliver its own quantities against proof taken for the screen's (Sol on #2614, HIGH 1). */
+export async function linesChangedOnServer(
+  deliveryId: string,
+  onScreen: ReadonlyArray<{ id: string; order_item_id?: string | null; product_id?: string | null; quantity: number | string }>,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('delivery_items')
+    .select('id, order_item_id, product_id, quantity')
+    .eq('delivery_id', deliveryId);
+  if (error) throw error;
+  const key = (line: { id: string; order_item_id?: string | null; product_id?: string | null; quantity: number | string }) =>
+    `${line.id}|${line.order_item_id ?? ''}|${line.product_id ?? ''}|${roundAmount6(Number(line.quantity))}`;
+  const server = ((data ?? []) as Array<{ id: string; order_item_id: string | null; product_id: string | null; quantity: number | string }>).map(key).sort();
+  const screen = onScreen.map(key).sort();
+  return server.length !== screen.length || server.some((line, i) => line !== screen[i]);
+}
+
+export const LINES_CHANGED_ON_SERVER_MESSAGE =
+  'The products or amounts on this delivery were changed by the office. They have been reloaded: check them and take the proof again.';
 
 /**
  * The client's copy of the server's proof-binding refusals, checked before anything (the signature
@@ -364,9 +408,9 @@ export function loadProofProblem(
   if (!currentLines) return LINES_LOADING_MESSAGE;
   if (!hasDeliveredAmount(currentLines)) return NOTHING_DELIVERED_MESSAGE;
   if (evidence === 'signature' && !sameLinesSeen(signedLines, currentLines)) return SIGNATURE_LOAD_CHANGED_MESSAGE;
-  if (evidence === 'paper_ticket' && !sameLinesSeen(photoLines, currentLines)) return TICKET_PHOTO_LOAD_CHANGED_MESSAGE;
+  if (evidence === 'paper_ticket' && !sameLinesSeen(photoLines, currentLines)) return staleProofPhotoMessage(photoLines, 'ticket');
   // Mason, 2026-11-25: the drop-location photo is bound to the load like a ticket photo.
-  if (evidence === 'left_at_site' && !sameLinesSeen(photoLines, currentLines)) return LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE;
+  if (evidence === 'left_at_site' && !sameLinesSeen(photoLines, currentLines)) return staleProofPhotoMessage(photoLines, 'left_at_site');
   return null;
 }
 
@@ -377,4 +421,14 @@ export const TICKET_PHOTO_LOAD_CHANGED_MESSAGE =
   'The products or amounts changed since this ticket photo. Get the ticket signed for the current amounts and take a new photo.';
 export const LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE =
   'The products or amounts changed since the drop-location photo. Take a new photo of where you left the delivery.';
+export const TICKET_PHOTO_NO_LIST_MESSAGE =
+  'This ticket photo was saved before CRX recorded which products a photo covers. Take a new photo of the signed ticket.';
+export const LEFT_AT_SITE_PHOTO_NO_LIST_MESSAGE =
+  'This drop-location photo was saved before CRX recorded which products a photo covers. Take a new photo of where you left the delivery.';
+
+/** Why a saved proof photo does not count: saved with no product list (before this change), or for other lines. */
+export function staleProofPhotoMessage(photoLines: unknown, kind: 'ticket' | 'left_at_site'): string {
+  if (!Array.isArray(photoLines)) return kind === 'ticket' ? TICKET_PHOTO_NO_LIST_MESSAGE : LEFT_AT_SITE_PHOTO_NO_LIST_MESSAGE;
+  return kind === 'ticket' ? TICKET_PHOTO_LOAD_CHANGED_MESSAGE : LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE;
+}
 export const NOTHING_DELIVERED_MESSAGE = 'At least one item must have a delivered quantity of at least 0.01.';

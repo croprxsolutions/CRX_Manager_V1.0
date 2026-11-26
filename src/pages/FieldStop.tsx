@@ -30,7 +30,7 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
-import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, keptQuantity, LINES_LOADING_MESSAGE, LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, evidencePhotoForLoad, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, LINES_CHANGED_ON_SERVER_MESSAGE, linesChangedOnServer, staleProofPhotoMessage, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, keptQuantity, LINES_LOADING_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, evidencePhotoForLoad, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
 import type { DeliveryCompletionEvidence, DeliveryIssueType, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
@@ -623,6 +623,25 @@ export default function FieldStop() {
       return true;
     };
     if (!stillSameAttempt()) return;
+    // The office may have changed the lines since this screen loaded them, and an "all full" completion sends no
+    // amounts: check the server's lines before sending, so proof taken for the screen's lines never completes
+    // the office's (Sol on #2614, HIGH 1).
+    let serverLinesChanged: boolean;
+    try {
+      serverLinesChanged = await linesChangedOnServer(id, items);
+    } catch (linesErr) {
+      Sentry.captureException(toSentryError(linesErr), { level: 'warning', extra: { context: 'Field Mode line check before completion failed' } });
+      toast('error', 'Could not check the products on this stop. The delivery was not completed; try again.');
+      return;
+    }
+    if (serverLinesChanged) {
+      toast('error', LINES_CHANGED_ON_SERVER_MESSAGE);
+      sig.clearSignature();
+      await fetchStop(deliveryQtys);
+      if (activeStopIdRef.current === id) setStep('verify');
+      return;
+    }
+    if (!stillSameAttempt()) return;
     // The server completes only once this attempt's signature image is saved, so it goes up first.
     // A failed upload does not stop the call: after a lost reply the earlier attempt may already have
     // completed the stop (storage then refuses the re-upload). The same key replays that completion,
@@ -911,7 +930,7 @@ export default function FieldStop() {
               showPaperTicketOption={!noOnePresent}
               paperTicket={{
                 hasPhoto: ticketPhotoMatchesLoad,
-                staleMessage: hasPaperTicketPhoto(photos) ? TICKET_PHOTO_LOAD_CHANGED_MESSAGE : undefined,
+                staleMessage: hasPaperTicketPhoto(photos) ? staleProofPhotoMessage(ticketPhotoLines, 'ticket') : undefined,
                 deliveredOn: paperDeliveredOn,
                 onDeliveredOnChange: setPaperDeliveredOn,
                 onTakePhoto: () => paperTicketInputRef.current?.click(),
@@ -938,7 +957,7 @@ export default function FieldStop() {
                   {leftPhotoMatchesLoad ? (
                     <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Photo of the drop location saved</p>
                   ) : hasLeftAtSitePhoto(photos) ? (
-                    <p className="text-sm text-amber-800">{LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE}</p>
+                    <p className="text-sm text-amber-800">{staleProofPhotoMessage(leftPhotoLines, 'left_at_site')}</p>
                   ) : (
                     <p className="text-sm text-amber-800">Signature skipped because no one was present. Take a photo of where you left the delivery.</p>
                   )}

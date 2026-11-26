@@ -34,7 +34,7 @@ import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail, EmailUnconfirmedError } from '../lib/emailService';
 import { buildDeliveryReceiptHtml } from '../lib/deliveryReceiptEmail';
 import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
-import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, keptQuantity, LINES_LOADING_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, evidencePhotoForLoad, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, LINES_CHANGED_ON_SERVER_MESSAGE, linesChangedOnServer, staleProofPhotoMessage, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, keptQuantity, LINES_LOADING_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, evidencePhotoForLoad, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
@@ -1348,6 +1348,25 @@ export default function DeliveryDetail() {
       return true;
     };
     if (!stillSameAttempt()) return;
+    // The lines may have changed since this screen loaded them, and an "all full" completion sends no amounts:
+    // proof is checked against the server's lines first (Sol on #2614, HIGH 1). No proof is not bound.
+    if (submittedEvidence !== 'no_proof') {
+      let serverLinesChanged: boolean;
+      try {
+        serverLinesChanged = await linesChangedOnServer(deliveryId, items);
+      } catch (linesErr) {
+        Sentry.captureException(toSentryError(linesErr), { level: 'warning', extra: { context: 'Line check before delivery completion failed' } });
+        toast('error', 'Could not check the products on this delivery. It was not completed; try again.');
+        return;
+      }
+      if (serverLinesChanged) {
+        toast('error', LINES_CHANGED_ON_SERVER_MESSAGE);
+        sig.clearSignature();
+        await fetchDelivery(deliveryQtys);
+        return;
+      }
+      if (!stillSameAttempt()) return;
+    }
     // The server completes only once this attempt's signature image is saved, so it goes up first.
     // A failed upload does not stop the call: after a lost reply the earlier attempt may already have
     // completed the delivery (storage then refuses the re-upload). The same key replays that
@@ -1767,7 +1786,7 @@ export default function DeliveryDetail() {
   const paperTicketProof = {
     // Only a photo of the current load counts (a NULL or older photo never matches).
     hasPhoto: ticketPhotoMatchesLoad,
-    staleMessage: hasPaperTicketPhoto(photos) ? TICKET_PHOTO_LOAD_CHANGED_MESSAGE : undefined,
+    staleMessage: hasPaperTicketPhoto(photos) ? staleProofPhotoMessage(currentTicketPhoto?.lines_seen, 'ticket') : undefined,
     deliveredOn: paperDeliveredOn,
     onDeliveredOnChange: setPaperDeliveredOn,
     onTakePhoto: () => paperTicketInputRef.current?.click(),

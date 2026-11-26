@@ -51,7 +51,7 @@ import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { digestIntentPayload, fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { isValidDeliveredOn, isValidNoProofReason, MAX_PAPER_TICKET_PHOTOS, NO_PROOF_REASON_MAX_CHARS, NO_PROOF_REASON_MIN_CHARS, NO_PROOF_SIGNER, noProofReasonLength, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
-import { buildLinesSeen, countTicketPhotosForLoad, COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, sameLinesSeen, TICKET_PHOTO_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, evidencePhotoForLoad, mergePhotosById, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadEvidencePhoto, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, countTicketPhotosForLoad, staleProofPhotoMessage, COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, sameLinesSeen, isSignatureDataUrl, isSignatureImageMissing, evidencePhotoForLoad, mergePhotosById, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadEvidencePhoto, uploadSignatureImage } from '../lib/deliveryEvidence';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
 import { useLoadBoundSignature } from '../hooks/useLoadBoundSignature';
 import { notifyDeliveryCompleted } from '../lib/notificationTriggers';
@@ -2375,7 +2375,7 @@ export default function Deliveries() {
                   <CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the signed ticket saved
                 </p>
               ) : currentTicketPhoto && currentCompleteLines ? (
-                <p className="text-sm text-amber-700">{TICKET_PHOTO_LOAD_CHANGED_MESSAGE}</p>
+                <p className="text-sm text-amber-700">{staleProofPhotoMessage(currentTicketPhoto.lines_seen, 'ticket')}</p>
               ) : (
                 <p className="text-sm text-amber-700">A photo of the signed paper ticket is required.</p>
               )}

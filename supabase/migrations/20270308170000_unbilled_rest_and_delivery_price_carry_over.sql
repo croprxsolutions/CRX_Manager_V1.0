@@ -8,9 +8,11 @@
 --    own share of the order line; repeated partial deliveries still sum to the line total, and nothing is caught up
 --    from another invoice, up or down. Every caller is fixed at once: completion's auto-draft and partial refresh,
 --    Create Invoice on a delivery and the Bill Split drafts.
---    KNOWN LIMIT (Taha, 2026-11-26): when a draft is cancelled or voided and billed again after a later delivery, a
---    line whose total does not divide evenly can end 1 cent over (3 units for $100.00: 33.34 + 33.34 + 33.33). The
---    follow-up PR records each invoice's allocation (stored cents, its own design).
+--    KNOWN LIMITS (Taha, 2026-11-26), closed by the follow-up PR that records each invoice's allocation (stored cents,
+--    its own design): (1) when drafts are cancelled or voided and billed again after later deliveries, a line whose
+--    total does not divide evenly can drift by a few cents, about one per re-bill (3 units for $100.00 billed
+--    $100.01; 7 units for $149.00 with three re-bills billed $149.03); (2) an earlier invoice line the editor added
+--    with no order line is not counted when the next delivery is priced (as on staging today).
 -- 2. A4. The Unbilled list counted a delivery billed once any active invoice touched it: 10 delivered, the line
 --    lowered to 6, and 4 units were never billed. delivery_billing_remainders compares delivered and billed units per
 --    delivery and order line (product lines on active non-credit invoices bill, as the invoice caps count them; lines
@@ -22,7 +24,10 @@
 --    a field split stays refused (ORDER_NEEDS_SPLIT_BILLING).
 -- 3. Scope. create_invoice_for_unbilled_delivery takes p_expected_scope (new, rest_delivery or rest_order): the scope
 --    the screen confirmed. A different scope at run time is refused (UNBILLED_SCOPE_CHANGED); the key binds it too.
---    NULL keeps the old behaviour. The three-argument chain is dropped and replaced (an overload would be ambiguous).
+--    No scope means 'new' (a screen from before A4 only ever offered a first invoice). Bill the rest is refused
+--    when an invoice line with no order line names a product the order has on order lines at different prices
+--    (UNBILLED_REST_LINE_AMBIGUOUS: link the line first). The three-argument chain is dropped and replaced (an
+--    overload would be ambiguous).
 -- Nothing else is rewritten: invoices drafted before this file keep their cents.
 --
 -- actor-binding-check: exempt -- the repo hook's marker, not a waiver: the public create_invoice_for_unbilled_delivery
@@ -34,8 +39,9 @@
 -- caller-analysis: _allocated_delivery_cents :: same signature, result and grants; callers
 --   _complete_delivery_authorized_impl_20270122, _create_invoice_for_unbilled_delivery_impl_20260718,
 --   _create_bill_split_delivery_invoices get the same cents unless an earlier invoice's price was changed.
---   create_invoice_for_unbilled_delivery :: adds p_expected_scope DEFAULT NULL; the screens pass it, positional
---   three-argument callers keep working; result adds billed_rest and scope.
+--   create_invoice_for_unbilled_delivery :: adds p_expected_scope DEFAULT NULL; the screens pass it; positional
+--   three-argument callers keep creating a first invoice exactly as before (any rest is refused for them); result
+--   adds billed_rest and scope.
 --   get_dashboard_action_items :: same signature and shape; unbilled_deliveries also lists short-billed deliveries.
 --
 -- ROLLBACK: scripts/smoke/unbilled-rest-and-carry-over-reverse.sql (proven by
@@ -176,8 +182,9 @@ BEGIN
   -- A4 carry-over (Mason, 2026-11-25): these units' share of the order line is the allocation through the units
   -- billed so far plus these, minus the allocation through the units billed so far. Telescoping on billed QUANTITY
   -- keeps partial deliveries summing to the line total; a price changed on another invoice stays on that invoice,
-  -- up or down. Known limit: after a draft is voided and billed again out of order, a fractional line can end 1 cent
-  -- off its total (follow-up: record each invoice's allocation, its own PR).
+  -- up or down. Known limit: when drafts are voided or cancelled and billed again out of order, a line whose total
+  -- does not divide evenly can end a few cents off its total, one per re-bill at worst (follow-up: record each
+  -- invoice's allocation, its own PR).
   RETURN GREATEST(
     public._allocated_cumulative_cents(
       p_order_item_id,
@@ -212,6 +219,7 @@ DECLARE
   v_rest boolean := false;
   v_order_level boolean := false;
   v_scope text := 'new';
+  v_ambiguous_product text;
 BEGIN
   v_actor := auth.uid();
   IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
@@ -275,10 +283,29 @@ BEGIN
          AND i.status NOT IN ('voided', 'cancelled') AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL);
     v_scope := CASE WHEN v_order_level THEN 'rest_order' ELSE 'rest_delivery' END;
   END IF;
-  -- The screen's confirmation names what it will bill; a change since it was read is refused, not billed.
-  IF p_expected_scope IS NOT NULL AND p_expected_scope IS DISTINCT FROM v_scope THEN
-    RAISE EXCEPTION 'UNBILLED_SCOPE_CHANGED: delivery %''s billing changed since the screen read it (it would now be %, not %); reload the delivery and check again', v_delivery.delivery_number, v_scope, p_expected_scope
+  -- The screen's confirmation names what it will bill; a change since it was read is refused, not billed. A caller
+  -- that names no scope (a screen from before A4) could only ever offer a first invoice, so it gets 'new' only.
+  IF COALESCE(p_expected_scope, 'new') IS DISTINCT FROM v_scope THEN
+    RAISE EXCEPTION 'UNBILLED_SCOPE_CHANGED: delivery %''s billing changed since the screen read it (it would now be %, not %); reload the delivery and check again', v_delivery.delivery_number, v_scope, COALESCE(p_expected_scope, 'new')
       USING ERRCODE = 'check_violation';
+  END IF;
+  -- An invoice line with no order line is matched to the order's lines by product. When the order has that product
+  -- on more than one order line at different prices, which line it billed is unknown: refuse rather than guess.
+  IF v_rest THEN
+    SELECT p.product_name INTO v_ambiguous_product
+      FROM invoice_items ii
+      JOIN invoices i ON i.id = ii.invoice_id
+      JOIN products p ON p.id = ii.product_id
+     WHERE i.order_id = v_delivery.order_id AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
+       AND i.status NOT IN ('voided', 'cancelled') AND ii.order_item_id IS NULL AND ii.charge_type IS NULL
+       AND (SELECT count(DISTINCT oi.price_per_unit) FROM order_items oi
+             WHERE oi.order_id = v_delivery.order_id AND oi.product_id = ii.product_id) > 1
+     ORDER BY p.product_name
+     LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION 'UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for % on this order has no order line, and the order has % on more than one order line at different prices; link the line to its order line first', v_ambiguous_product, v_ambiguous_product
+        USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
   -- Billing plan M2: a Bill Split sale is drafted per payer, as completing the delivery does.
   IF public._order_has_bill_split(v_delivery.order_id) THEN
@@ -807,8 +834,8 @@ DECLARE
   v_pin record;
 BEGIN
   FOR v_pin IN SELECT * FROM (VALUES
-      ('public._allocated_delivery_cents(uuid,numeric,uuid)', '6fce7a52bc300c843416ce5196443e15', false),
-      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', 'fea8e1fa560727ed3c1c8c1d53f2a7ce', true),
+      ('public._allocated_delivery_cents(uuid,numeric,uuid)', '2865a1d5ed3655c847b2073d500a24a6', false),
+      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', '7acbb5d862696f7b65ccbaa2d4d4f5e6', true),
       ('public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text)', '4f18fe996393549ebf7d4ee76570188d', true),
       ('public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text)', 'ee18d8501f94a4c34bb71831c767f0a2', true),
       ('public.get_dashboard_action_items(integer)', 'eb96aacf4dfc840a22df32d6bb549aeb', true)) t(sig, md5, definer)

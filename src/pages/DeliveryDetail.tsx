@@ -258,6 +258,8 @@ export default function DeliveryDetail() {
 
   // Office re-bill state for a completed delivery with no active covering invoice.
   const [createInvoiceConfirmOpen, setCreateInvoiceConfirmOpen] = useState(false);
+  // A4: what the confirmation showed, frozen when it opened; the server refuses a different scope (UNBILLED_SCOPE_CHANGED).
+  const [confirmIntent, setConfirmIntent] = useState<{ scope: 'new' | 'rest_delivery' | 'rest_order'; rest: string | null }>({ scope: 'new', rest: null });
   const [creatingInvoice, setCreatingInvoice] = useState(false);
 
   // Photo upload state
@@ -1646,7 +1648,7 @@ export default function DeliveryDetail() {
         p_delivery_id: delivery.id,
         p_performed_by: profile.id,
         p_idempotency_key: createInvoiceIdem.getKeyFor(delivery.id),
-        p_expected_scope: expectedScope,
+        p_expected_scope: confirmIntent.scope,
       });
       if (error) throw error;
 
@@ -2644,7 +2646,10 @@ export default function DeliveryDetail() {
             billedOutsideCrxReason,
             createInvoice: billSplitRest ? 'bill_split' : canCreateInvoice ? 'offer' : splitBillingBlocksInvoice ? 'split' : null,
             creating: creatingInvoice,
-            onCreate: () => setCreateInvoiceConfirmOpen(true),
+            onCreate: () => {
+              setConfirmIntent({ scope: expectedScope, rest: shortBilled && billingRemainder ? unbilledRemainderLabel(billingRemainder) : null });
+              setCreateInvoiceConfirmOpen(true);
+            },
           } : null}
         />
       )}
@@ -3115,11 +3120,11 @@ export default function DeliveryDetail() {
           if (!creatingInvoice) setCreateInvoiceConfirmOpen(false);
         }}
         onConfirm={() => { void handleCreateInvoice(); }}
-        title={shortBilled ? 'Bill the rest of this delivery?' : 'Create an invoice for this delivery?'}
-        message={shortBilled && billingRemainder
-          ? `This makes a draft invoice for whatever of delivery ${delivery.delivery_number} is still not billed when you confirm (now ${unbilledRemainderLabel(billingRemainder)}).${wholeOrderInvoiced ? ' This order has a whole-order invoice, so the draft bills every unbilled unit on the order.' : ''}`
+        title={confirmIntent.scope !== 'new' ? 'Bill the rest of this delivery?' : 'Create an invoice for this delivery?'}
+        message={confirmIntent.scope !== 'new'
+          ? `This makes a draft invoice for the units of delivery ${delivery.delivery_number} not billed yet (${confirmIntent.rest ?? 'see the invoices card'}).${confirmIntent.scope === 'rest_order' ? ' This order has a whole-order invoice, so the draft bills every unbilled unit on the order.' : ''} If the billing changes before you confirm, nothing is drafted and the page asks you to reload.`
           : `This makes a draft invoice for completed delivery ${delivery.delivery_number}.`}
-        confirmLabel={shortBilled ? 'Bill the rest' : 'Create invoice'}
+        confirmLabel={confirmIntent.scope !== 'new' ? 'Bill the rest' : 'Create invoice'}
         variant="info"
         loading={creatingInvoice}
       />

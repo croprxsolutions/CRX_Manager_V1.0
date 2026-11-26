@@ -553,6 +553,9 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_NOTHING_TO_BILL: delivery D-1')).toBe(
       'Nothing was billed. This delivery has no delivered quantity'
     );
+    expect(sanitizeError("UNBILLED_SCOPE_CHANGED: delivery D-1's billing changed")).toContain('Reload the page');
+    expect(sanitizeError('UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for X')).toContain('Link the line to its order line first');
+    expect(sanitizeError('BILL_SPLIT_REST_NOT_SUPPORTED: delivery D-1')).toContain('Void its Bill Split invoices');
     expect(sanitizeError('ORDER_HAS_BILL_SPLIT: this sale has a bill split, so it cannot be billed as one invoice'))
       .toContain('billed per payer');
     expect(sanitizeError("ORDER_ITEM_SHARES_OVER_100: a line's shares can't total more than 100%"))

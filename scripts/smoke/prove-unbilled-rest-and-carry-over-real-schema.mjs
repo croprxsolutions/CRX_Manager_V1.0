@@ -24,9 +24,14 @@
  *               $40.00, so the order bills $80.01 exactly
  *   void_rebill $100 for 3 in three deliveries, the first draft cancelled and billed again last: staging $100.00;
  *               KNOWN LIMIT after (Taha's option c): $100.01, pinned; the stored-cents follow-up PR makes it exact
+ *               (a few cents at worst, about one per out-of-order re-bill: see drift7)
  *   carry_void  the carry-over sale with delivery 2's draft cancelled and billed again: still $160.00
- *   scope       Create Invoice refuses a scope other than the one the screen showed (UNBILLED_SCOPE_CHANGED)
+ *   scope       Create Invoice refuses a scope other than the one the screen showed (UNBILLED_SCOPE_CHANGED); no
+ *               scope (a screen from before A4) means a first invoice only
  *   misc        a miscellaneous charge naming the product bills those units, as the order cap counts it (unchanged)
+ *   ambiguous   an editor line with no order line, for a product on two differently priced order lines: Bill the
+ *               rest is refused (UNBILLED_REST_LINE_AMBIGUOUS), nothing drafted
+ *   drift7      KNOWN LIMIT pinned: $149 for 7 units, three drafts cancelled and billed again: $149.03 (staging $149.00)
  * BEFORE (old bodies) the A4 and carry-over cases fail, AFTER they pass, rounding, void and misc are identical and void_rebill shows its known 1-cent limit; autocommit, a second
  * apply and a drifted reverse are refused; the reverse (scripts/smoke/unbilled-rest-and-carry-over-reverse.sql)
  * restores the old bodies byte for byte and every case gives its BEFORE result again; the candidate re-applies.
@@ -85,6 +90,11 @@ const ORDERS = {
   // Sol r2: a miscellaneous charge naming the product. The order cap counts it as billing those units, so the list must
   // not show them as owed (it would offer a draft the cap refuses): unchanged from staging.
   misc: [uid('a4ee'), [[uid('a4ff'), 10, '400.00', '40.00']], [[uid('a4be1'), [[0, 10]]]]],
+  // Taha r4: an editor line with no order line for a product on two differently priced order lines is refused.
+  ambiguous: [uid('a4ef'), [[uid('a4f10'), 5, '150.00', '30.00'], [uid('a4f11'), 5, '200.00', '40.00']], [[uid('a4bf1'), [[0, 5], [1, 5]]]]],
+  // Taha r4, known limit pinned: $149 for 7 units in seven deliveries; drafts 2, 4 and 6 cancelled and billed again.
+  drift7: [uid('a4e10'), [[uid('a4f12'), 7, '149.00', '21.29']],
+    [1, 2, 3, 4, 5, 6, 7].map((n) => [uid(`a4b10${n}`), [[0, 1]]])],
 };
 
 function seedAll() {
@@ -133,18 +143,22 @@ const orderBilled = (o) => `(SELECT COALESCE(sum(ii.extended_cents), 0) || '/' |
 // Sets t2 to whether the dashboard's "Delivered, not invoiced" lists the delivery.
 const listed = (del) => `${asUser(`r2 := public.get_dashboard_action_items(500);`)}
   t2 := EXISTS (SELECT 1 FROM jsonb_array_elements(r2->'unbilled_deliveries') e WHERE e->>'id' = '${del}')::text;`;
-const billRest = (del, key) => `BEGIN
-    ${asUser(`r := public.create_invoice_for_unbilled_delivery('${del}', '${ADMIN}', 'a4carry-b-${key}');`)}
+// After the candidate the screens send the scope their confirmation showed; staging's chain takes three arguments.
+let withScope = false;
+const billRest = (del, key, scope) => `BEGIN
+    ${asUser(withScope
+      ? `r := public.create_invoice_for_unbilled_delivery('${del}', '${ADMIN}', 'a4carry-b-${key}', '${scope}');`
+      : `r := public.create_invoice_for_unbilled_delivery('${del}', '${ADMIN}', 'a4carry-b-${key}');`)}
     t := 'drafted ' || (r->>'total_cents') || ' qty=' || (SELECT sum(quantity)::numeric(12,2) FROM public.invoice_items WHERE invoice_id = (r->>'invoice_id')::uuid)
       || ' on=' || COALESCE((SELECT CASE WHEN delivery_id IS NULL THEN 'order' ELSE 'delivery' END FROM public.invoices WHERE id = (r->>'invoice_id')::uuid), '?');
   EXCEPTION WHEN OTHERS THEN t := 'refused: ' || left(SQLERRM, 60); END;`;
 
 // Bill the rest on delivery d of order o, then: what was drafted, the order's billed cents/units, whether each
 // delivery in `watch` is still listed, and a second try.
-const restSteps = (o, d, key, watch = [d]) => `${listed(d)} v := v || 'listed=' || t2;
-    ${billRest(d, `${key}1`)} v := v || ' | ' || t || ' | billed=' || ${orderBilled(o)};
+const restSteps = (o, d, key, scope, watch = [d]) => `${listed(d)} v := v || 'listed=' || t2;
+    ${billRest(d, `${key}1`, scope)} v := v || ' | ' || t || ' | billed=' || ${orderBilled(o)};
     ${watch.map((w, i) => `${listed(w)} v := v || ' listed${watch.length > 1 ? i + 1 : ''}=' || t2;`).join('\n    ')}
-    ${billRest(d, `${key}2`)} v := v || ' | again ' || t;`;
+    ${billRest(d, `${key}2`, scope)} v := v || ' | again ' || t;`;
 // Replace a delivery's draft with one whole-order invoice (save_invoice, no delivery: the editor adds lines without
 // an order line) billing `q` units at `cents` each.
 const wholeOrder = (o, dels, q, cents, key) => `${dels.map((d) => `UPDATE public.invoices SET status = 'cancelled' WHERE id = ${invoiceOf(d)};`).join(' ')}
@@ -159,8 +173,8 @@ const CASES = {
     v := ${cents(d1)} || ' then ' || ${cents(d2)};`; },
   short: () => { const [o, , [[d]]] = ORDERS.short; return `${complete(d)} ${edit(invoiceOf(d), 6, 4000, 'sh')}
     ${listed(d)} v := 'listed=' || t2;
-    ${billRest(d, 'sh1')} ${listed(d)} v := v || ' | ' || t || ' | billed=' || ${orderBilled(o)} || ' listed=' || t2;
-    ${billRest(d, 'sh2')} v := v || ' | again ' || t;`; },
+    ${billRest(d, 'sh1', 'rest_delivery')} ${listed(d)} v := v || ' | ' || t || ' | billed=' || ${orderBilled(o)} || ' listed=' || t2;
+    ${billRest(d, 'sh2', 'rest_delivery')} v := v || ' | again ' || t;`; },
   whole: () => { const [o, [[l]], [[d]]] = ORDERS.whole; return `${complete(d)}
     -- The office replaces the delivery's draft with one whole-order invoice (save_invoice, no delivery) for 6.
     UPDATE public.invoices SET status = 'cancelled' WHERE id = ${invoiceOf(d)};
@@ -170,8 +184,8 @@ const CASES = {
     ${listed(d)}
     v := 'whole=' || (SELECT total_amount_cents || (CASE WHEN delivery_id IS NULL THEN ' on order' ELSE ' on delivery' END) FROM public.invoices WHERE id = u)
       || ' listed=' || t2;
-    ${billRest(d, 'wh1')} ${listed(d)} v := v || ' | ' || t || ' | billed=' || ${orderBilled(o)} || ' listed=' || t2;
-    ${billRest(d, 'wh2')} v := v || ' | again ' || t;`; },
+    ${billRest(d, 'wh1', 'rest_order')} ${listed(d)} v := v || ' | ' || t || ' | billed=' || ${orderBilled(o)} || ' listed=' || t2;
+    ${billRest(d, 'wh2', 'rest_order')} v := v || ' | again ' || t;`; },
   two_lines: () => { const [o, [[la]], [[d]]] = ORDERS.two_lines; return `${complete(d)}
     -- The office lowers line A to 1 unit ($30.00) and keeps line B's 5.
     u := ${invoiceOf(d)};
@@ -182,29 +196,33 @@ const CASES = {
        'cost_cents', ii.cost_cents, 'unit_size', ii.unit_size)) FROM public.invoice_items ii WHERE ii.invoice_id = u);
     ${asUser(`u := public.save_invoice(jsonb_build_object('id', u, 'customer_id', '${CUST}', 'invoice_type', 'chemical_sale'), r3, 'a4carry-e-tl');`)}
     v := '';
-    ${restSteps(o, d, 'tl')}`; },
+    ${restSteps(o, d, 'tl', 'rest_delivery')}`; },
   whole_two: () => { const [o, , [[d1], [d2]]] = ORDERS.whole_two; return `${complete(d1)} ${complete(d2)}
     ${wholeOrder(o, [d1, d2], 6, 4000, 'w2')}
     v := '';
-    ${restSteps(o, d2, 'w2', [d1, d2])}`; },
+    ${restSteps(o, d2, 'w2', 'rest_order', [d1, d2])}`; },
   editor_line: () => { const [o, , [[d]]] = ORDERS.editor_line; return `${complete(d)}
     ${wholeOrder(o, [d], 1, 4001, 'el')}
     v := '';
-    ${restSteps(o, d, 'el')}`; },
+    ${restSteps(o, d, 'el', 'rest_order')}`; },
   void_rebill: () => { const [o, , [[d1], [d2], [d3]]] = ORDERS.void_rebill; return `${complete(d1)} ${complete(d2)}
     UPDATE public.invoices SET status = 'cancelled' WHERE id = ${invoiceOf(d1)};
     ${complete(d3)}
-    ${billRest(d1, 'vr')}
+    ${billRest(d1, 'vr', 'new')}
     v := ${cents(d2)} || '+' || ${cents(d3)} || '+' || ${cents(d1)} || ' billed=' || ${orderBilled(o)};`; },
   carry_void: () => { const [o, , [[d1], [d2]]] = ORDERS.carry_void; return `${complete(d1)} ${edit(invoiceOf(d1), 6, 3500, 'cv')} ${complete(d2)}
     UPDATE public.invoices SET status = 'cancelled' WHERE id = ${invoiceOf(d2)};
-    ${billRest(d2, 'cv')}
+    ${billRest(d2, 'cv', 'new')}
     v := ${cents(d1)} || ' then ' || ${cents(d2)} || ' billed=' || ${orderBilled(o)};`; },
   scope: () => { const [o, , [[d]]] = ORDERS.scope; return `${complete(d)} ${edit(invoiceOf(d), 6, 4000, 'sc')}
+    -- A screen from before A4 sends no scope: it only ever offered a first invoice.
+    BEGIN ${asUser(`r := public.create_invoice_for_unbilled_delivery('${d}', '${ADMIN}', 'a4carry-s-0');`)} t := 'NOT REFUSED';
+    EXCEPTION WHEN OTHERS THEN t := left(SQLERRM, 40); END;
+    v := 'none: ' || t || ' | ';
     BEGIN ${asUser(`r := public.create_invoice_for_unbilled_delivery(p_delivery_id => '${d}', p_performed_by => '${ADMIN}',
       p_idempotency_key => 'a4carry-s-1', p_expected_scope => 'rest_order');`)} t := 'NOT REFUSED';
     EXCEPTION WHEN OTHERS THEN t := left(SQLERRM, 40); END;
-    v := 'order: ' || t;
+    v := v || 'order: ' || t;
     BEGIN ${asUser(`r := public.create_invoice_for_unbilled_delivery(p_delivery_id => '${d}', p_performed_by => '${ADMIN}',
       p_idempotency_key => 'a4carry-s-2', p_expected_scope => 'new');`)} t := 'NOT REFUSED';
     EXCEPTION WHEN OTHERS THEN t := left(SQLERRM, 40); END;
@@ -221,7 +239,15 @@ const CASES = {
       t := 'misc saved';
     EXCEPTION WHEN OTHERS THEN t := 'misc refused: ' || left(SQLERRM, 50); END;
     v := t || ' | ';
-    ${restSteps(o, d, 'mc')}`; },
+    ${restSteps(o, d, 'mc', 'rest_order')}`; },
+  ambiguous: () => { const [o, , [[d]]] = ORDERS.ambiguous; return `${complete(d)}
+    ${wholeOrder(o, [d], 5, 4000, 'amb')}
+    v := '';
+    ${restSteps(o, d, 'am', 'rest_order')}`; },
+  drift7: () => { const [o, , dels] = ORDERS.drift7; return `${dels.map(([d]) => complete(d)).join('\n')}
+    ${[1, 3, 5].map((i) => `UPDATE public.invoices SET status = 'cancelled' WHERE id = ${invoiceOf(dels[i][0])};
+    ${billRest(dels[i][0], `d7-${i}`, 'new')}`).join('\n    ')}
+    v := 'billed=' || ${orderBilled(o)};`; },
   rounding: () => { const [o, , dels] = ORDERS.rounding; return `${dels.map(([d]) => complete(d)).join('\n')}
     v := ${dels.map(([d]) => cents(d)).join(" || '+' || ")} || ' billed=' || ${orderBilled(o)};`; },
   void: () => { const [o, , [[d1], [d2]]] = ORDERS.void; return `${complete(d1)}
@@ -249,12 +275,17 @@ const EXPECT = {
   whole_two: 'ok|listed=true | drafted 56000 qty=14.00 on=order | billed=80000/20.00 listed1=false listed2=false | again refused: This delivery already has an active invoice (or an order-lev',
   // The second unit of $80.01 is $40.00 (8001 - 4001), so the order bills $80.01 exactly, not $80.02.
   editor_line: 'ok|listed=true | drafted 4000 qty=1.00 on=order | billed=8001/2.00 listed=false | again refused: This delivery already has an active invoice (or an order-lev',
-  // KNOWN LIMIT (Taha, 2026-11-26, option c): billing by units, a cancel and re-bill out of order can end 1 cent over
-  // on a line that does not divide evenly. Pinned so it cannot grow unseen; the stored-cents follow-up makes it $100.00.
+  // KNOWN LIMIT (Taha, 2026-11-26, option c): billing by units, a cancel and re-bill out of order can drift a few cents
+  // (about one per re-bill) on a line that does not divide evenly. Pinned so it cannot grow unseen; the stored-cents
+  // follow-up makes it $100.00.
   void_rebill: 'ok|3334+3334+3333 billed=10001/3.00',
   // Delivery 2 re-billed after its draft was cancelled still prices its own 4 at $160.00.
   carry_void: 'ok|21000 then 16000 billed=37000/10.00',
-  scope: 'ok|order: UNBILLED_SCOPE_CHANGED: delivery [A4] sc | new: UNBILLED_SCOPE_CHANGED: delivery [A4] sc | delivery: drafted 16000 rest_delivery billed=40000/10.00',
+  scope: 'ok|none: UNBILLED_SCOPE_CHANGED: delivery [A4] sc | order: UNBILLED_SCOPE_CHANGED: delivery [A4] sc | new: UNBILLED_SCOPE_CHANGED: delivery [A4] sc | delivery: drafted 16000 rest_delivery billed=40000/10.00',
+  // Which of the two order lines the $40 editor line billed is unknown: refused, nothing drafted.
+  ambiguous: 'ok|listed=true | refused: UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for [A4] produ | billed=20000/5.00 listed=true | again refused: UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for [A4] produ',
+  // KNOWN LIMIT, pinned: three out-of-order re-bills drift three cents ($149.03 on $149.00); stored cents closes it.
+  drift7: 'ok|billed=14903/7.00',
 };
 
 try {
@@ -274,6 +305,8 @@ try {
   assert.match(before.rounding, /^ok\|3333\+3334\+3333 billed=10000\/3\.00$/);
   assert.match(before.void, /^ok\|4000 billed=4000\/1\.00$/);
   assert.equal(before.void_rebill, 'ok|3334+3333+3333 billed=10000/3.00', 'staging re-bills to the cent after a cancel');
+  assert.equal(before.drift7, 'ok|billed=14900/7.00', 'staging re-bills seven units to the cent');
+  assert.match(before.ambiguous, /^ok\|listed=false \| refused: This delivery already has an active invoice/);
   assert.match(before.carry_void, /^ok\|21000 then 19000 billed=40000\/10\.00$/, 'carry-over must reproduce after a re-bill');
   assert.match(before.scope, /p_expected_scope|function public.create_invoice_for_unbilled_delivery/, 'staging has no scope argument');
 
@@ -287,7 +320,9 @@ try {
   assert.match(run(candidate, ['-1']).stderr, /UNBILLED_REST_BASELINE_DRIFT/, 're-apply must refuse');
   const newMd5 = md5s();
 
+  withScope = true;
   const after = probeAll('After the candidate');
+  withScope = false;
   for (const [name, expected] of Object.entries(EXPECT)) assert.equal(after[name], expected, name);
   assert.equal(after.rounding, before.rounding, 'rounding across partial deliveries must not change');
   assert.equal(after.void, before.void, 'a void must still free its units');

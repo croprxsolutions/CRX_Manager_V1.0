@@ -17,8 +17,8 @@ BEGIN
     RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: 20270308170000 is not what is installed';
   END IF;
   FOR v_pin IN SELECT * FROM (VALUES
-      ('public._allocated_delivery_cents(uuid,numeric,uuid)', '6fce7a52bc300c843416ce5196443e15'),
-      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', 'fea8e1fa560727ed3c1c8c1d53f2a7ce'),
+      ('public._allocated_delivery_cents(uuid,numeric,uuid)', '2865a1d5ed3655c847b2073d500a24a6'),
+      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', '7acbb5d862696f7b65ccbaa2d4d4f5e6'),
       ('public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text)', '4f18fe996393549ebf7d4ee76570188d'),
       ('public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text)', 'ee18d8501f94a4c34bb71831c767f0a2'),
       ('public.get_dashboard_action_items(integer)', 'eb96aacf4dfc840a22df32d6bb549aeb')) t(sig, md5)

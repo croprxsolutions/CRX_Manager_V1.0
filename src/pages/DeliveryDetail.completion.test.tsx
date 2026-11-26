@@ -501,7 +501,7 @@ describe('Invoices on this sale card', () => {
     await screen.findByText(paragraph('Not fully billed. 4 of 10 not billed ($160.00): the invoice bills fewer units than were delivered.'));
     fireEvent.click(screen.getByRole('button', { name: 'Bill the rest…' }));
     const dialog = await screen.findByRole('alertdialog', { name: 'Bill the rest of this delivery?' });
-    expect(within(dialog).getByText('This makes a draft invoice for whatever of delivery DEL-1 is still not billed when you confirm (now 4 of 10 not billed ($160.00)).')).toBeInTheDocument();
+    expect(within(dialog).getByText('This makes a draft invoice for the units of delivery DEL-1 not billed yet (4 of 10 not billed ($160.00)). If the billing changes before you confirm, nothing is drafted and the page asks you to reload.')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Bill the rest' })).toBeInTheDocument();
   });
 

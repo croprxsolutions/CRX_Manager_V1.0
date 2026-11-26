@@ -60,32 +60,50 @@ describe('job sourced-from readiness', () => {
     expect(sourceReadBlocksJobSave(true, true, {
       chemicalSourcesAvailable: false,
       isExistingJob: true,
-      stockPathAvailable: true,
+      stockPath: { available: true, path: 'batch' },
+      vendorListAvailable: false,
     })).toBe(true);
     expect(sourceReadBlocksJobSave(true, true, {
       chemicalSourcesAvailable: true,
       isExistingJob: true,
-      stockPathAvailable: true,
+      stockPath: { available: true, path: 'batch' },
+      vendorListAvailable: true,
     })).toBe(false);
     expect(sourceReadBlocksJobSave(true, true, {
       chemicalSourcesAvailable: true,
       isExistingJob: true,
-      stockPathAvailable: false,
+      stockPath: { available: true, path: 'batch' },
+      vendorListAvailable: false,
+    })).toBe(true);
+    expect(sourceReadBlocksJobSave(true, true, {
+      chemicalSourcesAvailable: true,
+      isExistingJob: true,
+      stockPath: { available: false, path: null },
+      vendorListAvailable: true,
     })).toBe(true);
     expect(sourceReadBlocksJobSave(true, true, {
       chemicalSourcesAvailable: true,
       isExistingJob: false,
-      stockPathAvailable: false,
+      stockPath: { available: false, path: null },
+      vendorListAvailable: false,
+    })).toBe(false);
+    expect(sourceReadBlocksJobSave(true, true, {
+      chemicalSourcesAvailable: true,
+      isExistingJob: true,
+      stockPath: { available: true, path: 'at_completion' },
+      vendorListAvailable: false,
     })).toBe(false);
     expect(sourceReadBlocksJobSave(false, true, {
       chemicalSourcesAvailable: false,
       isExistingJob: true,
-      stockPathAvailable: false,
+      stockPath: { available: false, path: null },
+      vendorListAvailable: false,
     })).toBe(false);
     expect(sourceReadBlocksJobSave(true, false, {
       chemicalSourcesAvailable: false,
       isExistingJob: true,
-      stockPathAvailable: false,
+      stockPath: { available: false, path: null },
+      vendorListAvailable: false,
     })).toBe(false);
   });
 

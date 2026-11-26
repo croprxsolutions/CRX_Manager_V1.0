@@ -117,6 +117,23 @@ describe('Job Detail office additions', () => {
     expect(screen.getByRole('option', { name: 'Old Supplier (inactive)' })).toBeDisabled();
   });
 
+  it('shows a reload note when the batch vendor list failed to load', () => {
+    render(
+      <SourcedFromControl
+        isOffice
+        stockPath={{ available: true, path: 'batch' }}
+        available={false}
+        canEdit
+        sourceVendorId={null}
+        vendors={[]}
+        vendorListLoadFailed
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Vendor list could not be loaded — reload the job')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sourced from')).toBeDisabled();
+  });
+
   it('hides the office-only details from crew when readiness flags are enabled', () => {
     const { container } = render(
       <>

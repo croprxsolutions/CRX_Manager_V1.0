@@ -23,11 +23,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { mockFrom, mockRpc, mockToast, mockNavigate } = vi.hoisted(() => ({
+const {
+  mockFrom,
+  mockRpc,
+  mockToast,
+  mockNavigate,
+  mockLoadVehicleCarrierDefault,
+  mockLoadActiveJobSourceVendors,
+  mockLoadJobChemicalSources,
+  mockLoadJobStockPath,
+} = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockRpc: vi.fn(),
   mockToast: vi.fn(),
   mockNavigate: vi.fn(),
+  mockLoadVehicleCarrierDefault: vi.fn(),
+  mockLoadActiveJobSourceVendors: vi.fn(),
+  mockLoadJobChemicalSources: vi.fn(),
+  mockLoadJobStockPath: vi.fn(),
 }));
 
 const CHAIN_METHODS = ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'neq',
@@ -70,11 +83,24 @@ vi.mock('../lib/jobStaleEdit', async (orig) => ({
   ...(await (orig() as Promise<Record<string, unknown>>)),
   readJobEditVersion: async () => ({ core: 'v', dispatches: [], rev: 'r' }),
 }));
+vi.mock('../lib/vehicleCarrierDefaults', async (orig) => ({
+  ...(await (orig() as Promise<Record<string, unknown>>)),
+  VEHICLE_CARRIER_DEFAULT_DB_READY: true,
+  loadVehicleCarrierDefault: mockLoadVehicleCarrierDefault,
+}));
+vi.mock('../lib/jobSourcedFrom', async (orig) => ({
+  ...(await (orig() as Promise<Record<string, unknown>>)),
+  FIELD_SOURCED_FROM_DB_READY: true,
+  loadActiveJobSourceVendors: mockLoadActiveJobSourceVendors,
+  loadJobChemicalSources: mockLoadJobChemicalSources,
+  loadJobStockPath: mockLoadJobStockPath,
+}));
 vi.mock('../lib/db', async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return {
     ...actual,
     supabase: { from: mockFrom, rpc: mockRpc, storage: { from: vi.fn() } },
+    supabaseUntyped: { from: mockFrom },
     checkMutationResult: vi.fn(),
     assertRpcResult: vi.fn((d) => d),
     sanitizeError: vi.fn((e: unknown) => (e as Error)?.message || 'Error'),
@@ -178,6 +204,9 @@ function deferred() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockRpc.mockResolvedValue({ data: null, error: null });
+  mockLoadActiveJobSourceVendors.mockResolvedValue({ available: true, vendors: [] });
+  mockLoadJobChemicalSources.mockResolvedValue({ available: true, sourcesByChemicalId: {} });
+  mockLoadJobStockPath.mockResolvedValue({ available: true, path: 'at_completion' });
 });
 
 describe('JobDetail cross-record binding', () => {
@@ -372,5 +401,89 @@ describe('JobDetail cross-record binding', () => {
     // issues its own jobs read either way.
     await waitFor(() => expect(screen.getByRole('heading', { name: 'J-BBBB-2002' })).toBeTruthy());
     expect(mockToast).not.toHaveBeenCalledWith('success', 'Job started');
+  });
+
+  it('does not apply a rig default reply from job A to job B when the rig stays selected', async () => {
+    let resolveCarrierDefault: (read: { available: boolean; defaultGpa: number | null }) => void = () => {};
+    const carrierDefaultReply = new Promise<{ available: boolean; defaultGpa: number | null }>((resolve) => {
+      resolveCarrierDefault = resolve;
+    });
+    mockLoadVehicleCarrierDefault.mockReturnValue(carrierDefaultReply);
+
+    const jobB = makeJob({
+      ...JOB_B,
+      vehicle_id: 'rig-b',
+      carrier_rate_gpa: null,
+    });
+    let jobsReadCount = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'jobs') {
+        jobsReadCount += 1;
+        return buildChain({ data: jobsReadCount === 1 ? JOB_A : jobB, error: null });
+      }
+      if (table === 'vehicles') {
+        return buildChain({ data: [{ id: 'rig-b', vehicle_name: 'Rig B', vehicle_type: 'sprayer', status: 'active' }], error: null });
+      }
+      return buildChain({ data: [], error: null });
+    });
+
+    const router = mountAt('/jobs/job-a');
+    await screen.findByRole('heading', { name: 'J-AAAA-1001' });
+    const vehiclePicker = screen.getByText('Vehicle').parentElement?.querySelector('select') as HTMLSelectElement;
+    await screen.findByRole('option', { name: /Rig B/ });
+    fireEvent.change(vehiclePicker, { target: { value: 'rig-b' } });
+    await waitFor(() => expect(mockLoadVehicleCarrierDefault).toHaveBeenCalledWith('rig-b'));
+
+    // Job B has the same selected rig, so the effect does not restart when the route changes.
+    await act(async () => { await router.navigate('/jobs/job-b'); });
+    await screen.findByRole('heading', { name: 'J-BBBB-2002' });
+    await waitFor(() => expect(document.querySelector('#job-loader input[type="number"]')).not.toBeNull());
+    const carrierRate = document.querySelector('#job-loader input[type="number"]') as HTMLInputElement;
+    await waitFor(() => expect(carrierRate.value).toBe(''));
+
+    await act(async () => {
+      resolveCarrierDefault({ available: true, defaultGpa: 4 });
+      await carrierDefaultReply;
+    });
+
+    expect(carrierRate.value).toBe('');
+  });
+
+  it('uses the sourcing read save blocker when a batch job vendor list fails', async () => {
+    mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'get_admin_cost_fields'
+      ? { data: {}, error: null }
+      : { data: null, error: null }));
+    mockLoadActiveJobSourceVendors.mockResolvedValue({ available: false, vendors: [] });
+    mockLoadJobStockPath.mockResolvedValue({ available: true, path: 'batch' });
+    const jobWithChemical = makeJob({
+      ...JOB_A,
+      job_chemicals: [{
+        id: 'chemical-1',
+        product_id: 'product-1',
+        quantity: 0,
+        unit: 'gal',
+        rate_per_acre: null,
+        rate_unit: 'gal/ac',
+        cost_per_unit_cents: 0,
+        price_per_unit_cents: 0,
+        sort_order: 0,
+      }],
+    });
+    mockFrom.mockImplementation((table: string) => (table === 'jobs'
+      ? buildChain({ data: jobWithChemical, error: null })
+      : buildChain({ data: [], error: null })));
+
+    mountAt('/jobs/job-a');
+    await screen.findByRole('heading', { name: 'J-AAAA-1001' });
+    await screen.findByText('Vendor list could not be loaded — reload the job');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error',
+      'The job sourcing details could not be loaded. Nothing was saved. Reload the job before saving again.',
+    ));
+    expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('choose a vendor'));
+    expect(mockRpc).not.toHaveBeenCalledWith('save_job', expect.anything());
   });
 });

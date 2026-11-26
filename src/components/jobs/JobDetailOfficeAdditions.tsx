@@ -18,6 +18,7 @@ interface SourcedFromControlProps {
   sourceVendorId: string | null;
   vendors: JobSourceVendor[];
   batchVendorRequired?: boolean;
+  vendorListLoadFailed?: boolean;
   onChange: (vendorId: string | null) => void;
 }
 
@@ -29,6 +30,7 @@ export function SourcedFromControl({
   sourceVendorId,
   vendors,
   batchVendorRequired = false,
+  vendorListLoadFailed = false,
   onChange,
 }: SourcedFromControlProps) {
   if (!jobSupportsVendorSourcing(FIELD_SOURCED_FROM_DB_READY, isOffice, stockPath)) return null;
@@ -60,6 +62,9 @@ export function SourcedFromControl({
       )}
       {FIELD_SOURCED_FROM_DB_READY && batchVendorRequired && (
         <p className="mt-1 text-xs text-red-700">Choose a vendor for this customer-supplied line on a batch job.</p>
+      )}
+      {FIELD_SOURCED_FROM_DB_READY && vendorListLoadFailed && (
+        <p className="mt-1 text-xs text-red-700">Vendor list could not be loaded — reload the job</p>
       )}
     </div>
   );

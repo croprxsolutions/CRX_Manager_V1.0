@@ -1545,10 +1545,11 @@ export default function JobDetail() {
       return;
     }
     let cancelled = false;
+    const stillOnThisJob = captureRouteEpoch();
     const applyToCurrentJob = carrierDefaultToApplyRef.current === vehicleId;
     if (applyToCurrentJob) carrierDefaultToApplyRef.current = null;
     void loadVehicleCarrierDefault(vehicleId).then((read) => {
-      if (cancelled) return;
+      if (cancelled || !stillOnThisJob()) return;
       const defaultGpa = read.available ? read.defaultGpa : null;
       setVehicleDefaultCarrierGpa(defaultGpa);
       if (!applyToCurrentJob) return;
@@ -1562,7 +1563,7 @@ export default function JobDetail() {
       setCarrierRateOrigin(loadedValueMatchesRigDefault ? 'loaded' : result.origin);
     });
     return () => { cancelled = true; };
-  }, [vehicleId, isCrew, carrierRateValueRef, carrierRateOriginRef]);
+  }, [vehicleId, isCrew, carrierRateValueRef, carrierRateOriginRef, captureRouteEpoch]);
 
   useEffect(() => {
     if (!APPLICATION_SERVICE_BILLING_DB_READY || isCrew || !applicationServiceId) {
@@ -1587,6 +1588,7 @@ export default function JobDetail() {
   const [activeSourceVendors, setActiveSourceVendors] = useState<JobSourceVendor[]>([]);
   const [savedSourceVendors, setSavedSourceVendors] = useState<JobSourceVendor[]>([]);
   const [sourceVendorsAvailable, setSourceVendorsAvailable] = useState(false);
+  const [sourceVendorsLoadFailed, setSourceVendorsLoadFailed] = useState(false);
   const [chemicalSourceRead, setChemicalSourceRead] = useState<{ jobKey: string; available: boolean }>({ jobKey: '', available: false });
   const [jobStockPathRead, setJobStockPathRead] = useState<{ jobId: string; read: JobStockPathRead } | null>(null);
 
@@ -1594,14 +1596,17 @@ export default function JobDetail() {
     if (!FIELD_SOURCED_FROM_DB_READY || isCrew) {
       setActiveSourceVendors([]);
       setSourceVendorsAvailable(false);
+      setSourceVendorsLoadFailed(false);
       return;
     }
     let cancelled = false;
     setSourceVendorsAvailable(false);
+    setSourceVendorsLoadFailed(false);
     void loadActiveJobSourceVendors().then((read) => {
       if (cancelled) return;
       setActiveSourceVendors(read.vendors);
       setSourceVendorsAvailable(read.available);
+      setSourceVendorsLoadFailed(!read.available);
     });
     return () => { cancelled = true; };
   }, [isCrew]);
@@ -2946,7 +2951,8 @@ export default function JobDetail() {
     if (sourceReadBlocksJobSave(FIELD_SOURCED_FROM_DB_READY, !isCrew, {
       chemicalSourcesAvailable: chemicalSourceDataAvailable,
       isExistingJob: !isNew,
-      stockPathAvailable: jobStockPath.available,
+      stockPath: jobStockPath,
+      vendorListAvailable: sourceVendorsAvailable,
     })) {
       toast('error', 'The job sourcing details could not be loaded. Nothing was saved. Reload the job before saving again.');
       return;
@@ -3136,7 +3142,8 @@ export default function JobDetail() {
     if (sourceReadBlocksJobSave(FIELD_SOURCED_FROM_DB_READY, !isCrew, {
       chemicalSourcesAvailable: chemicalSourceDataAvailable,
       isExistingJob: !isNew,
-      stockPathAvailable: jobStockPath.available,
+      stockPath: jobStockPath,
+      vendorListAvailable: sourceVendorsAvailable,
     })) {
       toast('error', 'The job sourcing details could not be loaded. Nothing was saved. Reload the job before saving again.');
       return;
@@ -5125,6 +5132,7 @@ export default function JobDetail() {
                         vendors={sourceVendorOptions}
                         batchVendorRequired={FIELD_SOURCED_FROM_DB_READY
                           && batchCustomerSuppliedLineNeedsVendor(jobStockPath, c.customer_supplied, c.source_vendor_id)}
+                        vendorListLoadFailed={sourceVendorsLoadFailed}
                         onChange={(vendorId) => updateChemSourceVendor(i, vendorId)}
                       />
                     )}

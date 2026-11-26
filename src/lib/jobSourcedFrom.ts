@@ -58,10 +58,17 @@ export function isJobChemicalNonBillable(
 export function sourceReadBlocksJobSave(
   featureReady: boolean,
   isOffice: boolean,
-  reads: { chemicalSourcesAvailable: boolean; isExistingJob: boolean; stockPathAvailable: boolean },
+  reads: {
+    chemicalSourcesAvailable: boolean;
+    isExistingJob: boolean;
+    stockPath: JobStockPathRead;
+    vendorListAvailable: boolean;
+  },
 ): boolean {
   return featureReady && isOffice && (
-    !reads.chemicalSourcesAvailable || (reads.isExistingJob && !reads.stockPathAvailable)
+    !reads.chemicalSourcesAvailable
+    || (reads.isExistingJob && !reads.stockPath.available)
+    || (reads.stockPath.available && reads.stockPath.path === 'batch' && !reads.vendorListAvailable)
   );
 }
 

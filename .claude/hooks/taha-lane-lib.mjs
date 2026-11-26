@@ -69,7 +69,7 @@ const LANE_FILE_PREFIXES = [
 const STRONG_LANE_WORDS = new Set(["quote", "quotes", "hold", "holds", "prepay", "prepayment", "prepayments", "booking", "bookings", "booked"]);
 
 // The block's own wiring: a PR that edits or unhooks it needs Mason's code too (Taha's review of #2303).
-const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router|sol-risk-lib|migration-landing-gate-lib|migration-apply-lib|migration-apply-guard)\.mjs|scripts\/apply-migration-file\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
+const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router|sol-risk-lib|migration-landing-gate-lib|migration-apply-lib|migration-apply-guard|teammate-comments-lib)\.mjs|scripts\/apply-migration-file\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
 
 /** True when this changed file is app or database code in Taha's lane (and not field billing), or the block itself. */
 export function isTahaLanePath(name) {
@@ -486,7 +486,7 @@ const live = (data, maxAge, now) => {
  * request for the same PR and head, else writes a new one to every folder in
  * `dirs`. null when none could be saved (the refusal then says so; the block holds).
  */
-export function issueTahaLaneCode({ dirs, pullRequest, headSha, now = Date.now(), newCode = () => String(randomInt(0, 1_000_000)).padStart(6, "0") }) {
+export function issueTahaLaneCode({ dirs, pullRequest, headSha, kind = "merge", now = Date.now(), newCode = () => String(randomInt(0, 1_000_000)).padStart(6, "0") }) {
   if (!usablePr(pullRequest) || !usableHead(headSha)) return null;
   headSha = headSha.toLowerCase();
   for (const dir of dirs || []) {
@@ -495,11 +495,12 @@ export function issueTahaLaneCode({ dirs, pullRequest, headSha, now = Date.now()
     for (const n of names) {
       if (!/^taha-lane-request-\d{6}\.json$/.test(n)) continue;
       const data = readSmall(path.join(dir, n));
-      if (data?.pullRequest === pullRequest && data?.headSha === headSha && live(data, TAHA_LANE_CODE_MAX_AGE_MS, now)) return data.code;
+      if (data?.pullRequest === pullRequest && data?.headSha === headSha && (data?.kind ?? "merge") === kind && live(data, TAHA_LANE_CODE_MAX_AGE_MS, now)) return data.code;
     }
   }
   const code = newCode();
-  const payload = { pullRequest, headSha, code, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_CODE_MAX_AGE_MS).toISOString() };
+  // `kind` (Sol, PR 1): only a code a live-apply refusal issued can become a live-apply override.
+  const payload = { pullRequest, headSha, code, kind, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_CODE_MAX_AGE_MS).toISOString() };
   let wrote = 0;
   for (const dir of dirs || []) {
     try {
@@ -514,11 +515,11 @@ export function issueTahaLaneCode({ dirs, pullRequest, headSha, now = Date.now()
 
 // The WHOLE message must be the command, naming the PR Mason means (a phone may capitalise it or add a period).
 // An optional `unavailable: <reason>` (one line) records that Mason has said Taha is unavailable.
-const COMMAND_RE = /^\s*taha\s+override\s+#(\d{1,7})\s+(\d{6})(?:\s+unavailable:[ \t]*(\S[^\r\n]{0,199}?))?\s*[.!]?\s*$/i;
+const COMMAND_RE = /^\s*taha\s+override\s+#(\d{1,7})\s+(\d{6})(?:\s+unavailable:[ \t]*([^\s\u2028\u2029][^\r\n\u2028\u2029]{0,199}?))?\s*[.!]?\s*$/i;
 /** { pullRequest, code } (plus `tahaUnavailable` when it says why Taha can't) when the whole message is the command, else null. */
 export const tahaOverrideCommand = (reply) => {
   const m = COMMAND_RE.exec(String(reply ?? ""));
-  if (!m) return null;
+  if (!m || (m[3] && !/[\p{L}\p{N}]/u.test(m[3]))) return null; // a reason of punctuation alone says nothing (Sol, PR 1)
   return m[3] ? { pullRequest: Number(m[1]), code: m[2], tahaUnavailable: m[3].trim() } : { pullRequest: Number(m[1]), code: m[2] };
 };
 /** True when the message mentions the command but is not exactly it. */
@@ -538,8 +539,10 @@ export function recordTahaLaneOverride({ dirs, pullRequest, code, tahaUnavailabl
   }
   if (!request) return { ok: false, reason: `no live merge-block code ${code} was found (it may be mistyped, used, or more than 24 hours old)` };
   if (request.pullRequest !== pullRequest) return { ok: false, reason: `code ${code} was issued for #${request.pullRequest}, not #${pullRequest}` };
-  const payload = { pullRequest: request.pullRequest, headSha: request.headSha, code, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_OVERRIDE_MAX_AGE_MS).toISOString(),
-    ...(typeof tahaUnavailable === "string" && tahaUnavailable.trim() ? { tahaUnavailable: tahaUnavailable.trim().slice(0, 200) } : {}) };
+  const unavailable = typeof tahaUnavailable === "string" && tahaUnavailable.trim();
+  if (unavailable && request.kind !== "apply") return { ok: false, reason: `code ${code} came from a staging merge refusal; "unavailable:" needs the code a live-apply refusal gives` };
+  const payload = { pullRequest: request.pullRequest, headSha: request.headSha, code, kind: request.kind === "apply" ? "apply" : "merge", issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_OVERRIDE_MAX_AGE_MS).toISOString(),
+    ...(unavailable ? { tahaUnavailable: unavailable.slice(0, 200) } : {}) };
   let wrote = 0;
   for (const dir of dirs || []) {
     try {
@@ -556,13 +559,13 @@ export function recordTahaLaneOverride({ dirs, pullRequest, code, tahaUnavailabl
  * Mason's live override for this PR, or null. It covers every later push to the PR for its 24 hours
  * (Mason, 2026-11-25: one message per PR, not per commit), unless `oneHead`: then only `headSha`.
  */
-export function findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead = false, now = Date.now() }) {
+export function findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead = false, accept = () => true, now = Date.now() }) {
   if (!usablePr(pullRequest)) return null;
   if (oneHead && !usableHead(headSha)) return null;
   for (const dir of dirs || []) {
     const data = readSmall(path.join(dir, overrideName(pullRequest)));
     if (data?.pullRequest === pullRequest && usableHead(data?.headSha) && live(data, TAHA_LANE_OVERRIDE_MAX_AGE_MS, now) &&
-      (!oneHead || data.headSha.toLowerCase() === headSha.toLowerCase())) return data;
+      (!oneHead || data.headSha.toLowerCase() === headSha.toLowerCase()) && accept(data)) return data;
   }
   return null;
 }
@@ -572,15 +575,21 @@ export function findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead = fal
  * and only for the head it was issued for (the 24-hour carry over pushes is for staging merges; Luna, PR 1 round 1).
  */
 export function findTahaUnavailableOverride({ dirs, pullRequest, headSha, now = Date.now() }) {
-  const data = findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead: true, now });
-  return typeof data?.tahaUnavailable === "string" && data.tahaUnavailable.trim() ? data : null;
+  return findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead: true, now,
+    accept: (data) => data.kind === "apply" && typeof data.tahaUnavailable === "string" && Boolean(data.tahaUnavailable.trim()) });
 }
 
 /** Records on the override that Taha was told (tahaToldAt for a merge; tahaToldApplyFor, the migrations, for a live apply). */
 export function markTahaTold({ dirs, override, field = "tahaToldAt", value = new Date().toISOString() }) {
   for (const dir of dirs || []) {
     const file = path.join(dir, overrideName(override.pullRequest));
-    try { if (existsSync(file)) writeFileSync(file, `${JSON.stringify({ ...override, [field]: value }, null, 2)}\n`, "utf8"); } catch { /* the next try posts again */ }
+    try {
+      // Re-read: a newer override (another code) is left alone, and earlier receipts are kept (Sol, PR 1).
+      const current = readSmall(file);
+      if (current?.code !== override.code || current?.headSha !== override.headSha) continue;
+      const merged = Array.isArray(value) ? [...new Set([...(Array.isArray(current[field]) ? current[field] : []), ...value])] : value;
+      writeFileSync(file, `${JSON.stringify({ ...current, [field]: merged }, null, 2)}\n`, "utf8");
+    } catch { /* the next try posts again */ }
   }
 }
 

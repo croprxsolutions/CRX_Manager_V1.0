@@ -285,7 +285,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   const hold = headRef === "release/next" ? null : tahaHoldProblem(pr, now);
   const ready = hold ? null : readyToMergeProblem({ comments: pr?.comments, head, now });
   if ((hold || ready) && !override) {
-    const code = issueTahaLaneCode({ dirs: stateDirs, pullRequest: Number(pr?.number), headSha: head, now });
+    const code = issueTahaLaneCode({ dirs: stateDirs, pullRequest: Number(pr?.number), headSha: head, kind: "apply", now });
     return refuse(`${number}: ${hold || ready}` + (code ? ` Or, only if Mason says Taha is unavailable and he will merge it himself, ask him to send as a message of its own: taha override #${pr.number} ${code} unavailable: <why Taha can't>` : ""));
   }
   // The override is what lets this apply through: Taha is told on the PR once every other check has passed (below).
@@ -473,7 +473,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   // Taha's audit, 2026-11-25: an override-allowed live apply must tag him on the PR, as the merge gate does; if it can't, refuse.
   if (tellTahaOfOverride) {
     const body = `@TahaKhanAbdalli Mason's override let a LIVE apply of migration \`${migName}\` go ahead on this PR at \`${String(head).toLowerCase()}\` ` +
-      `without your go-ahead or 4-hour hold (his code ${override.code}; he says you are unavailable: ${override.tahaUnavailable}). Every other apply check passed.`;
+      `without your go-ahead or 4-hour hold (his code ${override.code}; he told his agent you are unavailable). Every other apply check passed.`;
     let posted = false;
     try { posted = /^\d+$/.test(String(gh(["api", "-X", "POST", `repos/{owner}/{repo}/issues/${pr.number}/comments`, "-f", `body=${body}`, "--jq", ".id"])).trim()); } catch (error) { if (OUT(error)) throw error; }
     if (!posted) return refuse(`${number}: Mason's override is valid, but the PR comment telling Taha could not be posted, so the apply is refused. Retry.`);

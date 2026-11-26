@@ -3,8 +3,8 @@
 // Mason's whole message `taha override #<PR> <code>` turns the code a merge refusal
 // issued for that PR into a 24-hour override for that PR (later pushes included, Mason 2026-11-25).
 // Except on a PR that changes the block's own files: there it covers that head only (#2303).
-// `... unavailable: <reason>` also lets the migration landing gate use it in place of Taha's
-// go-ahead and 4-hour hold on a release or hotfix (Mason, 2026-11-25); a plain override does not.
+// `... unavailable: <reason>`, with a code a live-apply refusal issued, lets the migration landing
+// gate apply that commit without Taha's go-ahead and 4-hour hold (Mason, 2026-11-25); a plain override does not.
 // Anything else: silent, except a message that mentions the command but is not
 // exactly it, which is refused out loud.
 
@@ -39,7 +39,7 @@ try {
 if (!res.ok) emit(`TAHA LANE OVERRIDE NOT RECORDED — Mason sent #${command.pullRequest} ${command.code}, but ${res.reason}. Nothing was overridden. Tell him in one line; retrying the merge issues a fresh code.`);
 emit(`TAHA LANE OVERRIDE RECORDED — Mason let PR #${res.payload.pullRequest} past Taha's checks until ${res.payload.expiresAt}: ` +
   (res.payload.tahaUnavailable
-    ? `the lane block, and for a release or hotfix PR Taha's live-apply go-ahead and 4-hour hold (Mason says Taha is unavailable: ${res.payload.tahaUnavailable}) `
-    : "the staging-merge lane block only; a live apply still needs Taha's go-ahead (add `unavailable: <reason>` if Mason says Taha can't) ") +
-  "(this PR only, later pushes included unless it changes the block's own files; every other gate still applies). " +
-  "Confirm to him in one line and retry; on a staging merge the lane gate posts the PR comment telling Taha.");
+    ? `the live apply's wait for Taha's go-ahead and 4-hour hold, at commit ${res.payload.headSha} only (Mason says Taha is unavailable: ${res.payload.tahaUnavailable}; the apply tags Taha on the PR without that reason) `
+    : "the staging-merge lane block only, never a live apply's wait for Taha (that needs the code a live-apply refusal gives, plus `unavailable: <reason>`) ") +
+  "(this PR only; a staging-merge override covers later pushes unless the PR changes the block's own files; every other gate still applies). " +
+  "Confirm to him in one line and retry; the gate posts the PR comment telling Taha.");

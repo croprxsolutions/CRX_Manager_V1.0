@@ -1902,11 +1902,16 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       const posts = [];
       ok(gate({ pr: { createdAt: young, comments: [] }, posts }).ok === true, "Mason's override lifts the hold and the go-ahead on a hotfix");
       ok(posts.length === 1 && posts[0].includes("repos/{owner}/{repo}/issues/900/comments")
-        && posts[0].some((a) => a.startsWith("body=@TahaKhanAbdalli") && a.includes(HEAD_SHA) && a.includes("out sick today")), "and tags Taha on the PR, naming the head and the reason");
+        && posts[0].some((a) => a.startsWith("body=@TahaKhanAbdalli") && a.includes(HEAD_SHA) && !a.includes("out sick today")), "and tags Taha on the PR, naming the head but not Mason's private reason (Sol)");
+      ok(gate({ pr: { createdAt: young, comments: [] }, posts }).ok === true && posts.length === 1, "Taha is told once per migration, not on every retry");
+      // The release gets its own first post (Sol): clear the hotfix's receipt.
+      const saved = JSON.parse(readFileSync(overrideFile, "utf8"));
+      writeFileSync(overrideFile, JSON.stringify({ ...saved, tahaToldApplyFor: [] }));
       ok(gate({ pr: { headRefName: "release/next", comments: [] }, posts }).ok === true, "and on the release");
-      ok(posts.length === 1, "Taha is told once per migration, not on every retry");
+      ok(posts.length === 2 && posts[1].some((a) => a.startsWith("body=@TahaKhanAbdalli")), "which tags Taha too");
       ok(gate({ pr: { comments: [] }, migName: "20260101000001_second", posts }).ok === true, "a second migration on the same head applies");
-      ok(posts.length === 2 && posts[1].some((a) => a.includes("20260101000001_second")), "is told to Taha too, by name (Luna, round 2)");
+      ok(posts.length === 3 && posts[2].some((a) => a.includes("20260101000001_second")), "is told to Taha too, by name (Luna, round 2)");
+      ok(JSON.parse(readFileSync(overrideFile, "utf8")).kind === "apply", "the override came from the apply refusal's code (Sol)");
       const quiet = [];
       ok(gate({ posts: quiet }).ok === true && quiet.length === 0, "when Taha's own go-ahead lets it through, no override comment");
       ok(gate({ pr: { comments: [] }, git: { "rev-parse HEAD": `${"e".repeat(40)}\n` } }).ok === false, "but never the other gates");

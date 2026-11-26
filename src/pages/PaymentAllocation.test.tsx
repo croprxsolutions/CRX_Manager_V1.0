@@ -436,7 +436,7 @@ describe('Record Payments: faster entry', () => {
     expect(screen.getByLabelText('Check Amount')).toHaveValue('1e2');
     expect(screen.getAllByPlaceholderText('0.00').slice(1).map((el) => (el as HTMLInputElement).value)).not.toContain('50.00');
     fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '' } });
-    expect(screen.getByLabelText('Check Amount')).toHaveValue('');
+    expect((screen.getByLabelText('Check Amount') as HTMLInputElement).value).toBe('');
   });
 
   it('hides the Apply prepay link from a user without the Prepay Credits page (admin-only)', async () => {
@@ -484,14 +484,24 @@ describe('Record Payments: faster entry', () => {
       await screen.findByText('INV-OLD');
     }
 
-    it('starts the second customer with nothing allocated, and Apply posts to that customer', async () => {
+    it('switching customers starts a fresh check: the first farm’s amount and check # never post to the second', async () => {
       renderPayments();
-      await chooseByKeyboard();
+      // Pick Big Farm by name (the keyboard helper's ArrowDown lands on the second farm in this list).
+      const box = screen.getByRole('combobox', { name: 'Customer' });
+      fireEvent.change(box, { target: { value: 'Big' } });
+      fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
+      await screen.findByText('INV-OLD');
       fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+      fireEvent.change(screen.getByLabelText('Reference #'), { target: { value: '301' } });
       fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
       expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
 
       await switchToSmallFarm();
+      expect((screen.getByLabelText('Check Amount') as HTMLInputElement).value).toBe('');
+      expect((screen.getByLabelText('Reference #') as HTMLInputElement).value).toBe('');
+
+      // Small Farm's own check posts to Small Farm only.
+      fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
       expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$0.00');
       fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
       fireEvent.click(await screen.findByRole('button', { name: /^Continue/ }));

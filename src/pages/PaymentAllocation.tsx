@@ -211,13 +211,19 @@ export default function PaymentAllocation() {
   const selectCustomer = useCallback((c: CustomerOption) => {
     focusAmountAfterPick.current = true;
     setCustomerBoxText(null);
+    // Switching to another farm starts a fresh check, so one farm's check can't be posted to another (Mason, 2026-11-25).
+    if (selectedCustomer && selectedCustomer.id !== c.id) {
+      setCheckAmountInput('');
+      setReferenceNumber('');
+      setNotes('');
+    }
     setSelectedCustomer(c);
     prepayReadSeq.current += 1;
     setPrepayBalanceCents(c.prepay_balance_cents);
     setLastResult(null);
     setRetryRefused(false);
     fetchInvoices(c.id);
-  }, [fetchInvoices]);
+  }, [fetchInvoices, selectedCustomer]);
 
   const clearCustomer = useCallback(() => {
     // A load still running for the cleared customer must not refill the list.
@@ -237,8 +243,8 @@ export default function PaymentAllocation() {
   }, []);
 
   // The customer changes only when one is picked from the list. A stray keystroke keeps the
-  // chosen customer and the typed allocations; blur or Escape puts the name back. While the box
-  // shows other text, nothing that posts or fills allocations runs, so Apply Payment can never
+  // chosen customer and the typed allocations; Escape or "keep" puts the name back. While a search
+  // is unfinished, nothing that posts or fills allocations runs, so Apply Payment can never
   // post to a customer the box is not showing.
   const customerBeingChanged = selectedCustomer !== null && customerBoxText !== null
     && customerBoxText !== selectedCustomer.farm_name;

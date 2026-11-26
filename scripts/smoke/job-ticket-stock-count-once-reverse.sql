@@ -4,7 +4,10 @@
 -- index stay (the ledger is write-once; unused columns are harmless).
 -- Run in one transaction: psql -1 -f scripts/smoke/job-ticket-stock-count-once-reverse.sql
 
+\set ON_ERROR_STOP on
 SET LOCAL lock_timeout = '5s';
+-- The number lock every posting takes, so no counted posting can commit between the guard and the swap.
+SELECT pg_advisory_xact_lock(hashtext('next_application_record_number'));
 
 DO $guard$
 BEGIN
@@ -12,8 +15,8 @@ BEGIN
     RAISE EXCEPTION 'COUNT_ONCE_ROLLBACK_REFUSED: counted postings exist; fix forward with a new migration';
   END IF;
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)')), chr(13), '')) IS DISTINCT FROM '5df6e9533702ab6ab857fe4c9784fc04'
-     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)')), chr(13), '')) IS DISTINCT FROM 'bd94d49e02b583e9fc11eda8969d0902'
-     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.reverse_application_record(uuid, text)')), chr(13), '')) IS DISTINCT FROM '8a56f03e81eaabf61f5ee79eaac8c2c4' THEN
+     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)')), chr(13), '')) IS DISTINCT FROM '03b74676ffbc1852613b8f668a6ad2f3'
+     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.reverse_application_record(uuid, text)')), chr(13), '')) IS DISTINCT FROM '41fadd3a8c8f39d69e2364a1d0b95fd4' THEN
     RAISE EXCEPTION 'COUNT_ONCE_ROLLBACK_REFUSED: the live bodies are not the count-once bodies';
   END IF;
 END;
@@ -984,6 +987,7 @@ END;
 $function$;
 
 DROP FUNCTION public._job_stock_group_20270310(uuid, uuid);
+DROP FUNCTION public._job_stock_customer_20270310(uuid);
 
 DO $check$
 BEGIN

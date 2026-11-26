@@ -8,7 +8,8 @@
  *   AS THE REAL CALLERS (a sales rep files tickets, an admin completes jobs and reverses): contract cases 1-12, a
  *     multi-product ticket, a ticket moved between open jobs before filing, and two races (filing and reversing while
  *     a completion holds the lock). A filed ticket's job link stays frozen by the existing header lock. After every case each warehouse balance equals the expected total and the ledger.
- *   GRANTS and ROLLBACK: the helper is owner-only; wrapper grants unchanged; the rollback script refuses once counted
+ *   A job moved to another customer after a ticket was linked: both take their full claims (Sol r1).
+ *   GRANTS and ROLLBACK: the helpers are owner-only; wrapper grants unchanged; the rollback script refuses once counted
  *     rows exist, and otherwise restores the previous bodies.
  *
  * Run: node scripts/smoke/prove-job-ticket-stock-count-once-real-schema.mjs   (needs Docker)
@@ -24,7 +25,7 @@ const { buildContainer, removeContainer, seedUsers, psql, scalar, docker, USERS,
 
 const CANDIDATE = '20270311100000_job_ticket_stock_count_once.sql';
 const ROLLBACK = path.join(ROOT, 'scripts', 'smoke', 'job-ticket-stock-count-once-reverse.sql');
-const CUST = id('c1'), FIELD = id('c2');
+const CUST = id('c1'), FIELD = id('c2'), CUST2 = id('c3');
 const PRE = { job: '3bd9dfe0729d8175ffbb1cf16b258b5c', bt: '0ad9a78b900cb953e0aa7d2a0d87bda0', rev: 'bb7b45f8dca986c9cf39b5b6a41aa75b' };
 const SIG = {
   job: 'public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)',
@@ -96,21 +97,28 @@ function balance(p, outQty, what) {
 const md5 = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 const acl = (sig) => scalar(`SELECT coalesce(proacl::text, '<default>') FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 
-// A second signed-in psql session, for races; `delayMs` lets the first session take its locks first.
-function session(uid, sql, delayMs = 0) {
-  return new Promise((resolve) => setTimeout(() => {
+// A second signed-in psql session, for races.
+function session(uid, sql) {
+  return new Promise((resolve) => {
     const c = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], { cwd: ROOT });
     let text = '';
     c.stdout.on('data', (d) => { text += d; }); c.stderr.on('data', (d) => { text += d; });
     c.on('close', (code) => resolve({ code, text }));
     c.stdin.end(`${signedIn(uid)} ${sql}`);
-  }, delayMs));
+  });
 }
-// Completion holds its locks for 2 s; `other` starts 0.6 s later and must wait for it, then see the committed job record.
+const numberLockHeld = () => scalar(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted
+  AND objid::bigint = (hashtext('next_application_record_number')::bigint & 4294967295);`) !== '0';
+// Completion holds its locks for 2 s; `other` starts once the completion holds the number lock, and must wait for it,
+// then see the committed job record.
 async function whileCompleting(j, uid, otherSql) {
-  const [a, b] = await Promise.all([
-    session(USERS.admin, `BEGIN; ${completeSql(j)} SELECT pg_sleep(2); SELECT 'A-done ' || extract(epoch FROM clock_timestamp()); COMMIT;`),
-    session(uid, `BEGIN; SELECT 'B ' || extract(epoch FROM clock_timestamp()); ${otherSql} SELECT 'B-done ' || extract(epoch FROM clock_timestamp()); COMMIT;`, 600),
+  const aRun = session(USERS.admin, `BEGIN; ${completeSql(j)} SELECT pg_sleep(2); SELECT 'A-done ' || extract(epoch FROM clock_timestamp()); COMMIT;`);
+  for (let i = 0; !numberLockHeld(); i += 1) {
+    assert.ok(i < 200, 'the completion never took the number lock');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const [a, b] = await Promise.all([aRun,
+    session(uid, `BEGIN; SELECT 'B ' || extract(epoch FROM clock_timestamp()); ${otherSql} SELECT 'B-done ' || extract(epoch FROM clock_timestamp()); COMMIT;`),
   ]);
   assert.equal(a.code, 0, a.text);
   const started = Number((b.text.match(/^B ([0-9.]+)$/m) ?? [])[1]);
@@ -125,9 +133,10 @@ try {
   buildContainer({ stopBefore: CANDIDATE });
   seedUsers();
   seed(`INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST}', '[PROVER] Count Once Farm', true);
-    INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD}', '${CUST}', '[PROVER] Count Once Field');`);
+    INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD}', '${CUST}', '[PROVER] Count Once Field');
+    INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST2}', '[PROVER] Count Once Other Farm', true);`);
   for (let n = 0; n <= 9; n += 1) product(n);
-  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22]) product(n);
+  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22, 23, 24]) product(n);
   const wrapperAcl = WRAPPERS.map(acl);
 
   // BEFORE: the bug. Ticket 6 on an in-progress job, then the job's 10: 16 out.
@@ -154,7 +163,7 @@ try {
   console.log('[COUNT-ONCE] APPLY: commits with a NOTICE naming the 1 old pair; a second apply stops at the preflight; the ledger stays write-once');
 
   // GRANTS
-  for (const sig of ['public._job_stock_group_20270310(uuid, uuid)']) {
+  for (const sig of ['public._job_stock_group_20270310(uuid, uuid)', 'public._job_stock_customer_20270310(uuid)']) {
     for (const role of ['anon', 'authenticated', 'service_role']) {
       assert.equal(scalar(`SELECT has_function_privilege('${role}', '${sig}', 'EXECUTE');`), 'f', `${sig} not executable by ${role}`);
     }
@@ -263,6 +272,22 @@ try {
   assert.equal(rows(22), '10/-/false/none 6/-/false/blend_ticket 0/4/true/job');
   balance(22, 6, 'two tickets on an open job (10, 6), the first reversed, then the job claims 4');
 
+  // Sol r1: a job moved to another customer after a ticket was linked counts on its own. Ticket 6 (farm A) filed on an
+  // open job, the job moved to farm B, then completed: the job takes its full 10, and the ticket can still be reversed.
+  job(23, [[23, 10]]); ticket(23, 23, [[23, 6]]);
+  file(T(23));
+  seed(`UPDATE public.jobs SET customer_id = '${CUST2}' WHERE id = '${J(23)}';`);
+  complete(J(23));
+  assert.equal(rows(23), '6/-/false/blend_ticket 10/-/false/job');
+  balance(23, 16, 'job moved to another customer after its ticket was filed');
+  ok(USERS.admin, reverseSql(T(23)));
+  balance(23, 10, 'that ticket reversed');
+  // The other order: a farm-B job completed, then a farm-A ticket linked to it is filed: the ticket takes its full 6.
+  job(24, [[24, 10]]); seed(`UPDATE public.jobs SET customer_id = '${CUST2}' WHERE id = '${J(24)}';`);
+  complete(J(24)); ticket(24, 24, [[24, 6]]); file(T(24));
+  assert.equal(rows(24), '10/-/false/job 6/-/false/blend_ticket');
+  balance(24, 16, 'farm-A ticket filed against a completed farm-B job');
+
   // Races: each must wait for the completion's lock, then act on the committed job record.
   job(11, [['d', 10]]); ticket(11, 11, [['d', 6]]);
   let b = await whileCompleting(J(11), USERS.rep, fileSql(T(11)));
@@ -290,7 +315,14 @@ try {
   assert.deepEqual([md5(SIG.job), md5(SIG.bt), md5(SIG.rev)], [PRE.job, PRE.bt, PRE.rev], 'previous bodies restored');
   assert.deepEqual(WRAPPERS.map(acl), wrapperAcl, 'wrapper grants unchanged after rollback');
   job(15, [[0, 1]]); complete(J(15));
-  console.log('[COUNT-ONCE] ROLLBACK: refused once counted rows exist; otherwise restores the previous bodies, and a job still completes');
+  // The documented command (no -v ON_ERROR_STOP): the file sets it, so a refusal still exits non-zero.
+  r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-1', '-f', '/tmp/rollback.sql'], { allowFailure: true });
+  assert.notEqual(r.status, 0, `a refused rollback exits non-zero: ${out(r)}`);
+  // Re-apply after a rollback: the columns stayed, the migration applies again.
+  r = applyFile();
+  assert.equal(r.status, 0, `re-apply after rollback: ${out(r)}`);
+  assert.notDeepEqual([md5(SIG.job), md5(SIG.bt), md5(SIG.rev)], [PRE.job, PRE.bt, PRE.rev], 'count-once bodies back');
+  console.log('[COUNT-ONCE] ROLLBACK: refused once counted rows exist; otherwise restores the previous bodies, a job still completes, a refused run exits non-zero, and the migration re-applies');
 
   console.log('JOB_TICKET_COUNT_ONCE_PROOF_PASS');
 } finally {

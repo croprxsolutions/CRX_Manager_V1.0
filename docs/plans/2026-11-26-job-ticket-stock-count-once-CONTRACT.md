@@ -89,3 +89,13 @@ None left (Mason answered A on 2026-11-26).
 
 ## Luna round 3 (2026-11-26)
 - MED deadlock between completion and reversal: refuted. The `complete_job` wrapper (`20270227170000`, the body's only caller) locks the job row, then takes the shared number lock, and only then calls the body, so the status update and its hold-release trigger run with the number lock held. Reversal takes the same lock first, so the two never wait on each other in a cycle. A direct table status change runs no stock deduction and never takes the lock, so it cannot form a cycle either. Prover race (f) runs a reversal during a completion.
+
+## Sol round 1 (2026-11-26, head 6ca4b10e9)
+- HIGH (fixed): a ticket linked to a job that later moved to another customer was counted with that job. Count once now groups a ticket with its job only when the ticket's customer matches the job's customer: the customer on the job's record once it is completed, else the job's current customer (`_job_stock_customer_20270310`). Ticket filing, job completion and the reversal refusal all use it. Prover: both orders (ticket first, then job moved; job completed for farm B, then a farm-A ticket filed) take full claims, and the ticket stays reversible.
+- MED 2 (deferred, named follow-up): stock corrected by an adjustment after a duplicate ticket still leaves that ticket's claim in the group, so a later linked ticket can be over-taken. The correction route for counted lines is the existing follow-up "a route for correcting a wrong job link after filing"; every counted line is flagged for office review.
+- MED 3 (fixed): the rollback takes the number lock before its guard, so no counted posting can commit between the check and the swap.
+- MED 4 (fixed in part, residual accepted): the migration takes the number lock first, so it waits out any posting that holds it. A call already blocked inside an old body when the migration commits still runs the old body. Production has no jobs or application records yet (read-only check 2026-11-26), so apply at a quiet time.
+- MED 5 (refuted for real data): old raw-unit ticket rows need an application record before this migration; production has 0 application records, and raw-fallback lines were already flagged for review.
+- MED 6 (fixed): only the two helpers mark the migration applied; the columns and index use IF NOT EXISTS, so it re-applies after a rollback. Proven.
+- LOW 7 (fixed): the rollback file sets ON_ERROR_STOP itself; the prover runs the documented command and sees a non-zero exit.
+- LOW 8 (fixed): the race cases start the second session only after the completion holds the number lock (polled in pg_locks), not after a fixed delay.

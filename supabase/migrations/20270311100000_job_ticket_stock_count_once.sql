@@ -36,6 +36,8 @@
 --   (proven by scripts/smoke/prove-job-ticket-stock-count-once-real-schema.mjs)
 
 SET LOCAL lock_timeout = '5s';
+-- The number lock job completion, ticket filing and reversal take: wait out any posting already running.
+SELECT pg_advisory_xact_lock(hashtext('next_application_record_number'));
 
 DO $preflight$
 DECLARE
@@ -58,10 +60,9 @@ BEGIN
       RAISE EXCEPTION 'COUNT_ONCE_PREFLIGHT: % security or search_path changed', v_fn.sig;
     END IF;
   END LOOP;
-  IF EXISTS (SELECT 1 FROM information_schema.columns
-              WHERE table_schema = 'public' AND table_name = 'inventory_transactions'
-                AND column_name IN ('application_record_id', 'already_counted'))
-     OR to_regprocedure('public._job_stock_group_20270310(uuid, uuid)') IS NOT NULL THEN
+  -- The columns survive a rollback (the ledger is write-once), so only the helpers mark this as applied.
+  IF to_regprocedure('public._job_stock_group_20270310(uuid, uuid)') IS NOT NULL
+     OR to_regprocedure('public._job_stock_customer_20270310(uuid)') IS NOT NULL THEN
     RAISE EXCEPTION 'COUNT_ONCE_PREFLIGHT: already applied';
   END IF;
   -- Old pairs (both posted before this rule) are left as they are; say how many so staging data is visible.
@@ -75,14 +76,31 @@ END;
 $preflight$;
 
 ALTER TABLE public.inventory_transactions
-  ADD COLUMN application_record_id uuid,
-  ADD COLUMN already_counted numeric CHECK (already_counted IS NULL OR already_counted > 0);
+  ADD COLUMN IF NOT EXISTS application_record_id uuid,
+  ADD COLUMN IF NOT EXISTS already_counted numeric CHECK (already_counted IS NULL OR already_counted > 0);
 COMMENT ON COLUMN public.inventory_transactions.application_record_id IS
   'Application record this job_applied line posted for (job completion or blend-ticket filing). No foreign key: the ledger is write-once and a reversed record is deleted.';
 COMMENT ON COLUMN public.inventory_transactions.already_counted IS
   'Part of this line''s claim another posting for the same job already took (count once). Claim = quantity + already_counted.';
-CREATE INDEX idx_inv_tx_application_record ON public.inventory_transactions (application_record_id, product_id)
+CREATE INDEX IF NOT EXISTS idx_inv_tx_application_record ON public.inventory_transactions (application_record_id, product_id)
   WHERE application_record_id IS NOT NULL;
+
+-- The customer a job's stock group belongs to: the customer on its job record once completed, else the job's own.
+-- Only a linked ticket for this same customer counts with the job, so a job moved to another customer after a
+-- ticket was linked never credits one customer's spray against another's.
+CREATE FUNCTION public._job_stock_customer_20270310(p_job_id uuid)
+ RETURNS uuid
+ LANGUAGE sql
+ STABLE
+ SET search_path = public, pg_temp
+AS $fn$
+  SELECT COALESCE(
+    (SELECT ar.customer_id FROM public.application_records ar
+      WHERE ar.source_type = 'job' AND ar.source_id = p_job_id
+      ORDER BY ar.created_at, ar.id LIMIT 1),
+    (SELECT j.customer_id FROM public.jobs j WHERE j.id = p_job_id));
+$fn$;
+REVOKE ALL ON FUNCTION public._job_stock_customer_20270310(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
 -- The job/ticket group for one job and one product: the job record's claims, the linked tickets' claims, and what they took.
 -- A row joins its record by application_record_id; a row posted before this migration (no link) joins by job_id for the
@@ -107,6 +125,7 @@ AS $fn$
               AND strpos(it.notes, '(application record ' || ar.id::text || ')') > 0))
    WHERE (ar.source_type = 'job' AND ar.source_id = p_job_id)
       OR (ar.source_type = 'blend_ticket'
+          AND ar.customer_id IS NOT DISTINCT FROM public._job_stock_customer_20270310(p_job_id)
           AND ar.source_id IN (SELECT bt.id FROM public.blend_tickets bt WHERE bt.job_id = p_job_id));
 $fn$;
 REVOKE ALL ON FUNCTION public._job_stock_group_20270310(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
@@ -839,11 +858,12 @@ BEGIN
     END IF;
 
     -- Count once: on a ticket linked to a job, take only what the job's claims and its tickets' claims,
-    -- whichever is larger, still need beyond what was already taken. An unlinked ticket takes its full claim.
+    -- whichever is larger, still need beyond what was already taken. An unlinked ticket, or one for another customer, takes its full claim.
     -- v_ticket was read FOR UPDATE, so its job link cannot change under us.
     v_claim := v_deduct_qty;
     v_counted := 0;
-    IF v_ticket.job_id IS NOT NULL THEN
+    IF v_ticket.job_id IS NOT NULL
+       AND v_ticket.customer_id IS NOT DISTINCT FROM public._job_stock_customer_20270310(v_ticket.job_id) THEN
       SELECT g.job_claim, g.ticket_claim, g.taken INTO v_cj, v_ct, v_taken
         FROM public._job_stock_group_20270310(v_ticket.job_id, v_bt_product.product_id) g;
       v_deduct_qty := LEAST(v_claim, GREATEST(0, GREATEST(v_cj, v_ct + v_claim) - v_taken));
@@ -1008,6 +1028,7 @@ BEGIN
       FROM public.blend_tickets bt
       JOIN public.application_records jr ON jr.source_type = 'job' AND jr.source_id = bt.job_id
      WHERE bt.id = v_record.source_id
+       AND jr.customer_id IS NOT DISTINCT FROM v_record.customer_id
   ) THEN
     RAISE EXCEPTION 'APPLICATION_RECORD_COUNTED_WITH_JOB: this blend ticket''s stock was counted when its job was completed; correct stock with an inventory adjustment instead';
   END IF;
@@ -1154,8 +1175,8 @@ BEGIN
     SELECT x.sig, x.md5, x.api, p.oid, p.prosrc, p.prosecdef, p.proconfig
       FROM (VALUES
         ('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)', '5df6e9533702ab6ab857fe4c9784fc04', false),
-        ('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)', 'bd94d49e02b583e9fc11eda8969d0902', false),
-        ('public.reverse_application_record(uuid, text)', '8a56f03e81eaabf61f5ee79eaac8c2c4', true)
+        ('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)', '03b74676ffbc1852613b8f668a6ad2f3', false),
+        ('public.reverse_application_record(uuid, text)', '41fadd3a8c8f39d69e2364a1d0b95fd4', true)
       ) AS x(sig, md5, api)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(x.sig)
   LOOP
@@ -1169,7 +1190,10 @@ BEGIN
       RAISE EXCEPTION 'COUNT_ONCE_POSTFLIGHT: % grants changed', v_fn.sig;
     END IF;
   END LOOP;
-  IF has_function_privilege('anon', 'public._job_stock_group_20270310(uuid, uuid)', 'EXECUTE')
+  IF has_function_privilege('anon', 'public._job_stock_customer_20270310(uuid)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._job_stock_customer_20270310(uuid)', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._job_stock_customer_20270310(uuid)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public._job_stock_group_20270310(uuid, uuid)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._job_stock_group_20270310(uuid, uuid)', 'EXECUTE')
      OR has_function_privilege('service_role', 'public._job_stock_group_20270310(uuid, uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'COUNT_ONCE_POSTFLIGHT: a new helper is executable by an API role';

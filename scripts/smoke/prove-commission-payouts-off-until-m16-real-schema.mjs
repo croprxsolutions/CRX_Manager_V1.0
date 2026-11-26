@@ -5,7 +5,9 @@
  * in a network-disabled PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), commits one posted and one
  * unposted payout batch, then as the signed-in admin:
  *   1. before the apply: a new batch is created and the unposted batch posts (rolled back);
- *   2. after the apply: create and post are refused COMMISSION_PAYOUTS_OFF_UNTIL_M16 and nothing changes; voiding
+ *   2. after the apply: create and post are refused COMMISSION_PAYOUTS_OFF_UNTIL_M16 and nothing changes; a retry of a
+ *      create or post committed before the apply still replays its receipt; the table trigger refuses the old
+ *      implementation bodies called directly (what a payout call already running at apply time would do); voiding
  *      the posted and the unposted batch still works; a sales rep and a bad key get their old refusals; no API role
  *      can call the switch; a second apply is refused by the preflight;
  *   3. the reverse script restores both staging bodies (the candidate's preflight accepts them again) and a batch is
@@ -38,6 +40,8 @@ const reuse = process.env.PAYOUTGUARD_REUSE === '1';
 const sh = (sql, { user = 'postgres', single = true } = {}) => docker(['exec', '-i', NAME, 'psql', '-U', user, '-d', 'postgres', '-X', '-q',
   '-v', 'ON_ERROR_STOP=1', ...(single ? ['-1'] : [])], { input: sql, allowFailure: true });
 const bodyMd5 = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
+/** Like refuse(), but the call runs as postgres (the implementation bodies execute for postgres only). */
+const asPostgres = (stmt) => `BEGIN ${stmt} t := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN t := SQLERRM; END;`;
 const show = (label, got) => { console.log(`[payout-guard] ${label}: ${got}`); return got; };
 
 /** The three commissions and every batch holding them, read as postgres. */
@@ -89,9 +93,24 @@ try {
   console.log('[payout-guard] applied; postflight OK');
 
   assert.equal(show('after: create refused', attempt(ADMIN, `f0 := ${fp}; ${refuse(create(ADMIN, "'payoutguard-after-create'"))}
-    v := t || '|unchanged=' || (f0 = ${fp}) || '|receipts=' || (SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key = 'payoutguard-after-create');`)),
+    v := t || '|unchanged=' || (f0 = ${fp}) || '|receipts=' || (SELECT count(*) FROM public.idempotency_keys
+      WHERE idempotency_key = 'payoutguard-after-create' AND operation = 'create_commission_payment');`)),
     `ok|${OFF}|unchanged=true|receipts=0`);
   assert.equal(show('after: post refused', attempt(ADMIN, `f0 := ${fp}; ${refuse(post(UNPOSTED, 'payoutguard-after-post'))}
+    v := t || '|unchanged=' || (f0 = ${fp}) || '|receipts=' || (SELECT count(*) FROM public.idempotency_keys
+      WHERE idempotency_key = 'payoutguard-after-post' AND operation = 'post_commission_payment');`)), `ok|${OFF}|unchanged=true|receipts=0`);
+  // A retry of work committed before the apply replays its receipt instead of being refused.
+  assert.equal(show('after: create replay', attempt(ADMIN, `${asUser(`u := public.create_commission_payment(ARRAY['${COM.unposted}']::uuid[],
+      'check', 'PG16-CHK-2', CURRENT_DATE, NULL, '${ADMIN}', 'payoutguard-seed-create-2');`)} v := (u = ${UNPOSTED})::text || '|' || ${fp};`)),
+    `ok|true|${FIXTURE}`);
+  assert.equal(show('after: post replay', attempt(ADMIN, `${asUser(post(POSTED, 'payoutguard-seed-post-1'))}
+    v := ((r->>'payment_id')::uuid = ${POSTED})::text || '|' || ${fp};`)), `ok|true|${FIXTURE}`);
+  // The trigger stops the old implementation bodies, which a call already running at apply time is executing.
+  assert.equal(show('after: old create body', attempt(ADMIN, `f0 := ${fp}; ${asPostgres(`u := public._create_commission_payment_intent_impl_20260809(
+      ARRAY['${COM.free}']::uuid[], 'check', 'PG16-CHK-4', CURRENT_DATE, NULL, '${ADMIN}', 'payoutguard-impl-create');`)}
+    v := t || '|unchanged=' || (f0 = ${fp});`)), `ok|${OFF}|unchanged=true`);
+  assert.equal(show('after: old post body', attempt(ADMIN, `f0 := ${fp};
+    ${asPostgres(`r := public._post_commission_payment_intent_impl_20260809(${UNPOSTED}, '${ADMIN}', 'payoutguard-impl-post');`)}
     v := t || '|unchanged=' || (f0 = ${fp});`)), `ok|${OFF}|unchanged=true`);
   assert.equal(show('after: void posted batch', attempt(ADMIN, `${asUser(voidBatch(POSTED, 'payoutguard-after-void-1'))} v := ${fp};`)),
     'ok|1=pending:120.00 2=pending:80.00 3=pending:45.50 batches=unposted:80.00,voided:120.00');
@@ -119,10 +138,11 @@ try {
     assert.match(r.stderr, /REVERSE_OK/);
     assert.equal(bodyMd5(CREATE_SIG), STAGING_MD5.create);
     assert.equal(bodyMd5(POST_SIG), STAGING_MD5.post);
-    assert.equal(scalar(`SELECT to_regprocedure('public._commission_payouts_enabled()') IS NULL;`), 't');
+    assert.equal(scalar(`SELECT to_regprocedure('public._commission_payouts_enabled()') IS NULL AND to_regprocedure('public._commission_payouts_off_guard()') IS NULL
+      AND NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_commission_payouts_off_until_m16');`), 't');
   };
   reverse();
-  console.log('[payout-guard] reverse restored both staging bodies and dropped the switch');
+  console.log('[payout-guard] reverse restored both staging bodies and dropped the trigger and the switch');
   createWorks('reversed: create batch');
   const reapplied = sh(read('supabase', 'migrations', MIGRATION));
   assert.equal(reapplied.status, 0, reapplied.stderr);

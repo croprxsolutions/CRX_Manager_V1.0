@@ -5,16 +5,21 @@
 --   M16 = commission is earned only when the customer's money lands. Until then no commission payout batch may be
 --   created or paid.
 -- WHAT: one switch, public._commission_payouts_enabled(), returns false. create_commission_payment and
---   post_commission_payment check it right after their existing sign-in, admin and idempotency-key checks and refuse
---   with COMMISSION_PAYOUTS_OFF_UNTIL_M16. Nothing else in either body changes. void_commission_payment is NOT
---   touched: voiding an existing batch stays allowed. These two wrappers are the only way an API role writes a
---   payout (their _intent_impl_20260809 bodies execute for postgres only; the tables have no write policy).
+--   post_commission_payment check it after their sign-in, admin, idempotency-key and replay checks (so a request
+--   committed before the switch went off still replays its receipt) and refuse with COMMISSION_PAYOUTS_OFF_UNTIL_M16.
+--   Nothing else in either body changes. These two wrappers are the only way an API role writes a payout (their
+--   _intent_impl_20260809 bodies execute for postgres only; the tables have no write policy).
+--   Backstop: a BEFORE INSERT OR UPDATE OF status trigger on commission_payments refuses a new batch row or a move to
+--   'posted' while the switch is not true. It also stops a payout call that was already running when this migration
+--   committed (its old body has no check, but the trigger fires on its write).
+--   void_commission_payment is NOT touched and the trigger allows 'voided': voiding an existing batch stays allowed.
 --   M16 turns payouts back on with its own migration that makes the switch return true.
 -- SAFETY: preflight refuses unless this runs as one transaction, the switch does not exist yet, and both live
 --   bodies are exactly staging's current ones (md5, carriage returns removed). Postflight checks the two new bodies,
 --   that owner, grants, security mode, settings, return type, volatility and arguments did not move, and that the
 --   switch is owned by postgres, returns false, is SECURITY INVOKER and no API role can execute it.
--- ROLLBACK: scripts/smoke/commission-payouts-off-until-m16-reverse.sql (restores both bodies, drops the switch).
+-- ROLLBACK: scripts/smoke/commission-payouts-off-until-m16-reverse.sql (restores both bodies, drops the trigger and the
+--   switch). For this migration only, before M16 changes the switch.
 -- PROOF: node scripts/smoke/prove-commission-payouts-off-until-m16-real-schema.mjs
 
 SET LOCAL lock_timeout = '5s';
@@ -40,8 +45,9 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_temp.payoutguard_m16_attrs WHERE transaction_id IS DISTINCT FROM pg_current_xact_id()::text) THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: run this file as one transaction (psql -1 or the apply script)';
   END IF;
-  IF to_regprocedure('public._commission_payouts_enabled()') IS NOT NULL THEN
-    RAISE EXCEPTION 'PAYOUT_GUARD_M16_BASELINE_DRIFT: public._commission_payouts_enabled() already exists';
+  IF to_regprocedure('public._commission_payouts_enabled()') IS NOT NULL
+     OR to_regprocedure('public._commission_payouts_off_guard()') IS NOT NULL THEN
+    RAISE EXCEPTION 'PAYOUT_GUARD_M16_BASELINE_DRIFT: the payout switch or its trigger function already exists';
   END IF;
   FOR v_row IN
     SELECT a.sig, md5(replace(p.prosrc, chr(13), '')) AS body_md5
@@ -66,6 +72,27 @@ ALTER FUNCTION public._commission_payouts_enabled() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._commission_payouts_enabled() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 COMMENT ON FUNCTION public._commission_payouts_enabled() IS
   'False until commission-on-payment (M16) is live (Mason, 2026-11-25). create_commission_payment and post_commission_payment refuse with COMMISSION_PAYOUTS_OFF_UNTIL_M16 while it is false.';
+
+-- Backstop on the table itself (see WHY/WHAT). SECURITY DEFINER so it can read the switch whoever writes.
+CREATE FUNCTION public._commission_payouts_off_guard()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $guard$
+BEGIN
+  IF public._commission_payouts_enabled() IS NOT TRUE
+     AND (TG_OP = 'INSERT' OR (NEW.status = 'posted' AND OLD.status IS DISTINCT FROM 'posted')) THEN
+    RAISE EXCEPTION 'COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.';
+  END IF;
+  RETURN NEW;
+END;
+$guard$;
+ALTER FUNCTION public._commission_payouts_off_guard() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._commission_payouts_off_guard() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+CREATE TRIGGER trg_commission_payouts_off_until_m16
+  BEFORE INSERT OR UPDATE OF status ON public.commission_payments
+  FOR EACH ROW EXECUTE FUNCTION public._commission_payouts_off_guard();
 
 CREATE OR REPLACE FUNCTION public.create_commission_payment(p_commission_ids uuid[], p_payment_method text, p_reference text, p_payment_date date, p_notes text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS uuid
@@ -127,11 +154,6 @@ BEGIN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_commission_payment requires p_idempotency_key';
   END IF;
 
-  -- Mason, 2026-11-25: no commission payout batch is created or paid until commission-on-payment (M16) is live.
-  IF NOT public._commission_payouts_enabled() THEN
-    RAISE EXCEPTION 'COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.';
-  END IF;
-
   -- Intent = the actor plus the sorted, de-duplicated commission selection and
   -- every payment field the admin can edit. p_payment_date is fingerprinted
   -- raw: substituting CURRENT_DATE here would make an otherwise identical
@@ -179,6 +201,12 @@ BEGIN
       RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
     END IF;
     RETURN ((v_replay -> 'result') #>> '{}')::uuid;
+  END IF;
+
+  -- Mason, 2026-11-25: no commission payout batch is created or paid until commission-on-payment (M16) is live.
+  -- After the replay check, so a request committed before the switch went off still gets its receipt back.
+  IF public._commission_payouts_enabled() IS NOT TRUE THEN
+    RAISE EXCEPTION 'COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.';
   END IF;
 
   v_payment_id := public._create_commission_payment_intent_impl_20260809(
@@ -243,11 +271,6 @@ BEGIN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: post_commission_payment requires p_idempotency_key';
   END IF;
 
-  -- Mason, 2026-11-25: no commission payout batch is created or paid until commission-on-payment (M16) is live.
-  IF NOT public._commission_payouts_enabled() THEN
-    RAISE EXCEPTION 'COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.';
-  END IF;
-
   -- Intent = the actor plus which payment is being posted.
   v_fingerprint := encode(
     extensions.digest(
@@ -274,6 +297,12 @@ BEGIN
     RETURN v_replay -> 'result';
   END IF;
 
+  -- Mason, 2026-11-25: no commission payout batch is created or paid until commission-on-payment (M16) is live.
+  -- After the replay check, so a request committed before the switch went off still gets its receipt back.
+  IF public._commission_payouts_enabled() IS NOT TRUE THEN
+    RAISE EXCEPTION 'COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.';
+  END IF;
+
   v_result := public._post_commission_payment_intent_impl_20260809(
     p_payment_id, p_performed_by, p_idempotency_key
   );
@@ -294,8 +323,8 @@ $function$;
 DO $postflight$
 DECLARE
   v_expected constant jsonb := jsonb_build_object(
-    'create_commission_payment(uuid[],text,text,date,text,uuid,text)', '58349c6b07b88b798cdb548237559a3e',
-    'post_commission_payment(uuid,uuid,text)', '4fa82d42276d7d9411c50ba2b8622afb');
+    'create_commission_payment(uuid[],text,text,date,text,uuid,text)', '6e68288bef20e511cee5ebf2cccf05bf',
+    'post_commission_payment(uuid,uuid,text)', 'acaaa4020a8ecbbd439b38cd79dba9df');
   v_fn record;
   v_seen integer := 0;
   v_switch constant regprocedure := to_regprocedure('public._commission_payouts_enabled()');
@@ -320,7 +349,8 @@ BEGIN
        OR v_fn.prorettype IS DISTINCT FROM v_fn.was_rettype
        OR v_fn.provolatile IS DISTINCT FROM v_fn.was_volatile
        OR v_fn.prosecdef IS DISTINCT FROM v_fn.was_secdef
-       OR v_fn.args IS DISTINCT FROM v_fn.was_args THEN
+       OR v_fn.args IS DISTINCT FROM v_fn.was_args
+       OR NOT has_function_privilege(v_fn.owner, v_switch, 'EXECUTE') THEN
       RAISE EXCEPTION 'POSTFLIGHT_FAIL: % is not the expected body/attributes (md5 %)', v_fn.sig, v_fn.body_md5;
     END IF;
   END LOOP;
@@ -337,6 +367,19 @@ BEGIN
   FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated', 'service_role', 'metabase_ro'] LOOP
     IF has_function_privilege(v_role, v_switch, 'EXECUTE') THEN
       RAISE EXCEPTION 'POSTFLIGHT_FAIL: % can execute the payout switch', v_role;
+    END IF;
+  END LOOP;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid = t.tgfoid
+     WHERE t.tgrelid = 'public.commission_payments'::regclass AND t.tgname = 'trg_commission_payouts_off_until_m16'
+       AND t.tgenabled = 'O' AND NOT t.tgisinternal AND p.oid = to_regprocedure('public._commission_payouts_off_guard()')
+       AND pg_get_userbyid(p.proowner) = 'postgres' AND p.prosecdef
+  ) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: the commission_payments payout trigger is missing, disabled or not owned by postgres';
+  END IF;
+  FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated', 'service_role', 'metabase_ro'] LOOP
+    IF has_function_privilege(v_role, 'public._commission_payouts_off_guard()', 'EXECUTE') THEN
+      RAISE EXCEPTION 'POSTFLIGHT_FAIL: % can execute the payout trigger function', v_role;
     END IF;
   END LOOP;
   RAISE NOTICE 'POSTFLIGHT_OK: commission payouts are off until M16 (create and post refuse; void unchanged)';

@@ -25,17 +25,20 @@ function seedCommission() {
   const com = (k, dollars) => `INSERT INTO public.commissions (id, order_id, customer_id, recipient, recipient_user_id, split_percentage,
       commission_amount, order_profit, order_date, status)
     VALUES ('${COM[k]}', '${ORDER}', '${CUST}', '[UNDO] Rep', '${REP}', 100, ${dollars}, ${dollars}, CURRENT_DATE, 'pending');`;
-  seed('commission', `${payoutSwitch(true)}
+  // Payouts on for this seed only, then the switch exactly as it was (pg_get_functiondef), whatever it was.
+  seed('commission', `CREATE TEMP TABLE undo_payout_switch ON COMMIT DROP AS
+      SELECT pg_get_functiondef('public._commission_payouts_enabled()'::regprocedure) AS def;
+    ${payoutSwitch(true)}
     INSERT INTO public.customers (id, farm_name, account_number) VALUES ('${CUST}', '[UNDO] Commission Farm', '[UNDO]-COM-1');
     INSERT INTO public.orders (id, order_number, customer_id, status, booking_draw) VALUES ('${ORDER}', '[UNDO] COM-ORDER', '${CUST}', 'confirmed', false);
     ${com('paid1', '120.00')} ${com('paid2', '80.00')} ${com('free', '45.50')}
     INSERT INTO undo_paths.ids SELECT 'payout-posted', public.create_commission_payment(ARRAY['${COM.paid1}', '${COM.paid2}']::uuid[],
       'check', '[UNDO]-COM-CHK-1', CURRENT_DATE, NULL, '${ADMIN}', 'undo-seed-payout-create');
     SELECT public.post_commission_payment(${PAYOUT.posted}, '${ADMIN}', 'undo-seed-payout-post');
-    ${payoutSwitch(false)}`);
+    DO $restore$ BEGIN EXECUTE (SELECT def FROM pg_temp.undo_payout_switch); END $restore$;`);
 }
 
-// The switch exactly as 20270308180000 creates it, returning `on`; owner, grants and comment are kept.
+// The switch returning `on` (same attributes as 20270308180000); owner, grants and comment are kept.
 const payoutSwitch = (on) => `CREATE OR REPLACE FUNCTION public._commission_payouts_enabled() RETURNS boolean LANGUAGE sql STABLE
   SET search_path TO 'pg_catalog', 'pg_temp' AS $switch$ SELECT ${on} $switch$;`;
 

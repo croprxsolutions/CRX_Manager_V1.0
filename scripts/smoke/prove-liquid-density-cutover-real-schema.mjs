@@ -18,12 +18,21 @@ const wrapped = (text) => wrapperSql({
 const stagingSql = wrapped(cutover);
 assert.ok(stagingSql.includes(stagingContext), 'The staging runner preparation must be in the base branch');
 
+const definitionHash = `SELECT md5(concat(
+  pg_get_functiondef('public.liquid_density_review_open()'::regprocedure),
+  pg_get_functiondef('public.return_liquid_density_to_draft_for_brand()'::regprocedure),
+  (SELECT pg_get_triggerdef(oid) FROM pg_trigger
+    WHERE tgrelid = 'public.product_parent_brands'::regclass AND tgname = 'return_liquid_density_to_draft_for_brand')
+));`;
 try {
   buildContainer({ stopBefore: migration });
   assert.equal(scalar('SELECT public.liquid_density_review_open();'), 'f');
+  const before = scalar(definitionHash);
+  assert.match(before, /^[0-9a-f]{32}$/);
   for (const context of ['', "SET LOCAL crx.liquid_weight_staging_project = 'wrong_project';"]) {
     psql(`BEGIN;\n${context}\n${cutover}\nCOMMIT;`);
     assert.equal(scalar('SELECT public.liquid_density_review_open();'), 'f');
+    assert.equal(scalar(definitionHash), before);
   }
 
   function expectPreflightRefusal(change) {
@@ -50,6 +59,7 @@ try {
       EXECUTE FUNCTION public.return_liquid_density_to_draft_for_brand();`);
 
   expectPreflightRefusal('ALTER TABLE public.product_parent_brands DISABLE TRIGGER return_liquid_density_to_draft_for_brand;');
+  expectPreflightRefusal('ALTER TABLE public.product_parent_brands ENABLE ALWAYS TRIGGER return_liquid_density_to_draft_for_brand;');
   expectPreflightRefusal('ALTER FUNCTION public.approve_weights(jsonb, text) RESET search_path;');
   expectPreflightRefusal('ALTER FUNCTION public.approve_liquid_density_draft(uuid, uuid, bigint, jsonb, boolean, text) STABLE;');
   expectPreflightRefusal('GRANT EXECUTE ON FUNCTION public.liquid_density_review_open() TO anon;');
@@ -64,7 +74,6 @@ try {
   assert.match(failedApply.stderr, /LIQUID_DENSITY_STAGING_ACTIVATION_DID_NOT_OPEN/);
   assert.equal(scalar(`SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '${stem}';`), '0');
 
-  const definitionHash = "SELECT md5(pg_get_functiondef('public.liquid_density_review_open()'::regprocedure));";
   const rebuildDefinition = psql(
     `BEGIN;\n${stagingContext}\n${cutover}\n${definitionHash}\nROLLBACK;`,
   ).stdout.match(/\b[0-9a-f]{32}\b/)?.[0];
@@ -78,7 +87,7 @@ try {
   seedUsers();
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data)
         VALUES (gen_random_uuid(), 'density-reviewer@example.invalid', '{"full_name":"Density Reviewer","role":"admin"}');`);
-  for (const chain of ['smoke-liquid-density-review.sql', 'smoke-reject-liquid-density-draft.sql']) {
+  for (const chain of ['smoke-liquid-density-review.sql', 'smoke-reject-liquid-density-draft.sql', 'smoke-liquid-density-brand-rename.sql']) {
     const result = psql(read('scripts', 'smoke', chain), { allowFailure: true });
     assert.equal(result.status, 3, chain + result.stderr + result.stdout);
     assert.match(result.stderr, /^ERROR:\s+SMOKE_PASS_ROLLBACK\r?$/m, chain + result.stderr + result.stdout);

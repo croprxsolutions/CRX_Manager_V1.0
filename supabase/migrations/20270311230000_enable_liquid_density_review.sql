@@ -53,7 +53,7 @@ BEGIN
        WHERE tgrelid = to_regclass('public.product_parent_brands')
          AND tgfoid = to_regprocedure('public.return_liquid_density_to_draft_for_brand()')
          AND tgname = 'return_liquid_density_to_draft_for_brand'
-         AND tgenabled IN ('O', 'A') AND NOT tgisinternal
+         AND tgenabled = 'O' AND NOT tgisinternal
          AND pg_get_triggerdef(oid) ~ ' AFTER INSERT OR UPDATE OF status, parent_id, epa_registration, manufacturer ON (public[.])?product_parent_brands FOR EACH ROW EXECUTE FUNCTION (public[.])?return_liquid_density_to_draft_for_brand[(][)]$'
      )
      THEN
@@ -62,6 +62,67 @@ BEGIN
   IF public.liquid_density_review_open() IS DISTINCT FROM false THEN
     RAISE EXCEPTION 'PREFLIGHT_LIQUID_DENSITY_REVIEW: expected the review switch to be closed';
   END IF;
+
+  CREATE OR REPLACE FUNCTION public.return_liquid_density_to_draft_for_brand() RETURNS trigger
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $brand_review$
+  DECLARE
+    v_approved public.product_parent_density_values%ROWTYPE;
+    v_existing_draft boolean;
+    v_before jsonb;
+    v_after jsonb;
+    v_reason text := 'An active brand joined the product group';
+  BEGIN
+    IF NOT public.liquid_density_review_open() OR NEW.status <> 'active' THEN RETURN NULL; END IF;
+    IF TG_OP = 'UPDATE' AND OLD.status = 'active' AND OLD.parent_id = NEW.parent_id THEN
+      IF (OLD.epa_registration, OLD.manufacturer) IS DISTINCT FROM (NEW.epa_registration, NEW.manufacturer) THEN
+        v_reason := 'An active brand changed its EPA registration or manufacturer';
+      ELSIF lower(btrim(regexp_replace(OLD.brand_name, '[[:space:]]+', ' ', 'g')))
+            IS DISTINCT FROM lower(btrim(regexp_replace(NEW.brand_name, '[[:space:]]+', ' ', 'g'))) THEN
+        v_reason := 'An active brand name changed';
+      ELSE
+        RETURN NULL;
+      END IF;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.product_parents WHERE id = NEW.parent_id AND is_active AND product_form = 'liquid') THEN
+      RETURN NULL;
+    END IF;
+
+    PERFORM 1 FROM public.product_parent_density_state WHERE parent_id = NEW.parent_id FOR UPDATE;
+    IF NOT FOUND THEN RETURN NULL; END IF;
+    SELECT * INTO v_approved FROM public.product_parent_density_values
+     WHERE parent_id = NEW.parent_id AND review_state = 'approved' FOR UPDATE;
+    v_existing_draft := EXISTS (
+      SELECT 1 FROM public.product_parent_density_values WHERE parent_id = NEW.parent_id AND review_state = 'draft'
+    );
+    IF v_approved.id IS NULL AND NOT v_existing_draft THEN RETURN NULL; END IF;
+
+    UPDATE public.product_parent_density_state SET density_version = density_version + 1
+     WHERE parent_id = NEW.parent_id;
+    IF v_approved.id IS NULL THEN RETURN NULL; END IF;
+
+    v_before := jsonb_build_object(
+      'value_id', v_approved.id, 'review_state', 'approved', 'value', v_approved.lb_per_gal,
+      'basis', v_approved.basis, 'reviewed_by', v_approved.reviewed_by, 'reviewed_at', v_approved.reviewed_at
+    );
+    IF v_existing_draft THEN
+      UPDATE public.product_parent_density_values SET review_state = 'superseded', superseded_at = now()
+       WHERE id = v_approved.id;
+      v_after := v_before || jsonb_build_object('review_state', 'superseded');
+    ELSE
+      UPDATE public.product_parent_density_values SET review_state = 'draft', reviewed_by = NULL, reviewed_at = NULL
+       WHERE id = v_approved.id;
+      v_after := v_before || jsonb_build_object('review_state', 'draft', 'reviewed_by', NULL, 'reviewed_at', NULL);
+    END IF;
+    PERFORM public._product_weight_event('parent_density', NEW.parent_id, NULL, 'returned_to_draft', v_approved.id,
+      jsonb_build_array(v_before), jsonb_build_array(v_after), v_reason, NULL);
+    RETURN NULL;
+  END;
+  $brand_review$;
+
+  CREATE OR REPLACE TRIGGER return_liquid_density_to_draft_for_brand
+    AFTER INSERT OR UPDATE OF status, parent_id, epa_registration, manufacturer, brand_name ON public.product_parent_brands
+    FOR EACH ROW EXECUTE FUNCTION public.return_liquid_density_to_draft_for_brand();
+
   CREATE OR REPLACE FUNCTION public.liquid_density_review_open() RETURNS boolean
   LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $function$
   SELECT true;

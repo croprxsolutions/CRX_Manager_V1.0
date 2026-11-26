@@ -46,6 +46,8 @@ Before activation, verify the closed Weight card and workbook paths, legacy appr
 
 ## Owner decisions
 
+- On 26 November 2026, Mason confirmed that a substantive active-brand rename returns the approved weight to draft even when EPA registration and manufacturer stay the same. Capitalization and whitespace edits keep approval. Keep any draft already waiting and preserve saved paperwork.
+
 - Mason confirmed on 24 November 2026 that only admins enter links and draft weights. A different admin approves a draft.
 - An admin splits mismatched brands through the existing Product Setup workflow before approving either density.
 - Verify the existing outputs and add printed Blend Ticket Detail proof.

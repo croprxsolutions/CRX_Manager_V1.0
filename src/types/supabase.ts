@@ -4702,10 +4702,72 @@ export type Database = {
           },
         ]
       }
+      field_entrance_counters: {
+        Row: {
+          created_at: string
+          field_id: string
+          last_number: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          field_id: string
+          last_number: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          field_id?: string
+          last_number?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "field_entrance_counters_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: true
+            referencedRelation: "fields"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      field_marker_create_receipts: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          field_id: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          field_id: string
+          id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          field_id?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "field_marker_create_receipts_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "fields"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       field_obstacles: {
         Row: {
           created_at: string
           created_by: string | null
+          entrance_number: number | null
           field_id: string
           id: string
           kind: string
@@ -4716,6 +4778,7 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by?: string | null
+          entrance_number?: number | null
           field_id: string
           id?: string
           kind: string
@@ -4726,6 +4789,7 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string | null
+          entrance_number?: number | null
           field_id?: string
           id?: string
           kind?: string
@@ -20007,6 +20071,11 @@ export type Database = {
         Args: { p_months_ahead?: number }
         Returns: Json
       }
+      get_field_marker_create_result: {
+        Args: { p_field_id: string; p_marker_id: string }
+        Returns: Json
+      }
+      get_field_marker_read: { Args: { p_field_id: string }; Returns: Json }
       get_inventory_position: { Args: never; Returns: Json }
       get_job_billed_customers: {
         Args: { p_job_id: string }

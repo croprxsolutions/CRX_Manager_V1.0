@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270308070000_credit_tax_ledger_timing.sql (#2091).
+ * Real-schema proof for 20270308150000_credit_tax_ledger_timing.sql (#2091).
  *
  * Builds the checked-in production baseline in a network-disabled PostgreSQL container and replays every
  * migration before the candidate (scripts/smoke/undo-paths/harness.mjs), seeds invented users, customers and a
@@ -28,7 +28,7 @@ import {
   NAME, ROOT, USERS, buildContainer, claims, docker, psql, removeContainer, scalar, seedUsers,
 } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270308070000_credit_tax_ledger_timing.sql';
+const CANDIDATE = '20270308150000_credit_tax_ledger_timing.sql';
 const SMOKE = path.join(ROOT, 'scripts', 'smoke');
 const COVERING = ['smoke-credit-tax-ledger.sql', 'smoke-sales-tax.sql', 'smoke-split-payer-return-credit.sql', 'smoke-billing-m4-switch.sql', 'smoke-standing-grower-discount.sql'];
 const FUNCTIONS = ['public._freeze_credit_sales_tax_20270109(uuid)'];

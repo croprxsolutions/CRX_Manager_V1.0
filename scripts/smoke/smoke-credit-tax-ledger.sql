@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a return credit's tax lands in the tax ledger at the sale's rate (issue #2091)
 -- ----------------------------------------------------------------------------
--- Migration 20270308070000_credit_tax_ledger_timing (covering chain; the timing race itself needs two sessions and is
+-- Migration 20270308150000_credit_tax_ledger_timing (covering chain; the timing race itself needs two sessions and is
 -- in scripts/smoke/prove-credit-tax-ledger-timing-real-schema.mjs).
 --   A  A taxed sale of 10 posts; a return of 4 is credited: credit_memo_sales_tax records the credit's tax as a refund
 --      (negative), round(credit x sale tax / sale total)

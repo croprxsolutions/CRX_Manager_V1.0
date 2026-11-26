@@ -2,7 +2,7 @@
  * golden-path-quote-to-payment.spec.ts — Golden Path E2E
  *
  * Exercises the full lifecycle:
- *   Quote → Accept → Convert to Order → Create Delivery → Confirm → Complete
+ *   Quote → Accept → Draw from booking (whole booking) → Create Delivery → Confirm → Complete
  *   → Invoice → Post → Payment → Verify balances
  *
  * This is the "crown jewel" integration test that proves the audit-remediation

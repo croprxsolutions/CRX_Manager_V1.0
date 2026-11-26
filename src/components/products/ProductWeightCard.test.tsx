@@ -289,6 +289,19 @@ describe('ProductWeightCard', () => {
     expect(screen.getByRole('button', { name: 'Save weight' })).toBeEnabled();
   });
 
+  it('distinguishes a withdrawn approval from a weight returned to draft', async () => {
+    const event = { event_type: 'returned_to_draft', value_id: 'old', before_value: null, reason: null, evidence: null,
+      actor_kind: 'user', changed_by_name: 'Pat Admin', changed_at: '2026-11-07T15:00:00Z' };
+    mocks.fetchWeightEvents.mockResolvedValue([
+      { ...event, id: 1, after_value: [{ value_id: 'old', review_state: 'superseded', value: 8 }] },
+      { ...event, id: 2, after_value: [{ value_id: 'old', review_state: 'draft', value: 9 }] },
+    ]);
+    show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation,
+      weight: { kind: 'none', none_reason: 'no_approved_weight' } });
+    expect(await screen.findByText('Approval withdrawn: 8 lb/gal')).toBeInTheDocument();
+    expect(screen.getByText('Returned to draft: 9 lb/gal')).toBeInTheDocument();
+  });
+
   it('loads 25 more history rows on Show older', async () => {
     const event = (id: number) => ({ id, event_type: 'approved', value_id: null, before_value: null, after_value: null, reason: null, evidence: null,
       actor_kind: 'user', changed_by_name: 'Pat Admin', changed_at: '2026-11-07T15:00:00Z' });

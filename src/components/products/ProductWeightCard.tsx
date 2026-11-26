@@ -222,13 +222,16 @@ function WeightHistory({ subject, stockUnit, reloadToken }: { subject: WeightSub
       <ul className="mt-2 space-y-2">
         {rows.map((row) => {
           const value = eventValue(row);
+          const result = row.after_value?.[0] as { review_state?: string } | undefined;
+          const label = row.event_type === 'returned_to_draft' && result?.review_state === 'superseded'
+            ? 'Approval withdrawn' : EVENT_LABELS[row.event_type] ?? row.event_type;
           return (
             <li key={row.id} className="border-b border-gray-100 pb-2 last:border-0">
               <div className="flex flex-wrap justify-between gap-2">
                 <span className="font-medium text-nav-dark">{row.actor_kind === 'system' ? 'System' : row.changed_by_name || 'Unknown staff member'}</span>
                 <time className="text-secondary" dateTime={row.changed_at}>{new Date(row.changed_at).toLocaleString('en-US', { timeZone: BUSINESS_TIMEZONE })}</time>
               </div>
-              <p>{EVENT_LABELS[row.event_type] ?? row.event_type}{value ? `: ${value} ${unitLabel(subject, stockUnit)}` : ''}</p>
+              <p>{label}{value ? `: ${value} ${unitLabel(subject, stockUnit)}` : ''}</p>
               {row.reason && <p className="text-secondary">Reason: {row.reason}</p>}
               {row.evidence && <p className="text-secondary">Evidence: {row.evidence}</p>}
             </li>

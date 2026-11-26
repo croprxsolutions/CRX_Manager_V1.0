@@ -2379,6 +2379,8 @@ try {
   // means ALLOW. Unterminated quotes are the shape that can force a re-scan.
   // Measured as growth, not a wall-clock cap, so a slow or busy machine cannot
   // fail it: 8x the input costs about 8x when linear and 64x when quadratic.
+  // The 5s backstop catches a linear-but-huge slowdown; the hook's own timeout
+  // is 255 seconds (.codex/hooks.json), and a normal run here takes ~5-15ms.
   const fastestEvaluationMs = (command) => {
     let fastest = Infinity;
     for (let run = 0; run < 5; run += 1) {
@@ -2404,7 +2406,7 @@ try {
     const smallMs = fastestEvaluationMs(pathological(3000));
     const largeMs = fastestEvaluationMs(pathological(24000));
     assert.ok(
-      largeMs < smallMs * 24,
+      largeMs < smallMs * 24 && largeMs < 5000,
       `shell word splitting stays linear on adversarial quoting: ${label} (3000 chars ${smallMs.toFixed(1)}ms, 24000 chars ${largeMs.toFixed(1)}ms)`,
     );
   }

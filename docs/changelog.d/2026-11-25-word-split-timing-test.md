@@ -5,7 +5,8 @@ in 3 on his PC (300–920ms against a 250ms limit), costing 20+ minutes of rerun
 
 - `.codex/hooks/production-action-guard.test.mjs`: the check now times each adversarial quoting shape at 3,000
   and 24,000 characters (fastest of 5 runs each) and fails only if 8x the input costs 24x the time or more.
-  A linear splitter measures about 7–10x; a quadratic one about 52–64x. No wall-clock limit remains, so machine
-  speed no longer matters. The timed calls drop the test repo, whose git subprocesses added 100–300ms of noise.
+  A linear splitter measures about 7–10x; a quadratic one about 52–72x. The only wall-clock limit left is a 5-second
+  backstop for a huge slowdown (normal is ~5–15ms; the hook's own timeout is 255 seconds), so machine speed no
+  longer matters. The timed calls drop the test repo, whose git subprocesses added 100–300ms of noise.
 - Proven backwards: with a temporary quadratic rescan added to `splitShellWordsRaw`, the check failed; restored,
   the file passed on repeated runs.

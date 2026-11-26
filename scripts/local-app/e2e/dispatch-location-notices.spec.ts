@@ -11,6 +11,7 @@ test.afterEach(() => {
     DELETE FROM public.job_fields WHERE id IN ('${locationA}', '${locationB}');
     DELETE FROM public.jobs WHERE id = '${job}';
     DELETE FROM public.fields WHERE id IN ('${fieldA}', '${fieldB}');
+    DELETE FROM public.activity_feed WHERE customer_id = '${farm}';
     DELETE FROM public.customers WHERE id = '${farm}';
     DELETE FROM public.profile_public_directory WHERE id IN ('${first}', '${second}');
     DELETE FROM public.profiles WHERE id IN ('${first}', '${second}');

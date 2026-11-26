@@ -342,6 +342,7 @@ export default function ProductDetail() {
   const [parentLoadFailed, setParentLoadFailed] = useState(false);
   // DM-1: a weight save on this page re-reads cost per lb of active.
   const [weightSaves, setWeightSaves] = useState(0);
+  const [weightReviewReload, setWeightReviewReload] = useState(0);
   const [parentReload, setParentReload] = useState(0);
   // Category, use timings, EPA number and rates belong to the parent; until the page knows there is
   // none, they stay read-only.
@@ -1499,7 +1500,7 @@ export default function ProductDetail() {
               }}
             />
           )}
-          {/* DM-2: weight per gallon (on the parent) or per pack; re-read when the product or its parent is saved. */}
+          {/* DM-2: re-read weight and its review context after changes to the product, parent, or brand documents. */}
           {!isNew && persistedProduct && persistedProduct.id === id && profile && (
             <ProductWeightCard
               productId={id!}
@@ -1508,7 +1509,7 @@ export default function ProductDetail() {
               busy={isDirty || reloadRequired || saving}
               reloadKey={JSON.stringify([persistedProduct.updated_at, persistedProduct.product_form, persistedProduct.inventory_unit,
                 persistedProduct.container_size, persistedProduct.container_unit, persistedProduct.container_type, persistedProduct.unit_size,
-                parent?.id ?? null, parent?.parent_version ?? null])}
+                parent?.id ?? null, parent?.parent_version ?? null, weightReviewReload])}
               onSaved={() => setWeightSaves((n) => n + 1)}
             />
           )}
@@ -2220,6 +2221,9 @@ export default function ProductDetail() {
                 canEditAdjuvants={canEditAdjuvants}
                 onAdjuvantsSaved={refreshRegistrations}
                 onBrandsChange={handleBrandsChange}
+                onWeightReviewChange={() => {
+                  if (id === productIdRef.current) setWeightReviewReload((revision) => revision + 1);
+                }}
               />
             </PhoneSection>
           )}

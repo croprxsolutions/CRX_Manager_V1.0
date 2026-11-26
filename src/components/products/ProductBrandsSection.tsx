@@ -54,6 +54,8 @@ interface ProductBrandsSectionProps {
   onAdjuvantsSaved?: () => void;
   /** Told the brand list's state so the page banner covers brand numbers too: undefined while loading, null when the read failed. */
   onBrandsChange?: (productId: string, brands: ProductBrand[] | null | undefined) => void;
+  /** Brand and document edits can change the roster or SDS shown on the Weight card. */
+  onWeightReviewChange?: () => void;
 }
 
 interface BrandDraft {
@@ -148,7 +150,7 @@ function isClearRefusal(err: unknown): boolean {
 
 export default function ProductBrandsSection({
   productId, productName, isAdmin, userId, cancelled, registrations, registrationLookup = 'checking', canEditAdjuvants = false,
-  onAdjuvantsSaved, onBrandsChange,
+  onAdjuvantsSaved, onBrandsChange, onWeightReviewChange,
 }: ProductBrandsSectionProps) {
   const { toast } = useToast();
   const [brands, setBrands] = useState<ProductBrand[]>([]);
@@ -165,6 +167,10 @@ export default function ProductBrandsSection({
     const workspace = await readBrandDocumentWorkspace(false, brandIds);
     return workspace.filter((brand) => brand.parent_brand === parentBrand).flatMap((brand) => brand.links);
   });
+  const reloadBrands = () => {
+    setReloadToken((token) => token + 1);
+    onWeightReviewChange?.();
+  };
   const onBrandsChangeRef = useLatestRef(onBrandsChange);
   useEffect(() => {
     onBrandsChangeRef.current?.(productId, loading ? undefined : loadError ? null : brands);
@@ -358,7 +364,7 @@ export default function ProductBrandsSection({
       // Reload after every attempt: a reply lost after the save committed must not leave a stale list.
       // Marked loading at once, so new creates stay off until the reload shows what was saved.
       setLoading(true);
-      setReloadToken((token) => token + 1);
+      reloadBrands();
     }
   };
 
@@ -449,7 +455,7 @@ export default function ProductBrandsSection({
         setCopySelected((current) => new Set([...current].filter((id) => !copiedIds.has(id))));
       }
       setCopying(false);
-      setReloadToken((token) => token + 1);
+      reloadBrands();
     }
   };
 
@@ -498,7 +504,7 @@ export default function ProductBrandsSection({
       ) : loadError ? (
         <div className="flex items-center gap-3 text-sm text-red-600" role="alert">
           <span>Couldn’t load brands: {loadError}</span>
-          <Button size="sm" variant="secondary" onClick={() => setReloadToken((token) => token + 1)}>Try again</Button>
+          <Button size="sm" variant="secondary" onClick={reloadBrands}>Try again</Button>
         </div>
       ) : brands.length === 0 ? (
         <p className="text-sm text-secondary">No brands listed yet.</p>
@@ -553,8 +559,11 @@ export default function ProductBrandsSection({
                         brandName={brand.brand_name} userId={userId ?? ''} canEdit={isAdmin}
                         links={documents.data.filter((link) => (link.parent_brand_id ?? link.legacy_brand_id) === brand.id)}
                         onReload={(includeBrand) => {
-                          if (includeBrand) setReloadToken((token) => token + 1);
-                          else void documents.reload();
+                          if (includeBrand) reloadBrands();
+                          else {
+                            onWeightReviewChange?.();
+                            void documents.reload();
+                          }
                         }} />
                     ) : documents.status === 'failed' || documents.status === 'loaded' ? (
                       <Button variant="secondary" size="sm" onClick={() => void documents.reload()}>Retry links</Button>

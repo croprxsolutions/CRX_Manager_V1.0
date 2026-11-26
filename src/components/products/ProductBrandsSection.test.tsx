@@ -115,6 +115,26 @@ describe('ProductBrandsSection', () => {
     expect(mocks.listProductBrands).toHaveBeenCalledTimes(2);
   });
 
+  it('notifies the Weight card after an SDS replacement saves', async () => {
+    const sds = {
+      id: 'link-1', legacy_brand_id: slam.id, parent_brand_id: null, document_kind: 'sds',
+      url: 'https://manufacturer.example/old', expires_on: null, row_version: 2, reported_at: null,
+    };
+    mocks.readBrandDocumentWorkspace.mockResolvedValue([{ id: slam.id, parent_brand: false, links: [sds] }]);
+    mocks.changeBrandDocumentLinks.mockResolvedValue(undefined);
+    const onWeightReviewChange = vi.fn();
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="admin"
+      onWeightReviewChange={onWeightReviewChange} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage documents for Slam 5.4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit link' }));
+    fireEvent.change(screen.getByLabelText('SDS link'), { target: { value: 'https://manufacturer.example/current' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save link' }));
+
+    await waitFor(() => expect(onWeightReviewChange).toHaveBeenCalledOnce());
+    expect(mocks.changeBrandDocumentLinks).toHaveBeenCalledOnce();
+  });
+
   it('does not show an EPA label search link for a brand without a registration', async () => {
     mocks.listProductBrands.mockResolvedValue([{ ...slam, epa_registration: null }]);
     render(<ProductBrandsSection productId="p1" productName={productName} isAdmin={false} userId="u2" />);

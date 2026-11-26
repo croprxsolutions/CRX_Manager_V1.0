@@ -1,8 +1,9 @@
 -- Restore the report bodies before retiring their registration helper.
--- Run with psql -1 and ON_ERROR_STOP, or inside an explicit transaction.
--- Restore the prior vehicle grant before this reversal.
+-- Run the whole file as a standalone transaction after restoring the vehicle grant.
+BEGIN;
+
 CREATE TEMP TABLE logbook_reverse_pin ON COMMIT DROP AS
-SELECT *, pg_current_xact_id()::text AS transaction_id
+SELECT *
 FROM (VALUES
   ('get_logbook_faa', 'date,date', '9302f0a0cc8b2e90d08763d65b2d6ad2', 'ed749b3d8e621e7b43d22801a9f04a6e'),
   ('get_logbook_by_field', 'uuid,date,date', '61aa511789de5de1d2f4a9f96dda854e', '04aea37b07a3c0463e129bc995234f1f'),
@@ -15,10 +16,6 @@ DECLARE
   v_report record;
   v_oid regprocedure;
 BEGIN
-  IF to_regclass('pg_temp.logbook_reverse_pin') IS NULL
-     OR NOT EXISTS (SELECT 1 FROM pg_temp.logbook_reverse_pin WHERE transaction_id = pg_current_xact_id()::text) THEN
-    RAISE EXCEPTION 'LOGBOOK_REGISTRATION_REVERSE_REQUIRES_ONE_TRANSACTION';
-  END IF;
   IF NOT has_column_privilege('authenticated', 'public.vehicles', 'registration', 'SELECT') THEN
     RAISE EXCEPTION 'LOGBOOK_REGISTRATION_REVERSE_NEEDS_PRIOR_VEHICLE_GRANT';
   END IF;
@@ -173,3 +170,5 @@ BEGIN
   DROP FUNCTION public._logbook_vehicle_registrations();
 END;
 $postflight$;
+
+COMMIT;

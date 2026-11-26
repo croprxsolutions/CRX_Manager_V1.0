@@ -16,7 +16,8 @@ export interface PrepayCheck {
 }
 
 interface PrepayCheckRow {
-  customer_id: string; created_at: string; source_reference: string | null; original_amount_cents: number | null;
+  customer_id: string; created_at: string; source_reference: string | null; reference_number: string | null;
+  original_amount_cents: number | null;
   customers?: { farm_name: string } | null;
 }
 
@@ -25,18 +26,25 @@ interface PrepayCheckRow {
  * shortcut: Month-End also splits two checks entered at the same instant with the same reference (by audit
  * row); here they count once. That changes the count only, never the dollars.
  */
-function groupPrepayChecks(rows: ReadonlyArray<PrepayCheckRow>): PrepayCheck[] {
+export function groupPrepayChecks(rows: ReadonlyArray<PrepayCheckRow>): PrepayCheck[] {
   const byCheck = new Map<string, PrepayCheck>();
+  const refs = new Map<string, Set<string>>();
   for (const r of rows) {
     const key = `${r.customer_id}|${r.created_at}|${r.source_reference ?? ''}`;
     const check = byCheck.get(key) ?? {
       customer_id: r.customer_id,
       farm_name: r.customers?.farm_name || 'Unknown',
       day: paymentBusinessDate(null, r.created_at),
-      reference: r.source_reference,
+      reference: null,
       cents: 0,
     };
     check.cents += Number(r.original_amount_cents) || 0;
+    // The check # as staff last saved it on Prepay Credits (Edit changes reference_number per split).
+    const ref = r.reference_number || r.source_reference;
+    const seen = refs.get(key) ?? new Set<string>();
+    if (ref) seen.add(ref);
+    refs.set(key, seen);
+    check.reference = seen.size ? [...seen].join(', ') : null;
     byCheck.set(key, check);
   }
   return [...byCheck.values()];
@@ -46,7 +54,7 @@ function groupPrepayChecks(rows: ReadonlyArray<PrepayCheckRow>): PrepayCheck[] {
 export async function fetchPrepayChecks(): Promise<{ data: PrepayCheck[] | null; error: unknown }> {
   const { data, error } = await fetchAllRows<PrepayCheckRow>((from, to) => pageWithList(supabase
     .from('prepay_credits')
-    .select('id, customer_id, created_at, source_reference, original_amount_cents, customers!prepay_credits_customer_id_fkey ( farm_name )', { count: 'exact' })
+    .select('id, customer_id, created_at, source_reference, reference_number, original_amount_cents, customers!prepay_credits_customer_id_fkey ( farm_name )', { count: 'exact' })
     .eq('source_type', 'check')
     .is('allocation_set_id', null)
     .gt('original_amount_cents', 0)

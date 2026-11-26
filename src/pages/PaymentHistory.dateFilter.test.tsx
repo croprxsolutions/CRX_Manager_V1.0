@@ -30,6 +30,7 @@ vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) 
 vi.mock('../hooks/useIdempotencyKey', () => ({ useIdempotencyKey: () => ({ getKey: () => 'idem', resetKey: vi.fn() }) }));
 
 import PaymentHistory from './PaymentHistory';
+import { groupPrepayChecks } from '../lib/prepayChecks';
 
 // 9:30 PM Chicago on Nov 24 is already Nov 25 in UTC: "Today" must still be Nov 24.
 const NOW = new Date('2026-11-25T03:30:00Z');
@@ -120,6 +121,23 @@ describe('Payment History counts checks entered on Prepay Credits (KI-207)', () 
     expect(await screen.findByText('CHK-october')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Today' }));
     expect(activeTotal()).toHaveTextContent('$190.00');
+  });
+});
+
+describe('Prepay Credits check grouping', () => {
+  const row = (id: string, cents: number, reference_number: string | null) => ({
+    customer_id: 'c1', created_at: '2026-11-24T18:00:00Z', source_reference: '104', reference_number,
+    original_amount_cents: cents, customers: { farm_name: 'Big Farm' }, id,
+  });
+
+  it('labels a check with its corrected number, not the one first entered', () => {
+    const [check] = groupPrepayChecks([row('p1', 40000, '140'), row('p2', 20000, '140')]);
+    expect(check).toMatchObject({ reference: '140', cents: 60000 });
+  });
+
+  it('falls back to the entered number, and shows both if only one split was corrected', () => {
+    expect(groupPrepayChecks([row('p1', 100, null)])[0].reference).toBe('104');
+    expect(groupPrepayChecks([row('p1', 100, '140'), row('p2', 100, null)])[0].reference).toBe('140, 104');
   });
 });
 

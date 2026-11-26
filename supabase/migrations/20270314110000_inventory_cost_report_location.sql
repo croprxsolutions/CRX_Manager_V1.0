@@ -1,6 +1,6 @@
--- 20270312223100_inventory_cost_report_location.sql
+-- 20270314110000_inventory_cost_report_location.sql
 -- Written 2026-11-25. STATUS: NOT APPLIED (local candidate).
--- Record: docs/reference/migrations.d/20270312223100_inventory_cost_report_location.md
+-- Record: docs/reference/migrations.d/20270314110000_inventory_cost_report_location.md
 --
 -- WHAT: Reports > Operational > Inventory Cost returns one row per stock location but never said which
 --   location, so a product stocked in two barns showed as two identical-looking products (free-screens

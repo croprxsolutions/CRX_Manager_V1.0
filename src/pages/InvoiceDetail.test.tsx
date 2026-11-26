@@ -758,6 +758,19 @@ describe('InvoiceDetail — cutover refusal retries', () => {
     expect(mockToast.mock.calls.some(([type]) => type === 'error')).toBe(false);
   });
 
+  it('Ctrl+S runs the same Save changes as the button', async () => {
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_invoice'
+      ? { data: 'inv-cutover', error: null }
+      : { data: null, error: null }));
+    renderInvoiceDetail('inv-cutover');
+    await screen.findByText('INV-CUTOVER', { selector: 'h1' });
+    const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Invoice saved'));
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'save_invoice')).toHaveLength(1);
+  });
+
   it('retains the original key after bounded retries are exhausted', async () => {
     let saves = 0;
     mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_invoice'

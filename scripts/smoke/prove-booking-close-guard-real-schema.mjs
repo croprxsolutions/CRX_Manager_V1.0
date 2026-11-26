@@ -178,6 +178,13 @@ ${claims(REP_A)}
 SET LOCAL ROLE authenticated;
 SELECT public.close_quote_as_applied('${Q_FREE}', '${REP_A}', 'bcg-legacy-${Date.now()}');
 ROLLBACK;`).out, /BOOKING_HAS_JOB: spray job PRV-BCG-LEGACY /, 'a section-only job blocks the close');
+  // Luna r3: no auth.uid() is exempt from the owner rule, so anon must not reach either close.
+  for (const fn of ['close_quote_as_applied', 'close_quote_as_short']) {
+    assert.match(run(`BEGIN; SET LOCAL ROLE anon; SELECT public.${fn}('${Q_FREE}', '${REP_A}', 'bcg-anon-${fn}'); ROLLBACK;`).out,
+      /permission denied for function/, `anon must not execute ${fn}`);
+    assert.match(run(`BEGIN; SET LOCAL ROLE authenticated; SELECT public.${fn}('${Q_FREE}', '${REP_A}', 'bcg-nouid-${fn}'); ROLLBACK;`).out,
+      /AUTH_REQUIRED/, `${fn} without a signed-in user must be refused`);
+  }
   assert.match(directApplied('REPEATABLE READ'), /BOOKING_NEEDS_READ_COMMITTED/);
   assert.match(directApplied('SERIALIZABLE'), /BOOKING_NEEDS_READ_COMMITTED/);
   assert.equal(directApplied('READ COMMITTED'), 'ok');
@@ -216,7 +223,7 @@ ROLLBACK;`).out, /BOOKING_HAS_JOB: spray job PRV-BCG-LEGACY /, 'a section-only j
   const chains = ['smoke-booking-close-guard.sql', 'smoke-booking-guard-rep-and-delete.sql'];
   for (const chain of chains) assert.match(smoke(chain), /SMOKE_PASS_ROLLBACK/, `${chain} must pass after the candidate`);
   for (const chain of SAME) assert.equal(smoke(chain), before[chain], `${chain} must end exactly as before`);
-  console.log('[after] close as applied refused with a live job (rep and admin); rep B refused closing short and as applied; owner/admin/no-job closes go through; REPEATABLE READ and SERIALIZABLE refused');
+  console.log('[after] close as applied refused with a live job (rep and admin); rep B refused closing short and as applied; owner/admin/no-job closes go through; anon and no-user calls refused; REPEATABLE READ and SERIALIZABLE refused');
   console.log(`[after] ${chains.join(', ')} pass; ${SAME.map((c) => `${c} ends exactly as before (${(/ERROR:\s+([A-Z_]+)/.exec(before[c]) ?? ['', 'pass'])[1]})`).join('; ')}`);
 
   // 4. ROLLBACK text: both gaps come back.

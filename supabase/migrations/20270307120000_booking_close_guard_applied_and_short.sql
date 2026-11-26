@@ -27,6 +27,8 @@
 --      use) as an active sales rep is refused BOOKING_NOT_YOURS. System sessions (no auth.uid()) stay exempt.
 --   Both closes run through this trigger whether they come from the RPC or a direct update, and the RPC's whole call
 --   rolls back on a refusal (nothing released, no activity row).
+--   No auth.uid() is a system session (cron, the service role): anon cannot reach either close, because both RPCs
+--   refuse AUTH_REQUIRED and neither is executable by anon or PUBLIC (the postflight checks the grants).
 --   Concurrency (READ COMMITTED): a job scheduled, linked or reopened on a booking locks that booking FOR SHARE and
 --   refuses a closed one, closed_by_application included (_enforce_job_live_on_open_booking, 20270129150000), so it
 --   and a close serialize on the booking row: whichever commits first, the other waits, then sees it and is refused.
@@ -205,6 +207,16 @@ BEGIN
      OR EXISTS (SELECT 1 FROM aclexplode(v_p.proacl) a WHERE a.privilege_type = 'EXECUTE' AND a.grantee <> 'postgres'::regrole)
      OR md5(replace(v_p.prosrc, chr(13), '')) <> '02d3233a58743b0f0b892d2cc1996c3b' THEN
     RAISE EXCEPTION 'POSTFLIGHT_BOOKING_CLOSE_GUARD: _enforce_booking_live_job_rules() is not the new body, postgres-owned, definer, pinned search_path, no outside EXECUTE';
+  END IF;
+  -- Luna r3: the owner rule exempts sessions with no auth.uid() (cron, the service role). That is safe only while
+  -- neither close RPC can be run by anon or PUBLIC (both also refuse AUTH_REQUIRED without a signed-in user).
+  IF EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+             WHERE p.oid IN ('public.close_quote_as_applied(uuid,uuid,text)'::regprocedure, 'public.close_quote_as_short(uuid,uuid,text)'::regprocedure)
+               AND a.privilege_type = 'EXECUTE' AND (a.grantee = 0 OR a.grantee = 'anon'::regrole))
+     OR EXISTS (SELECT 1 FROM pg_proc p
+                WHERE p.oid IN ('public.close_quote_as_applied(uuid,uuid,text)'::regprocedure, 'public.close_quote_as_short(uuid,uuid,text)'::regprocedure)
+                  AND p.proacl IS NULL) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_BOOKING_CLOSE_GUARD_GRANTS: close_quote_as_applied or close_quote_as_short is executable by anon or PUBLIC';
   END IF;
   -- No booking closed as applied before this migration may still have a scheduled or in-progress spray job (quotes is
   -- locked above, so none closes in between); if one exists, re-read live and settle it with Mason first. The scan

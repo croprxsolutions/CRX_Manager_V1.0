@@ -1,5 +1,16 @@
 # Decision Log
 
+## 2026-11-23 — #2381: Mason owner-accepted 4 Sol finding(s) at `fd461adc8c3b`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2381 at `fd461adc8c3b` (base `3dd8f9bbf7dc`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (BLOCKER) at `docs/plans/2026-11-23-par1-epa-correction-on-CONTRACT.md:171`, text sha256 `c6211f75f3f6827d` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c5b1b0090f3c)
+- Finding 2 (HIGH) at `supabase/migrations/20270227100000_parent_epa_correction_on.sql:292`, text sha256 `317f9335d98b1a3b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c5b1b0090f3c)
+- Finding 3 (HIGH) at `supabase/migrations/20270227100000_parent_epa_correction_on.sql:292`, text sha256 `55b0d7529cde224e` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c5b1b0090f3c)
+- Finding 4 (HIGH) at `supabase/migrations/20270227100000_parent_epa_correction_on.sql:278`, text sha256 `79d234fe026226c7` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c5b1b0090f3c)
 ## 2026-11-22 — #2267: Mason owner-accepted 3 Sol finding(s) at `7e90626998c0`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2267 at `7e90626998c0` (base `6aceb0747958`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

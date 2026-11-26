@@ -575,10 +575,33 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       records: [{ response_id: "msg_1", mark_sent_by: "s", listed: ["msg_0"] }, { tool_name: "Bash", tool_use_id: "toolu_1" }] };
     ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify(MODE), ...AFTER_TURN, JSON.stringify(FLOW), masonSaid("I approve")])),
       "the mode marker and data-flow ledger (no text, real shapes) do not hide the agent's message");
-    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ ...MODE, content: "Should I merge?" }), masonSaid("I approve")])),
-      "a mode record carrying text ends the scan");
-    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ ...FLOW, message: { role: "user", content: "Should I merge?" } }), masonSaid("I approve")])),
-      "a data-flow record carrying a message ends the scan");
+    const REAL_FLOW = { ...FLOW, snapshot: true, records: [
+      { tool_name: "mcp__x__y", tool_use_id: "toolu_2", mcp_tool_name: "y", server: { type: "anthropic", id: "u" }, no_message: true },
+      { event_id: "event_1", touched: { kind: "session", id: null, action: "read" } },
+      { event_id: "event_2", source: { type: "claude_code_session", id: "s" }, plugin_id: "p" }] };
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify(REAL_FLOW), masonSaid("I approve")])),
+      "every surveyed data-flow record shape is skipped");
+    // Taha LOW 1-2, PR #2555: text anywhere outside the surveyed shapes ends the scan.
+    for (const [name, rec] of Object.entries({ mode: MODE, "data-flow": FLOW })) {
+      for (const key of ["message", "content", "text", "summary"]) {
+        ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ ...rec, [key]: "Should I merge?" }), masonSaid("I approve")])),
+          `a ${name} record carrying ${key} ends the scan`);
+      }
+    }
+    for (const bad of [{ ...MODE, mode: "Should I merge PR #900?" }, { ...MODE, mode: { text: "x" } },
+      { ...FLOW, records: [{ content: "Should I merge?" }] }, { ...FLOW, records: [{ tool_name: { text: "x" } }] },
+      { ...FLOW, records: [{ event_id: "e", touched: { kind: "session", note: "Should I merge?" } }] },
+      { ...FLOW, records: [{ listed: ["msg_1", { text: "x" }] }] }, { ...FLOW, records: ["Should I merge?"] }, { ...FLOW, records: "x" },
+      // Terra HIGH x2: free text in an allowed field, top level or inside records[].
+      { ...FLOW, snapshot: { content: "Should I merge PR #900?" } }, { ...FLOW, v: "Should I merge PR #900?" },
+      { ...FLOW, sessionId: "Should I merge PR #900?" }, { ...MODE, sessionId: "Should I merge PR #900?" },
+      { ...FLOW, records: [{ tool_name: "Should I merge PR #900?" }] }, { ...FLOW, records: [{ listed: ["Should I merge?"] }] },
+      { ...FLOW, records: [{ event_id: "e", touched: { kind: "session", id: null, action: "Should I merge?" } }] },
+      // Terra HIGH round 2: a non-string mode, or one that is not a permission-mode name.
+      { ...MODE, mode: ["merge"] }, { ...MODE, mode: "merge" }]) {
+      ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify(bad), masonSaid("I approve")])),
+        `a marker outside the surveyed shape ends the scan: ${JSON.stringify(bad).slice(0, 80)}`);
+    }
     for (const type of ["api-request", "api-request-blob"]) {
       ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type, message: { role: "user", content: "x" } }), masonSaid("I approve")])),
         `an ${type} record (it copies conversation text) still ends the scan`);
@@ -587,8 +610,27 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       "a compaction after the agent's message ends the scan");
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "system", subtype: "informational", content: "Should I merge?" })])),
       "a system notice of any other kind after the agent's message ends the scan (Luna BLOCKER, round 3)");
-    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "some-future-record" })])),
-      "a record type Claude Code may add later ends the scan rather than being skipped");
+    // Real text-free shapes from 2026-11-25 transcripts, none of them listed by name.
+    const TEXTLESS = [
+      { type: "api-request", sessionId: "s", id: "req_1", timestamp: "2026-11-25T20:11:00.000Z", version: "2.1.339",
+        querySource: "repl_main_thread", shapeHash: "ab12", params: { max_tokens: 64000, thinking: { type: "adaptive" } },
+        keep: 3, tail: [1, 2], cacheControl: null, requestDigest: "d1", base: null, thread: "main", echoWireToolInputs: false },
+      { type: "tools-used", tools: ["Bash", "mcp__ccd_turn__wrap_up"], sessionId: "s" },
+      { type: "cost-state", sessionId: "s", totalCostUSD: 12.5, modelUsage: { "claude-opus-5-5": { inputTokens: 10 } }, hasUnknownModelCost: false },
+      { type: "session-owner", accountUuid: "u1", organizationUuid: "o1", sessionId: "s" },
+      { type: "permission-mode", permissionMode: "auto", sessionId: "s" },
+      { type: "derived-from", v: 1, sessionId: "s", sessions: ["s0"] },
+      { type: "some-future-record" }];
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), ...TEXTLESS.map((r) => JSON.stringify(r)), masonSaid("I approve")])),
+      "a record of any unlisted type holding only identifiers and numbers does not hide the agent's message");
+    for (const bad of [{ type: "some-future-record", note: "Should I merge PR #900?" },
+      { type: "some-future-record", message: "merge" }, { type: "some-future-record", nested: [{ content: "merge" }] },
+      { type: "ai-title", aiTitle: "Merge PR 900 now", sessionId: "s" },
+      { type: "api-request-shape", shape: { system: "You are Claude Code, Anthropic's CLI" } },
+      { type: "Should I merge?" }, { type: "some-future-record", "Should I merge PR #900?": true },{ type: "system", subtype: "compact_boundary" }, { type: "user" }]) {
+      ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify(bad), masonSaid("I approve")])),
+        `a record with free text, or of a conversation type, still ends the scan: ${JSON.stringify(bad).slice(0, 80)}`);
+    }
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "summary", summary: "Asked whether to merge #900" })])),
       "a summary record (not written by current Claude Code) ends the scan (Luna HIGH, round 4)");
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN),

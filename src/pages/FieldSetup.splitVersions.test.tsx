@@ -124,8 +124,11 @@ describe('Field Setup — FP-1 split versions', () => {
   it('thirds save as exact micro-percents and show 33.33% each', async () => {
     await open();
     fireEvent.click(screen.getByRole('button', { name: 'Add customer to billing split' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Split Evenly' }));
+    const evenly = screen.getByRole('button', { name: 'Split Evenly' });
+    expect(evenly.parentElement?.closest('button')).toBeNull(); // not nested in the open/close button (known issue 2026-11-25)
+    fireEvent.click(evenly);
     expect(screen.getAllByDisplayValue('33.33')).toHaveLength(6);
+    expect(screen.getByRole('button', { name: /Default Billing/ })).toHaveAttribute('aria-expanded', 'true'); // still open
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
     await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
     const sent = calls('set_field_billing_split')[0];
@@ -202,6 +205,231 @@ describe('Field Setup — FP-1 split versions', () => {
     expect(await screen.findByText('This field could not be loaded')).toBeInTheDocument();
     expect(calls('set_field_billing_split')).toHaveLength(1);
     expect(screen.queryByLabelText('Notes for Owner Farm')).not.toBeInTheDocument();
+    // One message: the save went through, so no "Field updated" success on top of a load error.
+    expect(mockToast).toHaveBeenCalledWith('error', 'Field updated, but it could not be reloaded.');
+    expect(mockToast).not.toHaveBeenCalledWith('success', 'Field updated');
+  });
+
+  it('a failed boundary read shows the retry screen, not an endless loading screen', async () => {
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'get_field_geojson'
+      ? { data: null, error: { message: 'down' } }
+      : { data: [], error: null }));
+    render(<RouterProvider router={createMemoryRouter([{ path: '/fields/:id', element: <FieldSetup /> }], { initialEntries: ['/fields/field-1'] })} />);
+    expect(await screen.findByText('This field could not be loaded')).toBeInTheDocument();
+  });
+
+  const setShares = (owner: string, landlord: string) => {
+    for (const [label, v] of [['Owner Farm', owner], ['Landlord Farm', landlord]]) {
+      fireEvent.change(screen.getByLabelText(`Product share for ${label}`), { target: { value: v } });
+      fireEvent.change(screen.getByLabelText(`Application share for ${label}`), { target: { value: v } });
+    }
+  };
+
+  it('warns, without blocking, when someone else saved a newer split after the page opened', async () => {
+    await open();
+    setShares('50', '50');
+    VERSIONS.unshift({ ...VERSIONS[0], id: 'version-3', version_number: 3, effective_from: '2026-11-24' });
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+      expect(await screen.findByText('Split changed since you opened this field')).toBeInTheDocument();
+      expect(screen.getByText(/version 3\) was saved by Pat Rep/)).toBeInTheDocument();
+      expect(calls('set_field_billing_split')).toHaveLength(0);
+      fireEvent.click(screen.getByRole('button', { name: 'Save mine anyway' }));
+      await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+    } finally {
+      VERSIONS.shift();
+    }
+  });
+
+  it('warns, without blocking, when someone else changed the same payer note after the page opened', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('Notes for Landlord Farm'), { target: { value: 'Old tab note' } });
+    notes = [{ customer_id: 'customer-2', notes: 'Newer note from tab 1' }];
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    expect(await screen.findByText('Note changed since you opened this field')).toBeInTheDocument();
+    expect(screen.getByText(/note for Landlord Farm to "Newer note from tab 1"/)).toBeInTheDocument();
+    expect(calls('set_field_billing_split')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Save mine anyway' }));
+    await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+    expect(calls('set_field_billing_split')[0]).toMatchObject({ p_notes: [{ customer_id: 'customer-2', notes: 'Old tab note' }] });
+  });
+
+  it('a different, even newer note after "Save mine anyway" warns again', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('Notes for Landlord Farm'), { target: { value: 'Old tab note' } });
+    notes = [{ customer_id: 'customer-2', notes: 'Newer note' }];
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await screen.findByText('Note changed since you opened this field');
+    notes = [{ customer_id: 'customer-2', notes: 'Newest note' }];
+    fireEvent.click(screen.getByRole('button', { name: 'Save mine anyway' }));
+    expect(await screen.findByText(/note for Landlord Farm to "Newest note"/)).toBeInTheDocument();
+    expect(calls('set_field_billing_split')).toHaveLength(0);
+  });
+
+  it('a failed re-read never stops a notes save', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('Notes for Landlord Farm'), { target: { value: 'Call first' } });
+    mockFrom.mockImplementation((t: string) => (t === 'field_payer_notes'
+      ? { select: () => ({ eq: () => Promise.resolve({ data: null, error: { message: 'down' } }) }) }
+      : tables(t)));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+    expect(screen.queryByText('Note changed since you opened this field')).not.toBeInTheDocument();
+  });
+
+  it('a stale split and a stale note warn together; the accepted split is not asked about again', async () => {
+    await open();
+    setShares('50', '50');
+    fireEvent.change(screen.getByLabelText('Notes for Landlord Farm'), { target: { value: 'Old tab note' } });
+    VERSIONS.unshift({ ...VERSIONS[0], id: 'version-3', version_number: 3, effective_from: '2026-11-24' });
+    notes = [{ customer_id: 'customer-2', notes: 'Newer note' }];
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+      expect(await screen.findByText('Changed since you opened this field')).toBeInTheDocument();
+      expect(screen.getByText(/version 3\).*note for Landlord Farm to "Newer note".*replaces them/)).toBeInTheDocument();
+      notes = [{ customer_id: 'customer-2', notes: 'Newest note' }];
+      fireEvent.click(screen.getByRole('button', { name: 'Save mine anyway' }));
+      expect(await screen.findByText('Note changed since you opened this field')).toBeInTheDocument();
+      expect(screen.queryByText(/version 3\)/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Save mine anyway' }));
+      await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+    } finally {
+      VERSIONS.shift();
+    }
+  });
+
+  it('Cancel saves nothing and the next save warns again; a cleared note says so', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('Notes for Landlord Farm'), { target: { value: 'Old tab note' } });
+    notes = [];
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    expect(await screen.findByText(/cleared the note for Landlord Farm/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByText('Note changed since you opened this field')).not.toBeInTheDocument());
+    expect(calls('set_field_billing_split')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    expect(await screen.findByText(/cleared the note for Landlord Farm/)).toBeInTheDocument();
+  });
+
+  it('after a failed save, a note someone else saved meanwhile on the same payer still warns on retry', async () => {
+    let fail = true;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'set_field_billing_split' && fail) {
+        fail = false;
+        notes = [{ customer_id: 'customer-2', notes: 'Other rep note' }];
+        return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+      }
+      return Promise.resolve({ data: name === 'set_field_billing_split' ? { wrote_version: false } : [], error: null });
+    });
+    await open();
+    fireEvent.change(screen.getByLabelText('Notes for Landlord Farm'), { target: { value: 'My note' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Save Changes/ })).not.toBeDisabled());
+    expect(screen.getByLabelText('Notes for Landlord Farm')).toHaveValue('My note');
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    expect(await screen.findByText(/note for Landlord Farm to "Other rep note"/)).toBeInTheDocument();
+    expect(calls('set_field_billing_split')).toHaveLength(1);
+  });
+
+  it('after a failed save, a different split someone else saved meanwhile still warns on retry', async () => {
+    let fail = true;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'set_field_billing_split' && fail) {
+        fail = false;
+        VERSIONS.unshift({
+          ...VERSIONS[0], id: 'version-3', version_number: 3, effective_from: '2026-11-24',
+          field_billing_split_payers: [payer('customer-1', 'Owner Farm', 60_000_000), payer('customer-2', 'Landlord Farm', 40_000_000)],
+        });
+        return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+      }
+      return Promise.resolve({ data: name === 'set_field_billing_split' ? { wrote_version: true } : [], error: null });
+    });
+    try {
+      await open();
+      setShares('50', '50');
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+      await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+      await waitFor(() => expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(4));
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+      expect(await screen.findByText('Split changed since you opened this field')).toBeInTheDocument();
+      expect(calls('set_field_billing_split')).toHaveLength(1);
+    } finally {
+      if (VERSIONS[0].id === 'version-3') VERSIONS.shift();
+    }
+  });
+
+  it('no note warning when another payer note changed, or the newer note already matches', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('Notes for Owner Farm'), { target: { value: 'Gate code 42' } });
+    notes = [{ customer_id: 'customer-1', notes: 'Gate code 42' }, { customer_id: 'customer-2', notes: 'Changed elsewhere' }];
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+    expect(screen.queryByText('Note changed since you opened this field')).not.toBeInTheDocument();
+  });
+
+  it('after a failed notes save, what the user did not touch takes what others saved meanwhile', async () => {
+    let fail = true;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'set_field_billing_split' && fail) {
+        fail = false;
+        // Meanwhile another rep saved 50/50 and changed the landlord's note.
+        VERSIONS.unshift({
+          ...VERSIONS[0], id: 'version-3', version_number: 3, effective_from: '2026-11-24',
+          field_billing_split_payers: [payer('customer-1', 'Owner Farm', 50_000_000), payer('customer-2', 'Landlord Farm', 50_000_000)],
+        });
+        notes = [{ customer_id: 'customer-2', notes: 'Call before spraying' }];
+        return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+      }
+      return Promise.resolve({ data: name === 'set_field_billing_split' ? { wrote_version: false } : [], error: null });
+    });
+    try {
+      await open();
+      fireEvent.change(screen.getByLabelText('Notes for Owner Farm'), { target: { value: 'Gate code 42' } });
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+      await waitFor(() => expect(screen.getByLabelText('Notes for Landlord Farm')).toHaveValue('Call before spraying'));
+      expect(screen.getByLabelText('Product share for Owner Farm')).toHaveValue('50.00');
+      expect(screen.getByLabelText('Notes for Owner Farm')).toHaveValue('Gate code 42');
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+      await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(2));
+      // The retry sends only the user's own note: no old split, no cleared landlord note.
+      expect(calls('set_field_billing_split')[1]).toMatchObject({ p_payers: null, p_notes: [{ customer_id: 'customer-1', notes: 'Gate code 42' }] });
+    } finally {
+      if (VERSIONS[0].id === 'version-3') VERSIONS.shift();
+    }
+  });
+
+  it('after a failed split save it compares against the split really saved (a lost reply may have saved it)', async () => {
+    let lostReplies = 1;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'set_field_billing_split' && lostReplies > 0) {
+        lostReplies -= 1;
+        // The write landed, but its reply was lost.
+        VERSIONS.unshift({
+          ...VERSIONS[0], id: 'version-3', version_number: 3, effective_from: '2026-11-24', created_by: 'user-1',
+          field_billing_split_payers: [payer('customer-1', 'Owner Farm', 50_000_000), payer('customer-2', 'Landlord Farm', 50_000_000)],
+        });
+        return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+      }
+      return Promise.resolve({ data: name === 'set_field_billing_split' ? { wrote_version: true } : [], error: null });
+    });
+    try {
+      await open();
+      setShares('50', '50');
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+      await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+      await waitFor(() => expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(4));
+      // Going back to the old 100/0 split is now a real change, and it is the user's own version: no warning.
+      setShares('100', '0');
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+      await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(2));
+      expect(calls('set_field_billing_split')[1].p_payers).toContainEqual(
+        { customer_id: 'customer-1', product_share_micro_pct: 100_000_000, application_share_micro_pct: 100_000_000 },
+      );
+      expect(screen.queryByText('Split changed since you opened this field')).not.toBeInTheDocument();
+    } finally {
+      if (VERSIONS[0].id === 'version-3') VERSIONS.shift();
+    }
   });
 
   it('a first note for a payer on a saved version is kept when that payer is removed before saving', async () => {

@@ -14,7 +14,8 @@
  *             enough cents (else the line is refused by name, as before); quantities, unit prices, per-unit costs,
  *             booked costs, member headers and shares, the anchor, single-owner and customer-supplied invoices are
  *             unchanged; the body differs from the pinned one only in the line amount; grants unchanged; a second
- *             apply stops at the preflight.
+ *             apply stops at the preflight. Split by acres, equal quotas tie to the earlier owners. Known limit
+ *             (Taha, 2026-11-27, option B): at cost, an owner can bill a cent under its own booked cost.
  *   ROLLBACK: re-emitting the 20270303100000 body restores its md5 and the old amounts.
  *
  * Run: node scripts/smoke/prove-job-invoice-split-cents-real-schema.mjs   (needs Docker)
@@ -256,10 +257,10 @@ const id = (s) => `c3c3c3c3-1126-4000-8000-${String(s).padStart(12, '0')}`;
 // Farms A < B < C by id (owners are ordered by id, so ties go to A first).
 const ADMIN = id('a1'), A = id('c1'), B = id('c2'), C = id('c3');
 const G = id('f1'), F2 = id('f2'), F3A = id('f3a'), F3B = id('f3b'), F3C = id('f3c'), F4 = id('f4');
-const X = id('d1'), Y = id('d2'), Z = id('d3');
+const X = id('d1'), Y = id('d2'), Z = id('d3'), W = id('d4');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const OLD_IMPL = '53ecf1279da3aa7ea1590f440c6eb225';  // 20270303100000 (staging's current body)
-const NEW_IMPL = '2714b8df71f9e191c5d11e41f205473d';
+const NEW_IMPL = '8ef697686af9473ae9891e4bf9d57693';
 const md5Of = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 const meta = (sig) => scalar(`SELECT concat_ws('|', prosecdef, proowner::regrole, proconfig::text, coalesce(proacl::text, '-')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 
@@ -275,7 +276,8 @@ function seed() {
         current_cost, tier1_price, tier2_price, tier3_price, is_active, is_rup, epa_registration) VALUES
       ('${X}', '[PROVER] JC X', 'JC-X', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 6, 10, 10, 10, true, false, NULL),
       ('${Y}', '[PROVER] JC Y', 'JC-Y', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 7, 12.34, 12.34, 12.34, true, false, NULL),
-      ('${Z}', '[PROVER] JC Z', 'JC-Z', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 5, 9, 9, 9, true, false, NULL);
+      ('${Z}', '[PROVER] JC Z', 'JC-Z', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 5, 9, 9, 9, true, false, NULL),
+      ('${W}', '[PROVER] JC W', 'JC-W', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 200, 200, 200, 200, true, false, NULL);
     INSERT INTO public.fields (id, customer_id, field_name, total_acres, is_active) VALUES
       ('${G}', '${A}', '[PROVER] JC field A', 100, true), ('${F2}', '${A}', '[PROVER] JC field A+B', 100, true),
       ('${F3A}', '${A}', '[PROVER] JC third A', 1000, true), ('${F3B}', '${B}', '[PROVER] JC third B', 1000, true),
@@ -367,6 +369,12 @@ const CASES = {
   // Sol r1 MED: 1 Gal at $9,999.99 on 40.23 / 100.61 / 60.36 acres. Split by acre share, each owner within a cent of its
   // exact share (a split by quantity, 0.2 / 0.5 / 0.3, would put B 50.2 cents under and be refused).
   bigEdge: invoiceCase([F3A, F3B, F3C], [40.23, 100.61, 60.36], [L(X, 1, 999999)]),
+  // Sol r2 MED: owners on 2 / 2 / 5 acres, a 12-cent line (0.012 Gal at $10). Quotas 2 2/3, 2 2/3, 6 2/3 cents: split by
+  // acres the two extra cents go to A and B (rounded percentages would rank C first). Old body: 3 + 3 + 7 = 13 cents.
+  acreTie: invoiceCase([F3A, F3B, F3C], [2, 2, 5], [L(X, 0.012, 1000)]),
+  // Sol r2 HIGH, accepted as a known limit (Taha, 2026-11-27, option B): 1 Gal at a $200.00 price and $200.00 cost in
+  // thirds. A's 0.3334 Gal books $66.68 of cost and bills $66.67 (its acre share); the line still bills $200.00.
+  atCost: invoiceCase(...THIRDS, [L(W, 1, 20000)]),
   // One owner: the single-invoice path, untouched.
   single: invoiceCase([G], [10], [L(X, 10, 1000), L(Y, 10, 1234)]),
   // Grower's own product only, two owners: $0 lines, untouched.
@@ -382,6 +390,8 @@ const EXPECT_BEFORE = {
   twoProductsHalves: 'A=6852/4050 B=6851/4050 | X=10001/10000 Y=3702/3702',
   tiny: 'A=1/0 B=1/0 C=2/1 | X=4/3',
   bigEdge: 'A=200000/120 B=500000/300 C=300000/180 | X=1000000/999999',
+  acreTie: 'A=3/2 B=3/2 C=7/4 | X=13/12',
+  atCost: 'A=6668/6668 B=6666/6666 C=6666/6666 | W=20000/20000',
 };
 const EXPECT_AFTER = {
   halves: 'A=5000/3000 B=5000/3000 | X=10000/10000',  // exact shares 5000.4999 / 4999.5000
@@ -390,6 +400,8 @@ const EXPECT_AFTER = {
   twoProductsHalves: 'A=6851/4050 B=6851/4050 | X=10000/10000 Y=3702/3702',
   tiny: 'A=1/0 B=1/0 C=1/1 | X=3/3',
   bigEdge: 'A=199950/120 B=500049/300 C=300000/180 | X=999999/999999',
+  acreTie: 'A=3/2 B=3/2 C=6/4 | X=12/12',
+  atCost: 'A=6667/6668 B=6667/6666 C=6666/6666 | W=20000/20000',  // known limit: A bills 1 cent under its booked cost
 };
 // Fewer cents than owners with a quantity (0.002 Gal at $10 = 2 cents, three owners): one owner would bill $0, so the
 // line is refused by name, before and after (Mason, 2026-11-22, "never $0").

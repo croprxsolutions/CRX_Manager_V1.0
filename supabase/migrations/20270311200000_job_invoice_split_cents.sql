@@ -14,24 +14,30 @@
 --
 -- WHAT: _transfer_job_to_invoice_intent_impl_20260908 (re-emitted from 20270303100000, md5 pinned). In the owner-group
 --   path each priced chemical line's amount is rounded once, round(price x the line's quantity), exactly as a single
---   invoice bills it, and those cents are allocated to the owners by acre share with the existing largest-remainder
---   helper _job_transfer_split_qty_20270207 (ties to the earlier owner, owners ordered by id; Taha, 2026-11-26: "A").
---   The owners' amounts always add up to the line and each is within a cent of its exact share, so the 50-cent owner
---   check passes wherever rounding is the only difference. Mason's "never $0" (2026-11-22): an owner with a quantity
---   that the remainder left at 0 cents takes one cent from the owner furthest above its exact share that has two or
---   more (0.003 Gal at $10 split 16.67/23.33/60% bills 1 + 1 + 1 cents); only a line with fewer cents than such
---   owners keeps an owner at $0 and is refused by the existing JOB_LINE_ROUNDING check, as before. Everything else in
---   the body is byte-for-byte the pinned one: quantities, unit price, the per-unit cost on the line, both 50-cent
---   checks (now on the allocated amounts), customer-supplied $0 lines, the per-acre fee, member totals, shares, the
---   anchor (primary owner's invoice), the commission code, the single-owner path, locks and who may invoice. An
---   owner's commission base is its amount less its booked cost, so it follows the amount and can move by a cent.
+--   invoice bills it, and those cents are allocated to the owners by their billable acres with the existing
+--   largest-remainder helper _job_transfer_split_qty_20270207 (ties to the earlier owner, owners ordered by id; Taha,
+--   2026-11-27: split by acres, so equal acre quotas tie exactly). The owners' amounts always add up to the line, and
+--   before the never-$0 step below each is within a cent of its exact share. Mason's "never $0" (2026-11-22): an owner
+--   with a quantity that the remainder left at 0 cents takes one cent from the owner furthest above its exact share
+--   that has two or more (0.003 Gal at $10 split 16.67/23.33/60% bills 1 + 1 + 1 cents); such a move can leave an
+--   owner more than a cent from its share, and the existing 50-cent check still applies. A line with fewer cents than
+--   owners with a quantity keeps an owner at $0 and is refused by the existing JOB_LINE_ROUNDING check. Some such
+--   lines were billed before (0.002 Gal at $10 split exactly in thirds billed 1 + 1 + 1 cents for a 2-cent line); they
+--   are now refused. Everything else in the body is byte-for-byte the pinned one: quantities, unit price, the per-unit
+--   cost on the line, both 50-cent checks (now on the allocated amounts), customer-supplied $0 lines, the per-acre fee,
+--   member totals, shares, the anchor (primary owner's invoice), the commission code, the single-owner path, locks and
+--   who may invoice. An owner's commission base is its amount less its own booked cost, so it follows the owner's
+--   amount, and the owners' bases together can differ from a single invoice's base by the owners' cost rounding.
 --   Owner, SECURITY DEFINER, search_path and grants unchanged. No row changes.
 --
--- NOT CHANGED: a line's booked cost. invoice_items.cost_cents is a cost per sold unit and every reader books
---   cost x quantity (20270226150000), so each owner's cost is its own quantity's cost and the owners' costs can still
---   differ from the whole line's by under a cent per owner. Tying them needs a stored booked cost per line (a schema
---   change), not a rounding fix. safe_cents_qty (its comment says "banker's" rounding; ROUND on numeric rounds half
---   away from zero) is not touched.
+-- KNOWN LIMITS (Taha, 2026-11-27, option B): a line's booked cost is not changed. invoice_items.cost_cents is a cost
+--   per sold unit and every reader books cost x quantity (20270226150000), so each owner's cost is its own quantity's
+--   cost, and the owners' costs can differ from the whole line's by under a cent each (tying them needs a stored
+--   booked cost per line, a schema change). Because an owner's amount follows its acre share while its cost follows
+--   its quantity (rounded to 0.0001 of a unit), an owner on a line priced at or near cost can bill slightly under its
+--   own booked cost: 1 Gal at a $200.00 price and $200.00 cost split in thirds bills A $66.67 against $66.68 booked
+--   cost (about a cent, plus 0.0001 of a unit's cost at most). safe_cents_qty (its comment says "banker's" rounding;
+--   ROUND on numeric rounds half away from zero) is not touched.
 --
 -- ROLLBACK (its own reviewed migration): re-emit the transfer body from 20270303100000 (md5
 --   53ecf1279da3aa7ea1590f440c6eb225, pinned below). Invoices written meanwhile keep their exact owner amounts.
@@ -345,15 +351,16 @@ BEGIN
         SELECT * INTO v_line FROM public._job_transfer_line_price_20270207(
           v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit, v_chem.job_price);
         v_qtys := public._job_transfer_split_qty_20270207(v_line.o_quantity, v_acre_pcts);
-        -- Mason, 2026-11-26 ("Job-invoice cents: yes please, fix it before Dec 15"; Taha: split by acre share): the
-        -- line's amount is rounded once, as a single invoice bills it, and those cents are allocated to the owners by
-        -- acre share (largest remainder, ties to the earlier owner; the helper's 0.0001 steps are whole cents here), so
-        -- the owners' lines add up to the line exactly. An owner with a quantity but no cent then takes one from the
-        -- owner furthest above its exact share that has two or more; with fewer cents than such owners, one stays at $0
-        -- and the check below refuses the line, as before. A line's booked cost stays its cost x quantity.
+        -- Mason, 2026-11-26 ("Job-invoice cents: yes please, fix it before Dec 15"; Taha, 2026-11-27: split by acres):
+        -- the line's amount is rounded once, as a single invoice bills it, and those cents are allocated to the owners
+        -- by their billable acres (largest remainder, ties to the earlier owner; the helper's 0.0001 steps are whole
+        -- cents here), so the owners' lines add up to the line exactly. An owner with a quantity but no cent then takes
+        -- one from the owner furthest above its exact share that has two or more; with fewer cents than such owners,
+        -- one stays at $0 and the check below refuses the line. A line's booked cost stays its cost x quantity, so on a
+        -- line priced at cost an owner can bill a cent or so under its own booked cost (Taha, 2026-11-27: known limit).
         v_line_cents := safe_cents_qty(v_line.o_unit_price_cents, v_line.o_quantity);
         v_owner_cents := ARRAY(SELECT round(u.c * 10000)::bigint
-          FROM unnest(public._job_transfer_split_qty_20270207(v_line_cents / 10000.0, v_acre_pcts)) WITH ORDINALITY AS u(c, ord)
+          FROM unnest(public._job_transfer_split_qty_20270207(v_line_cents / 10000.0, v_owner_acres)) WITH ORDINALITY AS u(c, ord)
           ORDER BY u.ord);
         LOOP
           v_take := NULL;
@@ -362,7 +369,7 @@ BEGIN
            WHERE u.c = 0 AND v_qtys[u.ord] > 0 ORDER BY u.ord LIMIT 1;
           EXIT WHEN v_take IS NULL;
           SELECT u.ord INTO v_give FROM unnest(v_owner_cents) WITH ORDINALITY AS u(c, ord)
-           WHERE u.c >= 2 ORDER BY u.c - v_line_cents * v_acre_pcts[u.ord] / 100 DESC, u.ord LIMIT 1;
+           WHERE u.c >= 2 ORDER BY u.c - v_line_cents * v_owner_acres[u.ord] / v_total_billable_acres DESC, u.ord LIMIT 1;
           EXIT WHEN v_give IS NULL;
           v_owner_cents[v_give] := v_owner_cents[v_give] - 1;
           v_owner_cents[v_take] := v_owner_cents[v_take] + 1;
@@ -890,7 +897,7 @@ $function$;
 DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '2714b8df71f9e191c5d11e41f205473d' THEN
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '8ef697686af9473ae9891e4bf9d57693' THEN
     RAISE EXCEPTION 'JOB_INVOICE_SPLIT_CENTS_POSTFLIGHT: the re-emitted body is not this file''s';
   END IF;
   IF NOT COALESCE((SELECT p.prosecdef AND p.proowner = 'postgres'::regrole

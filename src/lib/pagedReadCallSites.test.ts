@@ -43,6 +43,7 @@ const SHARED_FILES = [
   'lib/productSetupChemistry.ts',
   'lib/reconciliation.ts',
   'lib/sellPriceHistory.ts',
+  'lib/statementEmailLog.ts',
   'lib/toteFill.ts',
   'lib/useVendorNames.ts',
 ];

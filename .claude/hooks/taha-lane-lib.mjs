@@ -78,8 +78,8 @@ export const isTahaGateWiring = (name) => BLOCK_FILES_RE.test(String(name ?? "")
 // in place, so code moved from one spot to another is a change (Luna, PR 2 rounds 1–2).
 // A missing patch (GitHub leaves it out of big diffs) is not text-only.
 // shortcut: pattern matching, not a parser; an honest-mistake net like the SQL check, not a security boundary.
-const TEXT_TOKEN_RE = /((?<![\w$-])(?:label|title|subtitle|placeholder|description|aria-label|alt|tooltip|helperText|emptyText|emptyMessage|heading)\s*[:=]\s*\{?\s*)(?:'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\$])*`)|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?<=[\w"'}])>([^<>{}\n]*)(?=<\/)/g;
-const TOOL_COMMENT_RE = /@|#__|\b(?:eslint|prettier|istanbul|webpack|vite|jsx|c8|v8|ts-)/i;
+const TEXT_TOKEN_RE = /((?<![\w$-])(?:label|title|subtitle|placeholder|description|aria-label|alt|tooltip|helperText|emptyText|emptyMessage|heading)\s*[:=]\s*\{?\s*)(?:'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\$])*`)|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?<=[\w"'}])(?<!<option\b[^<>]*)>([^<>{}\n]*)(?=<\/)/g;
+const TOOL_COMMENT_RE = /^\/\/\/|@|#__|\b(?:eslint|prettier|istanbul|webpack|vite|jsx|c8|v8|ts-)/i;
 function codeOnly(lines) {
   const kept = [];
   const keep = (m) => `\u0001${kept.push(m) - 1}\u0001`;
@@ -182,7 +182,8 @@ const FIELD_BILLING_TABLES = new Set(["invoices", "invoice_items", "invoice_shar
 // and quote lines (Mason, 2026-11-26: #2267 converted one product from mg to grams, its lines included, and locked what
 // it re-checks so nothing moved under it; a unit fix is not Taha's). Any other write to those tables (a status, a price,
 // a policy, a column, a delete) and every other lane table still count (Luna, PR 2 rounds 1 and 3).
-const UNIT_FIX_LOCK_RE = /\block\s+(?:table\s+)?[^;]*/gi;
+// A LOCK statement starts a statement; `IF lock THEN` is a variable (advisory Sol on PR 2, HIGH 4).
+const UNIT_FIX_LOCK_RE = /(?<=(?:^|;|\b(?:begin|then|else|loop)\b|\$\$)\s*)lock\s+(?:table\s+)?[^;]*/gi;
 const UNIT_LINE_UPDATE_RE = /\bupdate\s+(?:only\s+)?(?:"?public"?\s*\.\s*)?"?(?:order_items|quote_items)"?(?![\w$])(?:\s+(?:as\s+)?(?!set\b)\w+)?\s+set\s+([^;]*?)(?=\bfrom\b|\bwhere\b|\breturning\b|;|$)[^;]*/gi;
 const UNIT_COLUMN_RE = /^(?:unit|unit_size|uom|rate_unit|container_unit|inventory_unit|quantity|qty)$/i;
 const unitOnlySet = (set) => {
@@ -312,7 +313,8 @@ export function tahaLaneProblem({ files }) {
   for (const entry of files) {
     const name = entry?.filename;
     // A label-only edit of an app file in his lane, not renamed (Mason, 2026-11-26, #2451).
-    const wordsOnly = !entry?.previous_filename && typeof name === "string" && /^src\/.+\.[jt]sx?$/i.test(name) && !isTahaGateWiring(name) && isTextOnlyPatch(entry?.patch);
+    // Only an edited file: adding or deleting one is code even when it holds only comments (advisory Sol on PR 2, MED 15).
+    const wordsOnly = entry?.status === "modified" && !entry?.previous_filename && typeof name === "string" && /^src\/.+\.[jt]sx?$/i.test(name) && !isTahaGateWiring(name) && isTextOnlyPatch(entry?.patch);
     for (const n of wordsOnly ? [] : [entry?.filename, entry?.previous_filename]) {
       if (typeof n === "string" && isTahaLanePath(n) && !hits.includes(n)) hits.push(n);
     }
@@ -342,7 +344,7 @@ export function prFilesOnGitHub({ repo, gh, number, headSha }) {
     return rows.map(([status, filename, previous, ref = "", patch = ""]) => {
       const entry = { filename, previous_filename: previous || undefined };
       // The diff of an app file, for the label-only rule (@tsv escaped its line breaks).
-      if (patch && /^src\//i.test(filename)) entry.patch = patch.replace(/\\(.)/g, (_, c) => ({ n: "\n", r: "\r", t: "\t" })[c] ?? c);
+      if (patch && /^src\//i.test(filename)) Object.assign(entry, { status, patch: patch.replace(/\\(.)/g, (_, c) => ({ n: "\n", r: "\r", t: "\t" })[c] ?? c) });
       // Migrations, baselines and hand-run undo scripts are judged by their SQL at the head the merge is pinned to;
       // a removed or unreadable one, or one GitHub lists at another commit, counts as Taha's (Taha's review of #2382, LOW 7, LOW 8).
       // A SQL file moved out of the read folders counts as removed there (advisory Sol on #2382).

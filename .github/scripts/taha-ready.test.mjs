@@ -304,3 +304,11 @@ test('a PR that only changes the lane block itself is not sent to Taha', () => {
   const mixed = () => ({ files: ['.claude/hooks/taha-lane-lib.mjs', 'src/pages/Quotes.tsx'], reason: "it changes Taha's areas" });
   assert.equal(decide(pr(), { ...ok, lane: mixed }).act, true, 'wiring plus a lane file still goes to Taha');
 });
+
+test('a hand-labelled back-merge or wiring-only PR is not pinged either (advisory Sol on PR 2, MED 11)', () => {
+  assert.equal(P(labelled({ ...T, headRefName: 'main', baseRefName: 'staging' }), []), false, 'back-merge of main');
+  const wiring = () => ({ files: ['.claude/hooks/taha-lane-lib.mjs'], reason: "it changes Taha's areas" });
+  assert.equal(P(labelled(T), [], { ...ok, lane: wiring }), false, 'only the lane block');
+  const mixed = () => ({ files: ['.claude/hooks/taha-lane-lib.mjs', 'src/pages/Quotes.tsx'], reason: "it changes Taha's areas" });
+  assert.equal(P(labelled(T), [], { ...ok, lane: mixed }), true, 'wiring plus a lane file still pings');
+});

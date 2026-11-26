@@ -136,8 +136,10 @@ export function askedAfterPush(pushTimes, askTimes) {
 // because the bot cannot see Sol proofs and a request or label can outlive a push.
 // checks/sol/asked/carried are thunks as in decide(); backport() says the release guard wants Taha's hotfix-backport label.
 // Returns { ping, why, backport }.
-export function needsPing(pr, comments, { checks, sol, asked, carried, backport = () => false }) {
+export function needsPing(pr, comments, { checks, lane, sol, asked, carried, backport = () => false }) {
   const no = (why) => ({ ping: false, why });
+  // Same skips as decide(), for a PR someone labelled by hand (advisory Sol on PR 2, MED 11).
+  if (isBackMerge(pr)) return no('a back-merge of main: nothing new for Taha');
   // His approval survives a merge from main, but the label must follow the latest push: ask for the label alone.
   if (isMainHotfix(pr) && !pr.isDraft && !isTahasPr(pr) && !pr.isCrossRepository && tahaVerdict(pr, carried) === APPROVED) {
     if (pinged(comments, pr.headRefOid).length) return no('already pinged for this head');
@@ -150,6 +152,8 @@ export function needsPing(pr, comments, { checks, sol, asked, carried, backport 
   if (!tahaRequested(pr)) return no('Taha is not requested');
   const checkProblem = requiredChecksProblem(checksFor(pr, checks()));
   if (checkProblem) return no(checkProblem);
+  const inLane = lane?.();
+  if (inLane?.files?.length && inLane.files.every(isTahaGateWiring)) return no("only the lane block's own files: needs Mason's code, not Taha's review");
   const yes = (why) => ({ ping: true, why, backport: isMainHotfix(pr) && Boolean(backport()) });
   if (sol()?.risky === false) return yes('no Sol needed, checks green');
   if (asked()) return yes('Sol-list PR labelled or re-requested after its latest push');

@@ -510,11 +510,14 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   // Luna, PR 2 round 3: only the unit and quantity columns.
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET status = 'cancelled' WHERE product_id = 1;")], now: NOW }), "a unit-named migration setting order statuses is his");
   // Luna, PR 2 round 4: tuple assignments and clause words inside strings.
-  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET quantity = quantity * 16, (unit_size, unit_price) = ('g', 0);")], now: NOW }), "a price inside a tuple SET is his");
-  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET quantity = CASE WHEN unit = 'where' THEN quantity / 1000 ELSE quantity END, status = 'cancelled';")], now: NOW }), "a WHERE inside a string does not end the SET");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET quantity = quantity * 16, (unit_size, unit_price) = ('g', 0) WHERE product_id = 7;")], now: NOW }), "a price inside a tuple SET is his");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET quantity = CASE WHEN unit = 'where' THEN quantity / 1000 ELSE quantity END, status = 'cancelled' WHERE product_id = 7;")], now: NOW }), "a WHERE inside a string does not end the SET");
   eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET (unit_size, quantity) = ('g', quantity / 1000) WHERE unit = 'mg; where';")], now: NOW }), null, "a unit-only tuple SET is a unit fix");
-  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.quote_items q SET unit_size = 'g', unit_price = 0;")], now: NOW }), "a unit fix that also sets prices is his");
-  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET quantity = (SELECT 1 FROM invoices);")], now: NOW }), "a quantity copied from a subquery is his");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.quote_items q SET unit_size = 'g', unit_price = 0 WHERE q.product_id = 7;")], now: NOW }), "a unit fix that also sets prices is his");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET quantity = (SELECT 1 FROM invoices) WHERE product_id = 7;")], now: NOW }), "a quantity copied from a subquery is his");
+  // Advisory Sol on PR 2.
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "DO $$ BEGIN IF lock THEN UPDATE public.invoices SET status = 'void' WHERE id = 42; END IF; END $$;")], now: NOW }), "a variable named lock is not a LOCK statement");
+  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "DO $$ BEGIN LOCK TABLE public.invoices IN SHARE MODE; END $$;")], now: NOW }), null, "a LOCK inside a block still is");
   eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items AS x SET unit_size = 'g', quantity = x.quantity / 1000 FROM r WHERE x.id = r.id;")], now: NOW }), null, "unit and quantity with an alias and FROM are a unit fix");
   // 3. Delivery completion stays his (Mason: don't change without Taha).
   ok(isTahaLaneSql("CREATE OR REPLACE FUNCTION public._complete_delivery_authorized_impl() AS $$ SELECT 1 $$;"), "delivery completion is still Taha's");
@@ -553,6 +556,12 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   ok(tahaLaneProblem({ files: [{ filename: "src/pages/Quotes.tsx", status: "modified" }], now: NOW }), "a lane screen with no patch still counts");
   ok(tahaLaneProblem({ files: [{ filename: "src/pages/Quotes.tsx", previous_filename: "src/pages/Q.tsx", status: "renamed", patch: dash }], now: NOW }), "a renamed lane file still counts");
   ok(tahaLaneProblem({ files: [withPatch("src/lib/quotes.sql.ts", "")], now: NOW }), "an empty patch still counts");
+  // Advisory Sol on PR 2.
+  ok(tahaLaneProblem({ files: [{ filename: "src/lib/quotes/setup.js", status: "removed", patch: "@@ -1 +0,0 @@\n-// setup" }], now: NOW }), "deleting a comment-only lane file still counts");
+  ok(tahaLaneProblem({ files: [{ filename: "src/lib/quotes/setup.js", status: "added", patch: "@@ -0,0 +1 @@\n+// setup" }], now: NOW }), "adding one still counts");
+  eq(isTextOnlyPatch("@@ -1 +1 @@\n-<option>approved</option>\n+<option>cancelled</option>"), false, "an option's text is the value it submits");
+  eq(isTextOnlyPatch("@@ -1 +1 @@\n-<p>Old</p>\n+<p>New</p>"), true, "other JSX text is still words");
+  eq(isTextOnlyPatch("@@ -1 +0,0 @@\n-/// <reference types=\"node\" />"), false, "a /// compiler directive is code");
   ok(tahaLaneProblem({ files: [withPatch(".claude/hooks/taha-lane-lib.mjs", patch(["// a"], ["// b"]))], now: NOW }), "the block's own files never get the words-only pass");
   // The patch comes from GitHub's file list, line breaks unescaped.
   const rows = prFilesOnGitHub({ repo: undefined, number: 7, gh: () => "modified\tsrc/pages/Prepay.tsx\t\t\t@@ -1 +1 @@\\n-a\\n+b\nmodified\tdocs/x.md\t\t\t@@ x\n" });

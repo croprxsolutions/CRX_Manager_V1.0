@@ -5,7 +5,8 @@
 --   delivery_items. When the line's product is stocked in a count unit (Ea or Unit, case and spaces ignored), a
 --   quantity column that is new or changed and not a whole number is refused (WHOLE_ITEMS_ONLY, check_violation).
 --   Columns: quote_items.total_units_needed; order_items.total_units_needed, quantity_delivered;
---   delivery_items.quantity, quantity_delivered. NULL and unchanged values pass, so history saves as before.
+--   delivery_items.quantity, quantity_delivered. NULL and unchanged values pass, so history saves as before
+--   (except quote lines: save_quote re-inserts every line, so every quote save re-checks them all).
 --   Nothing is rounded. Products stocked by the gallon, pound or ounce are unchanged.
 -- Live 2026-11-26 (read-only): 0 quote, order or delivery lines on Ea/Unit products; no row changes here.
 --
@@ -90,8 +91,8 @@ DECLARE
   v_docs text;
 BEGIN
   -- Scanned after CREATE TRIGGER: its lock waits out in-flight writers and holds off new ones until commit,
-  -- so no fractional line can land between this scan and the triggers. A legacy fraction would be refused
-  -- on its next save: sort it out first.
+  -- so no fractional line can land between this scan and the triggers. Every status counts (closing a document
+  -- leaves its figures), and save_quote re-inserts lines, so a legacy quote fraction would block every save.
   WITH whole_items AS (
     SELECT p.id FROM public.products p
      WHERE lower(COALESCE(NULLIF(btrim(p.inventory_unit, E' \t\r\n' || chr(160)), ''),
@@ -110,7 +111,7 @@ BEGIN
   )
   SELECT string_agg(doc, ', ' ORDER BY doc) INTO v_docs FROM (SELECT doc FROM bad ORDER BY doc LIMIT 10) first_ten;
   IF v_docs IS NOT NULL THEN
-    RAISE EXCEPTION 'WHOLE_ITEMS_POSTFLIGHT: fractional quantities already exist on Ea/Unit products (first ten: %); make them whole or close them before applying', v_docs;
+    RAISE EXCEPTION 'WHOLE_ITEMS_POSTFLIGHT: fractional quantities already exist on Ea/Unit products (first ten: %). Closed and completed documents count too: closing one does not change its figures. Make each figure whole before applying; a delivered fraction needs a person to decide how to correct the record', v_docs;
   END IF;
   IF (SELECT count(*) FROM pg_trigger WHERE tgname = 'a3_whole_item_quantity' AND NOT tgisinternal
         AND tgfoid = 'public._enforce_whole_item_quantity()'::regprocedure) <> 3 THEN

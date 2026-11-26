@@ -8,4 +8,4 @@
 - A field split never triggers the re-price; only the sale's tax box or a sales-tax or discount line on its invoices does.
 - Only the return being received or credited changes. If another open return of the same product for that customer still has its old price, the office is asked to cancel and recreate that one first.
 - A return whose price went stale because an earlier return was cancelled still asks to be cancelled and recreated, as before.
-- Migration `20270311100000_return_tax_change_credit` (not applied).
+- Migration `20270313040000_return_tax_change_credit` (not applied).

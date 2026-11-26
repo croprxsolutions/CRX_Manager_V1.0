@@ -1,6 +1,6 @@
 # Credit-limit notices after New Order saves
 
-Reviewed against staging `de2fad0fec13f4816c843730474b84092d00b82e`. This contract covers ordinary New Order. Both quote conversion screens and the shared job warning keep their current paths for this unit.
+Design and database dependencies were reviewed at staging `fb7b42f13d63b71c71ef7cd9699074787510ca9d`. The refreshed target `2b81bfb45388c083c3eda456b466f81b655a7c5f` changed the review runner and its documentation only. This contract covers ordinary New Order. Both quote conversion screens and the shared job warning keep their current paths for this unit.
 
 ## Business behavior
 
@@ -33,4 +33,4 @@ Sources: `src/pages/NewOrder.tsx`, `src/hooks/useIdempotencyKey.ts`, `src/lib/ac
 
 The revised marker also passed a separate rollback prototype. An injected marker-write failure left the order saved. An injected notice-write failure preserved the warning and let the same key send once later. The old save returned only nonfinancial workflow metadata. The marker, notice and receipt assertions ran on the local 416-migration build. This advances the database design without qualifying a production migration or the browser flow for delivery.
 
-The authored migration is `20270313013100_record_direct_order_credit_notices.sql`. The local candidate smoke and three contention cases exercised the actual RPCs before the final postflight assertion was tightened. Independent database sessions demonstrated the same new save, legacy/new save competition, and competing notice sends. When no active admins exist, an under-limit result or empty active-recipient set consumes the notice, matching the existing helper's one-time check. The browser remains a separate proof.
+The authored migration is `20270313013100_record_direct_order_credit_notices.sql`. The exact migration file, including its final postflight assertion, installed on the loopback Docker build at commit `29f7213ef88dd619b445e7f6df256647a54fb469`. The build used 418 migrations and 1,341 ledger rows. The rollback smoke passed its exact-formatted-message, threshold, actor, expired-key, failure, and original-customer checks. The migration checksum is recorded in its ledger note. Independent database sessions demonstrated the same new save, legacy/new save competition, and competing notice sends. When no active admins exist, an under-limit result or empty active-recipient set consumes the notice, matching the existing helper's one-time check. The browser remains a separate proof.

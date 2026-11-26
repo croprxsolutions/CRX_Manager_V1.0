@@ -69,7 +69,7 @@ test "$(psqlq -c "SELECT count(*) FROM public.orders WHERE customer_id='$farm'")
 printf 'LOCAL_CREDIT_RACE_SAVE_PASS\n'
 
 prove_pair legacy "$old_save" "$new_replay"
-test "$(psqlq -c "SELECT NOT (result ? '_direct_order_credit_notice') FROM public.idempotency_keys WHERE idempotency_key='$tag-old'")" = t
+test "$(psqlq -c "SELECT NOT (result ? '_direct_order_credit_notice') FROM public.idempotency_keys WHERE idempotency_key='$tag-old' AND operation='create_direct_order'")" = t
 test "$(psqlq -c "SELECT count(*) FROM public.orders WHERE customer_id='$farm'")" = 2
 printf 'LOCAL_CREDIT_RACE_LEGACY_PASS\n'
 
@@ -77,5 +77,5 @@ prove_pair notice "$notice" "$notice"
 test "$(psqlq -c "SELECT
   (SELECT count(*) FROM public.notifications WHERE notification_type='credit_limit_exceeded' AND related_entity_id='$farm' AND created_by='$actor')
     = (SELECT count(*) FROM public.profiles WHERE role='admin' AND is_active)
-  AND (SELECT result #>> '{_direct_order_credit_notice,handled}' = 'true' FROM public.idempotency_keys WHERE idempotency_key='$tag-new');")" = t
+  AND (SELECT result #>> '{_direct_order_credit_notice,handled}' = 'true' FROM public.idempotency_keys WHERE idempotency_key='$tag-new' AND operation='create_direct_order');")" = t
 printf 'LOCAL_CREDIT_RACE_NOTICE_PASS\n'

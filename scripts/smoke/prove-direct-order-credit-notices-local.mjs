@@ -22,6 +22,7 @@ target.assertLocalState(state);
 
 const sql = readFileSync(new URL('./smoke-direct-order-credit-notices.sql', import.meta.url), 'utf8');
 assert.equal(localSql(sql), 'SMOKE_PASS_ROLLBACK');
+console.log('SMOKE_PASS_ROLLBACK');
 
 
 const [actor, admin, farm, product] = Array.from({ length: 4 }, randomUUID);
@@ -70,4 +71,12 @@ try {
     DELETE FROM auth.users WHERE id IN ('${actor}','${admin}');
     COMMIT;`);
 }
-console.log('SMOKE_PASS_ROLLBACK');
+const cleared = localSql(`SELECT
+  NOT EXISTS (SELECT 1 FROM public.orders WHERE customer_id='${farm}')
+  AND NOT EXISTS (SELECT 1 FROM public.invoices WHERE customer_id='${farm}')
+  AND NOT EXISTS (SELECT 1 FROM public.notifications WHERE related_entity_id='${farm}')
+  AND NOT EXISTS (SELECT 1 FROM public.products WHERE id='${product}')
+  AND NOT EXISTS (SELECT 1 FROM public.customers WHERE id='${farm}')
+  AND NOT EXISTS (SELECT 1 FROM auth.users WHERE id IN ('${actor}','${admin}'));`);
+assert.equal(cleared, 't');
+console.log('LOCAL_CREDIT_RACE_FIXTURES_CLEANUP_PASS');

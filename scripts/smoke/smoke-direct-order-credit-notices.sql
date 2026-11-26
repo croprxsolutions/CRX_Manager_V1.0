@@ -224,8 +224,18 @@ BEGIN
   END IF;
   RESET ROLE;
 
+  INSERT INTO public.idempotency_keys
+    (idempotency_key, operation, result, request_actor_id, request_fingerprint)
+  SELECT base_key || '-wrong-operation', 'invented_other_operation', idempotency_keys.result,
+    request_actor_id, request_fingerprint
+  FROM public.idempotency_keys
+  WHERE idempotency_key = base_key || '-cancel' AND operation = 'create_direct_order';
+  IF NOT FOUND THEN RAISE EXCEPTION 'Expected a controlled wrong-operation fixture'; END IF;
   UPDATE public.idempotency_keys SET expires_at = now() - interval '1 second' WHERE idempotency_key = base_key || '-new';
   SET LOCAL ROLE authenticated;
+  IF public.send_direct_order_credit_notice(base_key || '-wrong-operation') IS NOT NULL THEN
+    RAISE EXCEPTION 'A receipt from the wrong operation was accepted';
+  END IF;
   IF public.send_direct_order_credit_notice(base_key || '-new') IS NOT NULL THEN
     RAISE EXCEPTION 'Expired receipt was accepted';
   END IF;

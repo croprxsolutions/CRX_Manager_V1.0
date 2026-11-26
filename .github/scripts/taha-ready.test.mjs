@@ -351,3 +351,18 @@ test('the backport list is capped, counts unlisted commits, and says so when Git
   assert.equal(list.at(-1), `Files changed (15): ${files.slice(0, FILE_CAP).map((f) => `\`${f}\``).join(', ')} and 5 more`);
   assert.match(backportList(null), /Could not read what this brings to live/);
 });
+
+import { laneFor } from './taha-ready.mjs';
+test('a hotfix into main that changes lane wiring and .github/ keeps both lists (Codex bot on #2639)', () => {
+  const hotfix = { baseRefName: 'main', headRefName: 'hotfix/x' };
+  const files = [{ filename: '.claude/hooks/pr-merge-guard.mjs' }, { filename: '.github/workflows/ci.yml' }];
+  const lane = laneFor(hotfix, files);
+  assert.deepEqual(lane.files, ['.claude/hooks/pr-merge-guard.mjs', '.github/workflows/ci.yml']);
+  assert.equal(decide(pr({ baseRefName: 'main', headRefName: 'hotfix/x' }), { ...ok, lane: () => lane }).act, true, 'not skipped as wiring-only');
+  assert.deepEqual(laneFor({ baseRefName: 'staging', headRefName: 'f' }, files).files, ['.claude/hooks/pr-merge-guard.mjs'], 'into staging only the lane list');
+});
+
+test('a PR that changes the live-apply gate library still goes to Taha (advisory Sol on #2639, MED 18)', () => {
+  const gate = () => ({ files: ['.claude/hooks/migration-landing-gate-lib.mjs'], reason: "it changes Taha's areas" });
+  assert.equal(decide(pr(), { ...ok, lane: gate }).act, true);
+});

@@ -48,13 +48,23 @@ export const tahaReviewedHead = (pr) => (pr.reviews ?? []).some((r) => isTaha(r.
 // release-gate wait on his approval or hotfix-backport label, so those two can't hold back asking him.
 // A back-merge of main is judged like any PR: main needs no review, so a hotfix Mason merged by hand may not have
 // reached Taha (Taha's review of #2639, LOW 4).
-// Only the lane block's launchers and settings are not his work; taha-lane-lib.mjs defines his lane (#2639, MED 2).
-const wiringOnly = (file) => isTahaGateWiring(file) && !/(?:^|\/)taha-lane-lib\.mjs$/.test(file);
+// Only the lane block's launchers and settings are not his work (Taha's review of #2639, MED 2); its libraries define his
+// lane and his live-apply hold, so they still go to him (advisory Sol on #2639, MED 18).
+const wiringOnly = (file) => isTahaGateWiring(file) &&
+  /(?:^|\/)(?:pr-merge-guard|merge-guard-launcher|prompt-router|migration-apply-guard|production-action-guard)\.mjs$|(?:^|\/)(?:settings|hooks)\.json$/.test(file);
 export const isMainHotfix =(pr) => pr.baseRefName === 'main' && /^hotfix\//.test(pr.headRefName ?? '');
 const GATE_CHECKS = ['Release flow guard (main)', 'release-gate'];
 // A pending guard still waits: it may yet ask for the label, and the ping is sent once per head (Codex on #2589).
 const checksFor = (pr, checks) => (isMainHotfix(pr) && Array.isArray(checks)
   ? checks.filter((c) => !(c.name === GATE_CHECKS[1] || (c.name === GATE_CHECKS[0] && c.bucket === 'fail'))) : checks);
+// Taha's lane files plus, on a hotfix into main, the .github/ files he owns: both lists, so a hotfix that also
+// changes lane wiring is not skipped as wiring-only (Codex bot on #2639).
+export function laneFor(pr, files) {
+  const lane = tahaLaneProblem({ files });
+  const owned = isMainHotfix(pr) ? githubOwned(files) : null;
+  if (lane?.files?.length && owned) return { files: [...lane.files, ...owned.files], reason: `${lane.reason}; ${owned.reason}` };
+  return lane ?? owned;
+}
 export function githubOwned(files) {
   const hits = (files ?? []).map((f) => f?.filename).filter((n) => typeof n === 'string' && n.startsWith('.github/'));
   return hits.length ? { files: hits, reason: `Taha is a code owner of ${hits.slice(0, 5).join(', ')}` } : null;
@@ -294,8 +304,7 @@ async function handle(pr, mode, dry) {
   const facts = {
     checks: () => requiredChecks(pr.number),
     lane: () => {
-      const files = prFilesOnGitHub({ repo: REPO, gh, number: pr.number, headSha: pr.headRefOid });
-      return tahaLaneProblem({ files }) ?? (isMainHotfix(pr) ? githubOwned(files) : null);
+      return laneFor(pr, prFilesOnGitHub({ repo: REPO, gh, number: pr.number, headSha: pr.headRefOid }));
     },
     // The guard's latest run on this head failed asking for the label (its ::error:: line is an annotation).
     backport: () => {

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { buildJobChemicalsPayload, calculateJobChemicalTotals, type JobChemicalPayloadSource } from './jobChemicalPayload';
+import {
+  jobStockPathFromFieldBatchSetting,
+  jobStockPathForSourcing,
+  jobSupportsVendorSourcing,
+} from './jobSourcedFrom';
 
 /**
  * buildJobChemicalsPayload turns free-text form rows into the payload written for
@@ -215,6 +220,60 @@ describe('buildJobChemicalsPayload', () => {
         totalPriceCents: 7500,
       });
       expect(calculateJobChemicalTotals([vendorLine], true, { available: true, path: 'at_completion' })).toEqual({
+        totalCostCents: 10000,
+        totalPriceCents: 7500,
+      });
+    });
+
+    it('sends vendor source and excludes totals on a new batch job only when ready', () => {
+      const unavailable = { available: false, path: null } as const;
+      const newJobPath = jobStockPathForSourcing(null, unavailable, {
+        available: true,
+        path: jobStockPathFromFieldBatchSetting('true'),
+      });
+      const vendorLine = row({
+        quantity: '1',
+        cost_per_unit_cents: '10000',
+        price_per_unit_cents: '7500',
+        source_vendor_id: 'vendor-1',
+      });
+      const ready = jobSupportsVendorSourcing(true, true, newJobPath);
+      const readyPayload = buildJobChemicalsPayload([vendorLine], ready)[0];
+      expect(readyPayload.source_vendor_id).toBe('vendor-1');
+      expect(readyPayload).not.toHaveProperty('stock_path');
+      expect(calculateJobChemicalTotals([vendorLine], true, newJobPath)).toEqual({
+        totalCostCents: 0,
+        totalPriceCents: 0,
+      });
+
+      const disabled = jobSupportsVendorSourcing(false, true, newJobPath);
+      const disabledPayload = buildJobChemicalsPayload([vendorLine], disabled)[0];
+      expect(disabledPayload).not.toHaveProperty('source_vendor_id');
+      expect(disabledPayload).not.toHaveProperty('stock_path');
+      expect(calculateJobChemicalTotals([vendorLine], false, newJobPath)).toEqual({
+        totalCostCents: 10000,
+        totalPriceCents: 7500,
+      });
+    });
+
+    it.each(['false', null])('keeps at-completion payload and totals when the setting is %s', (settingValue) => {
+      const unavailable = { available: false, path: null } as const;
+      const newJobPath = jobStockPathForSourcing(null, unavailable, {
+        available: true,
+        path: jobStockPathFromFieldBatchSetting(settingValue),
+      });
+      const vendorLine = row({
+        quantity: '1',
+        cost_per_unit_cents: '10000',
+        price_per_unit_cents: '7500',
+        source_vendor_id: 'vendor-1',
+      });
+
+      expect(jobSupportsVendorSourcing(true, true, newJobPath)).toBe(false);
+      const payload = buildJobChemicalsPayload([vendorLine], false)[0];
+      expect(payload).not.toHaveProperty('source_vendor_id');
+      expect(payload).not.toHaveProperty('stock_path');
+      expect(calculateJobChemicalTotals([vendorLine], true, newJobPath)).toEqual({
         totalCostCents: 10000,
         totalPriceCents: 7500,
       });

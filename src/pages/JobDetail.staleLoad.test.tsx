@@ -31,8 +31,17 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { Profiler } from 'react';
 
-const { mockFrom, mockRpc, mockToast, mockNavigate, mockNotifyCreditLimit, dirtyStates } = vi.hoisted(() => ({
+const {
+  mockFrom,
+  mockRpc,
+  mockToast,
+  mockNavigate,
+  mockNotifyCreditLimit,
+  mockLoadVehicleCarrierDefault,
+  dirtyStates,
+} = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockRpc: vi.fn(),
   mockToast: vi.fn(),
@@ -44,6 +53,7 @@ const { mockFrom, mockRpc, mockToast, mockNavigate, mockNotifyCreditLimit, dirty
   // Every isDirty value the page has handed to useUnsavedChanges. The dirty engine
   // has no dedicated DOM of its own, so this is how the third test observes it.
   dirtyStates: [] as boolean[],
+  mockLoadVehicleCarrierDefault: vi.fn(),
 }));
 
 const CHAIN_METHODS = ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'neq',
@@ -140,6 +150,14 @@ vi.mock('../lib/dateUtils', async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return { ...actual, todayInBusinessTz: () => '2026-08-19' };
 });
+vi.mock('../lib/vehicleCarrierDefaults', async (importOriginal) => {
+  const actual = await (importOriginal() as Promise<Record<string, unknown>>);
+  return {
+    ...actual,
+    VEHICLE_CARRIER_DEFAULT_DB_READY: true,
+    loadVehicleCarrierDefault: mockLoadVehicleCarrierDefault,
+  };
+});
 
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import JobDetail from './JobDetail';
@@ -190,13 +208,94 @@ function deferred() {
   return { promise, release };
 }
 
+function deferredValue<T>() {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   dirtyStates.length = 0;
   mockRpc.mockResolvedValue({ data: null, error: null });
+  mockLoadVehicleCarrierDefault.mockResolvedValue({ available: false, defaultGpa: null });
 });
 
 describe('JobDetail cross-record stale-load guard', () => {
+  it('does not read the batch stock setting while sourcing DB readiness is off', async () => {
+    let batchSettingReads = 0;
+    mockFrom.mockImplementation((table: string) => {
+      const chain = buildChain({ data: [], error: null });
+      if (table === 'app_settings') {
+        chain.eq = (column: string, value: string) => {
+          if (column === 'setting_key' && value === 'field_batch_stock_enabled') batchSettingReads += 1;
+          return chain;
+        };
+      }
+      return chain;
+    });
+
+    mountAt('/jobs/new');
+    await screen.findByRole('button', { name: /Save Job/ });
+    expect(batchSettingReads).toBe(0);
+  });
+
+  it('starts a carrier-default request for job B with the same rig and ignores job A’s late reply', async () => {
+    const carrierA = deferredValue<{ available: boolean; defaultGpa: number | null }>();
+    const carrierB = deferredValue<{ available: boolean; defaultGpa: number | null }>();
+    const jobA = makeJob({ ...JOB_A, vehicle_id: 'rig-r', carrier_rate_gpa: 12 });
+    const jobB = makeJob({ ...JOB_B, vehicle_id: 'rig-r', carrier_rate_gpa: 15 });
+    const carrierRequests = [carrierA, carrierB];
+    let carrierRequestIndex = 0;
+    let commits = 0;
+    let jobsCalls = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'jobs') {
+        jobsCalls += 1;
+        return buildChain({ data: jobsCalls === 1 ? jobA : jobB, error: null });
+      }
+      return buildChain({ data: [], error: null });
+    });
+    mockLoadVehicleCarrierDefault.mockImplementation((vehicleId: string) => {
+      expect(vehicleId).toBe('rig-r');
+      const request = carrierRequests[carrierRequestIndex];
+      carrierRequestIndex += 1;
+      return request.promise;
+    });
+
+    const router = createMemoryRouter(
+      [{ path: '/jobs/:id', element: <JobDetail /> }],
+      { initialEntries: ['/jobs/job-a'] },
+    );
+    render(
+      <Profiler id="job-detail-carrier-default" onRender={() => { commits += 1; }}>
+        <RouterProvider router={router} />
+      </Profiler>,
+    );
+    await screen.findByRole('heading', { name: 'J-AAAA-1001' });
+    await waitFor(() => expect(mockLoadVehicleCarrierDefault).toHaveBeenCalledTimes(1));
+
+    await act(async () => { await router.navigate('/jobs/job-b'); });
+    await screen.findByRole('heading', { name: 'J-BBBB-2002' });
+    await waitFor(() => expect(mockLoadVehicleCarrierDefault).toHaveBeenCalledTimes(2));
+
+    const commitsBeforeBReply = commits;
+    await act(async () => {
+      carrierB.resolve({ available: true, defaultGpa: 15 });
+      await carrierB.promise;
+    });
+    expect(commits).toBeGreaterThan(commitsBeforeBReply);
+
+    const commitsAfterBReply = commits;
+    await act(async () => {
+      carrierA.resolve({ available: true, defaultGpa: 12 });
+      await carrierA.promise;
+    });
+    expect(commits).toBe(commitsAfterBReply);
+    expect(mockLoadVehicleCarrierDefault).toHaveBeenNthCalledWith(1, 'rig-r');
+    expect(mockLoadVehicleCarrierDefault).toHaveBeenNthCalledWith(2, 'rig-r');
+  });
+
   it('does not let job A\'s late-resolving fetch overwrite job B\'s loaded form', async () => {
     // Job A's `jobs` read is held open; job B's answers immediately. That makes A the
     // LAST to resolve — the exact ordering that installs A's record over B's.

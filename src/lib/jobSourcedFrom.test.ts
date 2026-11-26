@@ -5,9 +5,15 @@ vi.mock('./db', () => ({ supabaseUntyped: { from: mockFrom } }));
 
 import {
   FIELD_SOURCED_FROM_DB_READY,
+  TODO_CONFIRM_BATCH_CHEMICAL_SOURCE_INVALID_PREFIX,
+  TODO_CONFIRM_BATCH_JOB_MUST_BE_BORN_OPEN_PREFIX,
+  TODO_CONFIRM_FIELD_BATCH_STOCK_SETTING_KEY,
   batchCustomerSuppliedLineNeedsVendor,
+  batchCustomerSuppliedLineVendorError,
   isBatchVendorSourcedLine,
   isJobChemicalNonBillable,
+  jobStockPathFromFieldBatchSetting,
+  jobStockPathForSourcing,
   jobSupportsVendorSourcing,
   loadSavedJobSourceVendors,
   loadJobChemicalSources,
@@ -28,6 +34,30 @@ function resultChain(result: { data: unknown; error: unknown }) {
 describe('job sourced-from readiness', () => {
   it('keeps the feature disabled until the database lane is ready', () => {
     expect(FIELD_SOURCED_FROM_DB_READY).toBe(false);
+  });
+
+  it('maps the exact batch setting value and keeps unknown or saved paths distinct', () => {
+    const unavailable = { available: false, path: null } as const;
+    const batchPath = { available: true, path: jobStockPathFromFieldBatchSetting('true') } as const;
+    const atCompletionPath = { available: true, path: jobStockPathFromFieldBatchSetting('false') } as const;
+    expect(TODO_CONFIRM_FIELD_BATCH_STOCK_SETTING_KEY).toBe('field_batch_stock_enabled');
+    expect(jobStockPathFromFieldBatchSetting(null)).toBe('at_completion');
+    expect(jobStockPathFromFieldBatchSetting(undefined)).toBe('at_completion');
+    expect(jobStockPathFromFieldBatchSetting('TRUE')).toBe('at_completion');
+    expect(jobStockPathForSourcing(null, unavailable, batchPath)).toBe(batchPath);
+    expect(jobStockPathForSourcing(null, unavailable, atCompletionPath)).toBe(atCompletionPath);
+    expect(jobStockPathForSourcing(null, unavailable, unavailable)).toBe(unavailable);
+    expect(jobStockPathForSourcing('job-1', unavailable, batchPath)).toBe(unavailable);
+    expect(TODO_CONFIRM_BATCH_CHEMICAL_SOURCE_INVALID_PREFIX).toBe('BATCH_CHEMICAL_SOURCE_INVALID');
+    expect(TODO_CONFIRM_BATCH_JOB_MUST_BE_BORN_OPEN_PREFIX).toBe('BATCH_JOB_MUST_BE_BORN_OPEN');
+
+    const newJobPath = jobStockPathForSourcing(null, unavailable, batchPath);
+    expect(jobSupportsVendorSourcing(true, true, newJobPath)).toBe(true);
+    expect(jobSupportsVendorSourcing(false, true, newJobPath)).toBe(false);
+    expect(batchCustomerSuppliedLineNeedsVendor(newJobPath, true, null)).toBe(true);
+    expect(batchCustomerSuppliedLineVendorError(newJobPath, true, null))
+      .toBe('choose a vendor for this customer-supplied line on a batch job');
+    expect(batchCustomerSuppliedLineVendorError(newJobPath, true, 'vendor-1')).toBeNull();
   });
 
   it('blocks only a known batch customer-supplied line without a vendor', () => {
@@ -59,49 +89,41 @@ describe('job sourced-from readiness', () => {
   it('blocks save when office source data could not be read, but leaves disabled/crew paths alone', () => {
     expect(sourceReadBlocksJobSave(true, true, {
       chemicalSourcesAvailable: false,
-      isExistingJob: true,
       stockPath: { available: true, path: 'batch' },
       vendorListAvailable: false,
     })).toBe(true);
     expect(sourceReadBlocksJobSave(true, true, {
       chemicalSourcesAvailable: true,
-      isExistingJob: true,
       stockPath: { available: true, path: 'batch' },
       vendorListAvailable: true,
     })).toBe(false);
     expect(sourceReadBlocksJobSave(true, true, {
       chemicalSourcesAvailable: true,
-      isExistingJob: true,
       stockPath: { available: true, path: 'batch' },
       vendorListAvailable: false,
     })).toBe(true);
     expect(sourceReadBlocksJobSave(true, true, {
       chemicalSourcesAvailable: true,
-      isExistingJob: true,
       stockPath: { available: false, path: null },
       vendorListAvailable: true,
     })).toBe(true);
     expect(sourceReadBlocksJobSave(true, true, {
       chemicalSourcesAvailable: true,
-      isExistingJob: false,
       stockPath: { available: false, path: null },
       vendorListAvailable: false,
-    })).toBe(false);
+    })).toBe(true);
     expect(sourceReadBlocksJobSave(true, true, {
       chemicalSourcesAvailable: true,
-      isExistingJob: true,
       stockPath: { available: true, path: 'at_completion' },
       vendorListAvailable: false,
     })).toBe(false);
     expect(sourceReadBlocksJobSave(false, true, {
       chemicalSourcesAvailable: false,
-      isExistingJob: true,
       stockPath: { available: false, path: null },
       vendorListAvailable: false,
     })).toBe(false);
     expect(sourceReadBlocksJobSave(true, false, {
       chemicalSourcesAvailable: false,
-      isExistingJob: true,
       stockPath: { available: false, path: null },
       vendorListAvailable: false,
     })).toBe(false);

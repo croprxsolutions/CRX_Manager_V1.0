@@ -75,9 +75,13 @@ import { ApplicationServiceBillingSummary, RigCarrierSourceHint, SourcedFromCont
 import { APPLICATION_SERVICE_BILLING_DB_READY, loadApplicationServiceBilling } from '../lib/jobServiceBillingSummary';
 import {
   FIELD_SOURCED_FROM_DB_READY,
+  TODO_CONFIRM_FIELD_BATCH_STOCK_SETTING_KEY,
   batchCustomerSuppliedLineNeedsVendor,
+  batchCustomerSuppliedLineVendorError,
   isBatchVendorSourcedLine,
   isJobChemicalNonBillable,
+  jobStockPathFromFieldBatchSetting,
+  jobStockPathForSourcing,
   jobSupportsVendorSourcing,
   loadActiveJobSourceVendors,
   loadJobChemicalSources,
@@ -1563,7 +1567,7 @@ export default function JobDetail() {
       setCarrierRateOrigin(loadedValueMatchesRigDefault ? 'loaded' : result.origin);
     });
     return () => { cancelled = true; };
-  }, [vehicleId, isCrew, carrierRateValueRef, carrierRateOriginRef, captureRouteEpoch]);
+  }, [id, vehicleId, isCrew, carrierRateValueRef, carrierRateOriginRef, captureRouteEpoch]);
 
   useEffect(() => {
     if (!APPLICATION_SERVICE_BILLING_DB_READY || isCrew || !applicationServiceId) {
@@ -1590,7 +1594,7 @@ export default function JobDetail() {
   const [sourceVendorsAvailable, setSourceVendorsAvailable] = useState(false);
   const [sourceVendorsLoadFailed, setSourceVendorsLoadFailed] = useState(false);
   const [chemicalSourceRead, setChemicalSourceRead] = useState<{ jobKey: string; available: boolean }>({ jobKey: '', available: false });
-  const [jobStockPathRead, setJobStockPathRead] = useState<{ jobId: string; read: JobStockPathRead } | null>(null);
+  const [jobStockPathRead, setJobStockPathRead] = useState<{ jobKey: string; read: JobStockPathRead } | null>(null);
 
   useEffect(() => {
     if (!FIELD_SOURCED_FROM_DB_READY || isCrew) {
@@ -1624,19 +1628,58 @@ export default function JobDetail() {
 
   useEffect(() => {
     if (!FIELD_SOURCED_FROM_DB_READY || isCrew || isNew || !id) {
-      setJobStockPathRead(null);
+      if (!isNew) setJobStockPathRead(null);
       return;
     }
     let cancelled = false;
+    const stillOnThisJob = captureRouteEpoch();
+    setJobStockPathRead({ jobKey: id, read: { available: false, path: null } });
     void loadJobStockPath(id).then((read) => {
-      if (!cancelled) setJobStockPathRead({ jobId: id, read });
+      if (!cancelled && stillOnThisJob()) setJobStockPathRead({ jobKey: id, read });
     });
     return () => { cancelled = true; };
-  }, [id, isNew, isCrew]);
+  }, [id, isNew, isCrew, captureRouteEpoch]);
+
+  useEffect(() => {
+    if (!FIELD_SOURCED_FROM_DB_READY || isCrew || !isNew) return;
+    let cancelled = false;
+    const stillOnThisJob = captureRouteEpoch();
+    setJobStockPathRead({ jobKey: 'new', read: { available: false, path: null } });
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('app_settings')
+          .select('setting_value')
+          .eq('setting_key', TODO_CONFIRM_FIELD_BATCH_STOCK_SETTING_KEY)
+          .maybeSingle();
+        if (cancelled || !stillOnThisJob()) return;
+        if (error) {
+          setJobStockPathRead({ jobKey: 'new', read: { available: false, path: null } });
+          return;
+        }
+        const row = data as { setting_value?: string | null } | null;
+        setJobStockPathRead({
+          jobKey: 'new',
+          read: { available: true, path: jobStockPathFromFieldBatchSetting(row?.setting_value ?? null) },
+        });
+      } catch {
+        if (!cancelled && stillOnThisJob()) {
+          setJobStockPathRead({ jobKey: 'new', read: { available: false, path: null } });
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id, isNew, isCrew, captureRouteEpoch]);
 
   const jobStockPath: JobStockPathRead = useMemo(
-    () => jobStockPathRead?.jobId === id ? jobStockPathRead.read : { available: false, path: null },
-    [id, jobStockPathRead],
+    () => {
+      const currentJobKey = isNew ? 'new' : (id ?? '');
+      const currentRead = jobStockPathRead?.jobKey === currentJobKey
+        ? jobStockPathRead.read
+        : { available: false, path: null };
+      return jobStockPathForSourcing(isNew ? null : id, currentRead, currentRead);
+    },
+    [id, isNew, jobStockPathRead],
   );
   const currentJobSourceKey = isNew ? 'new' : (id ?? '');
   const chemicalSourceDataAvailable = chemicalSourceRead.jobKey === currentJobSourceKey
@@ -1895,8 +1938,11 @@ export default function JobDetail() {
         c.customer_supplied,
         c.source_vendor_id,
       );
-      if (FIELD_SOURCED_FROM_DB_READY && batchCustomerSuppliedLineNeedsVendor(jobStockPath, c.customer_supplied, c.source_vendor_id)) {
-        byIndex.set(i, 'choose a vendor for this customer-supplied line on a batch job');
+      const vendorError = FIELD_SOURCED_FROM_DB_READY
+        ? batchCustomerSuppliedLineVendorError(jobStockPath, c.customer_supplied, c.source_vendor_id)
+        : null;
+      if (vendorError) {
+        byIndex.set(i, vendorError);
         return;
       }
       if (rateDenominatorIsUnrecognized(c.rate_unit)) {
@@ -2950,7 +2996,6 @@ export default function JobDetail() {
   const runJobSave = async (overrideReasonForAudit?: string) => {
     if (sourceReadBlocksJobSave(FIELD_SOURCED_FROM_DB_READY, !isCrew, {
       chemicalSourcesAvailable: chemicalSourceDataAvailable,
-      isExistingJob: !isNew,
       stockPath: jobStockPath,
       vendorListAvailable: sourceVendorsAvailable,
     })) {
@@ -3141,7 +3186,6 @@ export default function JobDetail() {
   const performSave = async (licenseOverride: boolean, overrideReasonForAudit?: string) => {
     if (sourceReadBlocksJobSave(FIELD_SOURCED_FROM_DB_READY, !isCrew, {
       chemicalSourcesAvailable: chemicalSourceDataAvailable,
-      isExistingJob: !isNew,
       stockPath: jobStockPath,
       vendorListAvailable: sourceVendorsAvailable,
     })) {
@@ -5121,7 +5165,6 @@ export default function JobDetail() {
                       </div>
                       )}
                     </div>
-                    {/* New jobs have no stock path until the first save. */}
                     {!isCrew && (
                       <SourcedFromControl
                         isOffice={!isCrew}

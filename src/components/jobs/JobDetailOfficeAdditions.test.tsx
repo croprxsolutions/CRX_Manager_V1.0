@@ -13,6 +13,11 @@ import {
   RigCarrierSourceHint,
   SourcedFromControl,
 } from './JobDetailOfficeAdditions';
+import {
+  batchCustomerSuppliedLineNeedsVendor,
+  jobStockPathFromFieldBatchSetting,
+  jobStockPathForSourcing,
+} from '../../lib/jobSourcedFrom';
 
 describe('Job Detail office additions', () => {
   it('enables vendor selection only when the sourced-from data is available', () => {
@@ -86,6 +91,49 @@ describe('Job Detail office additions', () => {
         onChange={vi.fn()}
       />,
     );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('shows the first-save batch control and vendor-required message for a new job', () => {
+    const unavailable = { available: false, path: null } as const;
+    const stockPath = jobStockPathForSourcing(null, unavailable, {
+      available: true,
+      path: jobStockPathFromFieldBatchSetting('true'),
+    });
+    render(
+      <SourcedFromControl
+        isOffice
+        stockPath={stockPath}
+        available
+        canEdit
+        sourceVendorId={null}
+        vendors={[{ id: 'vendor-1', name: 'Spray Partner' }]}
+        batchVendorRequired={batchCustomerSuppliedLineNeedsVendor(stockPath, true, null)}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText('Sourced from')).toBeEnabled();
+    expect(screen.getByText('Choose a vendor for this customer-supplied line on a batch job.')).toBeInTheDocument();
+  });
+
+  it.each(['false', null])('keeps new jobs on the at-completion path when the setting is %s', (settingValue) => {
+    const unavailable = { available: false, path: null } as const;
+    const stockPath = jobStockPathForSourcing(null, unavailable, {
+      available: true,
+      path: jobStockPathFromFieldBatchSetting(settingValue),
+    });
+    const { container } = render(
+      <SourcedFromControl
+        isOffice
+        stockPath={stockPath}
+        available
+        canEdit
+        sourceVendorId={null}
+        vendors={[]}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(stockPath).toEqual({ available: true, path: 'at_completion' });
     expect(container).toBeEmptyDOMElement();
   });
 

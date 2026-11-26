@@ -4,12 +4,29 @@ export const FIELD_SOURCED_FROM_DB_READY = false;
 const TODO_CONFIRM_JOB_STOCK_PATH_COLUMN = 'stock_path' as const;
 const TODO_CONFIRM_JOB_CHEMICAL_SOURCE_VENDOR_COLUMN = 'source_vendor_id' as const;
 const TODO_CONFIRM_JOB_CHEMICAL_SOURCE_SELECT = 'id, source_vendor_id';
+export const TODO_CONFIRM_FIELD_BATCH_STOCK_SETTING_KEY = 'field_batch_stock_enabled' as const;
+// The DB-ready round must surface these server error prefixes plainly.
+export const TODO_CONFIRM_BATCH_CHEMICAL_SOURCE_INVALID_PREFIX = 'BATCH_CHEMICAL_SOURCE_INVALID' as const;
+export const TODO_CONFIRM_BATCH_JOB_MUST_BE_BORN_OPEN_PREFIX = 'BATCH_JOB_MUST_BE_BORN_OPEN' as const;
 
 export type JobStockPath = 'at_completion' | 'batch';
 
 export interface JobStockPathRead {
   available: boolean;
   path: JobStockPath | null;
+}
+
+export function jobStockPathFromFieldBatchSetting(settingValue: string | null | undefined): JobStockPath {
+  return settingValue === 'true' ? 'batch' : 'at_completion';
+}
+
+export function jobStockPathForSourcing(
+  jobId: string | null | undefined,
+  savedStockPath: JobStockPathRead,
+  newJobStockPath: JobStockPathRead,
+): JobStockPathRead {
+  if (jobId) return savedStockPath;
+  return newJobStockPath;
 }
 
 export interface JobSourceVendor {
@@ -29,6 +46,16 @@ export function batchCustomerSuppliedLineNeedsVendor(
   sourceVendorId: string | null | undefined,
 ): boolean {
   return stockPath.available && stockPath.path === 'batch' && customerSupplied && !sourceVendorId;
+}
+
+export function batchCustomerSuppliedLineVendorError(
+  stockPath: JobStockPathRead,
+  customerSupplied: boolean,
+  sourceVendorId: string | null | undefined,
+): string | null {
+  return batchCustomerSuppliedLineNeedsVendor(stockPath, customerSupplied, sourceVendorId)
+    ? 'choose a vendor for this customer-supplied line on a batch job'
+    : null;
 }
 
 export function jobSupportsVendorSourcing(
@@ -61,14 +88,13 @@ export function sourceReadBlocksJobSave(
   isOffice: boolean,
   reads: {
     chemicalSourcesAvailable: boolean;
-    isExistingJob: boolean;
     stockPath: JobStockPathRead;
     vendorListAvailable: boolean;
   },
 ): boolean {
   return featureReady && isOffice && (
     !reads.chemicalSourcesAvailable
-    || (reads.isExistingJob && !reads.stockPath.available)
+    || !reads.stockPath.available
     || (reads.stockPath.available && reads.stockPath.path === 'batch' && !reads.vendorListAvailable)
   );
 }

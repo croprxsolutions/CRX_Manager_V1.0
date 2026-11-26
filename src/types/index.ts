@@ -4670,6 +4670,8 @@ export interface InventoryCostRow {
   sku: string | null;
   category: string | null;
   vendor: string | null;
+  /** Stock location of this row; null for an active product with no stock record. */
+  location: string | null;
   quantity_available: number;
   quantity_prebooked: number;
   net_available: number;

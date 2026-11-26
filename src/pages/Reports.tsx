@@ -642,9 +642,11 @@ export default function Reports() {
     const seq = reportLoadSeq.current;
     const { data, error } = await fetchAllRows<InventoryCostRow>((from, to) => supabase
       .rpc('get_inventory_cost_report', undefined, { count: 'exact' })
-      // The function's own order (product name), then the unique product id.
+      // The function's own order (product name), then product id + location: unique per stock row,
+      // so a product stocked in two places can't be split or repeated across pages.
       .order('product_name')
       .order('product_id')
+      .order('location')
       .range(from, to));
     if (seq !== reportLoadSeq.current) return;
     if (error) {
@@ -1255,6 +1257,7 @@ export default function Reports() {
         { key: 'product_name', header: 'Product' },
         { key: 'sku', header: 'SKU' },
         { key: 'category', header: 'Category' },
+        { key: 'location', header: 'Location' },
         { key: 'quantity_available', header: 'Qty Available' },
         { key: 'unit_cost', header: 'Unit Cost', format: fmtCSV },
         { key: 'total_cost_value', header: 'Total Value', format: (v) => (v == null ? '' : fmtCSV(v)) },
@@ -1418,6 +1421,7 @@ export default function Reports() {
     { key: 'product_name', header: 'Product', sortable: true, render: (r) => <span className="font-medium text-nav-dark">{r.product_name}</span> },
     { key: 'sku', header: 'SKU' },
     { key: 'category', header: 'Category', sortable: true },
+    { key: 'location', header: 'Location', sortable: true, render: (r) => r.location ?? <span className="text-secondary">No stock record</span> },
     { key: 'quantity_available', header: 'Qty', sortable: true },
     { key: 'net_available', header: 'Net Available', sortable: true, render: (r) => <span className="font-mono">{r.net_available}</span> },
     { key: 'unit_cost', header: 'Unit Cost', render: (r) => <span className="font-mono">{fmt(r.unit_cost)}</span> },
@@ -1519,6 +1523,9 @@ export default function Reports() {
   const dateFilterBar = (onCSV: () => void, csvDisabled = false) => (
     <Card>
       <div className="flex flex-wrap items-end gap-3">
+        {category === 'operational' && operationalTab === 'inventory_cost' ? (
+          <p className="py-2 text-sm text-secondary">Current stock as of now. Dates don't apply to this report.</p>
+        ) : (<>
         <div>
           <label className="block text-xs font-medium text-secondary mb-1">Start Date</label>
           <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
@@ -1541,6 +1548,7 @@ export default function Reports() {
             </button>
           ))}
         </div>
+        </>)}
 
         {/* Gross sales group-by selector */}
         {category === 'financial' && isAdmin && financialTab === 'gross_sales' && (
@@ -1799,12 +1807,13 @@ export default function Reports() {
             return (
             <div className="flex flex-wrap items-center gap-6 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
               <span className="text-sm text-blue-800">
-                <span className="font-semibold">Inventory value at price-list cost:</span>{' '}
+                <span className="font-semibold">Current inventory value at price-list cost:</span>{' '}
                 {formatCents(valuation.valueCents)}
                 {note && <span className="ml-2 text-xs">({note})</span>}
               </span>
               <span className="text-sm text-blue-800">
-                <span className="font-semibold">Products:</span> {inventoryCostData.length}
+                <span className="font-semibold">Products:</span> {new Set(inventoryCostData.map((r) => r.product_id)).size}
+                {' '}({inventoryCostData.length} stock {inventoryCostData.length === 1 ? 'row' : 'rows'})
               </span>
               <span className="text-sm text-red-600">
                 <span className="font-semibold">Below Reorder:</span> {inventoryCostData.filter((r) => r.below_reorder).length}

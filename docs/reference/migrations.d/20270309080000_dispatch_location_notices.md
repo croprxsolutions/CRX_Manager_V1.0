@@ -2,6 +2,8 @@
 
 The Wizard sends one incoming notice per applicator and job. The Board uses the saved assignment to notify the incoming or outgoing applicator on a real change. The existing operations stay available during rollout. An exact retry uses their existing receipt and sends no new notice.
 
+`dispatch_location_with_notices(p_mode, p_assignments, p_job_field_ids, p_license_override, p_idempotency_key)` returns `{ dispatched }` or `{ undispatched }`. Add it to the app RPC catalog when the Wizard and Board start calling it.
+
 The registered local Docker smoke chain passed with invented records. It verified office and field role boundaries, recipient and sender records, both orders of concurrent dispatch and assignee deactivation, and a saved dispatch when its notice failed.
 
 Roll back the dependent app first, then retire the new operation and its private writer in a reviewed migration.

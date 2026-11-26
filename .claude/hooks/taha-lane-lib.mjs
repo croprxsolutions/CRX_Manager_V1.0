@@ -187,9 +187,21 @@ const UNIT_LINE_UPDATE_RE = /\bupdate\s+(?:only\s+)?(?:"?public"?\s*\.\s*)?"?(?:
 const UNIT_COLUMN_RE = /^(?:unit|unit_size|uom|rate_unit|container_unit|inventory_unit|quantity|qty)$/i;
 const unitOnlySet = (set) => {
   const cols = [...set.matchAll(/(?:^|,)\s*"?(\w+)"?\s*=/g)].map((m) => m[1]);
+  // SET (a, b) = (...) tuple assignments (Luna, PR 2 round 4).
+  for (const m of set.matchAll(/(?:^|,)\s*\(([^()]*)\)\s*=/g)) cols.push(...m[1].split(",").map((c) => c.trim().replace(/"/g, "")));
   return cols.length > 0 && cols.every((c) => UNIT_COLUMN_RE.test(c)) && !/\(\s*select\b/i.test(set);
 };
-const withoutUnitFix = (text) => text.replace(UNIT_FIX_LOCK_RE, "").replace(UNIT_LINE_UPDATE_RE, (m, set) => unitOnlySet(set) ? "" : m);
+// Blank out '...' literal contents (same length) so a WHERE or ; inside a string is not read as SQL (Luna, PR 2 round 4).
+const maskStrings = (text) => text.replace(/'(?:[^']|'')*'/g, (s) => `'${" ".repeat(s.length - 2)}'`);
+const withoutUnitFix = (text) => {
+  const masked = maskStrings(text);
+  const cuts = [...masked.matchAll(UNIT_FIX_LOCK_RE)].map((m) => [m.index, m.index + m[0].length]);
+  for (const m of masked.matchAll(UNIT_LINE_UPDATE_RE)) if (unitOnlySet(m[1])) cuts.push([m.index, m.index + m[0].length]);
+  cuts.sort((a, b) => a[0] - b[0]);
+  let out = "", at = 0;
+  for (const [start, end] of cuts) { if (start >= at) out += text.slice(at, start); at = Math.max(at, end); }
+  return out + text.slice(at);
+};
 // "unit(s)" alone is too common a word to count (a delivery_units fix could be his).
 const UNIT_WORDS = new Set(["uom", "gram", "grams", "mg", "oz", "ounce", "ounces", "lb", "lbs", "pound", "pounds",
   "gallon", "gallons", "quart", "quarts", "pint", "pints", "liter", "liters", "litre", "litres"]);

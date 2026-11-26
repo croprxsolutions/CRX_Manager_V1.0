@@ -506,6 +506,10 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "LOCK TABLE public.order_items; UPDATE public.invoice_items SET q = 1;")], now: NOW }), "an invoice write in a unit fix is still his");
   // Luna, PR 2 round 3: only the unit and quantity columns.
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET status = 'cancelled' WHERE product_id = 1;")], now: NOW }), "a unit-named migration setting order statuses is his");
+  // Luna, PR 2 round 4: tuple assignments and clause words inside strings.
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET quantity = quantity * 16, (unit_size, unit_price) = ('g', 0);")], now: NOW }), "a price inside a tuple SET is his");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET quantity = CASE WHEN unit = 'where' THEN quantity / 1000 ELSE quantity END, status = 'cancelled';")], now: NOW }), "a WHERE inside a string does not end the SET");
+  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET (unit_size, quantity) = ('g', quantity / 1000) WHERE unit = 'mg; where';")], now: NOW }), null, "a unit-only tuple SET is a unit fix");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.quote_items q SET unit_size = 'g', unit_price = 0;")], now: NOW }), "a unit fix that also sets prices is his");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items SET quantity = (SELECT 1 FROM invoices);")], now: NOW }), "a quantity copied from a subquery is his");
   eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "UPDATE public.order_items AS x SET unit_size = 'g', quantity = x.quantity / 1000 FROM r WHERE x.id = r.id;")], now: NOW }), null, "unit and quantity with an alias and FROM are a unit fix");

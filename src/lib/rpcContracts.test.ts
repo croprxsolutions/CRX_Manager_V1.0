@@ -2987,6 +2987,13 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // M4a sales tax (local candidate 20270109100200): trigger function, never an RPC.
   _sales_tax_record_rate_20261231:
     'AFTER INSERT / UPDATE OF invoice_type row trigger on invoices: records a taxed sale\'s draft at the Settings rate once (ON CONFLICT DO NOTHING), and re-records only when a draft really switches type, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  // M4 commission settles on posting (local candidate 20270308140000): trigger function and its helper, never RPCs.
+  _settle_order_commission_20270306:
+    'helper of the invoice posting trigger and four commission writers: puts a sale\'s pending, unbatched commission rows whose stored base differs onto its profit after the posted standing discount, writing nothing when they already sit on it, so a replay is a no-op; every API-role EXECUTE is revoked',
+  _invoice_settles_commission_20270306:
+    'AFTER UPDATE OF status, deleted_at row trigger on chemical-sale invoices entering or leaving the posted set: calls _settle_order_commission_20270306, a no-op when the rows are right, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _invoice_lines_settle_commission_20270306:
+    'AFTER INSERT statement trigger on invoice_items: for lines added to a posted chemical-sale or misc-charge invoice, calls _settle_order_commission_20270306, a no-op when the rows are right, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   // M4b standing discount (local candidate 20270109100100): trigger functions and their recompute helper, never RPCs.
   _recompute_standing_discount_20261231:
     'helper of the standing-discount triggers and set_invoice_standing_discount: records a draft\'s rate once (ON CONFLICT DO NOTHING) and rewrites its computed discount line and total, writing nothing when they are already right, so a replay is a no-op; every API-role EXECUTE is revoked',

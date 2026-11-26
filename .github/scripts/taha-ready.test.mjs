@@ -104,7 +104,7 @@ test('ping text escapes PR titles and names the short head', () => {
 });
 
 // ── Hotfixes into main (Mason, 2026-11-25) ─────────────────────────────────────────────────────
-import { cutAtSentence, githubOwned, isMainHotfix, onlyBackportReason } from './taha-ready.mjs';
+import { cutAtSentence, failedLatestRunId, githubOwned, isMainHotfix, onlyBackportReason } from './taha-ready.mjs';
 
 const hotfix = (o) => pr({ baseRefName: 'main', headRefName: 'hotfix/q', ...o });
 const gateWaiting = () => [...green(), { name: 'Release flow guard (main)', bucket: 'fail' }, { name: 'release-gate', bucket: 'pending' }];
@@ -144,6 +144,16 @@ test("the guard's reason is read from its failure annotations: only the hotfix-b
   assert.equal(onlyBackportReason([exit, badName]), false);
   assert.equal(onlyBackportReason([]), false);
   assert.equal(onlyBackportReason(null), false);
+});
+
+test("only the guard's newest run on the head counts, whatever order GitHub lists them in (Taha on #2663)", () => {
+  const run = (id, conclusion, status = 'completed') => ({ id, status, conclusion });
+  // #2573's head: older runs failed, the newest passed.
+  assert.equal(failedLatestRunId([run(139465093828, 'failure'), run(139502621931, 'success'), run(139491508402, 'failure')]), null);
+  assert.equal(failedLatestRunId([run(139502621931, 'failure'), run(139491508402, 'success')]), 139502621931);
+  assert.equal(failedLatestRunId([run(2, null, 'in_progress'), run(1, 'failure')]), null, 'a newer run still going: no stale reason');
+  assert.equal(failedLatestRunId([]), null);
+  assert.equal(failedLatestRunId(null), null);
 });
 
 test('a hotfix waits while the guard is still running: it may yet ask for the label (Codex on #2589)', () => {

@@ -62,6 +62,12 @@ export function onlyBackportReason(annotations) {
     .map((a) => String(a.message ?? '').trim()).filter((m) => !/^Process completed with exit code \d+\.?$/.test(m));
   return errors.length > 0 && errors.every((m) => BACKPORT_REASON.test(m) && m.includes(BACKPORT_LABEL));
 }
+// The id of the newest guard run on a head when it failed, else null. GitHub lists every run (label and edit events
+// re-run the guard; 13 on #2573's head), in no promised order, so the newest is the highest id, whatever its state (Taha on #2663).
+export function failedLatestRunId(runs) {
+  const latest = (Array.isArray(runs) ? runs : []).filter((r) => Number.isSafeInteger(r?.id)).reduce((a, r) => (!a || r.id > a.id ? r : a), null);
+  return latest?.conclusion === 'failure' ? latest.id : null;
+}
 export function githubOwned(files) {
   const hits = (files ?? []).map((f) => f?.filename).filter((n) => typeof n === 'string' && n.startsWith('.github/'));
   return hits.length ? { files: hits, reason: `Taha is a code owner of ${hits.slice(0, 5).join(', ')}` } : null;
@@ -307,8 +313,12 @@ async function handle(pr, mode, dry) {
     // The guard's latest run on this head failed only for the label (its ::error:: lines are annotations). Memoized:
     // the check filter, ping and reminder all ask.
     backport: () => (backportMemo ??= (() => {
-      const id = tryGh(['api', `repos/${REPO}/commits/${pr.headRefOid}/check-runs?check_name=${encodeURIComponent(GATE_CHECKS[0])}`,
-        '--jq', '.check_runs[0] | select(.conclusion == "failure") | .id'])?.trim();
+      let id;
+      try {
+        id = failedLatestRunId(JSON.parse(tryGh(['api', '--paginate', '--slurp',
+          `repos/${REPO}/commits/${pr.headRefOid}/check-runs?check_name=${encodeURIComponent(GATE_CHECKS[0])}&filter=all&per_page=100`]) ?? 'null')
+          ?.flatMap((page) => page?.check_runs ?? []));
+      } catch { return false; }
       if (!id) return false;
       try { return onlyBackportReason(JSON.parse(tryGh(['api', '--paginate', '--slurp', `repos/${REPO}/check-runs/${id}/annotations?per_page=100`]) ?? 'null')?.flat()); } catch { return false; }
     })()),

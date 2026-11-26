@@ -32,7 +32,7 @@ An invoice made from a blend ticket carries, on each chemical line and its restr
 ticket's job kept for that product; when the job kept no number for it, or the ticket has no job, the catalog's number,
 as today. Same rule as Create Invoice (#2341).
 
-Smallest change, one migration `20270311140000_blend_invoice_kept_epa.sql`, no screen change:
+Smallest change, one migration `20270311210000_blend_invoice_kept_epa.sql`, no screen change:
 
 1. `create_invoice_from_blend_ticket` re-emitted from 20270129190000; its two chemical inserts send
    `_job_kept_epa(v_ticket.job_id, v_btp.product_id)` (NULL → the line trigger fills the catalog's number as today).

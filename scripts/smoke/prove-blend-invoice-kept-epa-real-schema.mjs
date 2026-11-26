@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270311140000_blend_invoice_kept_epa.sql (Q1 of Taha's 2026-11-26 audit; contract
+ * Real-schema proof for 20270311210000_blend_invoice_kept_epa.sql (Q1 of Taha's 2026-11-26 audit; contract
  * docs/plans/2026-11-26-blend-invoice-kept-epa-CONTRACT.md). Harness copied from the tiny-line prover; cases follow
  * prove-job-invoice-kept-epa-real-schema.mjs (#2341).
  *
@@ -31,7 +31,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270311140000_blend_invoice_kept_epa.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270311210000_blend_invoice_kept_epa.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

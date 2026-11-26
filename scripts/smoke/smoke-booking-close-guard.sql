@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: booking close guard (release #1990 known issues: Sol r54 HIGH 2, #2065)
 -- ----------------------------------------------------------------------------
--- REQUIRES 20270307120000_booking_close_guard_applied_and_short. Planned bookings A1..A4 and B belong to rep A.
+-- REQUIRES 20270308200000_booking_close_guard_applied_and_short. Planned bookings A1..A4 and B belong to rep A.
 --   C1  close_quote_as_applied is refused BOOKING_HAS_JOB while a spray job from the booking is scheduled or in
 --       progress, for rep A and for an admin
 --   C2  it closes when the booking's job is completed or cancelled, or it has none

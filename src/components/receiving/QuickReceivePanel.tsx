@@ -373,9 +373,13 @@ export default function QuickReceivePanel() {
             condition: item.condition,
           };
         });
-        const firstPO = request.matchResults[0]?.allocations?.[0]?.po_number || 'Quick Receive';
-        const firstPOId = request.matchResults[0]?.allocations?.[0]?.purchase_order_id || '';
-        await notifyDamagedReceiving(firstPO, damagedInfo, firstPOId, damagedReceiptIntentIds);
+        const firstReceivedLineId = request.itemsPayload[0]?.po_item_id;
+        const firstAllocation = request.matchResults.flatMap((match) => match.allocations)
+          .find((allocation) => allocation.po_item_id === firstReceivedLineId);
+        if (firstAllocation) {
+          await notifyDamagedReceiving(firstAllocation.po_number, damagedInfo,
+            firstAllocation.purchase_order_id, damagedReceiptIntentIds);
+        }
       }
     } catch {
       // Damaged-item notification is non-critical after a proven receipt.

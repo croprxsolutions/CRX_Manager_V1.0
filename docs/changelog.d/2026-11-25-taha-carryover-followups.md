@@ -6,4 +6,4 @@
 - `migration-landing-gate-lib.mjs` joins the Taha block's own wiring (`BLOCK_FILES_RE`), since it reads Mason's override.
 - The Taha ready bot shows `taha-approved` only when the merge gate would accept his Approve (a base retarget voids it).
 - `ship.md` release-day applies name Mason's override beside Taha's `Ready to merge`.
-- Not changed, with reasons in the PR: a git mode-only change (only the executable bit can keep a file's content id) and override records written before #2605 (all expire by 2026-11-27 04:29 UTC).
+- Not changed, with reasons in the PR: a git mode-only change that keeps a file's content id (the executable bit, or a file turned into a symlink whose target equals its old text) and override records written before #2605 (all expire by 2026-11-27 04:29 UTC).

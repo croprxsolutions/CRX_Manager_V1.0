@@ -471,3 +471,27 @@ export function maxLabelReiPhi(
   }
   return { reiHours, phiDays };
 }
+
+/** Same-named fields get their farm (then job, then a number) so a crew member cannot pin a hazard on the wrong one. */
+export function distinctFieldNames<T extends { id: string; field_name: string }>(
+  fields: T[], cardFor: (field: T) => Pick<FieldViewJobCard, 'customer_name' | 'job_number'> | undefined,
+): T[] {
+  const count = (names: string[]) => names.reduce((m, n) => m.set(n, (m.get(n) ?? 0) + 1), new Map<string, number>());
+  const base = count(fields.map((field) => field.field_name));
+  const named = fields.map((field) => {
+    if ((base.get(field.field_name) ?? 0) < 2) return field.field_name;
+    const card = cardFor(field);
+    return [field.field_name, card?.customer_name, card?.job_number].filter(Boolean).join(' · ');
+  });
+  const seen = new Map<string, number>();
+  const still = count(named);
+  return fields.map((field, i) => {
+    let name = named[i];
+    if ((still.get(name) ?? 0) > 1) {
+      const n = (seen.get(name) ?? 0) + 1;
+      seen.set(name, n);
+      name = `${name} #${n}`;
+    }
+    return name === field.field_name ? field : { ...field, field_name: name };
+  });
+}

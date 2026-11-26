@@ -204,9 +204,9 @@ const [quickTaskOpen, setQuickTaskOpen] = useState(false);
 - `db.ts` throws at import if `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` is missing, so CI and tests must set them
 - Supabase join inference: joined FK tables infer as arrays — use `as unknown as TargetType[]`
 - JSX `&&` chains with `unknown` values: use ternary `cond ? <JSX/> : null`
-- Known warning: vendor-mapbox chunk ~1,680KB (>500KB limit) — expected
-- react-map-gl v8: import from `'react-map-gl/mapbox'`, NOT bare `'react-map-gl'`
-- react-map-gl can't go in Vite manualChunks — only put `mapbox-gl`
+- Known warning: vendor-maplibre chunk is large (>500KB) — expected for the map engine
+- react-map-gl v8: import MapLibre maps from `'react-map-gl/maplibre'`, NOT bare `'react-map-gl'`
+- react-map-gl can't go in Vite manualChunks — only put `maplibre-gl`
 
 ## Transaction Ledger Pattern (Inventory Improvements)
 - `TransactionLedgerModal` in `src/components/inventory/TransactionLedgerModal.tsx` — shows full transaction history per product

@@ -6,6 +6,11 @@ import { APP_URL, IS_SALES_GAUNTLET, STATE_FOLDER, assertCleanEnvironment, asser
 
 // Separate from the staging config on purpose: this one can only ever reach this computer.
 const here = fileURLToPath(new URL('.', import.meta.url));
+const MAP_SWAP_FAKE_MAPBOX_TOKEN = 'pk.test-not-a-real-token';
+const expectedMapboxToken = process.env.CRX_MAP_SWAP_FAKE_MAPBOX_TOKEN ?? '';
+if (expectedMapboxToken && expectedMapboxToken !== MAP_SWAP_FAKE_MAPBOX_TOKEN) {
+  throw new Error('LOCAL_APP_REFUSED: Only the fixed fake Mapbox token is allowed in this proof.');
+}
 const runId = process.env.CRX_LOCAL_APP_TEST_RUN;
 if (runId && !/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[a-f0-9]{8}$/.test(runId)) {
   throw new Error('Invalid walkthrough test run ID.');
@@ -19,7 +24,7 @@ const state = Object.fromEntries(
 );
 assertCleanEnvironment();
 assertLocalState(state);
-await assertFrontendIsOurs(state.LOCAL_ANON_KEY);
+await assertFrontendIsOurs(state.LOCAL_ANON_KEY, { expectedMapboxToken });
 process.env.LOCAL_TEST_EMAIL = state.LOCAL_TEST_EMAIL;
 process.env.LOCAL_TEST_PASSWORD = state.LOCAL_TEST_PASSWORD;
 if (IS_SALES_GAUNTLET) {
@@ -42,8 +47,8 @@ export default defineConfig({
     baseURL: APP_URL,
     actionTimeout: 15_000,
     screenshot: 'only-on-failure',
-    // A dead proxy for everything but this computer, so a stray request cannot leave, IP addresses included.
-    proxy: { server: 'http://127.0.0.1:9', bypass: '127.0.0.1' },
+    // Only the USDA raster host may leave this computer; Mapbox is intercepted by the proof fixture.
+    proxy: { server: 'http://127.0.0.1:9', bypass: '127.0.0.1,basemap.nationalmap.gov' },
     launchOptions: { args: ['--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] },
   },
   webServer: {

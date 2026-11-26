@@ -24,7 +24,7 @@ export default function LocateMe({ onLocate }: LocateMeProps) {
   };
 
   return (
-    <div className="absolute top-4 left-4 z-10">
+    <div className="crx-map-locate-control absolute top-16 left-4 z-10 max-[480px]:top-[50px] max-[480px]:left-2.5">
       <button
         type="button"
         onClick={handleLocate}

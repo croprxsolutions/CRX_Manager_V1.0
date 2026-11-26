@@ -8,8 +8,8 @@ Project-specific quirks that aren't obvious from reading the code, but have caus
 
 | Quirk | Wrong | Right |
 |-------|-------|-------|
-| react-map-gl v8 import path | `from 'react-map-gl'` | `from 'react-map-gl/mapbox'` |
-| Vite manualChunks for maps | put `react-map-gl` in chunks | only put `mapbox-gl` in chunks |
+| react-map-gl v8 import path | `from 'react-map-gl'` | `from 'react-map-gl/maplibre'` |
+| Vite manualChunks for maps | put `react-map-gl` in chunks | only put `maplibre-gl` in chunks |
 | Lucide icon tooltips | `<Icon title="..." />` (Lucide ignores it) | `<span title="..."><Icon /></span>` |
 | JSX truthy with unknown values | `{maybeNumber && <X/>}` (renders `0`) | `{maybeNumber ? <X/> : null}` |
 | What renders depends on a ref (React 19 batching) | `allowX={someRef.current}`, hoping another `setState` re-renders; or `ref.current = value` in the render body | keep a `useState` mirror for rendering (the ref stays for async handlers); for a latest-value/callback ref read by listeners or handlers use `useLatestRef` (`src/hooks/useLatestRef.ts`), which writes on commit. `react-hooks/refs` is enforced and flags both wrong patterns |

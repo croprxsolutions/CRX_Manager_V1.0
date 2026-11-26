@@ -23,6 +23,7 @@ const STATE_DIR = process.env.CRX_LOCAL_APP_STATE_DIR || path.join(HERE, STATE_F
 const STATE_FILE = path.join(STATE_DIR, 'local.env');
 const BUILD_FILE = path.join(STATE_DIR, 'build.json');
 const TEST_RECORD_FILE = path.join(STATE_DIR, 'last-test.json');
+const MAP_SWAP_FAKE_MAPBOX_TOKEN = 'pk.test-not-a-real-token';
 // One lock per checkout, in its canonical state folder, whatever CRX_LOCAL_APP_STATE_DIR says: the Docker project is fixed per checkout.
 const FIRST_START_LOCK = path.join(HERE, STATE_FOLDER, 'first-start.lock');
 const RECOVERY_COMMAND = `node scripts/local-app/${IS_SCREEN_WALK ? 'walkthrough' : IS_SALES_GAUNTLET ? 'sales' : IS_DOC_BYTES ? 'doc-bytes' : 'app'}.mjs rebuild`;
@@ -56,6 +57,15 @@ function readState() {
     const at = line.indexOf('=');
     return [line.slice(0, at), line.slice(at + 1)];
   }));
+}
+
+function mapSwapFakeMapboxToken() {
+  const requested = process.env.CRX_MAP_SWAP_FAKE_MAPBOX_TOKEN;
+  if (!requested) return '';
+  if (!IS_SCREEN_WALK || requested !== MAP_SWAP_FAKE_MAPBOX_TOKEN) {
+    throw new Refused('The map-swap fixture accepts only its fixed fake token in the screen-walk lane.');
+  }
+  return requested;
 }
 
 function signKey(secret, role) {
@@ -154,7 +164,7 @@ async function preflight({ needState = true } = {}) {
   if (state) assertLocalState(state);
   assertLocalDockerEndpoint(text(run('docker', ['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'])));
   assertAppPortIsLoopback(allListeners(), APP_PORT);
-  await assertFrontendIsOurs(state?.LOCAL_ANON_KEY);
+  await assertFrontendIsOurs(state?.LOCAL_ANON_KEY, { expectedMapboxToken: mapSwapFakeMapboxToken() });
   assertExistingStackIsOurs();
   if (IS_SCREEN_WALK) {
     const gateway = text(run('docker', ['ps', '-q', '--filter', `label=com.docker.compose.project=${PROJECT}`, '--filter', 'label=com.docker.compose.service=gateway']));
@@ -509,7 +519,7 @@ function frontendEnv(state, supabaseUrl = API_URL) {
     VITE_SUPABASE_URL: supabaseUrl,
     VITE_SUPABASE_ANON_KEY: state.LOCAL_ANON_KEY,
     // Set empty so a checkout's .env cannot switch on a service outside this computer.
-    VITE_MAPBOX_TOKEN: '',
+    VITE_MAPBOX_TOKEN: mapSwapFakeMapboxToken(),
     VITE_SENTRY_DSN: '',
   });
 }
@@ -528,7 +538,7 @@ async function ensureFrontend(state) {
     spawn(process.execPath, vite(APP_PORT), { cwd: ROOT, env: frontendEnv(state), detached: true, stdio: 'ignore' }).unref();
     await waitFor('test app', () => portIsOpen(APP_PORT));
   }
-  await assertFrontendIsOurs(state.LOCAL_ANON_KEY);
+  await assertFrontendIsOurs(state.LOCAL_ANON_KEY, { expectedMapboxToken: mapSwapFakeMapboxToken() });
 }
 
 async function start() {
@@ -589,7 +599,10 @@ async function test() {
     if (IS_SCREEN_WALK) await ensureFrontend(state);
     if (IS_SALES_GAUNTLET) run(process.execPath, ['scripts/local-app/sales-checks.mjs'], { stdio: 'inherit' });
     run(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '--config', 'scripts/local-app/playwright.config.ts', ...(spec ? [`scripts/local-app/e2e/${spec}`] : [])], {
-      stdio: 'inherit', env: childEnv(record ? { CRX_LOCAL_APP_TEST_RUN: runId } : {}),
+      stdio: 'inherit', env: childEnv(record ? {
+        CRX_LOCAL_APP_TEST_RUN: runId,
+        ...(mapSwapFakeMapboxToken() ? { CRX_MAP_SWAP_FAKE_MAPBOX_TOKEN: mapSwapFakeMapboxToken() } : {}),
+      } : {}),
     });
     if (record) {
       const report = JSON.parse(readFileSync(path.join(ROOT, record.artifacts, 'playwright.json'), 'utf8'));

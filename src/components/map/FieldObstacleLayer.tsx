@@ -17,7 +17,7 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
-import { Marker, Popup } from 'react-map-gl/mapbox';
+import { Marker, Popup } from 'react-map-gl/maplibre';
 import { fieldObstacleName, fieldObstacleToGeoJsonFeature, isFieldObstacleKind } from '../../lib/fieldObstacles';
 import type { FieldObstacle, FieldObstacleKind } from '../../types';
 

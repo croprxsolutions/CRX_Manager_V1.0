@@ -79,25 +79,33 @@ export default function DrawLayer({
   );
 
   const handleUpdate = useCallback(
-    (feature: GeoJSON.Feature) => {
-      if (feature.geometry.type !== 'Polygon') return;
-
-      const polygon = feature as Feature<Polygon>;
-      const sqMeters = area(polygon);
-      const acres = Math.round((sqMeters / 4046.8564224) * 100) / 100;
-      const center = centroid(polygon);
-      const [lng, lat] = center.geometry.coordinates;
+    (features: GeoJSON.Feature[]) => {
+      const polygons = features.filter(
+        (feature): feature is Feature<Polygon> => feature.geometry.type === 'Polygon',
+      );
+      if (polygons.length === 0) return;
 
       if (isMultiMode && initialPolygons) {
-        const drawId = feature.id as string;
-        const updated = initialPolygons.map((p) =>
-          p.drawId === drawId ? { ...p, polygon, acres } : p
-        );
+        const updatedById = new Map(polygons.map((polygon) => {
+          const sqMeters = area(polygon);
+          const acres = Math.round((sqMeters / 4046.8564224) * 100) / 100;
+          return [String(polygon.id ?? ''), { polygon, acres }] as const;
+        }));
+        const updated = initialPolygons.map((part) => {
+          const change = updatedById.get(part.drawId);
+          return change ? { ...part, ...change } : part;
+        });
         onPolygonsChange?.(updated);
         return;
       }
 
-      onBoundaryChange?.(polygon, acres, [lng, lat]);
+      for (const polygon of polygons) {
+        const sqMeters = area(polygon);
+        const acres = Math.round((sqMeters / 4046.8564224) * 100) / 100;
+        const center = centroid(polygon);
+        const [lng, lat] = center.geometry.coordinates;
+        onBoundaryChange?.(polygon, acres, [lng, lat]);
+      }
     },
     [isMultiMode, initialPolygons, onPolygonsChange, onBoundaryChange]
   );

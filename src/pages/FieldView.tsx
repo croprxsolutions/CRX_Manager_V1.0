@@ -79,7 +79,7 @@ import {
   AlertCircle,
   CloudUpload,
 } from 'lucide-react';
-import type { MapRef } from 'react-map-gl/mapbox';
+import type { MapRef } from 'react-map-gl/maplibre';
 import type { Json } from '../types/supabase';
 import CrewFieldMarkerMap from '../components/map/CrewFieldMarkerMap';
 import ErrorBoundary from '../components/ErrorBoundary';

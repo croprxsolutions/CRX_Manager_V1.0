@@ -77,7 +77,7 @@ export default function AddressSearch({ onSelect }: AddressSearchProps) {
   }, []);
 
   return (
-    <div className="absolute top-4 left-14 z-10 w-64 sm:w-80">
+    <div className="absolute top-4 left-14 z-10 w-64 sm:w-80 max-[480px]:w-48">
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
         <input

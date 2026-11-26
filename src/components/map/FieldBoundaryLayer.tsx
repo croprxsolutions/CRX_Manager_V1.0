@@ -1,5 +1,8 @@
-import { useMemo, useEffect } from 'react';
-import { Source, Layer, useMap } from 'react-map-gl/mapbox';
+import { useMemo, useEffect, useState } from 'react';
+import { Source, Layer, Marker, useMap } from 'react-map-gl/maplibre';
+import centroid from '@turf/centroid';
+import type { MapMouseEvent } from 'maplibre-gl';
+import type { Polygon as GeoJSONPolygon } from 'geojson';
 import { billableAcres } from '../../lib/fieldGeometry';
 import type { Customer, Field } from '../../types';
 
@@ -22,83 +25,156 @@ interface FieldBoundaryLayerProps {
   onFieldHover?: (fieldId: string | null) => void;
 }
 
-export default function FieldBoundaryLayer({
-  fields,
-  showLabels = true,
-  labelById,
-  onFieldClick,
-  selectedIds,
-  hoveredId,
-  onFieldHover,
-}: FieldBoundaryLayerProps) {
-  const geojson = useMemo(() => {
-    const features = fields
-      .filter((f) => f.boundary_geojson)
-      .map((f) => {
-        try {
-          const geometry =
-            typeof f.boundary_geojson === 'string'
-              ? JSON.parse(f.boundary_geojson)
-              : f.boundary_geojson;
-          const b = f.billable_acres ?? billableAcres(f.override_acres, f.measured_acres, f.total_acres);
-          const fieldLabel = labelById?.get(f.id)
-            ? `${labelById.get(f.id)} · ${f.field_name}`
-            : f.field_name;
-          return {
-            type: 'Feature' as const,
-            properties: {
-              id: f.id,
-              field_name: f.field_name,
-              // Map label shows the field name with its billable acres beneath it.
-              label: b != null ? `${fieldLabel}\n${b} ac` : fieldLabel,
-              total_acres: f.total_acres,
-              crop_type: f.crop_type,
-              customer_name:
-                f.customer_name || f.customer?.farm_name || '',
-              // Phase 6: stamp selection state into the feature so paint
-              // expressions can pick it up. Re-derived whenever selectedIds changes.
-              selected: selectedIds ? selectedIds.has(f.id) : false,
-              hovered: hoveredId === f.id,
-            },
-            geometry,
-          };
-        } catch {
-          return null;
-        }
-      })
-      .filter((f): f is NonNullable<typeof f> => f !== null);
+interface BoundaryLabel {
+  key: string;
+  text: string;
+  longitude: number;
+  latitude: number;
+}
 
-    return { type: 'FeatureCollection' as const, features };
-  }, [fields, hoveredId, labelById, selectedIds]);
+type BoundaryGeojson = ReturnType<typeof createBoundaryGeojson>;
 
-  // Click handler for boundary polygons
-  const { current: map } = useMap();
+function createBoundaryGeojson(
+  fields: FieldWithCustomer[],
+  labelById?: Map<string, string>,
+  selectedIds?: Set<string>,
+  hoveredId?: string | null,
+) {
+  const features = fields
+    .filter((field) => field.boundary_geojson)
+    .map((field) => {
+      try {
+        const geometry = typeof field.boundary_geojson === 'string'
+          ? JSON.parse(field.boundary_geojson)
+          : field.boundary_geojson;
+        const acres = field.billable_acres ?? billableAcres(field.override_acres, field.measured_acres, field.total_acres);
+        const name = labelById?.get(field.id)
+          ? `${labelById.get(field.id)} · ${field.field_name}`
+          : field.field_name;
+        return {
+          type: 'Feature' as const,
+          properties: {
+            id: field.id,
+            field_name: field.field_name,
+            label: acres != null ? `${name}\n${acres} ac` : name,
+            total_acres: field.total_acres,
+            crop_type: field.crop_type,
+            customer_name: field.customer_name || field.customer?.farm_name || '',
+            selected: selectedIds ? selectedIds.has(field.id) : false,
+            hovered: hoveredId === field.id,
+          },
+          geometry,
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter((feature): feature is NonNullable<typeof feature> => feature !== null);
+
+  return { type: 'FeatureCollection' as const, features };
+}
+
+function createBoundaryLabels(geojson: BoundaryGeojson): BoundaryLabel[] {
+  return geojson.features.flatMap((feature) => {
+    const geometry = feature.geometry;
+    const polygons: GeoJSONPolygon['coordinates'][] = geometry.type === 'Polygon'
+      ? [geometry.coordinates]
+      : geometry.type === 'MultiPolygon' ? geometry.coordinates : [];
+    return polygons.map((coordinates: GeoJSONPolygon['coordinates'], index: number) => {
+      const point = centroid({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'Polygon', coordinates },
+      }).geometry.coordinates;
+      return {
+        key: `${feature.properties.id}:${index}`,
+        text: feature.properties.label,
+        longitude: point[0],
+        latitude: point[1],
+      };
+    });
+  });
+}
+
+function useVisibleBoundaryLabels(labels: BoundaryLabel[], map: ReturnType<typeof useMap>['current'], enabled: boolean) {
+  const [visible, setVisible] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    if (!map || !enabled) {
+      setVisible((current) => current.size === 0 ? current : new Set());
+      return;
+    }
+
+    const update = () => {
+      const occupied: Array<{ left: number; top: number; right: number; bottom: number }> = [];
+      const next = new Set<string>();
+      const { clientWidth: width, clientHeight: height } = map.getContainer();
+      if (!width || !height) return;
+
+      for (const label of labels) {
+        const point = map.project([label.longitude, label.latitude]);
+        const lines = label.text.split('\n');
+        const widthEstimate = Math.min(180, Math.max(28, ...lines.map((line) => line.length * 6.5)));
+        const lineCount = lines.reduce((count, line) => count + Math.max(1, Math.ceil(line.length * 6.5 / 180)), 0);
+        const heightEstimate = lineCount * 15;
+        const box = {
+          left: point.x - widthEstimate / 2,
+          top: point.y - heightEstimate / 2,
+          right: point.x + widthEstimate / 2,
+          bottom: point.y + heightEstimate / 2,
+        };
+        if (box.right < 0 || box.left > width || box.bottom < 0 || box.top > height) continue;
+        if (occupied.some((other) => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top)) continue;
+        occupied.push(box);
+        next.add(label.key);
+      }
+
+      setVisible((current) => current.size === next.size && [...current].every((key) => next.has(key)) ? current : next);
+    };
+
+    let frame: number | null = null;
+    const schedule = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        update();
+      });
+    };
+    map.on('moveend', schedule);
+    map.on('resize', schedule);
+    schedule();
+    return () => {
+      map.off('moveend', schedule);
+      map.off('resize', schedule);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [enabled, labels, map]);
+
+  return visible;
+}
+
+function useBoundaryInteractions(
+  map: ReturnType<typeof useMap>['current'],
+  onFieldClick?: (fieldId: string) => void,
+  onFieldHover?: (fieldId: string | null) => void,
+) {
   useEffect(() => {
     if (!map || !onFieldClick) return;
-
-    const handleClick = (e: mapboxgl.MapMouseEvent) => {
-      const features = map.queryRenderedFeatures(e.point, {
-        layers: ['field-boundaries-fill'],
-      });
-      if (features && features.length > 0) {
-        const fieldId = features[0].properties?.id;
-        if (fieldId) onFieldClick(fieldId);
-      }
+    const handleClick = (event: MapMouseEvent) => {
+      const feature = map.queryRenderedFeatures(event.point, { layers: ['field-boundaries-fill'] })[0];
+      const fieldId = feature?.properties?.id;
+      if (fieldId) onFieldClick(fieldId);
     };
-    const handleMouseMove = (e: mapboxgl.MapMouseEvent) => {
+    const handleMouseMove = (event: MapMouseEvent) => {
       map.getCanvas().style.cursor = 'pointer';
-      const features = map.queryRenderedFeatures(e.point, {
-        layers: ['field-boundaries-fill'],
-      });
-      onFieldHover!(features[0]?.properties?.id ?? null);
+      const feature = map.queryRenderedFeatures(event.point, { layers: ['field-boundaries-fill'] })[0];
+      onFieldHover?.(feature?.properties?.id ?? null);
     };
     const handleMouseLeave = () => {
       map.getCanvas().style.cursor = '';
       onFieldHover?.(null);
     };
-    const handleMouseEnter = () => {
-      map.getCanvas().style.cursor = 'pointer';
-    };
+    const handleMouseEnter = () => { map.getCanvas().style.cursor = 'pointer'; };
 
     map.on('click', 'field-boundaries-fill', handleClick);
     if (onFieldHover) {
@@ -108,7 +184,6 @@ export default function FieldBoundaryLayer({
       map.on('mouseenter', 'field-boundaries-fill', handleMouseEnter);
       map.on('mouseleave', 'field-boundaries-fill', handleMouseLeave);
     }
-
     return () => {
       map.off('click', 'field-boundaries-fill', handleClick);
       if (onFieldHover) {
@@ -120,8 +195,26 @@ export default function FieldBoundaryLayer({
       }
     };
   }, [map, onFieldClick, onFieldHover]);
+}
+
+export default function FieldBoundaryLayer({
+  fields,
+  showLabels = true,
+  labelById,
+  onFieldClick,
+  selectedIds,
+  hoveredId,
+  onFieldHover,
+}: FieldBoundaryLayerProps) {
+  const geojson = useMemo(() => createBoundaryGeojson(fields, labelById, selectedIds, hoveredId), [fields, hoveredId, labelById, selectedIds]);
+  // Labels depend only on the fields, not hover/selection, so hovering never re-runs label placement.
+  const labelCandidates = useMemo(() => createBoundaryLabels(createBoundaryGeojson(fields, labelById)), [fields, labelById]);
+  const { current: map } = useMap();
+  const visibleLabels = useVisibleBoundaryLabels(labelCandidates, map, showLabels);
+  useBoundaryInteractions(map, onFieldClick, onFieldHover);
 
   return (
+    <>
     <Source id="field-boundaries" type="geojson" data={geojson}>
       <Layer
         id="field-boundaries-fill"
@@ -141,23 +234,24 @@ export default function FieldBoundaryLayer({
           'line-width': ['case', ['get', 'selected'], 3, ['get', 'hovered'], 3, 2],
         }}
       />
-      {showLabels && (
-        <Layer
-          id="field-boundaries-labels"
-          type="symbol"
-          layout={{
-            'text-field': ['get', 'label'],
-            'text-size': 12,
-            'text-anchor': 'center',
-            'text-allow-overlap': false,
-          }}
-          paint={{
-            'text-color': '#ffffff',
-            'text-halo-color': '#000000',
-            'text-halo-width': 1,
-          }}
-        />
-      )}
     </Source>
+      {showLabels && labelCandidates.filter((candidate) => visibleLabels.has(candidate.key)).map((candidate) => (
+        <Marker
+          key={candidate.key}
+          longitude={candidate.longitude}
+          latitude={candidate.latitude}
+          anchor="center"
+          style={{ pointerEvents: 'none' }}
+        >
+          <span
+            aria-hidden="true"
+            className="pointer-events-none whitespace-pre-wrap text-center text-xs text-white"
+            style={{ maxWidth: 180, textShadow: '-1px -1px 1px #000, 1px -1px 1px #000, -1px 1px 1px #000, 1px 1px 1px #000' }}
+          >
+            {candidate.text}
+          </span>
+        </Marker>
+      ))}
+    </>
   );
 }

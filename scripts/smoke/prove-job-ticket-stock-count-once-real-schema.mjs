@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270311100000_job_ticket_stock_count_once: a job and the blend tickets linked to it take a
+ * Real-schema proof for 20270312120000_job_ticket_stock_count_once: a job and the blend tickets linked to it take a
  * product out of stock once (the larger claim), not twice; the later posting takes only the difference and is flagged.
  * Builds the baseline plus every migration before the candidate (shared undo-paths harness), then:
  *   BEFORE: a linked ticket plus its job take the same product twice (the bug).
@@ -23,7 +23,7 @@ import { spawn } from 'node:child_process';
 process.env.UNDO_PATHS_CONTAINER ||= `crx-countonce-${process.pid}-${Date.now().toString(36)}`;
 const { buildContainer, removeContainer, seedUsers, psql, scalar, docker, USERS, id, NAME, ROOT } = await import('./undo-paths/harness.mjs');
 
-const CANDIDATE = '20270311100000_job_ticket_stock_count_once.sql';
+const CANDIDATE = '20270312120000_job_ticket_stock_count_once.sql';
 const ROLLBACK = path.join(ROOT, 'scripts', 'smoke', 'job-ticket-stock-count-once-reverse.sql');
 const CUST = id('c1'), FIELD = id('c2'), CUST2 = id('c3');
 const PRE = { job: '3bd9dfe0729d8175ffbb1cf16b258b5c', bt: '0ad9a78b900cb953e0aa7d2a0d87bda0', rev: 'bb7b45f8dca986c9cf39b5b6a41aa75b' };
@@ -109,10 +109,10 @@ function session(uid, sql) {
 }
 const numberLockHeld = () => scalar(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted
   AND objid::bigint = (hashtext('next_application_record_number')::bigint & 4294967295);`) !== '0';
-// Completion holds its locks for 2 s; `other` starts once the completion holds the number lock, and must wait for it,
+// Completion holds its locks for 6 s (docker exec can take over 1 s on a busy machine); `other` starts once the completion holds the number lock, and must wait for it,
 // then see the committed job record.
 async function whileCompleting(j, uid, otherSql) {
-  const aRun = session(USERS.admin, `BEGIN; ${completeSql(j)} SELECT pg_sleep(2); SELECT 'A-done ' || extract(epoch FROM clock_timestamp()); COMMIT;`);
+  const aRun = session(USERS.admin, `BEGIN; ${completeSql(j)} SELECT pg_sleep(6); SELECT 'A-done ' || extract(epoch FROM clock_timestamp()); COMMIT;`);
   for (let i = 0; !numberLockHeld(); i += 1) {
     assert.ok(i < 200, 'the completion never took the number lock');
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -136,7 +136,7 @@ try {
     INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD}', '${CUST}', '[PROVER] Count Once Field');
     INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST2}', '[PROVER] Count Once Other Farm', true);`);
   for (let n = 0; n <= 9; n += 1) product(n);
-  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22, 23, 24, 25, 26, 27]) product(n);
+  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22, 23, 24, 25, 26, 27, 28]) product(n);
   const wrapperAcl = WRAPPERS.map(acl);
 
   // BEFORE: the bug. Ticket 6 on an in-progress job, then the job's 10: 16 out.
@@ -319,6 +319,15 @@ try {
     AND quantity = 0 AND requires_review AND notes LIKE 'Review: other blend tickets on this job took 3 more%';`), '1');
   balance(26, 13, 'ticket 7 reversed: the other ticket\'s extra 3 stays out, flagged');
 
+  // Taha LOW 1: a ticket that moved nothing (job 10, ticket 6 takes 0) is reversed; a retry with a fresh key reads
+  // already_reversed, not not_found (no credit row exists, but its own job_applied row still names the record).
+  job(28, [[28, 10]]); ticket(28, 28, [[28, 6]]);
+  complete(J(28)); file(T(28));
+  const record28 = scalar(`SELECT ${recordOf(T(28))};`);
+  ok(USERS.admin, reverseSql(T(28)));
+  assert.match(ok(USERS.admin, `SELECT public.reverse_application_record('${record28}', '${key()}');`), /"status": "already_reversed"/);
+  balance(28, 10, 'zero-move ticket reversed, then retried with a fresh key');
+
   // Races: each must wait for the completion's lock, then act on the committed job record.
   job(11, [['d', 10]]); ticket(11, 11, [['d', 6]]);
   let b = await whileCompleting(J(11), USERS.rep, fileSql(T(11)));
@@ -336,7 +345,7 @@ try {
   // Luna r6: two reversals with the same key at once both return the first one's receipt.
   ticket(27, null, [[27, 5]]); file(T(27));
   const sameKey = key();
-  const firstRun = session(USERS.admin, `BEGIN; SELECT public.reverse_application_record(${recordOf(T(27))}, '${sameKey}'); SELECT pg_sleep(2); COMMIT;`);
+  const firstRun = session(USERS.admin, `BEGIN; SELECT public.reverse_application_record(${recordOf(T(27))}, '${sameKey}'); SELECT pg_sleep(6); COMMIT;`);
   for (let i = 0; !numberLockHeld(); i += 1) {
     assert.ok(i < 200, 'the first reversal never took the number lock');
     await new Promise((resolve) => setTimeout(resolve, 50));

@@ -64,8 +64,8 @@ Database only, one PR to `staging`. The deployed app calls the same RPCs with th
 - 33/34/35: rows from before the migration are outside the rule (cannot be backfilled; production has none; NOTICE counts staging ones); rollback split into before/after first use.
 
 ## Accepted limits (follow-ups, not this change)
-- Wrong job link discovered after completion: the filed ticket cannot be moved; the office corrects stock with an adjustment (existing route). A proper "fix the link" route is a follow-up.
-- A product whose inventory unit changes between the two postings compares claims in different units; rare, already flagged by both postings' review lines. Follow-up if units become editable on stocked products.
+- Wrong job link discovered after completion: smart undo (`reverse_application_record`) reverses the ticket's record, the job keeps what it still needs, and the ticket can be re-filed against the right job. A hand adjustment alone is not the route: it leaves the ticket's claim in the wrong job's group.
+- A product whose inventory unit changes between the two postings compares claims in different units. Only the second posting is flagged (as counted); the first, posted in full, is not. Rare; follow-up if units become editable on stocked products.
 - Two legal application records (job and ticket) still exist for the same spray; billing unchanged. Follow-up.
 - Pairs whose both halves were posted before this migration stay as they are (write-once ledger; production has none).
 

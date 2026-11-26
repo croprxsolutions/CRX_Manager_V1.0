@@ -351,7 +351,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _manual_inventory_add_replay_impl_20261015: ['manual_inventory_add'],
   _complete_job_replay_impl_20261015: ['complete_job'],
   // Same rename for create_application_record_from_blend_ticket (20261016140000), which kept its documented
-  // alias literal. 20270311100000 (count once) re-emits the body only to count a job's stock once.
+  // alias literal. 20270312120000 (count once) re-emits the body only to count a job's stock once.
   _create_app_record_from_bt_replay_impl_20261015: ['create_app_record_from_bt'],
   // Same rename for start_job; 20261217100000 (KI-73 part C) re-emits it only to end whole-job access with
   // the job. Changing the literal would orphan existing receipts.
@@ -374,6 +374,8 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _section9_record_vendor_payment_intent_impl_20260831: ['record_vendor_payment'],
   _section9_void_vendor_bill_intent_impl_20260831: ['void_vendor_bill'],
   _section9_receive_po_items_intent_impl_20260831: ['receive_po_items'],
+  // Old and new PO Detail clients share the receipt and the same input fingerprint during rollout.
+  receive_po_items_with_excess_notice: ['receive_po_items'],
   // 20270310150000 reads the receiver's receipt as notice evidence. Only its own operation stores or returns a notice receipt.
   notify_damaged_receiving: ['receive_po_items'],
   // Direct EXECUTE is revoked (postgres-only). Batch 4a (20261102180000) renamed the live

@@ -106,9 +106,11 @@ BEGIN
   RESET ROLE;
   IF (SELECT count(*) FROM public.notifications WHERE related_entity_id = job AND user_id = app_b
      AND notification_type = 'job_dispatched') <> 2
-    OR (SELECT count(*) FROM public.notifications WHERE related_entity_id = job
-     AND user_id = app_a AND notification_type = 'job_undispatched') <> 1
-  THEN RAISE EXCEPTION 'Wizard takeover, Board prior recipient or Board no-op changed'; END IF;
+  THEN RAISE EXCEPTION 'Wizard takeover or Board no-op changed'; END IF;
+  -- A still holds location B on this job, so moving location A away sends A no removal notice.
+  IF EXISTS (SELECT FROM public.notifications WHERE related_entity_id = job
+     AND user_id = app_a AND notification_type = 'job_undispatched')
+  THEN RAISE EXCEPTION 'Board told A the job was removed while A still holds another location'; END IF;
 
   SET LOCAL ROLE authenticated;
   PERFORM public.dispatch_location_with_notices('remove', p_job_field_ids => ARRAY[location_a],
@@ -120,13 +122,26 @@ BEGIN
     OR first_result IS DISTINCT FROM public.dispatch_location_with_notices('remove',
       p_job_field_ids => ARRAY[location_c], p_idempotency_key => old_remove_key)
   THEN RAISE EXCEPTION 'Removal replay from the old operation changed its result'; END IF;
+  RESET ROLE;
+  -- B still held location C when location A was removed, so B got no removal notice.
+  IF EXISTS (SELECT FROM public.notifications WHERE related_entity_id = job
+     AND user_id = app_b AND notification_type = 'job_undispatched')
+  THEN RAISE EXCEPTION 'Removal told B the job was removed while B still held another location'; END IF;
+  SET LOCAL ROLE authenticated;
+  -- A loses its only location to a crew: A gets the removal notice.
   PERFORM public.dispatch_location_with_notices('reassign', crew_payload, p_idempotency_key => gen_random_uuid()::text);
+  -- B gets location C back, then loses it, its only location: B gets the removal notice.
+  PERFORM public.dispatch_location_with_notices('wizard', take_over, p_idempotency_key => gen_random_uuid()::text);
+  PERFORM public.dispatch_location_with_notices('remove', p_job_field_ids => ARRAY[location_c],
+    p_idempotency_key => gen_random_uuid()::text);
   RESET ROLE;
   IF (SELECT count(*) FROM public.notifications WHERE related_entity_id = job) <> 6
+    OR (SELECT count(*) FROM public.notifications WHERE related_entity_id = job AND user_id = app_a
+     AND notification_type = 'job_undispatched') <> 1
     OR (SELECT count(*) FROM public.notifications WHERE related_entity_id = job AND user_id = app_b
      AND notification_type = 'job_undispatched') <> 1
     OR EXISTS (SELECT FROM public.notifications WHERE related_entity_id = job AND created_by IS DISTINCT FROM rep)
-  THEN RAISE EXCEPTION 'Removal, crew or sender behavior changed'; END IF;
+  THEN RAISE EXCEPTION 'Last-location removal, crew or sender behavior changed'; END IF;
 
   SELECT id INTO fixture_admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY id LIMIT 1;
   IF fixture_admin IS NULL THEN RAISE EXCEPTION 'The local walkthrough needs its seeded administrator'; END IF;

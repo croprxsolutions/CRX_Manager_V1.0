@@ -157,7 +157,7 @@ DECLARE
   v_short_flag     boolean;
   v_result         jsonb;
   v_deduct_qty     numeric;
-  -- Count once (20270311100000): this line's claim, the job/ticket group's claims and amount taken so far,
+  -- Count once: this line's claim, the job/ticket group's claims and amount taken so far,
   -- and the part of the claim another posting already took.
   v_claim          numeric;
   v_cj             numeric;
@@ -709,7 +709,7 @@ DECLARE
   v_app_time       time;
   -- A5: quantity converted to the product's inventory unit for the stock deduction
   v_deduct_qty     numeric;
-  -- Count once (20270311100000): this line's claim, the job/ticket group's claims and amount taken so far,
+  -- Count once: this line's claim, the job/ticket group's claims and amount taken so far,
   -- and the part of the claim another posting already took.
   v_claim          numeric;
   v_cj             numeric;
@@ -983,7 +983,7 @@ BEGIN
     END IF;
   END IF;
 
-  -- Count once (20270311100000): the same lock job completion and ticket filing take, before any row is
+  -- Count once: the same lock job completion and ticket filing take, before any row is
   -- read, so the job's stock group below is settled.
   PERFORM pg_advisory_xact_lock(hashtext('next_application_record_number'));
 
@@ -1016,6 +1016,14 @@ BEGIN
                COALESCE(it.notes, ''),
                '(reversed application record ' || p_application_record_id::text || ')'
              ) > 0
+    )
+    -- Count once: a ticket that moved nothing leaves no credit row when reversed; its own write-once
+    -- job_applied rows still name the record.
+    OR EXISTS (
+      SELECT 1
+        FROM public.inventory_transactions it
+       WHERE it.transaction_type = 'job_applied'
+         AND it.application_record_id = p_application_record_id
     ) INTO v_prior_reversal;
 
     v_result := jsonb_build_object(
@@ -1251,9 +1259,9 @@ BEGIN
   FOR v_fn IN
     SELECT x.sig, x.md5, x.api, p.oid, p.prosrc, p.prosecdef, p.proconfig
       FROM (VALUES
-        ('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)', '5df6e9533702ab6ab857fe4c9784fc04', false),
-        ('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)', '03b74676ffbc1852613b8f668a6ad2f3', false),
-        ('public.reverse_application_record(uuid, text)', 'b9bb5b47eabd4aace061542f9289cbfd', true)
+        ('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)', '0fc4e07bd31e23a56c37ca7bf8c9301b', false),
+        ('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)', '65ff342c6eccd4043ea3db7c4f7635d1', false),
+        ('public.reverse_application_record(uuid, text)', '5bdf42d93a5fbdd1302d3c7306229bc5', true)
       ) AS x(sig, md5, api)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(x.sig)
   LOOP

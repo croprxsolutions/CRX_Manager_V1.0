@@ -1,9 +1,9 @@
 {
   "ignoreCommand": "bash scripts/vercel-ignore-build.sh",
-  "rewrites":[{ "source": "/(.*)", "destination": "/index.html" }],
+  "rewrites":[{ "source": "/((?!api/maps-step0/?$).*)", "destination": "/index.html" }],
   "headers": [
     {
-      "source": "/(.*)",
+      "source": "/((?!api/maps-step0/?$).*)",
       "headers": [
         {
           "key": "Content-Security-Policy",

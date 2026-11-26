@@ -111,7 +111,7 @@ export default defineConfig({
     // decompression tests; the same suite is stable with bounded concurrency.
     // GitHub CI owns its own isolated runner, so retain Vitest's CI default there.
     maxWorkers: process.env.CI ? undefined : 2,
-    include: ['src/**/*.test.{ts,tsx}'],
+    include: ['src/**/*.test.{ts,tsx}', 'proofs/maps-step0/staging-probe.test.mjs'],
     setupFiles: ['src/setupTests.ts'],
     env: liveSchemaTests
       ? {

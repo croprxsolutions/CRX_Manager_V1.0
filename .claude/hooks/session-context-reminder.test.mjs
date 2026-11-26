@@ -72,7 +72,8 @@ try {
   const guardsRepo = path.join(scratch, "old-checkout");
   const sessionRepo = path.join(scratch, "worktree");
   const scratchHook = path.join(guardsRepo, ".claude", "hooks", "session-context-reminder.mjs");
-  const env = scratchHookEnvironment(scratch);
+  // A generous git budget: this checks the warning's logic, not how fast a loaded PC runs git.
+  const env = { ...scratchHookEnvironment(scratch), CRX_SESSION_REMINDER_GIT_BUDGET_MS: "60000" };
   const git = (cwd, ...args) => {
     const result = spawnSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", ...args], { cwd, env, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
@@ -99,8 +100,10 @@ try {
     return JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
   };
 
-  assert.match(reminder(sessionRepo), /WARNING: this session's guards and skills run from .*old-checkout, not this worktree/);
-  assert.match(reminder(sessionRepo), /Follow the gate anyway/);
+  // One output for both phrases: the warning is all-or-nothing, so two spawns only doubled the timing exposure.
+  const staleWarning = reminder(sessionRepo);
+  assert.match(staleWarning, /WARNING: this session's guards and skills run from .*old-checkout, not this worktree/);
+  assert.match(staleWarning, /Follow the gate anyway/);
   assert.doesNotMatch(reminder(guardsRepo), /WARNING/, "guards loaded from the session's own folder are not this problem");
   assert.doesNotMatch(reminder(path.join(scratch, "missing")), /WARNING/, "a bad cwd stays silent");
 

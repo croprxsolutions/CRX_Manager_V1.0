@@ -1,4 +1,4 @@
--- Rollback for 20270311100000_job_ticket_stock_count_once.sql, BEFORE the first posting under it only.
+-- Rollback for 20270312120000_job_ticket_stock_count_once.sql, BEFORE the first posting under it only.
 -- After any job_applied row carries application_record_id (every posting under the new bodies), fix forward instead.
 -- Restores the three previous bodies and drops the group helper. The two ledger columns and their
 -- index stay (the ledger is write-once; unused columns are harmless).
@@ -14,9 +14,9 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.inventory_transactions WHERE application_record_id IS NOT NULL OR already_counted IS NOT NULL) THEN
     RAISE EXCEPTION 'COUNT_ONCE_ROLLBACK_REFUSED: postings under the count-once rule exist; fix forward with a new migration';
   END IF;
-  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)')), chr(13), '')) IS DISTINCT FROM '5df6e9533702ab6ab857fe4c9784fc04'
-     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)')), chr(13), '')) IS DISTINCT FROM '03b74676ffbc1852613b8f668a6ad2f3'
-     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.reverse_application_record(uuid, text)')), chr(13), '')) IS DISTINCT FROM 'b9bb5b47eabd4aace061542f9289cbfd' THEN
+  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)')), chr(13), '')) IS DISTINCT FROM '0fc4e07bd31e23a56c37ca7bf8c9301b'
+     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)')), chr(13), '')) IS DISTINCT FROM '65ff342c6eccd4043ea3db7c4f7635d1'
+     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.reverse_application_record(uuid, text)')), chr(13), '')) IS DISTINCT FROM '5bdf42d93a5fbdd1302d3c7306229bc5' THEN
     RAISE EXCEPTION 'COUNT_ONCE_ROLLBACK_REFUSED: the live bodies are not the count-once bodies';
   END IF;
 END;

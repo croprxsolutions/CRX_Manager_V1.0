@@ -9,4 +9,4 @@
 - Reversing a blend ticket's application record is refused once its job is completed
   (`APPLICATION_RECORD_COUNTED_WITH_JOB`); correct stock with an inventory adjustment instead. (A filed ticket's job
   link was already frozen.)
-- Migration `20270311100000_job_ticket_stock_count_once.sql` (two ledger columns, three re-emitted bodies). Proof: `scripts/smoke/prove-job-ticket-stock-count-once-real-schema.mjs`.
+- Migration `20270312120000_job_ticket_stock_count_once.sql` (two ledger columns, three re-emitted bodies). Proof: `scripts/smoke/prove-job-ticket-stock-count-once-real-schema.mjs`.

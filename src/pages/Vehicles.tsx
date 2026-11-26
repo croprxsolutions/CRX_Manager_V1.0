@@ -38,13 +38,13 @@ export default function Vehicles() {
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const canBulkAction = role === 'admin' || role === 'sales_rep';
+  const canBulkAction = role === 'admin';
 
   const fetchVehicles = useCallback(async () => {
     const seq = ++loadSeqRef.current;
     setLoading(true);
     const { data, error } = await supabase
-      .from('vehicles')
+      .from('admin_vehicle_register')
       .select('*')
       .order('vehicle_name');
     if (seq !== loadSeqRef.current) return;
@@ -119,7 +119,7 @@ export default function Vehicles() {
     setDeleting(true);
     try {
       const ids = selectedRows.map((v) => v.id);
-      const result = await supabase.from('vehicles').delete().in('id', ids).select();
+      const result = await supabase.from('vehicles').delete().in('id', ids).select('id');
       checkMutationResult(result, 'Delete vehicles');
       toast('success', `Deleted ${ids.length} vehicle(s)`);
       clearSelection();

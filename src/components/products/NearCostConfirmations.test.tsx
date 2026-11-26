@@ -8,8 +8,8 @@ describe('NearCostConfirmations', () => {
     render(
       <NearCostConfirmations
         products={[{ product_id: 'p1', product_name: 'Roundup', tiers: [
-          { tier: 2, price_cents: 642n, cost_cents: 640n, fraction_margin_percent: '0.35' },
-          { tier: 3, price_cents: 652n, cost_cents: 640n, fraction_margin_percent: null },
+          { tier: 2, price_cents: 642n, cost_cents: 640n, fraction_margin_percent: '0.35', margin_driven: true },
+          { tier: 3, price_cents: 652n, cost_cents: 640n, fraction_margin_percent: null, margin_driven: false },
         ] }]}
         ticked={new Set()}
         disabled={false}
@@ -22,5 +22,38 @@ describe('NearCostConfirmations', () => {
     expect(box).toHaveAccessibleDescription(/Roundup/);
     fireEvent.click(box);
     expect(onTickChange).toHaveBeenCalledWith('p1', true);
+  });
+
+  it('keeps the near-cost tick without suggesting a margin correction on price-driven rows', () => {
+    render(
+      <NearCostConfirmations
+        products={[{ product_id: 'p1', product_name: 'Roundup', tiers: [
+          { tier: 1, price_cents: 642n, cost_cents: 640n, fraction_margin_percent: '0.35', margin_driven: false },
+        ] }]}
+        ticked={new Set()}
+        disabled={false}
+        onTickChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/margin 0.35%/)).toBeInTheDocument();
+    expect(screen.queryByText(/did you mean 35 for 35%/)).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /this price and margin are what I meant/ })).toBeInTheDocument();
+  });
+
+  it('does not suggest a rounded correction of 100 or more', () => {
+    render(
+      <NearCostConfirmations
+        products={[{ product_id: 'p1', product_name: 'Roundup', tiers: [
+          { tier: 1, price_cents: 641n, cost_cents: 640n, fraction_margin_percent: '0.999999999', margin_driven: true },
+        ] }]}
+        ticked={new Set()}
+        disabled={false}
+        onTickChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/margin 0.999999999%/)).toBeInTheDocument();
+    expect(screen.queryByText(/did you mean 100 for 100%/)).not.toBeInTheDocument();
   });
 });

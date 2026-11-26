@@ -40,7 +40,7 @@ While 2.4 and 2.6 wait for 12-15, build 2.1 → 2.2 → 2.3 → 2.5 → 2.7 in t
 
 ## Applicator access (all items)
 
-FP-1 made split versions and payer notes office only. The applicator's extra-field picker (2.2) cannot read `field_billing_split_payers`; give it a narrow read function that returns field id, name and acres only for fields a payer on the applicator's own job pays on (share above 0 on either side), no shares and no notes. Its grant is the applicator extra-field permission in the slice 2 batch: build it, but it merges only after Mason's yes.
+FP-1 made split versions and payer notes office only. The applicator's extra-field picker (2.2) cannot read `field_billing_split_payers`; give it a narrow read function that returns field id, name and acres only for fields a payer on the applicator's own job pays on (share above 0 on either side), no shares and no notes. Its grant is the applicator extra-field permission: Mason said yes 2026-11-25.
 
 ## Worktree and files
 

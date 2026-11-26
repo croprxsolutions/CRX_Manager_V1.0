@@ -11,7 +11,7 @@ You build the mixer tablet and the applicator phone screens. Read `docs/plans/fi
 ## What to build
 
 - **Mixer tablet:** job list from `get_mixable_jobs()`; confirm a load (name pick, real contents, per-load mix edit, warehouse pick), add to a load, correct a load (reason), leftover (ran dry, carried, to tote, none); the office's load entry for no-tablet jobs. Every call sends a retry key made once per action.
-- **Applicator phone:** work entries per field per day, load segments, gauge, Now buttons, weather, Job done, pause with acres left and a resume note; restricted-use fields per state; the extra field (picker from the narrow read function in the database brief, or a typed note), only after Mason's yes on the extra-field permission.
+- **Applicator phone:** work entries per field per day, load segments, gauge, Now buttons, weather, Job done, pause with acres left and a resume note; restricted-use fields per state; the extra field (picker from the narrow read function in the database brief, or a typed note) (Mason said yes 2026-11-25).
 - The next load's proposal shows "X acres to finish on field Y" and the resume note; spray record print per field (calls existing print libraries; does not edit them).
 
 ## Files

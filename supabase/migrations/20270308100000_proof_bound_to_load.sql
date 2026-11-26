@@ -1,7 +1,7 @@
 -- idempotency-body-check: exempt -- _complete_delivery_authorized_impl only reads check_idempotency to skip a replay
 -- (#2324's body, unchanged); the key is saved by _complete_delivery_authorized_impl_20270122 and the evidence step.
 -- Written 2026-11-23, extended 2026-11-24 (delivered amounts). STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270308000000_proof_bound_to_load.md.
+-- docs/reference/migrations.d/20270308100000_proof_bound_to_load.md.
 --
 -- WHY: a customer's proof (an on-screen signature, or a photo of the signed paper ticket) must complete a delivery only
 --   for the products the screen showed when the proof was taken (Sol round 7 on #2324, findings 1 and 2),

@@ -11,8 +11,10 @@ DECLARE
 BEGIN
   SELECT * INTO p FROM pg_proc WHERE oid = to_regprocedure('public._sync_quote_job_reservations(uuid,uuid)');
   IF NOT FOUND
+     OR (SELECT count(*) FROM pg_proc o
+          WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_sync_quote_job_reservations') <> 1
      OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM 'dceb55c5ff8556ac974a97a7e85d11b1' THEN
-    RAISE EXCEPTION 'JOB_DRAW_VERSION_REVERSE_PREFLIGHT: _sync_quote_job_reservations is not the 20270309040000 body (md5 dceb55c5ff8556ac974a97a7e85d11b1)';
+    RAISE EXCEPTION 'JOB_DRAW_VERSION_REVERSE_PREFLIGHT: _sync_quote_job_reservations is not the one 20270309040000 body (md5 dceb55c5ff8556ac974a97a7e85d11b1)';
   END IF;
 END
 $preflight$;
@@ -319,6 +321,8 @@ DECLARE
 BEGIN
   SELECT * INTO p FROM pg_proc WHERE oid = to_regprocedure('public._sync_quote_job_reservations(uuid,uuid)');
   IF NOT FOUND
+     OR (SELECT count(*) FROM pg_proc o
+          WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_sync_quote_job_reservations') <> 1
      OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '2e62bad29abc2ba33cb0e2f06a2d4a64'
      OR p.proowner <> 'postgres'::regrole
      OR NOT p.prosecdef

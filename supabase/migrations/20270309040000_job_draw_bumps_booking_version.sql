@@ -52,10 +52,13 @@ BEGIN
           WHERE t.tgrelid = 'public.quotes'::regclass AND t.tgname = 'quotes_bump_row_version'
             AND t.tgfoid = 'public.bump_record_row_version()'::regprocedure
             AND t.tgenabled = 'O' AND t.tgqual IS NULL AND t.tgattr = ''::int2vector
-            AND t.tgtype = 19) THEN -- BEFORE UPDATE, FOR EACH ROW
+            AND t.tgtype = 19) -- BEFORE UPDATE, FOR EACH ROW
+     -- ... and its function still moves the version (the 20260730235031 body: NEW.row_version := OLD.row_version + 1)
+     OR (SELECT md5(replace(b.prosrc, chr(13), '')) FROM pg_proc b
+          WHERE b.oid = to_regprocedure('public.bump_record_row_version()')) IS DISTINCT FROM 'd6f6ccb221314070e69fd7d4890f31f8' THEN
     -- md5 of the reviewed 20261107070000 body: any other body (a hotfix, or this migration already
     -- applied) stops here.
-    RAISE EXCEPTION 'JOB_DRAW_VERSION_PREFLIGHT: _sync_quote_job_reservations is not the reviewed 20261107070000 body (md5 2e62bad29abc2ba33cb0e2f06a2d4a64) with its owner, mode, search_path and grants, quotes_bump_row_version is missing, or this migration already ran';
+    RAISE EXCEPTION 'JOB_DRAW_VERSION_PREFLIGHT: _sync_quote_job_reservations is not the reviewed 20261107070000 body (md5 2e62bad29abc2ba33cb0e2f06a2d4a64) with its owner, mode, search_path and grants, quotes_bump_row_version or its 20260730235031 function body is missing, or this migration already ran';
   END IF;
 END
 $preflight$;
@@ -394,6 +397,7 @@ BEGIN
      OR position('v_job_draws_before := (SELECT string_agg(' IN p.prosrc) = 0
      OR position('UPDATE quotes SET updated_at = now() WHERE id = p_quote_id;' IN p.prosrc) = 0
      -- the snapshot is taken under the quote lock, before the draws are rebuilt
+     OR position('FOR UPDATE;' IN p.prosrc) = 0
      OR position('FOR UPDATE;' IN p.prosrc) > position('v_job_draws_before := (SELECT string_agg(' IN p.prosrc)
      OR position('v_job_draws_before := (SELECT string_agg(' IN p.prosrc) > position('DELETE FROM job_product_draws jpd' IN p.prosrc)
      OR position('v_hold := GREATEST(v_row.demand, v_draw);' IN p.prosrc) > position('UPDATE quotes SET updated_at = now() WHERE id = p_quote_id;' IN p.prosrc)

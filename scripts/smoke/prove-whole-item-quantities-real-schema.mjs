@@ -318,8 +318,17 @@ function beforeCases() {
 
 function applyCandidate() {
   stageText('candidate.sql', lf(CANDIDATE));
+  // 9 (Taha LOW 2). The seeded legacy 2.5 Ea line makes the preflight refuse, naming its order, with nothing installed.
+  const blocked = apply('candidate.sql');
+  assert.notEqual(blocked.status, 0, 'the apply must be refused while a fractional Ea line exists');
+  assert.match(blocked.output, /WHOLE_ITEMS_PREFLIGHT: fractional quantities already exist on Ea\/Unit products \(first ten: order WHOLE-O1\)/, blocked.output);
+  assert.equal(scalar("SELECT to_regprocedure('public._enforce_whole_item_quantity()') IS NULL;"), 't');
+  raw(`UPDATE public.order_items SET total_units_needed = 3, quantity_remaining = 3 WHERE id = '${OL}';`);
   const r = apply('candidate.sql');
   assert.equal(r.status, 0, r.output);
+  // Back to a legacy fraction (triggers off), as a row made before a later unit change would be.
+  raw(`UPDATE public.order_items SET total_units_needed = 2.5, quantity_remaining = 2.5 WHERE id = '${OL}';`);
+  console.log('[case 9] the preflight refuses the apply while order WHOLE-O1 holds 2.5 Ea, naming it; once whole, it applies');
   const again = apply('candidate.sql');
   assert.notEqual(again.status, 0, 'a second apply must be refused');
   assert.match(again.output, /WHOLE_ITEMS_PREFLIGHT/);
@@ -369,7 +378,24 @@ function afterCases() {
 
   // 5. A legacy fractional line (inserted before the rule) still saves an unrelated change.
   ok(`UPDATE public.order_items SET notes = 'legacy', sort_order = 9 WHERE id = '${OL}';`, 'a note on the legacy 2.5 Ea line');
-  console.log('[case 5] the legacy 2.5 Ea order line saves a note and sort change');
+  // The quantity column in the SET list fires the trigger; the figure is unchanged, so it passes.
+  ok(`UPDATE public.order_items SET total_units_needed = total_units_needed WHERE id = '${OL}';`, 'a rewrite of the legacy line\'s own 2.5');
+  console.log('[case 5] the legacy 2.5 Ea order line saves a note and sort change, and a rewrite of its unchanged 2.5');
+
+  // 10 (Taha LOW 1). The real save_quote re-inserts every line: a 2.5 Unit line is refused, a 3 Unit line saves.
+  const saveQuote = (qty, tag) => `SELECT public.save_quote(NULL::uuid,
+    ${J({ quote_number: `[PROVER] WIQ ${tag}`, customer_id: CUST, status: 'draft', tier: 1, commission_split: { splits: [] } })},
+    ${J([{ section_name: 'North', sort_order: 0, items: [{ product_id: PU, sort_order: 0, calc_mode: 'units_direct', total_units_needed: qty,
+      price_override: 12, price_per_unit: 12, current_cost: 8, unit_size: 'Unit', acres: 0, product_name: '[PROVER] Seed Unit' }] }])},
+    '${ADMIN}'::uuid, 'wiq-quote-${tag}')`;
+  r = committed(saveQuote(2.5, 'frac'));
+  assert.notEqual(r.status, 0, r.output);
+  assert.match(r.output, /WHOLE_ITEMS_ONLY: \[PROVER\] Seed Unit is sold by the whole item \(Unit\), so 2\.5 can't be used\. Enter a whole number\. Change the rate or acres/, r.output);
+  assert.equal(scalar("SELECT count(*) FROM public.quotes WHERE quote_number = '[PROVER] WIQ frac';"), '0', 'no quote survives the refusal');
+  r = committed(saveQuote(3, 'whole'));
+  assert.equal(r.status, 0, r.output);
+  assert.equal(scalar(`SELECT count(*) FROM public.quote_items qi JOIN public.quotes q ON q.id = qi.quote_id WHERE q.quote_number = '[PROVER] WIQ whole' AND qi.total_units_needed = 3;`), '1');
+  console.log('[case 10] the real save_quote refuses a 2.5 Unit line (no quote saved) and saves a 3 Unit line');
 
   // 6. A retry of the completed whole partial returns the saved receipt and moves nothing.
   const s6 = stockOf(IE);
@@ -389,11 +415,11 @@ function afterCases() {
     console.log(`[case 8] product change: 2.5 Gal moved to Ea refused (an order line with no product cannot be inserted: ${noProduct.output.trim().split('\n').at(-1)})`);
   }
 
-  // 9. No API role can call the trigger function.
+  // 11. No API role can call the trigger function.
   for (const role of ['anon', 'authenticated', 'service_role']) {
     assert.equal(scalar(`SELECT has_function_privilege('${role}', 'public._enforce_whole_item_quantity()', 'EXECUTE');`), 'f', role);
   }
-  console.log('[case 9] anon, authenticated and service_role cannot call the trigger function');
+  console.log('[case 11] anon, authenticated and service_role cannot call the trigger function');
 }
 
 function rollbackCases() {

@@ -51,17 +51,19 @@ Who may act: unchanged; the trigger only narrows what any writer may store.
 - Rule that always holds: a new or changed quantity on an Ea/Unit product line is a whole number. The refusal
   aborts the whole statement/transaction, so nothing partial is saved (a completion moves no stock).
 - Automatic record changes: none. Nothing is rounded.
-- Existing rows: none fractional (query in Facts); an untouched legacy figure would still save.
+- Existing rows: none fractional (query in Facts), and the migration's preflight refuses to apply while any exist,
+  naming the first ten documents (Taha's review LOW 2). An untouched legacy order or delivery figure would still save.
 - Timing: retries replay saved receipts before any write; a refused call saved nothing, so a retry is refused the same.
 - Undo: cancel and Cancel remaining quantity set whole figures from whole figures.
-- Product unit changed to Ea later: order and delivery lines must be closed first (existing rule). An old quote line
-  that keeps an unchanged fractional figure can still be saved, but it cannot become an order line (the order insert
-  is refused). None exist today.
+- Product unit changed to Ea later: order and delivery lines must be closed first (existing rule). Quote lines are not
+  covered by that rule, and `save_quote` deletes and re-inserts every line, so every save of a quote re-checks all of
+  its lines: a quote holding an old fractional line on a product later switched to Ea/Unit cannot be saved until that
+  line is made whole; the message names the product and the fix (Taha's review LOW 1; proof case 10). None exist today.
 
 ## Delivery
 Database and screens ship in one PR: no screen depends on the new trigger (the delivery screen check is local), and
-the trigger only refuses figures on products with no lines today, so no open document or in-progress completion
-can hit it at rollout. `lock_timeout` 5s; triggers take a brief lock on the three tables. Rollback:
+the trigger only refuses figures on products with no lines today, and the preflight re-checks that at apply time, so
+no open document or in-progress completion can hit it at rollout. `lock_timeout` 5s; triggers take a brief lock on the three tables. Rollback:
 `scripts/smoke/whole-item-quantities-reverse.sql`. Touches Taha's lane
 (quote and order lines): needs his Approve (`ready-for-taha`) after Sol.
 
@@ -71,7 +73,8 @@ can hit it at rollout. `lock_timeout` 5s; triggers take a brief lock on the thre
 3. Order line 2.5 Ea refused on insert and on update; 3 saves.
 4. Delivery line scheduled 1.5 Ea refused; completion with a delivered 0.5 on a whole-item line refused with nothing
    moved (stock, order line, invoice unchanged); whole partial (1 of 2) completes.
-5. A legacy fractional row (inserted with the trigger disabled) saves an unrelated column change.
+5. A legacy fractional row (made with the trigger off) saves an unrelated column change and a rewrite of its own
+   unchanged figure.
 6. Retry of a completed delivery returns the saved receipt.
 7. Browser: delivery screen refuses 0.5 on an Ea line with the message; error text on a quote save shows the sentence.
 
@@ -105,3 +108,5 @@ products; whole-container selling for gallon products
 ## Extra proof case
 8. A Gal line at 2.5 re-pointed to an Ea product is refused; a line with no product getting an Ea product at 2.5 is
    refused.
+9. The preflight refuses the apply while a fractional line exists on an Ea/Unit product, naming the document.
+10. The real `save_quote` refuses a 2.5 Unit line and saves a 3 Unit line (every save re-inserts every line).

@@ -2352,7 +2352,9 @@ export default function DeliveryDetail() {
                   <option value="" disabled={!!editDriverAtOpen && delivery.status === 'in_progress'}>Unassigned</option>
                   {/* Keyed on the driver at open, so it stays selectable after another pick. */}
                   {editDriverAtOpen && !drivers.some((d) => d.id === editDriverAtOpen) && (
-                    <option value={editDriverAtOpen}>Current driver (not in list)</option>
+                    <option value={editDriverAtOpen}>
+                      {driver?.full_name ? `Current driver: ${driver.full_name}` : 'Current driver (not in list)'}
+                    </option>
                   )}
                   {drivers.map((d) => (
                     <option key={d.id} value={d.id}>{d.full_name} ({d.role})</option>

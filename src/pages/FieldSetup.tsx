@@ -59,6 +59,7 @@ import {
   microToExactPct,
   microToPctText,
   payerNoteChanges,
+  staleNoteIds,
   pctTextToMicro,
   splitProblem,
   splitSaveErrorMessage,
@@ -209,6 +210,10 @@ function FieldSetupPage() {
   }, [billingSplits, splitHistory]);
   const [inForceSplit, setInForceSplit] = useState<SplitVersion | null>(null);
   const loadedNotesRef = useRef<Record<string, string>>({});
+  // What the user last saw (stale-save warning baseline): a failed save's refresh must not adopt someone else's newer
+  // split or note over the user's own unsaved edit to it, or the retry would replace it without a warning.
+  const seenVersionIdRef = useRef<string | null>(null);
+  const seenNotesRef = useRef<Record<string, string>>({});
   const [loading, setLoading] = useState(!isNew);
   // The field's read failed: say so, never "Field not found" or a form missing its saved values (To-Do 10.5).
   const [loadError, setLoadError] = useState(false);
@@ -369,6 +374,8 @@ function FieldSetupPage() {
     const rows = splitRowsFrom(data.inForce);
     loadedSplitsRef.current = rows;
     loadedNotesRef.current = data.notes;
+    seenVersionIdRef.current = data.history[0]?.id ?? null;
+    seenNotesRef.current = data.notes;
     setBillingSplits(rows);
     setPayerNotes(data.notes);
     setSplitHistory(data.history);
@@ -710,7 +717,19 @@ function FieldSetupPage() {
       // What the user did not touch takes the saved value, so a retry never sends an old split or clears a note
       // someone else wrote. The page is locked while saving, so billingSplits and payerNotes are what was sent.
       const rows = splitRowsFrom(data.inForce);
-      if (splitShape(billingSplits) === splitShape(loadedSplitsRef.current ?? [])) setBillingSplits(rows);
+      const splitUntouched = splitShape(billingSplits) === splitShape(loadedSplitsRef.current ?? []);
+      if (splitUntouched) setBillingSplits(rows);
+      // The warning baseline moves only where the user has no edit, or where the saved value is the user's own
+      // (a lost reply that did save it).
+      if (splitUntouched || splitShape(splitRowsFrom(data.history[0] ?? null)) === splitShape(billingSplits)) {
+        seenVersionIdRef.current = data.history[0]?.id ?? null;
+      }
+      const seen = { ...seenNotesRef.current };
+      for (const cid of new Set([...Object.keys(seen), ...Object.keys(data.notes)])) {
+        const mine = (payerNotes[cid] ?? '').trim();
+        if (mine === (loadedNotesRef.current[cid] ?? '').trim() || mine === (data.notes[cid] ?? '').trim()) seen[cid] = data.notes[cid] ?? '';
+      }
+      seenNotesRef.current = seen;
       const oldNotes = loadedNotesRef.current;
       setPayerNotes((current) => {
         const merged = { ...current };
@@ -730,11 +749,14 @@ function FieldSetupPage() {
   };
 
   // Low-friction field rule (Mason, 2026-11-25): someone else's newer split is a warning, never a block.
-  const [staleSplit, setStaleSplit] = useState<SplitVersion | null>(null);
-  useEffect(() => { setStaleSplit(null); }, [id]); // the warning belongs to the field it was found on
+  // The same rule covers a payer note someone else changed after the page opened (known issue 2026-11-25).
+  type SaveAck = { versionId?: string; notes?: Record<string, string> };
+  type StaleWarning = { split: SplitVersion | null; notes: Array<{ customer_id: string; name: string; theirs: string }>; ack?: SaveAck };
+  const [staleWarning, setStaleWarning] = useState<StaleWarning | null>(null);
+  useEffect(() => { setStaleWarning(null); }, [id]); // the warning belongs to the field it was found on
 
-  // acknowledgedVersionId: the newer version the user chose to replace; a later one still warns.
-  const handleSave = async (acknowledgedVersionId?: string) => {
+  // ack: the newer version and note texts the user chose to replace; a later change still warns.
+  const handleSave = async (ack?: SaveAck) => {
     if (!field.field_name) {
       toast('error', 'Field name is required');
       return;
@@ -763,12 +785,18 @@ function FieldSetupPage() {
     }
 
     setSaving(true);
-    if (splitChanged && !isNew && id) {
+    if ((splitChanged || notesChanges.length > 0) && !isNew && id) {
       const seq = fieldLoadSeqRef.current;
       try {
-        const latest = (await loadFieldSplit(id, localToday())).history[0] ?? null;
-        if (seq === fieldLoadSeqRef.current && latest && latest.id !== (acknowledgedVersionId ?? splitHistory[0]?.id ?? null)) {
-          setStaleSplit(latest);
+        const now = await loadFieldSplit(id, localToday());
+        const latest = now.history[0] ?? null;
+        const split = splitChanged && latest && latest.id !== (ack?.versionId ?? seenVersionIdRef.current) ? latest : null;
+        const names = new Map([...pastPayers, ...billingSplits].map((p) => [p.customer_id, p.customer_name]));
+        const notes = staleNoteIds(notesChanges, seenNotesRef.current, now.notes, ack?.notes).map((cid) => ({
+          customer_id: cid, name: names.get(cid) ?? 'a payer', theirs: (now.notes[cid] ?? '').trim(),
+        }));
+        if (seq === fieldLoadSeqRef.current && (split || notes.length > 0)) {
+          setStaleWarning({ split, notes, ack });
           setSaving(false);
           return;
         }
@@ -1475,28 +1503,27 @@ function FieldSetupPage() {
             <button
               type="button"
               onClick={() => setBillingOpen(!billingOpen)}
+              aria-expanded={billingOpen}
               className="w-full flex items-center justify-between"
             >
-              <CardHeader
-                title="Default Billing"
-                accent="Splits"
-                action={
-                  billingOpen && billingSplits.length > 1 ? (
-                    <Button variant="ghost" size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); distributeEvenly(); }}>
-                      Split Evenly
-                    </Button>
-                  ) : undefined
-                }
-              />
+              <CardHeader title="Default Billing" accent="Splits" />
               {billingOpen ? <ChevronUp className="w-4 h-4 text-secondary" /> : <ChevronDown className="w-4 h-4 text-secondary" />}
             </button>
             {billingOpen && (
               // Locked while saving: the save reloads the split afterwards, which would drop an edit made meanwhile.
               <fieldset disabled={saving} className="mt-4 min-w-0">
-                <p className="text-xs text-secondary mb-4">
-                  Who pays for this field. Product shares and application shares must each total 100%; a payer can be 0%.
-                  Each change is kept in the history below.
-                </p>
+                {/* Split Evenly lives here, not in the header: a button inside the open/close button is invalid HTML. */}
+                <div className="flex items-start justify-between gap-3 mb-4">
+                  <p className="text-xs text-secondary">
+                    Who pays for this field. Product shares and application shares must each total 100%; a payer can be 0%.
+                    Each change is kept in the history below.
+                  </p>
+                  {billingSplits.length > 1 && (
+                    <Button variant="ghost" size="sm" onClick={distributeEvenly}>
+                      Split Evenly
+                    </Button>
+                  )}
+                </div>
 
                 {billingSplits.length > 0 && (
                   <div className="space-y-3 mb-4">
@@ -1887,16 +1914,28 @@ function FieldSetupPage() {
       />
 
       <ConfirmModal
-        open={staleSplit !== null}
-        onClose={() => setStaleSplit(null)}
+        open={staleWarning !== null}
+        onClose={() => setStaleWarning(null)}
         onConfirm={() => {
-          const acknowledged = staleSplit?.id;
-          setStaleSplit(null);
-          void handleSave(acknowledged);
+          const w = staleWarning;
+          setStaleWarning(null);
+          void handleSave({
+            versionId: w?.split?.id ?? w?.ack?.versionId,
+            notes: { ...w?.ack?.notes, ...Object.fromEntries((w?.notes ?? []).map((n) => [n.customer_id, n.theirs])) },
+          });
         }}
-        title="Split changed since you opened this field"
-        message={staleSplit
-          ? `A newer billing split (version ${staleSplit.version_number}) was saved by ${staleSplit.created_by_name ?? 'Unknown'} on ${new Date(staleSplit.created_at).toLocaleString()}, after you opened this field. Saving replaces it with yours. To see it first, cancel and reload the page.`
+        title={!staleWarning?.split ? 'Note changed since you opened this field'
+          : staleWarning.notes.length > 0 ? 'Changed since you opened this field' : 'Split changed since you opened this field'}
+        message={staleWarning
+          ? [
+            staleWarning.split
+              ? `A newer billing split (version ${staleWarning.split.version_number}) was saved by ${staleWarning.split.created_by_name ?? 'Unknown'} on ${new Date(staleWarning.split.created_at).toLocaleString()}, after you opened this field.`
+              : '',
+            ...staleWarning.notes.map((n) => n.theirs
+              ? `Someone else changed the note for ${n.name} to "${n.theirs.length > 200 ? `${n.theirs.slice(0, 200)}…` : n.theirs}" after you opened this field.`
+              : `Someone else cleared the note for ${n.name} after you opened this field.`),
+            `Saving replaces ${(staleWarning.split ? 1 : 0) + staleWarning.notes.length > 1 ? 'them' : 'it'} with yours. To see it first, cancel and reload the page.`,
+          ].filter(Boolean).join(' ')
           : ''}
         confirmLabel="Save mine anyway"
         variant="warning"

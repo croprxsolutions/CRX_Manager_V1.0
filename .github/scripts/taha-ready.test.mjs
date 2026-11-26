@@ -285,3 +285,35 @@ test("strangers' fork PRs are never labelled or pinged", () => {
   assert.equal(decide(fork, { checks: green, lane: inLane, sol: noSol }).act, false);
   assert.equal(needsPing({ ...fork, labels: [{ name: 'ready-for-taha' }] }, [], { checks: green, sol: noSol, asked: () => [] }).ping, false);
 });
+
+import { backportList, BRING_CAP, FILE_CAP } from './taha-ready.mjs';
+
+test('a backport ping lists what the hotfix brings to live: PRs, bare commits, then files (Taha, 2026-11-26)', () => {
+  const list = backportList({ total: 4, files: ['src/a.ts', 'src/<b>.ts'], commits: [
+    { sha: 'c'.repeat(40), message: 'feat(billing): M4 commission <x> (#2525)\n\nbody', parents: 1 },
+    { sha: 'd'.repeat(40), message: 'fix typo in the hotfix', parents: 1 },
+    { sha: 'e'.repeat(40), message: "Merge branch 'staging' into hotfix/q", parents: 2 },
+    { sha: 'f'.repeat(40), message: 'feat(billing): M4 commission (cherry-picked again) (#2525)', parents: 1 },
+  ] });
+  assert.equal(list, [
+    'Brings to live (2 changes):',
+    '• <https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/2525|#2525> feat(billing): M4 commission &lt;x&gt;',
+    '• `ddddddd` fix typo in the hotfix',
+    'Files (2): `src/a.ts`, `src/&lt;b&gt;.ts`',
+  ].join('\n'));
+  const h = hotfix({});
+  assert.match(pingText(h, null, { backport: true, brings: list }), /\(head aaaaaaa\)\nBrings to live \(2 changes\):/);
+  // Only a backport ask carries the list.
+  assert.doesNotMatch(pingText(h, null, { backport: false, brings: list }), /Brings to live/);
+});
+
+test('the backport list is capped, counts unlisted commits, and says so when GitHub could not be read', () => {
+  const commits = Array.from({ length: BRING_CAP + 3 }, (_, i) => ({ sha: String(i).padStart(40, '0'), message: `change ${i} (#${100 + i})`, parents: 1 }));
+  const files = Array.from({ length: FILE_CAP + 5 }, (_, i) => `f${i}.ts`);
+  const list = backportList({ commits, files, total: commits.length + 2 }).split('\n');
+  assert.equal(list[0], `Brings to live (${BRING_CAP + 5} changes):`);
+  assert.equal(list.filter((l) => l.startsWith('• <')).length, BRING_CAP);
+  assert.equal(list.at(-2), '• …and 5 more');
+  assert.equal(list.at(-1), `Files (15): ${files.slice(0, FILE_CAP).map((f) => `\`${f}\``).join(', ')} and 5 more`);
+  assert.match(backportList(null), /Could not read what this brings to live/);
+});

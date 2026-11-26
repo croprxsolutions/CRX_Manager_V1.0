@@ -33,6 +33,7 @@ try {
       FOR EACH ROW WHEN (NEW.manufacturer IS NOT NULL)
       EXECUTE FUNCTION public.return_liquid_density_to_draft_for_brand();`);
 
+  expectPreflightRefusal('ALTER TABLE public.product_parent_brands DISABLE TRIGGER return_liquid_density_to_draft_for_brand;');
   expectPreflightRefusal('ALTER FUNCTION public.approve_weights(jsonb, text) RESET search_path;');
   expectPreflightRefusal('GRANT EXECUTE ON FUNCTION public.liquid_density_review_open() TO anon;');
   expectPreflightRefusal("CREATE FUNCTION public.get_liquid_density_review(text) RETURNS jsonb LANGUAGE sql AS 'SELECT NULL::jsonb';");

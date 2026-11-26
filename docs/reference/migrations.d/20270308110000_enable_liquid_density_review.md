@@ -4,6 +4,6 @@ The migration checks that the prior manufacturer-link columns, review reads and 
 
 The local cutover test verifies failed prerequisites, draft and approval rules, and draft rejection. Verify the blend ticket and loader PDF on staging for approved, missing, and rechecked weights. Reprint a ticket saved before activation to verify its captured weight is unchanged.
 
-Before any production rollout, review all previously approved multi-brand liquid groups against their brand SDS evidence. Split confirmed mismatches in Product Setup and reapprove the resulting groups before the production cutover.
+The [production release hold](../../manual/known-issues.d/2026-11-25-liquid-weight-production-hold.md) stays open until the previously approved multi-brand groups are reviewed and any confirmed mismatches are split and reapproved.
 
 Rollback uses a reviewed migration that restores the switch to false. It keeps every recorded draft, approval and event as history.

@@ -20,8 +20,8 @@ export function jobEpaText(kept: KeptEpa | undefined, catalog: string | null): s
   return kept.epa_registration?.trim() || EPA_NONE;
 }
 
-async function assertJobVisible(jobId: string): Promise<void> {
-  const { data: job, error } = await supabase.from('jobs').select('id').eq('id', jobId).maybeSingle();
+async function assertJobVisible(jobId: string, office: boolean): Promise<void> {
+  const { data: job, error } = await supabase.from(office ? 'jobs' : 'jobs_crew').select('id').eq('id', jobId).maybeSingle();
   if (error || !job) throw (error ?? new Error('This job can no longer be opened, so its EPA numbers cannot be printed'));
 }
 
@@ -32,11 +32,12 @@ async function assertJobVisible(jobId: string): Promise<void> {
 export async function applyKeptEpa<T extends { epa_registration: string | null }>(
   jobId: string,
   labels: Map<string, T>,
+  office = true,
 ): Promise<void> {
   if (labels.size === 0) return;
   // The kept rows are visible only while the job is: a job the caller cannot see must not read as "none kept".
   // Checked before AND after the read, so access that ends (or starts) in between cannot pass an empty answer.
-  await assertJobVisible(jobId);
+  await assertJobVisible(jobId, office);
   // Only the printed products: at most one row each, so the answer is never cut short.
   const { data, error } = await supabase
     .from('job_product_epa')
@@ -44,7 +45,7 @@ export async function applyKeptEpa<T extends { epa_registration: string | null }
     .eq('job_id', jobId)
     .in('product_id', [...labels.keys()]);
   if (error || !data) throw (error ?? new Error('Could not load the EPA numbers kept on this job'));
-  await assertJobVisible(jobId);
+  await assertJobVisible(jobId, office);
   const kept = new Map(data.map((r) => [r.product_id, r]));
   labels.forEach((label, productId) => {
     label.epa_registration = jobEpaText(kept.get(productId), label.epa_registration);

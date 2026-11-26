@@ -1,8 +1,7 @@
 /**
  * applicatorSheetPrintData — best-effort operational additions to the shared
- * applicator-sheet data model. A denied history/billing read must never stop a
- * crew sheet from printing; the core job, field, and chemical data remain the
- * authoritative print path.
+ * applicator-sheet data model. Office billing allocations and application history
+ * are optional add-ons. Crew payer identities are resolved before preparation.
  */
 import { assertRpcResult, supabase } from './db';
 import { fmtNum, type ApplicatorSheetBillingSplit, type ApplicatorSheetData, type ApplicatorSheetSafety, type PreviousFieldApplications } from './applicatorSheetData';
@@ -248,6 +247,7 @@ export async function prepareApplicatorSheetPrintData(
   jobId: string,
   data: ApplicatorSheetData,
   options: ApplicatorPrintOptions,
+  office = true,
 ): Promise<ApplicatorSheetData> {
   const [maps, previousApplications, billingSplits, locations, safety] = await Promise.all([
     options.mapPages === 'none'
@@ -256,7 +256,7 @@ export async function prepareApplicatorSheetPrintData(
     options.includePreviousApplications
       ? fetchPreviousApplications(data.fields, jobId, options.previousApplicationsPerField)
       : Promise.resolve([]),
-    options.includeBillingSplits
+    office && options.includeBillingSplits
       ? fetchApplicatorSheetBillingSplits(jobId, data.total_acres)
       : Promise.resolve([]),
     fetchJobFieldLocations(jobId),

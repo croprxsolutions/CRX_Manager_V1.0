@@ -14,7 +14,7 @@ import SplitHeading from '../components/ui/SplitHeading';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, assertRpcResult } from '../lib/db';
-import { JOB_COLUMNS } from '../lib/costFields';
+import { JOB_COLUMNS, JOB_CREW_COLUMNS, usesOfficeJobReads } from '../lib/costFields';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { chunkIds } from '../lib/dispatchDisplay';
 import { logActivity } from '../lib/activityLogger';
@@ -321,7 +321,8 @@ export default function Jobs() {
     });
   }, []);
 
-  const canBulkAction = role === 'admin' || role === 'sales_rep';
+  const office = usesOfficeJobReads(role);
+  const canBulkAction = office;
 
   // Field-app parity #6: load every reference list the filter pickers need in
   // one shot (customers, applicators, vehicles, application-service "types").
@@ -461,13 +462,13 @@ export default function Jobs() {
     // A fresh query per page: fetchAllRows reads every job, page by page (KI-32).
     const baseQuery = (options: { count: 'exact' }) => {
       let query = supabase
-        .from('jobs')
+        .from(office ? 'jobs' : 'jobs_crew')
         .select(`
-          ${JOB_COLUMNS},
+          ${office ? JOB_COLUMNS : JOB_CREW_COLUMNS},
           customer:customers(farm_name, account_number, phone),
           vehicle:vehicles(vehicle_name),
-          job_fields(crop, field:fields(field_name, crop_type, county, state)),
-          job_chemicals(rate_per_acre, rate_unit, product:products(product_name)),
+          job_fields(crop, field:fields(field_name, crop_type, county, state)),${office ? `
+          job_chemicals(rate_per_acre, rate_unit, product:products(product_name)),` : ''}
           job_tag_assignments(tag:job_tags(id, name, color, created_by, created_at, updated_at)),
           batch:job_batches(name),
           job_location_dispatches(applicator_id, crew_id, dispatch_status)
@@ -536,7 +537,7 @@ export default function Jobs() {
     if (applied.customerIds.length > 0) {
       // Every matching share, page by page; a failed read stops the load (Goal 4 N5).
       const { data: shareJobs, error: shareError } = await fetchAllRows((from, to) => supabase
-        .from('job_field_shares')
+        .from(office ? 'job_field_shares' : 'job_field_shares_crew')
         .select('id, job_id', { count: 'exact' })
         .in('customer_id', applied.customerIds)
         .order('id')
@@ -588,7 +589,7 @@ export default function Jobs() {
       customer?: { farm_name?: string; account_number?: string | null; phone?: string | null };
       vehicle?: { vehicle_name?: string };
       job_fields?: Array<{ crop?: string | null; field?: { field_name?: string; crop_type?: string | null; county?: string | null; state?: string | null } }>;
-      job_chemicals?: Array<{ rate_per_acre?: number | null; rate_unit?: string | null; product?: { product_name?: string } }>;
+      job_chemicals?: Array<{ rate_per_acre?: number | null; rate_unit?: string | null; product?: { product_name?: string | null } | null }>;
       job_tag_assignments?: Array<{ tag?: JobTag | null }>;
       batch?: { name?: string } | null;
       job_location_dispatches?: Array<{ applicator_id?: string | null; crew_id?: string | null; dispatch_status?: string }>;
@@ -599,6 +600,32 @@ export default function Jobs() {
       last_printed_by?: string | null;
     };
     const raw = (data || []) as RawJob[];
+
+    if (!office) {
+      const { data: chemicals, error: chemicalError } = await fetchAllRowsForIds(
+        raw.map((job) => job.id as string),
+        (ids, from, to) => pageWithList(supabase
+          .from('job_chemicals_crew')
+          .select('id, job_id, rate_per_acre, rate_unit, product:products(product_name)', { count: 'exact' })
+          .in('job_id', ids)
+          .order('id')
+          .range(from, to)),
+      );
+      if (superseded()) return;
+      if (chemicalError) {
+        Sentry.captureException(chemicalError, { tags: { source: 'fetch', action: 'load_crew_job_chemicals' } });
+        setJobs([]);
+        setLoadError(true);
+        toast('error', 'Failed to load jobs');
+        setLoading(false);
+        return;
+      }
+      const byJob = new Map(raw.map((job) => [job.id, job]));
+      for (const chemical of chemicals ?? []) {
+        const job = byJob.get(chemical.job_id);
+        if (job) (job.job_chemicals ??= []).push(chemical);
+      }
+    }
 
     // U13 (Codex R2 #1): the batch must ALSO include the ACTIVE per-location
     // dispatch applicator_ids — a dispatch-only/split assignee isn't in any of
@@ -782,7 +809,7 @@ export default function Jobs() {
     setJobs(rows);
     setLoadError(false);
     setLoading(false);
-  }, [applied, toast]);
+  }, [applied, office, toast]);
 
   useEffect(() => {
     fetchReferenceLists();
@@ -1092,7 +1119,7 @@ export default function Jobs() {
   const handleRowLoaderWorksheet = async (jobId: string) => {
     setRowLoaderId(jobId);
     try {
-      const data = await fetchLoaderWorksheetData([jobId]);
+      const data = await fetchLoaderWorksheetData([jobId], office);
       if (data.length === 0) {
         toast('error', 'No loader-worksheet data for that job.');
         setRowLoaderId(null);
@@ -1119,7 +1146,7 @@ export default function Jobs() {
   const handleRowChemicalReport = async (jobId: string) => {
     setRowChemReportId(jobId);
     try {
-      const data = await fetchChemicalApplicationReportData(jobId);
+      const data = await fetchChemicalApplicationReportData(jobId, { office });
       if (!data) {
         toast('error', 'No chemical-report data for that job.');
         setRowChemReportId(null);
@@ -1156,7 +1183,7 @@ export default function Jobs() {
   const handleRowApplicatorSheet = async (jobId: string) => {
     setRowSheetId(jobId);
     try {
-      const data = await fetchApplicatorSheetData(jobId);
+      const data = await fetchApplicatorSheetData(jobId, office);
       if (!data || data.products.length === 0 || data.fields.length === 0) {
         toast('error', 'This job needs fields and chemicals before printing an applicator sheet.');
         return;
@@ -1164,9 +1191,9 @@ export default function Jobs() {
       // Row printing stays one-click: use the saved packet defaults with the
       // Original format, because format itself is intentionally not persisted.
       const options = await loadApplicatorPrintOptions(role);
-      const printableData = await prepareApplicatorSheetPrintData(jobId, data, options);
+      const printableData = await prepareApplicatorSheetPrintData(jobId, data, options, office);
       await generateApplicatorSheetPdf(printableData, 'original', null, {
-        includeBillingSplits: options.includeBillingSplits,
+        includeBillingSplits: office && options.includeBillingSplits,
         blankSections: options.blankSections,
         includePreviousApplications: options.includePreviousApplications,
         showBanner: options.showBanner,

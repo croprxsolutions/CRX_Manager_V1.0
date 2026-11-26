@@ -36,6 +36,7 @@ const SHARED_FILES = [
   'lib/epaBatchFill.ts',
   'lib/epaRegistrationSeed.ts',
   'lib/fieldsGeojsonCache.ts',
+  'lib/loaderWorksheetFetch.ts',
   'lib/marginFloors.ts',
   'lib/ordersPage.ts',
   'lib/paymentDuplicate.ts',
@@ -169,6 +170,15 @@ const REGISTRY_COLUMNS: Record<string, string[]> = JSON.parse(
   readFileSync(join(__dirname, '..', '..', '.claude', 'schema-registry.json'), 'utf8'),
 ).columns;
 
+// The registry lists tables. Use the migration's explicit projections for the
+// crew views so their paged selects and sort keys are checked as well.
+const crewViewsSql = readFileSync(join(__dirname, '..', '..', 'supabase', 'migrations',
+  '20270308040000_applicator_crew_read_path.sql'), 'utf8');
+const CREW_VIEW_COLUMNS = Object.fromEntries(
+  [...crewViewsSql.matchAll(/CREATE VIEW public\.(\w+_crew) [^\r\n]+\r?\nSELECT ([^\r\n]+)/g)]
+    .map(([, view, projection]) => [view, projection.split(', ').map((column) => column.split('.')[1])]),
+);
+
 // Paged reads with no literal table name, so their columns cannot be checked:
 // file → number of such call sites, with the reason. The count must match
 // exactly, so a new unreadable read fails until it is listed here.
@@ -215,9 +225,8 @@ const TABLES_NOT_YET_LIVE: Record<string, string> = {
 };
 
 // What is checked, per call site (the callback text up to its `.range(`):
-// - the table is the one `.from('<table>')`; any other form (`.rpc(...)`, a
-//   variable or constant table name, or two different tables) is unreadable
-//   and must be listed in COLUMN_CHECK_EXEMPT;
+// - the table is a literal `.from('<table>')` or either literal in a simple
+//   role ternary. An RPC or a computed table name must be listed in COLUMN_CHECK_EXEMPT;
 // - every `.order('<col>')`, except one with a `referencedTable` /
 //   `foreignTable` option (it sorts an embedded table);
 // - every plain column in the literal text of each `.select(...)`, with
@@ -256,14 +265,18 @@ function selectListColumns(selectText: string): string[] {
 type ColumnSite = CallSite & { table: string | null; columns: string[] };
 
 function columnSites(): ColumnSite[] {
-  return findCallSites().map((site) => {
-    const tables = [...new Set([...site.callback.matchAll(/\.from\(\s*'([a-z0-9_]+)'\s*\)/g)].map((m) => m[1]))];
-    const readable = tables.length === 1 && !/\.from\(\s*[^'\s]/.test(site.callback) && !/\.rpc\(/.test(site.callback);
+  return findCallSites().flatMap((site) => {
+    const fromCalls = [...site.callback.matchAll(/\.from\(\s*([^)]*)\)/g)];
+    const relation = fromCalls.length === 1 && !/\.rpc\(/.test(site.callback) ? fromCalls[0][1].trim() : '';
+    const literal = /^'([a-z0-9_]+)'$/.exec(relation);
+    const conditional = /^\w+\s*\?\s*'([a-z0-9_]+)'\s*:\s*'([a-z0-9_]+)'$/.exec(relation);
+    const tables = literal ? literal.slice(1) : conditional?.slice(1) ?? [null];
     const orderMatches = [...site.callback.matchAll(/\.order\(\s*'([a-z0-9_]+)'\s*(?:,\s*\{([^}]*)\})?\s*\)/g)];
     const orders = orderMatches.filter((m) => !/referencedTable|foreignTable/.test(m[2] ?? '')).map((m) => m[1]);
     // A sort the pattern cannot read (a variable column) fails as an unknown column, never passes.
     if (orderMatches.length !== (site.callback.match(/\.order\(/g) ?? []).length) orders.push('<unreadable .order()>');
-    return { ...site, table: readable ? tables[0] : null, columns: [...selectedColumns(site.callback), ...orders] };
+    const columns = [...selectedColumns(site.callback), ...orders];
+    return tables.map((table) => ({ ...site, table, columns }));
   });
 }
 
@@ -278,7 +291,7 @@ describe('paged list reads only name columns their table has', () => {
   it('every selected and sorted column exists on its table in the schema registry', () => {
     const missing = sites.flatMap((site) => {
       if (!site.table || site.table in VIEWS_NOT_IN_REGISTRY || site.table in TABLES_NOT_YET_LIVE) return [];
-      const known = REGISTRY_COLUMNS[site.table];
+      const known = REGISTRY_COLUMNS[site.table] ?? CREW_VIEW_COLUMNS[site.table];
       if (!known) return [`${site.file}:${site.line} table ${site.table} is not in the schema registry`];
       return site.columns
         .filter((column) => !known.includes(column))

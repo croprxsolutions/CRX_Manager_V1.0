@@ -24,6 +24,9 @@ const { mockFrom, mockRpc, mockToast, mockNavigate } = vi.hoisted(() => ({
   mockToast: vi.fn(),
   mockNavigate: vi.fn(),
 }));
+const jobSelects: { table: string; columns: unknown }[] = [];
+const mockGenerateSheet = vi.hoisted(() => vi.fn());
+vi.mock('../lib/applicatorSheetPdf', () => ({ generateApplicatorSheetPdf: mockGenerateSheet }));
 
 function buildChain(result: { data: unknown; error: unknown }): Record<string, unknown> {
   const self: Record<string, unknown> = {};
@@ -253,6 +256,7 @@ function mountWith(
     license: { profile_id: string; expiry_date: string; is_active: boolean };
     savedApplicatorId?: string | null;
   },
+  product: Record<string, unknown> = DRY_PRODUCT,
 ) {
   // One gate per mount, created BEFORE render so the by-id effect can only ever
   // observe the pending promise. `from('products')` is called more than once, so the
@@ -263,13 +267,35 @@ function mountWith(
   labelLookupGated = true;
 
   mockFrom.mockImplementation((table: string) => {
-    if (table === 'jobs') {
-      return buildChain({
-        data: makeJob(chem, acres, licenseFixture?.savedApplicatorId ?? null),
+    if (table === 'jobs' || table === 'jobs_crew') {
+      const job = makeJob(chem, acres, licenseFixture?.savedApplicatorId ?? null);
+      const query = buildChain({
+        data: table === 'jobs' ? job : {
+          ...job,
+          job_fields: job.job_fields.map((field) => ({ ...field, field_id: field.id })),
+          job_chemicals: undefined,
+          job_field_shares: undefined,
+        },
         error: null,
       });
+      query.select = (columns: unknown) => {
+        jobSelects.push({ table, columns });
+        return query;
+      };
+      return query;
     }
-    if (table === 'products') return buildGatedByIdProductsChain([DRY_PRODUCT], gate);
+    if (table === 'job_chemicals_crew') {
+      const crewLine = { ...chem };
+      delete crewLine.price_per_unit_cents;
+      delete crewLine.cost_per_unit_cents;
+      const query = buildChain({ data: [crewLine], error: null });
+      query.select = (columns: unknown) => {
+        jobSelects.push({ table, columns });
+        return query;
+      };
+      return query;
+    }
+    if (table === 'products') return buildGatedByIdProductsChain([product], gate);
     if (table === 'unit_conversions') return buildChain({ data: UNIT_CONVERSIONS, error: null });
     if (table === 'profile_public_view') {
       return buildChain({ data: licenseFixture ? [licenseFixture.applicator] : [], error: null });
@@ -375,6 +401,7 @@ async function clickSave(saveButton: HTMLElement) {
 
 describe('JobDetail — billing-hazard guard is wired, not just implemented', () => {
   beforeEach(() => {
+    jobSelects.length = 0;
     mockToast.mockClear();
     mockRpc.mockClear();
     mockRpc.mockResolvedValue({ data: null, error: null });
@@ -384,11 +411,22 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
     releaseLabelLookup = () => {};
   });
 
-  it('an applicator sees no selling price, total, fee or internal memo; an admin still does', async () => {
+  it('omits save-validation warnings and billing language for crew and still flags an office line with no price', async () => {
+    const unpricedProduct = { ...DRY_PRODUCT, tier1_price: null, tier1_price_cents: null };
+    const unpricedLine = {
+      ...HAZARD_CHEM, quantity: 200, rate_per_acre: 2, rate_unit: 'Lb/ac', price_per_unit_cents: 0,
+    };
     authRole.current = 'applicator';
+    mockRpc.mockResolvedValue({ data: [], error: null });
     try {
-      const { unmount } = mountWith(HAZARD_CHEM);
-      await screen.findByText(/This line cannot be saved/i, {}, { timeout: 15000 });
+      const { unmount } = mountWith(unpricedLine, 100, undefined, unpricedProduct);
+      await screen.findByRole('heading', { name: 'Chemicals (1)' }, { timeout: 15000 });
+      expect(screen.queryByText(/cannot be saved|would bill|charges|cost ¢\/unit|total cost|bill for this product|billed customer/i)).toBeNull();
+      expect(jobSelects.map(({ table }) => table)).toEqual(['jobs_crew', 'job_chemicals_crew']);
+      expect(mockFrom).toHaveBeenCalledWith('job_field_shares_crew');
+      for (const { columns } of jobSelects) {
+        expect(columns).not.toMatch(/total_price_cents|total_cost_cents|internal_memo|commission_split|price_per_unit_cents|cost_per_unit_cents|split_pct|price_override_cents|pricing_note|job_chemicals\(|job_field_shares\(/);
+      }
       for (const text of [/Price ¢\/unit/, /Total Price/, /Internal Job\/Invoice Memo/, /Application Service/, /per-acre machine fee/]) {
         expect(screen.queryByText(text)).toBeNull();
       }
@@ -396,12 +434,56 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
     } finally {
       authRole.current = 'admin';
     }
-    mountWith(HAZARD_CHEM);
+    mountWith(unpricedLine, 100, undefined, unpricedProduct);
     await screen.findByText(/This line cannot be saved/i, {}, { timeout: 15000 });
+    expect(screen.getByText(/has no price for this customer's tier, so it would bill \$0/i)).toBeTruthy();
+    expect(jobSelects.at(-1)).toEqual({ table: 'jobs', columns: expect.stringMatching(/total_price_cents[\s\S]+job_chemicals\([^)]*price_per_unit_cents[\s\S]+job_field_shares\(\*\)/) });
     for (const text of [/Price ¢\/unit/, /Total Price/, /Internal Job\/Invoice Memo/, /Application Service/]) {
       expect(screen.getAllByText(text).length).toBeGreaterThan(0);
     }
   }, 30000);
+
+  it('keeps crew Job Detail open and shows an error when the payer names fail to load', async () => {
+    authRole.current = 'applicator';
+    mockNavigate.mockClear();
+    mockRpc.mockImplementation(async (name: string) => name === 'get_job_billed_customers'
+      ? { data: null, error: { message: 'Payer lookup failed' } }
+      : { data: null, error: null });
+    try {
+      mountWith(HAZARD_CHEM);
+      expect(await screen.findByRole('heading', { name: 'Chemicals (1)' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Field Sheet' })).toBeTruthy();
+      expect(mockToast).toHaveBeenCalledWith('error', 'Could not load payer names');
+      expect(mockNavigate).not.toHaveBeenCalled();
+    } finally {
+      authRole.current = 'admin';
+    }
+  });
+
+  it('stops a crew field sheet and shows an error when the billed customers RPC fails', async () => {
+    authRole.current = 'applicator';
+    mockGenerateSheet.mockClear();
+    mockRpc.mockImplementation(async (name: string) => name === 'get_job_billed_customers'
+      ? { data: null, error: { message: 'Payer lookup failed' } }
+      : { data: null, error: null });
+    try {
+      mountWith(HAZARD_CHEM);
+      releaseLabelLookup();
+      fireEvent.click(await screen.findByRole('button', { name: 'Field Sheet' }));
+      await waitFor(() => {
+        const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Print', exact: true });
+        expect(button.disabled).toBe(false);
+      });
+      const payerReads = mockRpc.mock.calls.filter(([name]) => name === 'get_job_billed_customers').length;
+      fireEvent.click(screen.getByRole('button', { name: 'Print', exact: true }));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to generate field sheet'));
+      expect(mockRpc.mock.calls.filter(([name]) => name === 'get_job_billed_customers')).toHaveLength(payerReads + 1);
+      expect(mockGenerateSheet).not.toHaveBeenCalled();
+      expect(mockRpc.mock.calls.some(([name]) => name === 'stamp_job_printed')).toBe(false);
+    } finally {
+      authRole.current = 'admin';
+    }
+  });
 
   it('shows the on-screen warning for the live Dry oz / Lb row', async () => {
     mountWith(HAZARD_CHEM);

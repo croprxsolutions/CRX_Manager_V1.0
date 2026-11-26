@@ -24,6 +24,7 @@ import { supabase, supabaseUntyped } from './db';
 import { resolveBilledCustomers } from './billedCustomersResolver';
 import { isGallonCapacityUnit } from './loaderWorksheet';
 import type { LoaderWorksheetPdfData } from './loaderWorksheetPdf';
+import { fetchAllRowsForIds, pageWithList } from './pagedRead';
 import { fetchLoaderJobWeights, loaderJobInputs, type LoaderGetterJob, type LoaderJobWeights } from './loaderWeightsFetch';
 import type { ApplicatorSheetCustomer } from './applicatorSheetData';
 import type { JobLoaderWorksheet } from '../types';
@@ -48,27 +49,48 @@ interface WorksheetVehicleRow {
   vehicle_name: string | null;
 }
 
-/**
- * Fetch the loader-worksheet PDF data for a set of job IDs (the bulk-selected jobs).
- * Results are returned in the SAME order as `jobIds`. Jobs that no longer exist are
- * skipped. The applicator name is resolved via profile_public_view.
- */
-export async function fetchLoaderWorksheetData(jobIds: string[]): Promise<LoaderWorksheetPdfData[]> {
-  if (jobIds.length === 0) return [];
-
+async function fetchLoaderJobs(jobIds: string[], office: boolean): Promise<LoaderJobRow[]> {
   const { data, error } = await supabase
-    .from('jobs')
+    .from(office ? 'jobs' : 'jobs_crew')
     .select(`
       id, job_number, job_date, scheduled_time, applicator_id,
       carrier_rate_gpa, loader_tank_capacity, loader_comment,
       vehicle:vehicles(vehicle_name, capacity_gallons, capacity_unit),
-      job_fields(field_id, acres_to_treat),
-      job_chemicals(id, product_id, quantity, unit, product:products(product_name))
+      job_fields(field_id, acres_to_treat)${office ? `,
+      job_chemicals(id, product_id, quantity, unit, product:products(product_name))` : ''}
     `)
     .in('id', jobIds);
   if (error) throw error;
 
   const rows = (data || []) as unknown as LoaderJobRow[];
+  if (!office) {
+    const { data: chemicals, error: chemicalError } = await fetchAllRowsForIds(
+      rows.map((job) => job.id),
+      (ids, from, to) => pageWithList(supabase
+        .from('job_chemicals_crew')
+        .select('id, job_id, product_id, quantity, unit, product:products(product_name)', { count: 'exact' })
+        .in('job_id', ids)
+        .order('id')
+        .range(from, to)),
+    );
+    if (chemicalError) throw chemicalError;
+    const byJob = new Map(rows.map((row) => [row.id, row]));
+    for (const chemical of chemicals ?? []) {
+      const job = byJob.get(chemical.job_id);
+      if (job) (job.job_chemicals ??= []).push(chemical);
+    }
+  }
+  return rows;
+}
+
+/**
+ * Fetch the loader-worksheet PDF data for a set of job IDs (the bulk-selected jobs).
+ * Results are returned in the SAME order as `jobIds`. Jobs that no longer exist are
+ * skipped. The applicator name is resolved via profile_public_view.
+ */
+export async function fetchLoaderWorksheetData(jobIds: string[], office = true): Promise<LoaderWorksheetPdfData[]> {
+  if (jobIds.length === 0) return [];
+  const rows = await fetchLoaderJobs(jobIds, office);
 
   // Saved worksheet scenarios are intentionally fetched separately instead of as
   // an embedded relationship: the selected partial-unique row must replace the

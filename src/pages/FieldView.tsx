@@ -90,6 +90,7 @@ import CompletionWeatherFields from '../components/jobs/CompletionWeatherFields'
 import { usePageMeta } from '../hooks/usePageMeta';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
+import { usesOfficeJobReads } from '../lib/costFields';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useQueuedJobCompletions } from '../hooks/useQueuedJobCompletions';
@@ -169,6 +170,7 @@ export default function FieldView() {
   usePageMeta();
   const { toast } = useToast();
   const { profile } = useAuth();
+  const office = usesOfficeJobReads(profile?.role);
   const isOnline = useOnlineStatus();
   const startIdem = useIdempotencyKey('start_job', profile?.id || '');
   const completeIdem = useIdempotencyKey('complete_job', profile?.id || '');
@@ -246,7 +248,7 @@ export default function FieldView() {
       if (profile?.id) {
         const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
         const legacyRes = await supabase
-          .from('jobs')
+          .from(office ? 'jobs' : 'jobs_crew')
           .select('id, job_number, job_date, status, total_acres, applied_acres, customer_id, customer:customers(farm_name)')
           .eq('applicator_id', profile.id)
           .is('deleted_at', null)
@@ -298,7 +300,7 @@ export default function FieldView() {
       }
     }
     setLoading(false);
-  }, [toast, profile?.id]);
+  }, [toast, profile?.id, office]);
 
   useEffect(() => { fetchCards(); }, [fetchCards]);
 
@@ -393,7 +395,7 @@ export default function FieldView() {
       // updated_at is the offline-conflict snapshot for a queued Complete — must be
       // captured HERE (while online) so a later offline Complete has a value to send.
       const jobRes = await supabase
-        .from('jobs')
+        .from(office ? 'jobs' : 'jobs_crew')
         .select('job_date, updated_at')
         .eq('id', card.job_id)
         .maybeSingle();
@@ -429,7 +431,7 @@ export default function FieldView() {
       // Chemicals (job_chemicals) — rate/quantity + REI/PHI only, NO pricing on this
       // screen (owner decision, U12). Readable via job_chemicals_select_location_dispatchee.
       const chemRes = await supabase
-        .from('job_chemicals')
+        .from(office ? 'job_chemicals' : 'job_chemicals_crew')
         .select('id, quantity, unit, rate_per_acre, rate_unit, sort_order, product:products(product_name, rei_hours, phi_days)')
         .eq('job_id', card.job_id)
         .order('sort_order', { ascending: true, nullsFirst: false });
@@ -480,7 +482,7 @@ export default function FieldView() {
       inFlightDetail.current.delete(cacheKey);
       setDetailLoading(null);
     }
-  }, [details, toast]);
+  }, [details, office, toast]);
 
   const toggleExpand = useCallback((card: FieldViewJobCard) => {
     setExpandedId((prev) => (prev === card.job_id ? null : card.job_id));

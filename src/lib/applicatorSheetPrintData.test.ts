@@ -66,6 +66,20 @@ describe('prepareApplicatorSheetPrintData safety sheet', () => {
     expect(mockFrom).not.toHaveBeenCalled();
   });
 
+  it('ignores saved billing-split preferences for crew and retains only the payer list', async () => {
+    const customers = [
+      { customer_name: 'North Farm', account_number: 'NF-100' },
+      { customer_name: 'West Farm', account_number: 'WF-200' },
+    ];
+    const result = await prepareApplicatorSheetPrintData(
+      'job-1', { ...data, customers }, { ...options, includeSafetySheet: false, includeBillingSplits: true }, false,
+    );
+    expect(result.customers).toEqual(customers);
+    expect(result.billingSplits).toEqual([]);
+    expect(mockFrom).not.toHaveBeenCalled();
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
   it('lists exactly the job order lines, each with its own product signal word, even when names repeat', async () => {
     reply({ data: [{ id: 'p-1', epa_registration: '100-1', signal_word: 'Caution', rei_hours: 24, phi_days: 7 }, { id: 'p-2', epa_registration: null, signal_word: 'Danger', rei_hours: 48, phi_days: null }], error: null });
     const result = await prepareApplicatorSheetPrintData('job-1', data, { ...options, includeSafetySheet: true });

@@ -57,7 +57,7 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import { generateIdempotencyKey } from '../lib/idempotency';
 import type { Json } from '../types/supabase';
 import { Sentry } from '../lib/sentry';
-import { JOB_COLUMNS } from '../lib/costFields';
+import { JOB_COLUMNS, JOB_CREW_COLUMNS, usesOfficeJobReads } from '../lib/costFields';
 import {
   formatAppliedOfTotal,
   jobStatusToDispatchBadge,
@@ -67,6 +67,7 @@ import {
   filterDispatchedRows,
   hasActiveDispatchedFilter,
   emptyDispatchedAssigneeFilter,
+  type DispatchBoardJob,
   type DispatchFilters,
   type DispatchView,
   type DispatchedListRow,
@@ -74,7 +75,7 @@ import {
 } from '../lib/dispatchDisplay';
 import { notifyApplicatorDispatched, notifyApplicatorUndispatched } from '../lib/notificationTriggers';
 import { aggregateAssignedTo, type DispatchLocation } from '../lib/dispatchWizard';
-import type { Job, Profile, Field, DispatchStockRow } from '../types';
+import type { Profile, Field, DispatchStockRow } from '../types';
 
 type NavSection = 'map' | 'list' | 'dispatch' | 'dispatched';
 
@@ -103,7 +104,7 @@ const STOCK_SEVERITY: Record<JobStockStatus, number> = { unknown: 0, ok: 1, low:
 const worseStock = (a: JobStockStatus, b: JobStockStatus): JobStockStatus =>
   STOCK_SEVERITY[b] > STOCK_SEVERITY[a] ? b : a;
 
-interface DispatchJob extends Job {
+interface DispatchJob extends DispatchBoardJob {
   customer_name?: string;
   /** Aggregated 'Assigned To' label — distinct per-location assignees (a job
    *  split between two applicators shows BOTH), falling back to the whole-job
@@ -215,10 +216,11 @@ export default function DispatchBoard() {
 
       // The unfiltered (no applicator) path keeps the direct jobs query; the filtered
       // path uses the RPC rows above. Both share the SAME downstream shape.
+      const isOffice = usesOfficeJobReads(profile?.role);
       const jobsQuery = supabase
-        .from('jobs')
+        .from(isOffice ? 'jobs' : 'jobs_crew')
         .select(`
-          ${JOB_COLUMNS},
+          ${isOffice ? JOB_COLUMNS : JOB_CREW_COLUMNS},
           customer:customers(farm_name),
           job_fields(id, field_id, acres_to_treat, sort_order, field:fields(id, field_name))
         `, { count: 'exact' })
@@ -333,7 +335,14 @@ export default function DispatchBoard() {
         const jobFields = (j.job_fields as Array<{ id?: string; field_id?: string; acres_to_treat?: number | null; field?: { field_name?: string } }>) || [];
         const customerName = (j.customer as { farm_name?: string })?.farm_name || 'Unknown';
         return {
-          ...j,
+          id: j.id as string,
+          job_number: j.job_number as string,
+          job_date: j.job_date as string,
+          status: j.status as DispatchJob['status'],
+          applicator_id: j.applicator_id as string | null,
+          recipe_id: j.recipe_id as string | null,
+          applied_acres: j.applied_acres as number,
+          total_acres: j.total_acres as number | null,
           customer_name: customerName,
           assigned_to_label: aggregateAssignedTo(dispatchesByJob[j.id as string] || [], jobLevelName),
           dispatched_applicator_ids: dispatchApplicatorIdsByJob[j.id as string] || [],
@@ -350,14 +359,13 @@ export default function DispatchBoard() {
               acres: jf.acres_to_treat ?? null,
             })),
         };
-      }) as DispatchJob[];
+      });
 
       // Inventory-aware dispatch (Layer 1): attach each schedulable job's product needs
       // and a stock light vs today's free stock. Read-only overlay — no reservation.
       // OFFICE-ONLY: /dispatch is also applicator-accessible, and get_inventory_position
       // exposes product cost/vendor + full stock levels. Gate the whole overlay to
       // admin/sales_rep so applicators see the board unchanged (Codex P1).
-      const isOffice = profile?.role === 'admin' || profile?.role === 'sales_rep';
       const activeJobIds = isOffice
         ? mapped
             .filter((j) => j.status === 'scheduled' || j.status === 'in_progress')

@@ -9,6 +9,7 @@
  *  - selectDispatchView: the SINGLE shared-filter selector — one filter object
  *    feeds either the map or the list, so switching view never forks the filter.
  */
+import type { Job } from '../types';
 
 export type JobLifecycleStatus =
   | 'scheduled'
@@ -112,6 +113,11 @@ export interface DispatchSelectableJob {
    *  per-location-only assignee still surfaces under that applicator's filter. */
   dispatched_applicator_ids?: string[];
 }
+
+/** Operational job fields shared by the office and crew versions of the board. */
+export type DispatchBoardJob = Pick<Job,
+  'id' | 'job_number' | 'job_date' | 'status' | 'applicator_id' | 'recipe_id' | 'applied_acres' | 'total_acres'
+>;
 
 /**
  * Apply the SHARED filter set to a job collection. The dispatch page calls this

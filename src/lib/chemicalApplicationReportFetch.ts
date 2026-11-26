@@ -33,6 +33,7 @@ import { resolveBilledCustomers } from './billedCustomersResolver';
 import { applyKeptEpa } from './jobEpa';
 import {
   buildApplicatorSheetData,
+  requireApplicatorSheetPayers,
   type ApplicatorSheetData,
   type RawSheetField,
   type RawSheetProduct,
@@ -78,6 +79,7 @@ interface ProductLabel {
 }
 
 interface ReportFetchOptions {
+  office?: boolean;
   /** Defaults to true so the Chemical Application Report remains compliance-strict. */
   strict?: boolean;
   /**
@@ -94,24 +96,33 @@ interface ReportFetchOptions {
  */
 export async function fetchChemicalApplicationReportData(
   jobId: string,
-  { strict = true, keptEpa = true }: ReportFetchOptions = {},
+  { strict = true, keptEpa = true, office = true }: ReportFetchOptions = {},
 ): Promise<ApplicatorSheetData | null> {
+  const chemicalColumns = 'product_id, quantity, unit, rate_per_acre, rate_unit, rei_hours, phi_days, sort_order';
   const { data, error } = await supabase
-    .from('jobs')
+    .from(office ? 'jobs' : 'jobs_crew')
     .select(`
       id, job_number, job_date, scheduled_time, applicator_id, loader_comment,
       customer:customers(farm_name, account_number),
       vehicle:vehicles(vehicle_name),
       job_fields(field_id, acres_to_treat, crop, pests, sort_order,
-        field:fields(field_name, county, state, crop_type)),
-      job_chemicals(product_id, quantity, unit, rate_per_acre, rate_unit, rei_hours, phi_days, sort_order,
-        product:products(product_name))
+        field:fields(field_name, county, state, crop_type))${office ? `,
+      job_chemicals(${chemicalColumns},
+        product:products(product_name))` : ''}
     `)
     .eq('id', jobId)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
   const r = data as unknown as ReportJobRow;
+  if (!office) {
+    const { data: chemicals, error: chemicalError } = await supabase
+      .from('job_chemicals_crew')
+      .select(`${chemicalColumns}, product:products(product_name)`)
+      .eq('job_id', jobId);
+    if (chemicalError) throw chemicalError;
+    r.job_chemicals = chemicals;
+  }
 
   // Applicator name via the public profile view (never a profiles embed).
   let applicatorName: string | null = null;
@@ -148,7 +159,7 @@ export async function fetchChemicalApplicationReportData(
     if (missingLabel.length > 0) throw new Error('Some products on this job have no label data on file — the chemical report cannot be completed.');
 
     // KI-195: a sprayed job prints the EPA number it kept, never the catalog's later one.
-    if (keptEpa) await applyKeptEpa(jobId, labelById);
+    if (keptEpa) await applyKeptEpa(jobId, labelById, office);
   }
 
   // Billed customers via the SECURITY DEFINER RPC (saved job_field_shares →
@@ -160,15 +171,16 @@ export async function fetchChemicalApplicationReportData(
   if (strict && !complete) {
     throw new Error('Some billed customers on this job could not be resolved — the chemical report cannot be completed.');
   }
-  // Applicator sheets are operational crew documents, not compliance records. Mirror
-  // JobDetail's non-strict path: keep every customer the resolver could name and, if
-  // it named none, retain the primary customer or a visible "Customer" placeholder.
-  const billedCustomers = !strict && resolvedCustomers.length === 0
-    ? [{
-        customer_name: r.customer?.farm_name?.trim() || 'Customer',
-        account_number: r.customer?.account_number ?? null,
-      }]
-    : resolvedCustomers;
+  // Crew prints require a complete list. Office field sheets retain their
+  // primary-customer fallback when the resolver returns no names.
+  const billedCustomers = !office
+    ? requireApplicatorSheetPayers(resolvedCustomers, complete)
+    : !strict && resolvedCustomers.length === 0
+      ? [{
+          customer_name: r.customer?.farm_name?.trim() || 'Customer',
+          account_number: r.customer?.account_number ?? null,
+        }]
+      : resolvedCustomers;
 
   const fields: RawSheetField[] = (r.job_fields || [])
     .filter((f) => f.field_id)
@@ -219,9 +231,9 @@ export async function fetchChemicalApplicationReportData(
 }
 
 /**
- * Fetch data for an internal applicator sheet. Unlike the compliance report,
- * incomplete billed-customer resolution falls back to a printable placeholder.
+ * Fetch data for an internal applicator sheet. The office path can use a
+ * printable placeholder when billed-customer resolution is incomplete.
  */
-export function fetchApplicatorSheetData(jobId: string): Promise<ApplicatorSheetData | null> {
-  return fetchChemicalApplicationReportData(jobId, { strict: false });
+export function fetchApplicatorSheetData(jobId: string, office = true): Promise<ApplicatorSheetData | null> {
+  return fetchChemicalApplicationReportData(jobId, { strict: false, office });
 }

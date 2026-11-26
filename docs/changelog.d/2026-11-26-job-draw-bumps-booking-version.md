@@ -1,6 +1,6 @@
 ## 2026-11-26 - A spray job drawing from a booking moves its version, so a stale Partial Order is refused (audit on #2318, KI-190)
 
-- Migration `20270309040000_job_draw_bumps_booking_version.sql` (local candidate, not applied).
+- Migration `20270309090000_job_draw_bumps_booking_version.sql` (local candidate, not applied).
 - Gap (audit 2026-11-26, MED): #2318 made Partial Order refuse a booking whose `quotes.row_version` moved since the rep opened it, but scheduling, editing, cancelling or completing a spray job rewrote the booking's `job_product_draws` without touching the quote. With 100 booked, a rep's open Partial Order for 150 with the extra at today's price went through as 40 booked + 110 at today's price after a 60 job was scheduled meanwhile (the rep saw 100 + 50). Cancelling a job did the reverse.
 - Fix: `_sync_quote_job_reservations` (every job path reaches it through `_sync_job_holds`) notes each product's job draw total right after it locks the booking and, if any total moved, touches the booking (`updated_at`), which moves `row_version`. No new lock (the booking row is already locked), same lock order. A sync that rebuilds the same totals does not move it. `draw_down_quote` and the Partial Order screen are unchanged: their existing "this booking changed since you opened it ... Reload" refusal now covers job draws.
 - Also: an open booking edit, restore or Whole Convert screen on the same booking now asks for a reload after a job changes its draws (same version).

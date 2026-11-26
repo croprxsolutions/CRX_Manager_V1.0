@@ -1,4 +1,4 @@
--- Rollback for 20270309040000_job_draw_bumps_booking_version.sql: re-emits the 20261107070000 body of
+-- Rollback for 20270309090000_job_draw_bumps_booking_version.sql: re-emits the 20261107070000 body of
 -- _sync_quote_job_reservations (md5 2e62bad29abc2ba33cb0e2f06a2d4a64), so job draws stop moving the
 -- booking's version. Ship it as its own reviewed migration if needed. Owner, mode, search_path and
 -- grants are unchanged by CREATE OR REPLACE and checked after.
@@ -14,7 +14,7 @@ BEGIN
      OR (SELECT count(*) FROM pg_proc o
           WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_sync_quote_job_reservations') <> 1
      OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM 'dceb55c5ff8556ac974a97a7e85d11b1' THEN
-    RAISE EXCEPTION 'JOB_DRAW_VERSION_REVERSE_PREFLIGHT: _sync_quote_job_reservations is not the one 20270309040000 body (md5 dceb55c5ff8556ac974a97a7e85d11b1)';
+    RAISE EXCEPTION 'JOB_DRAW_VERSION_REVERSE_PREFLIGHT: _sync_quote_job_reservations is not the one 20270309090000 body (md5 dceb55c5ff8556ac974a97a7e85d11b1)';
   END IF;
 END
 $preflight$;

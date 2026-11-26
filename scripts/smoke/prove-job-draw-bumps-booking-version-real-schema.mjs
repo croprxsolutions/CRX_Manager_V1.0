@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270309040000_job_draw_bumps_booking_version (audit 2026-11-26 on #2318 / KI-190).
+ * Real-schema proof for 20270309090000_job_draw_bumps_booking_version (audit 2026-11-26 on #2318 / KI-190).
  * Builds the production baseline plus every replayable migration before the candidate (Docker; the image may be
  * pulled once; no network), then runs each case before the candidate, after it, and after the rollback text
  * (scripts/smoke/job-draw-bumps-booking-version-reverse.sql). Every case uses the real RPCs on separate
@@ -31,7 +31,7 @@ process.env.UNDO_PATHS_CONTAINER ||= `crx-jdv-${process.pid}-${Date.now().toStri
 const { buildContainer, removeContainer, seedUsers, scalar, psql, claims, USERS, NAME, docker, ROOT } =
   await import('./undo-paths/harness.mjs');
 
-const CANDIDATE = '20270309040000_job_draw_bumps_booking_version.sql';
+const CANDIDATE = '20270309090000_job_draw_bumps_booking_version.sql';
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'job-draw-bumps-booking-version-reverse.sql');
 const OLD_SYNC_MD5 = '2e62bad29abc2ba33cb0e2f06a2d4a64';
 const { admin: ADMIN, rep: REP } = USERS;

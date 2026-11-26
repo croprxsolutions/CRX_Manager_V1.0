@@ -1,4 +1,4 @@
--- 20270309040000: a job draw on a booking moves the booking's version, so a stale Partial Order is
+-- 20270309090000: a job draw on a booking moves the booking's version, so a stale Partial Order is
 -- refused (audit 2026-11-26 on #2318 / KI-190).
 --
 -- WHY: #2318 (20270225100000) made draw_down_quote refuse a Partial Order when quotes.row_version is

@@ -218,6 +218,13 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was changed. A line share can't move to another line"],
   [/^BILL_SPLIT_NOTHING_TO_BILL\b/,
    "Nothing was billed. This delivery has no delivered quantity"],
+  // create_invoice_for_unbilled_delivery (A4, 20270311010000).
+  [/^UNBILLED_SCOPE_CHANGED\b/,
+   "Nothing was billed. This delivery's billing changed since the page loaded. Reload the page and check again"],
+  [/^UNBILLED_REST_LINE_AMBIGUOUS\b/,
+   "Nothing was billed. An invoice line for this product has no order line, and the order has the product on more than one order line at different prices. Link the line to its order line first"],
+  [/^BILL_SPLIT_REST_NOT_SUPPORTED\b/,
+   "Nothing was billed. This delivery is billed per payer. Void its Bill Split invoices, then Create Invoice bills it again in full"],
   // create_invoice_from_order refuses an order split across fields (20261022021000): it is billed
   // per field owner. The page offers that path once it sees the order's field allocations.
   [/^ORDER_HAS_FIELD_SPLIT\b/,

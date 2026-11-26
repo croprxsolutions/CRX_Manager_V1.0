@@ -89,15 +89,17 @@ test('Location dispatch saves notices once without a browser notification write'
   await card.getByRole('combobox').selectOption(`applicator:${second}`);
   await card.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(card.getByText(secondName, { exact: true })).toBeVisible();
+  // The first applicator still holds South, so moving North sends them no removal notice.
   expect(notices().sort()).toEqual([
-    `${first}:job_dispatched:${sender}`, `${first}:job_undispatched:${sender}`, `${second}:job_dispatched:${sender}`,
+    `${first}:job_dispatched:${sender}`, `${second}:job_dispatched:${sender}`,
   ].sort());
 
   await card.getByRole('button', { name: 'Undispatch', exact: true }).click();
   await page.getByRole('alertdialog', { name: 'Undispatch this location?' }).getByRole('button', { name: 'Undispatch' }).click();
   await expect(card).toHaveCount(0);
+  // North was the second applicator's only location on the job, so they get the removal notice.
   expect(notices().sort()).toEqual([
-    `${first}:job_dispatched:${sender}`, `${first}:job_undispatched:${sender}`,
+    `${first}:job_dispatched:${sender}`,
     `${second}:job_dispatched:${sender}`, `${second}:job_undispatched:${sender}`,
   ].sort());
   expect(browserSends).toEqual([]);

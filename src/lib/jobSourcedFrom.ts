@@ -3,6 +3,7 @@ import { fetchAllRows, pageWithList } from './pagedRead';
 export const FIELD_SOURCED_FROM_DB_READY = false;
 const TODO_CONFIRM_JOB_STOCK_PATH_COLUMN = 'stock_path' as const;
 const TODO_CONFIRM_JOB_CHEMICAL_SOURCE_VENDOR_COLUMN = 'source_vendor_id' as const;
+const TODO_CONFIRM_JOB_CHEMICAL_SOURCE_SELECT = 'id, source_vendor_id';
 
 export type JobStockPath = 'at_completion' | 'batch';
 
@@ -105,7 +106,7 @@ export async function loadJobChemicalSources(jobId: string | null): Promise<JobC
     const { supabaseUntyped } = await import('./db');
     let query = supabaseUntyped
       .from('job_chemicals')
-      .select(`id, ${TODO_CONFIRM_JOB_CHEMICAL_SOURCE_VENDOR_COLUMN}`);
+      .select(TODO_CONFIRM_JOB_CHEMICAL_SOURCE_SELECT);
     query = jobId ? query.eq('job_id', jobId) : query.limit(0);
     const { data, error } = await query;
     if (error || !Array.isArray(data)) return unavailableChemicalSources;

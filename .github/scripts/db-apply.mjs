@@ -13,6 +13,8 @@ import { pathToFileURL } from 'node:url';
 const LIVE_REF = 'rhyzpcqhnizqbxphqdkr';
 const METAHIVE_REF = 'dyxaxsjrqprvxzxkfooi';
 const STAGING_REF = 'fsnjredpmakbmhwowjjt';
+const LIQUID_DENSITY_ACTIVATION = /^\d{14}_enable_liquid_density_review$/;
+const LIQUID_DENSITY_MARKER = `SET LOCAL crx.liquid_weight_staging_project = '${STAGING_REF}';`;
 // <14-digit stamp>_<lower_snake>. Existing files only need this shape: three applied ones carry
 // impossible times (20261022086000 = 08:60). New files must also have a real date and time (below).
 const NAME = /^(\d{14})_[a-z0-9_]+$/;
@@ -52,15 +54,18 @@ export function dollarTag(text) {
 // Inside the one transaction: remember it, run the file, prove it is still the same transaction (a
 // file that committed on its own fails loudly), insert the ledger row, and prove the stored text
 // hashes to the file's bytes before COMMIT, so a mismatch rolls everything back.
-export function wrapperSql({ stem, text, run, sha, tag = dollarTag(text) }) {
+export function wrapperSql({ stem, text, run, sha, targetRef, tag = dollarTag(text) }) {
   if (!NAME.test(stem)) throw new Error(`bad migration name: ${stem}`);
   if (!/^[0-9a-f]{64}$/.test(sha ?? '')) throw new Error(`bad sha256 for ${stem}`);
+  const activatesLiquidDensity = run && targetRef === STAGING_REF && LIQUID_DENSITY_ACTIVATION.test(stem);
   return [
     'BEGIN;',
     "SELECT set_config('crx.apply_tx', txid_current()::text, true);",
+    ...(activatesLiquidDensity ? [LIQUID_DENSITY_MARKER] : []),
     // The file may end without a semicolon or inside a -- comment; close its last statement first.
     ...(run ? [text, ';'] : []),
     `DO $crx_check$ BEGIN IF current_setting('crx.apply_tx', true) IS DISTINCT FROM txid_current()::text THEN RAISE EXCEPTION 'MIGRATION_LEFT_ITS_TRANSACTION: ${stem}'; END IF; END $crx_check$;`,
+    ...(activatesLiquidDensity ? ["DO $crx_check$ BEGIN IF public.liquid_density_review_open() IS DISTINCT FROM true THEN RAISE EXCEPTION 'LIQUID_DENSITY_STAGING_ACTIVATION_DID_NOT_OPEN'; END IF; END $crx_check$;"] : []),
     `INSERT INTO supabase_migrations.schema_migrations (version, name, statements) VALUES (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISS'), '${stem}', ARRAY[${tag}${text}${tag}]);`,
     `DO $crx_check$ BEGIN IF (SELECT encode(sha256(convert_to(statements[1], 'UTF8')), 'hex') FROM supabase_migrations.schema_migrations WHERE name = '${stem}') IS DISTINCT FROM '${sha}' THEN RAISE EXCEPTION 'LEDGER_HASH_MISMATCH: ${stem}'; END IF; END $crx_check$;`,
     'COMMIT;',
@@ -74,6 +79,16 @@ export function wrapperSql({ stem, text, run, sha, tag = dollarTag(text) }) {
 // repair is by hand. Keep these files to one statement.
 export function isNoTransaction(text) {
   return /^--\s*crx:\s*no-transaction\s*$/i.test(text.split('\n')[0].trimEnd());
+}
+
+export function stagingLiquidDensityMigration(stems, read, oneShots = new Set()) {
+  const matches = stems.filter((stem) => LIQUID_DENSITY_ACTIVATION.test(stem));
+  if (matches.length > 1) throw new Error('STOPPED: more than one liquid density activation migration');
+  const [stem] = matches;
+  if (stem && (oneShots.has(stem) || isNoTransaction(read(stem)))) {
+    throw new Error('STOPPED: liquid density activation must run in its ledger transaction');
+  }
+  return stem ? { stem, marker: LIQUID_DENSITY_MARKER } : null;
 }
 
 // What the job refuses to run: a file that isn't plain UTF-8 (the ledger stores text, so the hash
@@ -416,6 +431,7 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRest
   if (badNames.length) throw new Error(`STOPPED before applying anything: badly named migration file(s): ${badNames.join(', ')} (<14-digit stamp>_<lower_snake>.sql)`);
   const files = allSql.filter((n) => NAME.test(n.slice(0, -4)));
   const fileBytes = (stem) => readFileSync(path.join(migDir, `${stem}.sql`));
+  if (expectedRef === STAGING_REF) stagingLiquidDensityMigration(files.map((file) => file.slice(0, -4)), (stem) => fileBytes(stem).toString('utf8'), oneShots);
   const postBaseline = (n) => NAME.test(n) && n.slice(0, 14) > highWater && files.includes(`${n}.sql`);
   const work = mkdtempSync(path.join(tmpdir(), 'db-apply-'));
 
@@ -499,7 +515,7 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRest
         throw new Error(`${stem} ran (outside a transaction) but its ledger row failed: record it by hand before the next run, or it runs again. ${e.message}`);
       }
     } else {
-      writeFileSync(wrapper, wrapperSql({ stem, text, run, sha }));
+      writeFileSync(wrapper, wrapperSql({ stem, text, run, sha, targetRef: expectedRef }));
       runFile(dbUrl, wrapper);
     }
     const after = query(dbUrl, `SELECT encode(sha256(convert_to(statements[1], 'UTF8')), 'hex') FROM supabase_migrations.schema_migrations WHERE name = '${stem}'`);

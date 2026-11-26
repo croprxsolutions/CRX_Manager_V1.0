@@ -7,7 +7,7 @@ import { useToast } from '../ui/Toast';
 import Button from '../ui/Button';
 import ConfirmModal from '../ui/ConfirmModal';
 import { Sentry } from '../../lib/sentry';
-import { activeInvoiceCoversDelivery, fetchActiveInvoiceCoveragePages } from '../../lib/deliveryInvoiceCoverage';
+import { activeInvoiceCoversDelivery, fetchActiveInvoiceCoveragePages, fetchDeliveryBillingRemainders, unbilledRemainderLabel, type DeliveryBillingRemainder } from '../../lib/deliveryInvoiceCoverage';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { useUnresolvedIntent, UNRESOLVED_INTENT_MESSAGE } from '../../hooks/useUnresolvedIntent';
 import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../../lib/deliverySplitBilling';
@@ -40,6 +40,13 @@ interface UnbilledDeliveryRow {
   customer_name: string;
   completed_at: string | null;
   item_count: number;
+  /** A4: an invoice bills this delivery only in part ("4 of 10 not billed ($160.00)"). */
+  unbilled_label: string | null;
+  /** What Create draft invoice does here; the server refuses it if that changed (UNBILLED_SCOPE_CHANGED). */
+  scope: 'new' | 'rest_delivery' | 'rest_order' | 'bill_split';
+  /** What the row shows is left to bill (the whole order's for rest_order); the server refuses anything else. */
+  expected_cents: number | null;
+  expected_units: number | null;
 }
 
 interface ManufacturedRow {
@@ -371,12 +378,14 @@ export default function IntegrityCleanupPanel() {
           // (e.g. in Chem Man); offering "Create draft invoice" on it would bill the
           // customer twice, so it is not listed. If that list cannot be read, hide
           // the section rather than risk showing those rows.
-          const [{ data: invoiceRows, error: coverageError }, externalBillingRes] = await Promise.all([
+          // A4: a delivery an invoice bills only in part stays listed, with what is left to bill.
+          const [{ data: invoiceRows, error: coverageError }, externalBillingRes, remaindersRes] = await Promise.all([
             fetchActiveInvoiceCoveragePages(orderIds),
             fetchBilledOutsideCrxDeliveryIds(),
+            fetchDeliveryBillingRemainders(allCompleted.map((d) => d.id)),
           ]);
           if (isStale()) return;
-          const invoiceCoverageError = coverageError ?? externalBillingRes.error;
+          const invoiceCoverageError = coverageError ?? externalBillingRes.error ?? remaindersRes.error;
           if (invoiceCoverageError) {
             Sentry.captureException(invoiceCoverageError);
             toast('error', 'Failed to verify invoice coverage. Unbilled delivery results are hidden; refresh to try again.');
@@ -386,12 +395,24 @@ export default function IntegrityCleanupPanel() {
           } else {
             const invRows = invoiceRows || [];
             const billedOutsideCrx = externalBillingRes.data ?? new Set<string>();
-            const filtered = allCompleted.filter((d) => !billedOutsideCrx.has(d.id) && !invRows.some((invoice) =>
-              activeInvoiceCoversDelivery(invoice, d.id, d.order_id)
-            ));
+            const remainders = remaindersRes.data ?? new Map<string, DeliveryBillingRemainder>();
+            const covered = (d: { id: string; order_id: string }) => invRows.some((invoice) =>
+              activeInvoiceCoversDelivery(invoice, d.id, d.order_id));
+            const filtered = allCompleted.filter((d) => !billedOutsideCrx.has(d.id) && (!covered(d) || remainders.has(d.id)));
             setUnbilled(
               filtered.map((d) => {
                 const c = Array.isArray(d.customer) ? d.customer[0] : d.customer;
+                const rest = covered(d) ? remainders.get(d.id) : undefined;
+                const active = invRows.filter((invoice) => activeInvoiceCoversDelivery(invoice, d.id, d.order_id));
+                const wholeOrder = active.some((invoice) => invoice.delivery_id === null);
+                // A whole-order invoice's rest is the order's: every short delivery of it in this list.
+                const shown = !rest ? undefined : wholeOrder
+                  ? allCompleted.filter((x) => x.order_id === d.order_id && remainders.has(x.id))
+                    .reduce((sum, x) => {
+                      const r = remainders.get(x.id) as DeliveryBillingRemainder;
+                      return { cents: sum.cents + r.unbilledCents, units: sum.units + r.unbilledQty };
+                    }, { cents: 0, units: 0 })
+                  : { cents: rest.unbilledCents, units: rest.unbilledQty };
                 return {
                   id: d.id,
                   delivery_number: d.delivery_number,
@@ -399,6 +420,12 @@ export default function IntegrityCleanupPanel() {
                   customer_name: c?.farm_name || 'Unknown',
                   completed_at: d.completed_at,
                   item_count: d.items?.length || 0,
+                  unbilled_label: rest ? unbilledRemainderLabel(rest) : null,
+                  scope: !rest ? 'new'
+                    : active.some((invoice) => invoice.delivery_id === d.id && invoice.invoice_group_id) ? 'bill_split'
+                    : wholeOrder ? 'rest_order' : 'rest_delivery',
+                  expected_cents: shown?.cents ?? null,
+                  expected_units: shown?.units ?? null,
                 };
               }),
             );
@@ -582,6 +609,9 @@ export default function IntegrityCleanupPanel() {
         p_performed_by: profile.id,
         // eslint-disable-next-line local-rules/idempotency-key-from-hook -- deliberate per-row key; see F2 comment above
         p_idempotency_key: idemKey,
+        p_expected_scope: row.scope === 'bill_split' ? undefined : row.scope,
+        p_expected_cents: row.expected_cents ?? undefined,
+        p_expected_units: row.expected_units ?? undefined,
       });
       if (error) throw error;
       assertRpcResult(data, 'create_invoice_for_unbilled_delivery');
@@ -874,7 +904,11 @@ export default function IntegrityCleanupPanel() {
               <tbody>
                 {unbilled.map((row) => (
                   <tr key={row.id} className="border-t border-blue-200">
-                    <td className="px-3 py-2 font-mono text-xs">{row.delivery_number}</td>
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {row.delivery_number}
+                      {row.unbilled_label && <div className="font-sans text-amber-700">{row.unbilled_label}</div>}
+                      {row.scope === 'rest_order' && <div className="font-sans text-gray-600">Whole-order invoice: bills every unbilled unit on the order</div>}
+                    </td>
                     <td className="px-3 py-2">{row.customer_name}</td>
                     <td className="px-3 py-2 text-gray-700">
                       {row.completed_at ? new Date(row.completed_at).toLocaleDateString() : '-'}
@@ -885,7 +919,9 @@ export default function IntegrityCleanupPanel() {
                           this row, so don't offer an action that cannot succeed. Shown
                           disabled rather than hidden so the operator can see WHY the
                           row is listed but not actionable here. */}
-                      {splitBillingOrderIds.has(row.order_id) ? (
+                      {row.scope === 'bill_split' ? (
+                        <span className="text-xs text-amber-700 max-w-xs">Bill Split: void its group, then Create draft invoice bills it in full.</span>
+                      ) : splitBillingOrderIds.has(row.order_id) ? (
                         <div className="flex flex-col gap-1">
                           <Button disabled>Create draft invoice</Button>
                           <span className="text-xs text-amber-700 max-w-xs">

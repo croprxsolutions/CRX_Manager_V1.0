@@ -857,6 +857,14 @@
         "lifecycle"
       ]
     },
+    "receive_po_items_with_excess_notice": {
+      "chain": "smoke-receiving-excess-notice.sql",
+      "container_only": true,
+      "container_prover": "prove-receiving-excess-notice-local.mjs",
+      "description": "CONTAINER ONLY: saved excess quantities, administrator notice recipients and sender, ordinary and refused receiving, repeated lines, old and new receipt-key replay, failed notice and receipt reversal.",
+      "covers": ["receive_po_items_with_excess_notice"],
+      "area": ["inventory", "lifecycle", "idempotency", "security"]
+    },
     "receiving_damage_receipts": {
       "chain": "smoke-receiving-damage-receipts.sql",
       "container_only": true,
@@ -1618,6 +1626,14 @@
         "billing",
         "security"
       ]
+    },
+    "dispatch_location_with_notices": {
+      "chain": "smoke-dispatch-location-notices.sql",
+      "container_only": true,
+      "container_prover": "prove-dispatch-location-notices-local.mjs",
+      "description": "CONTAINER ONLY: use the screen walkthrough's invented fixtures to prove saved notice recipients, role checks, exact replay across old and new callers, notice failure isolation, dispatch racing assignee deactivation, and no removal notice while the applicator still holds another location on the job (20270311190000).",
+      "covers": ["dispatch_location_with_notices"],
+      "area": ["lifecycle", "security", "idempotency", "regression"]
     },
     "dispatch_job_locations": {
       "chain": "smoke-dispatch-job-locations.sql",

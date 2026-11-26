@@ -55,9 +55,11 @@ which does not exist yet. See [TESTING.md](./TESTING.md#running-e2e-tests).
 ## Vercel configuration
 
 - Framework preset: **Vite**. Build command `npm run build`, output directory `dist`.
-- `vercel.json` sets the single-page-app rewrite (every path serves `index.html`), the
+- `vercel.json` sets the single-page-app rewrite to `index.html`, the
   security headers (Content-Security-Policy, HSTS, `X-Frame-Options`, and others), and the
   Ignored Build Step. It does not override the install or build commands.
+- The temporary staging-only `/api/maps-step0` route has its own response and security
+  headers. See the [Google Maps staging probe](./proofs/maps-step0/staging-probe.md).
 - **Ignored Build Step** (`ignoreCommand` → `scripts/vercel-ignore-build.sh`, 2026-10-28): Vercel
   bills build time, and most pushes change only notes the app never reads. The script compares
   the push with the branch's previous successful deployment and skips the build when every

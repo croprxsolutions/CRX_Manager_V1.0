@@ -40,8 +40,11 @@ function buildChain(table: string): Record<string, unknown> {
     'lt', 'lte', 'like', 'ilike', 'is', 'in', 'not', 'or', 'and', 'match',
     'order', 'limit', 'offset', 'returns', 'abortSignal', 'range',
   ]) self[m] = method;
+  // A paged read past its first page gets no more rows.
+  let from = 0;
+  self.range = (start: number) => { from = start; return self; };
   // Read the table when the query resolves, so a test can change it between calls.
-  const rows = () => tables.data[table] ?? [];
+  const rows = () => (from > 0 ? [] : tables.data[table] ?? []);
   self.single = () => Promise.resolve({ data: rows()[0] ?? null, error: null });
   self.maybeSingle = () => Promise.resolve({ data: rows()[0] ?? null, error: null });
   self.then = (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) =>
@@ -488,6 +491,85 @@ describe('Invoices on this sale card', () => {
     const dialog = await screen.findByRole('alertdialog', { name: 'Create an invoice for this delivery?' });
     expect(within(dialog).getByText('This makes a draft invoice for completed delivery DEL-1.')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Create invoice' })).toBeInTheDocument();
+  });
+
+  // A4: an invoice bills 6 of the 10 delivered; the card keeps the delivery unbilled and offers Bill the rest.
+  it('short-billed: an admin sees what is left to bill and Bill the rest… opens its confirm', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    tables.data.delivery_billing_remainders = [{ delivery_id: 'del-1', delivered_qty: 10, unbilled_qty: 4, unbilled_cents: 16000 }];
+    await renderPage();
+    await screen.findByText(paragraph('Not fully billed. 4 of 10 not billed ($160.00): the invoice bills fewer units than were delivered.'));
+    fireEvent.click(screen.getByRole('button', { name: 'Bill the rest…' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Bill the rest of this delivery?' });
+    expect(within(dialog).getByText('This makes a draft invoice for the units of delivery DEL-1 not billed yet (4 of 10 not billed ($160.00)). If the billing changes before you confirm, nothing is drafted and the page asks you to reload.')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Bill the rest' })).toBeInTheDocument();
+  });
+
+  it('short-billed: confirming sends the scope the dialog showed', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    tables.data.delivery_billing_remainders = [{ delivery_id: 'del-1', delivered_qty: 10, unbilled_qty: 4, unbilled_cents: 16000 }];
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Bill the rest…' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Bill the rest of this delivery?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Bill the rest' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('create_invoice_for_unbilled_delivery',
+      expect.objectContaining({ p_delivery_id: 'del-1', p_expected_scope: 'rest_delivery', p_expected_cents: 16000, p_expected_units: 4 })));
+  });
+
+  it('short-billed: a later remainder read does not change what the open confirmation sends', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    tables.data.delivery_billing_remainders = [{ delivery_id: 'del-1', delivered_qty: 10, unbilled_qty: 4, unbilled_cents: 16000 }];
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Bill the rest…' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Bill the rest of this delivery?' });
+    tables.data.delivery_billing_remainders = [{ delivery_id: 'del-1', delivered_qty: 10, unbilled_qty: 8, unbilled_cents: 32000 }];
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Bill the rest' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('create_invoice_for_unbilled_delivery',
+      expect.objectContaining({ p_expected_cents: 16000, p_expected_units: 4 })));
+  });
+
+  it('short-billed: moving to another delivery closes the open confirmation, nothing is sent', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    tables.data.delivery_billing_remainders = [{ delivery_id: 'del-1', delivered_qty: 10, unbilled_qty: 4, unbilled_cents: 16000 }];
+    const view = render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Bill the rest…' }, { timeout: 3000 }));
+    await screen.findByRole('alertdialog', { name: 'Bill the rest of this delivery?' });
+    route.id = 'del-2';
+    tables.data.deliveries = [{ ...OPEN_DELIVERY, id: 'del-2', delivery_number: 'DEL-2', status: 'completed', order_id: ORDER_ID }];
+    view.rerender(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    await waitFor(() => expect(screen.queryByRole('alertdialog', { name: 'Bill the rest of this delivery?' })).not.toBeInTheDocument());
+    expect(mockRpc).not.toHaveBeenCalledWith('create_invoice_for_unbilled_delivery', expect.anything());
+  });
+
+  it('short-billed Bill Split: no button, says to void the group', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS.map((row) => ({ ...row, invoice_group_id: 'grp-1' })));
+    tables.data.delivery_billing_remainders = [{ delivery_id: 'del-1', delivered_qty: 10, unbilled_qty: 4, unbilled_cents: 16000 }];
+    await renderPage();
+    await screen.findByText(/Billed per payer \(Bill Split\)/);
+    expect(screen.queryByRole('button', { name: /Bill the rest|Create invoice/ })).not.toBeInTheDocument();
+  });
+
+  it('a failed remainder read does not look fully billed', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'delivery_billing_remainders') return buildChain(table);
+      const chain = buildChain(table);
+      chain.then = (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) =>
+        Promise.resolve({ data: null, error: { message: 'timeout' } }).then(ok, bad);
+      return chain;
+    });
+    await renderPage();
+    expect(await screen.findByText('Could not check whether every delivered unit is billed. Refresh the page to check again.')).toBeInTheDocument();
+  });
+
+  it('fully billed: no note and no button', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    tables.data.delivery_billing_remainders = [];
+    await renderPage();
+    await screen.findByRole('link', { name: /CS-2026-0005-1/ });
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('delivery_billing_remainders'));
+    expect(screen.queryByText(/Not fully billed/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Bill the rest|Create invoice/ })).not.toBeInTheDocument();
   });
 
   // Review MED 1: an invoice linked by delivery_id on a delivery with no order was never found.

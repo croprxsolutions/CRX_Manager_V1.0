@@ -21,12 +21,12 @@
 --      the second posts: the credit is 4/10 of both posted invoices (only a POSTED tax or discount line re-prices).
 --   G  While a return made before the tick is open, a newer return is refused (RETURN_OLDER_RETURN_AT_ORDER_PRICE);
 --      once the older one is credited at its taxed share, the newer one is made and credits; each 4/10, together 8/10.
---   I  Mason's rule (26 Nov: unbilled units can be credited while the taxed lot is still a draft). 5 posted untaxed,
---      the box ticked, 5 more on a taxed draft; a return of 8 is received and credited while that lot is a draft. The
---      credit is 8/10 of both lots (the draft's tax included), its tax is in the ledger, the draft then posts, and the
---      return of the last 2 credits the rest: together exactly what was charged, and the ledger refunds all the tax.
+--   I  Mason's rule (26 Nov: "keep it simple"): 5 posted untaxed, the box ticked, 5 more on a taxed draft; a return of 8
+--      waits while that lot is a draft (RETURN_UNITS_ON_DRAFT, post the draft first). Once it posts, the return
+--      credits 8/10 of both lots (the tax included) with its tax in the ledger, and the return of the last 2 credits
+--      the rest: together exactly what was charged, and the ledger refunds all the tax.
 --   J  Units on no invoice at all stay refused once the sale has tax (RETURN_UNITS_NOT_INVOICED).
---   K  Same as I with the first lot posted TAXED: the return of 8 credits 8/10 of both lots, then the last 2 the rest.
+--   K  Same as I with the first lot posted TAXED: refused while the second lot is a draft, then 8/10 and the rest.
 --   L  Tax-on comes from the order's box (Taha, 26 Nov): with the box ticked and the line on no live invoice at all,
 --      a return made at the order price is refused (RETURN_UNITS_NOT_INVOICED), not credited at the order price.
 --   M  A line from before this change ('unrecorded') keeps staging's refusal while a taxed draft holds the line:
@@ -382,8 +382,8 @@ BEGIN
     v_fails := v_fails || ' (H) setup failed: ' || SQLERRM || ';';
   END;
 
-  -- I and K: Mason's rule. A return of 8 is credited while 5 of its units are on a taxed draft (I: the first lot
-  --    posted untaxed; K: posted taxed). The draft then posts and the last 2 are returned.
+  -- I and K: Mason's rule. A return of 8 waits while 5 of its units are on a taxed draft (I: the first lot posted
+  --    untaxed; K: posted taxed); once the draft posts it credits, and the last 2 are returned.
   DECLARE
     v_inv2 uuid;
     v_case text;
@@ -418,20 +418,31 @@ BEGIN
           -- both lots as they stand: the posted one and the taxed draft (one product line each, plus tax)
           v_total := (SELECT sum(total_amount_cents) FROM invoices WHERE id IN (v_invoice, v_inv2));
           v_tax := pg_temp.rtx_tax(ARRAY[v_invoice, v_inv2]);
+          BEGIN
+            PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc0-' || lower(v_case) || '-' || v_suffix));
+            v_fails := v_fails || format(' (%s) a return of units on a taxed draft was received before the draft posted;', v_case);
+          EXCEPTION WHEN OTHERS THEN
+            IF SQLERRM NOT LIKE 'RETURN_UNITS_ON_DRAFT%' THEN
+              v_fails := v_fails || format(' (%s) the refusal is not RETURN_UNITS_ON_DRAFT: %s;', v_case, SQLERRM);
+            END IF;
+          END;
+          IF (SELECT status FROM returns WHERE id = v_ret) = 'received' THEN
+            v_fails := v_fails || format(' (%s) the refused return was received anyway;', v_case);
+          END IF;
+          -- the draft posts and bills its 5 units; then the return credits
+          PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_inv2, v_inv2, 'smk-rtx-post-' || lower(v_case) || '2-' || v_suffix));
+          IF (SELECT sum(total_amount_cents) FROM invoices WHERE id IN (v_invoice, v_inv2)) IS DISTINCT FROM v_total THEN
+            v_fails := v_fails || format(' (%s) posting the draft changed what was charged;', v_case);
+          END IF;
           PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-' || lower(v_case) || '-' || v_suffix));
           PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-ic-' || lower(v_case) || '-' || v_suffix));
           v_credit := pg_temp.rtx_credit(v_ret);
           IF v_credit IS DISTINCT FROM round(v_total * 8 / 10.0)::bigint THEN
-            v_fails := v_fails || format(' (%s) the credit of 8 is %s cents, want 8/10 of both lots %s (the draft''s tax included);', v_case, v_credit, v_total);
+            v_fails := v_fails || format(' (%s) the credit of 8 is %s cents, want 8/10 of both posted lots %s (tax included);', v_case, v_credit, v_total);
           END IF;
           IF pg_temp.rtx_ledger(v_ret) IS DISTINCT FROM round(-v_credit * v_tax::numeric / v_total)::bigint THEN
             v_fails := v_fails || format(' (%s) the ledger froze %s cents tax for the credit, want %s (8/10 of both lots'' tax, as a refund);',
               v_case, pg_temp.rtx_ledger(v_ret), round(-v_credit * v_tax::numeric / v_total)::bigint);
-          END IF;
-          -- the draft still bills its 5 units
-          PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_inv2, v_inv2, 'smk-rtx-post-' || lower(v_case) || '2-' || v_suffix));
-          IF (SELECT sum(total_amount_cents) FROM invoices WHERE id IN (v_invoice, v_inv2)) IS DISTINCT FROM v_total THEN
-            v_fails := v_fails || format(' (%s) posting the draft changed what was charged;', v_case);
           END IF;
           v_ret2 := pg_temp.rtx_return(v_admin, v_customer, v_order, 2, lower(v_case) || 'r2-' || v_suffix);
           PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret2, v_admin, 'smk-rtx-rc-' || lower(v_case) || '2-' || v_suffix));
@@ -530,6 +541,6 @@ BEGIN
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL return tax change:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK return tax change: a return credits the taxed share after the box is ticked, before or after it is received, never more than the posted total; another return still at the old price is refused, never changed; a newer return waits for an older order-price one; a later discount credits the discounted total; create_return records how it priced each line; an untaxed return keeps the order price; units on a taxed draft credit at that lot''s price and the ledger records their tax; units on no invoice stay refused, the order''s tax box included; a line from before this change keeps today''s refusal';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK return tax change: a return credits the taxed share after the box is ticked, before or after it is received, never more than the posted total; another return still at the old price is refused, never changed; a newer return waits for an older order-price one; a later discount credits the discounted total; create_return records how it priced each line; an untaxed return keeps the order price; units on a taxed draft wait until it posts, then credit at the taxed share with the tax in the ledger; units on no invoice stay refused, the order''s tax box included; a line from before this change keeps today''s refusal';
 END
 $smoke$;

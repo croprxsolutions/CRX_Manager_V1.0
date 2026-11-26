@@ -15,15 +15,15 @@ function body(name: string): string {
 }
 
 describe('20270311100000 return credit after a tax change', () => {
-  it('runs as one transaction and pins the five bodies it re-emits', () => {
+  it('runs as one transaction and pins the four bodies it re-emits', () => {
     expect(MIGRATION).toContain('RETURN_TAX_CHANGE_NOT_IN_TRANSACTION');
     expect(MIGRATION).toContain("'67566a09967e74b1ee813354038955b0'");
     expect(MIGRATION).toContain("'0d5209ab7179f36d71f548b55a6cf77d'");
-    // the freeze as #2591 (20270308150000) left it
-    expect(MIGRATION).toContain("'bd8f710cfbfb0567baaf2f42025e7c13'");
+    // the tax ledger freeze (#2591) is not re-emitted
+    expect(MIGRATION).not.toContain('_freeze_credit_sales_tax_20270109');
     expect(MIGRATION).toContain("'dd95a7decaea1130352bc03e31f23ccf'");
     expect(MIGRATION).toContain("'8e799519fa332cb51465f51b5c3585e7'");
-    expect(MIGRATION.match(/CREATE OR REPLACE FUNCTION/g)).toHaveLength(5);
+    expect(MIGRATION.match(/CREATE OR REPLACE FUNCTION/g)).toHaveLength(4);
   });
 
   for (const fn of ['_receive_return_intent_impl_20260812', '_issue_return_credit_intent_impl_20260812']) {
@@ -39,8 +39,10 @@ describe('20270311100000 return credit after a tax change', () => {
       expect(b).toContain('RETURN_REPRICE_OTHER_RETURN_PENDING');
       // only this return's lines are written
       expect(b).toContain('     WHERE ri.id = f.id\n');
-      // priced from the customer's lots, posted or draft (Mason, 26 Nov), and units on no invoice stay refused
+      // priced from the customer's posted lots; units still on a draft wait (Mason, 26 Nov), units on no invoice are refused
       expect(b).toContain('public._return_order_price_lot_price(');
+      expect(b).toContain("RAISE EXCEPTION 'RETURN_UNITS_ON_DRAFT");
+      expect(b.indexOf('RETURN_UNITS_ON_DRAFT')).toBeLessThan(b.indexOf('RETURN_UNITS_NOT_INVOICED'));
       expect(b).toContain('RETURN_UNITS_NOT_INVOICED');
       expect(b).toContain('AND lp.applies AND lp.fits');
       expect(b).not.toContain('jsonb_to_recordset');
@@ -84,11 +86,13 @@ describe('20270311100000 return credit after a tax change', () => {
     expect(b.indexOf('UPDATE public.return_items ri')).toBeLessThan(b.indexOf("RAISE EXCEPTION 'RETURN_CREDIT_EXCEEDS_BILLED_SHARE'"));
   });
 
-  it('the lot price helper: own customer, no field split, a tax or discount line on a posted or draft invoice, the create_return formula', () => {
+  it('the lot price helper: own customer, no field split, tax or a discount, posted lots only, the create_return formula', () => {
     const start = MIGRATION.indexOf('CREATE FUNCTION public._return_order_price_lot_price(');
     expect(start).toBeGreaterThan(0);
     const h = MIGRATION.slice(start, MIGRATION.indexOf('$function$;', start));
-    expect(h).toContain("i.status IN ('draft', 'unposted', 'posted', 'overdue', 'paid')");
+    expect(h).toContain("i.status IN ('posted', 'overdue', 'paid') AS posted");
+    expect(h).toContain('FROM lots WHERE posted), 0)::bigint AS lot_cents');
+    expect(h).toContain('p.other_qty + p_quantity <= p.lot_qty + p.draft_qty');
     expect(h).toContain("dl.charge_type IN ('standing_discount', 'sales_tax')");
     expect(h).toContain('split_evidence');
     expect(h).toContain('round(t.lot_cents * (t.other_qty + p_quantity) / t.lot_qty)::bigint - t.other_cents');
@@ -107,19 +111,9 @@ describe('20270311100000 return credit after a tax change', () => {
     }
   });
 
-  it('issue_return_credit lets only lot-priced lines credit draft units without a source line', () => {
+  it('issue_return_credit keeps staging\'s no-source refusal for share returns', () => {
     const b = body('_issue_return_credit_intent_impl_20260812');
-    const unbacked = b.indexOf("RAISE EXCEPTION 'RETURN_SPLIT_CREDIT_UNBACKED'");
-    expect(b.lastIndexOf("lri.priced_from = 'order_price' AND llp.applies", unbacked)).toBeGreaterThan(0);
-  });
-
-  it('the tax ledger keeps #2591 and pools units credited from a taxed draft with their drafts', () => {
-    const b = body('_freeze_credit_sales_tax_20270109');
-    expect(b).not.toContain('<= v_inv.booked_at');
-    expect(b).toContain('(#2091)');
-    expect(b).toContain('LEFT JOIN public.invoice_items src ON src.id = ii.return_credit_source_item_id');
-    expect(b).toContain("OR (v_key.from_draft AND i.status IN ('draft', 'unposted'))");
-    expect(b).toContain("d.status IN ('draft', 'unposted')");
-    expect(b).not.toContain('pooled');
+    expect(b).toContain("RAISE EXCEPTION 'RETURN_SPLIT_CREDIT_UNBACKED'");
+    expect(b).not.toContain('llp.applies');
   });
 });

@@ -8,7 +8,7 @@
 --     crediting it refused with RETURN_SPLIT_SHARE_REPRICED. Mason, 22 Nov: re-price to the taxed share; the credit is
 --     never more than the customer was charged on the posted invoice, tax included.
 --
--- WHAT (Taha, 25 Nov: A+B; then 1 keep refusal, 2a, 3 yes; 26 Nov: Mason's draft-lot rule, "A + freeze OK"):
+-- WHAT (Taha, 25 Nov: A+B; then 1 keep refusal, 2a, 3 yes; 26 Nov: q3 yes; Mason, 26 Nov: draft units wait):
 --   1. return_items.priced_from ('order_price' | 'billed_share' | 'unrecorded'): how create_return priced the line,
 --      so a re-price never guesses from amounts. Every line that exists when this applies is 'unrecorded' (the column
 --      default; no guessing) and is never re-priced: such a return keeps today's stale refusal, for the office (live
@@ -21,60 +21,46 @@
 --      received meanwhile was re-priced from the untaxed lot alone and then refused once the draft posted.
 --      A re-priced line keeps priced_from 'order_price' (its origin), so it is re-priced again if more taxed lots
 --      post before it is credited.
---   1b. _return_order_price_lot_price (new, not SECURITY DEFINER, no grants): Mason, 26 Nov: "unbilled units can be
---      credited while the taxed lot is still a draft". An order-price line of the order's own customer (no field
---      split) whose live invoices carry a sales-tax or discount line, posted OR draft, is priced from its share of the
---      customer's lots of the line, the posted ones and the drafts that will bill the rest, each after its discount
---      and with its share of its tax, by create_return's running-total rule. The draft still bills those units when
---      it posts, and the credit already refunded them at that lot's price, so together they are exactly what is
---      charged. Units on no live invoice cannot be priced and stay refused (RETURN_UNITS_NOT_INVOICED; Taha, 26 Nov).
---      Tax-on comes from the order's sales-tax box (orders.sales_tax) as well as a tax or discount line on the
---      invoices (Taha, 26 Nov), so a line on no invoice of a taxed sale is refused too, not credited at the order price.
---      A line from before this change ('unrecorded') keeps staging's refusal while a live invoice of the line, a draft
---      too, carries a tax or discount line (Taha, 26 Nov), though share pricing now switches on posted lines only.
+--   1b. _return_order_price_lot_price (new, not SECURITY DEFINER, no grants): an order-price line of the order's own
+--      customer (no field split) on a sale with tax or a discount is priced from its share of the customer's POSTED
+--      lots of the line, each after its discount and with its share of its tax, by create_return's running-total
+--      rule. "Tax or a discount" is the order's sales-tax box (orders.sales_tax; Taha, 26 Nov: tax-on comes from the
+--      order) or a sales-tax or discount line on a live invoice holding the line, a draft too. Returned units that are
+--      still on a draft wait until it is posted (Mason, 26 Nov: "keep it simple"; RETURN_UNITS_ON_DRAFT, post the
+--      draft first); units on no live invoice cannot be priced (RETURN_UNITS_NOT_INVOICED). A line from before this
+--      change ('unrecorded') keeps staging's refusal while a live invoice of the line, a draft too, carries a tax or
+--      discount line (Taha, 26 Nov), though share pricing now switches on posted lines only.
 --   2. receive_return and issue_return_credit (_receive_return_intent_impl_20260812,
 --      _issue_return_credit_intent_impl_20260812): under the per-order-line locks they already take, a line of THIS
---      return priced 'order_price' whose sale gained a sales-tax or discount line on a live invoice, posted or draft
---      (the returner is the order's customer and the order has no split evidence; a field split never triggers it), is
---      re-priced to its lot price (1b: tax and discount included, never beyond the lots; it stays 'order_price'), with
---      one financial_audit_log row, instead of refused; a line with units on no live invoice is refused
---      (RETURN_UNITS_NOT_INVOICED), before anything is restocked. Such a line is checked against its lots instead of
---      the posted-only share, and issue_return_credit lets its units still on a draft through the no-source remainder
---      (_issue_return_credit_impl's existing unbilled path; otherwise RETURN_SPLIT_CREDIT_UNBACKED as before). No other
+--      return priced 'order_price' on a sale with tax or a discount (1b; the returner is the order's customer and the
+--      order has no split evidence; a field split never triggers it) is re-priced to its posted-lot price (tax and
+--      discount included, never beyond the posted lots; it stays 'order_price'), with one financial_audit_log row,
+--      instead of refused; a line with units still on a draft, or on no invoice, is refused before anything is
+--      restocked. No other
 --      return changes: while another open return of that customer and order line still has a price that is not what
 --      create_return would give it now, this one is refused (RETURN_REPRICE_OTHER_RETURN_PENDING) and nothing
 --      changes. A 'billed_share' line that went stale (an earlier return cancelled, a split payer's blend moved) is
 --      still refused (RETURN_SPLIT_SHARE_REPRICED, Mason's #1010 rule), as is anything beyond the billed share.
 --      issue_return_credit re-prices before its cents cap (its pre-lock check leaves the cents bound to that cap).
---      receive_return refuses a sales rep who cannot read every live invoice (drafts too) of the customer on the order before
+--      receive_return refuses a sales rep who cannot read every posted invoice of the customer on the order before
 --      re-pricing (RETURN_SPLIT_INVOICE_NOT_VISIBLE, as create_return), and refuses a re-priced line whose order line has
 --      a posted sale line in another unit (RETURN_CREDIT_UNIT_MISMATCH, create_return's check), before restocking.
---   3. _freeze_credit_sales_tax_20270109 (staging's #2091 body, md5-pinned, one hunk marked (#2066)): a credit line
---      with no source line used to be left out of the tax ledger (unbilled units carry no tax). Units still on a draft
---      of the customer whose order line has a tax or discount line (1b applies) are now pooled with that line, the
---      pool counting its drafts too, so the ledger records the tax the credit refunded at the lots' blended rate,
---      exactly as the credit was priced. Everything else in the freeze is unchanged (a line with no tax or discount,
---      or with no draft, freezes as before). When the draft posts, later credits take what remains, as before.
---   KNOWN LIMIT (Taha, 26 Nov): a draft edited, voided or deleted after it priced a credit is not reconciled: the
---      credit and its frozen tax keep the draft's price (the office corrects by hand, as for any unbilled-units credit).
---      The units' cost is not reversed when the draft later posts (the unbilled path's existing zero-cost remainder).
---      A NEW return made after a taxed lot posted is still priced from posted lots only and capped there
---      (create_return unchanged).
+--   The tax ledger freeze (#2591) is not touched: a re-priced line's units are all on posted lots, so it freezes as today.
 --   Applying: like every migration here, the preflight relies on the file running as one transaction with
 --   ON_ERROR_STOP (the apply gate and the staging DB job do); run statement by statement it stops at the preflight.
 --
--- NOT CHANGED (beyond 1a and 3): the credit implementation _issue_return_credit_impl, the public wrappers,
+-- NOT CHANGED (beyond 1a): the credit implementation _issue_return_credit_impl, the tax ledger freeze, the public wrappers,
 --   every trigger, every money amount already stored. Each re-emitted body is staging's current body (pinned below)
 --   plus only the hunks marked (#2066). CREATE OR REPLACE keeps each OID, owner and exact ACL; the
 --   postflight proves it.
 --
--- ROLLBACK (its own reviewed migration): re-emit the five bodies pinned in the preflight (20261215110000 for
---   create_return, 20261021155000 for the two return bodies, 20270109100200 for the share helper, 20270308150000 for
---   the freeze), drop _return_order_price_lot_price, then drop return_items.priced_from. Credits issued meanwhile keep
---   their amounts and frozen tax.
+-- ROLLBACK (its own reviewed migration): re-emit the four bodies pinned in the preflight (20261215110000 for
+--   create_return, 20261021155000 for the two return bodies, 20270109100200 for the share helper), drop
+--   _return_order_price_lot_price, then drop return_items.priced_from. Credits issued meanwhile keep their amounts and
+--   frozen tax.
 --
--- ORDERING: after 20261215110000 (create_return), 20270109100200 (the share helper), 20261021155000 (the return bodies)
---   and 20270308150000 (the freeze, #2091).
+-- ORDERING: after 20261215110000 (create_return), 20270109100200 (the share helper) and 20261021155000 (the return
+--   bodies).
 
 SET LOCAL lock_timeout = '5s';
 
@@ -96,13 +82,12 @@ BEGIN
   IF to_regprocedure('public._return_order_price_lot_price(uuid,uuid,uuid,uuid,numeric)') IS NOT NULL THEN
     RAISE EXCEPTION 'RETURN_TAX_CHANGE_PREFLIGHT: already applied';
   END IF;
-  -- The four SECURITY DEFINER functions re-emitted below, exactly as staging has them.
+  -- The three SECURITY DEFINER functions re-emitted below, exactly as staging has them.
   SELECT string_agg(f.name, ', ') INTO v_bad
     FROM (VALUES
       ('public._create_return_intent_impl_20260812(jsonb,jsonb,text)', 'dd95a7decaea1130352bc03e31f23ccf', 2),
       ('public._receive_return_intent_impl_20260812(uuid,uuid,text)', '67566a09967e74b1ee813354038955b0', 1),
-      ('public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', '0d5209ab7179f36d71f548b55a6cf77d', 1),
-      ('public._freeze_credit_sales_tax_20270109(uuid)', 'bd8f710cfbfb0567baaf2f42025e7c13', 0)
+      ('public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', '0d5209ab7179f36d71f548b55a6cf77d', 1)
     ) AS f(name, md5, ndef)
    WHERE NOT EXISTS (
      SELECT 1 FROM pg_proc p
@@ -456,20 +441,21 @@ AS $function$
     coalesce((SELECT sum(extended_cents) FROM other_returns), 0)::bigint;
 $function$;
 
--- 2b. (#2066) the price of an order-price line on a sale with a tax or discount line: its share of the customer's lots,
---     posted or still a draft (Mason, 26 Nov: unbilled units can be credited while the taxed lot is still a draft) --
+-- 2b. (#2066) the price of an order-price line on a sale with tax or a discount: its share of the customer's POSTED lots
 -- applies: the returner is the order's customer, the order has no field split, and the sale has tax or a discount: the
 --   order's sales-tax box is ticked (Taha, 26 Nov: tax-on comes from the order), or a live invoice of the customer on
 --   this order holding the line carries a sales-tax or discount line (posted or draft). Otherwise the line keeps the
 --   order price, as before.
+-- fits: the returned units, with this customer's other open returns of the line, are all on its posted invoices and
+--   within their cents.
+-- on_draft: it does not fit, but would once the customer's drafts of the line post (Mason, 26 Nov: such a return
+--   waits until the draft is posted).
+-- unit_price_cents / extended_cents: exactly as create_return prices a billed share (the running total over the posted
+--   lots, after each invoice's discount and with its share of its tax).
 -- adjusted: only the invoice evidence (a sales-tax or discount line on a live invoice holding the line), the rule
 --   staging used to switch a line to share pricing; it keeps a line from before this change refused (see receive).
--- fits: the returned units, with this customer's other open returns of the line, are all on its live invoices and
---   within their cents. Units on no live invoice cannot be priced (the caller refuses them).
--- unit_price_cents / extended_cents: exactly as create_return prices a billed share (the running total over the
---   lots, after each invoice's discount and with its share of its tax), the drafts counted as the lots they will bill.
 CREATE FUNCTION public._return_order_price_lot_price(p_order_id uuid, p_order_item_id uuid, p_customer_id uuid, p_exclude_return_id uuid, p_quantity numeric)
- RETURNS TABLE(applies boolean, fits boolean, unit_price_cents bigint, extended_cents bigint, adjusted boolean)
+ RETURNS TABLE(applies boolean, fits boolean, unit_price_cents bigint, extended_cents bigint, adjusted boolean, on_draft boolean)
  LANGUAGE sql
  STABLE
  SET search_path TO 'public', 'pg_temp'
@@ -487,7 +473,7 @@ AS $function$
       FROM public.orders o WHERE o.id = p_order_id
   ), live AS (
     -- the customer's live sale invoices of this order that hold this order line: posted lots and drafts
-    SELECT i.id
+    SELECT i.id, i.status IN ('posted', 'overdue', 'paid') AS posted
       FROM public.invoices i
      WHERE i.order_id = p_order_id
        AND i.customer_id = p_customer_id
@@ -497,7 +483,7 @@ AS $function$
        AND EXISTS (SELECT 1 FROM public.invoice_items x WHERE x.invoice_id = i.id AND x.order_item_id = p_order_item_id)
   ), lots AS (
     -- after the invoice's discount, with its share of the invoice's tax (as _return_customer_line_share bills)
-    SELECT ii.quantity, public._standing_discount_net_cents_20261231(ii.id) AS cents
+    SELECT live.posted, ii.quantity, public._standing_discount_net_cents_20261231(ii.id) AS cents
       FROM live
       JOIN public.invoice_items ii ON ii.invoice_id = live.id
       JOIN public.order_items oi ON oi.id = ii.order_item_id
@@ -516,8 +502,9 @@ AS $function$
        AND r.status NOT IN ('rejected', 'cancelled')
        AND r.id IS DISTINCT FROM p_exclude_return_id
   ), t AS (
-    SELECT coalesce((SELECT sum(quantity) FROM lots), 0) AS lot_qty,
-           coalesce((SELECT sum(cents) FROM lots), 0)::bigint AS lot_cents,
+    SELECT coalesce((SELECT sum(quantity) FROM lots WHERE posted), 0) AS lot_qty,
+           coalesce((SELECT sum(cents) FROM lots WHERE posted), 0)::bigint AS lot_cents,
+           coalesce((SELECT sum(quantity) FROM lots WHERE NOT posted), 0) AS draft_qty,
            coalesce((SELECT sum(quantity) FROM other_returns), 0) AS other_qty,
            coalesce((SELECT sum(extended_cents) FROM other_returns), 0)::bigint AS other_cents
   ), adj AS (
@@ -537,7 +524,10 @@ AS $function$
              AND p.other_cents + p.extended_cents <= p.lot_cents, false),
     p.unit_price_cents,
     p.extended_cents,
-    a.adjusted
+    a.adjusted,
+    COALESCE(NOT (p.lot_qty > 0 AND p.other_qty + p_quantity <= p.lot_qty
+                  AND p.other_cents + p.extended_cents <= p.lot_cents)
+             AND p.other_qty + p_quantity <= p.lot_qty + p.draft_qty, false)
   FROM priced p, adj a;
 $function$;
 REVOKE ALL ON FUNCTION public._return_order_price_lot_price(uuid, uuid, uuid, uuid, numeric)
@@ -611,7 +601,7 @@ BEGIN
           v_order_id, ri.order_item_id, v_customer_id, p_return_id
         ) s
        WHERE ri.return_id = p_return_id AND s.share_mode
-    ) OR EXISTS (  -- (#2066) an order-price line on a sale with a tax or discount line, posted or draft
+    ) OR EXISTS (  -- (#2066) an order-price line on a sale with tax or a discount
       SELECT 1
         FROM public.return_items ri
         CROSS JOIN LATERAL public._return_order_price_lot_price(v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
@@ -627,17 +617,17 @@ BEGIN
         PERFORM pg_advisory_xact_lock(hashtextextended(v_lock_order_item_id::text, 361));
       END LOOP;
       -- (#2066) A line create_return priced at the order price (the sale had no posted sales-tax or discount line yet), of
-      -- the order's own customer with no field split, whose live invoices now carry a sales-tax or discount line (posted, or
-      -- still a draft) is re-priced here, under these locks, to its share of that customer's lots of the line: the posted
-      -- ones and the drafts that will bill the rest (Mason, 26 Nov: "unbilled units can be credited while the taxed lot is
-      -- still a draft"), each after its discount and with its share of its tax, priced as create_return prices a share
-      -- (the running total), never beyond those lots (Mason, 22 Nov: the taxed share, never more than is charged). Units on
-      -- no live invoice cannot be priced and stay refused (RETURN_UNITS_NOT_INVOICED; Taha, 26 Nov). Only this return's
-      -- lines change (Taha, 25 Nov): while another open return of that customer and order line still has a price that is
-      -- not what it would be priced at now, this one is refused (RETURN_REPRICE_OTHER_RETURN_PENDING) and nothing
-      -- changes. The line keeps priced_from 'order_price' (its origin), so it is re-priced again if its lots change before
-      -- it is credited. A line priced from what was billed (priced_from 'billed_share') is never re-priced: if stale it is
-      -- refused below as before (Mason's #1010 rule, cancel and recreate).
+      -- the order's own customer with no field split, on a sale with tax or a discount (its sales-tax box, or a sales-tax or
+      -- discount line on a live invoice of the line) is re-priced here, under these locks, to its share of that customer's
+      -- POSTED lots of the line, each after its discount and with its share of its tax, priced as create_return prices a
+      -- share (the running total), never beyond those lots (Mason, 22 Nov: the taxed share, never more than is charged).
+      -- Units still on a draft wait until it is posted (Mason, 26 Nov: RETURN_UNITS_ON_DRAFT); units on no live invoice
+      -- cannot be priced (RETURN_UNITS_NOT_INVOICED; Taha, 26 Nov). Only this return's lines change (Taha, 25 Nov): while
+      -- another open return of that customer and order line still has a price that is not what it would be priced at now,
+      -- this one is refused (RETURN_REPRICE_OTHER_RETURN_PENDING) and nothing changes. The line keeps priced_from
+      -- 'order_price' (its origin), so it is re-priced again if more lots post before it is credited. A line priced from
+      -- what was billed (priced_from 'billed_share') is never re-priced: if stale it is refused below as before (Mason's
+      -- #1010 rule, cancel and recreate).
       IF EXISTS (
         SELECT 1
           FROM public.return_items ri
@@ -653,19 +643,27 @@ BEGIN
             FROM public.return_items ri
             CROSS JOIN LATERAL public._return_order_price_lot_price(
               v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
+           WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND lp.on_draft
+        ) THEN
+          RAISE EXCEPTION 'RETURN_UNITS_ON_DRAFT: some returned units are still on a draft invoice of this sale; post that invoice first';
+        END IF;
+        IF EXISTS (
+          SELECT 1
+            FROM public.return_items ri
+            CROSS JOIN LATERAL public._return_order_price_lot_price(
+              v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
            WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND NOT lp.fits
         ) THEN
           RAISE EXCEPTION 'RETURN_UNITS_NOT_INVOICED: some returned units are not on any invoice of this sale yet, and the sale has sales tax or a discount, so their credit cannot be priced; invoice them first';
         END IF;
-        -- A sales rep may re-price only from invoices invoices_select lets them read (as create_return requires), drafts
-        -- included, since a draft lot now prices the line.
+        -- A sales rep may re-price only from invoices invoices_select lets them read (as create_return requires).
         IF NOT public.is_admin() AND EXISTS (
           SELECT 1 FROM public.invoices hidden
            WHERE hidden.order_id = v_order_id
              AND hidden.customer_id = v_customer_id
              AND hidden.invoice_type <> 'credit_memo'
              AND hidden.deleted_at IS NULL
-             AND hidden.status IN ('draft', 'unposted', 'posted', 'overdue', 'paid')
+             AND hidden.status IN ('posted', 'overdue', 'paid')
              AND NOT (hidden.created_by IS NOT DISTINCT FROM auth.uid()
                       OR hidden.salesman_id IS NOT DISTINCT FROM auth.uid())
         ) THEN RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'; END IF;
@@ -802,7 +800,7 @@ BEGIN
       LEFT JOIN LATERAL public._return_customer_line_share(
         v_order_id, ri.order_item_id, v_customer_id, p_return_id
       ) s ON true
-      -- (#2066) an order-price line on a sale with a tax or discount line is priced from its lots, posted or draft
+      -- (#2066) an order-price line on a sale with tax or a discount is priced from its posted lots
       LEFT JOIN LATERAL public._return_order_price_lot_price(v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp ON true
       WHERE ri.return_id = p_return_id
         AND (
@@ -1017,7 +1015,7 @@ BEGIN
       LEFT JOIN LATERAL public._return_customer_line_share(
         v_order_id, ri.order_item_id, v_customer_id, p_return_id
       ) s ON true
-      -- (#2066) an order-price line on a sale with a tax or discount line is priced from its lots, posted or draft
+      -- (#2066) an order-price line on a sale with tax or a discount is priced from its posted lots
       LEFT JOIN LATERAL public._return_order_price_lot_price(v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp ON true
       WHERE ri.return_id = p_return_id
         AND (
@@ -1086,17 +1084,17 @@ BEGIN
       PERFORM pg_advisory_xact_lock(hashtextextended(v_lock_order_item_id::text, 361));
     END LOOP;
     -- (#2066) A line create_return priced at the order price (the sale had no posted sales-tax or discount line yet), of
-    -- the order's own customer with no field split, whose live invoices now carry a sales-tax or discount line (posted, or
-    -- still a draft) is re-priced here, under these locks, to its share of that customer's lots of the line: the posted
-    -- ones and the drafts that will bill the rest (Mason, 26 Nov: "unbilled units can be credited while the taxed lot is
-    -- still a draft"), each after its discount and with its share of its tax, priced as create_return prices a share
-    -- (the running total), never beyond those lots (Mason, 22 Nov: the taxed share, never more than is charged). Units on
-    -- no live invoice cannot be priced and stay refused (RETURN_UNITS_NOT_INVOICED; Taha, 26 Nov). Only this return's
-    -- lines change (Taha, 25 Nov): while another open return of that customer and order line still has a price that is
-    -- not what it would be priced at now, this one is refused (RETURN_REPRICE_OTHER_RETURN_PENDING) and nothing
-    -- changes. The line keeps priced_from 'order_price' (its origin), so it is re-priced again if its lots change before
-    -- it is credited. A line priced from what was billed (priced_from 'billed_share') is never re-priced: if stale it is
-    -- refused below as before (Mason's #1010 rule, cancel and recreate).
+    -- the order's own customer with no field split, on a sale with tax or a discount (its sales-tax box, or a sales-tax or
+    -- discount line on a live invoice of the line) is re-priced here, under these locks, to its share of that customer's
+    -- POSTED lots of the line, each after its discount and with its share of its tax, priced as create_return prices a
+    -- share (the running total), never beyond those lots (Mason, 22 Nov: the taxed share, never more than is charged).
+    -- Units still on a draft wait until it is posted (Mason, 26 Nov: RETURN_UNITS_ON_DRAFT); units on no live invoice
+    -- cannot be priced (RETURN_UNITS_NOT_INVOICED; Taha, 26 Nov). Only this return's lines change (Taha, 25 Nov): while
+    -- another open return of that customer and order line still has a price that is not what it would be priced at now,
+    -- this one is refused (RETURN_REPRICE_OTHER_RETURN_PENDING) and nothing changes. The line keeps priced_from
+    -- 'order_price' (its origin), so it is re-priced again if more lots post before it is credited. A line priced from
+    -- what was billed (priced_from 'billed_share') is never re-priced: if stale it is refused below as before (Mason's
+    -- #1010 rule, cancel and recreate).
     IF EXISTS (
       SELECT 1
         FROM public.return_items ri
@@ -1112,19 +1110,27 @@ BEGIN
           FROM public.return_items ri
           CROSS JOIN LATERAL public._return_order_price_lot_price(
             v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
+         WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND lp.on_draft
+      ) THEN
+        RAISE EXCEPTION 'RETURN_UNITS_ON_DRAFT: some returned units are still on a draft invoice of this sale; post that invoice first';
+      END IF;
+      IF EXISTS (
+        SELECT 1
+          FROM public.return_items ri
+          CROSS JOIN LATERAL public._return_order_price_lot_price(
+            v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
          WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND NOT lp.fits
       ) THEN
         RAISE EXCEPTION 'RETURN_UNITS_NOT_INVOICED: some returned units are not on any invoice of this sale yet, and the sale has sales tax or a discount, so their credit cannot be priced; invoice them first';
       END IF;
-      -- A sales rep may re-price only from invoices invoices_select lets them read (as create_return requires), drafts
-      -- included, since a draft lot now prices the line.
+      -- A sales rep may re-price only from invoices invoices_select lets them read (as create_return requires).
       IF NOT public.is_admin() AND EXISTS (
         SELECT 1 FROM public.invoices hidden
          WHERE hidden.order_id = v_order_id
            AND hidden.customer_id = v_customer_id
            AND hidden.invoice_type <> 'credit_memo'
            AND hidden.deleted_at IS NULL
-           AND hidden.status IN ('draft', 'unposted', 'posted', 'overdue', 'paid')
+           AND hidden.status IN ('posted', 'overdue', 'paid')
            AND NOT (hidden.created_by IS NOT DISTINCT FROM auth.uid()
                     OR hidden.salesman_id IS NOT DISTINCT FROM auth.uid())
       ) THEN RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'; END IF;
@@ -1268,10 +1274,7 @@ BEGIN
         CROSS JOIN LATERAL public._return_customer_line_share(
           v_order_id, ri.order_item_id, v_customer_id, p_return_id
         ) s
-        CROSS JOIN LATERAL public._return_order_price_lot_price(v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
        WHERE ri.return_id = p_return_id AND s.share_mode
-         -- (#2066) a line priced from its lots may credit its units still on a draft through the no-source remainder
-         AND NOT (ri.priced_from = 'order_price' AND lp.applies)
     );
 
     INSERT INTO public.return_credit_customer_claims (return_id, order_id, customer_id)
@@ -1286,110 +1289,11 @@ BEGIN
        WHERE r.id = p_return_id
          AND ii.quantity < 0
          AND ii.return_credit_source_item_id IS NULL
-         -- (#2066) its units still on a draft lot, priced from it (capped at the lots under the locks above)
-         AND NOT EXISTS (
-           SELECT 1 FROM public.return_items lri
-             CROSS JOIN LATERAL public._return_order_price_lot_price(
-               v_order_id, lri.order_item_id, v_customer_id, p_return_id, lri.quantity) llp
-            WHERE lri.return_id = p_return_id AND lri.order_item_id = ii.order_item_id
-              AND lri.priced_from = 'order_price' AND llp.applies)
     ) THEN RAISE EXCEPTION 'RETURN_SPLIT_CREDIT_UNBACKED'; END IF;
     RETURN v_result;
   END IF;
   RETURN public._issue_return_credit_impl(p_return_id, v_actor, p_idempotency_key);
 END;
-$function$;
-
--- 5. (#2066) the credit's tax ledger records the tax of units credited from a taxed draft ------------------------
-CREATE OR REPLACE FUNCTION public._freeze_credit_sales_tax_20270109(p_invoice_id uuid)
- RETURNS void
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_inv record;
-  v_key record;
-  v_pool_cents numeric;
-  v_pool_tax numeric;
-  v_tax bigint;
-BEGIN
-  SELECT i.id, i.invoice_type, i.status, i.deleted_at, i.customer_id,
-         COALESCE(i.posted_at, i.created_at) AS booked_at INTO v_inv
-    FROM public.invoices i WHERE i.id = p_invoice_id;
-  IF NOT FOUND OR v_inv.invoice_type IS DISTINCT FROM 'credit_memo' THEN
-    RETURN;
-  END IF;
-  -- one freeze or clear per customer at a time, so a credit never freezes against one being cleared
-  -- (ponytail: per customer; a per-line-pool lock if credits ever queue up)
-  PERFORM pg_advisory_xact_lock(hashtextextended('credit_memo_sales_tax:' || v_inv.customer_id::text, 0));
-  IF v_inv.deleted_at IS NOT NULL OR v_inv.status NOT IN ('posted', 'overdue', 'paid') THEN
-    DELETE FROM public.credit_memo_sales_tax WHERE invoice_id = p_invoice_id;
-    RETURN;
-  END IF;
-  -- (A) A return credit line with no source line is the quantity delivered but never billed
-  -- (_issue_return_credit_impl's NULL arm): it carries no tax, so it simply isn't in the loop below (the JOIN
-  -- skips it). It used to refuse the credit here, which rolled back a valid return.
-  -- (#2066) Except units still on a draft of this customer whose order line has a sales-tax or discount line: the
-  -- credit priced them from that draft lot, tax included (_return_order_price_lot_price; Mason, 26 Nov), so they pool
-  -- with the line and its drafts, and their tax is recorded. Once the draft posts, later credits of the line take what
-  -- remains, as before.
-  IF EXISTS (SELECT 1 FROM public.credit_memo_sales_tax WHERE invoice_id = p_invoice_id) THEN
-    RETURN;  -- already frozen (posted -> overdue -> paid keeps it)
-  END IF;
-  FOR v_key IN
-    -- a credited line with no order line (a charge, or a product billed by hand) pools on its own source line, at
-    -- that line's own whole-cent tax share
-    SELECT COALESCE(src.order_item_id, src.id, ii.order_item_id) AS line_key,
-           src.order_item_id IS NULL AND src.id IS NOT NULL AS is_charge,
-           sum(ii.extended_cents) AS cents,
-           bool_or(src.id IS NULL) AS from_draft  -- (#2066)
-      FROM public.invoice_items ii
-      LEFT JOIN public.invoice_items src ON src.id = ii.return_credit_source_item_id  -- (#2066) LEFT: see (A)
-     WHERE ii.invoice_id = p_invoice_id
-       AND (src.id IS NOT NULL
-            OR (ii.order_item_id IS NOT NULL AND ii.product_id IS NOT NULL AND ii.quantity < 0  -- (#2066)
-                AND EXISTS (SELECT 1 FROM public.invoices d JOIN public.invoice_items dl ON dl.invoice_id = d.id
-                             WHERE d.customer_id = v_inv.customer_id AND d.invoice_type <> 'credit_memo'
-                               AND d.deleted_at IS NULL AND d.status IN ('draft', 'unposted')
-                               AND dl.order_item_id = ii.order_item_id AND dl.quantity > 0)
-                AND COALESCE((SELECT lp.applies FROM public.order_items oi
-                                CROSS JOIN LATERAL public._return_order_price_lot_price(
-                                  oi.order_id, oi.id, v_inv.customer_id, NULL, 0) lp
-                               WHERE oi.id = ii.order_item_id), false)))
-     GROUP BY 1, 2
-  LOOP
-    SELECT COALESCE(sum(sh.net_cents), 0), COALESCE(sum(sh.tax_cents), 0) INTO v_pool_cents, v_pool_tax
-      FROM public.invoices i
-      CROSS JOIN LATERAL public._invoice_line_tax_shares_20270109(i.id) sh
-      JOIN public.invoice_items b ON b.id = sh.item_id
-     WHERE i.customer_id = v_inv.customer_id
-       AND i.invoice_type <> 'credit_memo'
-       AND i.deleted_at IS NULL
-       AND (i.status IN ('posted', 'overdue', 'paid')
-            OR (v_key.from_draft AND i.status IN ('draft', 'unposted')))  -- (#2066) and the drafts it was priced from
-       -- (#2091) every lot of the pool that is posted now, not only those stamped at or before the credit's posting
-       -- time: a return credit holds its order lines' locks (361), which posting or unposting a sale of the line also
-       -- takes, so this is exactly the set the credit was priced from, including a lot that posted after the credit's
-       -- transaction began.
-       AND CASE WHEN v_key.is_charge
-                THEN b.id = v_key.line_key AND b.order_item_id IS NULL
-                ELSE i.id IN (SELECT o.invoice_id FROM public.invoice_items o WHERE o.order_item_id = v_key.line_key)
-                     AND b.order_item_id = v_key.line_key AND b.quantity > 0 AND b.product_id IS NOT NULL
-           END;
-    SELECT v_pool_cents + COALESCE(sum(c.line_cents), 0), v_pool_tax + COALESCE(sum(c.tax_cents), 0)
-      INTO v_pool_cents, v_pool_tax
-      FROM public.credit_memo_sales_tax c
-     WHERE c.line_key = v_key.line_key AND c.customer_id = v_inv.customer_id;
-    v_tax := CASE
-      WHEN v_pool_cents <= 0 THEN 0
-      WHEN v_pool_cents + v_key.cents <= 0 THEN -v_pool_tax          -- takes all that remains
-      ELSE round(v_key.cents * v_pool_tax / v_pool_cents)
-    END;
-    INSERT INTO public.credit_memo_sales_tax (invoice_id, line_key, customer_id, line_cents, tax_cents)
-    VALUES (p_invoice_id, v_key.line_key, v_inv.customer_id, v_key.cents, v_tax);
-  END LOOP;
-END
 $function$;
 
 DO $postflight$
@@ -1400,15 +1304,12 @@ BEGIN
     FROM (VALUES
       ('public._create_return_intent_impl_20260812(jsonb,jsonb,text)', '(#2066)', 2),
       ('public._receive_return_intent_impl_20260812(uuid,uuid,text)', '(#2066)', 1),
-      ('public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', '(#2066)', 1),
-      ('public._freeze_credit_sales_tax_20270109(uuid)', '(#2066)', 0)
+      ('public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', '(#2066)', 1)
     ) AS f(name, marker, ndef)
    WHERE NOT EXISTS (
      SELECT 1 FROM pg_proc p
       WHERE p.oid = to_regprocedure(f.name)
         AND position(f.marker in p.prosrc) > 0
-        AND (f.name NOT LIKE '%_freeze_%' OR (position('(#2091)' in p.prosrc) > 0
-                                              AND position('<= v_inv.booked_at' in p.prosrc) = 0))
         AND p.proowner = 'postgres'::regrole
         AND p.prosecdef
         AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]

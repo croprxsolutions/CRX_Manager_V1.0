@@ -19901,6 +19901,16 @@ export type Database = {
         }
         Returns: Json
       }
+      dispatch_location_with_notices: {
+        Args: {
+          p_assignments?: Json
+          p_idempotency_key?: string
+          p_job_field_ids?: string[]
+          p_license_override?: boolean
+          p_mode: string
+        }
+        Returns: Json
+      }
       draw_down_quote: {
         Args: {
           p_below_cost_reason?: string

@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
-  findTahaLaneOverride, isTahaLanePath, isTahaLaneSql, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
+  findTahaLaneOverride, isTahaGateWiring, isTahaLanePath, isTahaLaneSql, isTextOnlyPatch, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
   pushDismissedApprovals, tahaApprovedHead, tahaApprovedOnGitHub, tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
 } from "./taha-lane-lib.mjs";
 
@@ -226,8 +226,8 @@ for (const fn of ["create_direct_order", "_create_rush_order_below_cost_impl_202
   "generate_finance_charges", "create_delivery_with_items", "_create_quick_delivery_intent_impl_20260802", "edit_delivery", "fix_delivery",
   "correct_delivery_brands", "batch_cancel_deliveries", "_delivery_line_matches_order_line", "_enforce_delivery_items_parent_lock",
   "_prebook_quick_delivery_inventory",
-  // Taha's review of #2408, LOW 1 and LOW 2.
-  "get_customer_year_end_summary", "get_batch_year_end_summaries", "check_period_open", "preview_finance_charges",
+  // Taha's review of #2408, LOW 1 and LOW 2 (the year-end summaries came off: Mason, 2026-11-26, tested below).
+  "check_period_open", "preview_finance_charges",
   "get_sales_summary_report", "get_sales_detail_report", "get_gross_sales_report", "get_profitability_report",
   "financial_dashboard_summary", "bump_order_edit_version", "prevent_oifa_edit_after_post", "guard_order_reopen_inactive_product"]) {
   ok(isTahaLaneSql(`CREATE OR REPLACE FUNCTION public.${fn}() RETURNS void AS $$ SELECT 1 $$;`), `redefining ${fn} is Taha's`);
@@ -480,5 +480,52 @@ ok(runHook("taha override #2247 000001", repo).includes("NOT RECORDED"), "a code
 ok(runHook(`taha override #2292 ${hookCode}`, repo).includes("not #2292"), "the wrong PR is refused");
 ok(runHook(`taha override #2247 ${hookCode}`, repo).includes("RECORDED — Mason let PR #2247"), "his code is recorded");
 ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override file exists for the gates");
+
+// ── Mason's false-tag answers (2026-11-26) ──────────────────────────────────
+{
+  const real = (name) => mig(`supabase/migrations/${name}.sql`, readFileSync(path.join(MIGS, `${name}.sql`), "utf8"));
+  // 1. #2381: the customer year-end summary is no longer on his function list.
+  eq(tahaLaneProblem({ files: [real("20270307180000_parent_epa_correction_on")], now: NOW }), null, "#2381 (parent EPA, rewrites the year-end summary) is not Taha's");
+  ok(!isTahaLaneSql("CREATE OR REPLACE FUNCTION public.get_customer_year_end_summary() AS $$ SELECT 1 $$;"), "the year-end summary alone is not his");
+  ok(isTahaLaneSql("CREATE OR REPLACE FUNCTION public.get_ar_aging() AS $$ SELECT 1 $$;"), "A/R functions still are");
+  ok(isTahaLaneSql("CREATE OR REPLACE FUNCTION public.check_period_open() AS $$ SELECT 1 $$;"), "month-end still is");
+  // 2. #2267: a product-unit fix may convert that product's order and quote lines.
+  eq(tahaLaneProblem({ files: [real("20270303180000_piksi_mg_to_grams")], now: NOW }), null, "#2267 (Piksi mg→grams) is not Taha's");
+  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.quote_items SET quantity = quantity * 16;")], now: NOW }), null, "a unit fix of quote lines is not his");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "UPDATE public.invoice_items SET quantity = quantity * 16;")], now: NOW }), "a unit fix that writes invoices still is");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_lbs_to_oz.sql", "CREATE OR REPLACE FUNCTION public.complete_delivery() AS $$ SELECT 1 $$;")], now: NOW }), "a unit fix that rewrites delivery completion still is");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_fix_line_quantities.sql", "UPDATE public.order_items SET quantity = 1;")], now: NOW }), "order lines without a unit name still are");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_order_units.sql", "UPDATE public.order_items SET quantity = 1;")], now: NOW }), "\"units\" alone is not a unit fix");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_quote_grams.sql", "UPDATE public.order_items SET quantity = 1;")], now: NOW }), "a lane word in the name wins over a unit word");
+  // 3. Delivery completion stays his (Mason: don't change without Taha).
+  ok(isTahaLaneSql("CREATE OR REPLACE FUNCTION public._complete_delivery_authorized_impl() AS $$ SELECT 1 $$;"), "delivery completion is still Taha's");
+  // 4. #2451: a label-only edit of his screens is not his; the A/R tab move is.
+  const patch = (minus, plus) => `@@ -1,3 +1,3 @@\n context\n${minus.map((l) => `-${l}`).join("\n")}\n${plus.map((l) => `+${l}`).join("\n")}`;
+  const dash = patch(["  { label: 'Prepay Manager', path: '/prepay?tab=manager', icon: <Banknote className=\"w-5 h-5\" /> },"],
+    ["  { label: 'Prepay Credits', path: '/prepay?tab=manager', icon: <Banknote className=\"w-5 h-5\" /> },"]);
+  const prepay = patch(["    { key: 'manager', label: 'Manager', content: <PrepaymentManagerPanel /> },", "        title=\"Prepay\""],
+    ["    { key: 'manager', label: 'Prepay Credits', content: <PrepaymentManagerPanel /> },", "        title=\"Prepayments\""]);
+  const ar = patch(["  { key: 'prepayments', label: 'Prepayments' },", "        {tab === 'prepayments' && <PrepaymentManagerPanel />}"],
+    ["  if (raw === 'prepayments') return <Navigate to=\"/prepay?tab=manager\" replace />;"]);
+  const withPatch = (filename, p) => ({ filename, status: "modified", patch: p });
+  eq(tahaLaneProblem({ files: [withPatch("src/pages/FinancialDashboard.tsx", dash), withPatch("src/pages/Prepay.tsx", prepay)], now: NOW }), null, "#2451's menu-label edits are not Taha's");
+  eq(tahaLaneProblem({ files: [withPatch("src/pages/AccountsReceivable.tsx", ar)], now: NOW })?.files, ["src/pages/AccountsReceivable.tsx"], "#2451's A/R tab move and redirect still are");
+  ok(isTextOnlyPatch(patch(["  // old note", "  <h2>Prepay Manager</h2>"], ["  // a new note, Taha's", "  <h2>Prepay Credits — today</h2>"])), "comments and JSX text are words");
+  ok(!isTextOnlyPatch(patch(["  const x = 'a';"], ["  const x = b;"])), "a string turned into code is a change");
+  ok(!isTextOnlyPatch(patch(["  const [v] = useState<string>('');"], ["  const [v] = useRef<string>('');"])), "an arrow or generic call is not JSX text");
+  ok(!isTextOnlyPatch(patch(["  amount: 1,"], ["  amount: 2,"])), "numbers are code");
+  ok(!isTextOnlyPatch(undefined) && !isTextOnlyPatch(""), "no patch (GitHub leaves big diffs out) is not text-only");
+  ok(tahaLaneProblem({ files: [{ filename: "src/pages/Quotes.tsx", status: "modified" }], now: NOW }), "a lane screen with no patch still counts");
+  ok(tahaLaneProblem({ files: [{ filename: "src/pages/Quotes.tsx", previous_filename: "src/pages/Q.tsx", status: "renamed", patch: dash }], now: NOW }), "a renamed lane file still counts");
+  ok(tahaLaneProblem({ files: [withPatch("src/lib/quotes.sql.ts", "")], now: NOW }), "an empty patch still counts");
+  ok(tahaLaneProblem({ files: [withPatch(".claude/hooks/taha-lane-lib.mjs", patch(["// a"], ["// b"]))], now: NOW }), "the block's own files never get the words-only pass");
+  // The patch comes from GitHub's file list, line breaks unescaped.
+  const rows = prFilesOnGitHub({ repo: undefined, number: 7, gh: () => "modified\tsrc/pages/Prepay.tsx\t\t\t@@ -1 +1 @@\\n-a\\n+b\nmodified\tdocs/x.md\t\t\t@@ x\n" });
+  eq(rows[0].patch, "@@ -1 +1 @@\n-a\n+b", "an app file's patch is read");
+  eq(rows[1].patch, undefined, "other files' patches are not kept");
+  // 5. Gate wiring is recognised (the bot skips it).
+  ok(isTahaGateWiring(".claude/hooks/taha-lane-lib.mjs") && isTahaGateWiring(".claude\\hooks\\pr-merge-guard.mjs"), "the block's own files are wiring");
+  ok(!isTahaGateWiring("src/pages/Quotes.tsx"), "a lane screen is not wiring");
+}
 
 console.log(`taha-lane-lib tests: ${pass} passed`);

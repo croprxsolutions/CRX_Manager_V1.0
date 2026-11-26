@@ -67,6 +67,22 @@ const STRONG_LANE_WORDS = new Set(["quote", "quotes", "hold", "holds", "prepay",
 
 // The block's own wiring: a PR that edits or unhooks it needs Mason's code too (Taha's review of #2303).
 const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router|sol-risk-lib)\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
+/** The block's own wiring: needs Mason's code, but is not Taha's work to review (Mason, 2026-11-26). */
+export const isTahaGateWiring = (name) => BLOCK_FILES_RE.test(String(name ?? "").replace(/\\/g, "/"));
+
+// Mason, 2026-11-26 (#2451): a change to one of Taha's screens that only edits words people read (strings, JSX text,
+// comments) is not his work. True only when the changed lines, with those stripped, are the same code before and after.
+// A missing patch (GitHub leaves it out of big diffs) is not text-only.
+// shortcut: "words between > and <" can also match a generic type name (extends Base<T>); upgrade to a real JSX parser if that ever hides a code change.
+const TEXT_TOKEN_RE = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\$]|\$(?!\{))*`|(?<![=-])>[\w\s.,!?'’:\-–—…]*[A-Za-z][\w\s.,!?'’:\-–—…]*</g;
+const codeOnly = (lines) => lines.join("\n").replace(TEXT_TOKEN_RE, (m) => m.startsWith("/") ? "" : m.startsWith(">") ? "><" : "S").replace(/\s+/g, "");
+export function isTextOnlyPatch(patch) {
+  if (typeof patch !== "string" || !patch.trim()) return false;
+  const lines = patch.split(/\r?\n/);
+  const removed = lines.filter((l) => l.startsWith("-")).map((l) => l.slice(1));
+  const added = lines.filter((l) => l.startsWith("+")).map((l) => l.slice(1));
+  return codeOnly(removed) === codeOnly(added);
+}
 
 /** True when this changed file is app or database code in Taha's lane (and not field billing), or the block itself. */
 export function isTahaLanePath(name) {
@@ -111,7 +127,8 @@ const TAHA_LANE_FUNCTIONS_RE = new RegExp("^_?(?:complete_delivery|start_and_com
   "|edit_delivery|fix_delivery|correct_delivery_brands|batch_cancel_deliveries|delivery_line_matches_order_line" +
   "|enforce_delivery_items_parent_lock|prebook_quick_delivery_inventory" +
   // Taha's review of #2408: read-only billing reports, the month lock, and NEW-setting triggers the write sweep missed.
-  "|get_customer_year_end_summary|get_batch_year_end_summaries|check_period_open|preview_finance_charges" +
+  // The customer year-end summaries came off (Mason, 2026-11-26: #2381, a product change, was caught by one).
+  "|check_period_open|preview_finance_charges" +
   "|get_sales_summary_report|get_sales_detail_report|get_gross_sales_report|get_profitability_report|financial_dashboard_summary" +
   "|bump_order_edit_version|prevent_oifa_edit_after_post|guard_order_reopen_inactive_product" +
   ")(?=_|$)|^_?get_ar_|accounting_period|credit_memo", "i");
@@ -142,6 +159,13 @@ export const TAHA_LANE_TABLES = [
 // writes the shared invoice tables). Every other lane table still counts there (Taha's review of #2382, HIGH 1);
 // "commissions" is here because Taha asked that #2260, which deletes a field invoice's commissions, keep passing.
 const FIELD_BILLING_TABLES = new Set(["invoices", "invoice_items", "invoice_shares", "invoice_line_shares", "commissions"]);
+// A migration named for a product's units may write these (Mason, 2026-11-26: #2267 converted one product from mg
+// to grams, its order and quote lines included; a unit fix is not Taha's). Every other lane table still counts.
+const PRODUCT_UNIT_TABLES = new Set(["order_items", "quote_items"]);
+// "unit(s)" alone is too common a word to count (a delivery_units fix could be his).
+const UNIT_WORDS = new Set(["uom", "gram", "grams", "mg", "oz", "ounce", "ounces", "lb", "lbs", "pound", "pounds",
+  "gallon", "gallons", "quart", "quarts", "pint", "pints", "liter", "liters", "litre", "litres"]);
+const isProductUnitName = (name) => wordsOf(name).some((w) => UNIT_WORDS.has(w)) && !isLaneName(name);
 const tableRe = (tables) => String.raw`(?:"?public"?\s*\.\s*)?"?(?:${tables.join("|")})"?(?![\w$]|\s*\.)`;
 // "INTO" covers INSERT, MERGE and SELECT INTO; "ON" covers triggers, policies, indexes, grants and comments;
 // TABLE / ONLY / IF [NOT] EXISTS are optional fillers, and a list (TRUNCATE a, invoices) is read to its end (LOW 5).
@@ -150,6 +174,10 @@ const readRe = (table) => new RegExp(String.raw`\b(?:from|join)(?:\s+only)?\s+` 
 const LANE_RES = { write: writeRe(tableRe(TAHA_LANE_TABLES)), read: readRe(tableRe(TAHA_LANE_TABLES)) };
 const FIELD_TABLES = TAHA_LANE_TABLES.filter((t) => !FIELD_BILLING_TABLES.has(t));
 const FIELD_RES = { write: writeRe(tableRe(FIELD_TABLES)), read: readRe(tableRe(FIELD_TABLES)) };
+const UNIT_TABLES = TAHA_LANE_TABLES.filter((t) => !PRODUCT_UNIT_TABLES.has(t));
+const UNIT_RES = { write: writeRe(tableRe(UNIT_TABLES)), read: readRe(tableRe(UNIT_TABLES)) };
+const BOTH_TABLES = FIELD_TABLES.filter((t) => !PRODUCT_UNIT_TABLES.has(t));
+const BOTH_RES = { write: writeRe(tableRe(BOTH_TABLES)), read: readRe(tableRe(BOTH_TABLES)) };
 const ROW_LOCK_RE = /\bfor\s+(?:no\s+key\s+)?update\b|\bfor\s+(?:key\s+)?share\b/i;
 // Booking stock (Taha on #2382): a write that sets inventory.quantity_prebooked, or a function body that does.
 const PREBOOKED_RE = /\bset\b(?:(?!\bwhere\b)[^;])*?\bquantity_prebooked"?\s*=|\bquantity_prebooked"?\s*:=|\binto\s+[\w".]*\binventory"?\s*\([^)]*\bquantity_prebooked\b|\bset\s*\([^)]*\bquantity_prebooked\b|\b(?:column|add|drop|alter|rename)\s+(?:column\s+)?(?:if\s+(?:not\s+)?exists\s+)?"?quantity_prebooked\b/i;
@@ -220,11 +248,13 @@ function withoutComments(sql) {
 /**
  * True when this migration SQL touches Taha's lane; unreadable SQL (null) counts, so the block fails closed.
  * `fieldBilling`: the file is named for field billing, so writes to FIELD_BILLING_TABLES are Mason's.
+ * `productUnits`: the file is named for a product's units, so writes to PRODUCT_UNIT_TABLES are not Taha's (Mason, 2026-11-26).
  */
-export function isTahaLaneSql(sql, { fieldBilling = false } = {}) {
+export function isTahaLaneSql(sql, { fieldBilling = false, productUnits = false } = {}) {
   if (typeof sql !== "string") return true;
-  const { write, read } = fieldBilling ? FIELD_RES : LANE_RES;
-  const text = withoutComments(sql);
+  const { write, read } = fieldBilling ? (productUnits ? BOTH_RES : FIELD_RES) : productUnits ? UNIT_RES : LANE_RES;
+  // A unit fix locks the tables it re-checks so nothing moves under it (#2267); the lock alone changes nothing of his.
+  const text = productUnits ? withoutComments(sql).replace(/\block\s+(?:table\s+)?[^;]*/gi, "") : withoutComments(sql);
   // Second pass joins string pieces ('UPDATE ' || 'invoices …'), so dynamic SQL built in parts still counts.
   const joined = text.replace(/'\s*\|\|\s*'/g, "");
   if ([text, joined].some((t) => write.test(t) || PREBOOKED_RE.test(t) || PREBOOKED_MORE_RE.test(t) || PREBOOKED_RE.test(withoutParens(t)))) return true;
@@ -243,13 +273,15 @@ export function tahaLaneProblem({ files }) {
   if (files.length >= MAX_FILES) return { files: [], reason: `${files.length} changed files may be a cut-short list` };
   const hits = [];
   for (const entry of files) {
-    for (const name of [entry?.filename, entry?.previous_filename]) {
-      if (typeof name === "string" && isTahaLanePath(name) && !hits.includes(name)) hits.push(name);
-    }
     const name = entry?.filename;
+    // A label-only edit of an app file in his lane, not renamed (Mason, 2026-11-26, #2451).
+    const wordsOnly = !entry?.previous_filename && typeof name === "string" && /^src\/.+\.[jt]sx?$/i.test(name) && !isTahaGateWiring(name) && isTextOnlyPatch(entry?.patch);
+    for (const n of wordsOnly ? [] : [entry?.filename, entry?.previous_filename]) {
+      if (typeof n === "string" && isTahaLanePath(n) && !hits.includes(n)) hits.push(n);
+    }
     // A migration named for field billing stays Mason's when it writes the shared invoice tables (Mason, 2026-11-23),
     // but the rest of its SQL is still read (Taha's review of #2382, HIGH 1).
-    if (entry && "sql" in entry && typeof name === "string" && !hits.includes(name) && isTahaLaneSql(entry.sql, { fieldBilling: isFieldBillingName(name) })) {
+    if (entry && "sql" in entry && typeof name === "string" && !hits.includes(name) && isTahaLaneSql(entry.sql, { fieldBilling: isFieldBillingName(name), productUnits: isProductUnitName(name) })) {
       hits.push(entry.sql === null ? `${name} (its SQL could not be read)` : name);
     }
   }
@@ -265,13 +297,15 @@ export function prFilesOnGitHub({ repo, gh, number, headSha }) {
   if (!repoPath || !Number.isInteger(number) || number < 1) return null;
   try {
     const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq",
-      '.[] | [.status, .filename, (.previous_filename // ""), ((.contents_url // "") | ([capture("[?&]ref=(?<r>[0-9a-f]{40})").r][0] // ""))] | @tsv']))
+      '.[] | [.status, .filename, (.previous_filename // ""), ((.contents_url // "") | ([capture("[?&]ref=(?<r>[0-9a-f]{40})").r][0] // "")), (.patch // "")] | @tsv']))
       .split(/\r?\n/).filter(Boolean).map((line) => line.split("\t"));
-    if (rows.some((r) => r.length < 2 || r.length > 4 || !r[1])) return null;
+    if (rows.some((r) => r.length < 2 || r.length > 5 || !r[1])) return null;
     // The whole list must be GitHub's answer for the pinned head, not a later push (advisory Sol on #2382).
     if (usableHead(headSha) && rows.some(([status, , , ref]) => status !== "removed" && ref && ref.toLowerCase() !== headSha.toLowerCase())) return null;
-    return rows.map(([status, filename, previous, ref = ""]) => {
+    return rows.map(([status, filename, previous, ref = "", patch = ""]) => {
       const entry = { filename, previous_filename: previous || undefined };
+      // The diff of an app file, for the label-only rule (@tsv escaped its line breaks).
+      if (patch && /^src\//i.test(filename)) entry.patch = patch.replace(/\\(.)/g, (_, c) => ({ n: "\n", r: "\r", t: "\t" })[c] ?? c);
       // Migrations, baselines and hand-run undo scripts are judged by their SQL at the head the merge is pinned to;
       // a removed or unreadable one, or one GitHub lists at another commit, counts as Taha's (Taha's review of #2382, LOW 7, LOW 8).
       // A SQL file moved out of the read folders counts as removed there (advisory Sol on #2382).

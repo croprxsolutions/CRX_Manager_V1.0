@@ -285,3 +285,23 @@ test("strangers' fork PRs are never labelled or pinged", () => {
   assert.equal(decide(fork, { checks: green, lane: inLane, sol: noSol }).act, false);
   assert.equal(needsPing({ ...fork, labels: [{ name: 'ready-for-taha' }] }, [], { checks: green, sol: noSol, asked: () => [] }).ping, false);
 });
+
+// Mason, 2026-11-26: gate-wiring-only PRs and back-merges of main need Mason's code, not Taha's review.
+test('back-merges of main into staging are never labelled', () => {
+  for (const headRefName of ['main', 'chore/backmerge-main-3591fc3cb', 'chore/backmerge-main-3591fc3cb-mc']) {
+    const d = decide(pr({ headRefName, baseRefName: 'staging' }), { checks: never, lane: never, sol: never });
+    assert.equal(d.act, false);
+    assert.match(d.why, /back-merge/);
+  }
+  assert.equal(decide(pr({ headRefName: 'chore/backmerge-main-x', baseRefName: 'main' }), ok).act, true, 'only into staging');
+  assert.equal(decide(pr({ headRefName: 'fix/main-menu', baseRefName: 'staging' }), ok).act, true, 'a branch merely named like main is not');
+});
+
+test('a PR that only changes the lane block itself is not sent to Taha', () => {
+  const wiring = () => ({ files: ['.claude/hooks/taha-lane-lib.mjs', '.claude/hooks/pr-merge-guard.mjs'], reason: "it changes Taha's areas" });
+  const d = decide(pr(), { ...ok, lane: wiring, sol: never });
+  assert.equal(d.act, false);
+  assert.match(d.why, /Mason's code/);
+  const mixed = () => ({ files: ['.claude/hooks/taha-lane-lib.mjs', 'src/pages/Quotes.tsx'], reason: "it changes Taha's areas" });
+  assert.equal(decide(pr(), { ...ok, lane: mixed }).act, true, 'wiring plus a lane file still goes to Taha');
+});

@@ -20,7 +20,7 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneProblem } from '../../.claude/hooks/taha-lane-lib.mjs';
+import { isTahaGateWiring, prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneProblem } from '../../.claude/hooks/taha-lane-lib.mjs';
 import { solRiskOnGitHub } from '../../.claude/hooks/sol-risk-lib.mjs';
 import { TAHA_LOGIN } from '../../.claude/hooks/migration-landing-gate-lib.mjs';
 import { esc, link, slack } from './release-slack.mjs';
@@ -46,6 +46,8 @@ export const tahaReviewedHead = (pr) => (pr.reviews ?? []).some((r) => isTaha(r.
 
 // A hotfix into main (Mason, 2026-11-25): Taha is a code owner of .github/, and the release guard and
 // release-gate wait on his approval or hotfix-backport label, so those two can't hold back asking him.
+// A back-merge of main into staging carries only code already reviewed for main (Mason, 2026-11-26).
+export const isBackMerge = (pr) => pr.baseRefName === 'staging' && (pr.headRefName === 'main' || /^chore\/backmerge-main-/.test(pr.headRefName ?? ''));
 export const isMainHotfix = (pr) => pr.baseRefName === 'main' && /^hotfix\//.test(pr.headRefName ?? '');
 const GATE_CHECKS = ['Release flow guard (main)', 'release-gate'];
 // A pending guard still waits: it may yet ask for the label, and the ping is sent once per head (Codex on #2589).
@@ -71,6 +73,7 @@ export function decide(pr, { checks, lane, sol, carried }) {
   if (pr.isDraft) return skip('draft');
   if (isTahasPr(pr)) return skip("Taha's own PR");
   if (pr.isCrossRepository) return skip('from a fork (not our team)');
+  if (isBackMerge(pr)) return skip('a back-merge of main: nothing new for Taha');
   if (hasLabel(pr) && tahaRequested(pr)) return skip('already labelled and waiting on Taha');
   if (tahaReviewedHead(pr)) return skip('Taha already reviewed this head');
   if (tahaVerdict(pr, carried) === APPROVED) return skip("Taha's Approve carries over to this head");
@@ -80,6 +83,8 @@ export function decide(pr, { checks, lane, sol, carried }) {
   if (!inLane) return skip("not in Taha's lane");
   // Unreadable or cut-short file lists block a merge, but never label: no named lane file, no label.
   if (!inLane.files?.length) return skip(`lane unclear: ${inLane.reason}`);
+  // Only the lane block's own files: Mason's code lets it merge; it is not Taha's work (Mason, 2026-11-26).
+  if (inLane.files.every(isTahaGateWiring)) return skip("only the lane block's own files: needs Mason's code, not Taha's review");
   const risk = sol();
   if (risk?.risky !== false) return skip(`Sol needed (${risk?.reason ?? 'unknown'}): the bot cannot see Sol proofs; the agent labels it after Sol`);
   return { act: true, why: `${hasLabel(pr) ? 're-request Taha' : 'label + request Taha'}: ${inLane.reason}; ${risk.reason}; required checks green` };

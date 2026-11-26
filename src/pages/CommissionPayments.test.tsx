@@ -265,6 +265,21 @@ describe('CommissionPayments idempotency intent-binding refusals', () => {
     );
   });
 
+  it('says plainly that payouts are off until M16, without claiming the post may have happened', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: 'COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.' } });
+    render(<CommissionPayments />);
+
+    const row = (await screen.findByText('CP-0001')).closest('tr');
+    fireEvent.click(within(row!).getByRole('button', { name: 'Post' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Post Payments' }));
+
+    await waitFor(() => {
+      expect(mockToast).toHaveBeenCalledWith('error', 'Nothing was created or paid. Commission payouts are switched off until commission-on-payment (M16) is live. Voiding an existing payment still works');
+    });
+    expect(mockToast).toHaveBeenCalledTimes(1);
+    expect(mockCaptureException).not.toHaveBeenCalled();
+  });
+
   it('still surfaces an unrelated failure as an error, without claiming nothing happened', async () => {
     // Round-5 review finding: a failed RESPONSE is not proof of a failed POST.
     // The request may have committed and the reply been lost, so telling the

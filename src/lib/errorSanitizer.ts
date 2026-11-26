@@ -118,6 +118,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Reps work with any customer (2026-10-13, migration 20261013220000) with these exceptions.
   [/^REP_CANNOT_REASSIGN\b/i,
    'Only an admin can change which sales rep a customer is assigned to'],
+  // Mason 2026-11-25 (20270308180000): no commission payout batch is created or paid until M16 is live.
+  [/^COMMISSION_PAYOUTS_OFF_UNTIL_M16\b/,
+   'Nothing was created or paid. Commission payouts are switched off until commission-on-payment (M16) is live. Voiding an existing payment still works'],
   // Admin-only since 2026-10-14 (migration 20261027080200).
   [/^COMMISSION_SPLIT_ADMIN_ONLY\b/i,
    "Only an admin can set or change a customer's default commission split"],
@@ -369,6 +372,12 @@ function deliveryCapReason(message: string): string | null {
     return hasControl || unsafe.test(label) ? null : reason;
   }
   return null;
+}
+
+/** create/post_commission_payment refused: payouts are off until M16 (20270308180000); nothing was created or paid. */
+export function isCommissionPayoutsOff(error: unknown): boolean {
+  const message = typeof error === 'string' ? error : (error as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && /^COMMISSION_PAYOUTS_OFF_UNTIL_M16\b/.test(message);
 }
 
 export function sanitizeError(error: unknown): string {

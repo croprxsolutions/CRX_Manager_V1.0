@@ -1,6 +1,8 @@
 /**
  * Commission: create_commission_payment (a payout batch claims pending commissions once), and
  * void_commission_payment (a posted payout is undone and its commissions are pending again).
+ * Payouts are switched off until M16 (20270308180000): creating one is refused, voiding still works. The seed and
+ * the create probe turn the switch on inside their own transaction to keep covering the payout path itself.
  */
 import assert from 'node:assert/strict';
 import { attempt, asUser, id, ref, refuse, scalar, seed, signIn, USERS } from './harness.mjs';
@@ -23,13 +25,19 @@ function seedCommission() {
   const com = (k, dollars) => `INSERT INTO public.commissions (id, order_id, customer_id, recipient, recipient_user_id, split_percentage,
       commission_amount, order_profit, order_date, status)
     VALUES ('${COM[k]}', '${ORDER}', '${CUST}', '[UNDO] Rep', '${REP}', 100, ${dollars}, ${dollars}, CURRENT_DATE, 'pending');`;
-  seed('commission', `INSERT INTO public.customers (id, farm_name, account_number) VALUES ('${CUST}', '[UNDO] Commission Farm', '[UNDO]-COM-1');
+  seed('commission', `${payoutSwitch(true)}
+    INSERT INTO public.customers (id, farm_name, account_number) VALUES ('${CUST}', '[UNDO] Commission Farm', '[UNDO]-COM-1');
     INSERT INTO public.orders (id, order_number, customer_id, status, booking_draw) VALUES ('${ORDER}', '[UNDO] COM-ORDER', '${CUST}', 'confirmed', false);
     ${com('paid1', '120.00')} ${com('paid2', '80.00')} ${com('free', '45.50')}
     INSERT INTO undo_paths.ids SELECT 'payout-posted', public.create_commission_payment(ARRAY['${COM.paid1}', '${COM.paid2}']::uuid[],
       'check', '[UNDO]-COM-CHK-1', CURRENT_DATE, NULL, '${ADMIN}', 'undo-seed-payout-create');
-    SELECT public.post_commission_payment(${PAYOUT.posted}, '${ADMIN}', 'undo-seed-payout-post');`);
+    SELECT public.post_commission_payment(${PAYOUT.posted}, '${ADMIN}', 'undo-seed-payout-post');
+    ${payoutSwitch(false)}`);
 }
+
+// The switch exactly as 20270308180000 creates it, returning `on`; owner, grants and comment are kept.
+const payoutSwitch = (on) => `CREATE OR REPLACE FUNCTION public._commission_payouts_enabled() RETURNS boolean LANGUAGE sql STABLE
+  SET search_path TO 'pg_catalog', 'pg_temp' AS $switch$ SELECT ${on} $switch$;`;
 
 const show = (label, got) => { console.log(`  ${label}: ${got}`); return got; };
 
@@ -42,7 +50,11 @@ export function run() {
   // create_commission_payment: one unposted $45.50 payout claims the free commission; replay; again refused; rep refused.
   const create = (who, key) => `u := public.create_commission_payment(ARRAY['${COM.free}']::uuid[], 'check', '[UNDO]-COM-CHK-2',
     CURRENT_DATE, NULL, '${who}', '${key}');`;
+  // Until M16 a new payout is refused and nothing changes.
+  const off = show('create payout (switched off)', attempt(ADMIN, `f0 := ${fp()}; ${refuse(create(ADMIN, 'undo-com-off'))}
+    v := t || '|unchanged=' || (f0 = ${fp()});`));
   const cr = show('create payout', attempt(ADMIN, `
+    EXECUTE $on$ ${payoutSwitch(true)} $on$;
     f0 := ${fp()};
     ${signIn(REP)} ${refuse(create(REP, 'undo-com-rep'))} t2 := t || '|rep_unchanged=' || (f0 = ${fp()}); ${signIn(ADMIN)}
     ${asUser(create(ADMIN, 'undo-com-1'))} f1 := ${fp()}; r := to_jsonb(u);
@@ -64,7 +76,8 @@ export function run() {
       || '|rep=' || t2;`));
 
   assert.equal(fixture, 'ok|com1=paid:120.00 com2=paid:80.00 com3=pending:45.50 payouts=posted:200.00');
-  // A new payout claims the $45.50 commission once; the commission stays pending until the payout is posted.
+  assert.equal(off, 'ok|COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.|unchanged=true');
+  // With payouts on (M16), a new payout claims the $45.50 commission once; the commission stays pending until the payout is posted.
   assert.equal(cr, 'ok|com1=paid:120.00 com2=paid:80.00 com3=pending:45.50 payouts=posted:200.00,unposted:45.50|replay_same=true|replay_unchanged=true'
     + '|again=One or more commissions are already in an existing (non-voided) payment. Void that payment first or remove those commissions from the selection.'
     + '|again_unchanged=true|rep=Admin access required to create a commission payment|rep_unchanged=true');

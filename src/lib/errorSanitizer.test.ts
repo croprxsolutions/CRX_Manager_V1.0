@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeError } from './errorSanitizer';
+import { isCommissionPayoutsOff, sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
   it('keeps document-link errors actionable and strips control characters', () => {
@@ -377,6 +377,14 @@ describe('sanitizeError', () => {
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
+    // 20270308180000: payouts are off until M16 (Mason, 2026-11-25).
+    const off = 'COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.';
+    expect(sanitizeError(off)).toBe('Nothing was created or paid. Commission payouts are switched off until commission-on-payment (M16) is live. Voiding an existing payment still works');
+    expect(sanitizeError({ message: off })).toBe(sanitizeError(off));
+    expect(isCommissionPayoutsOff({ message: off })).toBe(true);
+    expect(isCommissionPayoutsOff(new Error(off))).toBe(true);
+    expect(isCommissionPayoutsOff('note mentions COMMISSION_PAYOUTS_OFF_UNTIL_M16')).toBe(false);
+    expect(isCommissionPayoutsOff(null)).toBe(false);
     expect(sanitizeError('TIER_ADMIN_ONLY: only an admin can change a customer\'s price tier'))
       .toBe("Only an admin can set or change a customer's price tier");
     expect(sanitizeError('CREDIT_LIMIT_ADMIN_ONLY: only an admin can change a customer\'s credit limit'))

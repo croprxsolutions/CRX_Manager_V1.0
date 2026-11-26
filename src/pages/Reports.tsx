@@ -10,6 +10,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPageAccess } from '../lib/pagePermissions';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
+import { isCommissionPayoutsOff } from '../lib/errorSanitizer';
 import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
 import { unavailableReasonText } from '../lib/historicalBalanceReasons';
@@ -1052,6 +1053,11 @@ export default function Reports() {
         logActivity({ event: 'commission_payment_batch_created', description: `${totalBatched} commission(s) added to unposted payment batches via Reports`, performedBy: actor.id });
       }
     } catch (err: unknown) {
+      // Payouts are off until M16 (20270308180000): a definite refusal, nothing was created or paid.
+      if (totalBatched === 0 && isCommissionPayoutsOff(err)) {
+        toast('error', sanitizeError(err));
+        return;
+      }
       // Backstop only. The scoping above should make a binding refusal
       // unreachable from this page, so if one arrives the scope and the server
       // fingerprint have drifted apart — drop the one key that was refused so

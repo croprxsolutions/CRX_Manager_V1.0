@@ -16,6 +16,7 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, assertRpcResult } from '../lib/db';
+import { isCommissionPayoutsOff, sanitizeError } from '../lib/errorSanitizer';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { getIdempotencyBindingRejection } from '../lib/idempotency';
@@ -509,6 +510,11 @@ export default function CommissionPayments() {
         toast('success', `Commission payment ${createdSummary.paymentNumber} created: ${fmt(createdSummary.totalAmount)}`);
       }
     } catch (err: unknown) {
+      // Payouts are off until M16 (20270308180000): a definite refusal, nothing was created or paid.
+      if (isCommissionPayoutsOff(err)) {
+        toast('error', sanitizeError(err));
+        return;
+      }
       // The retry key is bound to one actor and one exact request. When the
       // database refuses it, no payment was created for THIS request, so the
       // key can be retired and the next click starts a clean action. A 'receipt'
@@ -617,6 +623,11 @@ export default function CommissionPayments() {
         toast('success', 'Commission payment posted');
       }
     } catch (err: unknown) {
+      // Payouts are off until M16 (20270308180000): a definite refusal, nothing was created or paid.
+      if (isCommissionPayoutsOff(err)) {
+        toast('error', sanitizeError(err));
+        return;
+      }
       // See handleCreate: a refused retry key means this posting did not run.
       const rejection = getIdempotencyBindingRejection(err);
       if (rejection) {

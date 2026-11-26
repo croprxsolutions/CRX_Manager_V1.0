@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270308000000_proof_bound_to_load.sql (contract
+ * Real-schema proof for 20270308100000_proof_bound_to_load.sql (contract
  * docs/plans/2026-11-23-proof-bound-to-load-CONTRACT.md): a customer's signature or ticket photo completes a delivery
  * only for the load the screen showed when it was taken.
  *
@@ -28,7 +28,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270308000000_proof_bound_to_load.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270308100000_proof_bound_to_load.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-bound-to-load-reverse.sql');
 const REQUIRED_REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-binding-required-reverse.sql');
 const FOLLOW_UPS = [path.join(MIGRATIONS, '20270308010000_proof_binding_required.sql')];  // step 4: the binding is required

@@ -1370,7 +1370,7 @@ export interface DeliveryPhoto {
   uploaded_at: string;
   file_size: number | null;
   sort_order: number;
-  // The lines the screen showed when a signed-ticket photo was taken (20270308000000); never changes after save.
+  // The lines the screen showed when a signed-ticket photo was taken (20270308100000); never changes after save.
   lines_seen?: { order_item_id: string; product_id: string; quantity: number; delivered: number }[] | null;
   uploader?: Profile;
 }

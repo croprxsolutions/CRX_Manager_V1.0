@@ -73,19 +73,34 @@ export const isTahaGateWiring = (name) => BLOCK_FILES_RE.test(String(name ?? "")
 // Mason, 2026-11-26 (#2451): a change to one of Taha's screens that only edits words people read (strings, JSX text,
 // comments) is not his work. True only when the changed lines, with those stripped, are the same code before and after.
 // Words are: a string given to a label-like name (label, title, placeholder…), JSX text between tags, and comments.
-// Every other string is code (a tab key or route can change behaviour: Luna, PR 2), and line breaks are kept.
+// Every other string is code (a tab key or route can change behaviour), kept exactly, spaces included; so are
+// tool comments (@ts-…, eslint, @vite-ignore, webpack…) and line breaks. Each block of changed lines is compared
+// in place, so code moved from one spot to another is a change (Luna, PR 2 rounds 1–2).
 // A missing patch (GitHub leaves it out of big diffs) is not text-only.
 // shortcut: pattern matching, not a parser; an honest-mistake net like the SQL check, not a security boundary.
-const TEXT_TOKEN_RE = /(\b(?:label|title|subtitle|placeholder|description|aria-label|alt|tooltip|helperText|emptyText|emptyMessage|heading)\s*[:=]\s*\{?\s*)(?:'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\$])*`)|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?<=[\w"'}/])>([^\S\n]*[A-Za-z][\w .,!?'’:\-–—…]*)<(?=\/|[A-Za-z])/g;
-const codeOnly = (lines) => lines.join("\n")
-  .replace(TEXT_TOKEN_RE, (m, key, jsx) => key !== undefined ? `${key.replace(/\s+/g, "")}S` : jsx !== undefined ? "><" : m.startsWith("/") ? "" : m)
-  .split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean).join("\n");
+const TEXT_TOKEN_RE = /(\b(?:label|title|subtitle|placeholder|description|aria-label|alt|tooltip|helperText|emptyText|emptyMessage|heading)\s*[:=]\s*\{?\s*)(?:'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\$])*`)|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?<=[\w"'}])>([^<>{}\n]*)(?=<\/)/g;
+const TOOL_COMMENT_RE = /@|#__|\b(?:eslint|prettier|istanbul|webpack|vite|jsx|c8|v8|ts-)/i;
+function codeOnly(lines) {
+  const kept = [];
+  const keep = (m) => `\u0001${kept.push(m) - 1}\u0001`;
+  return lines.join("\n")
+    .replace(TEXT_TOKEN_RE, (m, key, jsx) => key !== undefined ? `${key.replace(/\s+/g, "")}S` : jsx !== undefined ? ">"
+      : m.startsWith("/") ? (TOOL_COMMENT_RE.test(m) ? keep(m) : "") : keep(m))
+    .split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean).join("\n")
+    .replace(/\u0001(\d+)\u0001/g, (_, i) => kept[Number(i)]);
+}
 export function isTextOnlyPatch(patch) {
   if (typeof patch !== "string" || !patch.trim()) return false;
-  const lines = patch.split(/\r?\n/);
-  const removed = lines.filter((l) => l.startsWith("-")).map((l) => l.slice(1));
-  const added = lines.filter((l) => l.startsWith("+")).map((l) => l.slice(1));
-  return codeOnly(removed) === codeOnly(added);
+  const blocks = [];
+  let block = null;
+  for (const line of patch.split(/\r?\n/)) {
+    const sign = line[0];
+    if (sign === "-" || sign === "+") {
+      if (!block || (sign === "-" && block.added.length)) blocks.push(block = { removed: [], added: [] });
+      (sign === "-" ? block.removed : block.added).push(line.slice(1));
+    } else if (sign !== "\\") block = null; // a context or @@ line ends the block; "\ No newline" does not
+  }
+  return blocks.length > 0 && blocks.every((b) => codeOnly(b.removed) === codeOnly(b.added));
 }
 
 /** True when this changed file is app or database code in Taha's lane (and not field billing), or the block itself. */

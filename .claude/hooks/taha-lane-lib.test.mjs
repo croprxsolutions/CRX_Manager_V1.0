@@ -527,6 +527,16 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   ok(!isTextOnlyPatch(patch(["  return", "    { a: 1 };"], ["  return { a: 1 };"])), "a line break after return is kept");
   ok(!isTextOnlyPatch(patch(["  const ok = value > threshold < cap;"], ["  const ok = value > limit < cap;"])), "a comparison is not JSX text");
   ok(isTextOnlyPatch(patch(["  <Field label={'Old'} placeholder=\"Type here\" />"], ["  <Field label={'New'} placeholder=\"Type a name\" />"])), "label-like props are words");
+  // Luna, PR 2 round 2.
+  const twoBlocks = ["@@ -1,6 +1,6 @@", " if (approved) {", "-  commit();", "+  log();", " }", "-log();", "+commit();"].join(String.fromCharCode(10));
+  ok(!isTextOnlyPatch(twoBlocks), "code moved out of an if is a change");
+  ok(!isTextOnlyPatch(patch(["  if (approved) {", "    commit();", "  }"], ["  if (approved) {", "  }", "    commit();"])), "code reordered inside one block is a change");
+  ok(!isTextOnlyPatch(patch(["  const ok = value>threshold <limit;"], ["  const ok = value>ceiling <limit;"])), "a tight comparison is not JSX text");
+  ok(!isTextOnlyPatch(patch(['  const query = "A  B";'], ['  const query = "A B";'])), "spaces inside a code string count");
+  ok(!isTextOnlyPatch(patch(["  import(/* @vite-ignore */ modulePath);"], ["  import(modulePath);"])), "a tool comment is code");
+  ok(!isTextOnlyPatch(patch(["  // eslint-disable-next-line no-console"], ["  // a note"])), "an eslint comment is code");
+  ok(isTextOnlyPatch(patch(["  <p>Old</p>"], ["  <p>New & archived, 100%</p>"])), "any JSX copy edit is words");
+  ok(isTextOnlyPatch(patch(["  //  old   note"], [])), "deleting a plain comment line is words");
   ok(!isTextOnlyPatch(undefined) && !isTextOnlyPatch(""), "no patch (GitHub leaves big diffs out) is not text-only");
   ok(tahaLaneProblem({ files: [{ filename: "src/pages/Quotes.tsx", status: "modified" }], now: NOW }), "a lane screen with no patch still counts");
   ok(tahaLaneProblem({ files: [{ filename: "src/pages/Quotes.tsx", previous_filename: "src/pages/Q.tsx", status: "renamed", patch: dash }], now: NOW }), "a renamed lane file still counts");

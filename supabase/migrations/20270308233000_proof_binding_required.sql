@@ -241,7 +241,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = 'b542beff97b76eea519e6f067a5b7c8d'
+                    AND md5(replace(p.prosrc, chr(13), '')) = 'e3551741f3d8f03b11a098098195ec14'
                     AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
@@ -250,7 +250,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._delivery_lines_match(uuid,jsonb,jsonb)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = '196fa2f0edc9360123791c1799e9626a'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '7b96e70b1f605a7473930b7dad9d95e3'
                     AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')

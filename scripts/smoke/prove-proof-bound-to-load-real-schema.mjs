@@ -621,8 +621,8 @@ function requiredCases() {
   stageText('required.sql', lf(FOLLOW_UPS[0]));
   let r = apply('required.sql');
   assert.equal(r.status, 0, r.output);
-  assert.equal(scalar(STEP_MD5), 'b542beff97b76eea519e6f067a5b7c8d');
-  assert.equal(scalar(MATCH_MD5), '196fa2f0edc9360123791c1799e9626a');
+  assert.equal(scalar(STEP_MD5), 'e3551741f3d8f03b11a098098195ec14');
+  assert.equal(scalar(MATCH_MD5), '7b96e70b1f605a7473930b7dad9d95e3');
   // Taha's review of #2562 (LOW 1): a delivered amount above 0 and under 0.01 counts as 0 on both sides.
   const TWO = (d2) => [A(2)[0], B(2, d2)[0]];
   let tiny = (key, seen, figure) => {

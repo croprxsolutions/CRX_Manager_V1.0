@@ -309,15 +309,18 @@ try {
   assert.equal(rows(25), '10/-/false/job 2/10/true/none 12/-/false/blend_ticket 0/10/true/blend_ticket');
   balance(25, 22, 'wrong ticket re-filed unlinked, then the job\'s real ticket');
 
-  // A ticket whose claim made another ticket take extra: job 10, ticket 7 (takes 0), ticket 6 (takes 3); undoing the 7
-  // returns nothing (it took nothing); the other ticket's extra 3 stays out and is flagged for review.
-  job(26, [[26, 10]]); ticket(26, 26, [[26, 7]]); ticket(261, 26, [[26, 6]]);
+  // A ticket whose claim made another ticket take extra (Sol r4 MED 1): job 10, ticket 7 (takes 0), ticket 6 (takes 3);
+  // undoing the 7 returns the other ticket's extra 3 on the job's books, so a later 5-gallon ticket takes 1 (11 in all).
+  job(26, [[26, 10]]); ticket(26, 26, [[26, 7]]); ticket(261, 26, [[26, 6]]); ticket(262, 26, [[26, 5]]);
   complete(J(26)); file(T(26)); file(T(261));
   balance(26, 13, 'job 10, then tickets 7 and 6');
   assert.match(ok(USERS.admin, reverseSql(T(26))), /"over_taken_lines": 1/);
-  assert.equal(scalar(`SELECT count(*) FROM public.inventory_transactions WHERE product_id = '${P(26)}' AND transaction_type = 'adjusted'
-    AND quantity = 0 AND requires_review AND notes LIKE 'Review: other blend tickets on this job took 3 more%';`), '1');
-  balance(26, 13, 'ticket 7 reversed: the other ticket\'s extra 3 stays out, flagged');
+  assert.equal(scalar(`SELECT count(*) FROM public.inventory_transactions WHERE product_id = '${P(26)}' AND transaction_type = 'job_applied'
+    AND quantity = -3 AND already_counted = 3 AND job_id = '${J(26)}' AND requires_review
+    AND notes LIKE 'Returned from the job: other blend tickets took 3 more%';`), '1');
+  balance(26, 10, 'ticket 7 reversed: the other ticket\'s extra 3 comes back');
+  file(T(262));
+  balance(26, 11, 'a later 5-gallon ticket takes 1 (tickets 6 + 5 = 11)');
 
   // Taha LOW 1: a ticket that moved nothing (job 10, ticket 6 takes 0) is reversed; a retry with a fresh key reads
   // already_reversed, not not_found (no credit row exists, but its own job_applied row still names the record).

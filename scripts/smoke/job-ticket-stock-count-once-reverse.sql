@@ -16,7 +16,7 @@ BEGIN
   END IF;
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)')), chr(13), '')) IS DISTINCT FROM '0fc4e07bd31e23a56c37ca7bf8c9301b'
      OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)')), chr(13), '')) IS DISTINCT FROM '65ff342c6eccd4043ea3db7c4f7635d1'
-     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.reverse_application_record(uuid, text)')), chr(13), '')) IS DISTINCT FROM '5bdf42d93a5fbdd1302d3c7306229bc5' THEN
+     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.reverse_application_record(uuid, text)')), chr(13), '')) IS DISTINCT FROM 'd323fdbe0bfba5513872354a9fad9a20' THEN
     RAISE EXCEPTION 'COUNT_ONCE_ROLLBACK_REFUSED: the live bodies are not the count-once bodies';
   END IF;
 END;

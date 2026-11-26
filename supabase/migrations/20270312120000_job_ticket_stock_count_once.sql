@@ -1155,7 +1155,8 @@ BEGIN
   -- Count once: every line above was credited in full. For each product, take back out what the completed job
   -- still needs without this ticket (the larger of the job's claims and the other tickets' claims, less what the
   -- others took), as a job row whose negative already_counted keeps the job's claim unchanged. If other tickets
-  -- took more than the job now needs (because of this ticket), that extra stays out and is flagged for review.
+  -- took more than the job now needs (because of this ticket), that extra comes back too, as a job row with a
+  -- negative quantity whose already_counted keeps the job's claim unchanged, so later postings see it returned.
   IF v_job_record_id IS NOT NULL THEN
     FOR v_keep IN
       SELECT x.product_id, x.q, x.claim, g.job_claim, g.ticket_claim, g.taken
@@ -1188,16 +1189,19 @@ BEGIN
         v_kept_count := v_kept_count + 1;
       END IF;
       IF v_over_qty > 0 THEN
+        UPDATE public.inventory
+           SET quantity_available = quantity_available + v_over_qty,
+               updated_at = now()
+         WHERE product_id = v_keep.product_id AND location = 'Main Warehouse';
         INSERT INTO public.inventory_transactions (
           product_id, transaction_type, quantity, to_location,
-          performed_by, notes, requires_review
+          performed_by, notes, job_id, requires_review, application_record_id, already_counted
         ) VALUES (
-          v_keep.product_id, 'adjusted', 0, 'Main Warehouse',
+          v_keep.product_id, 'job_applied', -v_over_qty, 'Main Warehouse',
           v_actor,
-          'Review: other blend tickets on this job took ' || v_over_qty || ' more than the job now needs after application record ' ||
-            v_record.record_number || ' was reversed; correct with an adjustment if so' ||
-            ' (reversed application record ' || p_application_record_id::text || ')',
-          true
+          'Returned from the job: other blend tickets took ' || v_over_qty || ' more than the job needs after application record ' ||
+            v_record.record_number || ' was reversed — review',
+          v_job_id, true, v_job_record_id, v_over_qty
         );
         v_over_count := v_over_count + 1;
       END IF;
@@ -1221,7 +1225,7 @@ BEGIN
     'Application record ' || v_record.record_number || ' reversed; ' ||
       v_reversed_count || ' inventory deduction(s) restored' ||
       CASE WHEN v_kept_count > 0 THEN '; ' || v_kept_count || ' chemical line(s) kept on its completed job — review' ELSE '' END ||
-      CASE WHEN v_over_count > 0 THEN '; ' || v_over_count || ' chemical line(s) may be over-taken by other tickets — review' ELSE '' END,
+      CASE WHEN v_over_count > 0 THEN '; ' || v_over_count || ' chemical line(s) over-taken by other tickets returned — review' ELSE '' END,
     v_actor,
     'blend_ticket',
     v_record.source_id,
@@ -1261,7 +1265,7 @@ BEGIN
       FROM (VALUES
         ('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)', '0fc4e07bd31e23a56c37ca7bf8c9301b', false),
         ('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)', '65ff342c6eccd4043ea3db7c4f7635d1', false),
-        ('public.reverse_application_record(uuid, text)', '5bdf42d93a5fbdd1302d3c7306229bc5', true)
+        ('public.reverse_application_record(uuid, text)', 'd323fdbe0bfba5513872354a9fad9a20', true)
       ) AS x(sig, md5, api)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(x.sig)
   LOOP

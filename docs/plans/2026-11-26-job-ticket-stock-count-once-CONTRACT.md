@@ -82,3 +82,7 @@ None left (Mason answered A on 2026-11-26).
 
 ## Luna round 1 (2026-11-26)
 - HIGH: a half posted before the migration was invisible to the group, so its other half took the full amount. Fixed: the group also finds unlinked rows by `job_id` / note; prover straddle cases.
+
+## Luna round 2 (2026-11-26)
+- HIGH reversal-after-zero-ticket and MED ledger mismatch: refuted. On an open job every ticket line moves its full claim (no job record, so CJ = 0 and CT = T); a ticket row is credited only once the job record exists, which reversal refuses. Prover case added (two tickets, first reversed, job 4 moves 0).
+- HIGH unit fallback mismatch: refuted for real data. `inventory_unit` is NOT NULL, 0 of 606 live products blank, `validate_product_units` rejects invalid units; raw fallback lines are already flagged.

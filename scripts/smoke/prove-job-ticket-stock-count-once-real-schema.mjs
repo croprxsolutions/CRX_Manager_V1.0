@@ -127,7 +127,7 @@ try {
   seed(`INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST}', '[PROVER] Count Once Farm', true);
     INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD}', '${CUST}', '[PROVER] Count Once Field');`);
   for (let n = 0; n <= 9; n += 1) product(n);
-  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21]) product(n);
+  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22]) product(n);
   const wrapperAcl = WRAPPERS.map(acl);
 
   // BEFORE: the bug. Ticket 6 on an in-progress job, then the job's 10: 16 out.
@@ -252,6 +252,16 @@ try {
   file(T(9)); ok(USERS.admin, reverseSql(T(9))); complete(J(9));
   assert.equal(rows(9), '6/-/false/none 10/-/false/job');  // the reversed record is gone
   balance(9, 10, 'case 10, ticket reversed before its job completes; job takes its full 10');
+
+  // Luna r2: two tickets on an open job (10, then 6) each take their full claim (tickets add up; only a job record
+  // credits them); reversing the first leaves the second exact and reversible; the job's 4 then moves 0 (max(4, 6) = 6).
+  job(22, [[22, 4]]); ticket(22, 22, [[22, 10]]); ticket(221, 22, [[22, 6]]);
+  file(T(22)); file(T(221));
+  assert.equal(rows(22), '10/-/false/blend_ticket 6/-/false/blend_ticket');
+  ok(USERS.admin, reverseSql(T(22)));
+  complete(J(22));
+  assert.equal(rows(22), '10/-/false/none 6/-/false/blend_ticket 0/4/true/job');
+  balance(22, 6, 'two tickets on an open job (10, 6), the first reversed, then the job claims 4');
 
   // Races: each must wait for the completion's lock, then act on the committed job record.
   job(11, [['d', 10]]); ticket(11, 11, [['d', 6]]);

@@ -857,6 +857,14 @@
         "lifecycle"
       ]
     },
+    "receive_po_items_with_excess_notice": {
+      "chain": "smoke-receiving-excess-notice.sql",
+      "container_only": true,
+      "container_prover": "prove-receiving-excess-notice-local.mjs",
+      "description": "CONTAINER ONLY: saved excess quantities, administrator notice recipients and sender, ordinary and refused receiving, repeated lines, old and new receipt-key replay, failed notice and receipt reversal.",
+      "covers": ["receive_po_items_with_excess_notice"],
+      "area": ["inventory", "lifecycle", "idempotency", "security"]
+    },
     "receiving_damage_receipts": {
       "chain": "smoke-receiving-damage-receipts.sql",
       "container_only": true,

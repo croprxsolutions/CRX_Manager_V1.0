@@ -9,11 +9,18 @@ const migration = '20270308110000_enable_liquid_density_review.sql';
 const stagingRef = 'fsnjredpmakbmhwowjjt';
 const stagingContext = `SET LOCAL crx.liquid_weight_staging_project = '${stagingRef}';`;
 const read = (...parts) => readFileSync(path.join(ROOT, ...parts), 'utf8').replaceAll('\r\n', '\n');
+const cutover = read('supabase', 'migrations', migration);
+const stem = migration.slice(0, -4);
+const wrapped = (text) => wrapperSql({
+  stem, text, run: true, targetRef: stagingRef,
+  sha: createHash('sha256').update(text).digest('hex'),
+});
+const stagingSql = wrapped(cutover);
+assert.ok(stagingSql.includes(stagingContext), 'The staging runner preparation must be in the base branch');
 
 try {
   buildContainer({ stopBefore: migration });
   assert.equal(scalar('SELECT public.liquid_density_review_open();'), 'f');
-  const cutover = read('supabase', 'migrations', migration);
   for (const context of ['', "SET LOCAL crx.liquid_weight_staging_project = 'wrong_project';"]) {
     psql(`BEGIN;\n${context}\n${cutover}\nCOMMIT;`);
     assert.equal(scalar('SELECT public.liquid_density_review_open();'), 'f');
@@ -44,6 +51,7 @@ try {
 
   expectPreflightRefusal('ALTER TABLE public.product_parent_brands DISABLE TRIGGER return_liquid_density_to_draft_for_brand;');
   expectPreflightRefusal('ALTER FUNCTION public.approve_weights(jsonb, text) RESET search_path;');
+  expectPreflightRefusal('ALTER FUNCTION public.approve_liquid_density_draft(uuid, uuid, bigint, jsonb, boolean, text) STABLE;');
   expectPreflightRefusal('GRANT EXECUTE ON FUNCTION public.liquid_density_review_open() TO anon;');
   expectPreflightRefusal("CREATE FUNCTION public.get_liquid_density_review(text) RETURNS jsonb LANGUAGE sql AS 'SELECT NULL::jsonb';");
   expectPreflightRefusal(`
@@ -51,11 +59,6 @@ try {
     RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path = public, pg_temp
     AS $$ BEGIN RETURN '{"review_open":false,"brands":[]}'::jsonb; END; $$;`);
 
-  const stem = migration.slice(0, -4);
-  const wrapped = (text) => wrapperSql({
-    stem, text, run: true, targetRef: stagingRef,
-    sha: createHash('sha256').update(text).digest('hex'),
-  });
   const failedApply = psql(wrapped('SELECT 1;'), { allowFailure: true });
   assert.equal(failedApply.status, 3, failedApply.stderr + failedApply.stdout);
   assert.match(failedApply.stderr, /LIQUID_DENSITY_STAGING_ACTIVATION_DID_NOT_OPEN/);
@@ -66,9 +69,7 @@ try {
     `BEGIN;\n${stagingContext}\n${cutover}\n${definitionHash}\nROLLBACK;`,
   ).stdout.match(/\b[0-9a-f]{32}\b/)?.[0];
   assert.ok(rebuildDefinition);
-  const sql = wrapped(cutover);
-  assert.ok(sql.includes(stagingContext), 'The staging runner preparation must be in the base branch');
-  psql(sql);
+  psql(stagingSql);
   assert.equal(scalar('SELECT public.liquid_density_review_open();'), 't');
   assert.equal(scalar(definitionHash), rebuildDefinition);
   assert.equal(scalar(`SELECT encode(sha256(convert_to(statements[1], 'UTF8')), 'hex')

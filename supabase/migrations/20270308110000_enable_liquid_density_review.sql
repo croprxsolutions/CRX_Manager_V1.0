@@ -35,6 +35,10 @@ BEGIN
           OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM expected.body_hash
           OR p.proowner IS DISTINCT FROM 'postgres'::regrole
           OR p.prosecdef IS DISTINCT FROM expected.definer
+          OR p.provolatile::text IS DISTINCT FROM CASE
+               WHEN expected.signature IN ('liquid_density_review_open()', 'get_liquid_density_review(uuid)') THEN 's'
+               ELSE 'v'
+             END
           OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
           OR p.proacl IS NULL
           OR EXISTS (

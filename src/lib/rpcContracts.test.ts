@@ -3006,7 +3006,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // KI-156 follow-up (local candidate 20270120150000): the below-cost wall, re-emitted; a trigger function, never an RPC.
   _enforce_below_cost_line:
     'BEFORE INSERT/UPDATE row trigger on order_items, invoice_items and quote_items: refuses a below-cost line or records its admin approval for the line being written; the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function, and no browser role can EXECUTE it. Prune once the candidate is in the generated snapshot',
-  // #2617 (local candidate 20270311200000): the below-cost list check now writes the approvals of a marked reason.
+  // #2617 (local candidate 20270313023100): the below-cost list check now writes the approvals of a marked reason.
   _raise_below_cost_reason_list:
     'DEFERRABLE INITIALLY DEFERRED constraint trigger on order_items, quote_items and invoice_items: at commit either refuses the save or, for a reason bound to the shown list, inserts one approval per surviving noted line and clears the note, so it runs once per transaction; the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function, and EXECUTE is postgres and service_role only. Prune once the candidate is in the generated snapshot',
   // Sprayed jobs keep each product's EPA number (20261204120000).

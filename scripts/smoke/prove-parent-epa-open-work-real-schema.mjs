@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270308120000_parent_epa_correction_refuses_open_work (#2579): a parent EPA correction is
+ * Real-schema proof for 20270308160000_parent_epa_correction_refuses_open_work (#2579): a parent EPA correction is
  * refused while any size has work in progress, and allowed once that work is finished. Builds the baseline plus every
  * migration before the candidate (shared undo-paths harness; the correction is switched on by 20270307180000), then:
  *   APPLY:  refused outside one transaction; commits; a second apply stops at its preflight;
@@ -20,7 +20,7 @@ import path from 'node:path';
 process.env.UNDO_PATHS_CONTAINER ||= `crx-par1work-${process.pid}-${Date.now().toString(36)}`;
 const { buildContainer, removeContainer, seedUsers, psql, scalar, docker, USERS, id, NAME, ROOT } = await import('./undo-paths/harness.mjs');
 
-const CANDIDATE = '20270308120000_parent_epa_correction_refuses_open_work.sql';
+const CANDIDATE = '20270308160000_parent_epa_correction_refuses_open_work.sql';
 const OLD = '524-475', NEW = '100-497-37686';
 const CUST = id('e1'), PARENT = id('e2'), S1 = id('e3'), S2 = id('e4'), OTHER = id('e5');
 const JOB = id('e6'), TICKET = id('e7'), INV = id('e8'), POSTED = id('e9'), BTINV = id('ea');

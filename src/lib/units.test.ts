@@ -117,7 +117,7 @@ describe('blockedUnitSaveMessage', () => {
   });
 });
 
-describe('whole-item units (20270311150000)', () => {
+describe('whole-item units (20270313003100)', () => {
   it('treats Ea and Unit as whole items, ignoring case and spaces', () => {
     expect([' EA ', 'ea', 'Unit', 'unit'].every(isWholeItemUnit)).toBe(true);
     expect(['Gal', 'Lb', 'Dry oz', '', null, undefined].some(isWholeItemUnit)).toBe(false);

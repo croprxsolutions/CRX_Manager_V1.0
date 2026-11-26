@@ -270,7 +270,7 @@ describe('draw_down_quote actor and intent binding migration', () => {
       'const balanceReloaded = await openDrawDownModal();',
     ]);
     expect(drawHandler).toContain('const authError = rpcAuthErrorMessage(error);');
-    expect(drawHandler).toContain('Only active administrators and sales representatives can draw down bookings.');
+    expect(drawHandler).toContain('Only active administrators and sales representatives can draw from bookings.');
     expect(drawHandler).toContain('RpcErrorCodes.BOOKING_QUANTITY_INVALID');
     expect(drawHandler).toContain('RpcErrorCodes.BOOKING_PRODUCT_INVALID');
     expect(drawHandler).toContain('Check Orders for this booking before drawing again.');

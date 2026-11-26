@@ -80,7 +80,7 @@ test('margins type cleanly on all tiers, save exactly, and reopen priced', async
   await expect(page.getByText('Markup %:').first()).toBeVisible();
   await expect(page.getByText('Gross Margin')).toHaveCount(0);
   await expect(page.getByText(/release gate/i)).toHaveCount(0);
-  await page.screenshot({ path: 'scripts/local-app/.state/pm2-priced-product.png', fullPage: true });
+  await page.screenshot({ path: test.info().outputPath('pm2-priced-product.png'), fullPage: true });
 
   // Opening and saving a product whose margins set its prices changes no price.
   await page.getByRole('button', { name: 'Save Changes' }).click();
@@ -94,7 +94,7 @@ test('margins type cleanly on all tiers, save exactly, and reopen priced', async
   await page.getByRole('button', { name: /edit/i }).first().click();
   await expect(page.getByRole('combobox', { name: `Pricing mode for ${productName}` })).toHaveValue('price_driven');
   await expect(page.getByRole('spinbutton', { name: `Tier 1 price for ${productName}` })).toBeVisible();
-  await page.screenshot({ path: 'scripts/local-app/.state/pm2-list.png' });
+  await page.screenshot({ path: test.info().outputPath('pm2-list.png') });
 });
 
 test('moving between products keeps Stay and Leave honest', async ({ page }) => {

@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
   findTahaLaneOverride, isTahaLanePath, isTahaLaneSql, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
-  tahaApprovedHead, tahaApprovedOnGitHub, tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
+  pushDismissedApprovals, tahaApprovedHead, tahaApprovedOnGitHub, tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
 } from "./taha-lane-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -290,7 +290,7 @@ eq(tahaOverrideCommand("taha override #2242 123456 now"), null, "other words aft
 ok(tahaOverrideAttempt("taha override 123456"), "the old form is noticed and refused");
 ok(!tahaOverrideAttempt("hello"), "ordinary chat is not an attempt");
 
-// ── code → override, one PR at one commit, 24 hours ────────────────────────
+// ── code → override, one PR (later pushes included, Mason 2026-11-25), 24 hours ──
 const A = "a".repeat(40), B = "b".repeat(40);
 const root = tempDir("taha-lane-");
 const dir = path.join(root, ".claude", "session-" + "state");
@@ -310,7 +310,7 @@ const rec = recordTahaLaneOverride({ dirs, pullRequest: 2242, code, now: NOW + 6
 ok(rec.ok && rec.payload.pullRequest === 2242 && rec.payload.headSha === A, "the code becomes an override for its PR and head");
 eq(recordTahaLaneOverride({ dirs, pullRequest: 2242, code, now: NOW + 120e3 }).ok, false, "a code works once");
 ok(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW + 3600e3 }), "the override is found for that PR and head");
-eq(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: B, now: NOW + 3600e3 }), null, "a later push is not covered");
+ok(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: B, now: NOW + 3600e3 }), "a later push is covered too (one message per PR)");
 eq(findTahaLaneOverride({ dirs, pullRequest: 2243, headSha: A, now: NOW + 3600e3 }), null, "no other PR is covered");
 eq(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW + 60e3 + 24 * 3600e3 }), null, "the override ends after 24 hours");
 
@@ -323,8 +323,9 @@ eq(tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha: A, files: lane, dirs,
 ok(told.length === 1 && told[0].startsWith("@TahaKhanAbdalli") && told[0].includes(A), "the comment tags Taha and names the commit");
 eq(tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha: A, files: lane, dirs, now: NOW + 3600e3, tellTaha: () => { told.push("again"); return true; } }), null, "a retry still passes");
 eq(told.length, 1, "and Taha is told once, not on every retry");
-const pushed = tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha: B, files: lane, dirs, now: NOW + 3600e3, tellTaha: () => true });
-ok(/taha override #2242 777777/.test(pushed), "after a new push the block is back, with the new head's code");
+eq(tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha: B, files: lane, dirs, now: NOW + 3600e3, tellTaha: () => { told.push("pushed"); return true; } }), null, "after a new push the override still lets it through");
+eq(told.length, 1, "without telling Taha again");
+ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha: B, files: lane, dirs, now: NOW + 60e3 + 24 * 3600e3, tellTaha: () => true })), "after 24 hours the block is back");
 const refusal = tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: lane, dirs, now: NOW });
 ok(/TAHA LANE BLOCK/.test(refusal) && /taha override #2300 \d{6}/.test(refusal), "a refusal gives Mason the exact line, PR included");
 eq(tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: f("src/pages/Deliveries.tsx"), dirs, now: NOW }), null, "outside the lane, nothing to do");
@@ -352,9 +353,93 @@ const revGh = (tsv, base = "") => (args) => {
 };
 const approvedTsv = `50602678\tAPPROVED\t${A}\t2026-11-24T15:00:00Z\n`;
 ok(tahaApprovedOnGitHub({ repo: "o/r", gh: revGh(approvedTsv), pullRequest: 5, headSha: A }), "read from GitHub: approved");
-ok(!tahaApprovedOnGitHub({ repo: "o/r", gh: revGh(approvedTsv, "2026-11-20T00:00:00Z\n2026-11-24T16:00:00Z\n"), pullRequest: 5, headSha: A }), "read from GitHub: retargeted after the Approve");
+ok(!tahaApprovedOnGitHub({ repo: "o/r", gh: revGh(approvedTsv, "base_ref_changed\t2026-11-20T00:00:00Z\t\t\t\t\nautomatic_base_change_succeeded\t2026-11-24T16:00:00Z\t\t\t\t\n"), pullRequest: 5, headSha: A }), "read from GitHub: retargeted after the Approve");
 ok(!tahaApprovedOnGitHub({ repo: "o/r", gh: revGh(approvedTsv, null), pullRequest: 5, headSha: A }), "an unreadable base history refuses");
 ok(!tahaApprovedOnGitHub({ repo: "o/r", gh: () => { throw new Error("502"); }, pullRequest: 5, headSha: A }), "a failed read refuses");
+// Carry-over (Mason, 2026-11-25): his Approve of A still counts at B when the PR's own change is the same.
+const C = "c".repeat(40), D = "d".repeat(40), E = "e".repeat(40);
+const M1 = "1".repeat(40), M2 = "2".repeat(40);
+const carryGh = ({ before, after, blobs = {}, base = "staging", reviews = approvedTsv, timeline = "", mbAfter = M1, moved = null }) => (args) => {
+  const url = args.find((a) => /^repos\//.test(a)) || "";
+  if (/\/pulls\/5\/reviews/.test(url)) return reviews;
+  if (/\/issues\/5\/timeline/.test(url)) return timeline;
+  if (/\/pulls\/5$/.test(url)) return `${base}\n`;
+  if (url === `repos/o/r/compare/staging...${A}`) return JSON.stringify({ mb: M1, files: before });
+  if (url === `repos/o/r/compare/staging...${B}`) return JSON.stringify({ mb: mbAfter, files: after });
+  if (url === `repos/o/r/compare/${M1}...${M2}` && moved) return JSON.stringify(moved);
+  const blob = /\/git\/blobs\/([0-9a-f]{40})$/.exec(url);
+  if (blob && blob[1] in blobs) return Buffer.from(blobs[blob[1]]).toString("base64");
+  throw new Error(`unexpected ${url}`);
+};
+const carried = (opts) => tahaApprovedOnGitHub({ repo: "o/r", gh: carryGh(opts), pullRequest: 5, headSha: B });
+const fl = (filename, sha, status = "modified", previous_filename = null) => ({ filename, status, sha, previous_filename });
+const quotes = fl("src/pages/Quotes.tsx", C);
+ok(carried({ before: [quotes], after: [quotes] }), "a staging catch-up that leaves the PR's own files alone carries his Approve");
+const movedOn = (files, status = "ahead") => ({ status, files, count: files.length });
+ok(carried({ before: [quotes], after: [quotes], mbAfter: M2, moved: movedOn(["src/pages/Bills.tsx", "docs/x.md"]) }),
+  "staging moved on other files only: carries");
+ok(!carried({ before: [quotes], after: [quotes], mbAfter: M2, moved: movedOn(["src/pages/Quotes.tsx"]) }),
+  "staging changed one of the PR's own files: a kept-ours conflict could drop its fix, so he is needed (Sol HIGH)");
+ok(!carried({ before: [quotes], after: [quotes], mbAfter: M2, moved: movedOn(["src/a.ts"], "diverged") }), "a branch point that did not move forward refuses");
+ok(!carried({ before: [quotes], after: [quotes], mbAfter: M2, moved: { status: "ahead", files: null, count: 0 } }), "an unreadable staging change list refuses");
+ok(!carried({ before: [quotes], after: [quotes], mbAfter: M2, moved: movedOn(Array.from({ length: 300 }, (_, i) => `x/${i}`)) }), "300+ staging files refuses");
+ok(!carried({ before: null, after: null }), "a compare reply without files is unusable, not empty (Sol)");
+ok(!carried({ before: [fl("src/report_20270301120000.ts", C, "added")], after: [fl("src/report_20270304120000.ts", C, "added")] }),
+  "two differently dated code paths are different files (Sol)");
+ok(carried({ before: [quotes], after: [quotes, fl("docs/manual/decision-log.d/x.md", D, "added")] }), "a new note under docs/ carries it");
+ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "a = 1", [D]: "a = 2" } }), "a change to the PR's own code needs him again");
+ok(!carried({ before: [quotes], after: [quotes, fl("src/lib/new.ts", D, "added")] }), "a new code file needs him again");
+ok(!carried({ before: [quotes, fl("src/lib/old.ts", D)], after: [quotes] }), "dropping a file from the PR needs him again");
+ok(!carried({ before: [quotes], after: [quotes, fl("AGENTS.md", D)] }), "a markdown file outside docs/ is not a note");
+ok(!carried({ before: [quotes], after: [quotes, fl("docs/x.md", D, "renamed", "src/pages/Bills.tsx")] }), "moving code into docs/ is not a note");
+const migA = fl("supabase/migrations/20270301160000_f05b.sql", C, "added");
+const migB = fl("supabase/migrations/20270304160000_f05b.sql", C, "added");
+const smokeA = fl("scripts/smoke/f05b.sql", D, "added");
+const smokeB = fl("scripts/smoke/f05b.sql", E, "added");
+ok(carried({ before: [migA, smokeA], after: [migB, smokeB], blobs: { [D]: "-- 20270301160000_f05b\nselect 1;", [E]: "-- 20270304160000_f05b\nselect 1;" } }),
+  "a restamp (renamed migration, stamps changed in text) carries it");
+ok(!carried({ before: [migA, smokeA], after: [migB, smokeB], blobs: { [D]: "-- 20270301160000_f05b\nselect 1;", [E]: "-- 20270304160000_f05b\nselect 2;" } }),
+  "a restamp that also changes the text needs him again");
+ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "x = 62500000000000", [D]: "x = 62500000000001" } }),
+  "a 14-digit number that is not a date stamp is a real change (security review LOW)");
+ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "x = 100.00000000000001", [D]: "x = 100.20270304160000" } }),
+  "digits after a decimal point are never a stamp");
+const mig19 = fl("supabase/migrations/20270306190000_proof.sql", E, "added");
+const mig03 = fl("supabase/migrations/20270307030000_proof.sql", E, "added");
+ok(carried({ before: [quotes, mig19], after: [fl("src/pages/Quotes.tsx", D), mig03], blobs: { [C]: "// see 20270306190000.\n-- 20270306190000.sql", [D]: "// see 20270307030000.\n-- 20270307030000.sql" } }),
+  "a stamp at the end of a sentence or before .sql is still a stamp (PR #2557's real restamp)");
+ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "cutoff = 20270301160000", [D]: "cutoff = 20270304160000" } }),
+  "a date-shaped number changed with no restamp of the PR's own migration is a real change (Luna r1 HIGH)");
+ok(!carried({ before: [quotes, mig19], after: [fl("src/pages/Quotes.tsx", D), mig03], blobs: { [C]: "x = 20270301160000", [D]: "x = 20270304160000" } }),
+  "only the PR's own old -> new stamp may differ, not another date");
+ok(!carried({ before: [fl("src/report_20270301120000.ts", C, "added")], after: [fl("src/report_20270304120000.ts", D, "added")], blobs: { [C]: "cutoff = 20270301120000", [D]: "cutoff = 20270304120000" } }),
+  "a renamed code file with a date in its name is not a restamp (Luna r3 HIGH)");
+ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: Buffer.from([0x80]), [D]: Buffer.from([0x81]) } }),
+  "two different non-text files never compare equal (security review LOW)");
+ok(carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: Buffer.from([0x80]), [D]: Buffer.from([0x80]) } }),
+  "identical non-text files do");
+ok(!carried({ before: [quotes], after: Array.from({ length: 300 }, (_, i) => fl(`src/f${i}.ts`, C)) }), "a cut-short compare refuses");
+ok(!carried({ before: [quotes], after: [quotes], base: "bad base;" }), "an odd base name refuses");
+ok(!carried({ before: [quotes], after: [quotes], reviews: `${approvedTsv}50602678\tCHANGES_REQUESTED\t${C}\t2026-11-24T16:00:00Z\n` }),
+  "changes requested after the Approve is never carried past");
+// GitHub's rulesets dismiss stale reviews on push, so on real PRs his old Approve reads DISMISSED (#2381, #2324).
+const dismissedTsv = `50602678\tDISMISSED\t${A}\t2026-11-24T15:00:00Z\t6044671994\n`;
+const dismissal = (message = "", commit = B, state = "approved", review = "6044671994") =>
+  `review_dismissed\t2026-11-24T18:53:16Z\t${review}\t${state}\t${message}\t${commit}\n`;
+ok(carried({ before: [quotes], after: [quotes], reviews: dismissedTsv, timeline: dismissal() }),
+  "an Approve GitHub dismissed on a push still carries over a staging catch-up");
+ok(!carried({ before: [quotes], after: [quotes], reviews: dismissedTsv, timeline: dismissal("not ready after all") }),
+  "an Approve a person dismissed (with a message) does not");
+ok(!carried({ before: [quotes], after: [quotes], reviews: dismissedTsv, timeline: "" }), "a dismissal the timeline does not explain does not");
+ok(!carried({ before: [quotes], after: [quotes], reviews: dismissedTsv, timeline: dismissal("", "") }), "a dismissal not tied to a push does not");
+ok(!carried({ before: [quotes], after: [quotes], reviews: dismissedTsv, timeline: dismissal("", B, "changes_requested") }),
+  "a dismissed changes-request never becomes an Approve");
+ok(!carried({ before: [quotes], after: [quotes], reviews: dismissedTsv, timeline: dismissal("", B, "approved", "999") }), "another review's dismissal does not");
+ok(!carried({ before: [quotes], after: [fl("src/pages/Quotes.tsx", D)], blobs: { [C]: "a = 1", [D]: "a = 2" }, reviews: dismissedTsv, timeline: dismissal() }),
+  "a push-dismissed Approve still needs him again after a real code change");
+ok(!carried({ before: [quotes], after: [quotes], reviews: `${dismissedTsv}50602678\tCHANGES_REQUESTED\t${C}\t2026-11-24T16:00:00Z\t7\n`, timeline: dismissal() }),
+  "changes requested after a push-dismissed Approve still wins");
+eq([...pushDismissedApprovals([{ event: "review_dismissed", state: "approved", message: "", commit: B, review: "12" }])], ["12"], "the helper names the review");
 let askedTaha = 0;
 const approve = () => { askedTaha++; return true; };
 eq(tahaLaneGate({ prefix: "T", pullRequest: 2400, headSha: A, files: lane, dirs, now: NOW, tahaApproved: approve }), null, "Taha's Approve lets lane code through, no code needed");

@@ -92,6 +92,7 @@ vi.mock('../components/products/ProductsMobileList', async () => {
   return { ...actual, default: () => null };
 });
 vi.mock('../lib/productParents', () => ({ getProductParents: async () => [], searchProductParents: async () => [] }));
+vi.mock('../lib/epaBatchFill', () => ({ fetchBrandEpaOwners: async () => ({ parentIds: new Set(), productIds: new Set() }) }));
 vi.mock('../lib/productSetup', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/productSetup')>()),
   listProductCategories: async () => [

@@ -435,6 +435,36 @@ export async function loadExcelJs(): Promise<typeof import('exceljs')> {
   return (imported.default ?? imported) as typeof import('exceljs');
 }
 
+function exportCents(text: string | null): bigint | null {
+  const match = /^(\d+)\.(\d{2})$/.exec(text ?? '');
+  return match ? BigInt(match[1]) * 100n + BigInt(match[2]) : null;
+}
+
+/**
+ * Audit 2026-11-24 #4, Mason Q4 (2026-11-25): a cost-only edit on the sheet keeps the margins, so the
+ * prices move with cost. Fill margin_driven only when the database would re-derive today's exact prices
+ * from today's margins (round(cost / (1 - margin), 2), as _calculate_product_pricing does), so an
+ * untouched row still previews as unchanged. Anything else stays blank, as before, for the admin to choose.
+ * The export sends '' for a missing value.
+ */
+export function exportedPricingMode(row: PricingWorkbookExportRow): 'margin_driven' | '' {
+  const cost = exportCents(row.current_cost);
+  if (cost === null || cost <= 0n) return '';
+  for (const tier of [1, 2, 3] as const) {
+    const price = exportCents(row[`current_tier${tier}_price`]);
+    const match = /^(\d+)(?:\.(\d{1,8}))?$/.exec(row[`current_tier${tier}_margin_percent`] ?? '');
+    if (price === null || !match) return '';
+    const scale = 10n ** BigInt((match[2] ?? '').length);
+    const marginScaled = BigInt(match[1] + (match[2] ?? ''));
+    const denominator = 100n * scale - marginScaled;
+    if (denominator <= 0n) return '';
+    const numerator = cost * 100n * scale;
+    // Round half up, matching PostgreSQL round() for a positive value.
+    if ((2n * numerator + denominator) / (2n * denominator) !== price) return '';
+  }
+  return 'margin_driven';
+}
+
 function workbookRow(exportRow: PricingWorkbookExportRow): Record<PricingWorkbookHeader, string | number> {
   return {
     product_id: exportRow.product_id,
@@ -454,7 +484,7 @@ function workbookRow(exportRow: PricingWorkbookExportRow): Record<PricingWorkboo
     current_tier2_price: exportRow.current_tier2_price ?? '',
     current_tier3_margin_percent: exportRow.current_tier3_margin_percent ?? '',
     current_tier3_price: exportRow.current_tier3_price ?? '',
-    pricing_mode: '',
+    pricing_mode: exportedPricingMode(exportRow),
     new_cost: exportRow.current_cost ?? '',
     tier1_margin_percent: exportRow.current_tier1_margin_percent ?? '',
     tier1_price: exportRow.current_tier1_price ?? '',
@@ -534,7 +564,7 @@ function stylePricingWorksheet(worksheet: Worksheet, rowCount: number): void {
       formulae: ['"margin_driven,price_driven"'],
       showInputMessage: true,
       promptTitle: 'Pricing mode',
-      prompt: 'Leave blank for no change, or choose margin_driven or price_driven.',
+      prompt: 'margin_driven: a cost change moves prices and keeps margins. price_driven: prices stay. Blank: no change.',
       showErrorMessage: true,
       errorTitle: 'Invalid pricing mode',
       error: 'Choose margin_driven, price_driven, or leave the cell blank.',

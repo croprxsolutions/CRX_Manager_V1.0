@@ -5,6 +5,7 @@
  */
 
 const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
+  [/^PRODUCT_WEIGHT_REVIEW_NOT_OPEN\b/, 'Nothing was saved. Weight review changed. Check the current Weight card before trying again'],
   // M9 (20270301180000): a Prepayment Manager check's amount is locked; a check with an application is not deleted.
   [/^PREPAY_CHECK_AMOUNT_LOCKED\b/, "Nothing was saved. A prepayment check's amount cannot be edited. To correct a mistyped check, delete the whole check and enter it again"],
   [/^PREPAY_OVERPAYMENT_LOCKED\b/, "Nothing was saved. An overpayment's amount comes from its payment, so it cannot be edited or deleted here. To undo it, void the payment"],
@@ -22,6 +23,10 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Product price sheet: the server refuses a used, expired or someone else's sheet, or a sheet listing a product twice.
   [/^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/,
    'No prices were changed. This price sheet can no longer be used: it was already applied, is more than 7 days old, came from an older template, or was downloaded by another user. Download a fresh price sheet and make your changes in it'],
+  // Supplier Pricing (phase 1b upsert_product_supplier_link): a link needs SKU, price unit and pack description.
+  [/^SUPPLIER_LINK_REUSE_FIELDS_REQUIRED\b/,
+   'Nothing was saved. Fill in Supplier SKU, Supplier price unit and Supplier pack description, then save the link again'],
+  [/^SUPPLIER_PRODUCT_NAME_REQUIRED\b/, 'Nothing was saved. Fill in Supplier Product name, then save the link again'],
   // Supplier Pricing (20270305200000): bounds that keep the converted cost per inventory unit a sane number.
   [/^SUPPLIER_CONVERSION_INVALID\b|violates check constraint "product_supplier_links_conversion_floor"/,
    'Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals'],
@@ -382,6 +387,11 @@ export function sanitizeError(error: unknown): string {
     return message.slice('PRODUCT_INACTIVE'.length).replace(/^:\s*/, '').trim()
       || 'This product is turned off. Ask an admin to reactivate it.';
   }
+  if (/^BRAND_(?:DOCUMENT_)?CHANGED:/.test(message)) return 'This brand or link changed. Review it and try again.';
+  if (/^BRAND_DOCUMENT_(?:URL_INVALID|URL_BLOCKED|REASON_REQUIRED|GROUP_CONFLICT|MOVE_CONFLICT|IDENTITY_CHANGED):/.test(message)) {
+    return message.slice(message.indexOf(':') + 1).replace(/\p{Cc}+/gu, ' ').trim();
+  }
+  if (message === 'BRAND_DOCUMENT_INVALID') return 'Check the document link, state and expiration date, then try again.';
   if (/^PRODUCT_DEACTIVATION_BLOCKED(?::|$)/.test(message)) {
     return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
       || 'This product cannot be turned off while required work is open. Review its blockers.';

@@ -7,6 +7,7 @@ DECLARE
   v_size uuid := gen_random_uuid();
   v_brand uuid;
   v_link uuid;
+  v_metadata_link uuid;
   v_hidden_link uuid;
   v_suffix text := substr(md5(random()::text), 1, 12);
   v_key text := 'smoke:brand-documents:' || v_suffix;
@@ -241,6 +242,30 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'P0091', MESSAGE = 'SMOKE_REPLACE_ROLLBACK';
   EXCEPTION WHEN SQLSTATE 'P0091' THEN
     IF SQLERRM <> 'SMOKE_REPLACE_ROLLBACK' THEN RAISE; END IF;
+  END;
+  BEGIN
+    PERFORM public.change_brand_document_links(v_brand, false, 1, v_supplement, v_key || ':metadata-add');
+    SELECT id INTO STRICT v_metadata_link FROM public.brand_document_links
+      WHERE legacy_brand_id = v_brand AND document_kind = 'supplemental';
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_staff, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_staff::text, true);
+    PERFORM public.change_brand_document_links(v_brand, false, 1,
+      jsonb_build_array(jsonb_build_object('action', 'report', 'id', v_metadata_link, 'version', 1)), v_key || ':metadata-report');
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM public.change_brand_document_links(v_brand, false, 1,
+      jsonb_build_array(v_supplement->0 || jsonb_build_object('id', v_metadata_link, 'version', 2, 'expires_on', '2027-12-31')),
+      v_key || ':metadata-edit');
+    IF NOT EXISTS (SELECT 1 FROM public.brand_document_links WHERE id = v_metadata_link AND row_version = 3
+                   AND expires_on = '2027-12-31' AND reported_at IS NOT NULL AND reported_by = v_staff)
+       OR NOT EXISTS (SELECT 1 FROM public.brand_document_link_events WHERE link_id = v_metadata_link AND action = 'saved'
+                      AND after_value->>'expires_on' = '2027-12-31'
+                      AND before_value->>'reported_at' = after_value->>'reported_at') THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: correcting supplemental metadata cleared the open URL report or changed its history';
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'P0091', MESSAGE = 'SMOKE_METADATA_ROLLBACK';
+  EXCEPTION WHEN SQLSTATE 'P0091' THEN
+    IF SQLERRM <> 'SMOKE_METADATA_ROLLBACK' THEN RAISE; END IF;
   END;
   BEGIN
     PERFORM public.change_brand_document_links(v_brand, false, 1,

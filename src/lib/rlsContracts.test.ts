@@ -321,9 +321,9 @@ const RLS_ACCESS_MATRIX: TableRLSContract[] = [
     access: {
       admin:     { SELECT: 'own', INSERT: 'all', UPDATE: 'own', DELETE: 'none' },
       sales_rep: { SELECT: 'own', INSERT: 'all', UPDATE: 'own', DELETE: 'none' },
-      driver:    { SELECT: 'own', INSERT: 'all', UPDATE: 'own', DELETE: 'none' },
+      driver:    { SELECT: 'own', INSERT: 'own', UPDATE: 'own', DELETE: 'none' },
     },
-    notes: 'Users can only read/update their own notifications. Insert allows system notifications.',
+    notes: 'Users can update only is_read on their own notices. Receiving damage notices use the receipt workflow rather than a direct insert.',
   },
 
   // ─── Reference Data ─────────────────────────────────────────────────

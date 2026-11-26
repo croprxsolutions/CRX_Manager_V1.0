@@ -129,7 +129,8 @@ describe('gauntlet caller-side safety guards', () => {
     expect(migration).toContain("'items_summary', p_items_summary");
     expect(migration).toContain("'actor_id', v_actor");
     expect(detail).toContain('await notifyDamagedReceiving(po.po_number, damagedItems, po.id, damagedReceiptIntentIds)');
-    expect(quickReceive).toContain('await notifyDamagedReceiving(firstPO, damagedInfo, firstPOId, damagedReceiptIntentIds)');
+    expect(quickReceive).toContain('allocation.po_item_id === firstReceivedLineId');
+    expect(quickReceive).toMatch(/await notifyDamagedReceiving\(firstAllocation\.po_number, damagedInfo,\s*firstAllocation\.purchase_order_id, damagedReceiptIntentIds\)/);
   });
 
   it('keeps extension-only overloads excluded without hiding a mixed extension/application collision', () => {

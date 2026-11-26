@@ -48,7 +48,7 @@ vi.mock('../lib/db', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/db')>(),
   supabase: {
     from: (table: string) => ({
-      select: () => table === 'jobs' ? reply([{
+      select: () => table === 'jobs_crew' ? reply([{
         id: 'whole-job', job_number: 'J-100', status: fixtures.wholeJobStatus, job_date: null, customer: { farm_name: 'Whole job farm' },
       }]) : {
         in: (column: 'id' | 'job_id', ids: string[]) => {

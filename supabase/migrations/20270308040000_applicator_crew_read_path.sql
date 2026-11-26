@@ -1,5 +1,5 @@
--- 20270307190000_applicator_crew_read_path.sql
--- Record: docs/reference/migrations.d/20270307190000_applicator_crew_read_path.md
+-- 20270308040000_applicator_crew_read_path.sql
+-- Record: docs/reference/migrations.d/20270308040000_applicator_crew_read_path.md
 -- Contract: docs/plans/2026-11-25-applicator-crew-read-path-CONTRACT.md (step 1 of 3; Sol finding 1 on #2574, Mason: "fix").
 --
 -- WHAT: four read-only "crew" views give applicators, dispatchees and crew members the job rows they read today WITHOUT

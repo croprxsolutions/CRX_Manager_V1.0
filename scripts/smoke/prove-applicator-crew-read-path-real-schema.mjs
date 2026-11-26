@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270307190000_applicator_crew_read_path.sql
+ * Real-schema proof for 20270308040000_applicator_crew_read_path.sql
  * (contract: docs/plans/2026-11-25-applicator-crew-read-path-CONTRACT.md, proof cases 1, 2, 4 and 5).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
@@ -33,7 +33,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, scalar, psql, attempt, id, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270307190000_applicator_crew_read_path.sql';
+const CANDIDATE = '20270308040000_applicator_crew_read_path.sql';
 const reuse = process.env.CREW_READ_PROOF_REUSE === '1';
 if (reuse && !/^crx-(undo-paths|crp)-/.test(process.env.UNDO_PATHS_CONTAINER || '')) {
   throw new Error('CREW_READ_PROOF_REUSE needs UNDO_PATHS_CONTAINER naming a throwaway proof container (crx-undo-paths-* or crx-crp-*)');

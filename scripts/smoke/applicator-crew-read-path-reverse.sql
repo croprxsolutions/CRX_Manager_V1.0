@@ -1,4 +1,4 @@
--- Reverse of 20270307190000_applicator_crew_read_path.sql (generated with it from the same definitions).
+-- Reverse of 20270308040000_applicator_crew_read_path.sql (generated with it from the same definitions).
 -- Restores the 24 policies and 5 functions to their previous text, then removes the four crew views.
 -- Only valid while the app does not read the views (before #2574 deploys). Ships as its own reviewed migration.
 -- Proven by scripts/smoke/prove-applicator-crew-read-path-real-schema.mjs (every result returns to the before state).

@@ -34,6 +34,7 @@ const cropProgram = {
 describe('role audit controls', () => {
   beforeEach(() => {
     mocks.role = 'admin';
+    mocks.toast.mockReset();
     mocks.from.mockReset();
     mocks.rpc.mockReset();
     mocks.logActivity.mockReset();
@@ -111,6 +112,8 @@ describe('role audit controls', () => {
     fireEvent.click(save);
     await waitFor(() => expect(mocks.logActivity).toHaveBeenCalledTimes(1));
     expect(save).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: 'Program Name' })).toBeDisabled();
     fireEvent.click(save);
     expect(update).toHaveBeenCalledTimes(1);
     finishAudit();

@@ -1,6 +1,6 @@
 -- Watchdog flags and dismissals must be written by the existing office RPCs.
 -- Keep all existing rows, read policies, and system-role grants.
-BEGIN;
+SET LOCAL lock_timeout = '5s';
 
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, TRIGGER
   ON TABLE public.watchdog_flags, public.watchdog_flag_dismissals
@@ -27,5 +27,3 @@ BEGIN
   END IF;
 END
 $postflight$;
-
-COMMIT;

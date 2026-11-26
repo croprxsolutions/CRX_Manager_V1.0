@@ -487,12 +487,12 @@ export default function CropPrograms() {
       )}
 
       {/* Delete confirmation */}
-      <Modal open={isAdmin && !!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Delete Program?">
+      <Modal open={isAdmin && !!deleteConfirm} onClose={() => { if (!writeBusy) setDeleteConfirm(null); }} title="Delete Program?">
         <p className="text-sm text-secondary">
           This will permanently delete this crop program template. This action cannot be undone.
         </p>
         <div className="flex justify-end gap-3 mt-6">
-          <Button variant="ghost" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+          <Button variant="ghost" onClick={() => setDeleteConfirm(null)} disabled={writeBusy}>Cancel</Button>
           <Button variant="secondary" onClick={() => deleteConfirm && handleDelete(deleteConfirm)} loading={writeBusy}>
             Delete
           </Button>
@@ -500,8 +500,8 @@ export default function CropPrograms() {
       </Modal>
 
       {/* Create/Edit Modal */}
-      <Modal open={isAdmin && modalOpen} onClose={() => setModalOpen(false)} title={editingProgram ? 'Edit Program' : 'New Crop Program'} maxWidth="lg">
-        <div className="space-y-4 max-h-[70vh] overflow-y-auto">
+      <Modal open={isAdmin && modalOpen} onClose={() => { if (!writeBusy) setModalOpen(false); }} title={editingProgram ? 'Edit Program' : 'New Crop Program'} maxWidth="lg">
+        <fieldset disabled={writeBusy} className="space-y-4 max-h-[70vh] overflow-y-auto">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input label="Program Name" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. 2026 Corn Program" />
             <Input label="Description" value={formDesc} onChange={(e) => setFormDesc(e.target.value)} placeholder="Optional description" />
@@ -604,10 +604,10 @@ export default function CropPrograms() {
               ))}
             </div>
           </div>
-        </div>
+        </fieldset>
 
         <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
-          <Button variant="ghost" onClick={() => setModalOpen(false)}>Cancel</Button>
+          <Button variant="ghost" onClick={() => setModalOpen(false)} disabled={writeBusy}>Cancel</Button>
           <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={writeBusy}>
             {editingProgram ? 'Save Changes' : 'Create Program'}
           </Button>

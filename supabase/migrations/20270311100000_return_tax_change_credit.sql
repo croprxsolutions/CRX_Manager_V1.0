@@ -28,6 +28,10 @@
 --      and with its share of its tax, by create_return's running-total rule. The draft still bills those units when
 --      it posts, and the credit already refunded them at that lot's price, so together they are exactly what is
 --      charged. Units on no live invoice cannot be priced and stay refused (RETURN_UNITS_NOT_INVOICED; Taha, 26 Nov).
+--      Tax-on comes from the order's sales-tax box (orders.sales_tax) as well as a tax or discount line on the
+--      invoices (Taha, 26 Nov), so a line on no invoice of a taxed sale is refused too, not credited at the order price.
+--      A line from before this change ('unrecorded') keeps staging's refusal while a live invoice of the line, a draft
+--      too, carries a tax or discount line (Taha, 26 Nov), though share pricing now switches on posted lines only.
 --   2. receive_return and issue_return_credit (_receive_return_intent_impl_20260812,
 --      _issue_return_credit_intent_impl_20260812): under the per-order-line locks they already take, a line of THIS
 --      return priced 'order_price' whose sale gained a sales-tax or discount line on a live invoice, posted or draft
@@ -454,21 +458,24 @@ $function$;
 
 -- 2b. (#2066) the price of an order-price line on a sale with a tax or discount line: its share of the customer's lots,
 --     posted or still a draft (Mason, 26 Nov: unbilled units can be credited while the taxed lot is still a draft) --
--- applies: the returner is the order's customer, the order has no field split, and a live invoice of the customer on
+-- applies: the returner is the order's customer, the order has no field split, and the sale has tax or a discount: the
+--   order's sales-tax box is ticked (Taha, 26 Nov: tax-on comes from the order), or a live invoice of the customer on
 --   this order holding the line carries a sales-tax or discount line (posted or draft). Otherwise the line keeps the
 --   order price, as before.
+-- adjusted: only the invoice evidence (a sales-tax or discount line on a live invoice holding the line), the rule
+--   staging used to switch a line to share pricing; it keeps a line from before this change refused (see receive).
 -- fits: the returned units, with this customer's other open returns of the line, are all on its live invoices and
 --   within their cents. Units on no live invoice cannot be priced (the caller refuses them).
 -- unit_price_cents / extended_cents: exactly as create_return prices a billed share (the running total over the
 --   lots, after each invoice's discount and with its share of its tax), the drafts counted as the lots they will bill.
 CREATE FUNCTION public._return_order_price_lot_price(p_order_id uuid, p_order_item_id uuid, p_customer_id uuid, p_exclude_return_id uuid, p_quantity numeric)
- RETURNS TABLE(applies boolean, fits boolean, unit_price_cents bigint, extended_cents bigint)
+ RETURNS TABLE(applies boolean, fits boolean, unit_price_cents bigint, extended_cents bigint, adjusted boolean)
  LANGUAGE sql
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
   WITH ord AS (
-    SELECT o.customer_id,
+    SELECT o.customer_id, o.sales_tax,
            COALESCE(o.needs_split_billing, false)
              OR EXISTS (
                SELECT 1 FROM public.order_item_field_allocations oifa
@@ -513,6 +520,9 @@ AS $function$
            coalesce((SELECT sum(cents) FROM lots), 0)::bigint AS lot_cents,
            coalesce((SELECT sum(quantity) FROM other_returns), 0) AS other_qty,
            coalesce((SELECT sum(extended_cents) FROM other_returns), 0)::bigint AS other_cents
+  ), adj AS (
+    SELECT EXISTS (SELECT 1 FROM live JOIN public.invoice_items dl ON dl.invoice_id = live.id
+                    WHERE dl.charge_type IN ('standing_discount', 'sales_tax')) AS adjusted
   ), priced AS (
     SELECT t.*,
            CASE WHEN t.lot_qty > 0 THEN round(t.lot_cents / t.lot_qty)::bigint END AS unit_price_cents,
@@ -522,13 +532,13 @@ AS $function$
   )
   SELECT
     COALESCE((SELECT customer_id FROM ord) = p_customer_id AND NOT (SELECT split_evidence FROM ord), false)
-      AND EXISTS (SELECT 1 FROM live JOIN public.invoice_items dl ON dl.invoice_id = live.id
-                   WHERE dl.charge_type IN ('standing_discount', 'sales_tax')),
+      AND (COALESCE((SELECT sales_tax FROM ord), false) OR a.adjusted),
     COALESCE(p.lot_qty > 0 AND p.other_qty + p_quantity <= p.lot_qty
              AND p.other_cents + p.extended_cents <= p.lot_cents, false),
     p.unit_price_cents,
-    p.extended_cents
-  FROM priced p;
+    p.extended_cents,
+    a.adjusted
+  FROM priced p, adj a;
 $function$;
 REVOKE ALL ON FUNCTION public._return_order_price_lot_price(uuid, uuid, uuid, uuid, numeric)
   FROM PUBLIC, anon, authenticated, service_role;
@@ -605,7 +615,8 @@ BEGIN
       SELECT 1
         FROM public.return_items ri
         CROSS JOIN LATERAL public._return_order_price_lot_price(v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
-       WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies
+       WHERE ri.return_id = p_return_id
+         AND ((ri.priced_from = 'order_price' AND lp.applies) OR (ri.priced_from = 'unrecorded' AND lp.adjusted))
     ) THEN
       FOR v_lock_order_item_id IN
         SELECT DISTINCT ri.order_item_id
@@ -733,6 +744,27 @@ BEGIN
           );
         END IF;
       END IF;
+      -- (#2066, Taha 26 Nov) A line from before this change (priced_from 'unrecorded') keeps today's rule: while a live invoice
+      -- of the line (a draft too) carries a sales-tax or discount line, it must be exactly the posted billed share and within
+      -- it, as staging's share check required (a draft's tax line used to switch the line to share pricing).
+      IF EXISTS (
+        SELECT 1
+          FROM public.return_items ri
+          CROSS JOIN LATERAL public._return_customer_line_share(
+            v_order_id, ri.order_item_id, v_customer_id, p_return_id
+          ) s
+          CROSS JOIN LATERAL public._return_order_price_lot_price(v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
+         WHERE ri.return_id = p_return_id
+           AND ri.priced_from = 'unrecorded'
+           AND NOT s.share_mode AND lp.adjusted
+           AND (s.billed_qty <= 0
+                OR s.other_returned_qty + ri.quantity > s.billed_qty
+                OR s.other_returned_cents + ri.extended_cents > s.billed_cents
+                OR ri.extended_cents IS DISTINCT FROM greatest(0,
+                     round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
+                     - s.other_returned_cents)
+                OR ri.unit_price_cents IS DISTINCT FROM round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint)
+      ) THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_REPRICED'; END IF;
       -- Each share line's stored credit must still be exactly what create_return would price it at
       -- now: an earlier return of the line cancelled or rejected after this one was created leaves it
       -- stale, so refuse before restocking (cancel and recreate the return to reprice it).
@@ -1187,6 +1219,27 @@ BEGIN
            OR s.other_returned_cents + ri.extended_cents > s.billed_cents
          )
     ) THEN RAISE EXCEPTION 'RETURN_CREDIT_EXCEEDS_BILLED_SHARE'; END IF;
+    -- (#2066, Taha 26 Nov) A line from before this change (priced_from 'unrecorded') keeps today's rule: while a live invoice
+    -- of the line (a draft too) carries a sales-tax or discount line, it must be exactly the posted billed share and within
+    -- it, as staging's share check required (a draft's tax line used to switch the line to share pricing).
+    IF EXISTS (
+      SELECT 1
+        FROM public.return_items ri
+        CROSS JOIN LATERAL public._return_customer_line_share(
+          v_order_id, ri.order_item_id, v_customer_id, p_return_id
+        ) s
+        CROSS JOIN LATERAL public._return_order_price_lot_price(v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
+       WHERE ri.return_id = p_return_id
+         AND ri.priced_from = 'unrecorded'
+         AND NOT s.share_mode AND lp.adjusted
+         AND (s.billed_qty <= 0
+              OR s.other_returned_qty + ri.quantity > s.billed_qty
+              OR s.other_returned_cents + ri.extended_cents > s.billed_cents
+              OR ri.extended_cents IS DISTINCT FROM greatest(0,
+                   round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
+                   - s.other_returned_cents)
+              OR ri.unit_price_cents IS DISTINCT FROM round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint)
+    ) THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_REPRICED'; END IF;
     -- And each share line's stored credit is still exactly what create_return would price it at
     -- now: an earlier return of the line cancelled or rejected after this one was created leaves it
     -- stale, so refuse rather than credit a stale price (cancel and recreate the return).

@@ -93,7 +93,18 @@ describe('20270311100000 return credit after a tax change', () => {
     expect(h).toContain('split_evidence');
     expect(h).toContain('round(t.lot_cents * (t.other_qty + p_quantity) / t.lot_qty)::bigint - t.other_cents');
     expect(h).not.toContain('SECURITY DEFINER');
+    // tax-on comes from the order's box too (Taha, 26 Nov)
+    expect(h).toContain("COALESCE((SELECT sales_tax FROM ord), false) OR a.adjusted");
     expect(MIGRATION).toContain('FROM PUBLIC, anon, authenticated, service_role;');
+  });
+
+  it('a line from before this change keeps staging\'s refusal while a live invoice carries a tax or discount line', () => {
+    for (const fn of ['_receive_return_intent_impl_20260812', '_issue_return_credit_intent_impl_20260812']) {
+      const b = body(fn);
+      const guard = b.indexOf("AND ri.priced_from = 'unrecorded'\n");
+      expect(guard).toBeGreaterThan(b.indexOf('pg_advisory_xact_lock(hashtextextended(v_lock_order_item_id::text, 361))'));
+      expect(b.slice(guard, guard + 900)).toContain('NOT s.share_mode AND lp.adjusted');
+    }
   });
 
   it('issue_return_credit lets only lot-priced lines credit draft units without a source line', () => {

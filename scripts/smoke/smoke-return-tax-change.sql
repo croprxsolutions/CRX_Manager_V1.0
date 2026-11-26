@@ -27,6 +27,10 @@
 --      return of the last 2 credits the rest: together exactly what was charged, and the ledger refunds all the tax.
 --   J  Units on no invoice at all stay refused once the sale has tax (RETURN_UNITS_NOT_INVOICED).
 --   K  Same as I with the first lot posted TAXED: the return of 8 credits 8/10 of both lots, then the last 2 the rest.
+--   L  Tax-on comes from the order's box (Taha, 26 Nov): with the box ticked and the line on no live invoice at all,
+--      a return made at the order price is refused (RETURN_UNITS_NOT_INVOICED), not credited at the order price.
+--   M  A line from before this change ('unrecorded') keeps staging's refusal while a taxed draft holds the line:
+--      5 posted untaxed, 5 on a taxed draft, an unrecorded return of 8 is refused (RETURN_SPLIT_SHARE_REPRICED).
 --
 -- Tax is written at commit (deferred triggers). This file runs as ONE statement, so each step ends with
 -- SET CONSTRAINTS ALL IMMEDIATE / DEFERRED: the commit point of that call in the app.
@@ -475,9 +479,57 @@ BEGIN
     v_fails := v_fails || ' (J) setup failed: ' || SQLERRM || ';';
   END;
 
+  -- L: the order's tax box, no live invoice of the line at all.
+  BEGIN
+    v_order := pg_temp.rtx_order(v_admin, v_product.id, v_product.current_cost, v_customer, 'l-' || v_suffix);
+    v_invoice := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 'l1-' || v_suffix);
+    v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 5, 'l-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-rtx-tax-l-' || v_suffix));
+    PERFORM pg_temp.rtx_step(format('SELECT delete_invoices(ARRAY[%L]::uuid[], %L, %L)', v_invoice, v_admin, 'smk-rtx-del-l1-' || v_suffix));
+    IF EXISTS (SELECT 1 FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.id
+                WHERE i.order_id = v_order AND i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled')) THEN
+      RAISE EXCEPTION 'a live invoice still holds the line';
+    END IF;
+    BEGIN
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-l-' || v_suffix));
+      v_fails := v_fails || ' (L) a return of units on no invoice was received on a sale with the tax box ticked;';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'RETURN_UNITS_NOT_INVOICED%' THEN
+        v_fails := v_fails || ' (L) the refusal is not RETURN_UNITS_NOT_INVOICED: ' || SQLERRM || ';';
+      END IF;
+    END;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (L) setup failed: ' || SQLERRM || ';';
+  END;
+
+  -- M: a line from before this change, while a taxed draft holds the line.
+  DECLARE
+    v_inv2 uuid;
+  BEGIN
+    v_order := pg_temp.rtx_order(v_admin, v_product.id, v_product.current_cost, v_customer, 'm-' || v_suffix);
+    v_invoice := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 'm1-' || v_suffix);
+    v_inv2 := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 'm2-' || v_suffix);
+    v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 8, 'm-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-m1-' || v_suffix));
+    PERFORM pg_temp.rtx_step(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-rtx-tax-m-' || v_suffix));
+    IF pg_temp.rtx_tax(ARRAY[v_inv2]) <= 0 THEN RAISE EXCEPTION 'the second lot is not a taxed draft'; END IF;
+    BEGIN
+      -- as a line that existed when the migration applied
+      EXECUTE format('UPDATE return_items SET priced_from = %L WHERE return_id = %L', 'unrecorded', v_ret);
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-m-' || v_suffix));
+      v_fails := v_fails || ' (M) an unrecorded return of units on a taxed draft was received;';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'RETURN_SPLIT_SHARE_REPRICED%' THEN
+        v_fails := v_fails || ' (M) the refusal is not RETURN_SPLIT_SHARE_REPRICED: ' || SQLERRM || ';';
+      END IF;
+    END;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (M) setup failed: ' || SQLERRM || ';';
+  END;
+
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL return tax change:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK return tax change: a return credits the taxed share after the box is ticked, before or after it is received, never more than the posted total; another return still at the old price is refused, never changed; a newer return waits for an older order-price one; a later discount credits the discounted total; create_return records how it priced each line; an untaxed return keeps the order price; units on a taxed draft credit at that lot''s price and the ledger records their tax; units on no invoice stay refused';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK return tax change: a return credits the taxed share after the box is ticked, before or after it is received, never more than the posted total; another return still at the old price is refused, never changed; a newer return waits for an older order-price one; a later discount credits the discounted total; create_return records how it priced each line; an untaxed return keeps the order price; units on a taxed draft credit at that lot''s price and the ledger records their tax; units on no invoice stay refused, the order''s tax box included; a line from before this change keeps today''s refusal';
 END
 $smoke$;

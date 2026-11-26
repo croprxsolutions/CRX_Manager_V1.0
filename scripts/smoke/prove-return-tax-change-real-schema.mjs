@@ -10,7 +10,7 @@
  *      (#2591) records the tax the credit refunded; the covering chains pass;
  *   2. AUTOCOMMIT: run statement by statement the file stops at its preflight;
  *   3. APPLY (committed): POSTFLIGHT_OK;
- *   4. AFTER: the new chain passes (A-K); the #2591 race still records exactly the tax the credit refunded; every
+ *   4. AFTER: the new chain passes (A-M); the #2591 race still records exactly the tax the credit refunded; every
  *      covering chain that passed before (the ledger chain included) still passes;
  *   5. RE-APPLY: refused by the preflight;
  *   6. ROLLBACK: re-emitting the five pinned bodies, dropping _return_order_price_lot_price and
@@ -207,7 +207,7 @@ async function main() {
   // 4. AFTER
   const after = chain(NEW_CHAIN);
   assert.ok(after.pass, `AFTER: the new chain fails: ${after.fail}`);
-  console.log('[case] 4a AFTER (#2066): A-K pass: the credit is the taxed (or discounted) share, before or after receipt, never more than charged; units on a taxed draft credit at that lot\'s price with their tax in the ledger, and with the last units the credits equal what was charged and the ledger refunds all the tax; units on no invoice stay refused; another return still at the old price is refused and never changed; create_return records how it priced each line');
+  console.log('[case] 4a AFTER (#2066): A-M pass: the credit is the taxed (or discounted) share, before or after receipt, never more than charged; units on a taxed draft credit at that lot\'s price with their tax in the ledger, and with the last units the credits equal what was charged and the ledger refunds all the tax; units on no invoice stay refused, the order tax box included; a line from before this change keeps the old refusal; another return still at the old price is refused and never changed; create_return records how it priced each line');
   const r2 = await race();
   assert.ok(r2.tax > 0 && r2.credit > 0, `AFTER race: ${JSON.stringify(r2)}`);
   assert.equal(r2.ledger, r2.tax, `AFTER race: the ledger must still record the tax the credit refunded: ${JSON.stringify(r2)}`);

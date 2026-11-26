@@ -1887,6 +1887,13 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       ok(gate({ pr: { headRefName: "release/next", comments: [] } }).ok === true, "and on the release");
       ok(gate({ pr: { comments: [] }, git: { "rev-parse HEAD": `${"e".repeat(40)}\n` } }).ok === false, "but never the other gates");
       refused(gate({ pr: { number: 901, comments: [] } }), "Taha hasn't given the go-ahead", "another PR is not covered");
+      // Mason, 2026-11-25 (Sol r2): for the live apply it must be under 30 minutes old, so it shows he is about to merge.
+      const record = JSON.parse(readFileSync(overrideFile, "utf8"));
+      const shift = (iso) => new Date(Date.parse(iso) - 31 * 60_000).toISOString();
+      writeFileSync(overrideFile, JSON.stringify({ ...record, issuedAt: shift(record.issuedAt), expiresAt: shift(record.expiresAt) }));
+      const stale = gate({ pr: { comments: [] } });
+      refused(stale, "Taha hasn't given the go-ahead", "an override sent over 30 minutes ago does not cover the live apply");
+      ok(/taha override #900 \d{6}/.test(String(stale.reason)) && /older than that/.test(String(stale.reason)), `the refusal hands Mason a fresh code and says why: ${stale.reason}`);
     } finally { rmSync(overrideFile, { force: true }); }
     refused(gate({ pr: { comments: [] } }), "Taha hasn't given the go-ahead", "without the override the go-ahead is needed again");
   }

@@ -110,18 +110,21 @@ const rv = (state, oid = HEAD, login = 'TahaKhanAbdalli') => ({ author: { login 
 const L = (...names) => names.map((name) => ({ name }));
 
 test("Taha's verdict on the current head: latest decisive review wins, comments and old heads don't count", () => {
-  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED')] })), 'taha-approved');
-  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED'), rv('CHANGES_REQUESTED')] })), 'taha-changes');
-  assert.equal(tahaVerdict(pr({ reviews: [rv('CHANGES_REQUESTED'), rv('APPROVED')] })), 'taha-approved');
-  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED'), rv('COMMENTED')] })), 'taha-approved');
+  const gate = () => true; // the merge gate's own check (tahaApprovedOnGitHub) agrees
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED')] }), gate), 'taha-approved');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED'), rv('CHANGES_REQUESTED')] }), gate), 'taha-changes');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('CHANGES_REQUESTED'), rv('APPROVED')] }), gate), 'taha-approved');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED'), rv('COMMENTED')] }), gate), 'taha-approved');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED')] }), () => false), null, 'an Approve of this head the merge gate rejects (base retargeted since) is not shown (Sol r2)');
   assert.equal(tahaVerdict(pr({ reviews: [rv('DISMISSED')] })), null);
   assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED', NEW)] })), null, 'approval of another head');
   assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED', HEAD, 'masonwells1')] })), null, 'not Taha');
 });
 
 test('review labels: exactly one of approved / changes, or neither after a push', () => {
-  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED')] })), { add: ['taha-approved'], remove: [] });
-  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED')], labels: L('taha-approved') })), { add: [], remove: [] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED')] }), () => true), { add: ['taha-approved'], remove: [] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED')], labels: L('taha-approved') }), () => true), { add: [], remove: [] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED')], labels: L('taha-approved') }), () => false), { add: [], remove: ['taha-approved'] }, 'retargeted: the label comes off');
   assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('CHANGES_REQUESTED')], labels: L('taha-approved') })), { add: ['taha-changes'], remove: ['taha-approved'] });
   assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED', NEW)], labels: L('taha-approved', 'taha-changes') })), { add: [], remove: ['taha-approved', 'taha-changes'] });
   assert.deepEqual(reviewLabelChanges(pr({ author: { login: 'TahaKhanAbdalli' }, reviews: [rv('APPROVED')] })), { add: [], remove: [] }, "Taha's own PR untouched");
@@ -159,7 +162,8 @@ test('reminder: once per head, 24 h after the first ping, while Taha has not dec
   assert.equal(needsReminder(waiting, [], day, { checks: green }).remind, false, 'never pinged');
   assert.equal(needsReminder(waiting, [bot(`x ${pingMarker(NEW)}`)], day, { checks: green }).remind, false, 'pinged for another head only');
   assert.equal(needsReminder(waiting, [...pingedAt, bot(`y ${remindMarker(HEAD)}`)], day, { checks: green }).remind, false, 'already reminded');
-  assert.equal(needsReminder({ ...waiting, reviews: [rv('APPROVED')] }, pingedAt, day, { checks: green }).remind, false, 'Taha approved');
+  assert.equal(needsReminder({ ...waiting, reviews: [rv('APPROVED')] }, pingedAt, day, { checks: green, carried: () => true }).remind, false, 'Taha approved');
+  assert.equal(needsReminder({ ...waiting, reviews: [rv('APPROVED')] }, pingedAt, day, { checks: green, carried: () => false }).remind, true, 'his Approve no longer counts (base retargeted): reminded');
   assert.equal(needsReminder({ ...waiting, reviews: [rv('COMMENTED')] }, pingedAt, day, { checks: green }).remind, true, 'a comment still waits on his decision');
   assert.equal(needsReminder(waiting, pingedAt, day, { checks: () => [{ name: 'CI', bucket: 'fail' }] }).remind, false, 'checks red');
   assert.equal(needsReminder(waiting, [{ ...pingedAt[0], author: { login: 'someone' } }], day, { checks: green }).remind, false, "a person's copy of the marker doesn't count");

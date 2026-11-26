@@ -77,7 +77,8 @@ export function decide(pr, { checks, lane, sol, carried }) {
 export function tahaVerdict(pr, carried = () => false) {
   const state = (pr.reviews ?? []).filter((r) => isTaha(r.author?.login) && sameSha(r.commit?.oid, pr.headRefOid)
     && !['COMMENTED', 'PENDING'].includes(r.state)).at(-1)?.state;
-  if (state) return state === 'APPROVED' ? APPROVED : state === 'CHANGES_REQUESTED' ? CHANGES : null;
+  // An Approve of this head still asks the gate's own check, which also voids it after a base retarget (Sol r2).
+  if (state) return state === 'APPROVED' ? (carried() ? APPROVED : null) : state === 'CHANGES_REQUESTED' ? CHANGES : null;
   // Ask GitHub only when he approved some commit of this PR (pushes dismiss it, so DISMISSED counts here; each
   // carry check costs several calls and reads whether that dismissed review was an Approve).
   const approvedEarlier = (pr.reviews ?? []).some((r) => isTaha(r.author?.login) && ['APPROVED', 'DISMISSED'].includes(r.state));

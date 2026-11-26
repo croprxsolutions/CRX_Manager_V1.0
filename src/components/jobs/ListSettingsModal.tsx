@@ -1,6 +1,7 @@
 import { Check, RotateCcw, Eye, EyeOff, Link2 } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
+import type { UserRole } from '../../types';
 import {
   jobColumnsForRole,
   defaultJobListSettings,
@@ -17,8 +18,8 @@ interface ListSettingsModalProps {
   /** Called with a NEW settings object whenever the user changes something.
    *  The parent applies it immediately (criterion #2) and persists it. */
   onChange: (next: JobListSettings) => void;
-  /** Signed-in role: applicators get no Price column to turn on. */
-  role?: string | null;
+  /** Only office users can turn on the Price column. */
+  role?: UserRole | null;
   /** True while a save round-trip is in flight (disables controls subtly). */
   saving?: boolean;
 }

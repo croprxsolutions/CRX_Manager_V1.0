@@ -4,6 +4,8 @@
  * remains a deliberate choice each time the full print dialog is opened.
  */
 import { supabase } from './db';
+import { usesOfficeJobReads } from './costFields';
+import type { UserRole } from '../types';
 
 export type ApplicatorMapPages = 'none' | 'overview' | 'per-field' | 'both';
 
@@ -78,10 +80,10 @@ export function serializeApplicatorPrintOptions(options: ApplicatorPrintOptions)
 }
 
 /** Read the saved defaults. RLS/read failures deliberately retain safe local defaults.
- * Applicators never get the billing-split table (Mason, 2026-11-25: "Yes, hide them"). */
-export async function loadApplicatorPrintOptions(role?: string | null): Promise<ApplicatorPrintOptions> {
+ * Only office roles get the billing-split table. */
+export async function loadApplicatorPrintOptions(role?: UserRole | null): Promise<ApplicatorPrintOptions> {
   const options = await readApplicatorPrintOptions();
-  return role === 'applicator' ? { ...options, includeBillingSplits: false } : options;
+  return usesOfficeJobReads(role) ? options : { ...options, includeBillingSplits: false };
 }
 
 async function readApplicatorPrintOptions(): Promise<ApplicatorPrintOptions> {

@@ -53,9 +53,9 @@ describe('PrintOptionsDialog', () => {
     mockUpsertSelect.mockResolvedValue({ data: [{ setting_key: 'applicator_print_options' }], error: null });
   });
 
-  it('applicators never get the billing-split table and do not see its toggle', async () => {
+  it.each(['applicator', 'driver'])('%s cannot enable billing splits even when the saved default is on', async (role) => {
     mockMaybeSingle.mockResolvedValue({ data: { setting_value: JSON.stringify({ includeBillingSplits: true }) }, error: null });
-    authRole.current = 'applicator';
+    authRole.current = role;
     const onPrint = vi.fn().mockResolvedValue(undefined);
     try {
       render(<PrintOptionsDialog open onClose={vi.fn()} onPrint={onPrint} />);
@@ -73,12 +73,20 @@ describe('PrintOptionsDialog', () => {
   });
 
   it.each(['admin', 'sales_rep'])('%s still sees the billing-split toggle', async (role) => {
+    mockMaybeSingle.mockResolvedValue({ data: { setting_value: JSON.stringify({ includeBillingSplits: true }) }, error: null });
     authRole.current = role;
+    const onPrint = vi.fn().mockResolvedValue(undefined);
     try {
-      render(<PrintOptionsDialog open onClose={vi.fn()} onPrint={vi.fn()} />);
+      render(<PrintOptionsDialog open onClose={vi.fn()} onPrint={onPrint} />);
       expect(await screen.findByText('Show billing-split table')).toBeInTheDocument();
       // Shared defaults are admin-only in the database, so only admins get the button.
       expect(screen.queryAllByRole('button', { name: /save as default/i })).toHaveLength(role === 'admin' ? 1 : 0);
+      const print = screen.getByRole('button', { name: /^print/i });
+      await waitFor(() => expect(print).not.toBeDisabled());
+      fireEvent.click(print);
+      await waitFor(() => expect(onPrint).toHaveBeenCalledWith(expect.objectContaining({
+        options: expect.objectContaining({ includeBillingSplits: true }),
+      })));
     } finally {
       authRole.current = 'admin';
     }

@@ -5,6 +5,7 @@ import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../../contexts/AuthContext';
+import { usesOfficeJobReads } from '../../lib/costFields';
 import { sanitizeError, checkMutationResult, supabase } from '../../lib/db';
 import {
   APPLICATOR_PRINT_OPTIONS_KEY,
@@ -59,7 +60,7 @@ function ToggleSelect({
 export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOptionsDialogProps) {
   const { toast } = useToast();
   const { role } = useAuth();
-  const isApplicator = role === 'applicator';
+  const isOffice = usesOfficeJobReads(role);
   const [format, setFormat] = useState<ApplicatorSheetFormat>('original');
   const [options, setOptions] = useState<ApplicatorPrintOptions>({ ...DEFAULT_APPLICATOR_PRINT_OPTIONS });
   const [loadingDefaults, setLoadingDefaults] = useState(false);
@@ -70,7 +71,7 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
     if (!open) return;
     let current = true;
     setFormat('original');
-    setOptions({ ...DEFAULT_APPLICATOR_PRINT_OPTIONS, includeBillingSplits: !isApplicator });
+    setOptions({ ...DEFAULT_APPLICATOR_PRINT_OPTIONS, includeBillingSplits: isOffice });
     setLoadingDefaults(true);
     void loadApplicatorPrintOptions(role).then((saved) => {
       if (current) setOptions(saved);
@@ -78,7 +79,7 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
       if (current) setLoadingDefaults(false);
     });
     return () => { current = false; };
-  }, [open, role, isApplicator]);
+  }, [open, role, isOffice]);
 
   const updateOption = <Key extends keyof ApplicatorPrintOptions>(key: Key, value: ApplicatorPrintOptions[Key]) => {
     setOptions((current) => ({ ...current, [key]: value }));
@@ -209,7 +210,7 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
             </select>
           </label>
 
-          {!isApplicator && (
+          {isOffice && (
             <ToggleSelect
               label="Show billing-split table"
               value={options.includeBillingSplits}

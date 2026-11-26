@@ -9,6 +9,9 @@
 // whose id is currently "visible" (per the user's saved settings, defaulted).
 // Each column here maps 1:1 to a column key on the Jobs page.
 
+import { usesOfficeJobReads } from '../../lib/costFields';
+import type { UserRole } from '../../types';
+
 /** Stable ids for every toggleable job-list column. */
 export type JobColumnId =
   | 'jobTags'
@@ -146,12 +149,12 @@ export function mergeJobListSettings(raw: unknown): JobListSettings {
  * The Jobs page uses this to filter + order its rendered columns so the on/off
  * choice never changes column order unexpectedly.
  */
-// Mason 2026-11-25 ("Yes, hide them"): applicators never see selling prices, on screen or printed.
-export function jobColumnsForRole(role?: string | null) {
-  return role === 'applicator' ? JOB_COLUMN_REGISTRY.filter((c) => c.id !== 'total_price_cents') : JOB_COLUMN_REGISTRY;
+// Selling prices are office-only, on screen and in print.
+export function jobColumnsForRole(role?: UserRole | null) {
+  return usesOfficeJobReads(role) ? JOB_COLUMN_REGISTRY : JOB_COLUMN_REGISTRY.filter((c) => c.id !== 'total_price_cents');
 }
 
-export function orderedVisibleColumnIds(settings: JobListSettings, role?: string | null): JobColumnId[] {
+export function orderedVisibleColumnIds(settings: JobListSettings, role?: UserRole | null): JobColumnId[] {
   const want = new Set(settings.visibleColumns);
   return jobColumnsForRole(role).filter((c) => want.has(c.id)).map((c) => c.id);
 }

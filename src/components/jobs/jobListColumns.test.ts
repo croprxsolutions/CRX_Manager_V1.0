@@ -125,7 +125,7 @@ describe('orderedVisibleColumnIds', () => {
   it('matches full registry order when everything is visible', () => {
     const allIds = JOB_COLUMN_REGISTRY.map((c) => c.id);
     const settings = { visibleColumns: allIds, showCompleted: true };
-    expect(orderedVisibleColumnIds(settings)).toEqual(allIds);
+    expect(orderedVisibleColumnIds(settings, 'admin')).toEqual(allIds);
   });
 });
 
@@ -189,13 +189,13 @@ describe('toggleColumn', () => {
   });
 });
 
-describe('applicators never get the Price column (Mason 2026-11-25)', () => {
+describe('Price column by role', () => {
   const withPrice = { visibleColumns: ['job_number', 'total_price_cents'] as JobColumnId[], showCompleted: true };
-  it('drops Price for applicators, on screen and in print', () => {
-    expect(orderedVisibleColumnIds(withPrice, 'applicator')).toEqual(['job_number']);
-    expect(jobColumnsForRole('applicator').some((c) => c.id === 'total_price_cents')).toBe(false);
+  it.each(['applicator', 'driver', null, undefined] as const)('drops Price for %s, on screen and in print', (role) => {
+    expect(orderedVisibleColumnIds(withPrice, role)).toEqual(['job_number']);
+    expect(jobColumnsForRole(role).some((c) => c.id === 'total_price_cents')).toBe(false);
   });
-  it.each(['admin', 'sales_rep', undefined])('keeps Price for %s', (role) => {
+  it.each(['admin', 'sales_rep'] as const)('keeps Price for %s', (role) => {
     expect(orderedVisibleColumnIds(withPrice, role)).toEqual(['job_number', 'total_price_cents']);
   });
 });

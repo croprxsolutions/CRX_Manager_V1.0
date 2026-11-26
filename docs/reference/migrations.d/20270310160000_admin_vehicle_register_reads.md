@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270309040000_admin_vehicle_register_reads.sql` (SQL sha256: `dfb7dafe1fbd1eb0026956983f149fd8ac43f1d0b356fc5341e331f55ebf678e`) adds a read-only register for active administrators. The base table still allows all existing active-profile reads, including registration and notes, while clients move. Release phases and verification are in docs/plans/2026-11-26-vehicle-register-access-CONTRACT.md.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270310160000_admin_vehicle_register_reads.sql` (SQL sha256: `dfb7dafe1fbd1eb0026956983f149fd8ac43f1d0b356fc5341e331f55ebf678e`) adds a read-only register for active administrators. The base table still allows all existing active-profile reads, including registration and notes, while clients move. Release phases and verification are in docs/plans/2026-11-26-vehicle-register-access-CONTRACT.md.
 
 No records are modified. If a rollback is needed before the app adopts the new read path, use a reviewed compensating migration to remove the view.
 

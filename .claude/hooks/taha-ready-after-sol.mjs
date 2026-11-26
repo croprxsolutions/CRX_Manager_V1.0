@@ -27,6 +27,7 @@ const PR_FIELDS = "number,state,isDraft,isCrossRepository,author,headRefName,hea
 const isTaha = (login) => String(login ?? "").trim().toLowerCase() === TAHA_LOGIN;
 const lower = (sha) => String(sha ?? "").toLowerCase();
 const manual = (n) => `gh pr edit ${n ? `${n} ` : ""}--add-label ${LABEL} --add-reviewer TahaKhanAbdalli`;
+const FILES_UNREADABLE = "GitHub did not return the PR's changed files";
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** Why this PR should NOT be labelled now, or null when it should. `files()` (GitHub calls) is asked last. */
@@ -38,7 +39,9 @@ export function tahaReadyAfterSolProblem({ pr, proofClean, files }) {
   if (!proofClean) return "no clean Sol covers its current head";
   const head = lower(pr.headRefOid);
   if ((pr.reviews ?? []).some((r) => isTaha(r.author?.login) && lower(r.commit?.oid) === head)) return "Taha already reviewed this head";
-  if (!tahaLaneProblem({ files: files() })?.files?.length) return "not in Taha's lane";
+  const list = files();
+  if (list === null) return FILES_UNREADABLE;
+  if (!tahaLaneProblem({ files: list })?.files?.length) return "not in Taha's lane";
   return null;
 }
 
@@ -96,11 +99,11 @@ export function githubAncestry(gh) {
 }
 
 /**
- * Label + request Taha for the PR of `cwd`'s current branch when every condition holds.
- * `headSha` (the local HEAD) must equal the PR's head; GitHub may lag a push, so it is asked once more.
- * Returns a one-line note, or "" when nothing was due.
+ * Label + request Taha for the PR of `cwd`'s current branch (or `pr`, the one a `gh pr ready <n>` named) when
+ * every condition holds. `headSha` (the local HEAD) must equal the PR's head; GitHub may lag a push, so it is
+ * asked once more. Returns a one-line note, or "" when nothing was due.
  */
-export function askTahaAfterSol({ cwd, headSha = null, gh = defaultGh, readProof = null, now = Date.now(),
+export function askTahaAfterSol({ cwd, headSha = null, pr: target = null, gh = defaultGh, readProof = null, now = Date.now(),
   budgetMs = WRITER_BUDGET_MS, retryDelayMs = RETRY_DELAY_MS, wait = sleep }) {
   // Only this app's checkouts (a fast local check; also keeps throwaway test repos off GitHub).
   if (gh === defaultGh && !String(spawnSync("git", ["-C", cwd, "remote", "get-url", "origin"], { encoding: "utf8", windowsHide: true }).stdout).includes(APP_REPO_NAME)) return "";
@@ -115,7 +118,7 @@ export function askTahaAfterSol({ cwd, headSha = null, gh = defaultGh, readProof
   // Silent unless a clean Sol proof of one of these commits is on disk: then something may be due, so say so.
   const notYet = (n, why, shas) => (shas.map(lower).some((sha) => cleanSolShape(read(sha), now))
     ? `PR #${n ?? "?"}: not labelled for Taha yet (${why}); run: ${manual(n)}` : "");
-  const view = () => JSON.parse(call(["pr", "view", "--json", PR_FIELDS]));
+  const view = () => JSON.parse(call(["pr", "view", ...(target ? [String(target)] : []), "--json", PR_FIELDS]));
 
   let pr;
   try { pr = view(); } catch (error) {
@@ -134,19 +137,37 @@ export function askTahaAfterSol({ cwd, headSha = null, gh = defaultGh, readProof
     const { isAncestor, mergeBase } = githubAncestry(call);
     const covered = pr?.state === "OPEN" ? solCoversHead({ pr, readProof: read, isAncestor, mergeBase, now }) : false;
     const files = () => prFilesOnGitHub({ repo: undefined, gh: call, number: pr.number, headSha: pr.headRefOid });
-    if (tahaReadyAfterSolProblem({ pr, proofClean: covered !== false, files })) return "";
+    const problem = tahaReadyAfterSolProblem({ pr, proofClean: covered !== false, files });
+    // An unreadable list is not "not lane" (Taha LOW 2, Codex bot): say so, as the other unfinished paths do.
+    if (problem === FILES_UNREADABLE) return `PR #${pr.number}: not labelled for Taha yet (${FILES_UNREADABLE}); run: ${manual(pr.number)}`;
+    if (problem) return "";
     // His Approve of an earlier commit still counts after a staging catch-up, docs/ note or restamp (taha-ready.mjs
     // tahaVerdict; Taha MED 1). Asked only when he approved some commit (a push dismisses it): it costs several calls.
     const approvedEarlier = (pr.reviews ?? []).some((r) => isTaha(r.author?.login) && ["APPROVED", "DISMISSED"].includes(r.state));
     if (approvedEarlier && tahaApprovedOnGitHub({ repo: undefined, gh: call, pullRequest: pr.number, headSha: pr.headRefOid })) return "";
-    if (Date.now() >= deadline) return `PR #${pr.number}: not labelled for Taha yet (ran out of time checking his earlier sign-off); run: ${manual(pr.number)}`;
+    // Unfinished carry check: never a plain re-ask, since his sign-off may still stand (Taha MED 1, delta).
+    if (Date.now() >= deadline) {
+      return `PR #${pr.number}: not labelled for Taha yet. Taha signed off an earlier commit and there was no time to check whether it carries over. `
+        + `Only if this push changed code (not just a staging catch-up, docs/ notes or a migration restamp), run: ${manual(pr.number)}`;
+    }
     if (covered === null) return `PR #${pr.number}: not labelled for Taha yet (GitHub could not confirm the Sol covers this head); run: ${manual(pr.number)}`;
-    call(["api", `repos/{owner}/{repo}/issues/${pr.number}/labels`, "-f", `labels[]=${LABEL}`]);
+    // The request first: a label alone would claim he was asked (Taha LOW 5).
     call(["api", `repos/{owner}/{repo}/pulls/${pr.number}/requested_reviewers`, "-f", "reviewers[]=TahaKhanAbdalli"]);
-    return `PR #${pr.number}: a clean Sol covers its current head, so it is now labelled ${LABEL} and Taha is asked to review.`;
+    try {
+      call(["api", `repos/{owner}/{repo}/issues/${pr.number}/labels`, "-f", `labels[]=${LABEL}`]);
+    } catch (error) {
+      return `PR #${pr.number}: Taha is asked to review, but the ${LABEL} label could not be added (${error.message}); run: gh pr edit ${pr.number} --add-label ${LABEL}`;
+    }
+    return `PR #${pr.number}: a clean Sol covers its current head, so Taha is asked to review and it is labelled ${LABEL}.`;
   } catch (error) {
-    return `PR #${pr.number}: could not label it for Taha automatically (${error.message}); run: ${manual(pr.number)}`;
+    return `PR #${pr.number}: could not ask Taha automatically (${error.message}); run: ${manual(pr.number)}`;
   }
+}
+
+/** The PR a `gh pr ready <number|url|branch>` names, or null (the current branch's PR). */
+export function readyTarget(command) {
+  const m = /\bgh\s+pr\s+ready\s+(?!-)([^\s;&|]+)/.exec(String(command || ""));
+  return m ? m[1].replace(/^["']|["']$/g, "") : null;
 }
 
 function routedPayload() {
@@ -160,8 +181,10 @@ const command = String(input?.tool_input?.command || "");
 if (command) {
   const base = input.cwd || input.tool_input?.cwd || process.cwd();
   const cwd = isGitPush(command) ? gitPushCwd(command, base, command) : path.resolve(base);
-  // The local HEAD, so a PR GitHub has not yet moved to the pushed commit is not judged on its old head.
-  const head = spawnSync("git", ["-C", cwd, "rev-parse", "HEAD"], { encoding: "utf8", timeout: 2_000, windowsHide: true }).stdout?.trim();
-  const note = head ? askTahaAfterSol({ cwd, headSha: head, budgetMs: ROUTER_BUDGET_MS }) : "";
+  const target = readyTarget(command);
+  // The local HEAD, so a PR GitHub has not yet moved to the pushed commit is not judged on its old head. A PR named
+  // by `gh pr ready <n>` need not be this checkout's branch (Codex bot), so its own head is judged instead.
+  const head = target ? null : spawnSync("git", ["-C", cwd, "rev-parse", "HEAD"], { encoding: "utf8", timeout: 2_000, windowsHide: true }).stdout?.trim();
+  const note = target || head ? askTahaAfterSol({ cwd, headSha: head, pr: target, budgetMs: ROUTER_BUDGET_MS }) : "";
   if (note) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: note } }));
 }

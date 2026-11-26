@@ -9,7 +9,7 @@ import { promptModulesFor } from "./prompt-router.mjs";
 import { postToolModulesFor } from "./posttool-router.mjs";
 import { dirtyWarning, pushDir, pushTargets } from "./post-push-dirty-warning.mjs";
 import { dedupeContextBlocks } from "./hook-router-runtime.mjs";
-import { askTahaAfterSol, githubAncestry, proofReader, solCoversHead } from "./taha-ready-after-sol.mjs";
+import { askTahaAfterSol, githubAncestry, proofReader, readyTarget, solCoversHead } from "./taha-ready-after-sol.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -228,11 +228,12 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
   const laneFiles = ["modified", "src/pages/Quotes.tsx", "", HEAD].join("\t") + "\n";
   const otherFiles = ["modified", "src/pages/Fields.tsx", "", HEAD].join("\t") + "\n";
   const TAHA_ID = "50602678";
-  const attempt = ({ pr = {}, files = laneFiles, proofs = { [HEAD]: proof(HEAD) }, headSha = HEAD, fail = null, views = null, approvedHead = null, compare = () => "0", budgetMs = 20_000 } = {}) => {
+  const attempt = ({ pr = {}, files = laneFiles, proofs = { [HEAD]: proof(HEAD) }, headSha = HEAD, fail = null, views = null, approvedHead = null, compare = () => "0", budgetMs = 20_000, delayOn = null, delayMs = 0 } = {}) => {
     const calls = [];
     let viewed = 0;
     const gh = (args) => {
       calls.push(args.join(" "));
+      if (delayOn && args.some((a) => a.includes(delayOn))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
       if (fail && args.some((a) => a.includes(fail))) throw new Error("HTTP 403");
       if (args[0] === "pr") return JSON.stringify({ ...basePr, ...pr, ...(views ? views[Math.min(viewed++, views.length - 1)] : {}) });
       if (args.some((a) => a.endsWith("/files?per_page=100"))) return files;
@@ -246,7 +247,7 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
   };
   const done = attempt();
   ok(done.note.includes("PR #7") && done.wrote.length === 2, "clean Sol + lane + current head: label and review request");
-  ok(done.wrote[0].includes("labels[]=ready-for-taha") && done.wrote[1].includes("reviewers[]=TahaKhanAbdalli"), "the same two calls the bot makes");
+  ok(done.wrote[0].includes("reviewers[]=TahaKhanAbdalli") && done.wrote[1].includes("labels[]=ready-for-taha"), "the same two calls the bot makes, the review request first (Taha LOW 5)");
   for (const [why, args] of [
     ["no clean Sol proof", { proofs: {} }],
     ["not in Taha's lane", { files: otherFiles }],
@@ -261,7 +262,16 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
     ok(r.note === "" && r.wrote.length === 0, `no label when: ${why}`);
   }
   const failed = attempt({ fail: "requested_reviewers" });
-  ok(failed.note.includes("could not label") && failed.note.includes("gh pr edit 7 --add-label ready-for-taha --add-reviewer TahaKhanAbdalli"), "a gh failure prints one line with the manual command, never throws");
+  ok(failed.note.includes("could not ask Taha") && failed.note.includes("gh pr edit 7 --add-label ready-for-taha --add-reviewer TahaKhanAbdalli") && failed.wrote.length === 1, "a failed review request prints the manual command and adds no label on its own");
+  const labelFailed = attempt({ fail: "/labels" });
+  ok(labelFailed.note.includes("Taha is asked to review, but the ready-for-taha label could not be added") && labelFailed.note.includes("gh pr edit 7 --add-label ready-for-taha"), "request sent, label failed: says exactly that (Taha LOW 5)");
+  // Taha LOW 2 / Codex bot: an unreadable file list is not "not in the lane".
+  const noFiles = attempt({ fail: "/files" });
+  ok(noFiles.wrote.length === 0 && noFiles.note.includes("not labelled for Taha yet") && noFiles.note.includes("changed files"), "file list unreadable: one line with the manual command");
+  // Codex bot: `gh pr ready <n>` from another branch asks about PR n, judged on its own head.
+  eq([readyTarget("gh pr ready 2643"), readyTarget("gh pr ready --undo"), readyTarget("gh pr ready"), readyTarget("gh pr create --fill")], ["2643", null, null, null], "the PR a gh pr ready names");
+  const named = (() => { const calls = []; const note = askTahaAfterSol({ cwd: ".", pr: "7", gh: (args) => { calls.push(args.join(" ")); return args[0] === "pr" ? JSON.stringify(basePr) : args.some((a) => a.includes("/files")) ? laneFiles : "0"; }, readProof: (sha) => (sha === HEAD ? proof(HEAD) : null), now }); return { note, calls }; })();
+  ok(named.calls[0].startsWith("pr view 7 ") && named.note.includes("Taha is asked"), "gh pr ready <n>: that PR is asked about and labelled");
   ok(askTahaAfterSol({ cwd: ".", headSha: HEAD, gh: () => { throw new Error("no pull requests found for branch \"claude/x\""); }, readProof: () => proof(HEAD), now }) === "", "no PR yet: silent");
 
   // Taha MED 1: his earlier sign-off that still carries over (staging catch-up, docs/ note, restamp) is not re-asked.
@@ -271,6 +281,8 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
   ok(carried.calls.some((c) => c.includes("/timeline")), "the carry-over is asked of GitHub, as the bot does");
   const notCarried = attempt({ ...signedOff, approvedHead: null });
   ok(notCarried.wrote.length === 2, "his earlier sign-off does not carry over: label and re-ask him");
+  const carryTimedOut = attempt({ ...signedOff, approvedHead: HEAD, budgetMs: 200, delayOn: "/timeline", delayMs: 300 });
+  ok(carryTimedOut.wrote.length === 0 && carryTimedOut.note.includes("no time to check whether it carries over") && carryTimedOut.note.includes("Only if this push changed code"), "carry check out of time: no plain re-ask, a conditional line (Taha MED 1, delta)");
   ok(!done.calls.some((c) => c.includes("/timeline")), "no sign-off of his on the PR: the carry-over check costs no calls");
 
   // Taha LOW 2: GitHub behind the push is asked once more, and never silently dropped when a clean Sol is on disk.

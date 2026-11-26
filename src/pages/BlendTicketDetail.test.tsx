@@ -735,6 +735,31 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     expect(mockRpc.mock.calls.some(([name]) => name === 'save_blend_ticket_fields')).toBe(false);
   });
 
+  it('lets an admin undo a filed ticket through the smart-undo reversal', async () => {
+    mockFrom.mockReset();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
+      if (table === 'application_records') return buildChain({ data: [{ id: 'app-record-1' }], error: null });
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string) => name === 'reverse_application_record'
+      ? Promise.resolve({ data: { success: true, status: 'reversed', kept_on_job_lines: 1, over_taken_lines: 0 }, error: null })
+      : Promise.resolve({ data: null, error: null }));
+
+    renderTicket();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo Filing' }));
+    expect(mockRpc.mock.calls.some(([name]) => name === 'reverse_application_record')).toBe(false);
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Undo Filing' })).toHaveLength(2));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Undo Filing' })[1]);
+
+    await waitFor(() => {
+      const call = mockRpc.mock.calls.find(([name]) => name === 'reverse_application_record');
+      expect(call?.[1]).toMatchObject({ p_application_record_id: 'app-record-1' });
+      expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('stays with the linked job'));
+    });
+  });
+
   it('locks application-field controls when an application record exists', async () => {
     const unreviewedTicket = { ...baseTicket, review_status: 'unreviewed' };
     mockFrom.mockReset();

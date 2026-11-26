@@ -1,0 +1,3 @@
+## 2026-11-26 — Blend ticket: admin "Undo Filing" button
+
+The blend ticket screen gets an admin-only **Undo Filing** button (with a confirm step) once the ticket has an application record. It calls the existing `reverse_application_record` smart undo: the ticket's stock comes back, and if the ticket was counted with its completed job, the job keeps what it still needs (those lines are flagged for review). This is the office's route to fix a ticket filed against the wrong job: undo, relink, file again. A hand stock adjustment alone leaves the ticket counted with the wrong job (Sol r4 HIGH on PR #2679).

@@ -1,7 +1,7 @@
 import { toSentryError } from '../lib/sentryError';
 import { useState, useEffect, useRef , useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Check, X, Plus, Trash2, Image as ImageIcon, AlertCircle, ClipboardCheck, RefreshCw, MapPin, FileText } from 'lucide-react';
+import { Save, Check, X, Plus, Trash2, Image as ImageIcon, AlertCircle, ClipboardCheck, RefreshCw, MapPin, FileText, Undo2 } from 'lucide-react';
 import { sanitizeError, supabase, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
 import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
 import { blendQuotePriceSaveErrorMessage, blendTicketInvoiceRefusalMessage, blendTicketMissingPriceMessage, getBlendQuotePriceChoices, type BlendQuotePriceChoice } from '../lib/blendTicketPricing';
@@ -55,6 +55,7 @@ export function BlendTicketDetail() {
   const ocrThresholds = useOCRThresholds();
   const saveIdem = useIdempotencyKey('save_blend_ticket', profile?.id || '');
   const appRecordIdem = useIdempotencyKey('create_application_record_from_blend_ticket', profile?.id || '');
+  const undoFilingIdem = useIdempotencyKey('reverse_application_record', profile?.id || '');
   const fieldsIdem = useIdempotencyKey('save_blend_ticket_fields', profile?.id || '');
   const approveIdem = useIdempotencyKey('batch_approve_blend_tickets', profile?.id || '');
   const rejectIdem = useIdempotencyKey('batch_reject_blend_tickets', profile?.id || '');
@@ -83,6 +84,7 @@ export function BlendTicketDetail() {
   const [fieldsDirty, setFieldsDirty] = useState(false);
   const [saveHydrationRequired, setSaveHydrationRequired] = useState(false);
   const [hasApplicationRecord, setHasApplicationRecord] = useState(false);
+  const [applicationRecordId, setApplicationRecordId] = useState<string | null>(null);
   const [hasActiveInvoice, setHasActiveInvoice] = useState(false);
   const initialLoadDone = useRef(false);
   const loadSeqRef = useRef(0);
@@ -344,6 +346,7 @@ export function BlendTicketDetail() {
       // A linked job the reader cannot see keeps its link; only the label says so.
       setJobLabel(linkedJob ? jobSearchLabel(linkedJob) : ticketResult.data.job_id ? 'Linked job (not visible)' : '');
       setHasApplicationRecord((applicationRecordResult.data || []).length > 0);
+      setApplicationRecordId(applicationRecordResult.data?.[0]?.id ?? null);
       setHasActiveInvoice((activeInvoiceResult.data || []).length > 0);
       setSelectedJobId(ticketResult.data.job_id || '');
       // Fetch application services for dropdown
@@ -1021,6 +1024,8 @@ export function BlendTicketDetail() {
       // downstream lock immediately and do not allow a newly dirty field draft
       // that the database trigger would reject.
       setHasApplicationRecord(true);
+      const createdRecordId = (appRecData as { application_record_id?: unknown } | null)?.application_record_id;
+      setApplicationRecordId(typeof createdRecordId === 'string' ? createdRecordId : null);
       logActivity({ event: 'application_record_created', description: `Application record created from blend ticket ${ticket.ticket_number}`, performedBy: profile.id, entityType: 'blend_ticket', entityId: ticket.id, customerId: ticket.customer_id || undefined });
       toast('success', 'Application record created successfully');
     } catch (err: unknown) {
@@ -1028,6 +1033,43 @@ export function BlendTicketDetail() {
       toast('error', sanitizeError(err));
     } finally {
       setCreatingAppRecord(false);
+    }
+  }
+
+  // Undo filing (admin): reverse_application_record puts the ticket's stock back; if the ticket was counted with its
+  // completed job, the job keeps what it still needs. This is the correction for a ticket filed against the wrong job;
+  // a hand stock adjustment alone leaves the ticket counted with that job.
+  const [undoingFiling, setUndoingFiling] = useState(false);
+  const [undoFilingConfirmOpen, setUndoFilingConfirmOpen] = useState(false);
+
+  async function executeUndoFiling() {
+    if (!ticket || !profile || !applicationRecordId) return;
+    setUndoFilingConfirmOpen(false);
+    setUndoingFiling(true);
+    try {
+      const { data, error } = await supabase.rpc('reverse_application_record', {
+        p_application_record_id: applicationRecordId,
+        p_idempotency_key: undoFilingIdem.getKey(),
+      });
+      if (error) {
+        const bindingRejection = getIdempotencyBindingRejection(error);
+        if (bindingRejection === 'intent' || bindingRejection === 'actor') undoFilingIdem.resetKey();
+        throw error;
+      }
+      assertRpcResult(data, 'reverse_application_record');
+      undoFilingIdem.resetKey();
+      const result = data as { kept_on_job_lines?: number; over_taken_lines?: number } | null;
+      const review = (result?.kept_on_job_lines ?? 0) + (result?.over_taken_lines ?? 0) > 0;
+      logActivity({ event: 'application_record_reversed', description: `Application record filing undone for blend ticket ${ticket.ticket_number}`, performedBy: profile.id, entityType: 'blend_ticket', entityId: ticket.id, customerId: ticket.customer_id || undefined });
+      toast('success', review
+        ? 'Filing undone. Some stock stays with the linked job; the lines are flagged for review in inventory.'
+        : 'Filing undone. The ticket’s stock is back in Main Warehouse.');
+      await loadTicketData();
+    } catch (err: unknown) {
+      Sentry.captureException(toSentryError(err), { extra: { context: 'reverse_application_record' } });
+      toast('error', sanitizeError(err));
+    } finally {
+      setUndoingFiling(false);
     }
   }
 
@@ -1857,6 +1899,15 @@ export function BlendTicketDetail() {
             <HelpTip text="Create Application Record files the legal as-applied record (product, field, date, rate) for compliance. It does NOT bill anyone — it's the regulatory paperwork, separate from Create Invoice (billing) and from linking to a job." />
           </span>
         )}
+        {profile?.role === 'admin' && hasApplicationRecord && applicationRecordId && (
+          <span className="inline-flex items-center gap-1">
+            <Button variant="secondary" onClick={() => setUndoFilingConfirmOpen(true)} loading={undoingFiling} disabled={hasUnsavedChanges}>
+              <Undo2 className="h-4 w-4" />
+              Undo Filing
+            </Button>
+            <HelpTip text="Undo Filing deletes this ticket's application record and puts its stock back. If the ticket was counted with its completed job, the job keeps the stock it still needs. Use it to fix a ticket filed against the wrong job, then relink and file again. Do not fix that with a stock adjustment." />
+          </span>
+        )}
         <Button
           onClick={handleSave}
           disabled={saveHydrationRequired || saving || fieldsDirty || reprocessing || ticket.status === 'processing' || contentLocked || catalogLoadFailed || customerRowMissing}
@@ -1882,6 +1933,18 @@ export function BlendTicketDetail() {
         variant="info"
         icon={ClipboardCheck}
         loading={creatingAppRecord}
+      />
+
+      <ConfirmModal
+        open={undoFilingConfirmOpen}
+        onClose={() => setUndoFilingConfirmOpen(false)}
+        onConfirm={executeUndoFiling}
+        title="Undo Filing"
+        message="Delete this ticket's application record and put its stock back? If it was counted with its completed job, the job keeps the stock it still needs. You can relink the ticket and file it again."
+        confirmLabel="Undo Filing"
+        variant="danger"
+        icon={Undo2}
+        loading={undoingFiling}
       />
 
       <ConfirmModal

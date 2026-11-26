@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
+import { createMemoryRouter, Outlet, RouterProvider, useLocation, useNavigate } from 'react-router';
 import type { ReactNode } from 'react';
+
+// Keep useNavigate (the page) and useBlocker (the hook) in the same router package copy.
+vi.mock('react-router-dom', async () => vi.importActual('react-router'));
 
 type ServiceRow = {
   id: string;
@@ -12,12 +15,13 @@ type ServiceRow = {
   sort_order: number;
 };
 
-type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
+type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void; reject: (reason?: unknown) => void };
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((complete) => { resolve = complete; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((complete, fail) => { resolve = complete; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 const mocks = vi.hoisted(() => ({
@@ -60,9 +64,6 @@ vi.mock('../contexts/AuthContext', () => ({
 
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: mocks.captureException } }));
-vi.mock('../hooks/useUnsavedChanges', () => ({
-  useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
-}));
 vi.mock('../hooks/useIdempotencyKey', () => ({
   useIdempotencyKey: () => ({
     getKeyFor: (scope: string) => `retry-key-${scope}`,
@@ -71,7 +72,7 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
 }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../components/customers/CustomerSearchPicker', () => ({
-  default: () => <div>Customer picker</div>,
+  default: ({ disabled }: { disabled?: boolean }) => <button disabled={disabled}>Customer picker</button>,
 }));
 
 function routeRow(id: string, name: string, rate: number, isActive: boolean, sortOrder: number): ServiceRow {
@@ -96,17 +97,19 @@ function routeOverrides(
   builder.eq = (_column: string, value: string) => { id = value; return builder; };
   builder.order = () => builder;
   builder.single = () => serviceReads.get(id)?.promise;
-  builder.then = (resolve: (value: unknown) => unknown) => {
-    if (table === 'customer_application_rates') return overrideReads.get(id)?.promise.then(resolve);
-    return Promise.resolve({ data: [], error: null }).then(resolve);
+  builder.then = (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => {
+    if (table === 'customer_application_rates') return overrideReads.get(id)?.promise.then(resolve, reject);
+    return Promise.resolve({ data: [], error: null }).then(resolve, reject);
   };
   return builder;
 }
 
 function RouteControls() {
   const navigate = useNavigate();
+  const location = useLocation();
   return (
     <>
+      <output data-testid="route-path">{location.pathname}</output>
       <button onClick={() => navigate('/application-services/service-a')}>Switch to service A</button>
       <button onClick={() => navigate('/application-services/service-b')}>Switch to service B</button>
       <button onClick={() => navigate('/application-services/new')}>Switch to new service</button>
@@ -114,13 +117,16 @@ function RouteControls() {
   );
 }
 
-function renderDetail(children: ReactNode) {
-  return render(
-    <MemoryRouter initialEntries={['/application-services/service-a']}>
-      <RouteControls />
-      <Routes><Route path="/application-services/:id" element={children} /></Routes>
-    </MemoryRouter>,
-  );
+function renderDetail(children: ReactNode, initialPath = '/application-services/service-a') {
+  const router = createMemoryRouter([{
+    path: '/',
+    element: <><RouteControls /><Outlet /></>,
+    children: [
+      { path: 'application-services/:id', element: children },
+      { path: 'application-services', element: <div>Application services list</div> },
+    ],
+  }], { initialEntries: [initialPath] });
+  return { ...render(<RouterProvider router={router} />), router };
 }
 
 beforeEach(() => {
@@ -223,68 +229,7 @@ describe('ApplicationServiceDetail route changes', () => {
     expect(screen.queryByText('Farm B')).toBeNull();
   });
 
-  it('ignores a save result after the route changes', async () => {
-    const serviceReads = new Map([
-      ['service-a', deferred<{ data: ServiceRow; error: null }>()],
-      ['service-b', deferred<{ data: ServiceRow; error: null }>()],
-    ]);
-    const overrideReads = new Map([
-      ['service-a', deferred<{ data: Array<{ id: string; customer: { farm_name: string }; rate_per_acre_cents: number; season: number }>; error: null }>()],
-      ['service-b', deferred<{ data: Array<{ id: string; customer: { farm_name: string }; rate_per_acre_cents: number; season: number }>; error: null }>()],
-    ]);
-    const pendingSave = deferred<{ success: true; service_id: string; created: false }>();
-    const pendingSaveB = deferred<{ success: true; service_id: string; created: false }>();
-    mocks.from.mockImplementation((table: string) => routeOverrides(table, serviceReads, overrideReads));
-    mocks.loadBilling.mockResolvedValue({
-      available: true,
-      billsCustomer: true,
-      outsideVendorId: null,
-      existingVendor: null,
-      activeVendors: [],
-    });
-    mocks.rpc.mockImplementation((name: string, args?: { p_service_id?: string }) => {
-      if (name === 'admin_get_application_service_costs') {
-        return Promise.resolve({ data: [{ service_id: args?.p_service_id, cost_per_acre_cents: '800' }], error: null });
-      }
-      return Promise.resolve({ data: { success: true, service_id: args?.p_service_id, created: false }, error: null });
-    });
-    mocks.save.mockReturnValueOnce(pendingSave.promise).mockReturnValueOnce(pendingSaveB.promise);
-
-    const { default: ApplicationServiceDetail } = await import('./ApplicationServiceDetail');
-    renderDetail(<ApplicationServiceDetail />);
-
-    await act(async () => {
-      serviceReads.get('service-a')?.resolve({ data: routeRow('service-a', 'Service A', 1500, true, 1), error: null });
-      overrideReads.get('service-a')?.resolve({ data: [], error: null });
-    });
-    expect(await screen.findByLabelText(/Service Name/)).toHaveValue('Service A');
-    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
-
-    fireEvent.click(screen.getByRole('button', { name: 'Switch to service B' }));
-    await act(async () => {
-      serviceReads.get('service-b')?.resolve({ data: routeRow('service-b', 'Service B', 2400, false, 7), error: null });
-      overrideReads.get('service-b')?.resolve({ data: [], error: null });
-    });
-    expect(await screen.findByLabelText(/Service Name/)).toHaveValue('Service B');
-    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
-    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(2));
-    const serviceAKey = mocks.save.mock.calls[0][2];
-    const serviceBKey = mocks.save.mock.calls[1][2];
-    expect(serviceBKey).not.toBe(serviceAKey);
-
-    await act(async () => {
-      pendingSaveB.resolve({ success: true, service_id: 'service-b', created: false });
-    });
-    const successToastCount = mocks.toast.mock.calls.filter(([type]) => type === 'success').length;
-
-    await act(async () => {
-      pendingSave.resolve({ success: true, service_id: 'service-a', created: false });
-    });
-    expect(screen.getByLabelText(/Service Name/)).toHaveValue('Service B');
-    expect(mocks.toast.mock.calls.filter(([type]) => type === 'success')).toHaveLength(successToastCount);
-  });
-
-  it('keeps Save locked for a service while its save is in flight across routes', async () => {
+  it('freezes the service form and blocks navigation until a save finishes', async () => {
     const serviceReads = new Map([
       ['service-a', deferred<{ data: ServiceRow; error: null }>()],
       ['service-b', deferred<{ data: ServiceRow; error: null }>()],
@@ -298,7 +243,7 @@ describe('ApplicationServiceDetail route changes', () => {
     mocks.loadBilling.mockResolvedValue({
       available: true,
       billsCustomer: true,
-      outsideVendorId: null,
+      outsideVendorId: '',
       existingVendor: null,
       activeVendors: [],
     });
@@ -311,34 +256,88 @@ describe('ApplicationServiceDetail route changes', () => {
     mocks.save.mockReturnValueOnce(pendingSave.promise);
 
     const { default: ApplicationServiceDetail } = await import('./ApplicationServiceDetail');
-    renderDetail(<ApplicationServiceDetail />);
+    const { router } = renderDetail(<ApplicationServiceDetail />);
 
     await act(async () => {
       serviceReads.get('service-a')?.resolve({ data: routeRow('service-a', 'Service A', 1500, true, 1), error: null });
       overrideReads.get('service-a')?.resolve({ data: [], error: null });
     });
-    expect(await screen.findByLabelText(/Service Name/)).toHaveValue('Service A');
+    const nameField = await screen.findByLabelText(/Service Name/);
+    fireEvent.change(nameField, { target: { value: 'Service A updated' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
 
+    expect(nameField).toBeDisabled();
+    expect(screen.getByLabelText('Default Rate / Acre ($)')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Customer picker' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Switch to service B' }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('info', 'Saving — please wait'));
+    expect(router.state.location.pathname).toBe('/application-services/service-a');
+
+    await act(async () => {
+      pendingSave.resolve({ success: true, service_id: 'service-a', created: false });
+    });
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Service saved'));
+    expect(screen.getByLabelText(/Service Name/)).toHaveValue('Service A updated');
+    expect(screen.getByLabelText(/Service Name/)).not.toBeDisabled();
+    expect(mocks.save.mock.calls[0][0]).toMatchObject({ p_name: 'Service A updated', p_service_id: 'service-a' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to service B' }));
+    expect(router.state.location.pathname).toBe('/application-services/service-b');
     await act(async () => {
       serviceReads.get('service-b')?.resolve({ data: routeRow('service-b', 'Service B', 2400, false, 7), error: null });
       overrideReads.get('service-b')?.resolve({ data: [], error: null });
     });
     expect(await screen.findByLabelText(/Service Name/)).toHaveValue('Service B');
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Switch to service A' }));
-    expect(await screen.findByLabelText(/Service Name/)).toHaveValue('Service A');
-    const saveButton = screen.getByRole('button', { name: 'Save Changes' });
-    expect(saveButton).toBeDisabled();
-    fireEvent.click(saveButton);
-    expect(mocks.save).toHaveBeenCalledTimes(1);
+  it('finishes a new-service save with its success message and created-service navigation', async () => {
+    const serviceReads = new Map([['created-service', deferred<{ data: ServiceRow; error: null }>()]]);
+    const overrideReads = new Map([['created-service', deferred<{ data: Array<{ id: string; customer: { farm_name: string }; rate_per_acre_cents: number; season: number }>; error: null }>()]]);
+    const pendingSave = deferred<{ success: true; service_id: string; created: true }>();
+    mocks.from.mockImplementation((table: string) => routeOverrides(table, serviceReads, overrideReads));
+    mocks.loadBilling.mockResolvedValue({
+      available: true,
+      billsCustomer: true,
+      outsideVendorId: '',
+      existingVendor: null,
+      activeVendors: [],
+    });
+    mocks.rpc.mockImplementation((name: string, args?: { p_service_id?: string }) => {
+      if (name === 'admin_get_application_service_costs') {
+        return Promise.resolve({ data: [{ service_id: args?.p_service_id, cost_per_acre_cents: '600' }], error: null });
+      }
+      return Promise.resolve({ data: { success: true, service_id: args?.p_service_id, created: false }, error: null });
+    });
+    mocks.save.mockReturnValueOnce(pendingSave.promise);
+
+    const { default: ApplicationServiceDetail } = await import('./ApplicationServiceDetail');
+    const { router } = renderDetail(<ApplicationServiceDetail />, '/application-services/new');
+    fireEvent.change(await screen.findByLabelText(/Service Name/), { target: { value: 'New service' } });
+    fireEvent.change(screen.getByLabelText('Default Rate / Acre ($)'), { target: { value: '18.00' } });
+    fireEvent.change(screen.getByLabelText('Cost / Acre ($)'), { target: { value: '6.00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Service' }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
+
+    expect(screen.getByLabelText(/Service Name/)).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create Service' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to service B' }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('info', 'Saving — please wait'));
+    expect(router.state.location.pathname).toBe('/application-services/new');
 
     await act(async () => {
-      pendingSave.resolve({ success: true, service_id: 'service-a', created: false });
+      pendingSave.resolve({ success: true, service_id: 'created-service', created: true });
     });
-    await waitFor(() => expect(saveButton).not.toBeDisabled());
+    await waitFor(() => expect(router.state.location.pathname).toBe('/application-services/created-service'));
+    expect(mocks.toast).toHaveBeenCalledWith('success', 'Application service created');
+    expect(mocks.save.mock.calls[0][0]).toMatchObject({ p_name: 'New service', p_service_id: null });
+    await act(async () => {
+      serviceReads.get('created-service')?.resolve({ data: routeRow('created-service', 'New service', 1800, true, 0), error: null });
+      overrideReads.get('created-service')?.resolve({ data: [], error: null });
+    });
+    expect(await screen.findByLabelText(/Service Name/)).toHaveValue('New service');
   });
 
   it('keeps the form loading until the overrides read finishes', async () => {
@@ -352,7 +351,7 @@ describe('ApplicationServiceDetail route changes', () => {
     mocks.loadBilling.mockResolvedValue({
       available: true,
       billsCustomer: true,
-      outsideVendorId: null,
+      outsideVendorId: '',
       existingVendor: null,
       activeVendors: [],
     });
@@ -376,6 +375,40 @@ describe('ApplicationServiceDetail route changes', () => {
     });
     expect(await screen.findByLabelText(/Service Name/)).toHaveValue('Service A');
     expect(screen.getByText('Farm A')).toBeTruthy();
+  });
+
+  it('reports a rejected overrides read and leaves the detail page without an editable form', async () => {
+    const serviceReads = new Map([
+      ['service-a', deferred<{ data: ServiceRow; error: null }>()],
+    ]);
+    const overrideReads = new Map([
+      ['service-a', deferred<{ data: Array<{ id: string; customer: { farm_name: string }; rate_per_acre_cents: number; season: number }>; error: null }>()],
+    ]);
+    mocks.from.mockImplementation((table: string) => routeOverrides(table, serviceReads, overrideReads));
+    mocks.loadBilling.mockResolvedValue({
+      available: true,
+      billsCustomer: true,
+      outsideVendorId: '',
+      existingVendor: null,
+      activeVendors: [],
+    });
+    mocks.rpc.mockResolvedValue({ data: [{ service_id: 'service-a', cost_per_acre_cents: '800' }], error: null });
+
+    const { default: ApplicationServiceDetail } = await import('./ApplicationServiceDetail');
+    const { router } = renderDetail(<ApplicationServiceDetail />);
+
+    await act(async () => {
+      serviceReads.get('service-a')?.resolve({ data: routeRow('service-a', 'Service A', 1500, true, 1), error: null });
+      overrideReads.get('service-a')?.reject(new Error('override read failed'));
+    });
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/application-services'));
+    expect(screen.queryByLabelText(/Service Name/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save Changes' })).toBeNull();
+    expect(mocks.captureException).toHaveBeenCalledWith(expect.any(Error), {
+      extra: { context: 'load_application_service_detail', serviceId: 'service-a' },
+    });
+    expect(mocks.toast).toHaveBeenCalledWith('error', 'Failed to load application service');
   });
 
   it('ignores late service and override reads and saves the current service values', async () => {

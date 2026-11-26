@@ -73,8 +73,6 @@ export default function ApplicationServiceDetail() {
   const [newOverrideCustomerName, setNewOverrideCustomerName] = useState('');
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
-  const inFlightSaveScopesRef = useRef(new Set<string>());
-  const [saveLockState, setSaveLockState] = useState(() => ({ version: 0, scopes: new Set<string>() }));
   // "We could not read the cost" is NOT the same fact as "the cost is $0.00", and
   // conflating them loses money: the form would show 0.00, and saving any other
   // field would then push that 0 back through saveCost and destroy the real cost.
@@ -86,9 +84,8 @@ export default function ApplicationServiceDetail() {
   const loadedFormRef = useRef<typeof form | null>(null);
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
   const skipUnsavedPromptRef = useRef(false);
-  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
+  const blocker = useUnsavedChanges(isDirty || saving, skipUnsavedPromptRef);
   const saveIdem = useIdempotencyKey('admin_save_application_service', profile?.id || '');
-  const savingCurrentService = saveLockState.scopes.has(id ?? 'new');
   const [newOverride, setNewOverride] = useState({ customer_id: '', rate: '', season: computeSeason().toString(), notes: '' });
   const [deleteOverrideId, setDeleteOverrideId] = useState<string | null>(null);
 
@@ -96,6 +93,12 @@ export default function ApplicationServiceDetail() {
   const outsideVendorControlAvailable = billingControlsAvailable && activeVendors !== null;
 
   useEffect(() => { if (!initialLoadDone.current || form === loadedFormRef.current) return; setIsDirty(true); }, [form]);
+
+  useEffect(() => {
+    if (blocker.state !== 'blocked' || !saving) return;
+    toast('info', 'Saving — please wait');
+    blocker.reset?.();
+  }, [blocker, saving, toast]);
 
   useEffect(() => {
     supabase.from('vehicles').select('id, vehicle_name').eq('status', 'active').order('vehicle_name')
@@ -165,8 +168,9 @@ export default function ApplicationServiceDetail() {
 
   const fetchOverrides = useCallback(async (isCurrent: () => boolean) => {
     if (isNew || !id) return;
-    const { data } = await supabase.from('customer_application_rates').select('*, customer:customers(farm_name)').eq('application_service_id', id).order('season', { ascending: false });
+    const { data, error } = await supabase.from('customer_application_rates').select('*, customer:customers(farm_name)').eq('application_service_id', id).order('season', { ascending: false });
     if (!isCurrent()) return;
+    if (error) throw error;
     setOverrides((data || []) as (CustomerApplicationRate & { _dirty?: boolean })[]);
   }, [id, isNew]);
 
@@ -191,6 +195,11 @@ export default function ApplicationServiceDetail() {
     if (!isNew && id) {
       void Promise.all([fetchService(isCurrent), fetchOverrides(isCurrent)]).then(() => {
         if (isCurrent()) setLoading(false);
+      }).catch((err: unknown) => {
+        if (!isCurrent()) return;
+        Sentry.captureException(toSentryError(err), { extra: { context: 'load_application_service_detail', serviceId: id } });
+        toast('error', 'Failed to load application service');
+        navigate('/application-services');
       });
     } else {
       setLoading(false);
@@ -207,7 +216,7 @@ export default function ApplicationServiceDetail() {
       cancelled = true;
       routeGenerationRef.current += 1;
     };
-  }, [id, isNew, fetchService, fetchOverrides]);
+  }, [id, isNew, fetchService, fetchOverrides, navigate, toast]);
 
   // ONE call writes the whole service, cost_per_acre_cents included, inside a
   // single database transaction. This used to be a PostgREST insert/update
@@ -265,10 +274,7 @@ export default function ApplicationServiceDetail() {
   };
 
   const handleSave = async () => {
-    const saveRouteGeneration = routeGenerationRef.current;
-    const isCurrent = () => routeGenerationRef.current === saveRouteGeneration;
-    const serviceScope = id ?? 'new';
-    if (inFlightSaveScopesRef.current.has(serviceScope)) return;
+    if (saving) return;
     if (!form.name.trim()) { toast('error', 'Service name is required'); return; }
     if (!isAdmin) { toast('error', 'Only admins can manage application services'); return; }
     // Both money fields are refused (null) on more than two decimals. Neither may
@@ -287,12 +293,6 @@ export default function ApplicationServiceDetail() {
       if (parsedCost === null) { toast('error', `Cost per acre: ${MONEY_PRECISION_MESSAGE}`); return; }
       costCents = parsedCost;
     }
-    inFlightSaveScopesRef.current.add(serviceScope);
-    setSaveLockState((current) => {
-      const scopes = new Set(current.scopes);
-      scopes.add(serviceScope);
-      return { version: current.version + 1, scopes };
-    });
     setSaving(true);
     try {
       const saved = await saveService({
@@ -310,7 +310,6 @@ export default function ApplicationServiceDetail() {
       } else {
         if (profile) logActivity({ event: 'app_service_updated', description: `Application service "${form.name}" updated`, performedBy: profile.id, entityType: 'application_service', entityId: id! });
       }
-      if (!isCurrent()) return;
       if (isNew) {
         toast('success', 'Application service created'); setIsDirty(false); skipUnsavedPromptRef.current = true; navigate(`/application-services/${saved.service_id}`);
       } else {
@@ -318,16 +317,9 @@ export default function ApplicationServiceDetail() {
       }
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'save_application_service' } });
-      if (!isCurrent()) return;
       toast('error', sanitizeError(err));
     } finally {
-      inFlightSaveScopesRef.current.delete(serviceScope);
-      setSaveLockState((current) => {
-        const scopes = new Set(current.scopes);
-        scopes.delete(serviceScope);
-        return { version: current.version + 1, scopes };
-      });
-      if (isCurrent()) setSaving(false);
+      setSaving(false);
     }
   };
 
@@ -366,7 +358,7 @@ export default function ApplicationServiceDetail() {
 
   return (
     <div className="space-y-6">
-      <UnsavedChangesModal open={blocker.state === 'blocked'} onStay={() => blocker.reset?.()} onLeave={() => blocker.proceed?.()} />
+      <UnsavedChangesModal open={blocker.state === 'blocked' && !saving} onStay={() => blocker.reset?.()} onLeave={() => blocker.proceed?.()} />
       <ConfirmModal open={!!deleteOverrideId} title="Remove Rate Override" message="Remove this customer rate override? The default service rate will apply instead." confirmLabel="Remove" variant="danger" onConfirm={confirmDeleteOverride} onClose={() => setDeleteOverrideId(null)} />
 
       <div className="flex items-center gap-4">
@@ -375,11 +367,10 @@ export default function ApplicationServiceDetail() {
           <h1 className="text-2xl font-bold text-nav-dark">{isNew ? 'New Application Service' : form.name}</h1>
           {!isNew && <p className="text-sm text-secondary mt-0.5">{form.is_active ? 'Active' : 'Inactive'} &middot; {form.default_rate_per_acre ? `$${form.default_rate_per_acre}/ac` : 'No rate set'}</p>}
         </div>
-        {isAdmin && <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={savingCurrentService}>{isNew ? 'Create Service' : 'Save Changes'}</Button>}
+        {isAdmin && <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving} disabled={saving}>{isNew ? 'Create Service' : 'Save Changes'}</Button>}
       </div>
 
-      {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
-      <fieldset disabled={isNew && saving} className="min-w-0">
+      <fieldset disabled={saving} className="min-w-0">
       <Card><div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <Input label="Service Name" value={form.name} onChange={(e) => updateField('name', e.target.value)} required placeholder="e.g. Hagie Y-Drop Nitrogen" />
         <div><label className="block text-sm font-medium text-nav-dark mb-1">Vehicle (optional)</label><select value={form.vehicle_id} onChange={(e) => updateField('vehicle_id', e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"><option value="">No vehicle linked</option>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.vehicle_name}</option>)}</select></div>
@@ -403,6 +394,7 @@ export default function ApplicationServiceDetail() {
       </div></Card>
       </fieldset>
 
+      <fieldset disabled={saving} className="min-w-0">
       {!isNew && <Card>
         <h3 className="text-lg font-semibold text-nav-dark mb-4">Customer Rate Overrides</h3>
         <p className="text-sm text-secondary mb-4">Special per-acre rates for specific customers. These override the default rate above.</p>
@@ -410,6 +402,7 @@ export default function ApplicationServiceDetail() {
           <div className="flex-1"><label className="block text-xs font-medium text-secondary mb-1">Customer</label><CustomerSearchPicker
             value={newOverride.customer_id}
             selectedLabel={newOverrideCustomerName}
+            disabled={saving}
             onSelect={(c) => {
               setNewOverride((p) => ({ ...p, customer_id: c?.id ?? '' }));
               setNewOverrideCustomerName(c?.farm_name ?? '');
@@ -428,6 +421,7 @@ export default function ApplicationServiceDetail() {
           </tbody></table></div>
         )}
       </Card>}
+      </fieldset>
     </div>
   );
 }

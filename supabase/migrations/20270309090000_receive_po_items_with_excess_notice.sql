@@ -1,5 +1,7 @@
 -- Add an opt-in receipt operation for PO Detail. Build excess notices from saved rows.
 -- Existing receipt callers, damage notices and the browser notification policy are unchanged.
+-- idempotency-body-check: exempt. The receipt check takes the transaction-level key lock;
+-- receive_po_items saves that same receipt before any notice can be written.
 SET LOCAL lock_timeout = '5s';
 
 DO $preflight$

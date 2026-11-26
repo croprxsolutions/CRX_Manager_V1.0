@@ -102,7 +102,10 @@ interface PaymentEntry {
   // The one number box: a check's number goes to check_number, any other method's to reference_number.
   checkNumber: string;
   reference: string;
+  // The day for the warnings. Sent only when picked: an untouched date is left to the database, which
+  // dates it today in Chicago by its own clock and lets an unchanged retry after midnight replay the save.
   paymentDate: string;
+  dateChosen: boolean;
   notes: string;
   allocations: { invoice_id: string; amount_cents: number }[];
 }
@@ -277,10 +280,13 @@ export default function PaymentAllocation() {
     focusAmountAfterPick.current = true;
     setCustomerBoxText(null);
     // Switching to another farm starts a fresh check, so one farm's check can't be posted to another (Mason, 2026-11-25).
+    // The date goes back to the one this check started with, so an abandoned date is not carried.
     if (selectedCustomer && selectedCustomer.id !== c.id) {
       setCheckAmountInput('');
       setReferenceNumber('');
       setNotes('');
+      setPaymentDateInput(startingPaymentDate);
+      setPaymentDateRefused(null);
     }
     setSelectedCustomer(c);
     prepayReadSeq.current += 1;
@@ -288,7 +294,7 @@ export default function PaymentAllocation() {
     setLastResult(null);
     setRetryRefused(false);
     fetchInvoices(c.id);
-  }, [fetchInvoices, selectedCustomer]);
+  }, [fetchInvoices, selectedCustomer, startingPaymentDate]);
 
   const clearCustomer = useCallback(() => {
     // A load still running for the cleared customer must not refill the list.
@@ -436,7 +442,7 @@ export default function PaymentAllocation() {
   const handleSubmit = async () => {
     if (!selectedCustomer || !profile || customerBeingChanged) return;
     const problem = entryProblem();
-    // An untouched date is today as of this click, not as of the last render (a page left open past midnight).
+    // For the warnings, an untouched date is today as of this click (a page left open past midnight).
     const day = paymentDateInput === undefined ? todayInBusinessTz() : paymentDateInput;
     if (problem || !day) {
       toast('error', problem ?? 'Enter the payment date');
@@ -449,6 +455,7 @@ export default function PaymentAllocation() {
       checkNumber: isCheck ? referenceNumber : '',
       reference: isCheck ? '' : referenceNumber,
       paymentDate: day,
+      dateChosen: paymentDateInput !== undefined,
       notes,
       allocations: invoices
         .filter((inv) => inv.allocated_cents > 0)
@@ -508,6 +515,7 @@ export default function PaymentAllocation() {
       return;
     }
     setSubmitting(true);
+    const earlierAttemptUnresolved = saveUnresolvedRef.current;
     try {
       const args = {
         p_customer_id: payment.customerId,
@@ -516,7 +524,7 @@ export default function PaymentAllocation() {
         p_payment_method: payment.method,
         p_reference_number: payment.reference || undefined,
         p_check_number: payment.checkNumber || undefined,
-        p_payment_date: payment.paymentDate,
+        p_payment_date: payment.dateChosen ? payment.paymentDate : undefined,
         p_notes: payment.notes || undefined,
       };
       // One key for this check until it is confirmed: allocate_payment compares a retry's arguments with the
@@ -543,12 +551,12 @@ export default function PaymentAllocation() {
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'allocate_payment' } });
       const retryRefused = hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_ARGUMENT_MISMATCH);
-      // A database error code (SQLSTATE) means the transaction rolled back: nothing was saved. Any other
-      // failure (a lost reply) may have saved, and a refused retry says an earlier attempt may have.
+      // A database error code (SQLSTATE) on a first attempt means it rolled back: nothing was saved. Any other
+      // failure (a lost reply) may have saved, and so may an earlier attempt still unanswered.
       const code = (err as { code?: unknown } | null)?.code;
-      if (!retryRefused && typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) saveUnresolvedRef.current = false;
-      // While the save may have gone through, a retry after midnight must still send the day this attempt sent.
-      else if (paymentDateInput === undefined) setPaymentDateInput(payment.paymentDate);
+      if (!earlierAttemptUnresolved && !retryRefused && typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) {
+        saveUnresolvedRef.current = false;
+      }
       const dateRefusal = paymentDateRefusal(err, payment.paymentDate);
       if (retryRefused) setRetryRefused(true);
       else if (dateRefusal) refuseDate(dateRefusal);
@@ -568,12 +576,14 @@ export default function PaymentAllocation() {
     }
   };
 
-  // The payment date stays for the next check, so a stack received on one day is entered in a row.
+  // A saved check's date stays for the next check, so a stack received on one day is entered in a row.
+  // An unsaved check's date is dropped like its amount.
   const startNextCheck = () => {
     setCheckAmountInput('');
     setReferenceNumber('');
     setNotes('');
-    setStartingPaymentDate(paymentDateInput);
+    if (lastResult) setStartingPaymentDate(paymentDateInput);
+    else setPaymentDateInput(startingPaymentDate);
     setPaymentDateRefused(null);
     setLastResult(null);
   };

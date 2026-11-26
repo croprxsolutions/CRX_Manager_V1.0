@@ -49,9 +49,11 @@ export function closedPeriodMessage(day: string, period: ClosedPeriod): string {
  */
 export async function findClosedPeriod(day: string): Promise<ClosedPeriod | null> {
   // A stalled read must not hold the payment form disabled: past the limit, skip the early warning.
-  const timeLimit = AbortSignal.timeout(CLOSED_PERIOD_CHECK_TIMEOUT_MS);
+  // A plain timer, not AbortSignal.timeout: a browser without it must still reach the save.
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const stalled = new Promise<null>((resolve) => {
-    timeLimit.addEventListener('abort', () => resolve(null), { once: true });
+    timer = setTimeout(() => { controller.abort(); resolve(null); }, CLOSED_PERIOD_CHECK_TIMEOUT_MS);
   });
   const read = Promise.resolve(supabase
     .from('accounting_periods')
@@ -60,9 +62,9 @@ export async function findClosedPeriod(day: string): Promise<ClosedPeriod | null
     .lte('period_start', day)
     .gte('period_end', day)
     .limit(1)
-    .abortSignal(timeLimit))
+    .abortSignal(controller.signal))
     .catch(() => null);
-  const result = await Promise.race([read, stalled]);
+  const result = await Promise.race([read, stalled]).finally(() => clearTimeout(timer));
   if (!result) return null;
   const { data, error } = result;
   if (error || !Array.isArray(data) || data.length === 0) return null;

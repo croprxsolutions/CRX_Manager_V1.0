@@ -8,8 +8,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { createMemoryRouter, RouterProvider } from 'react-router';
 vi.mock('react-router-dom', async () => vi.importActual('react-router'));
 
-const { mockFrom, mockRpc, mockToast, mockAuth } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, mockAuth, idemKeyGeneration } = vi.hoisted(() => ({
   mockAuth: { role: 'admin', deniedPages: [] as string[] },
+  idemKeyGeneration: { n: 0 },
   mockFrom: vi.fn(),
   mockRpc: vi.fn().mockImplementation(() => Promise.resolve({ data: null, error: null })),
   mockToast: vi.fn(),
@@ -50,7 +51,13 @@ vi.mock('../components/ui/Toast', () => ({
 }));
 
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn(), getKeyFor: () => 'test-idem-key', resetKeyFor: vi.fn() }),
+  // A reset hands out a new key, so a test that expects one key across retries fails if one is reset.
+  useIdempotencyKey: () => ({
+    getKey: () => `test-idem-key-${idemKeyGeneration.n}`,
+    resetKey: () => { idemKeyGeneration.n += 1; },
+    getKeyFor: () => 'test-idem-key',
+    resetKeyFor: vi.fn(),
+  }),
 }));
 
 // parseCents is deliberately NOT mocked: the real parser refuses more than two
@@ -586,12 +593,15 @@ describe('Record Payments: payment date and check number', () => {
   }
   const apply = () => fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
 
-  it("defaults to today's date in Chicago and sends it with the check number", async () => {
+  it("shows today's date in Chicago and leaves an untouched date to the database's own clock", async () => {
     await fillPayment('1234');
     expect(shownDate()).toBe('11/24/2026');
+    // Past midnight with no redraw, and a device clock that may be wrong: the database dates it.
+    vi.setSystemTime(new Date('2026-11-25T06:30:00Z'));
     apply();
     await waitFor(() => expect(rpcCalls()).toHaveLength(1));
-    expect(rpcCalls()[0][1]).toMatchObject({ p_payment_date: '2026-11-24', p_check_number: '1234', p_payment_method: 'check' });
+    expect(rpcCalls()[0][1]).toMatchObject({ p_check_number: '1234', p_payment_method: 'check' });
+    expect(rpcCalls()[0][1].p_payment_date).toBeUndefined();
     expect(rpcCalls()[0][1].p_reference_number).toBeUndefined();
   });
 
@@ -616,7 +626,8 @@ describe('Record Payments: payment date and check number', () => {
     stepDate('day', 'ArrowDown');
     expect(shownDate()).toBe('11/24/2026');
     await act(async () => { finishSave(saved); });
-    expect(rpcCalls()[0][1]).toMatchObject({ p_payment_date: '2026-11-24', p_total_cents: 50000 });
+    expect(rpcCalls()[0][1]).toMatchObject({ p_total_cents: 50000 });
+    expect(rpcCalls()[0][1].p_payment_date).toBeUndefined();
   });
 
   it('another method sends a reference number, not a check number', async () => {
@@ -715,12 +726,12 @@ describe('Record Payments: payment date and check number', () => {
     await waitFor(() => expect(rpcCalls()).toHaveLength(2));
     const [first, second] = rpcCalls().map(([, args]) => args);
     expect(second.p_idempotency_key).toBe(first.p_idempotency_key);
-    expect([first.p_payment_date, second.p_payment_date]).toEqual(['2026-11-24', '2026-11-23']);
+    expect([first.p_payment_date, second.p_payment_date]).toEqual([undefined, '2026-11-23']);
     expect(await screen.findByRole('alert')).toHaveTextContent('Check Payment History, or ask an admin to');
     expect(screen.queryByText('Payment Applied Successfully')).not.toBeInTheDocument();
   });
 
-  it('a retry after a lost reply past midnight sends the day the first attempt sent, and replays the save', async () => {
+  it('an unchanged retry after a lost reply past midnight sends the same request, and replays the save', async () => {
     // The server's retry check: one key, one set of arguments (allocate_payment's request fingerprint).
     const firstArgs = new Map<string, unknown>();
     let replyLost = true;
@@ -743,7 +754,6 @@ describe('Record Payments: payment date and check number', () => {
     vi.setSystemTime(new Date('2026-11-25T06:30:00Z'));
     fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'x' } });
     fireEvent.change(screen.getByLabelText('Notes'), { target: { value: '' } });
-    expect(shownDate()).toBe('11/24/2026');
     apply();
     await waitFor(() => expect(rpcCalls()).toHaveLength(2));
     const [first, second] = rpcCalls().map(([, args]) => args);
@@ -751,12 +761,39 @@ describe('Record Payments: payment date and check number', () => {
     expect(await screen.findByText('Payment Applied Successfully')).toBeInTheDocument();
   });
 
-  it('an untouched date is today as of the click, even with no redraw since midnight', async () => {
+  it('a database error on a retry keeps the earlier unanswered save open: the next retry still reaches it', async () => {
+    const replies = [
+      () => Promise.reject(new Error('Failed to fetch')),
+      () => Promise.resolve({ data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } }),
+      () => Promise.resolve(saved),
+    ];
+    mockRpc.mockImplementation(() => replies.shift()!());
     await fillPayment();
-    vi.setSystemTime(new Date('2026-11-25T06:30:00Z'));
     apply();
     await waitFor(() => expect(rpcCalls()).toHaveLength(1));
-    expect(rpcCalls()[0][1]).toMatchObject({ p_payment_date: '2026-11-25' });
+    apply();
+    await waitFor(() => expect(rpcCalls()).toHaveLength(2));
+    closedPeriods = [{ period_start: '2026-11-01', period_end: '2026-11-30' }];
+    apply();
+    await waitFor(() => expect(rpcCalls()).toHaveLength(3));
+    expect(new Set(rpcCalls().map(([, args]) => args.p_idempotency_key)).size).toBe(1);
+    expect(screen.queryByText(/is in a closed month/)).not.toBeInTheDocument();
+  });
+
+  it('switching farms before saving drops a picked date like the amount', async () => {
+    const smallFarm = { id: 'cust-2', farm_name: 'Small Farm', account_number: null, prepay_balance_cents: 0 };
+    mockFrom.mockImplementation((table: string) => buildChain(
+      table === 'customers' ? { data: [customer, smallFarm], error: null }
+        : table === 'invoices' ? { data: [openInvoice], error: null, count: 1 } as { data: unknown; error: unknown }
+          : { data: [], error: null },
+    ));
+    await fillPayment();
+    stepDate('day', 'ArrowDown', 3);
+    expect(shownDate()).toBe('11/21/2026');
+    const box = screen.getByPlaceholderText('Search by name or account #...');
+    fireEvent.change(box, { target: { value: 'Small' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Small Farm/ }));
+    await waitFor(() => expect(shownDate()).toBe('11/24/2026'));
   });
 
   it('a save the database refused is not treated as maybe saved: the closed-month check still runs', async () => {

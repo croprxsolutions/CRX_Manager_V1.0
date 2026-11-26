@@ -72,15 +72,25 @@ describe('findClosedPeriod', () => {
     await expect(findClosedPeriod('2026-10-30')).resolves.toBeNull();
   });
 
-  it('gives up after 15 seconds instead of holding the payment form', async () => {
-    const limit = new AbortController();
-    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(limit.signal);
-    mockFrom.mockReturnValueOnce(chain(new Promise<never>(() => {})));
-    const found = findClosedPeriod('2026-10-30');
-    limit.abort();
-    await expect(found).resolves.toBeNull();
-    expect(timeout).toHaveBeenCalledWith(15_000);
-    timeout.mockRestore();
+  it('gives up after 15 seconds instead of holding the payment form, even without AbortSignal.timeout', async () => {
+    vi.useFakeTimers();
+    const original = AbortSignal.timeout;
+    // An older browser: no AbortSignal.timeout at all.
+    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true });
+    try {
+      mockFrom.mockReturnValueOnce(chain(new Promise<never>(() => {})));
+      const found = findClosedPeriod('2026-10-30');
+      await vi.advanceTimersByTimeAsync(14_999);
+      let settled = false;
+      void found.then(() => { settled = true; });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(found).resolves.toBeNull();
+    } finally {
+      Object.defineProperty(AbortSignal, 'timeout', { value: original, configurable: true });
+      vi.useRealTimers();
+    }
   });
 });
 

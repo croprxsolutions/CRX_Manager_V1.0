@@ -178,11 +178,18 @@ export const TAHA_LANE_TABLES = [
 // writes the shared invoice tables). Every other lane table still counts there (Taha's review of #2382, HIGH 1);
 // "commissions" is here because Taha asked that #2260, which deletes a field invoice's commissions, keep passing.
 const FIELD_BILLING_TABLES = new Set(["invoices", "invoice_items", "invoice_shares", "invoice_line_shares", "commissions"]);
-// A migration named for a product's units may UPDATE order and quote lines and take table locks (Mason, 2026-11-26:
-// #2267 converted one product from mg to grams, its lines included, and locked what it re-checks so nothing moved under
-// it; a unit fix is not Taha's). Any other write to those tables (a policy, a column, a delete) and every other lane
-// table still count (Luna, PR 2).
-const UNIT_FIX_STRIP_RE = /\block\s+(?:table\s+)?[^;]*|\bupdate\s+(?:only\s+)?(?:"?public"?\s*\.\s*)?"?(?:order_items|quote_items)"?(?![\w$])[^;]*/gi;
+// A migration named for a product's units may take table locks and UPDATE only the unit and quantity columns of order
+// and quote lines (Mason, 2026-11-26: #2267 converted one product from mg to grams, its lines included, and locked what
+// it re-checks so nothing moved under it; a unit fix is not Taha's). Any other write to those tables (a status, a price,
+// a policy, a column, a delete) and every other lane table still count (Luna, PR 2 rounds 1 and 3).
+const UNIT_FIX_LOCK_RE = /\block\s+(?:table\s+)?[^;]*/gi;
+const UNIT_LINE_UPDATE_RE = /\bupdate\s+(?:only\s+)?(?:"?public"?\s*\.\s*)?"?(?:order_items|quote_items)"?(?![\w$])(?:\s+(?:as\s+)?(?!set\b)\w+)?\s+set\s+([^;]*?)(?=\bfrom\b|\bwhere\b|\breturning\b|;|$)[^;]*/gi;
+const UNIT_COLUMN_RE = /^(?:unit|unit_size|uom|rate_unit|container_unit|inventory_unit|quantity|qty)$/i;
+const unitOnlySet = (set) => {
+  const cols = [...set.matchAll(/(?:^|,)\s*"?(\w+)"?\s*=/g)].map((m) => m[1]);
+  return cols.length > 0 && cols.every((c) => UNIT_COLUMN_RE.test(c)) && !/\(\s*select\b/i.test(set);
+};
+const withoutUnitFix = (text) => text.replace(UNIT_FIX_LOCK_RE, "").replace(UNIT_LINE_UPDATE_RE, (m, set) => unitOnlySet(set) ? "" : m);
 // "unit(s)" alone is too common a word to count (a delivery_units fix could be his).
 const UNIT_WORDS = new Set(["uom", "gram", "grams", "mg", "oz", "ounce", "ounces", "lb", "lbs", "pound", "pounds",
   "gallon", "gallons", "quart", "quarts", "pint", "pints", "liter", "liters", "litre", "litres"]);
@@ -266,12 +273,12 @@ function withoutComments(sql) {
  * True when this migration SQL touches Taha's lane; unreadable SQL (null) counts, so the block fails closed.
  * `fieldBilling`: the file is named for field billing, so writes to FIELD_BILLING_TABLES are Mason's.
  * `productUnits`: the file is named for a product's units, so its table locks and UPDATEs of order and quote lines
- * are not Taha's (Mason, 2026-11-26; UNIT_FIX_STRIP_RE).
+ * are not Taha's (Mason, 2026-11-26; withoutUnitFix).
  */
 export function isTahaLaneSql(sql, { fieldBilling = false, productUnits = false } = {}) {
   if (typeof sql !== "string") return true;
   const { write, read } = fieldBilling ? FIELD_RES : LANE_RES;
-  const text = productUnits ? withoutComments(sql).replace(UNIT_FIX_STRIP_RE, "") : withoutComments(sql);
+  const text = productUnits ? withoutUnitFix(withoutComments(sql)) : withoutComments(sql);
   // Second pass joins string pieces ('UPDATE ' || 'invoices …'), so dynamic SQL built in parts still counts.
   const joined = text.replace(/'\s*\|\|\s*'/g, "");
   if ([text, joined].some((t) => write.test(t) || PREBOOKED_RE.test(t) || PREBOOKED_MORE_RE.test(t) || PREBOOKED_RE.test(withoutParens(t)))) return true;

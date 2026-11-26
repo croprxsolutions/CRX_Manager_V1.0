@@ -347,9 +347,10 @@ const RLS_ACCESS_MATRIX: TableRLSContract[] = [
     table: 'app_settings',
     access: {
       admin:     { SELECT: 'all', INSERT: 'all', UPDATE: 'all', DELETE: 'none' },
-      sales_rep: { SELECT: 'all', INSERT: 'none', UPDATE: 'none', DELETE: 'none' },
-      driver:    { SELECT: 'all', INSERT: 'none', UPDATE: 'none', DELETE: 'none' },
+      sales_rep: { SELECT: 'scoped', INSERT: 'none', UPDATE: 'none', DELETE: 'none' },
+      driver:    { SELECT: 'scoped', INSERT: 'none', UPDATE: 'none', DELETE: 'none' },
     },
+    notes: 'Read access is limited by setting key. Drivers have company details for receipts. Applicators also get the job guardrail and print defaults.',
   },
 
   // ─── Admin-Only System Tables ───────────────────────────────────────

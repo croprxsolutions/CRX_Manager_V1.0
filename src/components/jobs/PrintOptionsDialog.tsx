@@ -4,6 +4,7 @@ import { ClipboardList, Printer, Save } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
+import { useAuth } from '../../contexts/AuthContext';
 import { sanitizeError, checkMutationResult, supabase } from '../../lib/db';
 import {
   APPLICATOR_PRINT_OPTIONS_KEY,
@@ -57,6 +58,8 @@ function ToggleSelect({
 
 export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOptionsDialogProps) {
   const { toast } = useToast();
+  const { role } = useAuth();
+  const canSaveDefault = role === 'admin';
   const [format, setFormat] = useState<ApplicatorSheetFormat>('original');
   const [options, setOptions] = useState<ApplicatorPrintOptions>({ ...DEFAULT_APPLICATOR_PRINT_OPTIONS });
   const [loadingDefaults, setLoadingDefaults] = useState(false);
@@ -82,6 +85,7 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
   };
 
   const handleSaveDefault = async () => {
+    if (!canSaveDefault) return;
     setSavingDefault(true);
     try {
       const result = await supabase
@@ -124,9 +128,11 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
       footer={(
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button variant="secondary" onClick={handleSaveDefault} loading={savingDefault} disabled={loadingDefaults || printing}>
-            <Save className="h-4 w-4" /> Save as default
-          </Button>
+          {canSaveDefault && (
+            <Button variant="secondary" onClick={handleSaveDefault} loading={savingDefault} disabled={loadingDefaults || printing}>
+              <Save className="h-4 w-4" /> Save as default
+            </Button>
+          )}
           <Button onClick={handlePrint} loading={printing} disabled={loadingDefaults || savingDefault}>
             <Printer className="h-4 w-4" /> Print
           </Button>
@@ -135,7 +141,7 @@ export default function PrintOptionsDialog({ open, onClose, onPrint }: PrintOpti
     >
       <div className="space-y-5">
         <p className="text-sm text-secondary">
-          Choose the packet contents for this print. Save as default remembers these options for future sheets; the sheet format stays a per-print choice.
+          Choose the packet contents for this print. {canSaveDefault && 'Save as default remembers these options for future sheets.'}
         </p>
 
         <div>

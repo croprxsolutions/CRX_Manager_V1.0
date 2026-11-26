@@ -1870,7 +1870,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
   ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");
   // Mason, 2026-11-25: release/next skips the 4-hour hold (its changes were each held on staging),
-  // and his `taha override #<PR> <code>` stands in for Taha's go-ahead and the hold.
+  // and his `taha override #<PR> <code> unavailable: <reason>` stands in for Taha's go-ahead and the hold; a plain override does not.
   {
     const young = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     refused(gate({ pr: { headRefName: "release/next", createdAt: young, comments: [] } }), "Taha hasn't given the go-ahead",
@@ -1881,7 +1881,14 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     ok(Boolean(code), "the refusal hands Mason an override code for this PR");
     const stateDir = path.join(gateDir, ".claude", "session-state");
     const overrideFile = path.join(stateDir, "taha-lane-override-pr900.json");
-    ok(recordTahaLaneOverride({ dirs: [stateDir], pullRequest: 900, code }).ok === true, "Mason's override records");
+    ok(/unavailable: <why Taha can't>/.test(String(asked.reason)), "and says it needs Taha to be unavailable");
+    ok(recordTahaLaneOverride({ dirs: [stateDir], pullRequest: 900, code }).ok === true, "Mason's plain override records");
+    try {
+      refused(gate({ pr: { createdAt: young, comments: [] } }), "4-hour review hold", "a plain override does not lift the hold on a live apply");
+      refused(gate({ pr: { headRefName: "release/next", comments: [] } }), "Taha hasn't given the go-ahead", "nor Taha's go-ahead on the release");
+    } finally { rmSync(overrideFile, { force: true }); }
+    const code2 = /taha override #900 (\d{6})/.exec(String(gate({ pr: { createdAt: young, comments: [] } }).reason))?.[1];
+    ok(recordTahaLaneOverride({ dirs: [stateDir], pullRequest: 900, code: code2, tahaUnavailable: "out sick today" }).ok === true, "Mason's unavailable override records");
     try {
       ok(gate({ pr: { createdAt: young, comments: [] } }).ok === true, "Mason's override lifts the hold and the go-ahead on a hotfix");
       ok(gate({ pr: { headRefName: "release/next", comments: [] } }).ok === true, "and on the release");

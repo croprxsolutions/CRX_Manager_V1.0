@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
-  findTahaLaneOverride, isTahaLanePath, isTahaLaneSql, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
+  findTahaLaneOverride, findTahaUnavailableOverride, isTahaLanePath, isTahaLaneSql, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
   pushDismissedApprovals, tahaApprovedHead, tahaApprovedOnGitHub, tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
 } from "./taha-lane-lib.mjs";
 
@@ -287,6 +287,10 @@ eq(tahaOverrideCommand("taha override 123456"), null, "a code without the PR is 
 eq(tahaOverrideCommand("taha override #2242 12345"), null, "five digits is not a code");
 eq(tahaOverrideCommand("please taha override #2242 123456"), null, "other words before it");
 eq(tahaOverrideCommand("taha override #2242 123456 now"), null, "other words after it");
+eq(tahaOverrideCommand("taha override #2242 123456 unavailable: on a plane until Monday."), { pullRequest: 2242, code: "123456", tahaUnavailable: "on a plane until Monday" },
+  "Mason can say Taha is unavailable, with a reason");
+eq(tahaOverrideCommand("taha override #2242 123456 unavailable:"), null, "unavailable needs a reason");
+eq(tahaOverrideCommand("taha override #2242 123456 unavailable: sick\nand more"), null, "the reason is one line");
 ok(tahaOverrideAttempt("taha override 123456"), "the old form is noticed and refused");
 ok(!tahaOverrideAttempt("hello"), "ordinary chat is not an attempt");
 
@@ -313,6 +317,15 @@ ok(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW + 3600e3
 ok(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: B, now: NOW + 3600e3 }), "a later push is covered too (one message per PR)");
 eq(findTahaLaneOverride({ dirs, pullRequest: 2243, headSha: A, now: NOW + 3600e3 }), null, "no other PR is covered");
 eq(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW + 60e3 + 24 * 3600e3 }), null, "the override ends after 24 hours");
+eq(findTahaUnavailableOverride({ dirs, pullRequest: 2242, now: NOW + 3600e3 }), null, "a plain override does not say Taha is unavailable (no live apply)");
+{
+  const c = issueTahaLaneCode({ dirs, pullRequest: 2250, headSha: A, now: NOW, newCode: () => "515151" });
+  const r = recordTahaLaneOverride({ dirs, pullRequest: 2250, code: c, tahaUnavailable: "  away all week  ", now: NOW + 60e3 });
+  ok(r.ok && r.payload.tahaUnavailable === "away all week", "the unavailable reason is recorded");
+  ok(findTahaUnavailableOverride({ dirs, pullRequest: 2250, now: NOW + 3600e3 }), "an unavailable override is found for the live apply");
+  ok(findTahaLaneOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 3600e3 }), "and works as a plain override for staging too");
+  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, now: NOW + 60e3 + 24 * 3600e3 }), null, "it ends after 24 hours too");
+}
 
 // ── the gate the merge guards call ──────────────────────────────────────────
 const lane = f("src/pages/Quotes.tsx");
@@ -329,6 +342,20 @@ ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha
 const refusal = tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: lane, dirs, now: NOW });
 ok(/TAHA LANE BLOCK/.test(refusal) && /taha override #2300 \d{6}/.test(refusal), "a refusal gives Mason the exact line, PR included");
 eq(tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: f("src/pages/Deliveries.tsx"), dirs, now: NOW }), null, "outside the lane, nothing to do");
+// A PR that changes the block's own files: the override covers only the head it was issued for (#2303).
+{
+  const wiringFiles = f(".claude/hooks/taha-lane-lib.mjs");
+  const asked = tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: A, files: wiringFiles, dirs, now: NOW });
+  const c = /taha override #2310 (\d{6})/.exec(asked)?.[1];
+  ok(c && /at this commit only/.test(asked), "a wiring PR's refusal says the code covers this commit only");
+  ok(recordTahaLaneOverride({ dirs, pullRequest: 2310, code: c, now: NOW + 60e3 }).ok, "Mason's override records");
+  eq(tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: A, files: wiringFiles, dirs, now: NOW + 120e3, tellTaha: () => true }), null, "it lets that head through");
+  ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: B, files: wiringFiles, dirs, now: NOW + 180e3, tellTaha: () => true })), "a later push voids it");
+  ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: B, files: f(".claude/hooks/migration-landing-gate-lib.mjs"), dirs, now: NOW + 180e3, tellTaha: () => true })),
+    "the migration landing gate counts as the block's own file");
+  ok(/TAHA LANE BLOCK/.test(tahaLaneGate({ prefix: "T", pullRequest: 2310, headSha: B, files: null, dirs, now: NOW + 180e3, tellTaha: () => true })), "an unreadable list gets the one-head rule");
+  eq(tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha: B, files: lane, dirs, now: NOW + 3600e3, tellTaha: () => true }), null, "an ordinary lane PR still carries the override over pushes");
+}
 // Taha's Approve on the exact head (Mason, 2026-11-24).
 const rv = (state, commit, id = "50602678", at = "2026-11-24T15:00:00Z") => ({ id, state, commit, at });
 ok(tahaApprovedHead([rv("APPROVED", A)], A), "Taha approved this head");

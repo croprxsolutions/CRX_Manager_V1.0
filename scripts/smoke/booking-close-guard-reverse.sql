@@ -1,4 +1,4 @@
--- ROLLBACK TEXT for 20270308200000_booking_close_guard_applied_and_short.sql (not a migration; a rollback ships as its own
+-- ROLLBACK TEXT for 20270309120000_booking_close_guard_applied_and_short.sql (not a migration; a rollback ships as its own
 -- reviewed migration). Re-creates _enforce_booking_live_job_rules() exactly as 20270129150000 left it. Used by
 -- scripts/smoke/prove-booking-close-guard-real-schema.mjs to show the gaps come back. Run it as one transaction.
 
@@ -7,7 +7,7 @@ BEGIN
   -- Only over this migration's body: a later safeguard in the same function must not be overwritten (Sol r1 LOW).
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._enforce_booking_live_job_rules()'))
        IS DISTINCT FROM '02d3233a58743b0f0b892d2cc1996c3b' THEN
-    RAISE EXCEPTION 'ROLLBACK_BOOKING_CLOSE_GUARD_DRIFT: _enforce_booking_live_job_rules() is not the 20270308200000 body; re-read live first';
+    RAISE EXCEPTION 'ROLLBACK_BOOKING_CLOSE_GUARD_DRIFT: _enforce_booking_live_job_rules() is not the 20270309120000 body; re-read live first';
   END IF;
 END
 $rollback_check$;

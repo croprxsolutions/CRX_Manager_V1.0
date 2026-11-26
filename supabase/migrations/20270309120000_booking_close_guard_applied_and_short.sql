@@ -2,7 +2,7 @@
 -- booking short. Release #1990 known issues (Sol r54 on ff46f6ca5, Mason 2026-11-20: fix before the next release).
 --
 -- Written 2026-11-25. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270308200000_booking_close_guard_applied_and_short.md. Re-read the live ledger first.
+-- docs/reference/migrations.d/20270309120000_booking_close_guard_applied_and_short.md. Re-read the live ledger first.
 --
 -- WHY:
 --   Sol r54 HIGH 2 (`20270129150000:282`): _enforce_booking_live_job_rules() refuses closing short (and accepting,

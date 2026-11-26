@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270308200000_booking_close_guard_applied_and_short.sql (release #1990 known issues:
+ * Real-schema proof for 20270309120000_booking_close_guard_applied_and_short.sql (release #1990 known issues:
  * Sol r54 HIGH 2 and #2065).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
@@ -26,7 +26,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, attempt, asUser, refuse, id, psql, scalar, claims, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270308200000_booking_close_guard_applied_and_short.sql';
+const CANDIDATE = '20270309120000_booking_close_guard_applied_and_short.sql';
 const OLD_MD5 = '9beb84454834da47d80e2c2a05a8a25d';
 const NEW_MD5 = '02d3233a58743b0f0b892d2cc1996c3b';
 const text = (file) => readFileSync(path.join(ROOT, file), 'utf8').replaceAll('\r\n', '\n');

@@ -19,6 +19,10 @@ test('the admin register reads and saves a vehicle through the supported screens
     }
   });
 
+  await page.addLocatorHandler(page.getByRole('dialog', { name: /what's new/i }), async dialog => {
+    await dialog.getByRole('button', { name: 'Got it' }).click();
+  });
+
   await page.goto('/login');
   await page.fill('#email', process.env.LOCAL_TEST_EMAIL!);
   await page.fill('#password', process.env.LOCAL_TEST_PASSWORD!);
@@ -34,7 +38,7 @@ test('the admin register reads and saves a vehicle through the supported screens
   await expect(page).toHaveURL(/\/vehicles\/[0-9a-f-]{36}$/);
   await expect(page.getByPlaceholder('Maintenance schedule, special considerations...')).toHaveValue(notes);
 
-  const status = page.getByRole('combobox').filter({ has: page.getByRole('option', { name: 'Inactive', exact: true }) });
+  const status = page.getByRole('combobox').filter({ has: page.locator('option[value="inactive"]') });
   await status.selectOption('inactive');
   await page.getByPlaceholder('Maintenance schedule, special considerations...').fill(changedNotes);
   await page.getByRole('button', { name: 'Save Changes' }).click();

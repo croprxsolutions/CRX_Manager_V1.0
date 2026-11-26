@@ -3486,6 +3486,8 @@ describe('QuoteBuilder', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reload Quote' }));
     await waitFor(() => expect(screen.queryByText('Reload Quote')).not.toBeInTheDocument());
     recoveryReadMode = 'refrozen';
+    // The reload rebuilds the preview with the reloaded prices; Email waits for it.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Email to grower' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Email to grower' }));
     await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
     expect(mockRpc.mock.calls.filter(([name]) => name === 'create_quote_version')).toHaveLength(2);
@@ -3736,6 +3738,8 @@ describe('QuoteBuilder', () => {
     // whose own reply was never validated.
     expect(mockResetIdempotencyKey).toHaveBeenCalledTimes(1);
 
+    // The reload rebuilds the preview with the reloaded prices; Email waits for it.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Email to grower' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Email to grower' }));
     await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
     expect(mockRpc).toHaveBeenCalledWith('create_quote_version', expect.objectContaining({

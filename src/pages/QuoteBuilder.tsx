@@ -805,6 +805,8 @@ export default function QuoteBuilder() {
   const [markingPresented, setMarkingPresented] = useState(false);
   // The columns the shown preview was drawn with; the effect below redraws when the chips change.
   const previewColumnsKeyRef = useRef<string | null>(null);
+  // The key the preview on screen was built for (state, so Email can wait for a rebuild).
+  const [previewBuiltKey, setPreviewBuiltKey] = useState<string | null>(null);
   const [previewRebuild, setPreviewRebuild] = useState<'idle' | 'updating' | 'failed'>('idle');
   // Bumped per Preview click and on a move to another quote, so a late first build never opens or
   // replaces the preview. A layout effect, so it moves on commit with routeQuoteIdRef.
@@ -3329,6 +3331,7 @@ export default function QuoteBuilder() {
         const doc = await generateQuotePdf(buildQuotePdfData(), columns);
         if (run !== previewRunRef.current) return;
         previewColumnsKeyRef.current = `${columns.join(',')}|${quoteLoadCount}`;
+        setPreviewBuiltKey(previewColumnsKeyRef.current);
         setPreviewPdfBlob(doc.output('blob'));
         setShowPreviewModal(true);
       },
@@ -3612,6 +3615,7 @@ export default function QuoteBuilder() {
         const doc = await generateQuotePdf(buildQuotePdfDataRef.current(), activePdfColumnsKey ? activePdfColumnsKey.split(',') : []);
         if (stale) return;
         previewColumnsKeyRef.current = activePreviewKey;
+        setPreviewBuiltKey(activePreviewKey);
         setPreviewPdfBlob(doc.output('blob'));
         setPreviewRebuild('idle');
       } catch (err) {
@@ -4624,7 +4628,7 @@ export default function QuoteBuilder() {
     : quoteUnsaved ? 'Save the quote before emailing it.'
       // After a save the preview rebuilds with the saved prices; Email waits so it never sits beside old ones.
       // A failed rebuild keeps the old preview with its warning, and Email builds its own PDF.
-      : showPreviewModal && previewRebuild !== 'failed' && previewColumnsKeyRef.current !== activePreviewKey ? 'Updating the preview…'
+      : showPreviewModal && previewRebuild !== 'failed' && previewBuiltKey !== activePreviewKey ? 'Updating the preview…'
         : null;
   const previewButton = (variant: 'primary' | 'secondary') => (
     <Button variant={variant} icon={<Eye className="w-4 h-4" />} onClick={handlePreviewQuote} className={tall}>

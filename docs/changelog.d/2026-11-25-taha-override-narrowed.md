@@ -9,4 +9,4 @@ override on the gate's own files goes back to one head, as agreed on #2303.
   for; the reason stays in chat, never on GitHub. Mason decides when Taha is unavailable. When it lets a live apply through,
   the landing gate now posts the PR comment tagging Taha, once per migration (it never did; only the merge gate did), or refuses. Staging merges are unchanged: any override covers the PR for 24 hours.
 - **The gate's own files** (`taha-lane-lib.mjs` `BLOCK_FILES_RE`, now including the live-apply gate and its callers):
-  an override on a PR that changes them covers only the head it was issued for; a later push needs a new code.
+  an override on a PR that changes them covers only the head it was issued for; a later push needs a new code. Known gap, accepted by Mason (2026-11-26): the list of the gate's own files is an honest-mistake net; reviews kept finding one more file that could join it, and making every override one-head instead was turned down.

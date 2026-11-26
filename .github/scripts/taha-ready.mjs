@@ -47,7 +47,9 @@ export const tahaReviewedHead = (pr) => (pr.reviews ?? []).some((r) => isTaha(r.
 // A hotfix into main (Mason, 2026-11-25): Taha is a code owner of .github/, and the release guard and
 // release-gate wait on his approval or hotfix-backport label, so those two can't hold back asking him.
 // A back-merge of main into staging carries only code already reviewed for main (Mason, 2026-11-26).
-export const isBackMerge = (pr) => pr.baseRefName === 'staging' && (pr.headRefName === 'main' || /^chore\/backmerge-main-/.test(pr.headRefName ?? ''));
+// Only main itself (protected, so nothing unreviewed is on it); a hand-made back-merge branch can carry other edits
+// and is judged like any PR (Luna, PR 2).
+export const isBackMerge = (pr) => pr.baseRefName === 'staging' && pr.headRefName === 'main' && !pr.isCrossRepository;
 export const isMainHotfix = (pr) => pr.baseRefName === 'main' && /^hotfix\//.test(pr.headRefName ?? '');
 const GATE_CHECKS = ['Release flow guard (main)', 'release-gate'];
 // A pending guard still waits: it may yet ask for the label, and the ping is sent once per head (Codex on #2589).

@@ -72,10 +72,14 @@ export const isTahaGateWiring = (name) => BLOCK_FILES_RE.test(String(name ?? "")
 
 // Mason, 2026-11-26 (#2451): a change to one of Taha's screens that only edits words people read (strings, JSX text,
 // comments) is not his work. True only when the changed lines, with those stripped, are the same code before and after.
+// Words are: a string given to a label-like name (label, title, placeholder…), JSX text between tags, and comments.
+// Every other string is code (a tab key or route can change behaviour: Luna, PR 2), and line breaks are kept.
 // A missing patch (GitHub leaves it out of big diffs) is not text-only.
-// shortcut: "words between > and <" can also match a generic type name (extends Base<T>); upgrade to a real JSX parser if that ever hides a code change.
-const TEXT_TOKEN_RE = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\$]|\$(?!\{))*`|(?<![=-])>[\w\s.,!?'’:\-–—…]*[A-Za-z][\w\s.,!?'’:\-–—…]*</g;
-const codeOnly = (lines) => lines.join("\n").replace(TEXT_TOKEN_RE, (m) => m.startsWith("/") ? "" : m.startsWith(">") ? "><" : "S").replace(/\s+/g, "");
+// shortcut: pattern matching, not a parser; an honest-mistake net like the SQL check, not a security boundary.
+const TEXT_TOKEN_RE = /(\b(?:label|title|subtitle|placeholder|description|aria-label|alt|tooltip|helperText|emptyText|emptyMessage|heading)\s*[:=]\s*\{?\s*)(?:'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\$])*`)|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?<=[\w"'}/])>([^\S\n]*[A-Za-z][\w .,!?'’:\-–—…]*)<(?=\/|[A-Za-z])/g;
+const codeOnly = (lines) => lines.join("\n")
+  .replace(TEXT_TOKEN_RE, (m, key, jsx) => key !== undefined ? `${key.replace(/\s+/g, "")}S` : jsx !== undefined ? "><" : m.startsWith("/") ? "" : m)
+  .split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean).join("\n");
 export function isTextOnlyPatch(patch) {
   if (typeof patch !== "string" || !patch.trim()) return false;
   const lines = patch.split(/\r?\n/);
@@ -159,9 +163,11 @@ export const TAHA_LANE_TABLES = [
 // writes the shared invoice tables). Every other lane table still counts there (Taha's review of #2382, HIGH 1);
 // "commissions" is here because Taha asked that #2260, which deletes a field invoice's commissions, keep passing.
 const FIELD_BILLING_TABLES = new Set(["invoices", "invoice_items", "invoice_shares", "invoice_line_shares", "commissions"]);
-// A migration named for a product's units may write these (Mason, 2026-11-26: #2267 converted one product from mg
-// to grams, its order and quote lines included; a unit fix is not Taha's). Every other lane table still counts.
-const PRODUCT_UNIT_TABLES = new Set(["order_items", "quote_items"]);
+// A migration named for a product's units may UPDATE order and quote lines and take table locks (Mason, 2026-11-26:
+// #2267 converted one product from mg to grams, its lines included, and locked what it re-checks so nothing moved under
+// it; a unit fix is not Taha's). Any other write to those tables (a policy, a column, a delete) and every other lane
+// table still count (Luna, PR 2).
+const UNIT_FIX_STRIP_RE = /\block\s+(?:table\s+)?[^;]*|\bupdate\s+(?:only\s+)?(?:"?public"?\s*\.\s*)?"?(?:order_items|quote_items)"?(?![\w$])[^;]*/gi;
 // "unit(s)" alone is too common a word to count (a delivery_units fix could be his).
 const UNIT_WORDS = new Set(["uom", "gram", "grams", "mg", "oz", "ounce", "ounces", "lb", "lbs", "pound", "pounds",
   "gallon", "gallons", "quart", "quarts", "pint", "pints", "liter", "liters", "litre", "litres"]);
@@ -174,10 +180,6 @@ const readRe = (table) => new RegExp(String.raw`\b(?:from|join)(?:\s+only)?\s+` 
 const LANE_RES = { write: writeRe(tableRe(TAHA_LANE_TABLES)), read: readRe(tableRe(TAHA_LANE_TABLES)) };
 const FIELD_TABLES = TAHA_LANE_TABLES.filter((t) => !FIELD_BILLING_TABLES.has(t));
 const FIELD_RES = { write: writeRe(tableRe(FIELD_TABLES)), read: readRe(tableRe(FIELD_TABLES)) };
-const UNIT_TABLES = TAHA_LANE_TABLES.filter((t) => !PRODUCT_UNIT_TABLES.has(t));
-const UNIT_RES = { write: writeRe(tableRe(UNIT_TABLES)), read: readRe(tableRe(UNIT_TABLES)) };
-const BOTH_TABLES = FIELD_TABLES.filter((t) => !PRODUCT_UNIT_TABLES.has(t));
-const BOTH_RES = { write: writeRe(tableRe(BOTH_TABLES)), read: readRe(tableRe(BOTH_TABLES)) };
 const ROW_LOCK_RE = /\bfor\s+(?:no\s+key\s+)?update\b|\bfor\s+(?:key\s+)?share\b/i;
 // Booking stock (Taha on #2382): a write that sets inventory.quantity_prebooked, or a function body that does.
 const PREBOOKED_RE = /\bset\b(?:(?!\bwhere\b)[^;])*?\bquantity_prebooked"?\s*=|\bquantity_prebooked"?\s*:=|\binto\s+[\w".]*\binventory"?\s*\([^)]*\bquantity_prebooked\b|\bset\s*\([^)]*\bquantity_prebooked\b|\b(?:column|add|drop|alter|rename)\s+(?:column\s+)?(?:if\s+(?:not\s+)?exists\s+)?"?quantity_prebooked\b/i;
@@ -248,13 +250,13 @@ function withoutComments(sql) {
 /**
  * True when this migration SQL touches Taha's lane; unreadable SQL (null) counts, so the block fails closed.
  * `fieldBilling`: the file is named for field billing, so writes to FIELD_BILLING_TABLES are Mason's.
- * `productUnits`: the file is named for a product's units, so writes to PRODUCT_UNIT_TABLES are not Taha's (Mason, 2026-11-26).
+ * `productUnits`: the file is named for a product's units, so its table locks and UPDATEs of order and quote lines
+ * are not Taha's (Mason, 2026-11-26; UNIT_FIX_STRIP_RE).
  */
 export function isTahaLaneSql(sql, { fieldBilling = false, productUnits = false } = {}) {
   if (typeof sql !== "string") return true;
-  const { write, read } = fieldBilling ? (productUnits ? BOTH_RES : FIELD_RES) : productUnits ? UNIT_RES : LANE_RES;
-  // A unit fix locks the tables it re-checks so nothing moves under it (#2267); the lock alone changes nothing of his.
-  const text = productUnits ? withoutComments(sql).replace(/\block\s+(?:table\s+)?[^;]*/gi, "") : withoutComments(sql);
+  const { write, read } = fieldBilling ? FIELD_RES : LANE_RES;
+  const text = productUnits ? withoutComments(sql).replace(UNIT_FIX_STRIP_RE, "") : withoutComments(sql);
   // Second pass joins string pieces ('UPDATE ' || 'invoices …'), so dynamic SQL built in parts still counts.
   const joined = text.replace(/'\s*\|\|\s*'/g, "");
   if ([text, joined].some((t) => write.test(t) || PREBOOKED_RE.test(t) || PREBOOKED_MORE_RE.test(t) || PREBOOKED_RE.test(withoutParens(t)))) return true;

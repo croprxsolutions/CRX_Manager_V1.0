@@ -288,12 +288,11 @@ test("strangers' fork PRs are never labelled or pinged", () => {
 
 // Mason, 2026-11-26: gate-wiring-only PRs and back-merges of main need Mason's code, not Taha's review.
 test('back-merges of main into staging are never labelled', () => {
-  for (const headRefName of ['main', 'chore/backmerge-main-3591fc3cb', 'chore/backmerge-main-3591fc3cb-mc']) {
-    const d = decide(pr({ headRefName, baseRefName: 'staging' }), { checks: never, lane: never, sol: never });
-    assert.equal(d.act, false);
-    assert.match(d.why, /back-merge/);
-  }
-  assert.equal(decide(pr({ headRefName: 'chore/backmerge-main-x', baseRefName: 'main' }), ok).act, true, 'only into staging');
+  const d = decide(pr({ headRefName: 'main', baseRefName: 'staging' }), { checks: never, lane: never, sol: never });
+  assert.equal(d.act, false);
+  assert.match(d.why, /back-merge/);
+  assert.equal(decide(pr({ headRefName: 'chore/backmerge-main-3591fc3cb', baseRefName: 'staging' }), ok).act, true,
+    'a hand-made back-merge branch can carry other edits, so it is judged like any PR (Luna)');
   assert.equal(decide(pr({ headRefName: 'fix/main-menu', baseRefName: 'staging' }), ok).act, true, 'a branch merely named like main is not');
 });
 

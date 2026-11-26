@@ -497,6 +497,13 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_fix_line_quantities.sql", "UPDATE public.order_items SET quantity = 1;")], now: NOW }), "order lines without a unit name still are");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_order_units.sql", "UPDATE public.order_items SET quantity = 1;")], now: NOW }), "\"units\" alone is not a unit fix");
   ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_quote_grams.sql", "UPDATE public.order_items SET quantity = 1;")], now: NOW }), "a lane word in the name wins over a unit word");
+  // Luna, PR 2: only UPDATEs of the lines and locks are a unit fix's.
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "CREATE POLICY p ON public.quote_items USING (true);")], now: NOW }), "a unit fix adding a policy on quote lines is his");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "DELETE FROM public.order_items WHERE id = 1;")], now: NOW }), "a unit fix deleting order lines is his");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "ALTER TABLE public.order_items ADD COLUMN g int;")], now: NOW }), "a unit fix changing the order-lines table is his");
+  eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "LOCK TABLE public.order_items, public.invoices; UPDATE public.order_items SET unit_size = 'g';")], now: NOW }), null,
+    "its locks alone change nothing of his (#2267 locks invoices so nothing moves while it converts)");
+  ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270303180000_x_grams.sql", "LOCK TABLE public.order_items; UPDATE public.invoice_items SET q = 1;")], now: NOW }), "an invoice write in a unit fix is still his");
   // 3. Delivery completion stays his (Mason: don't change without Taha).
   ok(isTahaLaneSql("CREATE OR REPLACE FUNCTION public._complete_delivery_authorized_impl() AS $$ SELECT 1 $$;"), "delivery completion is still Taha's");
   // 4. #2451: a label-only edit of his screens is not his; the A/R tab move is.
@@ -514,6 +521,12 @@ ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override 
   ok(!isTextOnlyPatch(patch(["  const x = 'a';"], ["  const x = b;"])), "a string turned into code is a change");
   ok(!isTextOnlyPatch(patch(["  const [v] = useState<string>('');"], ["  const [v] = useRef<string>('');"])), "an arrow or generic call is not JSX text");
   ok(!isTextOnlyPatch(patch(["  amount: 1,"], ["  amount: 2,"])), "numbers are code");
+  // Luna, PR 2.
+  ok(!isTextOnlyPatch(patch(["  {tab === 'prepayments' && <Panel />}"], ["  {tab === 'orders' && <Panel />}"])), "a string that is not a label is code");
+  ok(!isTextOnlyPatch(patch(["  const u = `https://${host}/quotes`;"], ["  const u = `https://${host}/orders`;"])), "a template with // inside is code, not a comment");
+  ok(!isTextOnlyPatch(patch(["  return", "    { a: 1 };"], ["  return { a: 1 };"])), "a line break after return is kept");
+  ok(!isTextOnlyPatch(patch(["  const ok = value > threshold < cap;"], ["  const ok = value > limit < cap;"])), "a comparison is not JSX text");
+  ok(isTextOnlyPatch(patch(["  <Field label={'Old'} placeholder=\"Type here\" />"], ["  <Field label={'New'} placeholder=\"Type a name\" />"])), "label-like props are words");
   ok(!isTextOnlyPatch(undefined) && !isTextOnlyPatch(""), "no patch (GitHub leaves big diffs out) is not text-only");
   ok(tahaLaneProblem({ files: [{ filename: "src/pages/Quotes.tsx", status: "modified" }], now: NOW }), "a lane screen with no patch still counts");
   ok(tahaLaneProblem({ files: [{ filename: "src/pages/Quotes.tsx", previous_filename: "src/pages/Q.tsx", status: "renamed", patch: dash }], now: NOW }), "a renamed lane file still counts");

@@ -84,6 +84,25 @@ const conditionVariant = (c: string): 'success' | 'error' | 'warning' | 'default
   return 'default';
 };
 
+async function notifyQuickReceiveDamage(request: QuickReceiveIntent, damagedReceiptIntentIds: string[]) {
+  const damagedItems = request.itemsPayload.filter((item) => item.condition !== 'good');
+  if (damagedItems.length === 0) return;
+
+  const firstReceivedLineId = request.itemsPayload[0]?.po_item_id;
+  const firstAllocation = request.matchResults.flatMap((match) => match.allocations)
+    .find((allocation) => allocation.po_item_id === firstReceivedLineId);
+  if (!firstAllocation) return;
+
+  const damagedInfo = damagedItems.map((item) => {
+    const match = request.matchResults.find((candidate) =>
+      candidate.allocations.some((allocation) => allocation.po_item_id === item.po_item_id)
+    );
+    return { productName: match?.product_name || 'Unknown', quantity: item.quantity, condition: item.condition };
+  });
+  await notifyDamagedReceiving(firstAllocation.po_number, damagedInfo,
+    firstAllocation.purchase_order_id, damagedReceiptIntentIds);
+}
+
 /* ═══════════════════════════════════════════════════════════════════ */
 export default function QuickReceivePanel() {
   const navigate = useNavigate();
@@ -361,22 +380,7 @@ export default function QuickReceivePanel() {
     // database result is proven. Their failure must never retain a mutation
     // lock or cause another stock receipt.
     try {
-      const damagedItems = request.itemsPayload.filter((item) => item.condition !== 'good');
-      if (damagedItems.length > 0) {
-        const damagedInfo = damagedItems.map((item) => {
-          const match = request.matchResults.find((candidate) =>
-            candidate.allocations.some((allocation) => allocation.po_item_id === item.po_item_id)
-          );
-          return {
-            productName: match?.product_name || 'Unknown',
-            quantity: item.quantity,
-            condition: item.condition,
-          };
-        });
-        const firstPO = request.matchResults[0]?.allocations?.[0]?.po_number || 'Quick Receive';
-        const firstPOId = request.matchResults[0]?.allocations?.[0]?.purchase_order_id || '';
-        await notifyDamagedReceiving(firstPO, damagedInfo, firstPOId, damagedReceiptIntentIds);
-      }
+      await notifyQuickReceiveDamage(request, damagedReceiptIntentIds);
     } catch {
       // Damaged-item notification is non-critical after a proven receipt.
     }

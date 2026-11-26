@@ -1732,7 +1732,7 @@ try {
   psql(canonicalDashboard);
   assertLiveRestored('public.get_dashboard_action_items(integer)');
 
-  const canonicalCompleteGate = liveDefinition('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamptz)');
+  const canonicalCompleteGate = liveDefinition('public._complete_delivery_body_impl_20270307(uuid,text,uuid,jsonb,text,text,text,timestamptz)');
   const completeGateMutant = canonicalCompleteGate.replace(
     /^\s*AND invoice_type <> 'credit_memo'\r?\n/m,
     '',
@@ -1749,7 +1749,7 @@ try {
   );
   completedProofs.add('DELIVERY_AUTO_INVOICE_CREDIT_FILTER_REMOVAL_DETECTED');
   psql(canonicalCompleteGate);
-  assertLiveRestored('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamptz)');
+  assertLiveRestored('public._complete_delivery_body_impl_20270307(uuid,text,uuid,jsonb,text,text,text,timestamptz)');
 
   const completeDeletedMutant = canonicalCompleteGate.replace(
     /(\s+AND invoice_type <> 'credit_memo'\r?\n)\s+AND deleted_at IS NULL\r?\n(\s+AND \(delivery_id = p_delivery_id OR delivery_id IS NULL\);)/,
@@ -1767,7 +1767,7 @@ try {
   );
   completedProofs.add('DELIVERY_AUTO_INVOICE_DELETED_FILTER_REMOVAL_DETECTED');
   psql(canonicalCompleteGate);
-  assertLiveRestored('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamptz)');
+  assertLiveRestored('public._complete_delivery_body_impl_20270307(uuid,text,uuid,jsonb,text,text,text,timestamptz)');
 
   const canonicalBackfillGate = liveDefinition('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)');
   const backfillGateMutant = canonicalBackfillGate.replace(

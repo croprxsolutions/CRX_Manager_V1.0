@@ -249,7 +249,7 @@ describe('QuickReceivePanel Product identity', () => {
     }
   });
 
-  it('restores a locked request after reload and retries its frozen payload without revalidation', async () => {
+  it.each([false, true])('restores and retries the saved receipt with a skipped first product: %s', async (skippedFirst) => {
     const sourceItem = {
       key: 'frozen-line',
       product_id: 'product-b',
@@ -320,7 +320,9 @@ describe('QuickReceivePanel Product identity', () => {
         receivedByName: 'Receiver',
         vendor: 'Vendor B',
         storageLocation: 'Main Warehouse',
-        matchResults: [frozenMatch],
+        matchResults: skippedFirst
+          ? [{ ...frozenMatch, product_id: 'skipped-product', quantity_unmatched: 3, allocations: [] }, frozenMatch]
+          : [frozenMatch],
         sourceItems: [sourceItem],
       },
     };

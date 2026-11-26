@@ -26,7 +26,7 @@ import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { logActivity } from '../../lib/activityLogger';
 import { fetchWeatherForDateTime } from '../../lib/weatherCapture';
 import GroundCrewsManager from './GroundCrewsManager';
-import type { Profile, Vehicle, JobAppliedRecordRow, GroundCrew, GroundCrewMember } from '../../types';
+import type { Profile, JobVehicle, JobAppliedRecordRow, GroundCrew, GroundCrewMember } from '../../types';
 import type { Json } from '../../types/supabase';
 import {
   emptyAppliedRecordDraft,
@@ -63,7 +63,7 @@ export interface AppliedJobField {
 interface Props {
   jobId: string;
   applicators: Profile[];
-  vehicles: Vehicle[];
+  vehicles: JobVehicle[];
   jobVehicleId: string | null;
   // #18: the job's planned locations + total planned acres, for per-location
   // applied-acres capture and the live remaining-acres counter.

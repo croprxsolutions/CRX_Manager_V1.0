@@ -1,4 +1,4 @@
--- Rollback for 20270311000000_whole_item_quantities.sql: drops the three triggers and the function. No data changes.
+-- Rollback for 20270311150000_whole_item_quantities.sql: drops the three triggers and the function. No data changes.
 BEGIN;
 DO $guard$
 BEGIN

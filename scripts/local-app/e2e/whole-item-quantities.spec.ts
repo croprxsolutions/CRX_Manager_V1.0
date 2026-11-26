@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { localSql } from './local-db';
 
-// Whole-item quantities (20270311000000): on a load in progress, an admin who sets 0.5 on a line whose product is
+// Whole-item quantities (20270311150000): on a load in progress, an admin who sets 0.5 on a line whose product is
 // stocked by the item (Ea) is refused on screen before anything is sent, and the load stays in progress.
 const ID = (k: string) => `md5('wiq-${k}')::uuid`;
 const CLEAN = `BEGIN;
@@ -20,7 +20,7 @@ let deliveryId = '';
 
 test.beforeAll(() => {
   if (localSql(`SELECT count(*) FROM pg_proc WHERE proname = '_enforce_whole_item_quantity'`) === '0') {
-    throw new Error('The local copy lacks 20270311000000. Rebuild it: node scripts/local-app/walkthrough.mjs rebuild.');
+    throw new Error('The local copy lacks 20270311150000. Rebuild it: node scripts/local-app/walkthrough.mjs rebuild.');
   }
   if (localSql(`SELECT count(*) FROM public.deliveries WHERE id = ${ID('delivery')}`) !== '0') {
     throw new Error('Invented WIQ rows are already in the local copy; if no run is going, run CLEAN from this file.');

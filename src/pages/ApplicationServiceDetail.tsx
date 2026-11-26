@@ -6,6 +6,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Badge from '../components/ui/Badge';
+import ApplicationServiceBillingFields from '../components/application-services/ApplicationServiceBillingFields';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
@@ -21,6 +22,14 @@ import {
   formatApplicationServiceCostDollars,
   parseApplicationServiceCostCents,
 } from '../lib/applicationServiceCosts';
+import {
+  APPLICATION_SERVICE_BILLING_DB_READY,
+  loadActiveApplicationServiceVendors,
+  loadApplicationServiceBillingForm,
+  saveApplicationService,
+  type ApplicationServiceSaveArgs,
+  type ApplicationServiceVendorChoice,
+} from '../lib/applicationServiceBilling';
 import type { Vehicle, CustomerApplicationRate } from '../types';
 import { computeSeason } from '../utils/season';
 
@@ -50,9 +59,13 @@ export default function ApplicationServiceDetail() {
 
   const [form, setForm] = useState({
     name: '', vehicle_id: '', default_rate_per_acre: '', cost_per_acre: '', is_active: true, sort_order: '0',
+    bills_customer: true, outside_vendor_id: '',
   });
 
   const [vehicles, setVehicles] = useState<Pick<Vehicle, 'id' | 'vehicle_name'>[]>([]);
+  const [billingReadAvailable, setBillingReadAvailable] = useState(false);
+  const [activeVendors, setActiveVendors] = useState<ApplicationServiceVendorChoice[] | null>(null);
+  const [existingOutsideVendor, setExistingOutsideVendor] = useState<ApplicationServiceVendorChoice | null>(null);
   const [overrides, setOverrides] = useState<(CustomerApplicationRate & { _dirty?: boolean })[]>([]);
   // Farm name of the customer picked for a new override (the picker searches; no list is loaded).
   const [newOverrideCustomerName, setNewOverrideCustomerName] = useState('');
@@ -74,6 +87,9 @@ export default function ApplicationServiceDetail() {
   const [newOverride, setNewOverride] = useState({ customer_id: '', rate: '', season: computeSeason().toString(), notes: '' });
   const [deleteOverrideId, setDeleteOverrideId] = useState<string | null>(null);
 
+  const billingControlsAvailable = APPLICATION_SERVICE_BILLING_DB_READY && billingReadAvailable;
+  const outsideVendorControlAvailable = billingControlsAvailable && activeVendors !== null;
+
   useEffect(() => { if (!initialLoadDone.current || form === loadedFormRef.current) return; setIsDirty(true); }, [form]);
 
   useEffect(() => {
@@ -84,6 +100,10 @@ export default function ApplicationServiceDetail() {
   const fetchService = useCallback(async () => {
     const { data, error } = await supabase.from('application_services').select(SERVICE_COLUMNS).eq('id', id!).single();
     if (error || !data) { toast('error', 'Service not found'); navigate('/application-services'); return; }
+    const billingForm = await loadApplicationServiceBillingForm(id!);
+    setBillingReadAvailable(billingForm.available);
+    setExistingOutsideVendor(billingForm.existingVendor);
+    setActiveVendors(billingForm.activeVendors);
     // cost_per_acre_cents is admin-only at the column-grant level (migration
     // 20260729015706), so it never comes back on the table read — it is fetched
     // through the admin-gated RPC instead.
@@ -118,7 +138,16 @@ export default function ApplicationServiceDetail() {
       }
     }
     setCostKnown(costCents !== null);
-    const loaded = { name: data.name, vehicle_id: data.vehicle_id || '', default_rate_per_acre: formatCentsToDollars(data.default_rate_per_acre_cents), cost_per_acre: costCents === null ? '' : formatApplicationServiceCostDollars(costCents), is_active: data.is_active, sort_order: String(data.sort_order) };
+    const loaded = {
+      name: data.name,
+      vehicle_id: data.vehicle_id || '',
+      default_rate_per_acre: formatCentsToDollars(data.default_rate_per_acre_cents),
+      cost_per_acre: costCents === null ? '' : formatApplicationServiceCostDollars(costCents),
+      is_active: data.is_active,
+      sort_order: String(data.sort_order),
+      bills_customer: billingForm.billsCustomer,
+      outside_vendor_id: billingForm.outsideVendorId,
+    };
     loadedFormRef.current = loaded;
     setForm(loaded);
     setLoading(false);
@@ -133,7 +162,14 @@ export default function ApplicationServiceDetail() {
 
   useEffect(() => {
     if (!isNew && id) { fetchService(); fetchOverrides(); }
-    else { setTimeout(() => { initialLoadDone.current = true; }, 0); }
+    else {
+      setTimeout(() => { initialLoadDone.current = true; }, 0);
+      setBillingReadAvailable(APPLICATION_SERVICE_BILLING_DB_READY);
+      setActiveVendors(null);
+      if (APPLICATION_SERVICE_BILLING_DB_READY) {
+        void loadActiveApplicationServiceVendors().then(setActiveVendors);
+      }
+    }
   }, [id, isNew, fetchService, fetchOverrides]);
 
   // ONE call writes the whole service, cost_per_acre_cents included, inside a
@@ -145,32 +181,16 @@ export default function ApplicationServiceDetail() {
   // DUPLICATE service, since idx_application_services_active_name is not unique.
   // Migration 20260729035923 collapsed both writes into
   // admin_save_application_service so they land together or not at all.
-  const saveService = async (args: {
-    p_name: string;
-    p_default_rate_per_acre_cents: number;
-    p_is_active: boolean;
-    p_sort_order: number;
-    p_vehicle_id: string | null;
-    p_cost_per_acre_cents: number | null;
-    p_service_id: string | null;
-  }) => {
+  const saveService = async (args: ApplicationServiceSaveArgs) => {
     const attempt = async () => {
-      const { data, error } = await supabase.rpc('admin_save_application_service', {
-        ...args,
-        // The Supabase type generator never emits `| null` for an RPC argument,
-        // but these three take SQL NULL by design: p_service_id NULL means
-        // "create", p_cost_per_acre_cents NULL means "leave the cost alone", and
-        // p_vehicle_id NULL means "no vehicle". Same cast the other
-        // null-accepting RPC callers use (BlendRecipes.tsx, JobDetail.tsx).
-        p_service_id: args.p_service_id as unknown as string,
-        p_vehicle_id: args.p_vehicle_id as unknown as string,
-        p_cost_per_acre_cents: args.p_cost_per_acre_cents as unknown as number,
-        p_idempotency_key: saveIdem.getKey(),
-      });
-      if (error) throw error;
-      return assertRpcResult<{ success: boolean; service_id: string; created: boolean }>(
-        data, 'admin_save_application_service',
-      );
+      const billing = billingControlsAvailable
+        ? {
+          billsCustomer: form.bills_customer,
+          outsideVendorId: form.outside_vendor_id || null,
+          clearOutsideVendor: form.outside_vendor_id === '' && Boolean(loadedFormRef.current?.outside_vendor_id),
+        }
+        : null;
+      return saveApplicationService(args, billing, saveIdem.getKey());
     };
     let result: { success: boolean; service_id: string; created: boolean };
     try {
@@ -309,6 +329,16 @@ export default function ApplicationServiceDetail() {
         {isAdmin && <Input label="Cost / Acre ($)" type="number" step="0.01" min={0} value={form.cost_per_acre} onChange={(e) => updateField('cost_per_acre', e.target.value)} placeholder={costKnown ? 'e.g. 6.50' : 'Unavailable'} disabled={!costKnown} error={costKnown ? undefined : 'Could not load the current cost — editing is locked so it cannot be overwritten. Reload to try again.'} />}
         <Input label="Sort Order" type="number" value={form.sort_order} onChange={(e) => updateField('sort_order', e.target.value)} placeholder="0" />
         <div><label className="block text-sm font-medium text-nav-dark mb-1">Status</label><select value={form.is_active ? 'active' : 'inactive'} onChange={(e) => updateField('is_active', e.target.value === 'active')} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
+        <ApplicationServiceBillingFields
+          billsCustomer={form.bills_customer}
+          outsideVendorId={form.outside_vendor_id}
+          billingAvailable={billingControlsAvailable}
+          outsideVendorAvailable={outsideVendorControlAvailable}
+          activeVendors={activeVendors}
+          existingOutsideVendor={existingOutsideVendor}
+          onBillsCustomerChange={(value) => updateField('bills_customer', value)}
+          onOutsideVendorChange={(value) => updateField('outside_vendor_id', value)}
+        />
       </div></Card>
       </fieldset>
 

@@ -19,7 +19,17 @@ import {
   formatApplicationServiceCostPerAcre,
   parseApplicationServiceCostCents,
 } from '../lib/applicationServiceCosts';
+import {
+  APPLICATION_SERVICE_BILLING_DB_READY,
+  readApplicationServiceBillingIfReady,
+} from '../lib/applicationServiceBilling';
 import type { ApplicationServiceWithCost } from '../types';
+
+interface ApplicationServiceListRow extends ApplicationServiceWithCost {
+  billingAvailable: boolean;
+  billsCustomer: boolean | null;
+  outsideVendorName: string | null;
+}
 
 // Every column of application_services EXCEPT cost_per_acre_cents. Migration
 // 20260729015706 revoked that column from `authenticated`, so `select('*')` here
@@ -37,7 +47,7 @@ export default function ApplicationServices() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { role } = useAuth();
-  const [services, setServices] = useState<ApplicationServiceWithCost[]>([]);
+  const [services, setServices] = useState<ApplicationServiceListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | ''>('');
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -101,10 +111,19 @@ export default function ApplicationServices() {
       }
     }
 
-    setServices(((data || []) as unknown as ApplicationServiceWithCost[]).map((s) => ({
-      ...s,
-      cost_per_acre_cents: costById.get(s.id) ?? null,
-    })));
+    const billingRead = await readApplicationServiceBillingIfReady(
+      (data || []).map((service) => service.id), APPLICATION_SERVICE_BILLING_DB_READY,
+    );
+    setServices(((data || []) as unknown as ApplicationServiceWithCost[]).map((s) => {
+      const billing = billingRead?.byServiceId.get(s.id);
+      return {
+        ...s,
+        cost_per_acre_cents: costById.get(s.id) ?? null,
+        billingAvailable: billingRead?.available === true && billing !== undefined,
+        billsCustomer: billing?.billsCustomer ?? null,
+        outsideVendorName: billing?.outsideVendorName ?? null,
+      };
+    }));
     setLoading(false);
   }, [toast, isAdmin]);
 
@@ -122,7 +141,7 @@ export default function ApplicationServices() {
     useRowSelection({ data: filtered, getId: (s) => s.id });
 
   const checkboxCol = useMemo(
-    () => createCheckboxColumn<ApplicationServiceWithCost>(selected, toggleSelect, (s) => s.id),
+    () => createCheckboxColumn<ApplicationServiceListRow>(selected, toggleSelect, (s) => s.id),
     [selected, toggleSelect],
   );
 
@@ -190,7 +209,7 @@ export default function ApplicationServices() {
     { key: 'delete', label: 'Delete', icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeleteModalOpen(true), variant: 'danger' as const },
   ];
 
-  const dataColumns: Column<ApplicationServiceWithCost>[] = [
+  const dataColumns: Column<ApplicationServiceListRow>[] = [
     {
       key: 'name',
       header: 'Service',
@@ -206,7 +225,7 @@ export default function ApplicationServices() {
       ),
     },
     {
-      key: 'vehicle' as keyof ApplicationServiceWithCost,
+      key: 'vehicle' as keyof ApplicationServiceListRow,
       header: 'Vehicle',
       sortable: false,
       render: (r) => r.vehicle?.vehicle_name || <span className="text-secondary">-</span>,
@@ -228,6 +247,22 @@ export default function ApplicationServices() {
           {r.cost_per_acre_cents === null ? '-' : formatApplicationServiceCostPerAcre(r.cost_per_acre_cents)}
         </span>
       ),
+    },
+    {
+      key: 'billsCustomer',
+      header: 'Billed by CRX',
+      sortable: true,
+      render: (r) => r.billingAvailable
+        ? r.billsCustomer ? 'Yes' : 'No'
+        : <span className="text-secondary">Not available yet</span>,
+    },
+    {
+      key: 'outsideVendorName',
+      header: 'Outside Company',
+      sortable: true,
+      render: (r) => r.billingAvailable
+        ? r.outsideVendorName || <span className="text-secondary">-</span>
+        : <span className="text-secondary">Not available yet</span>,
     },
     {
       key: 'is_active',
@@ -292,7 +327,7 @@ export default function ApplicationServices() {
 
       <Card padding={false}>
         <div className="p-5">
-          <DataTable<ApplicationServiceWithCost>
+          <DataTable<ApplicationServiceListRow>
             data={filtered}
             columns={columns}
             searchable

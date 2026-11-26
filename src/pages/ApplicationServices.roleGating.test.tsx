@@ -41,6 +41,7 @@ const H = vi.hoisted(() => ({
   role: { current: 'admin' as string | null },
   toast: vi.fn(),
   captureException: vi.fn(),
+  billingRead: vi.fn(),
 }));
 
 // Chainable stub: .from().select().order() awaits to the service list.
@@ -53,7 +54,13 @@ vi.mock('../lib/db', async (importOriginal) => {
   return {
     ...actual, // keeps the REAL assertRpcResult — its throw is what case 2 tests
     supabase: { from: () => builder, rpc: H.rpc },
+    supabaseUntyped: { from: () => builder, rpc: H.rpc },
   };
+});
+
+vi.mock('../lib/applicationServiceBilling', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, readApplicationServiceBilling: H.billingRead };
 });
 
 vi.mock('../contexts/AuthContext', () => ({
@@ -121,5 +128,17 @@ describe('ApplicationServices cost gating', () => {
     expect(screen.queryByText('$0.00/ac')).toBeNull();
     await waitFor(() => expect(H.captureException).toHaveBeenCalled());
     expect(H.toast).toHaveBeenCalledWith('error', 'Failed to load application service costs');
+  });
+
+  it('shows the billing and outside company columns while their data is unavailable', async () => {
+    H.role.current = 'sales_rep';
+    await renderPage();
+
+    expect(await screen.findByText('Y-Drop Nitrogen')).toBeTruthy();
+    expect(screen.getByText('Billed by CRX')).toBeTruthy();
+    expect(screen.getByText('Outside Company')).toBeTruthy();
+    expect(screen.getAllByText('Not available yet')).toHaveLength(2);
+    expect(H.toast).not.toHaveBeenCalled();
+    expect(H.billingRead).not.toHaveBeenCalled();
   });
 });

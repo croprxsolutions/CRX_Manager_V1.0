@@ -207,6 +207,16 @@ test('usersSee ignores the template placeholder and indented headings end the li
   assert.deepEqual(usersSee('What users see: <one plain sentence>'), []);
 });
 
+test('usersSee drops "nothing" notes and the PR footer, and shows links as plain text', () => {
+  const body = '## What users see\nNothing. Agent tooling only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)';
+  assert.deepEqual(usersSee(body), []);
+  for (const said of ['None (CI only).', 'nothing; agent tooling only.', 'N/A', 'None on production.']) {
+    assert.deepEqual(usersSee(`What users see: ${said}`), [], said);
+  }
+  assert.deepEqual(usersSee('## What users see\n- See the [price list](https://x.test/p) tab\n---\n- footer'), ['See the price list tab']);
+  assert.deepEqual(usersSee('What users see: Invoices show the [quote](/quotes/1) price.'), ['Invoices show the quote price.']);
+});
+
 test('prState: held-off needs its reason even when also verified', () => {
   assert.equal(prState({ labels: ['held-off', 'verified-on-staging'], body: 'Staging proof: https://x.example' }), 'missing');
   assert.equal(prState({ labels: ['held-off'], body: 'Held off: #12' }), 'held');

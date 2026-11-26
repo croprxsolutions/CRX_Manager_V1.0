@@ -237,7 +237,12 @@ export function changelogMarkdown(g) {
   return sections.map(([h, items]) => `#### ${h}\n${items.map((e) => `* ${e.text} (#${e.number})`).join('\n')}`).join('\n\n');
 }
 
-const NOTHING = /^(none|nothing|n\/a|-)\.?$/i;
+// "None", "None (CI only).", "Nothing. Agent tooling only." and "N/A" all mean nothing users see.
+const NOTHING = /^(?:none\b|nothing\b|n\/a\b|-\.?$)/i;
+// A heading, a rule or the PR's "🤖 Generated with …" footer ends the list.
+const SECTION_END = /^[ ]{0,3}(?:#|---|🤖)|generated with \[claude code\]/i;
+// The dialog shows plain text, so "[text](url)" becomes "text".
+const plain = (s) => s.replace(/\[([^\]]+)\]\([^)\s]+\)/g, '$1');
 
 // What a PR says users will notice: a "What users see: …" line, or a "## What users see" list.
 // "None" means nothing; the template's "<…>" placeholder counts as not filled in.
@@ -246,14 +251,14 @@ export function usersSee(body) {
   const line = /^[ \t]*what users see:[ \t]*(.*)$/im.exec(text);
   const said = line?.[1].trim() ?? '';
   if (NOTHING.test(said)) return [];
-  if (said && !said.startsWith('<')) return [said];
+  if (said && !said.startsWith('<')) return [plain(said)];
   const section = /^[ ]{0,3}#+\s*what users see\s*$/im.exec(text);
   if (!section) return [];
   const out = [];
   for (const l of text.slice(section.index + section[0].length).split('\n')) {
-    if (/^[ ]{0,3}#/.test(l)) break;
+    if (SECTION_END.test(l)) break;
     const item = l.replace(/^\s*[-*]\s*/, '').trim();
-    if (item && !NOTHING.test(item) && !item.startsWith('<') && !/^what users see:/i.test(item)) out.push(item);
+    if (item && !NOTHING.test(item) && !item.startsWith('<') && !/^what users see:/i.test(item)) out.push(plain(item));
   }
   return out;
 }

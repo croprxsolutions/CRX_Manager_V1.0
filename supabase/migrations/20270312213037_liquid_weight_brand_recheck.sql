@@ -1,6 +1,23 @@
 -- Prepare the liquid Weight review without opening the switch or rewriting existing approvals.
 -- Replacements retain the existing owners, signatures, and execute grants.
 
+SET LOCAL lock_timeout = '5s';
+
+DO $preflight$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM (VALUES
+      ('public.approve_weights(jsonb,text)', 'adda6f0854f3de86bca3e5d50ae88113'),
+      ('public.return_liquid_density_to_draft_for_brand()', 'f4a558214d47daf8d0bc2c2785e2f113')
+    ) AS expected(signature, body_md5)
+    LEFT JOIN pg_catalog.pg_proc AS p ON p.oid = to_regprocedure(expected.signature)
+    WHERE md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM expected.body_md5
+  ) THEN
+    RAISE EXCEPTION 'PREFLIGHT_LIQUID_WEIGHT_BRAND_RECHECK: existing weight functions differ from the reviewed versions';
+  END IF;
+END;
+$preflight$;
+
 CREATE OR REPLACE FUNCTION public.return_liquid_density_to_draft_for_brand() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE

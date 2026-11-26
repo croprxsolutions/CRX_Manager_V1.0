@@ -553,6 +553,9 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_NOTHING_TO_BILL: delivery D-1')).toBe(
       'Nothing was billed. This delivery has no delivered quantity'
     );
+    expect(sanitizeError("UNBILLED_SCOPE_CHANGED: delivery D-1's billing changed")).toContain('Reload the page');
+    expect(sanitizeError('UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for X')).toContain('Link the line to its order line first');
+    expect(sanitizeError('BILL_SPLIT_REST_NOT_SUPPORTED: delivery D-1')).toContain('Void its Bill Split invoices');
     expect(sanitizeError('ORDER_HAS_BILL_SPLIT: this sale has a bill split, so it cannot be billed as one invoice'))
       .toContain('billed per payer');
     expect(sanitizeError("ORDER_ITEM_SHARES_OVER_100: a line's shares can't total more than 100%"))
@@ -807,5 +810,21 @@ describe('customer receipt refusals (KI-25)', () => {
   it('leaves the invoice-posting DELIVERY_NOT_COMPLETED sentence alone', () => {
     const msg = 'DELIVERY_NOT_COMPLETED: delivery D-42 for invoice INV-1002 has been deleted. Void this invoice instead of posting it.';
     expect(sanitizeError(new Error(msg))).not.toMatch(/receipt/);
+  });
+});
+
+describe('M9 refund and returned-check refusals', () => {
+  it('turns the hand-check gate into a plain instruction', () => {
+    expect(sanitizeError({ message: 'RECORD_NEEDS_HAND_CHECK: STORED_BALANCE_MISMATCH (the records this touches do not agree; record it by hand)' }))
+      .toBe("Nothing was saved. The records this touches don't agree (STORED_BALANCE_MISMATCH), so this has to be recorded by hand. Month-End's prepay check shows the customer's stored and credit totals.");
+  });
+
+  it("keeps the server's sentence after the token", () => {
+    expect(sanitizeError({ message: "CHECK_PREPAY_REFUNDED: $100.00 of this check's prepay was already refunded to the customer; record this bounce by hand" }))
+      .toBe("Nothing was saved. $100.00 of this check's prepay was already refunded to the customer; record this bounce by hand.");
+    expect(sanitizeError({ message: 'PAYMENT_RETURNED: this check is recorded as returned (bounced); it cannot also be voided' }))
+      .toBe('Nothing was saved. This check is recorded as returned (bounced); it cannot also be voided.');
+    expect(sanitizeError({ message: 'RETURNED_BEFORE_RECEIVED: the check was received on 2026-09-15; the bank cannot have returned it before that' }))
+      .toBe('Nothing was saved. The check was received on 2026-09-15; the bank cannot have returned it before that.');
   });
 });

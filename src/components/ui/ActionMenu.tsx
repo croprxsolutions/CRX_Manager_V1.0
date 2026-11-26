@@ -20,6 +20,8 @@ export type ActionMenuItem = {
   danger?: boolean;
   disabled?: boolean;
   disabledReason?: string;
+  /** A second line under an enabled item (a disabled one shows its disabledReason). */
+  description?: string;
   group?: string;
 };
 
@@ -47,8 +49,8 @@ function Item({ item }: { item: ActionMenuItem }) {
       {item.icon && <span className="h-4 w-4 shrink-0 flex items-center justify-center" aria-hidden="true">{item.icon}</span>}
       <span className="flex flex-col min-w-0">
         <Text slot="label">{item.label}</Text>
-        {item.disabled && item.disabledReason && (
-          <Text slot="description" className="text-xs font-normal text-secondary">{item.disabledReason}</Text>
+        {(item.disabled ? item.disabledReason : item.description) && (
+          <Text slot="description" className="text-xs font-normal text-secondary">{item.disabled ? item.disabledReason : item.description}</Text>
         )}
       </span>
     </MenuItem>

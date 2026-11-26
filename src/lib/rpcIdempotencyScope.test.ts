@@ -334,6 +334,10 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // receipts (it is the only layer the wrapper's key reaches). 20261022021000 re-emits its live body
   // only to add the field-split refusal; changing the literal would orphan every existing receipt.
   _create_invoice_from_order_idem_impl_20260721: ['create_invoice_from_order'],
+  // Direct EXECUTE is revoked (postgres-only). 20260721145936 renamed the governed public body to this name, so it
+  // kept the public operation literal and owns the wrapper's receipts. 20270311010000 (A4) re-emits it only to carry
+  // p_expected_scope into its request binding; changing the literal would orphan every existing receipt.
+  _create_invoice_for_unbilled_delivery_idem_impl_20260721: ['create_invoice_for_unbilled_delivery'],
   // Direct EXECUTE is revoked (postgres-only). 20261016140000 renamed the original
   // create_order_from_blend_ticket body to this name behind a same-signature wrapper (ALTER
   // FUNCTION ... RENAME TO), so the body kept the public operation literal and both layers share

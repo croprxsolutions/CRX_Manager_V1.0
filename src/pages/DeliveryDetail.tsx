@@ -19,6 +19,7 @@ import CompletionProofFields, { ProofOption } from '../components/deliveries/Com
 import { ISSUE_TYPE_LABELS } from '../lib/deliveryIssueTypes';
 import { useLoadBoundSignature } from '../hooks/useLoadBoundSignature';
 import { useToast } from '../components/ui/Toast';
+import { isWholeItemUnit, wholeItemMessage } from '../lib/units';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -54,7 +55,7 @@ import {
   receiptMayAlreadyBeSent, readQueuedReceipt, queuedMeanwhileWarning, type ReceiptCloseResult,
 } from '../lib/receiptsToCheck';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
-import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
+import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery, fetchDeliveryBillingRemainders, fetchOrderBillingRemainder, unbilledRemainderLabel, type DeliveryBillingRemainder } from '../lib/deliveryInvoiceCoverage';
 import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { addDeliveryEditItem, removeDeliveryEditItem, type AvailableDeliveryEditItem, type DeliveryEditItem } from '../lib/deliveryEditItems';
@@ -259,6 +260,9 @@ export default function DeliveryDetail() {
 
   // Office re-bill state for a completed delivery with no active covering invoice.
   const [createInvoiceConfirmOpen, setCreateInvoiceConfirmOpen] = useState(false);
+  // A4: what the confirmation showed, frozen when it opened, for the delivery it opened on; the server refuses a
+  // different scope, amount or quantity (UNBILLED_SCOPE_CHANGED).
+  const [confirmIntent, setConfirmIntent] = useState<ConfirmIntent>(NO_CONFIRM_INTENT);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
 
   // Photo upload state
@@ -281,6 +285,10 @@ export default function DeliveryDetail() {
   const [relatedInvoices, setRelatedInvoices] = useState<RelatedInvoice[]>([]);
   // False until this delivery's invoice reads return: the card says Loading, never "No invoice yet".
   const [invoicesLoaded, setInvoicesLoaded] = useState(false);
+  // A4: delivered units no active invoice bills yet, when an invoice covers this delivery only in part.
+  const [billingRemainder, setBillingRemainder] = useState<DeliveryBillingRemainder | null>(null);
+  // The remainder read failed: the page must not look fully billed.
+  const [remainderUnknown, setRemainderUnknown] = useState(false);
 
   // H5: true when the server's ORDER_NEEDS_SPLIT_BILLING guard would refuse a
   // single backfilled invoice for this delivery's order. Defaults to false and
@@ -311,6 +319,9 @@ export default function DeliveryDetail() {
     setParentOrder(null);
     setRelatedInvoices([]);
     setInvoicesLoaded(false);
+    setBillingRemainder(null);
+    setCreateInvoiceConfirmOpen(false);
+    setConfirmIntent(NO_CONFIRM_INTENT);
     setSiblingDeliveries([]);
     setParentQuote(null);
   }, [id]);
@@ -346,18 +357,55 @@ export default function DeliveryDetail() {
     activeInvoiceCoversDelivery(invoice, delivery.id, delivery.order_id)
     || (invoice.delivery_id === delivery.id && activeInvoiceCountsTowardBilling(invoice))
   );
+  // A4: an invoice bills fewer units than were delivered, so the rest is still to bill. Admins only: other roles may
+  // not see every invoice (invoices RLS), so their remainder could count billed units as unbilled.
+  const shortBilled = isAdmin && hasActiveRelatedInvoice && billingRemainder !== null;
+  const needsBilling = !hasActiveRelatedInvoice || shortBilled;
+  // A whole-order invoice covers the order, so Bill the rest drafts every unbilled unit on the order.
+  const wholeOrderInvoiced = relatedInvoices.some((invoice) => invoice.delivery_id === null && activeInvoiceCountsTowardBilling(invoice));
+  // Re-read after every invoice load (a Create Invoice reloads them), only where the note can show.
+  const remainderDeliveryId = isAdmin && invoicesLoaded && delivery?.status === 'completed' && hasActiveRelatedInvoice ? delivery.id : null;
+  useEffect(() => {
+    setBillingRemainder(null);
+    setRemainderUnknown(false);
+    if (!remainderDeliveryId) return undefined;
+    let live = true;
+    void loadBillingRemainder(remainderDeliveryId).then((r) => {
+      if (!live) return;
+      setBillingRemainder(r === 'failed' ? null : r);
+      setRemainderUnknown(r === 'failed');
+    });
+    return () => { live = false; };
+  }, [remainderDeliveryId, relatedInvoices]);
+  // A Bill Split sale's rest is redrafted by voiding its group; the server refuses Bill the rest on it.
+  const billSplitRest = shortBilled && relatedInvoices.some((invoice) =>
+    invoice.delivery_id === delivery?.id && invoice.invoice_group_id !== null && activeInvoiceCountsTowardBilling(invoice));
+  // What the confirmation shows is what the server must still find (UNBILLED_SCOPE_CHANGED otherwise).
+  const expectedScope = !hasActiveRelatedInvoice ? 'new' : wholeOrderInvoiced ? 'rest_order' : 'rest_delivery';
+  // A4: freeze what the confirmation shows. On a whole-order invoice the rest is the order's, read fresh.
+  const openCreateInvoiceConfirm = async () => {
+    if (!delivery) return;
+    let rest = shortBilled ? billingRemainder : null;
+    if (expectedScope === 'rest_order' && delivery.order_id) {
+      rest = await fetchOrderBillingRemainder(delivery.order_id);
+      if (!rest) { toast('error', 'Could not read what is left to bill on this order. Refresh the page and try again.'); return; }
+    }
+    setConfirmIntent({ deliveryId: delivery.id, scope: expectedScope, rest: rest ? unbilledRemainderLabel(rest) : null,
+      cents: expectedScope === 'new' || !rest ? null : rest.unbilledCents, units: expectedScope === 'new' || !rest ? null : rest.unbilledQty });
+    setCreateInvoiceConfirmOpen(true);
+  };
   // RPC is admin-only (finding #78's backfill twin); sales_reps bill jobs, not stray deliveries.
   // H5: also mirror the server's ORDER_NEEDS_SPLIT_BILLING refusal via the shared
   // predicate, so this surface and IntegrityCleanupPanel cannot drift apart.
   const canCreateInvoice = isAdmin
     && delivery?.status === 'completed'
-    && !hasActiveRelatedInvoice
+    && needsBilling
     && !orderNeedsSplitBilling
     && billedOutsideCrxReason === null;
   // Only worth explaining where the button would otherwise have been offered.
   const splitBillingBlocksInvoice = isAdmin
     && delivery?.status === 'completed'
-    && !hasActiveRelatedInvoice
+    && needsBilling
     && orderNeedsSplitBilling
     && billedOutsideCrxReason === null;
 
@@ -843,6 +891,12 @@ export default function DeliveryDetail() {
       return;
     }
 
+    const editFraction = activeEditItems.map((i) => wholeItemMessage(i.product_name, i.unit_size || '', i.quantity)).find(Boolean);
+    if (editFraction) {
+      toast('error', `Nothing was saved. ${editFraction}`);
+      return;
+    }
+
     setSavingEdit(true);
 
     const itemsPayload = editItemsPayload(isScheduled, activeEditItems);
@@ -1251,6 +1305,15 @@ export default function DeliveryDetail() {
     }
     if (submittedEvidence === 'no_proof' && !isValidNoProofReason(noProofReason)) {
       toast('error', `Write why there is no proof (${NO_PROOF_REASON_MIN_CHARS} to ${NO_PROOF_REASON_MAX_CHARS} characters)`);
+      return;
+    }
+    // Products sold by the whole item (Ea, Unit) take whole figures; the server refuses a fraction too (WHOLE_ITEMS_ONLY).
+    const fraction = items.map((item) => wholeItemMessage(
+      (item.product as unknown as { product_name?: string } | null)?.product_name || 'This product',
+      item.unit_size || '', deliveryQtys[item.id] ?? item.quantity,
+    )).find(Boolean);
+    if (fraction) {
+      toast('error', `The delivery was not completed. ${fraction}`);
       return;
     }
     // Caught here, before the signature image is uploaded: nothing delivered, or proof taken for other lines or amounts.
@@ -1667,13 +1730,18 @@ export default function DeliveryDetail() {
   // U16a: office-visible twin of IntegrityCleanup's admin-only backfill (finding #78).
   const handleCreateInvoice = async () => {
     if (!delivery || !profile) return;
+    // The confirmation belongs to the delivery it opened on.
+    if (confirmIntent.deliveryId !== delivery.id) { setCreateInvoiceConfirmOpen(false); return; }
     setCreatingInvoice(true);
 
     try {
       const { data, error } = await supabase.rpc('create_invoice_for_unbilled_delivery', {
-        p_delivery_id: delivery.id,
+        p_delivery_id: confirmIntent.deliveryId,
         p_performed_by: profile.id,
-        p_idempotency_key: createInvoiceIdem.getKeyFor(delivery.id),
+        p_idempotency_key: createInvoiceIdem.getKeyFor(confirmIntent.deliveryId),
+        p_expected_scope: confirmIntent.scope,
+        p_expected_cents: confirmIntent.cents ?? undefined,
+        p_expected_units: confirmIntent.units ?? undefined,
       });
       if (error) throw error;
 
@@ -1966,7 +2034,7 @@ export default function DeliveryDetail() {
                           onChange={(e) => updateDeliveryQty(item.id, parseFloat(e.target.value) || 0, item.quantity)}
                           className="h-12 w-0 min-w-0 flex-1 rounded-xl border border-gray-300 bg-white text-center font-heading text-[1.75rem]! font-bold tabular-nums text-nav-dark focus:outline-none focus:ring-2 focus:ring-crx-green focus:border-crx-green"
                           min="0"
-                          step="any"
+                          step={isWholeItemUnit(item.unit_size) ? 1 : 'any'}
                           aria-label={`Quantity for ${productName || 'item'}`}
                         />
                         <button
@@ -2549,7 +2617,7 @@ export default function DeliveryDetail() {
                           className="w-20 text-center px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                           min="0"
                           max={item.max_quantity}
-                          step="any"
+                          step={isWholeItemUnit(item.unit_size) ? 1 : 'any'}
                         />
                         <button
                           onClick={() => setEditItems((prev) =>
@@ -2667,12 +2735,14 @@ export default function DeliveryDetail() {
           invoices={relatedInvoices}
           deliveryId={delivery.id}
           loading={!invoicesLoaded}
-          unbilled={delivery.status === 'completed' && invoicesLoaded && !hasActiveRelatedInvoice ? {
+          remainderUnknown={delivery.status === 'completed' && invoicesLoaded && remainderUnknown}
+          unbilled={delivery.status === 'completed' && invoicesLoaded && needsBilling ? {
             isAdmin,
+            rest: shortBilled && billingRemainder ? unbilledRemainderLabel(billingRemainder) : null,
             billedOutsideCrxReason,
-            createInvoice: canCreateInvoice ? 'offer' : splitBillingBlocksInvoice ? 'split' : null,
+            createInvoice: billSplitRest ? 'bill_split' : canCreateInvoice ? 'offer' : splitBillingBlocksInvoice ? 'split' : null,
             creating: creatingInvoice,
-            onCreate: () => setCreateInvoiceConfirmOpen(true),
+            onCreate: () => { void openCreateInvoiceConfirm(); },
           } : null}
         />
       )}
@@ -2819,7 +2889,7 @@ export default function DeliveryDetail() {
                       onChange={(e) => updateDeliveryQty(item.id, parseFloat(e.target.value) || 0, item.quantity)}
                       className="w-20 text-center px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                       min="0"
-                      step="any"
+                      step={isWholeItemUnit(item.unit_size) ? 1 : 'any'}
                     />
                     <button
                       onClick={() => updateDeliveryQty(item.id, currentQty + 1, item.quantity)}
@@ -3144,9 +3214,11 @@ export default function DeliveryDetail() {
           if (!creatingInvoice) setCreateInvoiceConfirmOpen(false);
         }}
         onConfirm={() => { void handleCreateInvoice(); }}
-        title="Create an invoice for this delivery?"
-        message={`This makes a draft invoice for completed delivery ${delivery.delivery_number}.`}
-        confirmLabel="Create invoice"
+        title={confirmIntent.scope !== 'new' ? 'Bill the rest of this delivery?' : 'Create an invoice for this delivery?'}
+        message={confirmIntent.scope !== 'new'
+          ? `This makes a draft invoice for the units of delivery ${delivery.delivery_number} not billed yet (${confirmIntent.rest ?? 'see the invoices card'}).${confirmIntent.scope === 'rest_order' ? ' This order has a whole-order invoice, so the draft bills every unbilled unit on the order.' : ''} If the billing changes before you confirm, nothing is drafted and the page asks you to reload.`
+          : `This makes a draft invoice for completed delivery ${delivery.delivery_number}.`}
+        confirmLabel={confirmIntent.scope !== 'new' ? 'Bill the rest' : 'Create invoice'}
         variant="info"
         loading={creatingInvoice}
       />
@@ -3181,11 +3253,13 @@ interface RelatedInvoice {
   id: string; invoice_number: string; invoice_date: string; status: string;
   total_amount_cents: number; order_id: string; delivery_id: string | null;
   invoice_type: string; deleted_at: string | null;
+  /** Set on a Bill Split (or field split) group's invoices. */
+  invoice_group_id: string | null;
   /** The invoice's customer (each payer has its own invoice on a Bill Split). */
   bill_to: string | null;
 }
 
-const RELATED_INVOICE_COLUMNS = 'id, invoice_number, invoice_date, status, total_amount_cents, order_id, delivery_id, invoice_type, deleted_at, customer:customers!invoices_customer_id_fkey(farm_name)';
+const RELATED_INVOICE_COLUMNS = 'id, invoice_number, invoice_date, status, total_amount_cents, order_id, delivery_id, invoice_type, deleted_at, invoice_group_id, customer:customers!invoices_customer_id_fkey(farm_name)';
 
 /** Read-only, same RLS as the order read: invoices linked by delivery_id, or null (reported) when the read fails. */
 async function fetchInvoicesByDelivery(deliveryId: string): Promise<Record<string, unknown>[] | null> {
@@ -3247,8 +3321,28 @@ function toRelatedInvoice(inv: Record<string, unknown>): RelatedInvoice {
     delivery_id: inv.delivery_id as string | null,
     invoice_type: inv.invoice_type as string,
     deleted_at: inv.deleted_at as string | null,
+    invoice_group_id: (inv.invoice_group_id as string | null | undefined) ?? null,
     bill_to: (inv.customer as { farm_name?: string | null } | null)?.farm_name ?? null,
   };
+}
+
+interface ConfirmIntent {
+  deliveryId: string | null;
+  scope: 'new' | 'rest_delivery' | 'rest_order';
+  rest: string | null;
+  cents: number | null;
+  units: number | null;
+}
+const NO_CONFIRM_INTENT: ConfirmIntent = { deliveryId: null, scope: 'new', rest: null, cents: null, units: null };
+
+/** A4: what an invoice leaves unbilled on this delivery; 'failed' when it could not be read. */
+async function loadBillingRemainder(deliveryId: string): Promise<DeliveryBillingRemainder | null | 'failed'> {
+  const { data, error } = await fetchDeliveryBillingRemainders([deliveryId]);
+  if (error || !data) {
+    Sentry.captureException(error, { extra: { context: 'load_delivery_billing_remainder', deliveryId } });
+    return 'failed';
+  }
+  return data.get(deliveryId) ?? null;
 }
 
 /**
@@ -3256,11 +3350,12 @@ function toRelatedInvoice(inv: Record<string, unknown>): RelatedInvoice {
  * delivery's own invoices carry a "This delivery" tag. Once completed it never disappears: with
  * nothing billing this delivery it says so (see UnbilledNote).
  */
-function DeliveryInvoicesCard({ invoices, deliveryId, loading, unbilled }: {
+function DeliveryInvoicesCard({ invoices, deliveryId, loading, unbilled, remainderUnknown }: {
   invoices: RelatedInvoice[];
   deliveryId: string;
   loading: boolean;
   unbilled: UnbilledNoteProps | null;
+  remainderUnknown: boolean;
 }) {
   return (
     <SectionCard id="delivery-invoices" icon={<FileText className="w-5 h-5" />} title="Invoices on this sale">
@@ -3277,6 +3372,12 @@ function DeliveryInvoicesCard({ invoices, deliveryId, loading, unbilled }: {
         )}
         {loading && <p role="status" className="text-sm text-secondary">Loading invoices…</p>}
         {unbilled && <div className={invoices.length > 0 ? 'mt-3' : ''}><UnbilledNote {...unbilled} /></div>}
+        {remainderUnknown && !unbilled && (
+          <p role="alert" className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-900">
+            <AlertTriangle className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+            Could not check whether every delivered unit is billed. Refresh the page to check again.
+          </p>
+        )}
       </div>
     </SectionCard>
   );
@@ -3284,8 +3385,10 @@ function DeliveryInvoicesCard({ invoices, deliveryId, loading, unbilled }: {
 
 interface UnbilledNoteProps {
   isAdmin: boolean;
+  /** A4: an invoice bills this delivery only in part ("4 of 10 not billed ($160.00)"). */
+  rest: string | null;
   billedOutsideCrxReason: string | null;
-  createInvoice: 'offer' | 'split' | null;
+  createInvoice: 'offer' | 'split' | 'bill_split' | null;
   creating: boolean;
   onCreate: () => void;
 }
@@ -3295,7 +3398,8 @@ interface UnbilledNoteProps {
  * an admin is told nothing is billed and gets Create invoice… under today's condition (or the
  * disabled split-billing button with its reason); others may not see every invoice (invoices RLS).
  */
-function UnbilledNote({ isAdmin, billedOutsideCrxReason, createInvoice, creating, onCreate }: UnbilledNoteProps) {
+function UnbilledNote({ isAdmin, rest, billedOutsideCrxReason, createInvoice, creating, onCreate }: UnbilledNoteProps) {
+  const label = rest ? 'Bill the rest…' : 'Create invoice…';
   // The stored reason is admin-only, as before this card; others get the plain empty text below.
   if (isAdmin && billedOutsideCrxReason !== null) {
     return (
@@ -3308,18 +3412,23 @@ function UnbilledNote({ isAdmin, billedOutsideCrxReason, createInvoice, creating
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-900">
       <AlertTriangle className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-      {isAdmin
+      {rest
+        ? <p className="min-w-0 flex-1"><strong>Not fully billed.</strong> {rest}: the invoice bills fewer units than were delivered.</p>
+        : isAdmin
         ? <p className="min-w-0 flex-1"><strong>No invoice yet.</strong> This delivery is complete but nothing has been billed.</p>
         : <p className="min-w-0 flex-1"><strong>No invoices you can see for this delivery.</strong> Ask the office whether it has been billed.</p>}
       {createInvoice === 'offer' && (
         <Button variant="secondary" size="sm" showChevron={false} onClick={onCreate} disabled={creating} className="min-h-11 md:min-h-0">
-          Create invoice…
+          {label}
         </Button>
+      )}
+      {createInvoice === 'bill_split' && (
+        <p className="w-full text-xs">Billed per payer (Bill Split): void its Bill Split invoices, then Create invoice drafts it again in full.</p>
       )}
       {/* H5: the server would refuse this one. Show it disabled with the reason. */}
       {createInvoice === 'split' && (
         <span className="flex items-center gap-1">
-          <Button variant="secondary" size="sm" showChevron={false} disabled className="min-h-11 md:min-h-0">Create invoice…</Button>
+          <Button variant="secondary" size="sm" showChevron={false} disabled className="min-h-11 md:min-h-0">{label}</Button>
           <HelpTip text={SPLIT_BILLING_BLOCK_REASON} />
         </span>
       )}

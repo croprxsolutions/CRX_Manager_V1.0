@@ -10,6 +10,7 @@ export function schemaFingerprint(root, migrations) {
     'supabase/baselines/manifest.json',
     'supabase/baselines/one-shot-migrations.json',
     'scripts/decompress-schema-baseline.mjs',
+    'scripts/local-app/walkthrough-reference-fixtures.sql',
     'scripts/verify-schema-baseline.mjs',
     'scripts/list-post-baseline-migrations.mjs',
     'scripts/local-app/app.mjs',

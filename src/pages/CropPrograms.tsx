@@ -2,9 +2,8 @@
  * CropPrograms.tsx — Reusable crop program templates
  * GAP FIX #19: Crop Program Templates
  *
- * Lets admins/sales reps create standard "programs" (e.g. "2026 Corn Program")
- * that contain a predefined set of products and rates. When creating a new quote,
- * they can "Apply Program" to auto-fill sections and items.
+ * Admins maintain templates of products and rates. Office staff can apply
+ * templates to fill sections and items on a quote.
  *
  * Stored in app_settings as JSON (no new table needed).
  */
@@ -85,8 +84,14 @@ export default function CropPrograms() {
   const [formSeason, setFormSeason] = useState(SEASONS[1]);
   const [formItems, setFormItems] = useState<ProgramItem[]>([]);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const isAdmin = role === 'admin';
+  useEffect(() => {
+    if (isAdmin) return;
+    setModalOpen(false);
+    setDeleteConfirm(null);
+  }, [isAdmin]);
 
   // Only the newest read may change the list or its error state: saving rewrites the whole
   // list, so a slow older read must never replace a newer one.
@@ -140,30 +145,39 @@ export default function CropPrograms() {
 
   const savePrograms = async (updated: CropProgram[]) => {
     if (!isAdmin) throw new Error('Administrator access is required to change crop programs');
-    const { data: existing } = await supabase
-      .from('app_settings')
-      .select('id')
-      .eq('setting_key', 'crop_programs')
-      .maybeSingle();
-
-    const value = JSON.stringify(updated);
-
-    if (existing) {
-      const updateResult = await supabase
+    if (savingRef.current) throw new Error('A crop program change is already saving');
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const { data: existing, error } = await supabase
         .from('app_settings')
-        .update({ setting_value: value, updated_by: profile?.id, updated_at: new Date().toISOString() })
-        .eq('id', existing.id)
-        .select();
-      checkMutationResult(updateResult, 'Update crop programs setting');
-    } else {
-      const insertResult = await supabase.from('app_settings').insert({
-        setting_key: 'crop_programs',
-        setting_value: value,
-        updated_by: profile?.id,
-      }).select();
-      checkMutationResult(insertResult, 'Create crop programs setting');
+        .select('id')
+        .eq('setting_key', 'crop_programs')
+        .maybeSingle();
+      if (error) throw error;
+
+      const value = JSON.stringify(updated);
+
+      if (existing) {
+        const updateResult = await supabase
+          .from('app_settings')
+          .update({ setting_value: value, updated_by: profile?.id, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+          .select();
+        checkMutationResult(updateResult, 'Update crop programs setting');
+      } else {
+        const insertResult = await supabase.from('app_settings').insert({
+          setting_key: 'crop_programs',
+          setting_value: value,
+          updated_by: profile?.id,
+        }).select();
+        checkMutationResult(insertResult, 'Create crop programs setting');
+      }
+      setPrograms(updated);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
-    setPrograms(updated);
   };
 
   const openNew = () => {
@@ -281,7 +295,6 @@ export default function CropPrograms() {
         }
       },
       toast,
-      setLoading: setSaving,
       successMessage: editingProgram ? 'Program updated' : 'Program created',
       sentryTag: editingProgram ? 'update_crop_program' : 'create_crop_program',
       onSuccess: () => {
@@ -405,6 +418,7 @@ export default function CropPrograms() {
                       </button>
                       <button
                         onClick={() => handleDuplicate(prog)}
+                        disabled={saving}
                         className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                         title="Duplicate"
                         aria-label="Duplicate"
@@ -453,6 +467,7 @@ export default function CropPrograms() {
                     <div className="flex justify-end mt-3">
                       <button
                         onClick={() => toggleActive(prog.id)}
+                        disabled={saving}
                         className="text-xs text-secondary hover:text-crx-green underline"
                       >
                         {prog.is_active ? 'Deactivate' : 'Activate'} Program
@@ -473,7 +488,7 @@ export default function CropPrograms() {
         </p>
         <div className="flex justify-end gap-3 mt-6">
           <Button variant="ghost" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
-          <Button variant="secondary" onClick={() => deleteConfirm && handleDelete(deleteConfirm)}>
+          <Button variant="secondary" onClick={() => deleteConfirm && handleDelete(deleteConfirm)} loading={saving}>
             Delete
           </Button>
         </div>

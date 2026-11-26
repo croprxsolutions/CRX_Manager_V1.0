@@ -61,6 +61,10 @@ export default function ReceivingLogPanel() {
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
 
+  useEffect(() => {
+    if (!isAdmin) setDeleteModalOpen(false);
+  }, [isAdmin]);
+
   /* Filters */
   const [vendorFilter, setVendorFilter] = useState('');
   const [conditionFilter, setConditionFilter] = useState('');

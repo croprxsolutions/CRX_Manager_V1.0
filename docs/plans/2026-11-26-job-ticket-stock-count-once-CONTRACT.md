@@ -86,3 +86,6 @@ None left (Mason answered A on 2026-11-26).
 ## Luna round 2 (2026-11-26)
 - HIGH reversal-after-zero-ticket and MED ledger mismatch: refuted. On an open job every ticket line moves its full claim (no job record, so CJ = 0 and CT = T); a ticket row is credited only once the job record exists, which reversal refuses. Prover case added (two tickets, first reversed, job 4 moves 0).
 - HIGH unit fallback mismatch: refuted for real data. `inventory_unit` is NOT NULL, 0 of 606 live products blank, `validate_product_units` rejects invalid units; raw fallback lines are already flagged.
+
+## Luna round 3 (2026-11-26)
+- MED deadlock between completion and reversal: refuted. The `complete_job` wrapper (`20270227170000`, the body's only caller) locks the job row, then takes the shared number lock, and only then calls the body, so the status update and its hold-release trigger run with the number lock held. Reversal takes the same lock first, so the two never wait on each other in a cycle. A direct table status change runs no stock deduction and never takes the lock, so it cannot form a cycle either. Prover race (f) runs a reversal during a completion.

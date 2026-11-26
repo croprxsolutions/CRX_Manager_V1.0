@@ -320,6 +320,23 @@ it('clears the job list when a map recheck is refused for lost access', async ()
   expect(screen.queryByText('J-100')).not.toBeInTheDocument();
 });
 
+it('warns that assigned fields could not be rechecked when the map reopens offline', async () => {
+  render(fieldView());
+  const map = await openMap();
+  await map.findByRole('heading', { name: 'My dispatched field' });
+  expect(screen.queryByText(/Couldn't check all assigned fields/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'List' }));
+  const onlineState = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+  try {
+    act(() => { window.dispatchEvent(new Event('offline')); });
+    fireEvent.click(screen.getByRole('button', { name: 'Map' }));
+    expect(await screen.findByText(/Couldn't check all assigned fields/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reload map' })).toBeDisabled();
+  } finally {
+    onlineState.mockRestore();
+  }
+});
+
 it('ignores an older map assignment response after a newer job reload removes its field', async () => {
   render(fieldView());
   const map = await openMap();

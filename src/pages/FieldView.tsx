@@ -191,21 +191,23 @@ function jobLoadFallback(error: unknown, actorId: string | undefined, forMap: bo
   return saved && Array.isArray(saved.data) ? { kind: 'saved', saved } as const : { kind: 'unavailable' } as const;
 }
 
-function FieldMapReadWarning({ jobsFailed, fieldsFailed, mapAssignmentFailed, savedCopyAt, loading, retry }: {
+function FieldMapReadWarning({ jobsFailed, fieldsFailed, mapAssignmentFailed, savedCopyAt, offline, loading, retry }: {
   jobsFailed: boolean;
+  offline: boolean;
   fieldsFailed: boolean;
   mapAssignmentFailed: boolean;
   savedCopyAt: string | null;
   loading: boolean;
   retry: () => void;
 }) {
-  if (!jobsFailed && !fieldsFailed && !mapAssignmentFailed && !savedCopyAt) {
+  // Offline, assignments cannot be rechecked, so the shown fields may be out of date.
+  if (!jobsFailed && !fieldsFailed && !mapAssignmentFailed && !savedCopyAt && !offline) {
     return loading ? <p role="status" className="m-3 text-sm">Checking assigned fields…</p> : null;
   }
   return (
     <div className="m-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
       <p role="status">Couldn't check all assigned fields. Some markers may be missing. Confirm hazards on site.</p>
-      <button type="button" disabled={loading} onClick={retry}
+      <button type="button" disabled={loading || offline} onClick={retry}
         className="mt-2 min-h-[44px] rounded-lg border border-amber-300 bg-white px-3 font-semibold disabled:opacity-50">
         {loading ? 'Checking assigned fields…' : 'Reload map'}
       </button>
@@ -1133,7 +1135,7 @@ export default function FieldView() {
       {mapOpenCount > 0 && (
         <div hidden={view !== 'map'} className="m-3 rounded-xl border border-gray-200">
           <FieldMapReadWarning jobsFailed={fetchError} fieldsFailed={mapReadFailed} mapAssignmentFailed={mapAssignmentFailed}
-            savedCopyAt={savedCopyAt} loading={mapChecking} retry={() => void fetchCards(true)} />
+            savedCopyAt={savedCopyAt} offline={!isOnline} loading={mapChecking} retry={() => void fetchCards(true)} />
           <ErrorBoundary inline>
             <CrewFieldMarkerMap
               key={markerUser.actorId}

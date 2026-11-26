@@ -39,6 +39,7 @@ const SHARED_FILES = [
   'lib/marginFloors.ts',
   'lib/ordersPage.ts',
   'lib/paymentDuplicate.ts',
+  'lib/prepayChecks.ts',
   'lib/productParentProposals.ts',
   'lib/productSetupChemistry.ts',
   'lib/reconciliation.ts',

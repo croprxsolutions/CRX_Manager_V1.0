@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync('supabase/migrations/20270311040000_pricing_history_append_only.sql', 'utf8')
+const sql = readFileSync('supabase/migrations/20270311130000_pricing_history_append_only.sql', 'utf8')
   .replaceAll('\r\n', '\n')
   .replace(/^--.*$/gm, '');
 

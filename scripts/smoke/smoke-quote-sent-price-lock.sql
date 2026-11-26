@@ -65,7 +65,7 @@ DECLARE
   v_section_id uuid;
   v_trail_guard boolean;
 BEGIN
-  -- Since 20270311040000 the price trail is append-only. This rolled-back fixture removes trail rows to
+  -- Since 20270311130000 the price trail is append-only. This rolled-back fixture removes trail rows to
   -- prove the lock on a price nothing vouches for, so it lifts only that guard, only around those deletes.
   v_trail_guard := EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.quote_price_changes'::regclass
                              AND tgname = 'trigger_quote_price_changes_append_only');

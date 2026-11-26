@@ -2,10 +2,16 @@ import { AlertTriangle } from 'lucide-react';
 import { formatExactCents } from '../../lib/money';
 import type { NearCostProduct } from '../../lib/nearCostPricing';
 
-/** "0.35" -> "35"; toFixed keeps float noise out and rejects rounded suggestions of 100 or more. */
+function displayPercent(percent: number): string {
+  return String(Number(percent.toFixed(2)));
+}
+
+/** "0.35" -> "35". Keep suggestions that would read as 100% off the screen. */
 function wholePercent(text: string): string | null {
   const percent = Number((Number(text) * 100).toFixed(6));
-  return Number.isFinite(percent) && percent < 100 ? String(percent) : null;
+  if (!Number.isFinite(percent) || percent >= 100) return null;
+  const displayed = displayPercent(percent);
+  return displayed === '100' ? null : displayed;
 }
 
 interface NearCostConfirmationsProps {
@@ -51,7 +57,7 @@ export default function NearCostConfirmations({ products, ticked, disabled, onTi
                       Tier {tier.tier} {formatExactCents(tier.price_cents)} on a cost of {formatExactCents(tier.cost_cents)}
                       {tier.fraction_margin_percent !== null && (
                         <span className="font-semibold">
-                          {` (margin ${tier.fraction_margin_percent}%`}
+                          {` (margin ${displayPercent(Number(tier.fraction_margin_percent))}%`}
                           {suggestedPercent !== null && `: did you mean ${suggestedPercent} for ${suggestedPercent}%?`}
                           {')'}
                         </span>

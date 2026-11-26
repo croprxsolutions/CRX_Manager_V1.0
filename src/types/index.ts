@@ -1385,6 +1385,8 @@ export interface DeliveryPhoto {
   uploaded_at: string;
   file_size: number | null;
   sort_order: number;
+  // The lines the screen showed when a signed-ticket photo was taken (20270309170000); never changes after save.
+  lines_seen?: { order_item_id: string; product_id: string; quantity: number; delivered: number }[] | null;
   uploader?: Profile;
 }
 
@@ -3421,7 +3423,15 @@ export type FieldObstacleKind =
   | 'tree_line'
   | 'power_line'
   | 'waterway'
-  | 'other';
+  | 'other'
+  | 'field_entrance'
+  | 'washout'
+  | 'pole'
+  | 'garden'
+  | 'well'
+  | 'pivot'
+  | 'sensitive_crop'
+  | 'gate';
 
 export interface FieldObstacle {
   id: string;
@@ -3432,6 +3442,17 @@ export interface FieldObstacle {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  entrance_number: number | null;
+}
+
+export interface FieldMarkerState {
+  checking?: boolean;
+  status: 'loading' | 'complete' | 'incomplete' | 'unavailable' | 'stale';
+  markers: FieldObstacle[];
+  authors: Map<string, string>;
+  authorsUnavailable?: boolean;
+  accessDenied?: true;
+  checkedAt?: number;
 }
 
 // Result shapes for the two-acre RPCs (migration 20260623130000)
@@ -3825,6 +3846,10 @@ export interface Vehicle {
   created_at: string;
   updated_at: string;
 }
+
+// Equipment fields used by Job Detail and its worksheets.
+export type JobVehicle = Pick<Database['public']['Tables']['vehicles']['Row'],
+  'id' | 'vehicle_name' | 'vehicle_type' | 'category' | 'capacity_gallons' | 'capacity_unit' | 'status'>;
 
 // Application Services (custom application pricing per vehicle/service)
 
@@ -5352,6 +5377,25 @@ export interface BelowCostApprovalDetail {
    * (20261021070000).
    */
   zero_lines: BelowCostZeroLine[];
+  /**
+   * Every below-cost line the database found in this save (pricing audit fix 1); empty when the
+   * database did not send a list (before that migration), and then the prompt names only the first line.
+   */
+  lines: BelowCostLine[];
+  /** Lines found beyond those listed. The database lists every line, so it sends 0; kept for a future cap. */
+  more_count: number;
+  /** The whole save's shortfall in cents, listed lines and the rest; null when not sent. */
+  total_shortfall_cents: number | null;
+}
+
+export interface BelowCostLine {
+  product_name: string | null;
+  unit_price_cents: number;
+  locked_unit_cost_cents: number;
+  quantity: number;
+  line_shortfall_cents: number;
+  /** 'unit': price and cost are per unit; 'line': a non-product invoice line, price and cost are the line's totals. */
+  per: 'unit' | 'line';
 }
 
 export interface BelowCostZeroLine {

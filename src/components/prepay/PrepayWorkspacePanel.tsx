@@ -28,6 +28,7 @@ import { localToday } from '../../lib/dateUtils';
 import { formatCents as fmt } from '../../lib/money';
 import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import { Sentry } from '../../lib/sentry';
+import { CUSTOMER_PARAM } from '../../hooks/useCustomerParam';
 
 interface PrepayBucket {
   id: string;
@@ -60,14 +61,23 @@ export default function PrepayWorkspacePanel() {
   const { toast } = useToast();
   const batchApplyIdem = useIdempotencyKey('batch_apply_prepayments', profile?.id || '');
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const initialCustomerId = searchParams.get('customer') || '';
+  // The chosen customer lives in the address (?customer=), shared with the other Prepay Credits
+  // and A/R tabs, so it carries between tabs and survives a refresh.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedCustomerId = searchParams.get(CUSTOMER_PARAM) || '';
+  const setSelectedCustomerId = useCallback((id: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (id) next.set(CUSTOMER_PARAM, id);
+      else next.delete(CUSTOMER_PARAM);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   const [customers, setCustomers] = useState<{ id: string; farm_name: string }[]>([]);
   const [customersFailed, setCustomersFailed] = useState(false);
   // Bumped by Try again to read the customer list once more.
   const [customersAttempt, setCustomersAttempt] = useState(0);
-  const [selectedCustomerId, setSelectedCustomerId] = useState(initialCustomerId);
   const [buckets, setBuckets] = useState<PrepayBucket[]>([]);
   const [invoices, setInvoices] = useState<UnpaidInvoice[]>([]);
   const [pendingAllocations, setPendingAllocations] = useState<PendingAllocation[]>([]);

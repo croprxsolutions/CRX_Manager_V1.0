@@ -3,9 +3,13 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+// One router package for the page and the test, as useUnsavedChanges' useBlocker comes from
+// 'react-router' (the same setup as QuoteBuilder.saveNavigation.test.tsx).
+import { createMemoryRouter, RouterProvider } from 'react-router';
+vi.mock('react-router-dom', async () => vi.importActual('react-router'));
 
-const { mockFrom, mockRpc, mockToast } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, mockAuth } = vi.hoisted(() => ({
+  mockAuth: { role: 'admin', deniedPages: [] as string[] },
   mockFrom: vi.fn(),
   mockRpc: vi.fn().mockImplementation(() => Promise.resolve({ data: null, error: null })),
   mockToast: vi.fn(),
@@ -38,7 +42,7 @@ vi.mock('../lib/db', () => ({
 }));
 
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ profile: { id: 'user-1', role: 'admin', full_name: 'Test Admin' }, role: 'admin' }),
+  useAuth: () => ({ profile: { id: 'user-1', role: mockAuth.role, full_name: 'Test User' }, role: mockAuth.role, deniedPages: mockAuth.deniedPages }),
 }));
 
 vi.mock('../components/ui/Toast', () => ({
@@ -55,14 +59,16 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
 
 import PaymentAllocation, { autoAllocate } from './PaymentAllocation';
 
+// A data router, as in the app, so the unsaved-changes guard (useBlocker) runs for real.
 function renderPayments() {
-  return render(
-    <MemoryRouter initialEntries={['/payments']}>
-      <Routes>
-        <Route path="/payments" element={<PaymentAllocation />} />
-      </Routes>
-    </MemoryRouter>,
+  const router = createMemoryRouter(
+    [
+      { path: '/payments', element: <PaymentAllocation /> },
+      { path: '/elsewhere', element: <p>Somewhere else</p> },
+    ],
+    { initialEntries: ['/payments'] },
   );
+  return { router, ...render(<RouterProvider router={router} />) };
 }
 
 describe('PaymentAllocation page', () => {
@@ -98,7 +104,7 @@ describe('PaymentAllocation page', () => {
       : buildChain({ data: [], error: null })));
     renderPayments();
     fireEvent.change(await screen.findByPlaceholderText(/search by name/i), { target: { value: 'Ac' } });
-    fireEvent.click(await screen.findByRole('button', { name: /Acme Farm/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /Acme Farm/ }));
 
     const amount = await screen.findByPlaceholderText('0.00');
     fireEvent.change(amount, { target: { value: '12.345' } });
@@ -131,7 +137,7 @@ describe('PaymentAllocation duplicate and retry warnings', () => {
   async function fillPayment(reference: string) {
     renderPayments();
     fireEvent.change(screen.getByPlaceholderText('Search by name or account #...'), { target: { value: 'Big' } });
-    fireEvent.click(await screen.findByRole('button', { name: /Big Farm/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
     fireEvent.change(await screen.findByPlaceholderText('0.00'), { target: { value: '500.00' } });
     fireEvent.change(screen.getByPlaceholderText('Check # or ref...'), { target: { value: reference } });
     await screen.findByText('No open invoices for this customer');
@@ -177,7 +183,8 @@ describe('PaymentAllocation duplicate and retry warnings', () => {
       await waitFor(() => expect(screen.getByPlaceholderText('0.00')).toBeDisabled());
       expect(screen.getByPlaceholderText('Check # or ref...')).toBeDisabled();
       expect(screen.getByPlaceholderText('Search by name or account #...')).toBeDisabled();
-      expect(screen.getByRole('button', { name: 'Clear customer' })).toBeDisabled();
+      // The shared customer box hides its clear button while it is locked.
+      expect(screen.queryByRole('button', { name: 'Clear customer' })).not.toBeInTheDocument();
 
       await act(async () => { finishCheck({ data: [existing], error: null }); await held; });
       expect(await screen.findByText(/already has a \$500\.00 payment/)).toBeInTheDocument();
@@ -238,6 +245,295 @@ describe('PaymentAllocation duplicate and retry warnings', () => {
     await fillPayment('1234');
     fireEvent.click(await screen.findByRole('button', { name: /^Continue/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Your sign-in could not be verified.'));
+  });
+});
+
+describe('Record Payments: faster entry', () => {
+  const customer = { id: 'cust-1', farm_name: 'Big Farm', account_number: 'A-9', city: null, state: null, is_active: true, prepay_balance_cents: 2500 };
+  const invoice = (id: string, number: string, date: string, balanceCents: number) => ({
+    id, invoice_number: number, invoice_date: date, due_date: null, invoice_type: 'chemical_sale',
+    total_amount_cents: balanceCents, balance_cents: balanceCents,
+  });
+  const openInvoices = [invoice('i1', 'INV-OLD', '2026-08-01', 5000), invoice('i2', 'INV-NEW', '2026-09-01', 3000)];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFrom.mockImplementation((table: string) => buildChain(
+      table === 'customers' ? { data: [customer], error: null }
+        : table === 'invoices' ? { data: openInvoices, error: null, count: openInvoices.length } as { data: unknown; error: unknown }
+          : { data: [], error: null },
+    ));
+  });
+
+  // Chooses Big Farm from the keyboard only: type, arrow down, Enter.
+  async function chooseByKeyboard() {
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    box.focus();
+    fireEvent.change(box, { target: { value: 'Big' } });
+    await screen.findByRole('option', { name: /Big Farm/ });
+    fireEvent.keyDown(box, { key: 'ArrowDown' });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await screen.findByText('INV-OLD');
+  }
+
+  it('a customer chosen with the keyboard moves the cursor to the check amount', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    expect(screen.getByRole('combobox', { name: 'Customer' })).toHaveValue('Big Farm');
+    await waitFor(() => expect(screen.getByLabelText('Check Amount')).toHaveFocus());
+  });
+
+  it('puts the check amount before Notes, in the page and in tab order', async () => {
+    renderPayments();
+    const amount = screen.getByLabelText('Check Amount');
+    const notes = screen.getByLabelText('Notes');
+    expect(amount.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(amount).not.toHaveAttribute('tabindex');
+    expect(notes).not.toHaveAttribute('tabindex');
+  });
+
+  it('Pay full balance fills every open invoice with its balance from a typed check, saving nothing', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
+    expect(screen.getAllByPlaceholderText('0.00').slice(1).map((el) => (el as HTMLInputElement).value)).toEqual(['50.00', '30.00']);
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
+    expect(screen.getByText('Remaining:').parentElement!).toHaveTextContent('$0.00');
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('Pay full balance keeps a larger typed check and leaves the rest to prepay, as before', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '100.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('100.00');
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
+    expect(screen.getByText('$20.00 will become a prepay credit')).toBeInTheDocument();
+  });
+
+  it('Pay full balance refuses a typed check smaller than the balance and changes nothing', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '60.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+
+    expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('$20.00 short of the full balance of $80.00'));
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('60.00');
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$0.00');
+  });
+
+  it('keeps the totals bar pinned on screen while the invoice list scrolls', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    const totals = screen.getByRole('region', { name: 'Payment totals' });
+    expect(totals).toHaveClass('sticky', 'md:bottom-0');
+    expect(totals).toHaveTextContent('Check Total: $80.00');
+  });
+
+  it('shows the prepay balance with a link to where prepay is applied', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    expect(screen.getByText('$25.00')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Apply prepay to invoices' })).toHaveAttribute('href', '/prepay?tab=workspace&customer=cust-1');
+  });
+
+  it('asks before leaving with a typed amount, and Keep editing stays', async () => {
+    const { router } = renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+
+    await act(async () => { await router.navigate('/elsewhere'); });
+    expect(await screen.findByText('Leave without saving?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    await waitFor(() => expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument());
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
+    expect(screen.queryByText('Somewhere else')).not.toBeInTheDocument();
+  });
+
+  it('a stray keystroke keeps the customer and the typed allocations; Apply waits until the name is back', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
+
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(box, { target: { value: 'Small' } });
+    // While the box shows other text, nothing can post or refill allocations.
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Pay full balance/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Auto-Allocate/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
+    expect(mockRpc).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(box).toHaveValue('Big Farm');
+    expect(screen.getByText('INV-OLD')).toBeInTheDocument();
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled();
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
+  });
+
+  it('shows the picked customer account number, so same-named farms can be told apart', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    expect(screen.getByText('Account #A-9')).toBeInTheDocument();
+  });
+
+  it('leaving the box mid-search keeps posting blocked until a pick or "keep"', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(box, { target: { value: 'Small' } });
+    fireEvent.blur(box);
+    // The box shows the old name again, but the unfinished search still blocks posting.
+    expect(box).toHaveValue('Big Farm');
+    expect(screen.getByText('INV-OLD')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Auto-Allocate/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
+    expect(mockRpc).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'keep Big Farm' }));
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled();
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
+  });
+
+  it('Pay full balance is admin-only: a sales rep sees only their own invoices, so the total could be short', async () => {
+    mockAuth.role = 'sales_rep';
+    try {
+      renderPayments();
+      await chooseByKeyboard();
+      expect(screen.queryByRole('button', { name: /Pay full balance/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Auto-Allocate/ })).toBeInTheDocument();
+    } finally {
+      mockAuth.role = 'admin';
+    }
+  });
+
+  it('Pay full balance never fills in the check amount: it waits for the amount on the paper check', async () => {
+    // A filled-in balance could re-book a check already posted for a different amount (Sol, #2438).
+    renderPayments();
+    await chooseByKeyboard();
+    const payFull = screen.getByRole('button', { name: /Pay full balance/ });
+    expect(payFull).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '1e2' } });
+    expect(payFull).toBeDisabled();
+    fireEvent.click(payFull);
+
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('1e2');
+    expect(screen.getAllByPlaceholderText('0.00').slice(1).map((el) => (el as HTMLInputElement).value)).not.toContain('50.00');
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '' } });
+    expect((screen.getByLabelText('Check Amount') as HTMLInputElement).value).toBe('');
+  });
+
+  it('hides the Apply prepay link from a user without the Prepay Credits page (admin-only)', async () => {
+    mockAuth.role = 'sales_rep';
+    try {
+      renderPayments();
+      await chooseByKeyboard();
+      expect(screen.getByText('$25.00')).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Apply prepay to invoices' })).not.toBeInTheDocument();
+    } finally {
+      mockAuth.role = 'admin';
+    }
+  });
+
+  describe('switching to a second customer', () => {
+    const small = { ...customer, id: 'cust-2', farm_name: 'Small Farm', account_number: 'A-2', prepay_balance_cents: 900 };
+    let finishPrepayRead: (result: { data: unknown; error: unknown }) => void;
+
+    beforeEach(() => {
+      const held = new Promise<{ data: unknown; error: unknown }>((resolve) => { finishPrepayRead = resolve; });
+      mockRpc.mockImplementation(() => Promise.resolve({ data: { total_allocated_cents: 8000, prepay_created_cents: 0, invoices_paid: 2 }, error: null }));
+      mockFrom.mockImplementation((table: string) => {
+        if (table !== 'customers') {
+          return buildChain(table === 'invoices'
+            ? { data: openInvoices, error: null, count: openInvoices.length } as { data: unknown; error: unknown }
+            : { data: [], error: null });
+        }
+        const chain = buildChain({ data: [customer, small], error: null });
+        // The balance re-read after a save waits until the test lets it finish.
+        chain.select = (columns: string) => {
+          if (columns !== 'prepay_balance_cents') return chain;
+          const read = buildChain({ data: null, error: null });
+          read.then = held.then.bind(held);
+          return read;
+        };
+        return chain;
+      });
+    });
+
+    async function switchToSmallFarm() {
+      const box = screen.getByRole('combobox', { name: 'Customer' });
+      fireEvent.change(box, { target: { value: 'Small' } });
+      fireEvent.click(await screen.findByRole('option', { name: /Small Farm/ }));
+      await waitFor(() => expect(box).toHaveValue('Small Farm'));
+      await screen.findByText('INV-OLD');
+    }
+
+    it('switching customers starts a fresh check: the first farm’s amount and check # never post to the second', async () => {
+      renderPayments();
+      // Pick Big Farm by name (the keyboard helper's ArrowDown lands on the second farm in this list).
+      const box = screen.getByRole('combobox', { name: 'Customer' });
+      fireEvent.change(box, { target: { value: 'Big' } });
+      fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
+      await screen.findByText('INV-OLD');
+      fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+      fireEvent.change(screen.getByLabelText('Reference #'), { target: { value: '301' } });
+      fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+      expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
+
+      await switchToSmallFarm();
+      expect((screen.getByLabelText('Check Amount') as HTMLInputElement).value).toBe('');
+      expect((screen.getByLabelText('Reference #') as HTMLInputElement).value).toBe('');
+
+      // Small Farm's own check posts to Small Farm only.
+      fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+      expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$0.00');
+      fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
+      fireEvent.click(await screen.findByRole('button', { name: /^Continue/ }));
+
+      const calls = () => mockRpc.mock.calls.filter(([name]) => name === 'allocate_payment');
+      await waitFor(() => expect(calls()).toHaveLength(1));
+      expect(calls()[0][1]).toMatchObject({ p_customer_id: 'cust-2', p_total_cents: 8000 });
+      expect(JSON.stringify(calls()[0][1])).not.toContain('"i1"');
+    });
+
+    it('ignores a late prepay balance for the first customer once the second is chosen', async () => {
+      renderPayments();
+      await chooseByKeyboard();
+      fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+      fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));
+      fireEvent.click(await screen.findByRole('button', { name: /Next Check/ }));
+
+      await switchToSmallFarm();
+      expect(screen.getByText('$9.00')).toBeInTheDocument();
+      await act(async () => { finishPrepayRead({ data: { prepay_balance_cents: 7777 }, error: null }); });
+      expect(screen.getByText('$9.00')).toBeInTheDocument();
+      expect(screen.queryByText('$77.77')).not.toBeInTheDocument();
+    });
+  });
+
+  it('leaves without asking when nothing is typed', async () => {
+    const { router } = renderPayments();
+    await chooseByKeyboard();
+    await act(async () => { await router.navigate('/elsewhere'); });
+    expect(await screen.findByText('Somewhere else')).toBeInTheDocument();
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
   });
 });
 

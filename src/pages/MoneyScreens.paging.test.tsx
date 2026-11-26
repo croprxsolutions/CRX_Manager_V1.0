@@ -45,6 +45,8 @@ vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({ profile: { id: 'user-1', role: 'admin', full_name: 'Admin' }, role: 'admin', deniedPages: [] }),
 }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) }));
+// Leaving Record Payments with typed amounts asks first (useBlocker), which needs the app's data router.
+vi.mock('../hooks/useUnsavedChanges', () => ({ useUnsavedChanges: () => ({ state: 'unblocked' }) }));
 
 import ARaging from './ARaging';
 import AccountsReceivable from './AccountsReceivable';
@@ -150,7 +152,7 @@ describe('money screens past the 1,000-row server cap', () => {
     renderAt(<PaymentAllocation />, '/payments');
 
     fireEvent.change(await screen.findByPlaceholderText(/search by name/i), { target: { value: 'Big' } });
-    fireEvent.click(await screen.findByRole('button', { name: /Big Farm/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
     expect(await screen.findByText(`(${TOTAL} invoices, $1,010.00 outstanding)`, {}, { timeout: 60000 })).toBeInTheDocument();
 
     // A $1,010.00 check auto-allocates across every invoice, the oldest past row 1,000 included:
@@ -175,7 +177,7 @@ describe('money screens past the 1,000-row server cap', () => {
     renderAt(<PaymentAllocation />, '/payments');
 
     fireEvent.change(await screen.findByPlaceholderText(/search by name/i), { target: { value: 'Big' } });
-    fireEvent.click(await screen.findByRole('button', { name: /Big Farm/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
     expect(await screen.findByText(/Open invoices could not be loaded/)).toBeInTheDocument();
     fireEvent.change(screen.getAllByPlaceholderText('0.00')[0], { target: { value: '500.00' } });
     expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeDisabled();

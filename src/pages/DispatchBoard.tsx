@@ -57,7 +57,7 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import { generateIdempotencyKey } from '../lib/idempotency';
 import type { Json } from '../types/supabase';
 import { Sentry } from '../lib/sentry';
-import { JOB_COLUMNS } from '../lib/costFields';
+import { JOB_COLUMNS, JOB_CREW_COLUMNS, usesOfficeJobReads } from '../lib/costFields';
 import {
   formatAppliedOfTotal,
   jobStatusToDispatchBadge,
@@ -67,14 +67,14 @@ import {
   filterDispatchedRows,
   hasActiveDispatchedFilter,
   emptyDispatchedAssigneeFilter,
+  type DispatchBoardJob,
   type DispatchFilters,
   type DispatchView,
   type DispatchedListRow,
   type DispatchedAssigneeFilter,
 } from '../lib/dispatchDisplay';
-import { notifyApplicatorDispatched, notifyApplicatorUndispatched } from '../lib/notificationTriggers';
 import { aggregateAssignedTo, type DispatchLocation } from '../lib/dispatchWizard';
-import type { Job, Profile, Field, DispatchStockRow } from '../types';
+import type { Profile, Field, DispatchStockRow } from '../types';
 
 type NavSection = 'map' | 'list' | 'dispatch' | 'dispatched';
 
@@ -103,7 +103,7 @@ const STOCK_SEVERITY: Record<JobStockStatus, number> = { unknown: 0, ok: 1, low:
 const worseStock = (a: JobStockStatus, b: JobStockStatus): JobStockStatus =>
   STOCK_SEVERITY[b] > STOCK_SEVERITY[a] ? b : a;
 
-interface DispatchJob extends Job {
+interface DispatchJob extends DispatchBoardJob {
   customer_name?: string;
   /** Aggregated 'Assigned To' label — distinct per-location assignees (a job
    *  split between two applicators shows BOTH), falling back to the whole-job
@@ -215,13 +215,19 @@ export default function DispatchBoard() {
 
       // The unfiltered (no applicator) path keeps the direct jobs query; the filtered
       // path uses the RPC rows above. Both share the SAME downstream shape.
-      const jobsQuery = supabase
-        .from('jobs')
-        .select(`
+      const isOffice = usesOfficeJobReads(profile?.role);
+      const query = isOffice
+        ? supabase.from('jobs').select(`
           ${JOB_COLUMNS},
           customer:customers(farm_name),
           job_fields(id, field_id, acres_to_treat, sort_order, field:fields(id, field_name))
         `, { count: 'exact' })
+        : supabase.from('jobs_crew').select(`
+          ${JOB_CREW_COLUMNS},
+          customer:customers(farm_name),
+          job_fields(id, field_id, acres_to_treat, sort_order, field:fields(id, field_name))
+        `, { count: 'exact' });
+      const jobsQuery = query
         .is('deleted_at', null)
         .order('job_date', { ascending: false, nullsFirst: false })
         .order('id', { ascending: false })
@@ -333,7 +339,14 @@ export default function DispatchBoard() {
         const jobFields = (j.job_fields as Array<{ id?: string; field_id?: string; acres_to_treat?: number | null; field?: { field_name?: string } }>) || [];
         const customerName = (j.customer as { farm_name?: string })?.farm_name || 'Unknown';
         return {
-          ...j,
+          id: j.id as string,
+          job_number: j.job_number as string,
+          job_date: j.job_date as string,
+          status: j.status as DispatchJob['status'],
+          applicator_id: j.applicator_id as string | null,
+          recipe_id: j.recipe_id as string | null,
+          applied_acres: j.applied_acres as number,
+          total_acres: j.total_acres as number | null,
           customer_name: customerName,
           assigned_to_label: aggregateAssignedTo(dispatchesByJob[j.id as string] || [], jobLevelName),
           dispatched_applicator_ids: dispatchApplicatorIdsByJob[j.id as string] || [],
@@ -350,14 +363,13 @@ export default function DispatchBoard() {
               acres: jf.acres_to_treat ?? null,
             })),
         };
-      }) as DispatchJob[];
+      });
 
       // Inventory-aware dispatch (Layer 1): attach each schedulable job's product needs
       // and a stock light vs today's free stock. Read-only overlay — no reservation.
       // OFFICE-ONLY: /dispatch is also applicator-accessible, and get_inventory_position
       // exposes product cost/vendor + full stock levels. Gate the whole overlay to
       // admin/sales_rep so applicators see the board unchanged (Codex P1).
-      const isOffice = profile?.role === 'admin' || profile?.role === 'sales_rep';
       const activeJobIds = isOffice
         ? mapped
             .filter((j) => j.status === 'scheduled' || j.status === 'in_progress')
@@ -1280,28 +1292,17 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
         applicator_id: kind === 'applicator' ? id : null,
         crew_id: kind === 'crew' ? id : null,
       }];
-      const { data, error } = await supabase.rpc('dispatch_job_locations', {
+      const { data, error } = await supabase.rpc('dispatch_location_with_notices', {
+        p_mode: 'reassign',
         p_assignments: payload as unknown as Json,
-        p_performed_by: performedBy,
         p_idempotency_key: getReassignKey(scope),
         p_license_override: licenseOverride,
       });
       activeScopeRef.current = null; // RPC resolved — no longer in flight
       if (error) throw error;
-      assertRpcResult<{ dispatched: number }>(data, 'dispatch_job_locations');
+      assertRpcResult<{ dispatched: number }>(data, 'dispatch_location_with_notices');
       reassignKeysRef.current.delete(scope); // confirmed success → next reassign of this intent is a new action
       toast('success', `Reassigned ${row.field_name || 'location'}${licenseOverride ? ' (license override)' : ''}`);
-
-      // U12: notify the NEW applicator they got this location, and — if the
-      // PREVIOUS assignee was a different applicator — notify them it's off
-      // their plate. Crews are skipped (no single user to notify). Best-effort;
-      // never blocks the already-committed reassign.
-      if (kind === 'applicator') {
-        void notifyApplicatorDispatched(id, row.job_number, row.customer_name || 'Unknown', null, row.job_id);
-      }
-      if (row.applicator_id && row.applicator_id !== (kind === 'applicator' ? id : null)) {
-        void notifyApplicatorUndispatched(row.applicator_id, row.job_number, row.customer_name || 'Unknown', row.job_id);
-      }
 
       setReassignFor(null);
       setReassignChoice('');
@@ -1334,14 +1335,14 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
     // In flight → a concurrent fetchRows() preserves only THIS key (Codex #37 final-8/9).
     activeScopeRef.current = { kind: 'undispatch', scope: row.job_field_id };
     try {
-      const { data, error } = await supabase.rpc('undispatch_job_locations', {
+      const { data, error } = await supabase.rpc('dispatch_location_with_notices', {
+        p_mode: 'remove',
         p_job_field_ids: [row.job_field_id],
-        p_performed_by: performedBy,
         p_idempotency_key: getUndispatchKey(row.job_field_id),
       });
       activeScopeRef.current = null; // RPC resolved — no longer in flight
       if (error) throw error;
-      const res = assertRpcResult<{ undispatched: number }>(data, 'undispatch_job_locations');
+      const res = assertRpcResult<{ undispatched: number }>(data, 'dispatch_location_with_notices');
       undispatchKeysRef.current.delete(row.job_field_id); // confirmed success → clear this row's key
       // The RPC returns {undispatched:0} (not an error) when the row was already gone —
       // another dispatcher beat us to it, or the job left the dispatchable window. Don't
@@ -1349,12 +1350,6 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
       // stale row disappears (Codex #37 final-3 P3).
       if (res.undispatched > 0) {
         toast('success', `Undispatched ${row.field_name || 'location'}`);
-        // U12: tell the applicator this location is off their plate. Skipped
-        // for a crew dispatch (no single user) and skipped when undispatched=0
-        // (nothing actually changed — see the else branch below).
-        if (row.applicator_id) {
-          void notifyApplicatorUndispatched(row.applicator_id, row.job_number, row.customer_name || 'Unknown', row.job_id);
-        }
       } else {
         toast('info', 'This location was already undispatched or its job is no longer active — list refreshed.');
       }

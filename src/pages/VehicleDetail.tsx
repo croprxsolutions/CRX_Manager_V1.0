@@ -61,7 +61,7 @@ export default function VehicleDetail() {
 
   const fetchVehicle = useCallback(async () => {
     const { data, error } = await supabase
-      .from('vehicles')
+      .from('admin_vehicle_register')
       .select('*')
       .eq('id', id!)
       .single();
@@ -122,7 +122,7 @@ export default function VehicleDetail() {
 
     try {
       if (isNew) {
-        const result = await supabase.from('vehicles').insert(payload).select().single();
+        const result = await supabase.from('vehicles').insert(payload).select('id').single();
         checkMutationResult(result, 'Create vehicle');
         if (profile) logActivity({ event: 'vehicle_created', description: `Vehicle "${form.vehicle_name}" created`, performedBy: profile.id });
         toast('success', 'Vehicle created');
@@ -130,7 +130,7 @@ export default function VehicleDetail() {
         skipUnsavedPromptRef.current = true;
         navigate(`/vehicles/${result.data!.id}`);
       } else {
-        const result = await supabase.from('vehicles').update(payload).eq('id', id!).select().single();
+        const result = await supabase.from('vehicles').update(payload).eq('id', id!).select('id').single();
         checkMutationResult(result, 'Update vehicle');
         if (profile) logActivity({ event: 'vehicle_updated', description: `Vehicle "${form.vehicle_name}" updated`, performedBy: profile.id });
         toast('success', 'Vehicle saved');

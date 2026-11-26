@@ -14,6 +14,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. Stock can go only into Main Warehouse until transfers between warehouses exist. Choose Main Warehouse and try again'],
   // #2000 (20270201120000): an inactive customer gets no new orders, deliveries, holds or spray jobs.
   [/^CUSTOMER_INACTIVE_NEW_WORK\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added'],
+  // #2089 (20270308130000): no sales invoice is created or posted, and no invoice restored or moved, for an inactive customer (credit memos and payment corrections allowed).
+  [/^CUSTOMER_INACTIVE_POSTING\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them'],
   // 20270226213000 (#2331): a delivery line's quantities must be finite numbers.
   [/violates check constraint "delivery_items_quantity(_delivered)?_finite_chk"/, 'Nothing was saved. Delivery quantities must be ordinary numbers. Reload the delivery and enter them again'],
   [/violates check constraint "inventory_holds_source_needs_customer"/, 'Nothing was saved. A stock hold for a spray job or quote must name its customer'],
@@ -116,6 +118,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Reps work with any customer (2026-10-13, migration 20261013220000) with these exceptions.
   [/^REP_CANNOT_REASSIGN\b/i,
    'Only an admin can change which sales rep a customer is assigned to'],
+  // Mason 2026-11-25 (20270309010000): no commission payout batch is created or paid until M16 is live.
+  [/^COMMISSION_PAYOUTS_OFF_UNTIL_M16\b/,
+   'Nothing was created or paid. Commission payouts are switched off until commission-on-payment (M16) is live. Voiding an existing payment still works'],
   // Admin-only since 2026-10-14 (migration 20261027080200).
   [/^COMMISSION_SPLIT_ADMIN_ONLY\b/i,
    "Only an admin can set or change a customer's default commission split"],
@@ -137,6 +142,10 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Say why the cost of a received line is changing'],
   [/^PO_COST_REASON_TOO_LONG\b/i,
    'Keep the reason to 500 characters'],
+  [/^PO_COST_CHANGED_SINCE_LOADED\b/i,
+   'A line’s cost or product changed since you opened this purchase order. Nothing was saved. Review the reloaded lines and save again'],
+  [/^PO_EXPECTED_(?:COST_INVALID|PRODUCT_INVALID|PAIR_REQUIRED)\b/i,
+   'The purchase order line details could not be verified. Reload the purchase order and try again'],
   [/^PO_CANCELLED\b/i,
    'This purchase order is cancelled, so its cost cannot change'],
   [/^PO_COST_BELOW_BILLED\b/i,
@@ -213,6 +222,13 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was changed. A line share can't move to another line"],
   [/^BILL_SPLIT_NOTHING_TO_BILL\b/,
    "Nothing was billed. This delivery has no delivered quantity"],
+  // create_invoice_for_unbilled_delivery (A4, 20270311010000).
+  [/^UNBILLED_SCOPE_CHANGED\b/,
+   "Nothing was billed. This delivery's billing changed since the page loaded. Reload the page and check again"],
+  [/^UNBILLED_REST_LINE_AMBIGUOUS\b/,
+   "Nothing was billed. An invoice line for this product has no order line, and the order has the product on more than one order line at different prices. Link the line to its order line first"],
+  [/^BILL_SPLIT_REST_NOT_SUPPORTED\b/,
+   "Nothing was billed. This delivery is billed per payer. Void its Bill Split invoices, then Create Invoice bills it again in full"],
   // create_invoice_from_order refuses an order split across fields (20261022021000): it is billed
   // per field owner. The page offers that path once it sees the order's field allocations.
   [/^ORDER_HAS_FIELD_SPLIT\b/,
@@ -369,6 +385,12 @@ function deliveryCapReason(message: string): string | null {
   return null;
 }
 
+/** create/post_commission_payment refused: payouts are off until M16 (20270309010000); nothing was created or paid. */
+export function isCommissionPayoutsOff(error: unknown): boolean {
+  const message = typeof error === 'string' ? error : (error as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && /^COMMISSION_PAYOUTS_OFF_UNTIL_M16\b/.test(message);
+}
+
 export function sanitizeError(error: unknown): string {
   if (!error) return 'An unexpected error occurred';
 
@@ -401,6 +423,17 @@ export function sanitizeError(error: unknown): string {
       .replace(/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '').trim();
     return detail ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`
       : 'This customer still has open work (orders, deliveries, holds, quotes, invoices, spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.';
+  }
+  // M9 (20270301180000): a refund or returned check the records behind it can't prove; the office records it by hand.
+  const handCheck = /^RECORD_NEEDS_HAND_CHECK:\s*([A-Z_]+)/.exec(message)?.[1];
+  if (handCheck) {
+    return `Nothing was saved. The records this touches don't agree (${handCheck}), so this has to be recorded by hand.${/BALANCE|DRIFT/.test(handCheck) ? " Month-End's prepay check shows the customer's stored and credit totals." : ''}`;
+  }
+  // M9: the server's sentence after the token says what is wrong and what to do.
+  const m9 = /^(?:CHECK_PREPAY_REFUNDED|CHECK_ALREADY_RETURNED|PREPAY_REFUND_EXCEEDS_AVAILABLE|RETURNED_BEFORE_RECEIVED|RETURNED_DATE_IN_FUTURE|PAID_ON_IN_FUTURE|NOT_A_CHECK_PAYMENT|PAYMENT_VOIDED|PAYMENT_UNDATED|RETURN_INVOICE_NOT_OPEN|NOTHING_TO_RETURN|PAYMENT_RETURNED|PAYMENT_PREPAY_REFUNDED|INVOICE_HAS_RETURNED_PAYMENT|PREPAY_CREDIT_HAS_REVERSALS|REFUND_DRAW_INCOMPLETE|REFUND_DUPLICATE_REFERENCE|CREDIT_NOT_FOUND):\s*(.+)$/s.exec(message)?.[1];
+  if (m9) {
+    const detail = m9.split('\n')[0].replace(/;?\s*nothing was saved\.?\s*$/i, '').trim();
+    return `Nothing was saved. ${detail.charAt(0).toUpperCase()}${detail.slice(1)}${/[.!?]$/.test(detail) ? '' : '.'}`;
   }
   // 20270226150000 (Sol round 1 MED): Create Invoice on a job deleted since the screen opened.
   if (/^JOB_DELETED(?::|$)/.test(message)) {
@@ -540,13 +573,16 @@ export function sanitizeError(error: unknown): string {
   if (overActive) {
     return `Nothing was saved. Other open deliveries for this order already hold ${overActive[1]} of this product, so only ${overActive[2]} more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.`;
   }
-  // Partial completion figures (20270203120000, #1942) and completing past the order (F05): the server sentence says what to do.
-  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER|DELIVERY_NOTHING_DELIVERED):\s*(.+)$/s);
+  // Partial completion figures (20270203120000, #1942), completing past the order (F05) and proof taken for another
+  // load (20270309170000): the server sentence says what to do.
+  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER|DELIVERY_NOTHING_DELIVERED|DELIVERY_LOAD_CHANGED|PAPER_TICKET_LOAD_CHANGED):\s*(.+)$/s);
   if (deliveryQuantities) {
     // The server sentences start lowercase (they follow the token); start the second sentence with a capital,
-    // unless it starts with a mixed-case product name such as "pH Plus" (Sol r5 LOW).
+    // unless it starts with a mixed-case product name such as "pH Plus" (Sol r5 LOW). DELIVERY_EXCEEDS_ORDER always
+    // starts with the product name, kept exactly as written ("acme Plus": Sol r11 LOW on #2324).
     const sentence = deliveryQuantities[1].trim();
-    const capital = /^[a-z](?![A-Z])/.test(sentence) ? sentence.charAt(0).toUpperCase() : sentence.charAt(0);
+    const keepName = message.startsWith('DELIVERY_EXCEEDS_ORDER:');
+    const capital = !keepName && /^[a-z](?![A-Z])/.test(sentence) ? sentence.charAt(0).toUpperCase() : sentence.charAt(0);
     return `The delivery was not completed. ${capital}${sentence.slice(1)}`;
   }
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.

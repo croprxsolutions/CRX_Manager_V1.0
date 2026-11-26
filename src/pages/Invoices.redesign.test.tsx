@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { buildInMemoryQuery } from '../test-utils/inMemoryQuery';
 
 const H = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), toast: vi.fn(), role: 'admin' as string }));
@@ -76,8 +76,8 @@ describe('Invoices list redesign', () => {
 
   afterEach(() => { vi.useRealTimers(); });
 
-  describe('the Ready to post tile is a visible, removable filter', () => {
-    it('toggles the filter, says "Showing these" and shows a chip that clears it', async () => {
+  describe('the Ready to post tile opens the Drafts tab', () => {
+    it('toggles the Drafts tab, says "Showing these", and the All Invoices tab clears it', async () => {
       await renderList();
       const tile = screen.getByRole('button', { name: 'Show invoices ready to post' });
       expect(tile).toHaveAttribute('aria-pressed', 'false');
@@ -90,9 +90,10 @@ describe('Invoices list redesign', () => {
       expect(screen.queryByText('CS-POSTED')).not.toBeInTheDocument();
       expect(screen.getAllByText('CS-UNPOSTED').length).toBeGreaterThan(0);
 
-      fireEvent.click(screen.getByRole('button', { name: 'Remove filter: Ready to post' }));
+      expect(screen.getByRole('tab', { name: /Drafts/ })).toHaveAttribute('aria-selected', 'true');
+
+      fireEvent.click(screen.getByRole('tab', { name: 'All Invoices' }));
       expect(tile).toHaveAttribute('aria-pressed', 'false');
-      expect(screen.queryByRole('button', { name: 'Remove filter: Ready to post' })).not.toBeInTheDocument();
       expect(screen.getAllByText('CS-POSTED').length).toBeGreaterThan(0);
     });
 
@@ -270,13 +271,13 @@ describe('Invoices list redesign', () => {
       expect(within(rowOf('CS-DRAFT')).queryByText('Split invoice')).not.toBeInTheDocument();
     });
 
-    it('has the new headers, and below xl keeps only Invoice, Date, Total, Balance and Status (bill-to under the number)', async () => {
+    it('leads with the Field Invoices columns (Invoice #, Customer, Date, Due, Total, Status), and below xl keeps the customer under the number', async () => {
       await renderList();
       const headers = screen.getAllByRole('columnheader');
       const names = headers.map((h) => h.textContent?.trim()).filter(Boolean);
-      expect(names).toEqual(['Invoice', 'Bill to', 'Sale', 'Type', 'Date', 'Total', 'Balance', 'Status', 'Salesperson']);
+      expect(names).toEqual(['Invoice #', 'Customer', 'Date', 'Due', 'Total', 'Status', 'Balance', 'Sale', 'Type', 'Salesperson']);
       const xlOnly = headers.filter((h) => h.className.includes('hidden xl:table-cell')).map((h) => h.textContent?.trim());
-      expect(xlOnly).toEqual(['Bill to', 'Sale', 'Type', 'Salesperson']);
+      expect(xlOnly).toEqual(['Customer', 'Sale', 'Type', 'Salesperson']);
       // Below xl the customer shows under the invoice number instead.
       const underNumber = within(rowOf('CS-SPLIT-2')).getAllByText('Cedar Ridge Ag').find((el) => el.closest('.xl\\:hidden'));
       expect(underNumber).toBeTruthy();
@@ -293,6 +294,51 @@ describe('Invoices list redesign', () => {
       expect(screen.getByText('8 invoices')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Show invoices ready to post' }));
       expect(screen.getByText('4 invoices')).toBeInTheDocument();
+    });
+  });
+
+  describe('the list remembers its view and hands an opened invoice the drafts after it', () => {
+    function InvoicePage() {
+      const location = useLocation();
+      const navigate = useNavigate();
+      return (
+        <div>
+          <p data-testid="queue">{JSON.stringify(location.state)}</p>
+          <button type="button" onClick={() => navigate(-1)}>Back to invoices</button>
+        </div>
+      );
+    }
+    const renderWithInvoicePage = async () => {
+      render(
+        <MemoryRouter initialEntries={['/invoices']}>
+          <Routes>
+            <Route path="/invoices" element={<Invoices />} />
+            <Route path="/invoices/:id" element={<InvoicePage />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getAllByText('CS-DRAFT').length).toBeGreaterThan(0));
+    };
+
+    it('opening a row passes the unposted invoices after it, in the order on screen', async () => {
+      await renderWithInvoicePage();
+      fireEvent.click(screen.getByRole('button', { name: /Sort by Invoice #/ }));
+      fireEvent.click(rowOf('CS-DRAFT'));
+      // Sorted by number: CS-DRAFT, CS-OVERDUE, CS-PAID, CS-POSTED, CS-SPLIT-1, CS-SPLIT-2, CS-UNPOSTED, CS-VOIDED.
+      expect(JSON.parse(screen.getByTestId('queue').textContent!)).toEqual({ nextDrafts: ['CS-SPLIT-1', 'CS-SPLIT-2', 'CS-UNPOSTED'] });
+    });
+
+    it('Back from an invoice brings back the filters and search', async () => {
+      await renderWithInvoicePage();
+      fireEvent.click(screen.getByRole('button', { name: 'Show invoices ready to post' }));
+      fireEvent.change(screen.getByLabelText('Search invoice, customer or salesperson'), { target: { value: 'SPLIT' } });
+      fireEvent.click(rowOf('CS-SPLIT-1'));
+      fireEvent.click(await screen.findByRole('button', { name: 'Back to invoices' }));
+
+      await waitFor(() => expect(screen.getAllByText('CS-SPLIT-2').length).toBeGreaterThan(0));
+      expect(screen.getByRole('button', { name: 'Show invoices ready to post' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByLabelText('Search invoice, customer or salesperson')).toHaveValue('SPLIT');
+      expect(screen.queryByText('CS-DRAFT')).not.toBeInTheDocument();
     });
   });
 });

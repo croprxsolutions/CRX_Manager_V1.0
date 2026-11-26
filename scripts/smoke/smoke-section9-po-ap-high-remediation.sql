@@ -23,6 +23,9 @@ DECLARE
   v_period_count integer;
   v_notification_count integer;
   v_notification_replay_count integer;
+  v_damage_po uuid;
+  v_damage_line uuid;
+  v_damage_key text;
   v_receipt uuid;
   v_result jsonb;
   v_replay_result jsonb;
@@ -465,39 +468,47 @@ BEGIN
     END IF;
   END;
 
-  -- The browser key is derived from public receipt IDs, so server-side actor
-  -- and payload binding must reject a guessed key pre-seeded with other text.
+  INSERT INTO public.purchase_orders (po_number,vendor,status,created_by)
+    VALUES ('SMK-S9-DAMAGE-' || v_suffix,v_vendor_name,'submitted',v_admin) RETURNING id INTO v_damage_po;
+  INSERT INTO public.purchase_order_items (purchase_order_id,product_id,quantity_ordered,quantity_received,unit_cost,unit_size)
+    VALUES (v_damage_po,v_product,2,0,1.00,v_unit_size) RETURNING id INTO v_damage_line;
+  v_result := public.receive_po_items(jsonb_build_array(jsonb_build_object(
+    'po_item_id',v_damage_line,'quantity',1,'condition','damaged')),v_admin,'smk-s9-damage-receipt-' || v_suffix);
+  v_damage_key := 'damaged-receiving:' || v_damage_po || ':' || encode(extensions.digest(convert_to(
+    array_to_json(ARRAY[v_result -> 'receiving_record_ids' ->> 0])::text, 'UTF8'), 'sha256'), 'hex');
+
+  -- Receipt and notice use separate operations. A changed exact-key retry retains its existing refusal.
   PERFORM public.notify_damaged_receiving(
-    'SMK-S9-PO-' || v_suffix,
-    'damaged payload A',
-    v_po,
-    'smk-s9-damaged-notify-' || v_suffix
+    'SMK-S9-DAMAGE-' || v_suffix,
+    v_product_name,
+    v_damage_po,
+    v_damage_key
   );
   SELECT count(*) INTO v_notification_count
   FROM public.notifications
   WHERE notification_type = 'po_damaged_received'
-    AND related_entity_id = v_po
-    AND message LIKE '%damaged payload A%';
+    AND related_entity_id = v_damage_po
+    AND message LIKE '%' || v_product_name || '%';
   PERFORM public.notify_damaged_receiving(
-    'SMK-S9-PO-' || v_suffix,
-    'damaged payload A',
-    v_po,
-    'smk-s9-damaged-notify-' || v_suffix
+    'SMK-S9-DAMAGE-' || v_suffix,
+    v_product_name,
+    v_damage_po,
+    v_damage_key
   );
   SELECT count(*) INTO v_notification_replay_count
   FROM public.notifications
   WHERE notification_type = 'po_damaged_received'
-    AND related_entity_id = v_po
-    AND message LIKE '%damaged payload A%';
-  IF v_notification_count IS DISTINCT FROM v_notification_replay_count THEN
+    AND related_entity_id = v_damage_po
+    AND message LIKE '%' || v_product_name || '%';
+  IF v_notification_count = 0 OR v_notification_count IS DISTINCT FROM v_notification_replay_count THEN
     RAISE EXCEPTION 'SMOKE_FAIL: exact damaged notification replay duplicated alerts';
   END IF;
   BEGIN
     PERFORM public.notify_damaged_receiving(
-      'SMK-S9-PO-' || v_suffix,
+      'SMK-S9-DAMAGE-' || v_suffix,
       'damaged payload B',
-      v_po,
-      'smk-s9-damaged-notify-' || v_suffix
+      v_damage_po,
+      v_damage_key
     );
     RAISE EXCEPTION 'SMOKE_FAIL: changed damaged notification replayed a prior success';
   EXCEPTION WHEN OTHERS THEN

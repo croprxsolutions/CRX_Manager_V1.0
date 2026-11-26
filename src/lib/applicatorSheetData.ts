@@ -172,6 +172,15 @@ export interface ApplicatorSheetCustomer {
   account_number: string | null;
 }
 
+/** A crew field sheet requires a complete payer list before it can print. */
+export function requireApplicatorSheetPayers(
+  customers: ApplicatorSheetCustomer[],
+  complete: boolean,
+): ApplicatorSheetCustomer[] {
+  if (!complete || customers.length === 0) throw new Error('Could not load billed customers for the field sheet');
+  return customers;
+}
+
 /** One prior application shown under a field on the operational sheet. */
 export interface PreviousApplicationRecord {
   date: string;

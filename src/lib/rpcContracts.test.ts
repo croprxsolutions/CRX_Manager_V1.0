@@ -2949,10 +2949,6 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // (20270126110000 renamed it, so no generated type carries it yet); keyed by complete_delivery's p_idempotency_key.
   // Prune once the generated types carry it.
   '_complete_delivery_authorized_impl_20270122',
-  // 20270301180000 (M9, local candidate): refund paid outside CRX and returned (bounced) check; each requires its key
-  // and saves and binds its receipt. The screen PR adds the generated types and prunes these entries.
-  'record_outside_refund',
-  'record_returned_check',
 ]);
 
 /**
@@ -2987,6 +2983,13 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // M4a sales tax (local candidate 20270109100200): trigger function, never an RPC.
   _sales_tax_record_rate_20261231:
     'AFTER INSERT / UPDATE OF invoice_type row trigger on invoices: records a taxed sale\'s draft at the Settings rate once (ON CONFLICT DO NOTHING), and re-records only when a draft really switches type, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  // M4 commission settles on posting (local candidate 20270308140000): trigger function and its helper, never RPCs.
+  _settle_order_commission_20270306:
+    'helper of the invoice posting trigger and four commission writers: puts a sale\'s pending, unbatched commission rows whose stored base differs onto its profit after the posted standing discount, writing nothing when they already sit on it, so a replay is a no-op; every API-role EXECUTE is revoked',
+  _invoice_settles_commission_20270306:
+    'AFTER UPDATE OF status, deleted_at row trigger on chemical-sale invoices entering or leaving the posted set: calls _settle_order_commission_20270306, a no-op when the rows are right, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _invoice_lines_settle_commission_20270306:
+    'AFTER INSERT statement trigger on invoice_items: for lines added to a posted chemical-sale or misc-charge invoice, calls _settle_order_commission_20270306, a no-op when the rows are right, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   // M4b standing discount (local candidate 20270109100100): trigger functions and their recompute helper, never RPCs.
   _recompute_standing_discount_20261231:
     'helper of the standing-discount triggers and set_invoice_standing_discount: records a draft\'s rate once (ON CONFLICT DO NOTHING) and rewrites its computed discount line and total, writing nothing when they are already right, so a replay is a no-op; every API-role EXECUTE is revoked',
@@ -3134,10 +3137,14 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'AFTER INSERT/DELETE trigger on prepay_applications: recomputes one credit balance from its rows, now including M9 reversal lines (convergent, so a replay writes the same value); the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function and M9 revokes API-role EXECUTE. Prune once the candidate is in the generated snapshot',
   _recompute_po_on_order_for_products:
     'internal convergent PO-cache recomputation helper; trigger parents own the transaction and direct browser EXECUTE is revoked',
+  _record_standard_delivery_assignment_notice:
+    'internal notice writer called only by create_delivery_with_items after it binds a fresh actor-specific receipt; every API-role EXECUTE is revoked',
   // Trigger-only helpers whose migrations are now at or below the live registry
   // high-water are absent from generated client types and this inventory. Keeping
   // dead exemptions would silently pre-suppress any future RPC reusing a name.
   _sync_job_holds: 'internal convergent hold-sync helper; direct client EXECUTE is revoked',
+  _send_dispatch_location_notice:
+    'internal notice writer called only for a fresh dispatch or removal using the existing actor-bound receipt; every API-role EXECUTE is revoked',
   _sync_planned_holds: 'internal convergent hold-sync helper called within parent transactions',
   _sync_quote_job_reservations: 'internal convergent reservation-sync helper called by parent RPCs',
   check_idempotency: 'idempotency infrastructure helper; mutation only purges an expired key',

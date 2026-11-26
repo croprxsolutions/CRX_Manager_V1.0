@@ -1,7 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeError } from './errorSanitizer';
+import { isCommissionPayoutsOff, sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('tells the admin to reload after a stale purchase order cost correction', () => {
+    expect(sanitizeError({ code: 'P0001', message: 'PO_COST_CHANGED_SINCE_LOADED: stale line' }))
+      .toBe('A line’s cost or product changed since you opened this purchase order. Nothing was saved. Review the reloaded lines and save again');
+  });
+
+  it.each(['COST_INVALID', 'PRODUCT_INVALID', 'PAIR_REQUIRED'])('maps the PO_EXPECTED_%s error', (code) => {
+    expect(sanitizeError(`PO_EXPECTED_${code}: invalid details`))
+      .toBe('The purchase order line details could not be verified. Reload the purchase order and try again');
+  });
+
   it('keeps document-link errors actionable and strips control characters', () => {
     expect(sanitizeError({ message: 'BRAND_DOCUMENT_URL_BLOCKED: Use a manufacturer link.\tChoose another URL.' }))
       .toBe('Use a manufacturer link. Choose another URL.');
@@ -62,6 +72,9 @@ describe('sanitizeError', () => {
       'Nothing was saved. Parent "Atrazine 4L" changed since you opened it; reload and try again'],
     ['PRODUCT_PARENT_EPA_CORRECTION_OFF: EPA number correction is switched off until registrations (REG-1) are built',
       'Nothing was saved. EPA number correction is switched off until registrations (REG-1) are built'],
+    // RAISE text of 20270309140000_parent_epa_correction_refuses_open_work.sql (#2579).
+    ['PRODUCT_PARENT_EPA_OPEN_WORK: finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete it and invoice it or its blend ticket; if it will not be sprayed, cancel it or take this product off it; a blend ticket not tied to a job: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): job 1042 (scheduled), invoice INV-7 (draft)',
+      'Nothing was saved. Finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete it and invoice it or its blend ticket; if it will not be sprayed, cancel it or take this product off it; a blend ticket not tied to a job: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): job 1042 (scheduled), invoice INV-7 (draft)'],
     ['EVIDENCE_REQUIRED: say what shows it', 'Nothing was saved. Say what shows it'],
     // RAISE texts of 20261117130000_tote_fill_from_bulk.sql (BLK-1a).
     ['TOTE_FILL_STOCK_MOVED: stock of the tote or its bulk has moved since this fill; adjust stock instead',
@@ -115,6 +128,8 @@ describe('sanitizeError', () => {
     ['DELIVERY_QUANTITIES_STALE', "this delivery's lines changed since the screen loaded them; reload it and enter the quantities again."],
     ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
     ['DELIVERY_NOTHING_DELIVERED', 'every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'],
+    ['DELIVERY_LOAD_CHANGED', 'the products or delivered amounts on this delivery changed after the customer signed. Reload the delivery, check the products and amounts with the customer and get a new signature. If the customer already has the goods, call the office.'],
+    ['PAPER_TICKET_LOAD_CHANGED', 'the products or delivered amounts on this delivery changed after the ticket photo was taken. Get the ticket signed for the current products and amounts and add a new photo of it. If the customer already has the goods, call the office.'],
   ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` }))
       .toBe(`The delivery was not completed. ${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}`);
@@ -143,6 +158,10 @@ describe('sanitizeError', () => {
   });
   it('keeps a mixed-case product name as written (Sol r5 LOW)', () => {
     const sentence = 'pH Plus — this would deliver more than was ordered. Call the office before completing this delivery.';
+    expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
+  });
+  it('keeps a lower-case product name as written (Sol r11 LOW on #2324)', () => {
+    const sentence = 'acme Plus — this would deliver more than was ordered. Call the office before completing this delivery.';
     expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
   });
   it('explains a completion past the order (F05) without the raw token', () => {
@@ -377,6 +396,14 @@ describe('sanitizeError', () => {
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
+    // 20270309010000: payouts are off until M16 (Mason, 2026-11-25).
+    const off = 'COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.';
+    expect(sanitizeError(off)).toBe('Nothing was created or paid. Commission payouts are switched off until commission-on-payment (M16) is live. Voiding an existing payment still works');
+    expect(sanitizeError({ message: off })).toBe(sanitizeError(off));
+    expect(isCommissionPayoutsOff({ message: off })).toBe(true);
+    expect(isCommissionPayoutsOff(new Error(off))).toBe(true);
+    expect(isCommissionPayoutsOff('note mentions COMMISSION_PAYOUTS_OFF_UNTIL_M16')).toBe(false);
+    expect(isCommissionPayoutsOff(null)).toBe(false);
     expect(sanitizeError('TIER_ADMIN_ONLY: only an admin can change a customer\'s price tier'))
       .toBe("Only an admin can set or change a customer's price tier");
     expect(sanitizeError('CREDIT_LIMIT_ADMIN_ONLY: only an admin can change a customer\'s credit limit'))
@@ -439,6 +466,8 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'CUSTOMER_INACTIVE_NEW_WORK: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added' }))
       .toBe('Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added');
     expect(sanitizeError('CUSTOMER_INACTIVE_NEW_WORK')).toContain('must reactivate the customer');
+    expect(sanitizeError({ message: 'CUSTOMER_INACTIVE_POSTING: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them' }))
+      .toBe('Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them');
     expect(sanitizeError({ message: 'new row for relation "inventory_holds" violates check constraint "inventory_holds_source_needs_customer"' }))
       .toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
     expect(sanitizeError({ message: 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery' }))
@@ -534,6 +563,9 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_NOTHING_TO_BILL: delivery D-1')).toBe(
       'Nothing was billed. This delivery has no delivered quantity'
     );
+    expect(sanitizeError("UNBILLED_SCOPE_CHANGED: delivery D-1's billing changed")).toContain('Reload the page');
+    expect(sanitizeError('UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for X')).toContain('Link the line to its order line first');
+    expect(sanitizeError('BILL_SPLIT_REST_NOT_SUPPORTED: delivery D-1')).toContain('Void its Bill Split invoices');
     expect(sanitizeError('ORDER_HAS_BILL_SPLIT: this sale has a bill split, so it cannot be billed as one invoice'))
       .toContain('billed per payer');
     expect(sanitizeError("ORDER_ITEM_SHARES_OVER_100: a line's shares can't total more than 100%"))
@@ -788,5 +820,21 @@ describe('customer receipt refusals (KI-25)', () => {
   it('leaves the invoice-posting DELIVERY_NOT_COMPLETED sentence alone', () => {
     const msg = 'DELIVERY_NOT_COMPLETED: delivery D-42 for invoice INV-1002 has been deleted. Void this invoice instead of posting it.';
     expect(sanitizeError(new Error(msg))).not.toMatch(/receipt/);
+  });
+});
+
+describe('M9 refund and returned-check refusals', () => {
+  it('turns the hand-check gate into a plain instruction', () => {
+    expect(sanitizeError({ message: 'RECORD_NEEDS_HAND_CHECK: STORED_BALANCE_MISMATCH (the records this touches do not agree; record it by hand)' }))
+      .toBe("Nothing was saved. The records this touches don't agree (STORED_BALANCE_MISMATCH), so this has to be recorded by hand. Month-End's prepay check shows the customer's stored and credit totals.");
+  });
+
+  it("keeps the server's sentence after the token", () => {
+    expect(sanitizeError({ message: "CHECK_PREPAY_REFUNDED: $100.00 of this check's prepay was already refunded to the customer; record this bounce by hand" }))
+      .toBe("Nothing was saved. $100.00 of this check's prepay was already refunded to the customer; record this bounce by hand.");
+    expect(sanitizeError({ message: 'PAYMENT_RETURNED: this check is recorded as returned (bounced); it cannot also be voided' }))
+      .toBe('Nothing was saved. This check is recorded as returned (bounced); it cannot also be voided.');
+    expect(sanitizeError({ message: 'RETURNED_BEFORE_RECEIVED: the check was received on 2026-09-15; the bank cannot have returned it before that' }))
+      .toBe('Nothing was saved. The check was received on 2026-09-15; the bank cannot have returned it before that.');
   });
 });

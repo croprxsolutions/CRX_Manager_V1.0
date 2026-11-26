@@ -10,6 +10,7 @@ import { render, screen } from '@testing-library/react';
 
 const state = vi.hoisted(() => ({
   externalBilling: { data: new Set(['d1']), error: null } as { data: Set<string> | null; error: unknown },
+  rpc: vi.fn(async () => ({ data: { success: true }, error: null })),
 }));
 
 const DELIVERIES = [
@@ -37,6 +38,7 @@ vi.mock('../lib/db', () => {
     supabase: {
       from: vi.fn((table: string) =>
         chainable(() => (table === 'deliveries' ? { data: DELIVERIES, error: null } : { data: [], error: null }))),
+      rpc: state.rpc,
     },
     supabaseUntyped: {
       from: vi.fn(() =>
@@ -51,6 +53,8 @@ vi.mock('../lib/db', () => {
 vi.mock('../lib/deliveryInvoiceCoverage', () => ({
   fetchActiveInvoiceCoveragePages: vi.fn(async () => ({ data: [], error: null })),
   activeInvoiceCoversDelivery: vi.fn(() => false),
+  fetchDeliveryBillingRemainders: vi.fn(async () => ({ data: new Map(), error: null })),
+  unbilledRemainderLabel: vi.fn(() => ''),
 }));
 
 vi.mock('../lib/deliveryExternalBilling', () => ({
@@ -75,6 +79,8 @@ vi.mock('../contexts/AuthContext', () => ({
 }));
 
 import IntegrityCleanupPanel from '../components/integrity/IntegrityCleanupPanel';
+import { activeInvoiceCoversDelivery, fetchActiveInvoiceCoveragePages, fetchDeliveryBillingRemainders } from '../lib/deliveryInvoiceCoverage';
+import { fireEvent, waitFor } from '@testing-library/react';
 
 describe('IntegrityCleanup — deliveries billed outside CRX', () => {
   beforeEach(() => {
@@ -94,5 +100,19 @@ describe('IntegrityCleanup — deliveries billed outside CRX', () => {
     expect(await screen.findByText('Could not verify invoice coverage — refresh to try again.', {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.queryByText('DEL-QB-1')).toBeNull();
     expect(screen.queryByText('DEL-CRX-2')).toBeNull();
+  });
+
+  it('A4: a short-billed row sends the scope and the remainder it shows', async () => {
+    vi.mocked(fetchActiveInvoiceCoveragePages).mockResolvedValue({ data: [
+      { id: 'inv-2', order_id: 'o2', delivery_id: 'd2', total_amount_cents: 24000, invoice_type: 'chemical_sale', status: 'draft', deleted_at: null },
+    ], error: null } as never);
+    vi.mocked(activeInvoiceCoversDelivery).mockImplementation((inv: { delivery_id: string | null }, id: string) => inv.delivery_id === id);
+    vi.mocked(fetchDeliveryBillingRemainders).mockResolvedValue({ data: new Map([['d2', { deliveredQty: 10, unbilledQty: 4, unbilledCents: 16000 }]]), error: null } as never);
+    render(<IntegrityCleanupPanel />);
+    expect(await screen.findByText('DEL-CRX-2', {}, { timeout: 5000 })).toBeTruthy();
+    fireEvent.click(screen.getByText('Create draft invoice'));
+    await waitFor(() => expect(state.rpc).toHaveBeenCalledWith('create_invoice_for_unbilled_delivery', expect.objectContaining({
+      p_delivery_id: 'd2', p_expected_scope: 'rest_delivery', p_expected_cents: 16000, p_expected_units: 4,
+    })));
   });
 });

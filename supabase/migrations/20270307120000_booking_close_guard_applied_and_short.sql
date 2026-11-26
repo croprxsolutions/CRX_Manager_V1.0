@@ -69,8 +69,12 @@ BEGIN
   END IF;
   -- Sol r1 HIGH: the other half of the rule is the jobs trigger, which locks the booking and refuses a closed one
   -- (closed_by_application included) when a job is scheduled, linked or reopened. Pinned as 20270129150000 left it.
+  -- Sol r2 MED 3: its attributes too (a STABLE function could not take the FOR SHARE lock the rule relies on).
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._enforce_job_live_on_open_booking()'))
        IS DISTINCT FROM '08a8fed5fb807e1763cf40886078fc4c'
+     OR NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = to_regprocedure('public._enforce_job_live_on_open_booking()')
+                      AND p.provolatile = 'v' AND p.prosecdef AND p.proowner = 'postgres'::regrole
+                      AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[])
      OR NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.jobs'::regclass AND t.tgname = 'jobs_live_on_open_booking'
                       AND t.tgtype = 23 AND t.tgenabled = 'O' AND t.tgqual IS NULL
                       AND t.tgfoid = 'public._enforce_job_live_on_open_booking()'::regprocedure
@@ -210,17 +214,15 @@ BEGIN
   END IF;
   -- Luna r3: the owner rule exempts sessions with no auth.uid() (cron, the service role). That is safe only while
   -- neither close RPC can be run by anon or PUBLIC (both also refuse AUTH_REQUIRED without a signed-in user).
-  IF EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
-             WHERE p.oid IN ('public.close_quote_as_applied(uuid,uuid,text)'::regprocedure, 'public.close_quote_as_short(uuid,uuid,text)'::regprocedure)
-               AND a.privilege_type = 'EXECUTE' AND (a.grantee = 0 OR a.grantee = 'anon'::regrole))
-     OR EXISTS (SELECT 1 FROM pg_proc p
-                WHERE p.oid IN ('public.close_quote_as_applied(uuid,uuid,text)'::regprocedure, 'public.close_quote_as_short(uuid,uuid,text)'::regprocedure)
-                  AND p.proacl IS NULL) THEN
+  -- Sol r2 MED 4: every overload, and EXECUTE however anon gets it (PUBLIC, a direct grant or a group role).
+  IF EXISTS (SELECT 1 FROM pg_proc p
+             WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN ('close_quote_as_applied', 'close_quote_as_short')
+               AND has_function_privilege('anon', p.oid, 'EXECUTE')) THEN
     RAISE EXCEPTION 'POSTFLIGHT_BOOKING_CLOSE_GUARD_GRANTS: close_quote_as_applied or close_quote_as_short is executable by anon or PUBLIC';
   END IF;
   -- No booking closed as applied before this migration may still have a scheduled or in-progress spray job (quotes is
   -- locked above, so none closes in between); if one exists, re-read live and settle it with Mason first. The scan
-  -- starts from the bookings closed as applied (Sol r1 MED 5: it runs under the write lock); live holds a few hundred.
+  -- starts from the bookings closed as applied, the only rows it can match (Sol r1 MED 5: it runs under the write lock).
   IF EXISTS (SELECT 1 FROM public.quotes q
              WHERE q.status = 'closed_by_application'
                AND EXISTS (SELECT 1 FROM public.jobs j

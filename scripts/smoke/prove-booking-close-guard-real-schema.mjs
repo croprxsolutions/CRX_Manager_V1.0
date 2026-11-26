@@ -36,6 +36,8 @@ const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-
 const run = (sql, flags = []) => { const r = docker([...PSQL, ...flags], { input: sql, allowFailure: true }); return { status: r.status, out: `${r.stdout}\n${r.stderr}` }; };
 const bodyMd5 = () => scalar("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._enforce_booking_live_job_rules()'::regprocedure;");
 const smoke = (file) => run(text(`scripts/smoke/${file}`)).out;
+// Sol r2 LOW: a chain passes only when psql stops on the chain's own terminal SMOKE_PASS_ROLLBACK error.
+const PASS = /^ERROR:\s+SMOKE_PASS_ROLLBACK /m;
 
 const REP_A = USERS.rep;
 const REP_B = id('a5');
@@ -221,7 +223,7 @@ ROLLBACK;`).out, /BOOKING_HAS_JOB: spray job PRV-BCG-LEGACY /, 'a section-only j
   resetRace();
   console.log('[race] job insert then close: the close is seen waiting, then refused; close then job insert: the insert is seen waiting, then refused');
   const chains = ['smoke-booking-close-guard.sql', 'smoke-booking-guard-rep-and-delete.sql'];
-  for (const chain of chains) assert.match(smoke(chain), /SMOKE_PASS_ROLLBACK/, `${chain} must pass after the candidate`);
+  for (const chain of chains) assert.match(smoke(chain), PASS, `${chain} must pass after the candidate`);
   for (const chain of SAME) assert.equal(smoke(chain), before[chain], `${chain} must end exactly as before`);
   console.log('[after] close as applied refused with a live job (rep and admin); rep B refused closing short and as applied; owner/admin/no-job closes go through; anon and no-user calls refused; REPEATABLE READ and SERIALIZABLE refused');
   console.log(`[after] ${chains.join(', ')} pass; ${SAME.map((c) => `${c} ends exactly as before (${(/ERROR:\s+([A-Z_]+)/.exec(before[c]) ?? ['', 'pass'])[1]})`).join('; ')}`);

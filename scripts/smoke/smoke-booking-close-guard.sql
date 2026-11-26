@@ -97,7 +97,7 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_rep_a::text, true);
   FOR v_i IN 1..3 LOOP
     v_res := public.close_quote_as_applied(v_q[v_i], v_rep_a, 'bcg-c2-' || v_i || '-' || v_sfx);
-    IF (SELECT status FROM quotes WHERE id = v_q[v_i]) <> 'closed_by_application' THEN
+    IF (SELECT status FROM quotes WHERE id = v_q[v_i]) IS DISTINCT FROM 'closed_by_application' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: (C2) booking % did not close as applied: %', v_i, v_res;
     END IF;
   END LOOP;
@@ -125,7 +125,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (S1) rep B closing rep A''s booking as applied was not refused BOOKING_NOT_YOURS: % %', v_err, v_res;
   END IF;
   v_n := v_n + 1;
-  IF (SELECT status FROM quotes WHERE id = v_q[4]) <> 'sent' THEN
+  IF (SELECT status FROM quotes WHERE id = v_q[4]) IS DISTINCT FROM 'sent' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (S1) a refused close changed the booking';
   END IF;
 
@@ -160,7 +160,7 @@ BEGIN
       ELSE
         v_res := public.close_quote_as_short(v_q[4], v_who, 'bcg-s2-' || v_who || '-' || v_sfx);
       END IF;
-      IF (SELECT status FROM quotes WHERE id = v_q[4]) <> 'closed_short' THEN
+      IF (SELECT status FROM quotes WHERE id = v_q[4]) IS DISTINCT FROM 'closed_short' THEN
         RAISE EXCEPTION 'SMOKE_FAIL: (S2) closing short as % did not land: %', COALESCE(v_who::text, 'system'), v_res;
       END IF;
       RAISE EXCEPTION 'BCG_UNDO';
@@ -200,7 +200,7 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep_a, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_rep_a::text, true);
   UPDATE quotes SET status = 'declined' WHERE id = v_q[5];
-  IF (SELECT status FROM quotes WHERE id = v_q[5]) <> 'declined' THEN
+  IF (SELECT status FROM quotes WHERE id = v_q[5]) IS DISTINCT FROM 'declined' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (S3) declining with the job cancelled did not go through';
   END IF;
 

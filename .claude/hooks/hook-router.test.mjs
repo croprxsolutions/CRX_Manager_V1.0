@@ -9,7 +9,7 @@ import { promptModulesFor } from "./prompt-router.mjs";
 import { postToolModulesFor } from "./posttool-router.mjs";
 import { dirtyWarning, pushDir, pushTargets } from "./post-push-dirty-warning.mjs";
 import { dedupeContextBlocks } from "./hook-router-runtime.mjs";
-import { askTahaAfterSol, ghCommandCwd, githubAncestry, proofReader, readyTarget, solCoversHead } from "./taha-ready-after-sol.mjs";
+import { askTahaAfterSol, ghCommandCwd, githubAncestry, laterSolRisk, proofReader, readyTarget, solCoversHead } from "./taha-ready-after-sol.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -330,7 +330,7 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
   // History: BASE <- EARLIER <- HEAD; OTHER is unrelated.
   const chain = [BASE, EARLIER, HEAD];
   const isAncestor = (a, b) => (chain.includes(a) && chain.includes(b) ? chain.indexOf(a) <= chain.indexOf(b) : false);
-  const covers = (proofs, more = {}) => solCoversHead({ pr, readProof: (sha) => proofs[sha] ?? null, isAncestor, mergeBase: () => BASE, now, ...more });
+  const covers = (proofs, more = {}) => solCoversHead({ pr, readProof: (sha) => proofs[sha] ?? null, isAncestor, mergeBase: () => BASE, laterRisky: () => false, now, ...more });
   ok(covers({ [HEAD]: proof(HEAD) }) === true, "a clean Sol of the current head covers it");
   ok(covers({ [EARLIER]: proof(EARLIER) }) === true, "a clean Sol of an earlier commit of this PR covers a fix pushed after it");
   ok(covers({ [OTHER]: proof(OTHER) }) === false, "a proof of a commit outside this PR does not");
@@ -340,6 +340,14 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
   ok(covers({ [EARLIER]: proof(EARLIER, { review_ref: "origin/main" }) }) === false, "a review against main does not cover a PR into staging");
   ok(covers({}) === false, "no proof: not covered");
   ok(covers({ [EARLIER]: proof(EARLIER) }, { isAncestor: () => null }) === null, "ancestry unknown: unsure (null), never a plain no");
+  // Codex bot: as the merge gate, an earlier commit's Sol covers only later commits that stay off the Sol list.
+  ok(covers({ [EARLIER]: proof(EARLIER) }, { laterRisky: () => true }) === false, "a later commit on the Sol list: the earlier Sol does not cover the head");
+  ok(covers({ [EARLIER]: proof(EARLIER) }, { laterRisky: () => null }) === null, "later commits unreadable: unsure, never covered");
+  ok(covers({ [HEAD]: proof(HEAD) }, { laterRisky: () => true }) === true, "a Sol of the head itself needs no later-commit check");
+  const compareWith = (files) => () => JSON.stringify({ status: "ahead", ahead_by: 1, head: HEAD, files: files.map((filename) => ({ filename, status: "modified" })) });
+  ok(laterSolRisk(compareWith(["src/pages/Quotes.tsx"]))(EARLIER, HEAD) === true, "the merge gate's Sol-risk check: a quotes screen is on the list");
+  ok(laterSolRisk(compareWith(["docs/notes.md"]))(EARLIER, HEAD) === false, "the merge gate's Sol-risk check: a docs note is not");
+  ok(laterSolRisk(() => { throw new Error("HTTP 502"); })(EARLIER, HEAD) === null, "the comparison unreadable: unknown, not covered");
 
   // Taha LOW 4: the real proof reader (files across checkouts) and the GitHub-backed ancestry answers.
   const main = tempDir("crx-taha-ready-main-");
@@ -355,7 +363,7 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
   ok(answers(() => "3").isAncestor(BASE, HEAD) === false, "GitHub: behind, so not contained");
   ok(answers(() => { throw new Error("HTTP 404"); }).isAncestor(BASE, HEAD) === null, "GitHub error (e.g. a commit it lacks): unknown, not false");
   ok(answers(() => `${BASE}\n`).mergeBase(HEAD, NEW_BASE) === BASE && answers(() => { throw new Error("x"); }).mergeBase(HEAD, NEW_BASE) === null, "merge-base from GitHub; an error is unknown");
-  const realCovers = solCoversHead({ pr: { ...pr, baseRefOid: NEW_BASE }, readProof: read, ...answers((args) => (args.includes(".merge_base_commit.sha") ? BASE : args.some((a) => a.includes(`${EARLIER}...${NEW_BASE}`)) ? "1" : "0")), now });
+  const realCovers = solCoversHead({ pr: { ...pr, baseRefOid: NEW_BASE }, readProof: read, ...answers((args) => (args.includes(".merge_base_commit.sha") ? BASE : args.some((a) => a.includes(`${EARLIER}...${NEW_BASE}`)) ? "1" : "0")), laterRisky: () => false, now });
   ok(realCovers === true, "end to end: another worktree's Sol of an earlier commit covers the head after staging moved");
 }
 

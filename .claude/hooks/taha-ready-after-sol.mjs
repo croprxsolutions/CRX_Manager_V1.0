@@ -15,6 +15,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_REPO_NAME } from "./app-repo-identity.mjs";
 import { gitPushCwd, headContainsBaseOnGitHub, isGitPush, mergeBaseOnGitHub, nativeFolder, proofSearchDirs, proofValid, proofValidForMerge } from "./codex-push-lib.mjs";
+import { solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneProblem, TAHA_LOGIN } from "./taha-lane-lib.mjs";
 
 const LABEL = "ready-for-taha";
@@ -68,15 +69,18 @@ const cleanSolShape = (data, now) => Boolean(data) && !ownerAccepted(data) && pr
  * commit of this PR)? true / false, or null when a clean Sol proof exists but `isAncestor` / `mergeBase`
  * could not answer (they return null then), so the caller says so instead of staying silent.
  */
-export function solCoversHead({ pr, readProof, isAncestor, mergeBase, now = Date.now() }) {
-  const commits = [...new Set([pr.headRefOid, ...(pr.commits ?? []).map((c) => c?.oid)].map(lower).filter(Boolean))];
+export function solCoversHead({ pr, readProof, isAncestor, mergeBase, laterRisky = () => null, now = Date.now() }) {
+  const head = lower(pr.headRefOid);
+  const commits = [...new Set([head, ...(pr.commits ?? []).map((c) => c?.oid)].map(lower).filter(Boolean))];
   const prCommits = new Set(commits);
   let unsure = false;
   const watch = (fn) => (...args) => { const answer = fn(...args); if (answer === null || answer === undefined) unsure = true; return answer; };
   const covered = commits.some((sha) => {
     const data = readProof(sha);
     return cleanSolShape(data, now) && proofValidForMerge({ data, headSha: pr.headRefOid, nowMs: now, baseSha: pr.baseRefOid,
-      isAncestor: watch(isAncestor), mergeBase: watch(mergeBase), prCommits, baseRef: pr.baseRefName });
+      isAncestor: watch(isAncestor), mergeBase: watch(mergeBase), prCommits, baseRef: pr.baseRefName })
+      // As the merge gate (pr-merge-guard.mjs): an earlier commit's Sol covers only later commits off the Sol list (Codex bot).
+      && (sha === head || watch(laterRisky)(sha, pr.headRefOid) === false);
   });
   return covered ? true : unsure ? null : false;
 }
@@ -103,6 +107,19 @@ export function githubAncestry(gh) {
   return {
     isAncestor: (a, b) => ask(() => headContainsBaseOnGitHub({ baseSha: a, headSha: b, repo: undefined, gh })),
     mergeBase: (a, b) => ask(() => mergeBaseOnGitHub({ baseSha: b, headSha: a, repo: undefined, gh })),
+  };
+}
+
+/**
+ * Do the commits after `from` up to `to` touch the Sol list (the merge gate's `solRiskOnGitHub`)? true / false,
+ * or null when GitHub could not answer, so an unread comparison is "unsure", never "covered".
+ */
+export function laterSolRisk(gh) {
+  return (from, to) => {
+    let failed = false;
+    const watched = (args) => { try { return gh(args); } catch (error) { failed = true; throw error; } };
+    const risk = solRiskOnGitHub({ baseSha: from, headSha: to, repo: undefined, gh: watched });
+    return failed ? null : risk.risky === true;
   };
 }
 
@@ -143,7 +160,7 @@ export function askTahaAfterSol({ cwd, headSha = null, pr: target = null, gh = d
   }
   try {
     const { isAncestor, mergeBase } = githubAncestry(call);
-    const covered = pr?.state === "OPEN" ? solCoversHead({ pr, readProof: read, isAncestor, mergeBase, now }) : false;
+    const covered = pr?.state === "OPEN" ? solCoversHead({ pr, readProof: read, isAncestor, mergeBase, laterRisky: laterSolRisk(call), now }) : false;
     const files = () => prFilesOnGitHub({ repo: undefined, gh: call, number: pr.number, headSha: pr.headRefOid });
     const problem = tahaReadyAfterSolProblem({ pr, proofClean: covered !== false, files });
     // An unreadable list is not "not lane" (Taha LOW 2, Codex bot): say so, as the other unfinished paths do.

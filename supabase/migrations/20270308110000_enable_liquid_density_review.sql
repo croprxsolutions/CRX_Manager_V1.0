@@ -7,7 +7,10 @@ BEGIN
      OR (SELECT count(*) FROM pg_attribute
          WHERE attrelid = to_regclass('public.brand_document_links')
            AND attnum > 0 AND NOT attisdropped
-           AND attname IN ('id', 'parent_brand_id', 'document_kind', 'hidden_at', 'url')) <> 5
+           AND (attname, atttypid) IN (
+             ('id', 'uuid'::regtype), ('parent_brand_id', 'uuid'::regtype),
+             ('document_kind', 'text'::regtype), ('hidden_at', 'timestamptz'::regtype), ('url', 'text'::regtype)
+           )) <> 5
      OR EXISTS (
        SELECT 1
        FROM (VALUES
@@ -22,6 +25,10 @@ BEGIN
        ) AS expected(signature, body_hash, definer, authenticated)
        LEFT JOIN pg_proc p ON p.oid = to_regprocedure('public.' || expected.signature)
        WHERE p.oid IS NULL
+          OR EXISTS (
+            SELECT 1 FROM pg_proc other
+            WHERE other.pronamespace = p.pronamespace AND other.proname = p.proname AND other.oid <> p.oid
+          )
           OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM expected.body_hash
           OR p.proowner IS DISTINCT FROM 'postgres'::regrole
           OR p.prosecdef IS DISTINCT FROM expected.definer

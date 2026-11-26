@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,6 +26,24 @@ target.assertLocalDockerEndpoint(docker(['context', 'inspect', '--format', '{{.E
 const container = target.PROJECT + '-db-1';
 assert.equal(docker(['inspect', '--format', '{{index .Config.Labels "com.docker.compose.project"}}', container]), target.PROJECT);
 
+const migrations = new URL('../../supabase/migrations/', import.meta.url);
+const filename = readdirSync(migrations).find(name => name.endsWith('_admin_vehicle_register_reads.sql'));
+assert(filename, 'Vehicle register migration missing from this checkout');
+const migration = readFileSync(new URL(filename, migrations), 'utf8');
+const sqlCommand = ['exec', '-i', container, 'psql', '-Xq', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'];
+
+function expectApplyRefused(input, message) {
+  const result = spawnSync('docker', sqlCommand, { input, encoding: 'utf8' });
+  assert.notEqual(result.status, 0, 'An unsafe test apply unexpectedly passed');
+  assert(result.stderr?.includes(message), 'The test apply did not refuse for the expected reason');
+}
+
+expectApplyRefused(migration, 'ADMIN_VEHICLE_REGISTER_NEEDS_TRANSACTION');
+expectApplyRefused(
+  'BEGIN;\nALTER POLICY vehicles_select ON public.vehicles USING (true);\n' + migration + '\nROLLBACK;\n',
+  'ADMIN_VEHICLE_REGISTER_BASE_POLICY_CHANGED',
+);
+
 const accounts = [['admin', true], ['sales_rep', true], ['driver', true], ['applicator', true], ['entity_recipient', true], ['admin', false]]
   .map(([role, active], i) => ({ role, active, id: randomUUID(), name: 'Invented vehicle proof ' + (i + 1) }));
 const owned = [randomUUID(), randomUUID()];
@@ -49,8 +67,10 @@ const checks = accounts.map(({ role, active, id }) => `
   END $proof$;
   RESET ROLE;
 `).join('\n');
-docker(['exec', '-i', container, 'psql', '-Xq', '-v', 'ON_ERROR_STOP=1', '-U', 'supabase_admin', '-d', 'postgres'], `
+docker(sqlCommand, `
   BEGIN;
+  DROP VIEW IF EXISTS public.admin_vehicle_register;
+  ${migration}
   SET LOCAL session_replication_role = replica;
   ${profiles}
   INSERT INTO public.vehicles (id, vehicle_name, vehicle_type, status, registration, notes) VALUES

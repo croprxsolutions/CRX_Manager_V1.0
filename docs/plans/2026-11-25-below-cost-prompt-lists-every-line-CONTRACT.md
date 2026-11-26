@@ -151,3 +151,7 @@ None for this PR. The follow-up "retry bound to what was shown" is Mason's call 
 3. **MED, refuted:** a total above JavaScript's safe-integer limit (about $90 trillion) shows no total. No real save reaches that size; this is the same display-rounding note Sol round 2 deferred.
 4. **LOW, deferred:** a note kept through an exempt quantity cut keeps the old quantity (see the peer-review section).
 5. **LOW, fixed:** contract rule 3 now states the 200-line cap.
+
+## Sol round 3 (gpt-6.2-sol high, head 429873ba9: 1 HIGH)
+
+1. **HIGH, fixed:** pricing a partly delivered rush order listed the order line and its draft invoice line, counting the delivered units twice. The peer-review quantity rule (equal quantity) caused it. Count-once now needs the same price and cost and an invoice line for no more units than its order line. A larger invoice quantity cannot pass the delivered-goods check, so it never hides units. Proof case 12d: 2 ordered, 1 on the invoice → one line, $8.00.

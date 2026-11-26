@@ -33,7 +33,7 @@ BEGIN
   -- Drop only what the migration created: the list function's body and each trigger's shape, so drifted code is not
   -- silently removed.
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._raise_below_cost_reason_list()'::regprocedure)
-       IS DISTINCT FROM '88347fb570813d08d44933503805d61e'
+       IS DISTINCT FROM '200f01085a2363e64cedb022c1ae33aa'
      OR (SELECT count(*) FROM pg_trigger t
           WHERE t.tgname = 'zzz_crx_below_cost_reason_list'
             AND t.tgrelid IN ('public.order_items'::regclass, 'public.quote_items'::regclass, 'public.invoice_items'::regclass)

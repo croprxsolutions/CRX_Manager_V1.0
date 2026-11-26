@@ -492,13 +492,13 @@ BEGIN
            WHEN 'invoice_items' THEN EXISTS (SELECT 1 FROM public.invoice_items x WHERE x.id = split_part(e.key, ':', 2)::uuid)
            ELSE true
          END)
-     -- An invoice line billing an order line listed in this same save at the same price, cost and quantity is that sale
-     -- (price_order on a delivered rush order writes both): list it once, under the order line.
+     -- An invoice line billing an order line listed in this same save at the same price and cost, for no more units, is
+     -- part of that sale (price_order on a delivered or partly delivered rush order writes both): list it once, under the order line.
      AND NOT (split_part(e.key, ':', 1) = 'invoice_items'
               AND COALESCE((
                 SELECT o.value -> 'unit_price_cents' = e.value -> 'unit_price_cents'
                        AND o.value -> 'locked_unit_cost_cents' = e.value -> 'locked_unit_cost_cents'
-                       AND o.value -> 'quantity' = e.value -> 'quantity'
+                       AND (e.value ->> 'quantity')::numeric <= (o.value ->> 'quantity')::numeric
                        AND EXISTS (SELECT 1 FROM public.order_items x WHERE x.id = (e.value ->> 'order_item_id')::uuid)
                   FROM jsonb_each(v_pending -> 'lines') AS o
                  WHERE o.key = 'order_items:' || (e.value ->> 'order_item_id')), false))

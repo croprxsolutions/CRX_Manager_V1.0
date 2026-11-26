@@ -472,15 +472,18 @@ UPDATE public.invoice_items SET id = '${INV_LINE}', quantity = 1, extended_cents
   console.log('[case 12c] a kept line restored to its id with a lower quantity: listed at the restored quantity 1 and its $3.00 shortfall');
   // Case 12d (Sol round 1): price_order on a delivered rush order writes the order line and its linked invoice line at
   // the same price. That is one sale: listed once, under the order line, and counted once. At another price, both list.
-  const priceBoth = (invoiceCents) => asAdminWrite(`UPDATE public.order_items SET price_per_unit = 6.00 WHERE id = (${INV_OI});
-UPDATE public.invoice_items SET unit_price_cents = ${invoiceCents}, extended_cents = ${invoiceCents * 2} WHERE id = '${INV_LINE}';`, 'price_order');
+  const priceBoth = (invoiceCents, qty = 2) => asAdminWrite(`UPDATE public.order_items SET price_per_unit = 6.00 WHERE id = (${INV_OI});
+UPDATE public.invoice_items SET unit_price_cents = ${invoiceCents}, quantity = ${qty}, extended_cents = ${invoiceCents * qty} WHERE id = '${INV_LINE}';`, 'price_order');
   const once = refusedAtCommit(priceBoth(600));
   assert.equal(once.lines.length, 1, JSON.stringify(once));
   assert.equal(once.lines[0].line_id, scalar(INV_OI)); assert.equal(once.total_shortfall_cents, 800);
+  // Sol round 3: a partly delivered rush order (2 ordered, 1 on the draft invoice) is still one sale: listed once.
+  const partly = refusedAtCommit(priceBoth(600, 1));
+  assert.equal(partly.lines.length, 1, JSON.stringify(partly)); assert.equal(partly.total_shortfall_cents, 800);
   const both = refusedAtCommit(priceBoth(500));
   assert.equal(both.lines.length, 2, JSON.stringify(both)); assert.equal(both.total_shortfall_cents, 1800);
   assert.equal(scalar(`SELECT string_agg(id::text || ':' || unit_price_cents, ',') FROM public.invoice_items WHERE invoice_id = '${INV}';`), `${INV_LINE}:700`);
-  console.log('[case 12d] pricing an order line and its linked invoice line at the same $6.00: one line, $8.00 short (not $16.00); at different prices both are listed ($18.00)');
+  console.log('[case 12d] pricing an order line and its linked invoice line at the same $6.00: one line, $8.00 short (not $16.00), also with only 1 of 2 units on the invoice; at different prices both are listed ($18.00)');
   // Case 13: a line written below cost, then touched by an exempt bookkeeping write (same product, price, cost, order
   // line, fee flag; quantity not raised) in the same save, keeps its note: the save is still refused. (A reviewer found
   // the exempt write used to wipe the note, so the save went through with no reason.)

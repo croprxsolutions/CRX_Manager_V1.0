@@ -11,7 +11,7 @@ import { daysSinceBusinessDate, parseLocalDate, todayInBusinessTz } from './date
 const OLD_PAYMENT_DATE_DAYS = 31;
 
 /** Same limit as the duplicate-payment check that runs beside it. */
-export const CLOSED_PERIOD_CHECK_TIMEOUT_MS = 15_000;
+const CLOSED_PERIOD_CHECK_TIMEOUT_MS = 15_000;
 
 const showDay = (day: string): string => parseLocalDate(day).toLocaleDateString('en-US');
 

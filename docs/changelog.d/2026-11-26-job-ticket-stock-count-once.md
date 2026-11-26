@@ -6,7 +6,8 @@
 - Now: for one job and one product, the total taken is the larger of the job's amount and its tickets' amounts
   together. Whichever posts second takes only the difference, and its stock line is flagged for office review with a
   note ("N already counted by …"). Unlinked tickets and jobs with no filed ticket work as before.
-- Reversing a blend ticket's application record is refused once its job is completed
-  (`APPLICATION_RECORD_COUNTED_WITH_JOB`); correct stock with an inventory adjustment instead. (A filed ticket's job
-  link was already frozen.)
+- Reversing a blend ticket's application record after its job is completed uses smart undo (see the smart-undo
+  entry): the ticket's lines come back and the job keeps what it still needs. Do not correct a wrong job link with an
+  inventory adjustment alone; it leaves the ticket's claim in the job's group. (A filed ticket's job link was already
+  frozen.)
 - Migration `20270312120000_job_ticket_stock_count_once.sql` (two ledger columns, three re-emitted bodies). Proof: `scripts/smoke/prove-job-ticket-stock-count-once-real-schema.mjs`.

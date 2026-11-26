@@ -48,8 +48,9 @@ post it"). No screen code change.
 - **Rules that always hold:** a parent EPA number never changes while W1-W4 holds a saved row for one of its sizes, as
   seen by the save's check. A refusal raises and rolls back the whole correction (parent, sizes, version, event).
 - **Existing rows:** observed 2026-11-25 on production (read-only `execute_sql`, the W1/W2/W3-unbilled/W4 joins
-  through `product_parent_members`): 458 parents, zero matching rows (the app is not in real use yet). Re-run the
-  final predicates read-only before the production apply.
+  through `product_parent_members`), and separately every not-deleted, not-rejected blend ticket with no `application_records` row whatever its billing (the billed, prepaid or no-charge branch of W3): 458 parents, zero matching rows in each (the app is not in real use yet). Re-run the
+  final predicates read-only before the production apply, the no-application-record branch included; if it is not
+  zero, decide what those tickets need before applying (Taha, #2613).
 - **Timing:** READ COMMITTED, no new lock. The save first locks the parent and every size `FOR UPDATE`
   (`_lock_product_parent`, `20261108120000:686`), which conflicts with the `FOR KEY SHARE` an insert of a job,
   blend-ticket or invoice line for a size takes through its foreign key: that insert waits for the correction, or the

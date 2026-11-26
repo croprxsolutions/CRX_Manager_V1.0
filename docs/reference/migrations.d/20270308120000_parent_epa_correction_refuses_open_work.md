@@ -4,7 +4,7 @@ What it does (no rows written): re-emits `_product_parent_identity_after` from t
 
 Preflight (`PARENT_EPA_OPEN_WORK_PREFLIGHT` / `_NOT_IN_TRANSACTION`): one transaction; the helper is the `20270307180000` body (md5 `b97145311af25c6ac873f78aa44bf2ac`, owner `postgres`, not SECURITY DEFINER, volatile, `search_path=public, pg_temp`); a second apply stops here. Postflight (`PARENT_EPA_OPEN_WORK_POSTFLIGHT`): body md5 `1ce88f15dc79e7baa2a7538d40379470`, same attributes, ACL exactly `{postgres=X/postgres}`.
 
-Ordering: right after `20270307180000_parent_epa_correction_on`, in the same release and the same apply session (if this one fails, switch the correction off before anything else), so the correction is never switched on in production without this rule. Re-run the open-work query read-only before applying.
+Ordering: right after `20270307180000_parent_epa_correction_on`, in the same release and the same apply session (if this one fails, switch the correction off before anything else), so the correction is never switched on in production without this rule. Re-run the open-work query read-only before applying, including blend tickets with no application record whatever their billing (zero on production 2026-11-25); if not zero, decide what those tickets need first (Taha, #2613).
 
 Rollback (its own reviewed migration): switch the correction off (`_product_parent_epa_correction_enabled()` as `SELECT false`, `20270307180000`'s rollback). Never re-emit the `20270307180000` helper while the switch is on.
 

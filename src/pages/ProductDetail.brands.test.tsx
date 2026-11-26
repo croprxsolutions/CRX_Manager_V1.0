@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useEffect } from 'react';
 import type { Product, ProductBrand } from '../types';
 
 const H = vi.hoisted(() => ({
@@ -16,6 +17,10 @@ const H = vi.hoisted(() => ({
   optionLoadFailed: false,
   unitsFailed: false,
   created: null as { parent: Record<string, unknown>; size: Record<string, unknown> } | null,
+  parent: null as { id: string; name: string; generic_epa_registration: string | null; sizes: Array<{ product_id: string }> } | null,
+  getParent: vi.fn(),
+  fetchParentEpaNumbers: vi.fn(),
+  brandsByParent: {} as Record<string, ProductBrand[]>,
 }));
 
 function baseProduct(overrides: Partial<Product> = {}): Product {
@@ -133,7 +138,7 @@ vi.mock('../lib/db', async () => {
 // PAR-1: a new product is created through the parent RPC; these products have no parent.
 vi.mock('../lib/productParents', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/productParents')>()),
-  getParentOfProduct: async () => null,
+  getParentOfProduct: H.getParent,
   addProductSize: vi.fn(),
   createProductWithParent: async (parent: Record<string, unknown>, size: Record<string, unknown>) => {
     H.created = { parent, size };
@@ -211,10 +216,30 @@ vi.mock('../components/products/ProductPriceHistory', () => ({
 }));
 
 vi.mock('../components/products/ProductBrandsSection', () => ({
-  default: (props: { productId: string; productName: string }) => {
+  default: function MockProductBrandsSection(props: {
+    productId: string;
+    productName: string;
+    onBrandsChange?: (id: string, brands: ProductBrand[]) => void;
+    [key: string]: unknown;
+  }) {
     H.brandSection(props);
-    return <div data-testid="brands-section">{props.productId}: {props.productName}</div>;
+    const { productId, productName, onBrandsChange } = props;
+    useEffect(() => {
+      if (H.parent) onBrandsChange?.(productId, H.brandsByParent[H.parent.id] ?? []);
+    }, [productId, onBrandsChange]);
+    return <div data-testid="brands-section">{productId}: {productName}</div>;
   },
+}));
+
+vi.mock('../components/products/ProductParentPanel', () => ({
+  default: ({ onChanged }: { onChanged: () => void }) => <button onClick={onChanged}>Refresh parent</button>,
+}));
+
+vi.mock('../components/products/ProductChemistrySection', () => ({ default: () => null }));
+
+vi.mock('../lib/epaProposals', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/epaProposals')>()),
+  fetchParentEpaNumbers: H.fetchParentEpaNumbers,
 }));
 
 import ProductDetail from './ProductDetail';
@@ -231,6 +256,65 @@ describe('ProductDetail brands section', () => {
     H.created = null;
     H.optionLoadFailed = false;
     H.unitsFailed = false;
+    H.parent = null;
+    H.getParent.mockImplementation(async () => H.parent);
+    H.fetchParentEpaNumbers.mockResolvedValue([]);
+    H.brandsByParent = {};
+  });
+
+  it("drops the old group's EPA brand after a size moves to another group", async () => {
+    const productSetup = baseProduct({ rei_hours: 0, phi_days: 0 });
+    H.product = productSetup;
+    H.parent = {
+      id: 'parent-1', name: 'First group', generic_epa_registration: null,
+      sizes: [{ product_id: productSetup.id }],
+    };
+    H.getParent.mockImplementation(async () => H.parent);
+    H.brandsByParent = {
+      'parent-1': [{ brand_name: 'First group brand', epa_registration: '111-111' } as ProductBrand],
+      'parent-2': [],
+    };
+    H.fetchParentEpaNumbers.mockImplementation(async (parentId: string) => (
+      parentId === 'parent-1' ? ['111-111'] : []
+    ));
+
+    render(<ProductDetail />);
+    await screen.findByTestId('brands-section');
+    await waitFor(() => expect(screen.getByText(/Still needed for complete setup:/)).not.toHaveTextContent('EPA number'));
+
+    H.parent = {
+      id: 'parent-2', name: 'Second group', generic_epa_registration: null,
+      sizes: [{ product_id: productSetup.id }],
+    };
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh parent' }));
+
+    await waitFor(() => expect(screen.getByText(/Still needed for complete setup:/)).toHaveTextContent('EPA number'));
+  });
+
+  it("shows EPA as needed when a group's last brand number is cleared", async () => {
+    H.product = baseProduct({ rei_hours: 0, phi_days: 0 });
+    H.parent = {
+      id: 'parent-1', name: 'Generic group', generic_epa_registration: null,
+      sizes: [{ product_id: 'product-1' }],
+    };
+    H.getParent.mockImplementation(async () => H.parent);
+    H.brandsByParent = {
+      'parent-1': [{ brand_name: 'Generic brand', epa_registration: '111-111' } as ProductBrand],
+    };
+    let hasGroupEpa = true;
+    H.fetchParentEpaNumbers.mockImplementation(async () => (hasGroupEpa ? ['111-111'] : []));
+
+    render(<ProductDetail />);
+    await screen.findByTestId('brands-section');
+    await waitFor(() => expect(screen.getByText(/Still needed for complete setup:/)).not.toHaveTextContent('EPA number'));
+
+    hasGroupEpa = false;
+    const props = H.brandSection.mock.lastCall![0] as {
+      onBrandsChange: (id: string, brands: ProductBrand[]) => void;
+    };
+    act(() => props.onBrandsChange('product-1', []));
+
+    await waitFor(() => expect(screen.getByText(/Still needed for complete setup:/)).toHaveTextContent('EPA number'));
   });
 
   it('names a brand on a cancelled registration in the page banner', async () => {

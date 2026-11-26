@@ -99,8 +99,13 @@ export function readyToMergeProblem({ comments, head, now = Date.now() }) {
 // only while on the PR, when his account added it after the head commit arrived (a later push needs it again), and
 // for 30 minutes (READY_WINDOW_MS). events: the PR's issue timeline, oldest first; labels: its current labels.
 export const TAHA_UNAVAILABLE_LABEL = "taha-unavailable";
-export function tahaUnavailableLabelled({ events, labels, head, now = Date.now() }) {
-  if (!Array.isArray(events) || !Array.isArray(labels) || !labels.some((l) => l?.name === TAHA_UNAVAILABLE_LABEL)) return false;
+// pushes: the branch's push activity (GET /activity: after, timestamp). The timeline lists commits by commit date, not
+// push time, so an older commit pushed after his label would look covered; the label must be newer than the head's
+// latest push (Taha's review of #2668, HIGH 1). Unreadable, or no push of this head: it does not count.
+export function tahaUnavailableLabelled({ events, labels, pushes, head, now = Date.now() }) {
+  if (!Array.isArray(events) || !Array.isArray(labels) || !Array.isArray(pushes) || !labels.some((l) => l?.name === TAHA_UNAVAILABLE_LABEL)) return false;
+  const pushedAt = Math.max(...pushes.filter((p) => String(p?.after ?? "").toLowerCase() === String(head ?? "").toLowerCase())
+    .map((p) => Date.parse(String(p?.timestamp ?? ""))));
   // The head's LAST arrival: a force-push back to an older head is a new push, so a label from before it does not count (Luna, PR 3).
   const arrived = events.findLastIndex((e) => e?.event === "committed" && String(e?.sha ?? "").toLowerCase() === String(head ?? "").toLowerCase());
   if (arrived < 0) return false;
@@ -108,7 +113,7 @@ export function tahaUnavailableLabelled({ events, labels, head, now = Date.now()
   const last = events.slice(headAt + 1).filter((e) => e?.label?.name === TAHA_UNAVAILABLE_LABEL && (e.event === "labeled" || e.event === "unlabeled")).pop();
   const at = Date.parse(String(last?.created_at ?? ""));
   // Matched by his account number, not his renamable login (Luna, PR 3).
-  return last?.event === "labeled" && String(last?.actor?.id ?? "") === TAHA_ID &&
+  return last?.event === "labeled" && String(last?.actor?.id ?? "") === TAHA_ID && Number.isFinite(pushedAt) && at > pushedAt &&
     Number.isFinite(at) && now - at <= READY_WINDOW_MS && at - now <= 60_000;
 }
 
@@ -316,7 +321,9 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
         if (batch.length < 100) { complete = true; break; }
       }
       const labels = JSON.parse(String(gh(["api", `repos/{owner}/{repo}/issues/${pr.number}/labels?per_page=100`])));
-      labelled = complete && tahaUnavailableLabelled({ events, labels, head, now });
+      // Newest first; the head is the branch tip, so its latest push is on the first page.
+      const pushes = JSON.parse(String(gh(["api", `repos/{owner}/{repo}/activity?ref=${encodeURIComponent(`refs/heads/${headRef}`)}&activity_type=push,force_push,branch_creation&per_page=100`])));
+      labelled = complete && Boolean(headRef) && tahaUnavailableLabelled({ events, labels, pushes, head, now });
     } catch (error) { if (OUT(error)) throw error; }
   }
   const tahaGap = Boolean(hold || ready) && !labelled;

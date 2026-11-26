@@ -1666,7 +1666,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false,
     trees = { main: ['20260101000000_old.sql'], staging: ['20260101000000_old.sql'] }, treesError = null,
     workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40), stagingTip = "d".repeat(40), stagingBehind = "0", openStaging = [],
-    posts = null, timeline = [], prLabels = [] } = {}) => evaluateLandingGate({
+    posts = null, timeline = [], prLabels = [], pushes = [{ after: HEAD_SHA, timestamp: new Date(Date.now() - 20 * 60_000).toISOString() }] } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
       const key = args.join(" ");
@@ -1688,6 +1688,10 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
         return JSON.stringify(timeline);
       }
       if (args[0] === "api" && String(args[1]).includes(`/issues/${pr.number ?? 900}/labels?`)) return JSON.stringify(prLabels);
+      if (args[0] === "api" && String(args[1]).includes("/activity?ref=refs%2Fheads%2F")) {
+        if (pushes instanceof Error) throw pushes;
+        return JSON.stringify(pushes);
+      }
       if (args[0] === "api" && args[1] === "-X" && args[2] === "POST") {
         if (!posts) throw new Error("HTTP 502");
         posts.push(args);
@@ -1935,7 +1939,8 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     const label = { name: "taha-unavailable" };
     const added = (over = {}) => ({ event: "labeled", label, actor: { login: "TahaKhanAbdalli", id: 50602678 }, created_at: new Date(now - 5 * 60_000).toISOString(), ...over });
     const commit = { event: "committed", sha: HEAD_SHA };
-    const t = (events, labels = [label]) => ({ events, labels, head: HEAD_SHA, now });
+    const pushed = (minutesAgo, after = HEAD_SHA) => ({ after, timestamp: new Date(now - minutesAgo * 60_000).toISOString() });
+    const t = (events, labels = [label], pushes = [pushed(20)]) => ({ events, labels, pushes, head: HEAD_SHA, now });
     ok(tahaUnavailableLabelled(t([commit, added()])) === true, "Taha's fresh label after the head counts");
     ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "MasonWells1", id: 1 } })])) === false, "Mason's shared account doesn't count");
     ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "TahaKhanAbdalli", id: 999 } })])) === false, "another account under Taha's old login doesn't count (Luna, PR 3)");
@@ -1952,6 +1957,13 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     ok(tahaUnavailableLabelled(t([commit, added({ label: { name: "hotfix-backport" } })])) === false, "another label doesn't count");
     ok(tahaUnavailableLabelled(t([added()])) === false, "no head commit in the timeline doesn't count");
     ok(tahaUnavailableLabelled({ events: undefined, labels: [label], head: HEAD_SHA, now }) === false, "an unreadable timeline fails closed");
+    // Taha's review of #2668, HIGH 1: the timeline orders commits by commit date; a commit made before his label but
+    // pushed after it sits before the label there, so push time decides.
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2)])) === false, "a head pushed after his label doesn't count, whatever the timeline order");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2), pushed(20)])) === false, "the head's latest push decides");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2, "b".repeat(40)), pushed(20)])) === true, "another head's push doesn't");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [])) === false, "no push of this head found doesn't count");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], null)) === false, "unreadable push activity fails closed");
 
     const quiet = [];
     ok(gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added()], prLabels: [label], posts: quiet }).ok === true,
@@ -1962,6 +1974,9 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     refused(asked, "4-hour review hold", "someone else's label does not");
     ok(/taha-unavailable/.test(String(asked.reason)) && /unavailable: <why Taha can't>/.test(String(asked.reason)), "the refusal names the label and keeps Mason's override as the backup");
     refused(gate({ pr: { createdAt: young, comments: [] }, timeline: new Error("HTTP 502"), prLabels: [label] }), "4-hour review hold", "an unreadable timeline fails closed");
+    refused(gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added()], prLabels: [label], pushes: [{ after: HEAD_SHA, timestamp: new Date().toISOString() }] }), "4-hour review hold",
+      "the gate reads push times: a head pushed after the label is refused (Taha, #2668 HIGH 1)");
+    refused(gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added()], prLabels: [label], pushes: new Error("HTTP 502") }), "4-hour review hold", "unreadable push activity fails closed");
     const full = Array.from({ length: 100 }, () => ({ event: "commented" }));
     refused(gate({ pr: { createdAt: young, comments: [] }, timeline: [...full.slice(0, 98), commit, added()], prLabels: [label] }), "4-hour review hold",
       "a full first page (more may follow, never ending here) is never read as complete");

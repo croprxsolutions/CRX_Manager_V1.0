@@ -6,6 +6,7 @@ import {
   orderedVisibleColumnIds,
   toggleColumn,
   isInvoiceColumnVisible,
+  jobColumnsForRole,
   type JobColumnId,
 } from './jobListColumns';
 
@@ -124,7 +125,7 @@ describe('orderedVisibleColumnIds', () => {
   it('matches full registry order when everything is visible', () => {
     const allIds = JOB_COLUMN_REGISTRY.map((c) => c.id);
     const settings = { visibleColumns: allIds, showCompleted: true };
-    expect(orderedVisibleColumnIds(settings)).toEqual(allIds);
+    expect(orderedVisibleColumnIds(settings, 'admin')).toEqual(allIds);
   });
 });
 
@@ -185,5 +186,21 @@ describe('toggleColumn', () => {
   it('preserves showCompleted', () => {
     const settings = { visibleColumns: ['job_number'] as JobColumnId[], showCompleted: false };
     expect(toggleColumn(settings, 'status').showCompleted).toBe(false);
+  });
+});
+
+describe('Price column by role', () => {
+  const withPrice = { visibleColumns: ['job_number', 'total_price_cents'] as JobColumnId[], showCompleted: true };
+  it.each(['applicator', 'driver', null, undefined] as const)('drops Price for %s, on screen and in print', (role) => {
+    expect(orderedVisibleColumnIds(withPrice, role)).toEqual(['job_number']);
+    expect(jobColumnsForRole(role).some((c) => c.id === 'total_price_cents')).toBe(false);
+  });
+  it.each(['admin', 'sales_rep'] as const)('keeps Price for %s', (role) => {
+    expect(orderedVisibleColumnIds(withPrice, role)).toEqual(['job_number', 'total_price_cents']);
+  });
+  it('falls back to default crew columns when a saved layout only shows Price', () => {
+    const priceOnly = { visibleColumns: ['total_price_cents'] as JobColumnId[], showCompleted: true };
+    expect(orderedVisibleColumnIds(priceOnly, 'applicator')).toEqual(defaultJobListSettings().visibleColumns);
+    expect(orderedVisibleColumnIds(priceOnly, 'admin')).toEqual(['total_price_cents']);
   });
 });

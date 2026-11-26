@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import Jobs from './Jobs';
 
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ role: 'viewer', profile: { id: 'user-1', role: 'viewer' } }),
+  useAuth: () => ({ role: 'applicator', profile: { id: 'user-1', role: 'applicator' } }),
 }));
 
 vi.mock('../components/ui/Toast', () => ({
@@ -25,7 +25,6 @@ vi.mock('../lib/db', () => {
     customer: { farm_name: 'Acme Acres', account_number: '1001', phone: null },
     vehicle: null,
     job_fields: [{ crop: 'Corn', field: { field_name: 'North 40', crop_type: 'Corn', county: null, state: null } }],
-    job_chemicals: [{ rate_per_acre: 1, rate_unit: 'gal/ac', product: { product_name: 'Test Blend' } }],
     job_tag_assignments: [],
     batch: null,
     job_location_dispatches: [],
@@ -34,13 +33,22 @@ vi.mock('../lib/db', () => {
     updated_by: null,
     last_printed_by: null,
   };
-  const dataFor = (table: string) => table === 'jobs' ? [job] : [];
+  const dataFor = (table: string) => {
+    if (table === 'jobs_crew') return [job];
+    if (table === 'job_chemicals_crew') return [
+      { id: 'chemical-1', job_id: 'job-1', rate_per_acre: 1, rate_unit: 'gal/ac', product: { product_name: 'Test Blend' } },
+    ];
+    return [];
+  };
   const chain = (table: string) => {
     const value: Record<string, unknown> = {};
     const self = () => value;
     for (const method of ['select', 'is', 'eq', 'in', 'gte', 'lte', 'ilike', 'or', 'order', 'limit', 'range']) value[method] = self;
     value.maybeSingle = () => Promise.resolve({ data: null, error: null });
-    value.then = (resolve: (result: { data: unknown[]; error: null }) => unknown) => resolve({ data: dataFor(table), error: null });
+    value.then = (resolve: (result: { data: unknown[]; error: null; count: number }) => unknown) => {
+      const data = dataFor(table);
+      return resolve({ data, error: null, count: data.length });
+    };
     return value;
   };
   return {

@@ -235,7 +235,9 @@ vi.mock('../components/products/ProductParentPanel', () => ({
   default: ({ onChanged }: { onChanged: () => void }) => <button onClick={onChanged}>Refresh parent</button>,
 }));
 
-vi.mock('../components/products/ProductChemistrySection', () => ({ default: () => null }));
+vi.mock('../components/products/ProductChemistrySection', () => ({
+  default: ({ refreshKey }: { refreshKey: string }) => <output data-testid="chemistry-refresh-key">{refreshKey}</output>,
+}));
 
 vi.mock('../lib/epaProposals', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/epaProposals')>()),
@@ -350,6 +352,21 @@ describe('ProductDetail brands section', () => {
     act(() => props.onWeightReviewChange?.());
 
     await waitFor(() => expect(screen.getByRole('link', { name: 'Open SDS for Test Brand' })).toHaveAttribute('href', sdsUrl));
+  });
+
+  it('refreshes the Chemistry card weight after a brand changes', async () => {
+    H.parent = {
+      id: 'parent-1', name: 'Generic group', generic_epa_registration: null,
+      sizes: [{ product_id: 'product-1' }],
+    };
+    render(<ProductDetail />);
+    await screen.findByTestId('brands-section');
+    const chemistry = await screen.findByTestId('chemistry-refresh-key');
+    const previousKey = chemistry.textContent;
+    const props = H.brandSection.mock.lastCall?.[0] as { onWeightReviewChange: () => void };
+    await act(async () => props.onWeightReviewChange());
+
+    expect(chemistry.textContent).not.toBe(previousKey);
   });
 
   it('after switching products, the previous brands never show under the new one', async () => {

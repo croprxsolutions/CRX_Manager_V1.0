@@ -1538,7 +1538,8 @@ export default function ProductDetail() {
             <ProductChemistrySection
               parentId={parent.id}
               parentVersion={parent.parent_version}
-              refreshKey={JSON.stringify([persistedProduct?.updated_at ?? null, persistedProduct?.pricing_version ?? null, weightSaves])}
+              refreshKey={JSON.stringify([persistedProduct?.updated_at ?? null, persistedProduct?.pricing_version ?? null,
+                weightSaves, weightReviewReload])}
               isAdmin={isAdmin}
               profileId={profile.id}
               busy={isDirty || reloadRequired || saving}

@@ -44,13 +44,6 @@ const LEDGER_ONLY = new Set([
   '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
   '20261105170000_data11_preferred_vendor_links.sql',
-  // Need live's storage.objects policies, which this database does not have; neither touches units or stock.
-  '20261217100000_job_access_ends_with_the_job.sql',
-  '20261220100000_applicator_keeps_own_record_fields.sql',
-  // Its preflight pins job function bodies that the two above leave different here; it touches only job read paths.
-  '20270308040000_applicator_crew_read_path.sql',
-  // Its preflight pins stage_offline_action as 20261217100000 (ledger-only above) leaves it; delivery driver checks only.
-  '20270227110000_delivery_driver_checks_need_a_driver.sql',
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate changes or relies on.
@@ -195,7 +188,9 @@ function buildContainer() {
     CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array(name, '/') $$;
     CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
     GRANT USAGE ON SCHEMA storage TO postgres;
-    GRANT ALL ON storage.objects, storage.buckets TO postgres;`, { user: 'supabase_admin' });
+    GRANT ALL ON storage.objects, storage.buckets TO postgres;
+    -- Row security on, as live has it: 20261217100000 and the job migrations after it check it (as the tiny-line prover).
+    ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;`, { user: 'supabase_admin' });
   psql('CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, name text NOT NULL, statements text[]);');
   for (const name of ['20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) psql(`\\i /tmp/${name}`, { user: name.includes('overlay') ? 'supabase_admin' : 'postgres' });
   const files = plan();

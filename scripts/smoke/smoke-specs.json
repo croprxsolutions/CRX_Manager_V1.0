@@ -857,6 +857,14 @@
         "lifecycle"
       ]
     },
+    "cancel_order_with_notice": {
+      "chain": "smoke-cancel-order-with-notice.sql",
+      "container_only": true,
+      "container_prover": "prove-cancel-order-with-notice-local.mjs",
+      "description": "CONTAINER ONLY: checked order cancellation, role and actor refusal, recipients, exact and expired retries, legacy cancellation, and notice failure isolation.",
+      "covers": ["cancel_order_with_notice"],
+      "area": ["lifecycle", "idempotency", "security"]
+    },
     "receive_po_items_with_excess_notice": {
       "chain": "smoke-receiving-excess-notice.sql",
       "container_only": true,

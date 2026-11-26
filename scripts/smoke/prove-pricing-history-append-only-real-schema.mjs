@@ -57,7 +57,7 @@ function restoreHistorySchema() {
   checked(psql(historyDdl.join('\n')));
 }
 
-const migration = read('supabase/migrations/20270309020000_pricing_history_append_only.sql');
+const migration = read('supabase/migrations/20270310200000_pricing_history_append_only.sql');
 const smoke = read('scripts/smoke/smoke-pricing-history-append-only.sql');
 
 checked(run('docker', ['run', '-d', '--name', name, '--network', 'none', '--tmpfs',

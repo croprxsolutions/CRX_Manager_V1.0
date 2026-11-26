@@ -1,4 +1,5 @@
 import { assertRpcResult, supabase, supabaseUntyped } from './db';
+import { fetchAllRows, pageWithList } from './pagedRead';
 
 // The office UI stays read-only for these fields until the database lane confirms
 // the columns and RPC argument names against its merged migration.
@@ -116,11 +117,13 @@ export async function readApplicationServiceBillingIfReady(
 
 export async function loadActiveApplicationServiceVendors(): Promise<ApplicationServiceVendorChoice[] | null> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('vendors')
-      .select('id, name')
+      .select('id, name', { count: 'exact' })
       .is('deleted_at', null)
-      .order('name');
+      .order('name')
+      .order('id')
+      .range(from, to)));
     if (error || !data) return null;
     return data.map(({ id, name }) => ({ id, name }));
   } catch {

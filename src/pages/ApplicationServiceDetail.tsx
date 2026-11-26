@@ -97,10 +97,14 @@ export default function ApplicationServiceDetail() {
       .then(({ data }) => setVehicles((data || []) as Pick<Vehicle, 'id' | 'vehicle_name'>[]));
   }, []);
 
-  const fetchService = useCallback(async () => {
-    const { data, error } = await supabase.from('application_services').select(SERVICE_COLUMNS).eq('id', id!).single();
+  const fetchService = useCallback(async (isCurrent: () => boolean) => {
+    const serviceId = id;
+    if (!serviceId || serviceId === 'new') return;
+    const { data, error } = await supabase.from('application_services').select(SERVICE_COLUMNS).eq('id', serviceId).single();
+    if (!isCurrent()) return;
     if (error || !data) { toast('error', 'Service not found'); navigate('/application-services'); return; }
-    const billingForm = await loadApplicationServiceBillingForm(id!);
+    const billingForm = await loadApplicationServiceBillingForm(serviceId);
+    if (!isCurrent()) return;
     setBillingReadAvailable(billingForm.available);
     setExistingOutsideVendor(billingForm.existingVendor);
     setActiveVendors(billingForm.activeVendors);
@@ -123,7 +127,8 @@ export default function ApplicationServiceDetail() {
     let costCents: bigint | null = null;
     if (isAdmin) {
       const { data: costRows, error: costError } = await supabase
-        .rpc('admin_get_application_service_costs', { p_service_id: id! });
+        .rpc('admin_get_application_service_costs', { p_service_id: serviceId });
+      if (!isCurrent()) return;
       try {
         if (costError) throw costError;
         const rawCost = assertRpcResult<{ service_id: string; cost_per_acre_cents: unknown }[]>(
@@ -151,25 +156,31 @@ export default function ApplicationServiceDetail() {
     loadedFormRef.current = loaded;
     setForm(loaded);
     setLoading(false);
-    setTimeout(() => { initialLoadDone.current = true; }, 0);
+    setTimeout(() => { if (isCurrent()) initialLoadDone.current = true; }, 0);
   }, [id, toast, navigate, isAdmin]);
 
-  const fetchOverrides = useCallback(async () => {
+  const fetchOverrides = useCallback(async (isCurrent: () => boolean) => {
     if (isNew || !id) return;
     const { data } = await supabase.from('customer_application_rates').select('*, customer:customers(farm_name)').eq('application_service_id', id).order('season', { ascending: false });
+    if (!isCurrent()) return;
     setOverrides((data || []) as (CustomerApplicationRate & { _dirty?: boolean })[]);
   }, [id, isNew]);
 
   useEffect(() => {
-    if (!isNew && id) { fetchService(); fetchOverrides(); }
+    let cancelled = false;
+    const isCurrent = () => !cancelled;
+    if (!isNew && id) { fetchService(isCurrent); fetchOverrides(isCurrent); }
     else {
-      setTimeout(() => { initialLoadDone.current = true; }, 0);
+      setTimeout(() => { if (isCurrent()) initialLoadDone.current = true; }, 0);
       setBillingReadAvailable(APPLICATION_SERVICE_BILLING_DB_READY);
       setActiveVendors(null);
       if (APPLICATION_SERVICE_BILLING_DB_READY) {
-        void loadActiveApplicationServiceVendors().then(setActiveVendors);
+        void loadActiveApplicationServiceVendors().then((vendors) => {
+          if (isCurrent()) setActiveVendors(vendors);
+        });
       }
     }
+    return () => { cancelled = true; };
   }, [id, isNew, fetchService, fetchOverrides]);
 
   // ONE call writes the whole service, cost_per_acre_cents included, inside a

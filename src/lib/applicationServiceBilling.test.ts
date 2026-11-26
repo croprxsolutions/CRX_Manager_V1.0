@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   APPLICATION_SERVICE_BILLING_DB_READY,
+  loadActiveApplicationServiceVendors,
   readApplicationServiceBilling,
   readApplicationServiceBillingIfReady,
   saveApplicationService,
@@ -30,6 +31,53 @@ beforeEach(() => {
 });
 
 describe('application service billing contract', () => {
+  it('pages all non-deleted vendors in name and id order', async () => {
+    const vendors = Array.from({ length: 1001 }, (_, index) => ({
+      id: `vendor-${String(index).padStart(4, '0')}`,
+      name: `Vendor ${String(index).padStart(4, '0')}`,
+    }));
+    const ranges: Array<[number, number]> = [];
+    const sortKeys: string[] = [];
+    let selectedColumns = '';
+    let exactCountRequested = false;
+    let deletedAtFilter: [string, null] | null = null;
+    let pageStart = 0;
+    let pageEnd = 0;
+    const builder: Record<string, unknown> = {};
+    builder.select = (columns: string, options?: { count?: string }) => {
+      selectedColumns = columns;
+      exactCountRequested = options?.count === 'exact';
+      return builder;
+    };
+    builder.is = (column: string, value: null) => { deletedAtFilter = [column, value]; return builder; };
+    builder.order = (key: string) => { sortKeys.push(key); return builder; };
+    builder.range = (from: number, to: number) => {
+      ranges.push([from, to]);
+      pageStart = from;
+      pageEnd = to;
+      return builder;
+    };
+    builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({
+      data: vendors.slice(pageStart, pageEnd + 1),
+      error: null,
+      count: vendors.length,
+    }).then(resolve);
+    mocks.from.mockReturnValue(builder);
+
+    const result = await loadActiveApplicationServiceVendors();
+
+    expect(result).toEqual(vendors);
+    expect(ranges).toContainEqual([0, 999]);
+    expect(ranges).toContainEqual([950, 1949]);
+    expect(ranges.length).toBeGreaterThan(2);
+    expect(selectedColumns).toBe('id, name');
+    expect(exactCountRequested).toBe(true);
+    expect(deletedAtFilter).toEqual(['deleted_at', null]);
+    expect(sortKeys.length).toBeGreaterThan(2);
+    expect(sortKeys.filter((_, index) => index % 2 === 0).every((key) => key === 'name')).toBe(true);
+    expect(sortKeys.filter((_, index) => index % 2 === 1).every((key) => key === 'id')).toBe(true);
+  });
+
   it('omits billing fields when the caller has no known billing values', async () => {
     mocks.rpc.mockResolvedValue({
       data: { success: true, service_id: 'service-1', created: false },

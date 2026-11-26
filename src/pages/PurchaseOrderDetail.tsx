@@ -25,7 +25,7 @@ import {
   purchaseOrderUnitCostCents,
 } from '../lib/purchaseOrderMoney';
 import { buildPurchaseOrderEditItemsPayload } from '../lib/purchaseOrderEditPayload';
-import { notifyDamagedReceiving, notifyOverReceive } from '../lib/notificationTriggers';
+import { notifyDamagedReceiving } from '../lib/notificationTriggers';
 import { logActivity } from '../lib/activityLogger';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { parseLocalDate } from '../lib/dateUtils';
@@ -673,7 +673,7 @@ export default function PurchaseOrderDetail() {
 
     await runCriticalAction({
       action: async () => {
-        const { data, error } = await supabase.rpc('receive_po_items', {
+        const { data, error } = await supabase.rpc('receive_po_items_with_excess_notice', {
           p_items: request.finalPayload,
           p_performed_by: request.performedBy,
           p_idempotency_key: idemKey,
@@ -705,7 +705,7 @@ export default function PurchaseOrderDetail() {
             }
           }
         } else {
-          responseData = assertRpcResult(data, 'receive_po_items');
+          responseData = assertRpcResult(data, 'receive_po_items_with_excess_notice');
         }
         // POST-COMMIT, and it can reject: resolveIntent() writes to IndexedDB, which
         // fails on quota, in a private window, or against a corrupted store. The
@@ -805,33 +805,6 @@ export default function PurchaseOrderDetail() {
           }
         }
 
-        // AUDIT: Notify admins about over-received items.
-        //
-        // This one STAYS scoped to a first, non-replay commit. Unlike the damaged
-        // notification it carries no idempotency key, so a replay would re-alert;
-        // and the "remaining" quantity it reports is derived from `items` held in
-        // memory, which the earlier commit has already moved past. On a replay it
-        // would send a duplicate alert quoting the wrong numbers.
-        if (po && !completedElsewhere && !wasLockedReplay) {
-          const overItems = request.itemsPayload
-            .filter((ip) => {
-              const poItem = items.find((i) => i.id === ip.po_item_id);
-              if (!poItem) return false;
-              const remaining = poItem.quantity_ordered - poItem.quantity_received;
-              return ip.quantity > remaining;
-            })
-            .map((ip) => {
-              const poItem = items.find((i) => i.id === ip.po_item_id);
-              return {
-                productName: (poItem?.product as unknown as { product_name: string } | undefined)?.product_name || 'Unknown',
-                quantityOrdered: poItem?.quantity_ordered || 0,
-                quantityReceived: ip.quantity,
-              };
-            });
-          if (overItems.length > 0) {
-            notifyOverReceive(po.po_number, overItems, po.id);
-          }
-        }
         } catch (notifyErr) {
           // Never surface a post-commit notification failure as a receiving
           // failure — see the comment above this block. The reporter itself is
@@ -849,8 +822,7 @@ export default function PurchaseOrderDetail() {
 
         // Offer PDF download.
         //
-        // Scoped to a first, non-replay commit for the same reason as the
-        // over-receive alert above: the slip is stamped with `new Date()` and the
+        // Scoped to a first, non-replay commit: the slip is stamped with `new Date()` and the
         // CURRENT operator, but a replay is answering for a receipt that committed
         // EARLIER, possibly in another tab or by another person. Regenerating it
         // here produced a receiving document stating the wrong time and the wrong

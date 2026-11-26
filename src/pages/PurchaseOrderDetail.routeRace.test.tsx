@@ -171,7 +171,6 @@ vi.mock('../lib/receivingPdf', () => ({
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/notificationTriggers', () => ({
   notifyDamagedReceiving: vi.fn(),
-  notifyOverReceive: vi.fn(),
 }));
 
 // Imported AFTER the mocks above so the page picks up the stubbed client.
@@ -561,7 +560,7 @@ async function submitReceive(quantity: string) {
   }
   return mocks.rpc.mock.calls
     .slice(rpcCallsBefore)
-    .find((call) => call[0] === 'receive_po_items');
+    .find((call) => call[0] === 'receive_po_items_with_excess_notice');
 }
 
 describe('PurchaseOrderDetail route-currency race', () => {
@@ -628,7 +627,7 @@ describe('PurchaseOrderDetail route-currency race', () => {
         // Every RPC passes through here, including one a test re-mocks to hold
         // open, so this is the one place that can see the receive ANSWER (as
         // opposed to being called). The afterEach guard keys off that.
-        if (name === 'receive_po_items') {
+        if (name === 'receive_po_items_with_excess_notice') {
           // The page never runs two receives at once, so the record that is
           // still open when the RPC is called is this receive's own.
           const record = currentReceive();
@@ -849,7 +848,7 @@ describe('PurchaseOrderDetail route-currency race', () => {
     let completeReceive: (() => void) | undefined;
     mocks.rpc.mockImplementation((name: string) => {
       if (name === 'get_notes_for_entity') return Promise.resolve({ data: [], error: null });
-      if (name === 'receive_po_items') {
+      if (name === 'receive_po_items_with_excess_notice') {
         return new Promise((resolve) => {
           completeReceive = () =>
             resolve({ data: { receiving_record_ids: ['rec-new'] }, error: null });
@@ -900,7 +899,7 @@ describe('PurchaseOrderDetail route-currency race', () => {
     let completeReceive: (() => void) | undefined;
     mocks.rpc.mockImplementation((name: string) => {
       if (name === 'get_notes_for_entity') return Promise.resolve({ data: [], error: null });
-      if (name === 'receive_po_items') {
+      if (name === 'receive_po_items_with_excess_notice') {
         return new Promise((resolve) => {
           completeReceive = () =>
             resolve({ data: { receiving_record_ids: ['rec-new'] }, error: null });
@@ -952,7 +951,7 @@ describe('PurchaseOrderDetail route-currency race', () => {
     let completeReceive: (() => void) | undefined;
     mocks.rpc.mockImplementation((name: string) => {
       if (name === 'get_notes_for_entity') return Promise.resolve({ data: [], error: null });
-      if (name === 'receive_po_items') {
+      if (name === 'receive_po_items_with_excess_notice') {
         return new Promise((resolve) => {
           completeReceive = () =>
             resolve({ data: { receiving_record_ids: ['rec-new'] }, error: null });

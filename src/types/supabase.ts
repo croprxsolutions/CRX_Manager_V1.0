@@ -21697,6 +21697,15 @@ export type Database = {
         }
         Returns: Json
       }
+      receive_po_items_with_excess_notice: {
+        Args: {
+          p_allow_over_receive?: boolean
+          p_idempotency_key?: string
+          p_items: Json
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
       receive_return: {
         Args: {
           p_idempotency_key?: string

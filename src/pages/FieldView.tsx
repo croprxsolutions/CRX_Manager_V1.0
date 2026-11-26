@@ -111,6 +111,7 @@ import {
   cardDetailCacheKey,
   type DispatchedListRow,
   type FieldViewJobCard,
+  distinctFieldNames,
 } from '../lib/dispatchDisplay';
 import type { Field, Profile } from '../types';
 import { saveTodaySnapshot, savedCopyAfterFailure } from '../lib/todaySnapshot';
@@ -165,12 +166,13 @@ function emptyCompleteForm(): CompleteForm {
 type ViewMode = 'list' | 'map';
 
 function crewMarkerScope(profile: Profile | null, loading: boolean, assignmentsChecked: boolean,
-  { savedCopyAt, isOnline, mapAssignmentFailed }: { savedCopyAt: string | null; isOnline: boolean; mapAssignmentFailed: boolean }) {
+  { savedCopyAt, isOnline, mapAssignmentFailed, mapReadFailed }: { savedCopyAt: string | null; isOnline: boolean; mapAssignmentFailed: boolean; mapReadFailed: boolean }) {
   const mapChecking = loading || !assignmentsChecked;
   const markerUser = {
     actorId: profile?.id ?? '',
     office: profile?.role === 'admin' || profile?.role === 'sales_rep',
-    placementAllowed: isOnline && !(mapChecking || savedCopyAt || mapAssignmentFailed),
+    // A failed boundary read leaves outlines possibly stale, so new pins wait for a clean recheck.
+    placementAllowed: isOnline && !(mapChecking || savedCopyAt || mapAssignmentFailed || mapReadFailed),
   };
   return { mapChecking, markerUser };
 }
@@ -259,7 +261,7 @@ export default function FieldView() {
   const [mapReadFailed, setMapReadFailed] = useState(false);
   const [mapCheckedCards, setMapCheckedCards] = useState(cards);
   const { mapChecking, markerUser } = crewMarkerScope(profile, loading, cards === mapCheckedCards, {
-    savedCopyAt, isOnline, mapAssignmentFailed,
+    savedCopyAt, isOnline, mapAssignmentFailed, mapReadFailed,
   });
   const mapRef = useRef<MapRef | null>(null);
   const [jobsByField, setJobsByField] = useState<Map<string, string[]>>(() => new Map());
@@ -519,7 +521,10 @@ export default function FieldView() {
     }
     return visibleFieldJobs;
   }, [cards, jobsByField, mapActorId, markerUser.actorId]);
-  const visibleMapFields = useMemo(() => mapFields.filter((field) => fieldToJob.has(field.id)), [mapFields, fieldToJob]);
+  const visibleMapFields = useMemo(() => distinctFieldNames(
+    mapFields.filter((field) => fieldToJob.has(field.id)),
+    (field) => cards.find((card) => card.job_id === fieldToJob.get(field.id)),
+  ), [mapFields, fieldToJob, cards]);
 
   // --- Lazy-load a card's read-only detail on first expand --------------------------
   const loadDetail = useCallback(async (card: FieldViewJobCard) => {

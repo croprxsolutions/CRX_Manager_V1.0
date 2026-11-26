@@ -10,7 +10,11 @@ export default function FieldMarkerEditor({ editor, ready, unavailable }: {
   unavailable: boolean;
 }) {
   const { draft, placing, saving } = editor;
-  const focusForm = useCallback((form: HTMLFormElement | null) => form?.focus({ preventScroll: true }), []);
+  const focusForm = useCallback((form: HTMLFormElement | null) => {
+    // On a phone the editor can open above the visible screen; bring it into view before focusing.
+    form?.scrollIntoView?.({ block: 'nearest' });
+    form?.focus({ preventScroll: true });
+  }, []);
   return (
     <>
       {editor.message && <p role="status" className="text-sm text-nav-dark">{editor.message}</p>}

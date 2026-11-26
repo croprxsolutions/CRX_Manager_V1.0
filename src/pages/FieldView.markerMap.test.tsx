@@ -337,6 +337,19 @@ it('warns that assigned fields could not be rechecked when the map reopens offli
   }
 });
 
+it('pauses new pins when a boundary recheck fails and the old outlines stay on the map', async () => {
+  render(fieldView());
+  const map = await openMap();
+  await map.findByRole('heading', { name: 'Whole-job field' });
+  expect(map.getByRole('button', { name: 'Add marker' })).toBeEnabled();
+  fixtures.geometryError = { message: 'Failed to fetch' };
+  fireEvent.click(screen.getByRole('button', { name: 'List' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Map' }));
+  await screen.findByText(/Couldn't check all assigned fields/);
+  expect(map.getByRole('heading', { name: 'Whole-job field' })).toBeInTheDocument();
+  expect(map.getByRole('button', { name: 'Add marker' })).toBeDisabled();
+});
+
 it('ignores an older map assignment response after a newer job reload removes its field', async () => {
   render(fieldView());
   const map = await openMap();

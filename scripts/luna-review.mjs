@@ -152,28 +152,29 @@ export function readSettled(file) {
 
 // Retro (Mason, 2026-11-26): on PR #2610 Luna rounds 3 and 4 re-raised findings its plan contract
 // had already refuted, because nobody passed --settled. A Luna round with no --settled now gets the
-// review sections of every docs/plans/*-CONTRACT.md in the diff. Lines marked fixed are dropped:
-// the code shows those, so re-raising one is a real finding.
+// "## Settled for Luna" section of every docs/plans/*-CONTRACT.md in the diff: only lines the author
+// wrote there as refuted or deferred, never whole review sections with fixed or open items in them
+// (Taha, #2669 MED 1). The contract is read at the reviewed commit, not from the disk (MED 2).
 const CONTRACT_IN_DIFF_RE = /^diff --git a\/\S+ b\/(docs\/plans\/[^\s/]+-CONTRACT\.md)$/gm;
-const REVIEW_HEADING_RE = /^## .*(?:challenge|review|round|refut|settled|answered|decided)/i;
-const FIXED_LINE_RE = /^(?:\|[^|]*\|\s*|[-*]\s*\*\*[^*]*?|\d+\.\s*\*\*[^*]*?)fixed\b/i;
+const SETTLED_HEADING_RE = /^## Settled for Luna[ \t]*$/i;
 
 export function contractSettled(text) {
   return text.replace(/\r/g, "").split(/^(?=## )/m)
-    .filter((section) => REVIEW_HEADING_RE.test(section))
-    .map((section) => section.split("\n").filter((line) => !FIXED_LINE_RE.test(line)).join("\n").trim())
-    .join("\n\n");
+    .filter((section) => SETTLED_HEADING_RE.test(section.split("\n", 1)[0]))
+    .flatMap((section) => section.split("\n").slice(1).filter((line) => line.trim()))
+    .join("\n");
 }
 
-export function contractSettledFromDiff(diff, rootDir) {
-  const paths = [...new Set([...diff.matchAll(CONTRACT_IN_DIFF_RE)].map((m) => m[1]))]
-    .filter((p) => existsSync(path.join(rootDir, p)));
-  const text = paths
-    .map((p) => [p, contractSettled(readFileSync(path.join(rootDir, p), "utf8"))])
-    .filter(([, settled]) => settled)
-    .map(([p, settled]) => `From ${p} (already decided; do not re-raise unless the code changed):\n${settled}`)
+// readContract(path) returns the contract's text at the reviewed commit, or null when it has none.
+export function contractSettledFromDiff(diff, readContract) {
+  const found = [...new Set([...diff.matchAll(CONTRACT_IN_DIFF_RE)].map((m) => m[1]))]
+    .map((p) => [p, contractSettled(readContract(p) ?? "")])
+    .filter(([, settled]) => settled);
+  if (!found.length) return null;
+  const text = found
+    .map(([p, settled]) => `From ${p} (from the plan contract; same rules as the settled list):\n${settled}`)
     .join("\n\n");
-  return text ? { text, paths } : null;
+  return { text, paths: found.map(([p]) => p) };
 }
 
 // With no settled list the prompt is byte-identical to the one before --settled existed.
@@ -397,6 +398,7 @@ function freezeDiff(git, opts) {
     // the prompt. It also leaves an --allow-empty commit truly empty, so the check below sees it.
     return {
       label: `commit ${sha}`,
+      ref: sha,
       diff: gitOutput(git, ["show", "--no-ext-diff", "--no-textconv", "--format=", "--no-notes", sha]),
     };
   }
@@ -409,6 +411,7 @@ function freezeDiff(git, opts) {
   return {
     label: `branch against ${base} (${baseSha.slice(0, 9)}) at head ${headSha}`,
     baseSha,
+    ref: headSha,
     defaultBase: !opts.base,
     diff: gitOutput(git, ["diff", "--no-ext-diff", "--no-textconv", `${baseSha}...${headSha}`]),
   };
@@ -594,9 +597,13 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
     let settledNote = settled
       ? `Settled list: ${opts.settled} (${settled.split("\n").filter((line) => line.trim()).length} line(s)) was given to Luna; it never goes to Sol.`
       : null;
-    const fromContract = settled || opts.sol || opts.terra ? null : contractSettledFromDiff(frozen.diff, rootDir);
+    // Branch and --commit rounds read the contract at the reviewed commit; only --uncommitted reads the disk.
+    const readContract = frozen.ref
+      ? (p) => { const r = git(["show", `${frozen.ref}:${p}`]); return r.error || r.status !== 0 ? null : r.stdout; }
+      : (p) => { const file = path.join(rootDir, p); return existsSync(file) ? readFileSync(file, "utf8") : null; };
+    const fromContract = settled || opts.sol || opts.terra ? null : contractSettledFromDiff(frozen.diff, readContract);
     if (fromContract && Buffer.byteLength(fromContract.text) > SETTLED_MAX_BYTES) {
-      settledNote = `Settled list: NOT given to Luna; the review sections of ${fromContract.paths.join(", ")} are over ${SETTLED_MAX_BYTES} bytes. Pass a short --settled file.`;
+      settledNote = `Settled list: NOT given to Luna; the "Settled for Luna" sections of ${fromContract.paths.join(", ")} are over ${SETTLED_MAX_BYTES} bytes. Pass a short --settled file.`;
     } else if (fromContract) {
       settled = fromContract.text;
       settledNote = `Settled list: refuted and deferred findings from ${fromContract.paths.join(", ")} were given to Luna; it never goes to Sol.`;

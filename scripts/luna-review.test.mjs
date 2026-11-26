@@ -477,20 +477,25 @@ assert.equal(nextStepHint("- BLOCKER: a.sql:3 — grants anon\n- MED: b.ts:2\nLU
     "# Example — behavior contract",
     "## 1. Outcome",
     "Rule text that is not a review answer.",
-    "## Cold challenge (Astra, 2026-11-25)",
-    "| # | Disposition |",
-    "| 1 BLOCKER cap hides lines | Fixed: no cap. |",
-    "| 6 blend mixed case | Existing, unchanged; follow-up. |",
-    "## Peer review (Opus)",
-    "- **HIGH, fixed:** exempt write dropped the note.",
-    "- **Refuted:** the dialog description reads the whole table.",
-    "## Luna round 5",
-    "3. **MED, refuted:** a total above the safe-integer limit shows no total.",
+    "## Cold challenge (Astra, 2026-11-25) — both fixed",
+    "- HIGH: the cap hides lines. Fixed: no cap.",
+    "- Luna r12 (MED, fixed): exempt write dropped the note.",
+    "## PR review (Taha, 2026-11-25)",
+    "Left as they are, to raise with Mason separately: two known billing gaps.",
+    "## Settled for Luna",
+    "- Refuted: the dialog description reads the whole table (it reads one row).",
+    "",
+    "- Deferred: a total above the safe-integer limit shows no total (follow-up #1).",
+    "## Questions for Mason — ANSWERED",
+    "- open question text",
     "",
   ].join("\r\n");
   const settled = contractSettled(contract);
-  for (const kept of ["6 blend mixed case", "Refuted:** the dialog", "MED, refuted:**", "## Peer review"]) assert.ok(settled.includes(kept), kept);
-  for (const dropped of ["Rule text", "cap hides lines", "exempt write", "\r"]) assert.ok(!settled.includes(dropped), dropped);
+  assert.equal(settled, [
+    "- Refuted: the dialog description reads the whole table (it reads one row).",
+    "- Deferred: a total above the safe-integer limit shows no total (follow-up #1).",
+  ].join("\n"));
+  assert.equal(contractSettled(contract.replace("## Settled for Luna", "## Settled for Luna round 2")), "", "only the exact heading counts");
 
   // End to end: a Luna round on a branch whose diff carries a contract gets its refuted findings,
   // with no --settled flag; --settled still wins, and Sol never sees either.
@@ -502,6 +507,8 @@ assert.equal(nextStepHint("- BLOCKER: a.sql:3 — grants anon\n- MED: b.ts:2\nLU
   writeFileSync(path.join(dir, "own.md"), "- my own settled item\n");
   git("add", "docs");
   git("commit", "-q", "-m", "contract");
+  // An uncommitted refutation must not reach a --commit round (Taha, #2669 MED 2).
+  writeFileSync(path.join(dir, "docs", "plans", "2026-11-25-x-CONTRACT.md"), contract.replace("## Settled for Luna\r\n", "## Settled for Luna\r\n- Refuted: UNCOMMITTED-LINE\r\n"));
   const inputs = [];
   const out = [];
   const savedLog = console.log;
@@ -522,6 +529,7 @@ assert.equal(nextStepHint("- BLOCKER: a.sql:3 — grants anon\n- MED: b.ts:2\nLU
     main(["--commit", "HEAD"], stub);
     main(["--commit", "HEAD", "--settled", path.join(dir, "own.md")], stub);
     main(["--commit", "HEAD", "--sol", "--reason", "test"], stub);
+    main(["--uncommitted"], stub);
   } finally {
     process.chdir(realCwd);
     console.log = savedLog;
@@ -529,8 +537,10 @@ assert.equal(nextStepHint("- BLOCKER: a.sql:3 — grants anon\n- MED: b.ts:2\nLU
     rmSync(dir, { recursive: true, force: true });
   }
   const section = (input) => input.slice(input.indexOf("===== SETTLED FINDINGS"), input.indexOf("===== END SETTLED FINDINGS"));
-  assert.match(section(inputs[0]), /From docs\/plans\/2026-11-25-x-CONTRACT\.md \(already decided; do not re-raise unless the code changed\)/);
-  assert.ok(section(inputs[0]).includes("a total above the safe-integer limit") && !section(inputs[0]).includes("cap hides lines"));
+  assert.match(section(inputs[0]), /From docs\/plans\/2026-11-25-x-CONTRACT\.md \(from the plan contract; same rules as the settled list\)/);
+  assert.ok(section(inputs[0]).includes("a total above the safe-integer limit"));
+  for (const absent of ["cap hides lines", "exempt write", "billing gaps", "open question", "UNCOMMITTED-LINE"]) assert.ok(!section(inputs[0]).includes(absent), absent);
+  assert.ok(section(inputs[3]).includes("UNCOMMITTED-LINE"), "--uncommitted reads the contract on disk");
   assert.ok(section(inputs[1]).includes("my own settled item") && !section(inputs[1]).includes("From docs/plans"));
   assert.ok(!inputs[2].includes("SETTLED FINDINGS"), "Sol never sees the contract's settled list");
   assert.match(out.join("\n"), /refuted and deferred findings from docs\/plans\/2026-11-25-x-CONTRACT\.md were given to Luna/);

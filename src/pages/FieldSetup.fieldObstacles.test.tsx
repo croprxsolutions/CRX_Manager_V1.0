@@ -1,22 +1,33 @@
 import type { ReactNode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MarkerPlacement } from '../lib/fieldMarkerData';
 import FieldSetup from './FieldSetup';
 
 const {
   mockCheckMutationResult,
+  mockBeforeMarkerDelete,
+  mockUseUnsavedChanges,
   mockDrawLayer,
   mockFrom,
+  mockGetSession,
   mockInsert,
+  mockUpdate,
+  mockUpdateFilter,
   mockRpc,
   mockToast,
   mockUseAuth,
   mockUseParams,
 } = vi.hoisted(() => ({
   mockCheckMutationResult: vi.fn(),
+  mockBeforeMarkerDelete: vi.fn(async () => {}),
+  mockUseUnsavedChanges: vi.fn((_dirty: boolean) => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() })),
   mockDrawLayer: vi.fn(),
   mockFrom: vi.fn(),
+  mockGetSession: vi.fn(),
   mockInsert: vi.fn(),
+  mockUpdate: vi.fn(),
+  mockUpdateFilter: vi.fn(),
   mockRpc: vi.fn(),
   mockToast: vi.fn(),
   mockUseAuth: vi.fn(),
@@ -47,12 +58,28 @@ vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
+let pendingMarker: MarkerPlacement | null;
+vi.mock('../lib/fieldMarkerPending', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/fieldMarkerPending')>(),
+  readPendingMarker: async () => pendingMarker,
+  reservePendingMarker: async (_actor: string, placement: MarkerPlacement) => pendingMarker ??= placement,
+  clearPendingMarker: async () => { pendingMarker = null; },
+  startReservedMarkerWrite: async <T,>(_actor: string, pin: MarkerPlacement, current: () => boolean, send: (signal: AbortSignal) => Promise<T>) => {
+    if (pendingMarker?.id !== pin.id || !current()) throw new Error('The pending marker is no longer active.');
+    return send(new AbortController().signal);
+  },
+}));
+
 vi.mock('../components/ui/Toast', () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
 vi.mock('../lib/db', () => ({
-  supabase: { from: mockFrom, rpc: mockRpc },
+  supabase: {
+    from: mockFrom,
+    rpc: mockRpc,
+    auth: { getSession: mockGetSession },
+  },
   assertRpcResult: <T,>(data: unknown): T => data as T,
   checkMutationResult: mockCheckMutationResult,
 }));
@@ -74,7 +101,7 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
 }));
 
 vi.mock('../hooks/useUnsavedChanges', () => ({
-  useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
+  useUnsavedChanges: mockUseUnsavedChanges,
 }));
 
 vi.mock('../components/map/CRXMap', () => ({
@@ -143,6 +170,7 @@ const savedObstacle = {
   kind: 'oil_well',
   label: 'West well',
   point_geojson: { type: 'Point', coordinates: [-89.05, 39.15] },
+  entrance_number: null,
   created_by: 'user-1',
   created_at: '2026-07-11T12:00:00Z',
   updated_at: '2026-07-11T12:00:00Z',
@@ -155,6 +183,9 @@ const insertedObstacle = {
   label: 'North windmill',
   point_geojson: { type: 'Point', coordinates: [-89.04, 39.16] },
 };
+const testSession = { data: { session: { user: { id: 'user-1' }, access_token: 'test-token' } }, error: null };
+let markerRows = [savedObstacle];
+const receipts = new Set<string>();
 
 function listChain(data: unknown, error: unknown = null): Record<string, unknown> {
   const chain: Record<string, unknown> = {};
@@ -181,9 +212,23 @@ const leftoverSplit = [{
 // Every customers query the page builds (only the owner/split search pickers read customers).
 const customerChains: Array<Record<string, unknown>> = [];
 
-function configureSupabase(obstacleReadError: unknown = null, measuredAcres: number | null = null): void {
+function configureSupabase(obstacleReadError: unknown = null, measuredAcres: number | null = null, loseInsertResponse = false): void {
   customerChains.length = 0;
-  mockRpc.mockImplementation((name: string) => {
+  markerRows = [savedObstacle];
+  receipts.clear();
+  mockRpc.mockImplementation((name: string, args?: { p_marker_id?: string }) => {
+    if (name === 'get_field_marker_read') {
+      const response = Promise.resolve({
+        data: obstacleReadError ? null : { available: true, count: markerRows.length, markers: markerRows },
+        error: obstacleReadError,
+      });
+      return { abortSignal: () => Object.assign(response, { setHeader: () => response }) };
+    }
+    if (name === 'get_field_marker_create_result') {
+      const id = args?.p_marker_id ?? '';
+      const state = !receipts.has(id) ? 'missing' : markerRows.some((row) => row.id === id) ? 'saved' : 'removed';
+      return { setHeader: () => ({ abortSignal: () => Promise.resolve({ data: { state }, error: null }) }) };
+    }
     if (name === 'get_field_geojson' || name === 'get_field_polygons') {
       return Promise.resolve({ data: [], error: null });
     }
@@ -231,27 +276,52 @@ function configureSupabase(obstacleReadError: unknown = null, measuredAcres: num
     if (table === 'field_billing_split_versions' || table === 'field_payer_notes') {
       return listChain([]);
     }
+    if (table === 'profile_public_view') {
+      return { select: () => ({ in: () => ({ abortSignal: () => Promise.resolve({ data: [] }) }) }) };
+    }
     if (table === 'field_obstacles') {
       return {
-        select: () => ({
-          eq: () => ({
-            order: () => Promise.resolve({
-              data: obstacleReadError ? null : [savedObstacle],
-              error: obstacleReadError,
-            }),
-          }),
-        }),
-        insert: (payload: unknown) => {
+        insert: (payload: { id: string }) => {
           mockInsert(payload);
           return {
             select: () => ({
-              single: () => Promise.resolve({ data: insertedObstacle, error: null }),
+              setHeader: () => ({
+                abortSignal: () => ({
+                  single: () => {
+                    const row = { ...insertedObstacle, id: payload.id };
+                    receipts.add(payload.id);
+                    markerRows = [...markerRows, row];
+                    if (loseInsertResponse) return Promise.resolve({ data: null, error: new Error('Connection lost') });
+                    return Promise.resolve({ data: row, error: null });
+                  },
+                }),
+              }),
             }),
           };
         },
+        update: (payload: unknown) => {
+          mockUpdate(payload);
+          const chain = {
+            eq: (column: string, value: string) => { mockUpdateFilter(column, value); return chain; },
+            select: () => ({ setHeader: () => ({ abortSignal: () => Promise.resolve({ data: [], error: null }) }) }),
+          };
+          return chain;
+        },
         delete: () => ({
           eq: (_column: string, id: string) => ({
-            select: () => Promise.resolve({ data: [{ id }], error: null }),
+            eq: () => ({
+              eq: () => ({
+                select: () => ({
+                  setHeader: () => ({
+                    abortSignal: async () => {
+                      await mockBeforeMarkerDelete();
+                      markerRows = markerRows.filter((row) => row.id !== id);
+                      return { data: [{ id }], error: null };
+                    },
+                  }),
+                }),
+              }),
+            }),
           }),
         }),
       };
@@ -263,52 +333,151 @@ function configureSupabase(obstacleReadError: unknown = null, measuredAcres: num
 describe('FieldSetup field obstacles', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pendingMarker = null;
     mockUseParams.mockReturnValue({ id: 'field-1' });
     mockUseAuth.mockReturnValue({ profile: { id: 'user-1', role: 'admin' } });
+    mockGetSession.mockReset().mockResolvedValue(testSession);
     configureSupabase();
+  });
+
+  it('blocks leaving Field Setup until a confirmed marker delete returns', async () => {
+    let finish: () => void = () => {};
+    mockBeforeMarkerDelete.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    render(<FieldSetup />);
+    await screen.findByText(/West well/);
+    const blockerFlag = () => mockUseUnsavedChanges.mock.lastCall?.[0];
+    expect(blockerFlag()).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: /^Delete$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete marker' }));
+    await waitFor(() => expect(mockBeforeMarkerDelete).toHaveBeenCalledTimes(1));
+    expect(blockerFlag()).toBe(true);
+    await act(async () => finish());
+    expect(screen.getByText('Marker deleted.')).toBeInTheDocument();
+    expect(blockerFlag()).toBe(false);
   });
 
   it('loads, adds, and confirms deletion of obstacle pins', async () => {
     render(<FieldSetup />);
 
     expect(await screen.findByText(/West well/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Add obstacle' }));
-    expect(screen.getByText('Click the map where the obstacle is located.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add marker' }));
+    expect(await screen.findByText('Tap the map where the marker belongs.')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Mock map click' }));
-    fireEvent.change(screen.getByLabelText('Obstacle type'), { target: { value: 'windmill' } });
-    fireEvent.change(screen.getByLabelText('Obstacle label (optional)'), { target: { value: 'North windmill' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save obstacle' }));
+    fireEvent.change(screen.getByLabelText('Marker type'), { target: { value: 'windmill' } });
+    fireEvent.change(screen.getByLabelText('Note (optional)'), { target: { value: 'North windmill' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save marker' }));
 
     await waitFor(() => expect(mockInsert).toHaveBeenCalledWith({
+      id: expect.any(String),
       field_id: 'field-1',
       kind: 'windmill',
       label: 'North windmill',
       point_geojson: { type: 'Point', coordinates: [-89.04, 39.16] },
-      created_by: 'user-1',
     }));
     expect(mockCheckMutationResult).toHaveBeenCalledWith(
-      expect.objectContaining({ data: insertedObstacle, error: null }),
-      'Add field obstacle',
+      expect.objectContaining({ data: expect.objectContaining({ label: 'North windmill' }), error: null }),
+      'Add field marker',
     );
     expect(await screen.findByText(/North windmill/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete obstacle North windmill' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete obstacle' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /^Delete$/ })[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete marker' }));
 
     await waitFor(() => expect(screen.queryByText(/North windmill/)).not.toBeInTheDocument());
     expect(mockCheckMutationResult).toHaveBeenLastCalledWith(
-      { data: [{ id: 'obstacle-2' }], error: null },
-      'Delete field obstacle',
+      { data: [{ id: expect.any(String) }], error: null },
+      'Delete field marker',
     );
   });
 
-  it('shows an empty section and toast when the obstacle read fails', async () => {
+  it('reports unavailable markers without claiming the field is empty', async () => {
     configureSupabase(new Error('read failed'));
     render(<FieldSetup />);
 
-    expect(await screen.findByText('No obstacles marked for this field.')).toBeInTheDocument();
-    expect(mockToast).toHaveBeenCalledWith('error', 'Could not load field obstacles.');
+    expect(await screen.findByText('Markers could not be checked for this field. Confirm hazards on site.')).toBeInTheDocument();
+    expect(screen.queryByText('None recorded.')).not.toBeInTheDocument();
+  });
+
+  it('checks the marker version when editing and preserves a draft after a stale save', async () => {
+    const { checkMutationResult } = await vi.importActual<typeof import('../lib/db')>('../lib/db');
+    mockCheckMutationResult.mockImplementationOnce(checkMutationResult);
+    render(<FieldSetup />);
+
+    await screen.findByText('West well');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Note (optional)'), { target: { value: 'My revised note' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save marker' }));
+
+    expect(await screen.findByText(/Cancel and reopen it to check the latest version/)).toBeInTheDocument();
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ label: 'My revised note' }));
+    expect(mockUpdateFilter.mock.calls).toEqual([
+      ['id', savedObstacle.id], ['field_id', savedObstacle.field_id], ['updated_at', savedObstacle.updated_at],
+    ]);
+    expect(screen.getByLabelText('Note (optional)')).toHaveValue('My revised note');
+    expect(screen.queryByText('Marker updated.')).not.toBeInTheDocument();
+  });
+
+  it('confirms the original pin after an interrupted save without inserting a duplicate', async () => {
+    configureSupabase(null, null, true);
+    render(<FieldSetup />);
+
+    await screen.findByText(/West well/);
+    fireEvent.click(screen.getByRole('button', { name: 'Add marker' }));
+    await screen.findByText('Tap the map where the marker belongs.');
+    fireEvent.click(screen.getByRole('button', { name: 'Mock map click' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save marker' }));
+
+    const retry = await screen.findByRole('button', { name: 'Retry save' });
+    expect(screen.queryByText('Marker added.')).not.toBeInTheDocument();
+    await waitFor(() => expect(retry).toBeEnabled());
+    fireEvent.click(retry);
+
+    expect(await screen.findByText('Marker added.')).toBeInTheDocument();
+    expect(mockInsert).toHaveBeenCalledTimes(1);
+    expect(markerRows).toHaveLength(2);
+  });
+
+  it.each([true, false])('recovers the same submitted pin without restoring a deleted pin (removed: %s)', async (removed) => {
+    configureSupabase(null, null, true);
+    const first = render(<FieldSetup />);
+    await screen.findByText('West well');
+    fireEvent.click(screen.getByRole('button', { name: 'Add marker' }));
+    await screen.findByText('Tap the map where the marker belongs.');
+    fireEvent.click(screen.getByRole('button', { name: 'Mock map click' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save marker' }));
+    await screen.findByText(/The save could not be confirmed/);
+    fireEvent.click(screen.getByRole('button', { name: 'Keep for later' }));
+    expect(screen.getByText('Pending marker kept on this device.')).toBeInTheDocument();
+    first.unmount();
+
+    if (removed) markerRows = [savedObstacle];
+    render(<FieldSetup />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add marker' }));
+    expect(await screen.findByText(removed ? 'This marker was saved and has since been removed.' : 'The pending marker was already saved.')).toBeInTheDocument();
+    expect(mockInsert).toHaveBeenCalledTimes(1);
+    expect(pendingMarker).toBeNull();
+  });
+
+  it('ends a save whose session lookup hangs and refuses to start it after timeout', async () => {
+    let finish = (_session: typeof testSession) => {};
+    mockGetSession.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    render(<FieldSetup />);
+    await screen.findByText('West well');
+    fireEvent.click(screen.getByRole('button', { name: 'Add marker' }));
+    await screen.findByText('Tap the map where the marker belongs.');
+    fireEvent.click(screen.getByRole('button', { name: 'Mock map click' }));
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Save marker' }));
+      await act(async () => {});
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      expect(screen.getByRole('button', { name: 'Retry save' })).toBeEnabled();
+      await act(async () => { finish(testSession); });
+      expect(mockInsert).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps the draw layer mounted and blocks obstacle mode during an active boundary sketch', async () => {
@@ -317,18 +486,14 @@ describe('FieldSetup field obstacles', () => {
     await screen.findByText(/West well/);
     expect(screen.getByTestId('mock-draw-layer')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add obstacle' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add marker' }));
+    await screen.findByText('Tap the map where the marker belongs.');
     expect(screen.getByTestId('mock-draw-layer')).toBeInTheDocument();
     expect(mockDrawLayer).toHaveBeenLastCalledWith(expect.objectContaining({ disabled: true }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel obstacle' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     fireEvent.click(screen.getByRole('button', { name: 'Start mock boundary drawing' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add obstacle' }));
-
-    expect(mockToast).toHaveBeenCalledWith(
-      'error',
-      'Finish or cancel the boundary before adding an obstacle.',
-    );
+    expect(screen.queryByRole('button', { name: 'Add marker' })).not.toBeInTheDocument();
     expect(mockDrawLayer).toHaveBeenLastCalledWith(expect.objectContaining({ disabled: false }));
   });
 
@@ -388,8 +553,8 @@ describe('FieldSetup field obstacles', () => {
     render(<FieldSetup />);
 
     expect(await screen.findByText(/West well/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Add obstacle' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Delete obstacle West well' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add marker' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Delete$/ })).not.toBeInTheDocument();
   });
 });
 

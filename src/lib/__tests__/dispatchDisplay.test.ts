@@ -20,6 +20,7 @@ import {
   type DispatchSelectableJob,
   type DispatchedListRow,
   type DispatchedAssigneeFilter,
+  distinctFieldNames,
 } from '../dispatchDisplay';
 
 describe('formatAppliedOfTotal', () => {
@@ -482,5 +483,25 @@ describe('chemicalChargeCents (field view #38 — derived charge)', () => {
     expect(chemicalChargeCents(0, 1000)).toBe(0);
     expect(chemicalChargeCents(-5, 1000)).toBe(0);
     expect(chemicalChargeCents(10, -1)).toBe(0);
+  });
+});
+
+describe('distinctFieldNames', () => {
+  const cards = new Map([
+    ['a', { customer_name: 'North farm', job_number: 'J-1' }],
+    ['b', { customer_name: 'South farm', job_number: 'J-2' }],
+    ['c', { customer_name: 'South farm', job_number: 'J-2' }],
+  ]);
+  const run = (fields: Array<{ id: string; field_name: string }>) =>
+    distinctFieldNames(fields, (field) => cards.get(field.id)).map((field) => field.field_name);
+
+  it('leaves unique names alone and adds the farm and job to same-named fields', () => {
+    expect(run([{ id: 'a', field_name: 'Home' }, { id: 'b', field_name: 'Home' }, { id: 'x', field_name: 'Creek' }]))
+      .toEqual(['Home · North farm · J-1', 'Home · South farm · J-2', 'Creek']);
+  });
+
+  it('numbers fields that still match after the farm and job are added', () => {
+    expect(run([{ id: 'b', field_name: 'Home' }, { id: 'c', field_name: 'Home' }]))
+      .toEqual(['Home · South farm · J-2 #1', 'Home · South farm · J-2 #2']);
   });
 });

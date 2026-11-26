@@ -20,6 +20,8 @@ const OLDER_PAGE = [{
 const deliveryRanges: Array<[number, number]> = [];
 // When set, every page of the scan is a full page billed outside CRX, so the scan stops at its cap.
 let cappedEmptyScan = false;
+// A4: delivery_billing_remainders rows (units an active invoice leaves unbilled).
+let shortRows: unknown[] = [];
 const makeBilledPage = (from: number) => Array.from({ length: 50 }, (_, i) => ({
   id: `billed-${from + i}`,
   delivery_number: `DEL-B${from + i}`,
@@ -51,6 +53,7 @@ function query(table: string) {
       if (cappedEmptyScan) data = makeBilledPage(range[0]);
       else data = range[0] === 0 ? BILLED_PAGE : range[0] === 50 ? OLDER_PAGE : [];
     }
+    if (table === 'delivery_billing_remainders') data = shortRows;
     if (table === 'delivery_external_billings') {
       data = requestedDeliveryIds.filter((id) => id.startsWith('billed-')).map((delivery_id) => ({ delivery_id }));
     }
@@ -100,6 +103,7 @@ vi.mock('../lib/db', async () => ({
 }));
 
 import OfficeCockpit from './OfficeCockpit';
+import { fetchActiveInvoiceCoveragePages } from '../lib/deliveryInvoiceCoverage';
 
 describe('OfficeCockpit "Delivered, not invoiced"', () => {
   it('pages past a full page of deliveries billed outside CRX to find an older unbilled one', async () => {
@@ -126,5 +130,19 @@ describe('OfficeCockpit "Delivered, not invoiced"', () => {
     expect(screen.queryByText('All clear!')).toBeNull();
     expect(deliveryRanges).toHaveLength(20);
     expect(deliveryRanges[deliveryRanges.length - 1]).toEqual([950, 999]);
+  });
+
+  it('A4: keeps a delivery an invoice bills only in part, with what is left to bill', async () => {
+    cappedEmptyScan = false;
+    shortRows = [{ delivery_id: 'unbilled-1', delivered_qty: 10, unbilled_qty: 4, unbilled_cents: 16000 }];
+    vi.mocked(fetchActiveInvoiceCoveragePages).mockImplementation(() => Promise.resolve({ data: [{
+      id: 'inv-1', order_id: 'order-u1', delivery_id: 'unbilled-1', total_amount_cents: 24000,
+      invoice_type: 'chemical_sale', status: 'draft', deleted_at: null,
+    }], error: null }));
+    render(<OfficeCockpit />);
+    expect(await screen.findByText('#DEL-UNBILLED', {}, { timeout: 5000 })).toBeTruthy();
+    expect(screen.getByText('4 of 10 not billed ($160.00)')).toBeTruthy();
+    shortRows = [];
+    vi.mocked(fetchActiveInvoiceCoveragePages).mockImplementation(() => Promise.resolve({ data: [], error: null }));
   });
 });

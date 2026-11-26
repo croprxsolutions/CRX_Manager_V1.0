@@ -78,7 +78,7 @@ import { SkeletonCard } from '../components/ui/Skeleton';
 import type { WatchdogFlag } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import FinanceSnapshotCard from '../components/dashboard/FinanceSnapshotCard';
-import { activeInvoiceCoversDelivery, fetchActiveInvoiceCoveragePages, type DeliveryInvoiceCoverage } from '../lib/deliveryInvoiceCoverage';
+import { activeInvoiceCoversDelivery, fetchActiveInvoiceCoveragePages, fetchDeliveryBillingRemainders, unbilledRemainderLabel, type DeliveryInvoiceCoverage } from '../lib/deliveryInvoiceCoverage';
 import { requirePostVersion } from '../lib/invoicePostVersion';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -120,6 +120,8 @@ interface DeliveredNotInvoicedRow {
   order_id: string;
   completed_at: string | null;
   customer_name: string;
+  /** A4: set when an invoice bills this delivery only in part ("4 of 10 not billed ($160.00)"). */
+  unbilled_label: string | null;
 }
 
 interface UpcomingJobRow {
@@ -370,11 +372,11 @@ function overdueInvoiceKind(invoiceType: string): string {
 // "Delivered, not invoiced" pages back through completed deliveries at most this many times.
 const DELIVERY_SCAN_PAGE_CAP = 20;
 
-type CompletedOrderDelivery = RawCompletedDelivery & { order_id: string };
+type CompletedOrderDelivery = RawCompletedDelivery & { order_id: string; unbilled_label?: string | null };
 
 /**
  * Newest-first completed deliveries that still need invoicing: no active CRX invoice covers
- * them and they were not billed outside CRX. Deliveries are paged and filtered BEFORE the tile
+ * them, or one does but bills fewer units than were delivered (A4), and they were not billed outside CRX. Deliveries are paged and filtered BEFORE the tile
  * limit, so a page of covered or Chem-Man-billed deliveries cannot hide an older unbilled one.
  * `hitLimit` means more may exist than were checked or shown.
  */
@@ -400,14 +402,15 @@ async function loadDeliveredNotInvoiced(): Promise<{
 
     if (candidates.length > 0) {
       // delivery_external_billings is readable by admins and sales reps; other roles read no rows.
-      const [invoiceCoverageRes, externalBillingRes] = await Promise.all([
+      const [invoiceCoverageRes, externalBillingRes, remaindersRes] = await Promise.all([
         fetchActiveInvoiceCoveragePages([...new Set(candidates.map((row) => row.order_id))]),
         supabaseUntyped
           .from('delivery_external_billings')
           .select('delivery_id')
           .in('delivery_id', candidates.map((row) => row.id)),
+        fetchDeliveryBillingRemainders(candidates.map((row) => row.id)),
       ]);
-      const coverageError = invoiceCoverageRes.error ?? externalBillingRes.error;
+      const coverageError = invoiceCoverageRes.error ?? externalBillingRes.error ?? remaindersRes.error;
       if (coverageError) return { rows: [], hitLimit: false, error: coverageError };
       const activeInvoices = (invoiceCoverageRes.data || []) as DeliveryInvoiceCoverage[];
       const billedOutsideCrx = new Set(
@@ -415,7 +418,12 @@ async function loadDeliveredNotInvoiced(): Promise<{
       );
       for (const row of candidates) {
         if (billedOutsideCrx.has(row.id)) continue;
-        if (activeInvoices.some((invoiceRow) => activeInvoiceCoversDelivery(invoiceRow, row.id, row.order_id))) continue;
+        const short = remaindersRes.data?.get(row.id);
+        if (activeInvoices.some((invoiceRow) => activeInvoiceCoversDelivery(invoiceRow, row.id, row.order_id))) {
+          if (!short) continue;
+          actionable.push({ ...row, unbilled_label: unbilledRemainderLabel(short) });
+          continue;
+        }
         actionable.push(row);
       }
       if (actionable.length >= TILE_LIMIT) return { rows: actionable.slice(0, TILE_LIMIT), hitLimit: true, error: null };
@@ -895,6 +903,7 @@ export default function OfficeCockpit() {
           order_id: deliveryRow.order_id,
           completed_at: deliveryRow.completed_at,
           customer_name: deliveryRow.customer?.farm_name ?? 'Unknown',
+          unbilled_label: deliveryRow.unbilled_label ?? null,
         }))
       : [];
 
@@ -1563,6 +1572,7 @@ export default function OfficeCockpit() {
                   <div>
                     <span className="font-medium text-nav-dark">{row.customer_name}</span>
                     <span className="ml-2 text-gray-500">#{row.delivery_number}</span>
+                    {row.unbilled_label && <span className="ml-2 text-amber-700">{row.unbilled_label}</span>}
                   </div>
                   <div className="flex items-center gap-1 text-gray-400 shrink-0">
                     <span className="text-xs">

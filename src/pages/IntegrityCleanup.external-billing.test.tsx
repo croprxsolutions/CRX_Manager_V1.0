@@ -51,6 +51,8 @@ vi.mock('../lib/db', () => {
 vi.mock('../lib/deliveryInvoiceCoverage', () => ({
   fetchActiveInvoiceCoveragePages: vi.fn(async () => ({ data: [], error: null })),
   activeInvoiceCoversDelivery: vi.fn(() => false),
+  fetchDeliveryBillingRemainders: vi.fn(async () => ({ data: new Map(), error: null })),
+  unbilledRemainderLabel: vi.fn(() => ''),
 }));
 
 vi.mock('../lib/deliveryExternalBilling', () => ({

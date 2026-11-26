@@ -7,7 +7,7 @@ import { useToast } from '../ui/Toast';
 import Button from '../ui/Button';
 import ConfirmModal from '../ui/ConfirmModal';
 import { Sentry } from '../../lib/sentry';
-import { activeInvoiceCoversDelivery, fetchActiveInvoiceCoveragePages } from '../../lib/deliveryInvoiceCoverage';
+import { activeInvoiceCoversDelivery, fetchActiveInvoiceCoveragePages, fetchDeliveryBillingRemainders, unbilledRemainderLabel, type DeliveryBillingRemainder } from '../../lib/deliveryInvoiceCoverage';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { useUnresolvedIntent, UNRESOLVED_INTENT_MESSAGE } from '../../hooks/useUnresolvedIntent';
 import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../../lib/deliverySplitBilling';
@@ -40,6 +40,8 @@ interface UnbilledDeliveryRow {
   customer_name: string;
   completed_at: string | null;
   item_count: number;
+  /** A4: an invoice bills this delivery only in part ("4 of 10 not billed ($160.00)"). */
+  unbilled_label: string | null;
 }
 
 interface ManufacturedRow {
@@ -371,12 +373,14 @@ export default function IntegrityCleanupPanel() {
           // (e.g. in Chem Man); offering "Create draft invoice" on it would bill the
           // customer twice, so it is not listed. If that list cannot be read, hide
           // the section rather than risk showing those rows.
-          const [{ data: invoiceRows, error: coverageError }, externalBillingRes] = await Promise.all([
+          // A4: a delivery an invoice bills only in part stays listed, with what is left to bill.
+          const [{ data: invoiceRows, error: coverageError }, externalBillingRes, remaindersRes] = await Promise.all([
             fetchActiveInvoiceCoveragePages(orderIds),
             fetchBilledOutsideCrxDeliveryIds(),
+            fetchDeliveryBillingRemainders(allCompleted.map((d) => d.id)),
           ]);
           if (isStale()) return;
-          const invoiceCoverageError = coverageError ?? externalBillingRes.error;
+          const invoiceCoverageError = coverageError ?? externalBillingRes.error ?? remaindersRes.error;
           if (invoiceCoverageError) {
             Sentry.captureException(invoiceCoverageError);
             toast('error', 'Failed to verify invoice coverage. Unbilled delivery results are hidden; refresh to try again.');
@@ -386,12 +390,14 @@ export default function IntegrityCleanupPanel() {
           } else {
             const invRows = invoiceRows || [];
             const billedOutsideCrx = externalBillingRes.data ?? new Set<string>();
-            const filtered = allCompleted.filter((d) => !billedOutsideCrx.has(d.id) && !invRows.some((invoice) =>
-              activeInvoiceCoversDelivery(invoice, d.id, d.order_id)
-            ));
+            const remainders = remaindersRes.data ?? new Map<string, DeliveryBillingRemainder>();
+            const covered = (d: { id: string; order_id: string }) => invRows.some((invoice) =>
+              activeInvoiceCoversDelivery(invoice, d.id, d.order_id));
+            const filtered = allCompleted.filter((d) => !billedOutsideCrx.has(d.id) && (!covered(d) || remainders.has(d.id)));
             setUnbilled(
               filtered.map((d) => {
                 const c = Array.isArray(d.customer) ? d.customer[0] : d.customer;
+                const rest = covered(d) ? remainders.get(d.id) : undefined;
                 return {
                   id: d.id,
                   delivery_number: d.delivery_number,
@@ -399,6 +405,7 @@ export default function IntegrityCleanupPanel() {
                   customer_name: c?.farm_name || 'Unknown',
                   completed_at: d.completed_at,
                   item_count: d.items?.length || 0,
+                  unbilled_label: rest ? unbilledRemainderLabel(rest) : null,
                 };
               }),
             );
@@ -874,7 +881,10 @@ export default function IntegrityCleanupPanel() {
               <tbody>
                 {unbilled.map((row) => (
                   <tr key={row.id} className="border-t border-blue-200">
-                    <td className="px-3 py-2 font-mono text-xs">{row.delivery_number}</td>
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {row.delivery_number}
+                      {row.unbilled_label && <div className="font-sans text-amber-700">{row.unbilled_label}</div>}
+                    </td>
                     <td className="px-3 py-2">{row.customer_name}</td>
                     <td className="px-3 py-2 text-gray-700">
                       {row.completed_at ? new Date(row.completed_at).toLocaleDateString() : '-'}

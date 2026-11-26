@@ -1,0 +1,212 @@
+#!/usr/bin/env node
+/**
+ * Real-schema proof for 20270308170000_unbilled_rest_and_delivery_price_carry_over.sql (A4 + delivery price carry-over,
+ * Mason 25 Nov).
+ *
+ * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
+ * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), seeds invented orders, and runs each case through the
+ * real complete_delivery, save_invoice (the invoice editor's save) and create_invoice_for_unbilled_delivery, signed in
+ * as an admin, each in a rolled-back probe:
+ *   carry_down  10 at $40 in two deliveries; delivery 1's 6 edited to $35 ($210); delivery 2's 4 must draft $160.00
+ *   carry_up    the same with $45 ($270); delivery 2 still $160.00
+ *   short       10 delivered, the draft lowered to 6 ($240): the delivery must stay on Unbilled, and Create Invoice must
+ *               draft exactly 4 for $160.00 (total $400.00, to the cent), then the delivery leaves the list and a
+ *               second Create Invoice is refused
+ *   whole       the same short bill on a whole-order invoice (save_invoice, no delivery): the rest is drafted on the
+ *               order (no delivery id), $160.00
+ *   rounding    3 units for $100.00 ($33.33 each) in three deliveries: 3333 + 3334 + 3333 cents (unchanged)
+ *   void        a cancelled delivery draft frees its units: the next delivery bills $40.00 (unchanged)
+ * BEFORE (old bodies) the first four fail, AFTER they pass and the last two are identical; autocommit, a second
+ * apply and a drifted reverse are refused; the reverse (scripts/smoke/unbilled-rest-and-carry-over-reverse.sql)
+ * restores the old bodies byte for byte and every case gives its BEFORE result again; the candidate re-applies.
+ *
+ * Run: node scripts/smoke/prove-unbilled-rest-and-carry-over-real-schema.mjs   (needs Docker; never touches live)
+ * Reuse a container built up to (not including) the candidate: UNDO_PATHS_CONTAINER=<name> A4CARRY_PROOF_REUSE=1
+ * (it is left as found: the candidate is reversed again at the end).
+ * Prints UNBILLED_REST_CARRY_OVER_PROOF_PASS on success.
+ */
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { buildContainer, removeContainer, seedUsers, seed, attempt, asUser, USERS, ROOT, NAME, docker, scalar } from './undo-paths/harness.mjs';
+
+const CANDIDATE = '20270308170000_unbilled_rest_and_delivery_price_carry_over.sql';
+const lf = (f) => readFileSync(f, 'utf8').replaceAll('\r\n', '\n');
+const candidate = lf(path.join(ROOT, 'supabase', 'migrations', CANDIDATE));
+const reverse = lf(path.join(ROOT, 'scripts', 'smoke', 'unbilled-rest-and-carry-over-reverse.sql'));
+const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
+const run = (sql, flags = []) => docker([...PSQL, ...flags], { input: sql, allowFailure: true });
+const ADMIN = USERS.admin;
+const FNS = ['public._allocated_delivery_cents(uuid,numeric,uuid)', 'public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)',
+  'public.get_dashboard_action_items(integer)'];
+const reuse = process.env.A4CARRY_PROOF_REUSE === '1';
+if (reuse && !/^(crx-undo-paths|a4carry)-/.test(process.env.UNDO_PATHS_CONTAINER || '')) {
+  throw new Error('A4CARRY_PROOF_REUSE needs UNDO_PATHS_CONTAINER naming a throwaway proof container (crx-undo-paths-* or a4carry-*)');
+}
+const md5s = () => FNS.map((f) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${f}'::regprocedure;`)).join(',');
+
+// Invented ids (tag 'a4..'; the harness's users use 'a1'..'a4' in the last places, so these sit higher).
+const uid = (n) => `7c7a0000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const CUST = uid('a4c1'); const PROD = uid('a4d1');
+// order -> [line, units, total $, deliveries [id, units]]
+const ORDERS = {
+  carry_down: [uid('a4e1'), uid('a4f1'), 10, 400, [[uid('a4b11'), 6], [uid('a4b12'), 4]]],
+  carry_up: [uid('a4e2'), uid('a4f2'), 10, 400, [[uid('a4b21'), 6], [uid('a4b22'), 4]]],
+  short: [uid('a4e3'), uid('a4f3'), 10, 400, [[uid('a4b31'), 10]]],
+  whole: [uid('a4e4'), uid('a4f4'), 10, 400, [[uid('a4b41'), 10]]],
+  rounding: [uid('a4e5'), uid('a4f5'), 3, 100, [[uid('a4b51'), 1], [uid('a4b52'), 1], [uid('a4b53'), 1]]],
+  void: [uid('a4e6'), uid('a4f6'), 2, 80, [[uid('a4b61'), 1], [uid('a4b62'), 1]]],
+};
+
+function seedAll() {
+  const price = `DO $price$ DECLARE v jsonb; BEGIN
+      v := public.preview_product_pricing_changes('product_page', NULL,
+        jsonb_build_array(jsonb_build_object('product_id', '${PROD}', 'row_version', 1, 'pricing_mode', 'price_driven',
+          'new_cost', '20.00', 'tier1_price', '40.00', 'tier2_price', '40.00', 'tier3_price', '40.00')), '${ADMIN}', 'a4carry-preview');
+      PERFORM public.apply_product_pricing_change_set((v->>'change_set_id')::uuid, v->>'request_fingerprint', '${ADMIN}', 'a4carry-apply');
+    END $price$;`;
+  const orders = Object.entries(ORDERS).map(([k, [o, l, units, total, dels]]) => `
+    INSERT INTO public.orders (id, order_number, customer_id, status, booking_draw) VALUES ('${o}', '[A4] ${k}', '${CUST}', 'confirmed', false);
+    INSERT INTO public.order_items (id, order_id, product_id, product_name, price_per_unit, cost_per_unit,
+        total_units_needed, total_price, profit, net_margin, quantity_delivered, quantity_remaining, unit_size)
+      VALUES ('${l}', '${o}', '${PROD}', '[A4] product', ${(total / units).toFixed(2)}, 20, ${units}, ${total}, ${total - units * 20}, 50, 0, ${units}, 'Gal');
+    ${dels.map(([d, q], i) => `INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, scheduled_date, status, created_by)
+        VALUES ('${d}', '[A4] ${k}-${i + 1}', '${o}', '${CUST}', CURRENT_DATE, 'scheduled', '${ADMIN}');
+      INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
+        VALUES ('${d}', '${l}', '${PROD}', ${q}, 0, 'Gal');`).join('\n    ')}`).join('\n');
+  seed('a4carry', `INSERT INTO public.customers (id, farm_name, account_number) VALUES ('${CUST}', '[A4] Farm', '[A4]-1');
+    INSERT INTO public.products (id, product_name, unit_size, epa_registration, product_form, inventory_unit)
+      VALUES ('${PROD}', '[A4] product', 'Gal', '999999-99991', 'liquid', 'Gal');
+    ${price}
+    INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
+      VALUES ('${PROD}', 'Main Warehouse', 1000, 0, 'Gal');
+    ${orders}`);
+}
+
+// --- probe pieces (plpgsql inside the harness's probe; r jsonb, t text, u uuid, n bigint are declared) ---------------
+const complete = (del) => `UPDATE public.deliveries SET status = 'in_progress' WHERE id = '${del}';
+  ${asUser(`r := public.complete_delivery(p_delivery_id => '${del}', p_signed_by => 'No proof — recorded by office',
+    p_performed_by => '${ADMIN}', p_quantities => NULL, p_idempotency_key => 'a4carry-c-${del}', p_evidence => 'no_proof',
+    p_evidence_ref => '[A4] fixture');`)}`;
+const invoiceOf = (del) => `(SELECT i.id FROM public.invoices i WHERE i.delivery_id = '${del}' AND i.status NOT IN ('voided', 'cancelled') AND i.deleted_at IS NULL)`;
+// The invoice editor's save: every line kept, its quantity and unit price replaced.
+const edit = (inv, q, cents, key) => `u := ${inv};
+  r3 := (SELECT jsonb_agg(jsonb_build_object('id', ii.id, 'order_item_id', ii.order_item_id, 'product_id', ii.product_id,
+       'description', ii.description, 'quantity', ${q}, 'unit_price_cents', ${cents}, 'extended_cents', ${q} * ${cents},
+       'cost_cents', ii.cost_cents, 'unit_size', ii.unit_size)) FROM public.invoice_items ii WHERE ii.invoice_id = u);
+  ${asUser(`u := public.save_invoice(
+    jsonb_build_object('id', u, 'customer_id', '${CUST}', 'invoice_type', 'chemical_sale'), r3, 'a4carry-e-${key}');`)}`;
+const cents = (del) => `COALESCE((SELECT total_amount_cents FROM public.invoices WHERE id = ${invoiceOf(del)})::text, 'none')`;
+const orderBilled = (o) => `(SELECT COALESCE(sum(ii.extended_cents), 0) || '/' || COALESCE(sum(ii.quantity), 0)::numeric(12,2)
+  FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
+  WHERE i.order_id = '${o}' AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled'))`;
+// Sets t2 to whether the dashboard's "Delivered, not invoiced" lists the delivery.
+const listed = (del) => `${asUser(`r2 := public.get_dashboard_action_items(500);`)}
+  t2 := EXISTS (SELECT 1 FROM jsonb_array_elements(r2->'unbilled_deliveries') e WHERE e->>'id' = '${del}')::text;`;
+const billRest = (del, key) => `BEGIN
+    ${asUser(`r := public.create_invoice_for_unbilled_delivery('${del}', '${ADMIN}', 'a4carry-b-${key}');`)}
+    t := 'drafted ' || (r->>'total_cents') || ' qty=' || (SELECT sum(quantity)::numeric(12,2) FROM public.invoice_items WHERE invoice_id = (r->>'invoice_id')::uuid)
+      || ' on=' || COALESCE((SELECT CASE WHEN delivery_id IS NULL THEN 'order' ELSE 'delivery' END FROM public.invoices WHERE id = (r->>'invoice_id')::uuid), '?');
+  EXCEPTION WHEN OTHERS THEN t := 'refused: ' || left(SQLERRM, 60); END;`;
+
+const CASES = {
+  carry_down: () => { const [, , , , [[d1], [d2]]] = ORDERS.carry_down; return `${complete(d1)} ${edit(invoiceOf(d1), 6, 3500, 'cd')} ${complete(d2)}
+    v := ${cents(d1)} || ' then ' || ${cents(d2)};`; },
+  carry_up: () => { const [, , , , [[d1], [d2]]] = ORDERS.carry_up; return `${complete(d1)} ${edit(invoiceOf(d1), 6, 4500, 'cu')} ${complete(d2)}
+    v := ${cents(d1)} || ' then ' || ${cents(d2)};`; },
+  short: () => { const [o, , , , [[d]]] = ORDERS.short; return `${complete(d)} ${edit(invoiceOf(d), 6, 4000, 'sh')}
+    ${listed(d)} v := 'listed=' || t2;
+    ${billRest(d, 'sh1')} ${listed(d)} v := v || ' | ' || t || ' | billed=' || ${orderBilled(o)} || ' listed=' || t2;
+    ${billRest(d, 'sh2')} v := v || ' | again ' || t;`; },
+  whole: () => { const [o, l, , , [[d]]] = ORDERS.whole; return `${complete(d)}
+    -- The office replaces the delivery's draft with one whole-order invoice (save_invoice, no delivery) for 6.
+    UPDATE public.invoices SET status = 'cancelled' WHERE id = ${invoiceOf(d)};
+    ${asUser(`u := public.save_invoice(jsonb_build_object('order_id', '${o}', 'customer_id', '${CUST}', 'invoice_type', 'chemical_sale'),
+      jsonb_build_array(jsonb_build_object('order_item_id', '${l}', 'product_id', '${PROD}', 'description', '[A4] product',
+        'quantity', 6, 'unit_price_cents', 4000, 'extended_cents', 24000, 'cost_cents', 2000, 'unit_size', 'Gal')), 'a4carry-w');`)}
+    ${listed(d)}
+    v := 'whole=' || (SELECT total_amount_cents || (CASE WHEN delivery_id IS NULL THEN ' on order' ELSE ' on delivery' END) FROM public.invoices WHERE id = u)
+      || ' listed=' || t2;
+    ${billRest(d, 'wh1')} ${listed(d)} v := v || ' | ' || t || ' | billed=' || ${orderBilled(o)} || ' listed=' || t2;
+    ${billRest(d, 'wh2')} v := v || ' | again ' || t;`; },
+  rounding: () => { const [o, , , , dels] = ORDERS.rounding; return `${dels.map(([d]) => complete(d)).join('\n')}
+    v := ${dels.map(([d]) => cents(d)).join(" || '+' || ")} || ' billed=' || ${orderBilled(o)};`; },
+  void: () => { const [o, , , , [[d1], [d2]]] = ORDERS.void; return `${complete(d1)}
+    UPDATE public.invoices SET status = 'cancelled' WHERE id = ${invoiceOf(d1)};
+    ${complete(d2)} v := ${cents(d2)} || ' billed=' || ${orderBilled(o)};`; },
+};
+const probeAll = (label) => {
+  console.log(`${label}:`);
+  return Object.fromEntries(Object.entries(CASES).map(([name, body]) => {
+    const out = attempt(ADMIN, body());
+    console.log(`  ${name}: ${out}`);
+    return [name, out];
+  }));
+};
+
+// Expected AFTER, from the rules (each delivery's units at the order price; bill exactly the unbilled rest).
+const EXPECT = {
+  carry_down: 'ok|21000 then 16000',
+  carry_up: 'ok|27000 then 16000',
+  short: 'ok|listed=true | drafted 16000 qty=4.00 on=delivery | billed=40000/10.00 listed=false | again refused: This delivery already has an active invoice (or an order-lev',
+  whole: 'ok|whole=24000 on order listed=true | drafted 16000 qty=4.00 on=order | billed=40000/10.00 listed=false | again refused: This delivery already has an active invoice (or an order-lev',
+};
+
+try {
+  if (!reuse) { buildContainer({ stopBefore: CANDIDATE }); seedUsers(); }
+  seedAll();
+  const oldMd5 = md5s();
+
+  const before = probeAll('Before the candidate');
+  assert.equal(before.carry_down, 'ok|21000 then 19000', 'carry-over must reproduce on the old body ($190, not $160)');
+  assert.equal(before.carry_up, 'ok|27000 then 13000', 'carry-over must reproduce upward on the old body ($130)');
+  assert.match(before.short, /^ok\|listed=false \| refused: This delivery already has an active invoice/, 'A4 must reproduce: off the list, refused');
+  assert.match(before.short, /billed=24000\/6\.00/, 'A4: 4 units left unbilled on the old body');
+  assert.match(before.whole, /^ok\|whole=24000 on order listed=false \| refused:/, 'A4 whole-order must reproduce');
+  assert.match(before.rounding, /^ok\|3333\+3334\+3333 billed=10000\/3\.00$/);
+  assert.match(before.void, /^ok\|4000 billed=4000\/1\.00$/);
+
+  console.log('Apply:');
+  const auto = run(candidate);
+  assert.match(`${auto.stdout}${auto.stderr}`, /PREFLIGHT_FAIL: run this file as one transaction/, 'autocommit apply must refuse');
+  assert.equal(md5s(), oldMd5, 'a refused apply changes nothing');
+  const once = run(candidate, ['-1']);
+  assert.equal(once.status, 0, `${once.stdout}${once.stderr}`);
+  assert.match(`${once.stdout}${once.stderr}`, /POSTFLIGHT_OK/);
+  assert.match(run(candidate, ['-1']).stderr, /UNBILLED_REST_BASELINE_DRIFT/, 're-apply must refuse');
+  const newMd5 = md5s();
+
+  const after = probeAll('After the candidate');
+  for (const [name, expected] of Object.entries(EXPECT)) assert.equal(after[name], expected, name);
+  assert.equal(after.rounding, before.rounding, 'rounding across partial deliveries must not change');
+  assert.equal(after.void, before.void, 'a void must still free its units');
+  // What the screens read: the short bill's rest, as the signed-in admin (row policies on).
+  const [, , , , [[shortDel]]] = ORDERS.short;
+  const viewRow = attempt(ADMIN, `${complete(shortDel)} ${edit(invoiceOf(shortDel), 6, 4000, 'sv')}
+    ${asUser(`v := (SELECT string_agg(delivered_qty::numeric(12,2) || ' delivered, ' || billed_qty::numeric(12,2) || ' billed, '
+      || unbilled_qty::numeric(12,2) || ' unbilled, ' || unbilled_cents || ' cents', '; ')
+      FROM public.delivery_billing_remainders WHERE delivery_id = '${shortDel}');`)}`);
+  console.log(`  view (admin): ${viewRow}`);
+  assert.equal(viewRow, 'ok|10.00 delivered, 6.00 billed, 4.00 unbilled, 16000 cents');
+  // Access: anon reads nothing; the view runs under the reader's own policies.
+  assert.equal(scalar("SELECT has_table_privilege('anon', 'public.delivery_billing_remainders', 'SELECT');"), 'f');
+  assert.equal(scalar("SELECT reloptions::text FROM pg_class WHERE oid = 'public.delivery_billing_remainders'::regclass;"), '{security_invoker=true}');
+
+  console.log('Reverse:');
+  const back = run(reverse, ['-1']);
+  assert.equal(back.status, 0, `${back.stdout}${back.stderr}`);
+  assert.match(`${back.stdout}${back.stderr}`, /REVERSE_OK/);
+  assert.equal(md5s(), oldMd5, 'reverse must restore the earlier bodies byte for byte');
+  assert.equal(scalar("SELECT to_regclass('public.delivery_billing_remainders') IS NULL;"), 't');
+  assert.match(run(reverse, ['-1']).stderr, /UNBILLED_REST_REVERSE_DRIFT/, 'reverse must refuse when the candidate is not installed');
+  const reversed = probeAll('After the reverse');
+  assert.deepEqual(reversed, before, 'the reverse must give every BEFORE result back');
+  const again = run(candidate, ['-1']);
+  assert.match(`${again.stdout}${again.stderr}`, /POSTFLIGHT_OK/, 'candidate must re-apply after the reverse');
+  assert.equal(md5s(), newMd5);
+  if (reuse) assert.equal(run(reverse, ['-1']).status, 0, 'leave a reused container as found');
+
+  console.log('UNBILLED_REST_CARRY_OVER_PROOF_PASS');
+} finally {
+  if (!reuse && process.env.CRX_PROVER_KEEP_CONTAINER !== '1') removeContainer();
+}

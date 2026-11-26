@@ -53,7 +53,7 @@ import {
   receiptMayAlreadyBeSent, readQueuedReceipt, queuedMeanwhileWarning, type ReceiptCloseResult,
 } from '../lib/receiptsToCheck';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
-import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
+import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery, fetchDeliveryBillingRemainders, unbilledRemainderLabel, type DeliveryBillingRemainder } from '../lib/deliveryInvoiceCoverage';
 import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { addDeliveryEditItem, removeDeliveryEditItem, type AvailableDeliveryEditItem, type DeliveryEditItem } from '../lib/deliveryEditItems';
@@ -280,6 +280,8 @@ export default function DeliveryDetail() {
   const [relatedInvoices, setRelatedInvoices] = useState<RelatedInvoice[]>([]);
   // False until this delivery's invoice reads return: the card says Loading, never "No invoice yet".
   const [invoicesLoaded, setInvoicesLoaded] = useState(false);
+  // A4: delivered units no active invoice bills yet, when an invoice covers this delivery only in part.
+  const [billingRemainder, setBillingRemainder] = useState<DeliveryBillingRemainder | null>(null);
 
   // H5: true when the server's ORDER_NEEDS_SPLIT_BILLING guard would refuse a
   // single backfilled invoice for this delivery's order. Defaults to false and
@@ -310,6 +312,7 @@ export default function DeliveryDetail() {
     setParentOrder(null);
     setRelatedInvoices([]);
     setInvoicesLoaded(false);
+    setBillingRemainder(null);
     setSiblingDeliveries([]);
     setParentQuote(null);
   }, [id]);
@@ -345,18 +348,22 @@ export default function DeliveryDetail() {
     activeInvoiceCoversDelivery(invoice, delivery.id, delivery.order_id)
     || (invoice.delivery_id === delivery.id && activeInvoiceCountsTowardBilling(invoice))
   );
+  // A4: an invoice bills fewer units than were delivered, so the rest is still to bill. Admins only: other roles may
+  // not see every invoice (invoices RLS), so their remainder could count billed units as unbilled.
+  const shortBilled = isAdmin && hasActiveRelatedInvoice && billingRemainder !== null;
+  const needsBilling = !hasActiveRelatedInvoice || shortBilled;
   // RPC is admin-only (finding #78's backfill twin); sales_reps bill jobs, not stray deliveries.
   // H5: also mirror the server's ORDER_NEEDS_SPLIT_BILLING refusal via the shared
   // predicate, so this surface and IntegrityCleanupPanel cannot drift apart.
   const canCreateInvoice = isAdmin
     && delivery?.status === 'completed'
-    && !hasActiveRelatedInvoice
+    && needsBilling
     && !orderNeedsSplitBilling
     && billedOutsideCrxReason === null;
   // Only worth explaining where the button would otherwise have been offered.
   const splitBillingBlocksInvoice = isAdmin
     && delivery?.status === 'completed'
-    && !hasActiveRelatedInvoice
+    && needsBilling
     && orderNeedsSplitBilling
     && billedOutsideCrxReason === null;
 
@@ -523,6 +530,15 @@ export default function DeliveryDetail() {
             });
             setOrderItemContext(ctx);
           }
+          // Fail open: without it the page shows the invoices as before; Create Invoice still bills only the rest.
+          const remainderRes = del.status === 'completed'
+            ? await fetchDeliveryBillingRemainders([del.id])
+            : { data: null, error: null };
+          if (isStale()) return;
+          if (remainderRes.error) {
+            Sentry.captureException(remainderRes.error, { extra: { context: 'load_delivery_billing_remainder', deliveryId: del.id } });
+          }
+          setBillingRemainder(remainderRes.data?.get(del.id) ?? null);
           setParentOrder(orderRes.data as { id: string; order_number: string } | null);
           setRelatedInvoices(mergeRelatedInvoices(invRes.data, byDelivery));
           setInvoicesLoaded(true);
@@ -555,6 +571,7 @@ export default function DeliveryDetail() {
           // sibling deliveries or quote to carry over from a previously viewed delivery.
           setOrderNeedsSplitBilling(false);
           setBilledOutsideCrxReason(null);
+          setBillingRemainder(null);
           setParentOrder(null);
           setRelatedInvoices(mergeRelatedInvoices([], byDelivery));
           setInvoicesLoaded(true);
@@ -2606,8 +2623,9 @@ export default function DeliveryDetail() {
           invoices={relatedInvoices}
           deliveryId={delivery.id}
           loading={!invoicesLoaded}
-          unbilled={delivery.status === 'completed' && invoicesLoaded && !hasActiveRelatedInvoice ? {
+          unbilled={delivery.status === 'completed' && invoicesLoaded && needsBilling ? {
             isAdmin,
+            rest: shortBilled && billingRemainder ? unbilledRemainderLabel(billingRemainder) : null,
             billedOutsideCrxReason,
             createInvoice: canCreateInvoice ? 'offer' : splitBillingBlocksInvoice ? 'split' : null,
             creating: creatingInvoice,
@@ -3082,9 +3100,11 @@ export default function DeliveryDetail() {
           if (!creatingInvoice) setCreateInvoiceConfirmOpen(false);
         }}
         onConfirm={() => { void handleCreateInvoice(); }}
-        title="Create an invoice for this delivery?"
-        message={`This makes a draft invoice for completed delivery ${delivery.delivery_number}.`}
-        confirmLabel="Create invoice"
+        title={shortBilled ? 'Bill the rest of this delivery?' : 'Create an invoice for this delivery?'}
+        message={shortBilled && billingRemainder
+          ? `This makes a draft invoice for the units of delivery ${delivery.delivery_number} not billed yet: ${unbilledRemainderLabel(billingRemainder)}.`
+          : `This makes a draft invoice for completed delivery ${delivery.delivery_number}.`}
+        confirmLabel={shortBilled ? 'Bill the rest' : 'Create invoice'}
         variant="info"
         loading={creatingInvoice}
       />
@@ -3222,6 +3242,8 @@ function DeliveryInvoicesCard({ invoices, deliveryId, loading, unbilled }: {
 
 interface UnbilledNoteProps {
   isAdmin: boolean;
+  /** A4: an invoice bills this delivery only in part ("4 of 10 not billed ($160.00)"). */
+  rest: string | null;
   billedOutsideCrxReason: string | null;
   createInvoice: 'offer' | 'split' | null;
   creating: boolean;
@@ -3233,7 +3255,8 @@ interface UnbilledNoteProps {
  * an admin is told nothing is billed and gets Create invoice… under today's condition (or the
  * disabled split-billing button with its reason); others may not see every invoice (invoices RLS).
  */
-function UnbilledNote({ isAdmin, billedOutsideCrxReason, createInvoice, creating, onCreate }: UnbilledNoteProps) {
+function UnbilledNote({ isAdmin, rest, billedOutsideCrxReason, createInvoice, creating, onCreate }: UnbilledNoteProps) {
+  const label = rest ? 'Bill the rest…' : 'Create invoice…';
   // The stored reason is admin-only, as before this card; others get the plain empty text below.
   if (isAdmin && billedOutsideCrxReason !== null) {
     return (
@@ -3246,18 +3269,20 @@ function UnbilledNote({ isAdmin, billedOutsideCrxReason, createInvoice, creating
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-900">
       <AlertTriangle className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-      {isAdmin
+      {rest
+        ? <p className="min-w-0 flex-1"><strong>Not fully billed.</strong> {rest}: the invoice bills fewer units than were delivered.</p>
+        : isAdmin
         ? <p className="min-w-0 flex-1"><strong>No invoice yet.</strong> This delivery is complete but nothing has been billed.</p>
         : <p className="min-w-0 flex-1"><strong>No invoices you can see for this delivery.</strong> Ask the office whether it has been billed.</p>}
       {createInvoice === 'offer' && (
         <Button variant="secondary" size="sm" showChevron={false} onClick={onCreate} disabled={creating} className="min-h-11 md:min-h-0">
-          Create invoice…
+          {label}
         </Button>
       )}
       {/* H5: the server would refuse this one. Show it disabled with the reason. */}
       {createInvoice === 'split' && (
         <span className="flex items-center gap-1">
-          <Button variant="secondary" size="sm" showChevron={false} disabled className="min-h-11 md:min-h-0">Create invoice…</Button>
+          <Button variant="secondary" size="sm" showChevron={false} disabled className="min-h-11 md:min-h-0">{label}</Button>
           <HelpTip text={SPLIT_BILLING_BLOCK_REASON} />
         </span>
       )}

@@ -1,4 +1,5 @@
-import { supabase } from './db';
+import { supabase, supabaseUntyped } from './db';
+import { formatCents } from './money';
 import { chunkIds } from './dispatchDisplay';
 import { PAGE_RETURNED_NO_LIST } from './pagedRead';
 
@@ -91,4 +92,45 @@ export function activeInvoiceCoversDelivery(
 ): boolean {
   return activeInvoiceCoversOrder(invoice, orderId)
     && (invoice.delivery_id === deliveryId || invoice.delivery_id === null);
+}
+
+export interface DeliveryBillingRemainder {
+  /** Units delivered on the lines that are not fully billed. */
+  deliveredQty: number;
+  unbilledQty: number;
+  /** What Create Invoice would draft for those units. */
+  unbilledCents: number;
+}
+
+/**
+ * A4: completed deliveries an active invoice bills only in part (delivery_billing_remainders: delivered vs billed
+ * units per order line; whole-order invoices count too). Returns only deliveries with units still unbilled, summed
+ * over their short lines. Such a delivery stays on Unbilled even though an invoice covers it.
+ */
+export async function fetchDeliveryBillingRemainders(deliveryIds: string[]) {
+  const remainders = new Map<string, DeliveryBillingRemainder>();
+  for (const idChunk of chunkIds([...new Set(deliveryIds)], 100)) {
+    const { data, error } = await supabaseUntyped
+      .from('delivery_billing_remainders')
+      .select('delivery_id, delivered_qty, unbilled_qty, unbilled_cents')
+      .in('delivery_id', idChunk)
+      .gt('unbilled_qty', 0);
+    if (error) return { data: null, error };
+    if (!data) return { data: null, error: { message: PAGE_RETURNED_NO_LIST } };
+    for (const row of data as Array<{ delivery_id: string; delivered_qty: number; unbilled_qty: number; unbilled_cents: number }>) {
+      const sum = remainders.get(row.delivery_id) ?? { deliveredQty: 0, unbilledQty: 0, unbilledCents: 0 };
+      sum.deliveredQty += Number(row.delivered_qty);
+      sum.unbilledQty += Number(row.unbilled_qty);
+      sum.unbilledCents += Number(row.unbilled_cents);
+      remainders.set(row.delivery_id, sum);
+    }
+  }
+  return { data: remainders, error: null };
+}
+
+const qty = (n: number) => String(Number(n.toFixed(4)));
+
+/** "4 of 10 not billed ($160.00)" */
+export function unbilledRemainderLabel(r: DeliveryBillingRemainder): string {
+  return `${qty(r.unbilledQty)} of ${qty(r.deliveredQty)} not billed (${formatCents(r.unbilledCents)})`;
 }

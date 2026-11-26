@@ -144,7 +144,7 @@ Used on: `cost_history`. Re-read against live on 2026-08-19 UTC: that is the onl
 `cycle_count_items` is not carried in this file's matrix at all; its row lives in
 `docs/reference/database-schema.md`. The three `cycle_count_items` write policies are
 `is_admin() AND EXISTS (… cycle_counts.status = 'in_progress')`, so an admin cannot
-edit a closed count. Migration `20270309000000` makes rebate claim creation
+edit a closed count. Migration `20270310130000` makes rebate claim creation
 and status changes use their checked functions. Admins and sales reps can call
 `create_rebate_claim`. Only admins can call `transition_rebate_claim`.
 

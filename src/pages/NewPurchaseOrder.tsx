@@ -597,7 +597,7 @@ export default function NewPurchaseOrder() {
                       Total
                     </td>
                     <td className="px-4 py-3 font-mono font-semibold text-nav-dark">
-                      {fmt(totalCost)}
+                      {items.some((i) => i.product_id && parsePurchaseOrderUnitCostDollars(i.unit_cost) === null) ? '—' : fmt(totalCost)}
                     </td>
                     <td />
                   </tr>

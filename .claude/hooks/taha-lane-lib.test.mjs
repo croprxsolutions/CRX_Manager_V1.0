@@ -490,7 +490,9 @@ eq(runHook("hello there", repo), "", "ordinary chat: the hook says nothing");
 ok(runHook(`ok taha override #2247 ${hookCode}`, repo).includes("NOT RECORDED"), "a near miss is refused out loud");
 ok(runHook("taha override #2247 000001", repo).includes("NOT RECORDED"), "a code the guard never issued is refused");
 ok(runHook(`taha override #2292 ${hookCode}`, repo).includes("not #2292"), "the wrong PR is refused");
-ok(runHook(`taha override #2247 ${hookCode}`, repo).includes("RECORDED — Mason let PR #2247"), "his code is recorded");
+const recorded = runHook(`taha override #2247 ${hookCode}`, repo);
+ok(recorded.includes("RECORDED — Mason let PR #2247"), "his code is recorded");
+ok(/live-apply go-ahead and 4-hour hold only until \S+ \(30 minutes/.test(recorded), "the confirmation gives the live apply's 30-minute end, not 24 hours (Sol)");
 ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override file exists for the gates");
 
 console.log(`taha-lane-lib tests: ${pass} passed`);

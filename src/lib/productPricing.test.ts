@@ -29,6 +29,7 @@ import {
   previewProductPricingChanges,
   sha256Hex,
 } from './productPricing';
+import { nearCostProducts } from './nearCostPricing';
 
 describe('defaultPricingMode', () => {
   const prices = { tier1_price: 100, tier2_price: 90, tier3_price: 80 };
@@ -276,6 +277,44 @@ describe('getPricingWorkbookExportRefusalReason', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('nearCostProducts', () => {
+  const row = (
+    productId: string, cost: bigint, t1: bigint, t1Margin: number | null = null,
+    pricingMode: 'margin_driven' | 'price_driven' = 'price_driven',
+  ) => ({
+    sequence: 1, product_id: productId, row_status: 'ready', submitted_row: { product_name: productId },
+    effect: { product_name: productId, cost_cents: cost, pricing_changed: true,
+      tier1_price_cents: t1, tier2_price_cents: cost * 2n, tier3_price_cents: cost * 2n,
+      pricing_mode: pricingMode,
+      tier1_margin: t1Margin, tier1_margin_percent: t1Margin == null ? null : String(Number((t1Margin * 100).toFixed(6))) },
+  }) as unknown as Parameters<typeof nearCostProducts>[0][number];
+
+  it('flags a margin under 1% even when rounding puts the price over 2% (Mason Q2)', () => {
+    // 1 cent cost at 0.5% margin rounds to a 2-cent price: 100% over cost, but still a likely typo.
+    expect(nearCostProducts([row('A', 1n, 2n, 0.005, 'margin_driven')])[0].tiers[0].fraction_margin_percent).toBe('0.5');
+    expect(nearCostProducts([row('A', 640n, 642n, 0.0035, 'margin_driven')])[0].tiers[0].fraction_margin_percent).toBe('0.35');
+    const [priceDriven] = nearCostProducts([row('A', 640n, 642n, 0.0035, 'price_driven')]);
+    expect(priceDriven.tiers[0]).toMatchObject({ fraction_margin_percent: '0.35', margin_driven: false });
+    expect(nearCostProducts([row('A', 640n, 985n, 0.35)])).toEqual([]);
+  });
+
+  it('flags a price exactly 2% over cost and not one cent more', () => {
+    expect(nearCostProducts([row('A', 500n, 510n)])).toEqual([
+      { product_id: 'A', product_name: 'A', tiers: [{
+        tier: 1, price_cents: 510n, cost_cents: 500n, margin_driven: false, fraction_margin_percent: null,
+      }] },
+    ]);
+    expect(nearCostProducts([row('A', 500n, 511n)])).toEqual([]);
+    expect(nearCostProducts([row('A', 500n, 499n)])).toEqual([]);
+  });
+
+  it('lists a product once even if a sheet repeats it', () => {
+    const found = nearCostProducts([row('A', 500n, 505n), row('A', 500n, 510n)]);
+    expect(found).toHaveLength(1);
+    expect(found[0].tiers).toHaveLength(2);
   });
 });
 

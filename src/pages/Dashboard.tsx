@@ -576,7 +576,7 @@ export default function Dashboard() {
               </div>
               <div className="flex gap-2">
                 <Badge variant="draft">{data.quotePipelineDraft} draft</Badge>
-                <Badge variant="sent">{data.quotePipelineSent} sent</Badge>
+                <Badge variant="sent">{data.quotePipelineSent} booked</Badge>
                 <Badge variant="accepted">{data.quotePipelineAccepted} accepted</Badge>
               </div>
             </Card>

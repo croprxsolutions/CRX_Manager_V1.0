@@ -68,7 +68,8 @@ const QUEUED_FUNCTIONS = new Set(Object.keys(QUEUED_MIGRATION_FUNCTIONS));
 // requiring the function live here deadlocked the v0.1.0 release. Every migration already on main is live, so this
 // only admits the PR's own migrations. Only a branch of this repository counts (a fork's "hotfix/x" does not), and
 // only a push to main (the merge of one of those PRs) follows the same rule, or main stays red until the snapshot is
-// regenerated. A manual run on main and a local run keep the live rule.
+// regenerated. A manual run on main keeps the live rule. A local run (no GITHUB_ACTIONS) uses the staging rule,
+// which is what CI applies to every PR agents open (feature PRs into staging; release/hotfix PRs get the same rule).
 // Regenerate the snapshot after each release's live apply.
 type GateEnv = { base?: string; head?: string; headRepo?: string; repo?: string; refName?: string; event?: string };
 function rpcGateTarget({ base, head, headRepo, repo, refName, event }: GateEnv): string {
@@ -88,7 +89,7 @@ function headRepoOf(eventPath: string | undefined): string | undefined {
     return undefined;
   }
 }
-const RPC_GATE_TARGET = rpcGateTarget({
+const RPC_GATE_TARGET = !process.env.GITHUB_ACTIONS ? 'staging' : rpcGateTarget({
   base: process.env.GITHUB_BASE_REF,
   head: process.env.GITHUB_HEAD_REF,
   headRepo: headRepoOf(process.env.GITHUB_EVENT_PATH),

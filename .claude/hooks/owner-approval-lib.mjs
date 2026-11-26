@@ -264,7 +264,7 @@ const assertWordsAlone = (content) => {
 // shown to Mason as something to answer. Any OTHER entry between the agent's
 // message and his reply (a message of his, image-only included; text Claude Code
 // injects such as a Stop hook's feedback; a notification; a compaction; an error
-// or synthetic message; a record type not listed here) ends the scan, so "I
+// or synthetic message; a record type not listed here that carries any text) ends the scan, so "I
 // approve" is never carried past it (Luna rounds 1 and 3). A queue record that
 // carries a message (one waiting to be delivered, or withdrawn) is not
 // bookkeeping either, unless it is Mason's current message itself (Luna round 4).
@@ -272,10 +272,50 @@ const BOOKKEEPING_TYPES = new Set([
   "attachment", "last-prompt", "custom-title", "agent-name", "atis-latch", "pr-link",
   "bridge-session", "file-history-snapshot", "file-history-delta",
 ]);
-const isBookkeeping = (e, currentPrompt) => BOOKKEEPING_TYPES.has(e?.type) ||
+// Claude Code 2.1.33x (2026-11-25): the permission-mode marker and the data-flow ledger (tool
+// names and ids only; shapes surveyed on ~60,000 real records). Only those exact shapes are
+// skipped: any other key, value type, or string that is not a bare identifier (a sentence has
+// spaces) ends the scan (Taha LOW 1, PR #2555; Terra HIGH x2).
+const isPlainObject = (o) => o !== null && typeof o === "object" && !Array.isArray(o);
+const keysWithin = (o, allowed) => isPlainObject(o) && Object.keys(o).every((k) => allowed.has(k));
+const isId = (v) => typeof v === "string" && /^[A-Za-z0-9_.:@/+-]{1,200}$/.test(v);
+const MODE_KEYS = new Set(["type", "mode", "sessionId"]);
+// Claude Code's permission-mode names; only "normal" seen in real records (Terra HIGH, round 2).
+const PERMISSION_MODES = new Set(["normal", "default", "plan", "acceptEdits", "auto", "bypassPermissions", "dontAsk"]);
+const FLOW_KEYS = new Set(["type", "v", "sessionId", "snapshot", "records"]);
+const FLOW_ID_KEYS = new Set(["tool_name", "event_id", "tool_use_id", "mcp_tool_name", "response_id", "mark_sent_by", "plugin_id"]);
+const FLOW_REF_KEYS = new Set(["type", "id", "directory_id", "transport", "kind", "action"]);
+const isFlowValue = (k, v) => FLOW_ID_KEYS.has(k) ? isId(v)
+  : k === "no_message" ? typeof v === "boolean"
+  : k === "listed" ? Array.isArray(v) && v.every(isId)
+  : ["server", "touched", "source"].includes(k) ? keysWithin(v, FLOW_REF_KEYS) && Object.values(v).every((x) => x === null || isId(x))
+  : false;
+const isContentFreeMarker = (e) =>
+  (e?.type === "mode" && keysWithin(e, MODE_KEYS) && PERMISSION_MODES.has(e.mode) &&
+    (e.sessionId === undefined || isId(e.sessionId))) ||
+  (e?.type === "data-flow-records" && keysWithin(e, FLOW_KEYS) && Array.isArray(e.records) &&
+    (e.v === undefined || Number.isInteger(e.v)) && (e.snapshot === undefined || typeof e.snapshot === "boolean") &&
+    (e.sessionId === undefined || isId(e.sessionId)) &&
+    e.records.every((r) => isPlainObject(r) && Object.entries(r).every(([k, v]) => isFlowValue(k, v))));
+// Any other record type that holds only identifiers, numbers, booleans and nulls (no string
+// with a space, so no sentence) cannot show Mason a question. Claude Code keeps adding such
+// types (`mode`, `data-flow-records`, then `api-request`, `tools-used`, `cost-state`,
+// `session-owner`, `permission-mode`, `derived-from`: ~7,000 real records, 2026-11-25), and
+// each new one used to refuse his reply until listed. Conversation types never qualify, and
+// a record with any free text (`api-request-blob`, `ai-title`) still ends the scan. `mode`
+// and `data-flow-records` keep their stricter surveyed shapes above.
+const CONVERSATION_TYPES = new Set(["user", "assistant", "system", "queue-operation", "summary", "mode", "data-flow-records"]);
+const TEXT_KEYS = new Set(["message", "content", "text", "summary", "prompt"]);
+const idsOnly = (v, depth = 0) => depth <= 8 && (v === null || typeof v === "number" || typeof v === "boolean" || isId(v) ||
+  (Array.isArray(v) && v.length <= 1000 && v.every((x) => idsOnly(x, depth + 1))) ||
+  (isPlainObject(v) && Object.keys(v).length <= 200 &&
+    Object.entries(v).every(([k, x]) => isId(k) && !TEXT_KEYS.has(k) && idsOnly(x, depth + 1))));
+const isTextlessRecord = (e) => isPlainObject(e) && isId(e.type) && !CONVERSATION_TYPES.has(e.type) && idsOnly(e);
+const isBookkeeping = (e, currentPrompt) => BOOKKEEPING_TYPES.has(e?.type) || isTextlessRecord(e) ||
   (e?.type === "system" && e.subtype === "stop_hook_summary") ||
   // The turn timer (no content in 267 real records, 2026-11-22); one carrying text still ends the scan.
   (e?.type === "system" && e.subtype === "turn_duration" && (e.content == null || String(e.content).trim() === "")) ||
+  isContentFreeMarker(e) ||
   (e?.type === "queue-operation" &&
     (e.content == null || String(e.content).trim() === String(currentPrompt ?? "").trim()));
 const isToolResult = (e) => e?.type === "user" && Array.isArray(e.message?.content) && e.message.content.length > 0 &&

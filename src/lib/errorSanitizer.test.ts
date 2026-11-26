@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeError } from './errorSanitizer';
+import { isCommissionPayoutsOff, sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('keeps document-link errors actionable and strips control characters', () => {
+    expect(sanitizeError({ message: 'BRAND_DOCUMENT_URL_BLOCKED: Use a manufacturer link.\tChoose another URL.' }))
+      .toBe('Use a manufacturer link. Choose another URL.');
+    expect(sanitizeError({ message: 'BRAND_DOCUMENT_INVALID' }))
+      .toBe('Check the document link, state and expiration date, then try again.');
+  });
   it('explains a refused product price sheet without its code', () => {
     for (const code of ['WORKBOOK_V2_EXPORT_REQUIRED', 'WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED']) {
       expect(sanitizeError({ message: code })).toMatch(/^No prices were changed\. This price sheet can no longer be used: it was already applied/);
@@ -56,6 +62,9 @@ describe('sanitizeError', () => {
       'Nothing was saved. Parent "Atrazine 4L" changed since you opened it; reload and try again'],
     ['PRODUCT_PARENT_EPA_CORRECTION_OFF: EPA number correction is switched off until registrations (REG-1) are built',
       'Nothing was saved. EPA number correction is switched off until registrations (REG-1) are built'],
+    // RAISE text of 20270309140000_parent_epa_correction_refuses_open_work.sql (#2579).
+    ['PRODUCT_PARENT_EPA_OPEN_WORK: finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete it and invoice it or its blend ticket; if it will not be sprayed, cancel it or take this product off it; a blend ticket not tied to a job: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): job 1042 (scheduled), invoice INV-7 (draft)',
+      'Nothing was saved. Finish this work first so it keeps the number it was done under, then correct the number (a job: once sprayed, complete it and invoice it or its blend ticket; if it will not be sprayed, cancel it or take this product off it; a blend ticket not tied to a job: reject it, or approve it, make its application record and bill it; an invoice: post or delete it): job 1042 (scheduled), invoice INV-7 (draft)'],
     ['EVIDENCE_REQUIRED: say what shows it', 'Nothing was saved. Say what shows it'],
     // RAISE texts of 20261117130000_tote_fill_from_bulk.sql (BLK-1a).
     ['TOTE_FILL_STOCK_MOVED: stock of the tote or its bulk has moved since this fill; adjust stock instead',
@@ -67,6 +76,8 @@ describe('sanitizeError', () => {
       'Nothing was saved. Weight per gallon must be above 0 and at most 20 lb/gal (this is 30.0000 lb/gal)'],
     ['PRODUCT_WEIGHT_STALE: the weight of "TEST UAN" changed since you opened it; reload',
       'Nothing was saved. The weight of "TEST UAN" changed since you opened it; reload'],
+    ['PRODUCT_WEIGHT_REVIEW_NOT_OPEN',
+      'Nothing was saved. Weight review changed. Check the current Weight card before trying again'],
   ])('explains the parent refusal %s by name', (raw, expected) => {
     expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
   });
@@ -375,6 +386,14 @@ describe('sanitizeError', () => {
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
+    // 20270309010000: payouts are off until M16 (Mason, 2026-11-25).
+    const off = 'COMMISSION_PAYOUTS_OFF_UNTIL_M16: Commission payouts are switched off until commission-on-payment (M16) is live.';
+    expect(sanitizeError(off)).toBe('Nothing was created or paid. Commission payouts are switched off until commission-on-payment (M16) is live. Voiding an existing payment still works');
+    expect(sanitizeError({ message: off })).toBe(sanitizeError(off));
+    expect(isCommissionPayoutsOff({ message: off })).toBe(true);
+    expect(isCommissionPayoutsOff(new Error(off))).toBe(true);
+    expect(isCommissionPayoutsOff('note mentions COMMISSION_PAYOUTS_OFF_UNTIL_M16')).toBe(false);
+    expect(isCommissionPayoutsOff(null)).toBe(false);
     expect(sanitizeError('TIER_ADMIN_ONLY: only an admin can change a customer\'s price tier'))
       .toBe("Only an admin can set or change a customer's price tier");
     expect(sanitizeError('CREDIT_LIMIT_ADMIN_ONLY: only an admin can change a customer\'s credit limit'))
@@ -437,6 +456,8 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'CUSTOMER_INACTIVE_NEW_WORK: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added' }))
       .toBe('Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added');
     expect(sanitizeError('CUSTOMER_INACTIVE_NEW_WORK')).toContain('must reactivate the customer');
+    expect(sanitizeError({ message: 'CUSTOMER_INACTIVE_POSTING: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them' }))
+      .toBe('Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them');
     expect(sanitizeError({ message: 'new row for relation "inventory_holds" violates check constraint "inventory_holds_source_needs_customer"' }))
       .toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
     expect(sanitizeError({ message: 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery' }))
@@ -444,6 +465,10 @@ describe('sanitizeError', () => {
     // Supplier Pricing bounds (20270305200000): the database refusal reads as the rule, never the constraint name.
     expect(sanitizeError({ message: 'new row for relation "product_supplier_links" violates check constraint "product_supplier_links_conversion_floor"' }))
       .toBe('Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals');
+    expect(sanitizeError({ message: 'SUPPLIER_LINK_REUSE_FIELDS_REQUIRED' }))
+      .toBe('Nothing was saved. Fill in Supplier SKU, Supplier price unit and Supplier pack description, then save the link again');
+    expect(sanitizeError({ message: 'SUPPLIER_PRODUCT_NAME_REQUIRED' }))
+      .toBe('Nothing was saved. Fill in Supplier Product name, then save the link again');
     expect(sanitizeError('SUPPLIER_CONVERSION_INVALID'))
       .toBe('Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals');
     expect(sanitizeError({ message: 'new row for relation "supplier_price_observations" violates check constraint "supplier_price_observations_package_quantity_floor"' }))

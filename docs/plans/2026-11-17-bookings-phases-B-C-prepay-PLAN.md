@@ -1,5 +1,7 @@
 # Plan: Bookings Phase B (reserving stock), Phase C (applicator invoices), Prepay and price lock
 
+> **Partly superseded (2026-11-25).** Phase B (stock holds) is still the rule the inventory plan builds from. The **Prepay and price lock** sections are replaced by `docs/plans/2026-11-24-customer-price-lock-design.md` and `docs/research/2026-11-25-chemical-sales-final-plan.md`; do not build prepay from this file.
+
 Status: whole plan settled at v3 (2026-11-17); each phase still gets its own plan-contract before build. Originally drafted 2026-11-17, read at origin/staging 2bf18b3ef.
 - Builds on Phase A (`2026-11-17-bookings-phase-a-CONTRACT.md`, settled).
 - The gap IDs (A1–F3) refer to the audit `docs/research/2026-11-17-bookings-flow-audit/README.md`.

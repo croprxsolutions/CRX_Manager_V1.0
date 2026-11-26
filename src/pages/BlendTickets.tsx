@@ -18,6 +18,10 @@ import BulkActionBar from '../components/ui/BulkActionBar';
 import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
 import { BulkTicketUpload } from '../components/blendtickets/BulkTicketUpload';
 import { ManualTicketCreate } from '../components/blendtickets/ManualTicketCreate';
+
+// Scanned (OCR) ticket upload is hidden: hand tickets are entered manually (Mason, 2026-11-25).
+// Set to true to bring the Upload Tickets button back.
+const SCAN_UPLOAD_ENABLED = false;
 import DataTable, { type Column } from '../components/ui/DataTable';
 import PageHeader from '../components/ui/PageHeader';
 import { usePageMeta } from '../hooks/usePageMeta';
@@ -57,7 +61,8 @@ export function BlendTickets() {
   const batchRejectIdem = useIdempotencyKey('batch_reject_blend_tickets', profile?.id || '');
 
   const canBulkAction = role === 'admin' || role === 'sales_rep';
-  const { isProcessing, processedCount } = useOCRProcessor(true);
+  // With upload hidden, stop the 30s queue poll that sends scans to OCR; Re-process OCR calls the function directly.
+  const { isProcessing, processedCount } = useOCRProcessor(SCAN_UPLOAD_ENABLED);
 
   // Each OCR completion and every refresh re-reads both lists page by page; an
   // older, slower load must not overwrite a newer one, so only the latest may set state.
@@ -542,7 +547,7 @@ export function BlendTickets() {
       <PageHeader
         title="Blend"
         accent="Tickets"
-        subtitle="Upload and manage blend ticket images with automatic OCR processing"
+        subtitle={SCAN_UPLOAD_ENABLED ? "Upload and manage blend ticket images with automatic OCR processing" : "Create and manage blend tickets"}
         actions={(
           <>
           {canBulkAction && (
@@ -569,6 +574,7 @@ export function BlendTickets() {
             <Plus className="h-4 w-4" />
             {showManualCreate ? 'Hide Manual' : 'Create Manual'}
           </Button>
+          {SCAN_UPLOAD_ENABLED && (
           <Button
             onClick={() => {
               setShowUpload(!showUpload);
@@ -578,12 +584,13 @@ export function BlendTickets() {
             <Upload className="h-4 w-4" />
             {showUpload ? 'Hide Upload' : 'Upload Tickets'}
           </Button>
+          )}
           </div>
           </>
         )}
       />
 
-      {showUpload && (
+      {SCAN_UPLOAD_ENABLED && showUpload && (
         <BulkTicketUpload
           customers={customers}
           onUploadComplete={() => {
@@ -734,15 +741,22 @@ export function BlendTickets() {
             title="No blend tickets found"
             description={
               tickets.length === 0
-                ? "Upload your first blend ticket to get started"
+                ? (SCAN_UPLOAD_ENABLED ? "Upload your first blend ticket to get started" : "Create your first blend ticket to get started")
                 : "No tickets match your current filters"
             }
             action={
               tickets.length === 0 ? (
-                <Button onClick={() => setShowUpload(true)}>
-                  <Upload className="h-4 w-4" />
-                  Upload Tickets
-                </Button>
+                SCAN_UPLOAD_ENABLED ? (
+                  <Button onClick={() => setShowUpload(true)}>
+                    <Upload className="h-4 w-4" />
+                    Upload Tickets
+                  </Button>
+                ) : (
+                  <Button onClick={() => setShowManualCreate(true)}>
+                    <Plus className="h-4 w-4" />
+                    Create Manual
+                  </Button>
+                )
               ) : undefined
             }
           />

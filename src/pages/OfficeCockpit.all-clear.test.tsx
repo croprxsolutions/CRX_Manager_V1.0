@@ -94,7 +94,7 @@ describe('OfficeCockpit "All clear!" banner', () => {
     expect(screen.queryByText('No completed jobs without an invoice.')).toBeNull();
     expect(screen.queryByText('No scheduled jobs in the next 7 days.')).toBeNull();
     // Tiles whose reads loaded keep their all-clear line.
-    expect(screen.getByText('No overdue field-app receivables.')).toBeTruthy();
+    expect(screen.getByText('No overdue receivables.')).toBeTruthy();
   });
 
   it('stays hidden when a tile read returns no list and no error', async () => {

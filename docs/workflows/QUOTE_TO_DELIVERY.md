@@ -66,6 +66,8 @@ therefore fails earlier and with a clearer error, while the trigger remains auth
 - **expired**: Past the `expires_at` date.
 - **cancelled**: Quote was cancelled before fulfillment. It is terminal and reachable from `draft`, `sent`, and `revised`.
 
+On screen (Mason, 2026-11-24): a `sent` quote is an open booking and every status display reads **Booked** (`quoteStatusLabel`); the stored value stays `sent`. Every way to make an order from a booking is worded **Draw from booking**: the quote's green button opens "Whole booking" (`convert_quote_to_order`) and "Choose amounts…" (`draw_down_quote`, the draw window titled "Draw from booking"); the Quotes list row action is "Draw whole booking"; New Order's open-booking notice offers "Draw from booking Q-…"; a clean draft's one-step "Book and draw all" sends it and draws the whole booking.
+
 ### Key RPC
 - `save_quote()` — atomic save of header + sections + items in one transaction
 - `duplicate_quote()` — clones a quote for reuse
@@ -197,7 +199,7 @@ You **CANNOT** skip from scheduled directly to completed. The in_progress step i
 - `financial_audit_log` — immutable audit trail for all financial changes
 
 ### Source files
-- `src/pages/Invoices.tsx` — invoice list (unposted/posted), batch print, batch void
+- `src/pages/Invoices.tsx` — invoice list (Drafts / Posted / By Customer / All Invoices tabs, as on Field Invoices), tick-and-post, batch print, batch void
 - `src/pages/InvoiceDetail.tsx` — post/unpost, print PDF, write-off
 
 ### Status values

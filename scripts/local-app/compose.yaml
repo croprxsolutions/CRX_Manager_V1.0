@@ -7,7 +7,7 @@ name: crx-local-app
 services:
   db:
     image: public.ecr.aws/supabase/postgres:17.6.1.143
-    restart: unless-stopped
+    restart: "${LOCAL_RESTART_POLICY:-unless-stopped}"
     environment:
       POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD}
     volumes:
@@ -16,7 +16,7 @@ services:
 
   auth:
     image: public.ecr.aws/supabase/gotrue:v2.195.0
-    restart: unless-stopped
+    restart: "${LOCAL_RESTART_POLICY:-unless-stopped}"
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: "9999"
@@ -37,7 +37,7 @@ services:
 
   rest:
     image: public.ecr.aws/supabase/postgrest:v14.16
-    restart: unless-stopped
+    restart: "${LOCAL_RESTART_POLICY:-unless-stopped}"
     environment:
       PGRST_DB_URI: postgres://authenticator:${LOCAL_DB_PASSWORD}@db:5432/postgres
       PGRST_DB_SCHEMAS: public
@@ -47,7 +47,7 @@ services:
 
   storage:
     image: public.ecr.aws/supabase/storage-api:v1.68.10
-    restart: unless-stopped
+    restart: "${LOCAL_RESTART_POLICY:-unless-stopped}"
     environment:
       ANON_KEY: ${LOCAL_ANON_KEY}
       SERVICE_KEY: ${LOCAL_SERVICE_KEY}
@@ -68,7 +68,7 @@ services:
 
   gateway:
     image: public.ecr.aws/supabase/kong:2.8.1
-    restart: unless-stopped
+    restart: "${LOCAL_RESTART_POLICY:-unless-stopped}"
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong.yml

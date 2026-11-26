@@ -31,6 +31,7 @@ import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
 import ProductRateLockControl from '../components/products/ProductRateLockControl';
 import ProductSetupWorkbookModal from '../components/products/ProductSetupWorkbookModal';
+import BrandDocumentFixList from '../components/products/BrandDocumentFixList';
 import RateReviewWorkbookModal from '../components/products/RateReviewWorkbookModal';
 import { loadProductRateLock } from '../lib/productRateLock';
 import type { Product, ProductCategory, ProductRateLock, SalesSheetFormat } from '../types';
@@ -151,6 +152,7 @@ function storedMarginPercent(value: number | null | undefined): string | null {
 }
 
 const NO_ROWS: never[] = [];
+const NO_IDS: ReadonlySet<string> = new Set();
 
 /** A read that failed, or whose last refresh failed (its data may be out of date). */
 function readFailed(read: LoadState<unknown>): boolean {
@@ -248,10 +250,11 @@ export default function Products() {
   const loadedFloors = floorsRead.status === 'loaded' && !floorsRead.stale ? floorsRead.data : null;
   const categoryChoices = categoriesRead.status === 'loaded' ? categoriesRead.data : NO_ROWS;
   const parents = parentsRead.status === 'loaded' ? parentsRead.data : NO_ROWS;
+  const brandEpaData = brandEpaRead.status === 'loaded' ? brandEpaRead.data : null;
 
   const epaCovered = useMemo(() => epaCoveredProductIds(parents, loadedProducts,
-    brandEpaRead.status === 'loaded' ? brandEpaRead.data.parentIds : new Set(),
-    brandEpaRead.status === 'loaded' ? brandEpaRead.data.productIds : new Set()), [parents, loadedProducts, brandEpaRead]);
+    brandEpaData?.parentIds ?? NO_IDS,
+    brandEpaData?.productIds ?? NO_IDS), [parents, loadedProducts, brandEpaData]);
   const setupIncomplete = useCallback((row: Product) => isSetupIncomplete(row, epaCovered), [epaCovered]);
 
   const { parentByProduct, parentIndex } = useMemo(() => {
@@ -297,6 +300,8 @@ export default function Products() {
   const [vendorFilter, setVendorFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
   const [setupFilter, setSetupFilter] = useState<SetupFilter>('');
+  // The table owns its search box; it reports the text so the price sheet can match what the table shows.
+  const [tableSearch, setTableSearch] = useState('');
   const [bulkProductImportOpen, setBulkProductImportOpen] = useState(false);
   const [setupWorkbookOpen, setSetupWorkbookOpen] = useState(false);
   const [rateReviewOpen, setRateReviewOpen] = useState(false);
@@ -605,12 +610,14 @@ export default function Products() {
     floorsFailed && 'margin floors',
     readFailed(categoriesRead) && 'product categories',
     readFailed(parentsRead) && 'product groups',
+    readFailed(brandEpaRead) && 'brand EPA numbers',
   ].filter(Boolean);
   const retryFailedReads = () => {
     if (listStale) void reloadProducts();
     if (floorsFailed) void reloadFloors();
     if (readFailed(categoriesRead)) void categoriesRead.reload();
     if (readFailed(parentsRead)) void parentsRead.reload();
+    if (readFailed(brandEpaRead)) void brandEpaRead.reload();
   };
 
   const applyActiveReview = async () => {
@@ -943,7 +950,8 @@ export default function Products() {
   const handleExportPricingWorkbook = async (fullSheet: boolean) => {
     // The workbook marks grouped sizes, so it waits for the groups as well as a current list.
     if (!profile || listBlocked || !parentsReady) return;
-    const productIds = (fullSheet ? products : selectedRows.length > 0 ? selectedRows : filtered)
+    const shown = tableSearch ? filtered.filter((product) => searchProducts(product, tableSearch)) : filtered;
+    const productIds = (fullSheet ? products : selectedRows.length > 0 ? selectedRows : shown)
       .filter((product) => product.is_active)
       .map((product) => product.id);
     if (productIds.length === 0) {
@@ -980,11 +988,7 @@ export default function Products() {
       anchor.click();
       URL.revokeObjectURL(url);
       exportPricingIdem.resetKeyFor(exportIntent);
-      // The table's search box lives inside the table, so a filtered export never sees it.
-      const scope = !fullSheet && selectedRows.length === 0
-        ? ' The search box does not narrow this file: tick products to export only those.'
-        : '';
-      toast('success', `Exported ${productIds.length} Product pricing row(s).${scope}`);
+      toast('success', `Exported ${productIds.length} Product pricing row(s).`);
     } catch (error) {
       toast('error', sanitizeError(error));
     } finally {
@@ -1420,7 +1424,7 @@ export default function Products() {
                 onClick={() => void handleExportPricingWorkbook(false)}
                 loading={workbookBusy}
                 disabled={listBlocked || !parentsReady || filtered.length === 0}
-                title="The selected products, or every active product the filters show. The search box does not narrow this file."
+                title="The selected products, or every active product the filters and search show"
               >
                 Pricing .xlsx
               </Button>
@@ -1457,6 +1461,7 @@ export default function Products() {
               >
                 Setup Workbook
               </Button>
+              <BrandDocumentFixList />
               <Button
                 variant="secondary"
                 icon={<FileSpreadsheet className="w-4 h-4" />}
@@ -1521,6 +1526,7 @@ export default function Products() {
             searchable
             searchPlaceholder="Search products..."
             searchMatcher={searchProducts}
+            onSearchChange={setTableSearch}
             onRowClick={(row) => navigate(`/products/${row.id}`)}
             emptyTitle={products.length > 0 ? 'No matching products' : 'No products yet'}
             emptyDescription={products.length > 0 ? 'Try a different search or filter' : 'Add your first product to get started'}

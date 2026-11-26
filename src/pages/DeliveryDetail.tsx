@@ -689,7 +689,7 @@ export default function DeliveryDetail() {
   // Under 0.01 counts as nothing delivered, as on the server (DELIVERY_NOTHING_DELIVERED).
   const hasAnyQty = items.some((item) => (deliveryQtys[item.id] ?? item.quantity) >= 0.01);
   // The lines on screen with their delivered amounts: the signature and the ticket photo are bound to
-  // them (20270308100000). Null until the delivery's lines are loaded.
+  // them (20270309170000). Null until the delivery's lines are loaded.
   const currentLinesSeen = useMemo(
     () => (items.length ? buildLinesSeen(items, (item) => deliveryQtys[item.id] ?? item.quantity) : null),
     [items, deliveryQtys],
@@ -1043,7 +1043,7 @@ export default function DeliveryDetail() {
 
     setUploadingPhoto(true);
     let uploadCount = 0;
-    // A signed-ticket photo is saved with the lines and amounts on screen when it was taken (20270308100000).
+    // A signed-ticket photo is saved with the lines and amounts on screen when it was taken (20270309170000).
     const linesAtPhoto = caption === PAPER_TICKET_PHOTO_CAPTION ? currentLinesSeen : null;
 
     for (const rawFile of Array.from(files)) {
@@ -2394,7 +2394,9 @@ export default function DeliveryDetail() {
                   <option value="" disabled={!!editDriverAtOpen && delivery.status === 'in_progress'}>Unassigned</option>
                   {/* Keyed on the driver at open, so it stays selectable after another pick. */}
                   {editDriverAtOpen && !drivers.some((d) => d.id === editDriverAtOpen) && (
-                    <option value={editDriverAtOpen}>Current driver (not in list)</option>
+                    <option value={editDriverAtOpen}>
+                      {driver?.full_name ? `Current driver: ${driver.full_name}` : 'Current driver (not in list)'}
+                    </option>
                   )}
                   {drivers.map((d) => (
                     <option key={d.id} value={d.id}>{d.full_name} ({d.role})</option>

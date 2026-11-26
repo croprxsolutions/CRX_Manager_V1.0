@@ -29,6 +29,7 @@ import {
 import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatCents as fmt } from './money';
 import { getStatementAccountPosition } from './statementBalance';
+import { AR_AGING_LABELS } from './arAging';
 
 
 
@@ -203,11 +204,11 @@ export async function generateStatementPdf(
   doc.rect(margin, y, pageW - margin * 2, agingH, 'F');
 
   const agingBuckets = [
-    { label: 'Current', cents: aging.current_cents },
-    { label: '30 Days', cents: aging.days_30_cents },
-    { label: '60 Days', cents: aging.days_60_cents },
-    { label: '90 Days', cents: aging.days_90_cents },
-    { label: '120+ Days', cents: aging.over_120_cents },
+    { label: AR_AGING_LABELS.current, cents: aging.current_cents },
+    { label: AR_AGING_LABELS.days30, cents: aging.days_30_cents },
+    { label: AR_AGING_LABELS.days60, cents: aging.days_60_cents },
+    { label: AR_AGING_LABELS.days90, cents: aging.days_90_cents },
+    { label: AR_AGING_LABELS.over120, cents: aging.over_120_cents },
   ];
 
   agingBuckets.forEach((bucket, i) => {
@@ -775,10 +776,10 @@ function drawRemittanceStub(
   doc.text('AGING SUMMARY', agingStartX, sy);
 
   const agingItems = [
-    { label: '30 Days', cents: aging.days_30_cents },
-    { label: '60 Days', cents: aging.days_60_cents },
-    { label: '90 Days', cents: aging.days_90_cents },
-    { label: '120+ Days', cents: aging.over_120_cents },
+    { label: AR_AGING_LABELS.days30, cents: aging.days_30_cents },
+    { label: AR_AGING_LABELS.days60, cents: aging.days_60_cents },
+    { label: AR_AGING_LABELS.days90, cents: aging.days_90_cents },
+    { label: AR_AGING_LABELS.over120, cents: aging.over_120_cents },
   ];
 
   agingItems.forEach((item, i) => {

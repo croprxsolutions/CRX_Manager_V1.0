@@ -4,6 +4,7 @@ import type { Workbook } from 'exceljs';
 import type { PricingPreviewResult, PricingWorkbookExport } from './productPricing';
 import {
   DOLLAR_HEADER_NOTE,
+  exportedPricingMode,
   generateProductPricingWorkbook,
   groupedUseTimingRefusal,
   MAX_PRICING_WORKBOOK_FILE_BYTES,
@@ -193,7 +194,8 @@ describe('product pricing workbook', () => {
       current_tier1_margin_percent: '20',
       current_tier2_margin_percent: '15.5',
       current_tier3_margin_percent: '10.125',
-      pricing_mode: '',
+      // Mason Q4: today's margins re-derive today's prices exactly, so the row exports margin_driven.
+      pricing_mode: 'margin_driven',
       new_cost: '125.40',
       tier1_margin_percent: '20',
       tier1_price: '156.75',
@@ -230,7 +232,9 @@ describe('product pricing workbook', () => {
     expect(manifest.state).toBe('veryHidden');
     expect(worksheet.getColumn(identityColumn).hidden).toBe(true);
     expect(worksheet.getColumn(tokenColumn).hidden).toBe(true);
-    expect(worksheet.getCell(2, modeColumn).value).toBe('');
+    expect(worksheet.getCell(2, modeColumn).value).toBe('margin_driven');
+    // Tier 3 has no price or margin: left blank for the admin to choose.
+    expect(worksheet.getCell(3, modeColumn).value).toBe('');
     expect(worksheet.getCell(2, currentCostColumn).value).toBe('125.40');
     expect(worksheet.getCell(2, currentCostColumn).numFmt).toBe('@');
     expect(worksheet.getCell(2, quotingNotesColumn).value).toBe('Sales guidance');
@@ -555,5 +559,36 @@ describe('price sheet refusal reason wording', () => {
     for (const reason of ['NONE', 'SOMETHING_NEW', '', 'constructor', '__proto__', 'expired']) {
       expect(priceSheetReasonText(reason)).toBeNull();
     }
+  });
+});
+
+describe('exportedPricingMode (audit #4, Mason Q4)', () => {
+  // The export function sends '' for a missing value, never null.
+  const row = (cost: string, prices: [string, string, string], margins: [string, string, string]) => ({
+    ...pricingExport.rows[0],
+    current_cost: cost,
+    current_tier1_price: prices[0], current_tier2_price: prices[1], current_tier3_price: prices[2],
+    current_tier1_margin_percent: margins[0], current_tier2_margin_percent: margins[1], current_tier3_margin_percent: margins[2],
+  });
+
+  it('fills margin_driven when the margins re-derive the exact prices', () => {
+    expect(exportedPricingMode(row('6.40', ['9.85', '8.00', '6.40'], ['35', '20', '0']))).toBe('margin_driven');
+    // Price-driven history: an 8-decimal stored margin still rounds back to the same cent.
+    expect(exportedPricingMode(row('6.40', ['9.99', '9.99', '9.99'], ['35.935936', '35.935936', '35.935936']))).toBe('margin_driven');
+  });
+
+  it('rounds half up like the database', () => {
+    // 1.00 / (1 - 0.2) = 1.25 exactly; 0.01 / 0.6 = 0.016667 -> 0.02.
+    expect(exportedPricingMode(row('1.00', ['1.25', '1.25', '1.25'], ['20', '20', '20']))).toBe('margin_driven');
+    expect(exportedPricingMode(row('0.01', ['0.02', '0.02', '0.02'], ['40', '40', '40']))).toBe('margin_driven');
+    expect(exportedPricingMode(row('0.01', ['0.01', '0.01', '0.01'], ['40', '40', '40']))).toBe('');
+  });
+
+  it('leaves the mode blank when a re-upload could change anything', () => {
+    expect(exportedPricingMode(row('', ['', '', ''], ['', '', '']))).toBe('');
+    expect(exportedPricingMode(row('0.00', ['1.00', '1.00', '1.00'], ['100', '100', '100']))).toBe('');
+    expect(exportedPricingMode(row('6.40', ['9.85', '8.00', ''], ['35', '20', '']))).toBe('');
+    // Margins that no longer match the prices would re-price an untouched row.
+    expect(exportedPricingMode(row('6.40', ['9.86', '8.00', '6.40'], ['35', '20', '0']))).toBe('');
   });
 });

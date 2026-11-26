@@ -492,7 +492,11 @@ describe('CustomerDetail stale whole-record save', () => {
     // The fake server caps every reply at 1,000 rows like the real one. 1,010 orders,
     // one $10.00 line each: one unpaged read of either table stopped at 1,000.
     const total = SERVER_ROW_CAP + 10;
-    const orders = Array.from({ length: total }, (_, i) => ({ id: `order-${String(i).padStart(4, '0')}`, customer_id: 'customer-1', deleted_at: null }));
+    // Orders now open on page load, so each row carries what the Orders list shows.
+    const orders = Array.from({ length: total }, (_, i) => ({
+      id: `order-${String(i).padStart(4, '0')}`, customer_id: 'customer-1', deleted_at: null,
+      order_number: `ORD-${i}`, status: 'confirmed', total_price: 10, order_date: '2026-03-01',
+    }));
     const lines = orders.map((o, i) => ({
       id: `line-${String(i).padStart(4, '0')}`, order_id: o.id, product_name: 'Roundup', price_per_unit: 10,
       total_units_needed: 1, total_price: 10, quantity_delivered: 1, section_name: null,
@@ -1291,11 +1295,11 @@ describe('CustomerDetail tab loads bind to a customer, not only to call order', 
   }
 
   /**
-   * Fill in and submit the real modal. The page's trigger and the modal's own
-   * submit are both labelled "Log Call", so the submit is taken from the dialog.
+   * Fill in and submit the real modal. The page's trigger reads "Log call" and the
+   * modal's own submit "Log Call"; the submit is taken from the dialog.
    */
   async function logAnInteraction() {
-    fireEvent.click(screen.getAllByRole('button', { name: 'Log Call' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Log call' }));
     const dialog = await screen.findByRole('dialog');
     const summary = dialog.querySelector('textarea');
     if (!summary) throw new Error('the interaction modal rendered without a summary field');
@@ -1381,7 +1385,7 @@ describe('CustomerDetail tab loads bind to a customer, not only to call order', 
   });
 
   it('lets two open sections load side by side without one cancelling the other', async () => {
-    // One page, several sections: opening Quotes while the timeline read is still
+    // One page, several sections: opening Deliveries while the timeline read is still
     // out must not count as a newer load of the timeline and strand it on a spinner.
     const slowTimeline = openGate();
     installTables(async (customerId) => {
@@ -1393,9 +1397,9 @@ describe('CustomerDetail tab loads bind to a customer, not only to call order', 
     await screen.findByDisplayValue('Original Farm');
     fireEvent.click(screen.getByRole('button', { name: 'Timeline', expanded: false }));
     await screen.findByText('Loading timeline...');
-    fireEvent.click(screen.getByRole('button', { name: 'Quotes', expanded: false }));
+    fireEvent.click(screen.getByRole('button', { name: 'Deliveries', expanded: false }));
     expect(screen.getByRole('button', { name: 'Timeline', expanded: true })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Quotes', expanded: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deliveries', expanded: true })).toBeInTheDocument();
 
     slowTimeline.open();
     expect(await screen.findByText('customer-1 timeline entry')).toBeInTheDocument();

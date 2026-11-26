@@ -31,9 +31,12 @@ import {
   type SetupPreview,
 } from '../../lib/productSetupWorkbook';
 import { loadSetupWorkbookChemistry } from '../../lib/productSetupChemistry';
+import { readBrandDocumentWorkspace } from '../../lib/brandDocuments';
+import { assertBrandWorkbookFitsParserLimit, type ParsedBrandDocuments } from '../../lib/productSetupBrandDocumentsWorkbook';
 import { assertChemistryWorkbookFitsParserLimit } from '../../lib/productSetupChemistryWorkbook';
 import { classifyParentRatesSaveFailure, handleRatesSaveFailure, type DeferredRatesRebase, type RatesState } from './setupWorkbookRateRecovery';
 import SetupWorkbookChemistryTabs from './SetupWorkbookChemistryTabs';
+import BrandDocumentWorkbookPanel from './BrandDocumentWorkbookPanel';
 import type { ParsedChemistryWorkbook } from '../../lib/productSetupChemistryWorkbook';
 
 const TIERS = [1, 2, 3] as const;
@@ -253,6 +256,7 @@ interface SetupWorkbookDialogProps {
   parentRates: { rows: ParentRateUploadRow[]; previews: ParentRatePreview[] | null } | null;
   parentRatesSaved: number | null; parentRatesBlocked: boolean; confirmParentRates: () => void; retryParentPreview: () => void;
   chemistryGeneration: number; chemistryParsed: ParsedChemistryWorkbook | null;
+  brandDocuments: ParsedBrandDocuments | null; onBrandDocumentsBusy: (busy: boolean) => void;
   chemistryBusyOwnerKey: string; onChemistryBusyChange: (ownerKey: string, busy: boolean) => void;
 }
 
@@ -283,6 +287,10 @@ function SetupWorkbookDialog(props: SetupWorkbookDialogProps) {
         busy={busy} blocked={parentRatesBlocked} onConfirm={() => void confirmParentRates()} onRetry={() => void retryParentPreview()} />}
       <SetupWorkbookChemistryTabs key={`${profileId}:${chemistryGeneration}:${open}`} open={open} profileId={profileId} fileGeneration={chemistryGeneration}
         parsed={chemistryParsed} onSaved={onSaved} parentBusy={parentBusy} busyOwnerKey={chemistryBusyOwnerKey} onBusyChange={onChemistryBusyChange} />
+      {open && props.brandDocuments && (
+        <BrandDocumentWorkbookPanel key={`${profileId}:${chemistryGeneration}`} parsed={props.brandDocuments}
+          profileId={profileId} parentBusy={busy} onBusyChange={props.onBrandDocumentsBusy} />
+      )}
     </div>
   </Modal>;
 }
@@ -388,6 +396,37 @@ async function retryProductRatesPreview(input: {
   finally { if (generation === currentGeneration()) setBusy(false); }
 }
 
+async function downloadSetupWorkbook(
+  generationRef: React.RefObject<number>, setBusy: (busy: boolean) => void, toast: ReturnType<typeof useToast>['toast'],
+) {
+  const generation = generationRef.current;
+  const isCurrent = () => generation === generationRef.current;
+  setBusy(true);
+  try {
+    const [exported, options, parents, chemistry] = await Promise.all([
+      loadSetupWorkbookExport(), listProductUseTimingOptions(), getProductParents(null), loadSetupWorkbookChemistry(),
+    ]);
+    if (!isCurrent()) return;
+    assertChemistryWorkbookFitsParserLimit(chemistry);
+    const activeSizes = new Set(exported.rows.filter((product) => product.is_active).map((product) => product.product_id));
+    const brandDocuments = await readBrandDocumentWorkspace(false).then((documents) => {
+      const editable = documents.filter((brand) => brand.parent_brand || activeSizes.has(brand.product_id));
+      assertBrandWorkbookFitsParserLimit(editable);
+      return editable;
+    }).catch((error: unknown) => {
+      if (isCurrent()) toast('warning', 'Downloaded without Brand Links. ' + sanitizeError(error));
+      return undefined;
+    });
+    if (!isCurrent()) return;
+    const blob = await generateSetupWorkbook(exported, options, parents, chemistry, brandDocuments);
+    if (isCurrent()) saveSetupWorkbookFile(blob);
+  } catch (error) {
+    if (isCurrent()) toast('error', sanitizeError(error));
+  } finally {
+    if (isCurrent()) setBusy(false);
+  }
+}
+
 export default function ProductSetupWorkbookModal({ open, profileId, onClose, onSaved }: {
   open: boolean;
   profileId: string;
@@ -404,6 +443,8 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
   const [parentRates, setParentRatesState] = useState<{ rows: ParentRateUploadRow[]; previews: ParentRatePreview[] | null } | null>(null);
   const [parentRatesSaved, setParentRatesSaved] = useState<number | null>(null);
   const [chemistryParsed, setChemistryParsed] = useState<ParsedChemistryWorkbook | null>(null);
+  const [brandDocuments, setBrandDocuments] = useState<ParsedBrandDocuments | null>(null);
+  const [brandDocumentsBusy, setBrandDocumentsBusy] = useState(false);
   const [chemistryOwnerProfile, setChemistryOwnerProfile] = useState(profileId);
   const [chemistryGeneration, setChemistryGeneration] = useState(0);
   const chemistryGenerationRef = useRef(0);
@@ -432,6 +473,8 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
       resetRatesKey();
     }
     setChemistryParsed(null);
+    setBrandDocuments(null);
+    setBrandDocumentsBusy(false);
     setChemistryOwnerProfile(profileId);
     setSetup(null); setRates(null); setSetupSaved(null); setRatesSaved(null);
     setParentRatesState(null); setParentRatesSaved(null);
@@ -446,25 +489,7 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
     onClose();
   };
 
-  const download = async () => {
-    const generation = chemistryGenerationRef.current;
-    setBusy(true);
-    try {
-      // A failed parents load stops the download: grouped sizes must not be offered as ungrouped.
-      const [exported, options, parents, chemistry] = await Promise.all([
-        loadSetupWorkbookExport(), listProductUseTimingOptions(), getProductParents(null), loadSetupWorkbookChemistry(),
-      ]);
-      if (generation !== chemistryGenerationRef.current) return;
-      assertChemistryWorkbookFitsParserLimit(chemistry);
-      const blob = await generateSetupWorkbook(exported, options, parents, chemistry);
-      if (generation !== chemistryGenerationRef.current) return;
-      saveSetupWorkbookFile(blob);
-    } catch (error) {
-      if (generation === chemistryGenerationRef.current) toast('error', sanitizeError(error));
-    } finally {
-      if (generation === chemistryGenerationRef.current) setBusy(false);
-    }
-  };
+  const download = () => downloadSetupWorkbook(chemistryGenerationRef, setBusy, toast);
 
   const upload = async (file: File) => {
     reset();
@@ -485,6 +510,7 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
       }
       setChemistryOwnerProfile(profileId);
       setChemistryParsed(parsed.chemistry);
+      setBrandDocuments(parsed.brandDocuments ?? null);
       setSetup(setupPreview);
       // Keep the parent rows first, so a failed Rates preview still leaves them ready to preview again.
       if (parentRows.length > 0) setParentRatesState({ rows: parentRows, previews: null });
@@ -598,10 +624,12 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
   const chemistryForCurrentProfile = chemistryOwnerProfile === profileId ? chemistryParsed : null;
 
   const dialogProps: SetupWorkbookDialogProps = {
-    open, profileId, busy: busy || chemistryBusy, parentBusy: busy, onClose: close, onSaved, fileRef, download, upload, setup, setupSaved, setupBlocked,
+    open, profileId, busy: busy || chemistryBusy || brandDocumentsBusy, parentBusy: busy || brandDocumentsBusy,
+    onClose: close, onSaved, fileRef, download, upload, setup, setupSaved, setupBlocked,
     confirmSetup, rates, rateChanges, rateProblems, ratesSaved, ratesBlocked, confirmRates, retryRatesPreview,
     parentRates, parentRatesSaved, parentRatesBlocked, confirmParentRates, retryParentPreview, chemistryGeneration,
     chemistryParsed: chemistryForCurrentProfile, chemistryBusyOwnerKey, onChemistryBusyChange,
+    brandDocuments: chemistryOwnerProfile === profileId ? brandDocuments : null, onBrandDocumentsBusy: setBrandDocumentsBusy,
   };
   return <SetupWorkbookDialog {...dialogProps} />;
 }

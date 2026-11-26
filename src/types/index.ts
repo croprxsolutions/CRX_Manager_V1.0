@@ -471,6 +471,21 @@ export interface ProductBrand {
   updated_at: string;
 }
 
+export type BrandDocumentKind = 'specimen' | 'sds' | 'supplemental';
+
+export interface BrandDocumentLink {
+  id: string;
+  legacy_brand_id: string | null;
+  parent_brand_id: string | null;
+  document_kind: BrandDocumentKind;
+  url: string;
+  state_code: string | null;
+  expires_on: string | null;
+  row_version: number;
+  hidden_at: string | null;
+  reported_at: string | null;
+}
+
 /** One row of get_product_vendors (20261105180000): a vendor linked to a product. */
 export interface ProductVendor {
   link_id: string;
@@ -1238,7 +1253,7 @@ export interface DeliveryEvidencePhoto {
   image_url: string;
   caption: string | null;
   uploaded_at?: string | null;
-  // The lines the screen showed when a signed-ticket photo was taken (20270308100000).
+  // The lines the screen showed when a signed-ticket photo was taken (20270309170000).
   lines_seen?: { order_item_id: string; product_id: string; quantity: number; delivered: number }[] | null;
 }
 /** A delivery's receipt address, read through get_delivery_receipt_recipient. App-shaped: fetchReceiptRecipient maps the RPC's snake_case keys; never cast the raw result to this. */
@@ -1372,7 +1387,7 @@ export interface DeliveryPhoto {
   uploaded_at: string;
   file_size: number | null;
   sort_order: number;
-  // The lines the screen showed when a signed-ticket photo was taken (20270308100000); never changes after save.
+  // The lines the screen showed when a signed-ticket photo was taken (20270309170000); never changes after save.
   lines_seen?: { order_item_id: string; product_id: string; quantity: number; delivered: number }[] | null;
   uploader?: Profile;
 }
@@ -1916,7 +1931,21 @@ export type ProductWeightSource = 'measured' | 'sds' | 'label' | 'supplier';
 export type ProductWeightReviewState = 'draft' | 'approved' | 'superseded';
 export type ProductWeightKind = 'density' | 'net_weight' | 'unit_weight' | 'none';
 export type ProductWeightNoneReason = 'no_parent' | 'no_approved_weight' | 'seed_or_each' | 'unit_not_convertible' | 'unknown_form';
-export type ProductWeightEventType = 'draft_saved' | 'draft_replaced' | 'approved' | 'corrected' | 'returned_to_draft';
+export type ProductWeightEventType = 'draft_saved' | 'draft_replaced' | 'approved' | 'corrected' | 'returned_to_draft' | 'draft_rejected';
+
+export interface LiquidDensityBrand {
+  brand_id: string;
+  brand_name: string;
+  epa_registration: string | null;
+  manufacturer: string | null;
+  sds_link_id: string | null;
+  sds_url: string | null;
+}
+
+export interface LiquidDensityReview {
+  review_open: boolean;
+  brands: LiquidDensityBrand[];
+}
 
 /** lower(trim(unit)) -> pounds (weight), gallons (volume) or count per unit; names that collide are listed in `ambiguous`. */
 export interface WeightUnitFactors {
@@ -3396,7 +3425,15 @@ export type FieldObstacleKind =
   | 'tree_line'
   | 'power_line'
   | 'waterway'
-  | 'other';
+  | 'other'
+  | 'field_entrance'
+  | 'washout'
+  | 'pole'
+  | 'garden'
+  | 'well'
+  | 'pivot'
+  | 'sensitive_crop'
+  | 'gate';
 
 export interface FieldObstacle {
   id: string;
@@ -3407,6 +3444,17 @@ export interface FieldObstacle {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  entrance_number: number | null;
+}
+
+export interface FieldMarkerState {
+  checking?: boolean;
+  status: 'loading' | 'complete' | 'incomplete' | 'unavailable' | 'stale';
+  markers: FieldObstacle[];
+  authors: Map<string, string>;
+  authorsUnavailable?: boolean;
+  accessDenied?: true;
+  checkedAt?: number;
 }
 
 // Result shapes for the two-acre RPCs (migration 20260623130000)

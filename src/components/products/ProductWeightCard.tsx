@@ -12,12 +12,14 @@ import { hasRpcCode, RpcErrorCodes, sanitizeError } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import { BUSINESS_TIMEZONE } from '../../lib/dateUtils';
 import {
-  approveWeightDraft, draftMatchesBasis, fetchProductWeights, fetchWeightEvents, isLowerTrust, noWeightMessage,
-  saveWeight, sourceText, storedWeightPreview, WEIGHT_SOURCES,
+  approveWeightDraft, draftMatchesBasis, fetchLiquidDensityReview, fetchProductWeights, fetchWeightEvents, isLowerTrust, noWeightMessage,
+  saveWeight, sourceText, storedWeightPreview, submitLiquidDensityDraft, weightContextChanged, WEIGHT_SOURCES,
   type ProductWeightEntry, type WeightDraft, type WeightSubject,
 } from '../../lib/productWeights';
 import { ReasonField } from './ProductParentPanel';
-import type { ProductWeightEvent, ProductWeightSource } from '../../types';
+import { RejectDensityDraftModal } from './RejectDensityDraftModal';
+import { ApproveLiquidDensityDraftModal, LiquidDensityBrandList } from './LiquidDensityReview';
+import type { LiquidDensityReview, ProductWeightEvent, ProductWeightSource } from '../../types';
 
 const when = (iso: string | null | undefined) =>
   (iso ? new Date(iso).toLocaleDateString('en-US', { timeZone: BUSINESS_TIMEZONE }) : 'an unknown date');
@@ -26,7 +28,7 @@ const unitLabel = (subject: WeightSubject, stockUnit: string | null | undefined)
 
 const EVENT_LABELS: Record<string, string> = {
   draft_saved: 'Draft saved', draft_replaced: 'Draft replaced', approved: 'Approved',
-  corrected: 'Corrected', returned_to_draft: 'Returned to draft',
+  corrected: 'Corrected', returned_to_draft: 'Returned to draft', draft_rejected: 'Draft rejected',
 };
 
 /** The value of the row an event left in use (its `value_id`), from the event's after/before arrays. */
@@ -68,11 +70,21 @@ function overLimit(stored: string | null, density: boolean): number | null {
 
 const storedOk = (stored: string | null, tooHeavy: number | null) => stored !== null && Number(stored) > 0 && tooHeavy === null;
 
-function EnterWeightModal({ subject, entry, profileId, startAsCorrection, onClose, onSaved, onStale }: {
+function weightEntryAction(draftOnly: boolean, correction: boolean) {
+  if (draftOnly) {
+    return { operation: 'submit_liquid_density_draft', save: submitLiquidDensityDraft, button: 'Save draft',
+      message: 'Weight draft saved for a different admin to review' };
+  }
+  return { operation: correction ? 'correct_weight' : 'set_weight', save: saveWeight,
+    button: correction ? 'Save correction' : 'Save weight', message: 'Weight saved and approved' };
+}
+
+function EnterWeightModal({ subject, entry, profileId, startAsCorrection, draftOnly, onClose, onSaved, onStale }: {
   subject: WeightSubject;
   entry: ProductWeightEntry;
   profileId: string;
   startAsCorrection: boolean;
+  draftOnly: boolean;
   onClose: () => void;
   onSaved: () => void;
   onStale: () => void;
@@ -93,22 +105,23 @@ function EnterWeightModal({ subject, entry, profileId, startAsCorrection, onClos
   const tooHeavy = overLimit(stored, density);
   const ready = !saving && storedOk(stored, tooHeavy) && (!correction || (reason.trim() !== '' && evidence.trim() !== ''));
   const fingerprint = JSON.stringify([subject, value.trim(), unit, source, note.trim(), correction, reason.trim(), evidence.trim()]);
-  const { getKey, resetKey } = useIdempotencyKey(correction ? 'correct_weight' : 'set_weight', profileId, fingerprint);
+  const action = weightEntryAction(draftOnly, correction);
+  const { getKey, resetKey } = useIdempotencyKey(action.operation, profileId, fingerprint);
 
   const save = async () => {
     setSaving(true);
     try {
-      await saveWeight({
+      await action.save({
         subject, value: value.trim(), unit: density ? unit : 'lb_per_gal', source, note,
         correction: correction ? { reason: reason.trim(), evidence: evidence.trim() } : undefined, key: getKey(),
       });
       resetKey();
-      toast('success', 'Weight saved and approved');
+      toast('success', action.message);
       onSaved();
     } catch (error) {
       toast('error', sanitizeError(error));
       if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_LOWER_TRUST)) setForceCorrection(true);
-      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE)) onStale();
+      if (weightContextChanged(error)) onStale();
     } finally {
       setSaving(false);
     }
@@ -123,12 +136,12 @@ function EnterWeightModal({ subject, entry, profileId, startAsCorrection, onClos
       footer={(
         <>
           <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={() => void save()} loading={saving} disabled={!ready}>{correction ? 'Save correction' : 'Save weight'}</Button>
+          <Button onClick={() => void save()} loading={saving} disabled={!ready}>{action.button}</Button>
         </>
       )}
     >
       <fieldset disabled={saving} className="space-y-3">
-        <p className="text-sm text-secondary">{introText(subject, entry)}</p>
+        <p className="text-sm text-secondary">{draftOnly ? 'Enter specific gravity from Section 9 of the SDS, or enter lb/gal directly. A different admin reviews this draft.' : introText(subject, entry)}</p>
         <Input id="weight-value" maxLength={30} label={density ? 'Weight' : `Net weight (lb per ${entry.inventory_unit || 'unit'})`} inputMode="decimal"
           value={value} onChange={(event) => setValue(event.target.value)}
           error={value.trim() !== '' && stored === null ? 'Enter a number, like 8.34' : undefined} />
@@ -152,11 +165,12 @@ function EnterWeightModal({ subject, entry, profileId, startAsCorrection, onClos
   );
 }
 
-function DraftRow({ draft, subject, entry, isAdmin, busy, onApprove, onSetWeight }: {
-  draft: WeightDraft; subject: WeightSubject; entry: ProductWeightEntry; isAdmin: boolean; busy: boolean;
-  onApprove: () => void; onSetWeight: () => void;
+function DraftRow({ draft, subject, entry, canApprove, canReplace, reviewOpen, busy, onApprove, onSetWeight, onReject }: {
+  draft: WeightDraft; subject: WeightSubject; entry: ProductWeightEntry; canApprove: boolean; canReplace: boolean; reviewOpen: boolean; busy: boolean;
+  onApprove: () => void; onSetWeight: () => void; onReject?: () => void;
 }) {
   const matches = draftMatchesBasis(draft, entry.current_basis);
+  const needsReplacement = reviewOpen && (!matches || draft.created_by == null);
   return (
     <div className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900" data-testid="weight-draft">
       <p>Draft: {draft.value} {unitLabel(subject, entry.inventory_unit)} from {sourceText(draft.source)}, waiting for review</p>
@@ -164,15 +178,18 @@ function DraftRow({ draft, subject, entry, isAdmin, busy, onApprove, onSetWeight
       {draft.reason && <p>Reason: {draft.reason}</p>}
       {draft.evidence && <p>Evidence: {draft.evidence}</p>}
       {matches ? (
-        isAdmin && <Button size="sm" showChevron={false} disabled={busy} onClick={onApprove}>Approve draft</Button>
+        canApprove && <Button size="sm" showChevron={false} disabled={busy} onClick={onApprove}>Approve draft</Button>
       ) : (
         <>
           <p>{subject.kind === 'density'
-            ? 'Entered for the old formulation; enter the weight again.'
+            ? 'This draft was entered for the old formulation.'
             : 'Pack changed: enter the weight again for the new pack.'}</p>
-          {isAdmin && <Button size="sm" variant="secondary" showChevron={false} disabled={busy} onClick={onSetWeight}>Set weight</Button>}
+          {canReplace && <Button size="sm" variant="secondary" showChevron={false} disabled={busy} onClick={onSetWeight}>Set weight</Button>}
         </>
       )}
+      {reviewOpen && draft.created_by == null && <p>This draft has no recorded author.</p>}
+      {needsReplacement && <p>An admin other than the draft author can reject it so a new weight can be entered.</p>}
+      {onReject && <Button size="sm" variant="secondary" showChevron={false} disabled={busy} onClick={onReject}>Reject draft</Button>}
     </div>
   );
 }
@@ -256,22 +273,42 @@ function WeightActions({ hasApproved, busy, onOpen }: { hasApproved: boolean; bu
   );
 }
 
-type OpenState = null | { mode: 'enter' | 'correct' } | { mode: 'approve'; draft: WeightDraft };
+type OpenState = null | { mode: 'enter' | 'correct' } | { mode: 'approve' | 'reject'; draft: WeightDraft };
 
-function WeightBody({ entry, name, isAdmin, busy, reloadToken, setOpen }: {
-  entry: ProductWeightEntry; name: string; isAdmin: boolean; busy: boolean; reloadToken: number; setOpen: (open: OpenState) => void;
+function weightActionPermissions(entry: ProductWeightEntry, liquidReview: LiquidDensityReview | null,
+  isAdmin: boolean, profileId: string) {
+  const liquid = entry.subject?.kind === 'density';
+  const reviewOpen = liquidReview?.review_open === true;
+  const canEdit = isAdmin && (!liquid || liquidReview !== null);
+  const author = entry.draft?.created_by;
+  return {
+    liquid,
+    canApprove: canEdit && (!reviewOpen || (author != null && author !== profileId)),
+    canReplace: canEdit && !reviewOpen,
+    canReject: canEdit && liquid && author !== profileId,
+    canEnter: canEdit && !(reviewOpen && entry.draft),
+  };
+}
+
+function WeightBody({ entry, name, isAdmin, profileId, busy, reloadToken, liquidReview, setOpen }: {
+  entry: ProductWeightEntry; name: string; isAdmin: boolean; profileId: string; busy: boolean; reloadToken: number; liquidReview: LiquidDensityReview | null; setOpen: (open: OpenState) => void;
 }) {
   const subject = entry.subject ?? null;
   const draft = entry.draft ?? null;
+  const { liquid, canApprove, canReplace, canReject, canEnter } = weightActionPermissions(entry, liquidReview, isAdmin, profileId);
   return (
     <>
       <p className="text-sm text-nav-dark" data-testid="product-weight-summary">{weightSummary(entry, name)}</p>
-      {subject?.kind === 'density' && <p className="text-xs text-secondary">Shared by every size of this parent.</p>}
+      {liquid && <p className="text-xs text-secondary">Shared by every size of this parent.</p>}
+      {liquidReview && <LiquidDensityBrandList brands={liquidReview.brands} />}
       {subject && draft && (
-        <DraftRow draft={draft} subject={subject} entry={entry} isAdmin={isAdmin} busy={busy}
-          onApprove={() => setOpen({ mode: 'approve', draft })} onSetWeight={() => setOpen({ mode: 'enter' })} />
+        <DraftRow draft={draft} subject={subject} entry={entry} canApprove={canApprove} canReplace={canReplace}
+          reviewOpen={liquidReview?.review_open === true} busy={busy}
+          onApprove={() => setOpen({ mode: 'approve', draft })} onSetWeight={() => setOpen({ mode: 'enter' })}
+          onReject={canReject
+            ? () => setOpen({ mode: 'reject', draft }) : undefined} />
       )}
-      {subject && isAdmin && (
+      {subject && canEnter && (
         <WeightActions hasApproved={entry.weight?.kind === subject.kind} busy={busy} onOpen={(mode) => setOpen({ mode })} />
       )}
       {subject && <WeightHistory subject={subject} stockUnit={entry.inventory_unit} reloadToken={reloadToken} />}
@@ -296,7 +333,7 @@ function ApproveDraftModal({ draft, subject, entry, name, profileId, onClose, on
       onDone();
     } catch (error) {
       toast('error', sanitizeError(error));
-      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE) || hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_BASIS_CHANGED)) onDone();
+      if (weightContextChanged(error)) onDone();
     } finally {
       setApproving(false);
     }
@@ -317,25 +354,70 @@ function ApproveDraftModal({ draft, subject, entry, name, profileId, onClose, on
   );
 }
 
-function LoadedWeight({ entry, isAdmin, profileId, busy, reloadToken, reload, onSaved }: {
-  entry: ProductWeightEntry; isAdmin: boolean; profileId: string; busy: boolean; reloadToken: number; reload: () => void; onSaved?: () => void;
+function WeightActionModals({ open, subject, entry, name, profileId, liquidReview, onClose, onDone }: {
+  open: OpenState;
+  subject: WeightSubject | null;
+  entry: ProductWeightEntry;
+  name: string;
+  profileId: string;
+  liquidReview: LiquidDensityReview | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  return (
+    <>
+      {subject && (open?.mode === 'enter' || open?.mode === 'correct') && (
+        <EnterWeightModal subject={subject} entry={entry} profileId={profileId} startAsCorrection={open.mode === 'correct'}
+          draftOnly={liquidReview?.review_open === true}
+          onClose={onClose} onSaved={onDone} onStale={onDone} />
+      )}
+      {subject && open?.mode === 'reject' && (
+        <RejectDensityDraftModal subject={subject} draftId={open.draft.id} profileId={profileId}
+          onClose={onClose} onDone={onDone} />
+      )}
+      {subject && open?.mode === 'approve' && liquidReview?.review_open ? (
+        <ApproveLiquidDensityDraftModal subject={subject} draft={open.draft} brands={liquidReview.brands} profileId={profileId}
+          onClose={onClose} onDone={onDone} />
+      ) : (
+        <ApproveDraftModal draft={open?.mode === 'approve' ? open.draft : null} subject={subject} entry={entry} name={name}
+          profileId={profileId} onClose={onClose} onDone={onDone} />
+      )}
+    </>
+  );
+}
+
+type LiquidReviewLoad = LiquidDensityReview | 'ineligible' | null;
+
+async function loadLiquidReview(parentId: string): Promise<LiquidReviewLoad> {
+  try {
+    return await fetchLiquidDensityReview(parentId);
+  } catch (error) {
+    if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_NOT_ELIGIBLE)) return 'ineligible';
+    Sentry.captureException(error instanceof Error ? error : new Error(sanitizeError(error)), { extra: { context: 'get_liquid_density_review' } });
+    return null;
+  }
+}
+
+function LoadedWeight({ entry, isAdmin, profileId, busy, reloadToken, reload, onSaved, review }: {
+  entry: ProductWeightEntry; isAdmin: boolean; profileId: string; busy: boolean; reloadToken: number; reload: () => void; onSaved?: () => void; review: LiquidReviewLoad;
 }) {
   const [open, setOpen] = useState<OpenState>(null);
   const subject = entry.subject ?? null;
   const name = entry.product_name ?? 'This product';
+  const liquidReview = review === 'ineligible' ? null : review;
   const saved = () => { setOpen(null); reload(); onSaved?.(); };
   return (
     <>
       <CardHeader title="Weight" accent={subject?.kind === 'density' ? `Parent ${subject.parent_name ?? ''}`.trim() : undefined} />
       <div className="space-y-3" data-testid="product-weight-card">
-        <WeightBody entry={entry} name={name} isAdmin={isAdmin} busy={busy} reloadToken={reloadToken} setOpen={setOpen} />
+        {review === 'ineligible' && <p className="text-sm text-secondary">Weight review requires an active liquid group.</p>}
+        {subject?.kind === 'density' && review === null && (
+          <LoadFailedState title="Brand and SDS details could not be loaded" onRetry={reload} />
+        )}
+        <WeightBody entry={entry} name={name} isAdmin={isAdmin} profileId={profileId} busy={busy} reloadToken={reloadToken} liquidReview={liquidReview} setOpen={setOpen} />
       </div>
-      {subject && open && open.mode !== 'approve' && (
-        <EnterWeightModal subject={subject} entry={entry} profileId={profileId} startAsCorrection={open.mode === 'correct'}
-          onClose={() => setOpen(null)} onSaved={saved} onStale={saved} />
-      )}
-      <ApproveDraftModal draft={open?.mode === 'approve' ? open.draft : null} subject={subject} entry={entry} name={name}
-        profileId={profileId} onClose={() => setOpen(null)} onDone={saved} />
+      <WeightActionModals open={open} subject={subject} entry={entry} name={name} profileId={profileId}
+        liquidReview={liquidReview} onClose={() => setOpen(null)} onDone={saved} />
     </>
   );
 }
@@ -355,7 +437,7 @@ export default function ProductWeightCard({ productId, isAdmin, profileId, busy,
   /** After a weight save or stale refusal, so figures that use the weight (cost per lb of active) re-read. */
   onSaved?: () => void;
 }) {
-  const [loaded, setState] = useState<{ forKey: string; status: 'loading' | 'failed' } | { forKey: string; status: 'loaded'; entry: ProductWeightEntry }>({ forKey: '', status: 'loading' });
+  const [loaded, setState] = useState<{ forKey: string; status: 'loading' | 'failed' } | { forKey: string; status: 'loaded'; entry: ProductWeightEntry; review: LiquidReviewLoad }>({ forKey: '', status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
 
@@ -364,10 +446,15 @@ export default function ProductWeightCard({ productId, isAdmin, profileId, busy,
   const state = loaded.forKey === forKey ? loaded : { status: 'loading' as const };
   useEffect(() => {
     let cancelled = false;
-    fetchProductWeights([productId]).then((result) => {
+    fetchProductWeights([productId]).then(async (result) => {
       if (cancelled) return;
       const entry = result.products[productId];
-      setState(entry?.found ? { forKey, status: 'loaded', entry } : { forKey, status: 'failed' });
+      if (!entry?.found) {
+        setState({ forKey, status: 'failed' });
+        return;
+      }
+      const review = entry.subject?.kind === 'density' ? await loadLiquidReview(entry.subject.subject_id) : null;
+      if (!cancelled) setState({ forKey, status: 'loaded', entry, review });
     }).catch((error: unknown) => {
       Sentry.captureException(error instanceof Error ? error : new Error(sanitizeError(error)), { extra: { context: 'get_product_weights' } });
       if (!cancelled) setState({ forKey, status: 'failed' });
@@ -379,7 +466,8 @@ export default function ProductWeightCard({ productId, isAdmin, profileId, busy,
   return (
     <Card>
       {state.status === 'loaded' ? (
-        <LoadedWeight entry={state.entry} isAdmin={isAdmin} profileId={profileId} busy={busy} reloadToken={attempt} reload={reload} onSaved={onSaved} />
+        <LoadedWeight entry={state.entry} isAdmin={isAdmin} profileId={profileId} busy={busy} reloadToken={attempt}
+            reload={reload} onSaved={onSaved} review={state.review} />
       ) : (
         <>
           <CardHeader title="Weight" />

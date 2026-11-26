@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Trash2, MapPin, ChevronDown, ChevronUp, AlertTriangle, Eye, EyeOff, MapPinned, MousePointerSquareDashed, Plus, X } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, MapPin, ChevronDown, ChevronUp, AlertTriangle, Eye, EyeOff, MapPinned, MousePointerSquareDashed, X } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { LoadFailedState } from '../components/ui/EmptyState';
@@ -13,11 +13,15 @@ import DrawLayer, { type DrawnPolygon } from '../components/map/DrawLayer';
 import AddressSearch from '../components/map/AddressSearch';
 import FieldBoundaryLayer from '../components/map/FieldBoundaryLayer';
 import FieldObstacleLayer from '../components/map/FieldObstacleLayer';
+import FieldMarkerPanel, { MarkerTypeFilter } from '../components/map/FieldMarkerPanel';
+import FieldMarkerEditor from '../components/map/FieldMarkerEditor';
 import { Layer, Source } from 'react-map-gl/mapbox';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
-import { supabase, assertRpcResult, checkMutationResult, rpcAuthErrorMessage } from '../lib/db';
+import { useFieldMarkers } from '../hooks/useFieldMarkers';
+import { useFieldMarkerEditor } from '../hooks/useFieldMarkerEditor';
+import { supabase, assertRpcResult, rpcAuthErrorMessage } from '../lib/db';
 import { getCachedFieldsGeojson, type FieldsGeojsonRow } from '../lib/fieldsGeojsonCache';
 import { lookupPlss, type PlssLookupResult } from '../lib/plssLookup';
 import { CsbLookupError, findCsbFeatureAt, type CsbFeature } from '../lib/csbLookup';
@@ -39,14 +43,9 @@ import {
 import turfCentroid from '@turf/centroid';
 import turfArea from '@turf/area';
 import { JOB_FIELD_PICKER_MAP_LIMIT, mapFieldsForJobPicker } from '../components/jobs/jobFieldPicker';
-import {
-  canEnterObstacleMode,
-  FIELD_OBSTACLE_KINDS,
-  FIELD_OBSTACLE_KIND_LABELS,
-  fieldObstacleKindLabel,
-} from '../lib/fieldObstacles';
+import { canEnterObstacleMode } from '../lib/fieldObstacles';
 import type { Feature, MultiPolygon, Polygon } from 'geojson';
-import type { Field, FieldObstacle, FieldObstacleKind } from '../types';
+import type { Field } from '../types';
 import type { Json } from '../types/supabase';
 import { toSentryError } from '../lib/sentryError';
 import { localToday } from '../lib/dateUtils';
@@ -59,6 +58,7 @@ import {
   microToExactPct,
   microToPctText,
   payerNoteChanges,
+  staleNoteIds,
   pctTextToMicro,
   splitProblem,
   splitSaveErrorMessage,
@@ -152,7 +152,8 @@ function boundaryPartsFromGeometry(geometry: Polygon | MultiPolygon, fieldId: st
 // the whole form and split list.
 export default function FieldSetup() {
   const { id } = useParams();
-  return <FieldSetupPage key={id ?? 'none'} />;
+  const { profile } = useAuth();
+  return <FieldSetupPage key={(profile?.id ?? '') + ':' + (id ?? 'none')} />;
 }
 
 function FieldSetupPage() {
@@ -209,6 +210,10 @@ function FieldSetupPage() {
   }, [billingSplits, splitHistory]);
   const [inForceSplit, setInForceSplit] = useState<SplitVersion | null>(null);
   const loadedNotesRef = useRef<Record<string, string>>({});
+  // What the user last saw (stale-save warning baseline): a failed save's refresh must not adopt someone else's newer
+  // split or note over the user's own unsaved edit to it, or the retry would replace it without a warning.
+  const seenVersionIdRef = useRef<string | null>(null);
+  const seenNotesRef = useRef<Record<string, string>>({});
   const [loading, setLoading] = useState(!isNew);
   // The field's read failed: say so, never "Field not found" or a form missing its saved values (To-Do 10.5).
   const [loadError, setLoadError] = useState(false);
@@ -237,18 +242,11 @@ function FieldSetupPage() {
   const [partPendingDelete, setPartPendingDelete] = useState<DrawnPolygon | null>(null);
   const [legalLookupLoading, setLegalLookupLoading] = useState(false);
   const [pendingLegalLookup, setPendingLegalLookup] = useState<PlssLookupResult | null>(null);
-  const [obstacles, setObstacles] = useState<FieldObstacle[]>([]);
-  const [addObstacleMode, setAddObstacleMode] = useState(false);
+  const [markerFilter, setMarkerFilter] = useState('');
   const [adoptCsbMode, setAdoptCsbMode] = useState(false);
   const [csbLookupLoading, setCsbLookupLoading] = useState(false);
   const [pendingCsbFeature, setPendingCsbFeature] = useState<CsbFeature | null>(null);
   const [isBoundaryDrawing, setIsBoundaryDrawing] = useState(false);
-  const [pendingObstaclePoint, setPendingObstaclePoint] = useState<[number, number] | null>(null);
-  const [obstacleKind, setObstacleKind] = useState<FieldObstacleKind>('oil_well');
-  const [obstacleLabel, setObstacleLabel] = useState('');
-  const [savingObstacle, setSavingObstacle] = useState(false);
-  const [deletingObstacle, setDeletingObstacle] = useState(false);
-  const [obstaclePendingDelete, setObstaclePendingDelete] = useState<FieldObstacle | null>(null);
   const csbLookupRequestRef = useRef(0);
 
   // Owner (customer) name shown by the owner search picker
@@ -290,20 +288,16 @@ function FieldSetupPage() {
   );
 
   const canManageObstacles = profile?.role === 'admin' || profile?.role === 'sales_rep';
-  const obstaclesForMap = useMemo(() => {
-    if (!pendingObstaclePoint || !id || isNew) return obstacles;
-    const pending: FieldObstacle = {
-      id: 'pending-obstacle',
-      field_id: id,
-      kind: obstacleKind,
-      label: obstacleLabel.trim() || 'New obstacle',
-      point_geojson: { type: 'Point', coordinates: pendingObstaclePoint },
-      created_by: profile?.id ?? null,
-      created_at: '',
-      updated_at: '',
-    };
-    return [...obstacles, pending];
-  }, [id, isNew, obstacleKind, obstacleLabel, obstacles, pendingObstaclePoint, profile?.id]);
+  const markerPlacementAllowed = canManageObstacles && canEnterObstacleMode(isBoundaryDrawing) && !adoptCsbMode && !saving;
+  const markerField = id && !isNew && field.id === id ? { id, name: field.field_name || 'this field' } : null;
+  const { forField, refresh: refreshMarkers, revokeField, forgetDeletedMarker } = useFieldMarkers(profile?.id, markerField ? [markerField.id] : []);
+  const editor = useFieldMarkerEditor(profile?.id ?? '', canManageObstacles, forField, refreshMarkers,
+    { scope: `${profile?.id ?? ''}:${id ?? ''}`, placementAllowed: markerPlacementAllowed, onAccessDenied: revokeField, onDeleted: forgetDeletedMarker });
+  const read = forField(id ?? '');
+  const markersReady = read.status === 'complete';
+  const visibleMarkers = markerFilter ? read.markers.filter((marker) => marker.kind === markerFilter) : read.markers;
+  // Keep the unsaved placement visible even when saved symbols are filtered.
+  const obstaclesForMap = markersReady && editor.preview ? [...visibleMarkers, editor.preview] : visibleMarkers;
 
   // Mapbox also emits move-end for zooms whose center did not change. Preserve the existing
   // center tuple for those events so the field-drawing subtree keeps its stable inputs.
@@ -327,14 +321,15 @@ function FieldSetupPage() {
   const skipUnsavedPromptRef = useRef(false);
   // Set by a save that synced acres: what that save sent (null for a new field, which reloads after create).
   const adoptSavedBaselineRef = useRef<{ field: typeof field; splits: typeof billingSplits } | null | false>(false);
-  const blocker = useUnsavedChanges(isDirty || saving, skipUnsavedPromptRef);
-  // Locked while saving: leaving mid-save is refused, not offered.
+  const writingMarker = editor.saving && !!(editor.draft || editor.target);
+  const writingField = saving || writingMarker;
+  const blocker = useUnsavedChanges(isDirty || writingField || !!editor.draft, skipUnsavedPromptRef);
   useEffect(() => {
-    if (saving && blocker.state === 'blocked') {
+    if (writingField && blocker.state === 'blocked') {
       blocker.reset?.();
-      toast('warning', 'Saving. Wait a moment, then try again.');
+      toast('warning', writingMarker ? 'A marker change is in progress. Wait a moment, then try again.' : 'Saving. Wait a moment, then try again.');
     }
-  }, [saving, blocker, toast]);
+  }, [writingField, writingMarker, blocker, toast]);
   // Post-create navigation happens via this state so it fires on a render where
   // isDirty=false has committed — see the comment at the setter in handleSave.
   const [postSaveNavTarget, setPostSaveNavTarget] = useState<string | null>(null);
@@ -369,6 +364,8 @@ function FieldSetupPage() {
     const rows = splitRowsFrom(data.inForce);
     loadedSplitsRef.current = rows;
     loadedNotesRef.current = data.notes;
+    seenVersionIdRef.current = data.history[0]?.id ?? null;
+    seenNotesRef.current = data.notes;
     setBillingSplits(rows);
     setPayerNotes(data.notes);
     setSplitHistory(data.history);
@@ -378,8 +375,10 @@ function FieldSetupPage() {
   // Only the newest field read may set the page: moving to another field (or Try again) can
   // start one while an older read is still in flight.
   const fieldLoadSeqRef = useRef(0);
-  const fetchField = useCallback(async () => {
-    if (!id) return;
+  // Returns true when the page shows this field's saved state. afterSave: the save already went through, so a failed
+  // read says that instead of "Failed to load field" (one message, not a success plus a load error).
+  const fetchField = useCallback(async (afterSave = false): Promise<boolean> => {
+    if (!id) return false;
     const seq = ++fieldLoadSeqRef.current;
     const superseded = () => seq !== fieldLoadSeqRef.current;
     // Moving to another field must not leave the previous field's form usable while this one loads.
@@ -393,14 +392,14 @@ function FieldSetupPage() {
       .select('*, customer:customers!fields_customer_id_fkey(farm_name)')
       .eq('id', id)
       .maybeSingle();
-    if (superseded()) return;
+    if (superseded()) return false;
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_field' } });
-      toast('error', 'Failed to load field');
+      toast('error', afterSave ? 'Field updated, but it could not be reloaded.' : 'Failed to load field');
       setLoadError(true);
       setLoading(false);
-      return;
+      return false;
     }
     if (data) {
       const { customer: _customer, ...fieldRow } = data;
@@ -416,10 +415,14 @@ function FieldSetupPage() {
       // Fetch GeoJSON for map display
       let loadedBoundary: Feature<Polygon | MultiPolygon> | null = null;
       const { data: geoData, error: geoError } = await supabase.rpc('get_field_geojson', { p_field_id: id });
-      if (superseded()) return;
-      if (geoError) {
-        Sentry.captureException(geoError, { tags: { source: 'fetch', action: 'load_field_geometry' } });
-        toast('warning', 'Could not load field boundary');
+      if (superseded()) return false;
+      if (geoError || geoData == null) {
+        // Show the retry screen, not an endless loading screen (and never a form missing its saved boundary).
+        Sentry.captureException(toSentryError(geoError ?? new Error('get_field_geojson returned no data')), { tags: { source: 'fetch', action: 'load_field_geometry' } });
+        toast('error', afterSave ? 'Field updated, but it could not be reloaded.' : 'Failed to load field');
+        setLoadError(true);
+        setLoading(false);
+        return false;
       }
       const geoRows = assertRpcResult<Array<{ boundary_geojson?: string; centroid_geojson?: string }>>(geoData, 'get_field_geojson');
       if (geoRows && geoRows.length > 0) {
@@ -453,7 +456,7 @@ function FieldSetupPage() {
       // Load multi-polygon data if available. Older boundaries without field_polygons are
       // converted into the same DrawnPolygon state so adding a second part is additive too.
       const { data: polyData, error: polyError } = await supabase.rpc('get_field_polygons', { p_field_id: id });
-      if (superseded()) return;
+      if (superseded()) return false;
       let loadedPolygons: DrawnPolygon[] = [];
       if (!polyError && polyData) {
         const polyRows = assertRpcResult<Array<{ id: string; polygon_geojson: object; label: string | null; acres: number | null; sort_order: number }>>(polyData, 'get_field_polygons');
@@ -485,14 +488,14 @@ function FieldSetupPage() {
         setToday(day);
         splitData = await loadFieldSplit(id, day);
       } catch (splitError) {
-        if (superseded()) return;
+        if (superseded()) return false;
         Sentry.captureException(toSentryError(splitError), { tags: { source: 'fetch', action: 'load_field_split_versions' } });
-        toast('error', 'Failed to load field');
+        toast('error', afterSave ? 'Field updated, but it could not be reloaded.' : 'Failed to load field');
         setLoadError(true);
         setLoading(false);
-        return;
+        return false;
       }
-      if (superseded()) return;
+      if (superseded()) return false;
       if (splitData.history.length > 0) setBillingOpen(true);
       applySplitData(splitData);
     } else {
@@ -504,6 +507,7 @@ function FieldSetupPage() {
     setLoadError(false);
     setLoading(false);
     setTimeout(() => { initialLoadDone.current = true; }, 0);
+    return true;
   }, [id, toast, applySplitData]);
 
   useEffect(() => {
@@ -519,30 +523,6 @@ function FieldSetupPage() {
   // Each field route mounts a fresh page, so a read still in flight when this one unmounts
   // must not toast "Failed to load field" over the next field.
   useEffect(() => () => { fieldLoadSeqRef.current += 1; }, []);
-
-  useEffect(() => {
-    if (isNew || !id) {
-      setObstacles([]);
-      return;
-    }
-    let active = true;
-    const loadObstacles = async () => {
-      const { data, error } = await supabase
-        .from('field_obstacles')
-        .select('*')
-        .eq('field_id', id)
-        .order('created_at');
-      if (!active) return;
-      if (error) {
-        setObstacles([]);
-        toast('error', 'Could not load field obstacles.');
-        return;
-      }
-      setObstacles((data ?? []) as unknown as FieldObstacle[]);
-    };
-    void loadObstacles();
-    return () => { active = false; };
-  }, [id, isNew, toast]);
 
   useEffect(() => {
     try {
@@ -693,7 +673,56 @@ function FieldSetupPage() {
     return true;
   };
 
-  const handleSave = async () => {
+  // After a failed split save, compare the user's edit against what is really saved now: a lost reply may have saved
+  // it. The edit on screen stays; only the clean state, history and version the next save starts from are refreshed.
+  const refreshSplitBaseline = async (fieldId: string) => {
+    const seq = fieldLoadSeqRef.current;
+    try {
+      const data = await loadFieldSplit(fieldId, localToday());
+      if (seq !== fieldLoadSeqRef.current) return; // another field (or a fresh read) took over meanwhile
+      // What the user did not touch takes the saved value, so a retry never sends an old split or clears a note
+      // someone else wrote. The page is locked while saving, so billingSplits and payerNotes are what was sent.
+      const rows = splitRowsFrom(data.inForce);
+      const splitUntouched = splitShape(billingSplits) === splitShape(loadedSplitsRef.current ?? []);
+      if (splitUntouched) setBillingSplits(rows);
+      // The warning baseline moves only where the user has no edit, or where the saved value is the user's own
+      // (a lost reply that did save it).
+      if (splitUntouched || splitShape(splitRowsFrom(data.history[0] ?? null)) === splitShape(billingSplits)) {
+        seenVersionIdRef.current = data.history[0]?.id ?? null;
+      }
+      const seen = { ...seenNotesRef.current };
+      for (const cid of new Set([...Object.keys(seen), ...Object.keys(data.notes)])) {
+        const mine = (payerNotes[cid] ?? '').trim();
+        if (mine === (loadedNotesRef.current[cid] ?? '').trim() || mine === (data.notes[cid] ?? '').trim()) seen[cid] = data.notes[cid] ?? '';
+      }
+      seenNotesRef.current = seen;
+      const oldNotes = loadedNotesRef.current;
+      setPayerNotes((current) => {
+        const merged = { ...current };
+        for (const cid of new Set([...Object.keys(oldNotes), ...Object.keys(data.notes)])) {
+          if ((current[cid] ?? '') === (oldNotes[cid] ?? '')) merged[cid] = data.notes[cid] ?? '';
+        }
+        return merged;
+      });
+      loadedSplitsRef.current = rows;
+      loadedNotesRef.current = data.notes;
+      setSplitHistory(data.history);
+      setInForceSplit(data.inForce);
+    } catch (refreshError) {
+      // The save error is already on screen; the next save still compares against the last known split.
+      Sentry.captureException(toSentryError(refreshError), { tags: { source: 'fetch', action: 'refresh_field_split_after_failed_save' } });
+    }
+  };
+
+  // Low-friction field rule (Mason, 2026-11-25): someone else's newer split is a warning, never a block.
+  // The same rule covers a payer note someone else changed after the page opened (known issue 2026-11-25).
+  type SaveAck = { versionId?: string; notes?: Record<string, string> };
+  type StaleWarning = { split: SplitVersion | null; notes: Array<{ customer_id: string; name: string; theirs: string }>; ack?: SaveAck };
+  const [staleWarning, setStaleWarning] = useState<StaleWarning | null>(null);
+  useEffect(() => { setStaleWarning(null); }, [id]); // the warning belongs to the field it was found on
+
+  // ack: the newer version and note texts the user chose to replace; a later change still warns.
+  const handleSave = async (ack?: SaveAck) => {
     if (!field.field_name) {
       toast('error', 'Field name is required');
       return;
@@ -722,6 +751,26 @@ function FieldSetupPage() {
     }
 
     setSaving(true);
+    if ((splitChanged || notesChanges.length > 0) && !isNew && id) {
+      const seq = fieldLoadSeqRef.current;
+      try {
+        const now = await loadFieldSplit(id, localToday());
+        const latest = now.history[0] ?? null;
+        const split = splitChanged && latest && latest.id !== (ack?.versionId ?? seenVersionIdRef.current) ? latest : null;
+        const names = new Map([...pastPayers, ...billingSplits].map((p) => [p.customer_id, p.customer_name]));
+        const notes = staleNoteIds(notesChanges, seenNotesRef.current, now.notes, ack?.notes).map((cid) => ({
+          customer_id: cid, name: names.get(cid) ?? 'a payer', theirs: (now.notes[cid] ?? '').trim(),
+        }));
+        if (seq === fieldLoadSeqRef.current && (split || notes.length > 0)) {
+          setStaleWarning({ split, notes, ack });
+          setSaving(false);
+          return;
+        }
+      } catch (checkError) {
+        // Only a warning: a failed check must not stop the save.
+        Sentry.captureException(toSentryError(checkError), { tags: { source: 'fetch', action: 'check_field_split_changed' } });
+      }
+    }
     try {
       const fieldPayload = fieldPayloadOf(field);
       const detailsChanged = isNew || JSON.stringify(fieldPayload) !== JSON.stringify(fieldPayloadOf(loadedFieldRef.current ?? {}));
@@ -858,7 +907,10 @@ function FieldSetupPage() {
           ? await saveSplitAndNotes(savedFieldId, splitChanged, notesChanges, isNew)
           : null;
         const splitSaved = splitResult === true;
-        if (splitResult === false) persistError = true;
+        if (splitResult === false) {
+          persistError = true;
+          if (!isNew) await refreshSplitBaseline(savedFieldId);
+        }
         if (detailsChanged) loadedFieldRef.current = field; // saved: a retry after a later failure skips save_field
 
         const savedAcres = acresPatch;
@@ -877,7 +929,10 @@ function FieldSetupPage() {
 
         if (splitSaved && !isNew) {
           // Mason 2026-11-24: after a split save the page reloads fresh instead of merging the reply (it is locked meanwhile).
-          await fetchField();
+          if (!(await fetchField(true))) {
+            setSaving(false);
+            return;
+          }
         } else if (savedAcres) {
           // the synced acres are saved, not an edit
           adoptSavedBaselineRef.current = isNew ? null : { field, splits: billingSplits };
@@ -997,12 +1052,6 @@ function FieldSetupPage() {
     setMapZoom(16);
   }, []);
 
-  const resetObstacleDraft = useCallback(() => {
-    setPendingObstaclePoint(null);
-    setObstacleKind('oil_well');
-    setObstacleLabel('');
-  }, []);
-
   const clearCsbPreview = useCallback(() => {
     csbLookupRequestRef.current += 1;
     setPendingCsbFeature(null);
@@ -1052,12 +1101,10 @@ function FieldSetupPage() {
       finishCsbAdopt();
       return;
     }
-    if (isBoundaryDrawing) return;
-    setAddObstacleMode(false);
-    resetObstacleDraft();
+    if (isBoundaryDrawing || editor.draft) return;
     clearCsbPreview();
     setAdoptCsbMode(true);
-  }, [adoptCsbMode, clearCsbPreview, finishCsbAdopt, isBoundaryDrawing, resetObstacleDraft]);
+  }, [adoptCsbMode, clearCsbPreview, editor.draft, finishCsbAdopt, isBoundaryDrawing]);
 
   const handleAddCsbBoundary = useCallback(() => {
     // Save snapshots the polygon list when it starts and clears the dirty flag
@@ -1080,83 +1127,12 @@ function FieldSetupPage() {
     }
   }, [checkCsbOverlap, clearCsbPreview, drawnPolygons, handlePolygonsChange, pendingCsbFeature, saving, toast]);
 
-  const handleMapClick = useCallback((longitude: number, latitude: number) => {
+  const handleMapClick = (longitude: number, latitude: number) => {
     if (adoptCsbMode) {
       void handleCsbMapClick(longitude, latitude);
       return;
     }
-    if (!addObstacleMode || !canManageObstacles || isNew) return;
-    setPendingObstaclePoint([longitude, latitude]);
-  }, [adoptCsbMode, addObstacleMode, canManageObstacles, handleCsbMapClick, isNew]);
-
-  const handleObstacleModeToggle = useCallback(() => {
-    if (addObstacleMode) {
-      setAddObstacleMode(false);
-      resetObstacleDraft();
-      return;
-    }
-
-    if (!canEnterObstacleMode(isBoundaryDrawing)) {
-      toast('error', 'Finish or cancel the boundary before adding an obstacle.');
-      return;
-    }
-
-    finishCsbAdopt();
-    resetObstacleDraft();
-    setAddObstacleMode(true);
-  }, [addObstacleMode, finishCsbAdopt, isBoundaryDrawing, resetObstacleDraft, toast]);
-
-  const handleAddObstacle = async () => {
-    if (!id || isNew || !profile || !canManageObstacles || !pendingObstaclePoint) return;
-    setSavingObstacle(true);
-    try {
-      const result = await supabase
-        .from('field_obstacles')
-        .insert({
-          field_id: id,
-          kind: obstacleKind,
-          label: obstacleLabel.trim() || null,
-          point_geojson: { type: 'Point', coordinates: pendingObstaclePoint },
-          created_by: profile.id,
-        })
-        .select('*')
-        .single();
-      checkMutationResult(result, 'Add field obstacle');
-      setObstacles((current) => [...current, result.data as unknown as FieldObstacle]);
-      resetObstacleDraft();
-      setAddObstacleMode(false);
-      toast('success', 'Obstacle added');
-    } catch (error: unknown) {
-      Sentry.captureException(toSentryError(error), {
-        tags: { component: 'FieldSetup', action: 'add_field_obstacle' },
-      });
-      toast('error', 'Could not add obstacle.');
-    } finally {
-      setSavingObstacle(false);
-    }
-  };
-
-  const handleDeleteObstacle = async () => {
-    if (!obstaclePendingDelete || !canManageObstacles) return;
-    setDeletingObstacle(true);
-    try {
-      const result = await supabase
-        .from('field_obstacles')
-        .delete()
-        .eq('id', obstaclePendingDelete.id)
-        .select('id');
-      checkMutationResult(result, 'Delete field obstacle');
-      setObstacles((current) => current.filter((obstacle) => obstacle.id !== obstaclePendingDelete.id));
-      setObstaclePendingDelete(null);
-      toast('success', 'Obstacle deleted');
-    } catch (error: unknown) {
-      Sentry.captureException(toSentryError(error), {
-        tags: { component: 'FieldSetup', action: 'delete_field_obstacle' },
-      });
-      toast('error', 'Could not delete obstacle.');
-    } finally {
-      setDeletingObstacle(false);
-    }
+    if (markersReady) editor.place(longitude, latitude);
   };
 
   // A new field has nothing to load: a superseded read for the field open before may leave `loading` set.
@@ -1414,28 +1390,27 @@ function FieldSetupPage() {
             <button
               type="button"
               onClick={() => setBillingOpen(!billingOpen)}
+              aria-expanded={billingOpen}
               className="w-full flex items-center justify-between"
             >
-              <CardHeader
-                title="Default Billing"
-                accent="Splits"
-                action={
-                  billingOpen && billingSplits.length > 1 ? (
-                    <Button variant="ghost" size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); distributeEvenly(); }}>
-                      Split Evenly
-                    </Button>
-                  ) : undefined
-                }
-              />
+              <CardHeader title="Default Billing" accent="Splits" />
               {billingOpen ? <ChevronUp className="w-4 h-4 text-secondary" /> : <ChevronDown className="w-4 h-4 text-secondary" />}
             </button>
             {billingOpen && (
               // Locked while saving: the save reloads the split afterwards, which would drop an edit made meanwhile.
               <fieldset disabled={saving} className="mt-4 min-w-0">
-                <p className="text-xs text-secondary mb-4">
-                  Who pays for this field. Product shares and application shares must each total 100%; a payer can be 0%.
-                  Each change is kept in the history below.
-                </p>
+                {/* Split Evenly lives here, not in the header: a button inside the open/close button is invalid HTML. */}
+                <div className="flex items-start justify-between gap-3 mb-4">
+                  <p className="text-xs text-secondary">
+                    Who pays for this field. Product shares and application shares must each total 100%; a payer can be 0%.
+                    Each change is kept in the history below.
+                  </p>
+                  {billingSplits.length > 1 && (
+                    <Button variant="ghost" size="sm" onClick={distributeEvenly}>
+                      Split Evenly
+                    </Button>
+                  )}
+                </div>
 
                 {billingSplits.length > 0 && (
                   <div className="space-y-3 mb-4">
@@ -1580,7 +1555,7 @@ function FieldSetupPage() {
           )}
 
           <div className="flex justify-end">
-            <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>
+            <Button icon={<Save className="w-4 h-4" />} onClick={() => void handleSave()} loading={saving} disabled={legalLookupLoading} title={legalLookupLoading ? 'Wait for the legal lookup to finish' : undefined}>
               {isNew ? 'Create Field' : 'Save Changes'}
             </Button>
           </div>
@@ -1602,7 +1577,8 @@ function FieldSetupPage() {
                         size="sm"
                         icon={adoptCsbMode ? <X className="h-4 w-4" /> : <MousePointerSquareDashed className="h-4 w-4" />}
                         onClick={handleCsbModeToggle}
-                        disabled={isBoundaryDrawing}
+                        disabled={isBoundaryDrawing || !!editor.draft}
+                        title={editor.draft ? 'Close the marker editor to adopt a boundary' : undefined}
                       >
                         {adoptCsbMode ? 'Cancel USDA' : 'Adopt USDA boundary'}
                       </Button>
@@ -1625,6 +1601,7 @@ function FieldSetupPage() {
                 ? 'Use Redraw boundary or Add another section below the map. Remove a section from its confirmed list.'
                 : 'Use the polygon tool (top-left of map) to draw this field\'s boundary.'}
             </p>
+            {markerField && <MarkerTypeFilter value={markerFilter} onChange={setMarkerFilter} />}
             <CRXMap
               center={mapCenter}
               zoom={mapZoom}
@@ -1633,7 +1610,7 @@ function FieldSetupPage() {
               showLayerToggle
               onMapMoveEnd={handleMapMoveEnd}
               onMapClick={handleMapClick}
-              className={`h-[400px] w-full ${addObstacleMode || adoptCsbMode ? 'cursor-crosshair' : ''}`}
+              className={`h-[400px] w-full ${editor.placing || adoptCsbMode ? 'cursor-crosshair' : ''}`}
             >
               {showOtherFieldBoundaries && (
                 <FieldBoundaryLayer fields={nearbyOverlayFields} showLabels />
@@ -1658,10 +1635,10 @@ function FieldSetupPage() {
                 initialPolygons={drawnPolygons}
                 onPolygonsChange={handlePolygonsChange}
                 allowRemoveSinglePart={canRemoveSingleBoundary(hasSavedBoundary)}
-                disabled={addObstacleMode || adoptCsbMode}
+                disabled={!!editor.draft || adoptCsbMode}
                 onDrawingStateChange={setIsBoundaryDrawing}
               />
-              <FieldObstacleLayer obstacles={obstaclesForMap} interactive={!addObstacleMode && !adoptCsbMode && !isBoundaryDrawing} />
+              <FieldObstacleLayer obstacles={obstaclesForMap} interactive={!editor.placing && !adoptCsbMode && !isBoundaryDrawing} />
             </CRXMap>
             {adoptCsbMode && (
               <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
@@ -1680,50 +1657,7 @@ function FieldSetupPage() {
                 )}
               </div>
             )}
-            {addObstacleMode && (
-              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                {!pendingObstaclePoint ? (
-                  <p className="text-sm text-amber-800">Click the map where the obstacle is located.</p>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div>
-                        <label htmlFor="field-obstacle-kind" className="mb-1 block text-xs font-medium text-secondary">
-                          Obstacle type
-                        </label>
-                        <select
-                          id="field-obstacle-kind"
-                          value={obstacleKind}
-                          onChange={(event) => setObstacleKind(event.target.value as FieldObstacleKind)}
-                          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
-                        >
-                          {FIELD_OBSTACLE_KINDS.map((kind) => (
-                            <option key={kind} value={kind}>{FIELD_OBSTACLE_KIND_LABELS[kind]}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label htmlFor="field-obstacle-label" className="mb-1 block text-xs font-medium text-secondary">
-                          Obstacle label (optional)
-                        </label>
-                        <input
-                          id="field-obstacle-label"
-                          type="text"
-                          value={obstacleLabel}
-                          onChange={(event) => setObstacleLabel(event.target.value)}
-                          placeholder="e.g. North windmill"
-                          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button type="button" variant="ghost" size="sm" onClick={resetObstacleDraft}>Choose another point</Button>
-                      <Button type="button" size="sm" onClick={() => void handleAddObstacle()} loading={savingObstacle}>Save obstacle</Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+            <FieldMarkerEditor editor={editor} ready={markersReady && markerPlacementAllowed} unavailable={read.status === 'unavailable'} />
             {/* Polygon list panel */}
             {drawnPolygons.length > 1 && (
               <div className="mt-3 space-y-2">
@@ -1752,53 +1686,16 @@ function FieldSetupPage() {
               </div>
             )}
             <div className="mt-4 border-t border-gray-100 pt-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-nav-dark">Obstacles</h3>
-                  <p className="text-xs text-secondary">Pins shown to the field crew and on printed close-up maps.</p>
-                </div>
-                {canManageObstacles && !isNew && (
-                  <Button
-                    type="button"
-                    variant={addObstacleMode ? 'ghost' : 'secondary'}
-                    size="sm"
-                    icon={addObstacleMode ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                    onClick={handleObstacleModeToggle}
-                  >
-                    {addObstacleMode ? 'Cancel obstacle' : 'Add obstacle'}
-                  </Button>
-                )}
-              </div>
-              {isNew ? (
-                <p className="mt-3 text-xs text-secondary">Save this field before adding obstacle pins.</p>
-              ) : obstacles.length === 0 ? (
-                <p className="mt-3 text-xs text-secondary">No obstacles marked for this field.</p>
+              {markerField ? (
+                <FieldMarkerPanel name="Field markers" read={read} refresh={refreshMarkers}
+                  actions={markerPlacementAllowed && markersReady && !editor.draft && !editor.target && !editor.saving ? {
+                    add: () => editor.begin(markerField),
+                    edit: (marker) => editor.begin(markerField, marker),
+                    remove: editor.setTarget,
+                    canEdit: editor.canEdit,
+                  } : undefined} />
               ) : (
-                <ul className="mt-3 space-y-2">
-                  {obstacles.map((obstacle) => {
-                    const kindLabel = fieldObstacleKindLabel(obstacle.kind);
-                    const displayLabel = obstacle.label?.trim() || kindLabel;
-                    return (
-                      <li key={obstacle.id} className="flex items-center gap-2 rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2">
-                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-600 ring-2 ring-red-100" />
-                        <span className="min-w-0 flex-1 truncate text-sm text-nav-dark">
-                          {displayLabel}{displayLabel !== kindLabel ? <> &mdash; <span className="text-secondary">{kindLabel}</span></> : null}
-                        </span>
-                        {canManageObstacles && (
-                          <button
-                            type="button"
-                            onClick={() => setObstaclePendingDelete(obstacle)}
-                            title={`Delete ${displayLabel}`}
-                            aria-label={`Delete obstacle ${displayLabel}`}
-                            className="rounded p-1 text-gray-400 hover:bg-white hover:text-red-600"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
+                <p className="text-sm text-secondary">Save this field before adding marker pins.</p>
               )}
             </div>
           </Card>
@@ -1806,7 +1703,7 @@ function FieldSetupPage() {
       </div>
 
       <UnsavedChangesModal
-        open={blocker.state === 'blocked'}
+        open={blocker.state === 'blocked' && !writingField}
         onStay={() => blocker.reset?.()}
         onLeave={() => blocker.proceed?.()}
       />
@@ -1826,6 +1723,34 @@ function FieldSetupPage() {
       />
 
       <ConfirmModal
+        open={staleWarning !== null}
+        onClose={() => setStaleWarning(null)}
+        onConfirm={() => {
+          const w = staleWarning;
+          setStaleWarning(null);
+          void handleSave({
+            versionId: w?.split?.id ?? w?.ack?.versionId,
+            notes: { ...w?.ack?.notes, ...Object.fromEntries((w?.notes ?? []).map((n) => [n.customer_id, n.theirs])) },
+          });
+        }}
+        title={!staleWarning?.split ? 'Note changed since you opened this field'
+          : staleWarning.notes.length > 0 ? 'Changed since you opened this field' : 'Split changed since you opened this field'}
+        message={staleWarning
+          ? [
+            staleWarning.split
+              ? `A newer billing split (version ${staleWarning.split.version_number}) was saved by ${staleWarning.split.created_by_name ?? 'Unknown'} on ${new Date(staleWarning.split.created_at).toLocaleString()}, after you opened this field.`
+              : '',
+            ...staleWarning.notes.map((n) => n.theirs
+              ? `Someone else changed the note for ${n.name} to "${n.theirs.length > 200 ? `${n.theirs.slice(0, 200)}…` : n.theirs}" after you opened this field.`
+              : `Someone else cleared the note for ${n.name} after you opened this field.`),
+            `Saving replaces ${(staleWarning.split ? 1 : 0) + staleWarning.notes.length > 1 ? 'them' : 'it'} with yours. To see it first, cancel and reload the page.`,
+          ].filter(Boolean).join(' ')
+          : ''}
+        confirmLabel="Save mine anyway"
+        variant="warning"
+      />
+
+      <ConfirmModal
         open={pendingLegalLookup !== null}
         onClose={() => setPendingLegalLookup(null)}
         onConfirm={() => {
@@ -1836,17 +1761,6 @@ function FieldSetupPage() {
         message="Legal lookup found a new Section, Township, and Range. Replace the legal description you entered?"
         confirmLabel="Replace description"
         variant="warning"
-      />
-
-      <ConfirmModal
-        open={obstaclePendingDelete !== null}
-        onClose={() => setObstaclePendingDelete(null)}
-        onConfirm={() => void handleDeleteObstacle()}
-        title="Delete obstacle?"
-        message="This removes the obstacle pin from field maps and future printed close-up pages."
-        confirmLabel="Delete obstacle"
-        variant="danger"
-        loading={deletingObstacle}
       />
     </div>
   );

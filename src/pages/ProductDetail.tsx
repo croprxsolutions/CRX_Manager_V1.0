@@ -1712,8 +1712,11 @@ export default function ProductDetail() {
                   value={reiDraft}
                   onChange={(e) => {
                     if (reloadRequired) return;
-                    setReiDraft(e.target.value);
-                    update('rei_hours', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
+                    const value = e.target.value;
+                    setReiDraft(value);
+                    const hours = /^\d+$/.test(value) ? Number(value) : null;
+                    if (hours !== null) update('rei_not_applicable', false);
+                    update('rei_hours', hours);
                   }}
                   disabled={!isAdmin || saving || reloadRequired || reiNotApplicable}
                   placeholder={reiNotApplicable ? 'Not applicable' : 'From label, e.g. 12'}
@@ -1746,8 +1749,11 @@ export default function ProductDetail() {
                   value={phiDraft}
                   onChange={(e) => {
                     if (reloadRequired) return;
-                    setPhiDraft(e.target.value);
-                    update('phi_days', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
+                    const value = e.target.value;
+                    setPhiDraft(value);
+                    const days = /^\d+$/.test(value) ? Number(value) : null;
+                    if (days !== null) update('phi_not_applicable', false);
+                    update('phi_days', days);
                   }}
                   disabled={!isAdmin || saving || reloadRequired || phiNotApplicable}
                   placeholder={phiNotApplicable ? 'Not applicable' : 'From label, e.g. 30'}

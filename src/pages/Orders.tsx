@@ -915,7 +915,7 @@ function OrderPhoneRow({ row, checkbox, selected, onOpen }: {
     <div className={`flex items-start gap-1 px-4 py-2 ${selected ? 'bg-crx-green-tint' : ''}`}>
       {/* A 44px tap area around the small checkbox; a spacer keeps rows aligned without one. */}
       {checkbox
-        ? <label className="-ml-3 flex h-11 w-11 shrink-0 items-center justify-center">{checkbox}</label>
+        ? <label className="-ml-3 flex h-11 w-11 shrink-0 items-center justify-center">{checkbox}<span className="sr-only">Select order {row.order_number}</span></label>
         : <span aria-hidden="true" className="-ml-3 w-11 shrink-0" />}
       <button type="button" onClick={onOpen} className="flex min-h-11 min-w-0 flex-1 items-start gap-3 py-1.5 text-left">
         <span className="min-w-0 flex-1 space-y-0.5">

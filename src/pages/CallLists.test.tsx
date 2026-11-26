@@ -9,6 +9,7 @@ const { mockRpc, mockFrom, mockToast, mockAuth } = vi.hoisted(() => ({
   mockAuth: {
     profile: { id: 'rep-1', role: 'sales_rep' } as { id: string; role: string } | null,
     role: 'sales_rep' as string | null,
+    deniedPages: [] as string[],
   },
 }));
 
@@ -106,6 +107,7 @@ describe('Call Lists adoption workspace', () => {
     vi.clearAllMocks();
     mockAuth.profile = { id: 'rep-1', role: 'sales_rep' };
     mockAuth.role = 'sales_rep';
+    mockAuth.deniedPages = [];
     rpcRows = {};
     rpcImplementations = {};
     customerEnrichment = [{ id: 'customer-1', assigned_tier: 2, crops: ['corn'] }];
@@ -496,6 +498,15 @@ describe('Call Lists adoption workspace', () => {
     expect(await screen.findByText('Quote Farm')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open customer' }));
     expect(screen.getByTestId('location-path')).toHaveTextContent('/customers/customer-1');
+  });
+
+  it('a rep denied Quotes gets no Open quote button, only Open customer', async () => {
+    mockAuth.deniedPages = ['quotes'];
+    rpcRows.get_call_list_stale_quotes = [baseRow({ farm_name: 'Quote Farm', quote_id: 'quote-1', quote_number: 'Q-1', quote_total_cents: 50000, quote_updated_at: '2026-07-01T00:00:00Z', quote_age_days: 20 })];
+    renderCallLists('/call-lists?list=stale-quotes');
+    expect(await screen.findByText('Quote Farm')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open quote' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open customer' })).toBeInTheDocument();
   });
 
   it('other lists keep a single Open that goes to the customer', async () => {

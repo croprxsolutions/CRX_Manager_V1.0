@@ -151,6 +151,15 @@ describe('Chemical Invoices tabs', () => {
     });
   });
 
+  it("By Customer offers no whole-list Export CSV or List PDF, so one customer never gets everyone's rows", async () => {
+    await renderAt('/invoices?tab=customer');
+    expect(selectedTab()).toBe('By Customer');
+    expect(screen.queryByRole('button', { name: 'Export CSV' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /List PDF/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /All Invoices/ }));
+    expect(screen.getByRole('button', { name: 'Export CSV' })).toBeInTheDocument();
+  });
+
   it('a user denied Field Invoices gets no By Customer tab (it shows field invoices too)', async () => {
     H.deniedPages = ['field-invoices'];
     await renderAt('/invoices?tab=customer');

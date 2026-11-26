@@ -1128,6 +1128,8 @@ export default function Invoices() {
         subtitle="Post, print and follow up on every bill sent to customers."
         actions={
           <div className="flex gap-2 flex-wrap justify-end">
+            {/* By Customer shows one customer's statement; these lists are the whole filtered list, so they stay off there. */}
+            {activeTab !== 'customer' && (<>
             <Button
               variant="secondary"
               onClick={() =>
@@ -1157,6 +1159,7 @@ export default function Invoices() {
             >
               List PDF
             </Button>
+            </>)}
             <Button variant="secondary" icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/invoices/new?type=misc_charge')}>
               Misc charge
             </Button>

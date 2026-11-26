@@ -104,7 +104,12 @@ test.each([
   const environment = { VERCEL_TARGET_ENV: target, VERCEL_GIT_COMMIT_REF: branch };
   const config = createAppViteConfig(environment);
   assert.equal(config.plugins.some((plugin) => plugin?.name === 'staging-maps-drawing-proof'), expected);
-  assert.equal(mapsProofWorkboxOptions(environment).globIgnores.includes('api/maps-step0-draw/**'), expected);
+  const workbox = mapsProofWorkboxOptions(environment);
+  assert.equal(workbox.globIgnores.includes('api/maps-step0-draw/**'), expected);
+  const managesNavigation = workbox.runtimeCaching.find((rule) => rule.options?.cacheName === 'crx-pages').urlPattern;
+  const request = { mode: 'navigate' };
+  assert.equal(managesNavigation({ request, url: new URL('https://' + host + '/fields') }), true);
+  assert.equal(managesNavigation({ request, url: new URL('https://' + host + '/api/maps-step0-draw/index.html') }), !expected);
 });
 
 test('reserves both proof routes from the normal app rewrite and policy', () => {

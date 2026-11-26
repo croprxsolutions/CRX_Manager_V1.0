@@ -38,9 +38,19 @@ function stagingMapsProofPlugin(environment: NodeJS.ProcessEnv): Plugin | undefi
   };
 }
 
-export function mapsProofWorkboxOptions(environment: NodeJS.ProcessEnv) {
+export function mapsProofWorkboxOptions(environment: NodeJS.ProcessEnv): typeof workboxOptions {
   if (!hasStagingMapsProof(environment)) return workboxOptions;
-  return { ...workboxOptions, globIgnores: [...(workboxOptions.globIgnores ?? []), 'api/maps-step0-draw/**'] };
+  return {
+    ...workboxOptions,
+    globIgnores: [...(workboxOptions.globIgnores ?? []), 'api/maps-step0-draw/**'],
+    runtimeCaching: workboxOptions.runtimeCaching?.map((rule) => rule.options?.cacheName === 'crx-pages'
+      ? {
+          ...rule,
+          urlPattern: ({ request, url }) => request.mode === 'navigate'
+            && !/^\/api\/maps-step0-draw(?:\/|$)/.test(url.pathname),
+        }
+      : rule),
+  };
 }
 
 // Unit tests are deliberately isolated from Supabase. A trusted live-schema

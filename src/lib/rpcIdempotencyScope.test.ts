@@ -335,7 +335,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // only to add the field-split refusal; changing the literal would orphan every existing receipt.
   _create_invoice_from_order_idem_impl_20260721: ['create_invoice_from_order'],
   // Direct EXECUTE is revoked (postgres-only). 20260721145936 renamed the governed public body to this name, so it
-  // kept the public operation literal and owns the wrapper's receipts. 20270308170000 (A4) re-emits it only to carry
+  // kept the public operation literal and owns the wrapper's receipts. 20270310200000 (A4) re-emits it only to carry
   // p_expected_scope into its request binding; changing the literal would orphan every existing receipt.
   _create_invoice_for_unbilled_delivery_idem_impl_20260721: ['create_invoice_for_unbilled_delivery'],
   // Direct EXECUTE is revoked (postgres-only). 20261016140000 renamed the original

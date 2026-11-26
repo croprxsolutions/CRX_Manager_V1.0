@@ -14,7 +14,8 @@
 -- caller-analysis: get_inventory_cost_report :: Reports.tsx Inventory Cost tab, admin only; grants are restored unchanged and the extra column is additive
 -- ROLLBACK (new reviewed migration): drop both functions and recreate them from
 --   20261103100000_product_active_guard.sql (impl md5 fb77a0d38ee1bb31a3c5a43dd1a0da59,
---   wrapper md5 2fdd283e39482add63e075ab84a7e52d) with that file's grants, AND revert the app's
+--   wrapper md5 2fdd283e39482add63e075ab84a7e52d), then re-run this file's REVOKE/GRANT block (a
+--   recreated function otherwise gets default EXECUTE for PUBLIC), AND revert the app's
 --   Reports.tsx `.order('location')` in the same step: without the column that order errors (42703)
 --   and the Inventory Cost tab fails to load. Deploy order: apply this before the app change.
 -- ORDERING: independent; any order after 20261103100000_product_active_guard.

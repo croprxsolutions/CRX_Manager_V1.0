@@ -298,7 +298,7 @@ describe('Reports commission history', () => {
     expect(screen.getByText('No stock record')).toBeInTheDocument();
     expect(screen.getByText('Products:').parentElement?.textContent).toMatch(/Products:\s*2\s*\(2 stock rows\)/);
     expect(screen.getByText('Below Reorder:').parentElement?.textContent).toMatch(/Below Reorder:\s*1\s*\(2 stock rows\)/);
-    expect(screen.getByText(/Current stock as of now/)).toBeInTheDocument();
+    expect(screen.getByText(/Stock as of when this report loaded/)).toBeInTheDocument();
     expect(container.querySelectorAll('input[type="date"]')).toHaveLength(0);
     expect(H.rpcOrders.filter((o) => o.name === 'get_inventory_cost_report').map((o) => o.column))
       .toEqual(expect.arrayContaining(['product_name', 'product_id', 'location']));

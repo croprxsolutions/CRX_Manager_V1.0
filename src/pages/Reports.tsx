@@ -1524,7 +1524,7 @@ export default function Reports() {
     <Card>
       <div className="flex flex-wrap items-end gap-3">
         {category === 'operational' && operationalTab === 'inventory_cost' ? (
-          <p className="py-2 text-sm text-secondary">Current stock as of now. Dates don't apply to this report.</p>
+          <p className="py-2 text-sm text-secondary">Stock as of when this report loaded. Dates don't apply to this report.</p>
         ) : (<>
         <div>
           <label className="block text-xs font-medium text-secondary mb-1">Start Date</label>

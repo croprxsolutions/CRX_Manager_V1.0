@@ -63,7 +63,9 @@ async function renderPage() {
   await screen.findByRole('heading', { name: /Billing/ });
 }
 
-const saveButton = (name: string) => screen.getByRole('button', { name });
+// The section's own Save comes first; a phone-only pinned copy of it follows at the end of the page.
+const saveButton = (name: string) => screen.getAllByRole('button', { name })[0];
+const pinnedSave = () => document.querySelector<HTMLButtonElement>('[data-pinned-action] button');
 
 describe('SettingsPage — per-part Save', () => {
   beforeEach(() => {
@@ -103,6 +105,48 @@ describe('SettingsPage — per-part Save', () => {
     await waitFor(() => expect(saveButton('Save notices')).toBeDisabled());
     expect(mockUpsert).toHaveBeenCalledTimes(1);
     expect(mockUpsert.mock.calls[0][0].setting_key).toBe('post_application_notice_template');
+  });
+});
+
+describe('SettingsPage — phone controls', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCheck.mockReset(); // an earlier test makes the reminder save fail
+    mockFrom.mockImplementation((table: string) => chain(table === 'profiles' ? USERS : []));
+    mockRpc.mockResolvedValue({ data: {}, error: null });
+  });
+
+  it("shows the pinned Save only while a section has changes, and it runs the section's own Save", async () => {
+    await renderPage();
+    expect(pinnedSave()).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Header company name'), { target: { value: 'North Farm' } });
+    fireEvent.change(screen.getByLabelText('Remind when unpaid after'), { target: { value: '45' } });
+    // Page order: Reminders and quote defaults comes before the field sheet.
+    expect(pinnedSave()).toHaveTextContent('Save defaults');
+
+    fireEvent.click(pinnedSave()!);
+    await waitFor(() => expect(pinnedSave()).toHaveTextContent('Save field sheet'));
+    expect(mockUpsert).toHaveBeenCalledWith(expect.objectContaining({ setting_key: 'ar_reminder_days', setting_value: '45' }));
+    expect(mockUpsert).not.toHaveBeenCalledWith(expect.objectContaining({ setting_key: 'applicator_sheet_custom' }));
+  });
+
+  it('steps the day boxes by one and never below 1 or above 3650', async () => {
+    await renderPage();
+    const reminder = screen.getByLabelText('Remind when unpaid after');
+    fireEvent.click(screen.getByRole('button', { name: 'More reminder days' }));
+    expect(reminder).toHaveValue(31);
+    fireEvent.change(reminder, { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Fewer reminder days' }));
+    expect(reminder).toHaveValue(1);
+    fireEvent.change(reminder, { target: { value: '3650' } });
+    fireEvent.click(screen.getByRole('button', { name: 'More reminder days' }));
+    expect(reminder).toHaveValue(3650);
+
+    const valid = screen.getByLabelText('Quotes valid for');
+    fireEvent.click(screen.getByRole('button', { name: 'Fewer days quotes are valid' }));
+    expect(valid).toHaveValue(29);
+    expect(saveButton('Save defaults')).toBeEnabled();
   });
 });
 

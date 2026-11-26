@@ -2,7 +2,7 @@ import { toSentryError } from '../lib/sentryError';
 import { billingM4Enabled } from '../lib/billingFeatures';
 import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Save, UserPlus, Pencil, Shield, Users, KeyRound, Receipt, Sprout, Building2 } from 'lucide-react';
+import { Save, UserPlus, Pencil, Shield, Users, KeyRound, Receipt, Sprout, Building2, Minus, Plus } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -11,6 +11,9 @@ import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
+import SectionCard from '../components/ui/SectionCard';
+import PhoneHeader from '../components/ui/PhoneHeader';
+import PinnedAction from '../components/ui/PinnedAction';
 import Skeleton from '../components/ui/Skeleton';
 import EmptyState, { LoadFailedState } from '../components/ui/EmptyState';
 import { useToast } from '../components/ui/Toast';
@@ -81,26 +84,35 @@ const TEXTAREA_CLASS =
 
 // --- Style D building blocks (first use; move to components/ui the second time they are needed) ---
 
-function SettingsSection({ id, icon, title, action, children }: {
-  id: string;
-  icon: ReactNode;
-  title: string;
-  action?: ReactNode;
+const STEPPER_BUTTON =
+  'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-crx-green-light text-crx-green active:scale-95 md:hidden';
+// On phones a whole-number box grows to a large bold number between 48px − and + buttons.
+const STEPPER_INPUT = 'max-md:h-12 max-md:w-20 max-md:text-center max-md:font-heading max-md:text-[1.75rem] max-md:font-bold';
+
+/** Phone − and + buttons around a whole-number box; they step by 1 within min..max. The box can still be typed. */
+function PhoneStepper({ label, value, min, max, onChange, children }: {
+  label: string;
+  value: string;
+  min: number;
+  max?: number;
+  onChange: (value: string) => void;
   children: ReactNode;
 }) {
+  const bump = (delta: number) => {
+    const n = parseInt(value, 10);
+    const next = (Number.isFinite(n) ? n : min) + delta;
+    onChange(String(Math.min(Math.max(next, min), max ?? next)));
+  };
   return (
-    <Card id={id} padding={false} className="scroll-mt-32 overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-cream-dark px-4 py-3">
-        <div className="flex items-center gap-3">
-          <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-crx-green text-white">
-            {icon}
-          </span>
-          <h2 className="font-heading text-2xl font-bold leading-none text-nav-dark">{title}</h2>
-        </div>
-        {action}
-      </div>
+    <span className="inline-flex items-center gap-2">
+      <button type="button" aria-label={`Fewer ${label}`} onClick={() => bump(-1)} className={STEPPER_BUTTON}>
+        <Minus className="h-6 w-6" aria-hidden="true" />
+      </button>
       {children}
-    </Card>
+      <button type="button" aria-label={`More ${label}`} onClick={() => bump(1)} className={STEPPER_BUTTON}>
+        <Plus className="h-6 w-6" aria-hidden="true" />
+      </button>
+    </span>
   );
 }
 
@@ -981,6 +993,17 @@ export default function SettingsPage() {
   }
 
   const settingsReady = !settingsLoadError && settingsLoaded;
+  // Phones: the first section with unsaved changes (page order) gets the pinned Save; it runs that section's own Save.
+  const phoneSave = settingsReady ? [
+    billingM4Enabled() && isDirty('salesTax') && { label: 'Save sales tax', saving: savingSalesTax, onClick: saveSalesTax },
+    isDirty('autoDraft') && { label: 'Save invoice drafts', saving: savingAutoDraft, onClick: saveAutoDraft },
+    isDirty('fuel') && { label: 'Save fuel surcharge', saving: savingFuel, onClick: saveFuelSurcharge },
+    isDirty('defaults') && { label: 'Save defaults', saving: savingDefaults, onClick: saveDefaults },
+    isDirty('guardrail') && { label: 'Save guardrail', saving: savingGuardrail, onClick: saveGuardrailMode },
+    isDirty('sheet') && { label: 'Save field sheet', saving: savingSheet, onClick: saveSheetConfig },
+    isDirty('notices') && { label: 'Save notices', saving: savingNotices, onClick: saveNoticeTemplates },
+    isDirty('company') && { label: 'Save company details', saving: savingCompany, onClick: saveCompanyInfo },
+  ].find((part) => part !== false) : undefined;
   const addUserButton = (
     <Button size="sm" icon={<UserPlus className="w-4 h-4" />} onClick={() => setUserModalOpen(true)}>
       Add User
@@ -989,7 +1012,12 @@ export default function SettingsPage() {
 
   return (
     <div className="phone-touch space-y-5">
-      <header>
+      <PhoneHeader
+        title="Settings"
+        eyebrow="Company-wide · changes apply to everyone"
+        className="-mx-4 -mt-4 md:hidden"
+      />
+      <header className="hidden md:block">
         <h1 className="font-heading text-4xl font-bold leading-none text-nav-dark">
           App <span className="split-heading-accent">Settings</span>
         </h1>
@@ -1007,7 +1035,7 @@ export default function SettingsPage() {
         />
       )}
 
-      <SettingsSection id="settings-users" icon={<Users className="w-5 h-5" />} title="Users" action={addUserButton}>
+      <SectionCard id="settings-users" icon={<Users className="w-5 h-5" />} title="Users" action={addUserButton}>
         {usersLoadError ? (
           <LoadFailedState title="Users could not be loaded" onRetry={() => void fetchUsers()} />
         ) : users.length === 0 ? (
@@ -1089,7 +1117,7 @@ export default function SettingsPage() {
             </div>
           </>
         )}
-      </SettingsSection>
+      </SectionCard>
 
       {settingsLoadError ? (
         <Card>
@@ -1100,7 +1128,7 @@ export default function SettingsPage() {
         </Card>
       ) : !settingsLoaded ? null : (
       <>
-      <SettingsSection id="settings-billing" icon={<Receipt className="w-5 h-5" />} title="Billing">
+      <SectionCard id="settings-billing" icon={<Receipt className="w-5 h-5" />} title="Billing">
         {/* Off on live until commission ships (billingM4Enabled). */}
         {billingM4Enabled() && (
           <SubPart
@@ -1223,28 +1251,32 @@ export default function SettingsPage() {
               20260702162000 is applied live (get_ar_reminder_candidates reads
               app_settings.ar_reminder_days). Apply that migration before/with this deploy. */}
           <Row label="Remind when unpaid after" htmlFor="ar-reminder-days">
-            <input
-              id="ar-reminder-days"
-              type="number"
-              min="1"
-              max="3650"
-              inputMode="numeric"
-              value={arReminderDays}
-              onChange={(e) => setArReminderDays(e.target.value)}
-              className={`${FIELD_CLASS} w-24`}
-            />
+            <PhoneStepper label="reminder days" value={arReminderDays} min={1} max={3650} onChange={setArReminderDays}>
+              <input
+                id="ar-reminder-days"
+                type="number"
+                min="1"
+                max="3650"
+                inputMode="numeric"
+                value={arReminderDays}
+                onChange={(e) => setArReminderDays(e.target.value)}
+                className={`${FIELD_CLASS} w-24 ${STEPPER_INPUT}`}
+              />
+            </PhoneStepper>
             <span className="text-[13px] text-secondary">days past due</span>
           </Row>
           <Row label="Quotes valid for" htmlFor="default-valid-days">
-            <input
-              id="default-valid-days"
-              type="number"
-              min="1"
-              inputMode="numeric"
-              value={defaultValidDays}
-              onChange={(e) => setDefaultValidDays(e.target.value)}
-              className={`${FIELD_CLASS} w-24`}
-            />
+            <PhoneStepper label="days quotes are valid" value={defaultValidDays} min={1} onChange={setDefaultValidDays}>
+              <input
+                id="default-valid-days"
+                type="number"
+                min="1"
+                inputMode="numeric"
+                value={defaultValidDays}
+                onChange={(e) => setDefaultValidDays(e.target.value)}
+                className={`${FIELD_CLASS} w-24 ${STEPPER_INPUT}`}
+              />
+            </PhoneStepper>
             <span className="text-[13px] text-secondary">days</span>
           </Row>
           <Row label="Default price tier" htmlFor="default-tier">
@@ -1260,9 +1292,9 @@ export default function SettingsPage() {
             </select>
           </Row>
         </SubPart>
-      </SettingsSection>
+      </SectionCard>
 
-      <SettingsSection id="settings-field" icon={<Sprout className="w-5 h-5" />} title="Field jobs">
+      <SectionCard id="settings-field" icon={<Sprout className="w-5 h-5" />} title="Field jobs">
         {/* §5: Label-rate guardrail mode (WARN by default — never blocks a save). */}
         <SubPart
           title="Label-rate guardrail"
@@ -1431,9 +1463,9 @@ export default function SettingsPage() {
             </div>
           </Row>
         </SubPart>
-      </SettingsSection>
+      </SectionCard>
 
-      <SettingsSection
+      <SectionCard
         id="settings-company"
         icon={<Building2 className="w-5 h-5" />}
         title="Company"
@@ -1486,8 +1518,14 @@ export default function SettingsPage() {
             className={`${FIELD_CLASS} min-w-0 flex-1 basis-64`}
           />
         </Row>
-      </SettingsSection>
+      </SectionCard>
       </>
+      )}
+
+      {phoneSave && (
+        <PinnedAction className="md:hidden" onClick={() => void phoneSave.onClick()} loading={phoneSave.saving}>
+          <Save className="h-5 w-5" aria-hidden="true" /> {phoneSave.label}
+        </PinnedAction>
       )}
 
       <Modal open={userModalOpen} onClose={() => setUserModalOpen(false)} title="Add" accent="User">

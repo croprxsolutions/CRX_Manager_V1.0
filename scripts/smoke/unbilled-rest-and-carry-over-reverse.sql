@@ -1,28 +1,44 @@
 -- Reverse of 20270308170000_unbilled_rest_and_delivery_price_carry_over.sql. Run as one transaction (psql -1).
--- Refuses unless that file's bodies are installed; then restores the three earlier bodies byte for byte
--- (_allocated_delivery_cents from 20260827041100, _create_invoice_for_unbilled_delivery_impl_20260718 from
--- 20261215110000, get_dashboard_action_items from 20261109120000) and drops delivery_billing_remainders.
--- Invoices drafted meanwhile keep their cents. Proven by scripts/smoke/prove-unbilled-rest-and-carry-over-real-schema.mjs.
+-- Refuses unless that file's bodies are installed; then drops the allocation trigger, its function, the view and the
+-- allocation records (derived data: nothing else reads them), puts back the three-argument Create Invoice chain and the
+-- earlier _allocated_delivery_cents and get_dashboard_action_items bodies byte for byte, with their grants. Invoices
+-- drafted meanwhile keep their cents. Proven by scripts/smoke/prove-unbilled-rest-and-carry-over-real-schema.mjs.
 
 CREATE TEMP TABLE unbilled_rest_reverse_tx ON COMMIT DROP AS SELECT pg_current_xact_id()::text AS transaction_id;
 
 DO $reverse_preflight$
+DECLARE
+  v_pin record;
 BEGIN
   -- Under autocommit the ON COMMIT DROP marker is already gone here: refuse before any change.
   IF to_regclass('pg_temp.unbilled_rest_reverse_tx') IS NULL THEN
     RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: run this file as one transaction (psql -1)';
   END IF;
-  IF to_regclass('public.delivery_billing_remainders') IS NULL
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._allocated_delivery_cents(uuid,numeric,uuid)'))
-          IS DISTINCT FROM '280399d95c5581d3114e1673580d3fba'
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)'))
-          IS DISTINCT FROM 'e42c3cce1e7a74f65c1e1400ee5633ef'
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public.get_dashboard_action_items(integer)'))
-          IS DISTINCT FROM 'eb96aacf4dfc840a22df32d6bb549aeb' THEN
+  IF to_regclass('public.delivery_billing_remainders') IS NULL OR to_regclass('public.invoice_order_line_allocations') IS NULL THEN
     RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: 20270308170000 is not what is installed';
   END IF;
+  FOR v_pin IN SELECT * FROM (VALUES
+      ('public._allocated_delivery_cents(uuid,numeric,uuid)', '01eb25c376e2c472e55bed7ff9dcaebf'),
+      ('public._record_invoice_line_allocation()', '81474bdb9170f847f324cac4ce87e090'),
+      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', 'e2566c18809f11f2029121674ecab7f9'),
+      ('public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text)', '4f18fe996393549ebf7d4ee76570188d'),
+      ('public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text)', 'ee18d8501f94a4c34bb71831c767f0a2'),
+      ('public.get_dashboard_action_items(integer)', 'eb96aacf4dfc840a22df32d6bb549aeb')) t(sig, md5)
+  LOOP
+    IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure(v_pin.sig)) IS DISTINCT FROM v_pin.md5 THEN
+      RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: % is not the 20270308170000 body', v_pin.sig;
+    END IF;
+  END LOOP;
 END;
 $reverse_preflight$;
+
+DROP TRIGGER zz_record_invoice_line_allocation ON public.invoice_items;
+DROP FUNCTION public._record_invoice_line_allocation();
+DROP VIEW public.delivery_billing_remainders;
+DROP TABLE public.invoice_order_line_allocations;
+DROP FUNCTION public.create_invoice_for_unbilled_delivery(uuid, uuid, text, text);
+DROP FUNCTION public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid, uuid, text, text);
+DROP FUNCTION public._create_invoice_for_unbilled_delivery_impl_20260718(uuid, uuid, text, text);
 
 CREATE OR REPLACE FUNCTION public._allocated_delivery_cents(p_order_item_id uuid, p_quantity numeric, p_exclude_invoice_id uuid DEFAULT NULL::uuid)
  RETURNS bigint
@@ -55,11 +71,9 @@ BEGIN
     ) - v_prior_cents,
     0);
 END;
-$function$
+$function$;
 
-;
-
-CREATE OR REPLACE FUNCTION public._create_invoice_for_unbilled_delivery_impl_20260718(p_delivery_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
+CREATE FUNCTION public._create_invoice_for_unbilled_delivery_impl_20260718(p_delivery_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -193,9 +207,144 @@ BEGIN
   END IF;
   RETURN v_result;
 END;
-$function$
+$function$;
+REVOKE ALL ON FUNCTION public._create_invoice_for_unbilled_delivery_impl_20260718(uuid, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 
-;
+CREATE FUNCTION public._create_invoice_for_unbilled_delivery_idem_impl_20260721(p_delivery_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_existing jsonb;
+  v_request jsonb;
+  v_result jsonb;
+  v_is_deleted_fulfilled_recovery boolean := false;
+BEGIN
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
+    RAISE EXCEPTION 'ACTOR_MISMATCH';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles
+     WHERE id = v_actor AND is_active = true AND role = 'admin'
+  ) THEN
+    RAISE EXCEPTION 'Admin access required to create an invoice for a delivery';
+  END IF;
+
+  v_request := jsonb_build_object(
+    'version', 1,
+    'delivery_id', p_delivery_id,
+    'actor_id', v_actor
+  );
+
+  IF p_idempotency_key IS NOT NULL THEN
+    v_existing := public.check_idempotency(
+      p_idempotency_key, 'create_invoice_for_unbilled_delivery'
+    );
+    IF v_existing IS NOT NULL THEN
+      IF NOT (v_existing ? 'request' AND v_existing ? 'response') THEN
+        RAISE EXCEPTION 'IDEMPOTENCY_RESULT_FORMAT_INVALID: create_invoice_for_unbilled_delivery';
+      END IF;
+      IF v_existing->'request' IS DISTINCT FROM v_request THEN
+        RAISE EXCEPTION 'IDEMPOTENCY_ARGUMENT_MISMATCH: create_invoice_for_unbilled_delivery key was already used for a different delivery or actor';
+      END IF;
+      RETURN v_existing->'response';
+    END IF;
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1
+      FROM public.deliveries d
+      JOIN public.orders o ON o.id = d.order_id
+     WHERE d.id = p_delivery_id
+       AND d.status = 'completed'
+       AND d.deleted_at IS NULL
+       AND d.customer_id = o.customer_id
+       AND o.deleted_at IS NOT NULL
+       AND o.status IN ('fulfilled', 'partially_fulfilled')
+  ) INTO v_is_deleted_fulfilled_recovery;
+
+  IF v_is_deleted_fulfilled_recovery THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.delivery_items di
+       WHERE di.delivery_id = p_delivery_id
+    ) OR EXISTS (
+      SELECT 1
+        FROM public.delivery_items di
+        LEFT JOIN public.order_items oi ON oi.id = di.order_item_id
+        JOIN public.deliveries d ON d.id = di.delivery_id
+       WHERE di.delivery_id = p_delivery_id
+         AND (
+           oi.id IS NULL
+           OR oi.order_id IS DISTINCT FROM d.order_id
+           OR oi.product_id IS DISTINCT FROM di.product_id
+           OR COALESCE(di.quantity_delivered, 0) <= 0
+           OR di.quantity_delivered > COALESCE(di.quantity, 0)
+         )
+    ) THEN
+      RAISE EXCEPTION 'DELETED_DELIVERY_RECOVERY_ITEMS_INVALID: every historical recovery line must have matching order/product lineage and delivered quantity within its planned quantity';
+    END IF;
+
+    DELETE FROM public.invoice_delivery_recovery_capabilities
+     WHERE transaction_id = txid_current() AND purpose = 'writer';
+    INSERT INTO public.invoice_delivery_recovery_capabilities (
+      transaction_id, purpose, delivery_id, actor_id
+    ) VALUES (txid_current(), 'writer', p_delivery_id, v_actor);
+  END IF;
+
+  BEGIN
+    v_result := public._create_invoice_for_unbilled_delivery_impl_20260718(
+      p_delivery_id, v_actor, NULL
+    );
+  EXCEPTION WHEN OTHERS THEN
+    DELETE FROM public.invoice_delivery_recovery_capabilities
+     WHERE transaction_id = txid_current() AND purpose = 'writer';
+    RAISE;
+  END;
+
+  DELETE FROM public.invoice_delivery_recovery_capabilities
+   WHERE transaction_id = txid_current() AND purpose = 'writer';
+
+  IF p_idempotency_key IS NOT NULL THEN
+    PERFORM public.save_idempotency(
+      p_idempotency_key,
+      'create_invoice_for_unbilled_delivery',
+      jsonb_build_object('request', v_request, 'response', v_result)
+    );
+  END IF;
+  RETURN v_result;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE FUNCTION public.create_invoice_for_unbilled_delivery(p_delivery_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_actor uuid;
+BEGIN
+  IF p_idempotency_key IS NULL OR p_idempotency_key !~ '[^[:space:]]' THEN
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_invoice_for_unbilled_delivery'
+      USING ERRCODE = '22023';
+  END IF;
+  v_actor := auth.uid();
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
+  IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
+    RAISE EXCEPTION 'ACTOR_MISMATCH';
+  END IF;
+  RETURN public._create_invoice_for_unbilled_delivery_idem_impl_20260721(
+    p_delivery_id, p_performed_by, p_idempotency_key
+  );
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.create_invoice_for_unbilled_delivery(uuid, uuid, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.create_invoice_for_unbilled_delivery(uuid, uuid, text) TO authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.get_dashboard_action_items(p_limit integer DEFAULT 5)
  RETURNS jsonb
@@ -454,22 +603,23 @@ BEGIN
 
   RETURN v_result || jsonb_build_object('counts', v_counts);
 END;
-$function$
-
-;
-
-DROP VIEW public.delivery_billing_remainders;
+$function$;
 
 DO $reverse_postflight$
+DECLARE
+  v_pin record;
 BEGIN
-  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._allocated_delivery_cents(uuid,numeric,uuid)'::regprocedure)
-       IS DISTINCT FROM '401b886a577bd0d6ded65a54b74ac759'
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)'::regprocedure)
-       IS DISTINCT FROM '41d6ec7fd81c96b8ab9bc1c1ae679245'
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.get_dashboard_action_items(integer)'::regprocedure)
-       IS DISTINCT FROM 'cd2cc3c9f43d5d9eee85730e06fcfb92' THEN
-    RAISE EXCEPTION 'UNBILLED_REST_REVERSE_FAIL: an earlier body did not come back';
-  END IF;
+  FOR v_pin IN SELECT * FROM (VALUES
+      ('public._allocated_delivery_cents(uuid,numeric,uuid)', '401b886a577bd0d6ded65a54b74ac759'),
+      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)', '41d6ec7fd81c96b8ab9bc1c1ae679245'),
+      ('public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text)', '0a5997370d8e708c2bf87ba4e1b29199'),
+      ('public.create_invoice_for_unbilled_delivery(uuid,uuid,text)', 'a7f2531bd09ea6c650063f9661871caa'),
+      ('public.get_dashboard_action_items(integer)', 'cd2cc3c9f43d5d9eee85730e06fcfb92')) t(sig, md5)
+  LOOP
+    IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure(v_pin.sig)) IS DISTINCT FROM v_pin.md5 THEN
+      RAISE EXCEPTION 'UNBILLED_REST_REVERSE_FAIL: % did not come back', v_pin.sig;
+    END IF;
+  END LOOP;
   RAISE NOTICE 'REVERSE_OK';
 END;
 $reverse_postflight$;

@@ -179,7 +179,7 @@ describe('activeInvoiceCoversDelivery', () => {
     expect(integrityCleanup).toContain('Could not verify invoice coverage — refresh to try again.');
 
     const sharedSource = readFileSync(resolve(root, 'src/lib/deliveryInvoiceCoverage.ts'), 'utf8');
-    expect(sharedSource).toContain(".select('id, order_id, delivery_id, total_amount_cents, invoice_type, status, deleted_at')");
+    expect(sharedSource).toContain(".select('id, order_id, delivery_id, total_amount_cents, invoice_type, status, deleted_at, invoice_group_id')");
     expect(sharedSource).toContain('chunkIds(uniqueOrderIds, INVOICE_COVERAGE_ID_CHUNK_SIZE)');
     expect(sharedSource).toContain(".not('status', 'in', '(\"voided\",\"cancelled\")')");
     expect(sharedSource).toContain(".is('deleted_at', null)");

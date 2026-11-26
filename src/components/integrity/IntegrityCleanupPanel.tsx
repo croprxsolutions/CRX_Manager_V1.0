@@ -42,6 +42,8 @@ interface UnbilledDeliveryRow {
   item_count: number;
   /** A4: an invoice bills this delivery only in part ("4 of 10 not billed ($160.00)"). */
   unbilled_label: string | null;
+  /** What Create draft invoice does here; the server refuses it if that changed (UNBILLED_SCOPE_CHANGED). */
+  scope: 'new' | 'rest_delivery' | 'rest_order' | 'bill_split';
 }
 
 interface ManufacturedRow {
@@ -398,6 +400,7 @@ export default function IntegrityCleanupPanel() {
               filtered.map((d) => {
                 const c = Array.isArray(d.customer) ? d.customer[0] : d.customer;
                 const rest = covered(d) ? remainders.get(d.id) : undefined;
+                const active = invRows.filter((invoice) => activeInvoiceCoversDelivery(invoice, d.id, d.order_id));
                 return {
                   id: d.id,
                   delivery_number: d.delivery_number,
@@ -406,6 +409,9 @@ export default function IntegrityCleanupPanel() {
                   completed_at: d.completed_at,
                   item_count: d.items?.length || 0,
                   unbilled_label: rest ? unbilledRemainderLabel(rest) : null,
+                  scope: !rest ? 'new'
+                    : active.some((invoice) => invoice.delivery_id === d.id && invoice.invoice_group_id) ? 'bill_split'
+                    : active.some((invoice) => invoice.delivery_id === null) ? 'rest_order' : 'rest_delivery',
                 };
               }),
             );
@@ -589,6 +595,7 @@ export default function IntegrityCleanupPanel() {
         p_performed_by: profile.id,
         // eslint-disable-next-line local-rules/idempotency-key-from-hook -- deliberate per-row key; see F2 comment above
         p_idempotency_key: idemKey,
+        p_expected_scope: row.scope === 'bill_split' ? undefined : row.scope,
       });
       if (error) throw error;
       assertRpcResult(data, 'create_invoice_for_unbilled_delivery');
@@ -884,6 +891,7 @@ export default function IntegrityCleanupPanel() {
                     <td className="px-3 py-2 font-mono text-xs">
                       {row.delivery_number}
                       {row.unbilled_label && <div className="font-sans text-amber-700">{row.unbilled_label}</div>}
+                      {row.scope === 'rest_order' && <div className="font-sans text-gray-600">Whole-order invoice: bills every unbilled unit on the order</div>}
                     </td>
                     <td className="px-3 py-2">{row.customer_name}</td>
                     <td className="px-3 py-2 text-gray-700">
@@ -895,7 +903,9 @@ export default function IntegrityCleanupPanel() {
                           this row, so don't offer an action that cannot succeed. Shown
                           disabled rather than hidden so the operator can see WHY the
                           row is listed but not actionable here. */}
-                      {splitBillingOrderIds.has(row.order_id) ? (
+                      {row.scope === 'bill_split' ? (
+                        <span className="text-xs text-amber-700 max-w-xs">Bill Split: void its group, then Create draft invoice bills it in full.</span>
+                      ) : splitBillingOrderIds.has(row.order_id) ? (
                         <div className="flex flex-col gap-1">
                           <Button disabled>Create draft invoice</Button>
                           <span className="text-xs text-amber-700 max-w-xs">

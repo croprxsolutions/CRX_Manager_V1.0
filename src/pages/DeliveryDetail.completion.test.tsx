@@ -505,6 +505,38 @@ describe('Invoices on this sale card', () => {
     expect(within(dialog).getByRole('button', { name: 'Bill the rest' })).toBeInTheDocument();
   });
 
+  it('short-billed: confirming sends the scope the dialog showed', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    tables.data.delivery_billing_remainders = [{ delivery_id: 'del-1', delivered_qty: 10, unbilled_qty: 4, unbilled_cents: 16000 }];
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Bill the rest…' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Bill the rest of this delivery?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Bill the rest' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('create_invoice_for_unbilled_delivery',
+      expect.objectContaining({ p_delivery_id: 'del-1', p_expected_scope: 'rest_delivery' })));
+  });
+
+  it('short-billed Bill Split: no button, says to void the group', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS.map((row) => ({ ...row, invoice_group_id: 'grp-1' })));
+    tables.data.delivery_billing_remainders = [{ delivery_id: 'del-1', delivered_qty: 10, unbilled_qty: 4, unbilled_cents: 16000 }];
+    await renderPage();
+    await screen.findByText(/Billed per payer \(Bill Split\)/);
+    expect(screen.queryByRole('button', { name: /Bill the rest|Create invoice/ })).not.toBeInTheDocument();
+  });
+
+  it('a failed remainder read does not look fully billed', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'delivery_billing_remainders') return buildChain(table);
+      const chain = buildChain(table);
+      chain.then = (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) =>
+        Promise.resolve({ data: null, error: { message: 'timeout' } }).then(ok, bad);
+      return chain;
+    });
+    await renderPage();
+    expect(await screen.findByText('Could not check whether every delivered unit is billed. Refresh the page to check again.')).toBeInTheDocument();
+  });
+
   it('fully billed: no note and no button', async () => {
     useCompletedDeliveryOnOrder(INVOICE_ROWS);
     tables.data.delivery_billing_remainders = [];

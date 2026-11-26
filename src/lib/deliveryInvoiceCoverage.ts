@@ -17,6 +17,8 @@ export interface DeliveryInvoiceCoverage extends InvoiceBillingCoverage {
 export interface ActiveInvoiceCoverageRow extends DeliveryInvoiceCoverage {
   id: string;
   total_amount_cents: number;
+  /** Set on a Bill Split (or field split) group's invoices. */
+  invoice_group_id?: string | null;
 }
 
 const INVOICE_COVERAGE_PAGE_SIZE = 1000;
@@ -38,7 +40,7 @@ export async function fetchActiveInvoiceCoveragePages(orderIds: string[]) {
     for (let from = 0; ;) {
       const { data, error } = await supabase
         .from('invoices')
-        .select('id, order_id, delivery_id, total_amount_cents, invoice_type, status, deleted_at')
+        .select('id, order_id, delivery_id, total_amount_cents, invoice_type, status, deleted_at, invoice_group_id')
         .in('order_id', orderIdChunk)
         .not('status', 'in', '("voided","cancelled")')
         .is('deleted_at', null)

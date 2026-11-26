@@ -83,6 +83,10 @@ BEGIN
     CROSS JOIN (VALUES ('public.watchdog_flags'), ('public.watchdog_flag_dismissals')) t(relation_name)
     WHERE has_any_column_privilege(r.role_name, t.relation_name, 'INSERT, UPDATE')
   ) THEN RAISE EXCEPTION 'Direct browser Watchdog write privilege remains'; END IF;
+  IF NOT has_table_privilege('service_role', 'public.watchdog_flags', 'INSERT')
+    OR NOT has_table_privilege('service_role', 'public.watchdog_flag_dismissals', 'INSERT') THEN
+    RAISE EXCEPTION 'The Watchdog service role lost existing write access';
+  END IF;
 END
 $grants$;
 ${checks}

@@ -477,7 +477,7 @@ These RPCs are called from `src/` but had no entry in this file. Each purpose wa
 
 ### Watchdog and label data
 
-Browser writes to Watchdog flags and dismissals go through `refresh_watchdog_flags` and `dismiss_watchdog_flag`. The table grants are read-only for browser roles.
+Migration `20270308150000` limits browser writes to the existing `refresh_watchdog_flags` and `dismiss_watchdog_flag` functions when applied.
 
 | RPC | Latest definition | Purpose |
 |-----|-------------------|---------|

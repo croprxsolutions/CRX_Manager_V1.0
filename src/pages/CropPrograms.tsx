@@ -84,7 +84,9 @@ export default function CropPrograms() {
   const [formSeason, setFormSeason] = useState(SEASONS[1]);
   const [formItems, setFormItems] = useState<ProgramItem[]>([]);
   const [saving, setSaving] = useState(false);
+  const [formSaving, setFormSaving] = useState(false);
   const savingRef = useRef(false);
+  const writeBusy = saving || formSaving;
 
   const isAdmin = role === 'admin';
   useEffect(() => {
@@ -295,6 +297,7 @@ export default function CropPrograms() {
         }
       },
       toast,
+      setLoading: setFormSaving,
       successMessage: editingProgram ? 'Program updated' : 'Program created',
       sentryTag: editingProgram ? 'update_crop_program' : 'create_crop_program',
       onSuccess: () => {
@@ -339,7 +342,7 @@ export default function CropPrograms() {
         {/* Saving rewrites the whole program list, so it must never start from a list that failed to load.
             (Until a read finishes, the page renders only the loading skeleton above, so no save can start early.) */}
         {isAdmin && !loadError && (
-          <Button icon={<Plus className="w-4 h-4" />} onClick={openNew} disabled={saving}>
+          <Button icon={<Plus className="w-4 h-4" />} onClick={openNew} disabled={writeBusy}>
             New Program
           </Button>
         )}
@@ -359,7 +362,7 @@ export default function CropPrograms() {
                 <p className="text-xs text-gray-400 mt-1">
                   Create a program template to quickly build quotes for common crop applications
                 </p>
-                <Button className="mt-4" icon={<Plus className="w-4 h-4" />} onClick={openNew} disabled={saving}>
+                <Button className="mt-4" icon={<Plus className="w-4 h-4" />} onClick={openNew} disabled={writeBusy}>
                   Create First Program
                 </Button>
               </>
@@ -410,7 +413,7 @@ export default function CropPrograms() {
                     <>
                       <button
                         onClick={() => openEdit(prog)}
-                        disabled={saving}
+                        disabled={writeBusy}
                         className="p-1.5 rounded-lg text-gray-400 hover:text-crx-green hover:bg-crx-green-light transition-colors"
                         title="Edit"
                         aria-label="Edit"
@@ -419,7 +422,7 @@ export default function CropPrograms() {
                       </button>
                       <button
                         onClick={() => handleDuplicate(prog)}
-                        disabled={saving}
+                        disabled={writeBusy}
                         className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                         title="Duplicate"
                         aria-label="Duplicate"
@@ -428,7 +431,7 @@ export default function CropPrograms() {
                       </button>
                       <button
                         onClick={() => setDeleteConfirm(prog.id)}
-                        disabled={saving}
+                        disabled={writeBusy}
                         className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                         title="Delete"
                         aria-label="Delete"
@@ -469,7 +472,7 @@ export default function CropPrograms() {
                     <div className="flex justify-end mt-3">
                       <button
                         onClick={() => toggleActive(prog.id)}
-                        disabled={saving}
+                        disabled={writeBusy}
                         className="text-xs text-secondary hover:text-crx-green underline"
                       >
                         {prog.is_active ? 'Deactivate' : 'Activate'} Program
@@ -490,7 +493,7 @@ export default function CropPrograms() {
         </p>
         <div className="flex justify-end gap-3 mt-6">
           <Button variant="ghost" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
-          <Button variant="secondary" onClick={() => deleteConfirm && handleDelete(deleteConfirm)} loading={saving}>
+          <Button variant="secondary" onClick={() => deleteConfirm && handleDelete(deleteConfirm)} loading={writeBusy}>
             Delete
           </Button>
         </div>
@@ -605,7 +608,7 @@ export default function CropPrograms() {
 
         <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
           <Button variant="ghost" onClick={() => setModalOpen(false)}>Cancel</Button>
-          <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>
+          <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={writeBusy}>
             {editingProgram ? 'Save Changes' : 'Create Program'}
           </Button>
         </div>

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ReceivingLogPanel from '../components/receiving/ReceivingLogPanel';
@@ -9,12 +9,14 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
   from: vi.fn(),
   rpc: vi.fn(),
+  logActivity: vi.fn(),
 }));
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({ role: mocks.role, profile: { id: 'fixture-user' } }),
 }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
+vi.mock('../lib/activityLogger', () => ({ logActivity: mocks.logActivity }));
 vi.mock('../lib/db', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/db')>(),
   supabase: { from: mocks.from, rpc: mocks.rpc },
@@ -26,7 +28,7 @@ const cropProgram = {
   crop_type: 'Corn',
   season: '2026',
   is_active: true,
-  items: [{ product_id: 'fixture-product', product_name: 'Invented Product', rate: 1, rate_unit: 'gal' }],
+  items: [{ product_id: 'fixture-product', product_name: 'Invented Product', rate: 1, rate_unit: 'gal', section_name: 'Pre-Emerge', notes: '' }],
 };
 
 describe('role audit controls', () => {
@@ -34,6 +36,7 @@ describe('role audit controls', () => {
     mocks.role = 'admin';
     mocks.from.mockReset();
     mocks.rpc.mockReset();
+    mocks.logActivity.mockReset();
   });
 
   it('keeps crop templates readable and clears admin dialogs when access is lost', async () => {
@@ -91,5 +94,26 @@ describe('role audit controls', () => {
     expect(screen.getByRole('button', { name: 'Delete', exact: true })).toBeInTheDocument();
     expect(screen.queryByRole('heading', confirmation)).toBeNull();
     expect(mocks.rpc).not.toHaveBeenCalledWith('reverse_receiving_record', expect.anything());
+  });
+
+  it('keeps the crop editor busy until its audit write finishes', async () => {
+    let finishAudit = () => {};
+    mocks.logActivity.mockReturnValue(new Promise<void>((resolve) => { finishAudit = resolve; }));
+    const update = vi.fn(() => ({ eq: () => ({ select: async () => ({ data: [{ id: 'setting' }], error: null }) }) }));
+    const result = { data: { id: 'setting', setting_value: JSON.stringify([cropProgram]) }, error: null };
+    mocks.from.mockReturnValue({
+      update,
+      select: () => ({ eq: () => ({ maybeSingle: async () => result }), order: async () => ({ data: [], error: null }) }),
+    });
+    render(<CropPrograms />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit', exact: true }));
+    const save = screen.getByRole('button', { name: 'Save Changes' });
+    fireEvent.click(save);
+    await waitFor(() => expect(mocks.logActivity).toHaveBeenCalledTimes(1));
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(update).toHaveBeenCalledTimes(1);
+    finishAudit();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });

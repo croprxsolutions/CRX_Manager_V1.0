@@ -1,0 +1,3 @@
+**LOCAL CANDIDATE — NOT APPLIED.** `20270309060000_record_standard_delivery_assignment_notice.sql` (SQL sha256: `e220ea9b2fe1cbe659a9dc9a052c0231dc345ae2aeeb454314e4c39d7713dd99`) records the standard delivery's existing assignment notice when a new delivery saves. It retains the stored recipient and caller, and supports older browser sessions without duplicate notices.
+
+This is database support for the later client transition. Other delivery assignments and notification behaviors remain in their existing workflows. Before rollback after a client transition, restore the compatible client sender, then restore the prior delivery creation function and remove the compatibility trigger through a reviewed migration.

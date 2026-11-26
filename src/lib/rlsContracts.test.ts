@@ -18,10 +18,8 @@
  *    rule breaks. The live-policy gate is the postflight block inside each
  *    migration plus the RLS review agents — not this file.
  *
- * ROLE COVERAGE: the matrix models admin, sales_rep, and driver. `applicator`
- * is a fourth app role and is not represented here; treat driver as the
- * field-role stand-in and verify applicator access against the policies
- * themselves.
+ * ROLE COVERAGE: the matrix models admin, sales_rep, and driver throughout.
+ * Selected tables with a distinct applicator policy include it explicitly.
  *
  * RLS policies in Supabase fail SILENTLY:
  *   - Blocked SELECT returns [] (empty array), not an error
@@ -57,6 +55,7 @@ interface RoleAccess {
   admin: Record<Operation, AccessLevel>;
   sales_rep: Record<Operation, AccessLevel>;
   driver: Record<Operation, AccessLevel>;
+  applicator?: Record<Operation, AccessLevel>;
 }
 
 interface TableRLSContract {
@@ -349,6 +348,7 @@ const RLS_ACCESS_MATRIX: TableRLSContract[] = [
       admin:     { SELECT: 'all', INSERT: 'all', UPDATE: 'all', DELETE: 'none' },
       sales_rep: { SELECT: 'scoped', INSERT: 'none', UPDATE: 'none', DELETE: 'none' },
       driver:    { SELECT: 'scoped', INSERT: 'none', UPDATE: 'none', DELETE: 'none' },
+      applicator: { SELECT: 'scoped', INSERT: 'none', UPDATE: 'none', DELETE: 'none' },
     },
     notes: 'Read access is limited by setting key. Drivers have company details for receipts. Applicators also get the job guardrail and print defaults.',
   },

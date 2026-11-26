@@ -29,7 +29,7 @@ describe('staff settings access', () => {
   it('requires active profiles and preserves the three legitimate access groups', () => {
     expect(policy).toMatch(/\(SELECT public\.is_active_profile\(\)\)/);
     expect(policy).toMatch(/\(SELECT public\.is_admin\(\)\)/);
-    expect(policy).toMatch(/public\.is_driver\(\).*\n\s+AND setting_key IN \('company_name', 'company_phone', 'company_email', 'company_address'\)/);
+    expect(policy).toMatch(/public\.is_sales_rep\(\).*public\.is_driver\(\).*public\.is_applicator\(\).*\n\s+AND setting_key IN \('company_name', 'company_phone', 'company_email', 'company_address'\)/);
     expect(policy).toMatch(/public\.is_sales_rep\(\).*public\.is_applicator\(\).*\n\s+AND setting_key IN \('label_rate_guardrail_mode'/);
     expect(policy).not.toContain("'entity_recipient'");
   });

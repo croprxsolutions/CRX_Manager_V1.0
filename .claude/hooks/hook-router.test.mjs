@@ -9,6 +9,7 @@ import { promptModulesFor } from "./prompt-router.mjs";
 import { postToolModulesFor } from "./posttool-router.mjs";
 import { dirtyWarning, pushDir, pushTargets } from "./post-push-dirty-warning.mjs";
 import { dedupeContextBlocks } from "./hook-router-runtime.mjs";
+import { askTahaAfterSol } from "./taha-ready-after-sol.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -153,7 +154,9 @@ for (const surface of ["claude", "codex"]) {
 }
 eq(postToolModulesFor({ tool_name: "Edit" }, "claude"), ["./posttooluse-migration.mjs", "./eslint-autofix.mjs", "./session-heartbeat.mjs"], "write/edit path is explicit");
 eq(postToolModulesFor({ tool_name: "mcp__supabase__apply_migration" }, "codex"), ["./registry-freshness.mjs", "./applied-snapshot-invalidate.mjs"], "Codex apply path is explicit");
-eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "git -C C:/x push origin HEAD" } }, "codex"), ["./post-push-dirty-warning.mjs"], "a push routes the DIRTY-PR warning");
+eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "git -C C:/x push origin HEAD" } }, "codex"), ["./post-push-dirty-warning.mjs", "./taha-ready-after-sol.mjs"], "a push routes the DIRTY-PR warning and the Taha label check");
+eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "gh pr create --base staging --fill" } }, "codex"), ["./taha-ready-after-sol.mjs"], "opening a PR routes the Taha label check");
+eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "gh pr ready 12" } }, "codex"), ["./taha-ready-after-sol.mjs"], "marking a PR ready routes the Taha label check");
 eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "git status" } }, "codex"), [], "a non-push command does not");
 {
   // Warning only: DIRTY warns, UNKNOWN is retried once, anything else (or a gh failure) is silent.
@@ -212,6 +215,46 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
     configuredHooksFor(codex, toolName).some((hook) => `${hook.command} ${hook.commandWindows || ""}`.includes("production-action-guard.mjs")),
     `configured Codex ${toolName} path invokes the production guard`,
   );
+}
+
+// A clean Sol on a lane PR's current head labels it for Taha (agents kept forgetting; #2610, 2026-11-26).
+{
+  const HEAD = "a".repeat(40);
+  const basePr = { number: 7, state: "OPEN", isDraft: false, isCrossRepository: false, author: { login: "MasonWells" }, headRefName: "claude/x", headRefOid: HEAD, reviews: [] };
+  const laneFiles = ["modified", "src/pages/Quotes.tsx", "", HEAD].join("\t") + "\n";
+  const otherFiles = ["modified", "src/pages/Fields.tsx", "", HEAD].join("\t") + "\n";
+  const attempt = ({ pr = {}, files = laneFiles, clean = true, headSha = HEAD, fail = null } = {}) => {
+    const calls = [];
+    const gh = (args) => {
+      calls.push(args.join(" "));
+      if (args[0] === "pr") return JSON.stringify({ ...basePr, ...pr });
+      if (args.some((a) => a.endsWith("/files?per_page=100"))) return files;
+      if (fail && args.some((a) => a.includes(fail))) throw new Error("HTTP 403");
+      return "{}";
+    };
+    const note = askTahaAfterSol({ cwd: ".", headSha, gh, hasCleanSol: () => clean });
+    return { note, wrote: calls.filter((c) => c.includes("/labels") || c.includes("/requested_reviewers")) };
+  };
+  const done = attempt();
+  ok(done.note.includes("PR #7") && done.wrote.length === 2, "clean Sol + lane + current head: label and review request");
+  ok(done.wrote[0].includes("labels[]=ready-for-taha") && done.wrote[1].includes("reviewers[]=TahaKhanAbdalli"), "the same two calls the bot makes");
+  for (const [why, args] of [
+    ["no clean Sol proof", { clean: false }],
+    ["not in Taha's lane", { files: otherFiles }],
+    ["draft", { pr: { isDraft: true } }],
+    ["Taha's own PR (author)", { pr: { author: { login: "TahaKhanAbdalli" } } }],
+    ["Taha's own PR (branch)", { pr: { headRefName: "taha/billing" } }],
+    ["fork", { pr: { isCrossRepository: true } }],
+    ["closed", { pr: { state: "MERGED" } }],
+    ["proof is for an older head", { headSha: "b".repeat(40) }],
+    ["Taha already reviewed this head", { pr: { reviews: [{ author: { login: "tahakhanabdalli" }, state: "APPROVED", commit: { oid: HEAD } }] } }],
+  ]) {
+    const r = attempt(args);
+    ok(r.note === "" && r.wrote.length === 0, `no label when: ${why}`);
+  }
+  const failed = attempt({ fail: "requested_reviewers" });
+  ok(failed.note.includes("could not label") && failed.note.includes("gh pr edit 7 --add-label ready-for-taha --add-reviewer TahaKhanAbdalli"), "a gh failure prints one line with the manual command, never throws");
+  ok(askTahaAfterSol({ cwd: ".", headSha: HEAD, gh: () => { throw new Error("no PR"); }, hasCleanSol: () => true }) === "", "no PR yet: silent");
 }
 
 console.log(`hook-router: ${pass} assertions passed`);

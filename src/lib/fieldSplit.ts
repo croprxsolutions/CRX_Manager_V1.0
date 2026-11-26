@@ -66,6 +66,20 @@ export function payerNoteChanges(
     .map((id) => ({ customer_id: id, notes: (notes[id] ?? '').trim() || null }));
 }
 
+/** Payers whose note this save changes but someone else changed after the page loaded (a warning, never a block).
+ * Skips a note already equal to the user's, and one whose newer text the user already saw and chose to replace. */
+export function staleNoteIds(
+  changes: Array<{ customer_id: string; notes: string | null }>,
+  loaded: Record<string, string>, latest: Record<string, string>, acknowledged: Record<string, string> = {},
+): string[] {
+  return changes
+    .filter(({ customer_id: id, notes }) => {
+      const theirs = (latest[id] ?? '').trim();
+      return theirs !== (loaded[id] ?? '').trim() && theirs !== (notes ?? '') && theirs !== acknowledged[id];
+    })
+    .map((c) => c.customer_id);
+}
+
 const SHARES_MUST_MATCH = 'For now each payer\'s product and application shares must be the same; different shares come with the next billing update.';
 
 const SERVER_MESSAGES: Array<[string, string]> = [

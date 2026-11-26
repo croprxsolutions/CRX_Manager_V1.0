@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  clearSplitSaveKey, evenMicroShares, payerNoteChanges, microToPctText, pctTextToMicro, splitProblem, splitSaveErrorMessage, splitSaveKey,
+  clearSplitSaveKey, evenMicroShares, payerNoteChanges, microToPctText, staleNoteIds, pctTextToMicro, splitProblem, splitSaveErrorMessage, splitSaveKey,
 } from './fieldSplit';
 
 describe('field split shares (micro-percent)', () => {
@@ -44,6 +44,18 @@ describe('payer note changes', () => {
     expect(payerNoteChanges(['a'], { a: 'old', b: 'landlord, call first', c: 'typed then removed' }, saved))
       .toEqual([{ customer_id: 'b', notes: 'landlord, call first' }]);
     expect(payerNoteChanges(['a'], { a: ' old ', b: 'landlord' }, saved)).toEqual([]);
+  });
+});
+
+describe('stale payer notes (warning only)', () => {
+  const change = [{ customer_id: 'a', notes: 'mine' }];
+  it('flags a note someone else changed since load; not one already equal to mine or already acknowledged', () => {
+    expect(staleNoteIds(change, { a: 'old' }, { a: 'theirs' })).toEqual(['a']);
+    expect(staleNoteIds(change, { a: 'old' }, {})).toEqual(['a']); // cleared elsewhere
+    expect(staleNoteIds(change, { a: 'old' }, { a: ' old ' })).toEqual([]);
+    expect(staleNoteIds(change, { a: 'old' }, { a: 'mine' })).toEqual([]);
+    expect(staleNoteIds(change, { a: 'old' }, { a: 'theirs' }, { a: 'theirs' })).toEqual([]);
+    expect(staleNoteIds(change, { a: 'old' }, { a: 'newest' }, { a: 'theirs' })).toEqual(['a']);
   });
 });
 

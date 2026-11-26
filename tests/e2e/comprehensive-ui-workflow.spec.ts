@@ -643,8 +643,9 @@ test.describe.serial('Comprehensive UI Workflow (12 Acts)', () => {
       r => r.url().includes('/rpc/convert_quote_to_order'), { timeout: 20000 }
     ).catch(() => null);
 
-    const convertClicked = await btnIfVisible(page, /Convert to Order/i);
+    const convertClicked = await btnIfVisible(page, /Draw from booking/i);
     if (convertClicked) {
+      await page.getByRole('menuitem', { name: 'Whole booking' }).click().catch(() => {});
       await waitForPageStable(page, 1000);
       // Handle dialog confirmation
       const dialogBtn = page.getByRole('dialog').getByRole('button', { name: /Create Order/i }).first();

@@ -13,6 +13,8 @@ import { quoteLineChange } from './quoteNotes';
 import type { ProductRatePerAcre, UseTimingOption } from '../types';
 import type { Json } from '../types/supabase';
 import { addChemistryWorkbookSheets, parseChemistryWorkbook, type ParsedChemistryWorkbook, type SetupWorkbookChemistryExport } from './productSetupChemistryWorkbook';
+import type { BrandDocumentWorkspaceRow } from './brandDocuments';
+import { addBrandDocumentSheet, parseBrandDocumentSheet, type ParsedBrandDocuments } from './productSetupBrandDocumentsWorkbook';
 
 /**
  * WP-PM-11a-2: the setup workbook, separate from the price workbook. A Setup tab for product details
@@ -173,6 +175,7 @@ export interface ParsedSetupWorkbook {
   /** The grouping of the downloaded products when the file was made. */
   membershipHash: string;
   chemistry: ParsedChemistryWorkbook;
+  brandDocuments?: ParsedBrandDocuments;
 }
 
 /** Grouped size id -> its parent's name. */
@@ -300,6 +303,7 @@ async function styleSheet(sheet: Worksheet, headers: readonly string[], rowCount
  */
 export async function generateSetupWorkbook(
   exported: SetupWorkbookExport, options: readonly UseTimingOption[], parents: readonly ProductParent[], chemistry?: SetupWorkbookChemistryExport,
+  brandDocuments?: BrandDocumentWorkspaceRow[],
 ): Promise<Blob> {
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
@@ -367,6 +371,7 @@ export async function generateSetupWorkbook(
   ]);
 
   if (chemistry) addChemistryWorkbookSheets(workbook, chemistry);
+  addBrandDocumentSheet(workbook, brandDocuments);
 
   const buffer = await workbook.xlsx.writeBuffer();
   return new Blob([new Uint8Array(buffer as unknown as ArrayBuffer)], { type: PRICING_WORKBOOK_MIME });
@@ -467,7 +472,8 @@ export async function parseSetupWorkbook(arrayBuffer: ArrayBuffer): Promise<Pars
     });
   const chemistry = formatVersion === SETUP_WORKBOOK_FORMAT_VERSION
     ? parseChemistryWorkbook(workbook) : { weightRows: [], ingredientRows: [], issues: [], openProposalParentIds: [] };
-  return { setupRows, rateRows, parentRateRows, membershipHash, chemistry };
+  const brandDocuments = parseBrandDocumentSheet(workbook);
+  return { setupRows, rateRows, parentRateRows, membershipHash, chemistry, ...(brandDocuments ? { brandDocuments } : {}) };
 }
 
 /** Parent Rates rows the person edited, compared with what they downloaded. */

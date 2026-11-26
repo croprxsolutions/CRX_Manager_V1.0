@@ -1,5 +1,5 @@
-import { assertRpcResult, supabaseUntyped } from './db';
-import type { ProductWeight, ProductWeightEvent, ProductWeightSource, WeightUnitFactors } from '../types';
+import { assertRpcResult, hasRpcCode, RpcErrorCodes, supabaseUntyped } from './db';
+import type { LiquidDensityBrand, LiquidDensityReview, ProductWeight, ProductWeightEvent, ProductWeightSource, WeightUnitFactors } from '../types';
 
 // DM-2 (20261207100000_product_weights): weight per gallon on a liquid's parent and net weight per pack
 // on a dry size stocked in Ea/Unit. These RPCs are not in the generated types yet.
@@ -12,6 +12,18 @@ export const WEIGHT_SOURCES: ReadonlyArray<{ value: ProductWeightSource; label: 
 ];
 const SOURCE_TEXT: Record<string, string> = { measured: 'measured', sds: 'the SDS', label: 'the label', supplier: 'the supplier', unit: 'its stock unit' };
 export const sourceText = (source: string | null | undefined) => (source ? SOURCE_TEXT[source] ?? source : 'an unknown source');
+
+export function weightContextChanged(error: unknown): boolean {
+  return [
+    RpcErrorCodes.PRODUCT_WEIGHT_STALE,
+    RpcErrorCodes.PRODUCT_WEIGHT_BASIS_CHANGED,
+    RpcErrorCodes.PRODUCT_WEIGHT_BRANDS_CHANGED,
+    RpcErrorCodes.PRODUCT_WEIGHT_NOT_ELIGIBLE,
+    RpcErrorCodes.PRODUCT_WEIGHT_NOT_LIQUID,
+    RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_NOT_OPEN,
+    RpcErrorCodes.PRODUCT_WEIGHT_REVIEW_RELOAD,
+  ].some((code) => hasRpcCode(error, code));
+}
 
 /** Trust order, highest first (measured > SDS > label > supplier); same as `_product_weight_trust_rank`. */
 const TRUST: Record<ProductWeightSource, number> = { measured: 4, sds: 3, label: 2, supplier: 1 };
@@ -165,6 +177,54 @@ export async function approveWeightDraft(subject: WeightSubject, draftId: string
   });
   if (error) throw error;
   return assertRpcResult<unknown>(data, 'approve_weights');
+}
+
+export async function fetchLiquidDensityReview(parentId: string): Promise<LiquidDensityReview> {
+  const { data, error } = await supabaseUntyped.rpc('get_liquid_density_review', { p_parent_id: parentId });
+  if (error) throw error;
+  return assertRpcResult<LiquidDensityReview>(data, 'get_liquid_density_review');
+}
+
+export async function submitLiquidDensityDraft(write: WeightWrite): Promise<WeightWriteResult> {
+  const { data, error } = await supabaseUntyped.rpc('submit_liquid_density_draft', {
+    p_parent_id: write.subject.subject_id,
+    p_expected_version: write.subject.version,
+    p_value: write.value,
+    p_unit: write.unit,
+    p_source: write.source,
+    p_source_note: write.note.trim() || null,
+    p_reason: write.correction?.reason ?? null,
+    p_evidence: write.correction?.evidence ?? null,
+    p_idempotency_key: write.key,
+  });
+  if (error) throw error;
+  return assertRpcResult<WeightWriteResult>(data, 'submit_liquid_density_draft');
+}
+
+export async function approveLiquidDensityDraft(subject: WeightSubject, draftId: string,
+  brands: LiquidDensityBrand[], allBrandsMatch: boolean, key: string): Promise<void> {
+  const { data, error } = await supabaseUntyped.rpc('approve_liquid_density_draft', {
+    p_parent_id: subject.subject_id,
+    p_draft_id: draftId,
+    p_expected_version: subject.version,
+    p_reviewed_brands: brands,
+    p_all_brands_match: allBrandsMatch,
+    p_idempotency_key: key,
+  });
+  if (error) throw error;
+  assertRpcResult<unknown>(data, 'approve_liquid_density_draft');
+}
+
+export async function rejectLiquidDensityDraft(subject: WeightSubject, draftId: string, reason: string, key: string): Promise<void> {
+  const { data, error } = await supabaseUntyped.rpc('reject_liquid_density_draft', {
+    p_parent_id: subject.subject_id,
+    p_draft_id: draftId,
+    p_expected_version: subject.version,
+    p_reason: reason,
+    p_idempotency_key: key,
+  });
+  if (error) throw error;
+  assertRpcResult<unknown>(data, 'reject_liquid_density_draft');
 }
 
 /** The weight history of one parent (density) or size (net weight), newest first. */

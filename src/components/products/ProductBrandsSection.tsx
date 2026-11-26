@@ -7,12 +7,15 @@ import Input from '../ui/Input';
 import Modal from '../ui/Modal';
 import Select from '../ui/Select';
 import EpaLabelLink from './EpaLabelLink';
+import BrandDocuments from './BrandDocuments';
 import LabelAdjuvants from './LabelAdjuvants';
 import ProductSearchPicker from './ProductSearchPicker';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
+import { useLoad } from '../../hooks/useLoad';
 import { useLatestRef } from '../../hooks/useLatestRef';
 import { logActivity } from '../../lib/activityLogger';
+import { readBrandDocumentLinks, readBrandDocumentWorkspace } from '../../lib/brandDocuments';
 import { hasRpcCode, RpcErrorCodes } from '../../lib/db';
 import { lookupEpaRegistration } from '../../lib/epaLookupClient';
 import {
@@ -51,6 +54,8 @@ interface ProductBrandsSectionProps {
   onAdjuvantsSaved?: () => void;
   /** Told the brand list's state so the page banner covers brand numbers too: undefined while loading, null when the read failed. */
   onBrandsChange?: (productId: string, brands: ProductBrand[] | null | undefined) => void;
+  /** Brand and document edits can change the roster or SDS shown on the Weight card. */
+  onWeightReviewChange?: () => void;
 }
 
 interface BrandDraft {
@@ -145,7 +150,7 @@ function isClearRefusal(err: unknown): boolean {
 
 export default function ProductBrandsSection({
   productId, productName, isAdmin, userId, cancelled, registrations, registrationLookup = 'checking', canEditAdjuvants = false,
-  onAdjuvantsSaved, onBrandsChange,
+  onAdjuvantsSaved, onBrandsChange, onWeightReviewChange,
 }: ProductBrandsSectionProps) {
   const { toast } = useToast();
   const [brands, setBrands] = useState<ProductBrand[]>([]);
@@ -154,6 +159,18 @@ export default function ProductBrandsSection({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const brandIds = brands.map((brand) => brand.id);
+  const documents = useLoad(!loading && !loadError && brandIds.length > 0
+    ? JSON.stringify([userId, isAdmin, productId, parent?.id, brandIds, reloadToken]) : null, async () => {
+    const parentBrand = parent !== null;
+    if (!isAdmin) return readBrandDocumentLinks(brandIds, parentBrand);
+    const workspace = await readBrandDocumentWorkspace(false, brandIds);
+    return workspace.filter((brand) => brand.parent_brand === parentBrand).flatMap((brand) => brand.links);
+  });
+  const reloadBrands = () => {
+    setReloadToken((token) => token + 1);
+    onWeightReviewChange?.();
+  };
   const onBrandsChangeRef = useLatestRef(onBrandsChange);
   useEffect(() => {
     onBrandsChangeRef.current?.(productId, loading ? undefined : loadError ? null : brands);
@@ -347,7 +364,7 @@ export default function ProductBrandsSection({
       // Reload after every attempt: a reply lost after the save committed must not leave a stale list.
       // Marked loading at once, so new creates stay off until the reload shows what was saved.
       setLoading(true);
-      setReloadToken((token) => token + 1);
+      reloadBrands();
     }
   };
 
@@ -438,7 +455,7 @@ export default function ProductBrandsSection({
         setCopySelected((current) => new Set([...current].filter((id) => !copiedIds.has(id))));
       }
       setCopying(false);
-      setReloadToken((token) => token + 1);
+      reloadBrands();
     }
   };
 
@@ -487,7 +504,7 @@ export default function ProductBrandsSection({
       ) : loadError ? (
         <div className="flex items-center gap-3 text-sm text-red-600" role="alert">
           <span>Couldn’t load brands: {loadError}</span>
-          <Button size="sm" variant="secondary" onClick={() => setReloadToken((token) => token + 1)}>Try again</Button>
+          <Button size="sm" variant="secondary" onClick={reloadBrands}>Try again</Button>
         </div>
       ) : brands.length === 0 ? (
         <p className="text-sm text-secondary">No brands listed yet.</p>
@@ -503,6 +520,7 @@ export default function ProductBrandsSection({
                 <th scope="col" className="py-2 pr-3">Restricted use</th>
                 <th scope="col" className="py-2 pr-3">Signal word</th>
                 <th scope="col" className="py-2 pr-3">Status</th>
+                <th scope="col" className="py-2 pr-3">Manufacturer documents</th>
                 {isAdmin && <th scope="col" className="py-2"><span className="sr-only">Actions</span></th>}
               </tr>
             </thead>
@@ -534,6 +552,22 @@ export default function ProductBrandsSection({
                     <Badge variant={brand.is_currently_sourced ? 'success' : 'default'} size="sm">
                       {brand.is_currently_sourced ? 'Sourced' : 'Not sourced'}
                     </Badge>
+                  </td>
+                  <td className="py-2 pr-3">
+                    {documents.status === 'loaded' && !documents.stale ? (
+                      <BrandDocuments target={{ id: brand.id, parent_brand: parent !== null, brand_version: brand.row_version }}
+                        brandName={brand.brand_name} userId={userId ?? ''} canEdit={isAdmin}
+                        links={documents.data.filter((link) => (link.parent_brand_id ?? link.legacy_brand_id) === brand.id)}
+                        onReload={(includeBrand) => {
+                          if (includeBrand) reloadBrands();
+                          else {
+                            onWeightReviewChange?.();
+                            void documents.reload();
+                          }
+                        }} />
+                    ) : documents.status === 'failed' || documents.status === 'loaded' ? (
+                      <Button variant="secondary" size="sm" onClick={() => void documents.reload()}>Retry links</Button>
+                    ) : <span className="text-secondary">Loading links…</span>}
                   </td>
                   {isAdmin && (
                     <td className="py-2 text-right">

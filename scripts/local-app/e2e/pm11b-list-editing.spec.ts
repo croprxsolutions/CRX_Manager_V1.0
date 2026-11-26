@@ -47,7 +47,7 @@ test('edit mode shows a page of rows, keeps edits across pages, and warns before
   await page.getByRole('button', { name: 'Next' }).click();
   await expect(page.getByText('Showing 51–60 of 60')).toBeVisible();
   await expect(page.getByText('1 unsaved not shown')).toBeVisible();
-  await page.screenshot({ path: 'scripts/local-app/.state/pm11b-edit-page-2.png' });
+  await page.screenshot({ path: test.info().outputPath('pm11b-edit-page-2.png') });
 
   await page.getByText('Supplier Pricing').first().click();
   await page.getByRole('button', { name: 'Keep editing' }).click();
@@ -76,7 +76,7 @@ test.describe('on a phone', () => {
     await expect(page.getByRole('button', { name: /^Download/ }).first()).toBeVisible();
     const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(pageWidth).toBeLessThanOrEqual(390);
-    await page.screenshot({ path: 'scripts/local-app/.state/pm11b-phone.png' });
+    await page.screenshot({ path: test.info().outputPath('pm11b-phone.png') });
 
     await list.getByText(`${prefix} 001`).click();
     await expect(page).toHaveURL(/\/products\/[0-9a-f-]{36}$/);

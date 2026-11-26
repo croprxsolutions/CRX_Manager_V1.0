@@ -127,6 +127,21 @@ describe('EditableDataTable', () => {
       expect(screen.getByPlaceholderText('Search...')).toBeInTheDocument();
     });
 
+    it('reports the search text to onSearchChange, starting empty on every mount', () => {
+      const onSearchChange = vi.fn();
+      const { unmount } = render(
+        <EditableDataTable data={testData} columns={columns} rowKey="id" searchable searchKeys={['name']} onSearchChange={onSearchChange} />
+      );
+      expect(onSearchChange).toHaveBeenLastCalledWith('');
+      fireEvent.change(screen.getByPlaceholderText('Search...'), { target: { value: 'Product B' } });
+      expect(onSearchChange).toHaveBeenLastCalledWith('Product B');
+      unmount();
+      render(
+        <EditableDataTable data={testData} columns={columns} rowKey="id" searchable searchKeys={['name']} onSearchChange={onSearchChange} />
+      );
+      expect(onSearchChange).toHaveBeenLastCalledWith('');
+    });
+
     it('does not show search input when searchable is false', () => {
       render(<EditableDataTable data={testData} columns={columns} rowKey="id" />);
       expect(screen.queryByPlaceholderText('Search...')).not.toBeInTheDocument();

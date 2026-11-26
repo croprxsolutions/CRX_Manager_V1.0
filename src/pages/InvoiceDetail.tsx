@@ -26,6 +26,7 @@ import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { assertInvoiceSendable } from '../lib/invoiceSendDisposition';
 import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, type InvoiceBillTo } from '../lib/invoiceBulkEmail';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useSaveShortcut } from '../hooks/useSaveShortcut';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import PriceInput from '../components/invoices/PriceInput';
@@ -52,6 +53,7 @@ import { brandDeliveryIds, brandPostWarningText, invoiceBrandWarnings, type Bran
 import { hasRepeatedBrandTrip, invoiceBrandNotes } from '../../supabase/functions/_shared/brandNotes.ts';
 import { loadDeliveryPicks } from '../lib/deliveryBrandPaper';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
+import NextDraftButton from '../components/invoices/NextDraftButton';
 import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
 import { dueDateFromTerms } from '../lib/paymentTerms';
 import WriteOffModal from '../components/invoices/WriteOffModal';
@@ -424,6 +426,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('error', 'This invoice has not finished loading. Wait a moment, then post again.');
       return;
     }
+    const checkedFor = activeInvoiceIdRef.current;
     postIdem.resetKey();
     let warning: string | null = null;
     // Brand PR B-3: the saved lines' delivered brands. With no unsaved edits (checked above) `items` is the saved copy.
@@ -526,6 +529,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('error', 'The delivered brands could not be checked, so the invoice was not posted. Try again.');
       return;
     }
+    // The page moved to another invoice while this one was checked: its warnings are not that invoice's.
+    if (activeInvoiceIdRef.current !== checkedFor) return;
     setRupPostWarning(warning);
     setBrandPostWarning(brandWarning);
     setShowPostConfirm(true);
@@ -2124,6 +2129,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       ).slice(0, 10)
     : [];
 
+  // Ctrl+S / Cmd+S presses Save changes, only while that button is shown and can be clicked.
+  useSaveShortcut(handleSave, editable && !loading && !(!isNew && id && loadFailedId === id) && !saving && !addingProduct && !postFlowBusy);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -2168,6 +2176,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                 {thisPayerIndex >= 0 ? `Split invoice ${thisPayerIndex + 1} of ${billSplitPayers.length}` : 'Split invoice'}
               </span>
             )}
+            {!isNew && <NextDraftButton currentId={id} disabled={postFlowBusy} />}
           </div>
           {subtitle && <p className="mt-1 text-sm text-secondary">{subtitle}</p>}
         </div>

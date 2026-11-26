@@ -10,8 +10,11 @@
 //
 // Mason can still let ONE named PR through: the merge refusal issues a 6-digit
 // code for that PR at its current head, and his chat message `taha override #<PR> <code>`
-// (taha-lane-prompt.mjs) turns it into a 24-hour override for that PR at that head
-// only: a later push needs a new code (Taha's review of #2303). When it is used the
+// (taha-lane-prompt.mjs) turns it into a 24-hour override for that PR, later pushes
+// included (Mason, 2026-11-25), except on a PR that changes the block's own wiring
+// (BLOCK_FILES_RE): there it covers only the head it was issued for, as agreed on #2303.
+// On a live apply it stands in for Taha only when Mason's line also says Taha is
+// unavailable (`... unavailable: <reason>`, Mason 2026-11-25). When it is used the
 // gate itself tells Taha on the PR, or refuses. An agent cannot mint a
 // working code: only a request this guard wrote counts. Same accepted residual as
 // coderabbit-skip-lib.mjs: an agent that runs the prompt hook by hand with a forged
@@ -66,7 +69,7 @@ const LANE_FILE_PREFIXES = [
 const STRONG_LANE_WORDS = new Set(["quote", "quotes", "hold", "holds", "prepay", "prepayment", "prepayments", "booking", "bookings", "booked"]);
 
 // The block's own wiring: a PR that edits or unhooks it needs Mason's code too (Taha's review of #2303).
-const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router|sol-risk-lib)\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
+const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router|sol-risk-lib|migration-landing-gate-lib|migration-apply-lib|migration-apply-guard|teammate-comments-lib)\.mjs|scripts\/apply-migration-file\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
 
 /** True when this changed file is app or database code in Taha's lane (and not field billing), or the block itself. */
 export function isTahaLanePath(name) {
@@ -82,9 +85,16 @@ function isFieldBillingName(name) {
   return isFieldBilling(words) && !words.some((w) => STRONG_LANE_WORDS.has(w));
 }
 
+// Supplier quotes are Mason's purchasing lane, not customer quotes (Taha, 2026-11-25, after #2524).
+// Only inside one path segment, so src/pages/supplier/Quotes.tsx stays Taha's (desk review of #2548, LOW 1).
+const dropSupplierQuotes = (name) => String(name).split("/").flatMap((segment) => {
+  const words = wordsOf(segment);
+  return words.filter((w, i) => !(/^quotes?$/.test(w) && words[i - 1] === "supplier"));
+});
+
 function isLaneName(name) {
   if (isFieldBillingName(name)) return false;
-  const words = wordsOf(name);
+  const words = dropSupplierQuotes(name);
   return isBill(words) || words.some((w, i) => LANE_WORDS.has(w) || (w === "write" && /^offs?$/.test(words[i + 1] ?? "")));
 }
 
@@ -299,26 +309,157 @@ export const TAHA_ID = "50602678";
  * (`baseChangedAt`, ISO time or ""): a retarget keeps the head but changes the code that merges.
  */
 export function tahaApprovedHead(rows, headSha, baseChangedAt = "") {
-  if (!usableHead(headSha)) return false;
-  const verdict = (rows || []).filter((r) => String(r?.id || "") === TAHA_ID
-    && ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(r?.state)).at(-1);
-  if (verdict?.state !== "APPROVED" || String(verdict.commit || "").toLowerCase() !== headSha.toLowerCase()) return false;
-  if (!baseChangedAt) return true;
-  const approvedAt = Date.parse(verdict.at);
-  return Number.isFinite(approvedAt) && approvedAt > Date.parse(baseChangedAt);
+  return usableHead(headSha) && tahaApprovedCommit(rows, baseChangedAt) === headSha.toLowerCase();
 }
 
-/** Taha's reviews and the PR's base changes read from GitHub, fed to tahaApprovedHead. Any read error → false (refuse). */
+/** The commit Taha's standing Approve is on (lower case), under the same rules as tahaApprovedHead, or null. */
+export function tahaApprovedCommit(rows, baseChangedAt = "") {
+  const verdict = (rows || []).filter((r) => String(r?.id || "") === TAHA_ID
+    && ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(r?.state)).at(-1);
+  if (verdict?.state !== "APPROVED" || !usableHead(verdict.commit)) return null;
+  if (baseChangedAt) {
+    const approvedAt = Date.parse(verdict.at);
+    if (!(Number.isFinite(approvedAt) && approvedAt > Date.parse(baseChangedAt))) return null;
+  }
+  return verdict.commit.toLowerCase();
+}
+
+// Mason, 2026-11-25: Taha's Approve of an older commit still counts when the PR's own change is the same
+// now. Pushes that only catch up with staging, change only files under docs/, or restamp a migration (only its
+// own migration stamp changed, old -> new, in names and text; Luna r1) leave it so; any other change needs him again.
+// shortcut: a staging catch-up that changes how the PR's unchanged code behaves is not seen (Mason accepted, 2026-11-25).
+// shortcut: a file whose git mode alone changes (e.g. to a symlink) is not seen; same honest-mistake net (Luna r1, deferred).
+// Date-shaped (YYYYMMDDhhmmss, 2000-2099), never part of a decimal. Not \b: a stamp is followed by "_" in names.
+const STAMP_RE = /(?<!\d|\d\.)20\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:[01]\d|2[0-3])[0-5]\d[0-5]\d(?!\d|\.\d)/g;
+const unstamped = (text) => String(text ?? "").replace(STAMP_RE, "<stamp>");
+const COMPARE_MAX_FILES = 300; // GitHub's compare lists at most 300 files: at that size, refuse.
+const MAX_CONTENT_READS = 20;
+const isNote = (name) => /^docs\//i.test(String(name ?? ""));
+const isMigration = (name) => /^supabase\/migrations\/[^/]+\.sql$/i.test(String(name ?? ""));
+// Only a migration's path loses its stamp (Sol: two differently dated code paths are different files).
+const pathKey = (name) => (isMigration(name) ? unstamped(name) : String(name));
+
+/** The PR's own changes (GitHub compare `files`) keyed by stamp-free path, docs/ left out; null when unusable. */
+export function ownChanges(files) {
+  if (!Array.isArray(files) || files.length >= COMPARE_MAX_FILES) return null;
+  const out = new Map();
+  for (const f of files) {
+    const name = String(f?.filename ?? "");
+    if (!name) return null;
+    if (isNote(name) && (!f.previous_filename || isNote(f.previous_filename))) continue;
+    const key = pathKey(name);
+    if (out.has(key)) return null;
+    const from = f.previous_filename ? `renamed from ${pathKey(f.previous_filename)}` : "";
+    out.set(key, { status: f.status === "removed" ? "removed" : `present ${from}`, sha: String(f.sha ?? "").toLowerCase(), name });
+  }
+  return out;
+}
+
+/** Old stamp -> new stamp, read off the PR's own files whose names differ only by stamp (the restamp); null when inconsistent. */
+export function restampMap(before, after) {
+  if (!before || !after) return null;
+  const map = new Map();
+  for (const [key, a] of before) {
+    const b = after.get(key);
+    // Only a migration file names a restamp (Luna r3: any other renamed file with a date in its name does not).
+    if (!b || !isMigration(a.name) || !isMigration(b.name)) continue;
+    const [x, y] = [String(a.name ?? "").match(STAMP_RE) || [], String(b.name ?? "").match(STAMP_RE) || []];
+    if (x.length !== y.length) return null;
+    for (let i = 0; i < x.length; i++) {
+      if (x[i] === y[i]) continue;
+      if (map.has(x[i]) && map.get(x[i]) !== y[i]) return null;
+      map.set(x[i], y[i]);
+    }
+  }
+  return map;
+}
+
+/** [beforeBlob, afterBlob] pairs whose text must match once stamps are blanked; null when the change differs. */
+export function ownChangePairs(before, after) {
+  if (!before || !after) return null;
+  const pairs = [];
+  for (const key of new Set([...before.keys(), ...after.keys()])) {
+    const a = before.get(key);
+    const b = after.get(key);
+    if (!a || !b || a.status !== b.status) return null;
+    if (a.sha === b.sha) continue;
+    if (a.status === "removed" || !usableHead(a.sha) || !usableHead(b.sha)) return null;
+    pairs.push([a.sha, b.sha]);
+  }
+  return pairs.length > MAX_CONTENT_READS ? null : pairs;
+}
+
+// Sol HIGH: a catch-up whose conflict resolution keeps the PR's copy of a file silently drops staging's change to
+// it, yet the PR's file is unchanged. So when the branch point moved, staging must not have touched any PR file.
+function stagingLeftOwnFilesAlone({ repoPath, gh, from, to, files }) {
+  if (!usableHead(from) || !usableHead(to)) return false;
+  if (from.toLowerCase() === to.toLowerCase()) return true;
+  const moved = JSON.parse(String(gh(["api", `${repoPath}/compare/${from}...${to}`, "--jq",
+    "{status, files: (if .files == null then null else [.files[] | .filename, (.previous_filename // empty)] end), count: (.files // [] | length)}"])));
+  if (moved?.status !== "ahead" || !Array.isArray(moved.files) || moved.count >= COMPARE_MAX_FILES) return false;
+  const own = new Set(files.filter((f) => !isNote(f.filename) || (f.previous_filename && !isNote(f.previous_filename)))
+    .flatMap((f) => [f.filename, f.previous_filename].filter(Boolean)));
+  return !moved.files.some((name) => own.has(name));
+}
+
+function sameOwnChange({ repoPath, gh, pullRequest, from, to }) {
+  const base = String(gh(["api", `${repoPath}/pulls/${pullRequest}`, "--jq", ".base.ref"])).trim();
+  if (!/^[\w.-]+(?:\/[\w.-]+)*$/.test(base)) return false;
+  // base...commit is the PR's own diff at that commit (against where it branched off the base).
+  // A reply without `files` is unusable (null), never an empty change (Sol).
+  const compare = (commit) => JSON.parse(String(gh(["api", `${repoPath}/compare/${base}...${commit}`, "--jq",
+    "{mb: .merge_base_commit.sha, files: (if .files == null then null else [.files[] | {filename, status, sha, previous_filename}] end)}"])));
+  const [old, now] = [compare(from), compare(to)];
+  const [before, after] = [ownChanges(old?.files), ownChanges(now?.files)];
+  const pairs = ownChangePairs(before, after);
+  const restamps = restampMap(before, after);
+  if (!pairs || !restamps) return false;
+  if (!stagingLeftOwnFilesAlone({ repoPath, gh, from: old.mb, to: now.mb, files: [...old.files, ...now.files] })) return false;
+  const bytes = (sha) => Buffer.from(String(gh(["api", `${repoPath}/git/blobs/${sha}`, "--jq", ".content"])).replace(/\s+/g, ""), "base64");
+  // Only the PR's own restamp may differ in text (Luna r1: any other date-shaped number is a real change),
+  // and only in real UTF-8 text; anything else must match byte for byte.
+  const text = (buf) => { try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch { return null; } };
+  // shortcut: a code value equal to the PR's own migration stamp, moved in step with the restamp, carries over;
+  // real restamps rewrite bare stamp mentions in src/ and scripts/ comments (#2557), so all files are normalized
+  // (Luna r2, refuted; tighten only if a real code value ever matches a migration stamp).
+  const restamped = (t) => t.replace(STAMP_RE, (s) => restamps.get(s) ?? s);
+  return pairs.every(([a, b]) => {
+    const [x, y] = [bytes(a), bytes(b)];
+    const [tx, ty] = [text(x), text(y)];
+    return tx !== null && ty !== null ? restamped(tx) === restamped(ty) : x.equals(y);
+  });
+}
+
+/**
+ * Taha's reviews and the PR's base changes read from GitHub: his standing Approve of this head, or of an older
+ * commit whose own change is the same (sameOwnChange). Any read error → false (refuse).
+ */
+// The repo's rulesets dismiss stale reviews on every push, so GitHub lists an Approve of an older commit as
+// DISMISSED. Those, and only those, still count as his Approve here: the timeline records them as an
+// approval dismissed by a push (a commit) with no message; a person dismissing one must give a message.
+export function pushDismissedApprovals(events) {
+  return new Set((events || []).filter((e) => e?.event === "review_dismissed" && e.state === "approved" && !e.message
+    && usableHead(e.commit) && /^\d+$/.test(String(e.review ?? ""))).map((e) => String(e.review)));
+}
+
 export function tahaApprovedOnGitHub({ repo, gh, pullRequest, headSha }) {
   const repoPath = ghApiRepoPath(repo);
-  if (!repoPath || !usablePr(pullRequest)) return false;
+  if (!repoPath || !usablePr(pullRequest) || !usableHead(headSha)) return false;
   try {
+    const events = String(gh(["api", "--paginate", `${repoPath}/issues/${pullRequest}/timeline?per_page=100`, "--jq",
+      '.[] | select(.event == "base_ref_changed" or .event == "automatic_base_change_succeeded" or .event == "review_dismissed") | ' +
+      '[.event, (.created_at // ""), (.dismissed_review.review_id // "" | tostring), (.dismissed_review.state // ""), ' +
+      '(.dismissed_review.dismissal_message // ""), (.dismissed_review.dismissal_commit_id // "")] | @tsv'])).split(/\r?\n/).filter(Boolean)
+      .map((line) => { const [event, at, review, state, message, commit] = line.split("\t"); return { event, at, review, state, message, commit }; });
+    const baseChangedAt = events.filter((e) => e.event !== "review_dismissed").map((e) => e.at).filter(Boolean).sort().at(-1) || "";
+    const pushDismissed = pushDismissedApprovals(events);
     const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${pullRequest}/reviews?per_page=100`, "--jq",
-      '.[] | [(.user.id // "" | tostring), .state, (.commit_id // ""), (.submitted_at // "")] | @tsv'])).split(/\r?\n/).filter(Boolean)
-      .map((line) => { const [id, state, commit, at] = line.split("\t"); return { id, state, commit, at }; });
-    const baseChangedAt = String(gh(["api", "--paginate", `${repoPath}/issues/${pullRequest}/timeline?per_page=100`, "--jq",
-      '.[] | select(.event == "base_ref_changed" or .event == "automatic_base_change_succeeded") | .created_at'])).split(/\r?\n/).filter(Boolean).sort().at(-1) || "";
-    return tahaApprovedHead(rows, headSha, baseChangedAt);
+      '.[] | [(.user.id // "" | tostring), .state, (.commit_id // ""), (.submitted_at // ""), (.id // "" | tostring)] | @tsv'])).split(/\r?\n/).filter(Boolean)
+      .map((line) => { const [id, state, commit, at, review] = line.split("\t");
+        return { id, state: state === "DISMISSED" && pushDismissed.has(review) ? "APPROVED" : state, commit, at }; });
+    const approved = tahaApprovedCommit(rows, baseChangedAt);
+    if (!approved) return false;
+    return approved === headSha.toLowerCase() || sameOwnChange({ repoPath, gh, pullRequest, from: approved, to: headSha });
   } catch { return false; }
 }
 
@@ -345,7 +486,7 @@ const live = (data, maxAge, now) => {
  * request for the same PR and head, else writes a new one to every folder in
  * `dirs`. null when none could be saved (the refusal then says so; the block holds).
  */
-export function issueTahaLaneCode({ dirs, pullRequest, headSha, now = Date.now(), newCode = () => String(randomInt(0, 1_000_000)).padStart(6, "0") }) {
+export function issueTahaLaneCode({ dirs, pullRequest, headSha, kind = "merge", now = Date.now(), newCode = () => String(randomInt(0, 1_000_000)).padStart(6, "0") }) {
   if (!usablePr(pullRequest) || !usableHead(headSha)) return null;
   headSha = headSha.toLowerCase();
   for (const dir of dirs || []) {
@@ -354,11 +495,12 @@ export function issueTahaLaneCode({ dirs, pullRequest, headSha, now = Date.now()
     for (const n of names) {
       if (!/^taha-lane-request-\d{6}\.json$/.test(n)) continue;
       const data = readSmall(path.join(dir, n));
-      if (data?.pullRequest === pullRequest && data?.headSha === headSha && live(data, TAHA_LANE_CODE_MAX_AGE_MS, now)) return data.code;
+      if (data?.pullRequest === pullRequest && data?.headSha === headSha && (data?.kind ?? "merge") === kind && live(data, TAHA_LANE_CODE_MAX_AGE_MS, now)) return data.code;
     }
   }
   const code = newCode();
-  const payload = { pullRequest, headSha, code, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_CODE_MAX_AGE_MS).toISOString() };
+  // `kind` (Sol, PR 1): only a code a live-apply refusal issued can become a live-apply override.
+  const payload = { pullRequest, headSha, code, kind, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_CODE_MAX_AGE_MS).toISOString() };
   let wrote = 0;
   for (const dir of dirs || []) {
     try {
@@ -372,11 +514,13 @@ export function issueTahaLaneCode({ dirs, pullRequest, headSha, now = Date.now()
 }
 
 // The WHOLE message must be the command, naming the PR Mason means (a phone may capitalise it or add a period).
-const COMMAND_RE = /^\s*taha\s+override\s+#(\d{1,7})\s+(\d{6})\s*[.!]?\s*$/i;
-/** { pullRequest, code } when the whole message is `taha override #<PR> <code>`, else null. */
+// An optional `unavailable: <reason>` (one line) records that Mason has said Taha is unavailable.
+const COMMAND_RE = /^\s*taha\s+override\s+#(\d{1,7})\s+(\d{6})(?:\s+unavailable:[ \t]*([^\s\u2028\u2029][^\r\n\u2028\u2029]{0,199}?))?\s*[.!]?\s*$/i;
+/** { pullRequest, code } (plus `tahaUnavailable` when it says why Taha can't) when the whole message is the command, else null. */
 export const tahaOverrideCommand = (reply) => {
   const m = COMMAND_RE.exec(String(reply ?? ""));
-  return m ? { pullRequest: Number(m[1]), code: m[2] } : null;
+  if (!m || (m[3] && !/[\p{L}\p{N}]/u.test(m[3]))) return null; // a reason of punctuation alone says nothing (Sol, PR 1)
+  return m[3] ? { pullRequest: Number(m[1]), code: m[2], tahaUnavailable: m[3].trim() } : { pullRequest: Number(m[1]), code: m[2] };
 };
 /** True when the message mentions the command but is not exactly it. */
 export const tahaOverrideAttempt = (reply) => !tahaOverrideCommand(reply) && /\btaha\s+override\b/i.test(String(reply ?? ""));
@@ -385,7 +529,7 @@ export const tahaOverrideAttempt = (reply) => !tahaOverrideCommand(reply) && /\b
  * Turn Mason's code into a 24-hour override for the PR and head it was issued
  * for. The PR he named must be that PR. Returns { ok: true, payload } or { ok: false, reason }.
  */
-export function recordTahaLaneOverride({ dirs, pullRequest, code, now = Date.now() }) {
+export function recordTahaLaneOverride({ dirs, pullRequest, code, tahaUnavailable, now = Date.now() }) {
   if (!/^\d{6}$/.test(String(code ?? ""))) return { ok: false, reason: "the code is not 6 digits" };
   if (!usablePr(pullRequest)) return { ok: false, reason: "the message names no PR" };
   let request = null;
@@ -395,7 +539,10 @@ export function recordTahaLaneOverride({ dirs, pullRequest, code, now = Date.now
   }
   if (!request) return { ok: false, reason: `no live merge-block code ${code} was found (it may be mistyped, used, or more than 24 hours old)` };
   if (request.pullRequest !== pullRequest) return { ok: false, reason: `code ${code} was issued for #${request.pullRequest}, not #${pullRequest}` };
-  const payload = { pullRequest: request.pullRequest, headSha: request.headSha, code, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_OVERRIDE_MAX_AGE_MS).toISOString() };
+  const unavailable = typeof tahaUnavailable === "string" && tahaUnavailable.trim();
+  if (unavailable && request.kind !== "apply") return { ok: false, reason: `code ${code} came from a staging merge refusal; "unavailable:" needs the code a live-apply refusal gives` };
+  const payload = { pullRequest: request.pullRequest, headSha: request.headSha, code, kind: request.kind === "apply" ? "apply" : "merge", issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_OVERRIDE_MAX_AGE_MS).toISOString(),
+    ...(unavailable ? { tahaUnavailable: unavailable.slice(0, 200) } : {}) };
   let wrote = 0;
   for (const dir of dirs || []) {
     try {
@@ -408,20 +555,41 @@ export function recordTahaLaneOverride({ dirs, pullRequest, code, now = Date.now
   return wrote ? { ok: true, payload } : { ok: false, reason: "the override could not be saved" };
 }
 
-/** Mason's live override for this PR at exactly this head, or null. */
-export function findTahaLaneOverride({ dirs, pullRequest, headSha, now = Date.now() }) {
-  if (!usablePr(pullRequest) || !usableHead(headSha)) return null;
+/**
+ * Mason's live override for this PR, or null. It covers every later push to the PR for its 24 hours
+ * (Mason, 2026-11-25: one message per PR, not per commit), unless `oneHead`: then only `headSha`.
+ */
+export function findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead = false, accept = () => true, now = Date.now() }) {
+  if (!usablePr(pullRequest)) return null;
+  if (oneHead && !usableHead(headSha)) return null;
   for (const dir of dirs || []) {
     const data = readSmall(path.join(dir, overrideName(pullRequest)));
-    if (data?.pullRequest === pullRequest && data?.headSha === headSha.toLowerCase() && live(data, TAHA_LANE_OVERRIDE_MAX_AGE_MS, now)) return data;
+    if (data?.pullRequest === pullRequest && usableHead(data?.headSha) && live(data, TAHA_LANE_OVERRIDE_MAX_AGE_MS, now) &&
+      (!oneHead || data.headSha.toLowerCase() === headSha.toLowerCase()) && accept(data)) return data;
   }
   return null;
 }
 
-function markTahaTold({ dirs, override }) {
+/**
+ * The override a live apply may use in place of Taha: only one where Mason said Taha is unavailable (Mason, 2026-11-25),
+ * and only for the head it was issued for (the 24-hour carry over pushes is for staging merges; Luna, PR 1 round 1).
+ */
+export function findTahaUnavailableOverride({ dirs, pullRequest, headSha, now = Date.now() }) {
+  return findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead: true, now,
+    accept: (data) => data.kind === "apply" && typeof data.tahaUnavailable === "string" && Boolean(data.tahaUnavailable.trim()) });
+}
+
+/** Records on the override that Taha was told (tahaToldAt for a merge; tahaToldApplyFor, the migrations, for a live apply). */
+export function markTahaTold({ dirs, override, field = "tahaToldAt", value = new Date().toISOString() }) {
   for (const dir of dirs || []) {
     const file = path.join(dir, overrideName(override.pullRequest));
-    try { if (existsSync(file)) writeFileSync(file, `${JSON.stringify({ ...override, tahaToldAt: new Date().toISOString() }, null, 2)}\n`, "utf8"); } catch { /* the next try posts again */ }
+    try {
+      // Re-read: a newer override (another code) is left alone, and earlier receipts are kept (Sol, PR 1).
+      const current = readSmall(file);
+      if (current?.code !== override.code || current?.headSha !== override.headSha) continue;
+      const merged = Array.isArray(value) ? [...new Set([...(Array.isArray(current[field]) ? current[field] : []), ...value])] : value;
+      writeFileSync(file, `${JSON.stringify({ ...current, [field]: merged }, null, 2)}\n`, "utf8");
+    } catch { /* the next try posts again */ }
   }
 }
 
@@ -436,14 +604,15 @@ export function tellTahaOnGitHub({ repo, gh, pullRequest, body }) {
 
 /**
  * The merge gates' single call: null when the merge may go on, otherwise the
- * refusal text. `tahaApproved()` true (Taha signed off on this head) lets it through.
- * With Mason's override for this PR and head, `tellTaha(body)`
+ * refusal text. `tahaApproved()` true (Taha's Approve stands for this head) lets it through.
+ * With Mason's override for this PR (any head, 24 hours; only its own head when the PR changes the
+ * block's wiring, #2303), `tellTaha(body)`
  * must post the PR comment first (once per override); if it can't, the merge is refused.
  */
 export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, tahaApproved = () => false, notice = () => {} }) {
   const problem = tahaLaneProblem({ files });
   if (!problem) return null;
-  // Taha's Approve on this exact head lets lane code through. Not an unreadable file list, a migration
+  // Taha's standing Approve (tahaApprovedOnGitHub) lets lane code through. Not an unreadable file list, a migration
   // whose SQL could not be read, or the block's own files.
   // Unreadable SQL is checked on the raw entries: a lane-named migration is listed by name, never with the suffix (Astra, 2026-11-24).
   const unreadableSql = !Array.isArray(files) || files.some((e) => e && "sql" in e && e.sql === null);
@@ -451,10 +620,12 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
     notice(`${prefix}: TAHA LANE: Taha approved #${pullRequest} at ${String(headSha).slice(0, 12)}; it may go on to the next gate.\n`);
     return null;
   }
-  const override = findTahaLaneOverride({ dirs, pullRequest, headSha, now });
+  // An unreadable or cut-short list can't show it leaves the wiring alone, so it gets the one-head rule too.
+  const wiring = !problem.files.length || problem.files.some((f) => BLOCK_FILES_RE.test(f));
+  const override = findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead: wiring, now });
   if (override) {
     if (!override.tahaToldAt) {
-      const body = `@TahaKhanAbdalli Mason's override of the Taha lane block was used for a merge attempt on this PR at \`${override.headSha}\` ` +
+      const body = `@TahaKhanAbdalli Mason's override of the Taha lane block was used for a merge attempt on this PR at \`${String(headSha).toLowerCase()}\` ` +
         `(his code ${override.code}, valid until ${override.expiresAt}). The other merge checks still apply, so this attempt may still be refused; ` +
         `the PR's own merged state is the record of whether it landed. It ${problem.reason}.`;
       if (!tellTaha(body)) {
@@ -462,16 +633,16 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
       }
       markTahaTold({ dirs, override });
     }
-    notice(`${prefix}: TAHA LANE OVERRIDDEN BY MASON for #${pullRequest} at ${override.headSha}; Taha was told on the PR.\n`);
+    notice(`${prefix}: TAHA LANE OVERRIDDEN BY MASON for #${pullRequest} at ${String(headSha).slice(0, 12)}; Taha was told on the PR.\n`);
     return null;
   }
   const code = issueTahaLaneCode({ dirs, pullRequest, headSha, now });
   return `${prefix}: TAHA LANE BLOCK — #${pullRequest || "?"} is refused because ${problem.reason}. ` +
     "Agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) without Taha's " +
-    "GitHub Approve on this exact commit, and never change this block without Mason's code (Mason, 2026-11-22 and 2026-11-24). " +
+    "GitHub Approve (it carries over pushes that only catch up with staging, change only docs/ or restamp a migration), and never change this block without Mason's code (Mason, 2026-11-22 and 2026-11-24). " +
     `Request his review (gh pr edit ${pullRequest || "<n>"} --add-reviewer TahaKhanAbdalli) and wait for his Approve. ` +
     (code
       ? `Only if Mason wants it merged anyway: tell him why in one line and ask him to send, as a message of its own: taha override #${pullRequest} ${code} ` +
-        "(it covers this PR at its current commit only; a new push needs a new code)"
+        (wiring ? "(it covers this PR at this commit only, because it changes this block's own files)" : "(it covers this PR, later pushes included, for 24 hours)")
       : "The override code could not be saved, so only Taha can land it.");
 }

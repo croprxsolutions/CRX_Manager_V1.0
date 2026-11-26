@@ -4,7 +4,7 @@ import { expect, test, type Page } from '@playwright/test';
 // same review as the product page. Emulated phone size in Chromium, not a real iPhone. Invented data only.
 const run = Date.now();
 const phone = { width: 375, height: 812 };
-const shot = (name: string) => `scripts/local-app/.state/${name}.png`;
+const shot = (name: string) => test.info().outputPath(`${name}.png`);
 
 async function signIn(page: Page) {
   await page.goto('/login');

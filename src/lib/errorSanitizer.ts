@@ -5,6 +5,7 @@
  */
 
 const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
+  [/^PRODUCT_WEIGHT_REVIEW_NOT_OPEN\b/, 'Nothing was saved. Weight review changed. Check the current Weight card before trying again'],
   // M9 (20270301180000): a Prepayment Manager check's amount is locked; a check with an application is not deleted.
   [/^PREPAY_CHECK_AMOUNT_LOCKED\b/, "Nothing was saved. A prepayment check's amount cannot be edited. To correct a mistyped check, delete the whole check and enter it again"],
   [/^PREPAY_OVERPAYMENT_LOCKED\b/, "Nothing was saved. An overpayment's amount comes from its payment, so it cannot be edited or deleted here. To undo it, void the payment"],
@@ -13,6 +14,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. Stock can go only into Main Warehouse until transfers between warehouses exist. Choose Main Warehouse and try again'],
   // #2000 (20270201120000): an inactive customer gets no new orders, deliveries, holds or spray jobs.
   [/^CUSTOMER_INACTIVE_NEW_WORK\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added'],
+  // #2089 (20270308130000): no sales invoice is created or posted, and no invoice restored or moved, for an inactive customer (credit memos and payment corrections allowed).
+  [/^CUSTOMER_INACTIVE_POSTING\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them'],
   // 20270226213000 (#2331): a delivery line's quantities must be finite numbers.
   [/violates check constraint "delivery_items_quantity(_delivered)?_finite_chk"/, 'Nothing was saved. Delivery quantities must be ordinary numbers. Reload the delivery and enter them again'],
   [/violates check constraint "inventory_holds_source_needs_customer"/, 'Nothing was saved. A stock hold for a spray job or quote must name its customer'],
@@ -20,6 +23,10 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Product price sheet: the server refuses a used, expired or someone else's sheet, or a sheet listing a product twice.
   [/^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/,
    'No prices were changed. This price sheet can no longer be used: it was already applied, is more than 7 days old, came from an older template, or was downloaded by another user. Download a fresh price sheet and make your changes in it'],
+  // Supplier Pricing (phase 1b upsert_product_supplier_link): a link needs SKU, price unit and pack description.
+  [/^SUPPLIER_LINK_REUSE_FIELDS_REQUIRED\b/,
+   'Nothing was saved. Fill in Supplier SKU, Supplier price unit and Supplier pack description, then save the link again'],
+  [/^SUPPLIER_PRODUCT_NAME_REQUIRED\b/, 'Nothing was saved. Fill in Supplier Product name, then save the link again'],
   // Supplier Pricing (20270305200000): bounds that keep the converted cost per inventory unit a sane number.
   [/^SUPPLIER_CONVERSION_INVALID\b|violates check constraint "product_supplier_links_conversion_floor"/,
    'Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals'],
@@ -111,6 +118,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Reps work with any customer (2026-10-13, migration 20261013220000) with these exceptions.
   [/^REP_CANNOT_REASSIGN\b/i,
    'Only an admin can change which sales rep a customer is assigned to'],
+  // Mason 2026-11-25 (20270309010000): no commission payout batch is created or paid until M16 is live.
+  [/^COMMISSION_PAYOUTS_OFF_UNTIL_M16\b/,
+   'Nothing was created or paid. Commission payouts are switched off until commission-on-payment (M16) is live. Voiding an existing payment still works'],
   // Admin-only since 2026-10-14 (migration 20261027080200).
   [/^COMMISSION_SPLIT_ADMIN_ONLY\b/i,
    "Only an admin can set or change a customer's default commission split"],
@@ -364,6 +374,12 @@ function deliveryCapReason(message: string): string | null {
   return null;
 }
 
+/** create/post_commission_payment refused: payouts are off until M16 (20270309010000); nothing was created or paid. */
+export function isCommissionPayoutsOff(error: unknown): boolean {
+  const message = typeof error === 'string' ? error : (error as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && /^COMMISSION_PAYOUTS_OFF_UNTIL_M16\b/.test(message);
+}
+
 export function sanitizeError(error: unknown): string {
   if (!error) return 'An unexpected error occurred';
 
@@ -380,6 +396,11 @@ export function sanitizeError(error: unknown): string {
     return message.slice('PRODUCT_INACTIVE'.length).replace(/^:\s*/, '').trim()
       || 'This product is turned off. Ask an admin to reactivate it.';
   }
+  if (/^BRAND_(?:DOCUMENT_)?CHANGED:/.test(message)) return 'This brand or link changed. Review it and try again.';
+  if (/^BRAND_DOCUMENT_(?:URL_INVALID|URL_BLOCKED|REASON_REQUIRED|GROUP_CONFLICT|MOVE_CONFLICT|IDENTITY_CHANGED):/.test(message)) {
+    return message.slice(message.indexOf(':') + 1).replace(/\p{Cc}+/gu, ' ').trim();
+  }
+  if (message === 'BRAND_DOCUMENT_INVALID') return 'Check the document link, state and expiration date, then try again.';
   if (/^PRODUCT_DEACTIVATION_BLOCKED(?::|$)/.test(message)) {
     return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
       || 'This product cannot be turned off while required work is open. Review its blockers.';
@@ -531,7 +552,7 @@ export function sanitizeError(error: unknown): string {
     return `Nothing was saved. Other open deliveries for this order already hold ${overActive[1]} of this product, so only ${overActive[2]} more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.`;
   }
   // Partial completion figures (20270203120000, #1942), completing past the order (F05) and proof taken for another
-  // load (20270308230000): the server sentence says what to do.
+  // load (20270309170000): the server sentence says what to do.
   const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER|DELIVERY_NOTHING_DELIVERED|DELIVERY_LOAD_CHANGED|PAPER_TICKET_LOAD_CHANGED|LEFT_AT_SITE_LOAD_CHANGED):\s*(.+)$/s);
   if (deliveryQuantities) {
     // The server sentences start lowercase (they follow the token); start the second sentence with a capital,

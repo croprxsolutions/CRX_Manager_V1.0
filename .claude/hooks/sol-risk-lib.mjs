@@ -51,6 +51,9 @@ export const SOL_REQUIRED_PATHS = Object.freeze([
   "src/components/receiving/",
   "src/components/integrity/",
   "src/components/field-app/",
+  // The locked agent-safety lines and the check that enforces them (Mason, 2026-11-25).
+  "scripts/agent-guidance-locks.json",
+  "scripts/check-agent-guidance.mjs",
 ]);
 
 // GitHub's compare lists at most 300 files and says nothing when it stops.

@@ -15,6 +15,7 @@ vi.mock('react-router-dom', async () => vi.importActual('react-router'));
 const H = vi.hoisted(() => ({
   mockFrom: vi.fn(), mockToast: vi.fn(), mockUpdate: vi.fn(),
   getParent: vi.fn(), createParent: vi.fn(), addSize: vi.fn(),
+  fetchParentEpaNumbers: vi.fn(),
 }));
 
 vi.mock('../lib/db', async () => {
@@ -34,6 +35,10 @@ vi.mock('../lib/productParents', async (orig) => ({
   getParentOfProduct: H.getParent,
   createProductWithParent: H.createParent,
   addProductSize: H.addSize,
+}));
+vi.mock('../lib/epaProposals', async (orig) => ({
+  ...(await orig<typeof import('../lib/epaProposals')>()),
+  fetchParentEpaNumbers: H.fetchParentEpaNumbers,
 }));
 vi.mock('../lib/costFields', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/costFields')>()),
@@ -119,6 +124,7 @@ describe('ProductDetail — parents (PAR-1)', () => {
     H.getParent.mockResolvedValue(parent);
     H.createParent.mockResolvedValue({ parent_id: 'parent-1', parent_version: 4, product_id: 'aaaaaaaa-0000-4000-8000-000000000002', event_id: 1 });
     H.addSize.mockResolvedValue({ parent_id: 'parent-1', parent_version: 4, product_id: 'aaaaaaaa-0000-4000-8000-000000000002', event_id: 1 });
+    H.fetchParentEpaNumbers.mockResolvedValue([]);
   });
 
   it('a grouped size reads category, timings, EPA and rates from its parent, and never saves them', async () => {
@@ -224,6 +230,20 @@ describe('ProductDetail — parents (PAR-1)', () => {
     expect(H.mockUpdate).not.toHaveBeenCalled();
     expect(H.mockToast).toHaveBeenCalledWith('success', 'Product created. Now set its prices.');
     expect(H.mockToast).not.toHaveBeenCalledWith('error', expect.stringMatching(/notes/i));
+  });
+
+  it("uses a group's brand EPA number when showing setup for a new size", async () => {
+    const parentWithBrandEpa = { ...parent, generic_epa_registration: null };
+    H.getParent.mockResolvedValue(parentWithBrandEpa);
+    H.fetchParentEpaNumbers.mockResolvedValue(['524-475']);
+
+    renderAt('/products/aaaaaaaa-0000-4000-8000-000000000001');
+    await parentLoaded();
+    fireEvent.click(screen.getByRole('button', { name: 'Add a size' }));
+
+    const setupMessage = await screen.findByText(/Still needed for complete setup:/);
+    await waitFor(() => expect(H.fetchParentEpaNumbers).toHaveBeenCalledWith('parent-1'));
+    expect(setupMessage).not.toHaveTextContent('EPA number');
   });
 
   it('Add a size is disabled for a product with no parent, and New product stays available', async () => {

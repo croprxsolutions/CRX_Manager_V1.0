@@ -619,7 +619,7 @@ try {
   });
   assert.match(afterDec15.reason ?? "", /TAHA LANE BLOCK/, "the lane block has no end date (Mason, 2026-11-24)");
   // Taha's Approve on this exact head lets it on to the next gate, with no code (Mason, 2026-11-24).
-  // Reviews come back as "account id, state, commit, time"; the timeline read lists base-branch changes.
+  // Reviews come back as "account id, state, commit, time"; the timeline read lists base-branch changes (event, time, …).
   const tahaGh = (commit, baseChanges = "") => (args) => {
     if (args.some((a) => /\/reviews/.test(a))) return `50602678\tAPPROVED\t${commit}\t2026-11-24T15:00:00Z\n`;
     if (args.some((a) => /\/timeline/.test(a))) return baseChanges;
@@ -633,7 +633,7 @@ try {
   assert.doesNotMatch(tahaApprovedMerge.reason ?? "", /TAHA LANE/, "Taha's Approve on the head clears the lane block");
   const tahaApprovedRetargeted = evaluateProductionAction({
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo, nowMs: laneNow, prFiles: quoteFiles,
-    runGh: tahaGh(ordinaryHead, "2026-11-24T16:00:00Z\n"),
+    runGh: tahaGh(ordinaryHead, "base_ref_changed\t2026-11-24T16:00:00Z\t\t\t\t\n"),
   });
   assert.match(tahaApprovedRetargeted.reason ?? "", /TAHA LANE BLOCK/, "a base-branch change after his Approve refuses");
   const tahaApprovedOld = evaluateProductionAction({
@@ -2377,22 +2377,38 @@ try {
   // Backtracking on the new word walk, for the same reason the block above
   // measures it: a stalled PreToolUse hook is a timed-out hook, and silence
   // means ALLOW. Unterminated quotes are the shape that can force a re-scan.
-  for (const pathological of [
-    `gh api ${'"'.repeat(20000)} -X POST repos/o/r/issues/1/comments`,
-    `gh api ${"'".repeat(20000)} -X POST repos/o/r/issues/1/comments`,
-    `gh pr merge 1 ${"\\\"".repeat(10000)}`,
-    `gh api ${'a""'.repeat(6000)} -X POST repos/o/r/issues/1/comments`,
+  // Measured as growth, not a wall-clock cap, so a slow or busy machine cannot
+  // fail it: 8x the input costs about 8x when linear and 64x when quadratic.
+  // The 5s backstop catches a linear-but-huge slowdown; the hook's own timeout
+  // is 255 seconds (.codex/hooks.json), and a normal run here takes ~5-15ms.
+  const fastestEvaluationMs = (command) => {
+    let fastest = Infinity;
+    for (let run = 0; run < 5; run += 1) {
+      const started = process.hrtime.bigint();
+      // No repoDir: the merge shape would spend a noisy 100-300ms in git
+      // subprocesses that hide the splitter's own growth.
+      evaluateProductionAction({
+        toolName: "PowerShell",
+        toolInput: { command },
+        nowMs: now,
+        runGh: () => objectedPrJson,
+      });
+      fastest = Math.min(fastest, Number(process.hrtime.bigint() - started) / 1e6);
+    }
+    return fastest;
+  };
+  for (const [label, pathological] of [
+    ["unterminated double quotes", (n) => `gh api ${'"'.repeat(n)} -X POST repos/o/r/issues/1/comments`],
+    ["unterminated single quotes", (n) => `gh api ${"'".repeat(n)} -X POST repos/o/r/issues/1/comments`],
+    ["escaped double quotes", (n) => `gh pr merge 1 ${"\\\"".repeat(n / 2)}`],
+    ["empty quoted pairs", (n) => `gh api ${'a""'.repeat(n / 3)} -X POST repos/o/r/issues/1/comments`],
   ]) {
-    const started = process.hrtime.bigint();
-    evaluateProductionAction({
-      toolName: "PowerShell",
-      toolInput: { command: pathological },
-      repoDir: risky.repo,
-      nowMs: now,
-      runGh: () => objectedPrJson,
-    });
-    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
-    assert.ok(elapsedMs < 250, `shell word splitting stays linear on adversarial quoting (${elapsedMs.toFixed(1)}ms)`);
+    const smallMs = fastestEvaluationMs(pathological(3000));
+    const largeMs = fastestEvaluationMs(pathological(24000));
+    assert.ok(
+      largeMs < smallMs * 24 && largeMs < 5000,
+      `shell word splitting stays linear on adversarial quoting: ${label} (3000 chars ${smallMs.toFixed(1)}ms, 24000 chars ${largeMs.toFixed(1)}ms)`,
+    );
   }
 
   // Both directions. The last of these is the case CodeRabbit raised on PR #630:

@@ -3,7 +3,7 @@
 // One command for a feature branch whose migration stamp went stale while its PR waited for staging
 // (2026-11-23: four PRs re-dated by hand in one day). It renames the .sql and its migrations.d record
 // to a new stamp (npm run next-migration-stamp unless --to), swaps the old stamp in the files this
-// branch already changes, updates the SQL header's link to its record and the record's SQL sha256 pin,
+// branch already changes, updates the SQL header's link to its record (and a header line that is only its name) and the record's SQL sha256 pin,
 // renames its key in supabase/baselines/one-shot-migrations.json when it is a one-shot data migration,
 // commits, then runs `write-codex-push-proof.mjs --carry-restamp` so a clean Sol proof carries with no
 // model run. The SQL body is never touched. Pushing stays with the caller. Hotfix/release branches
@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { codexPushProofPath, ONE_SHOT_LIST } from "./write-codex-push-proof.mjs";
+import { codexPushProofPath, ONE_SHOT_LIST, restampHeaderLine } from "./write-codex-push-proof.mjs";
 
 const BASE = "origin/staging";
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -96,11 +96,13 @@ if (oneShotParts.length === 2 && oneShotParts.join("").includes(`"${newStem}"`))
 const reviewed = git("rev-parse", "HEAD");
 if (!existsSync(codexPushProofPath(process.cwd(), reviewed))) console.error(`note: no Sol proof for ${reviewed.slice(0, 12)} in this worktree; the restamp commits, but nothing will carry.`);
 
-// The SQL: only its leading comment header's link to its own record changes; the body keeps every byte.
+// The SQL: only its leading comment header's link to its own record and a line that is only its name change;
+// the body keeps every byte. --restamp-from (apply proofs) needs byte-identical SQL, so a moved line there
+// needs a fresh apply review; a live-apply restamp of a migration with neither uses the plain rename.
 const sqlText = readFileSync(oldSql, "latin1");
 const sqlLines = sqlText.split("\n");
 const bodyStart = sqlLines.findIndex((line) => line.trim() !== "" && !line.trimStart().startsWith("--"));
-const newSqlText = sqlLines.map((line, i) => (bodyStart === -1 || i < bodyStart ? line.split(`migrations.d/${oldStem}.md`).join(`migrations.d/${newStem}.md`) : line)).join("\n");
+const newSqlText = sqlLines.map((line, i) => (bodyStart === -1 || i < bodyStart ? restampHeaderLine(line, oldStem, newStem) : line)).join("\n");
 if (sqlLines.some((line, i) => bodyStart !== -1 && i >= bodyStart && line.includes(oldStamp))) {
   console.error(`note: the SQL body still names ${oldStamp}; it is left byte for byte, as Sol reviewed it.`);
 }

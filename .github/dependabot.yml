@@ -6,6 +6,8 @@ updates:
   # by this schedule — Dependabot raises those on its own default cadence.
   - package-ecosystem: "npm"
     directory: "/"
+    # Staging-first: only release/next and hotfix/<name> may target main.
+    target-branch: "staging"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -34,6 +36,7 @@ updates:
   # GitHub Actions workflow dependencies — same weekly cadence.
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "staging"
     schedule:
       interval: "weekly"
       day: "monday"

@@ -58,7 +58,7 @@ async function salesSheet(page: Page, section: 'PDF' | 'CSV'): Promise<Download>
   await page.getByRole('button', { name: /^Download/ }).first().click();
   await page.getByRole('button', { name: 'Customer Sales Sheet' }).nth(section === 'PDF' ? 0 : 1).click();
   await pickCustomer(page, farm);
-  await page.screenshot({ path: `scripts/local-app/.state/pm4-sheet-${section}.png` });
+  await page.screenshot({ path: test.info().outputPath(`pm4-sheet-${section}.png`) });
   const started = page.waitForEvent('download');
   await page.getByRole('button', { name: `Download ${section}` }).click();
   return started;
@@ -100,7 +100,7 @@ test('the sales sheet leaves out inactive products and internal fields, whatever
   await expect(page.getByText(inactiveName).filter({ visible: true }).first()).toBeVisible();
   await page.getByLabel('Filter by status').filter({ visible: true }).selectOption('all');
   await expect(page.getByText(inactiveName).filter({ visible: true }).first()).toBeVisible();
-  await page.screenshot({ path: 'scripts/local-app/.state/pm4-list.png' });
+  await page.screenshot({ path: test.info().outputPath('pm4-list.png') });
 
   await chooseFilters(page, 'all');
   const csv = (await fileText(await salesSheet(page, 'CSV'))).toString('utf8');
@@ -143,5 +143,5 @@ test('search finds a product by EPA number, and Details adds the compliance colu
   await page.getByRole('button', { name: 'Details', exact: true }).click();
   await expect(page.getByRole('columnheader', { name: 'Signal Word' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'RUP' })).toBeVisible();
-  await page.screenshot({ path: 'scripts/local-app/.state/pm4-details.png' });
+  await page.screenshot({ path: test.info().outputPath('pm4-details.png') });
 });

@@ -48,7 +48,7 @@ expectSqlStop(`BEGIN;\n${restore}\n${candidate}\nDROP TABLE pg_temp.delivery_ass
 const roles = ['admin', 'admin', 'driver', 'applicator'];
 const profiles = roles.map(role => {
   const id = randomUUID();
-  return `('${id}','${id}@fixture.example.test','Invented delivery proof ${role}','${role}',true)`;
+  return `('${id}','${id}@fixture.example.test','Invented delivery proof ${role} ${id.slice(0, 8)}','${role}',true)`;
 }).join(',');
 const smoke = readFileSync(new URL('../smoke/smoke-replay-binding-batch4c.sql', import.meta.url), 'utf8');
 expectSqlStop(`

@@ -29,27 +29,25 @@
  * Prints CREW_READ_PATH_PROOF_PASS on success.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildContainer, removeContainer, seedUsers, scalar, psql, attempt, id, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
 const CANDIDATE = '20270308040000_applicator_crew_read_path.sql';
 const reuse = process.env.CREW_READ_PROOF_REUSE === '1';
-if (reuse && !/^crx-(undo-paths|crp)-/.test(process.env.UNDO_PATHS_CONTAINER || '')) {
-  throw new Error('CREW_READ_PROOF_REUSE needs UNDO_PATHS_CONTAINER naming a throwaway proof container (crx-undo-paths-* or crx-crp-*)');
-}
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const run = (flags) => docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', ...flags], { input: candidate, allowFailure: true });
 
-const A = USERS.applicator;
-const D = id('d1');
-const K = USERS.driver;
-const ACTORS = { A, D, K, rep: USERS.rep, admin: USERS.admin };
-const JOBS = ['A', 'B', 'C', 'E'];
-const J = (k) => `md5('crp-job-${k}')::uuid`;
+export const A = USERS.applicator;
+export const D = id('d1');
+export const K = USERS.driver;
+export const ACTORS = { A, D, K, rep: USERS.rep, admin: USERS.admin };
+export const JOBS = ['A', 'B', 'C', 'E'];
+export const J = (k) => `md5('crp-job-${k}')::uuid`;
 const PRODUCT = id('e1');
 
-function seed() {
+export function seed() {
   if (scalar(`SELECT count(*) FROM public.jobs WHERE id = ${J('A')};`) === '1') return;
   if (scalar(`SELECT count(*) FROM auth.users WHERE id = '${USERS.admin}';`) === '0') seedUsers();
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -123,7 +121,7 @@ const boardKeys = (uid) => `(SELECT coalesce(json_agg(DISTINCT key ORDER BY key)
   WHERE b ->> 'job_number' LIKE 'CRP-%' AND key IN ${PROTECTED})`;
 const JOB_IDS = `ARRAY[${JOBS.map(J).join(', ')}]`;
 
-const READS = {
+export const READS = {
   jobs: rows('public.jobs t', 't.id', 't.id'),
   jobs_protected: list(`${L('t.id')} || ':' || coalesce(t.total_price_cents::text, '-') || '/' || coalesce(t.internal_memo, '-') || '/' || coalesce(t.commission_split::text, '-')`, 'public.jobs t'),
   job_chemicals: rows('public.job_chemicals t', 't.job_id', 't.id'),
@@ -157,7 +155,7 @@ for (const [who, uid] of [['A', A], ['D', D], ['K', K]]) {
   READS[`board_${who}_rows`] = `(SELECT coalesce(json_agg(b - ARRAY['total_price_cents','total_cost_cents','internal_memo','commission_split'] ORDER BY b ->> 'job_number')::text, '[]') FROM ${board(uid)} b WHERE b ->> 'job_number' LIKE 'CRP-%')`;
   READS[`board_${who}_total_count`] = `(SELECT coalesce(bool_and(b ? '_total_count'), true)::text FROM ${board(uid)} b WHERE b ->> 'job_number' LIKE 'CRP-%')`;
 }
-const VIEW_READS = {
+export const VIEW_READS = {
   view_jobs: rows('public.jobs_crew t', 't.id', 't.id'),
   view_job_chemicals: rows('public.job_chemicals_crew t', 't.job_id', 't.id'),
   view_job_field_shares: rows('public.job_field_shares_crew t', 't.job_id', 't.id'),
@@ -165,7 +163,7 @@ const VIEW_READS = {
 };
 const count = (dml) => `WITH w AS (${dml} RETURNING 1) SELECT count(*) FROM w`;
 const rec = (k) => `md5('crp-rec-${k}')::uuid`;
-const WRITES = {
+export const WRITES = {
   update_applied_info_A: count(`UPDATE public.job_applied_info SET updated_at = updated_at WHERE job_id = ${J('A')}`),
   update_applied_info_B: count(`UPDATE public.job_applied_info SET updated_at = updated_at WHERE job_id = ${J('B')}`),
   update_applied_info_C: count(`UPDATE public.job_applied_info SET updated_at = updated_at WHERE job_id = ${J('C')}`),
@@ -187,7 +185,7 @@ const WRITES = {
 
 // One rolled-back probe per user: each check runs as `authenticated` in its own sub-transaction; a write is undone
 // by raising after its row count is kept (plpgsql variables survive the rollback of their block).
-function snapshot(uid, withViews) {
+export function snapshot(uid, withViews) {
   const checks = { ...READS, ...(withViews ? VIEW_READS : {}) };
   const body = [
     "r := '{}'::jsonb;",
@@ -202,8 +200,14 @@ function snapshot(uid, withViews) {
   assert.ok(out.startsWith('ok|'), `snapshot failed: ${out}`);
   return JSON.parse(out.slice(3));
 }
-const all = (withViews) => Object.fromEntries(Object.entries(ACTORS).map(([r, u]) => [r, snapshot(u, withViews)]));
+export const all = (withViews) => Object.fromEntries(Object.entries(ACTORS).map(([r, u]) => [r, snapshot(u, withViews)]));
 
+// realpath on both sides, so a symlinked or differently-cased path still runs the proof instead of exiting 0 silently.
+if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) {
+// Checked only when run directly: the lockdown proof imports this file and builds its own container.
+if (reuse && !/^crx-(undo-paths|crp)-/.test(process.env.UNDO_PATHS_CONTAINER || '')) {
+  throw new Error('CREW_READ_PROOF_REUSE needs UNDO_PATHS_CONTAINER naming a throwaway proof container (crx-undo-paths-* or crx-crp-*)');
+}
 try {
   if (!reuse) buildContainer({ stopBefore: CANDIDATE });
   assert.equal(scalar("SELECT to_regclass('public.jobs_crew') IS NULL;"), 't', 'the container must not have the candidate');
@@ -311,4 +315,5 @@ try {
   console.log('\nCREW_READ_PATH_PROOF_PASS');
 } finally {
   if (!reuse) removeContainer();
+}
 }

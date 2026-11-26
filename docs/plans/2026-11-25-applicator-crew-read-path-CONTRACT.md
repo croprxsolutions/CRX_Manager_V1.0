@@ -2,6 +2,8 @@
 
 Status: settled after one cold challenge (Astra gpt-6.2-astra high, 62 findings, 2026-11-25); targeted re-check of the revised mechanism pending. Read at `origin/staging` 1414a0d35; live probe on a local Docker copy migrated to d3f186d0c (the three later staging migrations touch none of these objects: checked by diff; the local copy is rebuilt from the PR head before the after-proof).
 
+PR 3 status (2026-11-26): lockdown migration `20270311160000`, reverse script and real-schema proof written; the proof passed on a local Docker copy (`CREW_LOCKDOWN_PROOF_PASS`). Not applied.
+
 ## 1. Outcome and authority
 
 **Business result (Mason, 2026-11-25, "Yes, hide them"; on Sol finding 1 of PR #2574, "fix"):** applicators must not *receive* job selling prices, chemical prices, billing-split percentages, the commission split or the internal memo. Payer names and account numbers stay visible. Admin and sales rep access is unchanged.

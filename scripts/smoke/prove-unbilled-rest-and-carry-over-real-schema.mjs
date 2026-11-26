@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270310200000_unbilled_rest_and_delivery_price_carry_over.sql (A4 + delivery price carry-over,
+ * Real-schema proof for 20270311010000_unbilled_rest_and_delivery_price_carry_over.sql (A4 + delivery price carry-over,
  * Mason 25 Nov).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
@@ -49,7 +49,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, seed, attempt, asUser, USERS, ROOT, NAME, docker, scalar } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270310200000_unbilled_rest_and_delivery_price_carry_over.sql';
+const CANDIDATE = '20270311010000_unbilled_rest_and_delivery_price_carry_over.sql';
 const lf = (f) => readFileSync(f, 'utf8').replaceAll('\r\n', '\n');
 const candidate = lf(path.join(ROOT, 'supabase', 'migrations', CANDIDATE));
 const reverse = lf(path.join(ROOT, 'scripts', 'smoke', 'unbilled-rest-and-carry-over-reverse.sql'));

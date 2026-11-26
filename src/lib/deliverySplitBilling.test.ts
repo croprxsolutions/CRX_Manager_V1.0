@@ -141,7 +141,7 @@ describe('the client predicate still matches the shipped server guard', () => {
     // definition in the file would false-alarm.
     const family = functionDefinitions(sql)
       .filter((d) => /create_invoice_for_unbilled_delivery/i.test(d.name));
-    // A4 (20270310200000) re-emits the public wrapper and its idempotency layer only to carry p_expected_scope.
+    // A4 (20270311010000) re-emits the public wrapper and its idempotency layer only to carry p_expected_scope.
     // Those layers write no invoice and must reach the guarded body; every definition that writes an invoice
     // must carry the guard.
     const targets = family.filter((d) => /INSERT INTO\s+(public\.)?invoices\b/i.test(d.body));

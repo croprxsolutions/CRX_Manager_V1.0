@@ -218,7 +218,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was changed. A line share can't move to another line"],
   [/^BILL_SPLIT_NOTHING_TO_BILL\b/,
    "Nothing was billed. This delivery has no delivered quantity"],
-  // create_invoice_for_unbilled_delivery (A4, 20270310200000).
+  // create_invoice_for_unbilled_delivery (A4, 20270311010000).
   [/^UNBILLED_SCOPE_CHANGED\b/,
    "Nothing was billed. This delivery's billing changed since the page loaded. Reload the page and check again"],
   [/^UNBILLED_REST_LINE_AMBIGUOUS\b/,

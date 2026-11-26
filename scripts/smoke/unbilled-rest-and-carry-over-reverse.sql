@@ -1,4 +1,4 @@
--- Reverse of 20270310200000_unbilled_rest_and_delivery_price_carry_over.sql. Run as one transaction (psql -1).
+-- Reverse of 20270311010000_unbilled_rest_and_delivery_price_carry_over.sql. Run as one transaction (psql -1).
 -- Refuses unless that file's bodies are installed; then drops the view, puts back the three-argument Create Invoice chain and the
 -- earlier _allocated_delivery_cents and get_dashboard_action_items bodies byte for byte, with their grants. Invoices
 -- drafted meanwhile keep their cents. Proven by scripts/smoke/prove-unbilled-rest-and-carry-over-real-schema.mjs.
@@ -14,7 +14,7 @@ BEGIN
     RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: run this file as one transaction (psql -1)';
   END IF;
   IF to_regclass('public.delivery_billing_remainders') IS NULL THEN
-    RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: 20270310200000 is not what is installed';
+    RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: 20270311010000 is not what is installed';
   END IF;
   FOR v_pin IN SELECT * FROM (VALUES
       ('public._allocated_delivery_cents(uuid,numeric,uuid)', '2865a1d5ed3655c847b2073d500a24a6'),
@@ -24,7 +24,7 @@ BEGIN
       ('public.get_dashboard_action_items(integer)', 'eb96aacf4dfc840a22df32d6bb549aeb')) t(sig, md5)
   LOOP
     IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure(v_pin.sig)) IS DISTINCT FROM v_pin.md5 THEN
-      RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: % is not the 20270310200000 body', v_pin.sig;
+      RAISE EXCEPTION 'UNBILLED_REST_REVERSE_DRIFT: % is not the 20270311010000 body', v_pin.sig;
     END IF;
   END LOOP;
 END;

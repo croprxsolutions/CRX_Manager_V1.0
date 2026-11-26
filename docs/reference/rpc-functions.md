@@ -477,7 +477,7 @@ These RPCs are called from `src/` but had no entry in this file. Each purpose wa
 
 ### Watchdog and label data
 
-Migration `20270308150000` limits browser writes to the existing `refresh_watchdog_flags` and `dismiss_watchdog_flag` functions when applied.
+Migration `20270310140000` limits browser writes to the existing `refresh_watchdog_flags` and `dismiss_watchdog_flag` functions when applied.
 
 | RPC | Latest definition | Purpose |
 |-----|-------------------|---------|

@@ -350,6 +350,9 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // orphan existing receipts.
   _manual_inventory_add_replay_impl_20261015: ['manual_inventory_add'],
   _complete_job_replay_impl_20261015: ['complete_job'],
+  // Same rename for create_application_record_from_blend_ticket (20261016140000), which kept its documented
+  // alias literal. 20270311100000 (count once) re-emits the body only to count a job's stock once.
+  _create_app_record_from_bt_replay_impl_20261015: ['create_app_record_from_bt'],
   // Same rename for start_job; 20261217100000 (KI-73 part C) re-emits it only to end whole-job access with
   // the job. Changing the literal would orphan existing receipts.
   _start_job_replay_impl_20261015: ['start_job'],

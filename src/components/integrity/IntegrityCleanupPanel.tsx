@@ -44,6 +44,9 @@ interface UnbilledDeliveryRow {
   unbilled_label: string | null;
   /** What Create draft invoice does here; the server refuses it if that changed (UNBILLED_SCOPE_CHANGED). */
   scope: 'new' | 'rest_delivery' | 'rest_order' | 'bill_split';
+  /** What the row shows is left to bill (the whole order's for rest_order); the server refuses anything else. */
+  expected_cents: number | null;
+  expected_units: number | null;
 }
 
 interface ManufacturedRow {
@@ -401,6 +404,15 @@ export default function IntegrityCleanupPanel() {
                 const c = Array.isArray(d.customer) ? d.customer[0] : d.customer;
                 const rest = covered(d) ? remainders.get(d.id) : undefined;
                 const active = invRows.filter((invoice) => activeInvoiceCoversDelivery(invoice, d.id, d.order_id));
+                const wholeOrder = active.some((invoice) => invoice.delivery_id === null);
+                // A whole-order invoice's rest is the order's: every short delivery of it in this list.
+                const shown = !rest ? undefined : wholeOrder
+                  ? allCompleted.filter((x) => x.order_id === d.order_id && remainders.has(x.id))
+                    .reduce((sum, x) => {
+                      const r = remainders.get(x.id) as DeliveryBillingRemainder;
+                      return { cents: sum.cents + r.unbilledCents, units: sum.units + r.unbilledQty };
+                    }, { cents: 0, units: 0 })
+                  : { cents: rest.unbilledCents, units: rest.unbilledQty };
                 return {
                   id: d.id,
                   delivery_number: d.delivery_number,
@@ -411,7 +423,9 @@ export default function IntegrityCleanupPanel() {
                   unbilled_label: rest ? unbilledRemainderLabel(rest) : null,
                   scope: !rest ? 'new'
                     : active.some((invoice) => invoice.delivery_id === d.id && invoice.invoice_group_id) ? 'bill_split'
-                    : active.some((invoice) => invoice.delivery_id === null) ? 'rest_order' : 'rest_delivery',
+                    : wholeOrder ? 'rest_order' : 'rest_delivery',
+                  expected_cents: shown?.cents ?? null,
+                  expected_units: shown?.units ?? null,
                 };
               }),
             );
@@ -596,6 +610,8 @@ export default function IntegrityCleanupPanel() {
         // eslint-disable-next-line local-rules/idempotency-key-from-hook -- deliberate per-row key; see F2 comment above
         p_idempotency_key: idemKey,
         p_expected_scope: row.scope === 'bill_split' ? undefined : row.scope,
+        p_expected_cents: row.expected_cents ?? undefined,
+        p_expected_units: row.expected_units ?? undefined,
       });
       if (error) throw error;
       assertRpcResult(data, 'create_invoice_for_unbilled_delivery');

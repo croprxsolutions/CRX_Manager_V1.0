@@ -31,6 +31,9 @@
  *   misc        a miscellaneous charge naming the product bills those units, as the order cap counts it (unchanged)
  *   ambiguous   an editor line with no order line, for a product on two differently priced order lines: Bill the
  *               rest is refused (UNBILLED_REST_LINE_AMBIGUOUS), nothing drafted
+ *   ambiguous_same the same with both order lines at $40: still refused (which line the editor line billed is unknown)
+ *   confirm     the confirmation's units and cents are checked: a different amount or quantity is refused before any
+ *               write (no invoice number drawn); the shown 4 for $160.00 drafts
  *   drift7      KNOWN LIMIT pinned: $149 for 7 units, three drafts cancelled and billed again: $149.03 (staging $149.00)
  * BEFORE (old bodies) the A4 and carry-over cases fail, AFTER they pass, rounding, void and misc are identical and void_rebill shows its known 1-cent limit; autocommit, a second
  * apply and a drifted reverse are refused; the reverse (scripts/smoke/unbilled-rest-and-carry-over-reverse.sql)
@@ -92,6 +95,10 @@ const ORDERS = {
   misc: [uid('a4ee'), [[uid('a4ff'), 10, '400.00', '40.00']], [[uid('a4be1'), [[0, 10]]]]],
   // Taha r4: an editor line with no order line for a product on two differently priced order lines is refused.
   ambiguous: [uid('a4ef'), [[uid('a4f10'), 5, '150.00', '30.00'], [uid('a4f11'), 5, '200.00', '40.00']], [[uid('a4bf1'), [[0, 5], [1, 5]]]]],
+  // Taha r5: same product on two order lines at the SAME price is still ambiguous for an editor line.
+  ambiguous_same: [uid('a4e11'), [[uid('a4f13'), 5, '200.00', '40.00'], [uid('a4f14'), 5, '200.00', '40.00']], [[uid('a4b111'), [[0, 5], [1, 5]]]]],
+  // Taha r5: the confirmation's units and cents must still be what the server would draft.
+  confirm: [uid('a4e12'), [[uid('a4f15'), 10, '400.00', '40.00']], [[uid('a4b121'), [[0, 10]]]]],
   // Taha r4, known limit pinned: $149 for 7 units in seven deliveries; drafts 2, 4 and 6 cancelled and billed again.
   drift7: [uid('a4e10'), [[uid('a4f12'), 7, '149.00', '21.29']],
     [1, 2, 3, 4, 5, 6, 7].map((n) => [uid(`a4b10${n}`), [[0, 1]]])],
@@ -244,6 +251,24 @@ const CASES = {
     ${wholeOrder(o, [d], 5, 4000, 'amb')}
     v := '';
     ${restSteps(o, d, 'am', 'rest_order')}`; },
+  ambiguous_same: () => { const [o, , [[d]]] = ORDERS.ambiguous_same; return `${complete(d)}
+    ${wholeOrder(o, [d], 5, 4000, 'ams')}
+    v := '';
+    ${restSteps(o, d, 'as', 'rest_order')}`; },
+  confirm: () => { const [o, , [[d]]] = ORDERS.confirm; return `${complete(d)} ${edit(invoiceOf(d), 6, 4000, 'cf')}
+    n := (SELECT last_value FROM public.cs_invoice_number_seq);
+    BEGIN ${asUser(`r := public.create_invoice_for_unbilled_delivery(p_delivery_id => '${d}', p_performed_by => '${ADMIN}',
+      p_idempotency_key => 'a4carry-cf-1', p_expected_scope => 'rest_delivery', p_expected_cents => 15000, p_expected_units => 4);`)} t := 'NOT REFUSED';
+    EXCEPTION WHEN OTHERS THEN t := left(SQLERRM, 40); END;
+    v := 'cents off: ' || t || ' seq_moved=' || ((SELECT last_value FROM public.cs_invoice_number_seq) <> n);
+    BEGIN ${asUser(`r := public.create_invoice_for_unbilled_delivery(p_delivery_id => '${d}', p_performed_by => '${ADMIN}',
+      p_idempotency_key => 'a4carry-cf-2', p_expected_scope => 'rest_delivery', p_expected_cents => 16000, p_expected_units => 3);`)} t := 'NOT REFUSED';
+    EXCEPTION WHEN OTHERS THEN t := left(SQLERRM, 40); END;
+    v := v || ' | units off: ' || t;
+    BEGIN ${asUser(`r := public.create_invoice_for_unbilled_delivery(p_delivery_id => '${d}', p_performed_by => '${ADMIN}',
+      p_idempotency_key => 'a4carry-cf-3', p_expected_scope => 'rest_delivery', p_expected_cents => 16000, p_expected_units => 4);`)} t := 'drafted ' || (r->>'total_cents');
+    EXCEPTION WHEN OTHERS THEN t := left(SQLERRM, 60); END;
+    v := v || ' | as shown: ' || t || ' billed=' || ${orderBilled(o)};`; },
   drift7: () => { const [o, , dels] = ORDERS.drift7; return `${dels.map(([d]) => complete(d)).join('\n')}
     ${[1, 3, 5].map((i) => `UPDATE public.invoices SET status = 'cancelled' WHERE id = ${invoiceOf(dels[i][0])};
     ${billRest(dels[i][0], `d7-${i}`, 'new')}`).join('\n    ')}
@@ -284,6 +309,9 @@ const EXPECT = {
   scope: 'ok|none: UNBILLED_SCOPE_CHANGED: delivery [A4] sc | order: UNBILLED_SCOPE_CHANGED: delivery [A4] sc | new: UNBILLED_SCOPE_CHANGED: delivery [A4] sc | delivery: drafted 16000 rest_delivery billed=40000/10.00',
   // Which of the two order lines the $40 editor line billed is unknown: refused, nothing drafted.
   ambiguous: 'ok|listed=true | refused: UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for [A4] produ | billed=20000/5.00 listed=true | again refused: UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for [A4] produ',
+  ambiguous_same: 'ok|listed=true | refused: UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for [A4] produ | billed=20000/5.00 listed=true | again refused: UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for [A4] produ',
+  // A changed amount or quantity is refused before any write, the invoice number included.
+  confirm: 'ok|cents off: UNBILLED_SCOPE_CHANGED: delivery [A4] co seq_moved=false | units off: UNBILLED_SCOPE_CHANGED: delivery [A4] co | as shown: drafted 16000 billed=40000/10.00',
   // KNOWN LIMIT, pinned: three out-of-order re-bills drift three cents ($149.03 on $149.00); stored cents closes it.
   drift7: 'ok|billed=14903/7.00',
 };
@@ -307,6 +335,8 @@ try {
   assert.equal(before.void_rebill, 'ok|3334+3333+3333 billed=10000/3.00', 'staging re-bills to the cent after a cancel');
   assert.equal(before.drift7, 'ok|billed=14900/7.00', 'staging re-bills seven units to the cent');
   assert.match(before.ambiguous, /^ok\|listed=false \| refused: This delivery already has an active invoice/);
+  assert.match(before.ambiguous_same, /^ok\|listed=false \| refused: This delivery already has an active invoice/);
+  assert.match(before.confirm, /function public.create_invoice_for_unbilled_delivery/, 'staging has no confirmation arguments');
   assert.match(before.carry_void, /^ok\|21000 then 19000 billed=40000\/10\.00$/, 'carry-over must reproduce after a re-bill');
   assert.match(before.scope, /p_expected_scope|function public.create_invoice_for_unbilled_delivery/, 'staging has no scope argument');
 

@@ -12,7 +12,9 @@
 --    its own design): (1) when drafts are cancelled or voided and billed again after later deliveries, a line whose
 --    total does not divide evenly can drift by a few cents, about one per re-bill (3 units for $100.00 billed
 --    $100.01; 7 units for $149.00 with three re-bills billed $149.03); (2) an earlier invoice line the editor added
---    with no order line is not counted when the next delivery is priced (as on staging today).
+--    with no order line is not counted when the next delivery is priced (as on staging today); (3) every read of
+--    delivery_billing_remainders computes all completed deliveries (fine at today's volume; a follow-up scopes it to
+--    one order).
 -- 2. A4. The Unbilled list counted a delivery billed once any active invoice touched it: 10 delivered, the line
 --    lowered to 6, and 4 units were never billed. delivery_billing_remainders compares delivered and billed units per
 --    delivery and order line (product lines on active non-credit invoices bill, as the invoice caps count them; lines
@@ -22,10 +24,11 @@
 --    those already billed: on the delivery, or, when a whole-order invoice
 --    covers the order, every unbilled unit on the order. A Bill Split sale is refused (BILL_SPLIT_REST_NOT_SUPPORTED);
 --    a field split stays refused (ORDER_NEEDS_SPLIT_BILLING).
--- 3. Scope. create_invoice_for_unbilled_delivery takes p_expected_scope (new, rest_delivery or rest_order): the scope
---    the screen confirmed. A different scope at run time is refused (UNBILLED_SCOPE_CHANGED); the key binds it too.
+-- 3. Scope. create_invoice_for_unbilled_delivery takes p_expected_scope (new, rest_delivery or rest_order) and, for a
+--    rest, p_expected_cents / p_expected_units: what the screen's confirmation showed. Anything different at run time
+--    is refused (UNBILLED_SCOPE_CHANGED) before a row or invoice number is written; the key binds them too.
 --    No scope means 'new' (a screen from before A4 only ever offered a first invoice). Bill the rest is refused
---    when an invoice line with no order line names a product the order has on order lines at different prices
+--    when an invoice line with no order line names a product the order has on more than one order line
 --    (UNBILLED_REST_LINE_AMBIGUOUS: link the line first). The three-argument chain is dropped and replaced (an
 --    overload would be ambiguous).
 -- Nothing else is rewritten: invoices drafted before this file keep their cents.
@@ -39,7 +42,8 @@
 -- caller-analysis: _allocated_delivery_cents :: same signature, result and grants; callers
 --   _complete_delivery_authorized_impl_20270122, _create_invoice_for_unbilled_delivery_impl_20260718,
 --   _create_bill_split_delivery_invoices get the same cents unless an earlier invoice's price was changed.
---   create_invoice_for_unbilled_delivery :: adds p_expected_scope DEFAULT NULL; the screens pass it; positional
+--   create_invoice_for_unbilled_delivery :: adds p_expected_scope, p_expected_cents, p_expected_units (DEFAULT NULL);
+--   the screens pass them; positional
 --   three-argument callers keep creating a first invoice exactly as before (any rest is refused for them); result
 --   adds billed_rest and scope.
 --   get_dashboard_action_items :: same signature and shape; unbilled_deliveries also lists short-billed deliveries.
@@ -61,7 +65,7 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: run this file as one transaction (psql -1 or the apply script)';
   END IF;
   IF to_regclass('public.delivery_billing_remainders') IS NOT NULL
-     OR to_regprocedure('public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text)') IS NOT NULL THEN
+     OR to_regprocedure('public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text,bigint,numeric)') IS NOT NULL THEN
     RAISE EXCEPTION 'UNBILLED_REST_BASELINE_DRIFT: already applied';
   END IF;
   FOR v_pin IN SELECT * FROM (VALUES
@@ -201,7 +205,7 @@ DROP FUNCTION public.create_invoice_for_unbilled_delivery(uuid, uuid, text);
 DROP FUNCTION public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid, uuid, text);
 DROP FUNCTION public._create_invoice_for_unbilled_delivery_impl_20260718(uuid, uuid, text);
 
-CREATE FUNCTION public._create_invoice_for_unbilled_delivery_impl_20260718(p_delivery_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_expected_scope text DEFAULT NULL::text)
+CREATE FUNCTION public._create_invoice_for_unbilled_delivery_impl_20260718(p_delivery_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_expected_scope text DEFAULT NULL::text, p_expected_cents bigint DEFAULT NULL::bigint, p_expected_units numeric DEFAULT NULL::numeric)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -220,6 +224,8 @@ DECLARE
   v_order_level boolean := false;
   v_scope text := 'new';
   v_ambiguous_product text;
+  v_rest_cents bigint;
+  v_rest_units numeric;
 BEGIN
   v_actor := auth.uid();
   IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
@@ -298,12 +304,28 @@ BEGIN
       JOIN products p ON p.id = ii.product_id
      WHERE i.order_id = v_delivery.order_id AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
        AND i.status NOT IN ('voided', 'cancelled') AND ii.order_item_id IS NULL AND ii.charge_type IS NULL
-       AND (SELECT count(DISTINCT oi.price_per_unit) FROM order_items oi
+       AND (SELECT count(*) FROM order_items oi
              WHERE oi.order_id = v_delivery.order_id AND oi.product_id = ii.product_id) > 1
      ORDER BY p.product_name
      LIMIT 1;
     IF FOUND THEN
-      RAISE EXCEPTION 'UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for % on this order has no order line, and the order has % on more than one order line at different prices; link the line to its order line first', v_ambiguous_product, v_ambiguous_product
+      RAISE EXCEPTION 'UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for % on this order has no order line, and the order has % on more than one order line; link the line to its order line first', v_ambiguous_product, v_ambiguous_product
+        USING ERRCODE = 'check_violation';
+    END IF;
+    -- The screen confirmed these units and cents; a change since (an invoice edited meanwhile) is refused before
+    -- anything, an invoice number included, is written.
+    SELECT COALESCE(sum(GREATEST(public._allocated_cumulative_cents(x.order_item_id, x.line_billed + x.quantity)
+                                 - public._allocated_cumulative_cents(x.order_item_id, x.line_billed), 0)), 0),
+           COALESCE(sum(x.quantity), 0)
+      INTO v_rest_cents, v_rest_units
+      FROM (SELECT r.order_item_id, sum(r.unbilled_qty) AS quantity, max(r.line_billed_qty) AS line_billed
+              FROM public.delivery_billing_remainders r
+             WHERE r.unbilled_qty > 0
+               AND (r.delivery_id = p_delivery_id OR (v_order_level AND r.order_id = v_delivery.order_id))
+             GROUP BY r.order_item_id, r.product_id) x;
+    IF (p_expected_cents IS NOT NULL AND p_expected_cents IS DISTINCT FROM v_rest_cents)
+       OR (p_expected_units IS NOT NULL AND round(p_expected_units, 4) IS DISTINCT FROM round(v_rest_units, 4)) THEN
+      RAISE EXCEPTION 'UNBILLED_SCOPE_CHANGED: delivery %''s billing changed since the screen read it (the rest is now % units for % cents, not % for %); reload the delivery and check again', v_delivery.delivery_number, v_rest_units, v_rest_cents, p_expected_units, p_expected_cents
         USING ERRCODE = 'check_violation';
     END IF;
   END IF;
@@ -424,9 +446,9 @@ BEGIN
   RETURN v_result;
 END;
 $function$;
-REVOKE ALL ON FUNCTION public._create_invoice_for_unbilled_delivery_impl_20260718(uuid, uuid, text, text) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public._create_invoice_for_unbilled_delivery_impl_20260718(uuid, uuid, text, text, bigint, numeric) FROM PUBLIC, anon, authenticated, service_role;
 
-CREATE FUNCTION public._create_invoice_for_unbilled_delivery_idem_impl_20260721(p_delivery_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_expected_scope text DEFAULT NULL::text)
+CREATE FUNCTION public._create_invoice_for_unbilled_delivery_idem_impl_20260721(p_delivery_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_expected_scope text DEFAULT NULL::text, p_expected_cents bigint DEFAULT NULL::bigint, p_expected_units numeric DEFAULT NULL::numeric)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -459,7 +481,9 @@ BEGIN
     'version', 1,
     'delivery_id', p_delivery_id,
     'actor_id', v_actor
-  ) || CASE WHEN p_expected_scope IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('expected_scope', p_expected_scope) END;
+  ) || CASE WHEN p_expected_scope IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('expected_scope', p_expected_scope) END
+    || CASE WHEN p_expected_cents IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('expected_cents', p_expected_cents) END
+    || CASE WHEN p_expected_units IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('expected_units', round(p_expected_units, 4)) END;
 
   IF p_idempotency_key IS NOT NULL THEN
     v_existing := public.check_idempotency(
@@ -470,7 +494,7 @@ BEGIN
         RAISE EXCEPTION 'IDEMPOTENCY_RESULT_FORMAT_INVALID: create_invoice_for_unbilled_delivery';
       END IF;
       IF v_existing->'request' IS DISTINCT FROM v_request THEN
-        RAISE EXCEPTION 'IDEMPOTENCY_ARGUMENT_MISMATCH: create_invoice_for_unbilled_delivery key was already used for a different delivery, actor or billing scope';
+        RAISE EXCEPTION 'IDEMPOTENCY_ARGUMENT_MISMATCH: create_invoice_for_unbilled_delivery key was already used for a different delivery, actor or confirmed billing';
       END IF;
       RETURN v_existing->'response';
     END IF;
@@ -518,7 +542,7 @@ BEGIN
 
   BEGIN
     v_result := public._create_invoice_for_unbilled_delivery_impl_20260718(
-      p_delivery_id, v_actor, NULL, p_expected_scope
+      p_delivery_id, v_actor, NULL, p_expected_scope, p_expected_cents, p_expected_units
     );
   EXCEPTION WHEN OTHERS THEN
     DELETE FROM public.invoice_delivery_recovery_capabilities
@@ -539,9 +563,9 @@ BEGIN
   RETURN v_result;
 END;
 $function$;
-REVOKE ALL ON FUNCTION public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid, uuid, text, text) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid, uuid, text, text, bigint, numeric) FROM PUBLIC, anon, authenticated, service_role;
 
-CREATE FUNCTION public.create_invoice_for_unbilled_delivery(p_delivery_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_expected_scope text DEFAULT NULL::text)
+CREATE FUNCTION public.create_invoice_for_unbilled_delivery(p_delivery_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_expected_scope text DEFAULT NULL::text, p_expected_cents bigint DEFAULT NULL::bigint, p_expected_units numeric DEFAULT NULL::numeric)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -560,12 +584,12 @@ BEGIN
     RAISE EXCEPTION 'ACTOR_MISMATCH';
   END IF;
   RETURN public._create_invoice_for_unbilled_delivery_idem_impl_20260721(
-    p_delivery_id, p_performed_by, p_idempotency_key, p_expected_scope
+    p_delivery_id, p_performed_by, p_idempotency_key, p_expected_scope, p_expected_cents, p_expected_units
   );
 END;
 $function$;
-REVOKE ALL ON FUNCTION public.create_invoice_for_unbilled_delivery(uuid, uuid, text, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.create_invoice_for_unbilled_delivery(uuid, uuid, text, text) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.create_invoice_for_unbilled_delivery(uuid, uuid, text, text, bigint, numeric) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.create_invoice_for_unbilled_delivery(uuid, uuid, text, text, bigint, numeric) TO authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.get_dashboard_action_items(p_limit integer DEFAULT 5)
  RETURNS jsonb
@@ -835,9 +859,9 @@ DECLARE
 BEGIN
   FOR v_pin IN SELECT * FROM (VALUES
       ('public._allocated_delivery_cents(uuid,numeric,uuid)', '2865a1d5ed3655c847b2073d500a24a6', false),
-      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', '7acbb5d862696f7b65ccbaa2d4d4f5e6', true),
-      ('public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text)', '4f18fe996393549ebf7d4ee76570188d', true),
-      ('public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text)', 'ee18d8501f94a4c34bb71831c767f0a2', true),
+      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text,bigint,numeric)', '4fb7d15a9551b4f9ac77c89141704623', true),
+      ('public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text,bigint,numeric)', '8fcdb36b13ec85918eee1f8d106cf5e4', true),
+      ('public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text,bigint,numeric)', '750cc76aad38fa169915f48757a5657f', true),
       ('public.get_dashboard_action_items(integer)', 'eb96aacf4dfc840a22df32d6bb549aeb', true)) t(sig, md5, definer)
   LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = to_regprocedure(v_pin.sig)
@@ -850,12 +874,12 @@ BEGIN
   IF to_regprocedure('public.create_invoice_for_unbilled_delivery(uuid,uuid,text)') IS NOT NULL
      OR to_regprocedure('public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text)') IS NOT NULL
      OR to_regprocedure('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)') IS NOT NULL
-     OR has_function_privilege('anon', 'public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text)', 'EXECUTE')
-     OR has_function_privilege('service_role', 'public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', 'EXECUTE')
-     OR has_function_privilege('service_role', 'public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text,bigint,numeric)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text,bigint,numeric)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text,bigint,numeric)', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text,bigint,numeric)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text,bigint,numeric)', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text,bigint,numeric)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._allocated_delivery_cents(uuid,numeric,uuid)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.get_dashboard_action_items(integer)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.get_dashboard_action_items(integer)', 'EXECUTE') THEN

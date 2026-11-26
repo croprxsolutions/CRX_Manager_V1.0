@@ -53,7 +53,7 @@ import {
   receiptMayAlreadyBeSent, readQueuedReceipt, queuedMeanwhileWarning, type ReceiptCloseResult,
 } from '../lib/receiptsToCheck';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
-import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery, fetchDeliveryBillingRemainders, unbilledRemainderLabel, type DeliveryBillingRemainder } from '../lib/deliveryInvoiceCoverage';
+import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery, fetchDeliveryBillingRemainders, fetchOrderBillingRemainder, unbilledRemainderLabel, type DeliveryBillingRemainder } from '../lib/deliveryInvoiceCoverage';
 import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { addDeliveryEditItem, removeDeliveryEditItem, type AvailableDeliveryEditItem, type DeliveryEditItem } from '../lib/deliveryEditItems';
@@ -258,8 +258,9 @@ export default function DeliveryDetail() {
 
   // Office re-bill state for a completed delivery with no active covering invoice.
   const [createInvoiceConfirmOpen, setCreateInvoiceConfirmOpen] = useState(false);
-  // A4: what the confirmation showed, frozen when it opened; the server refuses a different scope (UNBILLED_SCOPE_CHANGED).
-  const [confirmIntent, setConfirmIntent] = useState<{ scope: 'new' | 'rest_delivery' | 'rest_order'; rest: string | null }>({ scope: 'new', rest: null });
+  // A4: what the confirmation showed, frozen when it opened, for the delivery it opened on; the server refuses a
+  // different scope, amount or quantity (UNBILLED_SCOPE_CHANGED).
+  const [confirmIntent, setConfirmIntent] = useState<ConfirmIntent>(NO_CONFIRM_INTENT);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
 
   // Photo upload state
@@ -317,6 +318,8 @@ export default function DeliveryDetail() {
     setRelatedInvoices([]);
     setInvoicesLoaded(false);
     setBillingRemainder(null);
+    setCreateInvoiceConfirmOpen(false);
+    setConfirmIntent(NO_CONFIRM_INTENT);
     setSiblingDeliveries([]);
     setParentQuote(null);
   }, [id]);
@@ -377,6 +380,18 @@ export default function DeliveryDetail() {
     invoice.delivery_id === delivery?.id && invoice.invoice_group_id !== null && activeInvoiceCountsTowardBilling(invoice));
   // What the confirmation shows is what the server must still find (UNBILLED_SCOPE_CHANGED otherwise).
   const expectedScope = !hasActiveRelatedInvoice ? 'new' : wholeOrderInvoiced ? 'rest_order' : 'rest_delivery';
+  // A4: freeze what the confirmation shows. On a whole-order invoice the rest is the order's, read fresh.
+  const openCreateInvoiceConfirm = async () => {
+    if (!delivery) return;
+    let rest = shortBilled ? billingRemainder : null;
+    if (expectedScope === 'rest_order' && delivery.order_id) {
+      rest = await fetchOrderBillingRemainder(delivery.order_id);
+      if (!rest) { toast('error', 'Could not read what is left to bill on this order. Refresh the page and try again.'); return; }
+    }
+    setConfirmIntent({ deliveryId: delivery.id, scope: expectedScope, rest: rest ? unbilledRemainderLabel(rest) : null,
+      cents: expectedScope === 'new' || !rest ? null : rest.unbilledCents, units: expectedScope === 'new' || !rest ? null : rest.unbilledQty });
+    setCreateInvoiceConfirmOpen(true);
+  };
   // RPC is admin-only (finding #78's backfill twin); sales_reps bill jobs, not stray deliveries.
   // H5: also mirror the server's ORDER_NEEDS_SPLIT_BILLING refusal via the shared
   // predicate, so this surface and IntegrityCleanupPanel cannot drift apart.
@@ -1641,14 +1656,18 @@ export default function DeliveryDetail() {
   // U16a: office-visible twin of IntegrityCleanup's admin-only backfill (finding #78).
   const handleCreateInvoice = async () => {
     if (!delivery || !profile) return;
+    // The confirmation belongs to the delivery it opened on.
+    if (confirmIntent.deliveryId !== delivery.id) { setCreateInvoiceConfirmOpen(false); return; }
     setCreatingInvoice(true);
 
     try {
       const { data, error } = await supabase.rpc('create_invoice_for_unbilled_delivery', {
-        p_delivery_id: delivery.id,
+        p_delivery_id: confirmIntent.deliveryId,
         p_performed_by: profile.id,
-        p_idempotency_key: createInvoiceIdem.getKeyFor(delivery.id),
+        p_idempotency_key: createInvoiceIdem.getKeyFor(confirmIntent.deliveryId),
         p_expected_scope: confirmIntent.scope,
+        p_expected_cents: confirmIntent.cents ?? undefined,
+        p_expected_units: confirmIntent.units ?? undefined,
       });
       if (error) throw error;
 
@@ -2646,10 +2665,7 @@ export default function DeliveryDetail() {
             billedOutsideCrxReason,
             createInvoice: billSplitRest ? 'bill_split' : canCreateInvoice ? 'offer' : splitBillingBlocksInvoice ? 'split' : null,
             creating: creatingInvoice,
-            onCreate: () => {
-              setConfirmIntent({ scope: expectedScope, rest: shortBilled && billingRemainder ? unbilledRemainderLabel(billingRemainder) : null });
-              setCreateInvoiceConfirmOpen(true);
-            },
+            onCreate: () => { void openCreateInvoiceConfirm(); },
           } : null}
         />
       )}
@@ -3231,6 +3247,15 @@ function toRelatedInvoice(inv: Record<string, unknown>): RelatedInvoice {
     bill_to: (inv.customer as { farm_name?: string | null } | null)?.farm_name ?? null,
   };
 }
+
+interface ConfirmIntent {
+  deliveryId: string | null;
+  scope: 'new' | 'rest_delivery' | 'rest_order';
+  rest: string | null;
+  cents: number | null;
+  units: number | null;
+}
+const NO_CONFIRM_INTENT: ConfirmIntent = { deliveryId: null, scope: 'new', rest: null, cents: null, units: null };
 
 /** A4: what an invoice leaves unbilled on this delivery; 'failed' when it could not be read. */
 async function loadBillingRemainder(deliveryId: string): Promise<DeliveryBillingRemainder | null | 'failed'> {

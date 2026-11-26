@@ -513,7 +513,32 @@ describe('Invoices on this sale card', () => {
     const dialog = await screen.findByRole('alertdialog', { name: 'Bill the rest of this delivery?' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Bill the rest' }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('create_invoice_for_unbilled_delivery',
-      expect.objectContaining({ p_delivery_id: 'del-1', p_expected_scope: 'rest_delivery' })));
+      expect.objectContaining({ p_delivery_id: 'del-1', p_expected_scope: 'rest_delivery', p_expected_cents: 16000, p_expected_units: 4 })));
+  });
+
+  it('short-billed: a later remainder read does not change what the open confirmation sends', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    tables.data.delivery_billing_remainders = [{ delivery_id: 'del-1', delivered_qty: 10, unbilled_qty: 4, unbilled_cents: 16000 }];
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Bill the rest…' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Bill the rest of this delivery?' });
+    tables.data.delivery_billing_remainders = [{ delivery_id: 'del-1', delivered_qty: 10, unbilled_qty: 8, unbilled_cents: 32000 }];
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Bill the rest' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('create_invoice_for_unbilled_delivery',
+      expect.objectContaining({ p_expected_cents: 16000, p_expected_units: 4 })));
+  });
+
+  it('short-billed: moving to another delivery closes the open confirmation, nothing is sent', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    tables.data.delivery_billing_remainders = [{ delivery_id: 'del-1', delivered_qty: 10, unbilled_qty: 4, unbilled_cents: 16000 }];
+    const view = render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Bill the rest…' }, { timeout: 3000 }));
+    await screen.findByRole('alertdialog', { name: 'Bill the rest of this delivery?' });
+    route.id = 'del-2';
+    tables.data.deliveries = [{ ...OPEN_DELIVERY, id: 'del-2', delivery_number: 'DEL-2', status: 'completed', order_id: ORDER_ID }];
+    view.rerender(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    await waitFor(() => expect(screen.queryByRole('alertdialog', { name: 'Bill the rest of this delivery?' })).not.toBeInTheDocument());
+    expect(mockRpc).not.toHaveBeenCalledWith('create_invoice_for_unbilled_delivery', expect.anything());
   });
 
   it('short-billed Bill Split: no button, says to void the group', async () => {

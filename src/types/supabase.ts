@@ -16294,7 +16294,9 @@ export type Database = {
       _create_invoice_for_unbilled_delivery_idem_impl_20260721: {
         Args: {
           p_delivery_id: string
+          p_expected_cents?: number
           p_expected_scope?: string
+          p_expected_units?: number
           p_idempotency_key?: string
           p_performed_by?: string
         }
@@ -16303,7 +16305,9 @@ export type Database = {
       _create_invoice_for_unbilled_delivery_impl_20260718: {
         Args: {
           p_delivery_id: string
+          p_expected_cents?: number
           p_expected_scope?: string
+          p_expected_units?: number
           p_idempotency_key?: string
           p_performed_by?: string
         }
@@ -19493,7 +19497,9 @@ export type Database = {
       create_invoice_for_unbilled_delivery: {
         Args: {
           p_delivery_id: string
+          p_expected_cents?: number
           p_expected_scope?: string
+          p_expected_units?: number
           p_idempotency_key?: string
           p_performed_by?: string
         }

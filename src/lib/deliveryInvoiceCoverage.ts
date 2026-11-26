@@ -140,6 +140,24 @@ export async function fetchDeliveryBillingRemainders(deliveryIds: string[]) {
   return { data: remainders, error: null };
 }
 
+/** A4: everything an order's whole-order invoice leaves unbilled, over all its completed deliveries; null on a failed read. */
+export async function fetchOrderBillingRemainder(orderId: string): Promise<DeliveryBillingRemainder | null> {
+  const { data, error } = await supabaseUntyped
+    .from('delivery_billing_remainders')
+    .select('delivered_qty, unbilled_qty, unbilled_cents')
+    .eq('order_id', orderId)
+    .gt('unbilled_qty', 0);
+  if (error || !data) return null;
+  return (data as Array<{ delivered_qty: number; unbilled_qty: number; unbilled_cents: number }>).reduce(
+    (sum, row) => ({
+      deliveredQty: sum.deliveredQty + Number(row.delivered_qty),
+      unbilledQty: sum.unbilledQty + Number(row.unbilled_qty),
+      unbilledCents: sum.unbilledCents + Number(row.unbilled_cents),
+    }),
+    { deliveredQty: 0, unbilledQty: 0, unbilledCents: 0 },
+  );
+}
+
 const qty = (n: number) => String(Number(n.toFixed(4)));
 
 /** "4 of 10 not billed ($160.00)" */

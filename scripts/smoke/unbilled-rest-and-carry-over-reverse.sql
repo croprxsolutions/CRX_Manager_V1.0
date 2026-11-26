@@ -18,9 +18,9 @@ BEGIN
   END IF;
   FOR v_pin IN SELECT * FROM (VALUES
       ('public._allocated_delivery_cents(uuid,numeric,uuid)', '2865a1d5ed3655c847b2073d500a24a6'),
-      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text)', '7acbb5d862696f7b65ccbaa2d4d4f5e6'),
-      ('public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text)', '4f18fe996393549ebf7d4ee76570188d'),
-      ('public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text)', 'ee18d8501f94a4c34bb71831c767f0a2'),
+      ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text,text,bigint,numeric)', '4fb7d15a9551b4f9ac77c89141704623'),
+      ('public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid,uuid,text,text,bigint,numeric)', '8fcdb36b13ec85918eee1f8d106cf5e4'),
+      ('public.create_invoice_for_unbilled_delivery(uuid,uuid,text,text,bigint,numeric)', '750cc76aad38fa169915f48757a5657f'),
       ('public.get_dashboard_action_items(integer)', 'eb96aacf4dfc840a22df32d6bb549aeb')) t(sig, md5)
   LOOP
     IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure(v_pin.sig)) IS DISTINCT FROM v_pin.md5 THEN
@@ -31,9 +31,9 @@ END;
 $reverse_preflight$;
 
 DROP VIEW public.delivery_billing_remainders;
-DROP FUNCTION public.create_invoice_for_unbilled_delivery(uuid, uuid, text, text);
-DROP FUNCTION public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid, uuid, text, text);
-DROP FUNCTION public._create_invoice_for_unbilled_delivery_impl_20260718(uuid, uuid, text, text);
+DROP FUNCTION public.create_invoice_for_unbilled_delivery(uuid, uuid, text, text, bigint, numeric);
+DROP FUNCTION public._create_invoice_for_unbilled_delivery_idem_impl_20260721(uuid, uuid, text, text, bigint, numeric);
+DROP FUNCTION public._create_invoice_for_unbilled_delivery_impl_20260718(uuid, uuid, text, text, bigint, numeric);
 
 CREATE OR REPLACE FUNCTION public._allocated_delivery_cents(p_order_item_id uuid, p_quantity numeric, p_exclude_invoice_id uuid DEFAULT NULL::uuid)
  RETURNS bigint

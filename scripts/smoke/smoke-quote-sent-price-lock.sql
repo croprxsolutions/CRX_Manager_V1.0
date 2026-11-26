@@ -63,13 +63,12 @@ DECLARE
   v_season_end date := season_end_date(compute_season((now() AT TIME ZONE 'America/Chicago')::date));
   v_snapshot jsonb;
   v_section_id uuid;
+  v_trail_guard boolean;
 BEGIN
   -- Since 20270309020000 the price trail is append-only. This rolled-back fixture removes trail rows to
-  -- prove the lock on a price nothing vouches for, so it switches off only that guard (rollback restores it).
-  IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.quote_price_changes'::regclass
-               AND tgname = 'trigger_quote_price_changes_append_only') THEN
-    ALTER TABLE public.quote_price_changes DISABLE TRIGGER trigger_quote_price_changes_append_only;
-  END IF;
+  -- prove the lock on a price nothing vouches for, so it lifts only that guard, only around those deletes.
+  v_trail_guard := EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.quote_price_changes'::regclass
+                             AND tgname = 'trigger_quote_price_changes_append_only');
   SELECT id INTO v_admin FROM profiles
   WHERE role = 'admin' AND is_active = true
   ORDER BY created_at LIMIT 1;
@@ -233,7 +232,9 @@ BEGIN
         AND sent_version = 1 AND grower_confirmed_by IS NOT NULL) <> 1 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (B) the ticked raise was not recorded once';
   END IF;
+  IF v_trail_guard THEN ALTER TABLE public.quote_price_changes DISABLE TRIGGER trigger_quote_price_changes_append_only; END IF;
   DELETE FROM quote_price_changes WHERE quote_id = v_id;
+  IF v_trail_guard THEN ALTER TABLE public.quote_price_changes ENABLE TRIGGER trigger_quote_price_changes_append_only; END IF;
   SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
   BEGIN
     PERFORM convert_quote_to_order(v_id, v_admin, 'smk-lock-conv-B1-' || v_suffix, v_rv, NULL);
@@ -301,7 +302,9 @@ BEGIN
     jsonb_set(jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'C')),
       '{0,items,0,price_override}', '9'::jsonb), '{0,items,0,grower_confirmed}', 'true'::jsonb),
     v_admin, 'smk-lock-save-C2-' || v_suffix);
+  IF v_trail_guard THEN ALTER TABLE public.quote_price_changes DISABLE TRIGGER trigger_quote_price_changes_append_only; END IF;
   DELETE FROM quote_price_changes WHERE quote_id = v_id;
+  IF v_trail_guard THEN ALTER TABLE public.quote_price_changes ENABLE TRIGGER trigger_quote_price_changes_append_only; END IF;
   SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
   BEGIN
     PERFORM convert_quote_to_order(v_id, v_admin, 'smk-lock-conv-C1-' || v_suffix, v_rv, NULL);
@@ -387,7 +390,9 @@ BEGIN
       'quote_number', '[SMOKE] LOCK-N-' || v_suffix, 'customer_id', v_c1, 'status', 'revised', 'tier', 1,
       'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_rv),
     jsonb_set(v_sections, '{0,items,0,grower_confirmed}', 'true'::jsonb), v_admin, 'smk-lock-save-N2-' || v_suffix);
+  IF v_trail_guard THEN ALTER TABLE public.quote_price_changes DISABLE TRIGGER trigger_quote_price_changes_append_only; END IF;
   DELETE FROM quote_price_changes WHERE quote_id = v_id;
+  IF v_trail_guard THEN ALTER TABLE public.quote_price_changes ENABLE TRIGGER trigger_quote_price_changes_append_only; END IF;
   IF (SELECT price_per_unit FROM quote_items WHERE quote_id = v_id) IS DISTINCT FROM 8.75
      OR (SELECT cost_at_quote_cents FROM quote_items WHERE quote_id = v_id) IS DISTINCT FROM 600 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (N) an id-less line did not take today''s price with its kept cost: %',
@@ -424,7 +429,9 @@ BEGIN
     jsonb_set(jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'O')),
       '{0,items,0,price_override}', '9'::jsonb), '{0,items,0,grower_confirmed}', 'true'::jsonb),
     v_admin, 'smk-lock-save-O2-' || v_suffix);
+  IF v_trail_guard THEN ALTER TABLE public.quote_price_changes DISABLE TRIGGER trigger_quote_price_changes_append_only; END IF;
   DELETE FROM quote_price_changes WHERE quote_id = v_id;
+  IF v_trail_guard THEN ALTER TABLE public.quote_price_changes ENABLE TRIGGER trigger_quote_price_changes_append_only; END IF;
   SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
   BEGIN
     PERFORM convert_quote_to_order(v_id, v_admin, 'smk-lock-conv-O2-' || v_suffix, v_rv, NULL);
@@ -459,7 +466,9 @@ BEGIN
     jsonb_set(jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'G')),
       '{0,items,0,use_todays_price}', 'true'::jsonb), '{0,items,0,grower_confirmed}', 'true'::jsonb),
     v_admin, 'smk-lock-save-G2-' || v_suffix);
+  IF v_trail_guard THEN ALTER TABLE public.quote_price_changes DISABLE TRIGGER trigger_quote_price_changes_append_only; END IF;
   DELETE FROM quote_price_changes WHERE quote_id = v_id;
+  IF v_trail_guard THEN ALTER TABLE public.quote_price_changes ENABLE TRIGGER trigger_quote_price_changes_append_only; END IF;
   SELECT id INTO v_section_id FROM quote_sections WHERE quote_id = v_id;
   BEGIN
     PERFORM create_job_from_quote_section(v_id, v_section_id, v_admin, 'smk-lock-job-G-' || v_suffix);

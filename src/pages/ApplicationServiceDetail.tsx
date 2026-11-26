@@ -73,6 +73,8 @@ export default function ApplicationServiceDetail() {
   const [newOverrideCustomerName, setNewOverrideCustomerName] = useState('');
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
+  const inFlightSaveScopesRef = useRef(new Set<string>());
+  const [saveLockState, setSaveLockState] = useState(() => ({ version: 0, scopes: new Set<string>() }));
   // "We could not read the cost" is NOT the same fact as "the cost is $0.00", and
   // conflating them loses money: the form would show 0.00, and saving any other
   // field would then push that 0 back through saveCost and destroy the real cost.
@@ -86,6 +88,7 @@ export default function ApplicationServiceDetail() {
   const skipUnsavedPromptRef = useRef(false);
   const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
   const saveIdem = useIdempotencyKey('admin_save_application_service', profile?.id || '');
+  const savingCurrentService = saveLockState.scopes.has(id ?? 'new');
   const [newOverride, setNewOverride] = useState({ customer_id: '', rate: '', season: computeSeason().toString(), notes: '' });
   const [deleteOverrideId, setDeleteOverrideId] = useState<string | null>(null);
 
@@ -157,7 +160,6 @@ export default function ApplicationServiceDetail() {
     };
     loadedFormRef.current = loaded;
     setForm(loaded);
-    setLoading(false);
     setTimeout(() => { if (isCurrent()) initialLoadDone.current = true; }, 0);
   }, [id, toast, navigate, isAdmin]);
 
@@ -186,8 +188,11 @@ export default function ApplicationServiceDetail() {
     setNewOverride({ customer_id: '', rate: '', season: computeSeason().toString(), notes: '' });
     setNewOverrideCustomerName('');
     setDeleteOverrideId(null);
-    if (!isNew && id) { fetchService(isCurrent); fetchOverrides(isCurrent); }
-    else {
+    if (!isNew && id) {
+      void Promise.all([fetchService(isCurrent), fetchOverrides(isCurrent)]).then(() => {
+        if (isCurrent()) setLoading(false);
+      });
+    } else {
       setLoading(false);
       setTimeout(() => { if (isCurrent()) initialLoadDone.current = true; }, 0);
       setBillingReadAvailable(APPLICATION_SERVICE_BILLING_DB_READY);
@@ -262,6 +267,8 @@ export default function ApplicationServiceDetail() {
   const handleSave = async () => {
     const saveRouteGeneration = routeGenerationRef.current;
     const isCurrent = () => routeGenerationRef.current === saveRouteGeneration;
+    const serviceScope = id ?? 'new';
+    if (inFlightSaveScopesRef.current.has(serviceScope)) return;
     if (!form.name.trim()) { toast('error', 'Service name is required'); return; }
     if (!isAdmin) { toast('error', 'Only admins can manage application services'); return; }
     // Both money fields are refused (null) on more than two decimals. Neither may
@@ -280,6 +287,12 @@ export default function ApplicationServiceDetail() {
       if (parsedCost === null) { toast('error', `Cost per acre: ${MONEY_PRECISION_MESSAGE}`); return; }
       costCents = parsedCost;
     }
+    inFlightSaveScopesRef.current.add(serviceScope);
+    setSaveLockState((current) => {
+      const scopes = new Set(current.scopes);
+      scopes.add(serviceScope);
+      return { version: current.version + 1, scopes };
+    });
     setSaving(true);
     try {
       const saved = await saveService({
@@ -308,6 +321,12 @@ export default function ApplicationServiceDetail() {
       if (!isCurrent()) return;
       toast('error', sanitizeError(err));
     } finally {
+      inFlightSaveScopesRef.current.delete(serviceScope);
+      setSaveLockState((current) => {
+        const scopes = new Set(current.scopes);
+        scopes.delete(serviceScope);
+        return { version: current.version + 1, scopes };
+      });
       if (isCurrent()) setSaving(false);
     }
   };
@@ -356,7 +375,7 @@ export default function ApplicationServiceDetail() {
           <h1 className="text-2xl font-bold text-nav-dark">{isNew ? 'New Application Service' : form.name}</h1>
           {!isNew && <p className="text-sm text-secondary mt-0.5">{form.is_active ? 'Active' : 'Inactive'} &middot; {form.default_rate_per_acre ? `$${form.default_rate_per_acre}/ac` : 'No rate set'}</p>}
         </div>
-        {isAdmin && <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>{isNew ? 'Create Service' : 'Save Changes'}</Button>}
+        {isAdmin && <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={savingCurrentService}>{isNew ? 'Create Service' : 'Save Changes'}</Button>}
       </div>
 
       {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}

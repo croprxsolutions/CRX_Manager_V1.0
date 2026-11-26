@@ -30,6 +30,7 @@ type CallSite = { file: string; line: number; callback: string };
 // fetchAllRows (paths under src). The integrity checks recompute ledgers from
 // reconciliation's reads, so a short read is a false result.
 const SHARED_FILES = [
+  'lib/applicationServiceBilling.ts',
   'lib/customerDuplicates.ts',
   'lib/customerStatement.ts',
   'lib/deliveryBrandPaper.ts',

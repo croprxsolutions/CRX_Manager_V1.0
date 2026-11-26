@@ -1,5 +1,5 @@
 -- Written 2026-11-25. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270307230000_parent_epa_correction_refuses_open_work.md. Re-read the live ledger before applying.
+-- docs/reference/migrations.d/20270308120000_parent_epa_correction_refuses_open_work.md. Re-read the live ledger before applying.
 --
 -- #2579 (Mason, 2026-11-25: "go ahead with 2579"): refuse a parent EPA-number correction while any size of the parent
 -- has work in progress, and name that work. Contract: docs/plans/2026-11-25-par1-epa-refuse-open-work-CONTRACT.md.

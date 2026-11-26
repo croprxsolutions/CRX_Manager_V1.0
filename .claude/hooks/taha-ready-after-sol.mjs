@@ -27,7 +27,7 @@ const PR_FIELDS = "number,state,isDraft,isCrossRepository,author,headRefName,hea
 const isTaha = (login) => String(login ?? "").trim().toLowerCase() === TAHA_LOGIN;
 const lower = (sha) => String(sha ?? "").toLowerCase();
 const manual = (n) => `gh pr edit ${n ? `${n} ` : ""}--add-label ${LABEL} --add-reviewer TahaKhanAbdalli`;
-const FILES_UNREADABLE = "GitHub did not return the PR's changed files";
+const FILES_UNREADABLE = "GitHub did not return the PR's full list of changed files";
 const LANE_UNKNOWN = "GitHub did not return its migrations' SQL";
 const UNREAD_SQL = "(its SQL could not be read)"; // tahaLaneProblem's marker
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -43,7 +43,10 @@ export function tahaReadyAfterSolProblem({ pr, proofClean, files }) {
   if ((pr.reviews ?? []).some((r) => isTaha(r.author?.login) && lower(r.commit?.oid) === head)) return "Taha already reviewed this head";
   const list = files();
   if (list === null) return FILES_UNREADABLE;
-  const hits = tahaLaneProblem({ files: list })?.files ?? [];
+  const lane = tahaLaneProblem({ files: list });
+  // A 250+ file list may be cut short: lane unknown, not "not lane" (Codex bot).
+  if (lane && !lane.files?.length) return FILES_UNREADABLE;
+  const hits = lane?.files ?? [];
   if (!hits.length) return "not in Taha's lane";
   // A migration whose SQL could not be read counts as lane for the merge gates, but here it only means "unknown".
   if (hits.every((hit) => hit.endsWith(UNREAD_SQL))) return LANE_UNKNOWN;

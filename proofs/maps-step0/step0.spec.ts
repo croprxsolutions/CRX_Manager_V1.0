@@ -183,7 +183,16 @@ function polygonClicks(box: { x: number; y: number; width: number; height: numbe
 
 async function clickPolygon(page: Page, points: Array<{ x: number; y: number }>): Promise<void> {
   for (const point of points) await page.mouse.click(point.x, point.y);
+  await waitForDrawVertex(page, points[0]);
   await page.mouse.click(points[0].x, points[0].y);
+  await expect.poll(() => callProof<string>(page, 'getMode')).toBe('simple_select');
+}
+
+async function waitForDrawVertex(page: Page, point: { x: number; y: number }): Promise<void> {
+  await page.waitForFunction(({ x, y }) => {
+    const proof = (window as Window & { __proof?: ProofApi }).__proof;
+    return proof?.hasRenderedVertex(x, y);
+  }, point);
 }
 
 async function expectOneFourCornerPolygon(page: Page): Promise<void> {
@@ -270,6 +279,7 @@ test('manual switch, automatic fallback and Retry preserve the in-progress sketc
   await page.mouse.click(points[2].x, points[2].y);
   await page.mouse.click(points[3].x, points[3].y);
   expect(await callProof<string>(page, 'getMode')).toBe('draw_polygon');
+  await waitForDrawVertex(page, points[0]);
   await page.mouse.click(points[0].x, points[0].y);
 
   await expectOneFourCornerPolygon(page);
@@ -300,10 +310,7 @@ test('manual switch, automatic fallback and Retry preserve an active vertex drag
   const secondVertex = await callProof<{ x: number; y: number }>(page, 'projectSecondVertex');
   await callProof(page, 'startDirectSelect');
   expect(await callProof<string>(page, 'getMode')).toBe('direct_select');
-  await page.waitForFunction(({ x, y }) => {
-    const proof = (window as Window & { __proof?: ProofApi }).__proof;
-    return proof?.hasRenderedVertex(x, y);
-  }, secondVertex);
+  await waitForDrawVertex(page, secondVertex);
 
   const releasePoint = { x: secondVertex.x + 55, y: secondVertex.y + 32 };
   const beforeDrag = await drawingState(page);

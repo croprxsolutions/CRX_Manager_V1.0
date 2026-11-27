@@ -48,7 +48,7 @@ type TaskFields = {
 async function saveQuickTask(fields: TaskFields, callbackId: string | null) {
   const input: TaskFields & { id?: string } = callbackId ? { id: callbackId, ...fields } : fields;
   const { error } = await supabase.from('team_notes').insert(input);
-  if (!error) return;
+  if (!error) return true;
   if (!callbackId || error.code !== '23505') throw error;
 
   // A lost save response can leave this same callback in Team Board already.
@@ -57,9 +57,7 @@ async function saveQuickTask(fields: TaskFields, callbackId: string | null) {
     .eq('id', callbackId).eq('created_by', fields.created_by).maybeSingle();
   if (prior.error || !prior.data) throw prior.error ?? error;
   const saved = prior.data;
-  if (Object.keys(fields).some((key) => saved[key as keyof TaskFields] !== fields[key as keyof TaskFields])) {
-    throw new Error('The earlier callback was already saved. Open it on Team Board to make changes.');
-  }
+  return Object.keys(fields).every((key) => saved[key as keyof TaskFields] === fields[key as keyof TaskFields]);
 }
 
 export default function QuickTaskModal({
@@ -88,6 +86,8 @@ export default function QuickTaskModal({
   const [assigneeRetry, setAssigneeRetry] = useState(0);
   const [saving, setSaving] = useState(false);
   const callbackIdRef = useRef<string | null>(null);
+  const waitingForAssignee = callbackOnly && !!assignedTo && assigneeStatus !== 'ready';
+  const callbackAssigneeUnavailable = callbackOnly && !!assignedTo && !profiles.some((person) => person.id === assignedTo);
 
   useEffect(() => { callbackIdRef.current = null; }, [open, entityId]);
 
@@ -125,7 +125,7 @@ export default function QuickTaskModal({
   }, [open, assigneeRetry]);
 
   async function handleSave() {
-    if (saving) return;
+    if (saving || waitingForAssignee) return;
     if (!profile) {
       toast('error', 'Please wait for profile to load');
       return;
@@ -134,8 +134,7 @@ export default function QuickTaskModal({
       toast('error', 'Title is required');
       return;
     }
-    if (callbackOnly && assignedTo && assigneeStatus !== 'ready') return;
-    if (callbackOnly && assignedTo && !profiles.some((person) => person.id === assignedTo)) {
+    if (callbackAssigneeUnavailable) {
       toast('error', 'Choose an active assignee or select Unassigned.');
       return;
     }
@@ -143,7 +142,7 @@ export default function QuickTaskModal({
     setSaving(true);
     try {
       if (callbackOnly && !callbackIdRef.current) callbackIdRef.current = crypto.randomUUID();
-      await saveQuickTask({
+      const matches = await saveQuickTask({
         title: title.trim(),
         content: content.trim() || null,
         note_type: callbackOnly ? 'todo' : noteType,
@@ -155,8 +154,9 @@ export default function QuickTaskModal({
         linked_entity_id: entityId,
       }, callbackOnly ? callbackIdRef.current : null);
 
-      toast('success', 'Task created successfully');
       onCreated?.();
+      if (!matches) throw new Error('The earlier callback was already saved. Open it on Team Board to make changes.');
+      toast('success', callbackOnly ? 'Callback saved' : 'Task created successfully');
       onClose();
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'QuickTaskModal.handleSave' } });
@@ -217,7 +217,7 @@ export default function QuickTaskModal({
             <label htmlFor={`${fieldId}-assignee`} className="block text-sm font-medium text-secondary mb-1">Assign To</label>
             <select id={`${fieldId}-assignee`} value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className={selectClass}>
               <option value="">Unassigned</option>
-              {callbackOnly && assignedTo && !profiles.some((person) => person.id === assignedTo) && (
+              {callbackAssigneeUnavailable && (
                 <option value={assignedTo}>{assigneeStatus === 'loading' ? 'Loading assigned rep…' : 'Selected assignee unavailable'}</option>
               )}
               {profiles.map((p) => (
@@ -236,7 +236,7 @@ export default function QuickTaskModal({
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} loading={saving} disabled={callbackOnly && !!assignedTo && assigneeStatus !== 'ready'}>
+          <Button onClick={handleSave} loading={saving} disabled={waitingForAssignee}>
             {callbackOnly ? 'Save callback' : 'Create Task'}
           </Button>
         </div>

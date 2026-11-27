@@ -85,8 +85,12 @@ describe('Sales follow-ups', () => {
   });
 
   it('opens the existing exact callback and offers scheduling for a different quote', async () => {
+    const approvedQuoteTasks = read([{ id: 'task-id', linked_entity_id: 'quote-1' }]);
+    const myTasks = read([]);
     db.from.mockImplementation((table) => {
-      if (table === 'team_notes') return read([callback('task-id', 'Callback', '2026-11-27', 'quote')]);
+      if (table === 'team_notes') return {
+        select: (columns: string) => columns.includes('title') ? myTasks : approvedQuoteTasks,
+      };
       if (table === 'quotes') return read([{ id: 'quote-1', quote_number: 'Q-1', customer: { farm_name: 'Oak Farm' } }]);
       return read(names);
     });
@@ -94,6 +98,8 @@ describe('Sales follow-ups', () => {
     expect(await screen.findByRole('link', { name: 'Open callback for quote Q-1' })).toHaveAttribute('href', '/team-board?note=task-id');
     expect(screen.getByRole('button', { name: 'Schedule callback for quote Q-2' })).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Schedule callback for quote Q-1' })).not.toBeInTheDocument();
+    expect(approvedQuoteTasks.in).toHaveBeenCalledWith('linked_entity_id', ['quote-1', 'quote-2']);
+    expect(approvedQuoteTasks.eq).not.toHaveBeenCalledWith('assigned_to', expect.anything());
   });
 
   it('offers a retry for a failed context lookup while keeping the stale quote list available', async () => {
@@ -105,11 +111,13 @@ describe('Sales follow-ups', () => {
     });
     render(<MemoryRouter><SalesFollowUps profile={profile} deniedPages={[]} /></MemoryRouter>);
     const pane = screen.getByRole('region', { name: 'My callbacks' });
-    expect(await within(pane).findByRole('alert')).toHaveTextContent('Callbacks could not be loaded');
+    expect(await within(pane).findByText('Some details could not be loaded.')).toBeVisible();
+    expect(within(pane).getByRole('link', { name: 'Existing call' })).toBeVisible();
     expect(await screen.findByRole('link', { name: 'Oak Farm · #Q-1' })).toBeVisible();
     farmError = false;
-    fireEvent.click(within(pane).getByRole('button', { name: 'Try again' }));
-    expect(await within(pane).findByRole('link', { name: 'Existing call' })).toBeVisible();
+    fireEvent.click(within(pane).getByRole('button', { name: 'Retry details' }));
+    expect(await within(pane).findByText(/Oak Farm/)).toBeVisible();
+    expect(within(pane).queryByText('Some details could not be loaded.')).not.toBeInTheDocument();
   });
 
   it('waits for a prefilled assignee, refuses an inactive selection, and saves an exact quote todo', async () => {
@@ -135,7 +143,7 @@ describe('Sales follow-ups', () => {
     }));
   });
 
-  it('reuses the same task ID after a lost response and acknowledges only the saved fields', async () => {
+  it.each([false, true])('reconciles a lost response when the form has been edited: %s', async (edited) => {
     const fields = {
       title: 'Call Oak', content: null, note_type: 'todo', priority: 'medium', assigned_to: null,
       due_date: null, created_by: 'rep', linked_entity_type: 'quote', linked_entity_id: 'quote-1',
@@ -148,16 +156,24 @@ describe('Sales follow-ups', () => {
     existing.eq.mockReturnValue({ eq: existing.eq, maybeSingle: vi.fn().mockResolvedValue({ data: fields, error: null }) });
     db.from.mockImplementation((table) => table === 'team_notes' ? { insert, select } : read(names));
     const onCreated = vi.fn();
+    const onClose = vi.fn();
     render(<QuickTaskModal open callbackOnly entityType="quote" entityId="quote-1" prefillTitle="Call Oak"
-      onCreated={onCreated} onClose={vi.fn()} />);
+      onCreated={onCreated} onClose={onClose} />);
     const save = screen.getByRole('button', { name: 'Save callback' });
     fireEvent.click(save);
     await waitFor(() => expect(db.toast).toHaveBeenCalledWith('error', 'Lost save response'));
+    if (edited) fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'New title' } });
     fireEvent.click(save);
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
     expect(insert).toHaveBeenCalledTimes(2);
     const first = insert.mock.calls[0][0];
     expect(first).toEqual({ id: expect.any(String), ...fields });
-    expect(insert.mock.calls[1][0]).toEqual(first);
+    expect(insert.mock.calls[1][0]).toEqual({ ...first, title: edited ? 'New title' : fields.title });
+    if (edited) {
+      expect(onClose).not.toHaveBeenCalled();
+      expect(db.toast).toHaveBeenCalledWith('error', 'The earlier callback was already saved. Open it on Team Board to make changes.');
+    } else {
+      expect(onClose).toHaveBeenCalledOnce();
+    }
   });
 });

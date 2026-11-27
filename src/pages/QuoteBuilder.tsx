@@ -295,7 +295,14 @@ function LineAcres({ item, onAcres }: { item: LocalItem; onAcres: (acres: number
 
 /** Lines whose acres were filled in automatically and not yet checked by the rep. */
 function unconfirmedAcresCount(sections: LocalSection[]): number {
-  return sections.reduce((n, sec) => n + sec.items.filter((i) => i.acres_prefill && !i.acres_confirmed && i.product_id && i.acres != null).length, 0);
+  return uncheckedAcres(sections).size;
+}
+
+/** Each unchecked auto-filled line's key, with the acres the rep is asked about. */
+function uncheckedAcres(sections: LocalSection[]): Map<string, number | null> {
+  return new Map(sections.flatMap((sec) => sec.items)
+    .filter((i) => i.acres_prefill && !i.acres_confirmed && i.product_id && i.acres != null)
+    .map((i) => [i._key, i.acres]));
 }
 
 // The quote's totals: line sums, then rounded to the cent. The page's one totals rule.
@@ -2457,11 +2464,12 @@ export default function QuoteBuilder() {
     setAcresCheck(null);
     return ok;
   };
-  // A successful save makes the checked acres the rep's: the highlight goes. A failed or refused
-  // save keeps it, so a later field change still drops untouched copies (Sol, #2445).
-  const acceptAutoAcres = () => setSections((prev) => prev.map((sec) => ({
+  // A successful save marks the acres the rep checked, and only those (same line, same acres), as
+  // checked: the highlight goes. A line added or changed meanwhile is still asked about (Luna, #2713).
+  const acceptAutoAcres = (checked: Map<string, number | null>) => setSections((prev) => prev.map((sec) => ({
     ...sec,
-    items: sec.items.map((i) => (i.acres_prefill && i.product_id ? { ...i, acres_confirmed: true } : i)),
+    items: sec.items.map((i) => (i.acres_prefill && checked.has(i._key) && checked.get(i._key) === i.acres
+      ? { ...i, acres_confirmed: true } : i)),
   })));
 
   const saveQuote = async (newStatus?: QuoteStatus): Promise<string | null> => {
@@ -2512,6 +2520,7 @@ export default function QuoteBuilder() {
       return null;
     }
     if (!profile) return null;
+    const checkedAcres = uncheckedAcres(sections);
     if (!(await confirmAutoAcres())) return null;
 
     // Validation: warn about empty sections
@@ -2973,7 +2982,7 @@ export default function QuoteBuilder() {
         // Only Save Draft creates, and it opens the saved quote, which loads the stored prices.
         if (!quoteIdAtSend) {
           toast('warning', `The quote was saved, but ${repricedCount} priced at today's catalog price, which changed since this page loaded. Check the saved prices before sending it.`);
-          acceptAutoAcres();
+          acceptAutoAcres(checkedAcres);
           return savedQuoteId;
         }
         quoteVersionRecoveryRequiredRef.current = true;
@@ -2985,7 +2994,7 @@ export default function QuoteBuilder() {
       if (isAdmin && savedLineIdsRef.current.size > 0) {
         await refreshSavedLineCosts(editingSessionChanged);
       }
-      acceptAutoAcres();
+      acceptAutoAcres(checkedAcres);
       return savedQuoteId;
     } catch (err: unknown) {
       if (isBelowCostApprovalHandledError(err)) return null;

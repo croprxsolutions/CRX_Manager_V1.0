@@ -199,9 +199,17 @@ describe('QuoteBuilder — acres on a new line', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Clear field/ }));
     await waitFor(() => expect(acres()).toEqual(['', '']));
     expect(screen.queryByText('Filled from field')).not.toBeInTheDocument();
+
+    // A blank line the field had filled is still untouched after the clear: closing its picker drops it.
+    fireEvent.click(await screen.findByRole('button', { name: 'Add product' }));
+    await waitFor(() => expect(acres()).toEqual(['', '', '']));
+    const selects = screen.getAllByRole('button', { name: /Select product/ });
+    fireEvent.click(selects[selects.length - 1]);
+    fireEvent.keyDown(await screen.findByPlaceholderText('Search by name, SKU, category, or vendor...'), { key: 'Escape' });
+    await waitFor(() => expect(acres()).toEqual(['', '']));
   });
 
-  it("a reopened quote's new line takes the new field's acres, not the saved line's old ones (Taha, #2445)", { timeout: 20000 }, async () => {
+  it("a reopened quote's new line below a saved line starts empty: neither the saved acres nor the field's are guessed (Taha, Sol, #2445)", { timeout: 20000 }, async () => {
     mockFrom.mockImplementation((table: string) => rowChain(
       table === 'quotes' ? savedQuote : table === 'quote_sections' ? [savedSection] : table === 'quote_items' ? [savedItem]
         : table === 'customers' ? [customer] : table === 'products' ? [product] : table === 'fields' ? [field, fieldB] : [],
@@ -222,10 +230,10 @@ describe('QuoteBuilder — acres on a new line', () => {
     expect(acres()).toEqual(['80']);
     expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('saved lines keep their acres'));
 
+    // The saved 80 may be stale (field changed) or a partial treatment: the new line is left for the rep.
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
-    await waitFor(() => expect(acres()).toEqual(['80', '120']));
-    expect(screen.getByText('Filled from field')).toBeInTheDocument();
-    expect(screen.queryByText('Copied from line above')).not.toBeInTheDocument();
+    await waitFor(() => expect(acres()).toEqual(['80', '']));
+    expect(screen.queryByText(/^(Filled from field|Copied from line above)$/)).not.toBeInTheDocument();
   });
 
   it('starts the next line empty when the line above has 0 acres typed, even with a field (Luna, #2445)', { timeout: 20000 }, async () => {

@@ -1918,6 +1918,8 @@ export default function QuoteBuilder() {
       items: sec.items.map((item) => {
         if (!filledByField(item)) return item;
         const cleared: LocalItem = { ...item, acres: null, acres_source: undefined, acres_prefill: undefined };
+        // A prefilled line with no product is still untouched: leave its quantity blank (Sol, #2445).
+        if (item.acres_prefill && !item.product_id) return cleared;
         return item.calc_mode === 'units_direct'
           ? { ...cleared, oz_per_acre: null, price_per_acre: null }
           : { ...cleared, total_units_needed: 0, total_price: 0, profit: 0, net_margin: 0 };
@@ -2307,11 +2309,11 @@ export default function QuoteBuilder() {
     const fieldAcres = field ? billableAcres(field.override_acres, field.measured_acres, field.total_acres) : null;
     const fromField = { acres: fieldAcres, acres_source: 'field', acres_prefill: 'field' } as const;
     if (above?.acres != null && above.acres > 0) {
-      // A saved line's acres have no known source and may predate a field change, so the field's
-      // acres win when it has some (Taha, #2445 MED).
-      if (above.acres_source === undefined && fieldAcres != null && fieldAcres > 0) return fromField;
-      // The copy keeps the above line's source as is: field-filled acres stay tied to the field, and
-      // an unknown source stays unknown so the "check them" warning still covers it.
+      // A saved line's acres have no known source: they may predate a field change (Taha, #2445) or
+      // be a partial-field treatment (Sol, #2445), so neither they nor the field's are guessed and
+      // the new line starts empty, as before.
+      if (above.acres_source === undefined) return null;
+      // Field-filled acres stay tied to the field, so clearing the field drops this copy too.
       return { acres: above.acres, acres_source: above.acres_source, acres_prefill: 'line_above' };
     }
     // Acres typed as 0 on the line above mean "none here": the new line starts empty (Luna, #2445).

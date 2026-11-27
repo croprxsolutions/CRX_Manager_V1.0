@@ -43,6 +43,7 @@ async function readStaleQuotes() {
   ]);
   return {
     rows, total: page.total, names: directory.names, byQuote: callbacks.byQuote,
+    callbacksUnavailable: Boolean(callbacks.error),
     detailsUnavailable: reportContextError(directory.error ?? callbacks.error),
   };
 }
@@ -153,7 +154,7 @@ function StaleQuoteRows({ list, refreshing, onSchedule }: {
               {task ? (
                 <Link className={`${linkClass} text-sm`} to={`/team-board?note=${task}`} aria-label={`Open callback for quote ${row.quote_number}`}>Open callback</Link>
               ) : (
-                <Button variant="ghost" size="sm" className="min-h-11 px-0" disabled={refreshing || list.detailsUnavailable} onClick={() => onSchedule(row)}
+                <Button variant="ghost" size="sm" className="min-h-11 px-0" disabled={refreshing || list.callbacksUnavailable} onClick={() => onSchedule(row)}
                   aria-label={`Schedule callback for quote ${row.quote_number}`}>Schedule callback</Button>
               )}
             </li>
@@ -220,7 +221,7 @@ export default function SalesFollowUps({ profile, deniedPages }: { profile: Pick
     const refreshed = await staleQuotes.reload();
     if (refreshed.status !== 'applied') return;
     const current = refreshed.data;
-    if (current.detailsUnavailable || current.byQuote.has(row.quote_id)) return;
+    if (current.callbacksUnavailable || current.byQuote.has(row.quote_id)) return;
     if (current.rows.some((quote) => quote.quote_id === row.quote_id)) setSelectedQuoteId(row.quote_id);
   }
 

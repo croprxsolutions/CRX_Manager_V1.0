@@ -120,6 +120,15 @@ describe('Sales follow-ups', () => {
     expect(within(pane).queryByText('Some details could not be loaded.')).not.toBeInTheDocument();
   });
 
+  it('keeps scheduling available when only the quote assignee name fails to load', async () => {
+    db.from.mockImplementation((table) => table === 'team_notes' ? read([]) : read(null, { message: 'Unavailable' }));
+    render(<MemoryRouter><SalesFollowUps profile={profile} deniedPages={[]} /></MemoryRouter>);
+    const pane = screen.getByRole('region', { name: 'Stale quotes' });
+    expect(await within(pane).findByText('Some details could not be loaded.')).toBeVisible();
+    fireEvent.click(within(pane).getByRole('button', { name: 'Schedule callback for quote Q-1' }));
+    expect(await screen.findByRole('dialog')).toBeVisible();
+  });
+
   it('keeps quotes visible and disables scheduling if their callback lookup fails', async () => {
     let callbackLookupFailed = true;
     db.from.mockImplementation((table) => {

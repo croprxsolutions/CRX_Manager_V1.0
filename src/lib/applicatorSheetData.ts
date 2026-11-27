@@ -118,7 +118,7 @@ export function serializeCustomConfig(cfg: ApplicatorSheetCustomConfig): string 
 
 export interface ApplicatorSheetHazards {
   complete: boolean;
-  markers: Array<{ name: string; note: string | null; hasValidPoint: boolean }>;
+  markers: Array<{ id: string; name: string; note: string | null; hasValidPoint: boolean }>;
 }
 
 /** One field/location on the sheet, already placed in route order. */
@@ -225,6 +225,7 @@ export interface ApplicatorSheetSafety {
 /** The full, format-agnostic sheet payload. All three layouts read this. */
 export interface ApplicatorSheetData {
   fieldMapPagesRequested?: boolean;
+  overviewMapRequested?: boolean;
   job_number: string;
   customers: ApplicatorSheetCustomer[];
   scheduled_date: string; // YYYY-MM-DD

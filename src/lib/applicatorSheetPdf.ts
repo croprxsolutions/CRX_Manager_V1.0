@@ -401,7 +401,7 @@ function drawFieldHazards(
   data: ApplicatorSheetData,
   startY: number,
 ): number {
-  const imagesByField = new Map(data.maps?.perField.map((image) => [image.fieldId, image]));
+  const imagesByField = new Map(data.maps?.perField.map((image) => [image.fieldId, image] as const));
   const rows = data.fields.flatMap(({ stop, field_name, field_id, hazards }) => {
     const markers = hazards?.markers ?? [];
     const details = markers.map(({ name, note, hasValidPoint }) => [name, note,
@@ -410,13 +410,21 @@ function drawFieldHazards(
     if (details.length === 0) details.push('None recorded');
     const image = field_id ? imagesByField.get(field_id) : undefined;
     if (data.fieldMapPagesRequested && !image) details.push('Map picture unavailable for this stop');
-    if (image && markers.length > (image.hazardPinCount ?? 0)) details.push('Some listed hazards may not appear as map pins');
+    if (image && markers.some(({ id }) => !image.hazardPinIds?.includes(id))) details.push('Some listed hazards may not appear as map pins');
     return details.map((text) => [String(stop), field_name, text]);
   });
   if (rows.length === 0) return startY;
   const margin = 40;
+  let y = ensureRoom(doc, startY, 42, margin);
+  if (data.overviewMapRequested && !data.maps?.overview) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...GRAY);
+    doc.text('Overview map picture unavailable', margin, y);
+    y += 14;
+  }
   autoTable(doc, {
-    startY: ensureRoom(doc, startY, 42, margin),
+    startY: y,
     margin: { left: margin, right: margin, top: margin, bottom: 60 },
     head: [['Stop', 'Field', 'Field hazards']],
     body: rows,

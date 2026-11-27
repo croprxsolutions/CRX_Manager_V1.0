@@ -352,7 +352,7 @@ describe('map pages only print', () => {
     const data = makeSheetData({ maps: null, fieldMapPagesRequested: true });
     const [field] = data.fields;
     data.fields = [
-      { ...field, hazards: { complete: false, markers: [{ name: 'Washout', note: 'Stay west', hasValidPoint: false }] } },
+      { ...field, hazards: { complete: false, markers: [{ id: 'washout-1', name: 'Washout', note: 'Stay west', hasValidPoint: false }] } },
       { ...field, stop: 2, field_name: 'South', hazards: { complete: true, markers: [] } },
     ];
 

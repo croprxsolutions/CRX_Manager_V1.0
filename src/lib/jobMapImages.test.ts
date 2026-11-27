@@ -67,6 +67,10 @@ describe('fetchJobMapImages', () => {
     vi.clearAllMocks();
     import.meta.env.VITE_MAPBOX_TOKEN = 'test-mapbox-token';
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.stubGlobal('Image', class {
+      src = '';
+      async decode() { return undefined; }
+    });
   });
 
   afterEach(() => {
@@ -315,6 +319,19 @@ describe('fetchJobMapImages', () => {
     expect(console.warn).toHaveBeenCalledWith(warning
       ? 'Mapbox overview print image returned a provider warning.'
       : 'Mapbox overview print image returned an unusable image type.');
+  });
+
+  it('does not return a picture when the browser rejects image decoding', async () => {
+    setupRpc();
+    vi.stubGlobal('Image', class {
+      src = '';
+      async decode() { throw new Error('Synthetic invalid image data'); }
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(['invalid'], { type: 'image/png' }),
+    }));
+    await expect(fetchJobMapImages('job-1', { perField: false })).resolves.toBeNull();
   });
 
   it('cuts off a twelve-field job before all its stalled images are requested', async () => {

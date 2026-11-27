@@ -24,7 +24,7 @@ interface JobMapImageOptions {
 
 export interface JobFieldMapImage {
   fieldId: string;
-  hazardPinCount?: number;
+  hazardPinIds?: string[];
   /** Spray order on this job, 1-based (from job_fields.sort_order; restarts per job). */
   sprayNumber?: number;
   fieldName: string;
@@ -365,6 +365,14 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+async function decodeMapDataUrl(blob: Blob): Promise<string> {
+  const url = await blobToDataUrl(blob);
+  const image = new Image();
+  image.src = url;
+  await image.decode();
+  return url;
+}
+
 /**
  * Web-Mercator Y scaled to the same 360-degree world width as longitude. Using
  * this scale (rather than normalized 0..1 Y) keeps X/Y bbox aspect ratios valid.
@@ -575,7 +583,11 @@ async function fetchImageDataUrl(
     controller.signal.addEventListener('abort', () => resolve(null), { once: true });
   });
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await Promise.race([fetch(url, { signal: controller.signal }), cutoff]);
+    if (!response) {
+      console.warn(`Mapbox ${label} print image timed out.`);
+      return null;
+    }
     if (!response.ok) {
       console.warn(`Mapbox ${label} print image returned ${response.status}.`);
       return null;
@@ -584,12 +596,13 @@ async function fetchImageDataUrl(
       console.warn(`Mapbox ${label} print image returned a provider warning.`);
       return null;
     }
-    const blob = await response.blob();
+    const blob = await Promise.race([response.blob(), cutoff]);
+    if (!blob) return null;
     if (blob.size === 0 || !/^image\/(?:png|jpeg)(?:\s*;|$)/i.test(blob.type)) {
       console.warn(`Mapbox ${label} print image returned an unusable image type.`);
       return null;
     }
-    const dataUrl = await Promise.race([blobToDataUrl(blob), cutoff]);
+    const dataUrl = await Promise.race([decodeMapDataUrl(blob), cutoff]);
     if (!dataUrl || !overview) return dataUrl;
     return await Promise.race([
       addAcreageLabels(blob, dataUrl, overview.fields, overview.features, overview.options), cutoff,
@@ -626,13 +639,15 @@ async function customerNamesById(customerIds: string[], signal: AbortSignal): Pr
   return names;
 }
 
-async function fieldObstacleFeatures(fieldIds: string[], signal: AbortSignal): Promise<Map<string, BoundaryFeature[]>> {
-  const byField = new Map<string, BoundaryFeature[]>();
+interface FieldHazardPin { id: string; feature: BoundaryFeature }
+
+async function fieldObstacleFeatures(fieldIds: string[], signal: AbortSignal): Promise<Map<string, FieldHazardPin[]>> {
+  const byField = new Map<string, FieldHazardPin[]>();
   if (fieldIds.length === 0) return byField;
   try {
     const { data, error } = await supabase
       .from('field_obstacles')
-      .select('field_id, point_geojson')
+      .select('id, field_id, point_geojson')
       .in('field_id', fieldIds)
       .abortSignal(signal);
     if (signal.aborted) return byField;
@@ -640,14 +655,17 @@ async function fieldObstacleFeatures(fieldIds: string[], signal: AbortSignal): P
       console.warn('Unable to load field obstacles for applicator-sheet maps.', error);
       return byField;
     }
-    for (const { field_id, point_geojson } of data ?? []) {
+    for (const { id, field_id, point_geojson } of data ?? []) {
       if (!isFieldObstaclePoint(point_geojson)) continue;
       const features = byField.get(field_id) ?? [];
       const [longitude, latitude] = point_geojson.coordinates;
       features.push({
-        type: 'Feature',
-        properties: { 'marker-color': '#dc2626', 'marker-size': 'small' },
-        geometry: { type: 'Point', coordinates: [longitude, latitude] },
+        id,
+        feature: {
+          type: 'Feature',
+          properties: { 'marker-color': '#dc2626', 'marker-size': 'small' },
+          geometry: { type: 'Point', coordinates: [longitude, latitude] },
+        },
       });
       byField.set(field_id, features);
     }
@@ -828,7 +846,7 @@ async function collectJobMapImages(
     if (opts.perField !== false) {
       for (const field of fields) {
         const fieldObstacles = obstacles.get(field.id) ?? [];
-        const image = buildStaticImageUrl([field], fieldObstacles, perFieldOptions);
+        const image = buildStaticImageUrl([field], fieldObstacles.map((pin) => pin.feature), perFieldOptions);
         if (!image) {
           console.warn(`Skipping map for ${field.name} because its geometry exceeds Mapbox URL limits.`);
           continue;
@@ -836,9 +854,10 @@ async function collectJobMapImages(
         const dataUrl = await fetchImageDataUrl(image.url, 'field', signal);
         if (signal.aborted) return;
         if (!dataUrl) continue;
+        const includedFeatures = new Set(image.features);
         result.perField.push({
           fieldId: field.id,
-          hazardPinCount: image.features.filter(({ geometry }) => geometry.type === 'Point').length,
+          hazardPinIds: fieldObstacles.filter(({ feature }) => includedFeatures.has(feature)).map(({ id }) => id),
           sprayNumber: field.sprayNumber,
           fieldName: field.name,
           customerName: customerNames.get(field.customerId) ?? null,

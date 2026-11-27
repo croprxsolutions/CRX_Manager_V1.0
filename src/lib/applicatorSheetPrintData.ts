@@ -265,7 +265,7 @@ async function readSheetHazards(fields: ApplicatorSheetData['fields']) {
         results.set(id, {
           complete: snapshot.count === markers.size && snapshot.markers.length === markers.size,
           markers: [...markers.values()].map((marker) => ({
-            name: fieldObstacleName(marker), note: marker.label?.trim() || null,
+            id: marker.id, name: fieldObstacleName(marker), note: marker.label?.trim() || null,
             hasValidPoint: isFieldObstaclePoint(marker.point_geojson),
           })),
         });
@@ -297,10 +297,11 @@ export async function prepareApplicatorSheetPrintData(
   options: ApplicatorPrintOptions,
   office = true,
 ): Promise<ApplicatorSheetData> {
+  const mapOptions = mapImageOptions(options.mapPages);
   const [maps, previousApplications, billingSplits, locations, safety, hazards] = await Promise.all([
     options.mapPages === 'none'
       ? Promise.resolve(null)
-      : fetchJobMapImages(jobId, mapImageOptions(options.mapPages)),
+      : fetchJobMapImages(jobId, mapOptions),
     options.includePreviousApplications
       ? fetchPreviousApplications(data.fields, jobId, options.previousApplicationsPerField)
       : Promise.resolve([]),
@@ -320,7 +321,8 @@ export async function prepareApplicatorSheetPrintData(
     ...data,
     fields,
     maps,
-    fieldMapPagesRequested: options.mapPages === 'both' || options.mapPages === 'per-field',
+    fieldMapPagesRequested: mapOptions.perField,
+    overviewMapRequested: mapOptions.overview,
     previousApplications,
     billingSplits,
     // Safety is off unless chosen; when chosen it prints on its own sheet (Mason, 2026-11-24).

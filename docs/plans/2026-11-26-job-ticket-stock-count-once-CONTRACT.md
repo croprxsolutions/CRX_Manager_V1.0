@@ -142,3 +142,7 @@ None left (Mason answered A on 2026-11-26).
 - MED (fixed): an undo that moved nothing (the job had already counted the ticket) said the stock was back; it now says no stock changed.
 - MEDs accepted (decision `docs/manual/decision-log.d/2026-11-26-pr2679-record-numbers-round7.md`): a retry replayed from another device; a cycle count between filing and undo; undo vs invoicing deadlock; the deploy window; the database-only rollback window.
 - LOWs: note-text lookups (accepted, indexed by product, small per job); stale contract text (fixed here); the same-key test's second receipt read (accepted, covered by the replay race).
+
+## Luna round 8 (2026-11-27, head 135c41116)
+- MED (fixed): Undo Filing reset the screen-wide filing key even after the admin moved to another ticket whose filing was pending; it now resets it only while the same ticket is on screen (test asserts no reset after a move).
+- LOW (fixed): the on-screen ticket marker now updates in a layout effect, in the same commit as the route change, so a late reply cannot see the previous ticket as current.

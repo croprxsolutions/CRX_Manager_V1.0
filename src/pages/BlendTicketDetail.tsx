@@ -1,5 +1,5 @@
 import { toSentryError } from '../lib/sentryError';
-import { useState, useEffect, useRef , useCallback, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef , useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Save, Check, X, Plus, Trash2, Image as ImageIcon, AlertCircle, ClipboardCheck, RefreshCw, MapPin, FileText, Undo2 } from 'lucide-react';
 import { sanitizeError, supabase, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
@@ -90,7 +90,8 @@ export function BlendTicketDetail() {
   const loadSeqRef = useRef(0);
   // The ticket the route shows now, for actions that finish after the admin may have moved to another ticket.
   const routeIdRef = useRef(id);
-  useEffect(() => { routeIdRef.current = id; }, [id]);
+  // Layout effect: updated in the same commit as the new route, before any late reply can run (Luna r8).
+  useLayoutEffect(() => { routeIdRef.current = id; }, [id]);
   const hasUnsavedChanges = isDirty || fieldsDirty || saveHydrationRequired;
   const blocker = useUnsavedChanges(hasUnsavedChanges);
 
@@ -1075,7 +1076,8 @@ export function BlendTicketDetail() {
       undoFilingIdem.resetKeyFor(recordId);
       // The record is gone (reversed, or already gone): a filing key kept from a lost reply would replay the
       // deleted record on the next Create App Record instead of filing again (Codex P2 on #2679).
-      appRecordIdem.resetKey();
+      // Only while this ticket is on screen: the key is screen-wide, and another ticket's pending filing may own it (Luna r8).
+      if (routeIdRef.current === undoRouteId) appRecordIdem.resetKey();
       const result = data as {
         status?: string; inventory_transactions_reversed?: number; kept_on_job_lines?: number; over_taken_lines?: number;
       } | null;

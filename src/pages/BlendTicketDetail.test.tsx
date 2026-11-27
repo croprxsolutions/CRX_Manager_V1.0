@@ -884,6 +884,8 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('Filing undone')));
     expect(ticketLoads()).toBe(loadsAfterMove);
+    // The other ticket's filing key is left alone (Luna r8).
+    expect(mockResetKey).not.toHaveBeenCalled();
   });
 
   it('does not give a late filing reply to another ticket opened meanwhile', async () => {

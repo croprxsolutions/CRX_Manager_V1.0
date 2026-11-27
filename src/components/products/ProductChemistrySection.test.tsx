@@ -72,6 +72,10 @@ describe('ProductChemistrySection', () => {
       .mockResolvedValueOnce({ costs: { ...costs(13), sizes }, refVersion: 1 });
     const { rerender } = render(section('unchanged'));
     expect(await screen.findByText('Weight per gallon: 10 lb/gal (approved)')).toBeInTheDocument();
+    const sizesPanel = screen.getByText('Each size').closest('details');
+    if (!sizesPanel) throw new Error('Expected size disclosure');
+    sizesPanel.open = true;
+    fireEvent(sizesPanel, new Event('toggle'));
     const label = 'Reference size (no active bulk size)';
     fireEvent.change(screen.getByLabelText(label), { target: { value: 'size-1' } });
 
@@ -79,6 +83,7 @@ describe('ProductChemistrySection', () => {
 
     expect(await screen.findByText('Weight per gallon: 12 lb/gal (approved)')).toBeInTheDocument();
     expect(screen.getByLabelText(label)).toHaveValue('size-1');
+    expect(screen.getByText('Each size').closest('details')).toHaveAttribute('open');
     expect(mocks.fetchParentChemistry).toHaveBeenCalledTimes(1);
 
     rerender(section('unchanged', true, 2));

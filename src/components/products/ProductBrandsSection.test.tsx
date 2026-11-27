@@ -269,6 +269,19 @@ describe('ProductBrandsSection', () => {
     expect(secondKey).not.toBe(firstKey);
   });
 
+  it('reports the group used by the brand editor when a shared brand save finishes', async () => {
+    mocks.parentOf.mockReturnValue({ parentId: 'parent-1', parentName: 'Shared group' });
+    mocks.saveProductBrand.mockResolvedValue({ ...slam, brand_name: 'New brand name' });
+    const onWeightReviewChange = vi.fn();
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1"
+      onWeightReviewChange={onWeightReviewChange} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Brand name'), { target: { value: 'New brand name' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save brand' }));
+
+    await waitFor(() => expect(onWeightReviewChange).toHaveBeenCalledWith('parent-1'));
+  });
+
   it('keeps a new brand’s form editable after a clear refusal such as a taken name', async () => {
     mocks.saveProductBrand.mockRejectedValueOnce({ message: 'BRAND_NAME_TAKEN: that brand is already listed' });
     render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);

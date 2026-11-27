@@ -365,8 +365,8 @@ describe('ProductDetail brands section', () => {
     await screen.findByTestId('brands-section');
     const chemistry = await screen.findByTestId('chemistry-weight-revision');
     expect(chemistry).toHaveTextContent('0');
-    const props = H.brandSection.mock.lastCall?.[0] as { onWeightReviewChange: () => void };
-    await act(async () => props.onWeightReviewChange());
+    const props = H.brandSection.mock.lastCall?.[0] as { onWeightReviewChange: (parentId: string | undefined) => void };
+    await act(async () => props.onWeightReviewChange('parent-1'));
 
     expect(chemistry).toHaveTextContent('1');
   });
@@ -381,7 +381,7 @@ describe('ProductDetail brands section', () => {
     };
     const view = render(<ProductDetail key={H.routeId} />);
     await screen.findByTestId('chemistry-weight-revision');
-    const previous = H.brandSection.mock.lastCall?.[0] as { onWeightReviewChange: () => void };
+    const previous = H.brandSection.mock.lastCall?.[0] as { onWeightReviewChange: (parentId: string | undefined) => void };
 
     H.routeId = 'product-2';
     H.product = baseProduct({ id: 'product-2', product_name: 'Other size' });
@@ -390,9 +390,27 @@ describe('ProductDetail brands section', () => {
     const chemistry = await screen.findByTestId('chemistry-weight-revision');
     expect(chemistry).toHaveTextContent('0');
 
-    await act(async () => previous.onWeightReviewChange());
+    await act(async () => previous.onWeightReviewChange('parent-1'));
 
     expect(chemistry).toHaveTextContent(revision);
+  });
+
+  it('refreshes a sibling when the brand editor loaded its group before the origin page', async () => {
+    H.getParent.mockImplementationOnce(() => new Promise(() => {}));
+    const view = render(<ProductDetail key={H.routeId} />);
+    await screen.findByTestId('brands-section');
+    expect(screen.queryByTestId('chemistry-weight-revision')).not.toBeInTheDocument();
+    const previous = H.brandSection.mock.lastCall?.[0] as { onWeightReviewChange: (parentId: string) => void };
+
+    H.routeId = 'product-2';
+    H.product = baseProduct({ id: 'product-2', product_name: 'Sibling size' });
+    H.parent = { id: 'parent-1', name: 'Shared group', generic_epa_registration: null, sizes: [{ product_id: 'product-2' }] };
+    view.rerender(<ProductDetail key={H.routeId} />);
+    const chemistry = await screen.findByTestId('chemistry-weight-revision');
+
+    await act(async () => previous.onWeightReviewChange('parent-1'));
+
+    expect(chemistry).toHaveTextContent('1');
   });
 
   it('after switching products, the previous brands never show under the new one', async () => {

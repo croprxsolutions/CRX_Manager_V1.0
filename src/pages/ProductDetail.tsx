@@ -2256,8 +2256,8 @@ export default function ProductDetail() {
                 canEditAdjuvants={canEditAdjuvants}
                 onAdjuvantsSaved={refreshRegistrations}
                 onBrandsChange={handleBrandsChange}
-                onWeightReviewChange={() => window.dispatchEvent(new CustomEvent<WeightReviewChange>(WEIGHT_REVIEW_CHANGE_EVENT, {
-                  detail: { productId: id, parentId: weightParentId },
+                onWeightReviewChange={(parentId) => window.dispatchEvent(new CustomEvent<WeightReviewChange>(WEIGHT_REVIEW_CHANGE_EVENT, {
+                  detail: { productId: id, parentId },
                 }))}
               />
             </PhoneSection>

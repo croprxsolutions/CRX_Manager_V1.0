@@ -21,10 +21,10 @@ BEGIN
     SELECT 1 FROM supabase_migrations.schema_migrations WHERE name = '20270312233100_enable_liquid_density_review'
   )) OR EXISTS (
     SELECT 1 FROM (VALUES
-      ('public.approve_weights(jsonb,text)', 'adda6f0854f3de86bca3e5d50ae88113', true, 'v', 'plpgsql', true),
-      ('public.return_liquid_density_to_draft_for_brand()', v_trigger_md5, true, 'v', 'plpgsql', false),
-      ('public.liquid_density_review_open()', v_switch_md5, false, 's', 'sql', true)
-    ) AS expected(signature, body_md5, definer, volatility, language_name, staff_execute)
+      ('public.approve_weights(jsonb,text)', 'adda6f0854f3de86bca3e5d50ae88113', true, 'v', 'plpgsql', 'jsonb'::regtype, true),
+      ('public.return_liquid_density_to_draft_for_brand()', v_trigger_md5, true, 'v', 'plpgsql', 'trigger'::regtype, false),
+      ('public.liquid_density_review_open()', v_switch_md5, false, 's', 'sql', 'boolean'::regtype, true)
+    ) AS expected(signature, body_md5, definer, volatility, language_name, result_type, staff_execute)
     LEFT JOIN pg_catalog.pg_proc AS p ON p.oid = to_regprocedure(expected.signature)
     LEFT JOIN pg_catalog.pg_language AS l ON l.oid = p.prolang
     WHERE p.oid IS NULL
@@ -32,6 +32,7 @@ BEGIN
       OR p.proowner IS DISTINCT FROM 'postgres'::regrole OR p.prosecdef IS DISTINCT FROM expected.definer
       OR p.provolatile::text IS DISTINCT FROM expected.volatility
       OR l.lanname::text IS DISTINCT FROM expected.language_name
+      OR p.prorettype IS DISTINCT FROM expected.result_type OR p.proretset
       OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
       OR p.proacl IS NULL OR EXISTS (
         SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee <> p.proowner

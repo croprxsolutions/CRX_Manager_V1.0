@@ -36,6 +36,7 @@ export default function ChemistryActiveCosts({ chem, profileId, reloadKey, pendi
   const [attempt, setAttempt] = useState(0);
   const [referenceChoice, setReferenceChoice] = useState<{ parentId: string; refVersion: number; productId: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [expandedSizesFor, setExpandedSizesFor] = useState<string | null>(null);
   const forKey = JSON.stringify([chem.parent_id, reloadKey, attempt]);
   const state = loaded?.forKey === forKey ? loaded : null;
   useEffect(() => {
@@ -107,7 +108,8 @@ export default function ChemistryActiveCosts({ chem, profileId, reloadKey, pendi
         ? <ul className="space-y-0.5">{costs.parent_figures.map((row) => <FigureLine key={row.row_id} row={row} pricedUnit={refSize?.priced_unit ?? null} />)}</ul>
         : <p className="text-secondary">No ingredients or nutrients recorded.</p>)}
       {costs.sizes.length > 0 && (
-        <details>
+        <details open={expandedSizesFor === chem.parent_id}
+          onToggle={(event) => setExpandedSizesFor(event.currentTarget.open ? chem.parent_id : null)}>
           <summary className="min-h-11 cursor-pointer py-2 text-nav-dark">Each size</summary>
           <ul className="space-y-2">
             {costs.sizes.map((size) => (

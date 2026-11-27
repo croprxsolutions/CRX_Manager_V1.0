@@ -8,6 +8,7 @@ const rename = read('./smoke-liquid-weight-brand-recheck.sql');
 const core = read('./smoke-liquid-density-review.sql');
 const legacy = read('./smoke-product_weights.sql');
 const stagedActivation = read('../../supabase/migrations/20270312233100_enable_liquid_density_review.sql');
+const openSwitchBody = '\n  SELECT true;\n  ';
 const switchOpen = `CREATE OR REPLACE FUNCTION public.liquid_density_review_open() RETURNS boolean
   LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$ SELECT true; $$;`;
 
@@ -40,9 +41,7 @@ ${stagedActivation}`;
     'ALTER TABLE public.product_parent_brands DISABLE TRIGGER return_liquid_density_to_draft_for_brand;',
     `SET LOCAL check_function_bodies = off;
     CREATE OR REPLACE FUNCTION public.liquid_density_review_open() RETURNS boolean
-    LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $language_drift$
-  SELECT true;
-  $language_drift$;
+    LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $language_drift$${openSwitchBody}$language_drift$;
     SET LOCAL check_function_bodies = on;
     DO $fixture$ BEGIN
       IF (SELECT md5(prosrc) FROM pg_catalog.pg_proc
@@ -51,6 +50,13 @@ ${stagedActivation}`;
         RAISE EXCEPTION 'SMOKE_FAIL: language drift fixture changed the switch body';
       END IF;
     END $fixture$;`,
+    ...['text', 'SETOF boolean'].map((result) => `SET LOCAL check_function_bodies = off;
+    DROP FUNCTION public.liquid_density_review_open();
+    CREATE FUNCTION public.liquid_density_review_open() RETURNS ${result}
+    LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $result_drift$${openSwitchBody}$result_drift$;
+    SET LOCAL check_function_bodies = on;
+    REVOKE ALL ON FUNCTION public.liquid_density_review_open() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+    GRANT EXECUTE ON FUNCTION public.liquid_density_review_open() TO authenticated;`),
     'GRANT EXECUTE ON FUNCTION public.liquid_density_review_open() TO anon;',
     "CREATE FUNCTION public.approve_weights(jsonb) RETURNS jsonb LANGUAGE sql AS 'SELECT $1';",
   ]) {

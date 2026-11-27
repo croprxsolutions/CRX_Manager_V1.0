@@ -349,6 +349,9 @@ map.on('load', () => {
   drawControl.id = DRAW_CONTROL_ID;
 
   proof.ready = true;
+  toolbar.querySelectorAll<HTMLButtonElement>('button:not(#retry-picture)').forEach((button) => {
+    button.disabled = false;
+  });
   livePicturesButton.hidden = !livePicturesEnabled;
   try {
     const savedDraft = sessionStorage.getItem(saveKey);

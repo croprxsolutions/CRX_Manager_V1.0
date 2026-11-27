@@ -35,11 +35,13 @@
 --   20261106140000, live, md5 pinned), the body behind save_invoice, deletes and rebuilds a draft's lines at
 --   round(quantity x price), which would undo an owner's allocated cents when only a note is edited (10 Gal at $12.34 in
 --   thirds: A's 4114 would become 4113 and the group would bill $123.39 again). A line of an owner invoice made by Create
---   Invoice (job_id and invoice_group_id set) saved back as the same product at its saved quantity and unit price keeps
---   its stored cents, once per saved line, as S16b keeps an order line's; the header, its share and its pending
---   commissions then follow those cents as before. A changed quantity or price is re-rounded and runs the same checks
---   as before. Every other invoice and line is saved exactly as before. Owner, SECURITY DEFINER, search_path and
---   grants unchanged.
+--   Invoice (job_id and invoice_group_id set) saved back as the same product in the same unit at its saved quantity
+--   and unit price keeps its stored cents, once per saved line, as S16b keeps an order line's; the header, its share
+--   and its pending commissions then follow those cents as before. A changed unit, quantity or price is re-rounded and
+--   runs the same checks as before. A save that sends line ids no longer on the invoice (a second editor) is still
+--   refused by _save_invoice_scoped_impl (GENERATED_INVOICE_LINE_ID_INVALID), and a sales rep's line cost is still
+--   the server's (_cost_step2_invoice_items); both proved. Every other invoice and line is saved exactly as before.
+--   Owner, SECURITY DEFINER, search_path and grants unchanged.
 --
 -- KNOWN LIMITS (Taha, 2026-11-27, option B; both accepted): a line's booked cost is not changed. invoice_items.cost_cents
 --   is a cost per sold unit and every reader books cost x quantity (20270226150000), so each owner's cost is its own
@@ -47,16 +49,19 @@
 --   stored booked cost per line, a schema change). An owner's amount follows its acre share while its quantity is
 --   rounded to 0.0001 of a unit, so:
 --   1. On a line priced at or near cost an owner can bill under its own booked cost: under a cent at normal prices,
---      at most $0.50 (the 50-cent check). 1 Gal at a $200.00 price and $200.00 cost in thirds bills A $66.67 against
---      $66.68 booked cost.
+--      about $0.50 at most (the two 50-cent checks hold amount and cost separately, so the gap can just pass $0.50).
+--      1 Gal at a $200.00 price and $200.00 cost in thirds bills A $66.67 against $66.68 booked cost.
 --   2. An owner's amount can differ from its quantity x unit price: under a cent at normal prices. The 50-cent check
---      does not hold this gap: it is at most 0.0001 of the unit price plus a cent (about $0.50 at $5,000 a unit).
+--      does not hold this gap: it is at most 0.0001 of the unit price plus a cent (about $0.50 at $5,000 a unit), plus
+--      one cent for each owner the never-$0 step tops up from this owner (0.005 Gal at $10 on 2/2/2/2/92% acres: the
+--      92% owner bills 1 cent for 0.0046 Gal).
 --      1 Gal at $9,999.99 in thirds shows A 0.3334 Gal ($3,334.00 at the unit price) and bills $3,333.33.
 --   safe_cents_qty (its comment says "banker's" rounding; ROUND on numeric rounds half away from zero) is not touched.
 --
 -- ROLLBACK (its own reviewed migration): re-emit the transfer body from 20270303100000 (md5
 --   53ecf1279da3aa7ea1590f440c6eb225) and the save body from 20261106140000 (md5 cf36f99934d4b68aa7e9d3eab0b04fb8),
---   both pinned below. Invoices written meanwhile keep their exact owner amounts until a line is re-saved.
+--   both pinned below. Invoices written meanwhile keep their exact owner amounts, but after the rollback a note-only
+--   re-save of an owner invoice re-rounds its lines (A's $41.14 becomes $41.13 and the group bills $123.39 again).
 --
 -- ORDERING: after 20270303100000 and 20261106140000 (whose bodies this pins).
 
@@ -1143,12 +1148,12 @@ BEGIN
 
   -- Job invoice cents (Mason, 2026-11-26; Taha, 2026-11-27): Create Invoice shares a job line's cents between its
   -- owners' invoices, so an owner's line can differ from round(quantity x price). A line of such an invoice saved back as
-  -- the same product at its saved quantity and unit price keeps its stored cents (once per saved line), the way S16b
-  -- keeps an order line's; a changed quantity or price is re-rounded as before.
+  -- the same product in the same unit at its saved quantity and unit price keeps its stored cents (once per saved line),
+  -- the way S16b keeps an order line's; a changed unit, quantity or price is re-rounded as before.
   IF v_is_field AND EXISTS (SELECT 1 FROM invoices i
                              WHERE i.id = v_invoice_id AND i.job_id IS NOT NULL AND i.invoice_group_id IS NOT NULL) THEN
     SELECT COALESCE(jsonb_object_agg(ii.id::text, jsonb_build_object(
-             'product_id', ii.product_id, 'quantity', ii.quantity,
+             'product_id', ii.product_id, 'unit_size', ii.unit_size, 'quantity', ii.quantity,
              'unit_price_cents', ii.unit_price_cents, 'extended_cents', ii.extended_cents)), '{}'::jsonb)
       INTO v_job_cents
       FROM invoice_items ii
@@ -1174,6 +1179,7 @@ BEGIN
     IF v_job_line IS NOT NULL THEN
       v_job_cents := v_job_cents - lower(v_item->>'id');  -- used up by the first entry with its id, kept or not
       IF (v_job_line->>'product_id')::uuid IS NOT DISTINCT FROM (v_item->>'product_id')::uuid
+         AND (v_job_line->>'unit_size') IS NOT DISTINCT FROM (v_item->>'unit_size')
          AND (v_job_line->>'quantity')::numeric = v_qty
          AND (v_job_line->>'unit_price_cents')::bigint = v_unit_price THEN
         v_extended := (v_job_line->>'extended_cents')::bigint;
@@ -1371,7 +1377,7 @@ BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '90141e27397d1766be19d280bb9a046f'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-          WHERE p.oid = 'public._save_invoice_lineage_unaware_impl_20260827(jsonb,jsonb,text)'::regprocedure) IS DISTINCT FROM '537bd4a8585c6923208146747981ccbe' THEN
+          WHERE p.oid = 'public._save_invoice_lineage_unaware_impl_20260827(jsonb,jsonb,text)'::regprocedure) IS DISTINCT FROM '52a29445b4b88e6c068ae55c014139c9' THEN
     RAISE EXCEPTION 'JOB_INVOICE_SPLIT_CENTS_POSTFLIGHT: a re-emitted body is not this file''s';
   END IF;
   IF NOT COALESCE((SELECT p.prosecdef AND p.proowner = 'postgres'::regrole

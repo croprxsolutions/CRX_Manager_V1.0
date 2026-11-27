@@ -255,7 +255,7 @@ function okProbe(sql, uid) { const r = probe(sql, uid); assert.equal(r.status, 0
 
 const id = (s) => `c3c3c3c3-1126-4000-8000-${String(s).padStart(12, '0')}`;
 // Farms A < B < C by id (owners are ordered by id, so ties go to A first).
-const ADMIN = id('a1'), A = id('c1'), B = id('c2'), C = id('c3');
+const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), C = id('c3');
 const G = id('f1'), F2 = id('f2'), F3A = id('f3a'), F3B = id('f3b'), F3C = id('f3c'), F4 = id('f4');
 const X = id('d1'), Y = id('d2'), Z = id('d3'), W = id('d4');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
@@ -263,15 +263,17 @@ const OLD_IMPL = '53ecf1279da3aa7ea1590f440c6eb225';  // 20270303100000 (staging
 const NEW_IMPL = '90141e27397d1766be19d280bb9a046f';
 const SAVE = 'public._save_invoice_lineage_unaware_impl_20260827(jsonb,jsonb,text)';
 const OLD_SAVE = 'cf36f99934d4b68aa7e9d3eab0b04fb8';  // 20261106140000 (live)
-const NEW_SAVE = '537bd4a8585c6923208146747981ccbe';
+const NEW_SAVE = '52a29445b4b88e6c068ae55c014139c9';
 const SAVE_SOURCE = path.join(MIGRATIONS, '20261106140000_invoice_resave_keeps_cost.sql');
 const md5Of = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 const meta = (sig) => scalar(`SELECT concat_ws('|', prosecdef, proowner::regrole, proconfig::text, coalesce(proacl::text, '-')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
-    ('${ADMIN}', 'jobcents-admin@example.invalid', '{"full_name":"[PROVER] Job Cents Admin","role":"admin"}'::jsonb);`);
+    ('${ADMIN}', 'jobcents-admin@example.invalid', '{"full_name":"[PROVER] Job Cents Admin","role":"admin"}'::jsonb),
+    ('${REP}', 'jobcents-rep@example.invalid', '{"full_name":"[PROVER] Job Cents Rep","role":"sales_rep"}'::jsonb);`);
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
+    UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${REP}';
     DELETE FROM public.unit_conversions;
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};
     INSERT INTO public.customers (id, farm_name, assigned_tier, is_active) VALUES
@@ -343,8 +345,10 @@ function seed() {
                               JOIN customers c ON c.id = i2.customer_id WHERE j.id = p_job)
         FROM invoices i WHERE i.job_id = p_job AND i.deleted_at IS NULL $f$;
     -- What the invoice editor sends for one owner's invoice of the job (InvoiceDetail itemsPayload): every line with
-    -- its id, a header note edited; p_delta added to the first product line's quantity.
-    CREATE FUNCTION jx.payload(p_job uuid, p_farm text, p_delta numeric) RETURNS jsonb LANGUAGE sql SECURITY DEFINER
+    -- its id, a header note edited; p_delta added to the first product line's quantity; p_unit / p_cost, when given,
+    -- replace every product line's unit / cost.
+    CREATE FUNCTION jx.payload(p_job uuid, p_farm text, p_delta numeric, p_unit text DEFAULT NULL, p_cost bigint DEFAULT NULL)
+      RETURNS jsonb LANGUAGE sql SECURITY DEFINER
       SET search_path = public, pg_temp AS $f$
       SELECT jsonb_build_object(
         'invoice', jsonb_build_object('id', i.id, 'customer_id', i.customer_id, 'invoice_type', i.invoice_type,
@@ -357,8 +361,10 @@ function seed() {
             'quantity', x.quantity + CASE WHEN x.sort_order = (SELECT min(y.sort_order) FROM invoice_items y
                                                                   WHERE y.invoice_id = i.id AND y.product_id IS NOT NULL)
                                           AND x.product_id IS NOT NULL THEN p_delta ELSE 0 END,
-            'unit_price_cents', x.unit_price_cents, 'extended_cents', x.extended_cents, 'cost_cents', x.cost_cents,
-            'sort_order', x.sort_order, 'rate_per_acre', x.rate_per_acre, 'acres', x.acres, 'unit_size', x.unit_size,
+            'unit_price_cents', x.unit_price_cents, 'extended_cents', x.extended_cents,
+            'cost_cents', CASE WHEN x.product_id IS NOT NULL THEN COALESCE(p_cost, x.cost_cents) ELSE x.cost_cents END,
+            'sort_order', x.sort_order, 'rate_per_acre', x.rate_per_acre, 'acres', x.acres,
+            'unit_size', CASE WHEN x.product_id IS NOT NULL THEN COALESCE(p_unit, x.unit_size) ELSE x.unit_size END,
             'notes', x.notes, 'is_application_fee', x.is_application_fee, 'rate_unit', x.rate_unit,
             'total_applied', x.total_applied, 'total_applied_unit', x.total_applied_unit,
             'total_applied_gl_lb', x.total_applied_gl_lb, 'gl_lb_unit', x.gl_lb_unit,
@@ -385,30 +391,66 @@ SELECT jx.sums((SELECT id FROM j)) || ' || ' || jx.lines((SELECT id FROM j)) || 
 const THIRDS = [[F3A, F3B, F3C], [5, 5, 5]];
 // Desk MED 1 on #2686: after Create Invoice, the editor saves owner A's invoice through the app's own save_invoice
 // (p_delta 0 = a note-only edit; 1 = one more Gal on its first line).
-const resaveCase = (fields, acres, lines, delta) => `${asAdmin}
+const asUser = (uid) => `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);\n`;
+const resaveCase = (fields, acres, lines, delta, { unit = null, cost = null, saver = ADMIN } = {}) => `${asAdmin}
 CREATE TEMP TABLE j AS SELECT jx.job(ARRAY[${fields.map((x) => `'${x}'`).join(',')}]::uuid[], ARRAY[${acres.join(',')}]::numeric[],
   '${JSON.stringify(lines)}'::jsonb) AS id;
-SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jobcents-' || gen_random_uuid());
-CREATE TEMP TABLE pl AS SELECT jx.payload((SELECT id FROM j), 'A', ${delta}) AS p;
+${asUser(saver)}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${saver}', 'jobcents-' || gen_random_uuid());
+CREATE TEMP TABLE pl AS SELECT jx.payload((SELECT id FROM j), 'A', ${delta}, ${unit ? `'${unit}'` : 'NULL'}, ${cost ?? 'NULL'}) AS p;
 SELECT public.save_invoice((SELECT p->'invoice' FROM pl), (SELECT p->'items' FROM pl), 'jobcents-save-' || gen_random_uuid());
 SELECT jx.sums((SELECT id FROM j)) || ' || ' || jx.lines((SELECT id FROM j)) || ' || ' || jx.ties((SELECT id FROM j));`;
 const RESAVE = {
   noteThirds: resaveCase(...THIRDS, [L(Y, 10, 1234)], 0),
   noteBigThirds: resaveCase(...THIRDS, [L(X, 1, 999999)], 0),
   qtyThirds: resaveCase(...THIRDS, [L(Y, 10, 1234)], 1),
+  // Sol r4 HIGH 2 (refute by running): a sales rep runs Create Invoice (so the owner invoices are theirs to edit; a rep
+  // can't save an invoice someone else made: INVOICE_SCOPE_DENIED), then saves A's invoice sending cost_cents 0 on every
+  // product line; the server puts the cost back (_cost_step2_invoice_items), so A's booked cost and base do not move.
+  repCostZero: resaveCase(...THIRDS, [L(Y, 10, 1234)], 0, { cost: 0, saver: REP }),
+  // Sol r4 MED 7: the same quantity number in another unit (Gal -> fl oz) is not the same line, so it is re-priced.
+  unitChange: resaveCase(...THIRDS, [L(Y, 10, 1234)], 0, { unit: 'fl oz' }),
 };
 const RESAVE_AFTER = {
   noteThirds: 'A=4114/2333 B=4113/2333 C=4113/2333 | Y=12340/12340',
   noteBigThirds: 'A=333333/200 B=333333/200 C=333333/200 | X=999999/999999',
   // A real edit re-prices A's line, round(4.3334 x 1234) = 5347, and the group no longer matches the job's line.
   qtyThirds: 'A=5347/3033 B=4113/2333 C=4113/2333 | Y=13573/13574',
+  repCostZero: 'A=4114/2333 B=4113/2333 C=4113/2333 | Y=12340/12340',
+  unitChange: 'A=4113/2333 B=4113/2333 C=4113/2333 | Y=12339/12340',
 };
 // With only the transfer applied (the 20261106140000 save body back), a note-only re-save re-rounds A's line.
 const RESAVE_OLD_SAVE = {
   noteThirds: 'A=4113/2333 B=4113/2333 C=4113/2333 | Y=12339/12340',
   noteBigThirds: 'A=333400/200 B=333333/200 C=333333/200 | X=1000066/999999',
   qtyThirds: 'A=5347/3033 B=4113/2333 C=4113/2333 | Y=13573/13574',
+  repCostZero: 'A=4113/2333 B=4113/2333 C=4113/2333 | Y=12339/12340',
+  unitChange: 'A=4113/2333 B=4113/2333 C=4113/2333 | Y=12339/12340',
 };
+// Sol r4 HIGH 1 (refute by running): two editors open owner A's invoice. The first saves a note (A keeps 4114 and its
+// lines get new ids); the second then saves the lines it loaded, whose ids are gone: refused by save_invoice
+// (GENERATED_INVOICE_LINE_ID_INVALID), nothing written, so A still bills 4114 and the group $123.40.
+const TWO_EDITORS = `${asAdmin}
+CREATE TEMP TABLE j AS SELECT jx.job(ARRAY['${F3A}','${F3B}','${F3C}']::uuid[], ARRAY[5,5,5]::numeric[],
+  '${JSON.stringify([L(Y, 10, 1234)])}'::jsonb) AS id;
+SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jobcents-' || gen_random_uuid());
+CREATE TEMP TABLE e1 AS SELECT jx.payload((SELECT id FROM j), 'A', 0) AS p;
+CREATE TEMP TABLE e2 AS SELECT jx.payload((SELECT id FROM j), 'A', 0) AS p;
+SELECT public.save_invoice((SELECT p->'invoice' FROM e1), (SELECT p->'items' FROM e1), 'jobcents-e1-' || gen_random_uuid());
+CREATE TEMP TABLE second(msg text);
+DO $two$ BEGIN
+  PERFORM public.save_invoice((SELECT p->'invoice' FROM e2), (SELECT p->'items' FROM e2), 'jobcents-e2-' || gen_random_uuid());
+  INSERT INTO second VALUES ('second save written');
+EXCEPTION WHEN OTHERS THEN
+  INSERT INTO second VALUES ('second save refused: ' || SQLERRM);
+END $two$;
+SELECT jx.sums((SELECT id FROM j)) || ' || ' || (SELECT msg FROM second) || ' || ' || jx.ties((SELECT id FROM j));`;
+function twoEditors(label) {
+  const [sums, msg, ties] = okProbe(TWO_EDITORS).split(' || ');
+  console.log(`[${label}] twoEditors: ${sums} | ${msg} (${ties})`);
+  assert.match(msg, /^second save refused: GENERATED_INVOICE_LINE_ID_INVALID/, `${label}: the stale second save is refused`);
+  assert.equal(sums, 'A=4114/2333 B=4113/2333 C=4113/2333 | Y=12340/12340', `${label}: A keeps 4114 after the refused save`);
+  assert.match(ties, /^ties anchor=A$/);
+}
 function runResave(label, want) {
   for (const [k, sql] of Object.entries(RESAVE)) {
     const r = split(okProbe(sql));
@@ -557,6 +599,7 @@ function main() {
   }
   for (const k of ['single', 'suppliedOnly']) assert.equal(after[k].sums, before[k].sums, `after: ${k} is unchanged`);
   refusedTooTiny('after');
+  twoEditors('after');
   runResave('after', RESAVE_AFTER);
   console.log('[after] a note-only re-save keeps every owner line\'s cents ($123.40, $9,999.99 stay exact); a quantity change re-prices the line');
   equalThirdsTooTiny('after');

@@ -2314,6 +2314,8 @@ export default function QuoteBuilder() {
       // an unknown source stays unknown so the "check them" warning still covers it.
       return { acres: above.acres, acres_source: above.acres_source, acres_prefill: 'line_above' };
     }
+    // Acres typed as 0 on the line above mean "none here": the new line starts empty (Luna, #2445).
+    if (above?.acres != null) return null;
     if (fieldAcres != null && fieldAcres > 0) return fromField;
     return null;
   }

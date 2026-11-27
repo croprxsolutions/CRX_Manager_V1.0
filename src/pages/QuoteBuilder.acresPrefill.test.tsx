@@ -228,6 +228,23 @@ describe('QuoteBuilder — acres on a new line', () => {
     expect(screen.queryByText('Copied from line above')).not.toBeInTheDocument();
   });
 
+  it('starts the next line empty when the line above has 0 acres typed, even with a field (Luna, #2445)', { timeout: 20000 }, async () => {
+    renderNewQuote();
+    await pickCustomer();
+    const fieldBox = await screen.findByRole('combobox', { name: 'Field for Section 1' });
+    fireEvent.change(fieldBox, { target: { value: 'Ho' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Home Quarter/ }));
+    await waitFor(() => expect(fieldBox).toHaveValue('Home Quarter'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
+    await waitFor(() => expect(acres()).toEqual(['80']));
+    await pickProductOnLastLine();
+    fireEvent.change(screen.getByLabelText('Acres'), { target: { value: '0' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
+    await waitFor(() => expect(acres()).toEqual(['0', '']));
+    expect(screen.queryByText(/^(Filled from field|Copied from line above)$/)).not.toBeInTheDocument();
+  });
+
   it('saves and prices the filled acres exactly as typed acres', { timeout: 20000 }, async () => {
     renderNewQuote();
     await pickCustomer();

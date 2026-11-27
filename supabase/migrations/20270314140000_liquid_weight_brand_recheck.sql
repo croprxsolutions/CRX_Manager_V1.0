@@ -36,6 +36,9 @@ BEGIN
           AND (a.grantee <> 'authenticated'::regrole OR NOT expected.staff_execute OR a.is_grantable)
       )
       OR has_function_privilege('authenticated', p.oid, 'EXECUTE') IS DISTINCT FROM expected.staff_execute
+      OR has_function_privilege('anon', p.oid, 'EXECUTE')
+      OR has_function_privilege('service_role', p.oid, 'EXECUTE')
+      OR has_function_privilege('metabase_ro', p.oid, 'EXECUTE')
       OR EXISTS (
         SELECT 1 FROM pg_catalog.pg_proc other
          WHERE other.pronamespace = p.pronamespace AND other.proname = p.proname AND other.oid <> p.oid

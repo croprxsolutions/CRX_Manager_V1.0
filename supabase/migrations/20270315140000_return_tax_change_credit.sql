@@ -1,5 +1,5 @@
 -- Written 2026-11-25. STATUS: NOT APPLIED (staging candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270315120000_return_tax_change_credit.md.
+-- docs/reference/migrations.d/20270315140000_return_tax_change_credit.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY: a release #1990 follow-up (fix before the next release; Mason 20 Nov, Taha agreed):
@@ -140,7 +140,7 @@ $preflight$;
 ALTER TABLE public.return_items ADD COLUMN priced_from text NOT NULL DEFAULT 'unrecorded'
   CONSTRAINT return_items_priced_from_check CHECK (priced_from IN ('order_price', 'billed_share', 'unrecorded'));
 COMMENT ON COLUMN public.return_items.priced_from IS
-  'How create_return priced this line: order_price (the order line''s price) or billed_share (the returner''s billed share, tax and discount included). A re-price at receive or credit (20270315120000) keeps order_price: it records how the line was first priced. unrecorded: the line existed before this column, or was written by something other than create_return; never re-priced.';
+  'How create_return priced this line: order_price (the order line''s price) or billed_share (the returner''s billed share, tax and discount included). A re-price at receive or credit (20270315140000) keeps order_price: it records how the line was first priced. unrecorded: the line existed before this column, or was written by something other than create_return; never re-priced.';
 
 -- 2. (#2066) create_return records how it priced each line, and refuses a newer line over an older order-price one ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public._create_return_intent_impl_20260812(p_return jsonb, p_items jsonb DEFAULT '[]'::jsonb, p_idempotency_key text DEFAULT NULL::text)

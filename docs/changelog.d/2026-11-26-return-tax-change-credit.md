@@ -11,4 +11,4 @@
 - Only the return being received or credited changes. If another open return of the same product for that customer still has its old price, the office is asked to cancel and recreate that one first.
 - A return whose price went stale because an earlier return was cancelled still asks to be cancelled and recreated, as before.
 - Known limits until per-line pricing (A2), which this ships with: on a product billed with different discounts or tax across deliveries, after an earlier return was credited, one return's credit can be off its own units' price, whether the return was made before or after the later invoice posted (the totals never exceed what was charged; the second case was already so on staging); and a return re-priced at receipt is refused at credit if the sale's tax or discount is removed in between (cancel and recreate it).
-- Migration `20270315120000_return_tax_change_credit` (not applied).
+- Migration `20270315140000_return_tax_change_credit` (not applied).

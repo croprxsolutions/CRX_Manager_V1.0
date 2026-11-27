@@ -28,8 +28,10 @@ describe('EnvBanner', () => {
   });
 
   it('marks a local build', () => {
+    vi.stubGlobal('location', { hostname: 'staging.croprxsolutions.app' });
     render(<EnvBanner env="local" supabaseUrl="https://rhyzpcqhnizqbxphqdkr.supabase.co" />);
     expect(screen.getByText('LOCAL')).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Staging maps checks' })).not.toBeInTheDocument();
   });
 
   it('claims test data only for a database known to hold it', () => {

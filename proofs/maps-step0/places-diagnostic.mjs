@@ -78,7 +78,8 @@ export function renderPlacesDiagnostic(response, nonce, key) {
   return response.status(200).send(
     '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>CRX staging Places check</title><main><h1>CRX staging Places check</h1>' +
-    '<button id="places" type="button">Check Google Places</button><pre id="status" role="status" aria-live="polite">Ready</pre></main>' +
+    '<button id="places" type="button">Check Google Places</button><pre id="status" role="status" aria-live="polite">Ready</pre>' +
+    '<p><a href="/">Back to CRX</a></p></main>' +
     '<script nonce="' + nonce + '">(' + installPlacesCheck.toString() + ')(' + JSON.stringify(key) + ')</script></html>',
   );
 }

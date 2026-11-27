@@ -26,3 +26,13 @@ views instead. Sol passed it clean and left these notes open. Through the app no
    prover still expect an applicator to read `field_billing_defaults` rows directly and pin the
    pre-lockdown `fbd_select` policy. Replayed on a chain that includes the lockdown, they report a
    false failure. The prover stops before the crew views exist, so the fix must pick `field_billing_defaults_crew` only when that view is present (as `smoke-dispatch-job-locations.sql` now does for `jobs_crew`), never switch unconditionally.
+
+From the #2712 follow-up review (Sol round 3, all LOW, left open to stop the review loop):
+6. LOW: `scripts/smoke/smoke-dispatch-job-locations.sql` picks `jobs` whenever `jobs_crew` is missing,
+   so it cannot tell a historical replay from a current database missing the crew view. The
+   lockdown migration's own preflight refuses when the view is missing.
+7. LOW: that smoke's failure messages name `jobs_crew` even when the older branch queried `jobs`.
+8. LOW: a correctly run, approved reverse of the lockdown also re-opens crew price reads; that is
+   its purpose, and it needs Mason's yes under the contract's Undo / recovery rule.
+9. LOW: item 5's field-access prover also pins the old `fbd_select` policy, so a view fallback in
+   the smoke alone will not make it pass after the lockdown; the prover's policy pin must change too.

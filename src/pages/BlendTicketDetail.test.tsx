@@ -818,6 +818,42 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('other tickets for the job had taken is back')));
   });
 
+  it('retires a kept filing key when Undo Filing succeeds (lost filing reply)', async () => {
+    mockFrom.mockReset();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
+      if (table === 'application_records') return buildChain({ data: [{ id: 'app-record-1' }], error: null });
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string) => {
+      // The filing reply is lost (it may have committed), so its key is kept for a retry.
+      if (name === 'create_application_record_from_blend_ticket') {
+        return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+      }
+      if (name === 'reverse_application_record') {
+        return Promise.resolve({ data: { success: true, status: 'reversed', kept_on_job_lines: 0, over_taken_lines: 0 }, error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    const createKeys = () => mockRpc.mock.calls
+      .filter(([name]) => name === 'create_application_record_from_blend_ticket')
+      .map(([, args]) => (args as { p_idempotency_key: string }).p_idempotency_key);
+
+    renderTicket();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Create App Record' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Record' }));
+    await waitFor(() => expect(createKeys()).toHaveLength(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create App Record' })).toBeEnabled());
+    expect(mockResetKey).not.toHaveBeenCalled();  // the lost reply keeps the filing key
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo Filing' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Undo Filing' })[1]);
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('Filing undone')));
+    // The undo retires that filing key, so the next Create App Record files again instead of replaying the deleted record.
+    expect(mockResetKey).toHaveBeenCalledTimes(1);
+  });
+
   it('locks application-field controls when an application record exists', async () => {
     const unreviewedTicket = { ...baseTicket, review_status: 'unreviewed' };
     mockFrom.mockReset();

@@ -1065,6 +1065,9 @@ export function BlendTicketDetail() {
       }
       assertRpcResult(data, 'reverse_application_record');
       undoFilingIdem.resetKeyFor(recordId);
+      // The record is gone (reversed, or already gone): a filing key kept from a lost reply would replay the
+      // deleted record on the next Create App Record instead of filing again (Codex P2 on #2679).
+      appRecordIdem.resetKey();
       const result = data as { status?: string; kept_on_job_lines?: number; over_taken_lines?: number } | null;
       // reverse_application_record writes its own application_record_reversed activity entry.
       if (result?.status !== 'reversed') {

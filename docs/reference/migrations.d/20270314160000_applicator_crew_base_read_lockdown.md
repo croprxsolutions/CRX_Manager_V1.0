@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** Applicator price hide, database step 3 of 3 (contract `docs/plans/2026-11-25-applicator-crew-read-path-CONTRACT.md`): `20270311160000_applicator_crew_base_read_lockdown.sql`. Limits SELECT from four price-bearing base tables to admins and sales reps while applicator and dispatched-crew reads continue through the existing crew views.
+**LOCAL CANDIDATE — NOT APPLIED.** Applicator price hide, database step 3 of 3 (contract `docs/plans/2026-11-25-applicator-crew-read-path-CONTRACT.md`): `20270314160000_applicator_crew_base_read_lockdown.sql` (SQL sha256: `58656cf88b510199283149cbdcb871e49f9c295b6f430ebe09e57799f293284f`). Limits SELECT from four price-bearing base tables to admins and sales reps while applicator and dispatched-crew reads continue through the existing crew views.
 
 ## What changes
 

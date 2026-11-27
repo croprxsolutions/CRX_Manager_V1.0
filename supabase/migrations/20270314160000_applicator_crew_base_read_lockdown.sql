@@ -1,6 +1,6 @@
 -- Migration: applicator crew base-table read lockdown
 -- STATUS: NOT APPLIED
--- Record: docs/reference/migrations.d/20270311160000_applicator_crew_base_read_lockdown.md
+-- Record: docs/reference/migrations.d/20270314160000_applicator_crew_base_read_lockdown.md
 -- Contract: docs/plans/2026-11-25-applicator-crew-read-path-CONTRACT.md (PR 3, step 5).
 --
 -- WHAT: Limit SELECT on the four price-bearing job base tables to admins and sales reps.

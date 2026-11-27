@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270311160000_applicator_crew_base_read_lockdown.sql.
+ * Real-schema proof for 20270314160000_applicator_crew_base_read_lockdown.sql.
  * Uses the step-1 fixture and read/write probes, plus full visible-row payloads for each affected path.
  *
  * Run: node scripts/smoke/prove-applicator-crew-lockdown-real-schema.mjs
@@ -18,7 +18,7 @@ import {
   attempt, docker, NAME, ROOT, scalar,
 } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270311160000_applicator_crew_base_read_lockdown.sql';
+const CANDIDATE = '20270314160000_applicator_crew_base_read_lockdown.sql';
 const REVERSE = 'applicator-crew-lockdown-reverse.sql';
 const reuse = process.env.CREW_LOCKDOWN_PROOF_REUSE === '1';
 if (reuse && !/^crx-(undo-paths|crp)-/.test(process.env.UNDO_PATHS_CONTAINER || '')) {
@@ -155,7 +155,7 @@ try {
     assert.equal(docker(['inspect', '--format', '{{.State.Running}}', NAME]).stdout.trim(), 'true', 'reuse container must be running');
     assert.equal(docker(['inspect', '--format', '{{.HostConfig.NetworkMode}}', NAME]).stdout.trim(), 'none', 'reuse container must have networking disabled');
     assert.equal(scalar("SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '20270308040000_applicator_crew_read_path';"), '1', 'reuse container must include step 1');
-    assert.equal(scalar("SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '20270311160000_applicator_crew_base_read_lockdown';"), '0', 'reuse container must not include this candidate');
+    assert.equal(scalar("SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '20270314160000_applicator_crew_base_read_lockdown';"), '0', 'reuse container must not include this candidate');
   }
 
   assert.equal(scalar(`SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

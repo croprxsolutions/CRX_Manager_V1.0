@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import { localSql } from './local-db';
 
-// Applicator price-hide step 3 (20270311160000): an applicator's screens load from the crew views, and no response
+// Applicator price-hide step 3 (20270314160000): an applicator's screens load from the crew views, and no response
 // the browser receives carries a job price, cost, memo, commission split, chemical price or billing split.
 const PROTECTED = ['total_price_cents', 'total_cost_cents', 'internal_memo', 'commission_split', 'price_per_unit_cents',
   'cost_per_unit_cents', 'split_pct', 'price_override_cents', 'pricing_note', 'PR3 SECRET MEMO'];
@@ -115,7 +115,7 @@ test('applicator screens read no prices; admin still does', async ({ page }) => 
     expect(bodies.some(b => b.path.endsWith('/rest/v1/job_chemicals_crew') && b.text.includes(job))).toBe(true);
     crewScan();
     // The lockdown itself: the applicator's own signed-in token asking the base tables directly gets no rows.
-    // (Before migration 20270311160000 these return the job's prices, so this step fails without it.)
+    // (Before migration 20270314160000 these return the job's prices, so this step fails without it.)
     expect(crewAuth?.headers.authorization).toMatch(/^Bearer /);
     // Only key columns are asked for: step 1 column-revoked the cost columns (a select=* is refused), so this counts rows.
     // Before this migration the same request also returned the selling price; the row policies are what now hide it.

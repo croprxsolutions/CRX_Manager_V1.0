@@ -8,6 +8,7 @@ import handler from '../../api/maps-step0.mjs';
 const host = 'staging.croprxsolutions.app';
 const tilesKey = 'AIza' + 'a'.repeat(35);
 const staticKey = 'AIza' + 'b'.repeat(35);
+const placesKey = 'AIza' + 'c'.repeat(35);
 
 function run(request, settings = {}) {
   const original = {};
@@ -16,6 +17,7 @@ function run(request, settings = {}) {
     VERCEL_GIT_COMMIT_REF: 'staging',
     CRX_STEP0_GOOGLE_MAP_TILES_KEY: tilesKey,
     CRX_STEP0_GOOGLE_STATIC_MAPS_KEY: staticKey,
+    CRX_STEP0_GOOGLE_PLACES_KEY: placesKey,
     ...settings,
   };
   for (const [name, value] of Object.entries(environment)) {
@@ -53,6 +55,48 @@ test('exposes no probe or credentials on an off-host, off-branch or non-staging 
     assert.equal(response.headers['Cache-Control'], 'private, no-store');
     assert.doesNotMatch(response.headers['Content-Security-Policy'], /googleapis/);
   }
+});
+
+test('Places check uses its own policy and makes one autocomplete and one details request', async () => {
+  const query = { places: '1' };
+  const staged = run({ query });
+  assert.equal(staged.status, 200);
+  assert.match(staged.headers['Content-Security-Policy'], /connect-src https:\/\/places\.googleapis\.com;/);
+  assert.equal(staged.headers['Cache-Control'], 'private, no-store');
+  assert.equal(staged.body.includes(tilesKey) || staged.body.includes(staticKey), false);
+  assert.equal(run({ query }, { VERCEL_TARGET_ENV: 'preview' }).status, 404);
+  assert.equal(run({ query, headers: { host: 'croprxsolutions.app' } }).status, 404);
+  assert.equal(run({ query: { places: ['1', '1'] } }).status, 400);
+  assert.equal(run({}).body.includes(placesKey), false);
+
+  const source = staged.body.match(/<script nonce="[^"]+">([\s\S]+)<\/script>/)?.[1];
+  assert.ok(source);
+  const output = { textContent: '' };
+  let click;
+  const button = { disabled: false, addEventListener(_, callback) { click = callback; } };
+  const calls = [];
+  const placeId = 'TestPublicPlace123';
+  const sessionToken = 'a4ea93d1-6250-4bf9-9e58-463b3656a2da';
+  new Script(source).runInNewContext({
+    document: { querySelector(selector) { return selector === '#places' ? button : output; } },
+    crypto: { randomUUID: () => sessionToken },
+    AbortSignal,
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      const payload = calls.length === 1
+        ? { suggestions: [{ placePrediction: { placeId } }] }
+        : { id: placeId, location: { latitude: 41, longitude: -93 } };
+      return { ok: true, status: 200, json: async () => payload };
+    },
+  });
+  await Promise.all([click(), click()]);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].options.method, 'POST');
+  assert.equal(JSON.parse(calls[0].options.body).sessionToken, sessionToken);
+  assert.match(calls[1].url, new RegExp('sessionToken=' + sessionToken + '$'));
+  assert.equal(calls[1].options.headers['X-Goog-FieldMask'], 'id,location');
+  assert.equal(JSON.parse(output.textContent).state, 'passed');
+  for (const value of [placesKey, sessionToken, placeId]) assert.equal(output.textContent.includes(value), false);
 });
 
 test('ties the staging-only policy to the diagnostic page nonce and limits the method', () => {

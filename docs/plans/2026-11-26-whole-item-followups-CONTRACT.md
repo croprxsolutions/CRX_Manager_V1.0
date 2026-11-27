@@ -159,6 +159,9 @@ bodies. Returns are next to Taha's return-credit work (#2537 changes credits, no
   `search_path=public, pg_temp`. LOW: the split proof now runs the real `create_return` with two payers; the
   browser test cleans its activity entry; the changelog names the count's existing 4-place rounding.
 
+## Luna round 3 (head 28b363777): 1 LOW refuted
+- Count rounding (3.99999 saves 4): a repeat of rounds 1 and 2; the existing 4-place rule, named in the changelog.
+
 ## Business decisions settled on this PR
 - **Split-payer returns of a whole item.** Mason chose to allow fractions (D5): a sale split between payers is
   returned in shares. The trigger and postflight skip return lines whose sale line is on live invoices of two or more payers;

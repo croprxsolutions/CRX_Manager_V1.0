@@ -29,9 +29,21 @@ try {
   assert.match(before.stderr, /SMOKE_FAIL: a substantive rename must return the approved weight to draft/);
 
   const candidate = read(`../../supabase/migrations/${migration}`);
-  const staging = `BEGIN;
+  const openStaging = `BEGIN;
 SET LOCAL crx.liquid_weight_staging_project = 'fsnjredpmakbmhwowjjt';
-${stagedActivation}
+${stagedActivation}`;
+  for (const mismatch of [
+    "DELETE FROM supabase_migrations.schema_migrations WHERE name = '20270312233100_enable_liquid_density_review';",
+    `CREATE OR REPLACE TRIGGER return_liquid_density_to_draft_for_brand
+      AFTER INSERT OR UPDATE OF status, parent_id, epa_registration, manufacturer ON public.product_parent_brands
+      FOR EACH ROW EXECUTE FUNCTION public.return_liquid_density_to_draft_for_brand();`,
+    'ALTER TABLE public.product_parent_brands DISABLE TRIGGER return_liquid_density_to_draft_for_brand;',
+    'GRANT EXECUTE ON FUNCTION public.liquid_density_review_open() TO anon;',
+    "CREATE FUNCTION public.approve_weights(jsonb) RETURNS jsonb LANGUAGE sql AS 'SELECT $1';",
+  ]) {
+    expectRollback(`${openStaging}\n${mismatch}\n${candidate}\nROLLBACK;`, /PREFLIGHT_LIQUID_WEIGHT_BRAND_RECHECK/);
+  }
+  const staging = `${openStaging}
 ${candidate}
 DO $proof$ BEGIN
   IF public.liquid_density_review_open() IS DISTINCT FROM true THEN RAISE EXCEPTION 'SMOKE_FAIL: preparation must preserve open staging'; END IF;

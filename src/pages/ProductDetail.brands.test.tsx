@@ -371,6 +371,26 @@ describe('ProductDetail brands section', () => {
     expect(chemistry).toHaveTextContent('1');
   });
 
+  it('refreshes the next size when the previous brand save finishes after navigation', async () => {
+    H.parent = {
+      id: 'parent-1', name: 'Generic group', generic_epa_registration: null,
+      sizes: [{ product_id: 'product-1' }, { product_id: 'product-2' }],
+    };
+    const view = render(<ProductDetail key={H.routeId} />);
+    await screen.findByTestId('chemistry-weight-revision');
+    const previous = H.brandSection.mock.lastCall?.[0] as { onWeightReviewChange: () => void };
+
+    H.routeId = 'product-2';
+    H.product = baseProduct({ id: 'product-2', product_name: 'Other size' });
+    view.rerender(<ProductDetail key={H.routeId} />);
+    const chemistry = await screen.findByTestId('chemistry-weight-revision');
+    expect(chemistry).toHaveTextContent('0');
+
+    await act(async () => previous.onWeightReviewChange());
+
+    expect(chemistry).toHaveTextContent('1');
+  });
+
   it('after switching products, the previous brands never show under the new one', async () => {
     H.rpc.mockImplementation(async (name: string) => (name === 'get_epa_registrations'
       ? { data: [{ epa_registration: '524-475', registration_status: 'cancelled', cancelled_on: null }], error: null }

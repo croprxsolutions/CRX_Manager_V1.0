@@ -285,6 +285,7 @@ function ParentOwnedHint({ parentName, identity = false }: { parentName?: string
 }
 
 const NO_ROWS: never[] = [];
+const WEIGHT_REVIEW_CHANGE_EVENT = 'crx:weight-review-change';
 
 async function readUnitConversions(): Promise<UnitConversion[]> {
   const { data, error } = await supabase.from('unit_conversions').select('*').order('unit');
@@ -345,6 +346,12 @@ export default function ProductDetail() {
   // DM-1: a weight save on this page re-reads cost per lb of active.
   const [weightSaves, setWeightSaves] = useState(0);
   const [weightReviewReload, setWeightReviewReload] = useState(0);
+  // A brand save can finish after navigation has mounted a different product page.
+  useEffect(() => {
+    const refreshWeight = () => setWeightReviewReload((revision) => revision + 1);
+    window.addEventListener(WEIGHT_REVIEW_CHANGE_EVENT, refreshWeight);
+    return () => window.removeEventListener(WEIGHT_REVIEW_CHANGE_EVENT, refreshWeight);
+  }, []);
   const [parentReload, setParentReload] = useState(0);
   // Category, use timings, EPA number and rates belong to the parent; until the page knows there is
   // none, they stay read-only.
@@ -2242,9 +2249,7 @@ export default function ProductDetail() {
                 canEditAdjuvants={canEditAdjuvants}
                 onAdjuvantsSaved={refreshRegistrations}
                 onBrandsChange={handleBrandsChange}
-                onWeightReviewChange={() => {
-                  if (id === productIdRef.current) setWeightReviewReload((revision) => revision + 1);
-                }}
+                onWeightReviewChange={() => window.dispatchEvent(new Event(WEIGHT_REVIEW_CHANGE_EVENT))}
               />
             </PhoneSection>
           )}

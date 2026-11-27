@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -65,15 +65,25 @@ describe('ProductChemistrySection', () => {
   });
 
   it('re-reads weight and cost after a brand change without reloading the other chemistry data', async () => {
-    mocks.fetchActiveCostsWithVersion.mockResolvedValueOnce({ costs: costs(10), refVersion: 0 })
-      .mockResolvedValueOnce({ costs: costs(12), refVersion: 0 });
+    const sizes = [{ product_id: 'size-1', product_name: 'Small jug', is_active: true, priced_unit: 'Gal',
+      cost_per_base: null, cost_reason: null, figures: [] }];
+    mocks.fetchActiveCostsWithVersion.mockResolvedValueOnce({ costs: { ...costs(10), sizes }, refVersion: 0 })
+      .mockResolvedValueOnce({ costs: { ...costs(12), sizes }, refVersion: 0 })
+      .mockResolvedValueOnce({ costs: { ...costs(13), sizes }, refVersion: 1 });
     const { rerender } = render(section('unchanged'));
     expect(await screen.findByText('Weight per gallon: 10 lb/gal (approved)')).toBeInTheDocument();
+    const label = 'Reference size (no active bulk size)';
+    fireEvent.change(screen.getByLabelText(label), { target: { value: 'size-1' } });
 
     rerender(section('unchanged', true, 1));
 
     expect(await screen.findByText('Weight per gallon: 12 lb/gal (approved)')).toBeInTheDocument();
+    expect(screen.getByLabelText(label)).toHaveValue('size-1');
     expect(mocks.fetchParentChemistry).toHaveBeenCalledTimes(1);
+
+    rerender(section('unchanged', true, 2));
+    expect(await screen.findByText('Weight per gallon: 13 lb/gal (approved)')).toBeInTheDocument();
+    expect(screen.getByLabelText(label)).toHaveValue('');
   });
 
   // MOA-1 sheet 3.3: each row of the table, the summary, and "group not recorded".

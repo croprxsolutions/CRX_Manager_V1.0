@@ -34,7 +34,7 @@ export default function ChemistryActiveCosts({ chem, profileId, reloadKey, pendi
   const { toast } = useToast();
   const [loaded, setLoaded] = useState<{ forKey: string; status: 'failed' } | { forKey: string; status: 'loaded'; costs: ParentActiveCosts; refVersion: number } | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [picked, setPicked] = useState('');
+  const [referenceChoice, setReferenceChoice] = useState<{ parentId: string; refVersion: number; productId: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const forKey = JSON.stringify([chem.parent_id, reloadKey, attempt]);
   const state = loaded?.forKey === forKey ? loaded : null;
@@ -43,7 +43,11 @@ export default function ChemistryActiveCosts({ chem, profileId, reloadKey, pendi
     fetchActiveCostsWithVersion(chem.parent_id).then(({ costs, refVersion }) => {
       if (cancelled) return;
       setLoaded({ forKey, status: 'loaded', costs, refVersion });
-      setPicked(costs.reference.source === 'picked' ? costs.reference.product_id ?? '' : '');
+      // A weight read can refresh without changing the saved reference or eligible choices.
+      setReferenceChoice((choice) => choice?.parentId === chem.parent_id && choice.refVersion === refVersion
+        && costs.reference.source !== 'bulk'
+        && (!choice.productId || costs.sizes.some((size) => size.is_active && size.product_id === choice.productId))
+        ? choice : null);
     }).catch((error: unknown) => {
       Sentry.captureException(errorOf(error), { extra: { context: 'get_parent_active_costs' } });
       if (!cancelled) setLoaded({ forKey, status: 'failed' });
@@ -56,6 +60,7 @@ export default function ChemistryActiveCosts({ chem, profileId, reloadKey, pendi
   const { costs, refVersion } = state;
   const refSize = costs.sizes.find((size) => size.product_id === costs.reference.product_id);
   const current = costs.reference.source === 'picked' ? costs.reference.product_id ?? '' : '';
+  const picked = referenceChoice?.productId ?? current;
 
   const saveReference = async () => {
     setSaving(true);
@@ -64,11 +69,15 @@ export default function ChemistryActiveCosts({ chem, profileId, reloadKey, pendi
         p_parent_id: chem.parent_id, p_reference_product_id: picked || null, p_expected_row_version: refVersion,
       }, `Cost reference size on ${chem.parent_name}`);
       toast('success', 'Reference size saved');
+      setReferenceChoice(null);
       setAttempt((n) => n + 1);
       onSaveSettled('saved');
     } catch (error) {
       const outcome = reportSaveError(error, toast);
-      if (outcome === 'stale') setAttempt((n) => n + 1);
+      if (outcome === 'stale') {
+        setReferenceChoice(null);
+        setAttempt((n) => n + 1);
+      }
       onSaveSettled(outcome);
     } finally {
       setSaving(false);
@@ -89,7 +98,7 @@ export default function ChemistryActiveCosts({ chem, profileId, reloadKey, pendi
           <div className="min-w-48 flex-1">
             <Select id="cost-reference" label="Reference size (no active bulk size)" value={picked} disabled={saving || pending}
               options={[{ value: '', label: 'None' }, ...costs.sizes.filter((size) => size.is_active).map((size) => ({ value: size.product_id, label: size.product_name }))]}
-              onChange={(event) => setPicked(event.target.value)} />
+              onChange={(event) => setReferenceChoice({ parentId: chem.parent_id, refVersion, productId: event.target.value })} />
           </div>
           <Button size="sm" onClick={() => void saveReference()} loading={saving} disabled={pending || picked === current}>Save reference</Button>
         </div>

@@ -35,6 +35,7 @@ DECLARE
   v_lines jsonb;
   v_rep uuid := gen_random_uuid();
   v_other_rep uuid := gen_random_uuid();
+  v_inactive_rep uuid := gen_random_uuid();
   v_rep_key text;
   v_quick_delivery uuid;
   v_each_product uuid;
@@ -254,7 +255,9 @@ BEGIN
 
   INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES
     (v_rep,v_rep || '@fixture.example.test',jsonb_build_object('full_name','Invented Completion Sales Rep','role','sales_rep')),
-    (v_other_rep,v_other_rep || '@fixture.example.test',jsonb_build_object('full_name','Invented Other Sales Rep','role','sales_rep'));
+    (v_other_rep,v_other_rep || '@fixture.example.test',jsonb_build_object('full_name','Invented Other Sales Rep','role','sales_rep')),
+    (v_inactive_rep,v_inactive_rep || '@fixture.example.test',jsonb_build_object('full_name','Invented Inactive Sales Rep','role','sales_rep'));
+  UPDATE public.profiles SET is_active = false WHERE id = v_inactive_rep;
   INSERT INTO public.commissions (order_id,customer_id,recipient,recipient_user_id,order_date) VALUES
     (v_order,v_customer,upper(v_rep::text),v_rep,v_today),
     (v_order,v_customer,v_other_rep::text,v_other_rep,v_today);
@@ -351,7 +354,8 @@ BEGIN
   INSERT INTO public.commissions (order_id, customer_id, recipient, recipient_user_id, order_date)
   SELECT order_id, v_customer, fixture.recipient, fixture.user_id, v_today
   FROM public.deliveries
-  CROSS JOIN (VALUES (v_driver::text, v_driver), ('Invented Completion Sales Rep', v_rep)) fixture(recipient, user_id)
+  CROSS JOIN (VALUES (v_driver::text, v_driver), ('Invented Completion Sales Rep', v_rep),
+    (upper(v_other_rep::text), v_other_rep), (v_inactive_rep::text, v_inactive_rep)) fixture(recipient, user_id)
   WHERE id = v_quick_delivery;
   SET LOCAL ROLE authenticated;
   v_res := public.start_and_complete_delivery(v_quick_delivery, 'No proof — recorded by office',
@@ -368,6 +372,12 @@ BEGIN
     OR EXISTS (SELECT FROM public.notifications WHERE related_entity_id = v_quick_delivery
       AND user_id IN (v_rep, v_inactive_admin))
   THEN RAISE EXCEPTION 'Quick Delivery completion did not retain the expected driver notice: %, %', v_res, v_notice; END IF;
+  IF EXISTS (
+    SELECT FROM (VALUES (v_other_rep), (v_inactive_rep)) fixture(user_id)
+    WHERE (SELECT count(*) FROM public.notifications n WHERE n.related_entity_id = v_quick_delivery
+      AND n.user_id = fixture.user_id AND n.created_by = v_admin AND n.notification_type = 'delivery_completed'
+      AND n.message LIKE 'Your customer %') <> 1
+  ) THEN RAISE EXCEPTION 'The office completion did not preserve the legacy commission audiences'; END IF;
 
   -- Match the existing whole-item prover's rolled-back product fixture, then re-enable all triggers.
   SET LOCAL session_replication_role = replica;

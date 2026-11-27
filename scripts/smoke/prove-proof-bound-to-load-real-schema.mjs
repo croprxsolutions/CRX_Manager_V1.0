@@ -591,8 +591,7 @@ function afterCases() {
   assert.deepEqual([status(X), status(Y), status(Z)], ['completed', 'completed', 'completed']);
   console.log('[case 8b] three completions in one transaction: each binding is its own call\'s, and none is left after');
 
-  // 9. Grants at the proof-of-load migration boundary. This prover replays through that
-  // candidate and its named follow-ups, before the delivery notice wrappers add another argument.
+  // 9. Grants.
   for (const sig of ['public.complete_delivery(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone,text,text,boolean,bigint,jsonb)',
     'public.start_and_complete_delivery(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint,jsonb)']) {
     assert.equal(scalar(`SELECT has_function_privilege('anon', '${sig}', 'EXECUTE');`), 'f', sig);

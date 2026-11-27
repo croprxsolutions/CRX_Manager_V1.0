@@ -1,5 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { localSql } from './local-db';
+import { API_URL, STATE_FOLDER, assertLocalState } from '../target.mjs';
 
 // Local compatibility proof. The same old screen and invented fixtures run before and after the additive migration.
 const id = (name: string) => "md5('invented-completion-notice-" + name + "')::uuid";
@@ -10,7 +13,37 @@ const customer = id('customer');
 const invoiceIds = 'SELECT id FROM public.invoices WHERE delivery_id = ' + delivery;
 let deliveryId: string;
 let adminId: string;
+let driverId: string | undefined;
 let seeded = false;
+
+async function createDriver() {
+  const raw = readFileSync(new URL('../' + STATE_FOLDER + '/local.env', import.meta.url), 'utf8');
+  const state = Object.fromEntries(raw.split(/\r?\n/).filter(line => line.includes('=')).map(line => {
+    const equals = line.indexOf('=');
+    return [line.slice(0, equals), line.slice(equals + 1)];
+  }));
+  assertLocalState(state);
+  const email = 'legacy-notice-driver-' + randomUUID() + '@fixture.example.test';
+  const password = randomUUID();
+  const response = await fetch(API_URL + '/auth/v1/admin/users', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + state.LOCAL_SERVICE_KEY, apikey: state.LOCAL_SERVICE_KEY,
+      'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, email_confirm: true,
+      user_metadata: { role: 'driver', full_name: 'Invented Legacy Notice Driver' } }),
+  });
+  expect(response.ok).toBe(true);
+  const user = await response.json();
+  expect(user.id).toMatch(/^[0-9a-f-]{36}$/);
+  driverId = user.id;
+  localSql(`BEGIN;
+    SET LOCAL session_replication_role = replica;
+    UPDATE public.profiles SET role = 'driver', is_active = true WHERE id = '${driverId}';
+    UPDATE auth.users SET banned_until = NULL WHERE id = '${driverId}';
+    COMMIT;`);
+  localSql(`UPDATE public.profiles SET role = 'driver' WHERE id = '${driverId}';`);
+  return { email, password };
+}
 
 function seedDelivery(status: 'scheduled' | 'in_progress' = 'in_progress') {
   adminId = localSql("SELECT id FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY created_at LIMIT 1");
@@ -34,8 +67,8 @@ function seedDelivery(status: 'scheduled' | 'in_progress' = 'in_progress') {
       quantity_remaining,price_per_unit,cost_per_unit,total_price,profit,net_margin)
     VALUES (${id('order-line')},${order},${product},'Invented Completion Notice Product','Gal',2,0,2,10,6,20,8,40);
     INSERT INTO public.deliveries(id,delivery_number,order_id,customer_id,created_by,assigned_driver,status,scheduled_date)
-      VALUES (${delivery},'INVENTED-NOTICE-DELIVERY',${order},${customer},'${adminId}',
-        NULL,'${status}',(now() AT TIME ZONE 'America/Chicago')::date);
+      VALUES (${delivery},'INVENTED-NOTICE-DELIVERY',${order},${customer},'${driverId ?? adminId}',
+        ${driverId ? "'" + driverId + "'" : 'NULL'},'${status}',(now() AT TIME ZONE 'America/Chicago')::date);
     INSERT INTO public.delivery_items(id,delivery_id,order_item_id,product_id,quantity,quantity_delivered,unit_size)
       VALUES (${id('line')},${delivery},${id('order-line')},${product},2,0,'Gal');
     COMMIT;`);
@@ -68,6 +101,8 @@ test.afterEach(() => {
     DELETE FROM public.products WHERE id = ${product};
     DELETE FROM public.customers WHERE id = ${customer};
     COMMIT;`);
+  if (driverId) localSql(`DELETE FROM auth.users WHERE id = '${driverId}';`);
+  driverId = undefined;
   seeded = false;
 });
 
@@ -75,16 +110,17 @@ function legacySave(page: Page, operation: 'start_and_complete_delivery' | 'comp
   const hasSender = localSql("SELECT to_regprocedure('public.notify_saved_delivery_completion(uuid,text,text)') IS NOT NULL") === 't';
   const eventCount = () => localSql('SELECT count(*) FROM public.delivery_completion_notice_events');
   const before = hasSender ? eventCount() : null;
+  const actor = driverId ?? adminId;
   const save = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/rpc/' + operation));
-  const direct = page.waitForResponse(response => response.request().method() === 'POST'
+  // The old driver screen can attempt refused staff alerts before its successful self-alert.
+  const direct = page.waitForResponse(response => response.ok() && response.request().method() === 'POST'
     && new URL(response.url()).pathname.endsWith('/rest/v1/notifications'), { timeout: 30_000 });
   return async () => {
-    const [request, response] = await Promise.all([save, direct]);
+    const [request] = await Promise.all([save, direct]);
     expect(request.postDataJSON().p_record_completion_notice).toBeUndefined();
-    expect(response.ok()).toBe(true);
     if (hasSender) expect(eventCount()).toBe(before);
     await expect.poll(() => localSql(`SELECT count(*) FROM public.notifications WHERE related_entity_id = ${delivery}
-      AND user_id = '${adminId}' AND created_by = '${adminId}' AND notification_type = 'delivery_completed'`)).toBe('1');
+      AND user_id = '${actor}' AND created_by = '${actor}' AND notification_type = 'delivery_completed'`)).toBe('1');
   };
 }
 
@@ -105,10 +141,11 @@ test('Original Deliveries list completes and sends its legacy direct notice', as
   await expect(page.getByText(/^completed$/i).first()).toBeVisible();
 });
 
-test('Original Field Stop saves a signed partial and sends its legacy direct notice', async ({ page }) => {
+test('Original Field Stop lets the assigned driver save a signed partial and send their existing notice', async ({ page }) => {
   test.setTimeout(120_000);
+  const driver = await createDriver();
   seedDelivery();
-  await signIn(page);
+  await signIn(page, driver.email, driver.password);
   await page.goto('/my-route/' + deliveryId);
   const quantity = page.getByRole('spinbutton', { name: /Delivered quantity for Invented Completion Notice Product/ });
   await expect(quantity).toBeVisible({ timeout: 30_000 });
@@ -132,6 +169,8 @@ test('Original Field Stop saves a signed partial and sends its legacy direct not
   await checkSave();
   await expect(page.getByRole('button', { name: /Next Stop/i })).toBeVisible({ timeout: 30_000 });
   expect(localSql('SELECT quantity_delivered FROM public.delivery_items WHERE delivery_id = ' + delivery)).toBe('1');
+  expect(localSql(`SELECT count(*) FROM public.notifications WHERE related_entity_id = ${delivery}
+    AND user_id <> '${driverId}' AND notification_type IN ('delivery_completed', 'delivery_remainder')`)).toBe('0');
 });
 
 async function signIn(page: Page, email = process.env.LOCAL_TEST_EMAIL!, password = process.env.LOCAL_TEST_PASSWORD!) {

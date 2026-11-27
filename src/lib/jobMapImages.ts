@@ -531,7 +531,7 @@ async function addAcreageLabels(
     const contentHeight = options.height - options.padding * 2;
     labels.forEach((label) => {
       const x = options.padding + ((label.lng - viewportBounds.minLongitude) / (viewportBounds.maxLongitude - viewportBounds.minLongitude)) * contentWidth;
-      const y = options.padding + ((viewportBounds.maxMercatorLatitude - mapMercatorY(label.lat)) / (viewportBounds.maxMercatorLatitude - viewportBounds.minMercatorLatitude)) * contentHeight;
+      const y = options.padding + ((mapMercatorY(label.lat) - viewportBounds.minMercatorLatitude) / (viewportBounds.maxMercatorLatitude - viewportBounds.minMercatorLatitude)) * contentHeight;
       const textWidth = context.measureText(label.text).width;
       context.fillStyle = 'rgba(0, 0, 0, 0.72)';
       context.fillRect(x - textWidth / 2 - 6, y - 12, textWidth + 12, 24);

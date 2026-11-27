@@ -161,14 +161,14 @@ describe('QuoteBuilder — acres on a new line', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     await waitFor(() => expect(acres()).toEqual(['40', '40']));
-    const hint = screen.getByText('Copied from line above');
+    const hint = screen.getByText(/^Copied from line above/);
     expect(screen.getAllByLabelText('Acres')[1]).toHaveAttribute('aria-describedby', hint.id);
     expect(screen.getAllByLabelText('Acres')[0]).not.toHaveAttribute('aria-describedby');
 
     // The rep's own number replaces it; the hint goes, and the line above keeps its acres.
     fireEvent.change(screen.getAllByLabelText('Acres')[1], { target: { value: '55' } });
     expect(acres()).toEqual(['40', '55']);
-    expect(screen.queryByText('Copied from line above')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Copied from line above/)).not.toBeInTheDocument();
 
     // A later line copies the line just above it, not the first line.
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
@@ -185,15 +185,15 @@ describe('QuoteBuilder — acres on a new line', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
     await waitFor(() => expect(acres()).toEqual(['80']));
-    expect(screen.getByText('Filled from field')).toBeInTheDocument();
+    expect(screen.getByText(/^Filled from field/)).toBeInTheDocument();
 
     // Cleared by hand, the next line has no acres above it and takes the field's again.
     fireEvent.change(screen.getByLabelText('Acres'), { target: { value: '' } });
-    expect(screen.queryByText('Filled from field')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Filled from field/)).not.toBeInTheDocument();
     await pickProductOnLastLine();
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     await waitFor(() => expect(acres()).toEqual(['', '80']));
-    expect(screen.getByText('Filled from field')).toBeInTheDocument();
+    expect(screen.getByText(/^Filled from field/)).toBeInTheDocument();
 
     // A third line, filled from the field and given no product yet.
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
@@ -202,7 +202,7 @@ describe('QuoteBuilder — acres on a new line', () => {
     // Clearing the field drops the acres it filled in, hint and all.
     fireEvent.click(screen.getByRole('button', { name: /^Clear field/ }));
     await waitFor(() => expect(acres()).toEqual(['', '', '']));
-    expect(screen.queryByText(/^(Filled from field|Copied from line above)$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^(Filled from field|Copied from line above)/)).not.toBeInTheDocument();
 
     // The third line is still untouched after the clear: closing its picker drops it.
     const selects = screen.getAllByRole('button', { name: /Select product/ });
@@ -235,7 +235,7 @@ describe('QuoteBuilder — acres on a new line', () => {
     // The saved 80 may be stale (field changed) or a partial treatment: the new line is left for the rep.
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     await waitFor(() => expect(acres()).toEqual(['80', '']));
-    expect(screen.queryByText(/^(Filled from field|Copied from line above)$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^(Filled from field|Copied from line above)/)).not.toBeInTheDocument();
   });
 
   it('starts the next line empty when the line above has 0 acres typed, even with a field (Luna, #2445)', { timeout: 20000 }, async () => {
@@ -252,7 +252,7 @@ describe('QuoteBuilder — acres on a new line', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     await waitFor(() => expect(acres()).toEqual(['0', '']));
-    expect(screen.queryByText(/^(Filled from field|Copied from line above)$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^(Filled from field|Copied from line above)/)).not.toBeInTheDocument();
   });
 
   it('a copy of typed acres follows a field picked afterwards, and the typed line keeps its acres (Sol, #2445)', { timeout: 20000 }, async () => {
@@ -268,7 +268,7 @@ describe('QuoteBuilder — acres on a new line', () => {
     fireEvent.change(fieldBox, { target: { value: 'Ho' } });
     fireEvent.click(await screen.findByRole('option', { name: /Home Quarter/ }));
     await waitFor(() => expect(acres()).toEqual(['40', '80']));
-    expect(screen.queryByText('Copied from line above')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Copied from line above/)).not.toBeInTheDocument();
   });
 
   it('saves and prices the filled acres exactly as typed acres', { timeout: 20000 }, async () => {
@@ -280,7 +280,16 @@ describe('QuoteBuilder — acres on a new line', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     await pickProductOnLastLine();
 
+    // The auto-filled acres are checked before saving: "Let me check" saves nothing.
+    expect(screen.getAllByLabelText('Acres')[1]).toHaveClass('bg-amber-50');
     fireEvent.click(screen.getByText('Save draft'));
+    expect(await screen.findByText(/^1 line has acres filled in automatically/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Let me check' }));
+    await waitFor(() => expect(screen.queryByText(/acres filled in automatically/)).not.toBeInTheDocument());
+    expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
+
+    fireEvent.click(screen.getByText('Save draft'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Yes, save' }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
     const args = mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as {
       p_sections: { items: { acres: number | null; total_units_needed: number | null; total_price: number }[] }[];

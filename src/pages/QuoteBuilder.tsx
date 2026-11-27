@@ -264,7 +264,8 @@ function productMetaLine(p: ProductOptionPresentationModel): string {
   return [p.sku, p.product_family?.name, productPackageText(p)].filter(Boolean).join(' · ');
 }
 
-/** A line's Acres box. A new line's filled-in acres say where they came from until the rep types there. */
+/** A line's Acres box. Auto-filled acres stay highlighted, saying where they came from, until the
+ *  rep types there or confirms them when saving (Mason, #2445). */
 function LineAcres({ item, onAcres }: { item: LocalItem; onAcres: (acres: number | null) => void }) {
   const hintId = `line-acres-hint-${item._key}`;
   return (
@@ -275,17 +276,22 @@ function LineAcres({ item, onAcres }: { item: LocalItem; onAcres: (acres: number
         onChange={(e) => onAcres(e.target.value ? parseFloat(e.target.value) : null)}
         aria-label="Acres"
         aria-describedby={item.acres_prefill ? hintId : undefined}
-        className={`${LINE_INPUT} border-gray-300`}
+        className={`${LINE_INPUT} ${item.acres_prefill ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`}
         step="any"
         min={0}
       />
       {item.acres_prefill && (
-        <p id={hintId} className="mt-1 text-xs text-secondary">
-          {item.acres_prefill === 'line_above' ? 'Copied from line above' : 'Filled from field'}
+        <p id={hintId} className="mt-1 text-xs text-amber-800">
+          {item.acres_prefill === 'line_above' ? 'Copied from line above' : 'Filled from field'}: check
         </p>
       )}
     </>
   );
+}
+
+/** Lines whose acres were filled in automatically and not yet checked by the rep. */
+function unconfirmedAcresCount(sections: LocalSection[]): number {
+  return sections.reduce((n, sec) => n + sec.items.filter((i) => i.acres_prefill && i.product_id && i.acres != null).length, 0);
 }
 
 // The quote's totals: line sums, then rounded to the cent. The page's one totals rule.
@@ -795,6 +801,8 @@ export default function QuoteBuilder() {
   // decline/cancel set a terminal status (triggers release holds); un-accept/
   // reopen routes through the hardened admin-only revert_quote_status RPC.
   const [confirmDeclineOpen, setConfirmDeclineOpen] = useState(false);
+  // The open "check auto-filled acres" question and its answer's resolver (Mason, #2445).
+  const [acresCheck, setAcresCheck] = useState<{ count: number; answer: (ok: boolean) => void } | null>(null);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const [statusActionLoading, setStatusActionLoading] = useState(false);
   // Close a booking we fulfilled by APPLYING product (job applications), as
@@ -2274,6 +2282,8 @@ export default function QuoteBuilder() {
               ...item,
               acres: effectiveAcres,
               acres_source: 'field',
+              // Filled without the rep typing, so it is checked before saving like a new line's (Sol, #2445).
+              acres_prefill: 'field',
               calc_mode: item.calc_mode === 'units_direct' ? 'units_direct' : 'rate_acres',
             }, tier);
           }),
@@ -2477,6 +2487,18 @@ export default function QuoteBuilder() {
       return null;
     }
     if (!profile) return null;
+    // Auto-filled acres set the quantity, the price and a job's treated acres, so the rep checks
+    // them once before any save (Mason, #2445: auto-fill, then confirm).
+    const unconfirmed = unconfirmedAcresCount(sections);
+    if (unconfirmed > 0) {
+      const ok = await new Promise<boolean>((answer) => setAcresCheck({ count: unconfirmed, answer }));
+      setAcresCheck(null);
+      if (!ok) return null;
+      setSections((prev) => prev.map((sec) => ({
+        ...sec,
+        items: sec.items.map((i) => (i.acres_prefill && i.product_id ? { ...i, acres_prefill: undefined } : i)),
+      })));
+    }
 
     // Validation: warn about empty sections
     const emptySections = sections.filter((sec) => sec.items.length === 0 || sec.items.every((i) => !i.product_id));
@@ -6609,6 +6631,18 @@ export default function QuoteBuilder() {
         variant="info"
         icon={ShoppingCart}
         loading={bookingAsOrder || converting}
+      />
+
+      <ConfirmModal
+        open={acresCheck !== null}
+        onClose={() => acresCheck?.answer(false)}
+        onConfirm={() => acresCheck?.answer(true)}
+        title="Check the auto-filled acres"
+        message={`${acresCheck?.count === 1 ? '1 line has' : `${acresCheck?.count ?? 0} lines have`} acres filled in automatically (highlighted in yellow). They set the quantity, the price and the treated acres. Are they right?`}
+        confirmLabel="Yes, save"
+        cancelLabel="Let me check"
+        variant="warning"
+        icon={AlertTriangle}
       />
 
       <ConfirmModal

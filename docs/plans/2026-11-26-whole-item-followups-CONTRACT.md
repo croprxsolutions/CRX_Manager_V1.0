@@ -135,6 +135,13 @@ bodies. Returns are next to Taha's return-credit work (#2537 changes credits, no
   `receiving_records` are revoked. 3: the only reversal deletes the receipt; no partial reversal exists.
   4: adopted in proof case 2. 5: the same apply-time gate as #2675 (D3); live has no such receipts.
 
+## Luna round 1 (gpt-6-luna xhigh, head 7c319ecbe, 2026-11-26): no BLOCKER or HIGH, 2 MED refuted
+- 1 (a count of 3.99999 is rounded to 4 before the check): refuted; the same as Astra 1, 4 and 20 (State and failure):
+  `update_cycle_count_item`'s 4-place rounding is the existing product-wide rule, and what is stored and moved is whole.
+- 2 (a product changed from Gal to Ea keeps fractional history): refuted; a product's stock unit cannot change once it
+  has PO lines, receipts, returns, order or delivery lines, stock movements or an active hold (`PRODUCT_UNIT_HAS_HISTORY`,
+  20270201130000), so the case cannot arise for the figures this change covers.
+
 ## Open business decisions
 - **Split-payer returns of a whole item.** When a sale is billed to two payers, a payer's share can be a fraction
   (1 Ea split 50/50 = 0.5 each), so neither payer could return it. Options: (a) refuse, as everywhere else; a payer's half

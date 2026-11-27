@@ -1,11 +1,12 @@
 import { toSentryError } from '../lib/sentryError';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Plus, Trash2 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Badge from '../components/ui/Badge';
+import ApplicationServiceBillingFields from '../components/application-services/ApplicationServiceBillingFields';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
@@ -21,6 +22,14 @@ import {
   formatApplicationServiceCostDollars,
   parseApplicationServiceCostCents,
 } from '../lib/applicationServiceCosts';
+import {
+  APPLICATION_SERVICE_BILLING_DB_READY,
+  loadActiveApplicationServiceVendors,
+  loadApplicationServiceBillingForm,
+  saveApplicationService,
+  type ApplicationServiceSaveArgs,
+  type ApplicationServiceVendorChoice,
+} from '../lib/applicationServiceBilling';
 import type { Vehicle, CustomerApplicationRate } from '../types';
 import { computeSeason } from '../utils/season';
 
@@ -32,6 +41,10 @@ import { computeSeason } from '../utils/season';
 // "permission denied for column"; admins reach the cost through the two
 // admin-gated RPCs below instead.
 const SERVICE_COLUMNS = 'id, name, vehicle_id, default_rate_per_acre_cents, is_active, sort_order';
+const EMPTY_FORM = {
+  name: '', vehicle_id: '', default_rate_per_acre: '', cost_per_acre: '', is_active: true, sort_order: '0',
+  bills_customer: true, outside_vendor_id: '',
+};
 
 // Money safety: all pricing stored as bigint cents, display divided by 100.
 // parseDollarsToCents now comes from the hardened canonical lib/parseCents
@@ -42,17 +55,19 @@ function formatCentsToDollars(cents: number): string {
 
 export default function ApplicationServiceDetail() {
   const { id } = useParams();
+  const routeGenerationRef = useRef(0);
   const navigate = useNavigate();
   const { toast } = useToast();
   const { role, profile } = useAuth();
   const isNew = id === 'new';
   const isAdmin = role === 'admin';
 
-  const [form, setForm] = useState({
-    name: '', vehicle_id: '', default_rate_per_acre: '', cost_per_acre: '', is_active: true, sort_order: '0',
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
 
   const [vehicles, setVehicles] = useState<Pick<Vehicle, 'id' | 'vehicle_name'>[]>([]);
+  const [billingReadAvailable, setBillingReadAvailable] = useState(false);
+  const [activeVendors, setActiveVendors] = useState<ApplicationServiceVendorChoice[] | null>(null);
+  const [existingOutsideVendor, setExistingOutsideVendor] = useState<ApplicationServiceVendorChoice | null>(null);
   const [overrides, setOverrides] = useState<(CustomerApplicationRate & { _dirty?: boolean })[]>([]);
   // Farm name of the customer picked for a new override (the picker searches; no list is loaded).
   const [newOverrideCustomerName, setNewOverrideCustomerName] = useState('');
@@ -69,21 +84,38 @@ export default function ApplicationServiceDetail() {
   const loadedFormRef = useRef<typeof form | null>(null);
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
   const skipUnsavedPromptRef = useRef(false);
-  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
+  const blocker = useUnsavedChanges(isDirty || saving, skipUnsavedPromptRef);
   const saveIdem = useIdempotencyKey('admin_save_application_service', profile?.id || '');
   const [newOverride, setNewOverride] = useState({ customer_id: '', rate: '', season: computeSeason().toString(), notes: '' });
   const [deleteOverrideId, setDeleteOverrideId] = useState<string | null>(null);
 
+  const billingControlsAvailable = APPLICATION_SERVICE_BILLING_DB_READY && billingReadAvailable;
+  const outsideVendorControlAvailable = billingControlsAvailable && activeVendors !== null;
+
   useEffect(() => { if (!initialLoadDone.current || form === loadedFormRef.current) return; setIsDirty(true); }, [form]);
+
+  useEffect(() => {
+    if (blocker.state !== 'blocked' || !saving) return;
+    toast('info', 'Saving — please wait');
+    blocker.reset?.();
+  }, [blocker, saving, toast]);
 
   useEffect(() => {
     supabase.from('vehicles').select('id, vehicle_name').eq('status', 'active').order('vehicle_name')
       .then(({ data }) => setVehicles((data || []) as Pick<Vehicle, 'id' | 'vehicle_name'>[]));
   }, []);
 
-  const fetchService = useCallback(async () => {
-    const { data, error } = await supabase.from('application_services').select(SERVICE_COLUMNS).eq('id', id!).single();
+  const fetchService = useCallback(async (isCurrent: () => boolean) => {
+    const serviceId = id;
+    if (!serviceId || serviceId === 'new') return;
+    const { data, error } = await supabase.from('application_services').select(SERVICE_COLUMNS).eq('id', serviceId).single();
+    if (!isCurrent()) return;
     if (error || !data) { toast('error', 'Service not found'); navigate('/application-services'); return; }
+    const billingForm = await loadApplicationServiceBillingForm(serviceId, APPLICATION_SERVICE_BILLING_DB_READY);
+    if (!isCurrent()) return;
+    setBillingReadAvailable(billingForm.available);
+    setExistingOutsideVendor(billingForm.existingVendor);
+    setActiveVendors(billingForm.activeVendors);
     // cost_per_acre_cents is admin-only at the column-grant level (migration
     // 20260729015706), so it never comes back on the table read — it is fetched
     // through the admin-gated RPC instead.
@@ -103,7 +135,8 @@ export default function ApplicationServiceDetail() {
     let costCents: bigint | null = null;
     if (isAdmin) {
       const { data: costRows, error: costError } = await supabase
-        .rpc('admin_get_application_service_costs', { p_service_id: id! });
+        .rpc('admin_get_application_service_costs', { p_service_id: serviceId });
+      if (!isCurrent()) return;
       try {
         if (costError) throw costError;
         const rawCost = assertRpcResult<{ service_id: string; cost_per_acre_cents: unknown }[]>(
@@ -118,23 +151,72 @@ export default function ApplicationServiceDetail() {
       }
     }
     setCostKnown(costCents !== null);
-    const loaded = { name: data.name, vehicle_id: data.vehicle_id || '', default_rate_per_acre: formatCentsToDollars(data.default_rate_per_acre_cents), cost_per_acre: costCents === null ? '' : formatApplicationServiceCostDollars(costCents), is_active: data.is_active, sort_order: String(data.sort_order) };
+    const loaded = {
+      name: data.name,
+      vehicle_id: data.vehicle_id || '',
+      default_rate_per_acre: formatCentsToDollars(data.default_rate_per_acre_cents),
+      cost_per_acre: costCents === null ? '' : formatApplicationServiceCostDollars(costCents),
+      is_active: data.is_active,
+      sort_order: String(data.sort_order),
+      bills_customer: billingForm.billsCustomer,
+      outside_vendor_id: billingForm.outsideVendorId,
+    };
     loadedFormRef.current = loaded;
     setForm(loaded);
-    setLoading(false);
-    setTimeout(() => { initialLoadDone.current = true; }, 0);
+    setTimeout(() => { if (isCurrent()) initialLoadDone.current = true; }, 0);
   }, [id, toast, navigate, isAdmin]);
 
-  const fetchOverrides = useCallback(async () => {
+  const fetchOverrides = useCallback(async (isCurrent: () => boolean) => {
     if (isNew || !id) return;
-    const { data } = await supabase.from('customer_application_rates').select('*, customer:customers(farm_name)').eq('application_service_id', id).order('season', { ascending: false });
+    const { data, error } = await supabase.from('customer_application_rates').select('*, customer:customers(farm_name)').eq('application_service_id', id).order('season', { ascending: false });
+    if (!isCurrent()) return;
+    if (error) throw error;
     setOverrides((data || []) as (CustomerApplicationRate & { _dirty?: boolean })[]);
   }, [id, isNew]);
 
-  useEffect(() => {
-    if (!isNew && id) { fetchService(); fetchOverrides(); }
-    else { setTimeout(() => { initialLoadDone.current = true; }, 0); }
-  }, [id, isNew, fetchService, fetchOverrides]);
+  useLayoutEffect(() => {
+    let cancelled = false;
+    const isCurrent = () => !cancelled;
+    routeGenerationRef.current += 1;
+    initialLoadDone.current = false;
+    loadedFormRef.current = null;
+    setLoading(!isNew && Boolean(id));
+    setSaving(false);
+    setIsDirty(false);
+    setForm({ ...EMPTY_FORM });
+    setCostKnown(isNew);
+    setOverrides([]);
+    setBillingReadAvailable(false);
+    setActiveVendors(null);
+    setExistingOutsideVendor(null);
+    setNewOverride({ customer_id: '', rate: '', season: computeSeason().toString(), notes: '' });
+    setNewOverrideCustomerName('');
+    setDeleteOverrideId(null);
+    if (!isNew && id) {
+      void Promise.all([fetchService(isCurrent), fetchOverrides(isCurrent)]).then(() => {
+        if (isCurrent()) setLoading(false);
+      }).catch((err: unknown) => {
+        if (!isCurrent()) return;
+        Sentry.captureException(toSentryError(err), { extra: { context: 'load_application_service_detail', serviceId: id } });
+        toast('error', 'Failed to load application service');
+        navigate('/application-services');
+      });
+    } else {
+      setLoading(false);
+      setTimeout(() => { if (isCurrent()) initialLoadDone.current = true; }, 0);
+      setBillingReadAvailable(APPLICATION_SERVICE_BILLING_DB_READY);
+      setActiveVendors(null);
+      if (APPLICATION_SERVICE_BILLING_DB_READY) {
+        void loadActiveApplicationServiceVendors().then((vendors) => {
+          if (isCurrent()) setActiveVendors(vendors);
+        });
+      }
+    }
+    return () => {
+      cancelled = true;
+      routeGenerationRef.current += 1;
+    };
+  }, [id, isNew, fetchService, fetchOverrides, navigate, toast]);
 
   // ONE call writes the whole service, cost_per_acre_cents included, inside a
   // single database transaction. This used to be a PostgREST insert/update
@@ -145,32 +227,17 @@ export default function ApplicationServiceDetail() {
   // DUPLICATE service, since idx_application_services_active_name is not unique.
   // Migration 20260729035923 collapsed both writes into
   // admin_save_application_service so they land together or not at all.
-  const saveService = async (args: {
-    p_name: string;
-    p_default_rate_per_acre_cents: number;
-    p_is_active: boolean;
-    p_sort_order: number;
-    p_vehicle_id: string | null;
-    p_cost_per_acre_cents: number | null;
-    p_service_id: string | null;
-  }) => {
+  const saveService = async (args: ApplicationServiceSaveArgs) => {
+    const serviceScope = id ?? 'new';
     const attempt = async () => {
-      const { data, error } = await supabase.rpc('admin_save_application_service', {
-        ...args,
-        // The Supabase type generator never emits `| null` for an RPC argument,
-        // but these three take SQL NULL by design: p_service_id NULL means
-        // "create", p_cost_per_acre_cents NULL means "leave the cost alone", and
-        // p_vehicle_id NULL means "no vehicle". Same cast the other
-        // null-accepting RPC callers use (BlendRecipes.tsx, JobDetail.tsx).
-        p_service_id: args.p_service_id as unknown as string,
-        p_vehicle_id: args.p_vehicle_id as unknown as string,
-        p_cost_per_acre_cents: args.p_cost_per_acre_cents as unknown as number,
-        p_idempotency_key: saveIdem.getKey(),
-      });
-      if (error) throw error;
-      return assertRpcResult<{ success: boolean; service_id: string; created: boolean }>(
-        data, 'admin_save_application_service',
-      );
+      const billing = billingControlsAvailable
+        ? {
+          billsCustomer: form.bills_customer,
+          outsideVendorId: form.outside_vendor_id || null,
+          clearOutsideVendor: form.outside_vendor_id === '',
+        }
+        : null;
+      return saveApplicationService(args, billing, saveIdem.getKeyFor(serviceScope), APPLICATION_SERVICE_BILLING_DB_READY);
     };
     let result: { success: boolean; service_id: string; created: boolean };
     try {
@@ -199,14 +266,15 @@ export default function ApplicationServiceDetail() {
       // already been spent on some other operation, which cannot happen for a
       // freshly mounted new-service form — so surface it rather than paper over it.
       if (args.p_service_id === null) throw err;
-      saveIdem.resetKey();
+      saveIdem.resetKeyFor(serviceScope);
       result = await attempt();
     }
-    saveIdem.resetKey();
+    saveIdem.resetKeyFor(serviceScope);
     return result;
   };
 
   const handleSave = async () => {
+    if (saving) return;
     if (!form.name.trim()) { toast('error', 'Service name is required'); return; }
     if (!isAdmin) { toast('error', 'Only admins can manage application services'); return; }
     // Both money fields are refused (null) on more than two decimals. Neither may
@@ -236,18 +304,23 @@ export default function ApplicationServiceDetail() {
         p_cost_per_acre_cents: costCents,
         p_service_id: isNew ? null : id!,
       });
+      // The audit entry is written even if the user has already left this service.
       if (isNew) {
         if (profile) logActivity({ event: 'app_service_created', description: `Application service "${form.name}" created`, performedBy: profile.id, entityType: 'application_service', entityId: saved.service_id });
-        toast('success', 'Application service created'); setIsDirty(false); skipUnsavedPromptRef.current = true; navigate(`/application-services/${saved.service_id}`);
       } else {
         if (profile) logActivity({ event: 'app_service_updated', description: `Application service "${form.name}" updated`, performedBy: profile.id, entityType: 'application_service', entityId: id! });
+      }
+      if (isNew) {
+        toast('success', 'Application service created'); setIsDirty(false); skipUnsavedPromptRef.current = true; navigate(`/application-services/${saved.service_id}`);
+      } else {
         toast('success', costKnown ? 'Service saved' : 'Service saved — cost/acre left unchanged (it could not be loaded)'); setIsDirty(false);
       }
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'save_application_service' } });
       toast('error', sanitizeError(err));
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   const handleAddOverride = async () => {
@@ -285,7 +358,7 @@ export default function ApplicationServiceDetail() {
 
   return (
     <div className="space-y-6">
-      <UnsavedChangesModal open={blocker.state === 'blocked'} onStay={() => blocker.reset?.()} onLeave={() => blocker.proceed?.()} />
+      <UnsavedChangesModal open={blocker.state === 'blocked' && !saving} onStay={() => blocker.reset?.()} onLeave={() => blocker.proceed?.()} />
       <ConfirmModal open={!!deleteOverrideId} title="Remove Rate Override" message="Remove this customer rate override? The default service rate will apply instead." confirmLabel="Remove" variant="danger" onConfirm={confirmDeleteOverride} onClose={() => setDeleteOverrideId(null)} />
 
       <div className="flex items-center gap-4">
@@ -294,11 +367,10 @@ export default function ApplicationServiceDetail() {
           <h1 className="text-2xl font-bold text-nav-dark">{isNew ? 'New Application Service' : form.name}</h1>
           {!isNew && <p className="text-sm text-secondary mt-0.5">{form.is_active ? 'Active' : 'Inactive'} &middot; {form.default_rate_per_acre ? `$${form.default_rate_per_acre}/ac` : 'No rate set'}</p>}
         </div>
-        {isAdmin && <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>{isNew ? 'Create Service' : 'Save Changes'}</Button>}
+        {isAdmin && <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving} disabled={saving}>{isNew ? 'Create Service' : 'Save Changes'}</Button>}
       </div>
 
-      {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
-      <fieldset disabled={isNew && saving} className="min-w-0">
+      <fieldset disabled={saving} className="min-w-0">
       <Card><div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <Input label="Service Name" value={form.name} onChange={(e) => updateField('name', e.target.value)} required placeholder="e.g. Hagie Y-Drop Nitrogen" />
         <div><label className="block text-sm font-medium text-nav-dark mb-1">Vehicle (optional)</label><select value={form.vehicle_id} onChange={(e) => updateField('vehicle_id', e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"><option value="">No vehicle linked</option>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.vehicle_name}</option>)}</select></div>
@@ -309,9 +381,20 @@ export default function ApplicationServiceDetail() {
         {isAdmin && <Input label="Cost / Acre ($)" type="number" step="0.01" min={0} value={form.cost_per_acre} onChange={(e) => updateField('cost_per_acre', e.target.value)} placeholder={costKnown ? 'e.g. 6.50' : 'Unavailable'} disabled={!costKnown} error={costKnown ? undefined : 'Could not load the current cost — editing is locked so it cannot be overwritten. Reload to try again.'} />}
         <Input label="Sort Order" type="number" value={form.sort_order} onChange={(e) => updateField('sort_order', e.target.value)} placeholder="0" />
         <div><label className="block text-sm font-medium text-nav-dark mb-1">Status</label><select value={form.is_active ? 'active' : 'inactive'} onChange={(e) => updateField('is_active', e.target.value === 'active')} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
+        <ApplicationServiceBillingFields
+          billsCustomer={form.bills_customer}
+          outsideVendorId={form.outside_vendor_id}
+          billingAvailable={billingControlsAvailable}
+          outsideVendorAvailable={outsideVendorControlAvailable}
+          activeVendors={activeVendors}
+          existingOutsideVendor={existingOutsideVendor}
+          onBillsCustomerChange={(value) => updateField('bills_customer', value)}
+          onOutsideVendorChange={(value) => updateField('outside_vendor_id', value)}
+        />
       </div></Card>
       </fieldset>
 
+      <fieldset disabled={saving} className="min-w-0">
       {!isNew && <Card>
         <h3 className="text-lg font-semibold text-nav-dark mb-4">Customer Rate Overrides</h3>
         <p className="text-sm text-secondary mb-4">Special per-acre rates for specific customers. These override the default rate above.</p>
@@ -319,6 +402,7 @@ export default function ApplicationServiceDetail() {
           <div className="flex-1"><label className="block text-xs font-medium text-secondary mb-1">Customer</label><CustomerSearchPicker
             value={newOverride.customer_id}
             selectedLabel={newOverrideCustomerName}
+            disabled={saving}
             onSelect={(c) => {
               setNewOverride((p) => ({ ...p, customer_id: c?.id ?? '' }));
               setNewOverrideCustomerName(c?.farm_name ?? '');
@@ -337,6 +421,7 @@ export default function ApplicationServiceDetail() {
           </tbody></table></div>
         )}
       </Card>}
+      </fieldset>
     </div>
   );
 }

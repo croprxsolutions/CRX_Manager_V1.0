@@ -3,6 +3,7 @@ import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import mapLibreCss from 'maplibre-gl/dist/maplibre-gl.css?inline';
 import drawCss from '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css?inline';
+import mapboxLogoUrl from './mapbox-logo.svg?url';
 
 maplibregl.setWorkerUrl(workerUrl);
 
@@ -43,6 +44,8 @@ if (typeof document !== 'undefined' && !document.getElementById('crx-maplibre-st
   const style = document.createElement('style');
   style.id = 'crx-maplibre-styles';
   style.textContent = `${mapLibreCss}\n${scopeDrawCss(drawCss)}
+    .crx-mapbox-logo { display: inline-block; vertical-align: middle; width: 88px; height: 23px; margin-right: 4px; background: url(${JSON.stringify(mapboxLogoUrl)}) no-repeat center / contain; }
+    .crx-mapbox-logo-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     @media (max-width: 480px) {
       .crx-map-picture-notice { top: 140px; max-width: calc(100% - 20px); }
       .crx-field-setup-drawing .maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib { margin-bottom: 180px !important; }

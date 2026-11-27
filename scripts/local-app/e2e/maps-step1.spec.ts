@@ -372,6 +372,20 @@ ${error.stack ?? ''}`)}`);
     await zoomToFieldScale(page, mapboxTileZooms);
     await expect(page.getByText('© Mapbox', { exact: false })).toBeVisible();
     await expectMapboxPictureFrom(0, 'satellite-streets-v12');
+    const credits = page.locator('.maplibregl-ctrl-attrib');
+    // The logo is a CSS background; require that its picture actually loaded, not just that the link is there.
+    const logo = credits.locator('.crx-mapbox-logo');
+    await expect(logo).toBeVisible();
+    await expect.poll(() => logo.evaluate(async (el) => {
+      const url = getComputedStyle(el).backgroundImage.match(/^url\("(.*)"\)$/)?.[1];
+      if (!url) return 0;
+      const img = new Image();
+      img.src = url;
+      await img.decode().catch(() => undefined);
+      return img.naturalWidth;
+    }), { message: 'Mapbox logo picture did not load' }).toBeGreaterThan(0);
+    await expect(credits).toContainText('© Maxar');
+    await expect(credits.getByRole('link', { name: 'Improve this map' })).toBeVisible();
     holdMapboxTiles = true;
     await panMapAwayFromExistingFields(page);
     await page.locator('.maplibregl-ctrl-zoom-in').click();
@@ -384,7 +398,7 @@ ${error.stack ?? ''}`)}`);
     await page.getByRole('button', { name: 'USDA aerial' }).click();
     await expect(loadingPictureToggle.getByRole('button', { name: 'USDA aerial' })).toBeVisible();
     await expect.poll(() => usdaTileZooms.length, { timeout: 5000 }).toBeGreaterThan(usdaRequestsBeforeSwitch);
-    await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('Imagery: USGS The National Map');
+    await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('USDA, USGS The National Map');
     holdMapboxTiles = false;
     await expect.poll(() => pendingMapboxTiles, { timeout: 8000 }).toBe(0);
     await loadingPictureToggle.getByRole('button', { name: 'USDA aerial' }).click();
@@ -404,7 +418,7 @@ ${error.stack ?? ''}`)}`);
     await toggle.getByRole('button', { name: 'Satellite' }).click();
     await page.getByRole('button', { name: 'USDA aerial' }).click();
     await expect(toggle.getByRole('button', { name: 'USDA aerial' })).toBeVisible();
-    await expect(page.getByText('Imagery: USGS The National Map')).toBeVisible();
+    await expect(page.getByText('USDA, USGS The National Map')).toBeVisible();
     await toggle.getByRole('button', { name: 'USDA aerial' }).click();
     await page.getByRole('button', { name: 'Roads' }).click();
     await expect(toggle.getByRole('button', { name: 'Roads' })).toBeVisible();
@@ -521,7 +535,7 @@ ${error.stack ?? ''}`)}`);
   }
   await page.mouse.move(cornerStart.x + 17, cornerStart.y + 12, { steps: 4 });
   await page.mouse.up();
-  await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('Imagery: USGS The National Map');
+  await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('USDA, USGS The National Map');
   await screenshot(page, 'field-setup-corner-drag-usda');
   if (fakeToken) {
     const tilesBeforeRoads = mapboxTilePaths.length;
@@ -529,6 +543,8 @@ ${error.stack ?? ''}`)}`);
     await editToggle.getByRole('button', { name: 'Roads', exact: true }).click();
     await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('© Mapbox');
     await expectMapboxPictureFrom(tilesBeforeRoads, 'streets-v12');
+    await expect(page.locator('.maplibregl-ctrl-attrib .crx-mapbox-logo')).toBeVisible();
+    await expect(page.locator('.maplibregl-ctrl-attrib')).not.toContainText('© Maxar');
   }
   await expect.poll(async () => page.getByText(/Part 1 of 2/).textContent(), { message: consoleErrors.join(' | ') }).not.toBe(firstPartAcresBeforeEdit);
   await screenshot(page, fakeToken ? 'field-setup-corner-edit-roads' : 'field-setup-corner-edit-usda');
@@ -712,7 +728,7 @@ ${error.stack ?? ''}`)}`);
   await expect(page.getByText(/(?:[3-9]|\d{2,}) corners placed/)).toBeVisible();
   await page.locator('.crx-map-locate-control').scrollIntoViewIfNeeded();
   await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText(
-    fakeToken ? '© Mapbox' : 'Imagery: USGS The National Map',
+    fakeToken ? '© Mapbox' : 'USDA, USGS The National Map',
   );
   const phoneControlOverlap = await page.evaluate(() => {
     const selectors = [

@@ -8,10 +8,9 @@ import LocateMe from './LocateMe';
 import MapPictureNotice from './MapPictureNotice';
 import { type MapPicture } from './mapPreferences';
 import { useMapPicture } from './useMapPicture';
+import { mapAttribution } from './mapCredits';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
-const MAPBOX_ATTRIBUTION = '<a href="https://www.mapbox.com/about/maps/" target="_blank" rel="noopener noreferrer">© Mapbox</a> © OpenStreetMap';
-const USDA_ATTRIBUTION = 'Imagery: USGS The National Map';
 
 export type BaseLayerType = MapPicture;
 
@@ -144,7 +143,7 @@ export default function CRXMap({
           key={mapPicture.displayedPicture}
           position="bottom-right"
           compact={false}
-          customAttribution={mapPicture.displayedPicture === 'usda' ? USDA_ATTRIBUTION : MAPBOX_ATTRIBUTION}
+          customAttribution={mapAttribution(mapPicture.displayedPicture)}
         />
         {interactive && <NavigationControl position="top-right" />}
         {showLocateMe && <LocateMe onLocate={handleLocate} />}

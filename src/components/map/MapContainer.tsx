@@ -5,12 +5,11 @@ import './maplibreSetup';
 import MapPictureNotice from './MapPictureNotice';
 import { MapContainerContext } from './MapContainerContext';
 import { useMapPicture } from './useMapPicture';
+import { mapAttribution } from './mapCredits';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
 const DEFAULT_CENTER: [number, number] = [-89.0, 40.0]; // Central Illinois
 const DEFAULT_ZOOM = 7;
-const MAPBOX_ATTRIBUTION = '<a href="https://www.mapbox.com/about/maps/" target="_blank" rel="noopener noreferrer">© Mapbox</a> © OpenStreetMap';
-const USDA_ATTRIBUTION = 'Imagery: USGS The National Map';
 
 interface MapContainerProps {
   center?: [number, number]; // [lng, lat]
@@ -75,7 +74,7 @@ export default function MapContainer({
           key={mapPicture.displayedPicture}
           position="bottom-right"
           compact={false}
-          customAttribution={mapPicture.displayedPicture === 'usda' ? USDA_ATTRIBUTION : MAPBOX_ATTRIBUTION}
+          customAttribution={mapAttribution(mapPicture.displayedPicture)}
         />
         {interactive && <NavigationControl position="top-right" />}
         <MapContainerContext.Provider value={mapInstance}>

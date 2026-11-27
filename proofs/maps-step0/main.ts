@@ -96,6 +96,7 @@ function addScopedStyles(): void {
     #proof-map { position: absolute; inset: 0; }
     #proof-toolbar { position: absolute; top: 12px; left: 12px; right: 60px; width: fit-content; max-width: calc(100% - 88px); z-index: 3; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px; border-radius: 6px; background: white; box-shadow: 0 1px 5px #0003; font: 14px sans-serif; }
     #proof-toolbar button { min-height: 44px; padding: 0 10px; }
+    #proof-toolbar > a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; }
     #proof-draw-control { border-radius: 4px; }
     #proof-draw-control button { min-width: 44px; min-height: 44px; }
     #proof-credits { position: absolute; z-index: 3; bottom: 0; right: 0; background: white; font: 12px sans-serif; }

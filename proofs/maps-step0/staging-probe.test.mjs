@@ -87,6 +87,7 @@ test('Places check uses its own policy and makes one autocomplete and one detail
   const staged = run({ query });
   assert.equal(staged.status, 200);
   assert.match(staged.headers['Content-Security-Policy'], /connect-src https:\/\/places\.googleapis\.com;/);
+  assert.ok(staged.body.includes('<a href="/">Back to CRX</a>'));
   assert.equal(staged.headers['Cache-Control'], 'private, no-store');
   assert.equal(staged.body.includes(tilesKey) || staged.body.includes(staticKey), false);
   assert.equal(run({ query }, { VERCEL_TARGET_ENV: 'preview' }).status, 404);
@@ -196,7 +197,10 @@ test.each([
   const managesNavigation = workbox.runtimeCaching.find((rule) => rule.options?.cacheName === 'crx-pages').urlPattern;
   const request = { mode: 'navigate' };
   assert.equal(managesNavigation({ request, url: new URL('https://' + host + '/fields') }), true);
-  assert.equal(managesNavigation({ request, url: new URL('https://' + host + '/api/maps-step0-draw/index.html') }), !expected);
+  assert.equal(managesNavigation({ request, url: new URL('https://' + host + '/api/maps-step0/other') }), true);
+  for (const path of ['/api/maps-step0?places=1', '/api/maps-step0/', '/api/maps-step0-draw/index.html']) {
+    assert.equal(managesNavigation({ request, url: new URL('https://' + host + path) }), !expected);
+  }
 });
 
 test('reserves both proof routes from the normal app rewrite and policy', () => {

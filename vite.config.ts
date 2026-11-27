@@ -47,7 +47,7 @@ export function mapsProofWorkboxOptions(environment: NodeJS.ProcessEnv): typeof 
       ? {
           ...rule,
           urlPattern: ({ request, url }) => request.mode === 'navigate'
-            && !/^\/api\/maps-step0-draw(?:\/|$)/.test(url.pathname),
+            && !/^\/api\/maps-step0(?:-draw(?:\/|$)|\/?$)/.test(url.pathname),
         }
       : rule),
   };

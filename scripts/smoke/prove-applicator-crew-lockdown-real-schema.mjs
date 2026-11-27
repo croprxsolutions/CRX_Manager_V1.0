@@ -250,9 +250,10 @@ try {
   console.log('REVERSE BEFORE LOCKDOWN: refused');
 
   const applied = runCandidate(['-1']);
+  // A zero exit means the one transaction committed: arm the reuse cleanup before any assertion can throw.
+  lockedDown = applied.status === 0;
   assert.equal(applied.status, 0, `apply failed:\n${applied.stdout}\n${applied.stderr}`);
   assert.match(applied.stderr, /POSTFLIGHT_OK/);
-  lockedDown = true;
   console.log('APPLY: POSTFLIGHT_OK');
 
   const after = all(true);

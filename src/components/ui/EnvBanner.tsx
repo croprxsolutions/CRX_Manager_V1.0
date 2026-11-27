@@ -17,7 +17,7 @@ export default function EnvBanner({
   const { className, line } = LOOK[env];
   // Only staging claims "test data only", and only when its database is positively the staging project.
   const text = env === 'staging' && !isStagingDatabase(supabaseUrl) ? 'STAGING · check which database this uses' : LOOK[env].text;
-  const showMapsProofs = env === 'staging' && window.location.hostname === 'staging.croprxsolutions.app';
+  const showMapsProofs = env === 'staging' && globalThis.location?.hostname === 'staging.croprxsolutions.app';
   // A plain label, not a live region: screen readers shouldn't announce it on every load.
   return (
     <>

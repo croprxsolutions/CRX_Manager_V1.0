@@ -104,16 +104,11 @@ function addScopedStyles(): void {
   document.head.append(style);
 }
 
-function tileTemplate(picture: Picture | `${Picture}-outage`): string {
-  const tileQuery = 'z={z}&x={x}&y={y}';
-  const outageQuery = picture.endsWith('-outage') ? `&attempt=${outageAttempt}` : '';
-  if (stagingProof && picture.endsWith('-outage')) {
-    return `${location.origin}/api/maps-step0?drawingOutage=1&picture=${picture[0]}&${tileQuery}${outageQuery}`;
-  }
-  if (livePictures && (picture === 'A' || picture === 'B')) {
+function tileTemplate(picture: Picture): string {
+  if (livePictures) {
     return `proof-live://${picture.toLowerCase()}/${pictureAttempt}/{z}/{x}/{y}`;
   }
-  return `${location.origin}${import.meta.env.BASE_URL}tiles/${picture}.png?${tileQuery}${outageQuery}`;
+  return `${location.origin}${import.meta.env.BASE_URL}tiles/${picture}.png?z={z}&x={x}&y={y}`;
 }
 
 function getRasterTiles(map: maplibregl.Map): string[] {
@@ -169,15 +164,12 @@ let liveRequestsPending = 0;
 let liveBatchImages = 0;
 let liveBatchErrors = 0;
 let creditsPending = false;
-let outagePicture: Picture | undefined;
-let outageAttempt = 0;
-let outageTimeout: number | undefined;
+let outageRequest: AbortController | undefined;
 let livePictures = false;
 
 function clearOutage(): void {
-  outagePicture = undefined;
-  window.clearTimeout(outageTimeout);
-  outageTimeout = undefined;
+  outageRequest?.abort();
+  outageRequest = undefined;
 }
 
 function pictureName(picture: Picture): string {
@@ -192,18 +184,16 @@ function updateCredits(picture: Picture | undefined): void {
   mapboxFeedback.href = `https://apps.mapbox.com/feedback/#/${center.lng}/${center.lat}/${map.getZoom()}`;
 }
 
-function setPictureTiles(picture: Picture | `${Picture}-outage`): void {
+function setPictureTiles(picture: Picture): void {
   const source = map.getSource(PICTURE_SOURCE_ID) as RasterTileSource;
   pictureAttempt += 1;
   liveRequestsPending = 0;
-  if (picture === 'A' || picture === 'B') {
-    showingPicture = picture;
-    creditsPending = livePictures;
-    map.setLayoutProperty(PICTURE_LAYER_ID, 'visibility', 'visible');
-    // Keep old raster pixels and their successor's credit from appearing together.
-    map.setPaintProperty(PICTURE_LAYER_ID, 'raster-opacity', livePictures ? 0 : 1);
-    updateCredits(undefined);
-  }
+  showingPicture = picture;
+  creditsPending = livePictures;
+  map.setLayoutProperty(PICTURE_LAYER_ID, 'visibility', 'visible');
+  // Keep old raster pixels and their successor's credit from appearing together.
+  map.setPaintProperty(PICTURE_LAYER_ID, 'raster-opacity', livePictures ? 0 : 1);
+  updateCredits(undefined);
   source.setTiles([tileTemplate(picture)]);
 }
 
@@ -380,25 +370,6 @@ map.on('error', (event) => {
     revealLivePicture();
     return;
   }
-  if ('status' in error && 'url' in error && typeof error.url === 'string') {
-    let url: URL;
-    try {
-      url = new URL(error.url, location.href);
-    } catch {
-      return;
-    }
-    const failedFixture = url.origin === location.origin && (stagingProof
-      ? url.pathname === '/api/maps-step0' && url.searchParams.get('drawingOutage') === '1'
-      : /^\/tiles\/[AB]-outage\.png$/.test(url.pathname));
-    if (failedFixture) {
-      const failedPicture = outagePicture;
-      if (failedPicture && url.searchParams.get('attempt') === String(outageAttempt)) {
-        clearOutage();
-        recoverPicture(failedPicture);
-      }
-      return;
-    }
-  }
   // eslint-disable-next-line no-console -- the spec fails on any console.error, so map errors must reach it
   console.error('MapLibre proof error:', name);
 });
@@ -419,17 +390,29 @@ livePicturesButton.addEventListener('click', () => {
 map.on('moveend', () => {
   if (!mapboxCredit.hidden) updateCredits('B');
 });
-toolbar.querySelector('#fail-picture')!.addEventListener('click', () => {
-  if (!proof.ready || outagePicture || !retryButton.disabled) return;
+toolbar.querySelector('#fail-picture')!.addEventListener('click', async () => {
+  if (!proof.ready || outageRequest || !retryButton.disabled) return;
   const failedPicture = chosenPicture;
-  outagePicture = failedPicture;
-  outageAttempt += 1;
-  status.value = `Testing ${pictureName(chosenPicture)} outage`;
-  outageTimeout = window.setTimeout(() => {
-    clearOutage();
-    recoverPicture(failedPicture);
-  }, 12000);
-  setPictureTiles(`${outagePicture}-outage`);
+  const request = new AbortController();
+  outageRequest = request;
+  status.value = `Testing ${pictureName(failedPicture)} outage`;
+  const fixture = stagingProof
+    ? `/api/maps-step0?drawingOutage=1&picture=${failedPicture}`
+    : `${import.meta.env.BASE_URL}tiles/${failedPicture}-outage.png`;
+  // Check the outage once so a hung fixture cannot occupy the map's tile queue.
+  const timeout = window.setTimeout(() => request.abort(), 12000);
+  let failed: boolean;
+  try {
+    failed = !(await fetch(fixture, { signal: request.signal, cache: 'no-store' })).ok;
+  } catch {
+    failed = true;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+  if (outageRequest !== request) return;
+  outageRequest = undefined;
+  if (failed) recoverPicture(failedPicture);
+  else status.value = 'Outage fixture unexpectedly succeeded';
 });
 retryButton.addEventListener('click', () => proof.switchPicture(chosenPicture));
 toolbar.querySelector('#save-draft')!.addEventListener('click', () => {

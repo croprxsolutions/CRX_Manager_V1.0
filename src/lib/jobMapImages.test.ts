@@ -147,11 +147,13 @@ describe('fetchJobMapImages', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    await fetchJobMapImages('job-1', { overview: false });
+    const result = await fetchJobMapImages('job-1', { overview: false });
 
+    expect(result?.perField[0].hazardPinIds).toEqual(['obstacle-1']);
     expect(mockObstacleIn).toHaveBeenCalledWith('field_id', ['field-1']);
     const url = String(mockFetch.mock.calls[0][0]);
     const encodedOverlay = url.match(/geojson\((.+)\)\/auto/);
+    expect(decodeURIComponent(encodedOverlay?.[1] ?? '')).not.toContain('obstacle-1');
     const overlay = JSON.parse(decodeURIComponent(encodedOverlay?.[1] ?? '')) as {
       features: Array<{ geometry: { type: string }; properties: Record<string, string> }>;
     };

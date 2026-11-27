@@ -379,6 +379,28 @@ describe('map pages only print', () => {
       centroidLat: null, centroidLng: null, dataUrl: 'data:image/png;base64,ZmllbGQtMQ==' }],
   };
 
+  it('warns about a missing overview and mismatched pin even with a field picture', async () => {
+    const { default: autoTable } = await import('jspdf-autotable');
+    const data = makeSheetData({
+      overviewMapRequested: true,
+      fieldMapPagesRequested: true,
+      maps: { overview: null, perField: [{ ...maps.perField[0], hazardPinIds: ['other-hazard'] }] },
+    });
+    data.fields[0].field_id = 'field-1';
+    data.fields[0].hazards = { complete: true, markers: [
+      { id: 'saved-hazard', name: 'Washout', note: 'Stay west', hasValidPoint: true },
+    ] };
+
+    await generateApplicatorSheetPdf(data, 'original', null);
+
+    expect(mockDoc.text).toHaveBeenCalledWith('Overview map picture unavailable', 40, expect.any(Number));
+    expect(autoTable).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ body: [
+      ['1', 'North 40', 'Washout · Stay west'],
+      ['1', 'North 40', 'Some listed hazards may not appear as map pins'],
+    ] }));
+    expect(mockDoc.addImage).toHaveBeenCalled();
+  });
+
   it('prints only the map pages, no job order, and drops the blank first page', async () => {
     const { default: autoTable } = await import('jspdf-autotable');
     await generateApplicatorSheetPdf(makeSheetData({ maps }),

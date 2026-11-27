@@ -410,13 +410,16 @@ function drawFieldHazards(
     if (details.length === 0) details.push('None recorded');
     const image = field_id ? imagesByField.get(field_id) : undefined;
     if (data.fieldMapPagesRequested && !image) details.push('Map picture unavailable for this stop');
-    if (image && markers.some(({ id }) => !image.hazardPinIds?.includes(id))) details.push('Some listed hazards may not appear as map pins');
+    if (image && markers.some(({ id, hasValidPoint }) => hasValidPoint && !image.hazardPinIds?.includes(id))) {
+      details.push('Some listed hazards may not appear as map pins');
+    }
     return details.map((text) => [String(stop), field_name, text]);
   });
   if (rows.length === 0) return startY;
   const margin = 40;
-  let y = ensureRoom(doc, startY, 42, margin);
-  if (data.overviewMapRequested && !data.maps?.overview) {
+  const overviewMissing = data.overviewMapRequested && !data.maps?.overview;
+  let y = ensureRoom(doc, startY, overviewMissing ? 56 : 42, margin);
+  if (overviewMissing) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(...GRAY);
@@ -663,7 +666,7 @@ export async function generateApplicatorSheetPdf(
       doc.setTextColor(...CHARCOAL);
       doc.text(`Job ${data.job_number} · Field hazards`, 40, 40);
       if (!data.maps?.overview && !data.maps?.perField.length) {
-        doc.text('No map pictures available. Draw or import any missing field boundaries.', 40, 55);
+        doc.text('Map pictures could not be loaded. Retry or check field boundaries.', 40, 55);
       }
       drawFieldHazards(doc, autoTable, data, 67);
     }

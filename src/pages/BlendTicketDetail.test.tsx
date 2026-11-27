@@ -781,6 +781,43 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     expect(mockToast).not.toHaveBeenCalledWith('success', expect.anything());
   });
 
+  it('refuses Undo Filing on a ticket with an active invoice (void it first)', async () => {
+    for (const [ticketRow, invoices] of [
+      [{ ...baseTicket, payment_status: 'billed' }, []],
+      [baseTicket, [{ id: 'invoice-1' }]],
+    ] as const) {
+      mockFrom.mockReset();
+      mockFrom.mockImplementation((table: string) => {
+        if (table === 'blend_tickets') return buildChain({ data: ticketRow, error: null });
+        if (table === 'application_records') return buildChain({ data: [{ id: 'app-record-1' }], error: null });
+        if (table === 'invoices') return buildChain({ data: invoices, error: null });
+        return buildChain({ data: [], error: null });
+      });
+      const { unmount } = renderTicket();
+      expect(await screen.findByRole('button', { name: 'Undo Filing' })).toBeDisabled();
+      unmount();
+    }
+  });
+
+  it('says when undo returned extra stock other tickets had taken', async () => {
+    mockFrom.mockReset();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
+      if (table === 'application_records') return buildChain({ data: [{ id: 'app-record-1' }], error: null });
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string) => name === 'reverse_application_record'
+      ? Promise.resolve({ data: { success: true, status: 'reversed', kept_on_job_lines: 0, over_taken_lines: 1 }, error: null })
+      : Promise.resolve({ data: null, error: null }));
+
+    renderTicket();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo Filing' }));
+    expect(screen.getByText(/corrected in Application Records will be lost/)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Undo Filing' })[1]);
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('other tickets for the job had taken is back')));
+  });
+
   it('locks application-field controls when an application record exists', async () => {
     const unreviewedTicket = { ...baseTicket, review_status: 'unreviewed' };
     mockFrom.mockReset();

@@ -122,3 +122,12 @@ None left (Mason answered A on 2026-11-26).
 - MED 4 (accepted residual, settled round 1): a call already inside an old body when the migration commits runs the old body; production has no jobs or application records yet.
 - LOW race assertion (settled round 2): the second session starts only after the completion holds the number lock; a stall after that still runs inside the overlap window.
 - LOW changelog and contract wording: fixed.
+
+## Sol round 5 (2026-11-26, head 15c5458d1)
+- HIGH 1 (fixed, Mason "Yes, fix and run 6"): Undo Filing ran on a billed ticket whose invoice then kept the job link. `reverse_application_record` now locks the ticket and refuses while it is billed or has a live invoice (same test as `_blend_ticket_billed_keeps_job_20270129`); invoicing locks the ticket first too, so billing cannot start mid-undo. The button is disabled with that reason. Prover: billed status refuses, a live draft invoice on an unbilled ticket refuses, a cancelled invoice allows it.
+- HIGH 2 (fixed by warning, Mason): undo and refile lose lot corrections saved in Application Records. The confirmation says so and asks staff to re-enter them; not blocked (field workflow: flags and notes, not blocks).
+- MED over-take return read as a deduction (fixed): the return is a positive `adjusted` row, `to_location` Main Warehouse, `application_record_id` the job record; `_job_stock_group_20270310.taken` subtracts such linked `adjusted` rows and they are no one's claim. The prover's ledger check now uses production's sign rule (job_applied always subtracts). Prover: job 10, tickets 7 and 6, undo the 7: the +3 adjusted row, no negative job_applied row, a later 5 takes 1.
+- MED refund to a retired warehouse row (fixed): the over-take return upserts the Main Warehouse row like the credit loop. Prover: 13 on hand, filings empty it, the row is deleted, undo recreates it with 3.
+- MED confirmation could switch tickets (fixed): the record id is captured when the dialog opens and used on Confirm; the dialog hides if the page shows another record.
+- MED undo vs job invoicing deadlock: accepted (Sol r4, settled). MED in-flight old body across deployment: accepted residual (settled r1).
+- LOWs (fixed): success message names returned stock; the no-op message says "Refreshing the page" instead of claiming it already did; Create App Record no longer says filing cannot be undone; the race cases now assert the second session was seen queued on the number lock (`pg_locks`, not granted), not just started before the completion ended.

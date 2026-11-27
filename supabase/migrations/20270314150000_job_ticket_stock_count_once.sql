@@ -15,7 +15,8 @@
 -- A filed ticket's job link is already frozen (trg_linked_blend_ticket_header_lock, 20260714230100). reverse_application_record
 -- reverses a ticket counted with its completed job by "smart undo" (Mason, 2026-11-26): it credits the ticket's lines in
 -- full, then takes back out, on the job's own books, what the job still needs (a job row whose negative already_counted
--- keeps the job's claim unchanged); extra another ticket took because of this one stays out and is flagged for review.
+-- keeps the job's claim unchanged); extra another ticket took because of this one comes back as a positive 'adjusted'
+-- row linked to the job record, which the group counts as returned. A ticket with an active invoice is refused.
 -- It takes the application-record number lock first, the lock completion and filing already take before any stock row.
 --
 -- Rows posted before this migration carry no link (the ledger is write-once: trg_guard_inventory_transactions_immutable
@@ -106,25 +107,29 @@ REVOKE ALL ON FUNCTION public._job_stock_customer_20270310(uuid) FROM PUBLIC, an
 
 -- The job/ticket group for one job and one product: the job record's claims, the linked tickets' claims, and what they took.
 -- A row joins its record by application_record_id; a row posted before this migration (no link) joins by job_id for the
--- job record, or by the record id in its note for a ticket record.
+-- job record, or by the record id in its note for a ticket record. An 'adjusted' row linked to the job record is stock a
+-- ticket reversal returned from the job: it lowers what was taken and is no one's claim.
 CREATE FUNCTION public._job_stock_group_20270310(p_job_id uuid, p_product_id uuid,
   OUT job_claim numeric, OUT ticket_claim numeric, OUT taken numeric)
  LANGUAGE sql
  STABLE
  SET search_path = public, pg_temp
 AS $fn$
-  SELECT COALESCE(sum(it.quantity + COALESCE(it.already_counted, 0)) FILTER (WHERE ar.source_type = 'job'), 0),
-         COALESCE(sum(it.quantity + COALESCE(it.already_counted, 0)) FILTER (WHERE ar.source_type = 'blend_ticket'), 0),
-         COALESCE(sum(it.quantity), 0)
+  SELECT COALESCE(sum(it.quantity + COALESCE(it.already_counted, 0))
+                    FILTER (WHERE it.transaction_type = 'job_applied' AND ar.source_type = 'job'), 0),
+         COALESCE(sum(it.quantity + COALESCE(it.already_counted, 0))
+                    FILTER (WHERE it.transaction_type = 'job_applied' AND ar.source_type = 'blend_ticket'), 0),
+         COALESCE(sum(CASE WHEN it.transaction_type = 'adjusted' THEN -it.quantity ELSE it.quantity END), 0)
     FROM public.application_records ar
     JOIN public.inventory_transactions it
       ON it.product_id = p_product_id
-     AND it.transaction_type = 'job_applied'
-     AND (it.application_record_id = ar.id
-          OR (it.application_record_id IS NULL AND ar.source_type = 'job' AND it.job_id = p_job_id)
-          OR (it.application_record_id IS NULL AND ar.source_type = 'blend_ticket'
-              AND it.notes LIKE 'Blend ticket application:%'
-              AND strpos(it.notes, '(application record ' || ar.id::text || ')') > 0))
+     AND ((it.transaction_type = 'job_applied'
+           AND (it.application_record_id = ar.id
+                OR (it.application_record_id IS NULL AND ar.source_type = 'job' AND it.job_id = p_job_id)
+                OR (it.application_record_id IS NULL AND ar.source_type = 'blend_ticket'
+                    AND it.notes LIKE 'Blend ticket application:%'
+                    AND strpos(it.notes, '(application record ' || ar.id::text || ')') > 0)))
+          OR (it.transaction_type = 'adjusted' AND ar.source_type = 'job' AND it.application_record_id = ar.id))
    WHERE (ar.source_type = 'job' AND ar.source_id = p_job_id)
       OR (ar.source_type = 'blend_ticket'
           AND ar.customer_id IS NOT DISTINCT FROM public._job_stock_customer_20270310(p_job_id)
@@ -1050,6 +1055,19 @@ BEGIN
     RAISE EXCEPTION 'APPLICATION_RECORD_NOT_REVERSIBLE: only blend_ticket application records can be reversed by this RPC';
   END IF;
 
+  -- A billed ticket cannot be undone (Mason, 2026-11-26): its invoice keeps the job link
+  -- (_blend_ticket_billed_keeps_job_20270129), so the correction could not be finished. Same test as that lock.
+  -- Locking the ticket first (invoicing locks it first too) means billing cannot start until this commits.
+  PERFORM 1 FROM public.blend_tickets bt WHERE bt.id = v_record.source_id FOR UPDATE;
+  IF EXISTS (SELECT 1 FROM public.blend_tickets bt WHERE bt.id = v_record.source_id AND bt.payment_status = 'billed')
+     OR EXISTS (SELECT 1 FROM public.invoices i
+                 WHERE i.blend_ticket_id = v_record.source_id
+                   AND COALESCE(i.status, '') NOT IN ('voided', 'cancelled')
+                   AND i.deleted_at IS NULL) THEN
+    RAISE EXCEPTION 'APPLICATION_RECORD_TICKET_INVOICED: this blend ticket has an active invoice. Void the invoice first, then undo the filing.'
+      USING ERRCODE = 'P0001';
+  END IF;
+
   -- Count once (smart undo, Mason 2026-11-26): a ticket counted with its completed job (same customer) can be
   -- reversed; whatever the job still needs stays out of stock, on the job's own books.
   SELECT bt.job_id INTO v_job_id FROM public.blend_tickets bt WHERE bt.id = v_record.source_id;
@@ -1155,8 +1173,8 @@ BEGIN
   -- Count once: every line above was credited in full. For each product, take back out what the completed job
   -- still needs without this ticket (the larger of the job's claims and the other tickets' claims, less what the
   -- others took), as a job row whose negative already_counted keeps the job's claim unchanged. If other tickets
-  -- took more than the job now needs (because of this ticket), that extra comes back too, as a job row with a
-  -- negative quantity whose already_counted keeps the job's claim unchanged, so later postings see it returned.
+  -- took more than the job now needs (because of this ticket), that extra comes back too, as a positive 'adjusted'
+  -- row linked to the job record: the ledger reads it as stock added back, and the job's group counts it as returned.
   IF v_job_record_id IS NOT NULL THEN
     FOR v_keep IN
       SELECT x.product_id, x.q, x.claim, g.job_claim, g.ticket_claim, g.taken
@@ -1189,19 +1207,26 @@ BEGIN
         v_kept_count := v_kept_count + 1;
       END IF;
       IF v_over_qty > 0 THEN
-        UPDATE public.inventory
-           SET quantity_available = quantity_available + v_over_qty,
-               updated_at = now()
-         WHERE product_id = v_keep.product_id AND location = 'Main Warehouse';
+        -- This ticket may have moved nothing, so the credit loop above may not have recreated a retired row.
+        INSERT INTO public.inventory (
+          product_id, location, quantity_available,
+          quantity_prebooked, quantity_on_order
+        ) VALUES (
+          v_keep.product_id, 'Main Warehouse', v_over_qty,
+          0, 0
+        )
+        ON CONFLICT (product_id, location) DO UPDATE
+          SET quantity_available = public.inventory.quantity_available + EXCLUDED.quantity_available,
+              updated_at = now();
         INSERT INTO public.inventory_transactions (
           product_id, transaction_type, quantity, to_location,
           performed_by, notes, job_id, requires_review, application_record_id, already_counted
         ) VALUES (
-          v_keep.product_id, 'job_applied', -v_over_qty, 'Main Warehouse',
+          v_keep.product_id, 'adjusted', v_over_qty, 'Main Warehouse',
           v_actor,
           'Returned from the job: other blend tickets took ' || v_over_qty || ' more than the job needs after application record ' ||
             v_record.record_number || ' was reversed — review',
-          v_job_id, true, v_job_record_id, v_over_qty
+          v_job_id, true, v_job_record_id, NULL
         );
         v_over_count := v_over_count + 1;
       END IF;
@@ -1265,7 +1290,7 @@ BEGIN
       FROM (VALUES
         ('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)', '0fc4e07bd31e23a56c37ca7bf8c9301b', false),
         ('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)', '65ff342c6eccd4043ea3db7c4f7635d1', false),
-        ('public.reverse_application_record(uuid, text)', 'd323fdbe0bfba5513872354a9fad9a20', true)
+        ('public.reverse_application_record(uuid, text)', '8f3656f84e005203248b9f933543fd7a', true)
       ) AS x(sig, md5, api)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(x.sig)
   LOOP

@@ -89,7 +89,12 @@ const rows = (p) => scalar(`SELECT coalesce(string_agg(it.quantity::numeric(12,4
 // Independent checks: the warehouse moved exactly `out` from its opening 100, and the ledger says the same.
 function balance(p, outQty, what) {
   assert.equal(onHand(p), 100 - outQty, `${what}: warehouse should be ${100 - outQty}`);
-  const ledger = Number(scalar(`SELECT coalesce(sum(CASE WHEN transaction_type = 'job_applied' THEN quantity WHEN transaction_type = 'adjusted' THEN -quantity END), 0)
+  // Production's sign rule (src/lib/reconciliation.ts, stock-matches-history.sql): job_applied always subtracts.
+  const ledger = 0 - Number(scalar(`SELECT coalesce(sum(CASE
+      WHEN transaction_type IN ('received', 'cancelled_delivery_reversal', 'void_delivery_reversal') THEN abs(quantity)
+      WHEN transaction_type IN ('delivered', 'job_applied') THEN -abs(quantity)
+      WHEN transaction_type IN ('adjusted', 'transferred', 'returned', 'tote_fill_out', 'tote_fill_in') THEN quantity
+      ELSE 0 END), 0)
     FROM public.inventory_transactions WHERE product_id = '${P(p)}';`));
   assert.equal(ledger, outQty, `${what}: ledger history should total ${outQty}`);
   console.log(`[COUNT-ONCE] ${what}: ${outQty} out (warehouse and ledger agree)`);
@@ -117,10 +122,21 @@ async function whileCompleting(j, uid, otherSql) {
     assert.ok(i < 200, 'the completion never took the number lock');
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  const [a, b] = await Promise.all([aRun,
-    session(uid, `BEGIN; SELECT 'B ' || extract(epoch FROM clock_timestamp()); ${otherSql} SELECT 'B-done ' || extract(epoch FROM clock_timestamp()); COMMIT;`),
-  ]);
+  let aDone = false;
+  aRun.then(() => { aDone = true; });
+  const bRun = session(uid, `BEGIN; SELECT 'B ' || extract(epoch FROM clock_timestamp()); ${otherSql} SELECT 'B-done ' || extract(epoch FROM clock_timestamp()); COMMIT;`);
+  // Sol r5 LOW: seen queued behind the completion's number lock, not just started before it ended.
+  let waited = false;
+  while (!aDone && !waited) {
+    waited = scalar(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+      AND objid::bigint = (hashtext('next_application_record_number')::bigint & 4294967295);`) !== '0';
+    if (!waited) await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const [a, b] = await Promise.all([aRun, bRun]);
   assert.equal(a.code, 0, a.text);
+  assert.ok(waited, `the second session must wait on the completion's number lock:
+${a.text}
+${b.text}`);
   const started = Number((b.text.match(/^B ([0-9.]+)$/m) ?? [])[1]);
   const ended = Number((a.text.match(/^A-done ([0-9.]+)$/m) ?? [])[1]);
   assert.ok(started < ended, `the second session must start while the completion still holds its lock:
@@ -136,7 +152,7 @@ try {
     INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD}', '${CUST}', '[PROVER] Count Once Field');
     INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST2}', '[PROVER] Count Once Other Farm', true);`);
   for (let n = 0; n <= 9; n += 1) product(n);
-  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22, 23, 24, 25, 26, 27, 28]) product(n);
+  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]) product(n);
   const wrapperAcl = WRAPPERS.map(acl);
 
   // BEFORE: the bug. Ticket 6 on an in-progress job, then the job's 10: 16 out.
@@ -315,12 +331,42 @@ try {
   complete(J(26)); file(T(26)); file(T(261));
   balance(26, 13, 'job 10, then tickets 7 and 6');
   assert.match(ok(USERS.admin, reverseSql(T(26))), /"over_taken_lines": 1/);
-  assert.equal(scalar(`SELECT count(*) FROM public.inventory_transactions WHERE product_id = '${P(26)}' AND transaction_type = 'job_applied'
-    AND quantity = -3 AND already_counted = 3 AND job_id = '${J(26)}' AND requires_review
-    AND notes LIKE 'Returned from the job: other blend tickets took 3 more%';`), '1');
+  // Sol r5 MED: the return is a positive 'adjusted' row (stock added back, as every ledger reader reads it), linked to the job record.
+  assert.equal(scalar(`SELECT count(*) FROM public.inventory_transactions it JOIN public.application_records jr ON jr.id = it.application_record_id
+    WHERE it.product_id = '${P(26)}' AND it.transaction_type = 'adjusted' AND it.quantity = 3 AND it.to_location = 'Main Warehouse'
+      AND it.already_counted IS NULL AND it.job_id = '${J(26)}' AND it.requires_review AND jr.source_type = 'job' AND jr.source_id = '${J(26)}'
+      AND it.notes LIKE 'Returned from the job: other blend tickets took 3 more%';`), '1');
+  assert.equal(scalar(`SELECT count(*) FROM public.inventory_transactions WHERE product_id = '${P(26)}' AND transaction_type = 'job_applied' AND quantity < 0;`), '0',
+    'no negative job_applied row');
   balance(26, 10, 'ticket 7 reversed: the other ticket\'s extra 3 comes back');
   file(T(262));
   balance(26, 11, 'a later 5-gallon ticket takes 1 (tickets 6 + 5 = 11)');
+
+  // Sol r5 MED: the same 10/7/6 case starting at 13, with the empty warehouse row retired after filing. Undoing the 7
+  // (which moved nothing, so no credit row recreates the warehouse row) still puts the 3 back: the row is recreated with 3.
+  job(29, [[29, 10]]); ticket(29, 29, [[29, 7]]); ticket(291, 29, [[29, 6]]);
+  seed(`UPDATE public.inventory SET quantity_available = 13 WHERE product_id = '${P(29)}';`);
+  complete(J(29)); file(T(29)); file(T(291));
+  assert.equal(onHand(29), 0);
+  seed(`DELETE FROM public.inventory WHERE product_id = '${P(29)}' AND location = 'Main Warehouse';`);
+  assert.match(ok(USERS.admin, reverseSql(T(29))), /"over_taken_lines": 1/);
+  assert.equal(onHand(29), 3, 'the retired warehouse row is recreated with the returned 3');
+  console.log('[COUNT-ONCE] over-take returned to a retired warehouse row: row recreated with 3');
+
+  // Sol r5 HIGH (Mason 2026-11-26): a ticket with an active invoice cannot be undone (billed status, or a live invoice
+  // even when the status says unbilled); a cancelled invoice no longer blocks it.
+  job(30, [[30, 10]]); ticket(30, 30, [[30, 12]]);
+  complete(J(30)); file(T(30));
+  seed(`UPDATE public.blend_tickets SET payment_status = 'billed' WHERE id = '${T(30)}';`);
+  refused(USERS.admin, reverseSql(T(30)), /APPLICATION_RECORD_TICKET_INVOICED/);
+  seed(`UPDATE public.blend_tickets SET payment_status = 'unbilled' WHERE id = '${T(30)}';
+    INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number, blend_ticket_id, status, created_by)
+      VALUES ('${id('f030')}', '${CUST}', 'misc_charge', 'CO-INV30', '${T(30)}', 'draft', '${USERS.admin}');`);
+  refused(USERS.admin, reverseSql(T(30)), /APPLICATION_RECORD_TICKET_INVOICED/);
+  balance(30, 12, 'billed ticket: undo refused, nothing moved');
+  seed(`UPDATE public.invoices SET status = 'cancelled' WHERE id = '${id('f030')}';`);
+  ok(USERS.admin, reverseSql(T(30)));
+  balance(30, 10, 'invoice cancelled: the undo runs and the 2 come back');
 
   // Taha LOW 1: a ticket that moved nothing (job 10, ticket 6 takes 0) is reversed; a retry with a fresh key reads
   // already_reversed, not not_found (no credit row exists, but its own job_applied row still names the record).

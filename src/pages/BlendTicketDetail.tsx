@@ -1041,33 +1041,44 @@ export function BlendTicketDetail() {
   // completed job, the job keeps what it still needs. This is the correction for a ticket filed against the wrong job;
   // a hand stock adjustment alone leaves the ticket counted with that job.
   const [undoingFiling, setUndoingFiling] = useState(false);
-  const [undoFilingConfirmOpen, setUndoFilingConfirmOpen] = useState(false);
+  // The record the open confirmation is for, captured when it opens: the route can switch tickets meanwhile.
+  const [undoFilingRecordId, setUndoFilingRecordId] = useState<string | null>(null);
+  // Same test as reverse_application_record's refusal (Mason 2026-11-26): void the invoice first.
+  const undoFilingBlockReason = ticket && (ticket.payment_status === 'billed' || hasActiveInvoice)
+    ? 'This ticket has an active invoice, so its filing cannot be undone. Void the invoice first, then undo the filing.'
+    : null;
 
   async function executeUndoFiling() {
-    if (!ticket || !profile || !applicationRecordId) return;
-    setUndoFilingConfirmOpen(false);
+    const recordId = undoFilingRecordId;
+    setUndoFilingRecordId(null);
+    if (!ticket || !profile || !recordId) return;
     setUndoingFiling(true);
     try {
       const { data, error } = await supabase.rpc('reverse_application_record', {
-        p_application_record_id: applicationRecordId,
-        p_idempotency_key: undoFilingIdem.getKeyFor(applicationRecordId),
+        p_application_record_id: recordId,
+        p_idempotency_key: undoFilingIdem.getKeyFor(recordId),
       });
       if (error) {
         const bindingRejection = getIdempotencyBindingRejection(error);
-        if (bindingRejection === 'intent' || bindingRejection === 'actor') undoFilingIdem.resetKeyFor(applicationRecordId);
+        if (bindingRejection === 'intent' || bindingRejection === 'actor') undoFilingIdem.resetKeyFor(recordId);
         throw error;
       }
       assertRpcResult(data, 'reverse_application_record');
-      undoFilingIdem.resetKeyFor(applicationRecordId);
+      undoFilingIdem.resetKeyFor(recordId);
       const result = data as { status?: string; kept_on_job_lines?: number; over_taken_lines?: number } | null;
-      const review = (result?.kept_on_job_lines ?? 0) + (result?.over_taken_lines ?? 0) > 0;
       // reverse_application_record writes its own application_record_reversed activity entry.
       if (result?.status !== 'reversed') {
         // not_found / already_reversed: this call changed no stock; reload to show the current state.
-        toast('info', 'This filing was already undone or removed; no stock changed. The page has been refreshed.');
-      } else toast('success', review
-        ? 'Filing undone. Some stock stays with the linked job; the lines are flagged for review in inventory.'
-        : 'Filing undone. The ticket’s stock is back in Main Warehouse.');
+        toast('info', 'This filing was already undone or removed; no stock changed. Refreshing the page.');
+      } else {
+        const notes = [
+          (result.kept_on_job_lines ?? 0) > 0 && 'Some stock stays with the linked job.',
+          (result.over_taken_lines ?? 0) > 0 && 'Extra stock other tickets for the job had taken is back in Main Warehouse.',
+        ].filter(Boolean);
+        toast('success', notes.length > 0
+          ? `Filing undone. ${notes.join(' ')} The lines are flagged for review in inventory.`
+          : 'Filing undone. The ticket’s stock is back in Main Warehouse.');
+      }
       await loadTicketData();
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'reverse_application_record' } });
@@ -1905,11 +1916,11 @@ export function BlendTicketDetail() {
         )}
         {profile?.role === 'admin' && hasApplicationRecord && applicationRecordId && (
           <span className="inline-flex items-center gap-1">
-            <Button variant="secondary" onClick={() => setUndoFilingConfirmOpen(true)} loading={undoingFiling} disabled={hasUnsavedChanges}>
+            <Button variant="secondary" onClick={() => setUndoFilingRecordId(applicationRecordId)} loading={undoingFiling} disabled={hasUnsavedChanges || Boolean(undoFilingBlockReason)}>
               <Undo2 className="h-4 w-4" />
               Undo Filing
             </Button>
-            <HelpTip text="Undo Filing deletes this ticket's application record and puts its stock back. If the ticket was counted with its completed job, the job keeps the stock it still needs. Use it to fix a ticket filed against the wrong job, then relink and file again. Do not fix that with a stock adjustment." />
+            <HelpTip text={undoFilingBlockReason ?? "Undo Filing deletes this ticket's application record and puts its stock back. If the ticket was counted with its completed job, the job keeps the stock it still needs. Use it to fix a ticket filed against the wrong job, then relink and file again. Do not fix that with a stock adjustment."} />
           </span>
         )}
         <Button
@@ -1932,7 +1943,7 @@ export function BlendTicketDetail() {
         onClose={() => setAppRecordConfirmOpen(false)}
         onConfirm={executeCreateApplicationRecord}
         title="Create Application Record"
-        message="Create an application record from this approved blend ticket? This action cannot be undone."
+        message="Create an application record from this approved blend ticket?"
         confirmLabel="Create Record"
         variant="info"
         icon={ClipboardCheck}
@@ -1940,11 +1951,11 @@ export function BlendTicketDetail() {
       />
 
       <ConfirmModal
-        open={undoFilingConfirmOpen}
-        onClose={() => setUndoFilingConfirmOpen(false)}
+        open={undoFilingRecordId !== null && undoFilingRecordId === applicationRecordId}
+        onClose={() => setUndoFilingRecordId(null)}
         onConfirm={executeUndoFiling}
         title="Undo Filing"
-        message="Delete this ticket's application record and put its stock back? If it was counted with its completed job, the job keeps the stock it still needs. You can relink the ticket and file it again."
+        message="Delete this ticket's application record and put its stock back? If it was counted with its completed job, the job keeps the stock it still needs. Any lot numbers, quantities or receiving links corrected in Application Records will be lost: re-enter them after you relink the ticket and file it again."
         confirmLabel="Undo Filing"
         variant="danger"
         icon={Undo2}

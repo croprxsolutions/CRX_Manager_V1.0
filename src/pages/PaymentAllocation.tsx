@@ -228,8 +228,13 @@ export default function PaymentAllocation() {
 
   /* ── Load invoices when customer selected ──────────────────────────── */
 
-  // keepAllocations: a reload of the same customer keeps the amounts on screen when it lands (edits made
-  // while it loaded included) for invoices still open.
+  // The list on screen, read when a same-customer reload lands.
+  const invoicesRef = useRef(invoices);
+  useEffect(() => { invoicesRef.current = invoices; }, [invoices]);
+
+  // keepAllocations: a reload of the same customer keeps the amounts on screen only when the open invoices
+  // and their balances are unchanged; otherwise they clear and the clerk is told to allocate again
+  // (Mason, 2026-11-27), so a check is never posted against a list that has since changed.
   const fetchInvoices = useCallback(async (customerId: string, keepAllocations = false) => {
     const seq = ++invoiceLoadSeq.current;
     setLoadingInvoices(true);
@@ -275,12 +280,15 @@ export default function PaymentAllocation() {
       allocated_cents: 0,
     }));
 
-    if (keepAllocations) {
-      setInvoices((prev) => {
-        const kept = new Map(prev.map((inv) => [inv.invoice_id, inv.allocated_cents]));
-        return mapped.map((inv) => ({ ...inv, allocated_cents: kept.get(inv.invoice_id) ?? 0 }));
-      });
+    const prev = invoicesRef.current;
+    const unchanged = prev.length === mapped.length
+      && mapped.every((inv, i) => prev[i].invoice_id === inv.invoice_id && prev[i].balance_cents === inv.balance_cents);
+    if (keepAllocations && unchanged) {
+      setInvoices(prev.map((inv, i) => ({ ...mapped[i], allocated_cents: inv.allocated_cents })));
     } else {
+      if (keepAllocations && prev.some((inv) => inv.allocated_cents > 0)) {
+        toast('warning', "This customer's open invoices changed since you allocated. The amounts were cleared: allocate the check again.");
+      }
       setInvoices(mapped);
     }
     setLoadingInvoices(false);

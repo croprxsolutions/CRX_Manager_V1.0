@@ -479,7 +479,7 @@ describe('Record Payments: faster entry', () => {
     expect(screen.queryByText(/You started a new customer search/)).not.toBeInTheDocument();
   });
 
-  it('re-picking the customer already chosen reloads its invoices and keeps the allocations', async () => {
+  it('re-picking the customer reloads its invoices; a changed list clears the amounts and says so', async () => {
     renderPayments();
     await chooseByKeyboard();
     fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
@@ -501,10 +501,11 @@ describe('Record Payments: faster entry', () => {
     expect(box).toHaveValue('Big Farm');
     // A fresh read, so an invoice posted since shows up (Sol, 2026-11-27).
     expect(mockFrom.mock.calls.filter(([t]) => t === 'invoices')).toHaveLength(invoiceReads + 1);
-    await waitFor(() => expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled());
-    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
+    await screen.findByText('INV-POSTED');
+    // The older invoice posted since: the old amounts would skip it, so they clear (Mason, 2026-11-27).
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$0.00');
+    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/open invoices changed since you allocated/));
     expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
-    expect(screen.getByText('INV-POSTED')).toBeInTheDocument();
   });
 
   it('while the re-pick reload runs the allocation buttons are locked; the amounts come back when it lands', async () => {

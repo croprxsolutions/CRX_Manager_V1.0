@@ -9,3 +9,5 @@ two requests, an applicator's print or Job Detail can pair the old acres with th
 users still read in one request and are not affected. Rare in practice (needs an office save during the crew
 read); the fix is a single crew read (one RPC or view returning job plus chemicals), best done with the step-3
 database lockdown.
+
+PR 3 (the base-table lockdown) does not fix this: the fix is a single crew read function, which must land database-first and then be adopted by `JobDetail.tsx` and the print path in a separate app PR.

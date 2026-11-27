@@ -14,7 +14,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, RouterProvider, Routes, createMemoryRouter } from 'react-router-dom';
 
 const { mockFrom, mockRpc, mockToast, mockNavigate, mockStorageFrom, mockCreateSignedUrl, mockInvoke, mockResetKey, mockResetKeyFor } = vi.hoisted(() => ({
   mockResetKey: vi.fn(),
@@ -852,6 +852,38 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('Filing undone')));
     // The undo retires that filing key, so the next Create App Record files again instead of replaying the deleted record.
     expect(mockResetKey).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reload the old ticket onto another ticket opened while Undo Filing was running', async () => {
+    mockFrom.mockReset();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
+      if (table === 'application_records') return buildChain({ data: [{ id: 'app-record-1' }], error: null });
+      return buildChain({ data: [], error: null });
+    });
+    let finishUndo: (value: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => name === 'reverse_application_record'
+      ? new Promise((resolve) => { finishUndo = resolve; })
+      : Promise.resolve({ data: null, error: null }));
+    const router = createMemoryRouter([{ path: '/blend-tickets/:id', element: <BlendTicketDetail /> }], {
+      initialEntries: ['/blend-tickets/tk-1'],
+    });
+    render(<RouterProvider router={router} />);
+    const ticketLoads = () => mockFrom.mock.calls.filter(([table]) => table === 'blend_tickets').length;
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo Filing' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Undo Filing' })[1]);
+    await waitFor(() => expect(mockRpc.mock.calls.some(([name]) => name === 'reverse_application_record')).toBe(true));
+
+    await act(async () => { await router.navigate('/blend-tickets/tk-2'); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Undo Filing' })).toBeInTheDocument());
+    const loadsAfterMove = ticketLoads();
+    await act(async () => {
+      finishUndo({ data: { success: true, status: 'reversed', kept_on_job_lines: 0, over_taken_lines: 0 }, error: null });
+    });
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('Filing undone')));
+    expect(ticketLoads()).toBe(loadsAfterMove);
   });
 
   it('locks application-field controls when an application record exists', async () => {

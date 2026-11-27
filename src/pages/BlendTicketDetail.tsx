@@ -88,6 +88,9 @@ export function BlendTicketDetail() {
   const [hasActiveInvoice, setHasActiveInvoice] = useState(false);
   const initialLoadDone = useRef(false);
   const loadSeqRef = useRef(0);
+  // The ticket the route shows now, for actions that finish after the admin may have moved to another ticket.
+  const routeIdRef = useRef(id);
+  useEffect(() => { routeIdRef.current = id; }, [id]);
   const hasUnsavedChanges = isDirty || fieldsDirty || saveHydrationRequired;
   const blocker = useUnsavedChanges(hasUnsavedChanges);
 
@@ -1050,6 +1053,7 @@ export function BlendTicketDetail() {
 
   async function executeUndoFiling() {
     const recordId = undoFilingRecordId;
+    const undoRouteId = id;
     setUndoFilingRecordId(null);
     if (!ticket || !profile || !recordId) return;
     setUndoingFiling(true);
@@ -1082,7 +1086,8 @@ export function BlendTicketDetail() {
           ? `Filing undone. ${notes.join(' ')} The lines are flagged for review in inventory.`
           : 'Filing undone. The ticket’s stock is back in Main Warehouse.');
       }
-      await loadTicketData();
+      // Moved to another ticket meanwhile: reloading would put this ticket's data on that ticket's screen.
+      if (routeIdRef.current === undoRouteId) await loadTicketData();
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'reverse_application_record' } });
       toast('error', sanitizeError(err));

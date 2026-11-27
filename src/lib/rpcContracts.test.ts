@@ -2937,7 +2937,7 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'change_brand_document_links', // 20270306170000. Prune once generated types cover this RPC.
   'reject_liquid_density_draft', // 20270307205900. Prune once generated types cover this RPC.
-  'notify_saved_delivery_completion', // 20270314120000. Prune once generated types cover this RPC.
+  'notify_saved_delivery_completion', // 20270314230000. Prune once generated types cover this RPC.
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
   'set_registration_adjuvants',

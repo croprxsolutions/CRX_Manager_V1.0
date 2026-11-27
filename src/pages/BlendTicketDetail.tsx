@@ -1059,10 +1059,13 @@ export function BlendTicketDetail() {
       }
       assertRpcResult(data, 'reverse_application_record');
       undoFilingIdem.resetKey();
-      const result = data as { kept_on_job_lines?: number; over_taken_lines?: number } | null;
+      const result = data as { status?: string; kept_on_job_lines?: number; over_taken_lines?: number } | null;
       const review = (result?.kept_on_job_lines ?? 0) + (result?.over_taken_lines ?? 0) > 0;
       // reverse_application_record writes its own application_record_reversed activity entry.
-      toast('success', review
+      if (result?.status !== 'reversed') {
+        // not_found / already_reversed: this call changed no stock; reload to show the current state.
+        toast('info', 'This filing was already undone or removed; no stock changed. The page has been refreshed.');
+      } else toast('success', review
         ? 'Filing undone. Some stock stays with the linked job; the lines are flagged for review in inventory.'
         : 'Filing undone. The ticket’s stock is back in Main Warehouse.');
       await loadTicketData();

@@ -760,6 +760,27 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     });
   });
 
+  it('does not claim stock came back when the filing was already undone elsewhere', async () => {
+    mockFrom.mockReset();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
+      if (table === 'application_records') return buildChain({ data: [{ id: 'app-record-1' }], error: null });
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string) => name === 'reverse_application_record'
+      ? Promise.resolve({ data: { success: true, status: 'not_found' }, error: null })
+      : Promise.resolve({ data: null, error: null }));
+
+    renderTicket();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo Filing' }));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Undo Filing' })).toHaveLength(2));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Undo Filing' })[1]);
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('no stock changed')));
+    expect(mockToast).not.toHaveBeenCalledWith('success', expect.anything());
+  });
+
   it('locks application-field controls when an application record exists', async () => {
     const unreviewedTicket = { ...baseTicket, review_status: 'unreviewed' };
     mockFrom.mockReset();

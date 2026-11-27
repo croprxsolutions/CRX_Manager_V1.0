@@ -36,6 +36,8 @@ were uncommitted changes, database build, result and the checkout-relative path 
 At least one browser test must actually pass for the run to count. Use a passed record from a clean checkout
 at the candidate commit for PR proof. Keep credentials out of the handoff.
 
+The map-swap proof can opt into one fixed, non-secret Mapbox fixture string without editing any `.env` file: set `CRX_MAP_SWAP_FAKE_MAPBOX_TOKEN=pk.test-not-a-real-token` for the walkthrough `start`, `test`, and `stop` commands. The runner accepts this exact value only in the screen-walk lane, and the browser proof must route `api.mapbox.com` to its local PNG fixture. Unset it afterward. Normal local runs still set the token empty.
+
 ### Customer-document byte proof (separate test copy, KI-113)
 
 `node scripts/local-app/doc-bytes.mjs rebuild` (about 15 minutes), then
@@ -137,14 +139,14 @@ database, so it proves nothing about migrations this checkout adds.
   the memory folder and every `.claude` folder return 403. The `.claude` rule is tied to this checkout's own
   path, so a checkout that lives under `.claude/worktrees/` still works and its parent's `.claude` stays out
   of reach because it is outside the checkout.
-- **Commands pass on no credentials.** Child programs get a short list of variables, not the whole shell.
-- **The frontend never reads a checkout's `.env`.** It sets the Supabase address and key itself, and sets
-  the Mapbox and Sentry values empty.
+- **Commands pass on no credentials.** Child programs get a short list of variables, not the whole shell. The only opt-in map test value is the fixed fake string documented above; the frontend server guard verifies that exact value.
+- **The frontend never reads a checkout's `.env`.** It sets the Supabase address and key itself, defaults Mapbox and Sentry values to empty, and accepts the documented fake Mapbox fixture string only for the screen-walk proof.
 - **The services have no way out.** They sit on a Docker network with no route off it. Only the gateway has
   a second network, which publishes only to `127.0.0.1`, and each start removes its default route.
   `rebuild` proves both are sealed before it restores anything.
-- **The browser cannot leave.** The Playwright config sends everything but `127.0.0.1` to a dead proxy, IP
-  addresses included, and the test fails if any request tries. It is separate from the staging config,
+- **The browser can reach only the walkthrough services and the USDA raster host.** Playwright sends all other
+  non-local requests to a dead proxy, IP addresses included, and the map proof checks the requested hosts.
+  Mapbox's fixed fake token is served by a local PNG route. This is separate from the staging config,
   which is unchanged.
 
 We do not use `supabase start`, because it publishes its ports on every network address.

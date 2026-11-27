@@ -338,6 +338,19 @@ describe('running frontend', () => {
   it('accepts the test app', async () => {
     await assert.doesNotReject(assertFrontendIsOurs(localKey('anon'), { isOpen: portOpen, fetchFn: servedBy(viteModule(ourEnv)) }));
   });
+  it('accepts only the fixed fake Mapbox token when the map-swap proof opts in', async () => {
+    const mapboxFixture = 'pk.test-not-a-real-token';
+    const fakeTokenEnv = { ...ourEnv, VITE_MAPBOX_TOKEN: mapboxFixture };
+    await assert.doesNotReject(assertFrontendIsOurs(localKey('anon'), {
+      isOpen: portOpen,
+      fetchFn: servedBy(viteModule(fakeTokenEnv)),
+      expectedMapboxToken: mapboxFixture,
+    }));
+    await assert.rejects(assertFrontendIsOurs(localKey('anon'), {
+      isOpen: portOpen,
+      fetchFn: servedBy(viteModule(fakeTokenEnv)),
+    }), Refused);
+  });
   for (const [name, fetchFn] of [
     ['one wired to production', servedBy(viteModule({ ...ourEnv, VITE_SUPABASE_URL: PROD_URL }))],
     ['one using a live key', servedBy(viteModule({ ...ourEnv, VITE_SUPABASE_ANON_KEY: liveKey }))],

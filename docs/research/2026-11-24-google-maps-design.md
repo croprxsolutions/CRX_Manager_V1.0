@@ -1,7 +1,7 @@
 # Google Maps design for CRX (agreed by Mason 2026-11-24, pre-build)
 
 Background, options and the two earlier Sol reviews: `2026-11-24-map-provider-options.md`.
-Status: **design only, revision 7: Mason's additions (search, Locate me, drawing, markers) plus his answers to Sol reviews 4 and 5.** Nothing built
+Status: **revision 7: Mason's additions (search, Locate me, drawing, markers) plus his answers to Sol reviews 4 and 5.** Step 0 proof merged (#2594). Step 1 engine part (MapLibre 6.19.0 swap, Mapbox and keyless USDA pictures, credits, three drawing-tool fixes) is in review; Google pictures, Google search and the drawing upgrades are not built yet.
 except the Locate me header fix (PR #2465). Google staging project, keys, budget and caps are set up (see "Revision 5").
 Build starts after the field build's slice 1 lands.
 

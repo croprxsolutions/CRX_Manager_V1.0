@@ -1,20 +1,18 @@
 import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
-import Map, { NavigationControl, type MapRef } from 'react-map-gl/mapbox';
-import 'mapbox-gl/dist/mapbox-gl.css';
+import Map, { AttributionControl, NavigationControl, type MapRef } from 'react-map-gl/maplibre';
+import type { MapLibreEvent } from 'maplibre-gl';
+import './maplibreSetup';
 import { Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import LayerToggle from './LayerToggle';
 import LocateMe from './LocateMe';
+import MapPictureNotice from './MapPictureNotice';
+import { type MapPicture } from './mapPreferences';
+import { useMapPicture } from './useMapPicture';
+import { mapAttribution } from './mapCredits';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
 
-const BASE_LAYERS = {
-  satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
-  roads: 'mapbox://styles/mapbox/streets-v12',
-  hybrid: 'mapbox://styles/mapbox/satellite-streets-v12',
-  terrain: 'mapbox://styles/mapbox/outdoors-v12',
-} as const;
-
-export type BaseLayerType = keyof typeof BASE_LAYERS;
+export type BaseLayerType = MapPicture;
 
 export interface CRXMapProps {
   center?: [number, number];
@@ -59,11 +57,15 @@ export default function CRXMap({
     latitude: center[1],
     zoom,
   });
-  const [activeLayer, setActiveLayer] = useState<BaseLayerType>(baseLayer);
-
-  const effectiveLayer = printMode ? 'roads' : activeLayer;
+  const mapPicture = useMapPicture({ token: MAPBOX_TOKEN, baseLayer, printMode });
+  const attachPictureMap = mapPicture.onMapLoad;
+  const handlePictureError = mapPicture.onError;
 
   const mapRef = useRef<MapRef | null>(null);
+  const setMapRef = useCallback((ref: MapRef | null) => {
+    mapRef.current = ref;
+    if (ref) attachPictureMap(ref.getMap());
+  }, [attachPictureMap]);
 
   // Map load lifecycle: show a spinner until the first load, and a retryable error state if
   // the map never loads. Transient tile/network errors AFTER a successful load are ignored.
@@ -72,11 +74,11 @@ export default function CRXMap({
   const loadedRef = useRef(false);
 
   const handleLoad = useCallback(
-    (evt: { target: MapRef }) => {
-      mapRef.current = evt.target;
+    (evt: MapLibreEvent) => {
       loadedRef.current = true;
       setMapStatus('ready');
-      onMapLoad?.(evt.target);
+      attachPictureMap(evt.target);
+      if (mapRef.current) onMapLoad?.(mapRef.current);
       // If bounds were set before map loaded, apply now
       if (bounds) {
         evt.target.fitBounds(
@@ -85,17 +87,18 @@ export default function CRXMap({
         );
       }
     },
-    [onMapLoad, bounds, boundsOptions]
+    [onMapLoad, bounds, boundsOptions, attachPictureMap]
   );
 
-  const handleError = useCallback((evt?: { sourceId?: string; tile?: unknown }) => {
+  const handleError = useCallback((evt?: { sourceId?: string; tile?: unknown; error?: { status?: number; statusCode?: number } }) => {
+    if (evt) handlePictureError(evt);
     if (loadedRef.current) return;
     // Ignore transient tile/source-scoped errors before first load (a flaky rural connection can
     // drop a tile while the map is still coming up). Only a fatal style/auth load failure — which
     // is NOT source-scoped — should surface the retry overlay; a later successful 'load' clears it.
     if (evt && (evt.sourceId || evt.tile)) return;
     setMapStatus('error');
-  }, []);
+  }, [handlePictureError]);
 
   const handleRetry = useCallback(() => {
     loadedRef.current = false;
@@ -120,42 +123,40 @@ export default function CRXMap({
     onMapMoveEnd?.([evt.viewState.longitude, evt.viewState.latitude]);
   }, [onMapMoveEnd]);
 
-  if (!MAPBOX_TOKEN) {
-    return (
-      <div className={`${className} bg-gray-100 rounded-lg flex items-center justify-center border border-gray-200`}>
-        <div className="text-center px-4">
-          <p className="text-sm font-medium text-gray-500">Map not available</p>
-          <p className="text-xs text-gray-400 mt-1">
-            Set VITE_MAPBOX_TOKEN in your .env file to enable maps
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className={`${className} relative rounded-lg overflow-hidden`}>
       <Map
         key={reloadKey}
+        ref={setMapRef}
         {...viewState}
         onMove={(evt) => setViewState(evt.viewState)}
         onMoveEnd={handleMoveEnd}
         onClick={(evt) => onMapClick?.(evt.lngLat.lng, evt.lngLat.lat)}
-        mapboxAccessToken={MAPBOX_TOKEN}
-        mapStyle={BASE_LAYERS[effectiveLayer]}
+        mapStyle={mapPicture.mapStyle}
         style={{ width: '100%', height: '100%' }}
         interactive={interactive}
-        onLoad={handleLoad as unknown as (e: unknown) => void}
-        onError={handleError as unknown as (e: unknown) => void}
         attributionControl={false}
+        onLoad={handleLoad}
+        onError={handleError as unknown as (e: unknown) => void}
       >
+        <AttributionControl
+          key={mapPicture.displayedPicture}
+          position="bottom-right"
+          compact={false}
+          customAttribution={mapAttribution(mapPicture.displayedPicture)}
+        />
         {interactive && <NavigationControl position="top-right" />}
         {showLocateMe && <LocateMe onLocate={handleLocate} />}
         {children}
       </Map>
-      {showLayerToggle && (
-        <LayerToggle activeLayer={activeLayer} onChange={setActiveLayer} />
+      {showLayerToggle && !printMode && (
+        <LayerToggle
+          activeLayer={mapPicture.displayedPicture}
+          mapboxAvailable={mapPicture.mapboxAvailable}
+          onChange={mapPicture.selectPicture}
+        />
       )}
+      <MapPictureNotice message={mapPicture.notice} />
       {mapStatus === 'loading' && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-gray-100/80 pointer-events-none">
           <div className="flex items-center gap-2 text-sm text-secondary">

@@ -141,13 +141,13 @@ vi.mock('../../components/map/CRXMap', () => ({
   default: ({ children }: { children?: ReactNode }) => <div data-testid="crx-map">{children}</div>,
 }));
 vi.mock('../../components/map/FieldBoundaryLayer', () => ({ default: () => <div /> }));
-vi.mock('mapbox-gl', () => ({ default: {}, Map: class {}, Marker: class {}, Popup: class {} }));
+vi.mock('maplibre-gl', () => ({ setWorkerUrl: vi.fn(), Map: class {}, Marker: class {}, Popup: class {} }));
 // @fullcalendar + react-map-gl init real WebGL/DOM internals that hard-crash the
 // jsdom worker. Stub them so calendar/map pages mount.
 vi.mock('@fullcalendar/react', () => ({ default: () => <div data-testid="fullcalendar" /> }));
 vi.mock('@fullcalendar/daygrid', () => ({ default: {} }));
 vi.mock('@fullcalendar/interaction', () => ({ default: {} }));
-vi.mock('react-map-gl/mapbox', () => new Proxy({}, {
+vi.mock('react-map-gl/maplibre', () => new Proxy({}, {
   get: (_t, prop) => {
     if (prop === 'useMap') return () => ({ current: undefined });
     if (prop === '__esModule') return true;

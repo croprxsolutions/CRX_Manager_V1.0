@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { MapRef } from 'react-map-gl/mapbox';
+import type { MapRef } from 'react-map-gl/maplibre';
 import type { Field, FieldMarkerState } from '../../types';
 import { useFieldMarkerEditor } from '../../hooks/useFieldMarkerEditor';
 import { useFieldMarkers } from '../../hooks/useFieldMarkers';

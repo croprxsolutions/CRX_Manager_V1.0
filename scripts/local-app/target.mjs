@@ -26,6 +26,7 @@ export const API_URL = `http://127.0.0.1:${API_PORT}`;
 export const APP_URL = `http://127.0.0.1:${APP_PORT}`;
 export const DB_URL_PREFIX = `postgresql://postgres:`;
 export const DB_URL_SUFFIX = `@127.0.0.1:${DB_PORT}/postgres?sslmode=disable`;
+const MAP_SWAP_FAKE_MAPBOX_TOKEN = 'pk.test-not-a-real-token';
 export const ISSUER = PROJECT;
 export const TEST_EMAIL = 'admin@crx-local-app.test';
 export const REP_EMAIL = 'rep@crx-sales-gauntlet.test';
@@ -171,7 +172,14 @@ export function assertAppPortIsLoopback(netstat, port = APP_PORT) {
   }
 }
 
-export async function assertFrontendIsOurs(anonKey, { isOpen = portIsOpen, fetchFn = fetch } = {}) {
+export async function assertFrontendIsOurs(anonKey, {
+  isOpen = portIsOpen,
+  fetchFn = fetch,
+  expectedMapboxToken = '',
+} = {}) {
+  if (expectedMapboxToken && expectedMapboxToken !== MAP_SWAP_FAKE_MAPBOX_TOKEN) {
+    throw new Refused('Only the fixed fake Mapbox token is allowed in the local map-swap proof.');
+  }
   if (!(await isOpen(APP_PORT))) return;
   let source = '';
   try {
@@ -189,7 +197,7 @@ export async function assertFrontendIsOurs(anonKey, { isOpen = portIsOpen, fetch
   }
   const ours = served.VITE_SUPABASE_URL === API_URL
     && Boolean(anonKey) && served.VITE_SUPABASE_ANON_KEY === anonKey
-    && !served.VITE_MAPBOX_TOKEN
+    && served.VITE_MAPBOX_TOKEN === expectedMapboxToken
     && !served.VITE_SENTRY_DSN
     && Object.keys(served).filter((key) => key.startsWith('VITE_')).length === 4;
   if (!ours) throw new Refused(`An unknown frontend is running on port ${APP_PORT}. Stop it first.`);

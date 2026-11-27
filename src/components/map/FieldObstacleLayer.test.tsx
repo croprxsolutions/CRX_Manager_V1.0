@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest';
 import type { FieldObstacle } from '../../types';
 import FieldObstacleLayer from './FieldObstacleLayer';
 
-vi.mock('react-map-gl/mapbox', () => ({
+vi.mock('react-map-gl/maplibre', () => ({
   Marker: ({ children, onClick }: {
     children: ReactElement<{ onClick?: MouseEventHandler<HTMLButtonElement> }>;
     onClick?: (event: { originalEvent: { stopPropagation: () => void } }) => void;

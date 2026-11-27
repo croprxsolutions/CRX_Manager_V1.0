@@ -1,7 +1,8 @@
 import { useEffect, useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { useControl } from 'react-map-gl/mapbox';
+import { useControl } from 'react-map-gl/maplibre';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
-import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
+import type { IControl } from 'maplibre-gl';
+import './maplibreSetup';
 import type { GeoJSON } from 'geojson';
 import DrawingHud from './DrawingHud';
 import { useLatestRef } from '../../hooks/useLatestRef';
@@ -10,7 +11,7 @@ import { shouldSyncInitialDrawFeatures } from '../../lib/fieldBoundaryState';
 
 interface DrawControlProps {
   onDrawCreate?: (feature: GeoJSON.Feature) => void;
-  onDrawUpdate?: (feature: GeoJSON.Feature) => void;
+  onDrawUpdate?: (features: GeoJSON.Feature[]) => void;
   onDrawDelete?: (featureIds: string[]) => void;
   initialGeoJSON?: GeoJSON.Feature | GeoJSON.Feature[] | null;
   allowRemoveSinglePart?: boolean;
@@ -28,6 +29,14 @@ interface HudState {
 }
 
 const EMPTY_HUD: HudState = { isDrawing: false, partCount: 0, acres: 0, corners: 0 };
+
+interface DrawMapAdapter {
+  getContainer: () => HTMLElement;
+  getLayer: (id: string) => unknown;
+  once: (event: 'load', callback: () => void) => void;
+  on: (event: string, callback: (event: unknown) => void) => unknown;
+  off: (event: string, callback: (event: unknown) => void) => unknown;
+}
 
 // Mapbox Draw's normal selection modes allow existing boundary polygons to be dragged. During
 // obstacle placement, use a deliberately handler-free mode so those billable boundaries remain
@@ -47,7 +56,10 @@ export default function DrawControl({
   onDrawingStateChange,
 }: DrawControlProps) {
   const drawRef = useRef<MapboxDraw | null>(null);
-  const mapRef = useRef<{ getContainer: () => HTMLElement } | null>(null);
+  const mapRef = useRef<DrawMapAdapter | null>(null);
+  const mapLoadedRef = useRef(false);
+  const loadInitialRef = useRef<() => void>(() => {});
+  const loadEventHandlerRef = useRef<(() => void) | null>(null);
   const [hud, setHud] = useState<HudState>(EMPTY_HUD);
   const hudRef = useRef<HudState>(EMPTY_HUD);
   // Stable references for the draw.* listeners so onRemove can actually detach them.
@@ -110,7 +122,7 @@ export default function DrawControl({
     cbRef.current.onDrawingStateChange?.(drawing);
   }, [cbRef]);
 
-  const draw = useControl<MapboxDraw>(
+  const draw = useControl<IControl>(
     () =>
       new MapboxDraw({
         displayControlsDefault: false,
@@ -175,17 +187,27 @@ export default function DrawControl({
             paint: { 'circle-radius': 3, 'circle-color': '#28A26A' },
           },
         ],
-      }),
+      }) as unknown as IControl,
     ({ map }) => {
-      mapRef.current = map;
+      const drawMap = map as unknown as DrawMapAdapter;
+      mapRef.current = drawMap;
+      // MapLibre's isStyleLoaded() also waits for every source tile. Draw only needs the
+      // style itself, which is present as soon as this map's base layer exists.
+      mapLoadedRef.current = Boolean(drawMap.getLayer('crx-map-background'));
+      const onMapLoad = () => {
+        mapLoadedRef.current = true;
+        loadInitialRef.current();
+      };
+      loadEventHandlerRef.current = onMapLoad;
+      if (!mapLoadedRef.current) drawMap.once('load', onMapLoad);
       const onCreate = (e: unknown) => {
         const features = (e as { features?: GeoJSON.Feature[] }).features;
-        if (features && features.length > 0) cbRef.current.onDrawCreate?.(features[0]);
+        if (features && features.length > 0 && !disabledRef.current) cbRef.current.onDrawCreate?.(features[0]);
         recompute();
       };
       const onUpdate = (e: unknown) => {
         const features = (e as { features?: GeoJSON.Feature[] }).features;
-        if (features && features.length > 0) cbRef.current.onDrawUpdate?.(features[0]);
+        if (features && features.length > 0) cbRef.current.onDrawUpdate?.(features);
         recompute();
       };
       const onDelete = (e: unknown) => {
@@ -198,6 +220,7 @@ export default function DrawControl({
         // Keyboard bindings are disabled, but plugins and programmatic callers can still enter a
         // draw mode. Keep obstacle placement fail-closed by returning Draw to its inert mode.
         if (disabledRef.current && mode !== 'static') {
+          if (drawRef.current?.getMode() === 'draw_polygon') drawRef.current.trash();
           drawRef.current?.changeMode('static');
           return;
         }
@@ -212,16 +235,21 @@ export default function DrawControl({
         'draw.modechange': onModeChange,
         'draw.render': onRender,
       };
-      map.on('draw.create', onCreate);
-      map.on('draw.update', onUpdate);
-      map.on('draw.delete', onDelete);
-      map.on('draw.modechange', onModeChange);
-      map.on('draw.render', onRender);
+      drawMap.on('draw.create', onCreate);
+      drawMap.on('draw.update', onUpdate);
+      drawMap.on('draw.delete', onDelete);
+      drawMap.on('draw.modechange', onModeChange);
+      drawMap.on('draw.render', onRender);
       recompute();
     },
     ({ map }) => {
+      const drawMap = map as unknown as DrawMapAdapter;
+      const loadHandler = loadEventHandlerRef.current;
+      if (loadHandler) drawMap.off('load', loadHandler);
+      loadEventHandlerRef.current = null;
+      mapLoadedRef.current = false;
       for (const [evt, fn] of Object.entries(listenersRef.current)) {
-        map.off(evt, fn);
+        drawMap.off(evt, fn);
       }
       listenersRef.current = {};
     },
@@ -229,7 +257,7 @@ export default function DrawControl({
   );
   // Published on commit (before react-map-gl's passive effect adds the control), never during render.
   useLayoutEffect(() => {
-    drawRef.current = draw;
+    drawRef.current = draw as unknown as MapboxDraw;
   }, [draw]);
 
   // Mapbox Draw's built-in polygon button lives outside React. Disable that button and the
@@ -239,7 +267,10 @@ export default function DrawControl({
   useEffect(() => {
     const d = drawRef.current;
     if (d) {
-      if (disabled) d.changeMode('static');
+      if (disabled) {
+        if (d.getMode() === 'draw_polygon') d.trash();
+        d.changeMode('static');
+      }
       else d.changeMode('simple_select');
     }
 
@@ -260,9 +291,15 @@ export default function DrawControl({
     // replace Draw's feature collection in that mode: deleteAll() would erase the sketch.
     if (!shouldSyncInitialDrawFeatures(d.getMode())) return;
     try {
+      const incoming = Array.isArray(initialGeoJSON) ? initialGeoJSON : [initialGeoJSON];
+      const current = d.getAll().features;
+      const matchesCurrent = current.length === incoming.length && incoming.every((feature) => {
+        const currentFeature = current.find((candidate) => candidate.id === feature.id);
+        return currentFeature && JSON.stringify(currentFeature.geometry) === JSON.stringify(feature.geometry);
+      });
+      if (matchesCurrent) return;
       d.deleteAll();
-      const features = Array.isArray(initialGeoJSON) ? initialGeoJSON : [initialGeoJSON];
-      for (const f of features) {
+      for (const f of incoming) {
         d.add(f as unknown as GeoJSON.FeatureCollection);
       }
       recompute();
@@ -270,12 +307,18 @@ export default function DrawControl({
       // Silently handle invalid GeoJSON
     }
   }, [initialGeoJSON, recompute]);
+  useLayoutEffect(() => {
+    loadInitialRef.current = loadInitial;
+  }, [loadInitial]);
 
   useEffect(() => {
-    // Small delay to ensure draw control is fully initialized
-    const timer = setTimeout(loadInitial, 200);
-    return () => clearTimeout(timer);
-  }, [loadInitial]);
+    const map = mapRef.current;
+    if (!map || !initialGeoJSON) return;
+    if (mapLoadedRef.current || map.getLayer('crx-map-background')) {
+      mapLoadedRef.current = true;
+      loadInitial();
+    }
+  }, [initialGeoJSON, loadInitial]);
 
   // HUD button handlers — these drive the SAME draw.create/draw.delete callbacks the manual
   // polygon/trash controls do, so the saved geometry + acreage preview stay correct.

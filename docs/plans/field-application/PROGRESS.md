@@ -110,7 +110,7 @@ Briefs (2026-11-25, from the merged slice 1 code): `docs/loops/field-app-s2-db.m
 | 2.5 Review checks | NOT STARTED | |
 | 2.6 FP-3 archive fields | PARKED until after 2026-12-15 | Taha reviews (BUILD-PLAN) |
 | 2.7 Mixer account | NOT STARTED | Mason said yes 2026-11-25; created after loads and stock is on staging |
-| Crew and office screens | NOT STARTED | Dispatch board and phone maps wait for the Google Maps engine swap (Codex, steps 0–1) |
+| Crew and office screens | NOT STARTED | Unblocked once the map engine swap (design step 1, engine part) merges into staging; Google pictures and search come in a later step and do not block these screens |
 
 ## Needs another lane
 

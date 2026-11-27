@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Marker, Popup } from 'react-map-gl/mapbox';
+import { Marker, Popup } from 'react-map-gl/maplibre';
 import type { Customer, Field } from '../../types';
 import { billableAcres } from '../../lib/fieldGeometry';
 

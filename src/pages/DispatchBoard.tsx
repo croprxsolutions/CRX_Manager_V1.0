@@ -42,7 +42,7 @@ import {
   Loader2,
   MapPin,
 } from 'lucide-react';
-import type { MapRef } from 'react-map-gl/mapbox';
+import type { MapRef } from 'react-map-gl/maplibre';
 import CRXMap from '../components/map/CRXMap';
 import FieldBoundaryLayer from '../components/map/FieldBoundaryLayer';
 import ErrorBoundary from '../components/ErrorBoundary';

@@ -1,9 +1,9 @@
 import { useCallback } from 'react';
-import { Source, Layer, type MapRef } from 'react-map-gl/mapbox';
+import { Source, Layer, type MapRef } from 'react-map-gl/maplibre';
 import MapContainer from '../map/MapContainer';
 import { bbox } from '../../lib/fieldImportParser';
 import type { FeatureCollection, Polygon, GeoJsonProperties } from 'geojson';
-import type { LngLatBoundsLike } from 'mapbox-gl';
+import type { LngLatBoundsLike } from 'maplibre-gl';
 
 interface ImportPreviewMapProps {
   featureCollection: FeatureCollection<Polygon, GeoJsonProperties>;

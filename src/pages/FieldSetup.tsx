@@ -15,7 +15,7 @@ import FieldBoundaryLayer from '../components/map/FieldBoundaryLayer';
 import FieldObstacleLayer from '../components/map/FieldObstacleLayer';
 import FieldMarkerPanel, { MarkerTypeFilter } from '../components/map/FieldMarkerPanel';
 import FieldMarkerEditor from '../components/map/FieldMarkerEditor';
-import { Layer, Source } from 'react-map-gl/mapbox';
+import { Layer, Source } from 'react-map-gl/maplibre';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -570,24 +570,28 @@ function FieldSetupPage() {
   const billable = billableAcres(field.override_acres, measuredPreview, field.total_acres);
 
   // Duplicate field name check
+  // Only the latest check may set the warning; an older, slower reply is dropped.
+  const duplicateCheckRef = useRef(0);
   const checkDuplicate = useCallback(async (name: string, customerId: string) => {
+    const requestId = ++duplicateCheckRef.current;
     if (!name || !customerId) {
       setDuplicateWarning('');
       return;
     }
-    const { data } = await supabase
+    let duplicateQuery = supabase
       .from('fields')
       .select('id, field_name')
       .eq('customer_id', customerId)
-      .ilike('field_name', name)
-      .neq('id', id || '00000000-0000-0000-0000-000000000000')
-      .limit(1);
+      .ilike('field_name', name);
+    if (!isNew && id) duplicateQuery = duplicateQuery.neq('id', id);
+    const { data } = await duplicateQuery.limit(1);
+    if (requestId !== duplicateCheckRef.current) return;
     if (data && data.length > 0) {
       setDuplicateWarning(`A field named "${data[0].field_name}" already exists for this customer.`);
     } else {
       setDuplicateWarning('');
     }
-  }, [id]);
+  }, [id, isNew]);
 
   const addBillingSplit = (customerId: string, customerName: string) => {
     if (billingSplits.find((s) => s.customer_id === customerId)) {
@@ -1610,7 +1614,7 @@ function FieldSetupPage() {
               showLayerToggle
               onMapMoveEnd={handleMapMoveEnd}
               onMapClick={handleMapClick}
-              className={`h-[400px] w-full ${editor.placing || adoptCsbMode ? 'cursor-crosshair' : ''}`}
+              className={`h-[400px] w-full ${isBoundaryDrawing ? 'crx-field-setup-drawing' : ''} ${editor.placing || adoptCsbMode ? 'cursor-crosshair' : ''}`}
             >
               {showOtherFieldBoundaries && (
                 <FieldBoundaryLayer fields={nearbyOverlayFields} showLabels />

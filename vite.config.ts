@@ -140,7 +140,7 @@ export const createAppViteConfig = (environment = process.env) => defineConfig({
             { name: 'vendor-react', test: /[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/ },
             { name: 'vendor-supabase', test: /[\\/]node_modules[\\/]@supabase[\\/]/ },
             { name: 'vendor-ui', test: /[\\/]node_modules[\\/]lucide-react[\\/]/ },
-            { name: 'vendor-mapbox', test: /[\\/]node_modules[\\/]mapbox-gl[\\/]/ },
+            { name: 'vendor-maplibre', test: /[\\/]node_modules[\\/]maplibre-gl[\\/]/ },
           ],
         },
       },

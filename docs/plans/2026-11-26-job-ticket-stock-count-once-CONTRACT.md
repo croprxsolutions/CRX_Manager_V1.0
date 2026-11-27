@@ -131,3 +131,7 @@ None left (Mason answered A on 2026-11-26).
 - MED confirmation could switch tickets (fixed): the record id is captured when the dialog opens and used on Confirm; the dialog hides if the page shows another record.
 - MED undo vs job invoicing deadlock: accepted (Sol r4, settled). MED in-flight old body across deployment: accepted residual (settled r1).
 - LOWs (fixed): success message names returned stock; the no-op message says "Refreshing the page" instead of claiming it already did; Create App Record no longer says filing cannot be undone; the race cases now assert the second session was seen queued on the number lock (`pg_locks`, not granted), not just started before the completion ended.
+
+## Luna round 7 (2026-11-26, head 58995d9b8; round cap lifted on Mason's "Yes, fix and run 6")
+- HIGH (refuted): a ticket with `review_status` NULL passes the approval check. `blend_tickets.review_status` is `NOT NULL DEFAULT 'unreviewed'` (20260206203908) and no later migration relaxes it; the check is the unchanged pre-existing body.
+- MED (refuted): a product's stock unit changing between a ticket filing and its job's completion. `_refuse_stock_unit_change_with_history` (20270201130000) refuses any stock-unit change once the product has stock movements, and the first filing writes one.

@@ -137,6 +137,23 @@ describe('Sales follow-ups', () => {
     await waitFor(() => expect(schedule).toBeEnabled());
   });
 
+  it('rechecks the quote before scheduling and uses a callback added while Today was open', async () => {
+    let someoneElseAddedTask = false;
+    db.from.mockImplementation((table) => {
+      if (table !== 'team_notes') return read(names);
+      return {
+        select: (columns: string) => read(columns.includes('title') || !someoneElseAddedTask
+          ? [] : [{ id: 'new-task', linked_entity_id: 'quote-1' }]),
+      };
+    });
+    render(<MemoryRouter><SalesFollowUps profile={profile} deniedPages={[]} /></MemoryRouter>);
+    const schedule = await screen.findByRole('button', { name: 'Schedule callback for quote Q-1' });
+    someoneElseAddedTask = true;
+    fireEvent.click(schedule);
+    expect(await screen.findByRole('link', { name: 'Open callback for quote Q-1' })).toHaveAttribute('href', '/team-board?note=new-task');
+    expect(screen.queryByRole('dialog', { name: 'Schedule callback' })).not.toBeInTheDocument();
+  });
+
   it('waits for a prefilled assignee, refuses an inactive selection, and saves an exact quote todo', async () => {
     let finish: (value: unknown) => void = () => {};
     const pending = new Promise((resolve) => { finish = resolve; });

@@ -25,7 +25,7 @@ async function readNames(ids: (string | null)[]) {
   if (!present.length) return { names: new Map<string, string>(), error: null };
   const { data, error } = await supabase.from('profile_public_view').select('id, full_name')
     .in('id', present).eq('is_active', true).neq('role', 'entity_recipient');
-  const names = new Map((data ?? []).flatMap((row) => row.id && row.full_name ? [[row.id, row.full_name] as const] : []));
+  const names = new Map((data ?? []).flatMap((row) => row.id ? [[row.id, row.full_name?.trim() || 'Name unavailable'] as const] : []));
   return { names, error };
 }
 
@@ -216,6 +216,14 @@ export default function SalesFollowUps({ profile, deniedPages }: { profile: Pick
   const selectedQuote = quoteData?.rows.find((row) => row.quote_id === selectedQuoteId);
   const refreshLists = () => { void callbacks.reload(); void staleQuotes.reload(); };
 
+  async function scheduleCallback(row: StaleQuoteRow) {
+    const refreshed = await staleQuotes.reload();
+    if (refreshed.status !== 'applied') return;
+    const current = refreshed.data;
+    if (current.detailsUnavailable || current.byQuote.has(row.quote_id)) return;
+    if (current.rows.some((quote) => quote.quote_id === row.quote_id)) setSelectedQuoteId(row.quote_id);
+  }
+
   return (
     <SectionCard id="cockpit-sales-followups" title="Sales Follow-ups" icon={<ClipboardList className="h-5 w-5" />}>
       <div className="grid grid-cols-1 divide-y divide-gray-200 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
@@ -226,7 +234,7 @@ export default function SalesFollowUps({ profile, deniedPages }: { profile: Pick
         <FollowUpPanel title="Stale quotes" subject="stale quotes" state={staleQuotes}
           detailsUnavailable={quoteData?.detailsUnavailable} link={{ to: '/call-lists?list=stale-quotes', label: 'View Call Lists' }}>
           {staleQuotes.status === 'loaded' && quoteData && (
-            <StaleQuoteRows list={quoteData} refreshing={staleQuotes.refreshing} onSchedule={(row) => setSelectedQuoteId(row.quote_id)} />
+            <StaleQuoteRows list={quoteData} refreshing={staleQuotes.refreshing} onSchedule={(row) => void scheduleCallback(row)} />
           )}
         </FollowUpPanel>
       </div>

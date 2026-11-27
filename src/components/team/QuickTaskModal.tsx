@@ -221,7 +221,7 @@ export default function QuickTaskModal({
                 <option value={assignedTo}>{assigneeStatus === 'loading' ? 'Loading assigned rep…' : 'Selected assignee unavailable'}</option>
               )}
               {profiles.map((p) => (
-                <option key={p.id} value={p.id}>{p.full_name}</option>
+                <option key={p.id} value={p.id}>{p.full_name?.trim() || 'Name unavailable'}</option>
               ))}
             </select>
             {callbackOnly && assigneeStatus === 'failed' && (

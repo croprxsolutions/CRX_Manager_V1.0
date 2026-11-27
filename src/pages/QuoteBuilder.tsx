@@ -803,6 +803,9 @@ export default function QuoteBuilder() {
   const [confirmDeclineOpen, setConfirmDeclineOpen] = useState(false);
   // The open "check auto-filled acres" question and its answer's resolver (Mason, #2445).
   const [acresCheck, setAcresCheck] = useState<{ count: number; answer: (ok: boolean) => void } | null>(null);
+  const acresCheckRef = useLatestRef(acresCheck);
+  // Moving to another quote cancels an open check, so its answer can never save the quote left behind (Sol, #2445).
+  useEffect(() => () => acresCheckRef.current?.answer(false), [id, acresCheckRef]);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const [statusActionLoading, setStatusActionLoading] = useState(false);
   // Close a booking we fulfilled by APPLYING product (job applications), as
@@ -2439,6 +2442,22 @@ export default function QuoteBuilder() {
     })));
   };
 
+  // Auto-filled acres set the quantity, the price and a job's treated acres, so the rep checks
+  // them once before a save or a PDF (Mason, #2445: auto-fill, then confirm).
+  const confirmAutoAcres = async (): Promise<boolean> => {
+    const count = unconfirmedAcresCount(sections);
+    if (count === 0) return true;
+    const ok = await new Promise<boolean>((answer) => setAcresCheck({ count, answer }));
+    setAcresCheck(null);
+    return ok;
+  };
+  // A successful save makes the checked acres the rep's: the highlight goes. A failed or refused
+  // save keeps it, so a later field change still drops untouched copies (Sol, #2445).
+  const acceptAutoAcres = () => setSections((prev) => prev.map((sec) => ({
+    ...sec,
+    items: sec.items.map((i) => (i.acres_prefill && i.product_id ? { ...i, acres_prefill: undefined } : i)),
+  })));
+
   const saveQuote = async (newStatus?: QuoteStatus): Promise<string | null> => {
     // Fail closed when the loaded quote is not the quote the URL names. The
     // skeleton normally hides the form for the whole transition, but a load that
@@ -2487,18 +2506,7 @@ export default function QuoteBuilder() {
       return null;
     }
     if (!profile) return null;
-    // Auto-filled acres set the quantity, the price and a job's treated acres, so the rep checks
-    // them once before any save (Mason, #2445: auto-fill, then confirm).
-    const unconfirmed = unconfirmedAcresCount(sections);
-    if (unconfirmed > 0) {
-      const ok = await new Promise<boolean>((answer) => setAcresCheck({ count: unconfirmed, answer }));
-      setAcresCheck(null);
-      if (!ok) return null;
-      setSections((prev) => prev.map((sec) => ({
-        ...sec,
-        items: sec.items.map((i) => (i.acres_prefill && i.product_id ? { ...i, acres_prefill: undefined } : i)),
-      })));
-    }
+    if (!(await confirmAutoAcres())) return null;
 
     // Validation: warn about empty sections
     const emptySections = sections.filter((sec) => sec.items.length === 0 || sec.items.every((i) => !i.product_id));
@@ -2959,6 +2967,7 @@ export default function QuoteBuilder() {
         // Only Save Draft creates, and it opens the saved quote, which loads the stored prices.
         if (!quoteIdAtSend) {
           toast('warning', `The quote was saved, but ${repricedCount} priced at today's catalog price, which changed since this page loaded. Check the saved prices before sending it.`);
+          acceptAutoAcres();
           return savedQuoteId;
         }
         quoteVersionRecoveryRequiredRef.current = true;
@@ -2970,6 +2979,7 @@ export default function QuoteBuilder() {
       if (isAdmin && savedLineIdsRef.current.size > 0) {
         await refreshSavedLineCosts(editingSessionChanged);
       }
+      acceptAutoAcres();
       return savedQuoteId;
     } catch (err: unknown) {
       if (isBelowCostApprovalHandledError(err)) return null;
@@ -3155,6 +3165,7 @@ export default function QuoteBuilder() {
 
   // === GAP FIX #1: Download Quote as PDF ===
   const handleDownloadPdf = async () => {
+    if (!(await confirmAutoAcres())) return;
     await runCriticalAction({
       action: async () => {
         await downloadQuotePdf(buildQuotePdfData(), customColumns || getTemplateColumns(selectedTemplateId));

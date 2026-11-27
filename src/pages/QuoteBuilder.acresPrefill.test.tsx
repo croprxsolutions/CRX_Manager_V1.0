@@ -302,6 +302,32 @@ describe('QuoteBuilder — acres on a new line', () => {
     expect(filled.total_price).toBeGreaterThan(0);
   });
 
+  it('a failed save keeps the auto-filled acres highlighted, and a PDF download asks first (Sol, #2445)', { timeout: 20000 }, async () => {
+    renderNewQuote();
+    await pickCustomer();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
+    await pickProductOnLastLine();
+    fireEvent.change(screen.getByLabelText('Acres'), { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
+    await pickProductOnLastLine();
+
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+      ? { data: null, error: { message: 'save refused' } }
+      : name === 'generate_quote_number' ? { data: 'Q-2026-0001', error: null } : { data: null, error: null }));
+    fireEvent.click(screen.getByText('Save draft'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Yes, save' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+    await waitFor(() => expect(screen.queryByText(/acres filled in automatically/)).not.toBeInTheDocument());
+    expect(screen.getAllByLabelText('Acres')[1]).toHaveClass('bg-amber-50');
+
+    const { downloadQuotePdf } = await import('../lib/quotePdf');
+    fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Download PDF/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Let me check' }));
+    await waitFor(() => expect(screen.queryByText(/acres filled in automatically/)).not.toBeInTheDocument());
+    expect(downloadQuotePdf).not.toHaveBeenCalled();
+  });
+
   it('still drops a filled line the rep closes the product picker on, untouched', { timeout: 20000 }, async () => {
     renderNewQuote();
     await pickCustomer();

@@ -45,7 +45,7 @@ it('attaches unfiltered hazards by saved field and only treats a verified empty 
   });
 
   expect(result.fields.map(({ hazards }) => hazards)).toEqual([
-    { complete: false, markers: [{ id: 'marker-a', name: 'Washout', note: 'Check after rain', hasValidPoint: true }] },
+    { complete: false, markers: [{ name: 'Washout', note: 'Check after rain', pinIdentity: JSON.stringify(['marker-a', -89, 39]) }] },
     { complete: true, markers: [] },
     { complete: false, markers: [] },
   ]);

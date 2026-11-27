@@ -352,7 +352,7 @@ describe('map pages only print', () => {
     const data = makeSheetData({ maps: null, fieldMapPagesRequested: true });
     const [field] = data.fields;
     data.fields = [
-      { ...field, hazards: { complete: false, markers: [{ id: 'washout-1', name: 'Washout', note: 'Stay west', hasValidPoint: false }] } },
+      { ...field, hazards: { complete: false, markers: [{ name: 'Washout', note: 'Stay west', pinIdentity: null }] } },
       { ...field, stop: 2, field_name: 'South', hazards: { complete: true, markers: [] } },
     ];
 
@@ -379,16 +379,16 @@ describe('map pages only print', () => {
       centroidLat: null, centroidLng: null, dataUrl: 'data:image/png;base64,ZmllbGQtMQ==' }],
   };
 
-  it('warns about a missing overview and mismatched pin even with a field picture', async () => {
+  it('warns about a missing overview and a pin that moved after the field picture was made', async () => {
     const { default: autoTable } = await import('jspdf-autotable');
     const data = makeSheetData({
       overviewMapRequested: true,
       fieldMapPagesRequested: true,
-      maps: { overview: null, perField: [{ ...maps.perField[0], hazardPinIds: ['other-hazard'] }] },
+      maps: { overview: null, perField: [{ ...maps.perField[0], hazardPinIdentities: [JSON.stringify(['saved-hazard', -89, 39])] }] },
     });
     data.fields[0].field_id = 'field-1';
     data.fields[0].hazards = { complete: true, markers: [
-      { id: 'saved-hazard', name: 'Washout', note: 'Stay west', hasValidPoint: true },
+      { name: 'Washout', note: 'Stay west', pinIdentity: JSON.stringify(['saved-hazard', -89.01, 39]) },
     ] };
 
     await generateApplicatorSheetPdf(data, 'original', null);

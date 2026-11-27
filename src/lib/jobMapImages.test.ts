@@ -149,7 +149,7 @@ describe('fetchJobMapImages', () => {
 
     const result = await fetchJobMapImages('job-1', { overview: false });
 
-    expect(result?.perField[0].hazardPinIds).toEqual(['obstacle-1']);
+    expect(result?.perField[0].hazardPinIdentities).toEqual([JSON.stringify(['obstacle-1', -89.04, 39.16])]);
     expect(mockObstacleIn).toHaveBeenCalledWith('field_id', ['field-1']);
     const url = String(mockFetch.mock.calls[0][0]);
     const encodedOverlay = url.match(/geojson\((.+)\)\/auto/);

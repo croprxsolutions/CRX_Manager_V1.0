@@ -9,7 +9,7 @@ import { type ApplicatorPrintOptions, DEFAULT_APPLICATOR_PRINT_OPTIONS, mapImage
 import { generateApplicatorSheetPdf } from './applicatorSheetPdf';
 import { fetchJobFieldLocations, fetchJobMapImages } from './jobMapImages';
 import { MARKER_REQUEST_TIMEOUT_MS, readFieldMarkers } from './fieldMarkerData';
-import { fieldObstacleName, isFieldObstaclePoint } from './fieldObstacles';
+import { fieldObstacleName, fieldObstaclePinIdentity, isFieldObstaclePoint } from './fieldObstacles';
 
 interface ApplicationRecordJoin {
   application_date: string;
@@ -282,8 +282,8 @@ async function readSheetHazards(fields: ApplicatorSheetData['fields']) {
         results.set(id, {
           complete: snapshot.count === markers.size && snapshot.markers.length === markers.size,
           markers: [...markers.values()].map((marker) => ({
-            id: marker.id, name: fieldObstacleName(marker), note: marker.label?.trim() || null,
-            hasValidPoint: isFieldObstaclePoint(marker.point_geojson),
+            name: fieldObstacleName(marker), note: marker.label?.trim() || null,
+            pinIdentity: isFieldObstaclePoint(marker.point_geojson) ? fieldObstaclePinIdentity(marker.id, marker.point_geojson) : null,
           })),
         });
       } catch {

@@ -118,7 +118,7 @@ export function serializeCustomConfig(cfg: ApplicatorSheetCustomConfig): string 
 
 export interface ApplicatorSheetHazards {
   complete: boolean;
-  markers: Array<{ id: string; name: string; note: string | null; hasValidPoint: boolean }>;
+  markers: Array<{ name: string; note: string | null; pinIdentity: string | null }>;
 }
 
 /** One field/location on the sheet, already placed in route order. */

@@ -6,7 +6,7 @@
  * URL limit, and returns PNG data URLs that a PDF renderer can draw directly.
  */
 import { supabase, assertRpcResult } from './db';
-import { isFieldObstaclePoint } from './fieldObstacles';
+import { fieldObstaclePinIdentity, isFieldObstaclePoint } from './fieldObstacles';
 
 const MAPBOX_STYLE = 'mapbox/satellite-streets-v12';
 const MAPBOX_STATIC_URL = `https://api.mapbox.com/styles/v1/${MAPBOX_STYLE}/static`;
@@ -24,7 +24,7 @@ interface JobMapImageOptions {
 
 export interface JobFieldMapImage {
   fieldId: string;
-  hazardPinIds?: string[];
+  hazardPinIdentities?: string[];
   /** Spray order on this job, 1-based (from job_fields.sort_order; restarts per job). */
   sprayNumber?: number;
   fieldName: string;
@@ -639,7 +639,7 @@ async function customerNamesById(customerIds: string[], signal: AbortSignal): Pr
   return names;
 }
 
-interface FieldHazardPin { id: string; feature: BoundaryFeature }
+interface FieldHazardPin { identity: string; feature: BoundaryFeature }
 
 async function fieldObstacleFeatures(fieldIds: string[], signal: AbortSignal): Promise<Map<string, FieldHazardPin[]>> {
   const byField = new Map<string, FieldHazardPin[]>();
@@ -660,7 +660,7 @@ async function fieldObstacleFeatures(fieldIds: string[], signal: AbortSignal): P
       const features = byField.get(field_id) ?? [];
       const [longitude, latitude] = point_geojson.coordinates;
       features.push({
-        id,
+        identity: fieldObstaclePinIdentity(id, point_geojson),
         feature: {
           type: 'Feature',
           properties: { 'marker-color': '#dc2626', 'marker-size': 'small' },
@@ -862,7 +862,7 @@ async function collectJobMapImages(
         const includedFeatures = new Set(image.features);
         result.perField.push({
           fieldId: field.id,
-          hazardPinIds: fieldObstacles.filter(({ feature }) => includedFeatures.has(feature)).map(({ id }) => id),
+          hazardPinIdentities: fieldObstacles.filter(({ feature }) => includedFeatures.has(feature)).map(({ identity }) => identity),
           sprayNumber: field.sprayNumber,
           fieldName: field.name,
           customerName: customerNames.get(field.customerId) ?? null,

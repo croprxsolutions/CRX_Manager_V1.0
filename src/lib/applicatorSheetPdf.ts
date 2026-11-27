@@ -404,13 +404,13 @@ function drawFieldHazards(
   const imagesByField = new Map(data.maps?.perField.map((image) => [image.fieldId, image] as const));
   const rows = data.fields.flatMap(({ stop, field_name, field_id, hazards }) => {
     const markers = hazards?.markers ?? [];
-    const details = markers.map(({ name, note, hasValidPoint }) => [name, note,
-      hasValidPoint ? null : 'Pin could not be placed'].filter(Boolean).join(' · '));
+    const details = markers.map(({ name, note, pinIdentity }) => [name, note,
+      pinIdentity ? null : 'Pin could not be placed'].filter(Boolean).join(' · '));
     if (!hazards?.complete) details.push('Obstacles could not be checked — confirm on site');
     if (details.length === 0) details.push('None recorded');
     const image = field_id ? imagesByField.get(field_id) : undefined;
     if (data.fieldMapPagesRequested && !image) details.push('Map picture unavailable for this stop');
-    if (image && markers.some(({ id, hasValidPoint }) => hasValidPoint && !image.hazardPinIds?.includes(id))) {
+    if (image && markers.some(({ pinIdentity }) => pinIdentity && !image.hazardPinIdentities?.includes(pinIdentity))) {
       details.push('Some listed hazards may not appear as map pins');
     }
     return details.map((text) => [String(stop), field_name, text]);
@@ -423,7 +423,10 @@ function drawFieldHazards(
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(...GRAY);
-    doc.text('Overview map picture unavailable', margin, y);
+    const overviewNotice = data.maps?.perField.length
+      ? 'Overview map picture unavailable'
+      : 'Overview map picture unavailable. Retry or check field boundaries.';
+    doc.text(overviewNotice, margin, y);
     y += 14;
   }
   autoTable(doc, {
@@ -665,9 +668,6 @@ export async function generateApplicatorSheetPdf(
       doc.setFontSize(11);
       doc.setTextColor(...CHARCOAL);
       doc.text(`Job ${data.job_number} · Field hazards`, 40, 40);
-      if (!data.maps?.overview && !data.maps?.perField.length) {
-        doc.text('Map pictures could not be loaded. Retry or check field boundaries.', 40, 55);
-      }
       drawFieldHazards(doc, autoTable, data, 67);
     }
     appendMapPages(doc, data);

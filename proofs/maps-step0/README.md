@@ -2,7 +2,9 @@
 
 The protected staging drawing page is `https://staging.croprxsolutions.app/api/maps-step0-draw/index.html` when deployed. This bundle is generated only for Vercel's custom staging target from the staging branch. The normal app build contains no drawing page. The route relies on Vercel Deployment Protection. Before opening the signed-in proof, confirm a signed-out request to the exact URL redirects to Vercel. If it serves the proof to a signed-out request, stop. Then verify the signed-in page has one route-specific Content Security Policy. Keep real records and non-test geometry out of the proof.
 
-In staging, choose **Use live USDA and Mapbox** to enable the live providers for this page load. Check that USDA shows the USDA/USGS credit, and Mapbox shows its logo and attribution links. Start a synthetic polygon, place two corners, switch pictures, then select **Fail picture**. The staging fixture returns an intentional HTTP 503. Confirm that the alternate live picture and its credit appear without losing the draft or moving the camera. Select **Retry**, verify that the original picture and credit return, finish the polygon, and use **Save synthetic draft** and **Reopen**. Repeat while holding a vertex in a drag. The oldest-phone check must run in the installed staging app. If it opens the app shell after a weak connection, reconnect and open the exact proof path again.
+In staging, choose **Use live USDA and Mapbox** to enable the live providers for this page load. Check that USDA shows the USDA/USGS credit, and Mapbox shows its logo and attribution links. Start a synthetic polygon, place two corners, switch pictures, then select **Fail picture**. The staging fixture returns an intentional HTTP 503. Confirm that the alternate live picture and its credit appear without losing the draft or moving the camera. Select **Retry**, verify that the original picture and credit return, finish the polygon, and use **Save synthetic draft** and **Reopen**. Repeat while holding a vertex in a drag.
+
+Run the oldest-phone check inside the installed staging app. Accept its update prompt before opening the proof. If the proof URL shows the regular app screen, close and reopen the installed app while online, accept any pending update, and try the proof URL again. The updated app loads this page directly from the network.
 
 After Step 0, remove the drawing bundle hook, its routing and policy, and the outage fixture along with the associated disposable proof.
 
@@ -21,6 +23,8 @@ npx --no-install playwright test --config=proofs/maps-step0/playwright.config.ts
 ```
 
 The browser suite builds the standalone production bundle under `proofs/maps-step0/dist` and serves it on loopback. Both healthy picture files are part of that bundle. The preview server supplies the deliberate HTTP 503 fixture used by **Fail picture**. A deployed proof requires its own approved outage test setup.
+
+Before opening the staging PR, run `npm run build` locally with `VERCEL_TARGET_ENV=staging` and `VERCEL_GIT_COMMIT_REF=staging`. Check that `dist/api/maps-step0-draw/index.html` and the built entry and worker files exist, the HTML and script resolve assets under `/api/maps-step0-draw/assets/`, and the main app service worker excludes this route. Clear the two variables and confirm a normal build omits the proof directory.
 
 To open the page for free play, run `npx --no-install vite --config proofs/maps-step0/vite.config.ts --host 127.0.0.1` and open the localhost address Vite prints. Click **Start polygon**, click the map to place corners, and click the first corner again to close the shape. Click the selected polygon to show its vertices, then drag a vertex. **Fail picture** makes the active tile route return HTTP 503. **Retry** restores its healthy local route. **Reopen** reloads the page and restores the last saved synthetic polygon in that tab.
 

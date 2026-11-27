@@ -88,6 +88,7 @@ import {
   loadJobStockPath,
   loadSavedJobSourceVendors,
   sourceReadBlocksJobSave,
+  type JobChemicalSourcesRead,
   type JobSourceVendor,
   type JobStockPathRead,
 } from '../lib/jobSourcedFrom';
@@ -2380,7 +2381,7 @@ export default function JobDetail() {
       fetchJobDetailShares(j, isEditable),
       FIELD_SOURCED_FROM_DB_READY && !isCrew
         ? loadJobChemicalSources(id!)
-        : Promise.resolve({ available: false, sourcesByChemicalId: {} }),
+        : Promise.resolve<JobChemicalSourcesRead>({ available: false, sourcesByChemicalId: {} }),
     ]);
     const { shares: savedShares, defaultsError } = sharesRead;
     const sourceReadCoversRows = !FIELD_SOURCED_FROM_DB_READY || isCrew || (

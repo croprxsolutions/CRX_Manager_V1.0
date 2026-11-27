@@ -8,6 +8,7 @@ CREATE TABLE public.delivery_completion_notice_events (
   receipt_id uuid NOT NULL UNIQUE,
   receipt_operation text NOT NULL CHECK (receipt_operation IN ('complete_delivery', 'start_and_complete_delivery')),
   sender_role text NOT NULL,
+  assigned_driver_at_completion uuid,
   show_partial boolean NOT NULL,
   tiny_figures jsonb NOT NULL DEFAULT '{}'::jsonb,
   sent_at timestamptz
@@ -39,10 +40,11 @@ SET search_path = public, pg_temp
 AS $register$
 BEGIN
   INSERT INTO public.delivery_completion_notice_events
-    (completion_seq, receipt_id, receipt_operation, sender_role, show_partial, tiny_figures)
-  SELECT e.seq, r.id, r.operation, actor.role, lines.show_partial, lines.tiny_figures
+    (completion_seq, receipt_id, receipt_operation, sender_role, assigned_driver_at_completion, show_partial, tiny_figures)
+  SELECT e.seq, r.id, r.operation, actor.role, d.assigned_driver, lines.show_partial, lines.tiny_figures
   FROM public.idempotency_keys AS r
   JOIN public.profiles AS actor ON actor.id = r.request_actor_id AND actor.is_active
+  JOIN public.deliveries AS d ON d.id = p_delivery_id
   CROSS JOIN LATERAL (
     SELECT b.seq, b.actor FROM public.delivery_brand_events AS b
     WHERE b.delivery_id = p_delivery_id AND b.event_type = 'completed' ORDER BY b.seq DESC LIMIT 1
@@ -166,14 +168,14 @@ BEGIN
         THEN c.recipient::uuid END AS id
       FROM public.commissions AS c
       WHERE c.order_id = v_delivery.order_id AND c.status <> 'cancelled'
-        AND c.recipient IS DISTINCT FROM v_delivery.assigned_driver::text
+        AND c.recipient IS DISTINCT FROM v_event.assigned_driver_at_completion::text
         AND (v_role = 'admin' OR (v_role = 'sales_rep' AND c.recipient_user_id = v_actor
           AND NOT COALESCE('reports' = ANY(v_denied_pages), false)))
     ), recipients AS (
       SELECT id, 'completion' AS kind FROM admins
-      UNION SELECT v_delivery.assigned_driver, 'completion'
-        WHERE v_delivery.assigned_driver IS NOT NULL
-          AND (v_role IN ('admin', 'sales_rep') OR v_delivery.assigned_driver = v_actor)
+      UNION SELECT v_event.assigned_driver_at_completion, 'completion'
+        WHERE v_event.assigned_driver_at_completion IS NOT NULL
+          AND (v_role IN ('admin', 'sales_rep') OR v_event.assigned_driver_at_completion = v_actor)
       UNION SELECT id, 'remainder' FROM admins WHERE v_remainder_message IS NOT NULL
       UNION SELECT p.id, 'remainder' FROM public.profile_public_view AS p
         WHERE v_remainder_message IS NOT NULL AND p.id = v_delivery.created_by AND p.role <> 'admin'

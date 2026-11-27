@@ -514,7 +514,7 @@ Migration `20270310140000` limits browser writes to the existing `refresh_watchd
 
 ### Saved delivery alerts
 
-- `notify_saved_delivery_completion(p_delivery_id uuid, p_completion_key text, p_idempotency_key text)` — the three interactive completion screens call this after a saved delivery. It verifies the signed-in actor and the return value is JSON with `status: sent` or `status: pending` and a failed-recipient count. A retry does not repeat notices already sent.
+- `notify_saved_delivery_completion(p_delivery_id uuid, p_completion_key text, p_idempotency_key text DEFAULT NULL)` — the three interactive completion screens call this after a saved delivery. It verifies the signed-in actor and requires a nonblank retry key. It returns JSON with `status: sent` or `status: pending` and a failed-recipient count for pending sends. A retry does not repeat notices already sent.
 - `complete_delivery` and `start_and_complete_delivery` accept the optional `p_record_completion_notice` argument. Its default keeps the behavior of older screens and offline recovery. When true, a fresh successful save registers the receipt for a checked follow-up alert.
 
 ## Internal / Trigger Functions

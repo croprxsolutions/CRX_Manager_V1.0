@@ -37,6 +37,9 @@ DECLARE
   v_other_rep uuid := gen_random_uuid();
   v_rep_key text;
   v_quick_delivery uuid;
+  v_each_product uuid;
+  v_each_delivery uuid;
+  v_each_line uuid;
   v_offline_action uuid := gen_random_uuid();
 BEGIN
   -- 0. Preconditions and fixtures.
@@ -354,6 +357,9 @@ BEGIN
   v_res := public.start_and_complete_delivery(v_quick_delivery, 'No proof — recorded by office',
     v_today, v_admin, NULL, NULL, NULL, v_prefix || 'quick-complete', 'no_proof', 'Invented quick delivery confirmed',
     p_record_completion_notice => true);
+  RESET ROLE;
+  UPDATE public.deliveries SET assigned_driver = NULL WHERE id = v_quick_delivery;
+  SET LOCAL ROLE authenticated;
   v_notice := public.notify_saved_delivery_completion(v_quick_delivery, v_prefix || 'quick-complete', v_prefix || 'quick-notice');
   RESET ROLE;
   IF v_res->>'status' IS DISTINCT FROM 'completed' OR v_notice <> '{"status":"sent"}'::jsonb
@@ -362,6 +368,52 @@ BEGIN
     OR EXISTS (SELECT FROM public.notifications WHERE related_entity_id = v_quick_delivery
       AND user_id IN (v_rep, v_inactive_admin))
   THEN RAISE EXCEPTION 'Quick Delivery completion did not retain the expected driver notice: %, %', v_res, v_notice; END IF;
+
+  -- Match the existing whole-item prover's rolled-back product fixture, then re-enable all triggers.
+  SET LOCAL session_replication_role = replica;
+  INSERT INTO public.products (product_name, product_form, inventory_unit, unit_size, current_cost,
+    tier1_price, tier2_price, tier3_price, pricing_version)
+  VALUES ('Invented Whole Item ' || v_suffix, 'each', 'Ea', 'Ea', 6, 10, 10, 10, 1)
+  RETURNING id INTO v_each_product;
+  SET LOCAL session_replication_role = origin;
+  INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
+  VALUES (v_each_product, 'Main Warehouse', 10, 2, 'Ea');
+  INSERT INTO public.order_items (order_id, product_id, product_name, unit_size, total_units_needed,
+    quantity_delivered, quantity_remaining, price_per_unit, cost_per_unit)
+  VALUES (v_order, v_each_product, 'Invented Whole Item', 'Ea', 2, 0, 2, 10, 6) RETURNING id INTO v_oi;
+  INSERT INTO public.deliveries (delivery_number, order_id, customer_id, assigned_driver, status, created_by)
+  VALUES ('[SMOKE] SACD-EA-' || v_suffix, v_order, v_customer, v_driver, 'in_progress', v_admin)
+  RETURNING id INTO v_each_delivery;
+  INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+  VALUES (v_each_delivery, v_oi, v_each_product, 2, 'Ea') RETURNING id INTO v_each_line;
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    PERFORM public.complete_delivery(v_each_delivery, 'No proof — recorded by office', v_admin,
+      jsonb_build_object(v_each_line::text, 0.5), NULL, NULL, v_prefix || 'fractional-whole-item',
+      NULL, 'no_proof', 'Invented whole-item validation', p_record_completion_notice => true);
+    RAISE EXCEPTION 'A fractional whole-item completion unexpectedly saved';
+  EXCEPTION WHEN check_violation THEN
+    IF SQLERRM NOT LIKE 'WHOLE_ITEMS_ONLY:%' THEN RAISE; END IF;
+  END;
+  RESET ROLE;
+  IF (SELECT status FROM public.deliveries WHERE id = v_each_delivery) IS DISTINCT FROM 'in_progress'
+    OR EXISTS (SELECT FROM public.delivery_completion_notice_events e
+      JOIN public.delivery_brand_events b ON b.seq = e.completion_seq WHERE b.delivery_id = v_each_delivery)
+    OR EXISTS (SELECT FROM public.notifications WHERE related_entity_id = v_each_delivery)
+  THEN RAISE EXCEPTION 'A refused whole-item save left an alert or completed the delivery'; END IF;
+
+  -- Simulate a stale assignment in the rollback-only fixture. The completion screen locks that edit.
+  UPDATE public.deliveries SET assigned_driver = NULL WHERE id = v_del[3];
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_driver, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_driver::text, true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    PERFORM public.notify_saved_delivery_completion(v_del[3], v_driver_key, v_prefix || 'after-unassignment');
+    RAISE EXCEPTION 'A former assignment kept its alert authority';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'DELIVERY_COMPLETION_NOTICE_NOT_ALLOWED' THEN RAISE; END IF;
+  END;
+  RESET ROLE;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_fail_user, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_fail_user::text, true);

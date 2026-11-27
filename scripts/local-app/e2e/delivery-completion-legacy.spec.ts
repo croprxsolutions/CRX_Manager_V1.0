@@ -54,7 +54,8 @@ test.afterEach(() => {
     DELETE FROM public.invoice_items WHERE invoice_id IN (${invoiceIds});
     DELETE FROM public.invoices WHERE delivery_id = ${delivery};
     DELETE FROM public.delivery_brand_events WHERE delivery_id = ${delivery};
-    DELETE FROM public.idempotency_keys WHERE operation = 'complete_delivery' AND result ->> 'delivery_id' = '${deliveryId}';
+    DELETE FROM public.idempotency_keys WHERE operation IN ('complete_delivery','start_and_complete_delivery')
+      AND result ->> 'delivery_id' = '${deliveryId}';
     DELETE FROM public.inventory_transactions WHERE delivery_id = ${delivery};
     DELETE FROM public.delivery_remainders WHERE original_delivery_id = ${delivery};
     DELETE FROM public.delivery_receipt_queue WHERE delivery_id = ${delivery};
@@ -68,6 +69,69 @@ test.afterEach(() => {
     DELETE FROM public.customers WHERE id = ${customer};
     COMMIT;`);
   seeded = false;
+});
+
+function legacySave(page: Page, operation: 'start_and_complete_delivery' | 'complete_delivery') {
+  const hasSender = localSql("SELECT to_regprocedure('public.notify_saved_delivery_completion(uuid,text,text)') IS NOT NULL") === 't';
+  const eventCount = () => localSql('SELECT count(*) FROM public.delivery_completion_notice_events');
+  const before = hasSender ? eventCount() : null;
+  const save = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/rpc/' + operation));
+  const direct = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname.endsWith('/rest/v1/notifications'), { timeout: 30_000 });
+  return async () => {
+    const [request, response] = await Promise.all([save, direct]);
+    expect(request.postDataJSON().p_record_completion_notice).toBeUndefined();
+    expect(response.ok()).toBe(true);
+    if (hasSender) expect(eventCount()).toBe(before);
+    await expect.poll(() => localSql(`SELECT count(*) FROM public.notifications WHERE related_entity_id = ${delivery}
+      AND user_id = '${adminId}' AND created_by = '${adminId}' AND notification_type = 'delivery_completed'`)).toBe('1');
+  };
+}
+
+test('Original Deliveries list completes and sends its legacy direct notice', async ({ page }) => {
+  test.setTimeout(120_000);
+  seedDelivery('scheduled');
+  await signIn(page);
+  await page.goto('/deliveries');
+  await page.getByRole('button', { name: 'Mark delivery INVENTED-NOTICE-DELIVERY delivered', exact: true }).click();
+  const dialog = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Mark Delivered' }) });
+  await dialog.getByText('Record without proof (admin only)').click();
+  await dialog.locator('#complete-no-proof-reason').fill('Invented customer confirmed the list delivery by phone.');
+  await dialog.getByRole('button', { name: 'Mark Delivered' }).click();
+  const checkSave = legacySave(page, 'start_and_complete_delivery');
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Record Without Proof' }).click();
+  await checkSave();
+  await page.goto('/deliveries/' + deliveryId);
+  await expect(page.getByText(/^completed$/i).first()).toBeVisible();
+});
+
+test('Original Field Stop saves a signed partial and sends its legacy direct notice', async ({ page }) => {
+  test.setTimeout(120_000);
+  seedDelivery();
+  await signIn(page);
+  await page.goto('/my-route/' + deliveryId);
+  const quantity = page.getByRole('spinbutton', { name: /Delivered quantity for Invented Completion Notice Product/ });
+  await expect(quantity).toBeVisible({ timeout: 30_000 });
+  await quantity.fill('1');
+  await page.getByRole('button', { name: /Continue with Partial/ }).click();
+  await page.getByLabel('Signed by (name)').fill('Invented Route Customer');
+  const canvas = page.locator('canvas').first();
+  await canvas.scrollIntoViewIfNeeded();
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('Signature canvas is hidden');
+  await page.mouse.move(box.x + box.width * 0.10, box.y + box.height * 0.50);
+  await page.mouse.down();
+  for (let index = 1; index <= 14; index++) {
+    const y = index % 2 ? 0.20 : 0.80;
+    await page.mouse.move(box.x + box.width * (0.10 + index * 0.05), box.y + box.height * y, { steps: 4 });
+  }
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Continue to Review' }).click();
+  const checkSave = legacySave(page, 'complete_delivery');
+  await page.getByRole('button', { name: 'Complete Delivery' }).click();
+  await checkSave();
+  await expect(page.getByRole('button', { name: /Next Stop/i })).toBeVisible({ timeout: 30_000 });
+  expect(localSql('SELECT quantity_delivered FROM public.delivery_items WHERE delivery_id = ' + delivery)).toBe('1');
 });
 
 async function signIn(page: Page, email = process.env.LOCAL_TEST_EMAIL!, password = process.env.LOCAL_TEST_PASSWORD!) {

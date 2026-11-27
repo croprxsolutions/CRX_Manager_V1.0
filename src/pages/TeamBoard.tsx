@@ -76,6 +76,8 @@ export default function TeamBoard() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [notesLoadFailed, setNotesLoadFailed] = useState(false);
+  const [notesHaveLoaded, setNotesHaveLoaded] = useState(false);
+  const notesRequest = useRef(0);
   const [modalOpen, setModalOpen] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedNote, setSelectedNote] = useState<ExtendedTeamNote | null>(null);
@@ -131,6 +133,7 @@ export default function TeamBoard() {
   }, [toast]);
 
   const fetchNotes = useCallback(async () => {
+    const request = ++notesRequest.current;
     // Optimized: Fetch notes with completion info in a single query
     // Note: completed_by FK may be auto-named, so we use the column reference
     // PR-07 follow-up: dropped creator + assignee FK embeds; resolved via
@@ -142,6 +145,7 @@ export default function TeamBoard() {
       .order('is_pinned', { ascending: false })
       .order('created_at', { ascending: false });
 
+    if (request !== notesRequest.current) return;
     if (notesError) {
       Sentry.captureException(notesError, { tags: { source: 'fetch', action: 'load_notes' } });
       setNotesLoadFailed(true);
@@ -205,10 +209,12 @@ export default function TeamBoard() {
         completer: note.completed_by ? (profileMap[note.completed_by] || null) : null,
       }));
 
+      if (request !== notesRequest.current) return;
       setNotes(notesWithExtras as ExtendedTeamNote[]);
     } else {
       setNotes([]);
     }
+    setNotesHaveLoaded(true);
     setNotesLoadFailed(false);
     setLoading(false);
   }, []);
@@ -687,7 +693,7 @@ export default function TeamBoard() {
     );
   }
 
-  if (notesLoadFailed) {
+  if (notesLoadFailed && !notesHaveLoaded) {
     return <Card><LoadFailedState title="Team Board could not load" onRetry={() => { setLoading(true); fetchNotes(); }} /></Card>;
   }
 
@@ -718,6 +724,12 @@ export default function TeamBoard() {
 
   return (
     <div className="phone-touch space-y-4">
+      {notesLoadFailed && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          <span>Could not refresh notes. The board may be out of date.</span>
+          <Button onClick={fetchNotes} variant="secondary">Retry notes</Button>
+        </div>
+      )}
       {/* ── Stats Bar ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div
@@ -1298,7 +1310,7 @@ export default function TeamBoard() {
         accent={noteType === 'todo' ? 'Task' : 'Note'}
         closeDisabled={saving}
       >
-        <div className="space-y-4">
+        <fieldset disabled={saving} className="space-y-4">
           <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
           <div>
             <label htmlFor="team-note-content" className="block text-sm font-medium text-secondary mb-1">Content</label>
@@ -1388,7 +1400,7 @@ export default function TeamBoard() {
               {editingNote ? 'Save Changes' : noteType === 'todo' ? 'Add Task' : 'Add Note'}
             </Button>
           </div>
-        </div>
+        </fieldset>
       </Modal>
 
       {/* Note Detail Modal */}

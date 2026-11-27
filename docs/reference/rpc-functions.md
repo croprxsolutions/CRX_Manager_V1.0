@@ -580,6 +580,7 @@ These are NOT called directly from the frontend. They power triggers, guards, an
 
 ### Notification Triggers
 - `notify_damaged_receiving()` — notify on damaged item receipt
+- `notify_saved_delivery_completion(p_delivery_id uuid, p_completion_key text, p_idempotency_key text)` — uses the signed-in completer's saved interactive receipt to send eligible completion and remainder notices. Returns JSON with `status: sent` or `status: pending` and a failed-recipient count. A retry does not repeat notices already sent.
 - `notify_mentioned_users_in_comment()` — notify users @mentioned in comments
 
 ### Blend Ticket Helpers

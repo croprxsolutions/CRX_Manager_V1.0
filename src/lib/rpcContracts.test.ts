@@ -2937,6 +2937,7 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'change_brand_document_links', // 20270306170000. Prune once generated types cover this RPC.
   'reject_liquid_density_draft', // 20270307205900. Prune once generated types cover this RPC.
+  'notify_saved_delivery_completion', // 20270314120000. Prune once generated types cover this RPC.
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
   'set_registration_adjuvants',
@@ -3139,6 +3140,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'internal convergent PO-cache recomputation helper; trigger parents own the transaction and direct browser EXECUTE is revoked',
   _record_standard_delivery_assignment_notice:
     'internal notice writer called only by create_delivery_with_items after it binds a fresh actor-specific receipt; every API-role EXECUTE is revoked',
+  _register_delivery_completion_notice:
+    'internal event registration called only by a fresh opted-in delivery completion using its bound receipt; every API-role EXECUTE is revoked',
   // Trigger-only helpers whose migrations are now at or below the live registry
   // high-water are absent from generated client types and this inventory. Keeping
   // dead exemptions would silently pre-suppress any future RPC reusing a name.

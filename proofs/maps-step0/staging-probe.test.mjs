@@ -4,6 +4,7 @@ import { test } from 'vitest';
 import { Script } from 'node:vm';
 import { readFileSync } from 'node:fs';
 import handler from '../../api/maps-step0.mjs';
+import { createAppViteConfig, mapsProofWorkboxOptions } from '../../vite.config.ts';
 
 const host = 'staging.croprxsolutions.app';
 const tilesKey = 'AIza' + 'a'.repeat(35);
@@ -168,17 +169,54 @@ test('excludes malformed configuration from the browser document', () => {
   assert.ok(result.body.includes('"tilesKey":null'));
 });
 
-test('reserves only the probe route from the standard app rewrite and headers', () => {
+test('returns the drawing outage fixture only on the verified staging route', () => {
+  const query = { drawingOutage: '1' };
+  assert.equal(run({ query }).status, 503);
+  assert.equal(run({ query }).body, '');
+  assert.equal(run({ query }).headers['Cache-Control'], 'private, no-store');
+  assert.equal(run({ query, method: 'POST' }).status, 405);
+  assert.equal(run({ query }, { VERCEL_TARGET_ENV: 'preview' }).status, 404);
+  assert.equal(run({ query, headers: { host: 'croprxsolutions.app' } }).status, 404);
+  assert.equal(run({ query: { drawingOutage: ['1', '1'] } }).status, 400);
+  assert.equal(run({ query: { drawingOutage: ['1', '1'] } }).body, '');
+});
+
+test.each([
+  ['staging', 'staging', true],
+  ['staging', 'codex/test', false],
+  ['preview', 'staging', false],
+  ['production', 'main', false],
+  ['', '', false],
+])('adds the drawing bundle only to staging builds of staging (%s, %s)', (target, branch, expected) => {
+  const environment = { VERCEL_TARGET_ENV: target, VERCEL_GIT_COMMIT_REF: branch };
+  const config = createAppViteConfig(environment);
+  assert.equal(config.plugins.some((plugin) => plugin?.name === 'staging-maps-drawing-proof'), expected);
+  const workbox = mapsProofWorkboxOptions(environment);
+  assert.equal(workbox.globIgnores.includes('api/maps-step0-draw/**'), expected);
+  const managesNavigation = workbox.runtimeCaching.find((rule) => rule.options?.cacheName === 'crx-pages').urlPattern;
+  const request = { mode: 'navigate' };
+  assert.equal(managesNavigation({ request, url: new URL('https://' + host + '/fields') }), true);
+  assert.equal(managesNavigation({ request, url: new URL('https://' + host + '/api/maps-step0-draw/index.html') }), !expected);
+});
+
+test('reserves both proof routes from the normal app rewrite and policy', () => {
   const config = JSON.parse(readFileSync(new URL('../../vercel.json', import.meta.url), 'utf8'));
-  for (const rule of [config.rewrites[0], config.headers[0]]) {
+  const appHeaders = config.headers.find((entry) => entry.source === config.rewrites[0].source);
+  assert.ok(appHeaders);
+  for (const rule of [config.rewrites[0], appHeaders]) {
     const source = new RegExp('^' + rule.source + '$');
-    for (const path of ['/', '/fields', '/maps-step0', '/api/maps-step01', '/api/maps-step0/other']) {
+    for (const path of ['/', '/fields', '/maps-step0', '/api/maps-step01', '/api/maps-step0/other', '/api/maps-step0-drawing']) {
       assert.ok(source.test(path), path);
     }
-    for (const path of ['/api/maps-step0', '/api/maps-step0/']) {
+    for (const path of ['/api/maps-step0', '/api/maps-step0/', '/api/maps-step0-draw', '/api/maps-step0-draw/index.html', '/api/maps-step0-draw/assets/worker.js']) {
       assert.ok(!source.test(path), path);
     }
   }
+  const drawingHeaders = config.headers.find((entry) => entry.source === '/api/maps-step0-draw/:path*')?.headers;
+  assert.ok(drawingHeaders);
+  assert.equal(drawingHeaders.find((entry) => entry.key === 'Cache-Control')?.value, 'private, no-store');
+  assert.match(drawingHeaders.find((entry) => entry.key === 'Content-Security-Policy')?.value ?? '',
+    /worker-src 'self';.*connect-src 'self' https:\/\/basemap\.nationalmap\.gov https:\/\/api\.mapbox\.com;/);
 });
 
 function startBrowserProbe(fetch, Image) {

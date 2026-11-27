@@ -1,4 +1,5 @@
-import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
+import { build, defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -10,6 +11,47 @@ const liveSchemaUrl = process.env.VITE_SUPABASE_URL?.trim();
 const liveSchemaServiceRoleKey =
   process.env.CRX_LIVE_SCHEMA_SERVICE_ROLE_KEY?.trim();
 const liveSchemaProductionUrl = 'https://rhyzpcqhnizqbxphqdkr.supabase.co';
+function hasStagingMapsProof(environment: NodeJS.ProcessEnv): boolean {
+  return environment.VERCEL_TARGET_ENV === 'staging' && environment.VERCEL_GIT_COMMIT_REF === 'staging';
+}
+
+function stagingMapsProofPlugin(environment: NodeJS.ProcessEnv): Plugin | undefined {
+  if (!hasStagingMapsProof(environment)) return;
+  return {
+    name: 'staging-maps-drawing-proof',
+    apply: 'build',
+    closeBundle: {
+      order: 'post',
+      sequential: true,
+      handler: async (error) => {
+        if (error) return;
+        await build({
+          configFile: fileURLToPath(new URL('./proofs/maps-step0/vite.config.ts', import.meta.url)),
+          base: '/api/maps-step0-draw/',
+          build: {
+            outDir: fileURLToPath(new URL('./dist/api/maps-step0-draw', import.meta.url)),
+            emptyOutDir: false,
+          },
+        });
+      },
+    },
+  };
+}
+
+export function mapsProofWorkboxOptions(environment: NodeJS.ProcessEnv): typeof workboxOptions {
+  if (!hasStagingMapsProof(environment)) return workboxOptions;
+  return {
+    ...workboxOptions,
+    globIgnores: [...(workboxOptions.globIgnores ?? []), 'api/maps-step0-draw/**'],
+    runtimeCaching: workboxOptions.runtimeCaching?.map((rule) => rule.options?.cacheName === 'crx-pages'
+      ? {
+          ...rule,
+          urlPattern: ({ request, url }) => request.mode === 'navigate'
+            && !/^\/api\/maps-step0-draw(?:\/|$)/.test(url.pathname),
+        }
+      : rule),
+  };
+}
 
 // Unit tests are deliberately isolated from Supabase. A trusted live-schema
 // run must opt in explicitly and provide both credentials; otherwise a typo or
@@ -26,7 +68,7 @@ if (liveSchemaTests && liveSchemaUrl !== liveSchemaProductionUrl) {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export const createAppViteConfig = (environment = process.env) => defineConfig({
   plugins: [
     react(),
     tailwindcss(),
@@ -77,8 +119,9 @@ export default defineConfig({
           },
         ],
       },
-      workbox: workboxOptions,
+      workbox: mapsProofWorkboxOptions(environment),
     }),
+    stagingMapsProofPlugin(environment),
   ],
   optimizeDeps: {
     exclude: ['lucide-react'],
@@ -159,3 +202,5 @@ export default defineConfig({
     },
   },
 });
+
+export default createAppViteConfig();

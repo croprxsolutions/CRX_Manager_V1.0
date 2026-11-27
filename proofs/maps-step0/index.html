@@ -3,17 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MapLibre Draw Proof</title>
+    <link rel="icon" href="data:," />
+    <title>Disposable MapLibre drawing proof</title>
   </head>
   <body>
     <main id="proof-shell">
       <div id="proof-map" aria-label="Map drawing proof"></div>
       <nav id="proof-toolbar" aria-label="Proof controls">
-        <button id="start-polygon" type="button">Start polygon</button>
-        <button id="switch-picture-a" type="button">Picture A</button>
-        <button id="switch-picture-b" type="button">Picture B</button>
+        <button id="start-polygon" type="button" disabled>Start polygon</button>
+        <button id="switch-picture-a" type="button" disabled>Picture A</button>
+        <button id="switch-picture-b" type="button" disabled>Picture B</button>
+        <button id="live-pictures" type="button" disabled hidden>Use live USDA and Mapbox</button>
+        <button id="fail-picture" type="button" disabled>Fail picture</button>
+        <button id="retry-picture" type="button" disabled>Retry</button>
+        <button id="save-draft" type="button" disabled>Save synthetic draft</button>
+        <button id="reopen-draft" type="button" disabled>Reopen</button>
         <output id="proof-status" aria-live="polite">Loading map</output>
       </nav>
+      <aside id="proof-credits" aria-label="Picture credits">
+        <span id="usda-credit" hidden>
+          <a href="https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer">USDA, USGS The National Map: Orthoimagery</a>
+        </span>
+        <span id="mapbox-credit" hidden>
+          <a class="mapboxgl-ctrl-logo" href="https://www.mapbox.com/" aria-label="Mapbox"></a>
+          <a href="https://www.mapbox.com/about/maps/">© Mapbox</a>
+          <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a>
+          <a href="https://www.maxar.com/">© Maxar</a>
+          <a id="mapbox-feedback" href="https://apps.mapbox.com/feedback/">Improve this map</a>
+        </span>
+      </aside>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

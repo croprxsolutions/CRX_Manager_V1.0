@@ -6,7 +6,8 @@
 --   1. _assert_whole_item_quantity(product, qty, hint): the product lookup, finite-whole test and raise, in one place.
 --   2. _enforce_whole_item_quantity() re-emitted to call it and to know four more tables:
 --      purchase_order_items.quantity_ordered, receiving_records.quantity_received (each receipt, so a reversal,
---      which deletes the receipt, is never refused), cycle_count_items.counted_qty, return_items.quantity.
+--      which deletes the receipt, is never refused), cycle_count_items.counted_qty, return_items.quantity (except a return on a split-billed sale,
+--      which may be fractional: Mason 2026-11-26; split = create_return's own share_mode test).
 --      Quote, order and delivery behavior (and the quote hint) is unchanged.
 --   3. a3_whole_item_quantity triggers on those four tables.
 --   4. adjust_inventory and _manual_inventory_add_replay_impl_20261015 call the helper on the typed figure, after
@@ -110,6 +111,14 @@ BEGIN
     RAISE EXCEPTION 'WHOLE_ITEMS_TRIGGER_TABLE: % is not a whole-item table', TG_TABLE_NAME;
   END IF;
   IF NEW.product_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+  -- Mason 2026-11-26: a return on a split-billed sale may be fractional (one item shared by payers). Split is
+  -- create_return's own test for pricing a payer's share (_return_customer_line_share.share_mode).
+  IF TG_TABLE_NAME = 'return_items' AND EXISTS (
+       SELECT 1 FROM public.returns r
+        CROSS JOIN LATERAL public._return_customer_line_share(r.order_id, (v_new->>'order_item_id')::uuid, r.customer_id, r.id) s
+        WHERE r.id = (v_new->>'return_id')::uuid AND r.order_id IS NOT NULL AND s.share_mode) THEN
     RETURN NEW;
   END IF;
   FOREACH v_col IN ARRAY v_cols LOOP
@@ -383,6 +392,7 @@ BEGIN
     SELECT 'return ' || r.return_number FROM public.return_items ri JOIN public.returns r ON r.id = ri.return_id
      WHERE ri.product_id IN (SELECT id FROM whole_items)
        AND NOT (ri.quantity = trunc(ri.quantity) AND ri.quantity > '-Infinity'::numeric AND ri.quantity < 'Infinity'::numeric)
+       AND NOT (r.order_id IS NOT NULL AND EXISTS (SELECT 1 FROM public._return_customer_line_share(r.order_id, ri.order_item_id, r.customer_id, r.id) s WHERE s.share_mode))
   )
   SELECT string_agg(doc, ', ' ORDER BY doc) INTO v_docs FROM (SELECT doc FROM bad ORDER BY doc LIMIT 10) first_ten;
   IF v_docs IS NOT NULL THEN
@@ -400,7 +410,7 @@ BEGIN
   SELECT string_agg(a.sig, ', ') INTO v_bad
     FROM pg_temp.whole_item_followups_attrs a JOIN pg_proc p ON p.oid = a.fn_oid
    WHERE md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM CASE a.sig
-           WHEN '_enforce_whole_item_quantity()' THEN '5f23e2ec36ccee0a9eefa54f393f505e'
+           WHEN '_enforce_whole_item_quantity()' THEN '0ec25eb446a0cbd211538673b949593b'
            WHEN 'adjust_inventory(uuid,numeric,text,uuid,text)' THEN '43c9a4f91308ac272747071a4af437e8'
            ELSE 'f741844f6907c41ebf3329fa15b1a21c' END
       OR pg_get_userbyid(p.proowner) IS DISTINCT FROM a.owner OR p.proacl::text IS DISTINCT FROM a.acl

@@ -11,7 +11,7 @@ DECLARE
   v_bad text;
 BEGIN
   SELECT string_agg(s.sig || ' ' || COALESCE(md5(replace(p.prosrc, chr(13), '')), 'missing'), ', ') INTO v_bad
-    FROM (VALUES ('public._enforce_whole_item_quantity()', '5f23e2ec36ccee0a9eefa54f393f505e'),
+    FROM (VALUES ('public._enforce_whole_item_quantity()', '0ec25eb446a0cbd211538673b949593b'),
                  ('public.adjust_inventory(uuid,numeric,text,uuid,text)', '43c9a4f91308ac272747071a4af437e8'),
                  ('public._manual_inventory_add_replay_impl_20261015(uuid,text,numeric,text,uuid,text,numeric,text,numeric,numeric)', 'f741844f6907c41ebf3329fa15b1a21c')) s(sig, md5)
     LEFT JOIN pg_proc p ON p.oid = to_regprocedure(s.sig)

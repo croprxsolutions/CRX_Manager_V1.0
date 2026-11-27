@@ -445,7 +445,19 @@ function afterCases() {
   refusedAs(asAdmin(ret(0.5)), WHOLE('Seed Ea', 'Ea', '0.5'), 'returning 0.5 Ea');
   assert.equal(scalar(`SELECT count(*) FROM public.returns WHERE order_id = '${ORD}';`), '0');
   okAs(asAdmin(ret(1)), 'returning 1 Ea');
-  console.log('[case 6] returns: 0.5 Ea refused, no return; 1 Ea works');
+  // Split-billed sale (Mason 2026-11-26): a payer's share of one item may come back as a fraction. The same return
+  // line on the single-payer order is refused, so only the split test differs.
+  const splitLine = (split) => probe(`UPDATE public.orders SET needs_split_billing = ${split} WHERE id = '${ORD}';
+    INSERT INTO public.returns (id, return_number, customer_id, order_id, reason, requested_by, status)
+      VALUES ('${id('e9')}', 'WHOLEFU-R9', '${CUST}', '${ORD}', 'damaged', '${ADMIN}', 'requested');
+    INSERT INTO public.return_items (return_id, order_item_id, product_id, product_name, quantity, unit, unit_price_cents, extended_cents, condition, restock, sort_order)
+      VALUES ('${id('e9')}', '${OE}', '${PE}', '[PROVER] Seed Ea', 0.33, 'Ea', 1000, 330, 'unopened', true, 0);
+    SELECT quantity FROM public.return_items WHERE return_id = '${id('e9')}';`);
+  const split = splitLine(true);
+  okAs(split, 'a 0.33 Ea return line on a split-billed sale');
+  assert.equal(split.last, '0.33', split.output);
+  refusedAs(splitLine(false), WHOLE('Seed Ea', 'Ea', '0.33'), 'the same 0.33 Ea return line on a single-payer sale');
+  console.log('[case 6] returns: 0.5 Ea refused, no return; 1 Ea works; on a split-billed sale a 0.33 Ea return line saves, refused on the same sale unsplit');
 
   // 9. No API role can call the helper or the trigger function; the two RPCs keep their grants.
   for (const role of ['anon', 'authenticated', 'service_role']) {

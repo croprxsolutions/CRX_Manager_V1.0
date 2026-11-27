@@ -10,6 +10,8 @@ only after #2675 merges into staging; the new migration stacks above it.
 - **D2** Everywhere a quantity is typed. #2675 did quote, order and delivery lines; this does the rest.
 - **D3** New and changed figures only.
 - **D4** Refuse, never round.
+- **D5** (2026-11-26, on this PR) A return on a split-billed sale may be fractional: one item shared by payers is
+  returned in shares. Split = `create_return`'s own share test (`_return_customer_line_share(...).share_mode`).
 
 ## Facts
 - **Purchase order lines** hold their figures in the stock unit: `a1_line_unit_is_stock_unit` (20270121110000) refuses a
@@ -42,7 +44,7 @@ One rule and one message, reused from #2675:
 (check_violation). Nothing is rounded. Gal/Lb/oz products are unchanged.
 
 Covered (typed figures that move or promise stock): PO ordered quantity, each receipt, count, adjustment, manual add,
-return quantity. Not covered (named): reorder point and minimum stock (planning thresholds, not stock), field
+return quantity (except a return on a split-billed sale, D5). Not covered (named): reorder point and minimum stock (planning thresholds, not stock), field
 application quantities, and every automatic movement or reversal.
 
 Smallest change, one migration:
@@ -107,7 +109,8 @@ bodies. Returns are next to Taha's return-credit work (#2537 changes credits, no
 4. `adjust_inventory` -0.5 and +0.5 on Ea refused, stock and ledger unchanged; -1 works; Gal -0.5 works; a retry of a
    success returns its receipt.
 5. `manual_inventory_add` 2.5 on Ea refused, no inventory row; 2 works.
-6. `create_return` of 0.5 on a delivered 2 Ea line refused, no return; 1 works.
+6. `create_return` of 0.5 on a delivered 2 Ea line refused, no return; 1 works. On a split-billed sale a 0.33 Ea
+   return line saves; the same line on an unsplit sale is refused (D5).
 7. Re-pointing a Gal PO line at 2.5 to an Ea product (unit changed too) is refused with the sentence.
 8. The apply is refused while a fractional Ea PO line exists, naming it; a second apply is refused by the preflight.
 9. No API role can call the helper or trigger function; the two RPCs keep their grants and owners.
@@ -142,8 +145,7 @@ bodies. Returns are next to Taha's return-credit work (#2537 changes credits, no
   has PO lines, receipts, returns, order or delivery lines, stock movements or an active hold (`PRODUCT_UNIT_HAS_HISTORY`,
   20270201130000), so the case cannot arise for the figures this change covers.
 
-## Open business decisions
-- **Split-payer returns of a whole item.** When a sale is billed to two payers, a payer's share can be a fraction
-  (1 Ea split 50/50 = 0.5 each), so neither payer could return it. Options: (a) refuse, as everywhere else; a payer's half
-  item cannot go through the Returns screen, so any refund for it is handled outside it; (b) allow fractions on split-payer returns only (a second rule plus a way
-  to record one physical item returned by two payers). Recommendation (a): live has no sale at all on these products.
+## Business decisions settled on this PR
+- **Split-payer returns of a whole item.** Mason chose to allow fractions (D5): a sale split between payers is
+  returned in shares. The trigger and postflight skip return lines whose sale is split by `create_return`'s own test;
+  `create_return` still caps each payer at their share.

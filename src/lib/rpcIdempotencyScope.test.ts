@@ -219,11 +219,14 @@ const ALIAS_SCOPED: Record<string, string> = {
 };
 
 /**
- * Internal non-RPC functions that deliberately inspect another operation's
- * idempotency row. These do not read or write a cache under their own function
- * name, so treating the referenced operation as an alias would be misleading.
+ * Functions that deliberately use another operation's existing receipt.
+ * They do not create or return their own cached result under that name.
  */
-const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
+const OTHER_OPERATION_REFERENCES: Record<string, string[]> = {
+  // The checked save delegates to the original writer and marks only a newly
+  // bound receipt. The sender locks that actor's receipt and records delivery.
+  create_direct_order_with_credit_notice: ['create_direct_order'],
+  send_direct_order_credit_notice: ['create_direct_order'],
   _guard_idempotency_key_insert: ['allocate_payment'],
   // Direct EXECUTE is revoked (live 2026-09-05: proacl `postgres=X/postgres`;
   // anon and authenticated both false, while the public create_quick_delivery
@@ -724,7 +727,7 @@ describe('Idempotency operation literals in latest disk migrations', () => {
       const expected = new Set([
         fnName,
         ALIAS_SCOPED[fnName],
-        ...(INTERNAL_OPERATION_REFERENCES[fnName] || []),
+        ...(OTHER_OPERATION_REFERENCES[fnName] || []),
       ].filter(Boolean));
       for (const lit of literals) {
         if (!expected.has(lit)) {

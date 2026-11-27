@@ -1,22 +1,57 @@
--- Prepare the liquid Weight review without opening the switch or rewriting existing approvals.
+-- Update liquid Weight review without changing the switch or rewriting existing approvals.
 -- Replacements retain the existing owners, signatures, and execute grants.
 
 SET LOCAL lock_timeout = '5s';
 
 DO $preflight$
+DECLARE
+  v_switch_md5 text;
+  v_open boolean;
+  v_trigger_md5 text;
 BEGIN
-  IF public.liquid_density_review_open() IS DISTINCT FROM false THEN
-    RAISE EXCEPTION 'PREFLIGHT_LIQUID_WEIGHT_BRAND_RECHECK: the weight review switch must be closed';
-  END IF;
-  IF EXISTS (
+  SELECT md5(replace(p.prosrc, chr(13), '')) INTO v_switch_md5
+    FROM pg_catalog.pg_proc p WHERE p.oid = to_regprocedure('public.liquid_density_review_open()');
+  v_open := v_switch_md5 = '21e4ff3b1972203a116eb1f276b0bbc1';
+  v_trigger_md5 := CASE v_switch_md5
+    WHEN '7d69bbf21ad55293e15c24da50eaaa11' THEN 'f4a558214d47daf8d0bc2c2785e2f113'
+    WHEN '21e4ff3b1972203a116eb1f276b0bbc1' THEN '05f0e0addf0357be03376cae71859330'
+  END;
+
+  IF v_trigger_md5 IS NULL OR (v_open AND NOT EXISTS (
+    SELECT 1 FROM supabase_migrations.schema_migrations WHERE name = '20270312233100_enable_liquid_density_review'
+  )) OR EXISTS (
     SELECT 1 FROM (VALUES
-      ('public.approve_weights(jsonb,text)', 'adda6f0854f3de86bca3e5d50ae88113'),
-      ('public.return_liquid_density_to_draft_for_brand()', 'f4a558214d47daf8d0bc2c2785e2f113')
-    ) AS expected(signature, body_md5)
+      ('public.approve_weights(jsonb,text)', 'adda6f0854f3de86bca3e5d50ae88113', true, 'v', true),
+      ('public.return_liquid_density_to_draft_for_brand()', v_trigger_md5, true, 'v', false),
+      ('public.liquid_density_review_open()', v_switch_md5, false, 's', true)
+    ) AS expected(signature, body_md5, definer, volatility, staff_execute)
     LEFT JOIN pg_catalog.pg_proc AS p ON p.oid = to_regprocedure(expected.signature)
-    WHERE md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM expected.body_md5
+    WHERE p.oid IS NULL
+      OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM expected.body_md5
+      OR p.proowner IS DISTINCT FROM 'postgres'::regrole OR p.prosecdef IS DISTINCT FROM expected.definer
+      OR p.provolatile::text IS DISTINCT FROM expected.volatility
+      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
+      OR p.proacl IS NULL OR EXISTS (
+        SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee <> p.proowner
+          AND (a.grantee <> 'authenticated'::regrole OR NOT expected.staff_execute OR a.is_grantable)
+      )
+      OR has_function_privilege('authenticated', p.oid, 'EXECUTE') IS DISTINCT FROM expected.staff_execute
+      OR EXISTS (
+        SELECT 1 FROM pg_catalog.pg_proc other
+         WHERE other.pronamespace = p.pronamespace AND other.proname = p.proname AND other.oid <> p.oid
+      )
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_trigger t
+     WHERE t.tgrelid = to_regclass('public.product_parent_brands')
+       AND t.tgname = 'return_liquid_density_to_draft_for_brand' AND t.tgenabled = 'O' AND NOT t.tgisinternal
+       AND t.tgfoid = to_regprocedure('public.return_liquid_density_to_draft_for_brand()')
+       AND pg_get_triggerdef(t.oid) ~ (
+         ' AFTER INSERT OR UPDATE OF status, parent_id, epa_registration, manufacturer' ||
+         CASE WHEN v_open THEN ', brand_name' ELSE '' END ||
+         ' ON (public[.])?product_parent_brands FOR EACH ROW EXECUTE FUNCTION (public[.])?return_liquid_density_to_draft_for_brand[(][)]$'
+       )
   ) THEN
-    RAISE EXCEPTION 'PREFLIGHT_LIQUID_WEIGHT_BRAND_RECHECK: existing weight functions differ from the reviewed versions';
+    RAISE EXCEPTION 'PREFLIGHT_LIQUID_WEIGHT_BRAND_RECHECK: unrecognized switch, weight functions, or brand trigger';
   END IF;
 END;
 $preflight$;
@@ -32,11 +67,11 @@ DECLARE
 BEGIN
   IF NOT public.liquid_density_review_open() OR NEW.status <> 'active' THEN RETURN NULL; END IF;
   IF TG_OP = 'UPDATE' AND OLD.status = 'active' AND OLD.parent_id = NEW.parent_id THEN
-    IF lower(btrim(regexp_replace(OLD.brand_name, '[[:space:]]+', ' ', 'g')))
-        IS DISTINCT FROM lower(btrim(regexp_replace(NEW.brand_name, '[[:space:]]+', ' ', 'g'))) THEN
-      v_reason := 'An active brand changed its name';
-    ELSIF (OLD.epa_registration, OLD.manufacturer) IS DISTINCT FROM (NEW.epa_registration, NEW.manufacturer) THEN
+    IF (OLD.epa_registration, OLD.manufacturer) IS DISTINCT FROM (NEW.epa_registration, NEW.manufacturer) THEN
       v_reason := 'An active brand changed its EPA registration or manufacturer';
+    ELSIF lower(btrim(regexp_replace(OLD.brand_name, '[[:space:]]+', ' ', 'g')))
+        IS DISTINCT FROM lower(btrim(regexp_replace(NEW.brand_name, '[[:space:]]+', ' ', 'g'))) THEN
+      v_reason := 'An active brand name changed';
     ELSE
       RETURN NULL;
     END IF;
@@ -78,7 +113,7 @@ END;
 $function$;
 
 CREATE OR REPLACE TRIGGER return_liquid_density_to_draft_for_brand
-  AFTER INSERT OR UPDATE OF status, parent_id, brand_name, epa_registration, manufacturer ON public.product_parent_brands
+  AFTER INSERT OR UPDATE OF status, parent_id, epa_registration, manufacturer, brand_name ON public.product_parent_brands
   FOR EACH ROW EXECUTE FUNCTION public.return_liquid_density_to_draft_for_brand();
 
 CREATE OR REPLACE FUNCTION public.approve_weights(p_items jsonb, p_idempotency_key text DEFAULT NULL) RETURNS jsonb

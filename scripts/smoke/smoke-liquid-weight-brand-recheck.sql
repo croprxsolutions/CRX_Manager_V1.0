@@ -60,6 +60,22 @@ BEGIN
     IF SQLERRM <> 'SMOKE_CLOSED_ROLLBACK' THEN RAISE; END IF;
   END;
 
+  BEGIN
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM public.upsert_parent_brand(v_parent, v_size, 'Compound Edit Brand', '12345-2', 'Smoke Maker', true,
+      NULL, NULL, v_brand, 1, p_idempotency_key => 'rename-compound-' || v_tag);
+    EXECUTE 'RESET ROLE';
+    IF NOT EXISTS (
+      SELECT 1 FROM public.product_weight_events WHERE parent_id = v_parent AND value_id = v_approved
+        AND event_type = 'returned_to_draft' AND reason = 'An active brand changed its EPA registration or manufacturer'
+    ) THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: a compound edit must report the EPA or manufacturer change first';
+    END IF;
+    RAISE EXCEPTION 'SMOKE_COMPOUND_ROLLBACK';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'SMOKE_COMPOUND_ROLLBACK' THEN RAISE; END IF;
+  END;
+
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   PERFORM public.upsert_parent_brand(v_parent, v_size, E'  sMOKE\t  BRAND A  ', '12345-1', 'Smoke Maker', true,
     NULL, NULL, v_brand, 1, p_idempotency_key => 'rename-cosmetic-' || v_tag);
@@ -116,10 +132,10 @@ BEGIN
   EXECUTE 'RESET ROLE';
   IF NOT EXISTS (
     SELECT 1 FROM public.product_weight_events WHERE parent_id = v_parent AND event_type = 'returned_to_draft'
-      AND reason = 'An active brand changed its name' AND after_value->0->>'review_state' = 'superseded'
+      AND reason = 'An active brand name changed' AND after_value->0->>'review_state' = 'superseded'
   ) OR NOT EXISTS (
     SELECT 1 FROM public.product_weight_events WHERE parent_id = v_parent AND value_id = v_approved
-      AND event_type = 'returned_to_draft' AND reason = 'An active brand changed its name'
+      AND event_type = 'returned_to_draft' AND reason = 'An active brand name changed'
       AND before_value->0->>'review_state' = 'approved' AND after_value->0->>'review_state' = 'draft'
   ) OR NOT EXISTS (
     SELECT 1 FROM public.blend_ticket_product_weights

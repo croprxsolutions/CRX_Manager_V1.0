@@ -5,7 +5,7 @@
 
 #2702 (migration `20270314160000_applicator_crew_base_read_lockdown.sql`) stopped applicators and
 dispatched crew from reading four price-bearing base tables; their screens read the price-free crew
-views instead. Sol passed it clean and left these notes open. Through the app none exposes a price; item 2 can re-open crew price reads only if someone runs the reverse script by hand the wrong way.
+views instead. Sol passed it clean and left these notes open. Items 1–9 expose no price through the app; item 10 is an open price path outside the four tables; item 2 can re-open crew price reads only if someone runs the reverse script by hand the wrong way.
 
 1. MED: the order "frontend first" is written only as a comment in the migration. If the database
    change goes live while an old app bundle is still being served, or a tab is still open from
@@ -36,3 +36,10 @@ From the #2712 follow-up review (Sol round 3, all LOW, left open to stop the rev
    its purpose, and it needs Mason's yes under the contract's Undo / recovery rule.
 9. LOW: item 5's field-access prover also pins the old `fbd_select` policy, so a view fallback in
    the smoke alone will not make it pass after the lockdown; the prover's policy pin must change too.
+
+From Taha's #2712 review (2026-11-27):
+10. MED (owner: price hide step 2): `activity_feed` is outside the four tables #2702 locked down. Its
+    read policy (`activity_select`, `20260727174657`) lets every active profile, applicators included,
+    read every row. Invoice-post and returned-payment rows carry a dollar amount and the customer, so an
+    applicator can still see billed totals for customers on their jobs. Cost figures were already kept
+    out of this feed (`20260729015706`); invoice and payment amounts were not.

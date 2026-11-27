@@ -195,14 +195,16 @@ describe('QuoteBuilder — acres on a new line', () => {
     await waitFor(() => expect(acres()).toEqual(['', '80']));
     expect(screen.getByText('Filled from field')).toBeInTheDocument();
 
+    // A third line, filled from the field and given no product yet.
+    fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
+    await waitFor(() => expect(acres()).toEqual(['', '80', '80']));
+
     // Clearing the field drops the acres it filled in, hint and all.
     fireEvent.click(screen.getByRole('button', { name: /^Clear field/ }));
-    await waitFor(() => expect(acres()).toEqual(['', '']));
-    expect(screen.queryByText('Filled from field')).not.toBeInTheDocument();
-
-    // A blank line the field had filled is still untouched after the clear: closing its picker drops it.
-    fireEvent.click(await screen.findByRole('button', { name: 'Add product' }));
     await waitFor(() => expect(acres()).toEqual(['', '', '']));
+    expect(screen.queryByText(/^(Filled from field|Copied from line above)$/)).not.toBeInTheDocument();
+
+    // The third line is still untouched after the clear: closing its picker drops it.
     const selects = screen.getAllByRole('button', { name: /Select product/ });
     fireEvent.click(selects[selects.length - 1]);
     fireEvent.keyDown(await screen.findByPlaceholderText('Search by name, SKU, category, or vendor...'), { key: 'Escape' });
@@ -251,6 +253,22 @@ describe('QuoteBuilder — acres on a new line', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     await waitFor(() => expect(acres()).toEqual(['0', '']));
     expect(screen.queryByText(/^(Filled from field|Copied from line above)$/)).not.toBeInTheDocument();
+  });
+
+  it('a copy of typed acres follows a field picked afterwards, and the typed line keeps its acres (Sol, #2445)', { timeout: 20000 }, async () => {
+    renderNewQuote();
+    await pickCustomer();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
+    await pickProductOnLastLine();
+    fireEvent.change(screen.getByLabelText('Acres'), { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
+    await waitFor(() => expect(acres()).toEqual(['40', '40']));
+
+    const fieldBox = await screen.findByRole('combobox', { name: 'Field for Section 1' });
+    fireEvent.change(fieldBox, { target: { value: 'Ho' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Home Quarter/ }));
+    await waitFor(() => expect(acres()).toEqual(['40', '80']));
+    expect(screen.queryByText('Copied from line above')).not.toBeInTheDocument();
   });
 
   it('saves and prices the filled acres exactly as typed acres', { timeout: 20000 }, async () => {

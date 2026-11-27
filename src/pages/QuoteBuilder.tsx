@@ -1911,7 +1911,9 @@ export default function QuoteBuilder() {
   // a units line's totals do not use acres, only its per-acre figures do. So this needs neither the
   // product nor the unit conversions, which may still be loading.
   const clearSectionField = (sec: LocalSection): LocalSection => {
-    const filledByField = (item: LocalItem) => item.acres != null && item.acres_source === 'field';
+    // An untouched copy of the line above was made for the old field, so it goes too (Sol, #2445).
+    const filledByField = (item: LocalItem) =>
+      item.acres != null && (item.acres_source === 'field' || item.acres_prefill === 'line_above');
     return {
       ...sec,
       field_id: null,
@@ -2259,8 +2261,9 @@ export default function QuoteBuilder() {
       prev.map((section) => {
         if (section._key !== sectionKey) return section;
         // Clearing or replacing the field first drops the acres the old field filled in, as a
-        // customer change does; typed acres stay (Codex, #1049).
-        const cleared = section.field_id ? clearSectionField(section) : section;
+        // customer change does; typed acres stay (Codex, #1049). A first field also drops untouched
+        // copies of the line above, made before any field was known (Sol, #2445).
+        const cleared = clearSectionField(section);
         const withField = { ...cleared, field_id: field?.id ?? null };
         if (effectiveAcres == null) return withField;
         return {

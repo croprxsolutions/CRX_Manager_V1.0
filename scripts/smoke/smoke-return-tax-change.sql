@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a return still credits after the sale's sales-tax box changes (issue #2066)
 -- ----------------------------------------------------------------------------
--- Migration 20270313040000_return_tax_change_credit. Mason's rule (22 Nov): when tax changed after the return was
+-- Migration 20270315120000_return_tax_change_credit. Mason's rule (22 Nov): when tax changed after the return was
 -- made, its credit re-prices to the taxed share, and is never more than the customer was charged on the posted
 -- invoice, tax included.
 --   A  Untaxed sale, return of 4 of 10 made and received at the order price; the box is ticked and the draft posts

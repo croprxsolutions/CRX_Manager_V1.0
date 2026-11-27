@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270313040000_return_tax_change_credit.sql (#2066).
+ * Real-schema proof for 20270315120000_return_tax_change_credit.sql (#2066).
  *
  * Builds the checked-in production baseline in a network-disabled PostgreSQL container and replays every
  * migration before the candidate (scripts/smoke/undo-paths/harness.mjs), seeds invented users, customers and a
@@ -28,7 +28,7 @@ import {
   NAME, ROOT, USERS, buildContainer, claims, docker, psql, removeContainer, scalar, seedUsers,
 } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270313040000_return_tax_change_credit.sql';
+const CANDIDATE = '20270315120000_return_tax_change_credit.sql';
 const SMOKE = path.join(ROOT, 'scripts', 'smoke');
 const NEW_CHAIN = 'smoke-return-tax-change.sql';
 const COVERING = ['smoke-credit-tax-ledger.sql', 'smoke-sales-tax.sql', 'smoke-split-payer-return-credit.sql', 'smoke-billing-m4-switch.sql', 'smoke-standing-grower-discount.sql'];

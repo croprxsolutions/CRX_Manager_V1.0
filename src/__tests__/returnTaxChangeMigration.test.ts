@@ -1,11 +1,11 @@
 /**
- * Contract for 20270313040000_return_tax_change_credit (#2066). The behaviour is proven on the real schema by
+ * Contract for 20270315120000_return_tax_change_credit (#2066). The behaviour is proven on the real schema by
  * scripts/smoke/prove-return-tax-change-real-schema.mjs; this pins the shape the proof relies on.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const MIGRATION = readFileSync('supabase/migrations/20270313040000_return_tax_change_credit.sql', 'utf8');
+const MIGRATION = readFileSync('supabase/migrations/20270315120000_return_tax_change_credit.sql', 'utf8');
 
 function body(name: string): string {
   const start = MIGRATION.indexOf(`CREATE OR REPLACE FUNCTION public.${name}(`);
@@ -14,7 +14,7 @@ function body(name: string): string {
   return MIGRATION.slice(open, MIGRATION.indexOf('$function$;', open + 13));
 }
 
-describe('20270313040000 return credit after a tax change', () => {
+describe('20270315120000 return credit after a tax change', () => {
   it('runs as one transaction and pins the four bodies it re-emits', () => {
     expect(MIGRATION).toContain('RETURN_TAX_CHANGE_NOT_IN_TRANSACTION');
     expect(MIGRATION).toContain("'67566a09967e74b1ee813354038955b0'");

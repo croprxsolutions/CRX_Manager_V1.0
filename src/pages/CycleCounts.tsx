@@ -517,7 +517,7 @@ export default function CycleCounts() {
       if (error) {
         failedItemWritesRef.current.add(failedItemWriteKey(item.cycle_count_id, itemId));
         Sentry.captureException(error);
-        toast('error', error.message || 'Failed to update count');
+        toast('error', sanitizeError(error) || 'Failed to update count');
         return;
       }
       const result = assertRpcResult<{

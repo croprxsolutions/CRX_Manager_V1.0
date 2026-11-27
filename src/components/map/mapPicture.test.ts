@@ -79,6 +79,18 @@ describe('local map picture style', () => {
     expect(map.setLayoutProperty).toHaveBeenNthCalledWith(1, MAPBOX_PICTURE_LAYER_ID, 'visibility', 'none');
     expect(map.setLayoutProperty).toHaveBeenNthCalledWith(2, USDA_PICTURE_LAYER_ID, 'visibility', 'visible');
   });
+
+  it('shows a Mapbox picture on a source that has not loaded its tile list yet', () => {
+    const mapboxSource = { tiles: undefined, setTiles: vi.fn() };
+    const map = {
+      getLayer: vi.fn((id: string) => id === MAPBOX_PICTURE_LAYER_ID || id === USDA_PICTURE_LAYER_ID ? { id } : undefined),
+      getSource: vi.fn(() => mapboxSource),
+      setLayoutProperty: vi.fn(),
+    };
+    expect(() => applyDisplayedPicture(map as never, 'roads', 'test')).not.toThrow();
+    expect(mapboxSource.setTiles).toHaveBeenCalledWith([mapboxTileTemplate('roads', 'test')]);
+    expect(map.setLayoutProperty).toHaveBeenCalledWith(MAPBOX_PICTURE_LAYER_ID, 'visibility', 'visible');
+  });
 });
 
 describe('Mapbox picture error classification', () => {

@@ -570,7 +570,10 @@ function FieldSetupPage() {
   const billable = billableAcres(field.override_acres, measuredPreview, field.total_acres);
 
   // Duplicate field name check
+  // Only the latest check may set the warning; an older, slower reply is dropped.
+  const duplicateCheckRef = useRef(0);
   const checkDuplicate = useCallback(async (name: string, customerId: string) => {
+    const requestId = ++duplicateCheckRef.current;
     if (!name || !customerId) {
       setDuplicateWarning('');
       return;
@@ -582,6 +585,7 @@ function FieldSetupPage() {
       .ilike('field_name', name);
     if (!isNew && id) duplicateQuery = duplicateQuery.neq('id', id);
     const { data } = await duplicateQuery.limit(1);
+    if (requestId !== duplicateCheckRef.current) return;
     if (data && data.length > 0) {
       setDuplicateWarning(`A field named "${data[0].field_name}" already exists for this customer.`);
     } else {

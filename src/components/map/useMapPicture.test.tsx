@@ -105,6 +105,32 @@ describe('useMapPicture', () => {
     expect(result.current.displayedPicture).toBe('usda');
   });
 
+  it('shows the USDA notice only after 3 USDA tile errors', () => {
+    const { result } = renderHook(() => useMapPicture({ token: '', baseLayer: 'usda' }));
+    const usdaError = { sourceId: 'crx-usda-picture', error: { status: 503 } };
+    act(() => result.current.onError(usdaError));
+    expect(result.current.notice).toBeNull();
+    act(() => {
+      result.current.onError(usdaError);
+      result.current.onError(usdaError);
+    });
+    expect(result.current.notice).not.toBeNull();
+  });
+
+  it('ignores Mapbox errors arriving in the same tick as a switch to USDA', () => {
+    const token = 'pk.test-not-a-real-token';
+    const { result } = renderHook(() => useMapPicture({ token }));
+    act(() => result.current.onMapLoad(fakeMap(token).map as never));
+    const mapboxError = { sourceId: 'crx-mapbox-picture', error: { status: 401 } };
+    act(() => {
+      result.current.selectPicture('usda');
+      result.current.onError(mapboxError);
+      result.current.onError(mapboxError);
+      result.current.onError(mapboxError);
+    });
+    expect(result.current.notice).toBeNull();
+  });
+
   it('ignores late errors from a Mapbox style the user switched away from', () => {
     const token = 'pk.test-not-a-real-token';
     const { result } = renderHook(() => useMapPicture({ token }));

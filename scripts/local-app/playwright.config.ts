@@ -47,8 +47,8 @@ export default defineConfig({
     baseURL: APP_URL,
     actionTimeout: 15_000,
     screenshot: 'only-on-failure',
-    // Only the USDA raster host may leave this computer; Mapbox is intercepted by the proof fixture.
-    proxy: { server: 'http://127.0.0.1:9', bypass: '127.0.0.1,basemap.nationalmap.gov' },
+    // A dead proxy for everything but this computer, so a stray request cannot leave, IP addresses included.
+    proxy: { server: 'http://127.0.0.1:9', bypass: '127.0.0.1' },
     launchOptions: { args: ['--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] },
   },
   webServer: {

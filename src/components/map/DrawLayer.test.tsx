@@ -45,4 +45,27 @@ describe('DrawLayer', () => {
     );
     expect(updated.map((part) => part.label)).toEqual(['North', 'South']);
   });
+
+  it('starts a second update from the first update before the parent re-renders', () => {
+    const initialPolygons: DrawnPolygon[] = [
+      { drawId: 'part-a', polygon: polygon('part-a', 0), acres: 10, label: 'North' },
+      { drawId: 'part-b', polygon: polygon('part-b', 1), acres: 20, label: 'South' },
+    ];
+    const onPolygonsChange = vi.fn();
+    render(<DrawLayer initialPolygons={initialPolygons} onPolygonsChange={onPolygonsChange} />);
+    const drawProps = mockDrawControl.mock.calls[0][0] as {
+      onDrawUpdate: (features: Feature<Polygon>[]) => void;
+    };
+    const movedA = polygon('part-a', 2);
+    const movedB = polygon('part-b', 3);
+
+    drawProps.onDrawUpdate([movedA]);
+    drawProps.onDrawUpdate([movedB]);
+
+    const second = onPolygonsChange.mock.calls[1][0] as DrawnPolygon[];
+    expect(second.map((part) => part.polygon.geometry.coordinates)).toEqual([
+      movedA.geometry.coordinates,
+      movedB.geometry.coordinates,
+    ]);
+  });
 });

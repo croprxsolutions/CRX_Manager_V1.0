@@ -29,6 +29,15 @@ interface UseMapPictureResult {
   selectPicture: (picture: MapPicture) => void;
 }
 
+/** Adds an error now; true once 3 fall inside the rolling window. Mutates the list in place. */
+function recordRecentError(times: number[]): boolean {
+  const now = Date.now();
+  const recent = times.filter((at) => now - at <= FALLBACK_WINDOW_MS);
+  recent.push(now);
+  times.splice(0, times.length, ...recent);
+  return recent.length >= 3;
+}
+
 export function useMapPicture({ token, baseLayer = 'satellite', printMode = false }: UseMapPictureOptions): UseMapPictureResult {
   const mapboxToken = token || undefined;
   const mapboxAvailable = !!mapboxToken;
@@ -44,6 +53,7 @@ export function useMapPicture({ token, baseLayer = 'satellite', printMode = fals
   // The handlers read the picture on screen now, so a late error from a hidden source is ignored.
   const displayedRef = useRef<MapPicture>(initialPicture);
   const mapboxErrorsRef = useRef<number[]>([]);
+  const usdaErrorsRef = useRef<number[]>([]);
   const fallbackUsedRef = useRef(false);
 
   // Called when the map is created and again on load. A choice made before the style is ready is
@@ -57,7 +67,8 @@ export function useMapPicture({ token, baseLayer = 'satellite', printMode = fals
 
   const onError = useCallback((event: MapPictureErrorEvent) => {
     if (event.sourceId === 'crx-usda-picture') {
-      if (displayedRef.current === 'usda') setNotice(USDA_UNAVAILABLE_NOTICE);
+      // Same 3-in-10 s rule as Mapbox, so one dropped tile does not leave a lasting notice.
+      if (displayedRef.current === 'usda' && recordRecentError(usdaErrorsRef.current)) setNotice(USDA_UNAVAILABLE_NOTICE);
       return;
     }
     if (!isMapboxHttpTileError(event)) return;
@@ -66,12 +77,9 @@ export function useMapPicture({ token, baseLayer = 'satellite', printMode = fals
     // A late error from a Mapbox style the user already switched away from does not count.
     const url = event.error?.url;
     if (url && !url.startsWith(mapboxTileTemplate(displayedRef.current, '').split('/tiles/')[0] + '/')) return;
-    const now = Date.now();
-
-    mapboxErrorsRef.current = mapboxErrorsRef.current.filter((at) => now - at <= FALLBACK_WINDOW_MS);
-    mapboxErrorsRef.current.push(now);
-    if (mapboxErrorsRef.current.length >= 3) {
+    if (recordRecentError(mapboxErrorsRef.current)) {
       fallbackUsedRef.current = true;
+      displayedRef.current = 'usda';
       setDisplayedPicture('usda');
       setNotice(MAPBOX_FALLBACK_NOTICE);
     }
@@ -81,9 +89,11 @@ export function useMapPicture({ token, baseLayer = 'satellite', printMode = fals
     if (printMode || (picture !== 'usda' && !mapboxAvailable)) return;
     setSavedChoice(picture);
     saveMapPicturePreference(picture);
+    displayedRef.current = picture;
     setDisplayedPicture(picture);
     setNotice(null);
     mapboxErrorsRef.current = [];
+    usdaErrorsRef.current = [];
     fallbackUsedRef.current = false;
   }, [mapboxAvailable, printMode]);
 

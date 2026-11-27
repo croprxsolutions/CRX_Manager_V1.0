@@ -78,7 +78,8 @@ export function applyDisplayedPicture(
 
   if (!showUsda && token && source) {
     const tile = mapboxTileTemplate(picture, token);
-    if (source.tiles[0] !== tile) source.setTiles([tile]);
+    // `tiles` is unset until the source finishes loading; the map may call this right after creation.
+    if (source.tiles?.[0] !== tile) source.setTiles([tile]);
   }
   if (mapboxLayer) {
     map.setLayoutProperty(MAPBOX_PICTURE_LAYER_ID, 'visibility', showUsda ? 'none' : 'visible');

@@ -3,6 +3,10 @@ import { resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { localSql } from './local-db';
 
+// This spec only: the keyless lane must prove real USDA tiles load, so that one public host may
+// leave this computer. Every other spec keeps the config's dead proxy; Mapbox stays intercepted.
+test.use({ proxy: { server: 'http://127.0.0.1:9', bypass: '127.0.0.1,basemap.nationalmap.gov' } });
+
 const fakeToken = process.env.CRX_MAP_SWAP_FAKE_MAPBOX_TOKEN ?? '';
 const proofName = fakeToken ? 'mapbox-fixture' : 'usda-keyless';
 const proofDir = resolve(process.cwd(), 'proofs/maps-step1');
@@ -216,6 +220,12 @@ test('field maps use the local MapLibre style and preserve picture, boundary and
   let pendingUsdaTiles = 0;
   let holdMapboxTiles = false;
   let pendingMapboxTiles = 0;
+  // MapLibre fetches tiles only for a visible picture, so the style named in new tile requests is the one on screen.
+  const expectMapboxPictureFrom = async (since: number, style: 'satellite-streets-v12' | 'streets-v12') => {
+    await expect.poll(() => mapboxTilePaths.slice(since).some((path) => path.includes(`/mapbox/${style}/tiles/`)), {
+      message: `expected ${style} tiles after index ${since}; console: ${consoleErrors.join(' | ')}`,
+    }).toBe(true);
+  };
   // The supported screen-walk local stack intentionally omits Supabase Realtime; keep its
   // unused live-update socket idle so a local-only 404 does not pollute browser diagnostics.
   await page.routeWebSocket(/\/realtime\/v1\/websocket/, () => {});
@@ -249,9 +259,15 @@ test('field maps use the local MapLibre style and preserve picture, boundary and
     }
   });
   page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(safeConsoleText(message.text()));
+    if (message.type() !== 'error') return;
+    consoleErrors.push(safeConsoleText(message.text()));
+    console.warn(`Browser console error: ${safeConsoleText(message.text())}`);
   });
-  page.on('pageerror', (error) => consoleErrors.push(safeConsoleText(error.message)));
+  page.on('pageerror', (error) => {
+    consoleErrors.push(safeConsoleText(error.message));
+    console.warn(`Browser page error: ${safeConsoleText(`${error.message}
+${error.stack ?? ''}`)}`);
+  });
   page.on('response', (response) => {
     const url = new URL(response.url());
     if (url.hostname === 'basemap.nationalmap.gov' && response.ok()) {
@@ -355,6 +371,7 @@ test('field maps use the local MapLibre style and preserve picture, boundary and
     await expect(page.getByRole('button', { name: 'Satellite' }).first()).toBeVisible();
     await zoomToFieldScale(page, mapboxTileZooms);
     await expect(page.getByText('© Mapbox', { exact: false })).toBeVisible();
+    await expectMapboxPictureFrom(0, 'satellite-streets-v12');
     holdMapboxTiles = true;
     await panMapAwayFromExistingFields(page);
     await page.locator('.maplibregl-ctrl-zoom-in').click();
@@ -425,7 +442,7 @@ test('field maps use the local MapLibre style and preserve picture, boundary and
   await page.getByRole('button', { name: 'Create Field' }).click();
   await expect(page).toHaveURL(/\/fields\/[0-9a-f-]{36}$/);
   const fieldId = page.url().split('/').at(-1)!;
-  await expect(page.getByRole('heading', { name: fieldName })).toBeVisible();
+  await expect(page.getByRole('heading', { name: fieldName }), consoleErrors.join(' | ')).toBeVisible();
   expect(boundaryRpcResults).toHaveLength(1);
   expect(boundaryRpcResults[0].status, JSON.stringify(boundaryRpcResults[0])).toBe(200);
   await screenshot(page, 'field-setup-after-create-before-reload');
@@ -507,19 +524,27 @@ test('field maps use the local MapLibre style and preserve picture, boundary and
   await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('Imagery: USGS The National Map');
   await screenshot(page, 'field-setup-corner-drag-usda');
   if (fakeToken) {
+    const tilesBeforeRoads = mapboxTilePaths.length;
     await editToggle.getByRole('button', { name: 'USDA aerial', exact: true }).click();
     await editToggle.getByRole('button', { name: 'Roads', exact: true }).click();
     await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('© Mapbox');
+    await expectMapboxPictureFrom(tilesBeforeRoads, 'streets-v12');
   }
-  await expect.poll(async () => page.getByText(/Part 1 of 2/).textContent()).not.toBe(firstPartAcresBeforeEdit);
+  await expect.poll(async () => page.getByText(/Part 1 of 2/).textContent(), { message: consoleErrors.join(' | ') }).not.toBe(firstPartAcresBeforeEdit);
   await screenshot(page, fakeToken ? 'field-setup-corner-edit-roads' : 'field-setup-corner-edit-usda');
   const saveCornerEditResponse = page.waitForResponse((response) =>
     new URL(response.url()).pathname.endsWith('/rpc/set_field_boundary') && response.request().method() === 'POST',
   );
   await page.getByRole('button', { name: 'Save Changes' }).click();
   expect((await saveCornerEditResponse).ok()).toBe(true);
+  const tilesBeforeRememberedReload = mapboxTilePaths.length;
   await page.reload();
   await expect(page.getByRole('heading', { name: fieldName })).toBeVisible();
+  if (fakeToken) {
+    // The remembered Roads choice must be what loads, never the default Satellite.
+    await expectMapboxPictureFrom(tilesBeforeRememberedReload, 'streets-v12');
+    expect(mapboxTilePaths.slice(tilesBeforeRememberedReload).some((path) => path.includes('/satellite-streets-v12/'))).toBe(false);
+  }
   const geometryAfterCornerEdit = await page.evaluate(async (id) => {
     const { supabase } = await import(/* @vite-ignore */ '/src/lib/db.ts');
     const { data, error } = await supabase.from('field_polygons').select('polygon_geojson').eq('field_id', id).order('sort_order');

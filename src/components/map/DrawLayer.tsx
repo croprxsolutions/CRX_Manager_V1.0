@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import area from '@turf/area';
 import centroid from '@turf/centroid';
 import DrawControl from './DrawControl';
@@ -50,6 +50,14 @@ export default function DrawLayer({
     [initialGeoJSON, initialPolygons],
   );
 
+  // Draw can fire several events before the parent re-renders; start each from the last emitted list.
+  const latestPolygonsRef = useRef(initialPolygons);
+  useEffect(() => { latestPolygonsRef.current = initialPolygons; }, [initialPolygons]);
+  const emitPolygons = useCallback((next: DrawnPolygon[]) => {
+    latestPolygonsRef.current = next;
+    onPolygonsChange?.(next);
+  }, [onPolygonsChange]);
+
   const handleCreate = useCallback(
     (feature: GeoJSON.Feature) => {
       if (feature.geometry.type !== 'Polygon') return;
@@ -61,21 +69,22 @@ export default function DrawLayer({
       const [lng, lat] = center.geometry.coordinates;
 
       // Multi-polygon mode: append to list
-      if (isMultiMode && initialPolygons) {
+      const current = latestPolygonsRef.current;
+      if (isMultiMode && current) {
         const newPoly: DrawnPolygon = {
           drawId: (feature.id as string) || crypto.randomUUID(),
           polygon,
           acres,
-          label: `Polygon ${initialPolygons.length + 1}`,
+          label: `Polygon ${current.length + 1}`,
         };
-        onPolygonsChange?.([...initialPolygons, newPoly]);
+        emitPolygons([...current, newPoly]);
         return;
       }
 
       // Legacy single-polygon mode
       onBoundaryChange?.(polygon, acres, [lng, lat]);
     },
-    [isMultiMode, initialPolygons, onPolygonsChange, onBoundaryChange]
+    [isMultiMode, emitPolygons, onBoundaryChange]
   );
 
   const handleUpdate = useCallback(
@@ -85,17 +94,18 @@ export default function DrawLayer({
       );
       if (polygons.length === 0) return;
 
-      if (isMultiMode && initialPolygons) {
+      const current = latestPolygonsRef.current;
+      if (isMultiMode && current) {
         const updatedById = new Map(polygons.map((polygon) => {
           const sqMeters = area(polygon);
           const acres = Math.round((sqMeters / 4046.8564224) * 100) / 100;
           return [String(polygon.id ?? ''), { polygon, acres }] as const;
         }));
-        const updated = initialPolygons.map((part) => {
+        const updated = current.map((part) => {
           const change = updatedById.get(part.drawId);
           return change ? { ...part, ...change } : part;
         });
-        onPolygonsChange?.(updated);
+        emitPolygons(updated);
         return;
       }
 
@@ -107,19 +117,20 @@ export default function DrawLayer({
         onBoundaryChange?.(polygon, acres, [lng, lat]);
       }
     },
-    [isMultiMode, initialPolygons, onPolygonsChange, onBoundaryChange]
+    [isMultiMode, emitPolygons, onBoundaryChange]
   );
 
   const handleDelete = useCallback(
     (featureIds: string[]) => {
-      if (isMultiMode && initialPolygons) {
-        const remaining = initialPolygons.filter((p) => !featureIds.includes(p.drawId));
-        onPolygonsChange?.(remaining);
+      const current = latestPolygonsRef.current;
+      if (isMultiMode && current) {
+        const remaining = current.filter((p) => !featureIds.includes(p.drawId));
+        emitPolygons(remaining);
         return;
       }
       onBoundaryDelete?.();
     },
-    [isMultiMode, initialPolygons, onPolygonsChange, onBoundaryDelete]
+    [isMultiMode, emitPolygons, onBoundaryDelete]
   );
 
   return (

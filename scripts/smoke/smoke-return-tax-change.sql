@@ -31,6 +31,14 @@
 --      a return made at the order price is refused (RETURN_UNITS_NOT_INVOICED), not credited at the order price.
 --   M  A line from before this change ('unrecorded') keeps staging's refusal while a taxed draft holds the line:
 --      5 posted untaxed, 5 on a taxed draft, an unrecorded return of 8 is refused (RETURN_SPLIT_SHARE_REPRICED).
+--   N  A discount on another line's invoice counts for the whole sale (Taha, 27 Nov): line A posted with a discount,
+--      line B on no invoice; a return of B is refused (RETURN_UNITS_NOT_INVOICED), not credited at the order price.
+--   O  No draft, but another open return still carries the old, higher price: the refusal names that return
+--      (RETURN_REPRICE_OTHER_RETURN_PENDING), never "post the draft".
+--   P  create_return uses the same words as receive: 5 posted taxed and 5 on a taxed draft, a new return of 8 is
+--      refused with RETURN_UNITS_ON_DRAFT.
+--   Q  A sales rep who cannot read the posted invoice is refused for visibility first (RETURN_SPLIT_INVOICE_NOT_VISIBLE),
+--      before any message that would describe the invoices.
 --
 -- Tax is written at commit (deferred triggers). This file runs as ONE statement, so each step ends with
 -- SET CONSTRAINTS ALL IMMEDIATE / DEFERRED: the commit point of that call in the app.
@@ -536,6 +544,149 @@ BEGIN
     END;
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (M) setup failed: ' || SQLERRM || ';';
+  END;
+
+  -- N: a discounted invoice of line A makes line B's uninvoiced return wait.
+  DECLARE
+    v_item_a uuid;
+    v_item_b uuid;
+    v_d uuid;
+    v_inv_b uuid;
+  BEGIN
+    INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
+      VALUES ('SMK-RTX-n-' || v_suffix, v_customer, CURRENT_DATE, 'confirmed', v_admin) RETURNING id INTO v_order;
+    PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+    INSERT INTO order_items (order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit,
+      total_units_needed, total_price, quantity_delivered, quantity_remaining)
+      VALUES (v_order, v_product.id, '[SMOKE] Return tax line A', 'gal', v_product.current_cost + 1.37, v_product.current_cost,
+              5, (v_product.current_cost + 1.37) * 5, 0, 5) RETURNING id INTO v_item_a;
+    INSERT INTO order_items (order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit,
+      total_units_needed, total_price, quantity_delivered, quantity_remaining)
+      VALUES (v_order, v_product.id, '[SMOKE] Return tax line B', 'gal', v_product.current_cost + 1.37, v_product.current_cost,
+              5, (v_product.current_cost + 1.37) * 5, 0, 5) RETURNING id INTO v_item_b;
+    PERFORM set_config('app.crx_below_cost_operation', '', true);
+    FOREACH v_item IN ARRAY ARRAY[v_item_a, v_item_b] LOOP
+      INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+        VALUES ('SMK-RTX-n-' || v_item || '-' || v_suffix, v_order, v_customer, 'scheduled', CURRENT_DATE, v_admin) RETURNING id INTO v_d;
+      INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+        VALUES (v_d, v_item, v_product.id, 5, 'gal');
+      PERFORM confirm_delivery(v_d, v_admin, 'smk-rtx-confirm-n-' || v_item || v_suffix);
+      PERFORM complete_delivery(v_d, 'No proof — recorded by office', v_admin, NULL, NULL, NULL,
+        'smk-rtx-complete-n-' || v_item || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; return tax change');
+      SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+      IF NOT EXISTS (SELECT 1 FROM invoices WHERE delivery_id = v_d AND invoice_type <> 'credit_memo') THEN
+        PERFORM create_invoice_for_unbilled_delivery(v_d, v_admin, 'smk-rtx-invoice-n-' || v_item || v_suffix);
+        SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+      END IF;
+      IF v_item = v_item_a THEN
+        v_invoice := (SELECT id FROM invoices WHERE delivery_id = v_d AND invoice_type <> 'credit_memo');
+      ELSE
+        v_inv_b := (SELECT id FROM invoices WHERE delivery_id = v_d AND invoice_type <> 'credit_memo');
+      END IF;
+    END LOOP;
+    PERFORM pg_temp.rtx_step(format('SELECT set_invoice_standing_discount(%L, 10, %L)', v_invoice, 'smk-rtx-disc-n-' || v_suffix));
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-n-' || v_suffix));
+    PERFORM pg_temp.rtx_step(format('SELECT delete_invoices(ARRAY[%L]::uuid[], %L, %L)', v_inv_b, v_admin, 'smk-rtx-del-n-' || v_suffix));
+    IF EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+                WHERE ii.order_item_id = v_item_b AND i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled')) THEN
+      RAISE EXCEPTION 'line B is still on a live invoice';
+    END IF;
+    v_ret := (create_return(jsonb_build_object('customer_id', v_customer, 'order_id', v_order, 'reason', 'damaged'),
+      jsonb_build_array(jsonb_build_object('order_item_id', v_item_b, 'quantity', 2, 'condition', 'unopened', 'restock', false)),
+      'smk-rtx-ret-n-' || v_suffix) ->> 'return_id')::uuid;
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    PERFORM pg_temp.rtx_step(format('SELECT approve_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-ap-n-' || v_suffix));
+    BEGIN
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-n-' || v_suffix));
+      v_fails := v_fails || ' (N) a return of an uninvoiced line was received on a sale with a discounted invoice;';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'RETURN_UNITS_NOT_INVOICED%' THEN
+        v_fails := v_fails || ' (N) the refusal is not RETURN_UNITS_NOT_INVOICED: ' || SQLERRM || ';';
+      END IF;
+    END;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (N) setup failed: ' || SQLERRM || ';';
+  END;
+
+  -- O: no draft at all; an older open return keeps the price from before a 50% discount.
+  BEGIN
+    v_order := pg_temp.rtx_sale(v_admin, v_product.id, v_product.current_cost, v_customer, 'o-' || v_suffix);
+    SELECT id INTO v_invoice FROM invoices WHERE order_id = v_order AND invoice_type <> 'credit_memo';
+    v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 7, 'o1-' || v_suffix);
+    v_ret2 := pg_temp.rtx_return(v_admin, v_customer, v_order, 3, 'o2-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT set_invoice_standing_discount(%L, 50, %L)', v_invoice, 'smk-rtx-disc-o-' || v_suffix));
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-o-' || v_suffix));
+    IF EXISTS (SELECT 1 FROM invoices WHERE order_id = v_order AND status IN ('draft', 'unposted') AND deleted_at IS NULL) THEN
+      RAISE EXCEPTION 'a draft is left';
+    END IF;
+    BEGIN
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret2, v_admin, 'smk-rtx-rc-o2-' || v_suffix));
+      v_fails := v_fails || ' (O) a return was received while another return still had its old, higher price;';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'RETURN_REPRICE_OTHER_RETURN_PENDING%' THEN
+        v_fails := v_fails || ' (O) the refusal is not RETURN_REPRICE_OTHER_RETURN_PENDING: ' || SQLERRM || ';';
+      END IF;
+    END;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (O) setup failed: ' || SQLERRM || ';';
+  END;
+
+  -- P: create_return's words for units still on a taxed draft.
+  DECLARE
+    v_inv2 uuid;
+  BEGIN
+    v_order := pg_temp.rtx_order(v_admin, v_product.id, v_product.current_cost, v_customer, 'p-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-rtx-tax-p-' || v_suffix));
+    v_invoice := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 'p1-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-p1-' || v_suffix));
+    v_inv2 := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 'p2-' || v_suffix);
+    IF pg_temp.rtx_tax(ARRAY[v_invoice]) <= 0 OR pg_temp.rtx_tax(ARRAY[v_inv2]) <= 0 THEN
+      RAISE EXCEPTION 'the lots are not taxed';
+    END IF;
+    BEGIN
+      v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 8, 'p-' || v_suffix);
+      v_fails := v_fails || ' (P) a new return of units on a taxed draft was made;';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'RETURN_UNITS_ON_DRAFT%' THEN
+        v_fails := v_fails || ' (P) the refusal is not RETURN_UNITS_ON_DRAFT: ' || SQLERRM || ';';
+      END IF;
+    END;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (P) setup failed: ' || SQLERRM || ';';
+  END;
+
+  -- Q: a sales rep who cannot read the posted invoice, receiving a return of units on a taxed draft.
+  DECLARE
+    v_inv2 uuid;
+    v_rep uuid;
+  BEGIN
+    SELECT id INTO v_rep FROM profiles WHERE role = 'sales_rep' AND is_active = true ORDER BY created_at LIMIT 1;
+    IF v_rep IS NULL THEN RAISE EXCEPTION 'no active sales rep'; END IF;
+    v_order := pg_temp.rtx_order(v_admin, v_product.id, v_product.current_cost, v_customer, 'q-' || v_suffix);
+    v_invoice := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 'q1-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-q1-' || v_suffix));
+    PERFORM pg_temp.rtx_step(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-rtx-tax-q-' || v_suffix));
+    v_inv2 := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 'q2-' || v_suffix);
+    IF EXISTS (SELECT 1 FROM invoices WHERE id = v_invoice AND (created_by = v_rep OR salesman_id = v_rep)) THEN
+      RAISE EXCEPTION 'the rep can read the posted invoice';
+    END IF;
+    BEGIN
+      v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 8, 'q-' || v_suffix);
+      PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+      PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_rep, 'smk-rtx-rc-q-' || v_suffix));
+      v_fails := v_fails || ' (Q) a rep who cannot read the posted invoice received the return;';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'RETURN_SPLIT_INVOICE_NOT_VISIBLE%' THEN
+        v_fails := v_fails || ' (Q) the rep''s refusal is not RETURN_SPLIT_INVOICE_NOT_VISIBLE: ' || SQLERRM || ';';
+      END IF;
+    END;
+    PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    v_fails := v_fails || ' (Q) setup failed: ' || SQLERRM || ';';
   END;
 
   IF v_fails <> '' THEN

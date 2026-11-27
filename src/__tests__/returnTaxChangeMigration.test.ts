@@ -43,6 +43,12 @@ describe('20270313040000 return credit after a tax change', () => {
       expect(b).toContain('public._return_order_price_lot_price(');
       expect(b).toContain("RAISE EXCEPTION 'RETURN_UNITS_ON_DRAFT");
       expect(b.indexOf('RETURN_UNITS_ON_DRAFT')).toBeLessThan(b.indexOf('RETURN_UNITS_NOT_INVOICED'));
+      // the rep visibility check runs first (Taha, 27 Nov); the unit check before any "not invoiced" message
+      expect(b.indexOf("RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'")).toBeLessThan(b.indexOf("RAISE EXCEPTION 'RETURN_UNITS_ON_DRAFT"));
+      expect(b.indexOf("RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'")).toBeLessThan(b.indexOf("RAISE EXCEPTION 'RETURN_UNITS_ON_DRAFT"));
+      // a cents shortfall is named after the other return, never "post the draft"
+      expect(b.indexOf('RETURN_REPRICE_OTHER_RETURN_PENDING')).toBeLessThan(b.indexOf("AND lp.applies AND NOT lp.fits\n"));
+      expect(b).toContain('AND lp.applies AND lp.not_invoiced');
       expect(b).toContain('RETURN_UNITS_NOT_INVOICED');
       expect(b).toContain('AND lp.applies AND lp.fits');
       expect(b).not.toContain('jsonb_to_recordset');
@@ -78,12 +84,14 @@ describe('20270313040000 return credit after a tax change', () => {
     const c = body('_create_return_intent_impl_20260812');
     expect(c).toContain("CASE WHEN v_share.share_mode THEN 'billed_share' ELSE 'order_price' END");
     expect(c).toContain('RETURN_OLDER_RETURN_AT_ORDER_PRICE');
+    // same words as receive for units still on a draft
+    expect(c.indexOf("RAISE EXCEPTION 'RETURN_UNITS_ON_DRAFT")).toBeLessThan(c.indexOf("RAISE EXCEPTION 'RETURN_QUANTITY_EXCEEDS_BILLED_SHARE'"));
     expect(MIGRATION).toContain("priced_from text NOT NULL DEFAULT 'unrecorded'");
   });
 
   it('issue_return_credit re-prices before its billed-share cap', () => {
     const b = body('_issue_return_credit_intent_impl_20260812');
-    expect(b.indexOf('UPDATE public.return_items ri')).toBeLessThan(b.indexOf("RAISE EXCEPTION 'RETURN_CREDIT_EXCEEDS_BILLED_SHARE'"));
+    expect(b.indexOf('UPDATE public.return_items ri')).toBeLessThan(b.lastIndexOf("RAISE EXCEPTION 'RETURN_CREDIT_EXCEEDS_BILLED_SHARE'"));
   });
 
   it('the lot price helper: own customer, no field split, tax or a discount, posted lots only, the create_return formula', () => {
@@ -92,13 +100,15 @@ describe('20270313040000 return credit after a tax change', () => {
     const h = MIGRATION.slice(start, MIGRATION.indexOf('$function$;', start));
     expect(h).toContain("i.status IN ('posted', 'overdue', 'paid') AS posted");
     expect(h).toContain('FROM lots WHERE posted), 0)::bigint AS lot_cents');
-    expect(h).toContain('p.other_qty + p_quantity <= p.lot_qty + p.draft_qty');
+    expect(h).toContain('p.draft_qty > 0 AND p.other_qty + p_quantity > p.lot_qty AND p.other_qty + p_quantity <= p.lot_qty + p.draft_qty');
+    // a discount or tax line on any of the customer's invoices of the order counts (Taha, 27 Nov)
+    expect(h).toContain('AS order_adjusted');
     expect(h).toContain("dl.charge_type IN ('standing_discount', 'sales_tax')");
     expect(h).toContain('split_evidence');
     expect(h).toContain('round(t.lot_cents * (t.other_qty + p_quantity) / t.lot_qty)::bigint - t.other_cents');
     expect(h).not.toContain('SECURITY DEFINER');
     // tax-on comes from the order's box too (Taha, 26 Nov)
-    expect(h).toContain("COALESCE((SELECT sales_tax FROM ord), false) OR a.adjusted");
+    expect(h).toContain("COALESCE((SELECT sales_tax FROM ord), false) OR a.order_adjusted");
     expect(MIGRATION).toContain('FROM PUBLIC, anon, authenticated, service_role;');
   });
 

@@ -8,6 +8,11 @@ describe('EnvBanner', () => {
   it('marks staging as test data', () => {
     render(<EnvBanner env="staging" supabaseUrl="https://fsnjredpmakbmhwowjjt.supabase.co" />);
     expect(screen.getByText('STAGING · test data only')).toBeInTheDocument();
+  });
+
+  it.each(['localhost', 'preview.vercel.app', 'croprxsolutions.app'])('hides proof links on %s', (hostname) => {
+    vi.stubGlobal('location', { hostname });
+    render(<EnvBanner env="staging" />);
     expect(screen.queryByRole('navigation', { name: 'Staging maps checks' })).not.toBeInTheDocument();
   });
 

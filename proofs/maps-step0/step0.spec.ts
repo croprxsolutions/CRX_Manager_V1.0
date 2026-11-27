@@ -359,3 +359,30 @@ test('trashing a three-corner draft matches the app restart expectation', async 
   expect(await callProof<string>(page, 'getMode')).toBe('draw_polygon');
   await expectNoExternalRequestsOrErrors(externalRequests, consoleErrors);
 });
+
+test('a stalled outage request falls back without losing the sketch', async ({ page }) => {
+  await openProof(page);
+  const points = polygonClicks(await getCanvasBox(page));
+  await callProof(page, 'startPolygon');
+  for (const point of points.slice(0, 2)) await page.mouse.click(point.x, point.y);
+  const before = await drawingState(page);
+  let releaseTile!: () => void;
+  const stalled = new Promise<void>((resolve) => { releaseTile = resolve; });
+  await page.route((url) => url.pathname === '/tiles/A-outage.png', async (route) => {
+    await stalled;
+    await route.abort().catch(() => undefined);
+  });
+  const requested = page.waitForRequest((request) => new URL(request.url()).pathname === '/tiles/A-outage.png');
+  try {
+    await page.getByRole('button', { name: 'Fail picture' }).click();
+    await requested;
+    await expect(page.locator('#proof-status')).toHaveText('Picture A unavailable · showing B', { timeout: 15_000 });
+    await expectRaster(page, 'B');
+    expect(await drawingState(page)).toEqual(before);
+    await page.getByRole('button', { name: 'Retry' }).click();
+    await expectRaster(page, 'A');
+    expect(await drawingState(page)).toEqual(before);
+  } finally {
+    releaseTile();
+  }
+});

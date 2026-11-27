@@ -252,7 +252,7 @@ if (livePicturesEnabled) {
     const timeout = window.setTimeout(cancelTile, 8000);
     try {
       const response = await fetch(providerUrl, { signal: tileRequest.signal });
-      if (!response.ok || !response.headers.get('Content-Type')?.startsWith('image/')) {
+      if (!response.ok || !response.headers.get('Content-Type')?.toLowerCase().startsWith('image/')) {
         throw new Error('Picture provider returned no image');
       }
       const blob = await response.blob();
@@ -421,13 +421,13 @@ map.on('moveend', () => {
 });
 toolbar.querySelector('#fail-picture')!.addEventListener('click', () => {
   if (!proof.ready || outagePicture || !retryButton.disabled) return;
-  outagePicture = chosenPicture;
+  const failedPicture = chosenPicture;
+  outagePicture = failedPicture;
   outageAttempt += 1;
   status.value = `Testing ${pictureName(chosenPicture)} outage`;
   outageTimeout = window.setTimeout(() => {
     clearOutage();
-    retryButton.disabled = false;
-    status.value = 'Outage check timed out · choose Retry';
+    recoverPicture(failedPicture);
   }, 12000);
   setPictureTiles(`${outagePicture}-outage`);
 });

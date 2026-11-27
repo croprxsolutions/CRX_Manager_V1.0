@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270315063100_liquid_weight_brand_recheck.sql` (SQL sha256: `82345e7f917a0a2a14ab9518b73450517f567b865e35c124538df2ef36731916`). Updates the brand recheck and bulk approval while preserving the installed Weight switch.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270315110000_liquid_weight_brand_recheck.sql` (SQL sha256: `82345e7f917a0a2a14ab9518b73450517f567b865e35c124538df2ef36731916`). Updates the brand recheck and bulk approval while preserving the installed Weight switch.
 
 - A substantive active-brand rename withdraws the prior liquid group approval while review is open. Case and ordinary whitespace edits keep the approval, including tabs and repeated internal spaces. EPA and manufacturer checks still apply. Stored tickets, existing events, and waiting drafts are preserved.
 - The legacy bulk approval checks the switch after taking its liquid parent locks. The later cutover can refuse while those locks are held. The security mode, owner and grants of both functions are retained.

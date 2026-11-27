@@ -60,6 +60,9 @@ which does not exist yet. See [TESTING.md](./TESTING.md#running-e2e-tests).
   Ignored Build Step. It does not override the install or build commands.
 - The temporary staging-only `/api/maps-step0` route has its own response and security
   headers. See the [Google Maps staging probe](./proofs/maps-step0/staging-probe.md).
+- The protected `/api/maps-step0-draw/index.html` drawing page has its own security policy and
+  is built only for the staging branch in Vercel's staging target. It uses the existing probe's
+  `?drawingOutage=1` response to simulate an HTTP 503. See the [drawing proof](./proofs/maps-step0/README.md).
 - **Ignored Build Step** (`ignoreCommand` → `scripts/vercel-ignore-build.sh`, 2026-10-28): Vercel
   bills build time, and most pushes change only notes the app never reads. The script compares
   the push with the branch's previous successful deployment and skips the build when every

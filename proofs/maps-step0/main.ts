@@ -4,12 +4,20 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import mapLibreCss from 'maplibre-gl/dist/maplibre-gl.css?inline';
 import drawCss from '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css?inline';
+import mapboxCss from 'mapbox-gl/dist/mapbox-gl.css?inline';
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 const PICTURE_SOURCE_ID = 'proof-picture';
 const PICTURE_LAYER_ID = 'proof-picture-layer';
 const DRAW_CONTROL_ID = 'proof-draw-control';
+const STAGING_PROOF_PATH = '/api/maps-step0-draw/';
+const USDA_HOST = 'basemap.nationalmap.gov';
+const MAPBOX_HOST = 'api.mapbox.com';
+const stagingProof = import.meta.env.BASE_URL === STAGING_PROOF_PATH;
+const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
+const livePicturesEnabled = stagingProof && location.hostname === 'staging.croprxsolutions.app'
+  && /^pk\.[\w.-]+$/.test(mapboxToken ?? '');
 const DRAW_CLASSES = MapboxDraw.constants.classes as unknown as Record<
   'CANVAS' | 'CONTROL_BASE' | 'CONTROL_PREFIX' | 'CONTROL_GROUP' | 'ATTRIBUTION',
   string
@@ -33,6 +41,10 @@ type ProofApi = {
   getMode: () => string;
   getLayerOrder: () => string[];
   getPictureTiles: () => string[];
+  getCamera: () => number[];
+  moveCamera: () => void;
+  getRasterPixel: () => number[];
+  hasRenderedVertex: (x: number, y: number) => boolean;
   project: (coordinate: Coordinate) => { x: number; y: number };
   trash: () => void;
   mapInstanceId: string;
@@ -78,18 +90,26 @@ function scopeDrawCss(css: string): string {
 function addScopedStyles(): void {
   const style = document.createElement('style');
   style.id = 'proof-styles';
-  style.textContent = `${mapLibreCss}\n${scopeDrawCss(drawCss)}
+  style.textContent = `${mapLibreCss}\n${scopeDrawCss(drawCss)}\n${livePicturesEnabled ? mapboxCss : ''}
     html, body, #proof-shell { width: 100%; height: 100%; margin: 0; }
     #proof-shell { position: fixed; inset: 0; }
     #proof-map { position: absolute; inset: 0; }
-    #proof-toolbar { position: absolute; top: 12px; left: 12px; z-index: 3; display: flex; gap: 8px; align-items: center; padding: 8px; border-radius: 6px; background: white; box-shadow: 0 1px 5px #0003; font: 14px sans-serif; }
-    #proof-toolbar button { min-height: 36px; padding: 0 10px; }
-    #proof-draw-control { border-radius: 4px; }`;
+    #proof-toolbar { position: absolute; top: 12px; left: 12px; right: 60px; width: fit-content; max-width: calc(100% - 88px); z-index: 3; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px; border-radius: 6px; background: white; box-shadow: 0 1px 5px #0003; font: 14px sans-serif; }
+    #proof-toolbar button { min-height: 44px; padding: 0 10px; }
+    #proof-toolbar > a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; }
+    #proof-draw-control { border-radius: 4px; }
+    #proof-draw-control button { min-width: 44px; min-height: 44px; }
+    #proof-credits { position: absolute; z-index: 3; bottom: 0; right: 0; background: white; font: 12px sans-serif; }
+    #proof-credits span:not([hidden]) { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 6px; }
+    #proof-credits .mapboxgl-ctrl-logo { margin: 0; }`;
   document.head.append(style);
 }
 
 function tileTemplate(picture: Picture): string {
-  return `${window.location.origin}/tiles/${picture}/{z}/{x}/{y}.png`;
+  if (livePictures) {
+    return `proof-live://${picture.toLowerCase()}/${pictureAttempt}/{z}/{x}/{y}`;
+  }
+  return `${location.origin}${import.meta.env.BASE_URL}tiles/${picture}.png?z={z}&x={x}&y={y}`;
 }
 
 function getRasterTiles(map: maplibregl.Map): string[] {
@@ -114,16 +134,150 @@ const map = new maplibregl.Map({
       },
     ],
   },
-  center: [0, 0],
-  zoom: 2,
+  center: stagingProof ? [-93, 41] : [0, 0],
+  zoom: stagingProof ? 12 : 2,
   attributionControl: false,
   interactive: true,
+  canvasContextAttributes: { preserveDrawingBuffer: !stagingProof },
 });
 
 const draw = new MapboxDraw({
   displayControlsDefault: false,
   controls: { polygon: true, trash: true },
 });
+
+const toolbar = document.querySelector('#proof-toolbar')!;
+const status = toolbar.querySelector<HTMLOutputElement>('#proof-status')!;
+const retryButton = toolbar.querySelector<HTMLButtonElement>('#retry-picture')!;
+const livePicturesButton = toolbar.querySelector<HTMLButtonElement>('#live-pictures')!;
+const pictureAButton = toolbar.querySelector<HTMLButtonElement>('#switch-picture-a')!;
+const pictureBButton = toolbar.querySelector<HTMLButtonElement>('#switch-picture-b')!;
+const usdaCredit = document.querySelector<HTMLElement>('#usda-credit')!;
+const mapboxCredit = document.querySelector<HTMLElement>('#mapbox-credit')!;
+const mapboxFeedback = document.querySelector<HTMLAnchorElement>('#mapbox-feedback')!;
+const saveKey = 'maps-step0-synthetic-draft';
+let savedDraftJson: string | null = null;
+let chosenPicture: Picture = 'A';
+let showingPicture: Picture | undefined = 'A';
+let pictureAttempt = 0;
+let liveAttemptWithImage = 0;
+let liveRequestsPending = 0;
+let liveBatchImages = 0;
+let liveBatchErrors = 0;
+let creditsPending = false;
+let outageRequest: AbortController | undefined;
+let livePictures = false;
+
+function clearOutage(): void {
+  outageRequest?.abort();
+  outageRequest = undefined;
+}
+
+function pictureName(picture: Picture): string {
+  if (!livePictures) return `Picture ${picture}`;
+  return picture === 'A' ? 'USDA' : 'Mapbox';
+}
+
+function updateCredits(picture: Picture | undefined): void {
+  usdaCredit.hidden = !livePictures || picture !== 'A';
+  mapboxCredit.hidden = !livePictures || picture !== 'B';
+  const center = map.getCenter();
+  mapboxFeedback.href = `https://apps.mapbox.com/feedback/#/${center.lng}/${center.lat}/${map.getZoom()}`;
+}
+
+function setPictureTiles(picture: Picture): void {
+  const source = map.getSource(PICTURE_SOURCE_ID) as RasterTileSource;
+  pictureAttempt += 1;
+  liveRequestsPending = 0;
+  showingPicture = picture;
+  creditsPending = livePictures;
+  map.setLayoutProperty(PICTURE_LAYER_ID, 'visibility', 'visible');
+  // Keep old raster pixels and their successor's credit from appearing together.
+  map.setPaintProperty(PICTURE_LAYER_ID, 'raster-opacity', livePictures ? 0 : 1);
+  updateCredits(undefined);
+  source.setTiles([tileTemplate(picture)]);
+}
+
+function recoverPicture(failed: Picture): void {
+  if (failed !== showingPicture) return;
+  retryButton.disabled = false;
+  if (failed !== chosenPicture) {
+    showingPicture = undefined;
+    creditsPending = false;
+    map.setLayoutProperty(PICTURE_LAYER_ID, 'visibility', 'none');
+    updateCredits(undefined);
+    status.value = 'Both pictures unavailable · drawing stays open';
+    return;
+  }
+  const fallback = failed === 'A' ? 'B' : 'A';
+  setPictureTiles(fallback);
+  status.value = `${pictureName(failed)} unavailable · showing ${livePictures ? pictureName(fallback) : fallback}`;
+}
+
+function revealLivePicture(): void {
+  if (!creditsPending || liveAttemptWithImage !== pictureAttempt || !showingPicture
+    || !map.isSourceLoaded(PICTURE_SOURCE_ID)) return;
+  creditsPending = false;
+  updateCredits(showingPicture);
+  map.setPaintProperty(PICTURE_LAYER_ID, 'raster-opacity', 1);
+}
+
+if (livePicturesEnabled) {
+  maplibregl.addProtocol('proof-live', async (request, controller) => {
+    const [, , provider, attempt, zoom, column, row] = request.url.split('/');
+    if (provider !== 'a' && provider !== 'b') throw new Error('Unknown proof picture');
+    const picture = provider === 'a' ? 'A' : 'B';
+    const stillCurrent = () => !controller.signal.aborted && Number(attempt) === pictureAttempt;
+    if (!stillCurrent()) throw new DOMException('Tile belongs to an earlier picture', 'AbortError');
+    if (liveRequestsPending === 0) {
+      liveBatchImages = 0;
+      liveBatchErrors = 0;
+    }
+    liveRequestsPending += 1;
+    const providerUrl = picture === 'A'
+      ? `https://${USDA_HOST}/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${zoom}/${row}/${column}`
+      : `https://${MAPBOX_HOST}/styles/v1/mapbox/satellite-streets-v12/tiles/256/${zoom}/${column}/${row}?access_token=${encodeURIComponent(mapboxToken ?? '')}`;
+    const tileRequest = new AbortController();
+    const cancelTile = () => tileRequest.abort();
+    controller.signal.addEventListener('abort', cancelTile, { once: true });
+    const timeout = window.setTimeout(cancelTile, 8000);
+    try {
+      const response = await fetch(providerUrl, { signal: tileRequest.signal });
+      if (!response.ok || !response.headers.get('Content-Type')?.toLowerCase().startsWith('image/')) {
+        throw new Error('Picture provider returned no image');
+      }
+      const blob = await response.blob();
+      const bitmap = await createImageBitmap(blob);
+      bitmap.close();
+      const data = await blob.arrayBuffer();
+      if (!stillCurrent()) throw new Error('Tile belongs to an earlier picture');
+      liveAttemptWithImage = pictureAttempt;
+      liveBatchImages += 1;
+      return {
+        data,
+        cacheControl: response.headers.get('Cache-Control') ?? undefined,
+        expires: response.headers.get('Expires') ?? undefined,
+      };
+    } catch {
+      if (stillCurrent()) liveBatchErrors += 1;
+      const error = new Error('Live picture tile unavailable');
+      error.name = 'ProofPictureTileUnavailable';
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+      controller.signal.removeEventListener('abort', cancelTile);
+      if (Number(attempt) === pictureAttempt) {
+        liveRequestsPending -= 1;
+        // Keep the usable picture when a small pan encounters one or two missing tiles.
+        if (liveRequestsPending === 0 && liveBatchErrors > liveBatchImages
+          && (creditsPending || liveBatchErrors > 2)) recoverPicture(picture);
+      }
+    }
+  });
+  map.on('sourcedata', (event) => {
+    if (event.sourceId === PICTURE_SOURCE_ID) revealLivePicture();
+  });
+}
 
 const proof: ProofApi = {
   ready: false,
@@ -134,15 +288,32 @@ const proof: ProofApi = {
     draw.changeMode('direct_select', { featureId: String(feature.id) });
   },
   switchPicture: (picture) => {
-    if (picture !== 'A' && picture !== 'B') throw new Error(`Unknown proof picture: ${picture}`);
-    const source = map.getSource(PICTURE_SOURCE_ID) as RasterTileSource | undefined;
-    if (!source) throw new Error('Proof raster source is not ready');
-    source.setTiles([tileTemplate(picture)]);
+    if (!proof.ready) return;
+    chosenPicture = picture;
+    clearOutage();
+    retryButton.disabled = true;
+    setPictureTiles(picture);
+    status.value = pictureName(picture);
   },
   getDraft: () => draw.getAll(),
   getMode: () => draw.getMode(),
   getLayerOrder: () => map.getStyle().layers.map((layer) => layer.id),
   getPictureTiles: () => getRasterTiles(map),
+  getCamera: () => [
+    ...map.getCenter().toArray(), map.getZoom(), map.getBearing(), map.getPitch(),
+    ...Object.values(map.getPadding()),
+  ],
+  moveCamera: () => map.jumpTo({ center: [21, 12], zoom: 3.25, bearing: 16, pitch: 18 }),
+  getRasterPixel: () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d')!;
+    const mapCanvas = map.getCanvas();
+    context.drawImage(mapCanvas, 40, mapCanvas.height - 40, 1, 1, 0, 0, 1, 1);
+    return Array.from(context.getImageData(0, 0, 1, 1).data);
+  },
+  hasRenderedVertex: (x, y) => map.queryRenderedFeatures([x, y])
+    .some((feature) => feature.properties?.meta === 'vertex'),
   project: (coordinate) => map.project(coordinate),
   trash: () => draw.trash(),
   mapInstanceId,
@@ -155,9 +326,14 @@ map.on('load', () => {
     tiles: [tileTemplate('A')],
     tileSize: 256,
     minzoom: 0,
-    maxzoom: 8,
+    maxzoom: stagingProof ? 16 : 8,
   });
-  map.addLayer({ id: PICTURE_LAYER_ID, type: 'raster', source: PICTURE_SOURCE_ID });
+  map.addLayer({
+    id: PICTURE_LAYER_ID,
+    type: 'raster',
+    source: PICTURE_SOURCE_ID,
+    paint: { 'raster-fade-duration': 0 },
+  });
   map.addControl(draw as unknown as maplibregl.IControl, 'top-right');
 
   const drawControl = map
@@ -167,20 +343,112 @@ map.on('load', () => {
   drawControl.id = DRAW_CONTROL_ID;
 
   proof.ready = true;
-  document.querySelector('#proof-status')!.textContent = 'Ready · picture A';
+  toolbar.querySelectorAll<HTMLButtonElement>('button:not(#retry-picture)').forEach((button) => {
+    button.disabled = false;
+  });
+  livePicturesButton.hidden = !livePicturesEnabled;
+  try {
+    const savedDraft = sessionStorage.getItem(saveKey);
+    if (savedDraft) {
+      draw.set(JSON.parse(savedDraft));
+      savedDraftJson = JSON.stringify(draw.getAll());
+    }
+    status.value = savedDraft ? 'Reopened synthetic draft · picture A' : 'Picture A';
+    if (stagingProof && !livePicturesEnabled) {
+      status.value += ' · live imagery unavailable: staging Mapbox token missing or invalid';
+    }
+  } catch {
+    status.value = 'Saved synthetic draft could not be reopened · picture A';
+  }
 });
 
 map.on('error', (event) => {
+  const error = event.error;
+  if (!error) return;
+  const name = 'name' in error && typeof error.name === 'string' ? error.name : 'Error';
+  if (name === 'AbortError') return;
+  if (name === 'ProofPictureTileUnavailable') {
+    revealLivePicture();
+    return;
+  }
   // eslint-disable-next-line no-console -- the spec fails on any console.error, so map errors must reach it
-  if (event.error) console.error('MapLibre proof error:', event.error.message);
+  console.error('MapLibre proof error:', name);
 });
 
-document.querySelector('#start-polygon')!.addEventListener('click', () => proof.startPolygon());
-document.querySelector('#switch-picture-a')!.addEventListener('click', () => {
-  proof.switchPicture('A');
-  document.querySelector('#proof-status')!.textContent = 'Ready · picture A';
+toolbar.querySelector('#start-polygon')!.addEventListener('click', () => {
+  if (proof.ready) proof.startPolygon();
 });
-document.querySelector('#switch-picture-b')!.addEventListener('click', () => {
-  proof.switchPicture('B');
-  document.querySelector('#proof-status')!.textContent = 'Ready · picture B';
+pictureAButton.addEventListener('click', () => proof.switchPicture('A'));
+pictureBButton.addEventListener('click', () => proof.switchPicture('B'));
+livePicturesButton.addEventListener('click', () => {
+  if (!proof.ready || !livePicturesEnabled || livePictures) return;
+  livePictures = true;
+  livePicturesButton.hidden = true;
+  pictureAButton.textContent = pictureName('A');
+  pictureBButton.textContent = pictureName('B');
+  proof.switchPicture(chosenPicture);
+});
+map.on('moveend', () => {
+  if (!mapboxCredit.hidden) updateCredits('B');
+});
+toolbar.querySelector('#fail-picture')!.addEventListener('click', async () => {
+  if (!proof.ready || outageRequest || !retryButton.disabled) return;
+  const failedPicture = chosenPicture;
+  const request = new AbortController();
+  outageRequest = request;
+  status.value = `Testing ${pictureName(failedPicture)} outage`;
+  const fixture = stagingProof
+    ? `/api/maps-step0?drawingOutage=1&picture=${failedPicture}`
+    : `${import.meta.env.BASE_URL}tiles/${failedPicture}-outage.png`;
+  // Check the outage once so a hung fixture cannot occupy the map's tile queue.
+  const timeout = window.setTimeout(() => request.abort(), 12000);
+  let failed: boolean;
+  try {
+    failed = !(await fetch(fixture, { signal: request.signal, cache: 'no-store' })).ok;
+  } catch {
+    failed = true;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+  if (outageRequest !== request) return;
+  outageRequest = undefined;
+  if (failed) recoverPicture(failedPicture);
+  else status.value = 'Outage fixture unexpectedly succeeded';
+});
+retryButton.addEventListener('click', () => proof.switchPicture(chosenPicture));
+toolbar.querySelector('#save-draft')!.addEventListener('click', () => {
+  if (!proof.ready) return;
+  const draft = draw.getAll();
+  if (draw.getMode() === 'draw_polygon' || (!draft.features.length && !savedDraftJson)) {
+    status.value = 'Finish a polygon before saving';
+    return;
+  }
+  try {
+    if (!draft.features.length) {
+      sessionStorage.removeItem(saveKey);
+      savedDraftJson = null;
+      status.value = 'Cleared the saved synthetic draft';
+      return;
+    }
+    const draftJson = JSON.stringify(draft);
+    sessionStorage.setItem(saveKey, draftJson);
+    savedDraftJson = draftJson;
+    status.value = 'Saved synthetic draft in this tab';
+  } catch {
+    status.value = 'This tab could not save the synthetic draft';
+  }
+});
+toolbar.querySelector('#reopen-draft')!.addEventListener('click', () => {
+  if (!proof.ready) return;
+  const draft = draw.getAll();
+  if (draw.getMode() === 'draw_polygon') {
+    status.value = 'Finish or clear the current sketch before reopening';
+    return;
+  }
+  const hasUnsavedChanges = savedDraftJson === null ? draft.features.length > 0 : JSON.stringify(draft) !== savedDraftJson;
+  if (hasUnsavedChanges) {
+    status.value = 'Save changes before reopening';
+    return;
+  }
+  location.reload();
 });

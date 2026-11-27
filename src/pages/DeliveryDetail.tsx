@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useLayoutEffect, type ComponentProps } from 'react';
+import { useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo, type ComponentProps } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Phone, MapPin, CheckCircle2, Package, Download, WifiOff,
@@ -17,7 +17,9 @@ import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import CompletionProofFields, { ProofOption } from '../components/deliveries/CompletionProofFields';
 import { ISSUE_TYPE_LABELS } from '../lib/deliveryIssueTypes';
+import { useLoadBoundSignature } from '../hooks/useLoadBoundSignature';
 import { useToast } from '../components/ui/Toast';
+import { isWholeItemUnit, wholeItemMessage } from '../lib/units';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -33,14 +35,14 @@ import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail, EmailUnconfirmedError } from '../lib/emailService';
 import { buildDeliveryReceiptHtml } from '../lib/deliveryReceiptEmail';
 import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
-import { fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, LINES_CHANGED_ON_SERVER_MESSAGE, linesChangedOnServer, staleProofPhotoMessage, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, keptQuantity, LINES_LOADING_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, evidencePhotoForLoad, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
 import FixDeliveryModal from '../components/deliveries/FixDeliveryModal';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
-import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey, isValidNoProofReason, NO_PROOF_REASON_MAX_CHARS, NO_PROOF_REASON_MIN_CHARS, NO_PROOF_SIGNER, noProofReasonLength } from '../lib/paperTicket';
+import { countOrdinaryPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey, isValidNoProofReason, NO_PROOF_REASON_MAX_CHARS, NO_PROOF_REASON_MIN_CHARS, NO_PROOF_SIGNER, noProofReasonLength } from '../lib/paperTicket';
 import type { Json } from '../types/supabase';
 import { compressImage } from '../lib/imageCompression';
 import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
@@ -407,7 +409,8 @@ export default function DeliveryDetail() {
     && orderNeedsSplitBilling
     && billedOutsideCrxReason === null;
 
-  const fetchDelivery = useCallback(async () => {
+  // keepQtys: the entered partial amounts, kept (within each reloaded line) after a load-proof refusal (Luna).
+  const fetchDelivery = useCallback(async (keepQtys?: Record<string, number>) => {
     // Never carry the previous delivery's billed-outside-CRX badge onto this one.
     setBilledOutsideCrxReason(null);
     // This page is reused across deliveries: a slow load for the previous one must
@@ -479,7 +482,7 @@ export default function DeliveryDetail() {
         const loadedItems = (itemsRes.data || []) as unknown as DeliveryItem[];
         setItems(loadedItems);
         const initQtys: Record<string, number> = {};
-        loadedItems.forEach((item) => { initQtys[item.id] = item.quantity; });
+        loadedItems.forEach((item) => { initQtys[item.id] = keptQuantity(keepQtys, item.id, item.quantity); });
         setDeliveryQtys(initQtys);
         setAddress(addrRes.data as CustomerAddress | null);
         setDriver(driverRes.data as Profile | null);
@@ -731,7 +734,19 @@ export default function DeliveryDetail() {
   // an edit made during it is never silently dropped in favour of the values captured at confirm.
   const completionInputs = JSON.stringify([signedBy, deliveryQtys, driverIssueType, driverIssueNotes, usePaperTicket, paperDeliveredOn, signatureDataUrl, emailOnComplete, completionEvidence, noProofReason]);
   const completionInputsRef = useLatestRef(completionInputs);
-  const hasAnyQty = items.some((item) => (deliveryQtys[item.id] ?? item.quantity) > 0);
+  // Under 0.01 counts as nothing delivered, as on the server (DELIVERY_NOTHING_DELIVERED).
+  const hasAnyQty = items.some((item) => (deliveryQtys[item.id] ?? item.quantity) >= 0.01);
+  // The lines on screen with their delivered amounts: the signature and the ticket photo are bound to
+  // them (20270309170000). Null until the delivery's lines are loaded.
+  const currentLinesSeen = useMemo(
+    () => (items.length ? buildLinesSeen(items, (item) => deliveryQtys[item.id] ?? item.quantity) : null),
+    [items, deliveryQtys],
+  );
+  const currentLinesSeenRef = useLatestRef(currentLinesSeen);
+  const currentTicketPhoto = evidencePhotoForLoad(photos, PAPER_TICKET_PHOTO_CAPTION, currentLinesSeen);
+  // The ticket photo sent (the newest taken for these lines, else the newest) counts only when it was taken for these lines and amounts (one without lines never does).
+  const ticketPhotoMatchesLoad = !!currentTicketPhoto && sameLinesSeen(currentTicketPhoto.lines_seen, currentLinesSeen);
+  const sig = useLoadBoundSignature(signatureDataUrl, setSignatureDataUrl, currentLinesSeen);
 
   // ── Edit Mode ──────────────────────────────────────────────────────────
 
@@ -873,6 +888,12 @@ export default function DeliveryDetail() {
     const activeEditItems = editItems.filter((i) => i.quantity > 0);
     if (isScheduled && activeEditItems.length === 0) {
       toast('error', 'Delivery must have at least one item. Cancel the delivery instead.');
+      return;
+    }
+
+    const editFraction = activeEditItems.map((i) => wholeItemMessage(i.product_name, i.unit_size || '', i.quantity)).find(Boolean);
+    if (editFraction) {
+      toast('error', `Nothing was saved. ${editFraction}`);
       return;
     }
 
@@ -1067,13 +1088,17 @@ export default function DeliveryDetail() {
       toast('error', 'Maximum 10 photos per delivery');
       return;
     }
-    if (caption === PAPER_TICKET_PHOTO_CAPTION && countPaperTicketPhotos(photos) + files.length > MAX_PAPER_TICKET_PHOTOS) {
-      toast('error', 'Maximum 2 ticket photos per delivery');
+    // A ticket or drop-location photo is bound to the lines on screen, so it waits until they are loaded (Luna).
+    if (caption === PAPER_TICKET_PHOTO_CAPTION && !currentLinesSeen) { toast('error', LINES_LOADING_MESSAGE); return; }
+    if (caption === PAPER_TICKET_PHOTO_CAPTION && countTicketPhotosForLoad(photos, currentLinesSeen) + files.length > MAX_PAPER_TICKET_PHOTOS) {
+      toast('error', 'Maximum 2 ticket photos for these products and amounts');
       return;
     }
 
     setUploadingPhoto(true);
     let uploadCount = 0;
+    // A signed-ticket photo is saved with the lines and amounts on screen when it was taken (20270309170000).
+    const linesAtPhoto = caption === PAPER_TICKET_PHOTO_CAPTION ? currentLinesSeen : null;
 
     for (const rawFile of Array.from(files)) {
       try {
@@ -1102,6 +1127,7 @@ export default function DeliveryDetail() {
           file_size: file.size,
           sort_order: photos.length + uploadCount,
           ...(caption ? { caption } : {}),
+          ...(linesAtPhoto ? { lines_seen: linesAtPhoto } : {}),
         }).select();
         if (photoResult.error) {
           toast('error', `Photo saved to storage but DB record failed: ${photoResult.error.message}`);
@@ -1211,7 +1237,7 @@ export default function DeliveryDetail() {
     }
     if (!delivery || !profile) return;
     if (!hasAnyQty) {
-      toast('error', 'At least one item must have a quantity greater than 0');
+      toast('error', NOTHING_DELIVERED_MESSAGE);
       return;
     }
     if (completionEvidence === 'no_proof') {
@@ -1238,6 +1264,8 @@ export default function DeliveryDetail() {
       toast('error', 'Take a photo of the signed paper ticket before completing');
       return;
     }
+    const proofProblem = loadProofProblem(completionEvidence, currentLinesSeen, sig.signedLines, currentTicketPhoto?.lines_seen);
+    if (proofProblem) { sig.reportProofProblem(proofProblem); return; }
     if (usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn)) {
       toast('error', 'Enter the delivery date from the paper ticket (today or earlier)');
       return;
@@ -1279,6 +1307,20 @@ export default function DeliveryDetail() {
       toast('error', `Write why there is no proof (${NO_PROOF_REASON_MIN_CHARS} to ${NO_PROOF_REASON_MAX_CHARS} characters)`);
       return;
     }
+    // Products sold by the whole item (Ea, Unit) take whole figures; the server refuses a fraction too (WHOLE_ITEMS_ONLY).
+    const fraction = items.map((item) => wholeItemMessage(
+      (item.product as unknown as { product_name?: string } | null)?.product_name || 'This product',
+      item.unit_size || '', deliveryQtys[item.id] ?? item.quantity,
+    )).find(Boolean);
+    if (fraction) {
+      toast('error', `The delivery was not completed. ${fraction}`);
+      return;
+    }
+    // Caught here, before the signature image is uploaded: nothing delivered, or proof taken for other lines or amounts.
+    if (!hasAnyQty) { toast('error', NOTHING_DELIVERED_MESSAGE); return; }
+    const signedLinesAtSubmit = submittedEvidence === 'signature' ? sig.signedLines : null;
+    const proofProblem = loadProofProblem(submittedEvidence, currentLinesSeen, signedLinesAtSubmit, currentTicketPhoto?.lines_seen);
+    if (proofProblem) { sig.reportProofProblem(proofProblem); return; }
     setCompleting(true);
     const deliveryId = id!;
 
@@ -1286,7 +1328,7 @@ export default function DeliveryDetail() {
       ? Object.fromEntries(items.map((item) => [item.id, deliveryQtys[item.id] ?? item.quantity]))
       : null;
 
-    const ticketPhoto = usePaperTicket ? latestEvidencePhoto(photos, PAPER_TICKET_PHOTO_CAPTION) : undefined;
+    const ticketPhoto = usePaperTicket ? currentTicketPhoto : undefined;
     const intentParams = {
       p_delivery_id: deliveryId,
       p_signed_by: completionSignedBy,
@@ -1303,6 +1345,8 @@ export default function DeliveryDetail() {
       ...(ticketPhoto ? { p_evidence_ref: ticketPhoto.id } : {}),
       // no_proof: the reason exactly as typed (the server collapses whitespace; an exact retry resends it).
       ...(submittedEvidence === 'no_proof' ? { p_evidence_ref: noProofReason } : {}),
+      // The lines the customer signed for (part of the key's scope: another list is a new attempt).
+      ...(signedLinesAtSubmit ? { p_lines_seen: signedLinesAtSubmit } : {}),
     };
     // check_idempotency replays a saved result by key and operation only, so bind the
     // key to this exact payload: an edited retry (signer, quantities, issue, ticket date)
@@ -1335,6 +1379,7 @@ export default function DeliveryDetail() {
       p_evidence: DeliveryCompletionEvidence;
       p_evidence_ref?: string;
       p_email_receipt?: boolean;
+      p_lines_seen?: LineSeen[];
     } = { ...intentParams, ...(signaturePath ? { p_evidence_ref: signaturePath } : {}), p_idempotency_key: idemKey };
 
     // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;
@@ -1358,9 +1403,33 @@ export default function DeliveryDetail() {
         toast('error', 'Details changed while checking for signal. The delivery was not completed; check them and tap Complete Delivery again.');
         return false;
       }
+      // Lines or amounts changed since signing: stop before the image goes up (the screen asks for a new signature).
+      if (signedLinesAtSubmit && !sameLinesSeen(signedLinesAtSubmit, currentLinesSeenRef.current)) {
+        toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
+        return false;
+      }
       return true;
     };
     if (!stillSameAttempt()) return;
+    // The lines may have changed since this screen loaded them, and an "all full" completion sends no amounts:
+    // proof is checked against the server's lines first (Sol on #2614, HIGH 1). No proof is not bound.
+    if (submittedEvidence !== 'no_proof') {
+      let serverLinesChanged: boolean;
+      try {
+        serverLinesChanged = await linesChangedOnServer(deliveryId, items);
+      } catch (linesErr) {
+        Sentry.captureException(toSentryError(linesErr), { level: 'warning', extra: { context: 'Line check before delivery completion failed' } });
+        toast('error', 'Could not check the products on this delivery. It was not completed; try again.');
+        return;
+      }
+      if (serverLinesChanged) {
+        toast('error', LINES_CHANGED_ON_SERVER_MESSAGE);
+        sig.clearSignature();
+        await fetchDelivery(deliveryQtys);
+        return;
+      }
+      if (!stillSameAttempt()) return;
+    }
     // The server completes only once this attempt's signature image is saved, so it goes up first.
     // A failed upload does not stop the call: after a lost reply the earlier attempt may already have
     // completed the delivery (storage then refuses the re-upload). The same key replays that
@@ -1515,6 +1584,11 @@ export default function DeliveryDetail() {
       // then send as full. Still open: refresh only the photos (a refused photo may be gone).
       if (outcome.kind === 'completed_not_replayed' || outcome.kind === 'closed') {
         await fetchDelivery();
+      } else if (outcome.kind === 'open' && isLoadProofRefusal(error)) {
+        // Nothing delivered, or the proof is not for this load: clear the signature and reload the
+        // delivery's lines and photos, so the stale proof no longer counts. No automatic retry.
+        sig.clearSignature();
+        await fetchDelivery(deliveryQtys);
       } else if (outcome.kind === 'open') {
         const photoSeq = ++photoSeqRef.current;
         const { data: refreshedPhotos, error: photosErr } = await supabase
@@ -1778,11 +1852,13 @@ export default function DeliveryDetail() {
 
   // The signed-paper-ticket proof, as the shared completion step shows it (driver and office alike).
   const paperTicketProof = {
-    hasPhoto: hasPaperTicketPhoto(photos),
+    // Only a photo of the current load counts (a NULL or older photo never matches).
+    hasPhoto: ticketPhotoMatchesLoad,
+    staleMessage: hasPaperTicketPhoto(photos) ? staleProofPhotoMessage(currentTicketPhoto?.lines_seen, 'ticket') : undefined,
     deliveredOn: paperDeliveredOn,
     onDeliveredOnChange: setPaperDeliveredOn,
     onTakePhoto: () => paperTicketInputRef.current?.click(),
-    takePhotoDisabled: uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS,
+    takePhotoDisabled: uploadingPhoto || !isOnline || !currentLinesSeen || countTicketPhotosForLoad(photos, currentLinesSeen) >= MAX_PAPER_TICKET_PHOTOS,
     uploading: uploadingPhoto,
   };
   // A problem with the delivery, reported in the same completion step (driver and office alike) and sent with it.
@@ -1958,7 +2034,7 @@ export default function DeliveryDetail() {
                           onChange={(e) => updateDeliveryQty(item.id, parseFloat(e.target.value) || 0, item.quantity)}
                           className="h-12 w-0 min-w-0 flex-1 rounded-xl border border-gray-300 bg-white text-center font-heading text-[1.75rem]! font-bold tabular-nums text-nav-dark focus:outline-none focus:ring-2 focus:ring-crx-green focus:border-crx-green"
                           min="0"
-                          step="any"
+                          step={isWholeItemUnit(item.unit_size) ? 1 : 'any'}
                           aria-label={`Quantity for ${productName || 'item'}`}
                         />
                         <button
@@ -2052,7 +2128,8 @@ export default function DeliveryDetail() {
                 usePaperTicket={usePaperTicket}
                 onUsePaperTicketChange={setUsePaperTicket}
                 paperTicket={paperTicketProof}
-                onSignatureChange={setSignatureDataUrl}
+                onSignatureChange={sig.onSignatureChange}
+                signatureKey={String(sig.canvasKey)}
                 receipt={{ checked: emailOnComplete, onChange: setEmailOnComplete }}
                 issue={completionIssue}
               />
@@ -2540,7 +2617,7 @@ export default function DeliveryDetail() {
                           className="w-20 text-center px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                           min="0"
                           max={item.max_quantity}
-                          step="any"
+                          step={isWholeItemUnit(item.unit_size) ? 1 : 'any'}
                         />
                         <button
                           onClick={() => setEditItems((prev) =>
@@ -2812,7 +2889,7 @@ export default function DeliveryDetail() {
                       onChange={(e) => updateDeliveryQty(item.id, parseFloat(e.target.value) || 0, item.quantity)}
                       className="w-20 text-center px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                       min="0"
-                      step="any"
+                      step={isWholeItemUnit(item.unit_size) ? 1 : 'any'}
                     />
                     <button
                       onClick={() => updateDeliveryQty(item.id, currentQty + 1, item.quantity)}
@@ -2837,7 +2914,8 @@ export default function DeliveryDetail() {
               onUsePaperTicketChange={setUsePaperTicket}
               showPaperTicketOption={completionEvidence !== 'no_proof'}
               paperTicket={paperTicketProof}
-              onSignatureChange={setSignatureDataUrl}
+              onSignatureChange={sig.onSignatureChange}
+              signatureKey={String(sig.canvasKey)}
               extraOptions={isAdmin && (
                 <ProofOption
                   checked={useNoProof}

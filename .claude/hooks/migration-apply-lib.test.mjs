@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { evaluateMigrationApply, normalizeMigName, ownerApprovalNeeded, resolveMigrationSource, originFetchAgeMs } from "./migration-apply-lib.mjs";
 import { checkWrappable } from "./migration-wrappability-lib.mjs";
-import { evaluateLandingGate, hotfixStampProblem, readyToMergeProblem } from "./migration-landing-gate-lib.mjs";
+import { evaluateLandingGate, hotfixStampProblem, readyToMergeProblem, tahaUnavailableLabelled } from "./migration-landing-gate-lib.mjs";
 import { cancelCodeRabbitSkip, recordCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
 import { recordTahaLaneOverride } from "./taha-lane-lib.mjs";
 import { generateKeyPairSync } from "node:crypto";
@@ -1666,7 +1666,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false,
     trees = { main: ['20260101000000_old.sql'], staging: ['20260101000000_old.sql'] }, treesError = null,
     workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40), stagingTip = "d".repeat(40), stagingBehind = "0", openStaging = [],
-    posts = null } = {}) => evaluateLandingGate({
+    posts = null, timeline = [], prLabels = [], pushes = [{ after: HEAD_SHA, timestamp: new Date(Date.now() - 20 * 60_000).toISOString() }] } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
       const key = args.join(" ");
@@ -1682,6 +1682,16 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     },
     runGh: (args) => {
       // The PR comment telling Taha an override let the apply through: `posts` records it, or (null) the post fails.
+      // Taha's taha-unavailable label: the PR's issue timeline and current labels.
+      if (args[0] === "api" && String(args[1]).includes(`/issues/${pr.number ?? 900}/timeline?`)) {
+        if (timeline instanceof Error) throw timeline;
+        return JSON.stringify(timeline);
+      }
+      if (args[0] === "api" && String(args[1]).includes(`/issues/${pr.number ?? 900}/labels?`)) return JSON.stringify(prLabels);
+      if (args[0] === "api" && String(args[1]).includes("/activity?ref=refs%2Fheads%2F")) {
+        if (pushes instanceof Error) throw pushes;
+        return JSON.stringify(pushes);
+      }
       if (args[0] === "api" && args[1] === "-X" && args[2] === "POST") {
         if (!posts) throw new Error("HTTP 502");
         posts.push(args);
@@ -1921,6 +1931,56 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       refused(gate({ pr: { comments: [], headRefOid: pushed }, git: { "rev-parse HEAD": `${pushed}\n` }, posts }), "Taha hasn't given the go-ahead", "a later push needs a new code");
     } finally { rmSync(overrideFile, { force: true }); }
     refused(gate({ pr: { comments: [] } }), "Taha hasn't given the go-ahead", "without the override the go-ahead is needed again");
+  }
+  // Taha, 2026-11-26: his own taha-unavailable label stands in for his go-ahead and the hold, 30 minutes, this head only.
+  {
+    const young = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const now = Date.now();
+    const label = { name: "taha-unavailable" };
+    const added = (over = {}) => ({ event: "labeled", label, actor: { login: "TahaKhanAbdalli", id: 50602678 }, created_at: new Date(now - 5 * 60_000).toISOString(), ...over });
+    const commit = { event: "committed", sha: HEAD_SHA };
+    const pushed = (minutesAgo, after = HEAD_SHA) => ({ after, timestamp: new Date(now - minutesAgo * 60_000).toISOString() });
+    const t = (events, labels = [label], pushes = [pushed(20)]) => ({ events, labels, pushes, head: HEAD_SHA, now });
+    ok(tahaUnavailableLabelled(t([commit, added()])) === true, "Taha's fresh label after the head counts");
+    ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "MasonWells1", id: 1 } })])) === false, "Mason's shared account doesn't count");
+    ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "TahaKhanAbdalli", id: 999 } })])) === false, "another account under Taha's old login doesn't count (Luna, PR 3)");
+    ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "taha-renamed", id: 50602678 } })])) === true, "his account after a rename still counts");
+    ok(tahaUnavailableLabelled(t([commit, added({ created_at: new Date(now - 31 * 60_000).toISOString() })])) === false, "older than 30 minutes doesn't count");
+    ok(tahaUnavailableLabelled(t([added(), commit], [label], [pushed(2)])) === false, "a label added before the latest push doesn't count");
+    ok(tahaUnavailableLabelled(t([commit, added()], [])) === false, "a label since removed doesn't count");
+    // Luna, PR 3: head A, label, push B, force-push back to A.
+    const other = { event: "committed", sha: "b".repeat(40) };
+    ok(tahaUnavailableLabelled(t([commit, added(), other, { event: "head_ref_force_pushed" }], [label], [pushed(2), pushed(8, "b".repeat(40)), pushed(20)])) === false, "a force-push back to an older head needs the label again");
+    ok(tahaUnavailableLabelled(t([commit, added(), other, commit], [label], [pushed(2), pushed(20)])) === false, "the head's latest arrival is what counts");
+    ok(tahaUnavailableLabelled(t([commit, other, { event: "head_ref_force_pushed" }, added()], [label], [pushed(10), pushed(15, "b".repeat(40))])) === true, "a label after the force-push counts");
+    ok(tahaUnavailableLabelled(t([commit, added(), added({ event: "unlabeled" })])) === false, "an unlabel after it voids it");
+    ok(tahaUnavailableLabelled(t([commit, added({ label: { name: "hotfix-backport" } })])) === false, "another label doesn't count");
+    ok(tahaUnavailableLabelled(t([added(), commit])) === true, "a future-dated commit listed after the label doesn't hide it: push time decides (Luna, PR 3 round 4)");
+    ok(tahaUnavailableLabelled({ events: undefined, labels: [label], head: HEAD_SHA, now }) === false, "an unreadable timeline fails closed");
+    // Taha's review of #2668, HIGH 1: the timeline orders commits by commit date; a commit made before his label but
+    // pushed after it sits before the label there, so push time decides.
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2)])) === false, "a head pushed after his label doesn't count, whatever the timeline order");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2), pushed(20)])) === false, "the head's latest push decides");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2, "b".repeat(40)), pushed(20)])) === false, "a newer push of another head: the branch moved on, so it doesn't count (advisory Sol, PR 3)");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [])) === false, "no push of this head found doesn't count");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], null)) === false, "unreadable push activity fails closed");
+
+    const quiet = [];
+    ok(gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added()], prLabels: [label], posts: quiet }).ok === true,
+      "Taha's label lifts the 4-hour hold and the go-ahead on a hotfix");
+    ok(quiet.length === 0, "and no override comment is posted (the signal came from him)");
+    ok(gate({ pr: { headRefName: "release/next", comments: [] }, timeline: [commit, added()], prLabels: [label] }).ok === true, "and on the release");
+    const asked = gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added({ actor: { login: "masonwells1" } })], prLabels: [label] });
+    refused(asked, "4-hour review hold", "someone else's label does not");
+    ok(/taha-unavailable/.test(String(asked.reason)) && /unavailable: <why Taha can't>/.test(String(asked.reason)), "the refusal names the label and keeps Mason's override as the backup");
+    refused(gate({ pr: { createdAt: young, comments: [] }, timeline: new Error("HTTP 502"), prLabels: [label] }), "4-hour review hold", "an unreadable timeline fails closed");
+    refused(gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added()], prLabels: [label], pushes: [{ after: HEAD_SHA, timestamp: new Date().toISOString() }] }), "4-hour review hold",
+      "the gate reads push times: a head pushed after the label is refused (Taha, #2668 HIGH 1)");
+    refused(gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added()], prLabels: [label], pushes: new Error("HTTP 502") }), "4-hour review hold", "unreadable push activity fails closed");
+    const full = Array.from({ length: 100 }, () => ({ event: "commented" }));
+    refused(gate({ pr: { createdAt: young, comments: [] }, timeline: [...full.slice(0, 98), commit, added()], prLabels: [label] }), "4-hour review hold",
+      "a full first page (more may follow, never ending here) is never read as complete");
+    ok(gate({ pr: { comments: [] }, git: { "rev-parse HEAD": `${"e".repeat(40)}\n` }, timeline: [commit, added()], prLabels: [label] }).ok === false, "but never the other gates");
   }
   // A proof made under the release-only rules proves only the release PR, never a hotfix (Sol r8, #2226).
   {
@@ -2230,11 +2290,14 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   }) }), ACCESS), "picture or file", "an approval whose reply came with a picture is refused at the apply (Codex P1, PR #900)");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {}, { replyMark: undefined }) }), ACCESS),
     "does not say where his reply is", "an approval that does not say where his reply is is refused");
-  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {
-    issuedAt: new Date(Date.now() - OWNER_APPROVAL_MAX_AGE_MS - 2 * 60_000).toISOString(),
-    expiresAt: new Date(Date.now() - 2 * 60_000).toISOString(),
-  }, { approvedAt: new Date(Date.now() - OWNER_APPROVAL_MAX_AGE_MS - 60_000).toISOString() }) }), ACCESS),
-    "24 hours after Mason replied", "an approval more than 24 hours after his reply is refused");
+  { // One clock reading: separate Date.now() calls a millisecond apart made the request over 24h long (flaky on Windows CI).
+    const t = Date.now();
+    denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {
+      issuedAt: new Date(t - OWNER_APPROVAL_MAX_AGE_MS - 2 * 60_000).toISOString(),
+      expiresAt: new Date(t - 2 * 60_000).toISOString(),
+    }, { approvedAt: new Date(t - OWNER_APPROVAL_MAX_AGE_MS - 60_000).toISOString() }) }), ACCESS),
+      "24 hours after Mason replied", "an approval more than 24 hours after his reply is refused");
+  }
   // Mason, 2026-11-23: his yes carries to whichever session lands it (the merge captain).
   allows(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS, { ownerSessionId: "sess-other-chat-0002" }),
     "an approval given in another conversation is accepted by the session applying it");

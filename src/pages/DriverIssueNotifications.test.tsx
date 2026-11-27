@@ -3,14 +3,14 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { buildInMemoryQuery } from '../test-utils/inMemoryQuery';
 
-const H = vi.hoisted(() => ({ message: '', type: 'delivery_issue_reported' }));
+const H = vi.hoisted(() => ({ message: '', type: 'delivery_issue_reported', update: vi.fn() }));
 vi.mock('../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
-  return { ...actual, supabase: { from: () => buildInMemoryQuery([{
+  return { ...actual, supabase: { from: () => ({ ...buildInMemoryQuery([{
     id: 'report-1', user_id: 'office', notification_type: H.type, title: 'Delivery issue: Other — DEL-007',
     message: H.message, is_read: true, created_at: '2026-10-28T15:00:00Z',
     related_entity_type: 'delivery', related_entity_id: 'delivery-7',
-  }]) } };
+  }]), update: H.update }) } };
 });
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'office', role: 'admin' } }) }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
@@ -21,7 +21,10 @@ vi.mock('../hooks/useRealtimeSubscription', () => ({ useRealtimeNotifications: (
 import Notifications from './Notifications';
 import NotificationsPanel from '../components/team/NotificationsPanel';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  H.update.mockClear();
+});
 describe('driver report in office notification surfaces', () => {
   for (const panel of [false, true]) {
     it(`keeps the full report readable and user text inert in the ${panel ? 'bell' : 'page'}`, async () => {
@@ -58,7 +61,7 @@ describe('driver report in office notification surfaces', () => {
     fireEvent.keyDown(await screen.findByText(H.message), { key: 'Enter' });
     expect(await screen.findByText('Correct delivery opened')).toBeInTheDocument();
   });
-  it.each(['Enter', ' '])('does not open a notice when nested Delete receives %s', async (key) => {
+  it.each(['Enter', ' '])('does not open a notice when Delete receives %s', async (key) => {
     H.type = 'delivery_issue_reported';
     H.message = 'Driver report';
     render(<MemoryRouter><Routes>
@@ -68,5 +71,35 @@ describe('driver report in office notification surfaces', () => {
     fireEvent.click(await screen.findByTitle('Notifications'));
     fireEvent.keyDown(await screen.findByTitle('Delete'), { key });
     expect(screen.queryByText('Correct delivery opened')).not.toBeInTheDocument();
+  });
+
+  it('opens an already-read bell notice without writing it again', async () => {
+    H.type = 'delivery_issue_reported';
+    H.message = 'Driver report';
+    render(<MemoryRouter><Routes>
+      <Route path="/" element={<NotificationsPanel />} />
+      <Route path="/deliveries/delivery-7" element={<p>Correct delivery opened</p>} />
+    </Routes></MemoryRouter>);
+    fireEvent.click(await screen.findByTitle('Notifications'));
+    const notice = await screen.findByRole('button', { name: /Driver report/ });
+    expect(notice).not.toContainElement(screen.getByTitle('Delete'));
+    fireEvent.click(notice);
+    expect(await screen.findByText('Correct delivery opened')).toBeInTheDocument();
+    expect(H.update).not.toHaveBeenCalled();
+  });
+
+  it('closes the bell with Escape and returns focus to the trigger', async () => {
+    H.message = 'Driver report';
+    render(<MemoryRouter><NotificationsPanel /></MemoryRouter>);
+    const bell = await screen.findByTitle('Notifications');
+    fireEvent.click(bell);
+    await screen.findByText(H.message);
+    expect(bell).toHaveAttribute('aria-expanded', 'true');
+    const close = screen.getByTitle('Close');
+    close.focus();
+    fireEvent.keyDown(close, { key: 'Escape' });
+    expect(bell).toHaveAttribute('aria-expanded', 'false');
+    expect(bell).toHaveFocus();
+    expect(screen.queryByTitle('Close')).not.toBeInTheDocument();
   });
 });

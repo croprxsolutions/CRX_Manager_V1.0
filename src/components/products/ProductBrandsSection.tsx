@@ -55,7 +55,7 @@ interface ProductBrandsSectionProps {
   /** Told the brand list's state so the page banner covers brand numbers too: undefined while loading, null when the read failed. */
   onBrandsChange?: (productId: string, brands: ProductBrand[] | null | undefined) => void;
   /** Brand and document edits can change the roster or SDS shown on the Weight card. */
-  onWeightReviewChange?: () => void;
+  onWeightReviewChange?: (parentId: string | undefined) => void;
 }
 
 interface BrandDraft {
@@ -169,7 +169,7 @@ export default function ProductBrandsSection({
   });
   const reloadBrands = () => {
     setReloadToken((token) => token + 1);
-    onWeightReviewChange?.();
+    onWeightReviewChange?.(parent?.id);
   };
   const onBrandsChangeRef = useLatestRef(onBrandsChange);
   useEffect(() => {
@@ -561,7 +561,7 @@ export default function ProductBrandsSection({
                         onReload={(includeBrand) => {
                           if (includeBrand) reloadBrands();
                           else {
-                            onWeightReviewChange?.();
+                            onWeightReviewChange?.(parent?.id);
                             void documents.reload();
                           }
                         }} />

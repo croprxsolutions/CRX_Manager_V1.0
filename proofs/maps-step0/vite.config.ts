@@ -1,6 +1,6 @@
 import { deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
 
 const TILE_SIZE = 256;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -69,18 +69,32 @@ function localPictureTiles(): Plugin {
     B: solidTile(221, 112, 58),
   };
 
+  function serveTileFixtures(server: Pick<ViteDevServer, 'middlewares'>, serveHealthy: boolean): void {
+    server.middlewares.use((request, response, next) => {
+      const match = request.url?.match(/^\/tiles\/(A|B)(-outage)?\.png(?:\?.*)?$/);
+      if (!match || (!match[2] && !serveHealthy)) return next();
+
+      response.setHeader('Cache-Control', 'no-store');
+      if (match[2]) {
+        response.statusCode = 503;
+        response.end('Simulated provider outage');
+        return;
+      }
+
+      response.statusCode = 200;
+      response.setHeader('Content-Type', 'image/png');
+      response.end(tiles[match[1] as keyof typeof tiles]);
+    });
+  }
+
   return {
     name: 'maps-step0-local-picture-tiles',
-    configureServer(server) {
-      server.middlewares.use((request, response, next) => {
-        const match = request.url?.match(/^\/tiles\/(A|B)\/\d+\/\d+\/\d+\.png(?:\?.*)?$/);
-        if (!match) return next();
-
-        response.statusCode = 200;
-        response.setHeader('Content-Type', 'image/png');
-        response.setHeader('Cache-Control', 'no-store');
-        response.end(tiles[match[1] as keyof typeof tiles]);
-      });
+    configureServer: (server) => serveTileFixtures(server, true),
+    configurePreviewServer: (server) => serveTileFixtures(server, false),
+    generateBundle() {
+      for (const [picture, source] of Object.entries(tiles)) {
+        this.emitFile({ type: 'asset', fileName: `tiles/${picture}.png`, source });
+      }
     },
   };
 }
@@ -88,5 +102,6 @@ function localPictureTiles(): Plugin {
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [localPictureTiles()],
+  build: { target: ['chrome107', 'edge107', 'firefox104', 'safari16'] },
   server: { host: '127.0.0.1' },
 });

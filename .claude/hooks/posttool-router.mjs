@@ -18,7 +18,10 @@ export function postToolModulesFor(payload, surface = process.env.CRX_AGENT_SURF
   if (/apply_migration/i.test(toolName)) {
     modules.push("./registry-freshness.mjs", "./applied-snapshot-invalidate.mjs");
   }
-  if (isGitPush(payload?.tool_input?.command)) modules.push("./post-push-dirty-warning.mjs");
+  const command = payload?.tool_input?.command;
+  if (isGitPush(command)) modules.push("./post-push-dirty-warning.mjs");
+  // After a push or PR open/ready, label a Sol-clean lane PR for Taha (ship.md › Taha's PRs). Not imported: a cached module would not rerun.
+  if (isGitPush(command) || /\bgh\s+pr\s+(?:create|ready)\b/.test(String(command || ""))) modules.push("./taha-ready-after-sol.mjs");
   if (surface !== "codex") modules.push("./session-heartbeat.mjs");
   return modules;
 }

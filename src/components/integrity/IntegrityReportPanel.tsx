@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ShieldAlert, ShieldCheck, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { runReconciliationChecks, type ReconciliationReport } from '../../lib/reconciliation';
 import { useToast } from '../ui/Toast';
+import { LoadFailedState } from '../ui/EmptyState';
 
 export default function IntegrityReportPanel() {
   const { toast } = useToast();
@@ -15,6 +16,7 @@ export default function IntegrityReportPanel() {
       const result = await runReconciliationChecks();
       setReport(result);
     } catch (err) {
+      setReport(null);
       toast('error', err instanceof Error ? err.message : 'Reconciliation failed');
     } finally {
       setLoading(false);
@@ -26,7 +28,7 @@ export default function IntegrityReportPanel() {
     fetchReport();
   }, [fetchReport]);
 
-  if (loading) {
+  if (loading || (!report && refreshing)) {
     return (
       <div className="p-6">
         <div className="text-gray-600">Running integrity checks…</div>
@@ -37,16 +39,17 @@ export default function IntegrityReportPanel() {
   if (!report) {
     return (
       <div className="p-6">
-        <div className="text-red-600">Failed to load report.</div>
+        <LoadFailedState title="The integrity report could not be loaded" onRetry={fetchReport} />
       </div>
     );
   }
 
-  const allPassed = report.totalDiscrepancies === 0;
+  const incompleteChecks = report.checks.filter((check) => !check.passed && check.discrepancies.length === 0).length;
+  const allPassed = incompleteChecks === 0 && report.totalDiscrepancies === 0;
 
   return (
     <div className="p-6 space-y-6 max-w-6xl">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-3">
             {allPassed ? (
@@ -61,6 +64,11 @@ export default function IntegrityReportPanel() {
             Any discrepancy is a sign that two source-of-truth values disagree —
             usually due to a bug, manual edit, or interrupted operation.
           </p>
+          {incompleteChecks > 0 && (
+            <p role="alert" className="mt-2 text-sm text-amber-700">
+              Incomplete report. {incompleteChecks} {incompleteChecks === 1 ? 'check did' : 'checks did'} not finish. Re-run before relying on the result.
+            </p>
+          )}
           <p className="text-xs text-gray-500 mt-1">
             Run at {new Date(report.timestamp).toLocaleString()} ·
             {' '}{report.checks.length} checks ·
@@ -108,7 +116,9 @@ export default function IntegrityReportPanel() {
               }`}>
                 {check.passed
                   ? 'PASS'
-                  : `${check.discrepancies.length} issue${check.discrepancies.length === 1 ? '' : 's'}`}
+                  : check.discrepancies.length === 0
+                    ? 'Not completed'
+                    : `${check.discrepancies.length} issue${check.discrepancies.length === 1 ? '' : 's'}`}
               </span>
             </div>
 

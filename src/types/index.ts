@@ -1253,6 +1253,8 @@ export interface DeliveryEvidencePhoto {
   image_url: string;
   caption: string | null;
   uploaded_at?: string | null;
+  // The lines the screen showed when a signed-ticket photo was taken (20270309170000).
+  lines_seen?: { order_item_id: string; product_id: string; quantity: number; delivered: number }[] | null;
 }
 /** A delivery's receipt address, read through get_delivery_receipt_recipient. App-shaped: fetchReceiptRecipient maps the RPC's snake_case keys; never cast the raw result to this. */
 export interface ReceiptRecipient {
@@ -4676,6 +4678,8 @@ export interface InventoryCostRow {
   sku: string | null;
   category: string | null;
   vendor: string | null;
+  /** Stock location of this row; null for an active product with no stock record. */
+  location: string | null;
   quantity_available: number;
   quantity_prebooked: number;
   net_available: number;

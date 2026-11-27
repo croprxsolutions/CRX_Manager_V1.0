@@ -148,6 +148,19 @@ describe('ManualTicketCreate retry-safe atomic creation', () => {
   // These two render the real component and check that the tiers stay visually
   // distinct — a "couldn't check this" note must not appear in the amber error
   // block, which is what would retrain operators to ignore it.
+  it('names the manual ticket fields and product controls for assistive technology', async () => {
+    render(<ManualTicketCreate {...defaultProps} />);
+
+    expect(screen.getByRole('combobox', { name: 'Customer' })).toHaveFocus();
+    expect(screen.getByLabelText('Ticket Date')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Job #' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Total volume unit' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+    expect(await screen.findByRole('combobox', { name: 'Product' })).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: 'Qty' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove product 1' })).toBeInTheDocument();
+  });
+
   it('renders a real mismatch in the warning block', async () => {
     const { validateBlendMath } = await import('../../lib/blendMathValidator');
     vi.mocked(validateBlendMath).mockReturnValue([

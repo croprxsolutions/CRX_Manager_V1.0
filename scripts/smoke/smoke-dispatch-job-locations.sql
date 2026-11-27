@@ -27,7 +27,8 @@
 -- Self-contained fixtures (own customer/field/job/applicators) so the chain
 -- never depends on seed state. The DO block ALWAYS ends in
 -- RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK' — nothing here commits.
--- Requires migration 20260626120000 applied.
+-- Requires migration 20260626120000. The per-location read checks use the jobs_crew view when it exists
+-- (20270308040000) and the jobs base table on older replays.
 -- ============================================================================
 
 DO $$
@@ -52,6 +53,8 @@ DECLARE
   v_app_a    uuid;
   v_app_b    uuid;
   v_seen     int;
+  -- jobs_crew after 20270308040000; older replays (historical proof runners) read the base table instead.
+  v_has_crew_view boolean := to_regclass('public.jobs_crew') IS NOT NULL;
   v_crew_member uuid;  -- a profile that is a member of v_crew (for crew RLS read)
 BEGIN
   -- ----------------------------------------------------------------- actor
@@ -276,7 +279,7 @@ BEGIN
   -- ============================================ 12) CREW-MEMBER RLS READ (Codex re-review P2)
   -- Dispatch v_jf_c to the crew, add v_app1 as a member of that crew, then confirm
   -- v_app1 (a crew member, NOT the whole-job applicator) can SELECT the dispatch row
-  -- AND the parent job (jobs_select_location_dispatchee).
+  -- AND the parent job through jobs_crew (base-table crew reads were removed by the crew lockdown).
   v_res := dispatch_job_locations(
     jsonb_build_array(jsonb_build_object('job_field_id', v_jf_c, 'applicator_id', NULL, 'crew_id', v_crew)),
     v_admin, '[SMOKE] disp-L279-' || v_sfx, false);
@@ -288,17 +291,17 @@ BEGIN
   SELECT count(*) INTO v_seen FROM job_location_dispatches WHERE job_field_id = v_jf_c;
   IF v_seen <> 1 THEN RAISE EXCEPTION 'FAIL 12: crew member cannot read crew dispatch row (saw %)', v_seen; END IF;
   -- crew member can also read the PARENT job (else their work is invisible on the board)
-  SELECT count(*) INTO v_seen FROM jobs WHERE id = v_job;
-  IF v_seen <> 1 THEN RAISE EXCEPTION 'FAIL 12: crew member cannot read parent job via jobs_select_location_dispatchee'; END IF;
+  IF v_has_crew_view THEN SELECT count(*) INTO v_seen FROM jobs_crew WHERE id = v_job; ELSE SELECT count(*) INTO v_seen FROM jobs WHERE id = v_job; END IF;
+  IF v_seen <> 1 THEN RAISE EXCEPTION 'FAIL 12: crew member cannot read parent job via jobs_crew'; END IF;
   RESET role;
 
   -- ============================================ 13) PER-LOCATION APPLICATOR READS PARENT JOB (Codex re-review P1)
   -- v_jf_b is dispatched to v_app2 (who is NOT the whole-job applicator). Confirm
-  -- v_app2 can read the parent job through jobs_select_location_dispatchee.
+  -- v_app2 can read the parent job through jobs_crew.
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_app2, 'role', 'authenticated')::text, true);
   PERFORM set_config('role', 'authenticated', true);
-  SELECT count(*) INTO v_seen FROM jobs WHERE id = v_job;
+  IF v_has_crew_view THEN SELECT count(*) INTO v_seen FROM jobs_crew WHERE id = v_job; ELSE SELECT count(*) INTO v_seen FROM jobs WHERE id = v_job; END IF;
   IF v_seen <> 1 THEN RAISE EXCEPTION 'FAIL 13: per-location applicator cannot read parent job (RLS)'; END IF;
   RESET role;
 
@@ -313,7 +316,7 @@ BEGIN
   PERFORM set_config('role', 'authenticated', true);
   SELECT count(*) INTO v_seen FROM job_location_dispatches WHERE job_field_id = v_jf_b;
   IF v_seen <> 0 THEN RAISE EXCEPTION 'FAIL 13b: deactivated assignee still reads dispatch row (saw %)', v_seen; END IF;
-  SELECT count(*) INTO v_seen FROM jobs WHERE id = v_job;
+  IF v_has_crew_view THEN SELECT count(*) INTO v_seen FROM jobs_crew WHERE id = v_job; ELSE SELECT count(*) INTO v_seen FROM jobs WHERE id = v_job; END IF;
   IF v_seen <> 0 THEN RAISE EXCEPTION 'FAIL 13b: deactivated assignee still reads parent job (saw %)', v_seen; END IF;
   RESET role;
   -- reactivate for the remaining steps
@@ -334,7 +337,7 @@ BEGIN
   IF v_seen <> 0 THEN RAISE EXCEPTION 'FAIL 14: cancelled dispatch still visible to former assignee (saw %)', v_seen; END IF;
   -- v_app2 no longer reads the parent job EITHER (no other live dispatch to them).
   -- (v_jf_a is dispatched to v_app1, not v_app2, so v_app2 has no live grant.)
-  SELECT count(*) INTO v_seen FROM jobs WHERE id = v_job;
+  IF v_has_crew_view THEN SELECT count(*) INTO v_seen FROM jobs_crew WHERE id = v_job; ELSE SELECT count(*) INTO v_seen FROM jobs WHERE id = v_job; END IF;
   IF v_seen <> 0 THEN RAISE EXCEPTION 'FAIL 14: former assignee still reads parent job after cancel (saw %)', v_seen; END IF;
   RESET role;
 

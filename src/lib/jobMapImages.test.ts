@@ -199,7 +199,7 @@ describe('fetchJobMapImages', () => {
     expect(result?.perField).toHaveLength(1);
   });
 
-  it('draws an overview acreage label at the Mercator-matched position for a non-square bbox', async () => {
+  it.each([['north', 0.25], ['center', 0.5], ['south', 0.75]])('places a %s acreage label correctly on a wide overview', async (_side, fractionFromTop) => {
     const minLatitude = 39;
     const maxLatitude = 39.1;
     const mercatorY = (latitude: number) => {
@@ -207,9 +207,11 @@ describe('fetchJobMapImages', () => {
       return (1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) / 2;
     };
     const latitudeForMercatorY = (y: number) => Math.atan(Math.sinh(Math.PI * (1 - 2 * y))) * 180 / Math.PI;
+    const northY = mercatorY(maxLatitude);
+    const southY = mercatorY(minLatitude);
     const centroid: [number, number] = [
       -89.85,
-      latitudeForMercatorY((mercatorY(minLatitude) + mercatorY(maxLatitude)) / 2),
+      latitudeForMercatorY(northY + (southY - northY) * fractionFromTop),
     ];
     const nonSquareBoundary = JSON.stringify({
       type: 'Polygon',
@@ -245,7 +247,11 @@ describe('fetchJobMapImages', () => {
     const [text, x, y] = context.fillText.mock.calls[0] as [string, number, number];
     expect(text).toBe('1 · 10 ac');
     expect(Math.abs(x - width / 2)).toBeLessThanOrEqual(1);
-    expect(Math.abs(y - height / 2)).toBeLessThanOrEqual(1);
+    const padding = new URL(url).searchParams.get('padding');
+    expect(padding).not.toBeNull();
+    const inset = Number(padding);
+    const expectedY = inset + (height - 2 * inset) * fractionFromTop;
+    expect(Math.abs(y - expectedY)).toBeLessThanOrEqual(1);
   });
 
   it('omits acreage when the job-field acreage query fails', async () => {

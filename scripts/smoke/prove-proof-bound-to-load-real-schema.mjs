@@ -30,8 +30,13 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270309170000_proof_bound_to_load.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-bound-to-load-reverse.sql');
-const FOLLOW_UPS = [];
-const LATER_READ_ONLY = new Set([]);
+const REQUIRED_REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-binding-required-reverse.sql');
+const FOLLOW_UPS = [path.join(MIGRATIONS, '20270315083100_proof_binding_required.sql')];  // step 4: the binding is required
+// #2562 (Taha's review, LOW 3): it wraps _complete_delivery_authorized_impl_20270122, the body this proof's step calls
+// by name, and leaves the step, the wrappers and the helper alone.
+const LATER_READ_ONLY = new Set(['20270309180000_tiny_line_counts_as_zero.sql']);
+// Live applies #2562 between the candidate and step 4, so the step-4 cases replay it first (Codex on #2671).
+const TINY = path.join(MIGRATIONS, '20270309180000_tiny_line_counts_as_zero.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -345,6 +350,8 @@ const completeTicket = (d, key, ph, lines) => `SELECT public.complete_delivery(p
     p_performed_by => '${ADMIN}', p_idempotency_key => '${key}', p_evidence => 'paper_ticket', p_evidence_ref => '${ph}'${lit(lines)})`;
 const startTicket = (d, key, ph) => `SELECT public.start_and_complete_delivery(p_delivery_id => '${d}', p_signed_by => '[PROVER] Customer',
     p_delivered_on => ${today}, p_performed_by => '${ADMIN}', p_idempotency_key => '${key}', p_evidence => 'paper_ticket', p_evidence_ref => '${ph}')`;
+const startLeft = (d, key, ph) => `SELECT public.start_and_complete_delivery(p_delivery_id => '${d}', p_signed_by => 'No one present — left at site',
+    p_delivered_on => ${today}, p_performed_by => '${ADMIN}', p_idempotency_key => '${key}', p_evidence => 'left_at_site', p_evidence_ref => '${ph}')`;
 const completeLeft = (d, key, ph, lines) => `SELECT public.complete_delivery(p_delivery_id => '${d}', p_signed_by => 'No one present — left at site',
     p_performed_by => '${ADMIN}', p_idempotency_key => '${key}', p_evidence => 'left_at_site', p_evidence_ref => '${ph}'${lit(lines)})`;
 const completeNoProof = (d, key, lines, actor = ADMIN) => `SELECT public.complete_delivery(p_delivery_id => '${d}', p_signed_by => 'No proof — recorded by office',
@@ -371,8 +378,14 @@ const money = () => scalar(`SELECT (SELECT quantity_available || '/' || quantity
     (SELECT string_agg(quantity_delivered || '/' || quantity_remaining, ',' ORDER BY id) FROM public.order_items WHERE order_id = '${ORD}') || ' ' ||
     (SELECT count(*) FROM public.invoice_items);`);
 const keySaved = (key) => scalar(`SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key = '${key}';`);
+const LEFT = /LEFT_AT_SITE_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the drop-location photo was taken\. Take a new photo of where the delivery was left, for the current products and amounts\./;
 const LOAD = /DELIVERY_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the customer signed\. Reload the delivery, check the products and amounts with the customer and get a new signature\. If the customer already has the goods, call the office\./;
 const TICKET = /PAPER_TICKET_LOAD_CHANGED: the products or delivered amounts on this delivery changed after the ticket photo was taken\. Get the ticket signed for the current products and amounts and add a new photo of it\. If the customer already has the goods, call the office\./;
+// Proof binding required: with no list the message says the app copy is out of date (Taha, #2671).
+const OUTDATED = 'this copy of CRX is out of date and did not s[a-z]+ the products ';
+const NOLIST_LOAD = new RegExp(String.raw`DELIVERY_LOAD_CHANGED: ${OUTDATED}the customer signed for\. Tap Reload on the new-version notice \(or close CRX and open it again\), then get the signature again\.`);
+const NOLIST_TICKET = new RegExp(String.raw`PAPER_TICKET_LOAD_CHANGED: ${OUTDATED}with the ticket photo\. Tap Reload on the new-version notice \(or close CRX and open it again\), then take the photo again\.`);
+const NOLIST_LEFT = new RegExp(String.raw`LEFT_AT_SITE_LOAD_CHANGED: ${OUTDATED}with the drop-location photo\. Tap Reload on the new-version notice \(or close CRX and open it again\), then take the photo again\.`);
 
 let GAP;
 function beforeCases() {
@@ -608,6 +621,89 @@ function afterCases() {
   console.log('[case 9] anon cannot call either completion; no client role can call the renamed bodies, the helper or the trigger function');
 }
 
+// Step 4 (20270315083100): proof with no list is refused like proof for another load; nothing else changes.
+const MATCH_MD5 = "SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._delivery_lines_match(uuid,jsonb,jsonb)'::regprocedure;";
+const STEP_MD5 = "SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure;";
+function requiredCases() {
+  stageText('tiny.sql', lf(TINY));
+  let r = apply('tiny.sql');
+  assert.equal(r.status, 0, r.output);
+  stageText('required.sql', lf(FOLLOW_UPS[0]));
+  r = apply('required.sql');
+  assert.equal(r.status, 0, r.output);
+  assert.equal(scalar(STEP_MD5), '85f7bbe5eb3e9a6507fd0922fdd2506f');
+  assert.equal(scalar(MATCH_MD5), '0fa6b8c0d10033f1374f192d17641bb7');
+  // Taha's review of #2562 (LOW 1): a delivered amount above 0 and under 0.01 counts as 0 on both sides.
+  const TWO = (d2) => [A(2)[0], B(2, d2)[0]];
+  let tiny = (key, seen, figure) => {
+    const t = delivery(TWO(2), 'in_progress');
+    const [l1, l2] = scalar(`SELECT string_agg(id::text, ',' ORDER BY order_item_id = '${OI}' DESC) FROM public.delivery_items WHERE delivery_id = '${t}';`).split(',');
+    return [t, completeSig(t, key, seen).replace(', p_lines_seen', `, p_quantities => ${J({ [l1]: 2, [l2]: figure })}, p_lines_seen`), l2];
+  };
+  // The tiny line is recorded as 0 (#2562's wrapper): nothing delivered on it and no stock moved for its product.
+  const recordedZero = (t, l2) => {
+    assert.equal(Number(scalar(`SELECT quantity_delivered FROM public.delivery_items WHERE id = '${l2}';`)), 0, `${l2} recorded a tiny amount`);
+    assert.equal(scalar(`SELECT count(*) FROM public.inventory_transactions WHERE delivery_id = '${t}'
+      AND product_id = (SELECT product_id FROM public.delivery_items WHERE id = '${l2}');`), '0', `${l2} moved stock`);
+  };
+  let [t, sql, l2] = tiny('pbl-qt1', TWO(0), 0.005); ok(sql); assert.equal(status(t), 'completed'); recordedZero(t, l2);
+  [t, sql, l2] = tiny('pbl-qt2', TWO(0.004), 0.009); ok(sql); assert.equal(status(t), 'completed'); recordedZero(t, l2);
+  [t, sql, l2] = tiny('pbl-qt3', TWO(0.005), 0); ok(sql); assert.equal(status(t), 'completed'); recordedZero(t, l2);
+  [t, sql] = tiny('pbl-qt4', TWO(0.005), 0.05); refused(sql, LOAD); assert.equal(status(t), 'in_progress');
+  [t, sql] = tiny('pbl-qt5', TWO(0), 0.01); refused(sql, LOAD); assert.equal(status(t), 'in_progress');
+  console.log('[required tiny] an amount above 0 and under 0.01 counts as 0 on both sides: signed 0 / sent 0.005, signed 0.004 / sent 0.009 and signed 0.005 / sent 0 complete, each recording the tiny line as 0 with no stock moved (#2562 replayed first); signed 0.005 / sent 0.05 and signed 0 / sent 0.01 are refused');
+  let d = delivery(A(), 'in_progress');
+  refused(completeSig(d, 'pbl-q1', undefined), NOLIST_LOAD);
+  assert.equal(status(d), 'in_progress');
+  const receipt = (out) => out.split(/\r?\n/).filter((l) => l.includes('"delivery_id"')).at(-1);
+  const first = receipt(ok(completeSig(d, 'pbl-q1b', A())));
+  assert.equal(status(d), 'completed');
+  // A retry of that completed call with no list still returns its saved receipt (a replay never reaches the check).
+  const again = receipt(ok(`SELECT public.complete_delivery(p_delivery_id => '${d}', p_signed_by => '[PROVER] Customer', p_performed_by => '${ADMIN}',
+    p_idempotency_key => 'pbl-q1b', p_evidence => 'signature', p_evidence_ref => '${sigPath(d, 'pbl-q1b')}')`));
+  assert.ok(first);
+  assert.equal(again, first);
+  d = delivery(A());
+  refused(startSig(d, 'pbl-q2', undefined), NOLIST_LOAD);
+  assert.equal(status(d), 'scheduled');
+  d = delivery(A(), 'in_progress');
+  refused(completeTicket(d, 'pbl-q3', photo(d, undefined)), NOLIST_TICKET);
+  refused(completeTicket(d, 'pbl-q3n', photo(d, null)), NOLIST_TICKET);
+  assert.equal(status(d), 'in_progress');
+  refused(completeTicket(d, 'pbl-q3u', photo(d, undefined).toUpperCase()), /PAPER_TICKET_PHOTO_MISSING|PAPER_TICKET_LOAD_CHANGED: this copy of CRX is out of date/);
+  ok(completeTicket(d, 'pbl-q3b', photo(d, A())));
+  assert.equal(status(d), 'completed');
+  d = delivery(A());
+  refused(startTicket(d, 'pbl-q4', photo(d, undefined)), NOLIST_TICKET);
+  assert.equal(status(d), 'scheduled');
+  // Mason 2026-11-25: the drop-location photo of a no-one-present stop is bound to the load like a ticket photo.
+  d = delivery(A(), 'in_progress');
+  refused(completeLeft(d, 'pbl-q5', photo(d, undefined, 'Left at site — drop location')), NOLIST_LEFT);
+  refused(completeLeft(d, 'pbl-q5n', photo(d, null, 'Left at site — drop location')), NOLIST_LEFT);
+  refused(completeLeft(d, 'pbl-q5b', photo(d, B(), 'Left at site — drop location')), LEFT);
+  refused(completeLeft(d, 'pbl-q5s', photo(d, null, 'Left at site — drop location'), A()), NOLIST_LEFT);
+  assert.equal(status(d), 'in_progress');
+  ok(completeLeft(d, 'pbl-q5a', photo(d, A(), 'Left at site — drop location')));
+  assert.equal(status(d), 'completed');
+  d = delivery(A());
+  refused(startLeft(d, 'pbl-q5m', photo(d, B(), 'Left at site — drop location')), LEFT);
+  assert.equal(status(d), 'scheduled');
+  ok(startLeft(d, 'pbl-q5ma', photo(d, A(), 'Left at site — drop location')));
+  assert.equal(status(d), 'completed');
+  d = delivery(A(), 'in_progress'); ok(completeNoProof(d, 'pbl-q6')); assert.equal(status(d), 'completed');
+  console.log('[required] a signature with no list and a ticket photo saved with no list are refused with the reload-the-app message (complete and Mark Delivered; the photo id in capitals too), nothing changes; with the list they complete; a replay with no list returns its receipt; a drop-location photo saved with no list (reload message) or for another load is refused LEFT_AT_SITE_LOAD_CHANGED (complete and Mark Delivered, even when the call sends the right list), one for this load completes; no proof still completes');
+  stageText('required-reverse.sql', lf(REQUIRED_REVERSE));
+  r = apply('required-reverse.sql');
+  assert.equal(r.status, 0, r.output);
+  assert.equal(scalar(STEP_MD5), '92e373301409583f2f7fec1f0cb207ee');
+  assert.equal(scalar(MATCH_MD5), 'd622480ec89eb193526533db0475a643');
+  [t, sql] = tiny('pbl-qt6', TWO(0), 0.005); refused(sql, LOAD);
+  d = delivery(A(), 'in_progress'); ok(completeSig(d, 'pbl-q7', undefined)); assert.equal(status(d), 'completed');
+  d = delivery(A(), 'in_progress'); ok(completeTicket(d, 'pbl-q8', photo(d, undefined))); assert.equal(status(d), 'completed');
+  d = delivery(A(), 'in_progress'); ok(completeLeft(d, 'pbl-q9', photo(d, B(), 'Left at site — drop location'))); assert.equal(status(d), 'completed');
+  console.log('[required rollback] its reverse script restores 20270309170000\'s step and comparison: proof with no list completes again, signed 0 / sent 0.005 is refused again');
+}
+
 function rollbackCases() {
   stageText('reverse.sql', lf(REVERSE));
   const r = apply('reverse.sql');
@@ -635,6 +731,7 @@ async function main() {
   beforeCases();
   await applyCandidate();
   afterCases();
+  requiredCases();
   rollbackCases();
   console.log('PROOF_BOUND_TO_LOAD_PROOF_PASS');
 }

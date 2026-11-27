@@ -529,12 +529,12 @@ export default function SalesReports() {
           <div className="flex flex-wrap items-end gap-3">
             <div>
               <label className="block text-xs font-medium text-secondary mb-1">Start Date</label>
-              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+              <input type="date" aria-label="Start Date" value={startDate} onChange={e => setStartDate(e.target.value)}
                 className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
             </div>
             <div>
               <label className="block text-xs font-medium text-secondary mb-1">End Date</label>
-              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+              <input type="date" aria-label="End Date" value={endDate} onChange={e => setEndDate(e.target.value)}
                 className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
             </div>
             <div className="flex gap-1.5">
@@ -575,6 +575,7 @@ export default function SalesReports() {
               <label className="block text-xs font-medium text-secondary mb-1">Customer</label>
               <input
                 type="text"
+                aria-label="Customer"
                 placeholder={selectedCustomerIds.length > 0 ? `${selectedCustomerIds.length} selected` : 'Search customers...'}
                 value={customerSearch}
                 onChange={e => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }}
@@ -597,7 +598,7 @@ export default function SalesReports() {
             {!customerView && (
               <div>
                 <label className="block text-xs font-medium text-secondary mb-1">Sales Rep</label>
-                <select value={salesRepId} onChange={e => setSalesRepId(e.target.value)}
+                <select aria-label="Sales Rep" value={salesRepId} onChange={e => setSalesRepId(e.target.value)}
                   className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green min-w-[160px]">
                   <option value="">All Reps</option>
                   {salesRepOptions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
@@ -608,7 +609,7 @@ export default function SalesReports() {
             {/* Category */}
             <div>
               <label className="block text-xs font-medium text-secondary mb-1">Category</label>
-              <select value={category} onChange={e => setCategory(e.target.value)}
+              <select aria-label="Category" value={category} onChange={e => setCategory(e.target.value)}
                 className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green min-w-[140px]">
                 <option value="">All Categories</option>
                 {categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
@@ -618,7 +619,7 @@ export default function SalesReports() {
             {/* Season */}
             <div>
               <label className="block text-xs font-medium text-secondary mb-1">Season</label>
-              <select value={season} onChange={e => setSeason(e.target.value)}
+              <select aria-label="Season" value={season} onChange={e => setSeason(e.target.value)}
                 className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green min-w-[100px]">
                 <option value="">All</option>
                 {seasonOptions.map(s => <option key={s} value={s}>{s}</option>)}

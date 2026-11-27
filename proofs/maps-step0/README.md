@@ -1,13 +1,51 @@
-# Maps Step 0 proof
+# Disposable Maps Step 0 proof
 
-This throwaway page uses one MapLibre map, Mapbox Draw, and two solid-color raster tile routes served by Vite. It needs no API key and makes no requests outside the local test server.
+The protected staging drawing page is `https://staging.croprxsolutions.app/api/maps-step0-draw/index.html` when deployed. This bundle is generated only for Vercel's custom staging target from the staging branch. The normal app build contains no drawing page. The route relies on Vercel Deployment Protection. Before opening the signed-in proof, confirm a signed-out request to the exact URL redirects to Vercel. If it serves the proof to a signed-out request, stop. Then verify the signed-in page has one route-specific Content Security Policy. Keep real records and non-test geometry out of the proof.
 
-MapLibre GL JS 6 ships its map worker as a separate ES module. The Vite setup imports `maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url` and passes the emitted URL to `maplibregl.setWorkerUrl()` before creating the map. Vite serves the worker as a same-origin asset. Step 1's app Vite bundle needs the same setup; its Content Security Policy can allow `worker-src 'self'` without `blob:`. The proof's tests check that worker loading produces no external request or browser error.
+In staging, choose **Use live USDA and Mapbox** to enable the live providers for this page load. Check that USDA shows the USDA/USGS credit, and Mapbox shows its logo and attribution links. Start a synthetic polygon, place two corners, switch pictures, then select **Fail picture**. The staging fixture returns an intentional HTTP 503. Confirm that the alternate live picture and its credit appear without losing the draft or moving the camera. Select **Retry**, verify that the original picture and credit return, finish the polygon, and use **Save synthetic draft** and **Reopen**. Repeat while holding a vertex in a drag.
 
-From the repository root, run:
+Run the oldest-phone check inside the installed staging app. Accept its update prompt before opening the proof. If the proof URL shows the regular app screen, close and reopen the installed app while online, accept any pending update, and try the proof URL again. The updated app loads this page directly from the network.
+
+The separate [protected Places diagnostic](https://staging.croprxsolutions.app/api/maps-step0?places=1) passed one autocomplete and one details request in signed-in desktop Chrome on Nov. 26, 2026. Both returned HTTP 200. Repeat the bounded Places check inside the installed app during the work-phone proof.
+
+After Step 0, remove the drawing bundle hook, its routing and policy, and the outage fixture along with the associated disposable proof.
+
+This local page checks whether one MapLibre map can change raster pictures and recover from a failed tile while Mapbox Draw is still editing a synthetic polygon. The tile server generates two solid-color pictures. Save and Reopen use storage scoped to the current browser tab.
+
+The original local recovery proof at `1c48e0942` was tested against staging `723992d59`. The root lockfile pins Mapbox Draw to 1.5.2 and MapLibre GL JS to 6.19.0. The proof serves the MapLibre worker from the same origin.
+
+## Run locally
+
+Run from the worktree root with Chrome installed.
 
 ```powershell
-npx playwright test --config=proofs/maps-step0/playwright.config.ts
+npm ci
+npm test -- src/components/map/DrawControl.test.tsx
+npx --no-install playwright test --config=proofs/maps-step0/playwright.config.ts
 ```
 
-The proof checks polygon drawing, picture switches during drawing and vertex dragging, draw-layer order, and the existing trash/restart expectation. It does not cover real Google tiles, an installed-phone hand test, or the deployed Content Security Policy.
+The browser suite builds the standalone production bundle under `proofs/maps-step0/dist` and serves it on loopback. Both healthy picture files are part of that bundle. **Fail picture** sends one request to a separate HTTP 503 fixture. The preview server supplies it locally and the protected `?drawingOutage=1` probe supplies it on staging. A stalled fixture is cancelled before the page switches pictures.
+
+Before opening the staging PR, run `npm run build` locally with `VERCEL_TARGET_ENV=staging` and `VERCEL_GIT_COMMIT_REF=staging`. Check that `dist/api/maps-step0-draw/index.html` and the built entry and worker files exist, the HTML and script resolve assets under `/api/maps-step0-draw/assets/`, and the main app service worker excludes this route. Clear the two variables and confirm a normal build omits the proof directory.
+
+To open the page for free play, run `npx --no-install vite --config proofs/maps-step0/vite.config.ts --host 127.0.0.1` and open the localhost address Vite prints. Click **Start polygon**, click the map to place corners, and click the first corner again to close the shape. Click the selected polygon to show its vertices, then drag a vertex. **Fail picture** requests the outage fixture and changes to the backup picture on failure. **Retry** restores the selected picture. **Reopen** reloads the page and restores the last saved synthetic polygon in that tab.
+
+## Local checks
+
+Verified on the evening of Nov. 26, 2026 in desktop Google Chrome 158.0.8127.88 on Windows, using Playwright with software WebGL at 1000 × 800. The built page ran on a loopback URL. Three existing `DrawControl` tests and five Chrome scenarios passed. The proof also passed strict TypeScript and ESLint checks.
+
+| Check | Evidence collected by the test |
+| --- | --- |
+| Drawing compatibility | Chrome draws and closes a four-corner polygon, shows the scoped Draw controls, and can trash a sketch and start again. The same-origin raster is below the drawing layers. |
+| Manual switch, fallback and Retry during a sketch | Chrome switches A → B with two corners placed. The local outage fixture returns 503 and the map renders A automatically. Retry renders B. The active geometry, mode, camera and map identity stay the same. The sketch closes with four corners and reopens with identical coordinates. |
+| Manual switch, fallback and Retry during a vertex drag | Chrome starts dragging a vertex while B is visible, switches to A with the mouse still down, receives a fixture 503 and automatically renders B, then retries A. The held edit, mode, camera and original canvas survive. The vertex reaches the intended release point and its final coordinates survive a reopen. |
+| Stalled outage request | Chrome holds the fixture response open. The page cancels the request, switches to B and retries A, preserving the draft, camera, mode and map instance. |
+| Local-only execution | The browser checks the rendered colors and observes the 503. The suite fails on any external HTTP request or unexpected browser error. Both recovery cases use a deliberately moved, zoomed, rotated and tilted camera. |
+
+## Step 0 items that still need staging
+
+- Use the restricted browser key on a staging build under its real Content Security Policy. Open a Google Map Tiles session and render tiles. Exercise live fallback to USDA and Mapbox with their actual credits and verify their token scopes, request counts and quotas.
+- Verify Static Maps at 640 × 640, scale 2, including browser access to the image bytes and PDF embedding. Check bad key, quota and malformed-outline responses and distinguish an error or warning image from a usable picture.
+- Confirm Places autocomplete and place details. Hand-test drawing, dragging, switching and outage recovery on the oldest work phone inside the installed staging app. Repeat a desktop hand test against the deployed build.
+
+The prototype simulates an outage and restores the healthy route on Retry. On the deployed page, a real set of failed raster requests is a separate check from the deliberate fixture. The full provider chain, deployed security policy, physical phone touch behavior and CRX field persistence remain unverified. The shared engine swap waits until the Step 0 staging checks pass.

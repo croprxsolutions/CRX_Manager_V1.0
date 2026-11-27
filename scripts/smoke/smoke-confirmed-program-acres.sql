@@ -78,6 +78,8 @@ BEGIN
       END IF;
     END IF;
   END LOOP;
+  INSERT INTO public.job_field_shares (job_id, field_id, customer_id, split_pct, is_primary)
+    VALUES (v_jobs[1], v_field, v_other_farm, 100, true);
   INSERT INTO public.job_fields (job_id, field_id, acres_to_treat)
     VALUES (v_jobs[1], v_other_field, 70);
   INSERT INTO public.job_fields (job_id, field_id, acres_to_treat)
@@ -207,6 +209,8 @@ BEGIN
   END IF;
   RESET ROLE;
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  INSERT INTO public.job_fields (job_id, field_id, acres_to_treat)
+    VALUES (v_jobs[3], v_other_farm_field, 30);
   PERFORM public.set_field_billing_split(v_other_farm_field, v_today, jsonb_build_array(
     jsonb_build_object('customer_id', v_farm, 'product_share_micro_pct', 60000000, 'application_share_micro_pct', 60000000),
     jsonb_build_object('customer_id', v_other_farm, 'product_share_micro_pct', 40000000, 'application_share_micro_pct', 40000000)),
@@ -216,9 +220,15 @@ BEGIN
   IF NOT (v_row @> '{"completed_acres":30,"completion_pct":30}') THEN
     RAISE EXCEPTION 'SMOKE_FAIL the field billing default did not credit the paying farm: %', v_row;
   END IF;
+  SELECT row INTO STRICT v_row FROM jsonb_array_elements(public.get_program_completion(v_season)) AS rows(row)
+    WHERE row->>'section_id' = v_sections[3]::text;
+  IF NOT (v_row @> '{"completed_acres":70,"completion_pct":70}') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL a fieldless plan missed its shared-field pass: %', v_row;
+  END IF;
 
   INSERT INTO public.job_field_shares (job_id, field_id, customer_id, split_pct, is_primary)
-    VALUES (v_jobs[2], v_other_farm_field, v_other_farm, 100, true);
+    VALUES (v_jobs[2], v_other_farm_field, v_other_farm, 100, true),
+           (v_jobs[3], v_other_farm_field, v_other_farm, 100, true);
   SELECT row INTO STRICT v_row FROM jsonb_array_elements(public.get_program_completion(v_season)) AS rows(row)
     WHERE row->>'section_id' = v_sections[2]::text;
   IF NOT (v_row @> '{"completed_acres":0,"completion_pct":0}') THEN

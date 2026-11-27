@@ -67,6 +67,7 @@ function FieldDashboard({ id }: { id: string }) {
 
   const [data, setData] = useState<FieldDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [missingField, setMissingField] = useState(false);
   const loadSeqRef = useRef(0);
   const [cropHistory, setCropHistory] = useState<CropHistoryRecord[]>([]);
   const [children, setChildren] = useState<Array<{ id: string; field_name: string; total_acres: number | null; boundary_geojson?: string; centroid_geojson?: string }>>([]);
@@ -75,10 +76,16 @@ function FieldDashboard({ id }: { id: string }) {
     const seq = ++loadSeqRef.current;
     try {
       setLoading(true);
+      setMissingField(false);
       const { data: result, error } = await supabase.rpc('get_field_dashboard', {
         p_field_id: id,
       });
       if (seq !== loadSeqRef.current) return;
+      if (error?.code === 'P0001' && error.message.startsWith('Field not found: ')) {
+        setData(null);
+        setMissingField(true);
+        return;
+      }
       if (error) throw error;
       const dashboard = assertRpcResult<FieldDashboardResponse>(result, 'get_field_dashboard');
 
@@ -160,10 +167,7 @@ function FieldDashboard({ id }: { id: string }) {
 
   if (!data) {
     return (
-      <div className="text-center">
-        <LoadFailedState title="Field dashboard could not be loaded" onRetry={fetchDashboard} />
-        <Button variant="ghost" onClick={() => navigate('/fields')}>Back to Fields</Button>
-      </div>
+      <DashboardUnavailable missing={missingField} onRetry={fetchDashboard} onBack={() => navigate('/fields')} />
     );
   }
 
@@ -275,7 +279,7 @@ function FieldDashboard({ id }: { id: string }) {
       <CropHistoryTab
         history={cropHistory}
         currentCrop={field.crop_type}
-        fieldId={id || ''}
+        fieldId={id}
         onSaved={fetchDashboard}
       />
     </div>
@@ -305,6 +309,21 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
 }
 
 /* ─── Overview section ──────────────────────────────────────────── */
+
+function DashboardUnavailable({ missing, onRetry, onBack }: {
+  missing: boolean;
+  onRetry: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <div className="text-center">
+      {missing
+        ? <p className="pt-12 pb-4 text-gray-500">Field not found</p>
+        : <LoadFailedState title="Field dashboard could not be loaded" onRetry={onRetry} />}
+      <Button variant="ghost" onClick={onBack}>Back to Fields</Button>
+    </div>
+  );
+}
 
 function OverviewTab({ summary }: { summary: FieldDashboardResponse['season_summary'] }) {
   const stats = [

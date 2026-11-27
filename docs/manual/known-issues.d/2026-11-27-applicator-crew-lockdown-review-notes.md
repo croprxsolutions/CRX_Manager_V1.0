@@ -25,4 +25,4 @@ views instead. Sol passed it clean and left these notes open. None exposes a pri
 5. LOW: the container-only smoke `scripts/smoke/smoke-field-tables-follow-field-access.sql` and its
    prover still expect an applicator to read `field_billing_defaults` rows directly and pin the
    pre-lockdown `fbd_select` policy. Replayed on a chain that includes the lockdown, they report a
-   false failure; the check belongs on `field_billing_defaults_crew`.
+   false failure. The prover stops before the crew views exist, so the fix must pick `field_billing_defaults_crew` only when that view is present (as `smoke-dispatch-job-locations.sql` now does for `jobs_crew`), never switch unconditionally.

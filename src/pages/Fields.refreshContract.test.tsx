@@ -122,4 +122,44 @@ describe('Fields — the refresh contract the bulk import depends on', () => {
     // Counts left on screen would read as "0 fields" or a stale total next to the failure.
     expect(screen.queryByText(/billable acres/)).not.toBeInTheDocument();
   });
+
+
+  it('finds a collapsed sub-field and limits Select All to the search result', async () => {
+    rpc.mockResolvedValue({ data: groupedFields(), error: null });
+
+    render(<MemoryRouter><Fields /></MemoryRouter>);
+    await screen.findByText('North Forty');
+    expect(screen.queryByText('East corner')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('textbox', { name: /search fields/i }), { target: { value: 'East corner' } });
+    expect(screen.getByText('East corner')).toBeInTheDocument();
+    expect(screen.queryByText('North Forty')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox')).toBeChecked();
+  });
+
+  it('shows a matching sub-field when a filter hides its parent', async () => {
+    rpc.mockResolvedValue({ data: groupedFields(), error: null });
+
+    render(<MemoryRouter><Fields /></MemoryRouter>);
+    await screen.findByText('North Forty');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter by crop' }), { target: { value: 'corn' } });
+
+    expect(screen.getByText('East corner')).toBeInTheDocument();
+    expect(screen.queryByText('North Forty')).not.toBeInTheDocument();
+  });
 });
+
+function groupedFields() {
+  const parent = {
+    id: 'parent', field_name: 'North Forty', customer_name: 'Prairie View Farms', total_acres: 40,
+    is_active: true, county: null, crop_type: 'soybeans', legal_description: null, parent_field_id: null,
+    boundary_geojson: null, centroid_geojson: null, child_count: 1,
+  };
+  return [
+    parent,
+    { ...parent, id: 'child', field_name: 'East corner', crop_type: 'corn', parent_field_id: parent.id, child_count: 0 },
+  ];
+}

@@ -171,6 +171,14 @@
       "covers": ["approve_liquid_density_draft", "submit_liquid_density_draft", "get_liquid_density_review", "approve_weights", "_write_parent_density", "liquid_density_review_open"],
       "area": ["inventory", "security", "idempotency"]
     },
+    "return_liquid_density_to_draft_for_brand": {
+      "chain": "smoke-liquid-weight-brand-recheck.sql",
+      "container_prover": "prove-liquid-weight-brand-recheck-real-schema.mjs",
+      "container_only": true,
+      "description": "REQUIRES 20270315110000. Disposable before-and-after proof of active-brand rename recheck, inactive groups, waiting drafts, captured blend ticket weights, and the closed legacy approval path.",
+      "covers": ["return_liquid_density_to_draft_for_brand", "approve_weights"],
+      "area": ["inventory", "security", "idempotency"]
+    },
     "liquid_density_brand_rename": {
       "chain": "smoke-liquid-density-brand-rename.sql",
       "container_only": true,

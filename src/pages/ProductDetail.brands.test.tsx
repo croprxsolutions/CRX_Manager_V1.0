@@ -235,7 +235,11 @@ vi.mock('../components/products/ProductParentPanel', () => ({
   default: ({ onChanged }: { onChanged: () => void }) => <button onClick={onChanged}>Refresh parent</button>,
 }));
 
-vi.mock('../components/products/ProductChemistrySection', () => ({ default: () => null }));
+vi.mock('../components/products/ProductChemistrySection', () => ({
+  default: ({ weightReviewRevision }: { weightReviewRevision: number }) => (
+    <output data-testid="chemistry-weight-revision">{weightReviewRevision}</output>
+  ),
+}));
 
 vi.mock('../lib/epaProposals', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/epaProposals')>()),
@@ -350,6 +354,63 @@ describe('ProductDetail brands section', () => {
     act(() => props.onWeightReviewChange?.());
 
     await waitFor(() => expect(screen.getByRole('link', { name: 'Open SDS for Test Brand' })).toHaveAttribute('href', sdsUrl));
+  });
+
+  it('refreshes the Chemistry card weight after a brand changes', async () => {
+    H.parent = {
+      id: 'parent-1', name: 'Generic group', generic_epa_registration: null,
+      sizes: [{ product_id: 'product-1' }],
+    };
+    render(<ProductDetail />);
+    await screen.findByTestId('brands-section');
+    const chemistry = await screen.findByTestId('chemistry-weight-revision');
+    expect(chemistry).toHaveTextContent('0');
+    const props = H.brandSection.mock.lastCall?.[0] as { onWeightReviewChange: (parentId: string | undefined) => void };
+    await act(async () => props.onWeightReviewChange('parent-1'));
+
+    expect(chemistry).toHaveTextContent('1');
+  });
+
+  it.each([
+    { destination: 'a size in the same group', parentId: 'parent-1', revision: '1' },
+    { destination: 'an unrelated product', parentId: 'parent-2', revision: '0' },
+  ])('checks the scope of a late brand save after navigating to $destination', async ({ parentId, revision }) => {
+    H.parent = {
+      id: 'parent-1', name: 'Generic group', generic_epa_registration: null,
+      sizes: [{ product_id: 'product-1' }, { product_id: 'product-2' }],
+    };
+    const view = render(<ProductDetail key={H.routeId} />);
+    await screen.findByTestId('chemistry-weight-revision');
+    const previous = H.brandSection.mock.lastCall?.[0] as { onWeightReviewChange: (parentId: string | undefined) => void };
+
+    H.routeId = 'product-2';
+    H.product = baseProduct({ id: 'product-2', product_name: 'Other size' });
+    H.parent = { id: parentId, name: 'Current group', generic_epa_registration: null, sizes: [{ product_id: 'product-2' }] };
+    view.rerender(<ProductDetail key={H.routeId} />);
+    const chemistry = await screen.findByTestId('chemistry-weight-revision');
+    expect(chemistry).toHaveTextContent('0');
+
+    await act(async () => previous.onWeightReviewChange('parent-1'));
+
+    expect(chemistry).toHaveTextContent(revision);
+  });
+
+  it('refreshes a sibling when the brand editor loaded its group before the origin page', async () => {
+    H.getParent.mockImplementationOnce(() => new Promise(() => {}));
+    const view = render(<ProductDetail key={H.routeId} />);
+    await screen.findByTestId('brands-section');
+    expect(screen.queryByTestId('chemistry-weight-revision')).not.toBeInTheDocument();
+    const previous = H.brandSection.mock.lastCall?.[0] as { onWeightReviewChange: (parentId: string) => void };
+
+    H.routeId = 'product-2';
+    H.product = baseProduct({ id: 'product-2', product_name: 'Sibling size' });
+    H.parent = { id: 'parent-1', name: 'Shared group', generic_epa_registration: null, sizes: [{ product_id: 'product-2' }] };
+    view.rerender(<ProductDetail key={H.routeId} />);
+    const chemistry = await screen.findByTestId('chemistry-weight-revision');
+
+    await act(async () => previous.onWeightReviewChange('parent-1'));
+
+    expect(chemistry).toHaveTextContent('1');
   });
 
   it('after switching products, the previous brands never show under the new one', async () => {

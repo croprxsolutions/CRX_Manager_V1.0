@@ -99,10 +99,12 @@ function ChemistryForms({ form, chem, profileId, onClose, onFinished, onReviewCl
  * reads it; admins enter, correct, review the ingredient list, set ingredient groups (MOA-1), see cost per lb of
  * active and run EPA lookups (DM-4).
  */
-export default function ProductChemistrySection({ parentId, parentVersion, refreshKey, isAdmin, profileId, busy }: {
+export default function ProductChemistrySection({ parentId, parentVersion, refreshKey, weightReviewRevision = 0, isAdmin, profileId, busy }: {
   parentId: string; parentVersion: number; isAdmin: boolean; profileId: string;
   /** Changes when this page saves pricing or a weight, so cost per lb of active re-reads. */
   refreshKey: string;
+  /** Brand changes can invalidate the weight without restarting an EPA lookup. */
+  weightReviewRevision?: number;
   /** Other unsaved edits on the page: chemistry actions wait for them. */
   busy: boolean;
 }) {
@@ -170,7 +172,8 @@ export default function ProductChemistrySection({ parentId, parentVersion, refre
         {!state && <p className="text-sm text-secondary" role="status">Loading chemistry…</p>}
         {state?.status === 'failed' && <LoadFailedState title="Chemistry could not be loaded" onRetry={reload} />}
         {chem && (
-          <ChemistryBody chem={chem} groups={groups} isAdmin={isAdmin} busy={busy} profileId={profileId} reloadKey={forKey} pending={pending}
+          <ChemistryBody chem={chem} groups={groups} isAdmin={isAdmin} busy={busy} profileId={profileId}
+            reloadKey={JSON.stringify([forKey, weightReviewRevision])} pending={pending}
             onPendingSettled={(outcome) => finished(outcome === 'uncertain' ? 'uncertain' : 'saved')} onCostSettled={() => setPendingTick((n) => n + 1)}
             onSetGroups={setGroups} />
         )}

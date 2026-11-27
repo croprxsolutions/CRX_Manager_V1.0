@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270311220000_job_invoice_split_cents.sql (Mason, 2026-11-26: "Job-invoice cents: yes please,
+ * Real-schema proof for 20270314120000_job_invoice_split_cents.sql (Mason, 2026-11-26: "Job-invoice cents: yes please,
  * fix it before Dec 15"). Harness copied from prove-tiny-line-counts-as-zero-real-schema.mjs; seed and cases follow
  * prove-job-invoice-kept-epa-real-schema.mjs.
  *
@@ -37,7 +37,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270311220000_job_invoice_split_cents.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270314120000_job_invoice_split_cents.sql');
 const PINNED = path.join(MIGRATIONS, '20270303100000_job_invoice_kept_epa.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
@@ -53,7 +53,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate or its follow-up creates or relies on.
-const TOUCHED = /(_transfer_job_to_invoice_intent_impl_20260908|_job_transfer_split_qty_20270207|_job_transfer_line_price_20270207|_job_transfer_shares_20270207)/i;
+const TOUCHED = /(_transfer_job_to_invoice_intent_impl_20260908|_job_transfer_split_qty_20270207|_job_transfer_line_price_20270207|_job_transfer_shares_20270207|_save_invoice_lineage_unaware_impl_20260827|_save_invoice_scoped_impl|_save_invoice_cost_step2_impl)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -261,6 +261,10 @@ const X = id('d1'), Y = id('d2'), Z = id('d3'), W = id('d4');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const OLD_IMPL = '53ecf1279da3aa7ea1590f440c6eb225';  // 20270303100000 (staging's current body)
 const NEW_IMPL = '90141e27397d1766be19d280bb9a046f';
+const SAVE = 'public._save_invoice_lineage_unaware_impl_20260827(jsonb,jsonb,text)';
+const OLD_SAVE = 'cf36f99934d4b68aa7e9d3eab0b04fb8';  // 20261106140000 (live)
+const NEW_SAVE = '537bd4a8585c6923208146747981ccbe';
+const SAVE_SOURCE = path.join(MIGRATIONS, '20261106140000_invoice_resave_keeps_cost.sql');
 const md5Of = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 const meta = (sig) => scalar(`SELECT concat_ws('|', prosecdef, proowner::regrole, proconfig::text, coalesce(proacl::text, '-')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 
@@ -338,6 +342,31 @@ function seed() {
           || ' anchor=' || (SELECT right(c.farm_name, 1) FROM jobs j JOIN invoices i2 ON i2.id = j.invoice_id
                               JOIN customers c ON c.id = i2.customer_id WHERE j.id = p_job)
         FROM invoices i WHERE i.job_id = p_job AND i.deleted_at IS NULL $f$;
+    -- What the invoice editor sends for one owner's invoice of the job (InvoiceDetail itemsPayload): every line with
+    -- its id, a header note edited; p_delta added to the first product line's quantity.
+    CREATE FUNCTION jx.payload(p_job uuid, p_farm text, p_delta numeric) RETURNS jsonb LANGUAGE sql SECURITY DEFINER
+      SET search_path = public, pg_temp AS $f$
+      SELECT jsonb_build_object(
+        'invoice', jsonb_build_object('id', i.id, 'customer_id', i.customer_id, 'invoice_type', i.invoice_type,
+          'invoice_date', i.invoice_date, 'due_date', i.due_date, 'payment_terms', i.payment_terms,
+          'purchase_order_ref', i.purchase_order_ref, 'header_notes', 'note edited', 'footer_notes', i.footer_notes,
+          'salesman_id', i.salesman_id, 'season', i.season),
+        'items', (SELECT jsonb_agg(jsonb_build_object(
+            'id', x.id, 'order_item_id', x.order_item_id, 'product_id', x.product_id, 'vendor', x.vendor,
+            'description', x.description,
+            'quantity', x.quantity + CASE WHEN x.sort_order = (SELECT min(y.sort_order) FROM invoice_items y
+                                                                  WHERE y.invoice_id = i.id AND y.product_id IS NOT NULL)
+                                          AND x.product_id IS NOT NULL THEN p_delta ELSE 0 END,
+            'unit_price_cents', x.unit_price_cents, 'extended_cents', x.extended_cents, 'cost_cents', x.cost_cents,
+            'sort_order', x.sort_order, 'rate_per_acre', x.rate_per_acre, 'acres', x.acres, 'unit_size', x.unit_size,
+            'notes', x.notes, 'is_application_fee', x.is_application_fee, 'rate_unit', x.rate_unit,
+            'total_applied', x.total_applied, 'total_applied_unit', x.total_applied_unit,
+            'total_applied_gl_lb', x.total_applied_gl_lb, 'gl_lb_unit', x.gl_lb_unit,
+            'epa_registration', x.epa_registration, 'product_form', x.product_form, 'price_source', x.price_source,
+            'quoted_price_cents', x.quoted_price_cents, 'charge_type', x.charge_type) ORDER BY x.sort_order, x.id)
+          FROM invoice_items x WHERE x.invoice_id = i.id))
+        FROM invoices i JOIN customers c ON c.id = i.customer_id
+       WHERE i.job_id = p_job AND i.deleted_at IS NULL AND right(c.farm_name, 1) = p_farm $f$;
     GRANT USAGE ON SCHEMA jx TO authenticated;
     GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA jx TO authenticated;`, { user: 'supabase_admin' });
   console.log('[prover] test rows: an admin; farms A, B, C; field A (A 100%), field A+B (A 50.01% primary, B 50.00%), three'
@@ -354,6 +383,40 @@ CREATE TEMP TABLE j AS SELECT jx.job(ARRAY[${fields.map((x) => `'${x}'`).join(',
 SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jobcents-' || gen_random_uuid());
 SELECT jx.sums((SELECT id FROM j)) || ' || ' || jx.lines((SELECT id FROM j)) || ' || ' || jx.ties((SELECT id FROM j));`;
 const THIRDS = [[F3A, F3B, F3C], [5, 5, 5]];
+// Desk MED 1 on #2686: after Create Invoice, the editor saves owner A's invoice through the app's own save_invoice
+// (p_delta 0 = a note-only edit; 1 = one more Gal on its first line).
+const resaveCase = (fields, acres, lines, delta) => `${asAdmin}
+CREATE TEMP TABLE j AS SELECT jx.job(ARRAY[${fields.map((x) => `'${x}'`).join(',')}]::uuid[], ARRAY[${acres.join(',')}]::numeric[],
+  '${JSON.stringify(lines)}'::jsonb) AS id;
+SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jobcents-' || gen_random_uuid());
+CREATE TEMP TABLE pl AS SELECT jx.payload((SELECT id FROM j), 'A', ${delta}) AS p;
+SELECT public.save_invoice((SELECT p->'invoice' FROM pl), (SELECT p->'items' FROM pl), 'jobcents-save-' || gen_random_uuid());
+SELECT jx.sums((SELECT id FROM j)) || ' || ' || jx.lines((SELECT id FROM j)) || ' || ' || jx.ties((SELECT id FROM j));`;
+const RESAVE = {
+  noteThirds: resaveCase(...THIRDS, [L(Y, 10, 1234)], 0),
+  noteBigThirds: resaveCase(...THIRDS, [L(X, 1, 999999)], 0),
+  qtyThirds: resaveCase(...THIRDS, [L(Y, 10, 1234)], 1),
+};
+const RESAVE_AFTER = {
+  noteThirds: 'A=4114/2333 B=4113/2333 C=4113/2333 | Y=12340/12340',
+  noteBigThirds: 'A=333333/200 B=333333/200 C=333333/200 | X=999999/999999',
+  // A real edit re-prices A's line, round(4.3334 x 1234) = 5347, and the group no longer matches the job's line.
+  qtyThirds: 'A=5347/3033 B=4113/2333 C=4113/2333 | Y=13573/13574',
+};
+// With only the transfer applied (the 20261106140000 save body back), a note-only re-save re-rounds A's line.
+const RESAVE_OLD_SAVE = {
+  noteThirds: 'A=4113/2333 B=4113/2333 C=4113/2333 | Y=12339/12340',
+  noteBigThirds: 'A=333400/200 B=333333/200 C=333333/200 | X=1000066/999999',
+  qtyThirds: 'A=5347/3033 B=4113/2333 C=4113/2333 | Y=13573/13574',
+};
+function runResave(label, want) {
+  for (const [k, sql] of Object.entries(RESAVE)) {
+    const r = split(okProbe(sql));
+    console.log(`[${label}] resave ${k}: ${r.sums} (${r.ties})`);
+    assert.match(r.ties, /^ties anchor=A$/, `${label} resave ${k}: headers, costs and shares tie to the lines`);
+    assert.equal(r.sums, want[k], `${label} resave ${k}`);
+  }
+}
 const CASES = {
   // Desk example 1: a $100.00 line (10 Gal at $10.00) split 50.01% / 50.00%.
   halves: invoiceCase([F2], [10], [L(X, 10, 1000)]),
@@ -440,6 +503,14 @@ function runCases(label) {
 function priced(sums) {  // [[product, billed, line], ...] as exact integers (Sol r1: never Number)
   return [...sums.split(' | ')[1].matchAll(/([A-Z])=(\d+)\/(\d+)/g)].map((m) => [m[1], BigInt(m[2]), BigInt(m[3])]);
 }
+function reverseSaveSql() {
+  // The save body as 20261106140000 (live) has it.
+  const s = lf(SAVE_SOURCE);
+  const start = s.indexOf('CREATE OR REPLACE FUNCTION public._save_invoice_lineage_unaware_impl_20260827(');
+  const end = s.indexOf('$function$', s.indexOf('AS $function$', start) + 13) + '$function$'.length;
+  assert.ok(start > 0 && end > start, '20261106140000 no longer holds the save body');
+  return `${s.slice(start, end)};\n`;
+}
 function reverseSql() {
   // ROLLBACK as the migration states it: re-emit the 20270303100000 transfer body exactly as that file has it.
   const s = lf(PINNED);
@@ -452,6 +523,8 @@ function reverseSql() {
 function main() {
   buildContainer();
   assert.equal(md5Of(IMPL), OLD_IMPL, "the replayed transfer body is staging's current one (20270303100000), which the candidate pins");
+  assert.equal(md5Of(SAVE), OLD_SAVE, "the replayed save body is live's (20261106140000), which the candidate pins");
+  const saveMeta = meta(SAVE);
   const implMeta = meta(IMPL);
   seed();
 
@@ -465,6 +538,8 @@ function main() {
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   assert.equal(md5Of(IMPL), NEW_IMPL);
+  assert.equal(md5Of(SAVE), NEW_SAVE);
+  assert.equal(meta(SAVE), saveMeta, 'save owner, SECURITY DEFINER, search_path and grants unchanged');
   assert.equal(meta(IMPL), implMeta, 'transfer owner, SECURITY DEFINER, search_path and grants unchanged');
   const second = apply('candidate.sql');
   assert.notEqual(second.status, 0);
@@ -482,6 +557,8 @@ function main() {
   }
   for (const k of ['single', 'suppliedOnly']) assert.equal(after[k].sums, before[k].sums, `after: ${k} is unchanged`);
   refusedTooTiny('after');
+  runResave('after', RESAVE_AFTER);
+  console.log('[after] a note-only re-save keeps every owner line\'s cents ($123.40, $9,999.99 stay exact); a quantity change re-prices the line');
   equalThirdsTooTiny('after');
   console.log('[after] every priced line: owners add up to the line to the cent; quantities, prices, costs, headers, shares and anchor tie; single-owner and grower-supplied invoices unchanged');
 
@@ -500,7 +577,25 @@ function main() {
   assert.equal(createHash('md5').update(old).digest('hex'), OLD_IMPL,
     'apart from the line amount, the transfer body (quantities, price, cost, checks, fee, shares, anchor, commissions) is the pinned one');
   console.log('[after] transfer body = pinned body with only the owner line amount (and one commission comment) changed');
+  const saveBody = Buffer.from(scalar(`SELECT translate(encode(convert_to(replace(prosrc, chr(13), ''), 'UTF8'), 'base64'), E'\\n', '') FROM pg_proc WHERE oid = '${SAVE}'::regprocedure;`), 'base64').toString('utf8');
+  let oldSave = swap(saveBody, "  -- Job invoice cents (Mason, 2026-11-26; Taha, 2026-11-27): each product line of a job's owner invoice, by line id.\n  v_job_cents jsonb := '{}'::jsonb;\n  v_job_line jsonb;\n", '');
+  const KEEP_SNAPSHOT = /\n {2}-- Job invoice cents \(Mason, 2026-11-26; Taha, 2026-11-27\): Create Invoice shares[\s\S]*?\n {2}END IF;\n/;
+  const KEEP_LINE = / {4}v_job_line := v_job_cents -> lower[\s\S]*?\n {4}END IF;\n/;
+  assert.equal(oldSave.match(new RegExp(KEEP_SNAPSHOT.source, 'g'))?.length, 1, 'the re-save snapshot is in the body once');
+  assert.equal(oldSave.match(new RegExp(KEEP_LINE.source, 'g'))?.length, 1, 'the re-save keep is in the body once');
+  oldSave = oldSave.replace(KEEP_SNAPSHOT, '').replace(KEEP_LINE, '');
+  assert.equal(createHash('md5').update(oldSave).digest('hex'), OLD_SAVE, 'apart from keeping a job owner line\'s cents, the save body is the pinned one');
+  console.log('[after] save body = pinned body with only the job-owner-line keep added');
 
+
+  // Rollback, save body first: without it a note-only re-save undoes the split (desk MED 1).
+  stageText('reverse-save.sql', reverseSaveSql());
+  const backSave = apply('reverse-save.sql');
+  assert.equal(backSave.status, 0, backSave.output);
+  assert.equal(md5Of(SAVE), OLD_SAVE, 'rollback restores the 20261106140000 save body');
+  assert.equal(meta(SAVE), saveMeta, 'rollback keeps the save owner, settings and grants');
+  runResave('save rolled back', RESAVE_OLD_SAVE);
+  console.log('[rollback] with the old save body, a note-only re-save re-rounds owner A: $123.39 again, $9,999.99 bills $10,000.66');
   stageText('reverse.sql', reverseSql());
   const back = apply('reverse.sql');
   assert.equal(back.status, 0, back.output);

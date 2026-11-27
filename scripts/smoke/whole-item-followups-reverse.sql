@@ -11,13 +11,15 @@ DECLARE
   v_bad text;
 BEGIN
   SELECT string_agg(s.sig || ' ' || COALESCE(md5(replace(p.prosrc, chr(13), '')), 'missing'), ', ') INTO v_bad
-    FROM (VALUES ('public._enforce_whole_item_quantity()', '0ec25eb446a0cbd211538673b949593b'),
+    FROM (VALUES ('public._enforce_whole_item_quantity()', '95cf311b547eea92ac497f80b97b9254'),
                  ('public.adjust_inventory(uuid,numeric,text,uuid,text)', '43c9a4f91308ac272747071a4af437e8'),
                  ('public._manual_inventory_add_replay_impl_20261015(uuid,text,numeric,text,uuid,text,numeric,text,numeric,numeric)', 'f741844f6907c41ebf3329fa15b1a21c')) s(sig, md5)
     LEFT JOIN pg_proc p ON p.oid = to_regprocedure(s.sig)
-   WHERE md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM s.md5;
+   WHERE md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM s.md5
+      -- settings too: a later fix may change them without touching the body
+      OR p.prosecdef IS NOT TRUE OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp'];
   IF v_bad IS NOT NULL THEN
-    RAISE EXCEPTION 'WHOLE_ITEMS_FOLLOWUPS_REVERSE: not the follow-up bodies (%); already reversed or changed since', v_bad;
+    RAISE EXCEPTION 'WHOLE_ITEMS_FOLLOWUPS_REVERSE: not the follow-up bodies or settings (%); already reversed or changed since', v_bad;
   END IF;
 END;
 $reverse_preflight$;

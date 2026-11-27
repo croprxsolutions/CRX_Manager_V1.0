@@ -445,19 +445,33 @@ function afterCases() {
   refusedAs(asAdmin(ret(0.5)), WHOLE('Seed Ea', 'Ea', '0.5'), 'returning 0.5 Ea');
   assert.equal(scalar(`SELECT count(*) FROM public.returns WHERE order_id = '${ORD}';`), '0');
   okAs(asAdmin(ret(1)), 'returning 1 Ea');
-  // Split-billed sale (Mason 2026-11-26): a payer's share of one item may come back as a fraction. The same return
-  // line on the single-payer order is refused, so only the split test differs.
-  const splitLine = (split) => probe(`UPDATE public.orders SET needs_split_billing = ${split} WHERE id = '${ORD}';
-    INSERT INTO public.returns (id, return_number, customer_id, order_id, reason, requested_by, status)
-      VALUES ('${id('e9')}', 'WHOLEFU-R9', '${CUST}', '${ORD}', 'damaged', '${ADMIN}', 'requested');
-    INSERT INTO public.return_items (return_id, order_item_id, product_id, product_name, quantity, unit, unit_price_cents, extended_cents, condition, restock, sort_order)
-      VALUES ('${id('e9')}', '${OE}', '${PE}', '[PROVER] Seed Ea', 0.33, 'Ea', 1000, 330, 'unopened', true, 0);
-    SELECT quantity FROM public.return_items WHERE return_id = '${id('e9')}';`);
-  const split = splitLine(true);
-  okAs(split, 'a 0.33 Ea return line on a split-billed sale');
-  assert.equal(split.last, '0.33', split.output);
-  refusedAs(splitLine(false), WHOLE('Seed Ea', 'Ea', '0.33'), 'the same 0.33 Ea return line on a single-payer sale');
-  console.log('[case 6] returns: 0.5 Ea refused, no return; 1 Ea works; on a split-billed sale a 0.33 Ea return line saves, refused on the same sale unsplit');
+  // Split-billed sale (Mason 2026-11-26): a payer's share of one item may come back as a fraction, through the real
+  // create_return. Posted invoices (made with triggers off) bill the 2 Ea line 1 + 1 to two payers. With only the
+  // order customer's invoice, the order still flagged for split billing, 0.5 is refused: one payer is not a split.
+  const C2 = id('c2');
+  const splitReturn = (payers) => probe(`SET LOCAL session_replication_role = replica;
+    INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${C2}', '[PROVER] Whole FU Partner', true);
+    UPDATE public.orders SET needs_split_billing = true WHERE id = '${ORD}';
+    ${payers.map((c, n) => `INSERT INTO public.invoices (id, customer_id, order_id, invoice_number, status, posted_at, invoice_date, created_by, invoice_group_id)
+      VALUES ('${id(`d${n}`)}', '${c}', '${ORD}', 'WHOLEFU-I${n}', 'posted', now(), current_date, '${ADMIN}', '${id('d9')}');
+    INSERT INTO public.invoice_items (invoice_id, product_id, order_item_id, description, quantity, unit_size, unit_price_cents, extended_cents)
+      VALUES ('${id(`d${n}`)}', '${PE}', '${OE}', '[PROVER] Seed Ea', 1, 'Ea', 1000, 1000);
+    INSERT INTO public.split_invoice_provenance (invoice_id, order_id, invoice_group_id, customer_id, invoice_type, season, total_amount_cents, content_claim, created_by)
+      SELECT i.id, i.order_id, '${id('d9')}', i.customer_id, i.invoice_type, 2027, 1000, public._split_invoice_content_claim(i.id), '${ADMIN}'
+        FROM public.invoices i WHERE i.id = '${id(`d${n}`)}';`).join('\n')}
+    SET LOCAL session_replication_role = origin;
+    ${AS_ADMIN}
+    SELECT public.create_return(
+      ${J({ customer_id: payers.at(-1), order_id: ORD, reason: 'damaged', reason_notes: null, notes: null })},
+      ${J([{ order_item_id: OE, product_id: PE, product_name: '[PROVER] Seed Ea', quantity: 0.5, unit: 'Ea', unit_price_cents: 1000, condition: 'unopened', restock: true, sort_order: 0, notes: null }])},
+      '${k('split')}');
+    SELECT trim_scale(ri.quantity)::text FROM public.return_items ri JOIN public.returns r ON r.id = ri.return_id
+     WHERE r.order_id = '${ORD}' AND r.customer_id = '${payers.at(-1)}';`);
+  const split = splitReturn([CUST, C2]);
+  okAs(split, 'the partner payer returning 0.5 Ea of a line billed 1 + 1 to two payers');
+  assert.equal(split.last, '0.5', split.output);
+  refusedAs(splitReturn([CUST]), WHOLE('Seed Ea', 'Ea', '0.5'), 'returning 0.5 Ea of a line billed to one payer (order flagged split)');
+  console.log('[case 6] returns: 0.5 Ea refused, no return; 1 Ea works; create_return takes 0.5 Ea from a payer of a line billed to two payers, refused when one payer was billed');
 
   // 9. No API role can call the helper or the trigger function; the two RPCs keep their grants.
   for (const role of ['anon', 'authenticated', 'service_role']) {

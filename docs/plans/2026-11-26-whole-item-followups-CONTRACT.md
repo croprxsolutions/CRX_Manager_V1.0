@@ -11,7 +11,7 @@ only after #2675 merges into staging; the new migration stacks above it.
 - **D3** New and changed figures only.
 - **D4** Refuse, never round.
 - **D5** (2026-11-26, on this PR) A return on a split-billed sale may be fractional: one item shared by payers is
-  returned in shares. Split = `create_return`'s own share test (`_return_customer_line_share(...).share_mode`).
+  returned in shares. Split = the sale line is on live (posted, overdue or paid) invoices of two or more payers.
 
 ## Facts
 - **Purchase order lines** hold their figures in the stock unit: `a1_line_unit_is_stock_unit` (20270121110000) refuses a
@@ -109,8 +109,8 @@ bodies. Returns are next to Taha's return-credit work (#2537 changes credits, no
 4. `adjust_inventory` -0.5 and +0.5 on Ea refused, stock and ledger unchanged; -1 works; Gal -0.5 works; a retry of a
    success returns its receipt.
 5. `manual_inventory_add` 2.5 on Ea refused, no inventory row; 2 works.
-6. `create_return` of 0.5 on a delivered 2 Ea line refused, no return; 1 works. On a split-billed sale a 0.33 Ea
-   return line saves; the same line on an unsplit sale is refused (D5).
+6. `create_return` of 0.5 on a delivered 2 Ea line refused, no return; 1 works. A line billed 1 + 1 to two payers:
+   the partner returns 0.5 through `create_return`; billed to one payer (order still flagged split), 0.5 is refused (D5).
 7. Re-pointing a Gal PO line at 2.5 to an Ea product (unit changed too) is refused with the sentence.
 8. The apply is refused while a fractional Ea PO line exists, naming it; a second apply is refused by the preflight.
 9. No API role can call the helper or trigger function; the two RPCs keep their grants and owners.
@@ -152,7 +152,14 @@ bodies. Returns are next to Taha's return-credit work (#2537 changes credits, no
   (RETURN_QUANTITY_EXCEEDS_BILLED_SHARE) and refuses NaN as over-delivered (NaN sorts above every number). The
   whole-item rule never owned share caps; owner-level writes bypass every trigger alike.
 
+## Sol round 2 (gpt-6.2-sol high, head 435cf7b86, 2026-11-26): 1 HIGH fixed, 1 MED fixed, 3 LOW fixed
+- HIGH (the split test, `share_mode`, is also true for one payer with a field allocation, tax or a discount, so
+  0.5 Ea could be restocked on an ordinary sale): fixed; split now means two or more payers were billed for the line.
+- MED (rollback checked bodies, not settings): fixed; the reverse preflight also requires SECURITY DEFINER and
+  `search_path=public, pg_temp`. LOW: the split proof now runs the real `create_return` with two payers; the
+  browser test cleans its activity entry; the changelog names the count's existing 4-place rounding.
+
 ## Business decisions settled on this PR
 - **Split-payer returns of a whole item.** Mason chose to allow fractions (D5): a sale split between payers is
-  returned in shares. The trigger and postflight skip return lines whose sale is split by `create_return`'s own test;
+  returned in shares. The trigger and postflight skip return lines whose sale line is on live invoices of two or more payers;
   `create_return` still caps each payer at their share.

@@ -8,6 +8,7 @@ const NAME = '[WIF] Seed Bag';
 const SENTENCE = /\[WIF\] Seed Bag is sold by the whole item \(Ea\), so 0\.5 can't be used\. Enter a whole number\./;
 const CLEAN = `BEGIN;
 SET LOCAL session_replication_role = replica;
+DELETE FROM public.activity_feed WHERE customer_id = ${ID('customer')};
 DELETE FROM public.return_items WHERE product_id = ${ID('product')};
 DELETE FROM public.returns WHERE order_id = ${ID('order')};
 DELETE FROM public.receiving_records WHERE product_id = ${ID('product')};

@@ -5525,6 +5525,8 @@ export type Database = {
       }
       inventory_transactions: {
         Row: {
+          already_counted: number | null
+          application_record_id: string | null
           created_at: string
           delivery_id: string | null
           from_location: string | null
@@ -5541,6 +5543,8 @@ export type Database = {
           transaction_type: string
         }
         Insert: {
+          already_counted?: number | null
+          application_record_id?: string | null
           created_at?: string
           delivery_id?: string | null
           from_location?: string | null
@@ -5557,6 +5561,8 @@ export type Database = {
           transaction_type: string
         }
         Update: {
+          already_counted?: number | null
+          application_record_id?: string | null
           created_at?: string
           delivery_id?: string | null
           from_location?: string | null

@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
 // File -> number of batch-2 call sites in it.
 const SITES: Record<string, number> = {
   'src/pages/InventoryPage.tsx': 3, // release_inventory_hold, manual_inventory_add, retire_inventory_item
-  'src/pages/BlendTicketDetail.tsx': 1, // create_application_record_from_blend_ticket
+  'src/pages/BlendTicketDetail.tsx': 2, // create_application_record_from_blend_ticket, reverse_application_record (Undo Filing)
   'src/pages/NewOrder.tsx': 2, // create_rush_order, create_direct_order
   'src/pages/QuoteBuilder.tsx': 3, // create_planned_holds, close_quote_as_applied, close_quote_as_short
   'src/pages/Deliveries.tsx': 1, // batch_cancel_deliveries

@@ -1,0 +1,466 @@
+#!/usr/bin/env node
+/**
+ * Real-schema proof for 20270314150000_job_ticket_stock_count_once: a job and the blend tickets linked to it take a
+ * product out of stock once (the larger claim), not twice; the later posting takes only the difference and is flagged.
+ * Builds the baseline plus every migration before the candidate (shared undo-paths harness), then:
+ *   BEFORE: a linked ticket plus its job take the same product twice (the bug).
+ *   APPLY:  commits in one transaction with a NOTICE counting that old pair; a second apply stops at its preflight.
+ *   AS THE REAL CALLERS (a sales rep files tickets, an admin completes jobs and reverses): contract cases 1-12, a
+ *     multi-product ticket, a ticket moved between open jobs before filing, and two races (filing and reversing while
+ *     a completion holds the lock). A filed ticket's job link stays frozen by the existing header lock. After every case each warehouse balance equals the expected total and the ledger.
+ *   A job moved to another customer after a ticket was linked: both take their full claims (Sol r1).
+ *   GRANTS and ROLLBACK: the helpers are owner-only; wrapper grants unchanged; the rollback script refuses once any posting ran under the new rule (Luna r5)
+ *     rows exist, and otherwise restores the previous bodies.
+ *
+ * Run: node scripts/smoke/prove-job-ticket-stock-count-once-real-schema.mjs   (needs Docker)
+ * Prints JOB_TICKET_COUNT_ONCE_PROOF_PASS on success.
+ */
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+
+process.env.UNDO_PATHS_CONTAINER ||= `crx-countonce-${process.pid}-${Date.now().toString(36)}`;
+const { buildContainer, removeContainer, seedUsers, psql, scalar, docker, USERS, id, NAME, ROOT } = await import('./undo-paths/harness.mjs');
+
+const CANDIDATE = '20270314150000_job_ticket_stock_count_once.sql';
+const ROLLBACK = path.join(ROOT, 'scripts', 'smoke', 'job-ticket-stock-count-once-reverse.sql');
+const CUST = id('c1'), FIELD = id('c2'), CUST2 = id('c3');
+const PRE = { job: '3bd9dfe0729d8175ffbb1cf16b258b5c', bt: '0ad9a78b900cb953e0aa7d2a0d87bda0', rev: 'bb7b45f8dca986c9cf39b5b6a41aa75b', gen: '9bf10abef4830cd6b0ee3aea41c07469' };
+const SIG = {
+  job: 'public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)',
+  bt: 'public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)',
+  rev: 'public.reverse_application_record(uuid, text)',
+  gen: 'public.next_application_record_number()',
+};
+const WRAPPERS = ['public.complete_job(uuid, jsonb, uuid, text)', 'public.create_application_record_from_blend_ticket(uuid, uuid, text)'];
+
+// Ids: products p<n>, jobs j<n>, tickets t<n> (hex-safe: id() pads digits/letters a-f only).
+const P = (n) => id(`b0${n}`), J = (n) => id(`d0${n}`), T = (n) => id(`e0${n}`);
+
+const run = (sql) => docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'],
+  { input: sql, allowFailure: true });
+const out = (r) => `${r.stdout}${r.stderr}`;
+const signedIn = (uid) => `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', false);
+  SELECT set_config('request.jwt.claim.sub', '${uid}', false); SET ROLE authenticated;`;
+const as = (uid, sql) => `${signedIn(uid)} BEGIN; ${sql} COMMIT;`;
+const ok = (uid, sql) => { const r = run(as(uid, sql)); assert.equal(r.status, 0, out(r)); return r.stdout.trim(); };
+const refused = (uid, sql, re) => { const r = run(as(uid, sql)); assert.notEqual(r.status, 0, `expected a refusal: ${sql}`); assert.match(out(r), re); };
+const seed = (sql) => psql(`SET session_replication_role = replica; ${sql}`);
+let k = 0;
+const key = () => `count-once-${(k += 1)}`;
+
+const fileSql = (t) => `SELECT public.create_application_record_from_blend_ticket('${t}', '${USERS.rep}', '${key()}');`;
+const completeSql = (j) => `SELECT public.complete_job('${j}', '{}'::jsonb, '${USERS.admin}', '${key()}');`;
+const recordOf = (t) => `(SELECT id FROM public.application_records WHERE source_type = 'blend_ticket' AND source_id = '${t}')`;
+const reverseSql = (t) => `SELECT public.reverse_application_record(${recordOf(t)}, '${key()}');`;
+const relinkSql = (t, j) => `UPDATE public.blend_tickets SET job_id = ${j ? `'${j}'` : 'NULL'} WHERE id = '${t}';`;
+const file = (t) => ok(USERS.rep, fileSql(t));
+const complete = (j) => ok(USERS.admin, completeSql(j));
+
+function product(n, unit = 'Gal') {
+  seed(`INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
+      rate_per_acre, current_cost, tier1_price, tier2_price, tier3_price, pricing_version, is_active) VALUES
+      ('${P(n)}', '[PROVER] Count once ${n}', 'CO-${n}', 'liquid', '${unit}', '${unit}', '${unit}', '${unit}', 1, 24, 30, 30, 30, 1, true);
+    INSERT INTO public.inventory (product_id, location, unit_size, quantity_available, quantity_prebooked, quantity_on_order)
+      VALUES ('${P(n)}', 'Main Warehouse', '${unit}', 100, 0, 0);`);
+}
+/** lines: [productN, qty, unit = 'Gal', customerSupplied = false] in sort order. */
+function job(n, lines, status = 'in_progress') {
+  seed(`INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, created_by)
+      VALUES ('${J(n)}', 'CO-J${n}', '${CUST}', current_date, '${status}', '${USERS.admin}');
+    ${lines.map(([p, q, u = 'Gal', s = false], i) => `INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, sort_order, customer_supplied)
+      VALUES ('${J(n)}', '${P(p)}', ${q}, '${u}', ${i + 1}, ${s});`).join('\n')}`);
+}
+/** lines: [productN, qty, unit = 'Gal'] in sequence order. */
+function ticket(n, jobN, lines) {
+  seed(`INSERT INTO public.blend_tickets (id, ticket_number, uploaded_by, status, review_status, customer_id, season, ticket_date, total_acres, job_id)
+      VALUES ('${T(n)}', 'CO-T${n}', '${USERS.admin}', 'completed', 'approved', '${CUST}', 2027, current_date, 1, ${jobN == null ? 'NULL' : `'${J(jobN)}'`});
+    INSERT INTO public.blend_ticket_fields (blend_ticket_id, field_id, customer_id, planned_acres) VALUES ('${T(n)}', '${FIELD}', '${CUST}', 1);
+    ${lines.map(([p, q, u = 'Gal'], i) => `INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, sequence_order)
+      VALUES ('${T(n)}', '${P(p)}', '[PROVER] Count once ${p}', ${q}, '${u}', ${i + 1});`).join('\n')}`);
+}
+
+const onHand = (p) => Number(scalar(`SELECT quantity_available FROM public.inventory WHERE product_id = '${P(p)}' AND location = 'Main Warehouse';`));
+// Every job_applied row for a product, oldest first: quantity/already_counted/requires_review/source.
+const rows = (p) => scalar(`SELECT coalesce(string_agg(it.quantity::numeric(12,4)::float8 || '/' || coalesce(it.already_counted::numeric(12,4)::float8::text, '-') || '/'
+    || it.requires_review || '/' || coalesce(ar.source_type, 'none'), ' ' ORDER BY it.created_at, it.ctid), '')
+  FROM public.inventory_transactions it LEFT JOIN public.application_records ar ON ar.id = it.application_record_id
+  WHERE it.product_id = '${P(p)}' AND it.transaction_type = 'job_applied';`);
+// Independent checks: the warehouse moved exactly `out` from its opening 100, and the ledger says the same.
+function balance(p, outQty, what) {
+  assert.equal(onHand(p), 100 - outQty, `${what}: warehouse should be ${100 - outQty}`);
+  // Production's sign rule (src/lib/reconciliation.ts, stock-matches-history.sql): job_applied always subtracts.
+  const ledger = 0 - Number(scalar(`SELECT coalesce(sum(CASE
+      WHEN transaction_type IN ('received', 'cancelled_delivery_reversal', 'void_delivery_reversal') THEN abs(quantity)
+      WHEN transaction_type IN ('delivered', 'job_applied') THEN -abs(quantity)
+      WHEN transaction_type IN ('adjusted', 'transferred', 'returned', 'tote_fill_out', 'tote_fill_in') THEN quantity
+      ELSE 0 END), 0)
+    FROM public.inventory_transactions WHERE product_id = '${P(p)}';`));
+  assert.equal(ledger, outQty, `${what}: ledger history should total ${outQty}`);
+  console.log(`[COUNT-ONCE] ${what}: ${outQty} out (warehouse and ledger agree)`);
+}
+const md5 = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
+const acl = (sig) => scalar(`SELECT coalesce(proacl::text, '<default>') FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
+
+// A second signed-in psql session, for races.
+function session(uid, sql) {
+  return new Promise((resolve) => {
+    const c = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], { cwd: ROOT });
+    let text = '';
+    c.stdout.on('data', (d) => { text += d; }); c.stderr.on('data', (d) => { text += d; });
+    c.on('close', (code) => resolve({ code, text }));
+    c.stdin.end(`${signedIn(uid)} ${sql}`);
+  });
+}
+const numberLockHeld = () => scalar(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted
+  AND objid::bigint = (hashtext('next_application_record_number')::bigint & 4294967295);`) !== '0';
+// Completion holds its locks for 6 s (docker exec can take over 1 s on a busy machine); `other` starts once the completion holds the number lock, and must wait for it,
+// then see the committed job record.
+async function whileCompleting(j, uid, otherSql) {
+  const aRun = session(USERS.admin, `BEGIN; ${completeSql(j)} SELECT pg_sleep(6); SELECT 'A-done ' || extract(epoch FROM clock_timestamp()); COMMIT;`);
+  for (let i = 0; !numberLockHeld(); i += 1) {
+    assert.ok(i < 200, 'the completion never took the number lock');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  let aDone = false;
+  aRun.then(() => { aDone = true; });
+  const bRun = session(uid, `BEGIN; SELECT 'B ' || extract(epoch FROM clock_timestamp()); ${otherSql} SELECT 'B-done ' || extract(epoch FROM clock_timestamp()); COMMIT;`);
+  // Sol r5 LOW: seen queued behind the completion's number lock, not just started before it ended.
+  let waited = false;
+  while (!aDone && !waited) {
+    waited = scalar(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+      AND objid::bigint = (hashtext('next_application_record_number')::bigint & 4294967295);`) !== '0';
+    if (!waited) await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const [a, b] = await Promise.all([aRun, bRun]);
+  assert.equal(a.code, 0, a.text);
+  assert.ok(waited, `the second session must wait on the completion's number lock:
+${a.text}
+${b.text}`);
+  const started = Number((b.text.match(/^B ([0-9.]+)$/m) ?? [])[1]);
+  const ended = Number((a.text.match(/^A-done ([0-9.]+)$/m) ?? [])[1]);
+  assert.ok(started < ended, `the second session must start while the completion still holds its lock:
+${a.text}
+${b.text}`);
+  return b;
+}
+
+try {
+  buildContainer({ stopBefore: CANDIDATE });
+  seedUsers();
+  seed(`INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST}', '[PROVER] Count Once Farm', true);
+    INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD}', '${CUST}', '[PROVER] Count Once Field');
+    INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST2}', '[PROVER] Count Once Other Farm', true);`);
+  for (let n = 0; n <= 9; n += 1) product(n);
+  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]) product(n);
+  const wrapperAcl = WRAPPERS.map(acl);
+
+  // BEFORE: the bug. Ticket 6 on an in-progress job, then the job's 10: 16 out.
+  job(0, [[0, 10]]); ticket(0, 0, [[0, 6]]);
+  file(T(0)); complete(J(0));
+  balance(0, 16, 'BEFORE the fix, ticket 6 then its job 10 (the double count)');
+
+  // Halves posted BEFORE the migration, finished after it (Luna r1): a ticket filed on a job still open, and a job
+  // completed while its linked ticket is not yet filed.
+  job(20, [[20, 10]]); ticket(20, 20, [[20, 6]]); file(T(20));
+  job(21, [[21, 10]]); ticket(21, 21, [[21, 7]]); complete(J(21));
+
+  // APPLY (case 11: over a database that already has an old linked pair).
+  docker(['exec', '-i', NAME, 'sh', '-c', 'cat > /tmp/candidate.sql'], {
+    input: fs.readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n') });
+  const applyFile = () => docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/candidate.sql'], { allowFailure: true });
+  let r = applyFile();
+  assert.equal(r.status, 0, `the candidate applies: ${out(r)}`);
+  assert.match(out(r), /COUNT_ONCE: 1 job\(s\) already have both a job record and a linked ticket record/);
+  r = applyFile();
+  assert.notEqual(r.status, 0); assert.match(out(r), /COUNT_ONCE_PREFLIGHT/);
+  assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_guard_inventory_transactions_immutable' AND tgenabled = 'O';`), '1', 'the immutability guard is untouched');
+  refused(USERS.admin, `UPDATE public.inventory_transactions SET already_counted = 1 WHERE product_id = '${P(0)}';`, /permission denied|immutable|IMMUTABLE/i);
+  console.log('[COUNT-ONCE] APPLY: commits with a NOTICE naming the 1 old pair; a second apply stops at the preflight; the ledger stays write-once');
+
+  // GRANTS
+  for (const sig of ['public._job_stock_group_20270310(uuid, uuid)', 'public._job_stock_customer_20270310(uuid)']) {
+    for (const role of ['anon', 'authenticated', 'service_role']) {
+      assert.equal(scalar(`SELECT has_function_privilege('${role}', '${sig}', 'EXECUTE');`), 'f', `${sig} not executable by ${role}`);
+    }
+  }
+  assert.deepEqual(WRAPPERS.map(acl), wrapperAcl, 'wrapper grants unchanged');
+  assert.equal(scalar(`SELECT has_function_privilege('authenticated', '${SIG.rev}', 'EXECUTE')::text || '/' || has_function_privilege('anon', '${SIG.rev}', 'EXECUTE')::text;`), 'true/false');
+  console.log('[COUNT-ONCE] GRANTS: the group helper is owner-only; wrapper and reversal grants unchanged');
+
+  // Straddling the migration: the earlier half carries no link and is still counted.
+  complete(J(20));
+  assert.equal(rows(20), '6/-/false/none 4/6/true/job');
+  balance(20, 10, 'straddle, ticket 6 filed before the migration, job 10 completed after');
+  file(T(21));
+  assert.equal(rows(21), '10/-/false/none 0/7/true/blend_ticket');
+  balance(21, 10, 'straddle, job 10 completed before the migration, ticket 7 filed after');
+  // Smart undo of the pre-migration ticket: the job still needs all 10, so the 6 stays out on the job's books.
+  ok(USERS.admin, reverseSql(T(20)));
+  assert.equal(rows(20), '6/-/false/none 4/6/true/job 6/-6/true/job');
+  balance(20, 10, 'straddle ticket reversed; the job keeps its 10');
+
+  // 1. Ticket 6 then job 10: job moves 4, already_counted 6, flagged.
+  job(1, [[1, 10]]); ticket(1, 1, [[1, 6]]);
+  file(T(1)); complete(J(1));
+  assert.equal(rows(1), '6/-/false/blend_ticket 4/6/true/job');
+  assert.match(scalar(`SELECT notes FROM public.inventory_transactions WHERE product_id = '${P(1)}' AND already_counted IS NOT NULL;`), /\[6 already counted by blend ticket\(s\) for this job — review\]/);
+  balance(1, 10, 'case 1, ticket 6 then job 10');
+
+  // 2. Ticket 12 then job 10: job row 0, flagged, commits.
+  job(2, [[2, 10]]); ticket(2, 2, [[2, 12]]);
+  file(T(2)); complete(J(2));
+  assert.equal(rows(2), '12/-/false/blend_ticket 0/10/true/job');
+  assert.equal(scalar(`SELECT status FROM public.jobs WHERE id = '${J(2)}';`), 'completed');
+  balance(2, 12, 'case 2, ticket 12 then job 10');
+
+  // 3. Job 10 then ticket 7 (moves 0), then ticket 6 on the same job (moves 3).
+  job(3, [[3, 10]]); ticket(3, 3, [[3, 7]]); ticket(31, 3, [[3, 6]]);
+  complete(J(3)); file(T(3)); file(T(31));
+  assert.equal(rows(3), '10/-/false/job 0/7/true/blend_ticket 3/3/true/blend_ticket');
+  balance(3, 13, 'case 3, job 10 then tickets 7 and 6');
+
+  // 4. Job 10 then one ticket with two lines of the product (6, 7): 0 then 3.
+  job(4, [[4, 10]]); ticket(4, 4, [[4, 6], [4, 7]]);
+  complete(J(4)); file(T(4));
+  assert.equal(rows(4), '10/-/false/job 0/6/true/blend_ticket 3/4/true/blend_ticket');
+  balance(4, 13, 'case 4, job 10 then one ticket with lines 6 and 7');
+
+  // 5. Ticket 5 then two job lines (4, 6): credit goes first in line order.
+  job(5, [[5, 4], [5, 6]]); ticket(5, 5, [[5, 5]]);
+  file(T(5)); complete(J(5));
+  assert.equal(rows(5), '5/-/false/blend_ticket 0/4/true/job 5/1/true/job');
+  balance(5, 10, 'case 5, ticket 5 then job lines 4 and 6');
+
+  // 6. Unlinked ticket, and a ticket on a job still open: full move, no flag.
+  job(6, [[6, 9]]); ticket(6, null, [[6, 5]]); ticket(61, 6, [[6, 4]]);
+  file(T(6)); file(T(61));
+  assert.equal(rows(6), '5/-/false/blend_ticket 4/-/false/blend_ticket');
+  balance(6, 9, 'case 6, unlinked ticket 5 and open-job ticket 4');
+
+  // 7. Pints on a gallons product: claims compare in gallons (16 pt = 2 gal; job 3 gal moves 1).
+  job(7, [[7, 3]]); ticket(7, 7, [[7, 16, 'Pt']]);
+  file(T(7)); complete(J(7));
+  assert.equal(rows(7), '2/-/false/blend_ticket 1/2/true/job');
+  balance(7, 3, 'case 7, 16 pints ticket then 3 gallon job');
+
+  // 8. A customer-supplied job line: no row, the ticket's take stands.
+  job(8, [[8, 10, 'Gal', true]]); ticket(8, 8, [[8, 5]]);
+  file(T(8)); complete(J(8));
+  assert.equal(rows(8), '5/-/false/blend_ticket');
+  balance(8, 5, 'case 8, ticket 5 and a customer-supplied job line');
+
+  // Multi-product: ticket (P_a 3, P_b 6) then job (P_a 10, P_b 4).
+  job(10, [['a', 10], ['b', 4]]); ticket(10, 10, [['a', 3], ['b', 6]]);
+  file(T(10)); complete(J(10));
+  assert.equal(rows('a'), '3/-/false/blend_ticket 7/3/true/job');
+  assert.equal(rows('b'), '6/-/false/blend_ticket 0/4/true/job');
+  assert.notEqual(scalar(`SELECT count(*) FROM public.activity_feed WHERE description LIKE '%2 chemical line(s) already counted by blend tickets — review%';`), '0', 'the completion activity names the counted lines');
+  balance('a', 10, 'multi-product, product A'); balance('b', 6, 'multi-product, product B');
+
+  // 9. A filed ticket's job link stays frozen (existing trg_linked_blend_ticket_header_lock), open or completed job.
+  refused(USERS.rep, relinkSql(T(1), J(6)), /BLEND_TICKET_DOWNSTREAM_CONTENT_LOCKED/);
+  refused(USERS.rep, relinkSql(T(61), J(1)), /BLEND_TICKET_DOWNSTREAM_CONTENT_LOCKED/);
+  refused(USERS.rep, relinkSql(T(6), J(6)), /BLEND_TICKET_DOWNSTREAM_CONTENT_LOCKED/);  // unlinked → open job
+  console.log('[COUNT-ONCE] case 9, a filed ticket cannot change job (existing header lock)');
+
+  // An unfiled ticket moved between open jobs: job A (2), job B (10); ticket 6 moves A → B, then filed; A takes 2, B takes 4.
+  job(91, [['c', 2]]); job(92, [['c', 10]]); ticket(91, 91, [['c', 6]]);
+  ok(USERS.rep, relinkSql(T(91), J(92))); file(T(91));
+  complete(J(91)); complete(J(92));
+  assert.equal(rows('c'), '6/-/false/blend_ticket 2/-/false/job 4/6/true/job');
+  balance('c', 12, 'ticket 6 moved from open job A (2) to open job B (10) before filing');
+
+  // 10. Smart undo (Mason 2026-11-26): a ticket counted with its completed job reverses; the job keeps what it
+  // still needs (ticket 6, job 10: nothing comes back). Re-filing the ticket then takes nothing more.
+  assert.match(ok(USERS.admin, reverseSql(T(1))), /"kept_on_job_lines": 1/);
+  assert.equal(rows(1), '6/-/false/none 4/6/true/job 6/-6/true/job');
+  balance(1, 10, 'case 10, counted ticket 6 reversed; job 10 keeps its stock');
+  assert.notEqual(scalar(`SELECT count(*) FROM public.activity_feed WHERE description LIKE '%1 chemical line(s) kept on its completed job — review%';`), '0');
+  file(T(1));
+  assert.equal(rows(1), '6/-/false/none 4/6/true/job 6/-6/true/job 0/6/true/blend_ticket');
+  balance(1, 10, 'case 10, the same ticket re-filed after the undo');
+  ok(USERS.admin, reverseSql(T(6)));
+  balance(6, 4, 'case 10, unlinked ticket 5 reversed');
+  job(9, [[9, 10]]); ticket(9, 9, [[9, 6]]);
+  file(T(9)); ok(USERS.admin, reverseSql(T(9))); complete(J(9));
+  assert.equal(rows(9), '6/-/false/none 10/-/false/job');  // the reversed record is gone
+  balance(9, 10, 'case 10, ticket reversed before its job completes; job takes its full 10');
+
+  // Luna r2: two tickets on an open job (10, then 6) each take their full claim (tickets add up; only a job record
+  // credits them); reversing the first leaves the second exact and reversible; the job's 4 then moves 0 (max(4, 6) = 6).
+  job(22, [[22, 4]]); ticket(22, 22, [[22, 10]]); ticket(221, 22, [[22, 6]]);
+  file(T(22)); file(T(221));
+  assert.equal(rows(22), '10/-/false/blend_ticket 6/-/false/blend_ticket');
+  ok(USERS.admin, reverseSql(T(22)));
+  complete(J(22));
+  assert.equal(rows(22), '10/-/false/none 6/-/false/blend_ticket 0/4/true/job');
+  balance(22, 6, 'two tickets on an open job (10, 6), the first reversed, then the job claims 4');
+
+  // Sol r1: a job moved to another customer after a ticket was linked counts on its own. Ticket 6 (farm A) filed on an
+  // open job, the job moved to farm B, then completed: the job takes its full 10, and the ticket can still be reversed.
+  job(23, [[23, 10]]); ticket(23, 23, [[23, 6]]);
+  file(T(23));
+  seed(`UPDATE public.jobs SET customer_id = '${CUST2}' WHERE id = '${J(23)}';`);
+  complete(J(23));
+  assert.equal(rows(23), '6/-/false/blend_ticket 10/-/false/job');
+  balance(23, 16, 'job moved to another customer after its ticket was filed');
+  ok(USERS.admin, reverseSql(T(23)));
+  balance(23, 10, 'that ticket reversed');
+  // The other order: a farm-B job completed, then a farm-A ticket linked to it is filed: the ticket takes its full 6.
+  job(24, [[24, 10]]); seed(`UPDATE public.jobs SET customer_id = '${CUST2}' WHERE id = '${J(24)}';`);
+  complete(J(24)); ticket(24, 24, [[24, 6]]); file(T(24));
+  assert.equal(rows(24), '10/-/false/job 6/-/false/blend_ticket');
+  balance(24, 16, 'farm-A ticket filed against a completed farm-B job');
+
+  // Sol r2: job 10 completed, then a separate 12-gallon spray filed against it by mistake (takes 2). Undo puts the 2
+  // back; re-filed unlinked it takes its 12; the job's real 10-gallon ticket then takes nothing more. 22 in all.
+  job(25, [[25, 10]]); ticket(25, 25, [[25, 12]]); ticket(251, 25, [[25, 10]]);
+  complete(J(25)); file(T(25));
+  balance(25, 12, 'wrong 12-gallon ticket filed against a completed 10-gallon job');
+  ok(USERS.admin, reverseSql(T(25)));
+  balance(25, 10, 'the wrong ticket reversed: its 2 come back');
+  ok(USERS.rep, relinkSql(T(25), null)); file(T(25));
+  file(T(251));
+  assert.equal(rows(25), '10/-/false/job 2/10/true/none 12/-/false/blend_ticket 0/10/true/blend_ticket');
+  balance(25, 22, 'wrong ticket re-filed unlinked, then the job\'s real ticket');
+
+  // A ticket whose claim made another ticket take extra (Sol r4 MED 1): job 10, ticket 7 (takes 0), ticket 6 (takes 3);
+  // undoing the 7 returns the other ticket's extra 3 on the job's books, so a later 5-gallon ticket takes 1 (11 in all).
+  job(26, [[26, 10]]); ticket(26, 26, [[26, 7]]); ticket(261, 26, [[26, 6]]); ticket(262, 26, [[26, 5]]);
+  complete(J(26)); file(T(26)); file(T(261));
+  balance(26, 13, 'job 10, then tickets 7 and 6');
+  assert.match(ok(USERS.admin, reverseSql(T(26))), /"over_taken_lines": 1/);
+  // Sol r5 MED: the return is a positive 'adjusted' row (stock added back, as every ledger reader reads it), linked to the job record.
+  assert.equal(scalar(`SELECT count(*) FROM public.inventory_transactions it JOIN public.application_records jr ON jr.id = it.application_record_id
+    WHERE it.product_id = '${P(26)}' AND it.transaction_type = 'adjusted' AND it.quantity = 3 AND it.to_location = 'Main Warehouse'
+      AND it.already_counted IS NULL AND it.job_id = '${J(26)}' AND it.requires_review AND jr.source_type = 'job' AND jr.source_id = '${J(26)}'
+      AND it.notes LIKE 'Returned from the job: other blend tickets took 3 more%';`), '1');
+  assert.equal(scalar(`SELECT count(*) FROM public.inventory_transactions WHERE product_id = '${P(26)}' AND transaction_type = 'job_applied' AND quantity < 0;`), '0',
+    'no negative job_applied row');
+  balance(26, 10, 'ticket 7 reversed: the other ticket\'s extra 3 comes back');
+  file(T(262));
+  balance(26, 11, 'a later 5-gallon ticket takes 1 (tickets 6 + 5 = 11)');
+
+  // Sol r5 MED: the same 10/7/6 case starting at 13, with the empty warehouse row retired after filing. Undoing the 7
+  // (which moved nothing, so no credit row recreates the warehouse row) still puts the 3 back: the row is recreated with 3.
+  job(29, [[29, 10]]); ticket(29, 29, [[29, 7]]); ticket(291, 29, [[29, 6]]);
+  seed(`UPDATE public.inventory SET quantity_available = 13 WHERE product_id = '${P(29)}';`);
+  complete(J(29)); file(T(29)); file(T(291));
+  assert.equal(onHand(29), 0);
+  seed(`DELETE FROM public.inventory WHERE product_id = '${P(29)}' AND location = 'Main Warehouse';`);
+  assert.match(ok(USERS.admin, reverseSql(T(29))), /"over_taken_lines": 1/);
+  assert.equal(onHand(29), 3, 'the retired warehouse row is recreated with the returned 3');
+  console.log('[COUNT-ONCE] over-take returned to a retired warehouse row: row recreated with 3');
+
+  // Sol r5 HIGH (Mason 2026-11-26): a ticket with an active invoice cannot be undone (billed status, or a live invoice
+  // even when the status says unbilled); a cancelled invoice no longer blocks it.
+  job(30, [[30, 10]]); ticket(30, 30, [[30, 12]]);
+  complete(J(30)); file(T(30));
+  seed(`UPDATE public.blend_tickets SET payment_status = 'billed' WHERE id = '${T(30)}';`);
+  refused(USERS.admin, reverseSql(T(30)), /APPLICATION_RECORD_TICKET_INVOICED/);
+  seed(`UPDATE public.blend_tickets SET payment_status = 'unbilled' WHERE id = '${T(30)}';
+    INSERT INTO public.invoices (id, customer_id, invoice_type, invoice_number, blend_ticket_id, status, created_by)
+      VALUES ('${id('f030')}', '${CUST}', 'misc_charge', 'CO-INV30', '${T(30)}', 'draft', '${USERS.admin}');`);
+  refused(USERS.admin, reverseSql(T(30)), /APPLICATION_RECORD_TICKET_INVOICED/);
+  balance(30, 12, 'billed ticket: undo refused, nothing moved');
+  seed(`UPDATE public.invoices SET status = 'cancelled' WHERE id = '${id('f030')}';`);
+  ok(USERS.admin, reverseSql(T(30)));
+  balance(30, 10, 'invoice cancelled: the undo runs and the 2 come back');
+
+  // Taha LOW 1: a ticket that moved nothing (job 10, ticket 6 takes 0) is reversed; a retry with a fresh key reads
+  // already_reversed, not not_found (no credit row exists, but its own job_applied row still names the record).
+  job(28, [[28, 10]]); ticket(28, 28, [[28, 6]]);
+  complete(J(28)); file(T(28));
+  const record28 = scalar(`SELECT ${recordOf(T(28))};`);
+  ok(USERS.admin, reverseSql(T(28)));
+  assert.match(ok(USERS.admin, `SELECT public.reverse_application_record('${record28}', '${key()}');`), /"status": "already_reversed"/);
+  balance(28, 10, 'zero-move ticket reversed, then retried with a fresh key');
+
+  // Sol r6 HIGH (Mason 2026-11-26): undoing the newest filing never frees its number for the next filing.
+  ticket(41, null, [[31, 1]]); ticket(42, null, [[32, 1]]);
+  file(T(41));
+  const number31 = scalar(`SELECT record_number FROM public.application_records WHERE source_type = 'blend_ticket' AND source_id = '${T(41)}';`);
+  const record31 = scalar(`SELECT ${recordOf(T(41))};`);
+  assert.equal(number31, scalar(`SELECT max(record_number) FROM public.application_records;`), 'ticket 31 holds the newest number');
+  ok(USERS.admin, reverseSql(T(41)));
+  assert.equal(scalar(`SELECT application_record_id FROM public.application_record_numbers_retired WHERE record_number = '${number31}';`), record31, 'the undone number is retired');
+  file(T(42));
+  const number32 = scalar(`SELECT record_number FROM public.application_records WHERE source_type = 'blend_ticket' AND source_id = '${T(42)}';`);
+  assert.notEqual(number32, number31, 'the undone number is not handed out again');
+  assert.equal(Number(number32.split('-')[2]), Number(number31.split('-')[2]) + 1, `the next filing takes the next number: ${number31} -> ${number32}`);
+  // Who may see or write the retired list: admins read it, nobody writes it directly.
+  assert.equal(ok(USERS.rep, `SELECT count(*) FROM public.application_record_numbers_retired;`).split('\n').pop(), '0', 'a rep cannot read retired numbers');
+  assert.notEqual(ok(USERS.admin, `SELECT count(*) FROM public.application_record_numbers_retired;`).split('\n').pop(), '0', 'an admin can read retired numbers');
+  refused(USERS.admin, `INSERT INTO public.application_record_numbers_retired (record_number, application_record_id) VALUES ('APP-X', '${record31}');`, /permission denied/);
+  refused(USERS.admin, `DELETE FROM public.application_record_numbers_retired;`, /permission denied/);
+  console.log(`[COUNT-ONCE] RECORD NUMBERS: undoing ${number31} retires it; the next filing gets ${number32}; admins read the list, nobody writes it`);
+
+  // Races: each must wait for the completion's lock, then act on the committed job record.
+  job(11, [['d', 10]]); ticket(11, 11, [['d', 6]]);
+  let b = await whileCompleting(J(11), USERS.rep, fileSql(T(11)));
+  assert.equal(b.code, 0, b.text);
+  assert.equal(rows('d'), '10/-/false/job 0/6/true/blend_ticket');
+  balance('d', 10, 'race, ticket filed while its job completes');
+
+  job(14, [['f', 10]]); ticket(14, 14, [['f', 6]]);
+  file(T(14));
+  b = await whileCompleting(J(14), USERS.admin, reverseSql(T(14)));
+  assert.equal(b.code, 0, b.text);
+  assert.match(b.text, /"kept_on_job_lines": 1/);
+  balance('f', 10, 'race, ticket reversed while its job completes: the job keeps its 10');
+
+  // Luna r6: two reversals with the same key at once both return the first one's receipt.
+  ticket(27, null, [[27, 5]]); file(T(27));
+  const sameKey = key();
+  const firstRun = session(USERS.admin, `BEGIN; SELECT public.reverse_application_record(${recordOf(T(27))}, '${sameKey}'); SELECT pg_sleep(6); COMMIT;`);
+  for (let i = 0; !numberLockHeld(); i += 1) {
+    assert.ok(i < 200, 'the first reversal never took the number lock');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const recordId = scalar(`SELECT id FROM public.application_records WHERE source_type = 'blend_ticket' AND source_id = '${T(27)}';`);
+  const [first, second] = await Promise.all([firstRun,
+    session(USERS.admin, `SELECT public.reverse_application_record('${recordId}', '${sameKey}');`)]);
+  assert.equal(first.code, 0, first.text); assert.equal(second.code, 0, second.text);
+  assert.match(second.text, /"status": "reversed"/, `the second same-key reversal replays the first: ${second.text}`);
+  balance(27, 0, 'race, two same-key reversals: one credit, the same answer twice');
+
+  // ROLLBACK: refused once any posting ran under the new rule; on a database with none it restores the previous bodies.
+  const rollback = fs.readFileSync(ROLLBACK, 'utf8').replaceAll('\r\n', '\n');
+  docker(['exec', '-i', NAME, 'sh', '-c', 'cat > /tmp/rollback.sql'], { input: rollback });
+  r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/rollback.sql'], { allowFailure: true });
+  assert.notEqual(r.status, 0); assert.match(out(r), /COUNT_ONCE_ROLLBACK_REFUSED: postings under the count-once rule exist/);
+  // Luna r5: with every counted row gone, a plain linked posting (a ticket that took its full claim) still refuses it.
+  docker(['exec', '-i', NAME, 'sh', '-c', `cat > /tmp/rollback-uncounted.sql`], {
+    input: `SET session_replication_role = replica; DELETE FROM public.inventory_transactions WHERE already_counted IS NOT NULL; SET session_replication_role = origin;\n${rollback}` });
+  r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/rollback-uncounted.sql'], { allowFailure: true });
+  assert.notEqual(r.status, 0, 'an uncounted linked posting refuses the rollback'); assert.match(out(r), /COUNT_ONCE_ROLLBACK_REFUSED: postings under the count-once rule exist/);
+  // Sol r6: with no counted posting left, a retired number still refuses it (the old generator would reuse it).
+  docker(['exec', '-i', NAME, 'sh', '-c', `cat > /tmp/rollback-retired.sql`], {
+    input: `SET session_replication_role = replica; DELETE FROM public.inventory_transactions WHERE application_record_id IS NOT NULL OR already_counted IS NOT NULL; SET session_replication_role = origin;\n${rollback}` });
+  r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/rollback-retired.sql'], { allowFailure: true });
+  assert.notEqual(r.status, 0, 'a retired number refuses the rollback'); assert.match(out(r), /COUNT_ONCE_ROLLBACK_REFUSED: an undone record number is retired/);
+  // Prover-only: clear the counted rows (triggers off) in the same transaction as the rollback, as if none had posted yet.
+  docker(['exec', '-i', NAME, 'sh', '-c', `cat > /tmp/rollback-clean.sql`], {
+    input: `SET session_replication_role = replica; DELETE FROM public.inventory_transactions WHERE application_record_id IS NOT NULL OR already_counted IS NOT NULL; DELETE FROM public.application_record_numbers_retired; SET session_replication_role = origin;\n${rollback}` });
+  r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/rollback-clean.sql'], { allowFailure: true });
+  assert.equal(r.status, 0, `rollback applies: ${out(r)}`);
+  assert.deepEqual([md5(SIG.job), md5(SIG.bt), md5(SIG.rev), md5(SIG.gen)], [PRE.job, PRE.bt, PRE.rev, PRE.gen], 'previous bodies restored');
+  assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_retire_application_record_number';`), '0', 'the number-retiring trigger is gone');
+  assert.deepEqual(WRAPPERS.map(acl), wrapperAcl, 'wrapper grants unchanged after rollback');
+  job(15, [[0, 1]]); complete(J(15));
+  // The documented command (no -v ON_ERROR_STOP): the file sets it, so a refusal still exits non-zero.
+  r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-1', '-f', '/tmp/rollback.sql'], { allowFailure: true });
+  assert.notEqual(r.status, 0, `a refused rollback exits non-zero: ${out(r)}`);
+  // Re-apply after a rollback: the columns stayed, the migration applies again.
+  r = applyFile();
+  assert.equal(r.status, 0, `re-apply after rollback: ${out(r)}`);
+  assert.notDeepEqual([md5(SIG.job), md5(SIG.bt), md5(SIG.rev)], [PRE.job, PRE.bt, PRE.rev], 'count-once bodies back');
+  assert.notEqual(md5(SIG.gen), PRE.gen, 'the number generator counts retired numbers again');
+  console.log('[COUNT-ONCE] ROLLBACK: refused once counted rows exist; otherwise restores the previous bodies, a job still completes, a refused run exits non-zero, and the migration re-applies');
+
+  console.log('JOB_TICKET_COUNT_ONCE_PROOF_PASS');
+} finally {
+  removeContainer();
+}

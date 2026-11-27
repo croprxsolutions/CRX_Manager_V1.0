@@ -83,6 +83,12 @@ export function isFieldObstaclePoint(value: unknown): value is Point {
     && latitude <= 90;
 }
 
+/** A local identity for the exact point shown, including moves of an existing marker. */
+export function fieldObstaclePinIdentity(id: string, point: Point): string {
+  const [longitude, latitude] = point.coordinates;
+  return JSON.stringify([id, longitude, latitude]);
+}
+
 /** Convert a stored obstacle into a validated Mapbox simplestyle point feature. */
 export function fieldObstacleToGeoJsonFeature(
   obstacle: FieldObstacle,

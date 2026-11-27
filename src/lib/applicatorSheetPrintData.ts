@@ -4,10 +4,13 @@
  * are optional add-ons. Crew payer identities are resolved before preparation.
  */
 import { assertRpcResult, supabase } from './db';
-import { fmtNum, type ApplicatorSheetBillingSplit, type ApplicatorSheetData, type ApplicatorSheetSafety, type PreviousFieldApplications } from './applicatorSheetData';
+import { fmtNum, type ApplicatorSheetBillingSplit, type ApplicatorSheetData, type ApplicatorSheetHazards, type ApplicatorSheetSafety, type PreviousFieldApplications } from './applicatorSheetData';
 import { type ApplicatorPrintOptions, DEFAULT_APPLICATOR_PRINT_OPTIONS, mapImageOptions } from './applicatorPrintOptions';
 import { generateApplicatorSheetPdf } from './applicatorSheetPdf';
 import { fetchJobFieldLocations, fetchJobMapImages } from './jobMapImages';
+import { MARKER_REQUEST_TIMEOUT_MS, readFieldMarkers } from './fieldMarkerData';
+import { fieldObstacleName, fieldObstaclePinIdentity, isFieldObstaclePoint } from './fieldObstacles';
+import type { FieldObstacle } from '../types';
 
 interface ApplicationRecordJoin {
   application_date: string;
@@ -242,6 +245,66 @@ async function sheetSafety(products: ApplicatorSheetData['products']): Promise<A
   });
 }
 
+const hazardsUnavailable: ApplicatorSheetHazards = { complete: false, markers: [] };
+const PRINT_FIELD_HAZARD_TIMEOUT_MS = 5_000;
+
+async function readPrintFieldMarkers(id: string, jobSignal: AbortSignal) {
+  const request = new AbortController();
+  const abort = () => request.abort();
+  jobSignal.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(abort, PRINT_FIELD_HAZARD_TIMEOUT_MS);
+  const cutoff = new Promise<null>((resolve) => {
+    request.signal.addEventListener('abort', () => resolve(null), { once: true });
+  });
+  try {
+    return await Promise.race([readFieldMarkers(id, request.signal), cutoff]);
+  } finally {
+    clearTimeout(timer);
+    jobSignal.removeEventListener('abort', abort);
+  }
+}
+
+async function readSheetHazards(fields: ApplicatorSheetData['fields']) {
+  const ids = [...new Set(fields.flatMap(({ field_id }) => field_id ? [field_id] : []))];
+  const results = new Map<string, { complete: boolean; markers: FieldObstacle[] }>();
+  if (ids.length === 0) return results;
+
+  const request = new AbortController();
+  let next = 0;
+  async function readNextFields() {
+    while (!request.signal.aborted && next < ids.length) {
+      const id = ids[next++];
+      try {
+        const snapshot = await readPrintFieldMarkers(id, request.signal);
+        if (request.signal.aborted) return;
+        if (!snapshot?.available || !Array.isArray(snapshot.markers)) continue;
+        const markers = new Map(snapshot.markers.filter((marker) => marker?.field_id === id && typeof marker.id === 'string')
+          .map((marker) => [marker.id, marker] as const));
+        results.set(id, {
+          complete: snapshot.count === markers.size && snapshot.markers.length === markers.size,
+          markers: [...markers.values()],
+        });
+      } catch {
+        // Keep this field unavailable while allowing the other saved stops to print.
+      }
+    }
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cutoff = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      request.abort();
+      resolve();
+    }, MARKER_REQUEST_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([Promise.all(Array.from({ length: Math.min(ids.length, 3) }, readNextFields)), cutoff]);
+    return results;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Load maps/history/billing additions for every print entry point in one place. */
 export async function prepareApplicatorSheetPrintData(
   jobId: string,
@@ -249,10 +312,12 @@ export async function prepareApplicatorSheetPrintData(
   options: ApplicatorPrintOptions,
   office = true,
 ): Promise<ApplicatorSheetData> {
-  const [maps, previousApplications, billingSplits, locations, safety] = await Promise.all([
+  const mapOptions = mapImageOptions(options.mapPages);
+  const hazardSnapshot = readSheetHazards(data.fields);
+  const [maps, previousApplications, billingSplits, locations, safety, hazards] = await Promise.all([
     options.mapPages === 'none'
       ? Promise.resolve(null)
-      : fetchJobMapImages(jobId, mapImageOptions(options.mapPages)),
+      : fetchJobMapImages(jobId, { ...mapOptions, hazards: hazardSnapshot }),
     options.includePreviousApplications
       ? fetchPreviousApplications(data.fields, jobId, options.previousApplicationsPerField)
       : Promise.resolve([]),
@@ -261,12 +326,28 @@ export async function prepareApplicatorSheetPrintData(
       : Promise.resolve([]),
     fetchJobFieldLocations(jobId),
     options.includeSafetySheet ? sheetSafety(data.products) : Promise.resolve(undefined),
+    hazardSnapshot,
   ]);
-  const fields = data.fields.map((field) => ({ ...field, location: field.field_id ? locations.get(field.field_id) ?? null : null }));
+  const fields = data.fields.map((field) => {
+    const snapshot = field.field_id ? hazards.get(field.field_id) : undefined;
+    return {
+      ...field,
+      location: field.field_id ? locations.get(field.field_id) ?? null : null,
+      hazards: snapshot ? {
+        complete: snapshot.complete,
+        markers: snapshot.markers.map((marker) => ({
+          name: fieldObstacleName(marker), note: marker.label?.trim() || null,
+          pinIdentity: isFieldObstaclePoint(marker.point_geojson) ? fieldObstaclePinIdentity(marker.id, marker.point_geojson) : null,
+        })),
+      } : hazardsUnavailable,
+    };
+  });
   return {
     ...data,
     fields,
     maps,
+    fieldMapPagesRequested: mapOptions.perField,
+    overviewMapRequested: mapOptions.overview,
     previousApplications,
     billingSplits,
     // Safety is off unless chosen; when chosen it prints on its own sheet (Mason, 2026-11-24).
@@ -276,7 +357,7 @@ export async function prepareApplicatorSheetPrintData(
 
 /**
  * The "Map pages only" print: overview plus per-field maps for a saved job, with no
- * job order. Throws NO_MAP_PAGES_MESSAGE when the job has no map.
+ * job order. The hazard list still prints when no map image is available.
  */
 export async function printApplicatorMapPages(jobId: string, data: ApplicatorSheetData): Promise<void> {
   const options: ApplicatorPrintOptions = {

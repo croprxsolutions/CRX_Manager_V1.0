@@ -173,6 +173,29 @@ describe('initSentry', () => {
       expect(result.extra).toBeUndefined();
     });
 
+    it.each([
+      ['https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/geojson(synthetic-shape)/auto/640x640?access_token=synthetic-key', 'Mapbox'],
+      ['https://maps.googleapis.com/maps/api/staticmap?path=enc%3Asynthetic-shape&key=synthetic-key', 'Google'],
+    ])('removes the entire geometry-bearing print URL from telemetry (%s)', async (url, provider) => {
+      const event = loaded();
+      const operation = `[${provider} print image]`;
+      event.request.url = url;
+      event.spans[0].description = `GET ${url}`;
+      event.message = `Request rejected: ${url}`;
+      event.exception.values[0].value = `Could not load ${url}`;
+      const sendHooks = await hooks();
+      const error = sendHooks.beforeSend(event);
+      const trace = sendHooks.beforeSendTransaction(event);
+
+      expect(error.message).toBe(`Request rejected: ${operation}`);
+      expect(error.exception.values[0].value).toBe(`Could not load ${operation}`);
+      expect(trace.request.url).toBe(operation);
+      expect(trace.spans[0].description).toBe(`GET ${operation}`);
+      for (const payload of [error, trace]) {
+        expect(JSON.stringify(payload)).not.toMatch(/synthetic-shape|synthetic-key|mapbox\.com|maps\.googleapis\.com/);
+      }
+    });
+
     it('keeps the trace header path-only and leaves live SDK objects alone', async () => {
       class Scope { label = 'kept'; }
       const scope = new Scope();

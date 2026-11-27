@@ -10,10 +10,17 @@ const NETWORK_ERRORS = ['Failed to fetch', 'NetworkError', 'Load failed'];
 // so a database error that merely mentions fetching is kept.
 const NETWORK_BLIP = /^(?:TypeError: )?(?:Failed to fetch|NetworkError when attempting to fetch resource\.?|Load failed)(?: \([^)]*\))?$/;
 
+// A print request can carry field geometry in its URL path as well as its query.
+function redactPrintMapUrls(text: string) {
+  return text
+    .replace(/https:\/\/api\.mapbox\.com\/styles\/v1\/[^/\s]+\/[^/\s]+\/static\/[^\s"'<>]*/gi, '[Mapbox print image]')
+    .replace(/https:\/\/maps\.googleapis\.com\/maps\/api\/staticmap\b[^\s"'<>]*/gi, '[Google print image]');
+}
+
 // Query strings and fragments carry filter values, login tokens and one-time codes.
-const pathOnly = (url: string | undefined) => url?.replace(/[?#].*$/s, '');
+const pathOnly = (url: string | undefined) => url === undefined ? undefined : redactPrintMapUrls(url).replace(/[?#].*$/s, '');
 // The one free text Sentry gets (Mason, 2026-11-10): tokens removed whole, then figures blanked.
-const scrub = (text: string | undefined) => (text === undefined ? undefined : toSentryError(text).message);
+const scrub = (text: string | undefined) => text === undefined ? undefined : toSentryError(redactPrintMapUrls(text)).message;
 
 // Supabase errors are plain objects: Sentry titles them "Object captured as exception"
 // and ignoreErrors never sees their message, so read it here.

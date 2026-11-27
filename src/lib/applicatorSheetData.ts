@@ -116,6 +116,11 @@ export function serializeCustomConfig(cfg: ApplicatorSheetCustomConfig): string 
 
 // ── The shared sheet data model ──────────────────────────────────────────────
 
+export interface ApplicatorSheetHazards {
+  complete: boolean;
+  markers: Array<{ name: string; note: string | null; pinIdentity: string | null }>;
+}
+
 /** One field/location on the sheet, already placed in route order. */
 export interface ApplicatorSheetField {
   /** Saved field id, used to attach optional application-history sections. */
@@ -130,6 +135,7 @@ export interface ApplicatorSheetField {
   pest: string | null;
   /** The field's map pin, for the printed directions link (saved jobs only). */
   location?: { lat: number; lng: number } | null;
+  hazards?: ApplicatorSheetHazards;
 }
 
 /** Google Maps driving directions to a field's map pin. */
@@ -218,6 +224,8 @@ export interface ApplicatorSheetSafety {
 
 /** The full, format-agnostic sheet payload. All three layouts read this. */
 export interface ApplicatorSheetData {
+  fieldMapPagesRequested?: boolean;
+  overviewMapRequested?: boolean;
   job_number: string;
   customers: ApplicatorSheetCustomer[];
   scheduled_date: string; // YYYY-MM-DD

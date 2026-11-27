@@ -213,6 +213,7 @@ function drawSheet(
   });
   y = doc.lastAutoTable.finalY + 18;
   y = drawDirections(doc, data, y);
+  y = drawFieldHazards(doc, autoTable, data, y);
 
   // ── Billing splits ─────────────────────────────────────────────────────────
   if (options.includeBillingSplits && data.billingSplits && data.billingSplits.length > 0) {
@@ -360,11 +361,10 @@ function drawSheet(
   }
 }
 
-/** One tappable directions line per mapped field, in stop order. Returns the new y. */
+/** One directions line per job field in stop order, independent of map images. */
 function drawDirections(doc: JsPDFWithAutoTable, data: ApplicatorSheetData, startY: number): number {
   const margin = 40;
-  const located = data.fields.filter((field) => field.location);
-  if (located.length === 0) return startY;
+  if (data.fields.length === 0) return startY;
   let y = ensureRoom(doc, startY, 30, margin);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
@@ -372,23 +372,74 @@ function drawDirections(doc: JsPDFWithAutoTable, data: ApplicatorSheetData, star
   doc.text('Directions to each field (tap on a phone or tablet)', margin, y);
   y += 13;
   doc.setFontSize(8.5);
-  located.forEach((field) => {
-    const location = field.location as { lat: number; lng: number };
+  data.fields.forEach((field) => {
+    const location = field.location;
     y = ensureRoom(doc, y, 12, margin);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...GRAY);
-    const coordinates = `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`;
-    // A long field name is shortened so the tappable link always stays on the page.
-    const room = doc.internal.pageSize.getWidth() - margin * 2 - doc.getTextWidth(`Stop ${field.stop} ·  · ${coordinates}  Open directions`);
+    const coordinates = location ? ` · ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}` : '';
+    const action = location ? 'Open field location in Google Maps' : 'Directions unavailable';
+    const room = doc.internal.pageSize.getWidth() - margin * 2 - doc.getTextWidth(`Stop ${field.stop} · ${coordinates}  ${action}`);
     let name = field.field_name;
     while (name.length > 1 && doc.getTextWidth(name) > room) name = `${name.slice(0, -2)}…`;
-    const label = `Stop ${field.stop} · ${name} · ${coordinates}  `;
-    doc.text(label, margin, y);
-    doc.setTextColor(...CRX_GREEN);
-    doc.textWithLink('Open directions', margin + doc.getTextWidth(label), y, { url: fieldDirectionsUrl(location) });
+    const label = `Stop ${field.stop} · ${name}${coordinates}  `;
+    if (location) {
+      doc.text(label, margin, y);
+      doc.setTextColor(...CRX_GREEN);
+      doc.textWithLink(action, margin + doc.getTextWidth(label), y, { url: fieldDirectionsUrl(location) });
+    } else {
+      doc.text(`${label}${action}`, margin, y);
+    }
     y += 12;
   });
   return y + 6;
+}
+
+function drawFieldHazards(
+  doc: JsPDFWithAutoTable,
+  autoTable: typeof import('jspdf-autotable').default,
+  data: ApplicatorSheetData,
+  startY: number,
+): number {
+  const imagesByField = new Map(data.maps?.perField.map((image) => [image.fieldId, image] as const));
+  const rows = data.fields.flatMap(({ stop, field_name, field_id, hazards }) => {
+    const markers = hazards?.markers ?? [];
+    const details = markers.map(({ name, note, pinIdentity }) => [name, note,
+      pinIdentity ? null : 'Pin could not be placed'].filter(Boolean).join(' · '));
+    if (!hazards?.complete) details.push('Obstacles could not be checked — confirm on site');
+    if (details.length === 0) details.push('None recorded');
+    const image = field_id ? imagesByField.get(field_id) : undefined;
+    if (data.fieldMapPagesRequested && !image) details.push('Map picture unavailable for this stop');
+    if (image && markers.some(({ pinIdentity }) => pinIdentity && !image.hazardPinIdentities?.includes(pinIdentity))) {
+      details.push('Some listed hazards may not appear as map pins');
+    }
+    return details.map((text) => [String(stop), field_name, text]);
+  });
+  if (rows.length === 0) return startY;
+  const margin = 40;
+  const overviewMissing = data.overviewMapRequested && !data.maps?.overview;
+  let y = ensureRoom(doc, startY, overviewMissing ? 56 : 42, margin);
+  if (overviewMissing) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...GRAY);
+    const overviewNotice = data.maps?.perField.length
+      ? 'Overview map picture unavailable'
+      : 'Overview map picture unavailable. Retry or check field boundaries.';
+    doc.text(overviewNotice, margin, y);
+    y += 14;
+  }
+  autoTable(doc, {
+    startY: y,
+    margin: { left: margin, right: margin, top: margin, bottom: 60 },
+    head: [['Stop', 'Field', 'Field hazards']],
+    body: rows,
+    styles: { fontSize: 9, cellPadding: 4 },
+    headStyles: { fillColor: CRX_GREEN, textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: ALT_ROW_BG },
+    rowPageBreak: 'avoid',
+  });
+  return doc.lastAutoTable.finalY + 16;
 }
 
 /** Build the per-format theme. */
@@ -611,10 +662,19 @@ export async function generateApplicatorSheetPdf(
   };
 
   if (resolvedOptions.mapsOnly) {
+    const hasHazardTable = data.fields.some((field) => field.hazards);
+    if (hasHazardTable) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(...CHARCOAL);
+      doc.text(`Job ${data.job_number} · Field hazards`, 40, 40);
+      drawFieldHazards(doc, autoTable, data, 67);
+    }
     appendMapPages(doc, data);
-    // jsPDF opens on a blank first page; with no map page added there is nothing to print.
-    if (doc.getNumberOfPages() === 1) throw new Error(NO_MAP_PAGES_MESSAGE);
-    doc.deletePage(1);
+    if (!hasHazardTable) {
+      if (doc.getNumberOfPages() === 1) throw new Error(NO_MAP_PAGES_MESSAGE);
+      doc.deletePage(1);
+    }
   } else {
     drawSheet(doc, autoTable, data, theme, resolvedOptions);
     // The optional safety sheet goes with the job order, not with a map-pages-only print.

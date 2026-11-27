@@ -424,7 +424,7 @@ describe('Record Payments: faster entry', () => {
     renderPayments();
     await chooseByKeyboard();
     fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
-    fireEvent.change(screen.getByLabelText('Reference #'), { target: { value: '301' } });
+    fireEvent.change(screen.getByLabelText('Check #'), { target: { value: '301' } });
     fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
     const box = screen.getByRole('combobox', { name: 'Customer' });
     fireEvent.change(box, { target: { value: '' } });
@@ -432,7 +432,7 @@ describe('Record Payments: faster entry', () => {
 
     expect(box).toHaveValue('Big Farm');
     expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
-    expect(screen.getByLabelText('Reference #')).toHaveValue('301');
+    expect(screen.getByLabelText('Check #')).toHaveValue('301');
     expect(screen.getByText('INV-OLD')).toBeInTheDocument();
     // Posting waits until the user picks a customer or keeps this one.
     expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeDisabled();

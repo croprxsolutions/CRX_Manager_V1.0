@@ -24,7 +24,7 @@ async function readNames(ids: (string | null)[]) {
   const present = [...new Set(ids.filter((id): id is string => id !== null))];
   if (!present.length) return { names: new Map<string, string>(), error: null };
   const { data, error } = await supabase.from('profile_public_view').select('id, full_name')
-    .in('id', present).eq('is_active', true);
+    .in('id', present).eq('is_active', true).neq('role', 'entity_recipient');
   const names = new Map((data ?? []).flatMap((row) => row.id && row.full_name ? [[row.id, row.full_name] as const] : []));
   return { names, error };
 }
@@ -214,6 +214,7 @@ export default function SalesFollowUps({ profile, deniedPages }: { profile: Pick
   const callbackData = freshData(callbacks);
   const quoteData = freshData(staleQuotes);
   const selectedQuote = quoteData?.rows.find((row) => row.quote_id === selectedQuoteId);
+  const refreshLists = () => { void callbacks.reload(); void staleQuotes.reload(); };
 
   return (
     <SectionCard id="cockpit-sales-followups" title="Sales Follow-ups" icon={<ClipboardList className="h-5 w-5" />}>
@@ -235,8 +236,11 @@ export default function SalesFollowUps({ profile, deniedPages }: { profile: Pick
           entityType="quote" entityId={selectedQuote.quote_id}
           prefillTitle={`Follow up on quote #${selectedQuote.quote_number}`}
           prefillAssignee={selectedQuote.assigned_sales_rep && quoteData.names.has(selectedQuote.assigned_sales_rep) ? selectedQuote.assigned_sales_rep : ''}
-          onCreated={() => { void callbacks.reload(); void staleQuotes.reload(); }}
-          onClose={() => setSelectedQuoteId(null)}
+          onCreated={refreshLists}
+          onClose={(saved) => {
+            setSelectedQuoteId(null);
+            if (!saved) refreshLists();
+          }}
         />
       )}
     </SectionCard>

@@ -3,6 +3,9 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 const mockNavigate = vi.fn();
 const mockToast = vi.fn();
+const { auth } = vi.hoisted(() => ({
+  auth: { profile: { role: 'admin', id: '' }, deniedPages: [] as string[] },
+}));
 
 function emptyQuery(table: string) {
   const builder: Record<string, unknown> = {};
@@ -39,7 +42,11 @@ vi.mock('react-router-dom', async (importOriginal) => ({
 }));
 
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ profile: { role: 'admin' } }),
+  useAuth: () => auth,
+}));
+
+vi.mock('../components/dashboard/SalesFollowUps', () => ({
+  default: () => <h2>Sales Follow-ups</h2>,
 }));
 
 vi.mock('../components/ui/Toast', () => ({
@@ -131,6 +138,22 @@ import OfficeCockpit from './OfficeCockpit';
 describe('OfficeCockpit morning screen', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    auth.profile = { role: 'admin', id: '' };
+    auth.deniedPages = [];
+  });
+
+  it.each([
+    ['admin', [], true],
+    ['sales_rep', ['quotes'], true],
+    ['sales_rep', ['quotes', 'customers'], false],
+  ] as const)('uses page access to show Sales Follow-ups for %s with denied pages %j', async (role, deniedPages, visible) => {
+    auth.profile = { role, id: 'test-user' };
+    auth.deniedPages = [...deniedPages];
+    render(<OfficeCockpit />);
+    await screen.findByRole('heading', { name: 'Morning Snapshot' });
+    const sales = screen.queryByRole('heading', { name: 'Sales Follow-ups' });
+    if (visible) expect(sales).toBeVisible();
+    else expect(sales).not.toBeInTheDocument();
   });
 
   it('renders the action queues before the KPI, money, and inventory summaries', async () => {

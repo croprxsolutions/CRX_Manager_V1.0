@@ -12,7 +12,7 @@ import { toSentryError } from '../../lib/sentryError';
 
 interface QuickTaskModalProps {
   open: boolean;
-  onClose: () => void;
+  onClose: (saved?: boolean) => void;
   entityType: LinkedEntityType;
   entityId: string;
   prefillTitle?: string;
@@ -157,7 +157,7 @@ export default function QuickTaskModal({
       onCreated?.();
       if (!matches) throw new Error('The earlier callback was already saved. Open it on Team Board to make changes.');
       toast('success', callbackOnly ? 'Callback saved' : 'Task created successfully');
-      onClose();
+      onClose(true);
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'QuickTaskModal.handleSave' } });
       const message = err instanceof Error ? err.message : 'Failed to create task';
@@ -171,7 +171,7 @@ export default function QuickTaskModal({
     'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
 
   return (
-    <Modal open={open} onClose={saving ? () => {} : onClose} title={callbackOnly ? 'Schedule callback' : 'Quick Task'} accent={callbackOnly ? undefined : 'Note'}>
+    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title={callbackOnly ? 'Schedule callback' : 'Quick Task'} accent={callbackOnly ? undefined : 'Note'}>
       <fieldset className="space-y-4" disabled={saving}>
         {/* Entity badge */}
         <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-sm text-secondary">
@@ -235,7 +235,7 @@ export default function QuickTaskModal({
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="secondary" onClick={() => onClose()} disabled={saving}>Cancel</Button>
           <Button onClick={handleSave} loading={saving} disabled={waitingForAssignee}>
             {callbackOnly ? 'Save callback' : 'Create Task'}
           </Button>

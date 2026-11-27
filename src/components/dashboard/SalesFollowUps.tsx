@@ -37,27 +37,30 @@ function reportContextError(error: unknown) {
 async function readStaleQuotes() {
   const page = await getCallListStaleQuotes(DEFAULT_STALE_QUOTE_DAYS, null);
   const rows = page.rows.slice(0, PREVIEW_SIZE);
-  const [directory, byQuote] = await Promise.all([
+  const [directory, callbacks] = await Promise.all([
     readNames(rows.map((row) => row.assigned_sales_rep)),
     readQuoteCallbacks(rows.map((row) => row.quote_id)),
   ]);
-  return { rows, total: page.total, names: directory.names, byQuote, detailsUnavailable: reportContextError(directory.error) };
+  return {
+    rows, total: page.total, names: directory.names, byQuote: callbacks.byQuote,
+    detailsUnavailable: reportContextError(directory.error ?? callbacks.error),
+  };
 }
 
 async function readQuoteCallbacks(quoteIds: string[]) {
   const byQuote = new Map<string, string>();
-  if (!quoteIds.length) return byQuote;
+  if (!quoteIds.length) return { byQuote, error: null };
   // A quote can already have a callback owned by another rep or awaiting assignment.
   const result = await fetchAllRows((from, to) => pageWithList(supabase.from('team_notes')
     .select('id, linked_entity_id', { count: 'exact' })
     .eq('note_type', 'todo').eq('is_completed', false).is('deleted_at', null)
     .eq('linked_entity_type', 'quote').in('linked_entity_id', quoteIds)
     .order('due_date', { nullsFirst: false }).order('id').range(from, to)));
-  if (result.error || !result.data) throw result.error ?? new Error('Missing quote callback list');
+  if (result.error || !result.data) return { byQuote, error: result.error ?? new Error('Missing quote callback list') };
   for (const row of result.data) {
     if (row.linked_entity_id && !byQuote.has(row.linked_entity_id)) byQuote.set(row.linked_entity_id, row.id);
   }
-  return byQuote;
+  return { byQuote, error: null };
 }
 
 async function readCallbacks(userId: string, isAdmin: boolean, entityTypes: string[]) {

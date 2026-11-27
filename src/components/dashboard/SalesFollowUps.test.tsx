@@ -120,6 +120,23 @@ describe('Sales follow-ups', () => {
     expect(within(pane).queryByText('Some details could not be loaded.')).not.toBeInTheDocument();
   });
 
+  it('keeps quotes visible and disables scheduling if their callback lookup fails', async () => {
+    let callbackLookupFailed = true;
+    db.from.mockImplementation((table) => {
+      if (table !== 'team_notes') return read(names);
+      return { select: (columns: string) => columns.includes('title') || !callbackLookupFailed
+        ? read([]) : read(null, { message: 'Unavailable' }) };
+    });
+    render(<MemoryRouter><SalesFollowUps profile={profile} deniedPages={[]} /></MemoryRouter>);
+    const pane = screen.getByRole('region', { name: 'Stale quotes' });
+    expect(await within(pane).findByRole('link', { name: 'Oak Farm · #Q-1' })).toBeVisible();
+    const schedule = within(pane).getByRole('button', { name: 'Schedule callback for quote Q-1' });
+    expect(schedule).toBeDisabled();
+    callbackLookupFailed = false;
+    fireEvent.click(within(pane).getByRole('button', { name: 'Retry details' }));
+    await waitFor(() => expect(schedule).toBeEnabled());
+  });
+
   it('waits for a prefilled assignee, refuses an inactive selection, and saves an exact quote todo', async () => {
     let finish: (value: unknown) => void = () => {};
     const pending = new Promise((resolve) => { finish = resolve; });

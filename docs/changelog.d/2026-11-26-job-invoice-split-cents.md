@@ -10,4 +10,4 @@
   - An owner's amount can differ from its quantity x unit price: under a cent at normal prices. This gap is not held by the 50-cent check: it is at most 0.0001 of the unit price plus a cent, plus a cent for each owner the never-$0 step tops up from that owner (about $0.50 at $5,000 a unit; 1 Gal at $9,999.99 in thirds: A shows 0.3334 Gal, $3,334.00 at the unit price, and bills $3,333.33, a $0.67 gap).
   - Each owner's booked cost is still its own cost x quantity, so the owners' costs can differ from the whole line's by under a cent each (tying them needs a stored booked cost, a schema change).
 - Mason, 2026-11-26 (Slack): "Job-invoice cents: yes please, fix it before Dec 15".
-- Migration `20270315100000_job_invoice_split_cents` (no row changes). Proof: `node scripts/smoke/prove-job-invoice-split-cents-real-schema.mjs`.
+- Migration `20270315160000_job_invoice_split_cents` (no row changes). Proof: `node scripts/smoke/prove-job-invoice-split-cents-real-schema.mjs`.

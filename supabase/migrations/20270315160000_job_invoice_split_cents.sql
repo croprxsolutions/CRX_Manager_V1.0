@@ -4,7 +4,7 @@
 -- and their actor binding and p_idempotency_key are unchanged.
 --
 -- Written 2026-11-26. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270315100000_job_invoice_split_cents.md. Re-read the live ledger before applying.
+-- docs/reference/migrations.d/20270315160000_job_invoice_split_cents.md. Re-read the live ledger before applying.
 --
 -- WHY: since the 2026-11-22 redesign (20270226150000) each owner's line is priced on its own, round(price x the owner's
 --   quantity), and only a 50-cent check looks at the sum. Rounding each owner separately makes the owners' lines

@@ -228,11 +228,12 @@ export default function PaymentAllocation() {
 
   /* ── Load invoices when customer selected ──────────────────────────── */
 
-  const fetchInvoices = useCallback(async (customerId: string) => {
+  // keepAllocations: a reload of the same customer keeps the amounts typed on invoices still open.
+  const fetchInvoices = useCallback(async (customerId: string, keepAllocations?: Map<string, number>) => {
     const seq = ++invoiceLoadSeq.current;
     setLoadingInvoices(true);
     // The previous customer's invoices must never stay on screen to be paid against.
-    setInvoices([]);
+    if (!keepAllocations) setInvoices([]);
     const today = new Date();
     // Every open invoice, page by page: a check could only be applied to the
     // customer's first 200 before (2026-10-20 Goal 4 part 2).
@@ -270,7 +271,7 @@ export default function PaymentAllocation() {
       total_amount_cents: inv.total_amount_cents,
       balance_cents: inv.balance_cents,
       days_aged: daysBetween(inv.invoice_date, today),
-      allocated_cents: 0,
+      allocated_cents: keepAllocations?.get(inv.id) ?? 0,
     }));
 
     setInvoices(mapped);
@@ -279,8 +280,12 @@ export default function PaymentAllocation() {
 
   const selectCustomer = useCallback((c: CustomerOption) => {
     setCustomerBoxText(null);
-    // Re-picking the farm already chosen keeps its invoices and typed allocations (a failed load or a saved check still reloads).
-    if (selectedCustomer?.id === c.id && !invoicesFailed && !lastResult) return;
+    // Re-picking the farm already chosen reloads its invoices (one may have been posted since) and keeps
+    // the typed check and the amounts on invoices still open. A saved check still starts fresh.
+    if (selectedCustomer?.id === c.id && !lastResult) {
+      fetchInvoices(c.id, new Map(invoices.map((inv) => [inv.invoice_id, inv.allocated_cents])));
+      return;
+    }
     focusAmountAfterPick.current = true;
     // Switching to another farm starts a fresh check, so one farm's check can't be posted to another (Mason, 2026-11-25).
     // The date goes back to the one this check started with, so an abandoned date is not carried.
@@ -297,7 +302,7 @@ export default function PaymentAllocation() {
     setLastResult(null);
     setRetryRefused(false);
     fetchInvoices(c.id);
-  }, [fetchInvoices, selectedCustomer, invoicesFailed, lastResult, startingPaymentDate]);
+  }, [fetchInvoices, selectedCustomer, invoices, lastResult, startingPaymentDate]);
 
   const clearCustomer = useCallback(() => {
     // A load still running for the cleared customer must not refill the list.

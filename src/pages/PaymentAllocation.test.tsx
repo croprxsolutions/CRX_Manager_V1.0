@@ -479,23 +479,32 @@ describe('Record Payments: faster entry', () => {
     expect(screen.queryByText(/You started a new customer search/)).not.toBeInTheDocument();
   });
 
-  it('re-picking the customer already chosen keeps the allocations', async () => {
+  it('re-picking the customer already chosen reloads its invoices and keeps the allocations', async () => {
     renderPayments();
     await chooseByKeyboard();
     fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
     fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
     expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
     const invoiceReads = mockFrom.mock.calls.filter(([t]) => t === 'invoices').length;
+    // Someone posts an older invoice for this farm while the page is open.
+    const posted = [invoice('i0', 'INV-POSTED', '2026-07-01', 1000), ...openInvoices];
+    mockFrom.mockImplementation((table: string) => buildChain(
+      table === 'customers' ? { data: [customer], error: null }
+        : table === 'invoices' ? { data: posted, error: null, count: posted.length } as { data: unknown; error: unknown }
+          : { data: [], error: null },
+    ));
 
     const box = screen.getByRole('combobox', { name: 'Customer' });
     fireEvent.change(box, { target: { value: 'Big' } });
     fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
 
     expect(box).toHaveValue('Big Farm');
+    // A fresh read, so an invoice posted since shows up (Sol, 2026-11-27).
+    expect(mockFrom.mock.calls.filter(([t]) => t === 'invoices')).toHaveLength(invoiceReads + 1);
+    await waitFor(() => expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled());
     expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
     expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
-    expect(mockFrom.mock.calls.filter(([t]) => t === 'invoices')).toHaveLength(invoiceReads);
-    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled();
+    expect(screen.getByText('INV-POSTED')).toBeInTheDocument();
   });
 
   it('Pay full balance is admin-only: a sales rep sees only their own invoices, so the total could be short', async () => {

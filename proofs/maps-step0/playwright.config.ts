@@ -16,12 +16,14 @@ export default defineConfig({
   testDir: '.',
   testMatch: 'step0.spec.ts',
   fullyParallel: true,
+  workers: 2,
   reporter: 'list',
   timeout: 30_000,
   expect: { timeout: 8_000 },
   use: {
     baseURL,
     browserName: 'chromium',
+    channel: 'chrome',
     headless: true,
     viewport: { width: 1000, height: 800 },
     launchOptions: {
@@ -29,9 +31,9 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: `npx vite --config vite.config.ts --host 127.0.0.1 --port ${port} --strictPort`,
+    command: `npx vite build --config vite.config.ts && npx vite preview --config vite.config.ts --host 127.0.0.1 --port ${port} --strictPort`,
     url: baseURL,
     reuseExistingServer: false,
-    timeout: 30_000,
+    timeout: 60_000,
   },
 });

@@ -49,6 +49,16 @@ describe('CompletionProofFields', () => {
     expect(props.paperTicket.onTakePhoto).toHaveBeenCalled();
   });
 
+  it('says why a saved ticket photo no longer counts, instead of saved', () => {
+    setup({ usePaperTicket: true, paperTicket: {
+      hasPhoto: false, staleMessage: 'The products or amounts changed since this ticket photo.', deliveredOn: '2026-11-24',
+      onDeliveredOnChange: vi.fn(), onTakePhoto: vi.fn(), takePhotoDisabled: false, uploading: false,
+    } });
+    expect(screen.getByText('The products or amounts changed since this ticket photo.')).toBeInTheDocument();
+    expect(screen.queryByText(/Photo of the signed ticket saved/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Take a photo of the signed paper ticket/)).not.toBeInTheDocument();
+  });
+
   it('offers the contact on file as a one-tap name, and not once it is filled in', () => {
     const props = setup({ contactName: 'J. Hollow' });
     fireEvent.click(screen.getByRole('button', { name: 'Use J. Hollow' }));

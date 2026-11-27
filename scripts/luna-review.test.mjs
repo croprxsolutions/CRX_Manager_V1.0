@@ -24,6 +24,7 @@ import {
   scopeHint,
   parseArgs,
   readSettled,
+  contractSettled,
   runLunaReview, terraRefusal } from "./luna-review.mjs";
 import { fixedGitExecutable } from "./write-codex-push-proof.mjs";
 import { tempDir } from "./lib/test-temp-dir.mjs";
@@ -467,6 +468,84 @@ assert.equal(nextStepHint("- BLOCKER: a.sql:3 — grants anon\n- MED: b.ts:2\nLU
   assert.ok(inputs[0].includes(item) && !inputs[1].includes("SETTLED FINDINGS"));
   assert.match(out.join("\n"), /Settled list: .*ok\.md \(1 line\(s\)\) was given to Luna; it never goes to Sol\./);
   assert.match(out.join("\n"), /DID NOT RUN[\s\S]*limit is 8192/);
+}
+
+// Contract as settled list (retro, Mason, 2026-11-26): on PR #2610 Luna rounds 3 and 4 re-raised
+// findings the plan contract had already refuted, because no --settled file was passed.
+{
+  const contract = [
+    "# Example — behavior contract",
+    "## 1. Outcome",
+    "Rule text that is not a review answer.",
+    "## Cold challenge (Astra, 2026-11-25) — both fixed",
+    "- HIGH: the cap hides lines. Fixed: no cap.",
+    "- Luna r12 (MED, fixed): exempt write dropped the note.",
+    "## PR review (Taha, 2026-11-25)",
+    "Left as they are, to raise with Mason separately: two known billing gaps.",
+    "## Settled for Luna",
+    "- Refuted: the dialog description reads the whole table (it reads one row).",
+    "",
+    "- Deferred: a total above the safe-integer limit shows no total (follow-up #1).",
+    "### Open findings",
+    "- HIGH: invoices can be duplicated",
+    "## Questions for Mason — ANSWERED",
+    "- open question text",
+    "",
+  ].join("\r\n");
+  const settled = contractSettled(contract);
+  assert.equal(settled, [
+    "- Refuted: the dialog description reads the whole table (it reads one row).",
+    "- Deferred: a total above the safe-integer limit shows no total (follow-up #1).",
+  ].join("\n"));
+  assert.equal(contractSettled(contract.replace("## Settled for Luna", "## Settled for Luna round 2")), "", "only the exact heading counts");
+
+  // End to end: a Luna round on a branch whose diff carries a contract gets its refuted findings,
+  // with no --settled flag; --settled still wins, and Sol never sees either.
+  const dir = tempDir("crx-luna-contract-");
+  const git = (...gitArgs) => execFileSync(fixedGitExecutable(), ["-c", "user.name=t", "-c", "user.email=t@example.com", ...gitArgs], { cwd: dir });
+  git("init", "-q");
+  mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+  writeFileSync(path.join(dir, "docs", "plans", "2026-11-25-x-CONTRACT.md"), contract);
+  writeFileSync(path.join(dir, "own.md"), "- my own settled item\n");
+  git("add", "docs");
+  git("commit", "-q", "-m", "contract");
+  // An uncommitted refutation must not reach a --commit round (Taha, #2669 MED 2).
+  writeFileSync(path.join(dir, "docs", "plans", "2026-11-25-x-CONTRACT.md"), contract.replace("## Settled for Luna\r\n", "## Settled for Luna\r\n- Refuted: UNCOMMITTED-LINE\r\n"));
+  const inputs = [];
+  const out = [];
+  const savedLog = console.log;
+  const savedErr = console.error;
+  console.log = (line = "") => out.push(line);
+  console.error = () => {};
+  process.chdir(dir);
+  const stub = {
+    resolveCodex: () => "codex-stub",
+    spawn: (bin, spawnArgs, options) => {
+      inputs.push(options.input);
+      const tailCanary = /tail canary: (CRXDIFF-[^)\s]+)\) =====\s*$/.exec(options.input)[1];
+      writeFileSync(spawnArgs[spawnArgs.indexOf("-o") + 1], `${tailCanary}\nLUNA_REVIEW: CLEAN\n`);
+      return { status: 0, stdout: "", stderr: `${banner(LUNA_MODEL)}tokens used\n1\n` };
+    },
+  };
+  try {
+    main(["--commit", "HEAD"], stub);
+    main(["--commit", "HEAD", "--settled", path.join(dir, "own.md")], stub);
+    main(["--commit", "HEAD", "--sol", "--reason", "test"], stub);
+    main(["--uncommitted"], stub);
+  } finally {
+    process.chdir(realCwd);
+    console.log = savedLog;
+    console.error = savedErr;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const section = (input) => input.slice(input.indexOf("===== SETTLED FINDINGS"), input.indexOf("===== END SETTLED FINDINGS"));
+  assert.match(section(inputs[0]), /From docs\/plans\/2026-11-25-x-CONTRACT\.md \(from the plan contract; same rules as the settled list\)/);
+  assert.ok(section(inputs[0]).includes("a total above the safe-integer limit"));
+  for (const absent of ["invoices can be duplicated", "cap hides lines", "exempt write", "billing gaps", "open question", "UNCOMMITTED-LINE"]) assert.ok(!section(inputs[0]).includes(absent), absent);
+  assert.ok(section(inputs[3]).includes("UNCOMMITTED-LINE"), "--uncommitted reads the contract on disk");
+  assert.ok(section(inputs[1]).includes("my own settled item") && !section(inputs[1]).includes("From docs/plans"));
+  assert.ok(!inputs[2].includes("SETTLED FINDINGS"), "Sol never sees the contract's settled list");
+  assert.match(out.join("\n"), /refuted and deferred findings from docs\/plans\/2026-11-25-x-CONTRACT\.md were given to Luna/);
 }
 
 console.log("luna-review tests passed");

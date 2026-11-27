@@ -1,11 +1,11 @@
 ## 2026-11-27 — Applicator crew lockdown: deferred review notes
 
-**Severity:** MED. **Area:** applicator price hide (crew reads of jobs, job chemicals, field shares and billing splits). **Status:** ACCEPTED.
+**Severity:** MED. **Area:** applicator price hide (crew reads of jobs, job chemicals, field shares and billing splits). **Status:** OPEN (review notes deferred by the field orchestrator on 2026-11-27; no owner decision recorded).
 **Owner:** unassigned. **Tracked:** #2702 (merged into staging 2026-11-27), this follow-up PR.
 
 #2702 (migration `20270314160000_applicator_crew_base_read_lockdown.sql`) stopped applicators and
 dispatched crew from reading four price-bearing base tables; their screens read the price-free crew
-views instead. Sol passed it clean and left these notes open. None exposes a price.
+views instead. Sol passed it clean and left these notes open. Through the app none exposes a price; item 2 can re-open crew price reads only if someone runs the reverse script by hand the wrong way.
 
 1. MED: the order "frontend first" is written only as a comment in the migration. If the database
    change goes live while an old app bundle is still being served, or a tab is still open from

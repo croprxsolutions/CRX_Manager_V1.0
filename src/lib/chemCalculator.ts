@@ -883,6 +883,7 @@ export function chemLineBillingHazard(
   row: { quantity: string; rate_per_acre: string; rate_unit?: string | null; unit?: string | null },
   acres: number | string,
   productForm?: ProductForm | null,
+  includeBilledRatio = true,
 ): ChemBillingHazard {
   // A non-acre rate ('oz/cwt') is refused outright by the row-defect check (and the database),
   // so there is no quantity unit to compare; staying silent avoids advice to type 'oz/cwt/ac'.
@@ -978,7 +979,7 @@ export function chemLineBillingHazard(
 
   // What this quantity SHOULD read if it were carried into the price's unit. Acreage plays
   // no part, so a stale row reports the same honest ratio as a fresh one.
-  const correctlyPriced = fieldAppPricedQuantity(qty, quantityUnit, priceUnit, productForm ?? null);
+  const correctlyPriced = includeBilledRatio ? fieldAppPricedQuantity(qty, quantityUnit, priceUnit, productForm ?? null) : null;
   return {
     hazard: true,
     quantityUnit,

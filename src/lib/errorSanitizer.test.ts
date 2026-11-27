@@ -2,6 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { isCommissionPayoutsOff, sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('tells the admin to reload after a stale purchase order cost correction', () => {
+    expect(sanitizeError({ code: 'P0001', message: 'PO_COST_CHANGED_SINCE_LOADED: stale line' }))
+      .toBe('A line’s cost or product changed since you opened this purchase order. Nothing was saved. Review the reloaded lines and save again');
+  });
+
+  it.each(['COST_INVALID', 'PRODUCT_INVALID', 'PAIR_REQUIRED'])('maps the PO_EXPECTED_%s error', (code) => {
+    expect(sanitizeError(`PO_EXPECTED_${code}: invalid details`))
+      .toBe('The purchase order line details could not be verified. Reload the purchase order and try again');
+  });
+
   it('keeps document-link errors actionable and strips control characters', () => {
     expect(sanitizeError({ message: 'BRAND_DOCUMENT_URL_BLOCKED: Use a manufacturer link.\tChoose another URL.' }))
       .toBe('Use a manufacturer link. Choose another URL.');
@@ -118,6 +128,8 @@ describe('sanitizeError', () => {
     ['DELIVERY_QUANTITIES_STALE', "this delivery's lines changed since the screen loaded them; reload it and enter the quantities again."],
     ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
     ['DELIVERY_NOTHING_DELIVERED', 'every product on it has a delivered quantity of zero (anything under 0.01 counts as zero). If nothing was delivered, call the office.'],
+    ['DELIVERY_LOAD_CHANGED', 'the products or delivered amounts on this delivery changed after the customer signed. Reload the delivery, check the products and amounts with the customer and get a new signature. If the customer already has the goods, call the office.'],
+    ['PAPER_TICKET_LOAD_CHANGED', 'the products or delivered amounts on this delivery changed after the ticket photo was taken. Get the ticket signed for the current products and amounts and add a new photo of it. If the customer already has the goods, call the office.'],
   ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` }))
       .toBe(`The delivery was not completed. ${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}`);
@@ -148,6 +160,10 @@ describe('sanitizeError', () => {
     const sentence = 'pH Plus — this would deliver more than was ordered. Call the office before completing this delivery.';
     expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
   });
+  it('keeps a lower-case product name as written (Sol r11 LOW on #2324)', () => {
+    const sentence = 'acme Plus — this would deliver more than was ordered. Call the office before completing this delivery.';
+    expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
+  });
   it('explains a completion past the order (F05) without the raw token', () => {
     const sentence = 'Atrazine 4L — this would deliver more than was ordered. Call the office before completing this delivery.';
     expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
@@ -172,6 +188,7 @@ describe('sanitizeError', () => {
     ['PRODUCT_STOCK_UNIT_UNKNOWN', '"Tote" is not a known unit; pick a stock unit from the list.'],
     ['PRODUCT_UNIT_HAS_STOCK', 'this product\'s stock unit cannot change to "Qt" while it has stock counted in "Gal". Bring its stock to zero (or convert it) first.'],
     ['STOCK_ROW_UNIT_NOT_STOCK_UNIT', 'this stock row is in "Qt" but the product is stocked in "Gal".'],
+    ['WHOLE_ITEMS_ONLY', 'Seed Corn 80K is sold by the whole item (Unit), so 14.8 can\'t be used. Enter a whole number. Change the rate or acres, or type the number of items.'],
     ['PRODUCT_UNIT_HAS_HISTORY', 'this product\'s stock unit cannot change to "Qt" because it already has orders, purchases, deliveries, returns, stock movements or holds (order ORD-0001, return RMA-0001). Set up a new product for the new unit.'],
   ])('explains a %s refusal without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
@@ -547,6 +564,9 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_NOTHING_TO_BILL: delivery D-1')).toBe(
       'Nothing was billed. This delivery has no delivered quantity'
     );
+    expect(sanitizeError("UNBILLED_SCOPE_CHANGED: delivery D-1's billing changed")).toContain('Reload the page');
+    expect(sanitizeError('UNBILLED_REST_LINE_AMBIGUOUS: an invoice line for X')).toContain('Link the line to its order line first');
+    expect(sanitizeError('BILL_SPLIT_REST_NOT_SUPPORTED: delivery D-1')).toContain('Void its Bill Split invoices');
     expect(sanitizeError('ORDER_HAS_BILL_SPLIT: this sale has a bill split, so it cannot be billed as one invoice'))
       .toContain('billed per payer');
     expect(sanitizeError("ORDER_ITEM_SHARES_OVER_100: a line's shares can't total more than 100%"))
@@ -801,5 +821,21 @@ describe('customer receipt refusals (KI-25)', () => {
   it('leaves the invoice-posting DELIVERY_NOT_COMPLETED sentence alone', () => {
     const msg = 'DELIVERY_NOT_COMPLETED: delivery D-42 for invoice INV-1002 has been deleted. Void this invoice instead of posting it.';
     expect(sanitizeError(new Error(msg))).not.toMatch(/receipt/);
+  });
+});
+
+describe('M9 refund and returned-check refusals', () => {
+  it('turns the hand-check gate into a plain instruction', () => {
+    expect(sanitizeError({ message: 'RECORD_NEEDS_HAND_CHECK: STORED_BALANCE_MISMATCH (the records this touches do not agree; record it by hand)' }))
+      .toBe("Nothing was saved. The records this touches don't agree (STORED_BALANCE_MISMATCH), so this has to be recorded by hand. Month-End's prepay check shows the customer's stored and credit totals.");
+  });
+
+  it("keeps the server's sentence after the token", () => {
+    expect(sanitizeError({ message: "CHECK_PREPAY_REFUNDED: $100.00 of this check's prepay was already refunded to the customer; record this bounce by hand" }))
+      .toBe("Nothing was saved. $100.00 of this check's prepay was already refunded to the customer; record this bounce by hand.");
+    expect(sanitizeError({ message: 'PAYMENT_RETURNED: this check is recorded as returned (bounced); it cannot also be voided' }))
+      .toBe('Nothing was saved. This check is recorded as returned (bounced); it cannot also be voided.');
+    expect(sanitizeError({ message: 'RETURNED_BEFORE_RECEIVED: the check was received on 2026-09-15; the bank cannot have returned it before that' }))
+      .toBe('Nothing was saved. The check was received on 2026-09-15; the bank cannot have returned it before that.');
   });
 });

@@ -25,7 +25,7 @@ import {
   buildLoaderVesselOptions,
   capacityForLoaderVesselSelection,
 } from '../../lib/loaderVesselOptions';
-import type { JobLoaderWorksheet, Vehicle } from '../../types';
+import type { JobLoaderWorksheet, JobVehicle } from '../../types';
 import { selectedLoaderWeights, useLoaderJobWeights } from './loaderPanelWeights';
 import { LoaderLoadWeightsCell } from './LoaderLoadWeightsCell';
 
@@ -49,7 +49,7 @@ interface WorksheetDraft {
 
 interface LoaderWorksheetsPanelProps {
   jobId: string;
-  vehicles: Vehicle[];
+  vehicles: JobVehicle[];
   jobVehicleId: string | null;
   totalAcres: number;
   products: LoaderProductInput[];

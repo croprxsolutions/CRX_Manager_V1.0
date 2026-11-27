@@ -130,3 +130,14 @@ const CHANGE_SOURCE_LABELS: Record<CostHistory['change_source'], string> = {
 export function sourceLabel(source: string): string {
   return (CHANGE_SOURCE_LABELS as Record<string, string>)[source] ?? 'Other change';
 }
+
+/** A manual basis can still cite supplier evidence. Use only the source recorded for that change set. */
+export function costBasisSourceLabel(
+  basisType: string, changeSetId: unknown, priceSources: ReadonlyMap<string, string> | undefined,
+): string {
+  const source = basisType === 'manual_override' && typeof changeSetId === 'string'
+    ? priceSources?.get(changeSetId)
+    : undefined;
+  // Keep the recorded basis visible: the source explains it, it does not replace it.
+  return source ? `${source} (recorded as manual override)` : basisType.replace(/_/g, ' ');
+}

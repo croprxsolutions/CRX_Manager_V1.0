@@ -89,6 +89,7 @@ import CompletionWeatherFields from '../components/jobs/CompletionWeatherFields'
 import { usePageMeta } from '../hooks/usePageMeta';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
+import { usesOfficeJobReads } from '../lib/costFields';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useQueuedJobCompletions } from '../hooks/useQueuedJobCompletions';
@@ -217,10 +218,17 @@ function FieldMapReadWarning({ jobsFailed, fieldsFailed, mapAssignmentFailed, sa
   );
 }
 
+// Whole-job assignments for FieldView's legacy tail; crew read the price-free view.
+function selectLegacyAssignedJobs(office: boolean) {
+  const columns = 'id, job_number, job_date, status, total_acres, applied_acres, customer_id, customer:customers(farm_name)';
+  return office ? supabase.from('jobs').select(columns) : supabase.from('jobs_crew').select(columns);
+}
+
 export default function FieldView() {
   usePageMeta();
   const { toast } = useToast();
-  const { profile } = useAuth();
+  const { profile, role } = useAuth();
+  const office = usesOfficeJobReads(role);
   const isOnline = useOnlineStatus();
   const startIdem = useIdempotencyKey('start_job', profile?.id || '');
   const completeIdem = useIdempotencyKey('complete_job', profile?.id || '');
@@ -309,9 +317,7 @@ export default function FieldView() {
       // linger for legacy jobs is harmless.
       if (profile?.id) {
         const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-        const legacyRes = await supabase
-          .from('jobs')
-          .select('id, job_number, job_date, status, total_acres, applied_acres, customer_id, customer:customers(farm_name)')
+        const legacyRes = await selectLegacyAssignedJobs(office)
           .eq('applicator_id', profile.id)
           .is('deleted_at', null)
           .or(`status.in.(scheduled,in_progress),and(status.in.(completed,invoiced),updated_at.gte.${sevenDaysAgoIso})`);
@@ -375,7 +381,7 @@ export default function FieldView() {
     } finally {
       applyLatest(() => setLoading(false));
     }
-  }, [toast, profile?.id]);
+  }, [toast, profile?.id, office]);
 
   useEffect(() => {
     void fetchCards();
@@ -536,9 +542,10 @@ export default function FieldView() {
     try {
       // updated_at is the offline-conflict snapshot for a queued Complete — must be
       // captured HERE (while online) so a later offline Complete has a value to send.
-      const jobRes = await supabase
-        .from('jobs')
-        .select('job_date, updated_at')
+      const jobQuery = office
+        ? supabase.from('jobs').select('job_date, updated_at')
+        : supabase.from('jobs_crew').select('job_date, updated_at');
+      const jobRes = await jobQuery
         .eq('id', card.job_id)
         .maybeSingle();
       if (jobRes.error) throw jobRes.error;
@@ -572,9 +579,9 @@ export default function FieldView() {
 
       // Chemicals (job_chemicals) — rate/quantity + REI/PHI only, NO pricing on this
       // screen (owner decision, U12). Readable via job_chemicals_select_location_dispatchee.
-      const chemRes = await supabase
-        .from('job_chemicals')
-        .select('id, quantity, unit, rate_per_acre, rate_unit, sort_order, product:products(product_name, rei_hours, phi_days)')
+      const columns = 'id, quantity, unit, rate_per_acre, rate_unit, sort_order, product:products(product_name, rei_hours, phi_days)';
+      const chemQuery = office ? supabase.from('job_chemicals').select(columns) : supabase.from('job_chemicals_crew').select(columns);
+      const chemRes = await chemQuery
         .eq('job_id', card.job_id)
         .order('sort_order', { ascending: true, nullsFirst: false });
       if (chemRes.error) throw chemRes.error;
@@ -624,7 +631,7 @@ export default function FieldView() {
       inFlightDetail.current.delete(cacheKey);
       setDetailLoading(null);
     }
-  }, [details, toast]);
+  }, [details, office, toast]);
 
   const toggleExpand = useCallback((card: FieldViewJobCard) => {
     setExpandedId((prev) => (prev === card.job_id ? null : card.job_id));

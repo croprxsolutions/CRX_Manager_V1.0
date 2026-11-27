@@ -3454,6 +3454,7 @@ export type Database = {
           file_size: number | null
           id: string
           image_url: string
+          lines_seen: Json | null
           sort_order: number
           storage_path: string
           uploaded_at: string
@@ -3465,6 +3466,7 @@ export type Database = {
           file_size?: number | null
           id?: string
           image_url: string
+          lines_seen?: Json | null
           sort_order?: number
           storage_path: string
           uploaded_at?: string
@@ -3476,6 +3478,7 @@ export type Database = {
           file_size?: number | null
           id?: string
           image_url?: string
+          lines_seen?: Json | null
           sort_order?: number
           storage_path?: string
           uploaded_at?: string
@@ -7950,6 +7953,142 @@ export type Database = {
             columns: ["vendor_id"]
             isOneToOne: false
             referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_reversal_lines: {
+        Row: {
+          amount_cents: number
+          created_at: string
+          id: string
+          invoice_id: string | null
+          line_kind: string
+          prepay_application_id: string | null
+          prepay_credit_id: string | null
+          reversal_id: string
+        }
+        Insert: {
+          amount_cents: number
+          created_at?: string
+          id?: string
+          invoice_id?: string | null
+          line_kind: string
+          prepay_application_id?: string | null
+          prepay_credit_id?: string | null
+          reversal_id: string
+        }
+        Update: {
+          amount_cents?: number
+          created_at?: string
+          id?: string
+          invoice_id?: string | null
+          line_kind?: string
+          prepay_application_id?: string | null
+          prepay_credit_id?: string | null
+          reversal_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_reversal_lines_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_reversal_lines_prepay_application_id_fkey"
+            columns: ["prepay_application_id"]
+            isOneToOne: false
+            referencedRelation: "prepay_applications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_reversal_lines_prepay_credit_id_fkey"
+            columns: ["prepay_credit_id"]
+            isOneToOne: false
+            referencedRelation: "prepay_credits"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_reversal_lines_reversal_id_fkey"
+            columns: ["reversal_id"]
+            isOneToOne: false
+            referencedRelation: "money_reversals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_reversals: {
+        Row: {
+          allocation_set_id: string | null
+          amount_cents: number
+          created_at: string
+          customer_id: string
+          entry_date: string
+          id: string
+          kind: string
+          occurred_on: string | null
+          performed_by: string
+          prepay_credit_id: string | null
+          reason: string
+          reference: string | null
+        }
+        Insert: {
+          allocation_set_id?: string | null
+          amount_cents: number
+          created_at?: string
+          customer_id: string
+          entry_date: string
+          id?: string
+          kind: string
+          occurred_on?: string | null
+          performed_by: string
+          prepay_credit_id?: string | null
+          reason: string
+          reference?: string | null
+        }
+        Update: {
+          allocation_set_id?: string | null
+          amount_cents?: number
+          created_at?: string
+          customer_id?: string
+          entry_date?: string
+          id?: string
+          kind?: string
+          occurred_on?: string | null
+          performed_by?: string
+          prepay_credit_id?: string | null
+          reason?: string
+          reference?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_reversals_allocation_set_id_fkey"
+            columns: ["allocation_set_id"]
+            isOneToOne: false
+            referencedRelation: "allocation_sets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_reversals_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_reversals_performed_by_fkey"
+            columns: ["performed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_reversals_prepay_credit_id_fkey"
+            columns: ["prepay_credit_id"]
+            isOneToOne: false
+            referencedRelation: "prepay_credits"
             referencedColumns: ["id"]
           },
         ]
@@ -14885,6 +15024,58 @@ export type Database = {
       }
     }
     Views: {
+      admin_vehicle_register: {
+        Row: {
+          capacity_gallons: number | null
+          capacity_unit: string | null
+          category: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string | null
+          notes: string | null
+          registration: string | null
+          status: string | null
+          updated_at: string | null
+          vehicle_name: string | null
+          vehicle_type: string | null
+        }
+        Relationships: []
+      }
+      field_billing_defaults_crew: {
+        Row: {
+          created_at: string
+          customer_id: string
+          field_id: string
+          id: string
+          is_primary: boolean
+          notes: string | null
+          source_split_version_id: string | null
+          updated_at: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "field_billing_defaults_source_split_version_id_fkey"
+            columns: ["source_split_version_id"]
+            isOneToOne: false
+            referencedRelation: "field_billing_split_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "field_billing_defaults_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "field_billing_defaults_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "fields"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoices_postable: {
         Row: {
           application_date: string | null
@@ -15158,6 +15349,234 @@ export type Database = {
             columns: ["salesman_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_chemicals_crew: {
+        Row: {
+          customer_supplied: boolean
+          diluent_rate: number | null
+          driver: string | null
+          id: string
+          job_id: string
+          phi_days: number | null
+          product_id: string
+          quantity: number
+          rate_per_acre: number | null
+          rate_unit: string | null
+          rei_hours: number | null
+          sort_order: number | null
+          unit: string | null
+          vendor: string | null
+          warehouse: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_chemicals_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_chemicals_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_chemicals_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_field_shares_crew: {
+        Row: {
+          created_at: string
+          customer_id: string
+          field_id: string
+          id: string
+          is_primary: boolean
+          job_id: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_field_shares_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_field_shares_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "fields"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_field_shares_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      jobs_crew: {
+        Row: {
+          additional_info: string | null
+          application_service_id: string | null
+          applicator_id: string | null
+          applied_acres: number
+          batch_id: string | null
+          batch_ref: string | null
+          call_date: string | null
+          carrier_rate_gpa: number | null
+          completed_at: string | null
+          consultant_id: string | null
+          created_at: string
+          created_by: string | null
+          customer_id: string
+          date_expires: string | null
+          date_proposed: string | null
+          deleted_at: string | null
+          estimated_hours: number | null
+          ground_crew_id: string | null
+          id: string
+          invoice_id: string | null
+          job_date: string
+          job_number: string
+          last_printed_by: string | null
+          loader_comment: string | null
+          loader_tank_capacity: number | null
+          notes: string | null
+          printed_at: string | null
+          priority: string
+          quote_id: string | null
+          quote_section_id: string | null
+          recipe_id: string | null
+          remaining_acres: number | null
+          schedule_date: string | null
+          scheduled_time: string | null
+          season: number | null
+          status: string
+          tags: string[] | null
+          time_proposed: string | null
+          total_acres: number | null
+          updated_at: string
+          updated_by: string | null
+          vehicle_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jobs_application_service_id_fkey"
+            columns: ["application_service_id"]
+            isOneToOne: false
+            referencedRelation: "application_services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_applicator_id_fkey"
+            columns: ["applicator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_batch_ref_fkey"
+            columns: ["batch_ref"]
+            isOneToOne: false
+            referencedRelation: "job_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_ground_crew_id_fkey"
+            columns: ["ground_crew_id"]
+            isOneToOne: false
+            referencedRelation: "ground_crews"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices_postable"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_last_printed_by_fkey"
+            columns: ["last_printed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_quote_section_id_fkey"
+            columns: ["quote_section_id"]
+            isOneToOne: false
+            referencedRelation: "quote_sections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_recipe_id_fkey"
+            columns: ["recipe_id"]
+            isOneToOne: false
+            referencedRelation: "blend_recipes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
             referencedColumns: ["id"]
           },
         ]
@@ -16031,6 +16450,9 @@ export type Database = {
       _create_invoice_for_unbilled_delivery_idem_impl_20260721: {
         Args: {
           p_delivery_id: string
+          p_expected_cents?: number
+          p_expected_scope?: string
+          p_expected_units?: number
           p_idempotency_key?: string
           p_performed_by?: string
         }
@@ -16039,6 +16461,9 @@ export type Database = {
       _create_invoice_for_unbilled_delivery_impl_20260718: {
         Args: {
           p_delivery_id: string
+          p_expected_cents?: number
+          p_expected_scope?: string
+          p_expected_units?: number
           p_idempotency_key?: string
           p_performed_by?: string
         }
@@ -18935,6 +19360,7 @@ export type Database = {
           p_idempotency_key?: string
           p_issue_notes?: string
           p_issue_type?: string
+          p_lines_seen?: Json
           p_performed_by?: string
           p_quantities?: Json
           p_signed_by: string
@@ -19228,6 +19654,9 @@ export type Database = {
       create_invoice_for_unbilled_delivery: {
         Args: {
           p_delivery_id: string
+          p_expected_cents?: number
+          p_expected_scope?: string
+          p_expected_units?: number
           p_idempotency_key?: string
           p_performed_by?: string
         }
@@ -19473,6 +19902,16 @@ export type Database = {
           p_idempotency_key?: string
           p_license_override?: boolean
           p_performed_by?: string
+        }
+        Returns: Json
+      }
+      dispatch_location_with_notices: {
+        Args: {
+          p_assignments?: Json
+          p_idempotency_key?: string
+          p_job_field_ids?: string[]
+          p_license_override?: boolean
+          p_mode: string
         }
         Returns: Json
       }
@@ -20345,6 +20784,10 @@ export type Database = {
       get_parent_chemistry: { Args: { p_parent_id: string }; Returns: Json }
       get_parent_draft_rates: { Args: { p_parent_id: string }; Returns: Json }
       get_parent_mode_groups: { Args: { p_parent_id: string }; Returns: Json }
+      get_prepay_balance_check: {
+        Args: { p_customer_id?: string }
+        Returns: Json
+      }
       get_product_brands: { Args: { p_product_id: string }; Returns: Json }
       get_product_cost_basis_workspace: {
         Args: { p_product_id: string }
@@ -21268,6 +21711,15 @@ export type Database = {
         }
         Returns: Json
       }
+      receive_po_items_with_excess_notice: {
+        Args: {
+          p_allow_over_receive?: boolean
+          p_idempotency_key?: string
+          p_items: Json
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
       receive_return: {
         Args: {
           p_idempotency_key?: string
@@ -21327,6 +21779,31 @@ export type Database = {
           p_message: string
           p_performed_by?: string
           p_subject: string
+        }
+        Returns: Json
+      }
+      record_outside_refund: {
+        Args: {
+          p_allow_duplicate_reference?: boolean
+          p_amount_cents: number
+          p_credit_id?: string
+          p_customer_id: string
+          p_idempotency_key?: string
+          p_paid_on: string
+          p_performed_by?: string
+          p_reason: string
+          p_reference: string
+        }
+        Returns: Json
+      }
+      record_returned_check: {
+        Args: {
+          p_allocation_set_id: string
+          p_credit_id?: string
+          p_idempotency_key?: string
+          p_performed_by?: string
+          p_reason: string
+          p_returned_date: string
         }
         Returns: Json
       }
@@ -22112,6 +22589,7 @@ export type Database = {
           p_idempotency_key?: string
           p_issue_notes?: string
           p_issue_type?: string
+          p_lines_seen?: Json
           p_performed_by?: string
           p_quantities?: Json
           p_signed_by: string

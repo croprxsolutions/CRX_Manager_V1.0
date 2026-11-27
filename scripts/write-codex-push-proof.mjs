@@ -54,6 +54,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { carriedSolProof, proofSearchDirs, SOL_PROOF_MAX_AGE_MS } from "../.claude/hooks/codex-push-lib.mjs";
+import { askTahaAfterSol } from "../.claude/hooks/taha-ready-after-sol.mjs";
 import {
   CODEX_THREAD_PAGE_SIZE,
   CODEX_THREADS_QUERY,
@@ -954,6 +955,12 @@ export function buildCodexPushProof({
     base_sha: baseSha,
     timestamp,
   };
+}
+
+// Best-effort: a clean Sol on an open lane PR's current head labels it for Taha (taha-ready-after-sol.mjs).
+function askTahaAfterCleanSol(root, headSha) {
+  const note = askTahaAfterSol({ cwd: root, headSha });
+  if (note) process.stdout.write(`${note}\n`);
 }
 
 export function codexPushProofPath(root, headSha) {
@@ -2563,6 +2570,7 @@ function runCarryForward(root, options) {
     });
     writeFileSync(proofPath, `${JSON.stringify(proof, null, 2)}\n`, "utf8");
     process.stdout.write(`Carried Sol proof written to ${proofPath} (mode: ${plan.mode}).\n`);
+    askTahaAfterCleanSol(root, facts.headSha);
     return 0;
   };
   const stillSame = () =>
@@ -2922,6 +2930,7 @@ function mintSingleCommitCarry(root, options, facts, mode, carryExtra = {}) {
   Object.assign(proof.carry, carryExtra);
   writeFileSync(proofPath, `${JSON.stringify(proof, null, 2)}\n`, "utf8");
   process.stdout.write(`Carried Sol proof written to ${proofPath} (mode: ${mode}).\n`);
+  askTahaAfterCleanSol(root, facts.headSha);
   return 0;
 }
 
@@ -3641,6 +3650,7 @@ export function run(argv = process.argv.slice(2)) {
       `Codex push proof written to ${proofPath} (verdict: ${verdict}, head ${headAfter}, base ${proofBase}, ` +
       `reviewer binary ${codexRun.codexBin}${codexRun.fallbackUsed ? " — sandbox-startup fallback" : ""}).\n`,
     );
+    askTahaAfterCleanSol(root, headAfter);
     if (baseAfter !== proofBase) {
       process.stdout.write(
         `${target} (now ${baseAfter}) is ahead of the base this review was bound to. The clean review is kept, bound to ` +

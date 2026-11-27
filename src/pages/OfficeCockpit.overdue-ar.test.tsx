@@ -49,7 +49,10 @@ function query(table: string) {
 
 const stableNavigate = vi.fn();
 const stableToast = vi.fn();
-vi.mock('react-router-dom', () => ({ useNavigate: () => stableNavigate }));
+vi.mock('react-router-dom', async (importOriginal) => ({
+  ...await importOriginal<typeof import('react-router-dom')>(),
+  useNavigate: () => stableNavigate,
+}));
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { role: 'admin' } }) }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: stableToast }) }));
 vi.mock('../lib/idempotency', () => ({ generateIdempotencyKey: vi.fn(() => 'key') }));

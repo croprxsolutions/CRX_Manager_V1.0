@@ -1,4 +1,4 @@
-import { useState, useEffect, useId } from 'react';
+import { useState, useEffect, useId, useRef } from 'react';
 import { Link as LinkIcon } from 'lucide-react';
 import { supabase } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
@@ -33,6 +33,35 @@ const entityDisplayNames: Record<LinkedEntityType, string> = {
   product: 'Product',
 };
 
+type TaskFields = {
+  title: string;
+  content: string | null;
+  note_type: NoteType;
+  priority: NotePriority;
+  assigned_to: string | null;
+  due_date: string | null;
+  created_by: string;
+  linked_entity_type: LinkedEntityType;
+  linked_entity_id: string;
+};
+
+async function saveQuickTask(fields: TaskFields, callbackId: string | null) {
+  const input: TaskFields & { id?: string } = callbackId ? { id: callbackId, ...fields } : fields;
+  const { error } = await supabase.from('team_notes').insert(input);
+  if (!error) return;
+  if (!callbackId || error.code !== '23505') throw error;
+
+  // A lost save response can leave this same callback in Team Board already.
+  const prior = await supabase.from('team_notes')
+    .select('title, content, note_type, priority, assigned_to, due_date, created_by, linked_entity_type, linked_entity_id')
+    .eq('id', callbackId).eq('created_by', fields.created_by).maybeSingle();
+  if (prior.error || !prior.data) throw prior.error ?? error;
+  const saved = prior.data;
+  if (Object.keys(fields).some((key) => saved[key as keyof TaskFields] !== fields[key as keyof TaskFields])) {
+    throw new Error('The earlier callback was already saved. Open it on Team Board to make changes.');
+  }
+}
+
 export default function QuickTaskModal({
   open,
   onClose,
@@ -55,7 +84,12 @@ export default function QuickTaskModal({
   const [assignedTo, setAssignedTo] = useState(prefillAssignee);
   const [dueDate, setDueDate] = useState('');
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [assigneeStatus, setAssigneeStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [assigneeRetry, setAssigneeRetry] = useState(0);
   const [saving, setSaving] = useState(false);
+  const callbackIdRef = useRef<string | null>(null);
+
+  useEffect(() => { callbackIdRef.current = null; }, [open, entityId]);
 
   // Reset form when modal opens with new prefill values
   useEffect(() => {
@@ -72,19 +106,23 @@ export default function QuickTaskModal({
   // Load profiles for the assign-to dropdown
   useEffect(() => {
     if (!open) return;
+    let current = true;
     (async () => {
       // PR-07 follow-up: assignee picker only uses p.id + p.full_name; safe via view.
       // Codex P2 (2026-05-16): exclude entity_recipient service profiles
       // (CMCTW LLC, Crop Rx Solutions) — they can't log in or receive tasks.
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('profile_public_view')
         .select('id, full_name, role, is_active')
         .eq('is_active', true)
         .neq('role', 'entity_recipient')
         .order('full_name');
+      if (!current) return;
+      setAssigneeStatus(error || !data ? 'failed' : 'ready');
       if (data) setProfiles(data as unknown as Profile[]);
     })();
-  }, [open]);
+    return () => { current = false; };
+  }, [open, assigneeRetry]);
 
   async function handleSave() {
     if (saving) return;
@@ -96,6 +134,7 @@ export default function QuickTaskModal({
       toast('error', 'Title is required');
       return;
     }
+    if (callbackOnly && assignedTo && assigneeStatus !== 'ready') return;
     if (callbackOnly && assignedTo && !profiles.some((person) => person.id === assignedTo)) {
       toast('error', 'Choose an active assignee or select Unassigned.');
       return;
@@ -103,7 +142,8 @@ export default function QuickTaskModal({
 
     setSaving(true);
     try {
-      const { error } = await supabase.from('team_notes').insert({
+      if (callbackOnly && !callbackIdRef.current) callbackIdRef.current = crypto.randomUUID();
+      await saveQuickTask({
         title: title.trim(),
         content: content.trim() || null,
         note_type: callbackOnly ? 'todo' : noteType,
@@ -113,9 +153,7 @@ export default function QuickTaskModal({
         created_by: profile.id,
         linked_entity_type: entityType,
         linked_entity_id: entityId,
-      });
-
-      if (error) throw error;
+      }, callbackOnly ? callbackIdRef.current : null);
 
       toast('success', 'Task created successfully');
       onCreated?.();
@@ -134,7 +172,7 @@ export default function QuickTaskModal({
 
   return (
     <Modal open={open} onClose={saving ? () => {} : onClose} title={callbackOnly ? 'Schedule callback' : 'Quick Task'} accent={callbackOnly ? undefined : 'Note'}>
-      <div className="space-y-4">
+      <fieldset className="space-y-4" disabled={saving}>
         {/* Entity badge */}
         <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-sm text-secondary">
           <LinkIcon className="w-4 h-4 shrink-0" />
@@ -179,19 +217,30 @@ export default function QuickTaskModal({
             <label htmlFor={`${fieldId}-assignee`} className="block text-sm font-medium text-secondary mb-1">Assign To</label>
             <select id={`${fieldId}-assignee`} value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className={selectClass}>
               <option value="">Unassigned</option>
+              {callbackOnly && assignedTo && !profiles.some((person) => person.id === assignedTo) && (
+                <option value={assignedTo}>{assigneeStatus === 'loading' ? 'Loading assigned rep…' : 'Selected assignee unavailable'}</option>
+              )}
               {profiles.map((p) => (
                 <option key={p.id} value={p.id}>{p.full_name}</option>
               ))}
             </select>
+            {callbackOnly && assigneeStatus === 'failed' && (
+              <Button size="sm" variant="ghost" className="min-h-11" onClick={() => {
+                setAssigneeStatus('loading');
+                setAssigneeRetry((attempt) => attempt + 1);
+              }}>Retry loading assignees</Button>
+            )}
           </div>
           <Input label="Due Date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} loading={saving}>{callbackOnly ? 'Save callback' : 'Create Task'}</Button>
+          <Button onClick={handleSave} loading={saving} disabled={callbackOnly && !!assignedTo && assigneeStatus !== 'ready'}>
+            {callbackOnly ? 'Save callback' : 'Create Task'}
+          </Button>
         </div>
-      </div>
+      </fieldset>
     </Modal>
   );
 }

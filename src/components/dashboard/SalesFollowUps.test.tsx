@@ -1,0 +1,163 @@
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import SalesFollowUps from './SalesFollowUps';
+import QuickTaskModal from '../team/QuickTaskModal';
+
+const db = vi.hoisted(() => ({
+  from: vi.fn(),
+  rpc: vi.fn(),
+  toast: vi.fn(),
+}));
+
+vi.mock('../../lib/db', () => ({
+  supabase: { from: db.from, rpc: db.rpc },
+  assertRpcResult: (value: unknown) => value,
+}));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'rep', role: 'sales_rep' } }) }));
+vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: db.toast }) }));
+vi.mock('../../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
+vi.mock('../../lib/dateUtils', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../lib/dateUtils')>(),
+  localToday: () => '2026-11-27',
+}));
+
+const profile = { id: 'rep', role: 'sales_rep' } as const;
+const names = [{ id: 'rep', full_name: 'Oak Rep' }];
+const callback = (id: string, title: string, dueDate: string, entityType = 'customer') => ({
+  id, title, due_date: dueDate, assigned_to: 'rep',
+  linked_entity_type: entityType, linked_entity_id: entityType === 'quote' ? 'quote-1' : 'farm',
+});
+const stale = (id: string, quoteNumber: string) => ({
+  quote_id: id, quote_number: quoteNumber, farm_name: 'Oak Farm', assigned_sales_rep: 'rep',
+  quote_age_days: 23, last_interaction_at: null,
+});
+
+function read(data: unknown, error: unknown = null, pending?: Promise<unknown>) {
+  const result = pending ?? Promise.resolve({ data, error, count: Array.isArray(data) ? data.length : null });
+  const query = {
+    select: vi.fn(),
+    eq: vi.fn(),
+    is: vi.fn(),
+    in: vi.fn(),
+    not: vi.fn(),
+    neq: vi.fn(),
+    order: vi.fn(),
+    range: vi.fn(),
+    then: result.then.bind(result),
+  };
+  for (const method of ['select', 'eq', 'is', 'in', 'not', 'neq', 'order', 'range'] as const) {
+    query[method].mockReturnValue(query);
+  }
+  return query;
+}
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  db.rpc.mockResolvedValue({ data: { success: true, total_count: 2, rows: [stale('quote-1', 'Q-1'), stale('quote-2', 'Q-2')] }, error: null });
+});
+
+describe('Sales follow-ups', () => {
+  it('shows assigned open callbacks with Chicago due labels and respects denied quote access', async () => {
+    const tasks = read([
+      callback('one', 'Overdue call', '2026-11-26'),
+      callback('two', 'Today call', '2026-11-27'),
+      callback('three', 'Next call', '2026-11-28'),
+    ]);
+    db.from.mockImplementation((table) => {
+      if (table === 'team_notes') return tasks;
+      if (table === 'customers') return read([{ id: 'farm', farm_name: 'Oak Farm' }]);
+      return read(names);
+    });
+    render(<MemoryRouter><SalesFollowUps profile={profile} deniedPages={['quotes']} /></MemoryRouter>);
+    const list = await screen.findByRole('region', { name: 'My callbacks' });
+    expect(await within(list).findByRole('link', { name: 'Overdue call' })).toHaveAttribute('href', '/team-board?note=one');
+    expect(within(list).getByText('Overdue · Nov 26, 2026')).toBeVisible();
+    expect(within(list).getByText('Due today')).toBeVisible();
+    expect(within(list).getByText('Upcoming · Nov 28, 2026')).toBeVisible();
+    expect(tasks.eq).toHaveBeenCalledWith('note_type', 'todo');
+    expect(tasks.eq).toHaveBeenCalledWith('is_completed', false);
+    expect(tasks.eq).toHaveBeenCalledWith('assigned_to', 'rep');
+    expect(tasks.is).toHaveBeenCalledWith('deleted_at', null);
+    expect(tasks.in).toHaveBeenCalledWith('linked_entity_type', ['customer']);
+    expect(db.rpc).not.toHaveBeenCalled();
+    expect(screen.queryByRole('region', { name: 'Stale quotes' })).not.toBeInTheDocument();
+  });
+
+  it('opens the existing exact callback and offers scheduling for a different quote', async () => {
+    db.from.mockImplementation((table) => {
+      if (table === 'team_notes') return read([callback('task-id', 'Callback', '2026-11-27', 'quote')]);
+      if (table === 'quotes') return read([{ id: 'quote-1', quote_number: 'Q-1', customer: { farm_name: 'Oak Farm' } }]);
+      return read(names);
+    });
+    render(<MemoryRouter><SalesFollowUps profile={profile} deniedPages={[]} /></MemoryRouter>);
+    expect(await screen.findByRole('link', { name: 'Open callback for quote Q-1' })).toHaveAttribute('href', '/team-board?note=task-id');
+    expect(screen.getByRole('button', { name: 'Schedule callback for quote Q-2' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Schedule callback for quote Q-1' })).not.toBeInTheDocument();
+  });
+
+  it('offers a retry for a failed context lookup while keeping the stale quote list available', async () => {
+    let farmError = true;
+    db.from.mockImplementation((table) => {
+      if (table === 'team_notes') return read([callback('one', 'Existing call', '2026-11-27')]);
+      if (table === 'customers') return farmError ? read(null, { message: 'Unavailable' }) : read([{ id: 'farm', farm_name: 'Oak Farm' }]);
+      return read(names);
+    });
+    render(<MemoryRouter><SalesFollowUps profile={profile} deniedPages={[]} /></MemoryRouter>);
+    const pane = screen.getByRole('region', { name: 'My callbacks' });
+    expect(await within(pane).findByRole('alert')).toHaveTextContent('Callbacks could not be loaded');
+    expect(await screen.findByRole('link', { name: 'Oak Farm · #Q-1' })).toBeVisible();
+    farmError = false;
+    fireEvent.click(within(pane).getByRole('button', { name: 'Try again' }));
+    expect(await within(pane).findByRole('link', { name: 'Existing call' })).toBeVisible();
+  });
+
+  it('waits for a prefilled assignee, refuses an inactive selection, and saves an exact quote todo', async () => {
+    let finish: (value: unknown) => void = () => {};
+    const pending = new Promise((resolve) => { finish = resolve; });
+    const insert = vi.fn().mockResolvedValue({ error: null });
+    const onCreated = vi.fn();
+    db.from.mockImplementation((table) => table === 'team_notes' ? { insert } : read(null, null, pending));
+    render(<QuickTaskModal open callbackOnly entityType="quote" entityId="quote-1" prefillTitle="Call Oak"
+      prefillAssignee="inactive-rep" onClose={vi.fn()} onCreated={onCreated} />);
+    const save = screen.getByRole('button', { name: 'Save callback' });
+    expect(save).toBeDisabled();
+    finish({ data: names, error: null });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+    expect(insert).not.toHaveBeenCalled();
+    expect(db.toast).toHaveBeenCalledWith('error', 'Choose an active assignee or select Unassigned.');
+    fireEvent.change(screen.getByLabelText('Assign To'), { target: { value: 'rep' } });
+    fireEvent.click(save);
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
+    expect(insert).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      note_type: 'todo', assigned_to: 'rep', created_by: 'rep', linked_entity_type: 'quote', linked_entity_id: 'quote-1',
+    }));
+  });
+
+  it('reuses the same task ID after a lost response and acknowledges only the saved fields', async () => {
+    const fields = {
+      title: 'Call Oak', content: null, note_type: 'todo', priority: 'medium', assigned_to: null,
+      due_date: null, created_by: 'rep', linked_entity_type: 'quote', linked_entity_id: 'quote-1',
+    };
+    const insert = vi.fn()
+      .mockResolvedValueOnce({ error: new Error('Lost save response') })
+      .mockResolvedValueOnce({ error: { code: '23505' } });
+    const existing = read(fields);
+    const select = existing.select.mockReturnValue({ eq: existing.eq });
+    existing.eq.mockReturnValue({ eq: existing.eq, maybeSingle: vi.fn().mockResolvedValue({ data: fields, error: null }) });
+    db.from.mockImplementation((table) => table === 'team_notes' ? { insert, select } : read(names));
+    const onCreated = vi.fn();
+    render(<QuickTaskModal open callbackOnly entityType="quote" entityId="quote-1" prefillTitle="Call Oak"
+      onCreated={onCreated} onClose={vi.fn()} />);
+    const save = screen.getByRole('button', { name: 'Save callback' });
+    fireEvent.click(save);
+    await waitFor(() => expect(db.toast).toHaveBeenCalledWith('error', 'Lost save response'));
+    fireEvent.click(save);
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
+    expect(insert).toHaveBeenCalledTimes(2);
+    const first = insert.mock.calls[0][0];
+    expect(first).toEqual({ id: expect.any(String), ...fields });
+    expect(insert.mock.calls[1][0]).toEqual(first);
+  });
+});

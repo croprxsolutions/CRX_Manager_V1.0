@@ -21,8 +21,9 @@ const contactDate = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'num
 async function readNames(ids: (string | null)[]) {
   const present = [...new Set(ids.filter((id): id is string => id !== null))];
   if (!present.length) return new Map<string, string>();
-  const { data } = await supabase.from('profile_public_view').select('id, full_name')
+  const { data, error } = await supabase.from('profile_public_view').select('id, full_name')
     .in('id', present).eq('is_active', true);
+  if (error) throw error;
   return new Map((data ?? []).flatMap((row) => row.id && row.full_name ? [[row.id, row.full_name] as const] : []));
 }
 
@@ -52,6 +53,8 @@ async function readCallbacks(userId: string, isAdmin: boolean, entityTypes: stri
     farmIds.length ? supabase.from('customers').select('id, farm_name').in('id', farmIds) : null,
     quoteIds.length ? supabase.from('quotes').select('id, quote_number, customer:customers(farm_name)').in('id', quoteIds).is('deleted_at', null) : null,
   ]);
+  if (farms?.error) throw farms.error;
+  if (quotes?.error) throw quotes.error;
   const farmNames = new Map(farms?.data?.map((row) => [row.id, row.farm_name]));
   const quoteDetails = new Map(quotes?.data?.map((row) => [row.id, row]));
   const byQuote = new Map<string, string>();
@@ -64,7 +67,7 @@ async function readCallbacks(userId: string, isAdmin: boolean, entityTypes: stri
 }
 
 function assigneeLabel(id: string | null, names: Map<string, string>) {
-  return id ? names.get(id) ?? 'Assigned rep unavailable' : 'Unassigned';
+  return id ? names.get(id) ?? 'Assignee unavailable' : 'Unassigned';
 }
 
 function dueLabel(dueDate: string | null, today: string) {

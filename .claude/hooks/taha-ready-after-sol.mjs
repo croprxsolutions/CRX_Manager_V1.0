@@ -175,10 +175,13 @@ export function askTahaAfterSol({ cwd, headSha = null, pr: target = null, gh = d
     // His Approve of an earlier commit still counts after a staging catch-up, docs/ note or restamp (taha-ready.mjs
     // tahaVerdict; Taha MED 1). Asked only when he approved some commit (a push dismisses it): it costs several calls.
     const approvedEarlier = signedOff(pr);
-    if (approvedEarlier && tahaApprovedOnGitHub({ repo: undefined, gh: call, pullRequest: pr.number, headSha: pr.headRefOid })) return "";
+    // tahaApprovedOnGitHub reads a failed call as "not carried", so a failure is recorded here (Codex bot).
+    let carryFailed = false;
+    const carryCall = (args) => { try { return call(args); } catch (error) { carryFailed = true; throw error; } };
+    if (approvedEarlier && tahaApprovedOnGitHub({ repo: undefined, gh: carryCall, pullRequest: pr.number, headSha: pr.headRefOid })) return "";
     // Unfinished carry check: never a plain re-ask, since his sign-off may still stand (Taha MED 1, delta).
-    if (approvedEarlier && Date.now() >= deadline) {
-      return `PR #${pr.number}: not labelled for Taha yet. Taha signed off an earlier commit and there was no time to check whether it carries over. `
+    if (approvedEarlier && (carryFailed || Date.now() >= deadline)) {
+      return `PR #${pr.number}: not labelled for Taha yet. Taha signed off an earlier commit and GitHub could not finish checking whether it carries over. `
         + `Only if ${SIGNED_OFF_IF}, run: ${manual(pr.number)}`;
     }
     if (covered === null) return `PR #${pr.number}: not labelled for Taha yet (GitHub could not confirm the Sol covers this head); run: ${manual(pr.number)}`;

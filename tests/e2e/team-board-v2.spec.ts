@@ -244,7 +244,7 @@ test.describe.serial('Team Board V2 Features', () => {
     const _entitySelectVisible = await entityTypeSelect.isVisible().catch(() => false);
 
     // Save the note
-    const saveBtn = modal.locator('button:has-text("Add Note"), button:has-text("Save"), button:has-text("Create")').first();
+    const saveBtn = modal.locator('button:has-text("Add Task"), button:has-text("Add Note"), button:has-text("Save"), button:has-text("Create")').first();
     await saveBtn.click();
     await wait(page, 2000);
 

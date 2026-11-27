@@ -22,7 +22,17 @@ export interface FilterState {
   assignees: string[];
   priorities: string[];
   showCompleted: boolean;
+  overdueOnly: boolean;
 }
+
+export const emptyBoardFilters: FilterState = {
+  search: '',
+  tags: [],
+  assignees: [],
+  priorities: [],
+  showCompleted: false,
+  overdueOnly: false,
+};
 
 interface TeamBoardFiltersProps {
   filters: FilterState;
@@ -90,32 +100,16 @@ export default function TeamBoardFilters({ filters, onChange }: TeamBoardFilters
     updateFilter(key, updated);
   };
 
-  const clearFilters = () => {
-    onChange({
-      search: '',
-      tags: [],
-      assignees: [],
-      priorities: [],
-      showCompleted: false,
-    });
-  };
-
-  const hasActiveFilters =
-    filters.search ||
-    filters.tags.length > 0 ||
-    filters.assignees.length > 0 ||
-    filters.priorities.length > 0;
-
   const activeFilterCount =
     (filters.search ? 1 : 0) +
     filters.tags.length +
     filters.assignees.length +
-    filters.priorities.length;
+    filters.priorities.length + Number(filters.overdueOnly) + Number(filters.showCompleted);
 
   return (
     <div className="space-y-3">
       <div className="flex gap-2">
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
@@ -128,8 +122,9 @@ export default function TeamBoardFilters({ filters, onChange }: TeamBoardFilters
         </div>
         <button
           onClick={() => setShowFilters(!showFilters)}
+          aria-expanded={showFilters}
           className={`px-4 py-2 text-sm font-medium rounded-lg border transition-colors flex items-center gap-2 ${
-            showFilters || hasActiveFilters
+            showFilters || activeFilterCount > 0
               ? 'bg-crx-green text-white border-crx-green'
               : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300'
           }`}
@@ -142,9 +137,10 @@ export default function TeamBoardFilters({ filters, onChange }: TeamBoardFilters
             </span>
           )}
         </button>
-        {hasActiveFilters && (
+        {activeFilterCount > 0 && (
           <button
-            onClick={clearFilters}
+            onClick={() => onChange(emptyBoardFilters)}
+            aria-label="Clear all filters"
             className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
             title="Clear all filters"
           >
@@ -152,6 +148,12 @@ export default function TeamBoardFilters({ filters, onChange }: TeamBoardFilters
           </button>
         )}
       </div>
+
+      {filters.overdueOnly && (
+        <button type="button" onClick={() => updateFilter('overdueOnly', false)} className="inline-flex items-center gap-1 rounded-full bg-crx-green-light px-3 py-1 text-sm font-medium text-crx-green">
+          Overdue only <X className="size-4" aria-hidden="true" />
+        </button>
+      )}
 
       {showFilters && (
         <div className="border border-gray-200 rounded-lg p-4 bg-white space-y-4">
@@ -171,6 +173,7 @@ export default function TeamBoardFilters({ filters, onChange }: TeamBoardFilters
                     <button
                       key={tag.id}
                       onClick={() => toggleArrayFilter('tags', tag.id)}
+                      aria-pressed={isSelected}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                         isSelected
                           ? 'ring-2 ring-offset-1'
@@ -198,6 +201,7 @@ export default function TeamBoardFilters({ filters, onChange }: TeamBoardFilters
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => toggleArrayFilter('assignees', 'unassigned')}
+                aria-pressed={filters.assignees.includes('unassigned')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                   filters.assignees.includes('unassigned')
                     ? 'bg-gray-700 text-white border-gray-700'
@@ -212,6 +216,7 @@ export default function TeamBoardFilters({ filters, onChange }: TeamBoardFilters
                   <button
                     key={profile.id}
                     onClick={() => toggleArrayFilter('assignees', profile.id)}
+                    aria-pressed={isSelected}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                       isSelected
                         ? 'bg-crx-green text-white border-crx-green'
@@ -249,6 +254,7 @@ export default function TeamBoardFilters({ filters, onChange }: TeamBoardFilters
                   <button
                     key={priority}
                     onClick={() => toggleArrayFilter('priorities', priority)}
+                    aria-pressed={isSelected}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors capitalize ${
                       isSelected ? selectedColors[priority] : priorityColors[priority]
                     }`}
@@ -265,6 +271,7 @@ export default function TeamBoardFilters({ filters, onChange }: TeamBoardFilters
               <input
                 type="checkbox"
                 checked={filters.showCompleted}
+                disabled={filters.overdueOnly}
                 onChange={(e) => updateFilter('showCompleted', e.target.checked)}
                 className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green/20"
               />

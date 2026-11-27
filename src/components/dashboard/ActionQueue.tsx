@@ -230,7 +230,7 @@ export default function ActionQueue() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const toggleCategory = useCallback((key: string) => {
-    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+    setExpanded((prev) => ({ ...prev, [key]: prev[key] === false }));
   }, []);
 
   const dismissItem = useCallback((itemId: string) => {
@@ -282,7 +282,7 @@ export default function ActionQueue() {
       const { count, atLeast } = groupCount(counts[cat.key], loaded.length, loaded.length - items.length);
       return { ...cat, items, count, plus: atLeast ? '+' : '' };
     })
-    .filter((cat) => cat.items.length > 0);
+    .filter((cat) => cat.items.length > 0 || cat.count > 0 || cat.plus);
 
   const totalItems = visibleCategories.reduce((sum, cat) => sum + cat.count, 0);
   const totalPlus = visibleCategories.some((cat) => cat.plus) ? '+' : '';
@@ -311,6 +311,7 @@ export default function ActionQueue() {
               <div key={cat.key} className={`${cat.bg} border ${cat.border} rounded-xl overflow-hidden`}>
                 <button
                   onClick={() => toggleCategory(cat.key)}
+                  aria-expanded={isExpanded}
                   className="w-full flex items-center gap-3 p-3 text-left"
                 >
                   <span className={cat.iconColor}>{cat.icon}</span>
@@ -343,14 +344,14 @@ export default function ActionQueue() {
                         </button>
                         <button
                           onClick={() => navigate(cat.entityPath + item.id)}
-                          className={`shrink-0 p-1 rounded ${cat.iconColor} opacity-0 group-hover:opacity-100 transition-opacity`}
+                          className={`shrink-0 p-2 rounded ${cat.iconColor}`}
                           aria-label={'Open ' + item.primary_text}
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); openTaskForItem(cat, item); }}
-                          className="shrink-0 p-1 rounded text-gray-400 hover:text-crx-green hover:bg-white/80 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="shrink-0 p-2 rounded text-secondary hover:text-crx-green hover:bg-white/80"
                           aria-label={'Create task for ' + item.primary_text}
                           title="Create task"
                         >
@@ -358,16 +359,16 @@ export default function ActionQueue() {
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); dismissItem(item.id); }}
-                          className="shrink-0 text-xs px-1.5 py-0.5 rounded text-gray-400 hover:text-gray-600 hover:bg-white/80 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="shrink-0 text-xs px-2 py-2 rounded text-secondary hover:text-gray-600 hover:bg-white/80"
                           aria-label="Dismiss for today"
                         >
                           Dismiss
                         </button>
                       </div>
                     ))}
-                    {moreCount > 0 && (
+                    {(moreCount > 0 || cat.plus) && (
                       <div className={`text-center text-xs font-medium ${cat.iconColor} py-2`}>
-                        {cat.plus ? `${moreCount}+` : `+${moreCount}`} more items
+                        {moreCount > 0 ? `${cat.plus ? `${moreCount}+` : `+${moreCount}`} more items` : 'More items may be available'}
                       </div>
                     )}
                   </div>

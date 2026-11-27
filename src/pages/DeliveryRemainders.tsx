@@ -106,7 +106,7 @@ export default function DeliveryRemainders() {
     return true;
   });
 
-  // Group by customer for follow-up creation
+  // Customer options for filtering the list.
   const uniqueCustomers = [...new Map(remainders.map((r) => [r.customer_id, r.customer_name])).entries()]
     .sort((a, b) => a[1].localeCompare(b[1]));
 
@@ -262,11 +262,11 @@ export default function DeliveryRemainders() {
       <PageHeader
         title="Delivery"
         accent="Remainders"
-        subtitle={<HelpTip text="Items that couldn't be fully delivered. These are automatically created when a delivery is completed with less than the ordered quantity. Group by customer to create follow-up deliveries." />}
+        subtitle={<HelpTip text="Items left over from partial deliveries. Filter by customer to narrow the list. Follow-up works on pending items from the same original delivery." />}
       />
 
       {/* Summary: hidden after a failed load, where 0 would read as "nothing pending". */}
-      {!loadFailed && (
+      {!loading && !loadFailed && (
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Card>
           <div className="flex items-center gap-3 mb-2">
@@ -299,9 +299,9 @@ export default function DeliveryRemainders() {
             columns={columns}
             searchable
             searchPlaceholder="Search remainders..."
-            searchKeys={['customer_name', 'product_name', 'original_delivery_number']}
-            emptyTitle="No remainders"
-            emptyDescription="Partial deliveries will create remainder items automatically"
+            searchKeys={['customer_name', 'product_name', 'original_delivery_number', 'order_number']}
+            emptyTitle={remainders.length > 0 ? 'No remainders match these filters' : 'No remainders'}
+            emptyDescription={remainders.length > 0 ? 'Try a different status or customer.' : 'Partial deliveries will create remainder items automatically'}
             loading={loading}
             loadError={loadFailed}
             onRetry={() => { setLoading(true); fetchRemainders(); }}

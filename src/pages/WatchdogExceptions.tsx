@@ -10,7 +10,7 @@
  *
  * Advisory only — flags are never blocking.
  */
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   AlertTriangle,
   CheckCircle,
@@ -26,6 +26,7 @@ import { LoadFailedState } from '../components/ui/EmptyState';
 import { logActivity } from '../lib/activityLogger';
 import { useAuth } from '../contexts/AuthContext';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useLatestRef } from '../hooks/useLatestRef';
 import { Sentry } from '../lib/sentry';
 import { formatLocalDate } from '../lib/dateUtils';
 import PageHeader from '../components/ui/PageHeader';
@@ -103,25 +104,41 @@ export default function WatchdogExceptions() {
   );
   const [lastRefreshed, setLastRefreshed]   = useState<Date | null>(null);
   const [refreshSummary, setRefreshSummary] = useState<string | null>(null);
+  const [sweepFailed, setSweepFailed] = useState(false);
+  const includeDismissed = useLatestRef(showDismissed);
+  const loadSequence = useRef(0);
+  const mounted = useRef(false);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
   const fetchFlags = useCallback(async () => {
+    if (!mounted.current) return;
+    const sequence = ++loadSequence.current;
     setLoading(true);
     try {
-      setFlags(await readAllFlags(showDismissed));
+      const result = await readAllFlags(includeDismissed.current);
+      if (sequence !== loadSequence.current) return;
+      setFlags(result);
       setLoadFailed(false);
     } catch (err) {
+      if (sequence !== loadSequence.current) return;
       Sentry.captureException(err, { tags: { page: 'WatchdogExceptions' } });
       // No flags shown: an empty list would read as "No active watchdog flags".
       setFlags([]);
       setLoadFailed(true);
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
-  }, [showDismissed]);
+  }, [includeDismissed]);
 
-  useEffect(() => { void fetchFlags(); }, [fetchFlags]);
+  useEffect(() => {
+    mounted.current = true;
+    void fetchFlags();
+    return () => {
+      mounted.current = false;
+      loadSequence.current += 1;
+    };
+  }, [fetchFlags, showDismissed]);
 
   // ── Re-run DB detection sweep ──────────────────────────────────────────────
 
@@ -129,6 +146,7 @@ export default function WatchdogExceptions() {
     if (!profile?.id) return;
     setRefreshing(true);
     setRefreshSummary(null);
+    setSweepFailed(false);
     try {
       const { data, error } = await supabaseUntyped.rpc('refresh_watchdog_flags', {
         p_job_id:                    null,
@@ -137,6 +155,7 @@ export default function WatchdogExceptions() {
       });
       if (error) throw error;
       const result = assertRpcResult<RefreshWatchdogFlagsResult>(data, 'refresh_watchdog_flags');
+      if (!mounted.current) return;
       setLastRefreshed(new Date());
       setRefreshSummary(
         `Sweep complete — ${result.flags_total} active flag${result.flags_total !== 1 ? 's' : ''} ` +
@@ -145,24 +164,11 @@ export default function WatchdogExceptions() {
       await fetchFlags();
     } catch (err) {
       Sentry.captureException(err, { tags: { page: 'WatchdogExceptions', action: 'refresh' } });
+      if (mounted.current) setSweepFailed(true);
     } finally {
-      setRefreshing(false);
+      if (mounted.current) setRefreshing(false);
     }
   }, [profile, fetchFlags]);
-
-  // ── Grouping ───────────────────────────────────────────────────────────────
-
-  const grouped = useMemo(() => {
-    const map = new Map<WatchdogFlagType, WatchdogFlag[]>();
-    for (const type of ALL_FLAG_TYPES) map.set(type, []);
-    for (const f of flags) {
-      map.get(f.flag_type)?.push(f);
-    }
-    return map;
-  }, [flags]);
-
-  const activeCount = flags.filter(f => !f.is_dismissed).length;
-  const totalCount  = flags.length;
 
   // ── Toggle section ─────────────────────────────────────────────────────────
   const toggleType = (t: WatchdogFlagType) => {
@@ -194,7 +200,7 @@ export default function WatchdogExceptions() {
           </>
         )}
         actions={(
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer select-none">
             <input
               type="checkbox"
@@ -221,23 +227,15 @@ export default function WatchdogExceptions() {
       />
 
       {/* Sweep summary */}
+      {sweepFailed && (
+        <p role="alert" className="text-sm bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-red-800">
+          The watchdog sweep could not be completed. Run it again to check for new flags.
+        </p>
+      )}
       {refreshSummary && (
         <div className="flex items-center gap-2 text-sm bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-green-800">
           <CheckCircle className="w-4 h-4 shrink-0" />
           {refreshSummary}
-        </div>
-      )}
-
-      {/* Summary counts */}
-      {!loading && !loadFailed && (
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-secondary">
-            <span className="font-semibold text-primary">{activeCount}</span> active flag
-            {activeCount !== 1 ? 's' : ''}
-            {showDismissed && totalCount !== activeCount && (
-              <span className="text-tertiary"> ({totalCount - activeCount} dismissed)</span>
-            )}
-          </span>
         </div>
       )}
 
@@ -251,7 +249,57 @@ export default function WatchdogExceptions() {
         <LoadFailedState title="The watchdog flags could not be loaded" onRetry={() => { void fetchFlags(); }} />
       )}
 
-      {!loading && !loadFailed && ALL_FLAG_TYPES.map(type => {
+      {!loading && !loadFailed && (
+        <FlagList
+          flags={flags}
+          showDismissed={showDismissed}
+          expandedTypes={expandedTypes}
+          toggleType={toggleType}
+          profileId={profile?.id ?? null}
+          onDismissed={fetchFlags}
+        />
+      )}
+    </div>
+  );
+}
+
+interface FlagListProps {
+  flags: WatchdogFlag[];
+  showDismissed: boolean;
+  expandedTypes: Set<WatchdogFlagType>;
+  toggleType: (type: WatchdogFlagType) => void;
+  profileId: string | null;
+  onDismissed: () => void;
+}
+
+function FlagList({ flags, showDismissed, expandedTypes, toggleType, profileId, onDismissed }: FlagListProps) {
+  // ── Grouping ───────────────────────────────────────────────────────────────
+
+  const grouped = useMemo(() => {
+    const map = new Map<WatchdogFlagType, WatchdogFlag[]>();
+    for (const type of ALL_FLAG_TYPES) map.set(type, []);
+    for (const f of flags) {
+      map.get(f.flag_type)?.push(f);
+    }
+    return map;
+  }, [flags]);
+
+  const activeCount = flags.filter(f => !f.is_dismissed).length;
+  const totalCount  = flags.length;
+
+  return (
+    <>
+      <div className="flex items-center gap-4">
+        <span className="text-sm text-secondary">
+          <span className="font-semibold text-primary">{activeCount}</span> active flag
+          {activeCount !== 1 ? 's' : ''}
+          {showDismissed && totalCount !== activeCount && (
+            <span className="text-tertiary"> ({totalCount - activeCount} dismissed)</span>
+          )}
+        </span>
+      </div>
+
+      {ALL_FLAG_TYPES.map(type => {
         const typeFlags  = grouped.get(type) ?? [];
         const isExpanded = expandedTypes.has(type);
         const activeTypeCount = typeFlags.filter(f => !f.is_dismissed).length;
@@ -261,6 +309,7 @@ export default function WatchdogExceptions() {
             {/* Section header */}
             <button
               onClick={() => toggleType(type)}
+              aria-expanded={isExpanded}
               className="w-full flex items-center justify-between px-4 py-3 bg-gray-50
                          hover:bg-gray-100 transition-colors text-left"
             >
@@ -289,8 +338,8 @@ export default function WatchdogExceptions() {
                     <FlagRow
                       key={flag.id}
                       flag={flag}
-                      profileId={profile?.id ?? null}
-                      onDismissed={fetchFlags}
+                      profileId={profileId}
+                      onDismissed={onDismissed}
                     />
                   ))
                 )}
@@ -301,7 +350,7 @@ export default function WatchdogExceptions() {
       })}
 
       {/* Empty state */}
-      {!loading && !loadFailed && activeCount === 0 && !showDismissed && (
+      {activeCount === 0 && !showDismissed && (
         <div className="text-center py-12 text-secondary">
           <CheckCircle className="w-10 h-10 text-crx-green mx-auto mb-3 opacity-60" />
           <p className="text-sm font-medium">No active watchdog flags.</p>
@@ -310,7 +359,7 @@ export default function WatchdogExceptions() {
           </p>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -363,7 +412,7 @@ function FlagRow({ flag, profileId, onDismissed }: FlagRowProps) {
 
   return (
     <div
-      className={`flex items-start gap-3 px-4 py-3 ${
+      className={`flex flex-wrap sm:flex-nowrap items-start gap-3 px-4 py-3 ${
         flag.is_dismissed ? 'opacity-50 bg-gray-50' : 'bg-white'
       }`}
     >
@@ -373,7 +422,7 @@ function FlagRow({ flag, profileId, onDismissed }: FlagRowProps) {
         }`}
       />
 
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 break-words">
         <p className="text-sm text-primary">{flag.message}</p>
 
         {/* Metadata line */}
@@ -400,7 +449,7 @@ function FlagRow({ flag, profileId, onDismissed }: FlagRowProps) {
 
       {/* Dismiss controls — not shown for already-dismissed flags */}
       {!flag.is_dismissed && (
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex w-full flex-wrap items-center gap-2 pl-7 sm:w-auto sm:pl-0">
           {pending ? (
             <>
               <span className="text-xs text-secondary">Mark as:</span>

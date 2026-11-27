@@ -1,0 +1,11 @@
+## 2026-11-26 - Applicator crew base read lockdown
+
+Migration `20270314160000_applicator_crew_base_read_lockdown.sql` (**NOT APPLIED**) limits reads from the `jobs`, `job_chemicals`, `job_field_shares` and `field_billing_defaults` base tables to admins and sales reps. Applicators and dispatched crew continue to use the existing crew views. Office reads and write policies stay unchanged. The real-schema proof (`prove-applicator-crew-lockdown-real-schema.mjs`) passed on a local Docker copy: crew base-table reads empty, crew views, office reads and own-upload delete unchanged, reverse restores all.
+
+Browser check (local Docker walkthrough, `scripts/local-app/e2e/crew-price-lockdown.spec.ts`): passed as applicator (Jobs, Job Detail, Field View, dispatch board read only crew views, no prices received, and the applicator's own token reading the four base tables directly gets zero rows) and as admin (prices still shown). Not verified: staging or live apply; field sheet print and loader worksheet were not clicked through in the browser.
+
+Preflight also refuses: a crew view carrying a protected column, a crew view not owned by an RLS-bypassing role or set to security_invoker, and a base table with RLS off or forced. The migration locks the four crew views and four base tables before checking them, and the postflight re-checks RLS on the base tables and the crew-view grants. The reverse script refuses to run outside one transaction or when the current SELECT policies are not exactly the four the lockdown wrote. The proof exercises the column, security_invoker and reverse-autocommit refusals. The two location-dispatchee SELECT policies are dropped outright. Both the migration and the reverse use a 1s lock_timeout on each lock wait (on timeout nothing changes and the apply is re-run); once locked, the rest is catalog checks and policy statements, so apply in a quiet window.
+
+Crew-view fingerprint (Mason, 2026-11-26): the preflight also pins the exact kind, owner, options and definition of the four crew views (`e86b95ce92e6ac220d93bd7ccfd0c645|4`). Any change to a crew view before apply (for example a later slice-2 migration) refuses the lockdown; regenerate the fingerprint and re-run the proof against the new schema.
+
+The preflight also refuses when `authenticated` has lost SELECT on any crew view (the views become the only crew read path).

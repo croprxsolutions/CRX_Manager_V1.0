@@ -13,9 +13,12 @@ export interface PrepayCheck {
   day: string;
   reference: string | null;
   cents: number;
+  /** Its bucket credits (M9: a returned check is matched by any of them). */
+  ids: string[];
 }
 
 interface PrepayCheckRow {
+  id?: string;
   customer_id: string; created_at: string; source_reference: string | null; reference_number: string | null;
   original_amount_cents: number | null;
   customers?: { farm_name: string } | null;
@@ -37,8 +40,10 @@ export function groupPrepayChecks(rows: ReadonlyArray<PrepayCheckRow>): PrepayCh
       day: paymentBusinessDate(null, r.created_at),
       reference: null,
       cents: 0,
+      ids: [],
     };
     check.cents += Number(r.original_amount_cents) || 0;
+    if (r.id) check.ids.push(r.id);
     // The check # as staff last saved it on Prepay Credits (Edit changes reference_number per split).
     const ref = r.reference_number || r.source_reference;
     const seen = refs.get(key) ?? new Set<string>();

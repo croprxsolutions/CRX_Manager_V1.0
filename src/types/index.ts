@@ -1253,6 +1253,8 @@ export interface DeliveryEvidencePhoto {
   image_url: string;
   caption: string | null;
   uploaded_at?: string | null;
+  // The lines the screen showed when a signed-ticket photo was taken (20270309170000).
+  lines_seen?: { order_item_id: string; product_id: string; quantity: number; delivered: number }[] | null;
 }
 /** A delivery's receipt address, read through get_delivery_receipt_recipient. App-shaped: fetchReceiptRecipient maps the RPC's snake_case keys; never cast the raw result to this. */
 export interface ReceiptRecipient {
@@ -3847,6 +3849,10 @@ export interface Vehicle {
   updated_at: string;
 }
 
+// Equipment fields used by Job Detail and its worksheets.
+export type JobVehicle = Pick<Database['public']['Tables']['vehicles']['Row'],
+  'id' | 'vehicle_name' | 'vehicle_type' | 'category' | 'capacity_gallons' | 'capacity_unit' | 'status'>;
+
 // Application Services (custom application pricing per vehicle/service)
 
 // cost_per_acre_cents is NOT on this interface. Migration 20260729015706 revoked
@@ -5373,6 +5379,25 @@ export interface BelowCostApprovalDetail {
    * (20261021070000).
    */
   zero_lines: BelowCostZeroLine[];
+  /**
+   * Every below-cost line the database found in this save (pricing audit fix 1); empty when the
+   * database did not send a list (before that migration), and then the prompt names only the first line.
+   */
+  lines: BelowCostLine[];
+  /** Lines found beyond those listed. The database lists every line, so it sends 0; kept for a future cap. */
+  more_count: number;
+  /** The whole save's shortfall in cents, listed lines and the rest; null when not sent. */
+  total_shortfall_cents: number | null;
+}
+
+export interface BelowCostLine {
+  product_name: string | null;
+  unit_price_cents: number;
+  locked_unit_cost_cents: number;
+  quantity: number;
+  line_shortfall_cents: number;
+  /** 'unit': price and cost are per unit; 'line': a non-product invoice line, price and cost are the line's totals. */
+  per: 'unit' | 'line';
 }
 
 export interface BelowCostZeroLine {

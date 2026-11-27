@@ -2271,21 +2271,37 @@ try {
   }
   // Backtracking is MEASURED, not assumed: a hook that can be stalled is a hook
   // that can be timed out, and silence from a killed PreToolUse hook means ALLOW.
-  for (const pathological of [
-    `${"gh.".repeat(6000)}gh pr merge 1`,
-    `${"gh".repeat(10000)} pr merge 1`,
-    `gh${".gh".repeat(6000)} pr merge 1`,
+  // Measured as growth, not a wall-clock cap, so a slow or busy machine cannot
+  // fail it: 8x the input costs about 8x when linear and 64x when quadratic.
+  // The 5s backstop catches a linear-but-huge slowdown; the hook's own timeout
+  // is 255 seconds (.codex/hooks.json), and a normal run here takes ~5-15ms.
+  const fastestEvaluationMs = (command) => {
+    let fastest = Infinity;
+    for (let run = 0; run < 5; run += 1) {
+      const started = process.hrtime.bigint();
+      // No repoDir: the merge shape would spend a noisy 100-300ms in git
+      // subprocesses that hide the splitter's own growth.
+      evaluateProductionAction({
+        toolName: "PowerShell",
+        toolInput: { command },
+        nowMs: now,
+        runGh: () => objectedPrJson,
+      });
+      fastest = Math.min(fastest, Number(process.hrtime.bigint() - started) / 1e6);
+    }
+    return fastest;
+  };
+  for (const [label, pathological] of [
+    ["repeated gh.", (n) => `${"gh.".repeat(n)}gh pr merge 1`],
+    ["repeated gh", (n) => `${"gh".repeat(n)} pr merge 1`],
+    ["repeated .gh", (n) => `gh${".gh".repeat(n)} pr merge 1`],
   ]) {
-    const started = process.hrtime.bigint();
-    evaluateProductionAction({
-      toolName: "PowerShell",
-      toolInput: { command: pathological },
-      repoDir: risky.repo,
-      nowMs: now,
-      runGh: () => objectedPrJson,
-    });
-    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
-    assert.ok(elapsedMs < 250, `gh binary matching stays linear on adversarial input (${elapsedMs.toFixed(1)}ms)`);
+    const smallMs = fastestEvaluationMs(pathological(750));
+    const largeMs = fastestEvaluationMs(pathological(6000));
+    assert.ok(
+      largeMs < smallMs * 24 && largeMs < 5000,
+      `gh binary matching stays linear on adversarial input: ${label} (750 repeats ${smallMs.toFixed(1)}ms, 6000 repeats ${largeMs.toFixed(1)}ms)`,
+    );
   }
 
   // ── the SUBCOMMAND and OPTION words are shapes too (CodeRabbit, PR #630) ────
@@ -2377,26 +2393,6 @@ try {
   // Backtracking on the new word walk, for the same reason the block above
   // measures it: a stalled PreToolUse hook is a timed-out hook, and silence
   // means ALLOW. Unterminated quotes are the shape that can force a re-scan.
-  // Measured as growth, not a wall-clock cap, so a slow or busy machine cannot
-  // fail it: 8x the input costs about 8x when linear and 64x when quadratic.
-  // The 5s backstop catches a linear-but-huge slowdown; the hook's own timeout
-  // is 255 seconds (.codex/hooks.json), and a normal run here takes ~5-15ms.
-  const fastestEvaluationMs = (command) => {
-    let fastest = Infinity;
-    for (let run = 0; run < 5; run += 1) {
-      const started = process.hrtime.bigint();
-      // No repoDir: the merge shape would spend a noisy 100-300ms in git
-      // subprocesses that hide the splitter's own growth.
-      evaluateProductionAction({
-        toolName: "PowerShell",
-        toolInput: { command },
-        nowMs: now,
-        runGh: () => objectedPrJson,
-      });
-      fastest = Math.min(fastest, Number(process.hrtime.bigint() - started) / 1e6);
-    }
-    return fastest;
-  };
   for (const [label, pathological] of [
     ["unterminated double quotes", (n) => `gh api ${'"'.repeat(n)} -X POST repos/o/r/issues/1/comments`],
     ["unterminated single quotes", (n) => `gh api ${"'".repeat(n)} -X POST repos/o/r/issues/1/comments`],

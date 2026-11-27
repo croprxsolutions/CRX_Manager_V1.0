@@ -1,18 +1,21 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { supabase } from './db';
+import { supabase, supabaseUntyped } from './db';
 import {
   activeInvoiceCoversDelivery,
   activeInvoiceCoversOrder,
   activeInvoiceCountsTowardBilling,
   fetchActiveInvoiceCoveragePages,
+  fetchDeliveryBillingRemainders,
+  unbilledRemainderLabel,
   type ActiveInvoiceCoverageRow,
   type DeliveryInvoiceCoverage,
 } from './deliveryInvoiceCoverage';
 
 vi.mock('./db', () => ({
   supabase: { from: vi.fn() },
+  supabaseUntyped: { from: vi.fn() },
 }));
 
 const root = process.cwd();
@@ -176,12 +179,48 @@ describe('activeInvoiceCoversDelivery', () => {
     expect(integrityCleanup).toContain('Could not verify invoice coverage — refresh to try again.');
 
     const sharedSource = readFileSync(resolve(root, 'src/lib/deliveryInvoiceCoverage.ts'), 'utf8');
-    expect(sharedSource).toContain(".select('id, order_id, delivery_id, total_amount_cents, invoice_type, status, deleted_at')");
+    expect(sharedSource).toContain(".select('id, order_id, delivery_id, total_amount_cents, invoice_type, status, deleted_at, invoice_group_id')");
     expect(sharedSource).toContain('chunkIds(uniqueOrderIds, INVOICE_COVERAGE_ID_CHUNK_SIZE)');
     expect(sharedSource).toContain(".not('status', 'in', '(\"voided\",\"cancelled\")')");
     expect(sharedSource).toContain(".is('deleted_at', null)");
     expect(sharedSource).toContain('.range(from, from + INVOICE_COVERAGE_PAGE_SIZE - 1)');
     expect(sharedSource).toContain('if (page.length === 0)');
     expect(sharedSource).toContain('from += page.length');
+  });
+
+  describe('fetchDeliveryBillingRemainders (A4)', () => {
+    function remainderQuery(result: { data: unknown[] | null; error: unknown }) {
+      const q: Record<string, unknown> = {};
+      for (const m of ['select', 'in', 'gt', 'order']) q[m] = vi.fn(() => q);
+      q.range = vi.fn(async (from: number) => (from > 0 && result.data ? { data: [], error: null } : result));
+      return q;
+    }
+
+    it('sums the short lines per delivery and labels the rest', async () => {
+      const q = remainderQuery({
+        data: [
+          { delivery_id: 'd1', delivered_qty: 10, unbilled_qty: 4, unbilled_cents: 16000 },
+          { delivery_id: 'd2', delivered_qty: 3, unbilled_qty: 1.5, unbilled_cents: 501 },
+          { delivery_id: 'd2', delivered_qty: 2, unbilled_qty: 2, unbilled_cents: 1000 },
+        ],
+        error: null,
+      });
+      vi.mocked(supabaseUntyped.from).mockReturnValue(q as never);
+      const { data, error } = await fetchDeliveryBillingRemainders(['d1', 'd2', 'd1']);
+      expect(error).toBeNull();
+      expect(supabaseUntyped.from).toHaveBeenCalledWith('delivery_billing_remainders');
+      expect(q.in).toHaveBeenCalledWith('delivery_id', ['d1', 'd2']);
+      expect(q.gt).toHaveBeenCalledWith('unbilled_qty', 0);
+      expect(data?.get('d1')).toEqual({ deliveredQty: 10, unbilledQty: 4, unbilledCents: 16000 });
+      expect(unbilledRemainderLabel(data!.get('d1')!)).toBe('4 of 10 not billed ($160.00)');
+      expect(unbilledRemainderLabel(data!.get('d2')!)).toBe('3.5 of 5 not billed ($15.01)');
+    });
+
+    it('fails the read instead of reporting nothing unbilled', async () => {
+      vi.mocked(supabaseUntyped.from).mockReturnValue(remainderQuery({ data: null, error: null }) as never);
+      const { data, error } = await fetchDeliveryBillingRemainders(['d1']);
+      expect(data).toBeNull();
+      expect(error).not.toBeNull();
+    });
   });
 });

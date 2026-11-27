@@ -2,6 +2,8 @@
 
 Status: settled after one cold challenge (Astra gpt-6.2-astra high, 62 findings, 2026-11-25); targeted re-check of the revised mechanism pending. Read at `origin/staging` 1414a0d35; live probe on a local Docker copy migrated to d3f186d0c (the three later staging migrations touch none of these objects: checked by diff; the local copy is rebuilt from the PR head before the after-proof).
 
+PR 3 status (2026-11-26): lockdown migration `20270314160000`, reverse script and real-schema proof written; the proof passed on a local Docker copy (`CREW_LOCKDOWN_PROOF_PASS`). Not applied.
+
 ## 1. Outcome and authority
 
 **Business result (Mason, 2026-11-25, "Yes, hide them"; on Sol finding 1 of PR #2574, "fix"):** applicators must not *receive* job selling prices, chemical prices, billing-split percentages, the commission split or the internal memo. Payer names and account numbers stay visible. Admin and sales rep access is unchanged.
@@ -73,7 +75,7 @@ Mason, 2026-11-25 (relayed verbatim by the parent session): "Yes, second step". 
 ## Challenge settlement (Astra round 1)
 
 - **Corrected:** 1 (shares view keeps `is_applicator()`), 2–4, 7 (crew print shows names and accounts only; errors surface), 5, 10 (fbd crew view keeps payer identity), 14–18, 32 (text-only swap instead of new helper predicates), 19, 23 (trigger stays invoker), 34 (fixed column lists), 41 (per-phase expectations), 42, 45–47 (exact IDs and full payloads), 43, 44 (D writes on B; K, S added), 53 (protected-key list explicit), 54 (PR 1's one visible change named), 55, 58 (production order and recovery stated).
-- **Already true / no change:** 3 (no acres or % for crew), 11 (each screen keeps today's audience, enforced by verbatim filters), 13 (jobs `notes`, `loader_comment` and fbd `notes` are operational fields crew use today; no workflow copies price into them was found; `pricing_note` is always NULL), 16 (every job FK is validated and not deferrable; office branches are unchanged text), 28 (CHECK is validated), 29 (wording fixed), 49–51 (local probe hygiene; fixed where it affects a proof).
+- **Already true / no change:** 3 (no acres or % for crew), 11 (each screen keeps today's audience, enforced by verbatim filters), 13 (jobs `notes`, `loader_comment` and fbd `notes` are operational fields crew use today; no workflow copies price into them was found; `pricing_note` is always NULL), 16 (every job FK is validated, and jobs_quote_section_id_fkey is DEFERRABLE INITIALLY DEFERRED; office branches are unchanged text), 28 (CHECK is validated), 29 (wording fixed), 49–51 (local probe hygiene; fixed where it affects a proof).
 - **Out of scope (pre-existing, unchanged by this work; listed as follow-ups):** 20, 22 (billed-history trigger edge cases), 24, 59 (concurrent billing/save), 30, 31, 33 (board vs. dispatch-list membership differences), 32's timezone difference, 39 (performance: checked by timing the after-probe against before).
 - **Decision for the release owner, not Mason now:** 56 (whether PR 3 shares a release with PR 2).
 - **Declined suggestions:** 60, 62 (see "Alternative rejected"); 61 adopted.

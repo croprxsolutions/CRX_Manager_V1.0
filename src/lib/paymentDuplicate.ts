@@ -62,9 +62,10 @@ export async function findDuplicatePayment(
 
 export function duplicatePaymentMessage(match: DuplicatePayment, totalCents: number): string {
   const reference = match.reference_number || match.check_number;
-  const recorded = match.payment_date
-    ? ` recorded ${new Date(`${match.payment_date}T00:00:00`).toLocaleDateString()}`
+  // payment_date is the day the payment was received (possibly back-dated), not the day it was typed in.
+  const dated = match.payment_date
+    ? ` dated ${new Date(`${match.payment_date}T00:00:00`).toLocaleDateString()}`
     : '';
-  return `This customer already has a ${formatCents(totalCents)} payment with reference ${reference}${recorded}. `
+  return `This customer already has a ${formatCents(totalCents)} payment with reference ${reference}${dated}. `
     + 'Check Payment History first, or ask an admin to. Record it again only if this is a different check.';
 }

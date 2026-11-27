@@ -7,6 +7,7 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8').repl
 const rename = read('./smoke-liquid-weight-brand-recheck.sql');
 const core = read('./smoke-liquid-density-review.sql');
 const legacy = read('./smoke-product_weights.sql');
+const stagedActivation = read('../../supabase/migrations/20270312233100_enable_liquid_density_review.sql');
 const switchOpen = `CREATE OR REPLACE FUNCTION public.liquid_density_review_open() RETURNS boolean
   LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$ SELECT true; $$;`;
 
@@ -19,6 +20,8 @@ function expectRollback(sql, expected = /^ERROR:\s+SMOKE_PASS_ROLLBACK\r?$/m) {
 try {
   buildContainer({ stopBefore: migration });
   seedUsers();
+  // Generic replay records #2688 without the staging marker. Its open path is exercised below.
+  assert.equal(scalar('SELECT public.liquid_density_review_open();'), 'f');
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data)
     VALUES (gen_random_uuid(), 'density-brand-reviewer@example.invalid', '{"full_name":"Density Reviewer","role":"admin"}');`);
   const before = psql(`BEGIN;\n${switchOpen}\n${rename}\nROLLBACK;`, { allowFailure: true });
@@ -26,6 +29,15 @@ try {
   assert.match(before.stderr, /SMOKE_FAIL: a substantive rename must return the approved weight to draft/);
 
   const candidate = read(`../../supabase/migrations/${migration}`);
+  const staging = `BEGIN;
+SET LOCAL crx.liquid_weight_staging_project = 'fsnjredpmakbmhwowjjt';
+${stagedActivation}
+${candidate}
+DO $proof$ BEGIN
+  IF public.liquid_density_review_open() IS DISTINCT FROM true THEN RAISE EXCEPTION 'SMOKE_FAIL: preparation must preserve open staging'; END IF;
+END $proof$;`;
+  expectRollback(`${staging}\n${rename}\nROLLBACK;`);
+  assert.equal(scalar('SELECT public.liquid_density_review_open();'), 'f');
   psql(`BEGIN;\n${candidate}\nCOMMIT;`);
   assert.equal(scalar('SELECT public.liquid_density_review_open();'), 'f');
   assert.equal(scalar(`SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace

@@ -1050,15 +1050,15 @@ export function BlendTicketDetail() {
     try {
       const { data, error } = await supabase.rpc('reverse_application_record', {
         p_application_record_id: applicationRecordId,
-        p_idempotency_key: undoFilingIdem.getKey(),
+        p_idempotency_key: undoFilingIdem.getKeyFor(applicationRecordId),
       });
       if (error) {
         const bindingRejection = getIdempotencyBindingRejection(error);
-        if (bindingRejection === 'intent' || bindingRejection === 'actor') undoFilingIdem.resetKey();
+        if (bindingRejection === 'intent' || bindingRejection === 'actor') undoFilingIdem.resetKeyFor(applicationRecordId);
         throw error;
       }
       assertRpcResult(data, 'reverse_application_record');
-      undoFilingIdem.resetKey();
+      undoFilingIdem.resetKeyFor(applicationRecordId);
       const result = data as { status?: string; kept_on_job_lines?: number; over_taken_lines?: number } | null;
       const review = (result?.kept_on_job_lines ?? 0) + (result?.over_taken_lines ?? 0) > 0;
       // reverse_application_record writes its own application_record_reversed activity entry.

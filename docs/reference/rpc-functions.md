@@ -706,7 +706,7 @@ The retained Phase 1a `preview_product_pricing_changes` and `apply_product_prici
 
 ### Custom Application Workflow
 - `create_job_from_quote_section(p_quote_id, p_section_id, p_performed_by, p_idempotency_key)` -> jsonb {job_id} -- Creates scheduled job from planned quote section with pre-filled chemicals and fields
-- `get_program_completion(p_season)` -> jsonb array -- Office-only (active admin or sales rep) browser RPC. Returns planned vs actual acres per program section for the Program Tracker dashboard; migration `20260728182141` enforces the role gate in-body.
+- `get_program_completion(p_season)` -> jsonb array -- Office-only (active admin or sales rep) browser RPC for Today and Program Tracker. Returns planned and confirmed applied acres per program section and excludes removed quotes. The quote determines the reporting season. The reader counts saved application passes for a field the program's farm owns or pays for and excludes ticket-only acreage.
 
 ### Field Application Workflow V2 / Phase 1 (2026-04-29 rewrite)
 - `derive_customer_shares_from_fields(p_field_ids uuid[], p_applied_acres_map jsonb DEFAULT NULL)` -> jsonb `{rows[], customers[], total_applied_acres, field_count, fallback_used_field_ids[]}` — **Phase 1 rewrite:** returns per-(field × customer) detail in `rows` and per-customer aggregate in `customers`. Falls back to `fields.customer_id` at 100% when a field has no `field_billing_defaults` rows. Office-only since `20261023090000` (its definer callers already require an admin or sales rep).

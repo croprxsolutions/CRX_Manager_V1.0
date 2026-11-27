@@ -788,7 +788,7 @@ export default function OfficeCockpit() {
           'get_program_completion'
         );
         if (programs.length > 0) {
-          const totalPct = programs.reduce((sum, program) => sum + (Number(program.completion_pct) || 0), 0);
+          const totalPct = programs.reduce((sum, program) => sum + Math.min(Number(program.completion_pct) || 0, 100), 0);
           programCompletionPct = Math.round(totalPct / programs.length);
         } else {
           programCompletionPct = 0;

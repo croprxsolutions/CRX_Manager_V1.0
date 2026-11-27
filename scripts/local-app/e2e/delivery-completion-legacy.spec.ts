@@ -1,0 +1,117 @@
+import { expect, test, type Page } from '@playwright/test';
+import { localSql } from './local-db';
+
+// Local compatibility proof. The same old screen and invented fixtures run before and after the additive migration.
+const id = (name: string) => "md5('invented-completion-notice-" + name + "')::uuid";
+const delivery = id('delivery');
+const order = id('order');
+const product = id('product');
+const customer = id('customer');
+const invoiceIds = 'SELECT id FROM public.invoices WHERE delivery_id = ' + delivery;
+let deliveryId: string;
+let adminId: string;
+let seeded = false;
+
+function seedDelivery(status: 'scheduled' | 'in_progress' = 'in_progress') {
+  adminId = localSql("SELECT id FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY created_at LIMIT 1");
+  expect(adminId).toMatch(/^[0-9a-f-]{36}$/);
+  // Walkthrough seeding assigns the invented admin role while the directory trigger is paused.
+  // Exercise the original sender with the same synchronized directory that a real role update produces.
+  localSql(`UPDATE public.profiles SET role = 'admin' WHERE id = '${adminId}';`);
+  expect(localSql('SELECT count(*) FROM public.deliveries WHERE id = ' + delivery)).toBe('0');
+  localSql(`
+    BEGIN;
+    SET LOCAL session_replication_role = replica;
+    INSERT INTO public.customers(id,farm_name,is_active) VALUES (${customer},'Invented Delivery Notice Farm',true);
+    INSERT INTO public.products(id,product_name,sku,product_form,inventory_unit,unit_size,rate_unit,container_unit,
+      rate_per_acre,current_cost,tier1_price,tier2_price,tier3_price,pricing_version,is_active)
+      VALUES (${product},'Invented Completion Notice Product','INVENTED-NOTICE-01','liquid','Gal','Gal','Gal','Gal',1,6,10,10,10,1,true);
+    INSERT INTO public.inventory(product_id,location,quantity_available,quantity_prebooked,unit_size)
+      VALUES (${product},'Main Warehouse',20,2,'Gal');
+    INSERT INTO public.orders(id,order_number,customer_id,status)
+      VALUES (${order},'INVENTED-NOTICE-ORDER',${customer},'confirmed');
+    INSERT INTO public.order_items(id,order_id,product_id,product_name,unit_size,total_units_needed,quantity_delivered,
+      quantity_remaining,price_per_unit,cost_per_unit,total_price,profit,net_margin)
+    VALUES (${id('order-line')},${order},${product},'Invented Completion Notice Product','Gal',2,0,2,10,6,20,8,40);
+    INSERT INTO public.deliveries(id,delivery_number,order_id,customer_id,created_by,assigned_driver,status,scheduled_date)
+      VALUES (${delivery},'INVENTED-NOTICE-DELIVERY',${order},${customer},'${adminId}',
+        NULL,'${status}',(now() AT TIME ZONE 'America/Chicago')::date);
+    INSERT INTO public.delivery_items(id,delivery_id,order_item_id,product_id,quantity,quantity_delivered,unit_size)
+      VALUES (${id('line')},${delivery},${id('order-line')},${product},2,0,'Gal');
+    COMMIT;`);
+  deliveryId = localSql('SELECT ' + delivery);
+  seeded = true;
+}
+
+test.afterEach(() => {
+  if (seeded) localSql(`
+    BEGIN;
+    SET LOCAL session_replication_role = replica;
+    DELETE FROM public.notifications WHERE related_entity_id IN (${delivery}, ${order});
+    DELETE FROM public.failed_notifications WHERE entity_id = ${delivery};
+    DELETE FROM public.activity_feed WHERE customer_id = ${customer} OR related_entity_id IN (${delivery}, ${order});
+    DELETE FROM public.financial_audit_log WHERE entity_id IN (${delivery}, ${order}) OR entity_id IN (${invoiceIds});
+    DELETE FROM public.invoice_items WHERE invoice_id IN (${invoiceIds});
+    DELETE FROM public.invoices WHERE delivery_id = ${delivery};
+    DELETE FROM public.delivery_brand_events WHERE delivery_id = ${delivery};
+    DELETE FROM public.idempotency_keys WHERE operation = 'complete_delivery' AND result ->> 'delivery_id' = '${deliveryId}';
+    DELETE FROM public.inventory_transactions WHERE delivery_id = ${delivery};
+    DELETE FROM public.delivery_remainders WHERE original_delivery_id = ${delivery};
+    DELETE FROM public.delivery_receipt_queue WHERE delivery_id = ${delivery};
+    DELETE FROM storage.objects WHERE bucket_id = 'delivery-signatures' AND name LIKE 'signatures/${deliveryId}/%';
+    DELETE FROM public.delivery_items WHERE delivery_id = ${delivery};
+    DELETE FROM public.deliveries WHERE id = ${delivery};
+    DELETE FROM public.order_items WHERE order_id = ${order};
+    DELETE FROM public.orders WHERE id = ${order};
+    DELETE FROM public.inventory WHERE product_id = ${product};
+    DELETE FROM public.products WHERE id = ${product};
+    DELETE FROM public.customers WHERE id = ${customer};
+    COMMIT;`);
+  seeded = false;
+});
+
+async function signIn(page: Page, email = process.env.LOCAL_TEST_EMAIL!, password = process.env.LOCAL_TEST_PASSWORD!) {
+  await page.addLocatorHandler(
+    page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: /What's new/i }) }),
+    async dialog => { await dialog.getByRole('button', { name: 'Close' }).click(); },
+  );
+  await page.goto('/login');
+  await page.fill('#email', email);
+  await page.fill('#password', password);
+  await page.getByRole('button', { name: /sign in/i }).click();
+  await expect(page).not.toHaveURL(/login/);
+}
+
+test('Original Delivery Detail completes and sends its legacy direct notice', async ({ page }) => {
+  test.setTimeout(120_000);
+  seedDelivery();
+  await signIn(page);
+  const hasCheckedSender = localSql("SELECT to_regprocedure('public.notify_saved_delivery_completion(uuid,text,text)') IS NOT NULL") === 't';
+  const sentBefore = hasCheckedSender
+    ? localSql('SELECT count(*) FROM public.delivery_completion_notice_events')
+    : null;
+  let checkedRequests = 0;
+  page.on('request', request => {
+    if (new URL(request.url()).pathname.endsWith('/rpc/notify_saved_delivery_completion')) checkedRequests++;
+  });
+  await page.goto('/deliveries/' + deliveryId);
+  const section = page.locator('#delivery-complete');
+  await expect(section).toBeVisible({ timeout: 30_000 });
+  await section.getByText('Record without proof (admin only)').click();
+  await section.locator('#no-proof-reason').fill('Invented customer confirmed the delivery on the original screen.');
+  await section.getByRole('button', { name: 'Complete Delivery', exact: true }).click();
+  const save = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/rpc/complete_delivery'));
+  const direct = page.waitForRequest(request => request.method() === 'POST'
+    && new URL(request.url()).pathname.endsWith('/rest/v1/notifications'));
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Complete Delivery', exact: true }).click();
+  const [request] = await Promise.all([save, direct]);
+  expect(request.postDataJSON().p_record_completion_notice).toBeUndefined();
+  await expect.poll(() => localSql(`
+    SELECT count(*) FROM public.notifications WHERE related_entity_id = ${delivery}
+      AND user_id = '${adminId}' AND created_by = '${adminId}' AND notification_type = 'delivery_completed';`)).toBe('1');
+  expect(checkedRequests).toBe(0);
+  if (hasCheckedSender) expect(localSql('SELECT count(*) FROM public.delivery_completion_notice_events')).toBe(sentBefore);
+  await page.reload();
+  await expect(page.getByText(/^completed$/i).first()).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath(hasCheckedSender ? 'legacy-on-additive-db.png' : 'legacy-on-original-db.png'), fullPage: true });
+});

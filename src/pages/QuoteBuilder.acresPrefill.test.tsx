@@ -289,7 +289,7 @@ describe('QuoteBuilder — acres on a new line', () => {
     expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
 
     fireEvent.click(screen.getByText('Save draft'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Yes, save' }));
+    fireEvent.click(await screen.findByRole('button', { name: "Yes, they're right" }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
     const args = mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as {
       p_sections: { items: { acres: number | null; total_units_needed: number | null; total_price: number }[] }[];
@@ -315,7 +315,7 @@ describe('QuoteBuilder — acres on a new line', () => {
       ? { data: null, error: { message: 'save refused' } }
       : name === 'generate_quote_number' ? { data: 'Q-2026-0001', error: null } : { data: null, error: null }));
     fireEvent.click(screen.getByText('Save draft'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Yes, save' }));
+    fireEvent.click(await screen.findByRole('button', { name: "Yes, they're right" }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
     await waitFor(() => expect(screen.queryByText(/acres filled in automatically/)).not.toBeInTheDocument());
     expect(screen.getAllByLabelText('Acres')[1]).toHaveClass('bg-amber-50');

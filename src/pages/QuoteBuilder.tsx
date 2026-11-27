@@ -2447,6 +2447,7 @@ export default function QuoteBuilder() {
   const confirmAutoAcres = async (): Promise<boolean> => {
     const count = unconfirmedAcresCount(sections);
     if (count === 0) return true;
+    if (acresCheckRef.current) return false; // one question at a time; a second action waits for a new click (Luna, #2445)
     const ok = await new Promise<boolean>((answer) => setAcresCheck({ count, answer }));
     setAcresCheck(null);
     return ok;
@@ -6649,8 +6650,8 @@ export default function QuoteBuilder() {
         onClose={() => acresCheck?.answer(false)}
         onConfirm={() => acresCheck?.answer(true)}
         title="Check the auto-filled acres"
-        message={`${acresCheck?.count === 1 ? '1 line has' : `${acresCheck?.count ?? 0} lines have`} acres filled in automatically (highlighted in yellow). They set the quantity, the price and the treated acres. Are they right?`}
-        confirmLabel="Yes, save"
+        message={`${acresCheck?.count === 1 ? '1 line has' : `${acresCheck?.count ?? 0} lines have`} acres filled in automatically (highlighted in yellow). They can set the quantity, the price and the treated acres. Are they right?`}
+        confirmLabel="Yes, they're right"
         cancelLabel="Let me check"
         variant="warning"
         icon={AlertTriangle}

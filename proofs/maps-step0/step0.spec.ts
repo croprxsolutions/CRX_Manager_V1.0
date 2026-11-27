@@ -361,7 +361,7 @@ test('trashing a three-corner draft matches the app restart expectation', async 
 });
 
 test('a stalled outage request falls back without losing the sketch', async ({ page }) => {
-  await openProof(page);
+  const { externalRequests, consoleErrors } = await openProof(page);
   const points = polygonClicks(await getCanvasBox(page));
   await callProof(page, 'startPolygon');
   for (const point of points.slice(0, 2)) await page.mouse.click(point.x, point.y);
@@ -385,4 +385,5 @@ test('a stalled outage request falls back without losing the sketch', async ({ p
   } finally {
     releaseTile();
   }
+  await expectNoExternalRequestsOrErrors(externalRequests, consoleErrors);
 });

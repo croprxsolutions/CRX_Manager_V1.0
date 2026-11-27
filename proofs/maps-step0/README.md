@@ -24,21 +24,22 @@ npm test -- src/components/map/DrawControl.test.tsx
 npx --no-install playwright test --config=proofs/maps-step0/playwright.config.ts
 ```
 
-The browser suite builds the standalone production bundle under `proofs/maps-step0/dist` and serves it on loopback. Both healthy picture files are part of that bundle. The preview server supplies the deliberate HTTP 503 fixture used by **Fail picture**. A deployed proof requires its own approved outage test setup.
+The browser suite builds the standalone production bundle under `proofs/maps-step0/dist` and serves it on loopback. Both healthy picture files are part of that bundle. **Fail picture** sends one request to a separate HTTP 503 fixture. The preview server supplies it locally and the protected `?drawingOutage=1` probe supplies it on staging. A stalled fixture is cancelled before the page switches pictures.
 
 Before opening the staging PR, run `npm run build` locally with `VERCEL_TARGET_ENV=staging` and `VERCEL_GIT_COMMIT_REF=staging`. Check that `dist/api/maps-step0-draw/index.html` and the built entry and worker files exist, the HTML and script resolve assets under `/api/maps-step0-draw/assets/`, and the main app service worker excludes this route. Clear the two variables and confirm a normal build omits the proof directory.
 
-To open the page for free play, run `npx --no-install vite --config proofs/maps-step0/vite.config.ts --host 127.0.0.1` and open the localhost address Vite prints. Click **Start polygon**, click the map to place corners, and click the first corner again to close the shape. Click the selected polygon to show its vertices, then drag a vertex. **Fail picture** makes the active tile route return HTTP 503. **Retry** restores its healthy local route. **Reopen** reloads the page and restores the last saved synthetic polygon in that tab.
+To open the page for free play, run `npx --no-install vite --config proofs/maps-step0/vite.config.ts --host 127.0.0.1` and open the localhost address Vite prints. Click **Start polygon**, click the map to place corners, and click the first corner again to close the shape. Click the selected polygon to show its vertices, then drag a vertex. **Fail picture** requests the outage fixture and changes to the backup picture on failure. **Retry** restores the selected picture. **Reopen** reloads the page and restores the last saved synthetic polygon in that tab.
 
 ## Local checks
 
-Verified again on Nov. 26, 2026 at about 12:30 a.m. Central in desktop Google Chrome 158.0.8127.88 on Windows, using Playwright with software WebGL at 1000 × 800. The built page ran on a loopback URL. Three existing `DrawControl` tests and four Chrome scenarios passed. The proof also passed strict TypeScript and ESLint checks.
+Verified on the evening of Nov. 26, 2026 in desktop Google Chrome 158.0.8127.88 on Windows, using Playwright with software WebGL at 1000 × 800. The built page ran on a loopback URL. Three existing `DrawControl` tests and five Chrome scenarios passed. The proof also passed strict TypeScript and ESLint checks.
 
 | Check | Evidence collected by the test |
 | --- | --- |
 | Drawing compatibility | Chrome draws and closes a four-corner polygon, shows the scoped Draw controls, and can trash a sketch and start again. The same-origin raster is below the drawing layers. |
-| Manual switch, fallback and Retry during a sketch | Chrome switches A → B with two corners placed. A real local tile request returns 503 and the map renders A automatically. Retry renders B. The active geometry, mode, camera and map identity stay the same. The sketch closes with four corners and reopens with identical coordinates. |
-| Manual switch, fallback and Retry during a vertex drag | Chrome starts dragging a vertex while B is visible, switches to A with the mouse still down, receives a tile 503 and automatically renders B, then retries A. The held edit, mode, camera and original canvas survive. The vertex reaches the intended release point and its final coordinates survive a reopen. |
+| Manual switch, fallback and Retry during a sketch | Chrome switches A → B with two corners placed. The local outage fixture returns 503 and the map renders A automatically. Retry renders B. The active geometry, mode, camera and map identity stay the same. The sketch closes with four corners and reopens with identical coordinates. |
+| Manual switch, fallback and Retry during a vertex drag | Chrome starts dragging a vertex while B is visible, switches to A with the mouse still down, receives a fixture 503 and automatically renders B, then retries A. The held edit, mode, camera and original canvas survive. The vertex reaches the intended release point and its final coordinates survive a reopen. |
+| Stalled outage request | Chrome holds the fixture response open. The page cancels the request, switches to B and retries A, preserving the draft, camera, mode and map instance. |
 | Local-only execution | The browser checks the rendered colors and observes the 503. The suite fails on any external HTTP request or unexpected browser error. Both recovery cases use a deliberately moved, zoomed, rotated and tilted camera. |
 
 ## Step 0 items that still need staging
@@ -47,4 +48,4 @@ Verified again on Nov. 26, 2026 at about 12:30 a.m. Central in desktop Google Ch
 - Verify Static Maps at 640 × 640, scale 2, including browser access to the image bytes and PDF embedding. Check bad key, quota and malformed-outline responses and distinguish an error or warning image from a usable picture.
 - Confirm Places autocomplete and place details. Hand-test drawing, dragging, switching and outage recovery on the oldest work phone inside the installed staging app. Repeat a desktop hand test against the deployed build.
 
-The prototype simulates one provider outage and restores the healthy route on Retry. Persistent outages, the full provider chain and blank-map fallback, deployed security policy, phone touch behavior and CRX field persistence remain unverified. The shared engine swap waits until the Step 0 staging checks pass.
+The prototype simulates an outage and restores the healthy route on Retry. On the deployed page, a real set of failed raster requests is a separate check from the deliberate fixture. The full provider chain, deployed security policy, physical phone touch behavior and CRX field persistence remain unverified. The shared engine swap waits until the Step 0 staging checks pass.

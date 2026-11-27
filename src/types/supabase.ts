@@ -17024,6 +17024,7 @@ export type Database = {
         Returns: {
           below_reorder: boolean
           category: string
+          location: string
           net_available: number
           product_id: string
           product_name: string
@@ -20494,6 +20495,7 @@ export type Database = {
         Returns: {
           below_reorder: boolean
           category: string
+          location: string
           net_available: number
           product_id: string
           product_name: string

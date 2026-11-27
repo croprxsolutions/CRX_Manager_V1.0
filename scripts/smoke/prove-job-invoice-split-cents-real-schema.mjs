@@ -263,7 +263,7 @@ const OLD_IMPL = '53ecf1279da3aa7ea1590f440c6eb225';  // 20270303100000 (staging
 const NEW_IMPL = '90141e27397d1766be19d280bb9a046f';
 const SAVE = 'public._save_invoice_lineage_unaware_impl_20260827(jsonb,jsonb,text)';
 const OLD_SAVE = 'cf36f99934d4b68aa7e9d3eab0b04fb8';  // 20261106140000 (live)
-const NEW_SAVE = '52a29445b4b88e6c068ae55c014139c9';
+const NEW_SAVE = '9024a890693a8b251e914f6705575292';
 const SAVE_SOURCE = path.join(MIGRATIONS, '20261106140000_invoice_resave_keeps_cost.sql');
 const md5Of = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
 const meta = (sig) => scalar(`SELECT concat_ws('|', prosecdef, proowner::regrole, proconfig::text, coalesce(proacl::text, '-')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
@@ -346,8 +346,9 @@ function seed() {
         FROM invoices i WHERE i.job_id = p_job AND i.deleted_at IS NULL $f$;
     -- What the invoice editor sends for one owner's invoice of the job (InvoiceDetail itemsPayload): every line with
     -- its id, a header note edited; p_delta added to the first product line's quantity; p_unit / p_cost, when given,
-    -- replace every product line's unit / cost.
-    CREATE FUNCTION jx.payload(p_job uuid, p_farm text, p_delta numeric, p_unit text DEFAULT NULL, p_cost bigint DEFAULT NULL)
+    -- replace every product line's unit / cost; p_bare_ids sends each line id upper-case without hyphens.
+    CREATE FUNCTION jx.payload(p_job uuid, p_farm text, p_delta numeric, p_unit text DEFAULT NULL, p_cost bigint DEFAULT NULL,
+        p_bare_ids boolean DEFAULT false)
       RETURNS jsonb LANGUAGE sql SECURITY DEFINER
       SET search_path = public, pg_temp AS $f$
       SELECT jsonb_build_object(
@@ -356,7 +357,8 @@ function seed() {
           'purchase_order_ref', i.purchase_order_ref, 'header_notes', 'note edited', 'footer_notes', i.footer_notes,
           'salesman_id', i.salesman_id, 'season', i.season),
         'items', (SELECT jsonb_agg(jsonb_build_object(
-            'id', x.id, 'order_item_id', x.order_item_id, 'product_id', x.product_id, 'vendor', x.vendor,
+            'id', CASE WHEN p_bare_ids THEN upper(replace(x.id::text, '-', '')) ELSE x.id::text END,
+            'order_item_id', x.order_item_id, 'product_id', x.product_id, 'vendor', x.vendor,
             'description', x.description,
             'quantity', x.quantity + CASE WHEN x.sort_order = (SELECT min(y.sort_order) FROM invoice_items y
                                                                   WHERE y.invoice_id = i.id AND y.product_id IS NOT NULL)
@@ -392,23 +394,25 @@ const THIRDS = [[F3A, F3B, F3C], [5, 5, 5]];
 // Desk MED 1 on #2686: after Create Invoice, the editor saves owner A's invoice through the app's own save_invoice
 // (p_delta 0 = a note-only edit; 1 = one more Gal on its first line).
 const asUser = (uid) => `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);\n`;
-const resaveCase = (fields, acres, lines, delta, { unit = null, cost = null, saver = ADMIN } = {}) => `${asAdmin}
+const resaveCase = (fields, acres, lines, delta, { unit = null, cost = null, saver = ADMIN, bare = false } = {}) => `${asAdmin}
 CREATE TEMP TABLE j AS SELECT jx.job(ARRAY[${fields.map((x) => `'${x}'`).join(',')}]::uuid[], ARRAY[${acres.join(',')}]::numeric[],
   '${JSON.stringify(lines)}'::jsonb) AS id;
 ${asUser(saver)}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${saver}', 'jobcents-' || gen_random_uuid());
-CREATE TEMP TABLE pl AS SELECT jx.payload((SELECT id FROM j), 'A', ${delta}, ${unit ? `'${unit}'` : 'NULL'}, ${cost ?? 'NULL'}) AS p;
+CREATE TEMP TABLE pl AS SELECT jx.payload((SELECT id FROM j), 'A', ${delta}, ${unit ? `'${unit}'` : 'NULL'}, ${cost ?? 'NULL'}, ${bare}) AS p;
 SELECT public.save_invoice((SELECT p->'invoice' FROM pl), (SELECT p->'items' FROM pl), 'jobcents-save-' || gen_random_uuid());
 SELECT jx.sums((SELECT id FROM j)) || ' || ' || jx.lines((SELECT id FROM j)) || ' || ' || jx.ties((SELECT id FROM j));`;
 const RESAVE = {
   noteThirds: resaveCase(...THIRDS, [L(Y, 10, 1234)], 0),
   noteBigThirds: resaveCase(...THIRDS, [L(X, 1, 999999)], 0),
   qtyThirds: resaveCase(...THIRDS, [L(Y, 10, 1234)], 1),
-  // Sol r4 HIGH 2 (refute by running): a sales rep runs Create Invoice (so the owner invoices are theirs to edit; a rep
+  // A sales rep's cost (Sol r4 HIGH 2 checked here): a sales rep runs Create Invoice (so the owner invoices are theirs to edit; a rep
   // can't save an invoice someone else made: INVOICE_SCOPE_DENIED), then saves A's invoice sending cost_cents 0 on every
   // product line; the server puts the cost back (_cost_step2_invoice_items), so A's booked cost and base do not move.
   repCostZero: resaveCase(...THIRDS, [L(Y, 10, 1234)], 0, { cost: 0, saver: REP }),
   // Sol r4 MED 7: the same quantity number in another unit (Gal -> fl oz) is not the same line, so it is re-priced.
   unitChange: resaveCase(...THIRDS, [L(Y, 10, 1234)], 0, { unit: 'fl oz' }),
+  // Sol r5 MED 5: the same line ids in another spelling Postgres accepts (upper-case, no hyphens) still find their line.
+  bareIds: resaveCase(...THIRDS, [L(Y, 10, 1234)], 0, { bare: true }),
 };
 const RESAVE_AFTER = {
   noteThirds: 'A=4114/2333 B=4113/2333 C=4113/2333 | Y=12340/12340',
@@ -417,6 +421,7 @@ const RESAVE_AFTER = {
   qtyThirds: 'A=5347/3033 B=4113/2333 C=4113/2333 | Y=13573/13574',
   repCostZero: 'A=4114/2333 B=4113/2333 C=4113/2333 | Y=12340/12340',
   unitChange: 'A=4113/2333 B=4113/2333 C=4113/2333 | Y=12339/12340',
+  bareIds: 'A=4114/2333 B=4113/2333 C=4113/2333 | Y=12340/12340',
 };
 // With only the transfer applied (the 20261106140000 save body back), a note-only re-save re-rounds A's line.
 const RESAVE_OLD_SAVE = {
@@ -425,10 +430,13 @@ const RESAVE_OLD_SAVE = {
   qtyThirds: 'A=5347/3033 B=4113/2333 C=4113/2333 | Y=13573/13574',
   repCostZero: 'A=4113/2333 B=4113/2333 C=4113/2333 | Y=12339/12340',
   unitChange: 'A=4113/2333 B=4113/2333 C=4113/2333 | Y=12339/12340',
+  bareIds: 'A=4113/2333 B=4113/2333 C=4113/2333 | Y=12339/12340',
 };
-// Sol r4 HIGH 1 (refute by running): two editors open owner A's invoice. The first saves a note (A keeps 4114 and its
-// lines get new ids); the second then saves the lines it loaded, whose ids are gone: refused by save_invoice
-// (GENERATED_INVOICE_LINE_ID_INVALID), nothing written, so A still bills 4114 and the group $123.40.
+// Two editors of owner A's invoice (Sol r4 HIGH 1 checked here). The first saves a note (A keeps 4114 and its lines get
+// new ids); the second then saves the lines it loaded, whose ids are gone: refused by save_invoice
+// (GENERATED_INVOICE_LINE_ID_INVALID), nothing written, so A still bills 4114 and the group $123.40. The two saves run one
+// after the other in one transaction here; two real sessions are ordered the same way, because _save_invoice_scoped_impl
+// locks the invoice row FOR UPDATE before it checks the line ids, so the second waits for the first to commit.
 const TWO_EDITORS = `${asAdmin}
 CREATE TEMP TABLE j AS SELECT jx.job(ARRAY['${F3A}','${F3B}','${F3C}']::uuid[], ARRAY[5,5,5]::numeric[],
   '${JSON.stringify([L(Y, 10, 1234)])}'::jsonb) AS id;
@@ -623,7 +631,7 @@ function main() {
   const saveBody = Buffer.from(scalar(`SELECT translate(encode(convert_to(replace(prosrc, chr(13), ''), 'UTF8'), 'base64'), E'\\n', '') FROM pg_proc WHERE oid = '${SAVE}'::regprocedure;`), 'base64').toString('utf8');
   let oldSave = swap(saveBody, "  -- Job invoice cents (Mason, 2026-11-26; Taha, 2026-11-27): each product line of a job's owner invoice, by line id.\n  v_job_cents jsonb := '{}'::jsonb;\n  v_job_line jsonb;\n", '');
   const KEEP_SNAPSHOT = /\n {2}-- Job invoice cents \(Mason, 2026-11-26; Taha, 2026-11-27\): Create Invoice shares[\s\S]*?\n {2}END IF;\n/;
-  const KEEP_LINE = / {4}v_job_line := v_job_cents -> lower[\s\S]*?\n {4}END IF;\n/;
+  const KEEP_LINE = / {4}-- Keyed by the id as a uuid[\s\S]*?\n {4}END IF;\n/;
   assert.equal(oldSave.match(new RegExp(KEEP_SNAPSHOT.source, 'g'))?.length, 1, 'the re-save snapshot is in the body once');
   assert.equal(oldSave.match(new RegExp(KEEP_LINE.source, 'g'))?.length, 1, 'the re-save keep is in the body once');
   oldSave = oldSave.replace(KEEP_SNAPSHOT, '').replace(KEEP_LINE, '');

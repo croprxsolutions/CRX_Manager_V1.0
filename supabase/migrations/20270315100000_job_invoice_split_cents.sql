@@ -48,8 +48,10 @@
 --   quantity's cost and the owners' costs can differ from the whole line's by under a cent each (tying them needs a
 --   stored booked cost per line, a schema change). An owner's amount follows its acre share while its quantity is
 --   rounded to 0.0001 of a unit, so:
---   1. On a line priced at or near cost an owner can bill under its own booked cost: under a cent at normal prices,
---      about $0.50 at most (the two 50-cent checks hold amount and cost separately, so the gap can just pass $0.50).
+--   1. On a line priced at or near cost an owner can bill under its own booked cost: under a cent at normal prices
+--      (a few cents on a tiny line where the never-$0 step tops up other owners: 0.005 Gal at cost at $10 on
+--      2/2/2/2/92% acres bills the 92% owner 1 cent against 5 cents), about $0.50 at most (the two 50-cent checks hold
+--      amount and cost separately, so the gap can just pass $0.50).
 --      1 Gal at a $200.00 price and $200.00 cost in thirds bills A $66.67 against $66.68 booked cost.
 --   2. An owner's amount can differ from its quantity x unit price: under a cent at normal prices. The 50-cent check
 --      does not hold this gap: it is at most 0.0001 of the unit price plus a cent (about $0.50 at $5,000 a unit), plus
@@ -82,6 +84,8 @@ BEGIN
     RAISE EXCEPTION 'JOB_INVOICE_SPLIT_CENTS_PREFLIGHT: the transfer''s owner, settings or grants are not the reviewed ones';
   END IF;
   IF v_split IS NULL
+     OR (SELECT count(*) FROM pg_proc o WHERE o.pronamespace = 'public'::regnamespace
+            AND o.proname = '_job_transfer_split_qty_20270207') <> 1
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
     RAISE EXCEPTION 'JOB_INVOICE_SPLIT_CENTS_PREFLIGHT: the largest-remainder helper is not the reviewed one (20270226150000)';
   END IF;
@@ -1175,9 +1179,12 @@ BEGIN
        AND ABS((v_item->>'extended_cents')::bigint - v_extended) <= CEIL(v_qty)::bigint + 1 THEN
       v_extended := (v_item->>'extended_cents')::bigint;
     END IF;
-    v_job_line := v_job_cents -> lower(NULLIF(v_item->>'id', ''));
+    -- Keyed by the id as a uuid, so any spelling Postgres accepts finds its line. Only on a job owner invoice being
+    -- edited, whose line ids _save_invoice_scoped_impl has already cast and checked, so the cast cannot fail here.
+    v_job_line := CASE WHEN v_job_cents <> '{}'::jsonb AND NULLIF(v_item->>'id', '') IS NOT NULL
+                       THEN v_job_cents -> ((v_item->>'id')::uuid)::text END;
     IF v_job_line IS NOT NULL THEN
-      v_job_cents := v_job_cents - lower(v_item->>'id');  -- used up by the first entry with its id, kept or not
+      v_job_cents := v_job_cents - ((v_item->>'id')::uuid)::text;  -- used up by the first entry with its id, kept or not
       IF (v_job_line->>'product_id')::uuid IS NOT DISTINCT FROM (v_item->>'product_id')::uuid
          AND (v_job_line->>'unit_size') IS NOT DISTINCT FROM (v_item->>'unit_size')
          AND (v_job_line->>'quantity')::numeric = v_qty
@@ -1377,7 +1384,7 @@ BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '90141e27397d1766be19d280bb9a046f'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-          WHERE p.oid = 'public._save_invoice_lineage_unaware_impl_20260827(jsonb,jsonb,text)'::regprocedure) IS DISTINCT FROM '52a29445b4b88e6c068ae55c014139c9' THEN
+          WHERE p.oid = 'public._save_invoice_lineage_unaware_impl_20260827(jsonb,jsonb,text)'::regprocedure) IS DISTINCT FROM '9024a890693a8b251e914f6705575292' THEN
     RAISE EXCEPTION 'JOB_INVOICE_SPLIT_CENTS_POSTFLIGHT: a re-emitted body is not this file''s';
   END IF;
   IF NOT COALESCE((SELECT p.prosecdef AND p.proowner = 'postgres'::regrole

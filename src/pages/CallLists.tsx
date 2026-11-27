@@ -15,18 +15,9 @@ import { formatCents } from '../lib/money';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import { ALLOWED_CROPS, type CropValue } from '../lib/crops';
 import { toSentryError } from '../lib/sentryError';
+import { DEFAULT_STALE_QUOTE_DAYS, getCallListStaleQuotes, rowsOf, type CallListBaseRow, type CallListPage, type CallListPayload, type StaleQuoteRow } from '../lib/callLists';
 
 type CallListKey = 'prepay' | 'no-recent-contact' | 'stale-quotes' | 'lapsed-products' | 'unassigned-accounts';
-
-interface CallListBaseRow {
-  customer_id: string;
-  farm_name: string | null;
-  assigned_sales_rep: string | null;
-  primary_contact_name: string | null;
-  phone_display: string | null;
-  phone_e164: string | null;
-  last_interaction_at: string | null;
-}
 
 interface PrepayProspectRow extends CallListBaseRow {
   prior_season_spend_cents: number;
@@ -35,14 +26,6 @@ interface PrepayProspectRow extends CallListBaseRow {
 
 interface NoRecentContactRow extends CallListBaseRow {
   days_since_last_interaction: number | null;
-}
-
-interface StaleQuoteRow extends CallListBaseRow {
-  quote_id: string;
-  quote_number: string;
-  quote_total_cents: number;
-  quote_updated_at: string;
-  quote_age_days: number;
 }
 
 interface LapsedProductRow extends CallListBaseRow {
@@ -62,20 +45,7 @@ type CallListRow =
   | LapsedProductRow
   | UnassignedAccountRow;
 
-interface CallListPayload<Row> {
-  success: boolean;
-  rows: Row[];
-  total_count?: number;
-}
-
-interface CallListPage<Row> {
-  rows: Row[];
-  // Every matching customer, before the 200-row cut the database applies.
-  total: number;
-}
-
 const DEFAULT_NO_CONTACT_DAYS = 30;
-const DEFAULT_STALE_QUOTE_DAYS = 14;
 const DEFAULT_MIN_PRIOR_SPEND_CENTS = 100000;
 // Call-list day lookbacks feed PostgreSQL timestamp arithmetic. Although the
 // RPC parameter is int32, extreme int32 values can still underflow a timestamp
@@ -201,12 +171,6 @@ function whyNowText(listKey: CallListKey, row: CallListRow): string {
   return 'Why now: This customer has no assigned sales representative.';
 }
 
-function rowsOf<Row>(payload: CallListPayload<Row>, rpcName: string): CallListPage<Row> {
-  if (!Array.isArray(payload.rows)) throw new Error(`${rpcName} returned an invalid row list`);
-  const total = isFiniteNumber(payload.total_count) && payload.total_count >= payload.rows.length ? payload.total_count : payload.rows.length;
-  return { rows: payload.rows, total };
-}
-
 async function getCallListPrepayProspects(minPriorSpendCents: number, repId: string | null): Promise<CallListPage<PrepayProspectRow>> {
   const { data, error } = await supabase.rpc('get_call_list_prepay_prospects', {
     p_min_prior_spend_cents: minPriorSpendCents,
@@ -223,15 +187,6 @@ async function getCallListNoRecentContact(days: number, repId: string | null): P
   });
   if (error) throw error;
   return rowsOf(assertRpcResult<CallListPayload<NoRecentContactRow>>(data, 'get_call_list_no_recent_contact'), 'get_call_list_no_recent_contact');
-}
-
-async function getCallListStaleQuotes(days: number, repId: string | null): Promise<CallListPage<StaleQuoteRow>> {
-  const { data, error } = await supabase.rpc('get_call_list_stale_quotes', {
-    p_days: days,
-    ...(repId ? { p_rep_id: repId } : {}),
-  });
-  if (error) throw error;
-  return rowsOf(assertRpcResult<CallListPayload<StaleQuoteRow>>(data, 'get_call_list_stale_quotes'), 'get_call_list_stale_quotes');
 }
 
 async function getCallListLapsedProducts(repId: string | null): Promise<CallListPage<LapsedProductRow>> {

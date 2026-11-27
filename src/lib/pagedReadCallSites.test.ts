@@ -56,6 +56,7 @@ const SHARED_FILES = [
 const COMPONENT_FILES = [
   'blendtickets/ManualTicketCreate.tsx',
   'customers/CustomerContacts.tsx',
+  'dashboard/SalesFollowUps.tsx',
   'deliveries/QuickDeliveryModal.tsx',
   'field-app/SelectLocationsModal.tsx',
   'field-invoices/FieldInvoicesListPanel.tsx',

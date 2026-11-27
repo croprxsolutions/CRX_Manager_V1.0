@@ -78,6 +78,8 @@ import { SkeletonCard } from '../components/ui/Skeleton';
 import type { WatchdogFlag } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import FinanceSnapshotCard from '../components/dashboard/FinanceSnapshotCard';
+import SalesFollowUps from '../components/dashboard/SalesFollowUps';
+import { hasPageAccess } from '../lib/pagePermissions';
 import { activeInvoiceCoversDelivery, fetchActiveInvoiceCoveragePages, fetchDeliveryBillingRemainders, unbilledRemainderLabel, type DeliveryInvoiceCoverage } from '../lib/deliveryInvoiceCoverage';
 import { requirePostVersion } from '../lib/invoicePostVersion';
 
@@ -536,8 +538,12 @@ function LinkedCard({ to, children }: { to: string; children: React.ReactNode })
 export default function OfficeCockpit() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { profile } = useAuth();
+  const { profile, deniedPages } = useAuth();
   const isAdmin = profile?.role === 'admin';
+  const showSalesFollowUps = !!profile?.id && (
+    hasPageAccess(profile.role, deniedPages ?? [], 'customers')
+    || hasPageAccess(profile.role, deniedPages ?? [], 'quotes')
+  );
 
   const [loading, setLoading] = useState(true);
   const [morningSummary, setMorningSummary] = useState<MorningSummaryData>(emptyMorningSummary);
@@ -1265,12 +1271,15 @@ export default function OfficeCockpit() {
 
       <SectionJumpBar
         sections={[
+          ...(showSalesFollowUps ? [{ id: 'cockpit-sales-followups', label: 'Sales follow-ups' }] : []),
           { id: 'cockpit-exceptions', label: 'Needs attention' },
           { id: 'cockpit-snapshot', label: 'Morning snapshot' },
           { id: 'cockpit-inventory', label: 'Inventory' },
           ...(isAdmin || profile?.role === 'sales_rep' ? [{ id: 'cockpit-actions', label: 'Quick actions' }] : []),
         ]}
       />
+
+      {showSalesFollowUps && <SalesFollowUps key={profile.id} profile={profile} deniedPages={deniedPages ?? []} />}
 
       {/* All-clear banner when nothing is wrong */}
       {/* Only after every check loaded: a failed query, or a capped delivery scan that found
@@ -1282,7 +1291,7 @@ export default function OfficeCockpit() {
           <CheckCircle className="w-6 h-6 text-crx-green shrink-0" />
           <div>
             <p className="font-semibold text-emerald-800">All clear!</p>
-            <p className="text-sm text-emerald-600">No exceptions found across any category.</p>
+            <p className="text-sm text-emerald-600">No operational exceptions found.</p>
           </div>
         </div>
       )}

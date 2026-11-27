@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId } from 'react';
 import { Link as LinkIcon } from 'lucide-react';
 import { supabase } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
@@ -18,6 +18,8 @@ interface QuickTaskModalProps {
   prefillTitle?: string;
   prefillContent?: string;
   prefillAssignee?: string;
+  callbackOnly?: boolean;
+  onCreated?: () => void;
 }
 
 const entityDisplayNames: Record<LinkedEntityType, string> = {
@@ -39,9 +41,12 @@ export default function QuickTaskModal({
   prefillTitle = '',
   prefillContent = '',
   prefillAssignee = '',
+  callbackOnly = false,
+  onCreated,
 }: QuickTaskModalProps) {
   const { profile } = useAuth();
   const { toast } = useToast();
+  const fieldId = useId();
 
   const [title, setTitle] = useState(prefillTitle);
   const [content, setContent] = useState(prefillContent);
@@ -82,6 +87,7 @@ export default function QuickTaskModal({
   }, [open]);
 
   async function handleSave() {
+    if (saving) return;
     if (!profile) {
       toast('error', 'Please wait for profile to load');
       return;
@@ -90,13 +96,17 @@ export default function QuickTaskModal({
       toast('error', 'Title is required');
       return;
     }
+    if (callbackOnly && assignedTo && !profiles.some((person) => person.id === assignedTo)) {
+      toast('error', 'Choose an active assignee or select Unassigned.');
+      return;
+    }
 
     setSaving(true);
     try {
       const { error } = await supabase.from('team_notes').insert({
         title: title.trim(),
         content: content.trim() || null,
-        note_type: noteType,
+        note_type: callbackOnly ? 'todo' : noteType,
         priority,
         assigned_to: assignedTo || null,
         due_date: dueDate || null,
@@ -108,6 +118,7 @@ export default function QuickTaskModal({
       if (error) throw error;
 
       toast('success', 'Task created successfully');
+      onCreated?.();
       onClose();
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'QuickTaskModal.handleSave' } });
@@ -122,7 +133,7 @@ export default function QuickTaskModal({
     'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
 
   return (
-    <Modal open={open} onClose={onClose} title="Quick Task" accent="Note">
+    <Modal open={open} onClose={saving ? () => {} : onClose} title={callbackOnly ? 'Schedule callback' : 'Quick Task'} accent={callbackOnly ? undefined : 'Note'}>
       <div className="space-y-4">
         {/* Entity badge */}
         <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-sm text-secondary">
@@ -133,8 +144,9 @@ export default function QuickTaskModal({
         <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
 
         <div>
-          <label className="block text-sm font-medium text-secondary mb-1">Content</label>
+          <label htmlFor={`${fieldId}-content`} className="block text-sm font-medium text-secondary mb-1">Content</label>
           <textarea
+            id={`${fieldId}-content`}
             value={content}
             onChange={(e) => setContent(e.target.value)}
             rows={3}
@@ -143,17 +155,17 @@ export default function QuickTaskModal({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-secondary mb-1">Type</label>
-            <select value={noteType} onChange={(e) => setNoteType(e.target.value as NoteType)} className={selectClass}>
+          {!callbackOnly && <div>
+            <label htmlFor={`${fieldId}-type`} className="block text-sm font-medium text-secondary mb-1">Type</label>
+            <select id={`${fieldId}-type`} value={noteType} onChange={(e) => setNoteType(e.target.value as NoteType)} className={selectClass}>
               <option value="note">Note</option>
               <option value="todo">To-Do</option>
               <option value="announcement">Announcement</option>
             </select>
-          </div>
+          </div>}
           <div>
-            <label className="block text-sm font-medium text-secondary mb-1">Priority</label>
-            <select value={priority} onChange={(e) => setPriority(e.target.value as NotePriority)} className={selectClass}>
+            <label htmlFor={`${fieldId}-priority`} className="block text-sm font-medium text-secondary mb-1">Priority</label>
+            <select id={`${fieldId}-priority`} value={priority} onChange={(e) => setPriority(e.target.value as NotePriority)} className={selectClass}>
               <option value="low">Low</option>
               <option value="medium">Medium</option>
               <option value="high">High</option>
@@ -164,8 +176,8 @@ export default function QuickTaskModal({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-secondary mb-1">Assign To</label>
-            <select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className={selectClass}>
+            <label htmlFor={`${fieldId}-assignee`} className="block text-sm font-medium text-secondary mb-1">Assign To</label>
+            <select id={`${fieldId}-assignee`} value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className={selectClass}>
               <option value="">Unassigned</option>
               {profiles.map((p) => (
                 <option key={p.id} value={p.id}>{p.full_name}</option>
@@ -176,8 +188,8 @@ export default function QuickTaskModal({
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} loading={saving}>Create Task</Button>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSave} loading={saving}>{callbackOnly ? 'Save callback' : 'Create Task'}</Button>
         </div>
       </div>
     </Modal>

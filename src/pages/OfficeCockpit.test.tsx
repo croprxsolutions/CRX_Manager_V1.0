@@ -33,7 +33,8 @@ function emptyQuery(table: string) {
   return builder;
 }
 
-vi.mock('react-router-dom', () => ({
+vi.mock('react-router-dom', async (importOriginal) => ({
+  ...await importOriginal<typeof import('react-router-dom')>(),
   useNavigate: () => mockNavigate,
 }));
 

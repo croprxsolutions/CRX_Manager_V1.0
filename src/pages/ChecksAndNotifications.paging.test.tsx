@@ -211,6 +211,27 @@ describe('notifications past the 1,000-row server cap (L9, L10-1)', () => {
     expect(screen.getAllByText(/^Note \d{4}$/)).toHaveLength(TOTAL);
   });
 
+  it('searches old notifications and distinguishes filtered results from an empty inbox', async () => {
+    H.tables.notifications = [
+      ...many(notification),
+      { ...notification(TOTAL + 1), title: 'Office archive', message: 'North field report', is_read: true },
+    ];
+    renderAt(<Notifications />);
+    const search = await screen.findByRole('searchbox', { name: 'Search notifications' });
+    fireEvent.change(search, { target: { value: ' NORTH FIELD ' } });
+    expect(screen.getByText('Office archive')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('1 matching');
+    expect(screen.queryByText('Note 0000')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unread only' }));
+    expect(screen.getByText('No matching notifications')).toBeInTheDocument();
+    expect(screen.queryByText('No notifications')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(search).toHaveValue('');
+    expect(screen.getByText('Office archive')).toBeInTheDocument();
+    expect(screen.getByText('Note 0000')).toBeInTheDocument();
+  });
+
   it('the bell counts every unread notification in the database, not the unread among the 20 it loads', async () => {
     H.tables.notifications = many(notification);
     renderAt(<NotificationsPanel />);

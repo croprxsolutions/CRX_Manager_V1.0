@@ -25,6 +25,12 @@ export default function NotificationsPanel() {
   // The last list read failed: the dropdown says so instead of "No notifications".
   const [listFailed, setListFailed] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const closePanel = () => {
+    setIsOpen(false);
+    triggerRef.current?.focus();
+  };
 
   const fetchNotifications = useCallback(async () => {
     const seq = ++loadSeq.current;
@@ -158,7 +164,7 @@ export default function NotificationsPanel() {
   };
 
   const handleNotificationClick = (notification: Notification) => {
-    markAsRead(notification.id);
+    if (!notification.is_read) void markAsRead(notification.id);
 
     if (notification.related_entity_type === 'team_note' && notification.related_entity_id) {
       setIsOpen(false);
@@ -190,8 +196,21 @@ export default function NotificationsPanel() {
   const hasUnread = countUnknown ? notifications.some((n) => !n.is_read) : unreadCount > 0;
 
   return (
-    <div className="relative" ref={panelRef}>
+    <div
+      className="relative"
+      ref={panelRef}
+      onKeyDown={(event) => {
+        if (isOpen && event.key === 'Escape') {
+          event.stopPropagation();
+          closePanel();
+        }
+      }}
+    >
       <button
+        ref={triggerRef}
+        type="button"
+        aria-expanded={isOpen}
+        aria-label={countUnknown ? 'Notifications, unread count unavailable' : `Notifications, ${unreadCount} unread`}
         onClick={() => setIsOpen(!isOpen)}
         className="relative p-2 text-secondary hover:text-nav-dark rounded-lg hover:bg-gray-100 transition-colors"
         title={countUnknown ? 'Notifications (unread count could not be loaded)' : 'Notifications'}
@@ -209,10 +228,10 @@ export default function NotificationsPanel() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-96 bg-white rounded-xl shadow-lg border border-gray-200 z-50">
-          <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-            <h3 className="font-semibold text-nav-dark flex items-center gap-2">
-              <Bell className="w-5 h-5" />
+        <div className="absolute right-0 mt-2 w-96 max-w-[calc(100vw_-_1.25rem)] bg-white rounded-xl shadow-lg border border-gray-200 z-50">
+          <div className="p-3 sm:p-4 border-b border-gray-200 flex items-center justify-between gap-2">
+            <h3 className="font-semibold text-nav-dark flex flex-wrap items-center gap-2">
+              <Bell className="w-5 h-5 shrink-0" />
               Notifications
               {!countUnknown && unreadCount > 0 && (
                 <span className="px-2 py-0.5 bg-red-100 text-red-600 text-xs font-medium rounded-full">
@@ -220,19 +239,21 @@ export default function NotificationsPanel() {
                 </span>
               )}
             </h3>
-            <div className="flex items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1">
               {hasUnread && (
                 <button
+                  type="button"
                   onClick={markAllAsRead}
-                  className="p-1.5 text-xs text-secondary hover:text-crx-green rounded"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-secondary hover:text-crx-green md:min-h-8 md:min-w-8"
                   title="Mark all as read"
                 >
                   <Check className="w-4 h-4" />
                 </button>
               )}
               <button
-                onClick={() => setIsOpen(false)}
-                className="p-1.5 text-secondary hover:text-nav-dark rounded"
+                type="button"
+                onClick={closePanel}
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-secondary hover:text-nav-dark md:min-h-8 md:min-w-8"
                 title="Close"
               >
                 <X className="w-4 h-4" />
@@ -240,7 +261,7 @@ export default function NotificationsPanel() {
             </div>
           </div>
 
-          <div className="max-h-96 overflow-y-auto">
+          <div className="max-h-[min(24rem,calc(100dvh_-_11rem))] overflow-y-auto">
             {loading ? (
               <div className="p-4 space-y-3">
                 {Array.from({ length: 3 }).map((_, i) => (
@@ -263,58 +284,54 @@ export default function NotificationsPanel() {
                 {notifications.map((notification) => (
                   <div
                     key={notification.id}
-                    role="button"
-                    tabIndex={0}
-                    className={`p-4 hover:bg-gray-50 transition-colors cursor-pointer group ${
+                    className={`flex items-start gap-2 p-3 sm:p-4 hover:bg-gray-50 transition-colors ${
                       !notification.is_read ? 'bg-blue-50/50' : ''
                     }`}
-                    onClick={() => handleNotificationClick(notification)}
-                    onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNotificationClick(notification); } }}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          {!notification.is_read && (
-                            <div className="w-2 h-2 bg-blue-500 rounded-full shrink-0" />
-                          )}
-                          <p className="text-sm font-medium text-nav-dark">
-                            {notification.title}
-                          </p>
-                        </div>
-                        <p className={`text-xs text-secondary mt-1 ${notification.notification_type === 'delivery_issue_reported' ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'}`}>
-                          {notification.message}
-                        </p>
-                        {notification.sender_name && (
-                          <p className="text-xs text-secondary mt-0.5">From {notification.sender_name}</p>
-                        )}
-                        <p className="text-xs text-gray-400 mt-1">
-                          {formatTime(notification.created_at)}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    <button
+                      type="button"
+                      className="flex-1 min-w-0 min-h-11 rounded text-left"
+                      onClick={() => handleNotificationClick(notification)}
+                    >
+                      <span className="flex items-center gap-2">
                         {!notification.is_read && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              markAsRead(notification.id);
-                            }}
-                            className="p-1 text-gray-400 hover:text-crx-green rounded"
-                            title="Mark as read"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                          </button>
+                          <span className="w-2 h-2 bg-blue-500 rounded-full shrink-0">
+                            <span className="sr-only">Unread</span>
+                          </span>
                         )}
+                        <span className="min-w-0 break-words text-sm font-medium text-nav-dark">
+                          {notification.title}
+                        </span>
+                      </span>
+                      <span className={`text-xs text-secondary mt-1 break-words ${notification.notification_type === 'delivery_issue_reported' ? 'block whitespace-pre-wrap' : 'line-clamp-2'}`}>
+                        {notification.message}
+                      </span>
+                      {notification.sender_name && (
+                        <span className="block text-xs text-secondary mt-0.5 break-words">From {notification.sender_name}</span>
+                      )}
+                      <span className="block text-xs text-gray-400 mt-1">
+                        {formatTime(notification.created_at)}
+                      </span>
+                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {!notification.is_read && (
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteNotification(notification.id);
-                          }}
-                          className="p-1 text-gray-400 hover:text-red-500 rounded"
-                          title="Delete"
+                          type="button"
+                          onClick={() => void markAsRead(notification.id)}
+                          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-secondary hover:text-crx-green md:min-h-8 md:min-w-8"
+                          title="Mark as read"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Check className="w-3.5 h-3.5" />
                         </button>
-                      </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void deleteNotification(notification.id)}
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-secondary hover:text-red-500 md:min-h-8 md:min-w-8"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -325,11 +342,12 @@ export default function NotificationsPanel() {
           {notifications.length > 0 && (
             <div className="p-3 border-t border-gray-200 text-center">
               <button
+                type="button"
                 onClick={() => {
                   setIsOpen(false);
                   navigate('/notifications');
                 }}
-                className="text-sm text-crx-green hover:text-crx-green/80 font-medium"
+                className="min-h-11 md:min-h-8 text-sm text-crx-green hover:text-crx-green/80 font-medium"
               >
                 View All Notifications
               </button>

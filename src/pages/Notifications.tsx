@@ -4,7 +4,8 @@ import { Bell, BellOff, CheckCheck } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import EmptyState, { LoadFailedState } from '../components/ui/EmptyState';
-import SplitHeading from '../components/ui/SplitHeading';
+import Input from '../components/ui/Input';
+import PageHeader from '../components/ui/PageHeader';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { sanitizeError, supabase, checkMutationResult } from '../lib/db';
@@ -19,6 +20,8 @@ export default function Notifications() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<NotificationType[]>([]);
+  const [search, setSearch] = useState('');
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   // The last load failed: an error shows instead of "You're all caught up!".
   const [loadFailed, setLoadFailed] = useState(false);
@@ -138,6 +141,17 @@ export default function Notifications() {
   };
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
+  const query = search.trim().toLowerCase();
+  const filtered = unreadOnly || Boolean(query);
+  const visibleNotifications = filtered ? notifications.filter((n) =>
+    (!unreadOnly || !n.is_read)
+    && (!query || [n.title, n.message, n.sender_name].some((value) => value?.toLowerCase().includes(query)))
+  ) : notifications;
+
+  const clearFilters = () => {
+    setSearch('');
+    setUnreadOnly(false);
+  };
 
   if (loading) {
     return (
@@ -151,12 +165,15 @@ export default function Notifications() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <SplitHeading title="Your" accent="Notifications" />
-        {unreadCount > 0 && (
+      <PageHeader
+        title="Your"
+        accent="Notifications"
+        subtitle={loadFailed ? undefined : `${unreadCount.toLocaleString()} unread · ${notifications.length.toLocaleString()} total`}
+        actions={unreadCount > 0 && (
           <Button
             variant="ghost"
             size="sm"
+            className="min-h-11 md:min-h-10"
             icon={<CheckCheck className="w-4 h-4" />}
             showChevron={false}
             onClick={markAllRead}
@@ -164,7 +181,33 @@ export default function Notifications() {
             Mark All Read
           </Button>
         )}
-      </div>
+      />
+
+      {notifications.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="w-full sm:w-72">
+            <Input
+              type="search"
+              aria-label="Search notifications"
+              placeholder="Search notifications…"
+              className="min-h-11 max-md:text-base"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+          <Button
+            variant="secondary"
+            className={`min-h-11 md:min-h-10 ${unreadOnly ? 'bg-crx-green-light! text-crx-green!' : ''}`}
+            aria-pressed={unreadOnly}
+            onClick={() => setUnreadOnly(!unreadOnly)}
+          >
+            Unread only
+          </Button>
+          <p role="status" className="text-sm text-secondary">
+            {filtered ? `${visibleNotifications.length.toLocaleString()} matching` : ''}
+          </p>
+        </div>
+      )}
 
       {loadFailed ? (
         <Card>
@@ -178,46 +221,66 @@ export default function Notifications() {
             description="You're all caught up!"
           />
         </Card>
+      ) : visibleNotifications.length === 0 ? (
+        <Card>
+          <EmptyState
+            title="No matching notifications"
+            action={<Button variant="secondary" onClick={clearFilters}>Clear filters</Button>}
+          />
+        </Card>
       ) : (
         <div className="space-y-2">
-          {notifications.map((n) => (
-            <Card
-              key={n.id}
-              role="button"
-              tabIndex={0}
-              hover
-              className={`cursor-pointer ${!n.is_read ? 'border-crx-green/30 bg-crx-green-tint/30' : ''}`}
-              onClick={() => markAsRead(n)}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); markAsRead(n); } }}
-            >
-              <div className="flex items-start gap-3">
-                <div
-                  className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                    n.is_read ? 'bg-gray-100' : 'bg-crx-green-light'
-                  }`}
-                >
-                  <Bell className={`w-5 h-5 ${n.is_read ? 'text-gray-400' : 'text-crx-green'}`} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h4 className={`text-sm ${n.is_read ? 'text-secondary' : 'font-medium text-nav-dark'}`}>
-                      {n.title}
-                    </h4>
-                    {!n.is_read && (
-                      <span className="w-2 h-2 rounded-full bg-crx-green shrink-0" />
-                    )}
-                  </div>
-                  <p className={`text-xs text-secondary mt-0.5 ${n.notification_type === 'delivery_issue_reported' ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'}`}>{n.message}</p>
-                  {n.sender_name && <p className="text-xs text-secondary mt-0.5">From {n.sender_name}</p>}
-                  <p className="text-xs text-gray-400 mt-1">
-                    {new Date(n.created_at).toLocaleString()}
-                  </p>
-                </div>
-              </div>
-            </Card>
+          {visibleNotifications.map((n) => (
+            <NotificationCard key={n.id} notification={n} onOpen={markAsRead} />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+function NotificationCard({
+  notification: n,
+  onOpen,
+}: {
+  notification: NotificationType;
+  onOpen: (notification: NotificationType) => void;
+}) {
+  return (
+    <Card
+      role="button"
+      tabIndex={0}
+      hover
+      className={`cursor-pointer ${!n.is_read ? 'border-crx-green/30 bg-crx-green-tint/30' : ''}`}
+      onClick={() => onOpen(n)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(n); } }}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+            n.is_read ? 'bg-gray-100' : 'bg-crx-green-light'
+          }`}
+        >
+          <Bell className={`w-5 h-5 ${n.is_read ? 'text-gray-400' : 'text-crx-green'}`} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h4 className={`min-w-0 break-words text-sm ${n.is_read ? 'text-secondary' : 'font-medium text-nav-dark'}`}>
+              {n.title}
+            </h4>
+            {!n.is_read && (
+              <span className="w-2 h-2 rounded-full bg-crx-green shrink-0">
+                <span className="sr-only">Unread</span>
+              </span>
+            )}
+          </div>
+          <p className={`text-xs text-secondary mt-0.5 break-words ${n.notification_type === 'delivery_issue_reported' ? 'whitespace-pre-wrap' : 'line-clamp-2'}`}>{n.message}</p>
+          {n.sender_name && <p className="text-xs text-secondary mt-0.5">From {n.sender_name}</p>}
+          <p className="text-xs text-gray-400 mt-1">
+            {new Date(n.created_at).toLocaleString()}
+          </p>
+        </div>
+      </div>
+    </Card>
   );
 }

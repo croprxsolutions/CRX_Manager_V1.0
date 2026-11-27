@@ -6,6 +6,8 @@ In staging, choose **Use live USDA and Mapbox** to enable the live providers for
 
 Run the oldest-phone check inside the installed staging app. Accept its update prompt before opening the proof. If the proof URL shows the regular app screen, close and reopen the installed app while online, accept any pending update, and try the proof URL again. The updated app loads this page directly from the network.
 
+The separate [protected Places diagnostic](https://staging.croprxsolutions.app/api/maps-step0?places=1) passed one autocomplete and one details request in signed-in desktop Chrome on Nov. 26, 2026. Both returned HTTP 200. Repeat the bounded Places check inside the installed app during the work-phone proof.
+
 After Step 0, remove the drawing bundle hook, its routing and policy, and the outage fixture along with the associated disposable proof.
 
 This local page checks whether one MapLibre map can change raster pictures and recover from a failed tile while Mapbox Draw is still editing a synthetic polygon. The tile server generates two solid-color pictures. Save and Reopen use storage scoped to the current browser tab.

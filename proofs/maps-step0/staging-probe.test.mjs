@@ -57,6 +57,30 @@ test('exposes no probe or credentials on an off-host, off-branch or non-staging 
   }
 });
 
+function runPlacesScript(page, fetchResponse) {
+  const script = page.body.match(/<script nonce="([^"]+)">([\s\S]+)<\/script>/);
+  assert.ok(script);
+  assert.ok(page.headers['Content-Security-Policy'].includes("'nonce-" + script[1] + "'"));
+  const output = { textContent: '' };
+  const calls = [];
+  let click;
+  const button = { disabled: false, addEventListener(_, callback) { click = callback; } };
+  new Script(script[2]).runInNewContext({
+    document: { querySelector(selector) { return selector === '#places' ? button : output; } },
+    crypto: { randomUUID: () => placesSessionToken },
+    AbortSignal,
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      return fetchResponse(calls.length);
+    },
+  });
+  return { click, calls, output };
+}
+
+const placesSessionToken = 'a4ea93d1-6250-4bf9-9e58-463b3656a2da';
+const placeId = 'TestPublicPlace123';
+const placesPrediction = { suggestions: [{ placePrediction: { placeId } }] };
+
 test('Places check uses its own policy and makes one autocomplete and one details request', async () => {
   const query = { places: '1' };
   const staged = run({ query });
@@ -69,34 +93,53 @@ test('Places check uses its own policy and makes one autocomplete and one detail
   assert.equal(run({ query: { places: ['1', '1'] } }).status, 400);
   assert.equal(run({}).body.includes(placesKey), false);
 
-  const source = staged.body.match(/<script nonce="[^"]+">([\s\S]+)<\/script>/)?.[1];
-  assert.ok(source);
-  const output = { textContent: '' };
-  let click;
-  const button = { disabled: false, addEventListener(_, callback) { click = callback; } };
-  const calls = [];
-  const placeId = 'TestPublicPlace123';
-  const sessionToken = 'a4ea93d1-6250-4bf9-9e58-463b3656a2da';
-  new Script(source).runInNewContext({
-    document: { querySelector(selector) { return selector === '#places' ? button : output; } },
-    crypto: { randomUUID: () => sessionToken },
-    AbortSignal,
-    fetch: async (url, options) => {
-      calls.push({ url, options });
-      const payload = calls.length === 1
-        ? { suggestions: [{ placePrediction: { placeId } }] }
-        : { id: placeId, location: { latitude: 41, longitude: -93 } };
-      return { ok: true, status: 200, json: async () => payload };
-    },
+  const { click, calls, output } = runPlacesScript(staged, (count) => {
+    const payload = count === 1 ? placesPrediction : { id: placeId, location: { latitude: 41, longitude: -93 } };
+    return { ok: true, status: 200, json: async () => payload };
   });
   await Promise.all([click(), click()]);
   assert.equal(calls.length, 2);
   assert.equal(calls[0].options.method, 'POST');
-  assert.equal(JSON.parse(calls[0].options.body).sessionToken, sessionToken);
-  assert.match(calls[1].url, new RegExp('sessionToken=' + sessionToken + '$'));
+  assert.equal(JSON.parse(calls[0].options.body).sessionToken, placesSessionToken);
+  assert.match(calls[1].url, new RegExp('sessionToken=' + placesSessionToken + '$'));
   assert.equal(calls[1].options.headers['X-Goog-FieldMask'], 'id,location');
+  for (const { url, options } of calls) {
+    assert.equal(options.headers['X-Goog-Api-Key'], placesKey);
+    assert.equal(url.includes(placesKey), false);
+  }
   assert.equal(JSON.parse(output.textContent).state, 'passed');
-  for (const value of [placesKey, sessionToken, placeId]) assert.equal(output.textContent.includes(value), false);
+  for (const value of [placesKey, placesSessionToken, placeId]) assert.equal(output.textContent.includes(value), false);
+});
+
+test.each([
+  [1, 'autocomplete rejected'],
+  [2, 'place details rejected'],
+])('Places rejection at request %i reports only safe diagnostics', async (rejectedAt, state) => {
+  const providerMessage = [placesKey, placesSessionToken, placeId].join(' ');
+  const { click, calls, output } = runPlacesScript(run({ query: { places: '1' } }), (count) => {
+    if (count !== rejectedAt) return { ok: true, status: 200, json: async () => placesPrediction };
+    return {
+      ok: false,
+      status: 403,
+      json: async () => ({
+        error: {
+          message: providerMessage,
+          status: 'PERMISSION_DENIED',
+          details: [{ reason: 'API_KEY_HTTP_REFERRER_BLOCKED' }, { reason: providerMessage }],
+        },
+      }),
+    };
+  });
+  await click();
+  assert.equal(calls.length, rejectedAt);
+  assert.deepEqual(JSON.parse(output.textContent), {
+    autocompleteRequests: 1,
+    detailRequests: rejectedAt - 1,
+    autocompleteStatus: rejectedAt === 1 ? 403 : 200,
+    ...(rejectedAt === 2 ? { detailStatus: 403 } : {}),
+    reasons: ['PERMISSION_DENIED', 'API_KEY_HTTP_REFERRER_BLOCKED'],
+    state,
+  });
 });
 
 test('ties the staging-only policy to the diagnostic page nonce and limits the method', () => {

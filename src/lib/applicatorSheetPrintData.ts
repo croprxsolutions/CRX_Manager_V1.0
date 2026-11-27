@@ -279,7 +279,7 @@ async function readSheetHazards(fields: ApplicatorSheetData['fields']) {
         if (request.signal.aborted) return;
         if (!snapshot?.available || !Array.isArray(snapshot.markers)) continue;
         const markers = new Map(snapshot.markers.filter((marker) => marker?.field_id === id && typeof marker.id === 'string')
-          .map((marker) => [marker.id, marker]));
+          .map((marker) => [marker.id, marker] as const));
         results.set(id, {
           complete: snapshot.count === markers.size && snapshot.markers.length === markers.size,
           markers: [...markers.values()],

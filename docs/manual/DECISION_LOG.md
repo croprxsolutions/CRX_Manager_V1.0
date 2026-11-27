@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-27 — Field app: a line's vendor is where we got the product; "Customer" is a vendor
+
+**Decision (Mason, Slack #crx-work reply to Taha, 2026-11-27).** The vendor on a product line is always where we got the product, changeable per line. A grower's own product uses the vendor "Customer", linked to that customer, and prints "(customer)"; it bills $0 but stays on the application record and year-end summary. "Customer supplied" derives from vendor = Customer and is never set on another vendor's line. A customer's dropped-off chemical can be kept in our inventory under vendor Customer, linked to them, without price; it is theirs and is never sold to another customer or counted as ours in stock holds or the purchasing plan.
+
+**Why:** Taha found that the slice 2 brief (#2595) set `customer_supplied` on vendor lines, which would print a vendor's product as "(customer supplied)" on application records.
+
+**Replaces:** part of SPEC decision 2026-11-24 h ("no customer-to-vendor link"). Taha owns the holds and purchasing-plan readers; he chooses whether he changes them or reviews our change. Details: `docs/plans/field-application/SPEC.md` decision 2026-11-27.
+
 ## 2026-11-23 — #2381: Mason owner-accepted 4 Sol finding(s) at `fd461adc8c3b`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2381 at `fd461adc8c3b` (base `3dd8f9bbf7dc`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270312120000_job_ticket_stock_count_once: a job and the blend tickets linked to it take a
+ * Real-schema proof for 20270314150000_job_ticket_stock_count_once: a job and the blend tickets linked to it take a
  * product out of stock once (the larger claim), not twice; the later posting takes only the difference and is flagged.
  * Builds the baseline plus every migration before the candidate (shared undo-paths harness), then:
  *   BEFORE: a linked ticket plus its job take the same product twice (the bug).
@@ -23,7 +23,7 @@ import { spawn } from 'node:child_process';
 process.env.UNDO_PATHS_CONTAINER ||= `crx-countonce-${process.pid}-${Date.now().toString(36)}`;
 const { buildContainer, removeContainer, seedUsers, psql, scalar, docker, USERS, id, NAME, ROOT } = await import('./undo-paths/harness.mjs');
 
-const CANDIDATE = '20270312120000_job_ticket_stock_count_once.sql';
+const CANDIDATE = '20270314150000_job_ticket_stock_count_once.sql';
 const ROLLBACK = path.join(ROOT, 'scripts', 'smoke', 'job-ticket-stock-count-once-reverse.sql');
 const CUST = id('c1'), FIELD = id('c2'), CUST2 = id('c3');
 const PRE = { job: '3bd9dfe0729d8175ffbb1cf16b258b5c', bt: '0ad9a78b900cb953e0aa7d2a0d87bda0', rev: 'bb7b45f8dca986c9cf39b5b6a41aa75b' };

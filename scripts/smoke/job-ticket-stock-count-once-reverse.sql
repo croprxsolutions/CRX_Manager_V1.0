@@ -1,4 +1,4 @@
--- Rollback for 20270312120000_job_ticket_stock_count_once.sql, BEFORE the first posting under it only.
+-- Rollback for 20270314150000_job_ticket_stock_count_once.sql, BEFORE the first posting under it only.
 -- After any job_applied row carries application_record_id (every posting under the new bodies), fix forward instead.
 -- Restores the three previous bodies and drops the group helper. The two ledger columns and their
 -- index stay (the ledger is write-once; unused columns are harmless).

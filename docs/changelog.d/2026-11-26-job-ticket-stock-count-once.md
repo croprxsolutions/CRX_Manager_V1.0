@@ -10,4 +10,4 @@
   entry): the ticket's lines come back and the job keeps what it still needs. Do not correct a wrong job link with an
   inventory adjustment alone; it leaves the ticket's claim in the job's group. (A filed ticket's job link was already
   frozen.)
-- Migration `20270312120000_job_ticket_stock_count_once.sql` (two ledger columns, three re-emitted bodies). Proof: `scripts/smoke/prove-job-ticket-stock-count-once-real-schema.mjs`.
+- Migration `20270314150000_job_ticket_stock_count_once.sql` (two ledger columns, three re-emitted bodies). Proof: `scripts/smoke/prove-job-ticket-stock-count-once-real-schema.mjs`.

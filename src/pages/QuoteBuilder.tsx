@@ -207,6 +207,9 @@ interface LocalItem {
   // need not retype them (Mason, 2026-11-24). A one-time copy, so the hint says "Copied". Shown as a hint by the Acres box until the rep types
   // there; not saved. A prefilled line with nothing else in it still counts as untouched.
   acres_prefill?: 'line_above' | 'field';
+  // The rep confirmed these auto-filled acres when saving: no longer highlighted, but still a copy,
+  // so a later field change drops them like any other copy (Sol, #2713).
+  acres_confirmed?: boolean;
   total_units_needed: number | null;
   unit_size: string | null;
   profit: number;
@@ -268,6 +271,7 @@ function productMetaLine(p: ProductOptionPresentationModel): string {
  *  rep types there or confirms them when saving (Mason, #2445). */
 function LineAcres({ item, onAcres }: { item: LocalItem; onAcres: (acres: number | null) => void }) {
   const hintId = `line-acres-hint-${item._key}`;
+  const unchecked = !!item.acres_prefill && !item.acres_confirmed;
   return (
     <>
       <input
@@ -275,12 +279,12 @@ function LineAcres({ item, onAcres }: { item: LocalItem; onAcres: (acres: number
         value={item.acres ?? ''}
         onChange={(e) => onAcres(e.target.value ? parseFloat(e.target.value) : null)}
         aria-label="Acres"
-        aria-describedby={item.acres_prefill ? hintId : undefined}
-        className={`${LINE_INPUT} ${item.acres_prefill ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`}
+        aria-describedby={unchecked ? hintId : undefined}
+        className={`${LINE_INPUT} ${unchecked ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`}
         step="any"
         min={0}
       />
-      {item.acres_prefill && (
+      {unchecked && (
         <p id={hintId} className="mt-1 text-xs text-amber-800">
           {item.acres_prefill === 'line_above' ? 'Copied from line above' : 'Filled from field'}: check
         </p>
@@ -291,7 +295,7 @@ function LineAcres({ item, onAcres }: { item: LocalItem; onAcres: (acres: number
 
 /** Lines whose acres were filled in automatically and not yet checked by the rep. */
 function unconfirmedAcresCount(sections: LocalSection[]): number {
-  return sections.reduce((n, sec) => n + sec.items.filter((i) => i.acres_prefill && i.product_id && i.acres != null).length, 0);
+  return sections.reduce((n, sec) => n + sec.items.filter((i) => i.acres_prefill && !i.acres_confirmed && i.product_id && i.acres != null).length, 0);
 }
 
 // The quote's totals: line sums, then rounded to the cent. The page's one totals rule.
@@ -1930,7 +1934,7 @@ export default function QuoteBuilder() {
       field_id: null,
       items: sec.items.map((item) => {
         if (!filledByField(item)) return item;
-        const cleared: LocalItem = { ...item, acres: null, acres_source: undefined, acres_prefill: undefined };
+        const cleared: LocalItem = { ...item, acres: null, acres_source: undefined, acres_prefill: undefined, acres_confirmed: undefined };
         // A prefilled line with no product is still untouched: leave its quantity blank (Sol, #2445).
         if (item.acres_prefill && !item.product_id) return cleared;
         return item.calc_mode === 'units_direct'
@@ -2287,6 +2291,7 @@ export default function QuoteBuilder() {
               acres_source: 'field',
               // Filled without the rep typing, so it is checked before saving like a new line's (Sol, #2445).
               acres_prefill: 'field',
+              acres_confirmed: undefined,
               calc_mode: item.calc_mode === 'units_direct' ? 'units_direct' : 'rate_acres',
             }, tier);
           }),
@@ -2456,7 +2461,7 @@ export default function QuoteBuilder() {
   // save keeps it, so a later field change still drops untouched copies (Sol, #2445).
   const acceptAutoAcres = () => setSections((prev) => prev.map((sec) => ({
     ...sec,
-    items: sec.items.map((i) => (i.acres_prefill && i.product_id ? { ...i, acres_prefill: undefined } : i)),
+    items: sec.items.map((i) => (i.acres_prefill && i.product_id ? { ...i, acres_confirmed: true } : i)),
   })));
 
   const saveQuote = async (newStatus?: QuoteStatus): Promise<string | null> => {
@@ -5466,6 +5471,7 @@ export default function QuoteBuilder() {
                   acres: value,
                   acres_source: 'typed',
                   acres_prefill: undefined,
+                  acres_confirmed: undefined,
                   calc_mode: item.calc_mode === 'units_direct'
                     ? 'units_direct' // keep units_direct if typing acres alongside units
                     : 'rate_acres',

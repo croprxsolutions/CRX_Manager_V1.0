@@ -271,6 +271,39 @@ describe('QuoteBuilder — acres on a new line', () => {
     expect(screen.queryByText(/^Copied from line above/)).not.toBeInTheDocument();
   });
 
+  it('a copy confirmed by a save is still a copy: a later field change drops and refills it (Sol, #2713)', { timeout: 20000 }, async () => {
+    mockFrom.mockImplementation((table: string) => rowChain(
+      table === 'quotes' ? savedQuote : table === 'quote_sections' ? [savedSection] : table === 'quote_items' ? [savedItem]
+        : table === 'customers' ? [customer] : table === 'products' ? [product] : table === 'fields' ? [field, fieldB] : [],
+    ));
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+      ? { data: { status: 'saved', quote_id: 'quote-1', row_version: 4, item_ids: {} }, error: null }
+      : { data: name === 'get_quote_versions' ? [] : null, error: null }));
+    const router = createMemoryRouter(
+      [{ path: '/quotes/:id/edit', element: <QuoteBuilder /> }],
+      { initialEntries: ['/quotes/quote-1/edit'] },
+    );
+    render(<RouterProvider router={router} />);
+    await waitFor(() => expect(acres()).toEqual(['80']));
+
+    // Typed 40 on line A; line B copies it; the save confirms the copy.
+    fireEvent.change(screen.getByLabelText('Acres'), { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
+    await pickProductOnLastLine();
+    await waitFor(() => expect(acres()).toEqual(['40', '40']));
+    fireEvent.click(screen.getByText('Save draft'));
+    fireEvent.click(await screen.findByRole('button', { name: "Yes, they're right" }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+    await waitFor(() => expect(screen.getAllByLabelText('Acres')[1]).not.toHaveClass('bg-amber-50'));
+
+    // A new 120-acre field: line A keeps its typed 40; the confirmed copy is refilled and highlighted again.
+    const fieldBox = await screen.findByRole('combobox', { name: 'Field for Section 1' });
+    fireEvent.change(fieldBox, { target: { value: 'West' } });
+    fireEvent.click(await screen.findByRole('option', { name: /West Half/ }));
+    await waitFor(() => expect(acres()).toEqual(['40', '120']));
+    expect(screen.getAllByLabelText('Acres')[1]).toHaveClass('bg-amber-50');
+  });
+
   it('saves and prices the filled acres exactly as typed acres', { timeout: 20000 }, async () => {
     renderNewQuote();
     await pickCustomer();

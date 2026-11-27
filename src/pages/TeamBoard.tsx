@@ -8,17 +8,18 @@ import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
+import ConfirmModal from '../components/ui/ConfirmModal';
 import Input from '../components/ui/Input';
 import { useToast } from '../components/ui/Toast';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { useAuth } from '../contexts/AuthContext';
 import { sanitizeError, supabase, checkMutationResult, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
 import { Sentry } from '../lib/sentry';
-import { addDaysToDate, businessDayStartIso, localToday } from '../lib/dateUtils';
+import { addDaysToDate, BUSINESS_TIMEZONE, businessDayStartIso, localToday, parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useRealtimeNotes } from '../hooks/useRealtimeSubscription';
-import TeamBoardFilters, { FilterState } from '../components/team/TeamBoardFilters';
+import TeamBoardFilters, { type FilterState } from '../components/team/TeamBoardFilters';
 import CommentsSection from '../components/team/CommentsSection';
 import TagsManager from '../components/team/TagsManager';
 import ActivityFeed from '../components/team/ActivityFeed';
@@ -27,7 +28,7 @@ import EntityBadge from '../components/team/EntityBadge';
 import NoteAttachments from '../components/team/NoteAttachments';
 import NotePhotoUpload from '../components/team/NotePhotoUpload';
 import { canUseTeamNotePhotos } from '../lib/privatePhotos';
-import EmptyState from '../components/ui/EmptyState';
+import EmptyState, { LoadFailedState } from '../components/ui/EmptyState';
 import HelpTip from '../components/ui/HelpTip';
 import TodaysDeliveries from '../components/team/TodaysDeliveries';
 import YesterdayRecap from '../components/team/YesterdayRecap';
@@ -45,6 +46,15 @@ const priorityVariant: Record<NotePriority, 'default' | 'info' | 'warning' | 'er
 };
 
 type ViewTab = 'board' | 'my_tasks' | 'completed' | 'workload' | 'activity';
+
+const emptyBoardFilters: FilterState = {
+  search: '',
+  tags: [],
+  assignees: [],
+  priorities: [],
+  showCompleted: false,
+  overdueOnly: false,
+};
 
 
 interface GlobalActivity {
@@ -65,11 +75,15 @@ export default function TeamBoard() {
   const [notes, setNotes] = useState<ExtendedTeamNote[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notesLoadFailed, setNotesLoadFailed] = useState(false);
+  const [notesHaveLoaded, setNotesHaveLoaded] = useState(false);
+  const notesRequest = useRef(0);
   const [modalOpen, setModalOpen] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedNote, setSelectedNote] = useState<ExtendedTeamNote | null>(null);
   const [editingNote, setEditingNote] = useState<TeamNote | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [noteType, setNoteType] = useState<NoteType>('note');
@@ -98,13 +112,7 @@ export default function TeamBoard() {
   const [completedDateFrom, setCompletedDateFrom] = useState('');
   const [completedDateTo, setCompletedDateTo] = useState('');
 
-  const [filters, setFilters] = useState<FilterState>({
-    search: '',
-    tags: [],
-    assignees: [],
-    priorities: [],
-    showCompleted: false,
-  });
+  const [filters, setFilters] = useState<FilterState>(emptyBoardFilters);
 
   const isAdmin = role === 'admin';
   const canUseNotePhotos = canUseTeamNotePhotos(profile);
@@ -125,6 +133,7 @@ export default function TeamBoard() {
   }, [toast]);
 
   const fetchNotes = useCallback(async () => {
+    const request = ++notesRequest.current;
     // Optimized: Fetch notes with completion info in a single query
     // Note: completed_by FK may be auto-named, so we use the column reference
     // PR-07 follow-up: dropped creator + assignee FK embeds; resolved via
@@ -136,9 +145,10 @@ export default function TeamBoard() {
       .order('is_pinned', { ascending: false })
       .order('created_at', { ascending: false });
 
+    if (request !== notesRequest.current) return;
     if (notesError) {
       Sentry.captureException(notesError, { tags: { source: 'fetch', action: 'load_notes' } });
-      toast('error', 'Failed to load notes. Please try again.');
+      setNotesLoadFailed(true);
       setLoading(false);
       return;
     }
@@ -199,12 +209,15 @@ export default function TeamBoard() {
         completer: note.completed_by ? (profileMap[note.completed_by] || null) : null,
       }));
 
+      if (request !== notesRequest.current) return;
       setNotes(notesWithExtras as ExtendedTeamNote[]);
     } else {
       setNotes([]);
     }
+    setNotesHaveLoaded(true);
+    setNotesLoadFailed(false);
     setLoading(false);
-  }, [toast]);
+  }, []);
 
   useRealtimeNotes(() => {
     fetchNotes();
@@ -373,7 +386,7 @@ export default function TeamBoard() {
   // Track dirty state for note modal form
   useEffect(() => {
     if (modalInitialized.current) setIsNoteDirty(true);
-  }, [title, content, noteType, priority, assignedTo, dueDate]);
+  }, [title, content, noteType, priority, assignedTo, dueDate, linkedEntityType, linkedEntityId]);
 
   const resetForm = () => {
     setTitle('');
@@ -389,8 +402,10 @@ export default function TeamBoard() {
     modalInitialized.current = false;
   };
 
-  const openAddModal = () => {
+  const openAddModal = (type: NoteType = 'note', assignee = '') => {
     resetForm();
+    setNoteType(type);
+    setAssignedTo(assignee);
     setModalOpen(true);
     requestAnimationFrame(() => { modalInitialized.current = true; });
   };
@@ -420,34 +435,8 @@ export default function TeamBoard() {
 
     setSaving(true);
 
-    if (editingNote) {
-      try {
-        const result = await supabase
-          .from('team_notes')
-          .update({
-            title,
-            content: content || null,
-            note_type: noteType,
-            priority,
-            assigned_to: assignedTo || null,
-            due_date: dueDate || null,
-            linked_entity_type: linkedEntityType || null,
-            linked_entity_id: linkedEntityId || null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', editingNote.id)
-          .select();
-        checkMutationResult(result, 'Update note');
-        toast('success', 'Note updated');
-        setModalOpen(false);
-        resetForm();
-        fetchNotes();
-      } catch (err: unknown) {
-        Sentry.captureException(toSentryError(err), { extra: { context: 'update_team_note' } });
-        toast('error', sanitizeError(err));
-      }
-    } else {
-      const noteResult = await supabase.from('team_notes').insert({
+    try {
+      const fields = {
         title,
         content: content || null,
         note_type: noteType,
@@ -456,19 +445,21 @@ export default function TeamBoard() {
         due_date: dueDate || null,
         linked_entity_type: linkedEntityType || null,
         linked_entity_id: linkedEntityId || null,
-        created_by: profile.id,
-      }).select();
-      if (noteResult.error) {
-        toast('error', 'Failed to add note');
-      } else {
-        checkMutationResult(noteResult, 'Insert team note');
-        toast('success', 'Note added');
-        setModalOpen(false);
-        resetForm();
-        fetchNotes();
-      }
+      };
+      const result = editingNote
+        ? await supabase.from('team_notes').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', editingNote.id).select()
+        : await supabase.from('team_notes').insert({ ...fields, created_by: profile.id }).select();
+      checkMutationResult(result, editingNote ? 'Update note' : 'Insert team note');
+      toast('success', editingNote ? 'Note updated' : noteType === 'todo' ? 'Task added' : 'Note added');
+      setModalOpen(false);
+      resetForm();
+      fetchNotes();
+    } catch (err: unknown) {
+      Sentry.captureException(toSentryError(err), { extra: { context: 'save_team_note' } });
+      toast('error', sanitizeError(err));
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   const handleDelete = async (noteId: string) => {
@@ -478,6 +469,7 @@ export default function TeamBoard() {
       return;
     }
 
+    setDeleting(true);
     // Soft delete: set deleted_at timestamp for audit trail
     try {
       const result = await supabase
@@ -490,12 +482,14 @@ export default function TeamBoard() {
         .select();
       checkMutationResult(result, 'Delete note');
       toast('success', 'Note deleted');
+      setDeleteConfirmId(null);
       fetchNotes();
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'delete_team_note' } });
       toast('error', sanitizeError(err));
+    } finally {
+      setDeleting(false);
     }
-    setDeleteConfirmId(null);
   };
 
   const toggleComplete = async (note: TeamNote) => {
@@ -572,9 +566,10 @@ export default function TeamBoard() {
   const applyFilters = (notesList: ExtendedTeamNote[]): ExtendedTeamNote[] => {
     return notesList.filter(note => {
       if (!filters.showCompleted && note.is_completed) return false;
+      if (filters.overdueOnly && !isOverdue(note)) return false;
 
-      if (filters.search) {
-        const searchLower = filters.search.toLowerCase();
+      const searchLower = filters.search.trim().toLowerCase();
+      if (searchLower) {
         const matchesTitle = note.title.toLowerCase().includes(searchLower);
         const matchesContent = note.content?.toLowerCase().includes(searchLower);
         if (!matchesTitle && !matchesContent) return false;
@@ -642,7 +637,8 @@ export default function TeamBoard() {
   const notesByType = (type: NoteType) => applyFilters(notes).filter((n) => n.note_type === type);
   const getName = (p: TeamNote['creator'] | { full_name: string } | null | undefined) => (p as unknown as { full_name: string })?.full_name || '';
 
-  const formatDate = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const formatDueDate = (d: string) => parseLocalDate(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const formatCompletedDate = (d: string) => new Date(d).toLocaleDateString('en-US', { timeZone: BUSINESS_TIMEZONE, month: 'short', day: 'numeric', year: 'numeric' });
   const formatDateTime = (d: string) => new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
   const handleNoteClick = useCallback((note: ExtendedTeamNote) => {
@@ -697,6 +693,10 @@ export default function TeamBoard() {
     );
   }
 
+  if (notesLoadFailed && !notesHaveLoaded) {
+    return <Card><LoadFailedState title="Team Board could not load" onRetry={() => { setLoading(true); fetchNotes(); }} /></Card>;
+  }
+
   // ── View-specific content ──
   const myTasks = notes.filter(n => !n.is_completed && n.assigned_to === profile?.id)
     .sort((a, b) => {
@@ -706,19 +706,7 @@ export default function TeamBoard() {
       if (aOverdue !== bOverdue) return aOverdue - bOverdue;
       const priOrder: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
       if (priOrder[a.priority] !== priOrder[b.priority]) return priOrder[a.priority] - priOrder[b.priority];
-      if (a.due_date && b.due_date) return a.due_date.localeCompare(b.due_date);
-      return 0;
-    });
-
-  // For the Board tab's personalized sections
-  const myTasksForBoard = notes
-    .filter(n => !n.is_completed && n.assigned_to === profile?.id)
-    .sort((a, b) => {
-      const aOverdue = isOverdue(a) ? 0 : 1;
-      const bOverdue = isOverdue(b) ? 0 : 1;
-      if (aOverdue !== bOverdue) return aOverdue - bOverdue;
-      const priOrder: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
-      return (priOrder[a.priority] || 4) - (priOrder[b.priority] || 4);
+      return (a.due_date || '9999-12-31').localeCompare(b.due_date || '9999-12-31');
     });
 
   const pinnedAndAnnouncements = notes
@@ -727,22 +715,29 @@ export default function TeamBoard() {
   const completedNotes = notes
     .filter(n => n.is_completed)
     .filter(n => {
-      if (completedDateFrom && n.completed_at && n.completed_at < `${completedDateFrom}T00:00:00`) return false;
-      if (completedDateTo && n.completed_at && n.completed_at > `${completedDateTo}T23:59:59`) return false;
-      return true;
+      if (!completedDateFrom && !completedDateTo) return true;
+      if (!n.completed_at) return false;
+      const completedDay = todayInBusinessTz(new Date(n.completed_at));
+      return (!completedDateFrom || completedDay >= completedDateFrom) && (!completedDateTo || completedDay <= completedDateTo);
     })
     .sort((a, b) => (b.completed_at || '').localeCompare(a.completed_at || ''));
 
   return (
-    <div className="space-y-4">
+    <div className="phone-touch space-y-4">
+      {notesLoadFailed && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          <span>Could not refresh notes. The board may be out of date.</span>
+          <Button onClick={fetchNotes} variant="secondary">Retry notes</Button>
+        </div>
+      )}
       {/* ── Stats Bar ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div
           role="button"
           tabIndex={0}
-          className={`bg-white rounded-xl border p-3 cursor-pointer transition-all ${viewTab === 'board' ? 'border-crx-green ring-1 ring-crx-green/20' : 'border-gray-100 hover:border-gray-200'}`}
-          onClick={() => setViewTab('board')}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setViewTab('board'); } }}
+          className={`bg-white rounded-xl border p-3 cursor-pointer transition-all ${viewTab === 'board' && filters.showCompleted && !filters.overdueOnly ? 'border-crx-green ring-1 ring-crx-green/20' : 'border-gray-100 hover:border-gray-200'}`}
+          onClick={() => { setViewTab('board'); setFilters({ ...emptyBoardFilters, showCompleted: true }); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setViewTab('board'); setFilters({ ...emptyBoardFilters, showCompleted: true }); } }}
         >
           <div className="flex items-center gap-2 mb-1">
             <LayoutGrid className="w-4 h-4 text-blue-500" />
@@ -753,9 +748,9 @@ export default function TeamBoard() {
         <div
           role="button"
           tabIndex={0}
-          className={`bg-white rounded-xl border p-3 cursor-pointer transition-all ${viewTab === 'board' && !filters.showCompleted ? 'border-crx-green ring-1 ring-crx-green/20' : 'border-gray-100 hover:border-gray-200'}`}
-          onClick={() => { setViewTab('board'); setFilters(f => ({ ...f, showCompleted: false })); }}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setViewTab('board'); setFilters(f => ({ ...f, showCompleted: false })); } }}
+          className={`bg-white rounded-xl border p-3 cursor-pointer transition-all ${viewTab === 'board' && !filters.showCompleted && !filters.overdueOnly ? 'border-crx-green ring-1 ring-crx-green/20' : 'border-gray-100 hover:border-gray-200'}`}
+          onClick={() => { setViewTab('board'); setFilters(emptyBoardFilters); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setViewTab('board'); setFilters(emptyBoardFilters); } }}
         >
           <div className="flex items-center gap-2 mb-1">
             <ListChecks className="w-4 h-4 text-amber-500" />
@@ -779,9 +774,10 @@ export default function TeamBoard() {
         <div
           role="button"
           tabIndex={0}
-          className="bg-white rounded-xl border border-gray-100 hover:border-gray-200 p-3 cursor-pointer transition-all"
-          onClick={() => { setViewTab('board'); setFilters(f => ({ ...f, showCompleted: false, priorities: ['urgent', 'high'] })); }}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setViewTab('board'); setFilters(f => ({ ...f, showCompleted: false, priorities: ['urgent', 'high'] })); } }}
+          aria-pressed={viewTab === 'board' && filters.overdueOnly}
+          className={`bg-white rounded-xl border p-3 cursor-pointer transition-all ${viewTab === 'board' && filters.overdueOnly ? 'border-crx-green ring-1 ring-crx-green/20' : 'border-gray-100 hover:border-gray-200'}`}
+          onClick={() => { setViewTab('board'); setFilters({ ...emptyBoardFilters, overdueOnly: true }); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setViewTab('board'); setFilters({ ...emptyBoardFilters, overdueOnly: true }); } }}
         >
           <div className="flex items-center gap-2 mb-1">
             <AlertTriangle className="w-4 h-4 text-red-500" />
@@ -831,6 +827,7 @@ export default function TeamBoard() {
         ]).map(tab => (
           <button
             key={tab.id}
+            aria-pressed={viewTab === tab.id}
             onClick={() => setViewTab(tab.id)}
             className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap min-h-[44px] ${
               viewTab === tab.id
@@ -852,19 +849,31 @@ export default function TeamBoard() {
         ))}
       </div>
 
+      {viewTab !== 'board' && <Button variant="secondary" className="sm:hidden" onClick={() => openAddModal()}>Add Note</Button>}
+
       {/* ══════════════════════════════════════════════════ */}
       {/* ── VIEW: Board (original 3-column layout) ── */}
       {/* ══════════════════════════════════════════════════ */}
       {viewTab === 'board' && (
         <>
+          <div className="flex flex-wrap items-start gap-3">
+            <Button icon={<Plus className="w-4 h-4" />} onClick={() => openAddModal('todo')}>Add Task</Button>
+            <Button variant="secondary" onClick={() => openAddModal()}>Add Note</Button>
+            <div className="min-w-0 flex-1 basis-full lg:basis-0">
+              <TeamBoardFilters filters={filters} onChange={setFilters} onClear={() => setFilters(emptyBoardFilters)} />
+            </div>
+          </div>
+          {filters.overdueOnly && applyFilters(notes).length === 0 && (
+            <p className="text-sm text-secondary" role="status">No overdue items match these filters.</p>
+          )}
           {/* Today's Deliveries */}
-          <TodaysDeliveries />
+          {!filters.overdueOnly && <TodaysDeliveries />}
 
           {/* Stale Tasks — overdue tasks escalated by severity */}
-          <StaleTasksAlert notes={notes} onClickNote={(note) => { setSelectedNote(note); setDetailModalOpen(true); }} />
+          {!filters.overdueOnly && <StaleTasksAlert notes={notes} onClickNote={handleNoteClick} />}
 
           {/* Your Tasks & Mentions — personalized section */}
-          {myTasksForBoard.length > 0 && (
+          {!filters.overdueOnly && myTasks.length > 0 && (
             <Card padding={false}>
               <div className="p-5">
                 <div className="flex items-center justify-between mb-3">
@@ -872,7 +881,7 @@ export default function TeamBoard() {
                     <User className="w-4 h-4 text-crx-green" />
                     <h3 className="text-sm font-semibold text-nav-dark">Your Tasks</h3>
                     <span className="px-1.5 py-0.5 bg-crx-green/10 text-crx-green rounded-full text-xs font-semibold">
-                      {myTasksForBoard.length}
+                      {myTasks.length}
                     </span>
                   </div>
                   <button
@@ -883,7 +892,7 @@ export default function TeamBoard() {
                   </button>
                 </div>
                 <div className="space-y-2">
-                  {myTasksForBoard.slice(0, 5).map(n => (
+                  {myTasks.slice(0, 5).map(n => (
                     <NoteCard
                       key={n.id}
                       note={n}
@@ -903,7 +912,7 @@ export default function TeamBoard() {
           )}
 
           {/* Pinned & Announcements */}
-          {pinnedAndAnnouncements.length > 0 && (
+          {!filters.overdueOnly && pinnedAndAnnouncements.length > 0 && (
             <Card padding={false}>
               <div className="p-5">
                 <div className="flex items-center gap-2 mb-3">
@@ -930,20 +939,7 @@ export default function TeamBoard() {
           )}
 
           {/* Yesterday's Recap */}
-          <YesterdayRecap />
-
-          {/* Existing filters + grid below */}
-          <div className="flex justify-between items-start gap-4">
-            <div className="flex-1">
-              <TeamBoardFilters filters={filters} onChange={setFilters} />
-            </div>
-            <div className="flex items-center gap-1">
-              <Button icon={<Plus className="w-4 h-4" />} onClick={openAddModal} className="hidden sm:flex">
-                Add Note
-              </Button>
-              <HelpTip text="Notes can be tasks, reminders, or announcements. Assign to a team member, set a due date, and link to an order or delivery for context." className="ml-1 hidden sm:inline-flex" />
-            </div>
-          </div>
+          {!filters.overdueOnly && <YesterdayRecap />}
 
           {notes.length === 0 ? (
             <Card>
@@ -952,7 +948,7 @@ export default function TeamBoard() {
                 title="Your team board is empty"
                 description="Create notes, tasks, and announcements to keep your team coordinated."
                 action={
-                  <Button icon={<Plus className="w-4 h-4" />} onClick={openAddModal}>
+                  <Button icon={<Plus className="w-4 h-4" />} onClick={() => openAddModal()}>
                     Create First Note
                   </Button>
                 }
@@ -1005,13 +1001,13 @@ export default function TeamBoard() {
       {/* ══════════════════════════════════════════════════ */}
       {viewTab === 'my_tasks' && (
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between items-center gap-2">
             <p className="text-sm text-secondary">
               {myTasks.length === 0
                 ? "You're all caught up! No tasks assigned to you."
                 : `${myTasks.length} task${myTasks.length !== 1 ? 's' : ''} assigned to you`}
             </p>
-            <Button icon={<Plus className="w-4 h-4" />} onClick={() => { resetForm(); setAssignedTo(profile?.id || ''); setNoteType('todo'); setModalOpen(true); }}>
+            <Button icon={<Plus className="w-4 h-4" />} onClick={() => openAddModal('todo', profile?.id)}>
               Add Task for Me
             </Button>
           </div>
@@ -1058,6 +1054,7 @@ export default function TeamBoard() {
                 <label className="block text-xs font-medium text-secondary mb-1">From</label>
                 <input
                   type="date"
+                  aria-label="Completed from"
                   value={completedDateFrom}
                   onChange={(e) => setCompletedDateFrom(e.target.value)}
                   className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -1067,6 +1064,7 @@ export default function TeamBoard() {
                 <label className="block text-xs font-medium text-secondary mb-1">To</label>
                 <input
                   type="date"
+                  aria-label="Completed to"
                   value={completedDateTo}
                   onChange={(e) => setCompletedDateTo(e.target.value)}
                   className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -1117,11 +1115,11 @@ export default function TeamBoard() {
                       </div>
                       <div className="text-right shrink-0">
                         {n.completed_at && (
-                          <p className="text-xs text-secondary">{formatDate(n.completed_at)}</p>
+                          <p className="text-xs text-secondary">{formatCompletedDate(n.completed_at)}</p>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-4 mt-2 ml-6 text-xs text-gray-400">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 ml-6 text-xs text-secondary">
                       <span>Created by {getName(n.creator)}</span>
                       {getName(n.assignee) && (
                         <span>Assigned to <span className="text-crx-green font-medium">{getName(n.assignee)}</span></span>
@@ -1161,6 +1159,7 @@ export default function TeamBoard() {
                 <label className="block text-xs font-medium text-secondary mb-1">From</label>
                 <input
                   type="date"
+                  aria-label="Activity from"
                   value={activityDateFrom}
                   onChange={(e) => setActivityDateFrom(e.target.value)}
                   className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -1170,6 +1169,7 @@ export default function TeamBoard() {
                 <label className="block text-xs font-medium text-secondary mb-1">To</label>
                 <input
                   type="date"
+                  aria-label="Activity to"
                   value={activityDateTo}
                   onChange={(e) => setActivityDateTo(e.target.value)}
                   className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -1307,23 +1307,24 @@ export default function TeamBoard() {
         open={modalOpen}
         onClose={() => { setModalOpen(false); resetForm(); }}
         title={editingNote ? 'Edit' : 'Add'}
-        accent="Note"
+        accent={noteType === 'todo' ? 'Task' : 'Note'}
+        closeDisabled={saving}
       >
-        <div className="space-y-4">
+        <fieldset disabled={saving} className="space-y-4">
           <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
           <div>
-            <label className="block text-sm font-medium text-secondary mb-1">Content</label>
-            <textarea
+            <label htmlFor="team-note-content" className="block text-sm font-medium text-secondary mb-1">Content</label>
+            <textarea id="team-note-content"
               value={content}
               onChange={(e) => setContent(e.target.value)}
               rows={3}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-secondary mb-1">Type</label>
-              <select
+              <label htmlFor="team-note-type" className="block text-sm font-medium text-secondary mb-1">Type</label>
+              <select id="team-note-type"
                 value={noteType}
                 onChange={(e) => setNoteType(e.target.value as NoteType)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -1334,8 +1335,8 @@ export default function TeamBoard() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-secondary mb-1">Priority</label>
-              <select
+              <label htmlFor="team-note-priority" className="block text-sm font-medium text-secondary mb-1">Priority</label>
+              <select id="team-note-priority"
                 value={priority}
                 onChange={(e) => setPriority(e.target.value as NotePriority)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -1347,10 +1348,10 @@ export default function TeamBoard() {
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-secondary mb-1">Assign To</label>
-              <select
+              <label htmlFor="team-note-assignee" className="block text-sm font-medium text-secondary mb-1">Assign To</label>
+              <select id="team-note-assignee"
                 value={assignedTo}
                 onChange={(e) => setAssignedTo(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -1363,7 +1364,7 @@ export default function TeamBoard() {
             </div>
             <Input label="Due Date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-secondary mb-1">Link to Entity<HelpTip text="Link this note to an order, quote, delivery, or customer. The note will show up on that record's detail page too." className="ml-1" /></label>
               <select
@@ -1394,12 +1395,12 @@ export default function TeamBoard() {
             )}
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => { setModalOpen(false); resetForm(); }}>Cancel</Button>
-            <Button onClick={handleSave} loading={saving}>
-              {editingNote ? 'Save Changes' : 'Add Note'}
+            <Button variant="secondary" disabled={saving} onClick={() => { setModalOpen(false); resetForm(); }}>Cancel</Button>
+            <Button onClick={handleSave} loading={saving} disabled={!title.trim()}>
+              {editingNote ? 'Save Changes' : noteType === 'todo' ? 'Add Task' : 'Add Note'}
             </Button>
           </div>
-        </div>
+        </fieldset>
       </Modal>
 
       {/* Note Detail Modal */}
@@ -1440,7 +1441,7 @@ export default function TeamBoard() {
                 {selectedNote.due_date && (
                   <span className={`flex items-center gap-1 ${isOverdue(selectedNote) ? 'text-red-500 font-medium' : ''}`}>
                     <Clock className="w-3 h-3" />
-                    Due {formatDate(selectedNote.due_date)}
+                    Due {formatDueDate(selectedNote.due_date)}
                   </span>
                 )}
                 <span className="text-gray-400">
@@ -1521,29 +1522,15 @@ export default function TeamBoard() {
         )}
       </Modal>
 
-      {/* Delete Confirmation Modal */}
-      <Modal
+      <ConfirmModal
         open={deleteConfirmId !== null}
         onClose={() => setDeleteConfirmId(null)}
-        title="Delete"
-        accent="Note"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-secondary">
-            Are you sure you want to delete this note? The deletion will be recorded in the activity history for audit purposes.
-          </p>
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setDeleteConfirmId(null)}>Cancel</Button>
-            <Button
-              variant="primary"
-              onClick={() => deleteConfirmId && handleDelete(deleteConfirmId)}
-              className="!bg-red-600 hover:!bg-red-700"
-            >
-              Delete
-            </Button>
-          </div>
-        </div>
-      </Modal>
+        onConfirm={() => { if (deleteConfirmId) handleDelete(deleteConfirmId); }}
+        title="Delete this note?"
+        message="This note will be removed from the board. The deletion will still appear in the activity history."
+        confirmLabel="Delete note"
+        loading={deleting}
+      />
 
       <UnsavedChangesModal
         open={blocker.state === 'blocked'}
@@ -1551,14 +1538,6 @@ export default function TeamBoard() {
         onLeave={() => blocker.proceed?.()}
       />
 
-      {/* Mobile FAB — floating "Add Note" button visible only on small screens */}
-      <button
-        onClick={openAddModal}
-        className="fixed bottom-6 right-6 z-40 sm:hidden w-14 h-14 bg-crx-green text-white rounded-full shadow-lg hover:bg-crx-green/90 active:scale-95 transition-all flex items-center justify-center"
-        aria-label="Add Note"
-      >
-        <Plus className="w-6 h-6" />
-      </button>
     </div>
   );
 }

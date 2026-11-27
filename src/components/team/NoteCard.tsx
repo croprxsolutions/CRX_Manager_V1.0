@@ -5,7 +5,7 @@ import {
 import Badge from '../ui/Badge';
 import EntityBadge from './EntityBadge';
 import CustomerContextCard from './CustomerContextCard';
-import { parseLocalDate } from '../../lib/dateUtils';
+import { daysSinceBusinessDate, parseLocalDate } from '../../lib/dateUtils';
 import type { TeamNote, NotePriority, ExtendedTeamNote, LinkedEntityType } from '../../types';
 
 // ── Helper functions ──
@@ -17,19 +17,11 @@ const priorityVariant: Record<NotePriority, 'default' | 'info' | 'warning' | 'er
   urgent: 'error',
 };
 
-const isOverdue = (note: TeamNote) =>
-  !note.is_completed && note.due_date && parseLocalDate(note.due_date) < new Date();
-
-const getDaysUntilDue = (dueDate: string) => {
-  const diff = parseLocalDate(dueDate).getTime() - new Date().getTime();
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
-};
-
 const getName = (p: TeamNote['creator'] | { full_name: string } | null | undefined) =>
   (p as unknown as { full_name: string })?.full_name || '';
 
 const formatDate = (d: string) =>
-  new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  parseLocalDate(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
 const formatDateTime = (d: string) =>
   new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -77,6 +69,9 @@ export default function NoteCard({
   onDelete,
   onClick,
 }: NoteCardProps) {
+  const daysOverdue = note.due_date ? daysSinceBusinessDate(note.due_date) : 0;
+  const overdue = !note.is_completed && daysOverdue > 0;
+
   return (
     <div
       role="button"
@@ -84,18 +79,19 @@ export default function NoteCard({
       className={`p-4 rounded-lg border transition-colors group cursor-pointer ${
         note.is_completed
           ? 'border-gray-100 bg-gray-50/50 opacity-75'
-          : isOverdue(note)
+          : overdue
             ? 'border-red-200 bg-red-50/30 hover:border-red-300'
             : 'border-gray-100 hover:border-gray-200'
       }`}
       onClick={() => onClick(note)}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(note); } }}
+      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick(note); } }}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start gap-3 sm:flex-nowrap">
         {showCheckbox && (
           <button
             onClick={(e) => { e.stopPropagation(); if (canComplete) onToggleComplete(note); }}
             disabled={!canComplete}
+            aria-label={`${note.is_completed ? 'Reopen' : 'Complete'} ${note.title}`}
             title={canComplete ? undefined : 'Only the creator, the assignee, or an admin can check this off'}
             className={`mt-0.5 ${canComplete ? 'text-secondary hover:text-crx-green' : 'text-gray-300 cursor-not-allowed'}`}
           >
@@ -109,14 +105,14 @@ export default function NoteCard({
               {note.title}
             </h4>
             <Badge variant={priorityVariant[note.priority]}>{note.priority}</Badge>
-            {isOverdue(note) && (
+            {overdue && (
               <Badge variant="error">
                 <AlertTriangle className="w-3 h-3 mr-1" />
-                Overdue {Math.abs(getDaysUntilDue(note.due_date!))}d
+                Overdue {daysOverdue}d
               </Badge>
             )}
-            {!note.is_completed && note.due_date && !isOverdue(note) && getDaysUntilDue(note.due_date) <= 2 && (
-              <Badge variant="warning">Due soon</Badge>
+            {!note.is_completed && note.due_date && !overdue && daysOverdue >= -2 && (
+              <Badge variant="warning">{daysOverdue === 0 ? 'Due today' : 'Due soon'}</Badge>
             )}
           </div>
 
@@ -158,7 +154,7 @@ export default function NoteCard({
               <span className="text-crx-green font-medium">&rarr; {getName(note.assignee)}</span>
             )}
             {note.due_date && (
-              <span className={`flex items-center gap-1 ${isOverdue(note) ? 'text-red-500 font-medium' : ''}`}>
+              <span className={`flex items-center gap-1 ${overdue ? 'text-red-500 font-medium' : ''}`}>
                 <Clock className="w-3 h-3" />
                 {formatDate(note.due_date)}
               </span>
@@ -173,7 +169,7 @@ export default function NoteCard({
 
           {/* Completion details — shows who completed it and how long it took */}
           {showCompletionDetails && note.is_completed && note.completed_at && (
-            <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-3 text-xs">
+            <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-3 flex-wrap text-xs">
               <span className="flex items-center gap-1 text-crx-green font-medium">
                 <CheckSquare className="w-3 h-3" />
                 Completed by {getName(note.completer) || 'Unknown'}
@@ -189,7 +185,7 @@ export default function NoteCard({
           )}
         </div>
         {canEdit && (
-          <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
+          <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity shrink-0 basis-full justify-end sm:basis-auto">
             <button
               onClick={(e) => { e.stopPropagation(); onTogglePin(note); }}
               className="p-1.5 sm:p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-amber-500"

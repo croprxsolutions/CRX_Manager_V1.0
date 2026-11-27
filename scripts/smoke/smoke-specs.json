@@ -175,7 +175,7 @@
       "chain": "smoke-liquid-weight-brand-recheck.sql",
       "container_prover": "prove-liquid-weight-brand-recheck-real-schema.mjs",
       "container_only": true,
-      "description": "REQUIRES 20270312213037. Disposable before-and-after proof of active-brand rename recheck, inactive groups, waiting drafts, captured blend ticket weights, and the closed legacy approval path.",
+      "description": "REQUIRES 20270314140000. Disposable before-and-after proof of active-brand rename recheck, inactive groups, waiting drafts, captured blend ticket weights, and the closed legacy approval path.",
       "covers": ["return_liquid_density_to_draft_for_brand", "approve_weights"],
       "area": ["inventory", "security", "idempotency"]
     },

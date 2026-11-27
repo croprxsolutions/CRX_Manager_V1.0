@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { buildContainer, removeContainer, psql, scalar, seedUsers } from './undo-paths/harness.mjs';
 
-const migration = '20270312213037_liquid_weight_brand_recheck.sql';
+const migration = '20270314140000_liquid_weight_brand_recheck.sql';
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8').replaceAll('\r\n', '\n');
 const rename = read('./smoke-liquid-weight-brand-recheck.sql');
 const core = read('./smoke-liquid-density-review.sql');

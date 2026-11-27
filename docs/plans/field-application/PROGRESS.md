@@ -103,7 +103,7 @@ Briefs (2026-11-25, from the merged slice 1 code): `docs/loops/field-app-s2-db.m
 | Item | State | Note |
 |---|---|---|
 | Start gate: applicator data-access fix (database half of #2574) | BLOCKED (Field Setup lane building it) | Only database writer until it merges into staging; every slice 2 applicator read follows its safe-column shape |
-| 2.1 Loads and stock | NOT STARTED | Can merge before 12-15 if `jobs.stock_path` is set by a `jobs` insert trigger (no quote or booking writer edited) and Taha's holds and purchasing-plan readers skip vendor lines (his change or his review; 2026-11-27 vendor decision: vendor lines never set `customer_supplied`) |
+| 2.1 Loads and stock | NOT STARTED | Can merge before 12-15 if `jobs.stock_path` is set by a `jobs` insert trigger (no quote or booking writer edited) and Taha's holds and purchasing-plan change (his PR, after the 11-28 release) has landed; 2.1 adds the Customer vendor and customer-owned stock (2026-11-27 vendor decision and split) |
 | 2.2 Work entries and statuses | NOT STARTED | New `ready_for_review` status must count as open work in the customer-deactivation guard Taha's #2526 rewrites; extra-field read function waits on Mason's yes |
 | 2.3 Application services | NOT STARTED | Must not change commission writers (Taha's #2525) |
 | 2.4 FP-4 jobs carry splits | PARKED until after 2026-12-15 | Quote-to-job writer (Taha); needs FP-2 |

@@ -6,7 +6,9 @@
 
 **Why:** Taha found that the slice 2 brief (#2595) set `customer_supplied` on vendor lines, which would print a vendor's product as "(customer supplied)" on application records.
 
-**Replaces:** part of SPEC decision 2026-11-24 h ("no customer-to-vendor link"). Taha owns the holds and purchasing-plan readers; he chooses whether he changes them or reviews our change. Details: `docs/plans/field-application/SPEC.md` decision 2026-11-27.
+**Replaces:** part of SPEC decision 2026-11-24 h ("no customer-to-vendor link").
+
+**Split agreed with Taha 2026-11-27:** our slice 2.1 adds the "Customer" vendor (linked to the customer) and customer-owned stock; Taha changes the stock holds and purchasing plan so a line or stock whose vendor is Customer is never held, planned or sold as ours (his PR, after the 2026-11-28 release), and reviews 2.1. Agents do not edit his holds or purchasing-plan code. Details: `docs/plans/field-application/SPEC.md` decision 2026-11-27.
 
 ## 2026-11-23 — #2381: Mason owner-accepted 4 Sol finding(s) at `fd461adc8c3b`
 

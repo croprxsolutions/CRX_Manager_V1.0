@@ -25,6 +25,7 @@ vi.mock('./db', () => ({
 
 import { fetchJobFieldLocations, fetchJobMapImages, sprayNumbersByFieldId } from './jobMapImages';
 
+const noHazards = Promise.resolve(new Map<string, never>());
 const hazardPoint = { type: 'Point', coordinates: [-89.04, 39.16] } satisfies FieldObstacle['point_geojson'];
 
 const squareBoundary = JSON.stringify({
@@ -87,7 +88,7 @@ describe('fetchJobMapImages', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    const result = await fetchJobMapImages('job-1', { perField: false });
+    const result = await fetchJobMapImages('job-1', { perField: false, hazards: noHazards });
 
     expect(mockRpc).toHaveBeenCalledWith('get_job_fields_with_geojson', { p_job_id: 'job-1' });
     expect(mockEq).toHaveBeenCalledWith('job_id', 'job-1');
@@ -117,7 +118,7 @@ describe('fetchJobMapImages', () => {
       blob: async () => new Blob(['png'], { type: 'image/png' }),
     }));
 
-    const result = await fetchJobMapImages('job-1', { overview: false });
+    const result = await fetchJobMapImages('job-1', { overview: false, hazards: noHazards });
 
     expect(result?.perField).toHaveLength(1);
     expect(result?.perField[0].acres).toBe(10);
@@ -201,7 +202,7 @@ describe('fetchJobMapImages', () => {
       blob: async () => new Blob(['png'], { type: 'image/png' }),
     }));
 
-    const result = await fetchJobMapImages('job-1', { overview: false });
+    const result = await fetchJobMapImages('job-1', { overview: false, hazards: noHazards });
 
     expect(result?.perField).toHaveLength(1);
   });
@@ -242,7 +243,7 @@ describe('fetchJobMapImages', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,bGFiZWxlZA==');
     vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ close: vi.fn() }));
 
-    const result = await fetchJobMapImages('job-1', { perField: false });
+    const result = await fetchJobMapImages('job-1', { perField: false, hazards: noHazards });
 
     expect(result?.overview).toBe('data:image/png;base64,bGFiZWxlZA==');
     const url = String(mockFetch.mock.calls[0][0]);
@@ -270,7 +271,7 @@ describe('fetchJobMapImages', () => {
       blob: async () => new Blob(['png'], { type: 'image/png' }),
     }));
 
-    const result = await fetchJobMapImages('job-1', { overview: false });
+    const result = await fetchJobMapImages('job-1', { overview: false, hazards: noHazards });
 
     expect(result?.perField[0].acres).toBeNull();
   });
@@ -307,7 +308,7 @@ describe('fetchJobMapImages', () => {
     const blob = vi.fn(async () => new Blob([body], { type }));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, headers, blob }));
 
-    await expect(fetchJobMapImages('job-1', { perField: false })).resolves.toBeNull();
+    await expect(fetchJobMapImages('job-1', { perField: false, hazards: noHazards })).resolves.toBeNull();
     if (warning) expect(blob).not.toHaveBeenCalled();
     expect(console.warn).toHaveBeenCalledWith(warning
       ? 'Mapbox overview print image returned a provider warning.'
@@ -324,7 +325,7 @@ describe('fetchJobMapImages', () => {
       ok: true,
       blob: async () => new Blob(['invalid'], { type: 'image/png' }),
     }));
-    await expect(fetchJobMapImages('job-1', { perField: false })).resolves.toBeNull();
+    await expect(fetchJobMapImages('job-1', { perField: false, hazards: noHazards })).resolves.toBeNull();
   });
 
   it('cuts off a twelve-field job before all its stalled images are requested', async () => {
@@ -345,7 +346,7 @@ describe('fetchJobMapImages', () => {
     }));
     vi.stubGlobal('fetch', fetcher);
 
-    const result = fetchJobMapImages('job-1');
+    const result = fetchJobMapImages('job-1', { hazards: noHazards });
     await vi.advanceTimersByTimeAsync(25_000);
     await expect(result).resolves.toBeNull();
     expect(fetcher).toHaveBeenCalledTimes(7);
@@ -373,7 +374,7 @@ describe('fetchJobMapImages', () => {
       blob: async () => new Blob(['png'], { type: 'image/png' }),
     }));
 
-    const result = fetchJobMapImages('job-1');
+    const result = fetchJobMapImages('job-1', { hazards: noHazards });
     await vi.advanceTimersByTimeAsync(10_005);
     const snapshot = await result;
     expect(snapshot?.overview).toBe(encoded);
@@ -399,7 +400,7 @@ describe('fetchJobMapImages', () => {
     }));
     vi.stubGlobal('fetch', mockFetch);
 
-    const result = fetchJobMapImages('job-1', { perField: false });
+    const result = fetchJobMapImages('job-1', { perField: false, hazards: noHazards });
     await fetchStarted;
     await vi.advanceTimersByTimeAsync(10_000);
 
@@ -424,7 +425,7 @@ describe('fetchJobMapImages', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    await fetchJobMapImages('job-1', { perField: false });
+    await fetchJobMapImages('job-1', { perField: false, hazards: noHazards });
 
     const url = String(mockFetch.mock.calls[0][0]);
     const encodedOverlay = url.match(/geojson\((.+)\)\/auto/);
@@ -439,7 +440,7 @@ describe('fetchJobMapImages', () => {
     const mockFetch = vi.fn();
     vi.stubGlobal('fetch', mockFetch);
 
-    await expect(fetchJobMapImages('job-1')).resolves.toBeNull();
+    await expect(fetchJobMapImages('job-1', { hazards: noHazards })).resolves.toBeNull();
 
     expect(mockRpc).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
@@ -455,7 +456,7 @@ describe('fetchJobMapImages', () => {
     const mockFetch = vi.fn();
     vi.stubGlobal('fetch', mockFetch);
 
-    const result = await fetchJobMapImages('job-1', { perField: false });
+    const result = await fetchJobMapImages('job-1', { perField: false, hazards: noHazards });
 
     expect(result).toBeNull();
     expect(mockFetch).not.toHaveBeenCalled();

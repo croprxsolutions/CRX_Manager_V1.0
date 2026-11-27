@@ -21,7 +21,7 @@ interface JobMapImageOptions {
   perField?: boolean;
   widthPx?: number;
   heightPx?: number;
-  hazards?: Promise<ReadonlyMap<string, { markers: readonly Pick<FieldObstacle, 'id' | 'point_geojson'>[] }>>;
+  hazards: Promise<ReadonlyMap<string, { markers: readonly Pick<FieldObstacle, 'id' | 'point_geojson'>[] }>>;
 }
 
 export interface JobFieldMapImage {
@@ -711,7 +711,7 @@ export function sprayNumbersByFieldId(rows: Array<Pick<JobMapFieldRow, 'id' | 's
  */
 export async function fetchJobMapImages(
   jobId: string,
-  opts: JobMapImageOptions = {},
+  opts: JobMapImageOptions,
 ): Promise<JobMapImages | null> {
   const token = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
   if (!jobId || !token?.trim()) {
@@ -833,7 +833,7 @@ async function collectJobMapImages(
       const hazards = await opts.hazards;
       while (!signal.aborted && nextField < fields.length) {
         const field = fields[nextField++];
-        const fieldObstacles = fieldObstacleFeatures(hazards?.get(field.id)?.markers ?? []);
+        const fieldObstacles = fieldObstacleFeatures(hazards.get(field.id)?.markers ?? []);
         const image = buildStaticImageUrl([field], fieldObstacles.map((pin) => pin.feature), perFieldOptions);
         if (!image) {
           console.warn(`Skipping map for ${field.name} because its geometry exceeds Mapbox URL limits.`);

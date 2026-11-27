@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { FieldObstacle } from '../types';
 
-const { mockRpc, mockFrom, mockIn, mockObstacleIn, mockEq, mockReadSignal } = vi.hoisted(() => ({
+const { mockRpc, mockFrom, mockIn, mockEq, mockReadSignal } = vi.hoisted(() => ({
   mockRpc: vi.fn(),
   mockFrom: vi.fn(),
   mockIn: vi.fn(),
-  mockObstacleIn: vi.fn(),
   mockEq: vi.fn(),
   mockReadSignal: vi.fn(),
 }));
@@ -24,6 +24,8 @@ vi.mock('./db', () => ({
 }));
 
 import { fetchJobFieldLocations, fetchJobMapImages, sprayNumbersByFieldId } from './jobMapImages';
+
+const hazardPoint = { type: 'Point', coordinates: [-89.04, 39.16] } satisfies FieldObstacle['point_geojson'];
 
 const squareBoundary = JSON.stringify({
   type: 'Polygon',
@@ -50,13 +52,9 @@ function setupRpc(boundary = squareBoundary, centroid?: [number, number], acresT
     if (table === 'job_fields') {
       return { select: vi.fn().mockReturnValue({ eq: (...args: unknown[]) => abortable(mockEq(...args)) }) };
     }
-    if (table === 'field_obstacles') {
-      return { select: vi.fn().mockReturnValue({ in: (...args: unknown[]) => abortable(mockObstacleIn(...args)) }) };
-    }
     return { select: vi.fn().mockReturnValue({ in: (...args: unknown[]) => abortable(mockIn(...args)) }) };
   });
   mockEq.mockResolvedValue({ data: [{ field_id: 'field-1', acres_to_treat: acresToTreat }], error: null });
-  mockObstacleIn.mockResolvedValue({ data: [], error: null });
   mockIn.mockResolvedValue({ data: [{ id: 'customer-1', farm_name: 'Smith Farm' }], error: null });
 }
 
@@ -127,19 +125,16 @@ describe('fetchJobMapImages', () => {
 
   it('adds small red obstacle points to a per-field close-up overlay', async () => {
     setupRpc();
-    mockObstacleIn.mockResolvedValue({
-      data: [{
+    const hazards = Promise.resolve(new Map([['field-1', { markers: [{
         id: 'obstacle-1',
         field_id: 'field-1',
         kind: 'oil_well',
         label: 'West well',
-        point_geojson: { type: 'Point', coordinates: [-89.04, 39.16] },
+        point_geojson: hazardPoint,
         created_by: 'user-1',
         created_at: '2026-07-11T12:00:00Z',
         updated_at: '2026-07-11T12:00:00Z',
-      }],
-      error: null,
-    });
+    }] }]]));
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -147,10 +142,10 @@ describe('fetchJobMapImages', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    const result = await fetchJobMapImages('job-1', { overview: false });
+    const result = await fetchJobMapImages('job-1', { overview: false, hazards });
 
     expect(result?.perField[0].hazardPinIdentities).toEqual([JSON.stringify(['obstacle-1', -89.04, 39.16])]);
-    expect(mockObstacleIn).toHaveBeenCalledWith('field_id', ['field-1']);
+    expect(mockFrom).not.toHaveBeenCalledWith('field_obstacles');
     const url = String(mockFetch.mock.calls[0][0]);
     const encodedOverlay = url.match(/geojson\((.+)\)\/auto/);
     expect(decodeURIComponent(encodedOverlay?.[1] ?? '')).not.toContain('obstacle-1');
@@ -166,19 +161,16 @@ describe('fetchJobMapImages', () => {
 
   it('keeps an obstacle and the field fill even if private text would exceed the URL limit', async () => {
     setupRpc();
-    mockObstacleIn.mockResolvedValue({
-      data: [{
+    const hazards = Promise.resolve(new Map([['field-1', { markers: [{
         id: 'obstacle-1',
         field_id: 'field-1',
         kind: 'other',
         label: 'x'.repeat(8_000),
-        point_geojson: { type: 'Point', coordinates: [-89.04, 39.16] },
+        point_geojson: hazardPoint,
         created_by: 'user-1',
         created_at: '2026-07-11T12:00:00Z',
         updated_at: '2026-07-11T12:00:00Z',
-      }],
-      error: null,
-    });
+    }] }]]));
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -186,7 +178,7 @@ describe('fetchJobMapImages', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    await fetchJobMapImages('job-1', { overview: false });
+    await fetchJobMapImages('job-1', { overview: false, hazards });
 
     const url = String(mockFetch.mock.calls[0][0]);
     const encodedOverlay = url.match(/geojson\((.+)\)\/auto/);
@@ -201,9 +193,8 @@ describe('fetchJobMapImages', () => {
     });
   });
 
-  it('still builds map images when the obstacle fetch fails', async () => {
+  it('still builds field outlines without pins when the shared hazard read is unavailable', async () => {
     setupRpc();
-    mockObstacleIn.mockResolvedValue({ data: null, error: new Error('obstacles unavailable') });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -284,19 +275,19 @@ describe('fetchJobMapImages', () => {
     expect(result?.perField[0].acres).toBeNull();
   });
 
-  it('ends the whole map preparation when the obstacle lookup misses the cutoff', async () => {
+  it('does not start field pictures after a late shared hazard snapshot misses the cutoff', async () => {
     vi.useFakeTimers();
     setupRpc();
-    mockObstacleIn.mockImplementation(() => new Promise(resolve => {
-      setTimeout(() => resolve({ data: [], error: null }), 30_000);
-    }));
+    const hazards = new Promise<Map<string, never>>(resolve => {
+      setTimeout(() => resolve(new Map<string, never>()), 30_000);
+    });
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
 
-    const result = fetchJobMapImages('job-1');
+    const result = fetchJobMapImages('job-1', { overview: false, hazards });
     await vi.advanceTimersByTimeAsync(25_000);
     await expect(result).resolves.toBeNull();
-    expect(mockReadSignal).toHaveBeenCalledTimes(4);
+    expect(mockReadSignal).toHaveBeenCalledTimes(3);
     const [jobSignal] = mockReadSignal.mock.calls[0] as [AbortSignal];
     expect(jobSignal.aborted).toBe(true);
     for (const [signal] of mockReadSignal.mock.calls) expect(signal).toBe(jobSignal);

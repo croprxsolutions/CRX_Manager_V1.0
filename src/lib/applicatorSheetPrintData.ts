@@ -10,6 +10,7 @@ import { generateApplicatorSheetPdf } from './applicatorSheetPdf';
 import { fetchJobFieldLocations, fetchJobMapImages } from './jobMapImages';
 import { MARKER_REQUEST_TIMEOUT_MS, readFieldMarkers } from './fieldMarkerData';
 import { fieldObstacleName, fieldObstaclePinIdentity, isFieldObstaclePoint } from './fieldObstacles';
+import type { FieldObstacle } from '../types';
 
 interface ApplicationRecordJoin {
   application_date: string;
@@ -265,7 +266,7 @@ async function readPrintFieldMarkers(id: string, jobSignal: AbortSignal) {
 
 async function readSheetHazards(fields: ApplicatorSheetData['fields']) {
   const ids = [...new Set(fields.flatMap(({ field_id }) => field_id ? [field_id] : []))];
-  const results = new Map<string, ApplicatorSheetHazards>();
+  const results = new Map<string, { complete: boolean; markers: FieldObstacle[] }>();
   if (ids.length === 0) return results;
 
   const request = new AbortController();
@@ -281,10 +282,7 @@ async function readSheetHazards(fields: ApplicatorSheetData['fields']) {
           .map((marker) => [marker.id, marker]));
         results.set(id, {
           complete: snapshot.count === markers.size && snapshot.markers.length === markers.size,
-          markers: [...markers.values()].map((marker) => ({
-            name: fieldObstacleName(marker), note: marker.label?.trim() || null,
-            pinIdentity: isFieldObstaclePoint(marker.point_geojson) ? fieldObstaclePinIdentity(marker.id, marker.point_geojson) : null,
-          })),
+          markers: [...markers.values()],
         });
       } catch {
         // Keep this field unavailable while allowing the other saved stops to print.
@@ -315,10 +313,11 @@ export async function prepareApplicatorSheetPrintData(
   office = true,
 ): Promise<ApplicatorSheetData> {
   const mapOptions = mapImageOptions(options.mapPages);
+  const hazardSnapshot = readSheetHazards(data.fields);
   const [maps, previousApplications, billingSplits, locations, safety, hazards] = await Promise.all([
     options.mapPages === 'none'
       ? Promise.resolve(null)
-      : fetchJobMapImages(jobId, mapOptions),
+      : fetchJobMapImages(jobId, { ...mapOptions, hazards: hazardSnapshot }),
     options.includePreviousApplications
       ? fetchPreviousApplications(data.fields, jobId, options.previousApplicationsPerField)
       : Promise.resolve([]),
@@ -327,13 +326,22 @@ export async function prepareApplicatorSheetPrintData(
       : Promise.resolve([]),
     fetchJobFieldLocations(jobId),
     options.includeSafetySheet ? sheetSafety(data.products) : Promise.resolve(undefined),
-    readSheetHazards(data.fields),
+    hazardSnapshot,
   ]);
-  const fields = data.fields.map((field) => ({
-    ...field,
-    location: field.field_id ? locations.get(field.field_id) ?? null : null,
-    hazards: field.field_id ? hazards.get(field.field_id) ?? hazardsUnavailable : hazardsUnavailable,
-  }));
+  const fields = data.fields.map((field) => {
+    const snapshot = field.field_id ? hazards.get(field.field_id) : undefined;
+    return {
+      ...field,
+      location: field.field_id ? locations.get(field.field_id) ?? null : null,
+      hazards: snapshot ? {
+        complete: snapshot.complete,
+        markers: snapshot.markers.map((marker) => ({
+          name: fieldObstacleName(marker), note: marker.label?.trim() || null,
+          pinIdentity: isFieldObstaclePoint(marker.point_geojson) ? fieldObstaclePinIdentity(marker.id, marker.point_geojson) : null,
+        })),
+      } : hazardsUnavailable,
+    };
+  });
   return {
     ...data,
     fields,

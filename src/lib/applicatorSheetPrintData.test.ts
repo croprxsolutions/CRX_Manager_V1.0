@@ -19,6 +19,7 @@ vi.mock('./fieldMarkerData', () => ({ MARKER_REQUEST_TIMEOUT_MS: 15_000, readFie
 import { fetchApplicatorSheetBillingSplits, prepareApplicatorSheetPrintData } from './applicatorSheetPrintData';
 import { DEFAULT_APPLICATOR_PRINT_OPTIONS } from './applicatorPrintOptions';
 import { readFieldMarkers } from './fieldMarkerData';
+import { fetchJobMapImages } from './jobMapImages';
 import type { ApplicatorSheetData } from './applicatorSheetData';
 import type { FieldObstacle } from '../types';
 
@@ -40,10 +41,18 @@ it('attaches unfiltered hazards by saved field and only treats a verified empty 
     return { available: false };
   });
 
+  vi.mocked(fetchJobMapImages).mockResolvedValue(null);
   const result = await prepareApplicatorSheetPrintData('job-1', data, {
-    ...DEFAULT_APPLICATOR_PRINT_OPTIONS, mapPages: 'none', includeBillingSplits: false,
+    ...DEFAULT_APPLICATOR_PRINT_OPTIONS, mapPages: 'both', includeBillingSplits: false,
   });
 
+  expect(vi.mocked(readFieldMarkers).mock.calls.map(([id]) => id)).toEqual(['a', 'b', 'c']);
+  const [jobId, options] = vi.mocked(fetchJobMapImages).mock.calls[0];
+  expect(jobId).toBe('job-1');
+  expect([...(await options?.hazards ?? new Map())]).toEqual([
+    ['a', { complete: false, markers: [marker] }],
+    ['b', { complete: true, markers: [] }],
+  ]);
   expect(result.fields.map(({ hazards }) => hazards)).toEqual([
     { complete: false, markers: [{ name: 'Washout', note: 'Check after rain', pinIdentity: JSON.stringify(['marker-a', -89, 39]) }] },
     { complete: true, markers: [] },

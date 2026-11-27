@@ -7,6 +7,7 @@
  */
 import { supabase, assertRpcResult } from './db';
 import { fieldObstaclePinIdentity, isFieldObstaclePoint } from './fieldObstacles';
+import type { FieldObstacle } from '../types';
 
 const MAPBOX_STYLE = 'mapbox/satellite-streets-v12';
 const MAPBOX_STATIC_URL = `https://api.mapbox.com/styles/v1/${MAPBOX_STYLE}/static`;
@@ -20,6 +21,7 @@ interface JobMapImageOptions {
   perField?: boolean;
   widthPx?: number;
   heightPx?: number;
+  hazards?: Promise<ReadonlyMap<string, { markers: readonly Pick<FieldObstacle, 'id' | 'point_geojson'>[] }>>;
 }
 
 export interface JobFieldMapImage {
@@ -641,38 +643,21 @@ async function customerNamesById(customerIds: string[], signal: AbortSignal): Pr
 
 interface FieldHazardPin { identity: string; feature: BoundaryFeature }
 
-async function fieldObstacleFeatures(fieldIds: string[], signal: AbortSignal): Promise<Map<string, FieldHazardPin[]>> {
-  const byField = new Map<string, FieldHazardPin[]>();
-  if (fieldIds.length === 0) return byField;
-  try {
-    const { data, error } = await supabase
-      .from('field_obstacles')
-      .select('id, field_id, point_geojson')
-      .in('field_id', fieldIds)
-      .abortSignal(signal);
-    if (signal.aborted) return byField;
-    if (error) {
-      console.warn('Unable to load field obstacles for applicator-sheet maps.', error);
-      return byField;
-    }
-    for (const { id, field_id, point_geojson } of data ?? []) {
-      if (!isFieldObstaclePoint(point_geojson)) continue;
-      const features = byField.get(field_id) ?? [];
-      const [longitude, latitude] = point_geojson.coordinates;
-      features.push({
-        identity: fieldObstaclePinIdentity(id, point_geojson),
-        feature: {
-          type: 'Feature',
-          properties: { 'marker-color': '#dc2626', 'marker-size': 'small' },
-          geometry: { type: 'Point', coordinates: [longitude, latitude] },
-        },
-      });
-      byField.set(field_id, features);
-    }
-  } catch (error) {
-    if (!signal.aborted) console.warn('Unable to load field obstacles for applicator-sheet maps.', error);
+function fieldObstacleFeatures(markers: readonly Pick<FieldObstacle, 'id' | 'point_geojson'>[]): FieldHazardPin[] {
+  const pins: FieldHazardPin[] = [];
+  for (const { id, point_geojson } of markers) {
+    if (!isFieldObstaclePoint(point_geojson)) continue;
+    const [longitude, latitude] = point_geojson.coordinates;
+    pins.push({
+      identity: fieldObstaclePinIdentity(id, point_geojson),
+      feature: {
+        type: 'Feature',
+        properties: { 'marker-color': '#dc2626', 'marker-size': 'small' },
+        geometry: { type: 'Point', coordinates: [longitude, latitude] },
+      },
+    });
   }
-  return byField;
+  return pins;
 }
 
 /**
@@ -814,10 +799,7 @@ async function collectJobMapImages(
       return;
     }
 
-    const [obstacles, customerNames] = await Promise.all([
-      fieldObstacleFeatures(fields.map((field) => field.id), signal),
-      customerNamesById([...new Set(fields.map((field) => field.customerId))], signal),
-    ]);
+    const customerNames = await customerNamesById([...new Set(fields.map((field) => field.customerId))], signal);
     if (signal.aborted) return;
     const widthOverride = opts.widthPx;
     const heightOverride = opts.heightPx;
@@ -848,9 +830,10 @@ async function collectJobMapImages(
     let nextField = 0;
     async function readFieldPictures() {
       if (opts.perField === false) return;
+      const hazards = await opts.hazards;
       while (!signal.aborted && nextField < fields.length) {
         const field = fields[nextField++];
-        const fieldObstacles = obstacles.get(field.id) ?? [];
+        const fieldObstacles = fieldObstacleFeatures(hazards?.get(field.id)?.markers ?? []);
         const image = buildStaticImageUrl([field], fieldObstacles.map((pin) => pin.feature), perFieldOptions);
         if (!image) {
           console.warn(`Skipping map for ${field.name} because its geometry exceeds Mapbox URL limits.`);

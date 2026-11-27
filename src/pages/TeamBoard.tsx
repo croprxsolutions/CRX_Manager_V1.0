@@ -19,7 +19,7 @@ import { addDaysToDate, BUSINESS_TIMEZONE, businessDayStartIso, localToday, pars
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useRealtimeNotes } from '../hooks/useRealtimeSubscription';
-import TeamBoardFilters, { emptyBoardFilters, type FilterState } from '../components/team/TeamBoardFilters';
+import TeamBoardFilters, { type FilterState } from '../components/team/TeamBoardFilters';
 import CommentsSection from '../components/team/CommentsSection';
 import TagsManager from '../components/team/TagsManager';
 import ActivityFeed from '../components/team/ActivityFeed';
@@ -46,6 +46,15 @@ const priorityVariant: Record<NotePriority, 'default' | 'info' | 'warning' | 'er
 };
 
 type ViewTab = 'board' | 'my_tasks' | 'completed' | 'workload' | 'activity';
+
+const emptyBoardFilters: FilterState = {
+  search: '',
+  tags: [],
+  assignees: [],
+  priorities: [],
+  showCompleted: false,
+  overdueOnly: false,
+};
 
 
 interface GlobalActivity {
@@ -839,7 +848,7 @@ export default function TeamBoard() {
             <Button icon={<Plus className="w-4 h-4" />} onClick={() => openAddModal('todo')}>Add Task</Button>
             <Button variant="secondary" onClick={() => openAddModal()}>Add Note</Button>
             <div className="min-w-0 flex-1 basis-full lg:basis-0">
-              <TeamBoardFilters filters={filters} onChange={setFilters} />
+              <TeamBoardFilters filters={filters} onChange={setFilters} onClear={() => setFilters(emptyBoardFilters)} />
             </div>
           </div>
           {filters.overdueOnly && applyFilters(notes).length === 0 && (

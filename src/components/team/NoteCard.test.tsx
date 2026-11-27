@@ -11,7 +11,7 @@ it('lets keyboard events on the completion button reach the button without openi
   const note = { id: 'test', title: 'Check label', priority: 'medium', is_completed: false } as ExtendedTeamNote;
   render(<NoteCard note={note} showCheckbox canEdit={false} onClick={open} onToggleComplete={complete}
     onTogglePin={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} />);
-  const toggle = screen.getByRole('button', { name: 'Complete Check label', exact: true });
+  const toggle = screen.getByRole('button', { name: /^Complete Check label$/ });
   expect(fireEvent.keyDown(toggle, { key: ' ' })).toBe(true);
   expect(fireEvent.keyDown(toggle, { key: 'Enter' })).toBe(true);
   fireEvent.click(toggle);

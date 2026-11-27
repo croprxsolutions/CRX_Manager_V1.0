@@ -25,21 +25,13 @@ export interface FilterState {
   overdueOnly: boolean;
 }
 
-export const emptyBoardFilters: FilterState = {
-  search: '',
-  tags: [],
-  assignees: [],
-  priorities: [],
-  showCompleted: false,
-  overdueOnly: false,
-};
-
 interface TeamBoardFiltersProps {
   filters: FilterState;
   onChange: (filters: FilterState) => void;
+  onClear: () => void;
 }
 
-export default function TeamBoardFilters({ filters, onChange }: TeamBoardFiltersProps) {
+export default function TeamBoardFilters({ filters, onChange, onClear }: TeamBoardFiltersProps) {
   const [tags, setTags] = useState<NoteTag[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [showFilters, setShowFilters] = useState(false);
@@ -139,7 +131,7 @@ export default function TeamBoardFilters({ filters, onChange }: TeamBoardFilters
         </button>
         {activeFilterCount > 0 && (
           <button
-            onClick={() => onChange(emptyBoardFilters)}
+            onClick={onClear}
             aria-label="Clear all filters"
             className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
             title="Clear all filters"

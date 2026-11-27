@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270314120000_job_invoice_split_cents.sql (Mason, 2026-11-26: "Job-invoice cents: yes please,
+ * Real-schema proof for 20270315100000_job_invoice_split_cents.sql (Mason, 2026-11-26: "Job-invoice cents: yes please,
  * fix it before Dec 15"). Harness copied from prove-tiny-line-counts-as-zero-real-schema.mjs; seed and cases follow
  * prove-job-invoice-kept-epa-real-schema.mjs.
  *
@@ -37,7 +37,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270314120000_job_invoice_split_cents.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270315100000_job_invoice_split_cents.sql');
 const PINNED = path.join(MIGRATIONS, '20270303100000_job_invoice_kept_epa.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);

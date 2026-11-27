@@ -227,6 +227,7 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
     headRefOid: HEAD, baseRefName: "staging", baseRefOid: BASE, commits: [{ oid: HEAD }], reviews: [] };
   const laneFiles = ["modified", "src/pages/Quotes.tsx", "", HEAD].join("\t") + "\n";
   const otherFiles = ["modified", "src/pages/Fields.tsx", "", HEAD].join("\t") + "\n";
+  const wiringFiles = [".claude/settings.json", ".claude/hooks/prompt-router.mjs"].map((f) => ["modified", f, "", HEAD].join("\t") + "\n").join("");
   const TAHA_ID = "50602678";
   const attempt = ({ pr = {}, files = laneFiles, proofs = { [HEAD]: proof(HEAD) }, headSha = HEAD, fail = null, views = null, approvedHead = null, compare = () => "0", budgetMs = 20_000, delayOn = null, delayMs = 0 } = {}) => {
     const calls = [];
@@ -251,6 +252,7 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
   for (const [why, args] of [
     ["no clean Sol proof", { proofs: {} }],
     ["not in Taha's lane", { files: otherFiles }],
+    ["only the lane block's own wiring (Taha on #2639)", { files: wiringFiles }],
     ["draft", { pr: { isDraft: true } }],
     ["Taha's own PR (author)", { pr: { author: { login: "TahaKhanAbdalli" } } }],
     ["Taha's own PR (branch)", { pr: { headRefName: "taha/billing" } }],
@@ -261,6 +263,7 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
     const r = attempt(args);
     ok(r.note === "" && r.wrote.length === 0, `no label when: ${why}`);
   }
+  ok(attempt({ files: laneFiles + wiringFiles }).wrote.length === 2, "wiring plus a lane file: still labelled for Taha");
   const failed = attempt({ fail: "requested_reviewers" });
   ok(failed.note.includes("could not ask Taha") && failed.note.includes("gh pr edit 7 --add-label ready-for-taha --add-reviewer TahaKhanAbdalli") && failed.wrote.length === 1, "a failed review request prints the manual command and adds no label on its own");
   const labelFailed = attempt({ fail: "/labels" });

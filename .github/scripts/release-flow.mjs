@@ -238,10 +238,10 @@ export function changelogMarkdown(g) {
 }
 
 // "None", "None (CI only).", "None on production.", "Nothing. Agent tooling only." and "N/A" all mean nothing
-// users see; "None of the invoices need rounding now." is a real note and stays.
-const NOTHING = /^(?:none|nothing|n\/a|-)(?:[\s.,;:!—–-]*$|[.,;:!—–(]|\s+[—–(]|\s+-\s|\s+(?:on|for|in|here|yet|visible|user)\b)/i;
+// users see; "None of the invoices need rounding now." and "None for overdue invoices need rounding now." are real notes.
+const NOTHING = /^(?:none|nothing|n\/a|-)(?:[\s.,;:!—–-]*$|[.,;:!—–(]|\s+[—–(]|\s+-\s|\s+(?:on|for|in|here|yet|visible|user)\b(?:\s+[^\s.]+){0,3}[\s.!]*$)/i;
 // A heading, a rule or the PR's "🤖 Generated with …" footer ends the list.
-const SECTION_END = /^[ ]{0,3}(?:#|---|🤖|generated with \[claude code\])/i;
+const SECTION_END = /^[ ]{0,3}(?:#|---|(?:🤖\s*)?generated with \[claude code\])/i;
 // The dialog shows plain text, so "[text](url)" becomes "text".
 const plain = (s) => s.replace(/\[([^\]]+)\]\((?:[^()\s]|\([^()\s]*\))+(?:\s+"[^"]*")?\)/g, '$1');
 

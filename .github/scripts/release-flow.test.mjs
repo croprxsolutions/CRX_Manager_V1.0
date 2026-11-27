@@ -220,6 +220,12 @@ test('usersSee drops "nothing" notes and the PR footer, and shows links as plain
   assert.deepEqual(usersSee('## What users see\n- Reports generated with [Claude Code](https://x.test) now cite sources\n- Second'),
     ['Reports generated with Claude Code now cite sources', 'Second']);
   assert.deepEqual(usersSee('What users see: Read the [guide](https://x.test/guide_(v2)) first.'), ['Read the guide first.']);
+  assert.deepEqual(usersSee('What users see: None for overdue invoices need manual rounding now.'), ['None for overdue invoices need manual rounding now.']);
+  assert.deepEqual(usersSee('## What users see\n- 🤖 The assistant now cites sources\n- Faster reports\n\n🤖 Generated with [Claude Code](https://x.test)'),
+    ['🤖 The assistant now cites sources', 'Faster reports']);
+  for (const said of ['None for users.', 'None visible to users.', 'None here yet.', 'None in the app.']) {
+    assert.deepEqual(usersSee(`What users see: ${said}`), [], said);
+  }
 });
 
 test('prState: held-off needs its reason even when also verified', () => {

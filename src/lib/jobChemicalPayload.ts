@@ -1,3 +1,10 @@
+import {
+  FIELD_SOURCED_FROM_DB_READY,
+  isJobChemicalNonBillable,
+  type JobStockPathRead,
+} from './jobSourcedFrom';
+import { centsTimesQuantity } from './money';
+
 export interface JobChemicalPayloadSource {
   product_id: string;
   quantity: string;
@@ -12,11 +19,38 @@ export interface JobChemicalPayloadSource {
   warehouse: string;
   vendor: string;
   customer_supplied: boolean;
+  source_vendor_id?: string | null;
   /** F06: which field the operator typed ('rate' | 'qty'); undefined = unknown. */
   driver?: 'rate' | 'qty';
 }
 
-export function buildJobChemicalsPayload(rows: JobChemicalPayloadSource[]) {
+export function calculateJobChemicalTotals(
+  rows: JobChemicalPayloadSource[],
+  featureReady: boolean,
+  stockPath: JobStockPathRead,
+): { totalCostCents: number; totalPriceCents: number } {
+  return rows.reduce((totals, row) => {
+    const isNonBillable = isJobChemicalNonBillable(
+      featureReady,
+      stockPath,
+      row.customer_supplied,
+      row.source_vendor_id,
+    );
+    return {
+      totalCostCents: totals.totalCostCents + (isNonBillable
+        ? 0
+        : centsTimesQuantity(parseInt(row.cost_per_unit_cents) || 0, row.quantity)),
+      totalPriceCents: totals.totalPriceCents + (isNonBillable
+        ? 0
+        : centsTimesQuantity(parseInt(row.price_per_unit_cents) || 0, row.quantity)),
+    };
+  }, { totalCostCents: 0, totalPriceCents: 0 });
+}
+
+export function buildJobChemicalsPayload(
+  rows: JobChemicalPayloadSource[],
+  includeSourceVendor = FIELD_SOURCED_FROM_DB_READY,
+) {
   return rows.map((row, index) => {
     const parsedRatePerAcre = Number.parseFloat(row.rate_per_acre);
     return {
@@ -40,6 +74,7 @@ export function buildJobChemicalsPayload(rows: JobChemicalPayloadSource[]) {
     // client leaves exactly as saved. save_job refuses any other string
     // (CHEM_DRIVER_INVALID), so this narrowing is what keeps a stale tab from being refused.
     driver: row.driver === 'rate' || row.driver === 'qty' ? row.driver : null,
+    ...(includeSourceVendor ? { source_vendor_id: row.source_vendor_id || null } : {}),
     };
   });
 }

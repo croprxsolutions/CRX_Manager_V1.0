@@ -51,7 +51,7 @@ import Breadcrumbs from '../components/ui/Breadcrumbs';
 import SectionCard from '../components/ui/SectionCard';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
 import { parseLocalDate, todayInBusinessTz, BUSINESS_TIMEZONE } from '../lib/dateUtils';
-import { centsTimesQuantity, isExactDecimalText, quantitySurvivesSave } from '../lib/money';
+import { isExactDecimalText, quantitySurvivesSave } from '../lib/money';
 import { applyChemEdit, autofillPriceText, priceTextInLineUnit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, unitHasCharacterSaveJobRefuses, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
 import { compareToMaxRate, normalizeRateUnit, phiHarvestWarning } from '../lib/labelGuardrails';
 import { rateUnitOptionsForProduct, asProductForm } from '../lib/units';
@@ -71,6 +71,34 @@ import { billableAcres } from '../lib/fieldGeometry';
 import AppliedRecordsManager from '../components/jobs/AppliedRecordsManager';
 import type { JobFieldPickerSelection } from '../components/jobs/jobFieldPicker';
 import ApplicationServicePicker from '../components/field-app/ApplicationServicePicker';
+import { ApplicationServiceBillingSummary, RigCarrierSourceHint, SourcedFromControl } from '../components/jobs/JobDetailOfficeAdditions';
+import { APPLICATION_SERVICE_BILLING_DB_READY, loadApplicationServiceBilling } from '../lib/jobServiceBillingSummary';
+import {
+  FIELD_SOURCED_FROM_DB_READY,
+  TODO_CONFIRM_FIELD_BATCH_STOCK_SETTING_KEY,
+  batchCustomerSuppliedLineNeedsVendor,
+  batchCustomerSuppliedLineVendorError,
+  isBatchVendorSourcedLine,
+  isJobChemicalNonBillable,
+  jobStockPathFromFieldBatchSetting,
+  jobStockPathForSourcing,
+  jobSupportsVendorSourcing,
+  loadActiveJobSourceVendors,
+  loadJobChemicalSources,
+  loadJobStockPath,
+  loadSavedJobSourceVendors,
+  sourceReadBlocksJobSave,
+  type JobChemicalSourcesRead,
+  type JobSourceVendor,
+  type JobStockPathRead,
+} from '../lib/jobSourcedFrom';
+import {
+  VEHICLE_CARRIER_DEFAULT_DB_READY,
+  applyRigCarrierDefault,
+  carrierRateSourceLabel,
+  loadVehicleCarrierDefault,
+  type CarrierRateOrigin,
+} from '../lib/vehicleCarrierDefaults';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 // U13 (#15-21/#111): job-scoped "Dispatch Locations" — reuses the SAME 3-step
 // wizard the Dispatch Board uses, pre-scoped + pre-selected to this job.
@@ -99,7 +127,7 @@ import type { Json } from '../types/supabase';
 import type { ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { JobChemicalProductPicker } from '../components/jobs/JobChemicalProductPicker';
 import JobLabelCorrectionsNotice from '../components/jobs/JobLabelCorrectionsNotice';
-import { buildJobChemicalsPayload } from '../lib/jobChemicalPayload';
+import { buildJobChemicalsPayload, calculateJobChemicalTotals } from '../lib/jobChemicalPayload';
 import {
   FIELD_BILLING_DEFAULT_CREW_COLUMNS, JOB_CHEMICAL_COLUMNS, JOB_CHEMICAL_CREW_COLUMNS,
   JOB_COLUMNS, JOB_CREW_COLUMNS, JOB_FIELD_SHARE_CREW_COLUMNS, PRODUCT_COLUMNS, withAdminCosts,
@@ -273,6 +301,7 @@ interface ChemRow {
   /** #53/#54: grower brought this product — apply it, but don't deduct our
    *  inventory or bill for it. Persisted to job_chemicals.customer_supplied. */
   customer_supplied: boolean;
+  source_vendor_id?: string | null;
   sort_order: number;
   /** Which field the user last drove — so an acreage change re-derives the OTHER
    *  field and never silently rewrites a hand-entered quantity (Codex P2).
@@ -626,6 +655,14 @@ export default function JobDetail() {
   // optional per-job capacity override (blank = use the assigned vehicle's). Both
   // persisted via the direct .update() after save_job (frozen RPC contract).
   const [carrierRateGpa, setCarrierRateGpa] = useState('');
+  const [carrierRateOrigin, setCarrierRateOrigin] = useState<CarrierRateOrigin>(null);
+  const [vehicleDefaultCarrierGpa, setVehicleDefaultCarrierGpa] = useState<number | null>(null);
+  const carrierRateAutoFilledRef = useRef(false);
+  const carrierDefaultToApplyRef = useRef<string | null>(null);
+  // Bumped on every hand edit, so a rig-default reply that arrives after the user typed (or cleared) never overwrites it.
+  const carrierRateEditCountRef = useRef(0);
+  const carrierRateValueRef = useLatestRef(carrierRateGpa);
+  const carrierRateOriginRef = useLatestRef(carrierRateOrigin);
   const [tankCapacity, setTankCapacity] = useState('');
   // The vessel selection is convenience UI only. The persisted job value remains
   // loader_tank_capacity, so a reloaded job intentionally starts at Assigned vehicle.
@@ -1500,6 +1537,7 @@ export default function JobDetail() {
   // U3 (#52): optional per-acre machine fee (e.g. Hagie Y-Drop). NULL = no service fee.
   const [applicationServiceId, setApplicationServiceId] = useState<string | null>(null);
   const [crewApplicationServiceName, setCrewApplicationServiceName] = useState<string | null>(null);
+  const [applicationServiceBilling, setApplicationServiceBilling] = useState<{ billsCustomer: boolean; outsideCompanyName: string | null } | null>(null);
   // U3 follow-up (Codex P2): true only while the current applicationServiceId came
   // from a customer's default, not the user's hand. An auto-filled value must be
   // RE-evaluated when the customer changes (a manual pick is never clobbered).
@@ -1508,6 +1546,53 @@ export default function JobDetail() {
   const [batchId, setBatchId] = useState('');
   const [quoteLinkage, setQuoteLinkage] = useState<{ quote_id: string; quote_number: string; section_name: string } | null>(null);
 
+  useEffect(() => {
+    if (!VEHICLE_CARRIER_DEFAULT_DB_READY || isCrew || !vehicleId) {
+      setVehicleDefaultCarrierGpa(null);
+      return;
+    }
+    let cancelled = false;
+    const stillOnThisJob = captureRouteEpoch();
+    const applyToCurrentJob = carrierDefaultToApplyRef.current === vehicleId;
+    if (applyToCurrentJob) carrierDefaultToApplyRef.current = null;
+    const editCountAtRequest = carrierRateEditCountRef.current;
+    void loadVehicleCarrierDefault(vehicleId).then((read) => {
+      if (cancelled || !stillOnThisJob()) return;
+      const defaultGpa = read.available ? read.defaultGpa : null;
+      setVehicleDefaultCarrierGpa(defaultGpa);
+      if (!applyToCurrentJob || carrierRateEditCountRef.current !== editCountAtRequest) return;
+
+      const currentValue = carrierRateValueRef.current;
+      const result = applyRigCarrierDefault(currentValue, carrierRateAutoFilledRef.current, defaultGpa);
+      if (result.value !== currentValue) setCarrierRateGpa(result.value);
+      carrierRateAutoFilledRef.current = result.autoFilled;
+      const loadedValueMatchesRigDefault = carrierRateOriginRef.current === 'loaded'
+        && defaultGpa != null && Number(currentValue) === defaultGpa;
+      setCarrierRateOrigin(loadedValueMatchesRigDefault ? 'loaded' : result.origin);
+    });
+    return () => { cancelled = true; };
+  }, [id, vehicleId, isCrew, carrierRateValueRef, carrierRateOriginRef, captureRouteEpoch]);
+
+  const handleCarrierRateEdit = (nextValue: string) => {
+    carrierRateEditCountRef.current += 1;
+    carrierRateAutoFilledRef.current = false;
+    setCarrierRateOrigin(nextValue.trim() ? 'manual' : null);
+    setCarrierRateGpa(nextValue);
+  };
+
+  useEffect(() => {
+    if (!APPLICATION_SERVICE_BILLING_DB_READY || isCrew || !applicationServiceId) {
+      setApplicationServiceBilling(null);
+      return;
+    }
+    let cancelled = false;
+    setApplicationServiceBilling(null);
+    void loadApplicationServiceBilling(applicationServiceId).then((read) => {
+      if (!cancelled) setApplicationServiceBilling(read.available ? read.billing : null);
+    });
+    return () => { cancelled = true; };
+  }, [applicationServiceId, isCrew]);
+
   // Sub-collections
   const [fieldRows, setFieldRows] = useState<FieldRow[]>([]);
   const [fieldPickerOpen, setFieldPickerOpen] = useState(false);
@@ -1515,6 +1600,108 @@ export default function JobDetail() {
   // the applicator route order (null when no drag is in progress).
   const [dragFieldIndex, setDragFieldIndex] = useState<number | null>(null);
   const [chemRows, setChemRows] = useState<ChemRow[]>([]);
+  const [activeSourceVendors, setActiveSourceVendors] = useState<JobSourceVendor[]>([]);
+  const [savedSourceVendors, setSavedSourceVendors] = useState<JobSourceVendor[]>([]);
+  const [sourceVendorsAvailable, setSourceVendorsAvailable] = useState(false);
+  const [sourceVendorsLoadFailed, setSourceVendorsLoadFailed] = useState(false);
+  const [chemicalSourceRead, setChemicalSourceRead] = useState<{ jobKey: string; available: boolean }>({ jobKey: '', available: false });
+  const [jobStockPathRead, setJobStockPathRead] = useState<{ jobKey: string; read: JobStockPathRead } | null>(null);
+
+  useEffect(() => {
+    if (!FIELD_SOURCED_FROM_DB_READY || isCrew) {
+      setActiveSourceVendors([]);
+      setSourceVendorsAvailable(false);
+      setSourceVendorsLoadFailed(false);
+      return;
+    }
+    let cancelled = false;
+    setSourceVendorsAvailable(false);
+    setSourceVendorsLoadFailed(false);
+    void loadActiveJobSourceVendors().then((read) => {
+      if (cancelled) return;
+      setActiveSourceVendors(read.vendors);
+      setSourceVendorsAvailable(read.available);
+      setSourceVendorsLoadFailed(!read.available);
+    });
+    return () => { cancelled = true; };
+  }, [isCrew]);
+
+  useEffect(() => {
+    if (!FIELD_SOURCED_FROM_DB_READY || isCrew || !isNew) return;
+    let cancelled = false;
+    setSavedSourceVendors([]);
+    setChemicalSourceRead({ jobKey: 'new', available: false });
+    void loadJobChemicalSources(null).then((read) => {
+      if (!cancelled) setChemicalSourceRead({ jobKey: 'new', available: read.available });
+    });
+    return () => { cancelled = true; };
+  }, [isNew, isCrew]);
+
+  useEffect(() => {
+    if (!FIELD_SOURCED_FROM_DB_READY || isCrew || isNew || !id) {
+      if (!isNew) setJobStockPathRead(null);
+      return;
+    }
+    let cancelled = false;
+    const stillOnThisJob = captureRouteEpoch();
+    setJobStockPathRead({ jobKey: id, read: { available: false, path: null } });
+    void loadJobStockPath(id).then((read) => {
+      if (!cancelled && stillOnThisJob()) setJobStockPathRead({ jobKey: id, read });
+    });
+    return () => { cancelled = true; };
+  }, [id, isNew, isCrew, captureRouteEpoch]);
+
+  useEffect(() => {
+    if (!FIELD_SOURCED_FROM_DB_READY || isCrew || !isNew) return;
+    let cancelled = false;
+    const stillOnThisJob = captureRouteEpoch();
+    setJobStockPathRead({ jobKey: 'new', read: { available: false, path: null } });
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('app_settings')
+          .select('setting_value')
+          .eq('setting_key', TODO_CONFIRM_FIELD_BATCH_STOCK_SETTING_KEY)
+          .maybeSingle();
+        if (cancelled || !stillOnThisJob()) return;
+        if (error) {
+          setJobStockPathRead({ jobKey: 'new', read: { available: false, path: null } });
+          return;
+        }
+        const row = data as { setting_value?: string | null } | null;
+        setJobStockPathRead({
+          jobKey: 'new',
+          read: { available: true, path: jobStockPathFromFieldBatchSetting(row?.setting_value ?? null) },
+        });
+      } catch {
+        if (!cancelled && stillOnThisJob()) {
+          setJobStockPathRead({ jobKey: 'new', read: { available: false, path: null } });
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id, isNew, isCrew, captureRouteEpoch]);
+
+  const jobStockPath: JobStockPathRead = useMemo(
+    () => {
+      const currentJobKey = isNew ? 'new' : (id ?? '');
+      const currentRead = jobStockPathRead?.jobKey === currentJobKey
+        ? jobStockPathRead.read
+        : { available: false, path: null };
+      return jobStockPathForSourcing(isNew ? null : id, currentRead, currentRead);
+    },
+    [id, isNew, jobStockPathRead],
+  );
+  const currentJobSourceKey = isNew ? 'new' : (id ?? '');
+  const chemicalSourceDataAvailable = chemicalSourceRead.jobKey === currentJobSourceKey
+    && chemicalSourceRead.available;
+  const sourceVendorOptions = useMemo(() => {
+    const byId = new Map(activeSourceVendors.map((vendor) => [vendor.id, vendor]));
+    savedSourceVendors.forEach((vendor) => {
+      if (!byId.has(vendor.id)) byId.set(vendor.id, vendor);
+    });
+    return [...byId.values()];
+  }, [activeSourceVendors, savedSourceVendors]);
   const [labelDismissal, setLabelDismissal] = useState<string | null>(null);
   // §5 (Label-Rate Guardrails): policy mode (warn default, never blocks) + earliest
   // planned harvest across the job's fields (for the PHI-vs-harvest warning) + the
@@ -1733,11 +1920,12 @@ export default function JobDetail() {
     const acres = sumAcresExact(fieldRows) ?? '0';
     chemRows.forEach((c, i) => {
       if (!c.product_id) return;
+      if (isBatchVendorSourcedLine(FIELD_SOURCED_FROM_DB_READY, jobStockPath, c.source_vendor_id)) return;
       const h = chemLineBillingHazard(c, acres, productFormFor(c.product_id), !isCrew);
       if (h.hazard) byIndex.set(i, h);
     });
     return byIndex;
-  }, [isCrew, chemRows, fieldRows, productFormFor]);
+  }, [isCrew, chemRows, fieldRows, productFormFor, jobStockPath]);
 
   // Rows whose numbers are not fit to save at all, for reasons the billing-hazard guard
   // does not cover. Both fail closed rather than being silently coerced:
@@ -1755,6 +1943,19 @@ export default function JobDetail() {
     const exactAcres = sumAcresExact(fieldRows);
     chemRows.forEach((c, i) => {
       if (!c.product_id) return;
+      const customerSuppliedForBilling = isJobChemicalNonBillable(
+        FIELD_SOURCED_FROM_DB_READY,
+        jobStockPath,
+        c.customer_supplied,
+        c.source_vendor_id,
+      );
+      const vendorError = FIELD_SOURCED_FROM_DB_READY
+        ? batchCustomerSuppliedLineVendorError(jobStockPath, c.customer_supplied, c.source_vendor_id)
+        : null;
+      if (vendorError) {
+        byIndex.set(i, vendorError);
+        return;
+      }
       if (rateDenominatorIsUnrecognized(c.rate_unit)) {
         byIndex.set(i, `the rate unit "${c.rate_unit}" is measured per something other than acres, so a per-acre quantity cannot be derived from it`);
         return;
@@ -1772,7 +1973,7 @@ export default function JobDetail() {
       // unit an off switch for the guard: the warning vanished while the same quantity ×
       // price still billed (Codex High, 2026-08-24). Mirrors the server's
       // CHEM_UNIT_UNSPECIFIED refusal (PR #446), including its exemptions: a
-      // customer-supplied line and a line with neither a cost nor a price contribute
+      // customer-supplied or batch vendor-sourced line and a line with neither a cost nor a price contribute
       // nothing to either total, and a zero quantity bills nothing — a line that cannot
       // bill cannot bill wrongly. parseFloat('') is NaN, which fails the ≠ 0 test toward
       // BLOCKING, so an unparseable quantity stays gated (the grammar rule below also
@@ -1780,7 +1981,7 @@ export default function JobDetail() {
       const blankSides = chemUnitUnspecifiedSides(c.rate_unit, c.unit);
       if (blankSides
           && parseFloat(c.quantity) !== 0
-          && (isCrew || (!(c.customer_supplied ?? false)
+          && (isCrew || (!customerSuppliedForBilling
             && ((parseInt(c.cost_per_unit_cents) || 0) !== 0 || (parseInt(c.price_per_unit_cents) || 0) !== 0)))) {
         const side = blankSides.stockBlank && blankSides.rateBlank
           ? 'its Unit and its rate unit are both blank'
@@ -1846,7 +2047,7 @@ export default function JobDetail() {
       if (isCrew) return;
       // Mirror of CHEM_QUANTITY_ZERO_BUT_EXPECTED: priced, a positive quantity was derivable,
       // and the line records 0. The invoice bills the quantity, so this would charge nothing.
-      const expectedNonZero = chemQuantityExpectedButZero(c, acres);
+      const expectedNonZero = customerSuppliedForBilling ? null : chemQuantityExpectedButZero(c, acres);
       if (expectedNonZero != null) {
         byIndex.set(i, `it records a quantity of 0 while carrying a price and a rate of ${c.rate_per_acre}/ac over ${fmt4(acres)} acres (${fmt4(expectedNonZero)} expected) — the invoice would bill nothing for it. Enter the quantity applied, or clear the rate and the price if none was used`);
         return;
@@ -1864,9 +2065,10 @@ export default function JobDetail() {
       // that has already lost precision before any arithmetic runs. Refusing above 2^53
       // keeps every cents amount that reaches the total exactly representable.
       ] as const).find(([side, raw]) => {
-        // A customer-supplied line is never billed, so a blank price there (a picked product that
+        // A customer-supplied or batch vendor-sourced line is never billed, so a blank price there
+        // (a picked product that
         // states no price) saves as 0 instead of blocking the save.
-        if (side === 'price' && raw === '' && (c.customer_supplied ?? false)) return false;
+        if (side === 'price' && raw === '' && customerSuppliedForBilling) return false;
         return !isExactDecimalText(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) < 0;
       });
       if (badCents) {
@@ -1876,7 +2078,7 @@ export default function JobDetail() {
       // Mirror of the job_chemicals CHEM_PRICE_REQUIRED trigger (20261022087000): a billable line at
       // $0 whose product states no price for the customer's tier (tier 1 when it is not known yet,
       // as the server reads it). A product with a stated $0 price is not caught.
-      if (!(c.customer_supplied ?? false) && parseFloat(c.quantity) !== 0 && Number(c.price_per_unit_cents) === 0) {
+      if (!customerSuppliedForBilling && parseFloat(c.quantity) !== 0 && Number(c.price_per_unit_cents) === 0) {
         const product = allProducts.find((p) => p.id === c.product_id);
         const tier = customerPricingTier === 2 || customerPricingTier === 3 ? customerPricingTier : 1;
         if (product && getStatedTierPriceCents(product, tier) == null) {
@@ -1885,7 +2087,7 @@ export default function JobDetail() {
       }
     });
     return byIndex;
-  }, [isCrew, chemRows, fieldRows, allProducts, customerPricingTier]);
+  }, [isCrew, chemRows, fieldRows, allProducts, customerPricingTier, jobStockPath]);
 
   // SAFE-SCOPE U7: a job is "multi-owner" when its fields' billed shares span more
   // than one distinct customer — the same customer set transfer_job_to_invoice
@@ -2175,7 +2377,20 @@ export default function JobDetail() {
     // The last isCurrentLoad() check is therefore the real commit point. (Codex PR thread
     // at JobDetail.tsx:1813, original_commit_id 9cee23cc7.)
     //
-    const { shares: savedShares, defaultsError } = await fetchJobDetailShares(j, isEditable);
+    const [sharesRead, sourceRead] = await Promise.all([
+      fetchJobDetailShares(j, isEditable),
+      FIELD_SOURCED_FROM_DB_READY && !isCrew
+        ? loadJobChemicalSources(id!)
+        : Promise.resolve<JobChemicalSourcesRead>({ available: false, sourcesByChemicalId: {} }),
+    ]);
+    const { shares: savedShares, defaultsError } = sharesRead;
+    const sourceReadCoversRows = !FIELD_SOURCED_FROM_DB_READY || isCrew || (
+      sourceRead.available
+      && (j.job_chemicals || []).every((chemical) => Object.prototype.hasOwnProperty.call(sourceRead.sourcesByChemicalId, chemical.id))
+    );
+    const savedSourceVendorLabels = sourceReadCoversRows && FIELD_SOURCED_FROM_DB_READY && !isCrew
+      ? await loadSavedJobSourceVendors(Object.values(sourceRead.sourcesByChemicalId).filter((vendorId): vendorId is string => typeof vendorId === 'string'))
+      : [];
     if (!isCurrentLoad()) return false;
     if (defaultsError) Sentry.captureException(defaultsError, { tags: { source: 'fetch', page: 'job-detail', context: 'field_billing_defaults' } });
     if (crewPayerLabels === null || defaultsError) toast('error', 'Could not load payer names');
@@ -2187,6 +2402,8 @@ export default function JobDetail() {
     // Adding an await here re-opens the partial-install window described above; put any
     // new round trip in phase 1, above the last isCurrentLoad() check.
     setJobNumber(j.job_number);
+    setChemicalSourceRead({ jobKey: id!, available: sourceReadCoversRows });
+    setSavedSourceVendors(savedSourceVendorLabels);
     setStatus(j.status);
     setDeletedAt(j.deleted_at ?? null);
     setCustomerId(j.customer_id);
@@ -2217,6 +2434,8 @@ export default function JobDetail() {
     setInternalMemo(j.internal_memo || '');
     // #10 loader-worksheet inputs (numbers stored as strings in the form).
     setCarrierRateGpa(j.carrier_rate_gpa != null ? String(j.carrier_rate_gpa) : '');
+    carrierRateAutoFilledRef.current = false;
+    setCarrierRateOrigin(j.carrier_rate_gpa != null ? 'loaded' : null);
     setTankCapacity(j.loader_tank_capacity != null ? String(j.loader_tank_capacity) : '');
     loadedJobVersionRef.current = loadedVersion;
     savedLoaderRef.current = {
@@ -2282,6 +2501,7 @@ export default function JobDetail() {
           warehouse: c.warehouse || '',
           vendor: c.vendor || '',
           customer_supplied: c.customer_supplied ?? false,
+          source_vendor_id: sourceReadCoversRows ? sourceRead.sourcesByChemicalId[c.id] ?? null : null,
           sort_order: c.sort_order,
         };
       })
@@ -2514,16 +2734,19 @@ export default function JobDetail() {
     [allFields],
   );
   const totalAcres = sumAcres(fieldRows);
-  // #53/#54: a customer-supplied product is applied but not billed and cost us
-  // nothing — it contributes 0 to both job totals (mirrors the server's $0 line).
+  // #53/#54: a customer-supplied product, or a batch vendor-sourced product when enabled,
+  // contributes 0 to both job totals (mirrors the server's $0 line).
   // EXACT MONEY. These two totals are SAVED (jobs.total_cost_cents / total_price_cents at
   // the save_job call below), so they are authoritative, not display. They previously
   // multiplied in binary floating point, which disagrees with the server's exact numeric
   // `safe_cents_qty` whenever the true product lands on a half cent — e.g. 25c x 0.58 is
   // exactly 14.50, which the server rounds to 15c while Math.round(0.58 * 25) gives 14c.
   // centsTimesQuantity reproduces safe_cents_qty exactly (see money.ts).
-  const totalCostCents = chemRows.reduce((sum, c) => sum + (c.customer_supplied ? 0 : centsTimesQuantity(parseInt(c.cost_per_unit_cents) || 0, c.quantity)), 0);
-  const totalPriceCents = chemRows.reduce((sum, c) => sum + (c.customer_supplied ? 0 : centsTimesQuantity(parseInt(c.price_per_unit_cents) || 0, c.quantity)), 0);
+  const { totalCostCents, totalPriceCents } = calculateJobChemicalTotals(
+    chemRows,
+    FIELD_SOURCED_FROM_DB_READY,
+    jobStockPath,
+  );
 
   // Loader worksheet (#10) — the spray tank is sized by SPRAY VOLUME, not by the
   // sum of chemical gallons. Spray volume = total acres × the carrier rate (gal/
@@ -2782,6 +3005,14 @@ export default function JobDetail() {
   };
 
   const runJobSave = async (overrideReasonForAudit?: string) => {
+    if (sourceReadBlocksJobSave(FIELD_SOURCED_FROM_DB_READY, !isCrew, {
+      chemicalSourcesAvailable: chemicalSourceDataAvailable,
+      stockPath: jobStockPath,
+      vendorListAvailable: sourceVendorsAvailable,
+    })) {
+      toast('error', 'The job sourcing details could not be loaded. Nothing was saved. Reload the job before saving again.');
+      return;
+    }
     // Second layer of the billing-hazard guard. handleSave already blocks this and is the
     // only path a user can reach today, but runJobSave is the chokepoint EVERY save funnels
     // through (including the admin over-label-rate override), so the arithmetic guarantee
@@ -2964,6 +3195,14 @@ export default function JobDetail() {
   };
 
   const performSave = async (licenseOverride: boolean, overrideReasonForAudit?: string) => {
+    if (sourceReadBlocksJobSave(FIELD_SOURCED_FROM_DB_READY, !isCrew, {
+      chemicalSourcesAvailable: chemicalSourceDataAvailable,
+      stockPath: jobStockPath,
+      vendorListAvailable: sourceVendorsAvailable,
+    })) {
+      toast('error', 'The job sourcing details could not be loaded. Nothing was saved. Reload the job before saving again.');
+      return;
+    }
     // Crew/loader values as loaded when Save was clicked: a reload during the save must not make an untouched value look edited.
     const loaderBaseAtSave = isNew ? { groundCrewId: '', carrier: '', capacity: '' } : { ...savedLoaderRef.current };
     const versionAtSave = isNew ? null : loadedJobVersionRef.current;
@@ -3047,7 +3286,11 @@ export default function JobDetail() {
         sort_order: i,
       }));
 
-      const chemsPayload = buildJobChemicalsPayload(chemRows);
+      const chemsPayload = buildJobChemicalsPayload(
+        chemRows,
+        jobSupportsVendorSourcing(FIELD_SOURCED_FROM_DB_READY, !isCrew, jobStockPath)
+          && chemicalSourceDataAvailable,
+      );
 
       const newAssigneeIsApplicator = applicators.some((p) => p.id === applicatorId && p.role === 'applicator');
       // Mirrors the trigger's role='applicator' + active guard; the picker is active-only, so we never notify about a displacement that didn't happen.
@@ -3982,8 +4225,15 @@ export default function JobDetail() {
       cost_per_unit_cents: '0', price_per_unit_cents: '0',
       diluent_rate: '', rei_hours: '', phi_days: '', warehouse: '', vendor: '',
       customer_supplied: false,
+      source_vendor_id: null,
       sort_order: chemRows.length,
     }]);
+  };
+  const updateChemSourceVendor = (i: number, vendorId: string | null) => {
+    const updated = [...chemRows];
+    if (!updated[i]) return;
+    updated[i] = { ...updated[i], source_vendor_id: vendorId };
+    setChemRows(updated);
   };
   const removeChemRow = (i: number) => setChemRows(chemRows.filter((_, idx) => idx !== i));
   const toggleChemSupplied = (i: number) => {
@@ -4419,7 +4669,18 @@ export default function JobDetail() {
             <label className="block text-sm font-medium text-nav-dark mb-1">Vehicle</label>
             <select
               value={vehicleId}
-              onChange={(e) => setVehicleId(e.target.value)}
+              onChange={(e) => {
+                const nextVehicleId = e.target.value;
+                carrierDefaultToApplyRef.current = nextVehicleId || null;
+                if (carrierRateAutoFilledRef.current) {
+                  carrierRateAutoFilledRef.current = false;
+                  setCarrierRateGpa('');
+                  setCarrierRateOrigin(null);
+                } else if (carrierRateOriginRef.current === 'loaded') {
+                  setCarrierRateOrigin('manual');
+                }
+                setVehicleId(nextVehicleId);
+              }}
               disabled={!canEdit}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50"
             >
@@ -4449,6 +4710,7 @@ export default function JobDetail() {
               }}
               disabled={!canEdit}
             />
+            <ApplicationServiceBillingSummary isOffice={!isCrew} billing={applicationServiceBilling} />
             <p className="mt-1 text-xs text-gray-500">Adds a per-acre machine fee to this job's invoice.</p>
           </div>
           )}
@@ -4914,6 +5176,20 @@ export default function JobDetail() {
                       </div>
                       )}
                     </div>
+                    {!isCrew && (
+                      <SourcedFromControl
+                        isOffice={!isCrew}
+                        stockPath={jobStockPath}
+                        available={chemicalSourceDataAvailable && sourceVendorsAvailable}
+                        canEdit={canEdit}
+                        sourceVendorId={c.source_vendor_id ?? null}
+                        vendors={sourceVendorOptions}
+                        batchVendorRequired={FIELD_SOURCED_FROM_DB_READY
+                          && batchCustomerSuppliedLineNeedsVendor(jobStockPath, c.customer_supplied, c.source_vendor_id)}
+                        vendorListLoadFailed={sourceVendorsLoadFailed}
+                        onChange={(vendorId) => updateChemSourceVendor(i, vendorId)}
+                      />
+                    )}
                     {/* #53/#54: grower-supplied product — applied but not deducted or billed. */}
                     <div className="flex items-center gap-2 pt-1">
                       <input
@@ -4985,11 +5261,17 @@ export default function JobDetail() {
               the per-job override (blank = use the assigned vehicle's capacity). */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
-              <label className="block text-sm font-medium text-nav-dark mb-1">Carrier Rate (gal/acre)</label>
+              <label className="block text-sm font-medium text-nav-dark mb-1">
+                Carrier Rate (gal/acre)
+                <RigCarrierSourceHint
+                  isOffice={!isCrew}
+                  label={!isCrew ? carrierRateSourceLabel(carrierRateGpa, carrierRateOrigin, vehicleDefaultCarrierGpa) : null}
+                />
+              </label>
               <input
                 type="number"
                 value={carrierRateGpa}
-                onChange={(e) => setCarrierRateGpa(e.target.value)}
+                onChange={(e) => handleCarrierRateEdit(e.target.value)}
                 disabled={!canEdit}
                 step="0.1"
                 min="0"
@@ -5127,7 +5409,7 @@ export default function JobDetail() {
               legacyContent={
                 <LegacyLoaderWorksheet
                   carrierRateGpa={carrierRateGpa}
-                  onCarrierRateChange={setCarrierRateGpa}
+                  onCarrierRateChange={handleCarrierRateEdit}
                   loaderVesselId={loaderVesselId}
                   loaderVesselOptions={loaderVesselOptions}
                   onVesselChange={(selectedVesselId) => {

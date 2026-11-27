@@ -36,6 +36,7 @@ const SHARED_FILES = [
   'lib/epaBatchFill.ts',
   'lib/epaRegistrationSeed.ts',
   'lib/fieldsGeojsonCache.ts',
+  'lib/jobSourcedFrom.ts',
   'lib/loaderWorksheetFetch.ts',
   'lib/m9Reversals.ts',
   'lib/marginFloors.ts',

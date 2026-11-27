@@ -6,7 +6,7 @@
  * a Sentry error and log a failed notification on every load (Sentry CRX-MANAGER-1C).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const H = vi.hoisted(() => ({
@@ -14,6 +14,7 @@ const H = vi.hoisted(() => ({
   rpcCalls: [] as string[],
   captureException: vi.fn(),
   toast: vi.fn(),
+  failSummary: false,
 }));
 
 vi.mock('../lib/db', () => {
@@ -28,6 +29,9 @@ vi.mock('../lib/db', () => {
       from: read,
       rpc: (name: string) => {
         H.rpcCalls.push(name);
+        if (name === 'operational_dashboard_summary' && H.failSummary) {
+          return Promise.resolve({ data: null, error: { message: 'connection lost' } });
+        }
         return Promise.resolve({ data: {}, error: null });
       },
     },
@@ -54,8 +58,25 @@ describe('Dashboard remainder reminders', () => {
   beforeEach(() => {
     H.rpcCalls.length = 0;
     H.captureException.mockClear();
+    H.failSummary = false;
   });
   afterEach(cleanup);
+
+  it('retries a failed summary without showing false all-clear counts or repeating background checks', async () => {
+    H.auth.role = 'admin';
+    H.failSummary = true;
+    await load();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The dashboard summary could not be loaded');
+    expect(screen.queryByText(/No urgent action items/)).not.toBeInTheDocument();
+    H.failSummary = false;
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
+
+    expect(await screen.findByText(/No urgent action items/)).toBeInTheDocument();
+    expect(H.rpcCalls.filter((n) => n === 'operational_dashboard_summary')).toHaveLength(2);
+    expect(H.rpcCalls.filter((n) => n === 'check_remainder_reminders')).toHaveLength(1);
+    expect(H.rpcCalls.filter((n) => n === 'release_expired_quote_holds')).toHaveLength(1);
+  });
 
   it('a sales rep load does not call the admin-only reminder check', async () => {
     H.auth.role = 'sales_rep';

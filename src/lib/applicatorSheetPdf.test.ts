@@ -301,7 +301,7 @@ describe('generateApplicatorSheetPdf directions links', () => {
     mockDoc.splitTextToSize.mockImplementation((text: string) => [text]);
   });
 
-  it('prints one directions link per mapped field in stop order and skips unmapped fields', async () => {
+  it('prints links and coordinates only for located stops and explains a missing location', async () => {
     await generateApplicatorSheetPdf(makeSheetData({
       fields: [
         { stop: 1, field_name: 'North 40', county: null, state: null, acres: 40, crop: null, pest: null, location: { lat: 39.15, lng: -89.05 } },
@@ -313,9 +313,13 @@ describe('generateApplicatorSheetPdf directions links', () => {
       'https://www.google.com/maps/dir/?api=1&destination=39.150000,-89.050000',
       'https://www.google.com/maps/dir/?api=1&destination=39.200000,-89.100000',
     ]);
+    expect(mockDoc.textWithLink.mock.calls.every((call) => call[0] === 'Open field location in Google Maps')).toBe(true);
     const text = mockDoc.text.mock.calls.map((call) => call[0]).filter((value): value is string => typeof value === 'string');
-    expect(text.some((value) => value.startsWith('Stop 3 · South 80'))).toBe(true);
-    expect(text.some((value) => value.includes('No Pin ·'))).toBe(false);
+    expect(text.filter((value) => value.startsWith('Stop '))).toEqual([
+      'Stop 1 · North 40 · 39.150000, -89.050000  ',
+      'Stop 2 · No Pin  Directions unavailable',
+      'Stop 3 · South 80 · 39.200000, -89.100000  ',
+    ]);
   });
 
   it('shortens a long field name so the link stays on the page', async () => {
@@ -324,12 +328,12 @@ describe('generateApplicatorSheetPdf directions links', () => {
     await generateApplicatorSheetPdf(makeSheetData({
       fields: [{ stop: 1, field_name: longName, county: null, state: null, acres: 1, crop: null, pest: null, location: { lat: 1, lng: 2 } }],
     }), 'original', null);
-    const [, linkX] = mockDoc.textWithLink.mock.calls[0] as [string, number];
-    expect(linkX + 'Open directions'.length * 5).toBeLessThanOrEqual(612 - 40);
+    const [label, linkX] = mockDoc.textWithLink.mock.calls[0] as [string, number];
+    expect(linkX + label.length * 5).toBeLessThanOrEqual(612 - 40);
     mockDoc.getTextWidth.mockImplementation(() => 50);
   });
 
-  it('prints no directions block when no field has a map pin', async () => {
+  it('does not invent a directions link when no field has a saved location', async () => {
     await generateApplicatorSheetPdf(makeSheetData(), 'original', null);
     expect(mockDoc.textWithLink).not.toHaveBeenCalled();
   });
@@ -341,6 +345,32 @@ describe('map pages only print', () => {
     pageCount = 1;
     mockDoc.lastAutoTable = { finalY: 300 };
     mockDoc.splitTextToSize.mockImplementation((text: string) => [text]);
+  });
+
+  it.each([false, true])('prints hidden hazards even without any map image (maps only: %s)', async (mapsOnly) => {
+    const { default: autoTable } = await import('jspdf-autotable');
+    const data = makeSheetData({ maps: null });
+    const [field] = data.fields;
+    data.fields = [
+      { ...field, hazards: { complete: false, markers: [{ name: 'Washout', note: 'Stay west', hasValidPoint: false }] } },
+      { ...field, stop: 2, field_name: 'South', hazards: { complete: true, markers: [] } },
+    ];
+
+    await generateApplicatorSheetPdf(data, 'original', null, { mapsOnly });
+
+    const table = vi.mocked(autoTable).mock.calls.map(([, options]) => options)
+      .find((options) => {
+        const header = options.head?.[0];
+        return Array.isArray(header) && header.some((cell: unknown) => cell === 'Field hazards');
+      });
+    expect(table?.body).toEqual([
+      ['1', 'North 40', 'Washout · Stay west · Pin could not be placed'],
+      ['1', 'North 40', 'Obstacles could not be checked — confirm on site'],
+      ['1', 'North 40', 'Some listed hazards may not appear as map pins'],
+      ['2', 'South', 'None recorded'],
+    ]);
+    expect(mockDoc.addImage).not.toHaveBeenCalled();
+    expect(mockDoc.save).toHaveBeenCalledOnce();
   });
   const maps = {
     overview: 'data:image/png;base64,b3ZlcnZpZXc=',

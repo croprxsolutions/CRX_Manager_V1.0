@@ -14,8 +14,43 @@ vi.mock('./db', () => ({
 }));
 
 vi.mock('./jobMapImages', () => ({ fetchJobMapImages: vi.fn(), fetchJobFieldLocations: vi.fn(async () => new Map()) }));
+vi.mock('./fieldMarkerData', () => ({ MARKER_REQUEST_TIMEOUT_MS: 15_000, readFieldMarkers: vi.fn() }));
 
 import { fetchApplicatorSheetBillingSplits, prepareApplicatorSheetPrintData } from './applicatorSheetPrintData';
+import { DEFAULT_APPLICATOR_PRINT_OPTIONS } from './applicatorPrintOptions';
+import { readFieldMarkers } from './fieldMarkerData';
+import type { ApplicatorSheetData } from './applicatorSheetData';
+import type { FieldObstacle } from '../types';
+
+it('attaches unfiltered hazards by saved field and only treats a verified empty read as none', async () => {
+  const data: ApplicatorSheetData = {
+    job_number: 'JOB-HAZARD', customers: [], scheduled_date: '', scheduled_time: null, applicator_name: null,
+    vehicle_name: null, total_acres: 3, loader_comment: null, products: [],
+    fields: ['a', 'b', 'c'].map((field_id, index) => ({
+      field_id, stop: index + 1, field_name: field_id, county: null, state: null, acres: 1, crop: null, pest: null,
+    })),
+  };
+  const marker: FieldObstacle = {
+    id: 'marker-a', field_id: 'a', kind: 'washout', label: 'Check after rain', point_geojson: { type: 'Point', coordinates: [-89, 39] },
+    created_at: '', updated_at: '', created_by: null, entrance_number: null,
+  };
+  vi.mocked(readFieldMarkers).mockImplementation(async (id) => {
+    if (id === 'a') return { available: true, count: 2, markers: [marker, { ...marker, id: 'wrong-field', field_id: 'not-this-job' }] };
+    if (id === 'b') return { available: true, count: 0, markers: [] };
+    return { available: false };
+  });
+
+  const result = await prepareApplicatorSheetPrintData('job-1', data, {
+    ...DEFAULT_APPLICATOR_PRINT_OPTIONS, mapPages: 'none', includeBillingSplits: false,
+  });
+
+  expect(result.fields.map(({ hazards }) => hazards)).toEqual([
+    { complete: false, markers: [{ name: 'Washout', note: 'Check after rain', hasValidPoint: true }] },
+    { complete: true, markers: [] },
+    { complete: false, markers: [] },
+  ]);
+  expect(result.maps).toBeNull();
+});
 
 describe('fetchApplicatorSheetBillingSplits', () => {
   beforeEach(() => {

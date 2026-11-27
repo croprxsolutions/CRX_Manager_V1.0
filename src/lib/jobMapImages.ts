@@ -13,9 +13,18 @@ const MAPBOX_STATIC_URL = `https://api.mapbox.com/styles/v1/${MAPBOX_STYLE}/stat
 const MAX_STATIC_URL_LENGTH = 8_000;
 const SIMPLIFY_TOLERANCES = [0, 0.00005, 0.0001, 0.0005, 0.001];
 const MAPBOX_FETCH_TIMEOUT_MS = 10_000;
+const JOB_MAP_DEADLINE_MS = 25_000;
+
+interface JobMapImageOptions {
+  overview?: boolean;
+  perField?: boolean;
+  widthPx?: number;
+  heightPx?: number;
+}
 
 export interface JobFieldMapImage {
   fieldId: string;
+  hazardPinsOmitted?: boolean;
   /** Spray order on this job, 1-based (from job_fields.sort_order; restarts per job). */
   sprayNumber?: number;
   fieldName: string;
@@ -352,7 +361,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
       ? resolve(reader.result)
       : reject(new Error('Map image could not be converted to a data URL'));
     reader.onerror = () => reject(reader.error ?? new Error('Map image could not be read'));
-    reader.readAsDataURL(blob.type ? blob : new Blob([blob], { type: 'image/png' }));
+    reader.readAsDataURL(blob);
   });
 }
 
@@ -549,44 +558,58 @@ async function addAcreageLabels(
 
 async function fetchImageDataUrl(
   url: string,
-  label: string,
-  overviewFields?: ParsedJobField[],
-  overviewFeatures?: BoundaryFeature[],
-  overviewOptions?: Pick<BuildStaticUrlOptions, 'width' | 'height' | 'padding'>,
+  label: 'overview' | 'field',
+  jobSignal: AbortSignal,
+  overview?: {
+    fields: ParsedJobField[];
+    features: BoundaryFeature[];
+    options: Pick<BuildStaticUrlOptions, 'width' | 'height' | 'padding'>;
+  },
 ): Promise<string | null> {
+  if (jobSignal.aborted) return null;
   const controller = new AbortController();
+  const abortForJob = () => controller.abort();
+  jobSignal.addEventListener('abort', abortForJob, { once: true });
   const timeoutId = setTimeout(() => controller.abort(), MAPBOX_FETCH_TIMEOUT_MS);
   try {
     const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) {
-      console.warn(`Unable to fetch ${label} field map: Mapbox returned ${response.status}.`);
+      console.warn(`Mapbox ${label} print image returned ${response.status}.`);
+      return null;
+    }
+    if (response.headers?.has('X-Staticmap-API-Warning')) {
+      console.warn(`Mapbox ${label} print image returned a provider warning.`);
       return null;
     }
     const blob = await response.blob();
-    const dataUrl = await blobToDataUrl(blob);
-    return overviewFields && overviewFeatures && overviewOptions
-      ? addAcreageLabels(blob, dataUrl, overviewFields, overviewFeatures, overviewOptions)
-      : dataUrl;
-  } catch (error) {
-    if (controller.signal.aborted) {
-      console.warn(`Timed out fetching ${label} field map after ${MAPBOX_FETCH_TIMEOUT_MS / 1000} seconds.`, error);
-    } else {
-      console.warn(`Unable to fetch ${label} field map.`, error);
+    if (blob.size === 0 || !/^image\/(?:png|jpeg)(?:\s*;|$)/i.test(blob.type)) {
+      console.warn(`Mapbox ${label} print image returned an unusable image type.`);
+      return null;
     }
+    const dataUrl = await blobToDataUrl(blob);
+    if (controller.signal.aborted) return null;
+    return overview
+      ? addAcreageLabels(blob, dataUrl, overview.fields, overview.features, overview.options)
+      : dataUrl;
+  } catch {
+    console.warn(`Mapbox ${label} print image ${controller.signal.aborted ? 'timed out' : 'failed'}.`);
     return null;
   } finally {
     clearTimeout(timeoutId);
+    jobSignal.removeEventListener('abort', abortForJob);
   }
 }
 
-async function customerNamesById(customerIds: string[]): Promise<Map<string, string>> {
+async function customerNamesById(customerIds: string[], signal: AbortSignal): Promise<Map<string, string>> {
   const names = new Map<string, string>();
   if (customerIds.length === 0) return names;
   try {
     const { data, error } = await supabase
       .from('customers')
       .select('id, farm_name')
-      .in('id', customerIds);
+      .in('id', customerIds)
+      .abortSignal(signal);
+    if (signal.aborted) return names;
     if (error) {
       console.warn('Unable to load field-map customer names.', error);
       return names;
@@ -595,19 +618,21 @@ async function customerNamesById(customerIds: string[]): Promise<Map<string, str
       if (customer.farm_name) names.set(customer.id, customer.farm_name);
     });
   } catch (error) {
-    console.warn('Unable to load field-map customer names.', error);
+    if (!signal.aborted) console.warn('Unable to load field-map customer names.', error);
   }
   return names;
 }
 
-async function fieldObstacleFeatures(fieldIds: string[]): Promise<Map<string, BoundaryFeature[]>> {
+async function fieldObstacleFeatures(fieldIds: string[], signal: AbortSignal): Promise<Map<string, BoundaryFeature[]>> {
   const byField = new Map<string, BoundaryFeature[]>();
   if (fieldIds.length === 0) return byField;
   try {
     const { data, error } = await supabase
       .from('field_obstacles')
       .select('field_id, point_geojson')
-      .in('field_id', fieldIds);
+      .in('field_id', fieldIds)
+      .abortSignal(signal);
+    if (signal.aborted) return byField;
     if (error) {
       console.warn('Unable to load field obstacles for applicator-sheet maps.', error);
       return byField;
@@ -624,7 +649,7 @@ async function fieldObstacleFeatures(fieldIds: string[]): Promise<Map<string, Bo
       byField.set(field_id, features);
     }
   } catch (error) {
-    console.warn('Unable to load field obstacles for applicator-sheet maps.', error);
+    if (!signal.aborted) console.warn('Unable to load field obstacles for applicator-sheet maps.', error);
   }
   return byField;
 }
@@ -635,15 +660,27 @@ async function fieldObstacleFeatures(fieldIds: string[]): Promise<Map<string, Bo
  */
 export async function fetchJobFieldLocations(jobId: string): Promise<Map<string, { lat: number; lng: number }>> {
   const locations = new Map<string, { lat: number; lng: number }>();
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cutoff = new Promise<null>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(null);
+    }, JOB_MAP_DEADLINE_MS);
+  });
   try {
-    const { data, error } = await supabase.rpc('get_job_fields_with_geojson', { p_job_id: jobId });
-    if (error) return locations;
-    assertRpcResult<JobMapFieldRow[]>(data, 'get_job_fields_with_geojson').forEach((row) => {
+    const response = await Promise.race([
+      supabase.rpc('get_job_fields_with_geojson', { p_job_id: jobId }).abortSignal(controller.signal), cutoff,
+    ]);
+    if (!response || response.error) return locations;
+    assertRpcResult<JobMapFieldRow[]>(response.data, 'get_job_fields_with_geojson').forEach((row) => {
       const { lat, lng } = centroidFromGeoJson(row.centroid_geojson);
       if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) locations.set(row.id, { lat, lng });
     });
   } catch {
     // Directions are optional; the crew sheet still prints.
+  } finally {
+    clearTimeout(timer);
   }
   return locations;
 }
@@ -668,7 +705,7 @@ export function sprayNumbersByFieldId(rows: Array<Pick<JobMapFieldRow, 'id' | 's
  */
 export async function fetchJobMapImages(
   jobId: string,
-  opts: { overview?: boolean; perField?: boolean; widthPx?: number; heightPx?: number } = {},
+  opts: JobMapImageOptions = {},
 ): Promise<JobMapImages | null> {
   const token = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
   if (!jobId || !token?.trim()) {
@@ -676,80 +713,115 @@ export async function fetchJobMapImages(
     return null;
   }
 
+  const controller = new AbortController();
+  const result: JobMapImages = { overview: null, perField: [] };
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const cutoff = new Promise<void>((resolve) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      resolve();
+    }, JOB_MAP_DEADLINE_MS);
+  });
   try {
-    const { data, error } = await supabase.rpc('get_job_fields_with_geojson', { p_job_id: jobId });
-    if (error) throw error;
-    const rows = assertRpcResult<JobMapFieldRow[]>(data, 'get_job_fields_with_geojson');
-    const jobAcresByFieldId = new Map<string, number | null>();
-    try {
-      const { data: jobFields, error: jobFieldsError } = await supabase
-        .from('job_fields')
-        .select('field_id, acres_to_treat')
-        .eq('job_id', jobId);
-      if (jobFieldsError) {
-        console.warn('Unable to load job-specific field acres for applicator-sheet maps.', jobFieldsError);
-      } else {
-        (jobFields as JobFieldAcresRow[] | null)?.forEach((jobField) => {
-          if (jobField.field_id) jobAcresByFieldId.set(jobField.field_id, jobField.acres_to_treat);
-        });
-      }
-    } catch (error) {
-      console.warn('Unable to load job-specific field acres for applicator-sheet maps.', error);
+    await Promise.race([collectJobMapImages(jobId, opts, token.trim(), controller.signal, result), cutoff]);
+    return result.overview || result.perField.length > 0 ? result : null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function loadJobMapFields(jobId: string, signal: AbortSignal): Promise<ParsedJobField[]> {
+  const { data, error } = await supabase.rpc('get_job_fields_with_geojson', { p_job_id: jobId }).abortSignal(signal);
+  if (signal.aborted) return [];
+  if (error) throw error;
+  const rows = assertRpcResult<JobMapFieldRow[]>(data, 'get_job_fields_with_geojson');
+  const jobAcresByFieldId = new Map<string, number | null>();
+  try {
+    const { data: jobFields, error: jobFieldsError } = await supabase
+      .from('job_fields')
+      .select('field_id, acres_to_treat')
+      .eq('job_id', jobId)
+      .abortSignal(signal);
+    if (signal.aborted) return [];
+    if (jobFieldsError) {
+      console.warn('Unable to load job-specific field acres for applicator-sheet maps.', jobFieldsError);
+    } else {
+      (jobFields as JobFieldAcresRow[] | null)?.forEach((jobField) => {
+        if (jobField.field_id) jobAcresByFieldId.set(jobField.field_id, jobField.acres_to_treat);
+      });
     }
-    // Spray numbers 1, 2, 3 follow job_fields.sort_order for THIS job only (Sol 86).
-    const sprayNumberById = sprayNumbersByFieldId(rows);
-    const fields = rows
-      .map((row): ParsedJobField | null => {
-        const geometry = parseGeoJsonGeometry(row.boundary_geojson);
-        if (!geometry || (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon')) return null;
-        const centroid = centroidFromGeoJson(row.centroid_geojson);
-        return {
-          id: row.id,
-          sprayNumber: sprayNumberById.get(row.id) ?? 0,
-          name: row.field_name,
-          customerId: row.customer_id,
-          acres: jobAcresByFieldId.get(row.id) ?? null,
-          centroidLat: centroid.lat,
-          centroidLng: centroid.lng,
-          geometry,
-        };
-      })
-      .filter((field): field is ParsedJobField => field !== null)
-      .sort((first, second) => first.sprayNumber - second.sprayNumber);
+  } catch (error) {
+    if (!signal.aborted) console.warn('Unable to load job-specific field acres for applicator-sheet maps.', error);
+  }
+  if (signal.aborted) return [];
+  // Spray numbers 1, 2, 3 follow job_fields.sort_order for THIS job only (Sol 86).
+  const sprayNumberById = sprayNumbersByFieldId(rows);
+  return rows
+    .map((row): ParsedJobField | null => {
+      const geometry = parseGeoJsonGeometry(row.boundary_geojson);
+      if (!geometry || (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon')) return null;
+      const centroid = centroidFromGeoJson(row.centroid_geojson);
+      return {
+        id: row.id,
+        sprayNumber: sprayNumberById.get(row.id) ?? 0,
+        name: row.field_name,
+        customerId: row.customer_id,
+        acres: jobAcresByFieldId.get(row.id) ?? null,
+        centroidLat: centroid.lat,
+        centroidLng: centroid.lng,
+        geometry,
+      };
+    })
+    .filter((field): field is ParsedJobField => field !== null)
+    .sort((first, second) => first.sprayNumber - second.sprayNumber);
+}
+
+async function collectJobMapImages(
+  jobId: string,
+  opts: JobMapImageOptions,
+  token: string,
+  signal: AbortSignal,
+  result: JobMapImages,
+): Promise<void> {
+  try {
+    const fields = await loadJobMapFields(jobId, signal);
+    if (signal.aborted) return;
 
     if (fields.length === 0) {
       console.warn('Skipping applicator-sheet maps because this job has no field boundaries.');
-      return null;
+      return;
     }
 
-    const obstacles = await fieldObstacleFeatures(fields.map((field) => field.id));
-    const customerNames = await customerNamesById([...new Set(fields.map((field) => field.customerId))]);
+    const [obstacles, customerNames] = await Promise.all([
+      fieldObstacleFeatures(fields.map((field) => field.id), signal),
+      customerNamesById([...new Set(fields.map((field) => field.customerId))], signal),
+    ]);
+    if (signal.aborted) return;
     const widthOverride = opts.widthPx;
     const heightOverride = opts.heightPx;
     const perFieldOptions: BuildStaticUrlOptions = {
       width: clampDimension(widthOverride ?? 1000, 1000),
       height: clampDimension(heightOverride ?? 700, 700),
       padding: 40,
-      token: token.trim(),
+      token,
     };
 
-    let overview: string | null = null;
     if (opts.overview !== false) {
-      const overviewImage = buildOverviewStaticImage(fields, token.trim());
+      const overviewImage = buildOverviewStaticImage(fields, token);
       if (overviewImage) {
-        overview = await fetchImageDataUrl(
+        const overview = await fetchImageDataUrl(
           overviewImage.url,
           'overview',
-          fields,
-          overviewImage.features,
-          overviewImage.options,
+          signal,
+          { fields, features: overviewImage.features, options: overviewImage.options },
         );
+        if (signal.aborted) return;
+        result.overview = overview;
       } else {
         console.warn('Skipping applicator-sheet overview map because its geometry exceeds Mapbox URL limits.');
       }
     }
 
-    const perField: JobFieldMapImage[] = [];
     if (opts.perField !== false) {
       for (const field of fields) {
         const fieldObstacles = obstacles.get(field.id) ?? [];
@@ -758,10 +830,12 @@ export async function fetchJobMapImages(
           console.warn(`Skipping map for ${field.name} because its geometry exceeds Mapbox URL limits.`);
           continue;
         }
-        const dataUrl = await fetchImageDataUrl(image.url, field.name);
+        const dataUrl = await fetchImageDataUrl(image.url, 'field', signal);
+        if (signal.aborted) return;
         if (!dataUrl) continue;
-        perField.push({
+        result.perField.push({
           fieldId: field.id,
+          hazardPinsOmitted: fieldObstacles.length > image.features.filter(({ geometry }) => geometry.type === 'Point').length,
           sprayNumber: field.sprayNumber,
           fieldName: field.name,
           customerName: customerNames.get(field.customerId) ?? null,
@@ -773,9 +847,7 @@ export async function fetchJobMapImages(
       }
     }
 
-    return overview || perField.length > 0 ? { overview, perField } : null;
   } catch (error) {
-    console.warn('Unable to load applicator-sheet field maps.', error);
-    return null;
+    if (!signal.aborted) console.warn('Unable to load applicator-sheet field maps.', error);
   }
 }

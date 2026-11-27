@@ -4,10 +4,12 @@
  * are optional add-ons. Crew payer identities are resolved before preparation.
  */
 import { assertRpcResult, supabase } from './db';
-import { fmtNum, type ApplicatorSheetBillingSplit, type ApplicatorSheetData, type ApplicatorSheetSafety, type PreviousFieldApplications } from './applicatorSheetData';
+import { fmtNum, type ApplicatorSheetBillingSplit, type ApplicatorSheetData, type ApplicatorSheetHazards, type ApplicatorSheetSafety, type PreviousFieldApplications } from './applicatorSheetData';
 import { type ApplicatorPrintOptions, DEFAULT_APPLICATOR_PRINT_OPTIONS, mapImageOptions } from './applicatorPrintOptions';
 import { generateApplicatorSheetPdf } from './applicatorSheetPdf';
 import { fetchJobFieldLocations, fetchJobMapImages } from './jobMapImages';
+import { MARKER_REQUEST_TIMEOUT_MS, readFieldMarkers } from './fieldMarkerData';
+import { fieldObstacleName, isFieldObstaclePoint } from './fieldObstacles';
 
 interface ApplicationRecordJoin {
   application_date: string;
@@ -242,6 +244,52 @@ async function sheetSafety(products: ApplicatorSheetData['products']): Promise<A
   });
 }
 
+const hazardsUnavailable: ApplicatorSheetHazards = { complete: false, markers: [] };
+
+async function readSheetHazards(fields: ApplicatorSheetData['fields']) {
+  const ids = [...new Set(fields.flatMap(({ field_id }) => field_id ? [field_id] : []))];
+  const results = new Map<string, ApplicatorSheetHazards>();
+  if (ids.length === 0) return results;
+
+  const request = new AbortController();
+  let next = 0;
+  async function readNextFields() {
+    while (!request.signal.aborted && next < ids.length) {
+      const id = ids[next++];
+      try {
+        const snapshot = await readFieldMarkers(id, request.signal);
+        if (request.signal.aborted) return;
+        if (!snapshot.available || !Array.isArray(snapshot.markers)) continue;
+        const markers = new Map(snapshot.markers.filter((marker) => marker?.field_id === id && typeof marker.id === 'string')
+          .map((marker) => [marker.id, marker]));
+        results.set(id, {
+          complete: snapshot.count === markers.size && snapshot.markers.length === markers.size,
+          markers: [...markers.values()].map((marker) => ({
+            name: fieldObstacleName(marker), note: marker.label?.trim() || null,
+            hasValidPoint: isFieldObstaclePoint(marker.point_geojson),
+          })),
+        });
+      } catch {
+        // Keep this field unavailable while allowing the other saved stops to print.
+      }
+    }
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cutoff = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      request.abort();
+      resolve();
+    }, MARKER_REQUEST_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([Promise.all(Array.from({ length: Math.min(ids.length, 3) }, readNextFields)), cutoff]);
+    return results;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Load maps/history/billing additions for every print entry point in one place. */
 export async function prepareApplicatorSheetPrintData(
   jobId: string,
@@ -249,7 +297,7 @@ export async function prepareApplicatorSheetPrintData(
   options: ApplicatorPrintOptions,
   office = true,
 ): Promise<ApplicatorSheetData> {
-  const [maps, previousApplications, billingSplits, locations, safety] = await Promise.all([
+  const [maps, previousApplications, billingSplits, locations, safety, hazards] = await Promise.all([
     options.mapPages === 'none'
       ? Promise.resolve(null)
       : fetchJobMapImages(jobId, mapImageOptions(options.mapPages)),
@@ -261,8 +309,13 @@ export async function prepareApplicatorSheetPrintData(
       : Promise.resolve([]),
     fetchJobFieldLocations(jobId),
     options.includeSafetySheet ? sheetSafety(data.products) : Promise.resolve(undefined),
+    readSheetHazards(data.fields),
   ]);
-  const fields = data.fields.map((field) => ({ ...field, location: field.field_id ? locations.get(field.field_id) ?? null : null }));
+  const fields = data.fields.map((field) => ({
+    ...field,
+    location: field.field_id ? locations.get(field.field_id) ?? null : null,
+    hazards: field.field_id ? hazards.get(field.field_id) ?? hazardsUnavailable : hazardsUnavailable,
+  }));
   return {
     ...data,
     fields,

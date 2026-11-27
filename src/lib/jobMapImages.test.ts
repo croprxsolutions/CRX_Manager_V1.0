@@ -1,15 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockRpc, mockFrom, mockIn, mockObstacleIn, mockEq } = vi.hoisted(() => ({
+const { mockRpc, mockFrom, mockIn, mockObstacleIn, mockEq, mockReadSignal } = vi.hoisted(() => ({
   mockRpc: vi.fn(),
   mockFrom: vi.fn(),
   mockIn: vi.fn(),
   mockObstacleIn: vi.fn(),
   mockEq: vi.fn(),
+  mockReadSignal: vi.fn(),
 }));
 
+function abortable<T>(request: T) {
+  return Object.assign(request as T & object, {
+    abortSignal(signal: AbortSignal) {
+      mockReadSignal(signal);
+      return request;
+    },
+  });
+}
+
 vi.mock('./db', () => ({
-  supabase: { rpc: mockRpc, from: mockFrom },
+  supabase: { rpc: (...args: unknown[]) => abortable(mockRpc(...args)), from: mockFrom },
   assertRpcResult: <T,>(data: unknown): T => data as T,
 }));
 
@@ -38,12 +48,12 @@ function setupRpc(boundary = squareBoundary, centroid?: [number, number], acresT
   mockRpc.mockResolvedValue({ data: [makeRow(boundary, centroid)], error: null });
   mockFrom.mockImplementation((table: string) => {
     if (table === 'job_fields') {
-      return { select: vi.fn().mockReturnValue({ eq: mockEq }) };
+      return { select: vi.fn().mockReturnValue({ eq: (...args: unknown[]) => abortable(mockEq(...args)) }) };
     }
     if (table === 'field_obstacles') {
-      return { select: vi.fn().mockReturnValue({ in: mockObstacleIn }) };
+      return { select: vi.fn().mockReturnValue({ in: (...args: unknown[]) => abortable(mockObstacleIn(...args)) }) };
     }
-    return { select: vi.fn().mockReturnValue({ in: mockIn }) };
+    return { select: vi.fn().mockReturnValue({ in: (...args: unknown[]) => abortable(mockIn(...args)) }) };
   });
   mockEq.mockResolvedValue({ data: [{ field_id: 'field-1', acres_to_treat: acresToTreat }], error: null });
   mockObstacleIn.mockResolvedValue({ data: [], error: null });
@@ -268,6 +278,98 @@ describe('fetchJobMapImages', () => {
     expect(result?.perField[0].acres).toBeNull();
   });
 
+  it('ends the whole map preparation when the obstacle lookup misses the cutoff', async () => {
+    vi.useFakeTimers();
+    setupRpc();
+    mockObstacleIn.mockImplementation(() => new Promise(resolve => {
+      setTimeout(() => resolve({ data: [], error: null }), 30_000);
+    }));
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+
+    const result = fetchJobMapImages('job-1');
+    await vi.advanceTimersByTimeAsync(25_000);
+    await expect(result).resolves.toBeNull();
+    expect(mockReadSignal).toHaveBeenCalledTimes(4);
+    const [jobSignal] = mockReadSignal.mock.calls[0] as [AbortSignal];
+    expect(jobSignal.aborted).toBe(true);
+    for (const [signal] of mockReadSignal.mock.calls) expect(signal).toBe(jobSignal);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a warning on an otherwise successful response', 'image/png', 'png', true],
+    ['a success response carrying an HTML error page', 'text/html', '<p>synthetic provider error</p>', false],
+    ['an empty image response', 'image/png', '', false],
+    ['a missing content type', '', 'png', false],
+  ])('declines %s before passing it to the PDF', async (_description, type, body, warning) => {
+    setupRpc();
+    const headers = new Headers();
+    if (warning) headers.set('X-Staticmap-API-Warning', 'synthetic warning details');
+    const blob = vi.fn(async () => new Blob([body], { type }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, headers, blob }));
+
+    await expect(fetchJobMapImages('job-1', { perField: false })).resolves.toBeNull();
+    if (warning) expect(blob).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledWith(warning
+      ? 'Mapbox overview print image returned a provider warning.'
+      : 'Mapbox overview print image returned an unusable image type.');
+  });
+
+  it('cuts off a twelve-field job before all its stalled images are requested', async () => {
+    vi.useFakeTimers();
+    setupRpc();
+    mockRpc.mockResolvedValue({ data: Array.from({ length: 12 }, (_, sortOrder) => ({
+      ...makeRow(),
+      id: `field-${sortOrder}`,
+      sort_order: sortOrder,
+      boundary_geojson: sortOrder === 11 ? null : squareBoundary,
+    })), error: null });
+    const aborted = vi.fn();
+    const fetcher = vi.fn((_url: string, options: RequestInit) => new Promise((_resolve, reject) => {
+      options.signal?.addEventListener('abort', () => {
+        aborted();
+        reject(new DOMException('Map image request aborted', 'AbortError'));
+      }, { once: true });
+    }));
+    vi.stubGlobal('fetch', fetcher);
+
+    const result = fetchJobMapImages('job-1');
+    await vi.advanceTimersByTimeAsync(25_000);
+    await expect(result).resolves.toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(aborted).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps a completed overview when a field image conversion exceeds the cutoff', async () => {
+    vi.useFakeTimers();
+    setupRpc();
+    const encoded = 'data:image/png;base64,cG5n';
+    let readCount = 0;
+    vi.stubGlobal('FileReader', class {
+      onloadend: (() => void) | null = null;
+      result = encoded;
+      readAsDataURL() {
+        readCount += 1;
+        setTimeout(() => this.onloadend?.(), readCount === 1 ? 1 : 30_000);
+      }
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(['png'], { type: 'image/png' }),
+    }));
+
+    const result = fetchJobMapImages('job-1');
+    await vi.advanceTimersByTimeAsync(25_000);
+    const snapshot = await result;
+    expect(snapshot).toEqual({ overview: encoded, perField: [] });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(snapshot).toEqual({ overview: encoded, perField: [] });
+  });
+
   it('returns null when a hanging Mapbox request reaches the ten-second timeout', async () => {
     vi.useFakeTimers();
     setupRpc();
@@ -290,10 +392,7 @@ describe('fetchJobMapImages', () => {
     await vi.advanceTimersByTimeAsync(10_000);
 
     await expect(result).resolves.toBeNull();
-    expect(console.warn).toHaveBeenCalledWith(
-      'Timed out fetching overview field map after 10 seconds.',
-      expect.objectContaining({ name: 'AbortError' }),
-    );
+    expect(console.warn).toHaveBeenCalledWith('Mapbox overview print image timed out.');
   });
 
   it('keeps the original geometry when its URL already fits within the Mapbox limit', async () => {
@@ -382,5 +481,24 @@ describe('fetchJobFieldLocations', () => {
   it('returns no pins when the read is refused', async () => {
     mockRpc.mockResolvedValue({ data: null, error: { message: 'denied' } });
     expect((await fetchJobFieldLocations('job-1')).size).toBe(0);
+  });
+
+  it('gives up on directions at the map cutoff so the sheet can still print', async () => {
+    vi.useFakeTimers();
+    try {
+      mockRpc.mockImplementation(() => new Promise(resolve => {
+        setTimeout(() => resolve({ data: [makeRow()], error: null }), 30_000);
+      }));
+      const locations = fetchJobFieldLocations('job-1');
+      await vi.advanceTimersByTimeAsync(25_000);
+      const result = await locations;
+      expect(result.size).toBe(0);
+      const [signal] = mockReadSignal.mock.calls[0] as [AbortSignal];
+      expect(signal.aborted).toBe(true);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(result.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

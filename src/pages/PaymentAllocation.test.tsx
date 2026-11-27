@@ -507,7 +507,7 @@ describe('Record Payments: faster entry', () => {
     expect(screen.getByText('INV-POSTED')).toBeInTheDocument();
   });
 
-  it('an allocation change made while the re-pick reload runs is kept when the reload lands', async () => {
+  it('while the re-pick reload runs the allocation buttons are locked; the amounts come back when it lands', async () => {
     renderPayments();
     await chooseByKeyboard();
     fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
@@ -528,11 +528,15 @@ describe('Record Payments: faster entry', () => {
     const box = screen.getByRole('combobox', { name: 'Customer' });
     fireEvent.change(box, { target: { value: 'Big' } });
     fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
-    expect(allocated()).toHaveTextContent('$0.00');
+    // The old list must not be allocated against while the fresh one loads (Sol, 2026-11-27).
+    expect(screen.getByRole('button', { name: /Auto-Allocate/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Pay full balance/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeDisabled();
     release();
     await waitFor(() => expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled());
-    expect(allocated()).toHaveTextContent('$0.00');
+    expect(screen.getByRole('button', { name: /Auto-Allocate/ })).toBeEnabled();
+    expect(allocated()).toHaveTextContent('$80.00');
   });
 
   it('a failed re-pick reload keeps the allocations, and Retry keeps them too', async () => {

@@ -847,7 +847,8 @@ export default function PaymentAllocation() {
                       size="sm"
                       icon={<Zap className="w-4 h-4" />}
                       onClick={handleAutoAllocate}
-                      disabled={submitting || customerBeingChanged || checkCents <= 0 || invoices.length === 0}
+                      // Locked while the invoices (re)load: a re-pick keeps the old list on screen until the fresh one lands.
+                      disabled={submitting || customerBeingChanged || invoicesNotReady || checkCents <= 0 || invoices.length === 0}
                     >
                       Auto-Allocate
                     </Button>
@@ -870,7 +871,7 @@ export default function PaymentAllocation() {
                       icon={<RotateCcw className="w-4 h-4" />}
                       onClick={handleClearAllocations}
                       showChevron={false}
-                      disabled={submitting || !hasAllocations}
+                      disabled={submitting || loadingInvoices || !hasAllocations}
                     >
                       Clear
                     </Button>

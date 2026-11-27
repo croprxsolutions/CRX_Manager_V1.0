@@ -1,4 +1,4 @@
--- Reverse of 20270313023100_below_cost_retry_bound_to_shown_list: restores the 20270310210000 bodies of
+-- Reverse of 20270315073100_below_cost_retry_bound_to_shown_list: restores the 20270310210000 bodies of
 -- _enforce_below_cost_line and _raise_below_cost_reason_list (owner and grants are kept by CREATE OR REPLACE).
 -- An approved retry then re-judges every line again, and the refusal loses "shown". Apply as ONE transaction.
 SET LOCAL lock_timeout = '5s';
@@ -9,7 +9,7 @@ BEGIN
        WHERE p.pronamespace = 'public'::regnamespace
          AND ((p.proname = '_enforce_below_cost_line' AND md5(replace(p.prosrc, chr(13), '')) = '0efb1da15a45b26a0d7f11b879744833')
            OR (p.proname = '_raise_below_cost_reason_list' AND md5(replace(p.prosrc, chr(13), '')) = '9dcc36b1431e905a8708a2d371bd7793'))) <> 2 THEN
-    RAISE EXCEPTION 'BELOW_COST_SHOWN_REVERSE_PREFLIGHT: the installed bodies are not the 20270313023100 ones; nothing to reverse';
+    RAISE EXCEPTION 'BELOW_COST_SHOWN_REVERSE_PREFLIGHT: the installed bodies are not the 20270315073100 ones; nothing to reverse';
   END IF;
 END;
 $reverse_preflight$;

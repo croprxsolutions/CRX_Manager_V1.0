@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270313023100_below_cost_retry_bound_to_shown_list (#2617, Mason 2026-11-26: "Yes, refuse if
+ * Real-schema proof for 20270315073100_below_cost_retry_bound_to_shown_list (#2617, Mason 2026-11-26: "Yes, refuse if
  * changed"). Copied from prove-below-cost-prompt-lists-every-line-real-schema.mjs, whose cases all re-run here against the
  * new bodies (no reason, or a reason with no marker, must behave exactly as 20270310210000 does). Products cost $10.00.
  * New cases (the [shown:] marker): an unchanged marked retry saves and logs the listed lines with the typed reason only;
@@ -32,7 +32,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270313023100_below_cost_retry_bound_to_shown_list.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270315073100_below_cost_retry_bound_to_shown_list.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

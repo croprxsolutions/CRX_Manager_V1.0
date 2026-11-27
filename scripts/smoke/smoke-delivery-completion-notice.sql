@@ -35,8 +35,10 @@ DECLARE
   v_rep uuid := gen_random_uuid();
   v_other_rep uuid := gen_random_uuid();
   v_rep_key text;
+  v_quick_delivery uuid;
+  v_offline_action uuid := gen_random_uuid();
 BEGIN
-  -- 0. Preconditions, two admins, fixtures.
+  -- 0. Preconditions and fixtures.
   IF EXISTS (SELECT 1 FROM public.accounting_periods
               WHERE status = 'closed' AND (v_today - 1) BETWEEN period_start AND period_end) THEN
     RAISE EXCEPTION 'SMOKE_SETUP: yesterday falls in a CLOSED accounting period';
@@ -70,11 +72,11 @@ BEGIN
   INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
   VALUES (v_product, 'Main Warehouse', 100, 8, 'Gal');
 
-  -- One order, four 2-unit lines; deliveries 1-3 scheduled, 4 in_progress.
+  -- One order with five loads. The fifth stays in progress for the offline review case.
   INSERT INTO public.orders (order_number, customer_id, status, booking_draw)
   VALUES ('[SMOKE] SACD-' || v_suffix, v_customer, 'confirmed', false)
   RETURNING id INTO v_order;
-  FOR v_i IN 1..4 LOOP
+  FOR v_i IN 1..5 LOOP
     INSERT INTO public.order_items (order_id, product_id, product_name, price_per_unit, cost_per_unit,
                                     total_units_needed, total_price, profit, net_margin,
                                     quantity_delivered, quantity_remaining)
@@ -89,7 +91,7 @@ BEGIN
     INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
     VALUES (v_id, v_oi, v_product, 2, 0, 'Gal');
   END LOOP;
-  UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_del[4];
+  UPDATE public.deliveries SET status = 'in_progress' WHERE id IN (v_del[4], v_del[5]);
 
   -- a. Scheduled delivery, today: one call starts and completes it.
   v_key := v_prefix || 'start-complete';
@@ -278,9 +280,43 @@ BEGIN
   END;
   RESET ROLE;
 
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  SELECT updated_at INTO v_completed FROM public.deliveries WHERE id = v_del[5];
+  SET LOCAL ROLE authenticated;
+  v_res := public.stage_offline_action(v_offline_action, 'complete_delivery', v_del[5], 1,
+    clock_timestamp() - interval '1 minute', jsonb_build_object('signed_by', 'Invented Offline Customer',
+      'issue_type', 'none', 'completed_at', to_jsonb(clock_timestamp() - interval '1 minute')),
+    v_prefix || 'offline', v_completed);
+  IF v_res->>'status' IS DISTINCT FROM 'received' THEN RAISE EXCEPTION 'Offline receipt did not stage: %', v_res; END IF;
+  v_res := public.process_offline_action(v_offline_action, v_prefix || 'offline');
+  RESET ROLE;
+  IF v_res->>'status' IS DISTINCT FROM 'needs_review'
+    OR (SELECT status FROM public.deliveries WHERE id = v_del[5]) IS DISTINCT FROM 'in_progress'
+    OR EXISTS (SELECT FROM public.delivery_completion_notice_events e
+      JOIN public.delivery_brand_events b ON b.seq=e.completion_seq WHERE b.delivery_id = v_del[5])
+    OR EXISTS (SELECT FROM public.notifications WHERE related_entity_id = v_del[5])
+  THEN RAISE EXCEPTION 'Offline recovery changed the delivery notice behavior: %', v_res; END IF;
 
-
-
+  SET LOCAL ROLE authenticated;
+  v_res := public.create_quick_delivery(v_customer,
+    jsonb_build_array(jsonb_build_object('product_id',v_product,'quantity',2,'unit_size','Gal','price_cents',1000)),
+    v_driver,v_today,'Invented Quick Delivery',v_admin,v_prefix || 'quick-create',true);
+  RESET ROLE;
+  v_quick_delivery := (v_res->>'delivery_id')::uuid;
+  IF NOT EXISTS(SELECT FROM public.deliveries WHERE id = v_quick_delivery AND status = 'scheduled' AND is_quick_delivery)
+    OR EXISTS (SELECT FROM public.notifications WHERE related_entity_id = v_quick_delivery)
+  THEN RAISE EXCEPTION 'Quick Delivery unexpectedly notified on creation'; END IF;
+  SET LOCAL ROLE authenticated;
+  v_res := public.start_and_complete_delivery(v_quick_delivery, 'No proof — recorded by office',
+    v_today, v_admin, NULL, NULL, NULL, v_prefix || 'quick-complete', 'no_proof', 'Invented quick delivery confirmed',
+    p_record_completion_notice => true);
+  v_notice := public.notify_saved_delivery_completion(v_quick_delivery, v_prefix || 'quick-complete', v_prefix || 'quick-notice');
+  RESET ROLE;
+  IF v_res->>'status' IS DISTINCT FROM 'completed' OR v_notice <> '{"status":"sent"}'::jsonb
+    OR (SELECT count(*) FROM public.notifications WHERE related_entity_id = v_quick_delivery
+      AND user_id = v_driver AND notification_type = 'delivery_completed' AND created_by = v_admin) <> 1
+  THEN RAISE EXCEPTION 'Quick Delivery completion did not retain the expected driver notice: %, %', v_res, v_notice; END IF;
 END;
 $smoke$;
 SET CONSTRAINTS ALL IMMEDIATE;

@@ -45,8 +45,8 @@ async function proveRace(useSameKey) {
   const savedKey = 'invented-completion-' + tag;
   const secondKey = useSameKey ? firstKey : differentKey;
   const holder = 'dc-alert-holder-' + tag;
-  const ready = 'dc-alert-ready-' + tag;
   const waiter = 'dc-alert-waiter-' + tag;
+  const readinessLock = parseInt(tag.slice(0, 7), 16);
   const workers = [];
   try {
     // The separate rollback smoke proves a real save. This private local fixture gives both
@@ -73,24 +73,26 @@ async function proveRace(useSameKey) {
         SELECT seq,'${receipt}','complete_delivery','sales_rep',false FROM event;
       COMMIT;`);
 
-    const send = request => `
+    const signIn = `
       DO $actor$
       BEGIN
         PERFORM set_config('request.jwt.claim.sub','${actor}',true);
         PERFORM set_config('request.jwt.claims',jsonb_build_object('sub','${actor}','role','authenticated')::text,true);
       END;
       $actor$;
-      SET LOCAL ROLE authenticated;
+      SET LOCAL ROLE authenticated;`;
+    const send = request => `
+      ${signIn}
       SELECT public.notify_saved_delivery_completion('${delivery}','${savedKey}','${request}') ->> 'status';
       RESET ROLE;`;
     const first = localSqlInWorker(`
       SET application_name = '${holder}';
       BEGIN;
       ${send(firstKey)}
-      SET LOCAL application_name = '${ready}';
       DO $wait$
-      DECLARE deadline timestamptz := clock_timestamp() + interval '45 seconds';
+      DECLARE deadline timestamptz := clock_timestamp() + interval '90 seconds';
       BEGIN
+        PERFORM pg_advisory_xact_lock(386912, ${readinessLock});
         LOOP
           PERFORM pg_stat_clear_snapshot();
           EXIT WHEN EXISTS (SELECT FROM pg_stat_activity WHERE application_name = '${waiter}'
@@ -101,20 +103,23 @@ async function proveRace(useSameKey) {
       END;
       $wait$;
       COMMIT;`);
-    workers.push(first);
-    first.catch(() => {});
-    const readyDeadline = Date.now() + 30_000;
-    while (localSql("SELECT EXISTS (SELECT FROM pg_stat_activity WHERE application_name = '" + ready + "');") !== 't') {
-      assert(Date.now() < readyDeadline, 'First notice request did not finish its send');
-      await new Promise(resolveWait => setTimeout(resolveWait, 100));
-    }
-
     const second = localSqlInWorker(`
       SET application_name = '${waiter}';
       BEGIN;
+      DO $ready$
+      DECLARE deadline timestamptz := clock_timestamp() + interval '90 seconds';
+      BEGIN
+        LOOP
+          EXIT WHEN NOT pg_try_advisory_lock(386912, ${readinessLock});
+          PERFORM pg_advisory_unlock(386912, ${readinessLock});
+          IF clock_timestamp() >= deadline THEN RAISE EXCEPTION 'First notice did not reach the readiness lock'; END IF;
+          PERFORM pg_sleep(0.05);
+        END LOOP;
+      END;
+      $ready$;
       ${send(secondKey)}
       COMMIT;`);
-    workers.push(second);
+    workers.push(first, second);
     assert.deepEqual(await Promise.all(workers), ['sent', 'sent']);
     assert.equal(localSql(`
       SELECT NOT EXISTS (
@@ -128,6 +133,33 @@ async function proveRace(useSameKey) {
         EXCEPT ALL
         SELECT id FROM public.profiles WHERE role = 'admin' AND is_active
       );`), 't', 'The concurrent requests must leave exactly one notice per eligible admin');
+
+    if (useSameKey) {
+      const refuseOldReceipt = `
+        ${signIn}
+        DO $receipt$
+        BEGIN
+          PERFORM public.notify_saved_delivery_completion('${delivery}','${savedKey}','${firstKey}');
+          RAISE EXCEPTION 'Earlier receipt unexpectedly authorized a send';
+        EXCEPTION WHEN raise_exception THEN
+          IF SQLERRM <> 'DELIVERY_COMPLETION_NOTICE_RECEIPT_REQUIRED' THEN RAISE; END IF;
+        END;
+        $receipt$;
+        RESET ROLE;`;
+      assert.equal(localSql(`
+        BEGIN;
+        -- One new completion identity on the same delivery and unchanged business date.
+        INSERT INTO public.delivery_brand_events(delivery_id,event_type,actor)
+          VALUES ('${delivery}','completed','${actor}');
+        ${refuseOldReceipt}
+        ROLLBACK;
+        BEGIN;
+        UPDATE public.idempotency_keys SET expires_at = now() - interval '1 second' WHERE id = '${receipt}';
+        ${refuseOldReceipt}
+        ROLLBACK;
+        SELECT 'LOCAL_DELIVERY_NOTICE_STALE_RECEIPT_PASS';`), 'LOCAL_DELIVERY_NOTICE_STALE_RECEIPT_PASS');
+      console.log('LOCAL_DELIVERY_NOTICE_STALE_RECEIPT_PASS');
+    }
   } finally {
     await Promise.allSettled(workers);
     localSql(`

@@ -2290,11 +2290,14 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   }) }), ACCESS), "picture or file", "an approval whose reply came with a picture is refused at the apply (Codex P1, PR #900)");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {}, { replyMark: undefined }) }), ACCESS),
     "does not say where his reply is", "an approval that does not say where his reply is is refused");
-  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {
-    issuedAt: new Date(Date.now() - OWNER_APPROVAL_MAX_AGE_MS - 2 * 60_000).toISOString(),
-    expiresAt: new Date(Date.now() - 2 * 60_000).toISOString(),
-  }, { approvedAt: new Date(Date.now() - OWNER_APPROVAL_MAX_AGE_MS - 60_000).toISOString() }) }), ACCESS),
-    "24 hours after Mason replied", "an approval more than 24 hours after his reply is refused");
+  { // One clock reading: separate Date.now() calls a millisecond apart made the request over 24h long (flaky on Windows CI).
+    const t = Date.now();
+    denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {
+      issuedAt: new Date(t - OWNER_APPROVAL_MAX_AGE_MS - 2 * 60_000).toISOString(),
+      expiresAt: new Date(t - 2 * 60_000).toISOString(),
+    }, { approvedAt: new Date(t - OWNER_APPROVAL_MAX_AGE_MS - 60_000).toISOString() }) }), ACCESS),
+      "24 hours after Mason replied", "an approval more than 24 hours after his reply is refused");
+  }
   // Mason, 2026-11-23: his yes carries to whichever session lands it (the merge captain).
   allows(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS, { ownerSessionId: "sess-other-chat-0002" }),
     "an approval given in another conversation is accepted by the session applying it");

@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270311180000_cancel_order_with_staff_notice.sql` (SQL sha256: `1c72f8d32bfbc82e26abdaa44c21fbcdcfec91988d2d072f2e17bf72c6511b8a`) adds the checked staff notice after whole-order cancellation.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270314190000_cancel_order_with_staff_notice.sql` (SQL sha256: `1c72f8d32bfbc82e26abdaa44c21fbcdcfec91988d2d072f2e17bf72c6511b8a`) adds the checked staff notice after whole-order cancellation.
 
 An active admin can call `cancel_order_with_notice(p_order_id, p_performed_by, p_idempotency_key)`. It calls the existing cancellation operation and returns the same JSON result. The new operation has a separate bound receipt. A fresh whole cancellation alerts active admins and records the signed-in sender. A failed send preserves the successful cancellation and records the failure.
 

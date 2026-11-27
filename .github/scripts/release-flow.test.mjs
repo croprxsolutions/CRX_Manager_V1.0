@@ -207,6 +207,30 @@ test('usersSee ignores the template placeholder and indented headings end the li
   assert.deepEqual(usersSee('What users see: <one plain sentence>'), []);
 });
 
+test('usersSee drops "nothing" notes and the PR footer, and shows links as plain text', () => {
+  const body = '## What users see\nNothing. Agent tooling only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)';
+  assert.deepEqual(usersSee(body), []);
+  for (const said of ['None (CI only).', 'nothing; agent tooling only.', 'N/A', 'None on production.']) {
+    assert.deepEqual(usersSee(`What users see: ${said}`), [], said);
+  }
+  assert.deepEqual(usersSee('## What users see\n- See the [price list](https://x.test/p) tab\n---\n- footer'), ['See the price list tab']);
+  assert.deepEqual(usersSee('What users see: Invoices show the [quote](/quotes/1) price.'), ['Invoices show the quote price.']);
+  // Real notes that only look like the junk stay (Terra review).
+  assert.deepEqual(usersSee('What users see: None of the invoices need rounding now.'), ['None of the invoices need rounding now.']);
+  assert.deepEqual(usersSee('## What users see\n- Reports generated with [Claude Code](https://x.test) now cite sources\n- Second'),
+    ['Reports generated with Claude Code now cite sources', 'Second']);
+  assert.deepEqual(usersSee('What users see: Read the [guide](https://x.test/guide_(v2)) first.'), ['Read the guide first.']);
+  assert.deepEqual(usersSee('What users see: None for overdue invoices need manual rounding now.'), ['None for overdue invoices need manual rounding now.']);
+  assert.deepEqual(usersSee('## What users see\n- 🤖 The assistant now cites sources\n- Faster reports\n\n🤖 Generated with [Claude Code](https://x.test)'),
+    ['🤖 The assistant now cites sources', 'Faster reports']);
+  assert.deepEqual(usersSee('What users see: None for overdue invoices now.'), ['None for overdue invoices now.']);
+  assert.deepEqual(usersSee('## What users see\nGenerated with [Claude Code](https://x.test) reports now cite sources\n- Faster reports'),
+    ['Generated with Claude Code reports now cite sources', 'Faster reports']);
+  for (const said of ['None for users.', 'None visible to users.', 'None here yet.', 'None in the app.']) {
+    assert.deepEqual(usersSee(`What users see: ${said}`), [], said);
+  }
+});
+
 test('prState: held-off needs its reason even when also verified', () => {
   assert.equal(prState({ labels: ['held-off', 'verified-on-staging'], body: 'Staging proof: https://x.example' }), 'missing');
   assert.equal(prState({ labels: ['held-off'], body: 'Held off: #12' }), 'held');

@@ -237,7 +237,13 @@ export function changelogMarkdown(g) {
   return sections.map(([h, items]) => `#### ${h}\n${items.map((e) => `* ${e.text} (#${e.number})`).join('\n')}`).join('\n\n');
 }
 
-const NOTHING = /^(none|nothing|n\/a|-)\.?$/i;
+// "None", "None (CI only).", "None on production.", "Nothing. Agent tooling only." and "N/A" all mean nothing
+// users see (an exact list, so "None for overdue invoices now." stays a real note).
+const NOTHING = /^(?:none|nothing|n\/a|-)(?:[\s.,;:!—–-]*$|[.,;:!—–(]|\s+[—–(]|\s+-\s|\s+(?:on production|for users|visible(?: to users)?|here(?: yet)?|yet|in the app|user[- ]facing)[\s.!]*$)/i;
+// A heading, a rule or the PR's whole-line "🤖 Generated with [Claude Code](…)" footer ends the list.
+const SECTION_END = /^[ ]{0,3}(?:#|---|(?:🤖\s*)?generated with \[claude code\]\([^)\s]*\)\s*$)/i;
+// The dialog shows plain text, so "[text](url)" becomes "text".
+const plain = (s) => s.replace(/\[([^\]]+)\]\((?:[^()\s]|\([^()\s]*\))+(?:\s+"[^"]*")?\)/g, '$1');
 
 // What a PR says users will notice: a "What users see: …" line, or a "## What users see" list.
 // "None" means nothing; the template's "<…>" placeholder counts as not filled in.
@@ -246,14 +252,14 @@ export function usersSee(body) {
   const line = /^[ \t]*what users see:[ \t]*(.*)$/im.exec(text);
   const said = line?.[1].trim() ?? '';
   if (NOTHING.test(said)) return [];
-  if (said && !said.startsWith('<')) return [said];
+  if (said && !said.startsWith('<')) return [plain(said)];
   const section = /^[ ]{0,3}#+\s*what users see\s*$/im.exec(text);
   if (!section) return [];
   const out = [];
   for (const l of text.slice(section.index + section[0].length).split('\n')) {
-    if (/^[ ]{0,3}#/.test(l)) break;
+    if (SECTION_END.test(l)) break;
     const item = l.replace(/^\s*[-*]\s*/, '').trim();
-    if (item && !NOTHING.test(item) && !item.startsWith('<') && !/^what users see:/i.test(item)) out.push(item);
+    if (item && !NOTHING.test(item) && !item.startsWith('<') && !/^what users see:/i.test(item)) out.push(plain(item));
   }
   return out;
 }

@@ -62,6 +62,7 @@ try {
     DELETE FROM public.notifications WHERE related_entity_id IN ('${distinct}', '${same}', '${eligibility}');
     DELETE FROM public.orders WHERE id IN ('${distinct}', '${same}', '${eligibility}');
     DELETE FROM public.customers WHERE id = '${farm}';
+    DELETE FROM public.profile_public_directory WHERE id IN ('${first}', '${second}');
     DELETE FROM public.profiles WHERE id IN ('${first}', '${second}');
     DELETE FROM auth.users WHERE id IN ('${first}', '${second}');
     COMMIT;`);

@@ -195,6 +195,8 @@ BEGIN
 
   IF (SELECT count(*) FROM public.notifications WHERE related_entity_id = fresh_order AND created_by = admin_id AND notification_type = 'order_status') <> active_admin_count
      OR (SELECT count(*) FROM public.notifications WHERE related_entity_id = nested_order AND created_by = admin_id AND notification_type = 'order_status') <> active_admin_count
+     OR (SELECT count(DISTINCT user_id) FROM public.notifications WHERE related_entity_id = fresh_order AND created_by = admin_id AND notification_type = 'order_status') <> active_admin_count
+     OR (SELECT count(DISTINCT user_id) FROM public.notifications WHERE related_entity_id = nested_order AND created_by = admin_id AND notification_type = 'order_status') <> active_admin_count
      OR EXISTS (SELECT 1 FROM public.notifications WHERE related_entity_id IN (legacy_order, failed_notice_order, remaining_order) AND notification_type = 'order_status')
      OR EXISTS (SELECT 1 FROM public.notifications WHERE related_entity_id IN (fresh_order, nested_order)
                     AND user_id IN (inactive_admin, rep_id) AND notification_type = 'order_status')

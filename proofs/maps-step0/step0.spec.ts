@@ -14,6 +14,10 @@ type ProofApi = {
   getMode: () => string;
   getLayerOrder: () => string[];
   getPictureTiles: () => string[];
+  getCamera: () => number[];
+  moveCamera: () => void;
+  getRasterPixel: () => number[];
+  hasRenderedVertex: (x: number, y: number) => boolean;
   project: (coordinate: [number, number]) => { x: number; y: number };
   trash: () => void;
   mapInstanceId: string;
@@ -28,6 +32,9 @@ type ProofAction =
   | 'getMode'
   | 'getLayerOrder'
   | 'getPictureTiles'
+  | 'getCamera'
+  | 'moveCamera'
+  | 'getRasterPixel'
   | 'projectSecondVertex'
   | 'trash'
   | 'mapInstanceId';
@@ -46,6 +53,9 @@ async function callProof<T = void>(page: Page, action: ProofAction): Promise<T> 
       case 'getMode': return proof.getMode();
       case 'getLayerOrder': return proof.getLayerOrder();
       case 'getPictureTiles': return proof.getPictureTiles();
+      case 'getCamera': return proof.getCamera();
+      case 'moveCamera': return proof.moveCamera();
+      case 'getRasterPixel': return proof.getRasterPixel();
       case 'projectSecondVertex': {
         const geometry = proof.getDraft().features[0].geometry as unknown as { coordinates: number[][][] };
         const coordinates = geometry.coordinates;
@@ -74,7 +84,9 @@ async function openProof(page: Page): Promise<{
     }
   });
   page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(message.text());
+    const { url } = message.location();
+    if (/\/tiles\/[AB]-outage\.png/.test(url) && message.text().includes('503')) return;
+    if (message.type() === 'error') consoleErrors.push(`${url} ${message.text()}`.trim());
   });
   page.on('pageerror', (error) => consoleErrors.push(error.message));
 
@@ -93,9 +105,63 @@ async function openProof(page: Page): Promise<{
   const polygonButton = page.locator('#proof-draw-control .mapbox-gl-draw_polygon');
   await expect(polygonButton).toBeVisible();
   expect(await polygonButton.evaluate((button) => getComputedStyle(button).backgroundImage)).toContain('data:image/svg+xml');
+  expect(await polygonButton.evaluate((button) => button.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
   await expect(page.locator('#proof-map.maplibregl-map canvas.maplibregl-canvas')).toHaveCount(1);
-  await expect.poll(() => tileRequests.some((path) => path.startsWith('/tiles/A/'))).toBe(true);
+  await expect.poll(() => tileRequests.includes('/tiles/A.png')).toBe(true);
+  await expectRaster(page, 'A');
+  const defaultCamera = await callProof(page, 'getCamera');
+  await callProof(page, 'moveCamera');
+  expect(await callProof(page, 'getCamera')).not.toEqual(defaultCamera);
   return { tileRequests, externalRequests, consoleErrors };
+}
+
+async function expectRaster(page: Page, picture: 'A' | 'B'): Promise<void> {
+  const pixel = picture === 'A' ? [48, 132, 180, 255] : [221, 112, 58, 255];
+  await expect.poll(() => callProof<number[]>(page, 'getRasterPixel')).toEqual(pixel);
+}
+
+async function exerciseOutageAndRetry(page: Page, chosen: 'A' | 'B'): Promise<void> {
+  const fallback = chosen === 'A' ? 'B' : 'A';
+  const before = await drawingState(page);
+  const canvas = await page.locator('#proof-map canvas.maplibregl-canvas').elementHandle();
+  const failedTile = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === `/tiles/${chosen}-outage.png` && response.status() === 503);
+  // Dispatch the actual button action without releasing an active map drag.
+  await page.getByRole('button', { name: 'Fail picture' }).dispatchEvent('click');
+  await failedTile;
+  await expect(page.locator('#proof-status')).toHaveText(`Picture ${chosen} unavailable · showing ${fallback}`);
+  await expectRaster(page, fallback);
+  expect(await drawingState(page)).toEqual(before);
+  expect(await canvas.evaluate((element) => element === document.querySelector('#proof-map canvas'))).toBe(true);
+  await expectRasterBelowDraw(page);
+
+  const retry = page.getByRole('button', { name: 'Retry' });
+  await expect(retry).toBeEnabled();
+  await retry.dispatchEvent('click');
+  await expect(page.locator('#proof-status')).toHaveText(`Picture ${chosen}`);
+  await expectRaster(page, chosen);
+  expect(await drawingState(page)).toEqual(before);
+  expect(await canvas.evaluate((element) => element === document.querySelector('#proof-map canvas'))).toBe(true);
+  await expectRasterBelowDraw(page);
+}
+
+async function drawingState(page: Page) {
+  return {
+    camera: await callProof<number[]>(page, 'getCamera'),
+    draft: await callProof<ReturnType<ProofApi['getDraft']>>(page, 'getDraft'),
+    mode: await callProof<string>(page, 'getMode'),
+    mapInstanceId: await callProof<string>(page, 'mapInstanceId'),
+  };
+}
+
+async function saveAndReopen(page: Page): Promise<void> {
+  const before = await drawingState(page);
+  await page.getByRole('button', { name: 'Save synthetic draft' }).click();
+  await expect(page.locator('#proof-status')).toHaveText('Saved synthetic draft in this tab');
+  await page.getByRole('button', { name: 'Reopen' }).click();
+  await expect(page.locator('#proof-status')).toHaveText('Reopened synthetic draft · picture A');
+  expect(await callProof(page, 'getDraft')).toEqual(before.draft);
+  expect(await callProof<string>(page, 'mapInstanceId')).not.toBe(before.mapInstanceId);
 }
 
 async function getCanvasBox(page: Page) {
@@ -117,7 +183,16 @@ function polygonClicks(box: { x: number; y: number; width: number; height: numbe
 
 async function clickPolygon(page: Page, points: Array<{ x: number; y: number }>): Promise<void> {
   for (const point of points) await page.mouse.click(point.x, point.y);
+  await waitForDrawVertex(page, points[0]);
   await page.mouse.click(points[0].x, points[0].y);
+  await expect.poll(() => callProof<string>(page, 'getMode')).toBe('simple_select');
+}
+
+async function waitForDrawVertex(page: Page, point: { x: number; y: number }): Promise<void> {
+  await page.waitForFunction(({ x, y }) => {
+    const proof = (window as Window & { __proof?: ProofApi }).__proof;
+    return proof?.hasRenderedVertex(x, y);
+  }, point);
 }
 
 async function expectOneFourCornerPolygon(page: Page): Promise<void> {
@@ -145,7 +220,6 @@ async function expectRasterBelowDraw(page: Page): Promise<void> {
 }
 
 async function expectNoExternalRequestsOrErrors(
-  page: Page,
   externalRequests: string[],
   consoleErrors: string[],
 ): Promise<void> {
@@ -153,7 +227,8 @@ async function expectNoExternalRequestsOrErrors(
   expect(consoleErrors, `Browser errors: ${consoleErrors.join(' | ')}`).toEqual([]);
 }
 
-test('draws a polygon using Mapbox Draw on one MapLibre map', async ({ page }) => {
+test('draws a polygon using Mapbox Draw on one MapLibre map', async ({ page, browser }) => {
+  test.info().annotations.push({ type: 'Chrome', description: browser.version() });
   const { externalRequests, consoleErrors } = await openProof(page);
   const mapInstanceId = await callProof<string>(page, 'mapInstanceId');
   await callProof(page, 'startPolygon');
@@ -162,10 +237,24 @@ test('draws a polygon using Mapbox Draw on one MapLibre map', async ({ page }) =
   await expectOneFourCornerPolygon(page);
   await expectRasterBelowDraw(page);
   expect(await callProof<string>(page, 'mapInstanceId')).toBe(mapInstanceId);
-  await expectNoExternalRequestsOrErrors(page, externalRequests, consoleErrors);
+  const save = page.getByRole('button', { name: 'Save synthetic draft' });
+  await save.click();
+  await expect(page.locator('#proof-status')).toHaveText('Saved synthetic draft in this tab');
+  await page.locator('#proof-draw-control .mapbox-gl-draw_trash').click();
+  await expect.poll(async () =>
+    (await callProof<ReturnType<ProofApi['getDraft']>>(page, 'getDraft')).features.length).toBe(0);
+  await page.getByRole('button', { name: 'Reopen' }).click();
+  await expect(page.locator('#proof-status')).toHaveText('Save changes before reopening');
+  expect(await callProof<string>(page, 'mapInstanceId')).toBe(mapInstanceId);
+  await save.click();
+  await expect(page.locator('#proof-status')).toHaveText('Cleared the saved synthetic draft');
+  await page.getByRole('button', { name: 'Reopen' }).click();
+  await expect(page.locator('#proof-status')).toHaveText('Picture A');
+  expect((await callProof<ReturnType<ProofApi['getDraft']>>(page, 'getDraft')).features).toEqual([]);
+  await expectNoExternalRequestsOrErrors(externalRequests, consoleErrors);
 });
 
-test('switching picture mid-draw preserves all corners and draw mode', async ({ page }) => {
+test('manual switch, automatic fallback and Retry preserve the in-progress sketch', async ({ page }) => {
   const { tileRequests, externalRequests, consoleErrors } = await openProof(page);
   const mapInstanceId = await callProof<string>(page, 'mapInstanceId');
   const points = polygonClicks(await getCanvasBox(page));
@@ -173,37 +262,44 @@ test('switching picture mid-draw preserves all corners and draw mode', async ({ 
   await page.mouse.click(points[0].x, points[0].y);
   await page.mouse.click(points[1].x, points[1].y);
   expect(await callProof<string>(page, 'getMode')).toBe('draw_polygon');
+  const beforeSwitch = await drawingState(page);
+  expect(beforeSwitch.draft.features).toHaveLength(1);
 
   await callProof(page, 'switchB');
+  await expectRaster(page, 'B');
+  expect(await drawingState(page)).toEqual(beforeSwitch);
   expect(await callProof<string>(page, 'getMode')).toBe('draw_polygon');
   expect(await callProof<string[]>(page, 'getPictureTiles')).toEqual(
-    expect.arrayContaining([expect.stringContaining('/tiles/B/')]),
+    expect.arrayContaining([expect.stringContaining('/tiles/B.png?')]),
   );
-  await expect.poll(() => tileRequests.some((path) => path.startsWith('/tiles/B/'))).toBe(true);
+  await expect.poll(() => tileRequests.includes('/tiles/B.png')).toBe(true);
   await expectRasterBelowDraw(page);
+  await exerciseOutageAndRetry(page, 'B');
 
   await page.mouse.click(points[2].x, points[2].y);
   await page.mouse.click(points[3].x, points[3].y);
   expect(await callProof<string>(page, 'getMode')).toBe('draw_polygon');
+  await waitForDrawVertex(page, points[0]);
   await page.mouse.click(points[0].x, points[0].y);
 
   await expectOneFourCornerPolygon(page);
   expect(await callProof<string>(page, 'getMode')).toBe('simple_select');
   expect(await callProof<string>(page, 'mapInstanceId')).toBe(mapInstanceId);
   await expectRasterBelowDraw(page);
-  await expectNoExternalRequestsOrErrors(page, externalRequests, consoleErrors);
+  await saveAndReopen(page);
+  await expectNoExternalRequestsOrErrors(externalRequests, consoleErrors);
 });
 
-test('switching picture during a vertex drag keeps the edit in the same map', async ({ page }) => {
+test('manual switch, automatic fallback and Retry preserve an active vertex drag', async ({ page }) => {
   const { tileRequests, externalRequests, consoleErrors } = await openProof(page);
   const mapInstanceId = await callProof<string>(page, 'mapInstanceId');
-  const bRequestCountBeforeSwitch = tileRequests.filter((path) => path.startsWith('/tiles/B/')).length;
+  const bRequestCountBeforeSwitch = tileRequests.filter((path) => path === '/tiles/B.png').length;
   await callProof(page, 'switchB');
   await expect
-    .poll(() => tileRequests.filter((path) => path.startsWith('/tiles/B/')).length)
+    .poll(() => tileRequests.filter((path) => path === '/tiles/B.png').length)
     .toBeGreaterThan(bRequestCountBeforeSwitch);
   expect(await callProof<string[]>(page, 'getPictureTiles')).toEqual(
-    expect.arrayContaining([expect.stringContaining('/tiles/B/')]),
+    expect.arrayContaining([expect.stringContaining('/tiles/B.png?')]),
   );
   await expectRasterBelowDraw(page);
   const points = polygonClicks(await getCanvasBox(page));
@@ -214,20 +310,28 @@ test('switching picture during a vertex drag keeps the edit in the same map', as
   const secondVertex = await callProof<{ x: number; y: number }>(page, 'projectSecondVertex');
   await callProof(page, 'startDirectSelect');
   expect(await callProof<string>(page, 'getMode')).toBe('direct_select');
+  await waitForDrawVertex(page, secondVertex);
 
   const releasePoint = { x: secondVertex.x + 55, y: secondVertex.y + 32 };
+  const beforeDrag = await drawingState(page);
   await page.mouse.move(secondVertex.x, secondVertex.y);
   await page.mouse.down();
   await page.mouse.move(secondVertex.x + 20, secondVertex.y + 12, { steps: 3 });
-  const aToARequestCount = tileRequests.filter((path) => path.startsWith('/tiles/A/')).length;
+  const beforeSwitch = await drawingState(page);
+  expect(beforeSwitch.draft).not.toEqual(beforeDrag.draft);
+  expect(beforeSwitch.camera).toEqual(beforeDrag.camera);
+  const aToARequestCount = tileRequests.filter((path) => path === '/tiles/A.png').length;
   await callProof(page, 'switchA');
+  await expectRaster(page, 'A');
+  expect(await drawingState(page)).toEqual(beforeSwitch);
   await expect
-    .poll(() => tileRequests.filter((path) => path.startsWith('/tiles/A/')).length)
+    .poll(() => tileRequests.filter((path) => path === '/tiles/A.png').length)
     .toBeGreaterThan(aToARequestCount);
   expect(await callProof<string[]>(page, 'getPictureTiles')).toEqual(
-    expect.arrayContaining([expect.stringContaining('/tiles/A/')]),
+    expect.arrayContaining([expect.stringContaining('/tiles/A.png?')]),
   );
   await expectRasterBelowDraw(page);
+  await exerciseOutageAndRetry(page, 'A');
   await page.mouse.move(releasePoint.x, releasePoint.y, { steps: 5 });
   await page.mouse.up();
 
@@ -236,7 +340,9 @@ test('switching picture during a vertex drag keeps the edit in the same map', as
   await expectOneFourCornerPolygon(page);
   expect(await callProof<string>(page, 'getMode')).toBe('direct_select');
   expect(await callProof<string>(page, 'mapInstanceId')).toBe(mapInstanceId);
-  await expectNoExternalRequestsOrErrors(page, externalRequests, consoleErrors);
+  expect(await callProof<number[]>(page, 'getCamera')).toEqual(beforeDrag.camera);
+  await saveAndReopen(page);
+  await expectNoExternalRequestsOrErrors(externalRequests, consoleErrors);
 });
 
 test('trashing a three-corner draft matches the app restart expectation', async ({ page }) => {
@@ -251,5 +357,33 @@ test('trashing a three-corner draft matches the app restart expectation', async 
   expect(await callProof<string>(page, 'getMode')).toBe('simple_select');
   await callProof(page, 'startPolygon');
   expect(await callProof<string>(page, 'getMode')).toBe('draw_polygon');
-  await expectNoExternalRequestsOrErrors(page, externalRequests, consoleErrors);
+  await expectNoExternalRequestsOrErrors(externalRequests, consoleErrors);
+});
+
+test('a stalled outage request falls back without losing the sketch', async ({ page }) => {
+  const { externalRequests, consoleErrors } = await openProof(page);
+  const points = polygonClicks(await getCanvasBox(page));
+  await callProof(page, 'startPolygon');
+  for (const point of points.slice(0, 2)) await page.mouse.click(point.x, point.y);
+  const before = await drawingState(page);
+  let releaseTile!: () => void;
+  const stalled = new Promise<void>((resolve) => { releaseTile = resolve; });
+  await page.route((url) => url.pathname === '/tiles/A-outage.png', async (route) => {
+    await stalled;
+    await route.abort().catch(() => undefined);
+  });
+  const requested = page.waitForRequest((request) => new URL(request.url()).pathname === '/tiles/A-outage.png');
+  try {
+    await page.getByRole('button', { name: 'Fail picture' }).click();
+    await requested;
+    await expect(page.locator('#proof-status')).toHaveText('Picture A unavailable · showing B', { timeout: 15_000 });
+    await expectRaster(page, 'B');
+    expect(await drawingState(page)).toEqual(before);
+    await page.getByRole('button', { name: 'Retry' }).click();
+    await expectRaster(page, 'A');
+    expect(await drawingState(page)).toEqual(before);
+  } finally {
+    releaseTile();
+  }
+  await expectNoExternalRequestsOrErrors(externalRequests, consoleErrors);
 });

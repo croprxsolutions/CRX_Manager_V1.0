@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { renderPlacesDiagnostic } from '../proofs/maps-step0/places-diagnostic.mjs';
 
 const STAGING_HOST = 'staging.croprxsolutions.app';
 const KEY_FORMAT = /^AIza[A-Za-z0-9_-]{35}$/;
@@ -150,8 +151,16 @@ export default function handler(request, response) {
     response.setHeader('Allow', 'GET');
     return response.status(405).end();
   }
+  if (request.query?.drawingOutage !== undefined) {
+    return response.status(request.query.drawingOutage === '1' ? 503 : 400).end();
+  }
 
   const nonce = randomBytes(18).toString('base64');
+  if (request.query?.places !== undefined) {
+    if (request.query.places !== '1') return response.status(400).end();
+    const placesKey = process.env.CRX_STEP0_GOOGLE_PLACES_KEY ?? '';
+    return renderPlacesDiagnostic(response, nonce, KEY_FORMAT.test(placesKey) ? placesKey : null);
+  }
   const tilesKey = process.env.CRX_STEP0_GOOGLE_MAP_TILES_KEY ?? '';
   const staticKey = process.env.CRX_STEP0_GOOGLE_STATIC_MAPS_KEY ?? '';
   const config = JSON.stringify({

@@ -4,10 +4,12 @@ import { test } from 'vitest';
 import { Script } from 'node:vm';
 import { readFileSync } from 'node:fs';
 import handler from '../../api/maps-step0.mjs';
+import { createAppViteConfig, mapsProofWorkboxOptions } from '../../vite.config.ts';
 
 const host = 'staging.croprxsolutions.app';
 const tilesKey = 'AIza' + 'a'.repeat(35);
 const staticKey = 'AIza' + 'b'.repeat(35);
+const placesKey = 'AIza' + 'c'.repeat(35);
 
 function run(request, settings = {}) {
   const original = {};
@@ -16,6 +18,7 @@ function run(request, settings = {}) {
     VERCEL_GIT_COMMIT_REF: 'staging',
     CRX_STEP0_GOOGLE_MAP_TILES_KEY: tilesKey,
     CRX_STEP0_GOOGLE_STATIC_MAPS_KEY: staticKey,
+    CRX_STEP0_GOOGLE_PLACES_KEY: placesKey,
     ...settings,
   };
   for (const [name, value] of Object.entries(environment)) {
@@ -55,6 +58,92 @@ test('exposes no probe or credentials on an off-host, off-branch or non-staging 
   }
 });
 
+function runPlacesScript(page, fetchResponse) {
+  const script = page.body.match(/<script nonce="([^"]+)">([\s\S]+)<\/script>/);
+  assert.ok(script);
+  assert.ok(page.headers['Content-Security-Policy'].includes("'nonce-" + script[1] + "'"));
+  const output = { textContent: '' };
+  const calls = [];
+  let click;
+  const button = { disabled: false, addEventListener(_, callback) { click = callback; } };
+  new Script(script[2]).runInNewContext({
+    document: { querySelector(selector) { return selector === '#places' ? button : output; } },
+    crypto: { randomUUID: () => placesSessionToken },
+    AbortSignal,
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      return fetchResponse(calls.length);
+    },
+  });
+  return { click, calls, output };
+}
+
+const placesSessionToken = 'a4ea93d1-6250-4bf9-9e58-463b3656a2da';
+const placeId = 'TestPublicPlace123';
+const placesPrediction = { suggestions: [{ placePrediction: { placeId } }] };
+
+test('Places check uses its own policy and makes one autocomplete and one details request', async () => {
+  const query = { places: '1' };
+  const staged = run({ query });
+  assert.equal(staged.status, 200);
+  assert.match(staged.headers['Content-Security-Policy'], /connect-src https:\/\/places\.googleapis\.com;/);
+  assert.ok(staged.body.includes('<a href="/">Back to CRX</a>'));
+  assert.equal(staged.headers['Cache-Control'], 'private, no-store');
+  assert.equal(staged.body.includes(tilesKey) || staged.body.includes(staticKey), false);
+  assert.equal(run({ query }, { VERCEL_TARGET_ENV: 'preview' }).status, 404);
+  assert.equal(run({ query, headers: { host: 'croprxsolutions.app' } }).status, 404);
+  assert.equal(run({ query: { places: ['1', '1'] } }).status, 400);
+  assert.equal(run({}).body.includes(placesKey), false);
+
+  const { click, calls, output } = runPlacesScript(staged, (count) => {
+    const payload = count === 1 ? placesPrediction : { id: placeId, location: { latitude: 41, longitude: -93 } };
+    return { ok: true, status: 200, json: async () => payload };
+  });
+  await Promise.all([click(), click()]);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].options.method, 'POST');
+  assert.equal(JSON.parse(calls[0].options.body).sessionToken, placesSessionToken);
+  assert.match(calls[1].url, new RegExp('sessionToken=' + placesSessionToken + '$'));
+  assert.equal(calls[1].options.headers['X-Goog-FieldMask'], 'id,location');
+  for (const { url, options } of calls) {
+    assert.equal(options.headers['X-Goog-Api-Key'], placesKey);
+    assert.equal(url.includes(placesKey), false);
+  }
+  assert.equal(JSON.parse(output.textContent).state, 'passed');
+  for (const value of [placesKey, placesSessionToken, placeId]) assert.equal(output.textContent.includes(value), false);
+});
+
+test.each([
+  [1, 'autocomplete rejected'],
+  [2, 'place details rejected'],
+])('Places rejection at request %i reports only safe diagnostics', async (rejectedAt, state) => {
+  const providerMessage = [placesKey, placesSessionToken, placeId].join(' ');
+  const { click, calls, output } = runPlacesScript(run({ query: { places: '1' } }), (count) => {
+    if (count !== rejectedAt) return { ok: true, status: 200, json: async () => placesPrediction };
+    return {
+      ok: false,
+      status: 403,
+      json: async () => ({
+        error: {
+          message: providerMessage,
+          status: 'PERMISSION_DENIED',
+          details: [{ reason: 'API_KEY_HTTP_REFERRER_BLOCKED' }, { reason: providerMessage }],
+        },
+      }),
+    };
+  });
+  await click();
+  assert.equal(calls.length, rejectedAt);
+  assert.deepEqual(JSON.parse(output.textContent), {
+    autocompleteRequests: 1,
+    detailRequests: rejectedAt - 1,
+    autocompleteStatus: rejectedAt === 1 ? 403 : 200,
+    ...(rejectedAt === 2 ? { detailStatus: 403 } : {}),
+    reasons: ['PERMISSION_DENIED', 'API_KEY_HTTP_REFERRER_BLOCKED'],
+    state,
+  });
+});
+
 test('ties the staging-only policy to the diagnostic page nonce and limits the method', () => {
   const methodRejected = run({ method: 'POST' });
   assert.equal(methodRejected.status, 405);
@@ -81,17 +170,57 @@ test('excludes malformed configuration from the browser document', () => {
   assert.ok(result.body.includes('"tilesKey":null'));
 });
 
-test('reserves only the probe route from the standard app rewrite and headers', () => {
+test('returns the drawing outage fixture only on the verified staging route', () => {
+  const query = { drawingOutage: '1' };
+  assert.equal(run({ query }).status, 503);
+  assert.equal(run({ query }).body, '');
+  assert.equal(run({ query }).headers['Cache-Control'], 'private, no-store');
+  assert.equal(run({ query, method: 'POST' }).status, 405);
+  assert.equal(run({ query }, { VERCEL_TARGET_ENV: 'preview' }).status, 404);
+  assert.equal(run({ query, headers: { host: 'croprxsolutions.app' } }).status, 404);
+  assert.equal(run({ query: { drawingOutage: ['1', '1'] } }).status, 400);
+  assert.equal(run({ query: { drawingOutage: ['1', '1'] } }).body, '');
+});
+
+test.each([
+  ['staging', 'staging', true],
+  ['staging', 'codex/test', false],
+  ['preview', 'staging', false],
+  ['production', 'main', false],
+  ['', '', false],
+])('adds the drawing bundle only to staging builds of staging (%s, %s)', (target, branch, expected) => {
+  const environment = { VERCEL_TARGET_ENV: target, VERCEL_GIT_COMMIT_REF: branch };
+  const config = createAppViteConfig(environment);
+  assert.equal(config.plugins.some((plugin) => plugin?.name === 'staging-maps-drawing-proof'), expected);
+  const workbox = mapsProofWorkboxOptions(environment);
+  assert.equal(workbox.globIgnores.includes('api/maps-step0-draw/**'), expected);
+  const managesNavigation = workbox.runtimeCaching.find((rule) => rule.options?.cacheName === 'crx-pages').urlPattern;
+  const request = { mode: 'navigate' };
+  assert.equal(managesNavigation({ request, url: new URL('https://' + host + '/fields') }), true);
+  assert.equal(managesNavigation({ request, url: new URL('https://' + host + '/api/maps-step0/other') }), true);
+  for (const path of ['/api/maps-step0?places=1', '/api/maps-step0/', '/api/maps-step0-draw/index.html']) {
+    assert.equal(managesNavigation({ request, url: new URL('https://' + host + path) }), !expected);
+  }
+});
+
+test('reserves both proof routes from the normal app rewrite and policy', () => {
   const config = JSON.parse(readFileSync(new URL('../../vercel.json', import.meta.url), 'utf8'));
-  for (const rule of [config.rewrites[0], config.headers[0]]) {
+  const appHeaders = config.headers.find((entry) => entry.source === config.rewrites[0].source);
+  assert.ok(appHeaders);
+  for (const rule of [config.rewrites[0], appHeaders]) {
     const source = new RegExp('^' + rule.source + '$');
-    for (const path of ['/', '/fields', '/maps-step0', '/api/maps-step01', '/api/maps-step0/other']) {
+    for (const path of ['/', '/fields', '/maps-step0', '/api/maps-step01', '/api/maps-step0/other', '/api/maps-step0-drawing']) {
       assert.ok(source.test(path), path);
     }
-    for (const path of ['/api/maps-step0', '/api/maps-step0/']) {
+    for (const path of ['/api/maps-step0', '/api/maps-step0/', '/api/maps-step0-draw', '/api/maps-step0-draw/index.html', '/api/maps-step0-draw/assets/worker.js']) {
       assert.ok(!source.test(path), path);
     }
   }
+  const drawingHeaders = config.headers.find((entry) => entry.source === '/api/maps-step0-draw/:path*')?.headers;
+  assert.ok(drawingHeaders);
+  assert.equal(drawingHeaders.find((entry) => entry.key === 'Cache-Control')?.value, 'private, no-store');
+  assert.match(drawingHeaders.find((entry) => entry.key === 'Content-Security-Policy')?.value ?? '',
+    /worker-src 'self';.*connect-src 'self' https:\/\/basemap\.nationalmap\.gov https:\/\/api\.mapbox\.com;/);
 });
 
 function startBrowserProbe(fetch, Image) {

@@ -29,6 +29,8 @@ interface PaperTicketProof {
   onTakePhoto: () => void;
   takePhotoDisabled: boolean;
   uploading: boolean;
+  /** Shown instead of the take-a-photo hint when a saved photo no longer counts (for example the load changed). */
+  staleMessage?: string;
 }
 
 interface CompletionProofFieldsProps {
@@ -97,7 +99,7 @@ function PaperTicketPanel({ idPrefix, proof }: { idPrefix: string; proof: PaperT
           <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" /> Photo of the signed ticket saved
         </p>
       ) : (
-        <p className="text-sm text-amber-800">Take a photo of the signed paper ticket. It replaces the on-screen signature.</p>
+        <p className="text-sm text-amber-800">{proof.staleMessage ?? 'Take a photo of the signed paper ticket. It replaces the on-screen signature.'}</p>
       )}
       <div>
         <label htmlFor={`${idPrefix}-paper-delivered-on`} className="mb-1 block text-sm font-semibold text-nav-dark">Delivered on (date on the ticket)</label>

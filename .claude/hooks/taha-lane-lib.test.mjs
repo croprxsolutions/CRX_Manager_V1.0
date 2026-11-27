@@ -360,10 +360,24 @@ eq(tahaOverrideCommand("taha override #2242 123456 unavailable: sick and more"
   const c = issueTahaLaneCode({ dirs, pullRequest: 2250, headSha: A, kind: "apply", now: NOW, newCode: () => "515151" });
   const r = recordTahaLaneOverride({ dirs, pullRequest: 2250, code: c, tahaUnavailable: "  away all week  ", now: NOW + 60e3 });
   ok(r.ok && r.payload.tahaUnavailable === "away all week", "the unavailable reason is recorded");
-  ok(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: A, now: NOW + 3600e3 }), "an unavailable override is found for the live apply");
-  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 3600e3 }), null, "a live apply at a later push is not covered");
-  ok(findTahaLaneOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 3600e3 }), "but it works as a plain override for staging merges at any head");
-  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: A, now: NOW + 60e3 + 24 * 3600e3 }), null, "it ends after 24 hours too");
+  eq(Date.parse(r.payload.expiresAt) - Date.parse(r.payload.issuedAt), 30 * 60e3, "a live-apply override is written for 30 minutes (Taha, PR 3)");
+  ok(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: A, now: NOW + 60e3 + 29 * 60e3 }), "an unavailable override is found for the live apply inside 30 minutes");
+  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: A, now: NOW + 60e3 + 31 * 60e3 }), null, "it no longer counts after 30 minutes");
+  eq(findTahaUnavailableOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 20 * 60e3 }), null, "a live apply at a later push is not covered");
+  ok(findTahaLaneOverride({ dirs, pullRequest: 2250, headSha: B, now: NOW + 20 * 60e3 }), "but it works as a plain override for staging merges at any head while it lasts");
+}
+{
+  // An older file written with a 24-hour life still counts for only 30 minutes on a live apply.
+  const dir = tempDir("taha-lane-old-");
+  writeFileSync(path.join(dir, "taha-lane-override-pr2251.json"), JSON.stringify({ pullRequest: 2251, headSha: A, code: "525252", kind: "apply", tahaUnavailable: "away",
+    issuedAt: new Date(NOW).toISOString(), expiresAt: new Date(NOW + 24 * 3600e3).toISOString() }));
+  eq(findTahaUnavailableOverride({ dirs: [dir], pullRequest: 2251, headSha: A, now: NOW + 3600e3 }), null, "a 24-hour apply override file does not count for a live apply");
+}
+{
+  const c = issueTahaLaneCode({ dirs, pullRequest: 2254, headSha: A, now: NOW, newCode: () => "535353" });
+  const r = recordTahaLaneOverride({ dirs, pullRequest: 2254, code: c, now: NOW });
+  eq(Date.parse(r.payload.expiresAt) - Date.parse(r.payload.issuedAt), 24 * 3600e3, "a staging-merge override still lasts 24 hours");
+  ok(findTahaLaneOverride({ dirs, pullRequest: 2254, headSha: B, now: NOW + 23 * 3600e3 }), "and is found 23 hours later");
 }
 
 // ── the gate the merge guards call ──────────────────────────────────────────

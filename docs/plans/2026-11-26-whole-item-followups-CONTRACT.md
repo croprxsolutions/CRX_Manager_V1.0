@@ -145,6 +145,13 @@ bodies. Returns are next to Taha's return-credit work (#2537 changes credits, no
   has PO lines, receipts, returns, order or delivery lines, stock movements or an active hold (`PRODUCT_UNIT_HAS_HISTORY`,
   20270201130000), so the case cannot arise for the figures this change covers.
 
+## Luna round 2 (gpt-6-luna xhigh, head 8820775d8, 2026-11-26): no BLOCKER or HIGH, 2 MED refuted
+- 1 (count 3.99999 rounded to 4): refuted; repeat of round 1 finding 1 (existing 4-place rule, what is stored is whole).
+- 2 (split-return exemption skips the check, so a direct write could exceed a share or hold NaN): refuted; app roles
+  cannot write `return_items` directly (20260715203911), and `create_return` caps each payer at their share
+  (RETURN_QUANTITY_EXCEEDS_BILLED_SHARE) and refuses NaN as over-delivered (NaN sorts above every number). The
+  whole-item rule never owned share caps; owner-level writes bypass every trigger alike.
+
 ## Business decisions settled on this PR
 - **Split-payer returns of a whole item.** Mason chose to allow fractions (D5): a sale split between payers is
   returned in shares. The trigger and postflight skip return lines whose sale is split by `create_return`'s own test;

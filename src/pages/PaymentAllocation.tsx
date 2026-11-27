@@ -228,8 +228,9 @@ export default function PaymentAllocation() {
 
   /* ── Load invoices when customer selected ──────────────────────────── */
 
-  // keepAllocations: a reload of the same customer keeps the amounts typed on invoices still open.
-  const fetchInvoices = useCallback(async (customerId: string, keepAllocations?: Map<string, number>) => {
+  // keepAllocations: a reload of the same customer keeps the amounts on screen when it lands (edits made
+  // while it loaded included) for invoices still open.
+  const fetchInvoices = useCallback(async (customerId: string, keepAllocations = false) => {
     const seq = ++invoiceLoadSeq.current;
     setLoadingInvoices(true);
     // The previous customer's invoices must never stay on screen to be paid against.
@@ -271,10 +272,17 @@ export default function PaymentAllocation() {
       total_amount_cents: inv.total_amount_cents,
       balance_cents: inv.balance_cents,
       days_aged: daysBetween(inv.invoice_date, today),
-      allocated_cents: keepAllocations?.get(inv.id) ?? 0,
+      allocated_cents: 0,
     }));
 
-    setInvoices(mapped);
+    if (keepAllocations) {
+      setInvoices((prev) => {
+        const kept = new Map(prev.map((inv) => [inv.invoice_id, inv.allocated_cents]));
+        return mapped.map((inv) => ({ ...inv, allocated_cents: kept.get(inv.invoice_id) ?? 0 }));
+      });
+    } else {
+      setInvoices(mapped);
+    }
     setLoadingInvoices(false);
   }, [toast]);
 
@@ -283,7 +291,7 @@ export default function PaymentAllocation() {
     // Re-picking the farm already chosen reloads its invoices (one may have been posted since) and keeps
     // the typed check and the amounts on invoices still open. A saved check still starts fresh.
     if (selectedCustomer?.id === c.id && !lastResult) {
-      fetchInvoices(c.id, new Map(invoices.map((inv) => [inv.invoice_id, inv.allocated_cents])));
+      fetchInvoices(c.id, true);
       return;
     }
     focusAmountAfterPick.current = true;
@@ -302,7 +310,7 @@ export default function PaymentAllocation() {
     setLastResult(null);
     setRetryRefused(false);
     fetchInvoices(c.id);
-  }, [fetchInvoices, selectedCustomer, invoices, lastResult, startingPaymentDate]);
+  }, [fetchInvoices, selectedCustomer, lastResult, startingPaymentDate]);
 
   const clearCustomer = useCallback(() => {
     // A load still running for the cleared customer must not refill the list.

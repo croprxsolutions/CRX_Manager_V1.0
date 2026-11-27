@@ -507,6 +507,34 @@ describe('Record Payments: faster entry', () => {
     expect(screen.getByText('INV-POSTED')).toBeInTheDocument();
   });
 
+  it('an allocation change made while the re-pick reload runs is kept when the reload lands', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+    const allocated = () => screen.getByText('Allocated:').parentElement!;
+    expect(allocated()).toHaveTextContent('$80.00');
+    let release!: () => void;
+    const held = new Promise<{ data: unknown; error: unknown; count: number }>((resolve) => {
+      release = () => resolve({ data: openInvoices, error: null, count: openInvoices.length });
+    });
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'invoices') return buildChain(table === 'customers' ? { data: [customer], error: null } : { data: [], error: null });
+      const chain = buildChain({ data: null, error: null });
+      chain.then = held.then.bind(held);
+      return chain;
+    });
+
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(box, { target: { value: 'Big' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(allocated()).toHaveTextContent('$0.00');
+    release();
+    await waitFor(() => expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled());
+    expect(allocated()).toHaveTextContent('$0.00');
+  });
+
   it('Pay full balance is admin-only: a sales rep sees only their own invoices, so the total could be short', async () => {
     mockAuth.role = 'sales_rep';
     try {

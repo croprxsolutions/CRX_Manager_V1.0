@@ -203,6 +203,15 @@ interface LocalItem {
   // neither, and a cleared field keeps its acres even when they equal the field's: the source
   // cannot be told apart, and guessing could delete typed acres.
   acres_source?: 'field' | 'typed';
+  // A new line's acres this page copied from the line above or the section's field, so the rep
+  // need not retype them (Mason, 2026-11-24). A one-time copy, so the hint says "Copied". Shown as a hint by the Acres box until the rep types
+  // there; not saved. A prefilled line with nothing else in it still counts as untouched.
+  // 'field_changed': the section's field changed or was cleared after these acres were set. Acres
+  // are never rewritten then, only flagged for the rep to check (Mason, 2026-11-27, #2713).
+  acres_prefill?: 'line_above' | 'field' | 'field_changed';
+  // The rep confirmed these flagged acres when saving: no longer highlighted. A later field change
+  // or product change flags them again (Mason, 2026-11-27, #2713).
+  acres_confirmed?: boolean;
   total_units_needed: number | null;
   unit_size: string | null;
   profit: number;
@@ -258,6 +267,45 @@ const UNIT_SELECT = 'w-auto! shrink-0 max-w-[60%] border-l border-gray-200 bg-cr
 // ProductOptionDetails shows, without their labels. Missing ones are left out.
 function productMetaLine(p: ProductOptionPresentationModel): string {
   return [p.sku, p.product_family?.name, productPackageText(p)].filter(Boolean).join(' · ');
+}
+
+/** A line's Acres box. Auto-filled acres stay highlighted, saying where they came from, until the
+ *  rep types there or confirms them when saving (Mason, #2445). */
+function LineAcres({ item, onAcres }: { item: LocalItem; onAcres: (acres: number | null) => void }) {
+  const hintId = `line-acres-hint-${item._key}`;
+  const unchecked = !!item.acres_prefill && !item.acres_confirmed;
+  return (
+    <>
+      <input
+        type="number"
+        value={item.acres ?? ''}
+        onChange={(e) => onAcres(e.target.value ? parseFloat(e.target.value) : null)}
+        aria-label="Acres"
+        aria-describedby={unchecked ? hintId : undefined}
+        className={`${LINE_INPUT} ${unchecked ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`}
+        step="any"
+        min={0}
+      />
+      {unchecked && (
+        <p id={hintId} className="mt-1 text-xs text-amber-800">
+          {item.acres_prefill === 'line_above' ? 'Copied from line above'
+            : item.acres_prefill === 'field_changed' ? 'Field changed' : 'Filled from field'}: check
+        </p>
+      )}
+    </>
+  );
+}
+
+/** Lines whose acres were filled in automatically and not yet checked by the rep. */
+function unconfirmedAcresCount(sections: LocalSection[]): number {
+  return uncheckedAcres(sections).size;
+}
+
+/** Each unchecked auto-filled line's key, with the acres the rep is asked about. */
+function uncheckedAcres(sections: LocalSection[]): Map<string, number | null> {
+  return new Map(sections.flatMap((sec) => sec.items)
+    .filter((i) => i.acres_prefill && !i.acres_confirmed && i.product_id && i.acres != null)
+    .map((i) => [i._key, i.acres]));
 }
 
 // The quote's totals: line sums, then rounded to the cent. The page's one totals rule.
@@ -342,7 +390,7 @@ function hasUserEnteredItemValues(item: LocalItem): boolean {
     || item.price_override !== null
     || item.actual_rate !== null
     || item.rate_unit !== null
-    || item.acres !== null
+    || (item.acres !== null && (!item.acres_prefill || item.acres_prefill === 'field_changed'))
     || item.total_units_needed !== null
     || item.unit_size !== null
     || item.price_unit !== null
@@ -767,6 +815,11 @@ export default function QuoteBuilder() {
   // decline/cancel set a terminal status (triggers release holds); un-accept/
   // reopen routes through the hardened admin-only revert_quote_status RPC.
   const [confirmDeclineOpen, setConfirmDeclineOpen] = useState(false);
+  // The open "check auto-filled acres" question and its answer's resolver (Mason, #2445).
+  const [acresCheck, setAcresCheck] = useState<{ count: number; answer: (ok: boolean) => void } | null>(null);
+  const acresCheckRef = useLatestRef(acresCheck);
+  // Moving to another quote cancels an open check, so its answer can never save the quote left behind (Sol, #2445).
+  useEffect(() => () => acresCheckRef.current?.answer(false), [id, acresCheckRef]);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const [statusActionLoading, setStatusActionLoading] = useState(false);
   // Close a booking we fulfilled by APPLYING product (job applications), as
@@ -1816,8 +1869,7 @@ export default function QuoteBuilder() {
     recalcAllForTier(cust.assigned_tier);
     // A section's field must belong to the quote's customer: clear any that does not. A saved
     // field still loading by id is kept; the unresolved-field check blocks saving until it loads.
-    // A field-filled acre count is dropped with the field; acres typed by hand are kept, so the
-    // user is told to check them (Luna, #1017).
+    // Every line keeps its acres and is flagged for the rep to check (Mason, 2026-11-27, #2713).
     const clearedSections = sections.filter((sec) => sec.field_id && fields[sec.field_id] && fields[sec.field_id].customer_id !== cust.id);
     if (clearedSections.length > 0) {
       setSections((prev) => prev.map((sec) => (
@@ -1874,28 +1926,18 @@ export default function QuoteBuilder() {
     [products, getTierPrice, unitConversions, lineBasisFor]
   );
 
-  // Clearing a section's field drops the acres that field filled in this session, and keeps acres
-  // typed by hand. A line loaded from the database has no recorded source, so its acres are kept
-  // even when they equal the field's: guessing could overwrite typed acres and bill them (Sol,
-  // #1049). The callers warn the user to check those lines' acres.
-  // The line keeps its unit price (a customer change has already re-priced every line for the new
-  // tier), and nothing is converted: a rate line with no acres needs nothing (rate × no acres), and
-  // a units line's totals do not use acres, only its per-acre figures do. So this needs neither the
-  // product nor the unit conversions, which may still be loading.
-  const clearSectionField = (sec: LocalSection): LocalSection => {
-    const filledByField = (item: LocalItem) => item.acres != null && item.acres_source === 'field';
-    return {
-      ...sec,
-      field_id: null,
-      items: sec.items.map((item) => {
-        if (!filledByField(item)) return item;
-        const cleared: LocalItem = { ...item, acres: null, acres_source: undefined };
-        return item.calc_mode === 'units_direct'
-          ? { ...cleared, oz_per_acre: null, price_per_acre: null }
-          : { ...cleared, total_units_needed: 0, total_price: 0, profit: 0, net_margin: 0 };
-      }),
-    };
-  };
+  // Clearing a section's field never changes a line's acres, quantity or price: every line with
+  // acres is flagged instead, so the rep checks it before the next save or PDF (Mason, 2026-11-27,
+  // #2713: "flag, don't rewrite"). Dropping acres had let a cleared field export a $0 line, and a
+  // saved line's acres have no known source to drop by (Sol, #2713). Nothing is repriced, so this
+  // needs neither the product nor the unit conversions, which may still be loading.
+  const clearSectionField = (sec: LocalSection): LocalSection => ({
+    ...sec,
+    field_id: null,
+    items: sec.items.map((item) => ((item.acres ?? 0) > 0
+      ? { ...item, acres_prefill: item.acres_prefill ?? 'field_changed', acres_confirmed: undefined }
+      : item)),
+  });
   const clearSectionFieldRef = useLatestRef(clearSectionField);
   // The saved field ids whose by-id read has finished (loaded, missing or failed). Until it has, the
   // acres a field filled in cannot be told apart, so the section's field cannot be cleared or
@@ -2134,6 +2176,8 @@ export default function QuoteBuilder() {
             if (item._key !== itemKey) return item;
             const updated: LocalItem = {
               ...item,
+              // A new product's acres are checked again: the old product's check does not carry over (Sol, #2713).
+              acres_confirmed: undefined,
               product_id: product.id,
               product,
               notes: preferredQuoteNotes(product),
@@ -2228,9 +2272,12 @@ export default function QuoteBuilder() {
     setSections((prev) =>
       prev.map((section) => {
         if (section._key !== sectionKey) return section;
-        // Clearing or replacing the field first drops the acres the old field filled in, as a
-        // customer change does; typed acres stay (Codex, #1049).
-        const cleared = section.field_id ? clearSectionField(section) : section;
+        // Picking the same field again changes nothing (Sol, #2713).
+        if ((field?.id ?? null) === (section.field_id ?? null)) return section;
+        // A new, replaced or cleared field never changes acres already on a line; those lines are
+        // flagged for the rep to check, and only lines with no acres take the new field's (Mason,
+        // 2026-11-27, #2713).
+        const cleared = clearSectionField(section);
         const withField = { ...cleared, field_id: field?.id ?? null };
         if (effectiveAcres == null) return withField;
         return {
@@ -2241,6 +2288,9 @@ export default function QuoteBuilder() {
               ...item,
               acres: effectiveAcres,
               acres_source: 'field',
+              // Filled without the rep typing, so it is checked before saving like a new line's (Sol, #2445).
+              acres_prefill: 'field',
+              acres_confirmed: undefined,
               calc_mode: item.calc_mode === 'units_direct' ? 'units_direct' : 'rate_acres',
             }, tier);
           }),
@@ -2264,10 +2314,32 @@ export default function QuoteBuilder() {
       prev.map((sec) => {
         if (sec._key !== sectionKey) return sec;
         newItem.sort_order = sec.items.length + 1;
-        return { ...sec, items: [...sec.items, newItem] };
+        return { ...sec, items: [...sec.items, { ...newItem, ...prefilledAcres(sec) }] };
       })
     );
     return newItem._key;
+  }
+
+  // A new line starts with the acres of the line above it in its section, or else its section's
+  // field's acres, so the rep need not retype them; the box stays editable. Only a new line is
+  // filled: existing lines and anything typed are never changed here.
+  function prefilledAcres(sec: LocalSection): Pick<LocalItem, 'acres' | 'acres_source' | 'acres_prefill'> | null {
+    const above = sec.items[sec.items.length - 1];
+    const field = sec.field_id ? fields[sec.field_id] : undefined;
+    const fieldAcres = field ? billableAcres(field.override_acres, field.measured_acres, field.total_acres) : null;
+    const fromField = { acres: fieldAcres, acres_source: 'field', acres_prefill: 'field' } as const;
+    if (above?.acres != null && above.acres > 0) {
+      // A saved line's acres have no known source: they may predate a field change (Taha, #2445) or
+      // be a partial-field treatment (Sol, #2445), so neither they nor the field's are guessed and
+      // the new line starts empty, as before.
+      if (above.acres_source === undefined) return null;
+      // A copy keeps the source of the acres it copied.
+      return { acres: above.acres, acres_source: above.acres_source, acres_prefill: 'line_above' };
+    }
+    // Acres typed as 0 on the line above mean "none here": the new line starts empty (Luna, #2445).
+    if (above?.acres != null) return null;
+    if (fieldAcres != null && fieldAcres > 0) return fromField;
+    return null;
   }
 
   const removeItem = (sectionKey: string, itemKey: string) => {
@@ -2374,6 +2446,24 @@ export default function QuoteBuilder() {
     })));
   };
 
+  // Auto-filled acres set the quantity, the price and a job's treated acres, so the rep checks
+  // them once before a save or a PDF (Mason, #2445: auto-fill, then confirm).
+  const confirmAutoAcres = async (): Promise<boolean> => {
+    const count = unconfirmedAcresCount(sections);
+    if (count === 0) return true;
+    if (acresCheckRef.current) return false; // one question at a time; a second action waits for a new click (Luna, #2445)
+    const ok = await new Promise<boolean>((answer) => setAcresCheck({ count, answer }));
+    setAcresCheck(null);
+    return ok;
+  };
+  // A successful save marks the acres the rep checked, and only those (same line, same acres), as
+  // checked: the highlight goes. A line added or changed meanwhile is still asked about (Luna, #2713).
+  const acceptAutoAcres = (checked: Map<string, number | null>) => setSections((prev) => prev.map((sec) => ({
+    ...sec,
+    items: sec.items.map((i) => (i.acres_prefill && checked.has(i._key) && checked.get(i._key) === i.acres
+      ? { ...i, acres_confirmed: true } : i)),
+  })));
+
   const saveQuote = async (newStatus?: QuoteStatus): Promise<string | null> => {
     // Fail closed when the loaded quote is not the quote the URL names. The
     // skeleton normally hides the form for the whole transition, but a load that
@@ -2422,6 +2512,8 @@ export default function QuoteBuilder() {
       return null;
     }
     if (!profile) return null;
+    const checkedAcres = uncheckedAcres(sections);
+    if (!(await confirmAutoAcres())) return null;
 
     // Validation: warn about empty sections
     const emptySections = sections.filter((sec) => sec.items.length === 0 || sec.items.every((i) => !i.product_id));
@@ -2882,6 +2974,7 @@ export default function QuoteBuilder() {
         // Only Save Draft creates, and it opens the saved quote, which loads the stored prices.
         if (!quoteIdAtSend) {
           toast('warning', `The quote was saved, but ${repricedCount} priced at today's catalog price, which changed since this page loaded. Check the saved prices before sending it.`);
+          acceptAutoAcres(checkedAcres);
           return savedQuoteId;
         }
         quoteVersionRecoveryRequiredRef.current = true;
@@ -2893,6 +2986,8 @@ export default function QuoteBuilder() {
       if (isAdmin && savedLineIdsRef.current.size > 0) {
         await refreshSavedLineCosts(editingSessionChanged);
       }
+      // A rep who moved to another quote meanwhile never checked that quote's acres (Codex, #2713).
+      if (!editingSessionChanged()) acceptAutoAcres(checkedAcres);
       return savedQuoteId;
     } catch (err: unknown) {
       if (isBelowCostApprovalHandledError(err)) return null;
@@ -3078,6 +3173,15 @@ export default function QuoteBuilder() {
 
   // === GAP FIX #1: Download Quote as PDF ===
   const handleDownloadPdf = async () => {
+    // A rate line with no acres prices at $0; Save refuses it, so the PDF does too (Sol, #2713).
+    const noAcres = sections.flatMap((sec) => sec.items).find((i) => i.product_id
+      && i.calc_mode !== 'units_direct' && (i.actual_rate ?? 0) > 0 && !((i.acres ?? 0) > 0));
+    if (noAcres) {
+      const prod = noAcres.product || products.find((p) => p.id === noAcres.product_id);
+      toast('error', `"${prod?.product_name || 'An item'}" has a rate but no acres. Add its acres before downloading the PDF.`);
+      return;
+    }
+    if (!(await confirmAutoAcres())) return;
     await runCriticalAction({
       action: async () => {
         await downloadQuotePdf(buildQuotePdfData(), customColumns || getTemplateColumns(selectedTemplateId));
@@ -5370,24 +5474,19 @@ export default function QuoteBuilder() {
             </>
           );
           const acres = (
-            <input
-              type="number"
-              value={item.acres ?? ''}
-              onChange={(e) =>
+            <LineAcres
+              item={item}
+              onAcres={(value) =>
                 updateItem(sec._key, item._key, {
-                  acres: e.target.value
-                    ? parseFloat(e.target.value)
-                    : null,
+                  acres: value,
                   acres_source: 'typed',
+                  acres_prefill: undefined,
+                  acres_confirmed: undefined,
                   calc_mode: item.calc_mode === 'units_direct'
                     ? 'units_direct' // keep units_direct if typing acres alongside units
                     : 'rate_acres',
                 })
               }
-              aria-label="Acres"
-              className={`${LINE_INPUT} border-gray-300`}
-              step="any"
-              min={0}
             />
           );
           const quantity = (
@@ -6560,6 +6659,18 @@ export default function QuoteBuilder() {
         variant="info"
         icon={ShoppingCart}
         loading={bookingAsOrder || converting}
+      />
+
+      <ConfirmModal
+        open={acresCheck !== null}
+        onClose={() => acresCheck?.answer(false)}
+        onConfirm={() => acresCheck?.answer(true)}
+        title="Check the auto-filled acres"
+        message={`${acresCheck?.count === 1 ? '1 line has' : `${acresCheck?.count ?? 0} lines have`} acres filled in automatically (highlighted in yellow). They can set the quantity, the price and the treated acres. Are they right?`}
+        confirmLabel="Yes, they're right"
+        cancelLabel="Let me check"
+        variant="warning"
+        icon={AlertTriangle}
       />
 
       <ConfirmModal

@@ -182,15 +182,18 @@ describe('Sales follow-ups', () => {
     expect(screen.queryByRole('dialog', { name: 'Schedule callback' })).not.toBeInTheDocument();
   });
 
-  it('refreshes both lists when closing after an unconfirmed callback save', async () => {
+  it.each(['cancel', 'retry'])('refreshes both lists after a lost save response and %s', async (action) => {
     let saved = false;
     const task = callback('saved-task', 'Saved callback', '2026-11-27', 'quote');
     const insert = vi.fn().mockImplementation(async () => {
+      if (saved) return { error: { code: '23505' } };
       saved = true;
       return { error: new Error('Lost save response') };
     });
+    const prior = { eq: vi.fn(), maybeSingle: vi.fn().mockResolvedValue({ data: task, error: null }) };
+    prior.eq.mockReturnValue(prior);
     db.from.mockImplementation((table) => {
-      if (table === 'team_notes') return { insert, select: () => read(saved ? [task] : []) };
+      if (table === 'team_notes') return { insert, select: (columns: string) => columns.includes('content') ? prior : read(saved ? [task] : []) };
       if (table === 'quotes') return read([{ id: 'quote-1', quote_number: 'Q-1', customer: { farm_name: 'Oak Farm' } }]);
       return read(names);
     });
@@ -201,10 +204,20 @@ describe('Sales follow-ups', () => {
     await waitFor(() => expect(save).toBeEnabled());
     fireEvent.click(save);
     await waitFor(() => expect(db.toast).toHaveBeenCalledWith('error', 'Lost save response'));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    if (action === 'retry') {
+      fireEvent.change(within(dialog).getByLabelText('Title'), { target: { value: 'Edited callback' } });
+      db.rpc.mockResolvedValueOnce({ data: null, error: new Error('Lost quote response') });
+      fireEvent.click(save);
+      const retry = await screen.findByRole('button', { name: 'Try again' });
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      fireEvent.click(retry);
+    } else {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    }
     expect(await screen.findByRole('link', { name: 'Saved callback' })).toHaveAttribute('href', '/team-board?note=saved-task');
     expect(await screen.findByRole('link', { name: 'Open callback for quote Q-1' })).toHaveAttribute('href', '/team-board?note=saved-task');
-    expect(insert).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(insert).toHaveBeenCalledTimes(action === 'retry' ? 2 : 1);
   });
 
   it('waits for a prefilled assignee, refuses an inactive selection, and saves an exact quote todo', async () => {
@@ -256,11 +269,7 @@ describe('Sales follow-ups', () => {
     const first = insert.mock.calls[0][0];
     expect(first).toEqual({ id: expect.any(String), ...fields });
     expect(insert.mock.calls[1][0]).toEqual({ ...first, title: edited ? 'New title' : fields.title });
-    if (edited) {
-      expect(onClose).not.toHaveBeenCalled();
-      expect(db.toast).toHaveBeenCalledWith('error', 'The earlier callback was already saved. Open it on Team Board to make changes.');
-    } else {
-      expect(onClose).toHaveBeenCalledOnce();
-    }
+    expect(onClose).toHaveBeenCalledExactlyOnceWith(true);
+    if (edited) expect(db.toast).toHaveBeenCalledWith('error', 'The earlier callback was already saved. Open it on Team Board to make changes.');
   });
 });

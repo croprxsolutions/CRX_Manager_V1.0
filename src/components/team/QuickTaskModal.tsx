@@ -155,8 +155,8 @@ export default function QuickTaskModal({
       }, callbackOnly ? callbackIdRef.current : null);
 
       onCreated?.();
-      if (!matches) throw new Error('The earlier callback was already saved. Open it on Team Board to make changes.');
-      toast('success', callbackOnly ? 'Callback saved' : 'Task created successfully');
+      if (matches) toast('success', callbackOnly ? 'Callback saved' : 'Task created successfully');
+      else toast('error', 'The earlier callback was already saved. Open it on Team Board to make changes.');
       onClose(true);
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'QuickTaskModal.handleSave' } });

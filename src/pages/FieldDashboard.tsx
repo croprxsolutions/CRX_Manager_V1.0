@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -22,6 +22,7 @@ import Button from '../components/ui/Button';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
+import { LoadFailedState } from '../components/ui/EmptyState';
 import Select from '../components/ui/Select';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -55,34 +56,47 @@ interface CropHistoryRecord {
   notes: string | null;
 }
 
-export default function FieldDashboard() {
+export default function FieldDashboardRoute() {
   const { id } = useParams<{ id: string }>();
+  return id ? <FieldDashboard key={id} id={id} /> : null;
+}
+
+function FieldDashboard({ id }: { id: string }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
   const [data, setData] = useState<FieldDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [missingField, setMissingField] = useState(false);
+  const loadSeqRef = useRef(0);
   const [cropHistory, setCropHistory] = useState<CropHistoryRecord[]>([]);
   const [children, setChildren] = useState<Array<{ id: string; field_name: string; total_acres: number | null; boundary_geojson?: string; centroid_geojson?: string }>>([]);
 
   const fetchDashboard = useCallback(async () => {
-    if (!id) return;
+    const seq = ++loadSeqRef.current;
     try {
       setLoading(true);
+      setMissingField(false);
       const { data: result, error } = await supabase.rpc('get_field_dashboard', {
         p_field_id: id,
       });
+      if (seq !== loadSeqRef.current) return;
+      if (error?.code === 'P0001' && error.message.startsWith('Field not found: ')) {
+        setData(null);
+        setMissingField(true);
+        return;
+      }
       if (error) throw error;
       const dashboard = assertRpcResult<FieldDashboardResponse>(result, 'get_field_dashboard');
-      setData(dashboard);
 
       // Fetch crop history
-      const { data: histData } = await supabase
+      const { data: histData, error: histError } = await supabase
         .from('field_crop_history')
         .select('*')
         .eq('field_id', id)
         .order('season', { ascending: false });
-      setCropHistory((histData || []) as CropHistoryRecord[]);
+      if (seq !== loadSeqRef.current) return;
+      if (histError) throw histError;
 
       // Fetch child fields if this is a parent
       // Every page: the server cuts a function's rows off at 1,000, which could hide a child field.
@@ -91,21 +105,25 @@ export default function FieldDashboard() {
         .order('field_name')
         .order('id')
         .range(from, to)));
-      if (!childErr) {
-        const allRows = assertRpcResult<Array<{ id: string; field_name: string; total_acres: number | null; boundary_geojson?: string; centroid_geojson?: string; parent_field_id?: string }>>(allFields, 'get_fields_with_geojson');
-        const childFields = allRows.filter((f) => f.parent_field_id === id);
-        setChildren(childFields);
-      }
+      if (seq !== loadSeqRef.current) return;
+      if (childErr) throw childErr;
+      const childFields = assertRpcResult<NonNullable<typeof allFields>>(allFields, 'get_fields_with_geojson');
+      setData(dashboard);
+      setCropHistory((histData || []) as CropHistoryRecord[]);
+      setChildren(childFields.filter((field) => field.parent_field_id === id));
     } catch (err) {
+      if (seq !== loadSeqRef.current) return;
+      setData(null);
       Sentry.captureException(err);
       toast('error', 'Failed to load field dashboard');
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   }, [id, toast]);
 
   useEffect(() => {
-    fetchDashboard();
+    void fetchDashboard();
+    return () => { loadSeqRef.current += 1; };
   }, [fetchDashboard]);
 
   const mapBounds = useMemo(() => {
@@ -149,12 +167,7 @@ export default function FieldDashboard() {
 
   if (!data) {
     return (
-      <div className="text-center py-12">
-        <p className="text-gray-500">Field not found</p>
-        <Button variant="ghost" onClick={() => navigate('/fields')} className="mt-4">
-          Back to Fields
-        </Button>
-      </div>
+      <DashboardUnavailable missing={missingField} onRetry={fetchDashboard} onBack={() => navigate('/fields')} />
     );
   }
 
@@ -266,7 +279,7 @@ export default function FieldDashboard() {
       <CropHistoryTab
         history={cropHistory}
         currentCrop={field.crop_type}
-        fieldId={id || ''}
+        fieldId={id}
         onSaved={fetchDashboard}
       />
     </div>
@@ -296,6 +309,21 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
 }
 
 /* ─── Overview section ──────────────────────────────────────────── */
+
+function DashboardUnavailable({ missing, onRetry, onBack }: {
+  missing: boolean;
+  onRetry: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <div className="text-center">
+      {missing
+        ? <p className="pt-12 pb-4 text-gray-500">Field not found</p>
+        : <LoadFailedState title="Field dashboard could not be loaded" onRetry={onRetry} />}
+      <Button variant="ghost" onClick={onBack}>Back to Fields</Button>
+    </div>
+  );
+}
 
 function OverviewTab({ summary }: { summary: FieldDashboardResponse['season_summary'] }) {
   const stats = [

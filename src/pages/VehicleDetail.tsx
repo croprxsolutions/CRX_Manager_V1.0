@@ -191,8 +191,8 @@ export default function VehicleDetail() {
       </div>
 
       {/* Form */}
-      {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
-      <fieldset disabled={isNew && saving} className="min-w-0">
+      {/* Edits made during a save would miss its payload and lose their unsaved warning. */}
+      <fieldset disabled={saving} className="min-w-0">
       <Card>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <Input
@@ -203,8 +203,9 @@ export default function VehicleDetail() {
             placeholder="e.g. Hagie STS-16"
           />
           <div>
-            <label className="block text-sm font-medium text-nav-dark mb-1">Type</label>
+            <label htmlFor="vehicle-type" className="block text-sm font-medium text-nav-dark mb-1">Type</label>
             <select
+              id="vehicle-type"
               value={form.vehicle_type}
               onChange={(e) => updateField('vehicle_type', e.target.value as VehicleType)}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -239,8 +240,9 @@ export default function VehicleDetail() {
               className="flex-1"
             />
             <div className="w-32">
-              <label className="block text-sm font-medium text-nav-dark mb-1">Unit</label>
+              <label htmlFor="vehicle-unit" className="block text-sm font-medium text-nav-dark mb-1">Unit</label>
               <select
+                id="vehicle-unit"
                 value={form.capacity_unit}
                 onChange={(e) => updateField('capacity_unit', e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -258,8 +260,9 @@ export default function VehicleDetail() {
             placeholder={form.vehicle_type === 'air' ? 'FAA N-number (e.g. N12345)' : 'DOT# or internal ID'}
           />
           <div>
-            <label className="block text-sm font-medium text-nav-dark mb-1">Status</label>
+            <label htmlFor="vehicle-status" className="block text-sm font-medium text-nav-dark mb-1">Status</label>
             <select
+              id="vehicle-status"
               value={form.status}
               onChange={(e) => updateField('status', e.target.value as VehicleStatus)}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -271,8 +274,9 @@ export default function VehicleDetail() {
           </div>
         </div>
         <div className="mt-5">
-          <label className="block text-sm font-medium text-nav-dark mb-1">Notes</label>
+          <label htmlFor="vehicle-notes" className="block text-sm font-medium text-nav-dark mb-1">Notes</label>
           <textarea
+            id="vehicle-notes"
             value={form.notes}
             onChange={(e) => updateField('notes', e.target.value)}
             rows={3}

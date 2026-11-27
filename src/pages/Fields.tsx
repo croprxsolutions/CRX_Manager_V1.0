@@ -12,6 +12,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, checkMutationResult, assertRpcResult } from '../lib/db';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
+import { applyTableSearchSort } from '../lib/tableSearchSort';
 import { Sentry } from '../lib/sentry';
 import { exportToCSV } from '../lib/csvExport';
 import { downloadReportPdf } from '../lib/reportPdf';
@@ -28,6 +29,8 @@ import { computeBounds } from '../hooks/useFitBounds';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 
 type FieldWithCustomer = Field & { customer_name: string; parent_field_id?: string | null; child_count?: number; billable_acres?: number | null };
+
+const FIELD_SEARCH_KEYS = ['field_name', 'customer_name', 'county', 'legal_description', 'crop_type'];
 
 export default function Fields() {
   const navigate = useNavigate();
@@ -51,6 +54,7 @@ export default function Fields() {
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [groupParentId, setGroupParentId] = useState<string>('');
   const [grouping, setGrouping] = useState(false);
+  const [search, setSearch] = useState('');
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
 
   const canBulkAction = role === 'admin' || role === 'sales_rep';
@@ -148,8 +152,11 @@ export default function Fields() {
     return true;
   });
 
-  const totalAcres = filtered.reduce((sum, f) => sum + (f.billable_acres ?? f.total_acres ?? 0), 0);
-  const withBoundary = filtered.filter((f) => f.boundary_geojson).length;
+  const searchTerm = viewMode === 'list' ? search.trim() : '';
+  const matchingFields = applyTableSearchSort(filtered, FIELD_SEARCH_KEYS, searchTerm, null, 'asc');
+  const totalAcres = matchingFields.reduce((sum, f) => sum + (f.billable_acres ?? f.total_acres ?? 0), 0);
+  const withBoundary = matchingFields.filter((f) => f.boundary_geojson).length;
+  const hasFilters = Boolean(searchTerm || customerFilter || cropFilter || countyFilter || statusFilter !== 'all');
 
   // Compute map bounds from all filtered fields with geo data
   const geoStrings = useMemo(
@@ -168,8 +175,11 @@ export default function Fields() {
 
   // Tree view: group parent/child fields
   const displayRows = useMemo(() => {
+    if (searchTerm) return matchingFields;
+
+    const fieldIds = new Set(matchingFields.map((field) => field.id));
     const childMap = new Map<string, FieldWithCustomer[]>();
-    for (const f of filtered) {
+    for (const f of matchingFields) {
       if (f.parent_field_id) {
         const siblings = childMap.get(f.parent_field_id) || [];
         siblings.push(f);
@@ -178,9 +188,9 @@ export default function Fields() {
     }
 
     const rows: (FieldWithCustomer & { _isChild?: boolean; _isParent?: boolean })[] = [];
-    for (const f of filtered) {
-      if (f.parent_field_id) continue; // children shown under parent
-      const hasChildren = (f.child_count && f.child_count > 0) || childMap.has(f.id);
+    for (const f of matchingFields) {
+      if (f.parent_field_id && fieldIds.has(f.parent_field_id)) continue;
+      const hasChildren = childMap.has(f.id);
       if (hasChildren) {
         rows.push({ ...f, _isParent: true });
         if (expandedParents.has(f.id)) {
@@ -194,7 +204,7 @@ export default function Fields() {
       }
     }
     return rows;
-  }, [filtered, expandedParents]);
+  }, [matchingFields, expandedParents, searchTerm]);
 
   const toggleExpand = (id: string) => {
     setExpandedParents((prev) => {
@@ -314,8 +324,10 @@ export default function Fields() {
           {(row as FieldWithCustomer & { _isParent?: boolean })._isParent ? (
             <button
               onClick={(e) => { e.stopPropagation(); toggleExpand(row.id); }}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); toggleExpand(row.id); } }}
-              className="p-0.5"
+              onKeyDown={(e) => e.stopPropagation()}
+              aria-label={`Sub-fields of ${row.field_name}`}
+              aria-expanded={expandedParents.has(row.id)}
+              className="p-1 focus-visible:ring-2 focus-visible:ring-crx-green"
             >
               {expandedParents.has(row.id)
                 ? <ChevronDown className="w-4 h-4 text-secondary" />
@@ -405,7 +417,7 @@ export default function Fields() {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center flex-wrap gap-2">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* View toggle */}
           <div className="flex rounded-lg border border-gray-200 overflow-hidden">
             <button
@@ -432,7 +444,7 @@ export default function Fields() {
             </button>
           </div>
           {/* Bulk actions act on the selection, so they wait while the rows are hidden by a failed load. */}
-          {canBulkAction && !loadError && viewMode === 'list' && (
+          {canBulkAction && !loading && !loadError && viewMode === 'list' && (
             <BulkActionBar selectedCount={selectedCount} actions={bulkActions} onDeselectAll={clearSelection} />
           )}
         </div>
@@ -453,8 +465,8 @@ export default function Fields() {
 
       {/* Stats Bar — hidden after a failed load, where its counts would read as "no fields". */}
       {!loadError && (
-        <div className="flex gap-4 text-sm text-secondary">
-          <span><strong className="text-nav-dark">{filtered.length}</strong> fields</span>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-secondary">
+          <span><strong className="text-nav-dark">{matchingFields.length}</strong> fields</span>
           <span><strong className="text-nav-dark">{totalAcres.toLocaleString()}</strong> billable acres</span>
           <span><strong className="text-nav-dark">{withBoundary}</strong> with boundaries</span>
         </div>
@@ -511,15 +523,18 @@ export default function Fields() {
               columns={columns}
               searchable
               searchPlaceholder="Search fields..."
-              searchKeys={['field_name', 'customer_name', 'county', 'legal_description', 'crop_type']}
+              searchValue={search}
+              onSearchChange={setSearch}
               onRowClick={(row) => navigate(`/fields/${row.id}/dashboard`)}
-              emptyTitle="No fields yet"
-              emptyDescription="Add your first field to start tracking farm locations"
-              emptyAction={
+              emptyTitle={hasFilters && fields.length > 0 ? 'No matching fields' : 'No fields yet'}
+              emptyDescription={hasFilters && fields.length > 0
+                ? 'Try another search or change the filters.'
+                : 'Add your first field to start tracking farm locations.'}
+              emptyAction={fields.length === 0 && (
                 <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/fields/new')}>
                   Add Field
                 </Button>
-              }
+              )}
               loading={loading}
               loadError={loadError}
               onRetry={retryFields}
@@ -542,7 +557,7 @@ export default function Fields() {
                     <option value="inactive">Inactive</option>
                     <option value="all">All Status</option>
                   </select>
-                  {canBulkAction && !loadError && filtered.length > 0 && (
+                  {canBulkAction && !loading && !loadError && displayRows.length > 0 && (
                     <button
                       onClick={toggleAll}
                       className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors"

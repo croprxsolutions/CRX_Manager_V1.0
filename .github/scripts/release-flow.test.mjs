@@ -223,6 +223,9 @@ test('usersSee drops "nothing" notes and the PR footer, and shows links as plain
   assert.deepEqual(usersSee('What users see: None for overdue invoices need manual rounding now.'), ['None for overdue invoices need manual rounding now.']);
   assert.deepEqual(usersSee('## What users see\n- 🤖 The assistant now cites sources\n- Faster reports\n\n🤖 Generated with [Claude Code](https://x.test)'),
     ['🤖 The assistant now cites sources', 'Faster reports']);
+  assert.deepEqual(usersSee('What users see: None for overdue invoices now.'), ['None for overdue invoices now.']);
+  assert.deepEqual(usersSee('## What users see\nGenerated with [Claude Code](https://x.test) reports now cite sources\n- Faster reports'),
+    ['Generated with Claude Code reports now cite sources', 'Faster reports']);
   for (const said of ['None for users.', 'None visible to users.', 'None here yet.', 'None in the app.']) {
     assert.deepEqual(usersSee(`What users see: ${said}`), [], said);
   }

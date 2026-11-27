@@ -38,6 +38,8 @@ ${stagedActivation}`;
       AFTER INSERT OR UPDATE OF status, parent_id, epa_registration, manufacturer ON public.product_parent_brands
       FOR EACH ROW EXECUTE FUNCTION public.return_liquid_density_to_draft_for_brand();`,
     'ALTER TABLE public.product_parent_brands DISABLE TRIGGER return_liquid_density_to_draft_for_brand;',
+    `UPDATE pg_catalog.pg_proc SET prolang = (SELECT oid FROM pg_catalog.pg_language WHERE lanname = 'plpgsql')
+      WHERE oid = 'public.liquid_density_review_open()'::regprocedure;`,
     'GRANT EXECUTE ON FUNCTION public.liquid_density_review_open() TO anon;',
     "CREATE FUNCTION public.approve_weights(jsonb) RETURNS jsonb LANGUAGE sql AS 'SELECT $1';",
   ]) {

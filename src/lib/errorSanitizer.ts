@@ -305,6 +305,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "An older return of this product for this customer was priced before the sale's tax or discount and has not been credited yet. Credit or cancel that return first, then create this one. No changes were saved"],
   [/^RETURN_UNITS_ON_DRAFT\b/i,
    "Some of the returned units are still on a draft invoice for this sale. Post that invoice first, then receive or credit the return. No changes were saved"],
+  [/^RETURN_REPRICE_MIXED_RATES\b/i,
+   "This product was billed at more than one price on this sale, so this return can't be priced automatically. Credit it by hand from the right invoice line. No changes were saved"],
   [/^RETURN_UNITS_NOT_INVOICED\b/i,
    "Some of the returned units are not on any invoice of this sale yet, and the sale has sales tax or a discount, so their credit can't be priced. Invoice those units first, then receive or credit the return. No changes were saved"],
   [/^RETURN_REPRICE_OTHER_RETURN_PENDING\b/i,

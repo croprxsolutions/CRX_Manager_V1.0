@@ -50,6 +50,9 @@
 --      return holds an older, higher price) is named after that return or refused as beyond the billed share, never
 --      "post the draft". create_return refuses a new share-priced line of units still on a draft with the same words
 --      as receive (RETURN_UNITS_ON_DRAFT).
+--   KNOWN LIMIT until A2 (per-line pricing, planned): a line whose posted lots bill more than one unit price is not
+--      re-priced automatically; the office credits it by hand (RETURN_REPRICE_MIXED_RATES; Taha, 27 Nov). Lots at one
+--      price but different tax or discount are priced from their blend, as share returns already are.
 --   The tax ledger freeze (#2591) is not touched: a re-priced line's units are all on posted lots, so it freezes as today.
 --   Applying: like every migration here, the preflight relies on the file running as one transaction with
 --   ON_ERROR_STOP (the apply gate and the staging DB job do); run statement by statement it stops at the preflight.
@@ -314,10 +317,20 @@ BEGIN
       END IF;
       -- (#2066) units still on a draft of the order's own customer wait until it is posted, in receive's words (Mason,
       -- 26 Nov)
+      -- Only for a caller who can read every live invoice of the order (Taha, 27 Nov), so the words never reveal a draft
+      -- a sales rep cannot see; anyone else gets the old words below.
       IF v_share.other_returned_qty + v_qty > v_share.billed_qty AND EXISTS (
         SELECT 1 FROM public._return_order_price_lot_price(v_order_id, v_order_item.id, v_customer_id, v_return_id, v_qty) lp
          WHERE lp.applies AND lp.on_draft
-      ) THEN
+      ) AND (public.is_admin() OR NOT EXISTS (
+        SELECT 1 FROM public.invoices hidden
+         WHERE hidden.order_id = v_order_id
+           AND hidden.invoice_type <> 'credit_memo'
+           AND hidden.deleted_at IS NULL
+           AND hidden.status IN ('draft', 'unposted', 'posted', 'overdue', 'paid')
+           AND NOT (hidden.created_by IS NOT DISTINCT FROM auth.uid()
+                    OR hidden.salesman_id IS NOT DISTINCT FROM auth.uid())
+      )) THEN
         RAISE EXCEPTION 'RETURN_UNITS_ON_DRAFT: some returned units are still on a draft invoice of this sale; post that invoice first';
       END IF;
       IF v_share.other_returned_qty + v_qty > v_share.billed_qty THEN
@@ -465,12 +478,15 @@ $function$;
 --   (Mason, 26 Nov: such a return waits until the draft is posted). Only when such a draft exists.
 -- not_invoiced: its units are not all on posted invoices, and the drafts do not cover them either.
 --   (fits is false with neither when only the cents do not fit: another return holds an out-of-date price.)
+-- mixed_rates: the customer's posted lots of the line bill more than one unit price (a price change between
+--   deliveries). The running total cannot tell which lot each return took, so such a line is not re-priced
+--   automatically (Taha, 27 Nov: refuse, credit by hand; the per-line pricing planned as A2 replaces this).
 -- unit_price_cents / extended_cents: exactly as create_return prices a billed share (the running total over the posted
 --   lots, after each invoice's discount and with its share of its tax).
 -- adjusted: only the invoice evidence (a sales-tax or discount line on a live invoice holding the line), the rule
 --   staging used to switch a line to share pricing; it keeps a line from before this change refused (see receive).
 CREATE FUNCTION public._return_order_price_lot_price(p_order_id uuid, p_order_item_id uuid, p_customer_id uuid, p_exclude_return_id uuid, p_quantity numeric)
- RETURNS TABLE(applies boolean, fits boolean, unit_price_cents bigint, extended_cents bigint, adjusted boolean, on_draft boolean, not_invoiced boolean)
+ RETURNS TABLE(applies boolean, fits boolean, unit_price_cents bigint, extended_cents bigint, adjusted boolean, on_draft boolean, not_invoiced boolean, mixed_rates boolean)
  LANGUAGE sql
  STABLE
  SET search_path TO 'public', 'pg_temp'
@@ -498,7 +514,7 @@ AS $function$
        AND EXISTS (SELECT 1 FROM public.invoice_items x WHERE x.invoice_id = i.id AND x.order_item_id = p_order_item_id)
   ), lots AS (
     -- after the invoice's discount, with its share of the invoice's tax (as _return_customer_line_share bills)
-    SELECT live.posted, ii.quantity, public._standing_discount_net_cents_20261231(ii.id) AS cents
+    SELECT live.posted, ii.quantity, ii.unit_price_cents, public._standing_discount_net_cents_20261231(ii.id) AS cents
       FROM live
       JOIN public.invoice_items ii ON ii.invoice_id = live.id
       JOIN public.order_items oi ON oi.id = ii.order_item_id
@@ -520,6 +536,7 @@ AS $function$
     SELECT coalesce((SELECT sum(quantity) FROM lots WHERE posted), 0) AS lot_qty,
            coalesce((SELECT sum(cents) FROM lots WHERE posted), 0)::bigint AS lot_cents,
            coalesce((SELECT sum(quantity) FROM lots WHERE NOT posted), 0) AS draft_qty,
+           (SELECT count(DISTINCT unit_price_cents) FROM lots WHERE posted) > 1 AS mixed_rates,
            coalesce((SELECT sum(quantity) FROM other_returns), 0) AS other_qty,
            coalesce((SELECT sum(extended_cents) FROM other_returns), 0)::bigint AS other_cents
   ), adj AS (
@@ -548,7 +565,8 @@ AS $function$
     p.extended_cents,
     a.adjusted,
     p.draft_qty > 0 AND p.other_qty + p_quantity > p.lot_qty AND p.other_qty + p_quantity <= p.lot_qty + p.draft_qty,
-    p.other_qty + p_quantity > p.lot_qty + p.draft_qty OR (p.lot_qty <= 0 AND p.draft_qty <= 0)
+    p.other_qty + p_quantity > p.lot_qty + p.draft_qty OR (p.lot_qty <= 0 AND p.draft_qty <= 0),
+    p.mixed_rates
   FROM priced p, adj a;
 $function$;
 REVOKE ALL ON FUNCTION public._return_order_price_lot_price(uuid, uuid, uuid, uuid, numeric)
@@ -710,6 +728,16 @@ BEGIN
            WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND lp.not_invoiced
         ) THEN
           RAISE EXCEPTION 'RETURN_UNITS_NOT_INVOICED: some returned units are not on any invoice of this sale yet, and the sale has sales tax or a discount, so their credit cannot be priced; invoice them first';
+        END IF;
+        -- (#2066, Taha 27 Nov) a line billed at more than one price is not re-priced automatically (credit it by hand until A2)
+        IF EXISTS (
+          SELECT 1
+            FROM public.return_items ri
+            CROSS JOIN LATERAL public._return_order_price_lot_price(
+              v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
+           WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND lp.mixed_rates
+        ) THEN
+          RAISE EXCEPTION 'RETURN_REPRICE_MIXED_RATES: this product was billed at more than one price on this sale, so the return cannot be re-priced automatically; credit it by hand from the right invoice line';
         END IF;
         IF EXISTS (
           SELECT 1
@@ -1191,6 +1219,16 @@ BEGIN
          WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND lp.not_invoiced
       ) THEN
         RAISE EXCEPTION 'RETURN_UNITS_NOT_INVOICED: some returned units are not on any invoice of this sale yet, and the sale has sales tax or a discount, so their credit cannot be priced; invoice them first';
+      END IF;
+      -- (#2066, Taha 27 Nov) a line billed at more than one price is not re-priced automatically (credit it by hand until A2)
+      IF EXISTS (
+        SELECT 1
+          FROM public.return_items ri
+          CROSS JOIN LATERAL public._return_order_price_lot_price(
+            v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
+         WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND lp.mixed_rates
+      ) THEN
+        RAISE EXCEPTION 'RETURN_REPRICE_MIXED_RATES: this product was billed at more than one price on this sale, so the return cannot be re-priced automatically; credit it by hand from the right invoice line';
       END IF;
       IF EXISTS (
         SELECT 1

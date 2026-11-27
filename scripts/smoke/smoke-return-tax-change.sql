@@ -39,6 +39,11 @@
 --      refused with RETURN_UNITS_ON_DRAFT.
 --   Q  A sales rep who cannot read the posted invoice is refused for visibility first (RETURN_SPLIT_INVOICE_NOT_VISIBLE),
 --      before any message that would describe the invoices.
+--   R  A line billed at two prices is not re-priced automatically (Taha, 27 Nov: RETURN_REPRICE_MIXED_RATES; credit it by
+--      hand until per-line pricing, A2): 5 billed and credited at the order price, the price changed (+$10, then -$1),
+--      5 more billed taxed; a return of 1 is refused, never credited at a blend of the two prices.
+--   S  At create, a rep who cannot read the draft keeps the old words (RETURN_QUANTITY_EXCEEDS_BILLED_SHARE), so the
+--      refusal never reveals a draft the rep cannot see.
 --
 -- Tax is written at commit (deferred triggers). This file runs as ONE statement, so each step ends with
 -- SET CONSTRAINTS ALL IMMEDIATE / DEFERRED: the commit point of that call in the app.
@@ -687,6 +692,82 @@ BEGIN
     PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     v_fails := v_fails || ' (Q) setup failed: ' || SQLERRM || ';';
+  END;
+
+  -- R: two prices on one line, with an earlier credit at the first.
+  DECLARE
+    v_inv2 uuid;
+    v_delta numeric;
+    v_ret_a uuid;
+  BEGIN
+    FOREACH v_delta IN ARRAY ARRAY[10, -1]::numeric[] LOOP
+      BEGIN
+        v_order := pg_temp.rtx_order(v_admin, v_product.id, v_product.current_cost, v_customer, 'r' || (v_delta > 0)::int || '-' || v_suffix);
+        v_invoice := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 'r1' || (v_delta > 0)::int || '-' || v_suffix);
+        PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-r1' || (v_delta > 0)::int || v_suffix));
+        v_ret_a := pg_temp.rtx_return(v_admin, v_customer, v_order, 5, 'ra' || (v_delta > 0)::int || '-' || v_suffix);
+        PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret_a, v_admin, 'smk-rtx-rc-ra' || (v_delta > 0)::int || v_suffix));
+        PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret_a, v_admin, 'smk-rtx-ic-ra' || (v_delta > 0)::int || v_suffix));
+        -- the price changes before the second delivery
+        UPDATE order_items SET price_per_unit = price_per_unit + v_delta, total_price = (price_per_unit + v_delta) * total_units_needed
+         WHERE order_id = v_order;
+        v_inv2 := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 'r2' || (v_delta > 0)::int || '-' || v_suffix);
+        v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 1, 'rb' || (v_delta > 0)::int || '-' || v_suffix);
+        PERFORM pg_temp.rtx_step(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-rtx-tax-r' || (v_delta > 0)::int || v_suffix));
+        PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_inv2, v_inv2, 'smk-rtx-post-r2' || (v_delta > 0)::int || v_suffix));
+        IF (SELECT count(DISTINCT ii.unit_price_cents) FROM invoice_items ii
+             WHERE ii.invoice_id IN (v_invoice, v_inv2) AND ii.charge_type IS NULL AND ii.product_id IS NOT NULL) <> 2 THEN
+          RAISE EXCEPTION 'the two lots are not billed at two prices';
+        END IF;
+        BEGIN
+          PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-rb' || (v_delta > 0)::int || v_suffix));
+          v_fails := v_fails || format(' (R %s) a return of a line billed at two prices was re-priced and received at %s cents;',
+            v_delta, (SELECT extended_cents FROM return_items WHERE return_id = v_ret));
+        EXCEPTION WHEN OTHERS THEN
+          IF SQLERRM NOT LIKE 'RETURN_REPRICE_MIXED_RATES%' THEN
+            v_fails := v_fails || format(' (R %s) the refusal is not RETURN_REPRICE_MIXED_RATES: %s;', v_delta, SQLERRM);
+          END IF;
+        END;
+      EXCEPTION WHEN OTHERS THEN
+        v_fails := v_fails || format(' (R %s) setup failed: %s;', v_delta, SQLERRM);
+      END;
+    END LOOP;
+  END;
+
+  -- S: a rep who can read the posted invoice but not the draft keeps create_return's old words.
+  DECLARE
+    v_inv2 uuid;
+    v_rep uuid;
+  BEGIN
+    SELECT id INTO v_rep FROM profiles WHERE role = 'sales_rep' AND is_active = true ORDER BY created_at LIMIT 1;
+    IF v_rep IS NULL THEN RAISE EXCEPTION 'no active sales rep'; END IF;
+    v_order := pg_temp.rtx_order(v_admin, v_product.id, v_product.current_cost, v_customer, 's-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-rtx-tax-s-' || v_suffix));
+    v_invoice := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 's1-' || v_suffix);
+    v_inv2 := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 's2-' || v_suffix);
+    -- fixture only: the rep sells the first lot; the draft stays the admin's
+    UPDATE invoices SET salesman_id = v_rep WHERE id = v_invoice;
+    UPDATE invoices SET salesman_id = v_admin, created_by = v_admin WHERE id = v_inv2;
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-s1-' || v_suffix));
+    IF pg_temp.rtx_tax(ARRAY[v_invoice]) <= 0 OR pg_temp.rtx_tax(ARRAY[v_inv2]) <= 0 THEN RAISE EXCEPTION 'the lots are not taxed'; END IF;
+    BEGIN
+      PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+      PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
+      PERFORM create_return(jsonb_build_object('customer_id', v_customer, 'order_id', v_order, 'reason', 'damaged'),
+        (SELECT jsonb_agg(jsonb_build_object('order_item_id', oi.id, 'quantity', 8, 'condition', 'unopened', 'restock', false))
+           FROM order_items oi WHERE oi.order_id = v_order), 'smk-rtx-ret-s-' || v_suffix);
+      v_fails := v_fails || ' (S) the rep made a return of 8 with only 5 billed;';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'RETURN_QUANTITY_EXCEEDS_BILLED_SHARE%' THEN
+        v_fails := v_fails || ' (S) the rep''s refusal is not RETURN_QUANTITY_EXCEEDS_BILLED_SHARE: ' || SQLERRM || ';';
+      END IF;
+    END;
+    PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    v_fails := v_fails || ' (S) setup failed: ' || SQLERRM || ';';
   END;
 
   IF v_fails <> '' THEN

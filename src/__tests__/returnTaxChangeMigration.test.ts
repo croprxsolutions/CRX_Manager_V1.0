@@ -49,6 +49,8 @@ describe('20270313040000 return credit after a tax change', () => {
       // a cents shortfall is named after the other return, never "post the draft"
       expect(b.indexOf('RETURN_REPRICE_OTHER_RETURN_PENDING')).toBeLessThan(b.indexOf("AND lp.applies AND NOT lp.fits\n"));
       expect(b).toContain('AND lp.applies AND lp.not_invoiced');
+      // a line billed at two prices is not re-priced (Taha, 27 Nov; until A2)
+      expect(b.indexOf("RAISE EXCEPTION 'RETURN_REPRICE_MIXED_RATES")).toBeLessThan(b.indexOf('UPDATE public.return_items ri'));
       expect(b).toContain('RETURN_UNITS_NOT_INVOICED');
       expect(b).toContain('AND lp.applies AND lp.fits');
       expect(b).not.toContain('jsonb_to_recordset');
@@ -86,6 +88,8 @@ describe('20270313040000 return credit after a tax change', () => {
     expect(c).toContain('RETURN_OLDER_RETURN_AT_ORDER_PRICE');
     // same words as receive for units still on a draft
     expect(c.indexOf("RAISE EXCEPTION 'RETURN_UNITS_ON_DRAFT")).toBeLessThan(c.indexOf("RAISE EXCEPTION 'RETURN_QUANTITY_EXCEEDS_BILLED_SHARE'"));
+    // only for a caller who can read every live invoice of the order
+    expect(c.slice(c.indexOf("WHERE lp.applies AND lp.on_draft"), c.indexOf("RAISE EXCEPTION 'RETURN_UNITS_ON_DRAFT"))).toContain('public.is_admin() OR NOT EXISTS');
     expect(MIGRATION).toContain("priced_from text NOT NULL DEFAULT 'unrecorded'");
   });
 
@@ -103,6 +107,7 @@ describe('20270313040000 return credit after a tax change', () => {
     expect(h).toContain('p.draft_qty > 0 AND p.other_qty + p_quantity > p.lot_qty AND p.other_qty + p_quantity <= p.lot_qty + p.draft_qty');
     // a discount or tax line on any of the customer's invoices of the order counts (Taha, 27 Nov)
     expect(h).toContain('AS order_adjusted');
+    expect(h).toContain('(SELECT count(DISTINCT unit_price_cents) FROM lots WHERE posted) > 1 AS mixed_rates');
     expect(h).toContain("dl.charge_type IN ('standing_discount', 'sales_tax')");
     expect(h).toContain('split_evidence');
     expect(h).toContain('round(t.lot_cents * (t.other_qty + p_quantity) / t.lot_qty)::bigint - t.other_cents');

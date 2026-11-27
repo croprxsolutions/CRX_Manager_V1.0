@@ -192,10 +192,7 @@ test.describe.serial('Team Board V2 Features', () => {
     await page.goto('/team-board');
     await wait(page, 2000);
 
-    // Click "Add Note" button
-    const addBtn = page.locator(
-      'button:has-text("Add Note"), button:has-text("New"), button:has-text("Add"), button:has-text("+")',
-    ).first();
+    const addBtn = page.getByRole('button', { name: 'Add Task', exact: true });
     await expect(addBtn).toBeVisible({ timeout: 10000 });
     await addBtn.click();
     await wait(page, 1000);
@@ -216,18 +213,8 @@ test.describe.serial('Team Board V2 Features', () => {
       await textarea.fill(`Test content for V2 features ${RUN_ID}`);
     }
 
-    // Set type to "To-Do" (second select, first is often type)
-    const selects = modal.locator('select');
-    const _selectCount = await selects.count();
-    if (selectCount > 0) {
-      // First select is usually note_type
-      await selects.first().selectOption('todo');
-    }
-
-    // Set priority to "high"
-    if (selectCount > 1) {
-      await selects.nth(1).selectOption('high');
-    }
+    await expect(modal.getByLabel('Type', { exact: true })).toHaveValue('todo');
+    await modal.getByLabel('Priority', { exact: true }).selectOption('high');
 
     // Set due date to tomorrow
     const tomorrow = new Date();
@@ -244,7 +231,7 @@ test.describe.serial('Team Board V2 Features', () => {
     const _entitySelectVisible = await entityTypeSelect.isVisible().catch(() => false);
 
     // Save the note
-    const saveBtn = modal.locator('button:has-text("Add Task"), button:has-text("Add Note"), button:has-text("Save"), button:has-text("Create")').first();
+    const saveBtn = modal.getByRole('button', { name: 'Add Task', exact: true });
     await saveBtn.click();
     await wait(page, 2000);
 
@@ -946,28 +933,10 @@ test.describe.serial('Team Board V2 Features', () => {
       await deleteBtn.click();
       await wait(page, 1000);
 
-      // Confirmation modal should appear
-      const confirmModal = page.locator('[role="dialog"]').first();
-      const modalVisible = await confirmModal.isVisible({ timeout: 5000 }).catch(() => false);
-
-      if (modalVisible) {
-        // Should warn about deletion
-        const modalText = await confirmModal.textContent();
-        const hasWarning = /delete|remove|confirm|are you sure/i.test(modalText || '');
-        expect(hasWarning).toBeTruthy();
-
-        // Confirm deletion
-        const confirmBtn = confirmModal.locator(
-          'button:has-text("Delete"), button:has-text("Confirm"), button:has-text("Yes")',
-        ).first();
-        await confirmBtn.click();
-        await wait(page, 2000);
-
-        // Note should no longer appear on board
-        const deletedNote = page.locator(`text=${S.noteTitle}`).first();
-        const stillVisible = await deletedNote.isVisible({ timeout: 3000 }).catch(() => false);
-        expect(stillVisible).toBeFalsy();
-      }
+      const confirmModal = page.getByRole('alertdialog', { name: 'Delete this note?' });
+      await expect(confirmModal).toBeVisible();
+      await confirmModal.getByRole('button', { name: 'Delete note', exact: true }).click();
+      await expect(page.getByText(S.noteTitle, { exact: true })).toHaveCount(0);
     }
   });
 

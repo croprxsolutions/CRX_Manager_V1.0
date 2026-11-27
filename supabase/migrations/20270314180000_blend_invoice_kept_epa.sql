@@ -6,7 +6,7 @@
 -- actor check (ACTOR_MISMATCH), p_idempotency_key and grants; the capture trigger function is not callable by API roles.
 --
 -- Written 2026-11-26. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270311210000_blend_invoice_kept_epa.md. Re-read the live ledger before applying.
+-- docs/reference/migrations.d/20270314180000_blend_invoice_kept_epa.md. Re-read the live ledger before applying.
 --
 -- WHY: create_invoice_from_blend_ticket writes its chemical lines with no EPA number, so _fill_invoice_line_epa fills
 --   the catalog's current one; and _capture_invoice_line_rup finds a line's job only through invoices.job_id, which a

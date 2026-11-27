@@ -7,6 +7,7 @@ DECLARE
   card_payer uuid := gen_random_uuid();
   line_payer uuid := gen_random_uuid();
   unrelated uuid := gen_random_uuid();
+  missing_id uuid := gen_random_uuid();
   product uuid := gen_random_uuid();
   other_product uuid := gen_random_uuid();
   ordinary_order uuid := gen_random_uuid();
@@ -28,6 +29,7 @@ BEGIN
   INSERT INTO public.profiles (id,email,full_name,role,is_active) VALUES
     (rep,rep || '@fixture.example.test','Invented Rebates Rep','sales_rep',true),
     (admin_id,admin_id || '@fixture.example.test','Invented Rebates Admin','admin',true);
+  UPDATE public.profiles SET denied_pages=ARRAY['rebates'] WHERE id=admin_id;
   INSERT INTO public.customers (id,farm_name) VALUES
     (primary_farm,'Invented Primary'), (card_payer,'Invented Card Payer'),
     (line_payer,'Invented Line Payer'), (unrelated,'Invented Unrelated Farm');
@@ -51,6 +53,9 @@ BEGIN
     PERFORM set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);
     PERFORM set_config('request.jwt.claim.sub',actor::text,true);
     SET LOCAL ROLE authenticated;
+    IF NOT EXISTS (SELECT FROM public.rebate_programs WHERE id=program) THEN
+      RAISE EXCEPTION 'Rebate program was hidden from an authorized user';
+    END IF;
     FOR allowed IN SELECT * FROM (VALUES
       (ordinary_order,primary_farm), (split_order,line_payer), (empty_order,card_payer), (empty_order,primary_farm)
     ) AS cases(order_id,customer_id) LOOP
@@ -77,13 +82,17 @@ BEGIN
       END;
     END LOOP;
     PERFORM public.create_rebate_claim(program,1,1847,NULL,NULL,NULL,NULL,gen_random_uuid()::text);
-    rejected_key := gen_random_uuid()::text;
-    rejected_keys := array_append(rejected_keys,rejected_key);
-    BEGIN
-      PERFORM public.create_rebate_claim(program,2,1847,ordinary_order,gen_random_uuid(),product,NULL,rejected_key);
-      RAISE EXCEPTION 'Missing customer accepted';
-    EXCEPTION WHEN foreign_key_violation THEN NULL;
-    END;
+    FOR refused IN SELECT * FROM (VALUES
+      (ordinary_order,missing_id,product), (missing_id,primary_farm,product), (ordinary_order,primary_farm,missing_id)
+    ) AS cases(order_id,customer_id,product_id) LOOP
+      rejected_key := gen_random_uuid()::text;
+      rejected_keys := array_append(rejected_keys,rejected_key);
+      BEGIN
+        PERFORM public.create_rebate_claim(program,2,1847,refused.order_id,refused.customer_id,refused.product_id,NULL,rejected_key);
+        RAISE EXCEPTION 'Missing claim reference accepted';
+      EXCEPTION WHEN foreign_key_violation THEN NULL;
+      END;
+    END LOOP;
     RESET ROLE;
   END LOOP;
 

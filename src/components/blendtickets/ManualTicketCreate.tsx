@@ -1,5 +1,5 @@
 import { toSentryError } from '../../lib/sentryError';
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useId, useState, useEffect, useRef, useMemo } from 'react';
 import { Plus, Trash2, Save, AlertCircle, Beaker } from 'lucide-react';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
@@ -179,6 +179,7 @@ function readPersistedUncertainManualTicket(userId: string): PersistedUncertainM
 
 export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreateProps) {
   const { profile } = useAuth();
+  const formId = useId();
   const { toast } = useToast();
   const { getKey: getCreateKey, resetKey: resetCreateKey } = useIdempotencyKey(
     'create_blend_ticket',
@@ -582,8 +583,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div ref={customerPickerRef} className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Customer</label>
+            <label htmlFor={formId + '-customer'} className="block text-sm font-medium text-gray-700 mb-1">Customer</label>
             <SearchableSelect
+              id={formId + '-customer'}
               options={customers.map((customer) => ({ value: customer.id, label: customer.farm_name }))}
               value={formData.customer_id}
               onChange={(value) => setFormData({ ...formData, customer_id: value })}
@@ -592,8 +594,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Ticket Date</label>
+            <label htmlFor={formId + '-date'} className="block text-sm font-medium text-gray-700 mb-1">Ticket Date</label>
             <Input
+              id={formId + '-date'}
               type="date"
               value={formData.ticket_date}
               onChange={(e) => setFormData({ ...formData, ticket_date: e.target.value })}
@@ -601,8 +604,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Ticket Time</label>
+            <label htmlFor={formId + '-time'} className="block text-sm font-medium text-gray-700 mb-1">Ticket Time</label>
             <Input
+              id={formId + '-time'}
               type="text"
               value={formData.ticket_time}
               onChange={(e) => setFormData({ ...formData, ticket_time: e.target.value })}
@@ -611,8 +615,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Job #</label>
+            <label htmlFor={formId + '-job'} className="block text-sm font-medium text-gray-700 mb-1">Job #</label>
             <Input
+              id={formId + '-job'}
               type="text"
               value={formData.job_number}
               onChange={(e) => setFormData({ ...formData, job_number: e.target.value })}
@@ -621,8 +626,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Invoice #</label>
+            <label htmlFor={formId + '-invoice'} className="block text-sm font-medium text-gray-700 mb-1">Invoice #</label>
             <Input
+              id={formId + '-invoice'}
               type="text"
               value={formData.invoice_number}
               onChange={(e) => setFormData({ ...formData, invoice_number: e.target.value })}
@@ -631,8 +637,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
+            <label htmlFor={formId + '-driver'} className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
             <Input
+              id={formId + '-driver'}
               type="text"
               value={formData.driver_name}
               onChange={(e) => setFormData({ ...formData, driver_name: e.target.value })}
@@ -641,8 +648,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Applicator Name</label>
+            <label htmlFor={formId + '-applicator'} className="block text-sm font-medium text-gray-700 mb-1">Applicator Name</label>
             <Input
+              id={formId + '-applicator'}
               type="text"
               value={formData.applicator_name}
               onChange={(e) => setFormData({ ...formData, applicator_name: e.target.value })}
@@ -651,8 +659,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Mixer Name</label>
+            <label htmlFor={formId + '-mixer'} className="block text-sm font-medium text-gray-700 mb-1">Mixer Name</label>
             <Input
+              id={formId + '-mixer'}
               type="text"
               value={formData.mixer_name}
               onChange={(e) => setFormData({ ...formData, mixer_name: e.target.value })}
@@ -661,8 +670,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Tank #</label>
+            <label htmlFor={formId + '-tank'} className="block text-sm font-medium text-gray-700 mb-1">Tank #</label>
             <Input
+              id={formId + '-tank'}
               type="text"
               value={formData.tank_number}
               onChange={(e) => setFormData({ ...formData, tank_number: e.target.value })}
@@ -671,8 +681,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle</label>
+            <label htmlFor={formId + '-vehicle'} className="block text-sm font-medium text-gray-700 mb-1">Vehicle</label>
             <Input
+              id={formId + '-vehicle'}
               type="text"
               value={formData.vehicle_info}
               onChange={(e) => setFormData({ ...formData, vehicle_info: e.target.value })}
@@ -681,8 +692,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Field Names / Locations</label>
+            <label htmlFor={formId + '-fields'} className="block text-sm font-medium text-gray-700 mb-1">Field Names / Locations</label>
             <Input
+              id={formId + '-fields'}
               type="text"
               value={formData.field_names}
               onChange={(e) => setFormData({ ...formData, field_names: e.target.value })}
@@ -691,8 +703,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Total Acres</label>
+            <label htmlFor={formId + '-acres'} className="block text-sm font-medium text-gray-700 mb-1">Total Acres</label>
             <Input
+              id={formId + '-acres'}
               type="number"
               step="0.01"
               value={formData.total_acres}
@@ -702,8 +715,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Application Rate</label>
+            <label htmlFor={formId + '-application-rate'} className="block text-sm font-medium text-gray-700 mb-1">Application Rate</label>
             <Input
+              id={formId + '-application-rate'}
               type="text"
               value={formData.application_rate}
               onChange={(e) => setFormData({ ...formData, application_rate: e.target.value })}
@@ -712,17 +726,19 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Total Volume</label>
+            <label htmlFor={formId + '-volume'} className="block text-sm font-medium text-gray-700 mb-1">Total Volume</label>
             <div className="flex gap-2">
               <Input
                 type="number"
                 step="0.01"
+                id={formId + '-volume'}
                 value={formData.total_volume}
                 onChange={(e) => setFormData({ ...formData, total_volume: e.target.value })}
                 placeholder="0"
               />
               <Input
                 type="text"
+                aria-label="Total volume unit"
                 value={formData.total_volume_unit}
                 onChange={(e) => setFormData({ ...formData, total_volume_unit: e.target.value })}
                 placeholder="gal"
@@ -732,8 +748,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <label htmlFor={formId + '-notes'} className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
             <textarea
+              id={formId + '-notes'}
               value={formData.notes}
               onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
               placeholder="Add notes..."
@@ -755,6 +772,7 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
             Select a saved blend recipe to pre-fill the products list below.
           </p>
           <select
+            aria-label="Saved recipe"
             value={selectedRecipeId}
             onChange={(e) => applyRecipe(e.target.value)}
             disabled={catalogLoadFailed}
@@ -794,8 +812,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
             return (
             <div key={product.tempId} className="grid grid-cols-12 gap-3 items-start p-4 bg-gray-50 rounded-lg">
               <div className="col-span-12 md:col-span-3">
-                <label className="block text-xs font-medium text-gray-700 mb-1">Product</label>
+                <label htmlFor={product.tempId + '-product'} className="block text-xs font-medium text-gray-700 mb-1">Product</label>
                 <SearchableSelect
+                  id={product.tempId + '-product'}
                   options={allProducts.map((p) => ({ value: p.id, label: productOptionLabel(p) }))}
                   value={product.product_id || ''}
                   onChange={(value) => {
@@ -813,8 +832,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
               </div>
 
               <div className="col-span-4 md:col-span-1">
-                <label className="block text-xs font-medium text-gray-700 mb-1">Qty</label>
+                <label htmlFor={product.tempId + '-qty'} className="block text-xs font-medium text-gray-700 mb-1">Qty</label>
                 <Input
+                  id={product.tempId + '-qty'}
                   type="number"
                   step="0.01"
                   value={product.quantity || ''}
@@ -836,8 +856,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
               </div>
 
               <div className="col-span-4 md:col-span-2">
-                <label className="block text-xs font-medium text-gray-700 mb-1">Rate/Acre</label>
+                <label htmlFor={product.tempId + '-rate'} className="block text-xs font-medium text-gray-700 mb-1">Rate/Acre</label>
                 <Input
+                  id={product.tempId + '-rate'}
                   type="number"
                   step="0.01"
                   value={product.rate_per_acre ?? ''}
@@ -859,8 +880,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
               </div>
 
               <div className="col-span-6 md:col-span-3">
-                <label className="block text-xs font-medium text-gray-700 mb-1">Lot Number</label>
+                <label htmlFor={product.tempId + '-lot'} className="block text-xs font-medium text-gray-700 mb-1">Lot Number</label>
                 <Input
+                  id={product.tempId + '-lot'}
                   type="text"
                   value={product.lot_number}
                   onChange={(e) => updateProduct(product.tempId, 'lot_number', e.target.value)}
@@ -872,6 +894,7 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
                 <Button
                   variant="ghost"
                   size="sm"
+                  aria-label={`Remove product ${index + 1}`}
                   onClick={() => removeProduct(product.tempId)}
                   className="text-red-600 hover:text-red-700 hover:bg-red-50"
                 >

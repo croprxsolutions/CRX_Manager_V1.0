@@ -286,6 +286,7 @@ function ParentOwnedHint({ parentName, identity = false }: { parentName?: string
 
 const NO_ROWS: never[] = [];
 const WEIGHT_REVIEW_CHANGE_EVENT = 'crx:weight-review-change';
+type WeightReviewChange = { productId: string; parentId?: string };
 
 async function readUnitConversions(): Promise<UnitConversion[]> {
   const { data, error } = await supabase.from('unit_conversions').select('*').order('unit');
@@ -346,17 +347,23 @@ export default function ProductDetail() {
   // DM-1: a weight save on this page re-reads cost per lb of active.
   const [weightSaves, setWeightSaves] = useState(0);
   const [weightReviewReload, setWeightReviewReload] = useState(0);
-  // A brand save can finish after navigation has mounted a different product page.
-  useEffect(() => {
-    const refreshWeight = () => setWeightReviewReload((revision) => revision + 1);
-    window.addEventListener(WEIGHT_REVIEW_CHANGE_EVENT, refreshWeight);
-    return () => window.removeEventListener(WEIGHT_REVIEW_CHANGE_EVENT, refreshWeight);
-  }, []);
   const [parentReload, setParentReload] = useState(0);
   // Category, use timings, EPA number and rates belong to the parent; until the page knows there is
   // none, they stay read-only.
   const parentOwned = isNew ? Boolean(addSizeTo) : parent !== null;
   const shownParent = isNew ? addSizeTo ?? null : parent ?? null;
+  const weightParentId = shownParent?.id;
+  // A late brand save should refresh the same group without interrupting another product's draft.
+  useEffect(() => {
+    const refreshWeight = (event: Event) => {
+      const change = (event as CustomEvent<WeightReviewChange>).detail;
+      if (change && (change.productId === id || (change.parentId != null && change.parentId === weightParentId))) {
+        setWeightReviewReload((revision) => revision + 1);
+      }
+    };
+    window.addEventListener(WEIGHT_REVIEW_CHANGE_EVENT, refreshWeight);
+    return () => window.removeEventListener(WEIGHT_REVIEW_CHANGE_EVENT, refreshWeight);
+  }, [id, weightParentId]);
   // BLK-1a: a fixed tote with a Bulk fill source can be filled from that Bulk; the database rechecks everything else.
   const fillableTote = !isNew && Boolean(parent?.sizes.some((size) =>
     size.product_id === id && size.size_role === 'fixed_tote' && size.fill_source_product_id));
@@ -2249,7 +2256,9 @@ export default function ProductDetail() {
                 canEditAdjuvants={canEditAdjuvants}
                 onAdjuvantsSaved={refreshRegistrations}
                 onBrandsChange={handleBrandsChange}
-                onWeightReviewChange={() => window.dispatchEvent(new Event(WEIGHT_REVIEW_CHANGE_EVENT))}
+                onWeightReviewChange={() => window.dispatchEvent(new CustomEvent<WeightReviewChange>(WEIGHT_REVIEW_CHANGE_EVENT, {
+                  detail: { productId: id, parentId: weightParentId },
+                }))}
               />
             </PhoneSection>
           )}

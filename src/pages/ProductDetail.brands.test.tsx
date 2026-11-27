@@ -371,7 +371,10 @@ describe('ProductDetail brands section', () => {
     expect(chemistry).toHaveTextContent('1');
   });
 
-  it('refreshes the next size when the previous brand save finishes after navigation', async () => {
+  it.each([
+    { destination: 'a size in the same group', parentId: 'parent-1', revision: '1' },
+    { destination: 'an unrelated product', parentId: 'parent-2', revision: '0' },
+  ])('checks the scope of a late brand save after navigating to $destination', async ({ parentId, revision }) => {
     H.parent = {
       id: 'parent-1', name: 'Generic group', generic_epa_registration: null,
       sizes: [{ product_id: 'product-1' }, { product_id: 'product-2' }],
@@ -382,13 +385,14 @@ describe('ProductDetail brands section', () => {
 
     H.routeId = 'product-2';
     H.product = baseProduct({ id: 'product-2', product_name: 'Other size' });
+    H.parent = { id: parentId, name: 'Current group', generic_epa_registration: null, sizes: [{ product_id: 'product-2' }] };
     view.rerender(<ProductDetail key={H.routeId} />);
     const chemistry = await screen.findByTestId('chemistry-weight-revision');
     expect(chemistry).toHaveTextContent('0');
 
     await act(async () => previous.onWeightReviewChange());
 
-    expect(chemistry).toHaveTextContent('1');
+    expect(chemistry).toHaveTextContent(revision);
   });
 
   it('after switching products, the previous brands never show under the new one', async () => {

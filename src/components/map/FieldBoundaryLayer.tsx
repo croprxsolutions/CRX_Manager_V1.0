@@ -1,8 +1,7 @@
 import { useMemo, useEffect, useState } from 'react';
 import { Source, Layer, Marker, useMap } from 'react-map-gl/maplibre';
-import centroid from '@turf/centroid';
 import type { MapMouseEvent } from 'maplibre-gl';
-import type { Polygon as GeoJSONPolygon } from 'geojson';
+import { createBoundaryLabels, type BoundaryLabel } from './boundaryLabels';
 import { billableAcres } from '../../lib/fieldGeometry';
 import type { Customer, Field } from '../../types';
 
@@ -25,14 +24,6 @@ interface FieldBoundaryLayerProps {
   onFieldHover?: (fieldId: string | null) => void;
 }
 
-interface BoundaryLabel {
-  key: string;
-  text: string;
-  longitude: number;
-  latitude: number;
-}
-
-type BoundaryGeojson = ReturnType<typeof createBoundaryGeojson>;
 
 function createBoundaryGeojson(
   fields: FieldWithCustomer[],
@@ -72,28 +63,6 @@ function createBoundaryGeojson(
     .filter((feature): feature is NonNullable<typeof feature> => feature !== null);
 
   return { type: 'FeatureCollection' as const, features };
-}
-
-function createBoundaryLabels(geojson: BoundaryGeojson): BoundaryLabel[] {
-  return geojson.features.flatMap((feature) => {
-    const geometry = feature.geometry;
-    const polygons: GeoJSONPolygon['coordinates'][] = geometry.type === 'Polygon'
-      ? [geometry.coordinates]
-      : geometry.type === 'MultiPolygon' ? geometry.coordinates : [];
-    return polygons.map((coordinates: GeoJSONPolygon['coordinates'], index: number) => {
-      const point = centroid({
-        type: 'Feature',
-        properties: {},
-        geometry: { type: 'Polygon', coordinates },
-      }).geometry.coordinates;
-      return {
-        key: `${feature.properties.id}:${index}`,
-        text: feature.properties.label,
-        longitude: point[0],
-        latitude: point[1],
-      };
-    });
-  });
 }
 
 function useVisibleBoundaryLabels(labels: BoundaryLabel[], map: ReturnType<typeof useMap>['current'], enabled: boolean) {
@@ -208,7 +177,10 @@ export default function FieldBoundaryLayer({
 }: FieldBoundaryLayerProps) {
   const geojson = useMemo(() => createBoundaryGeojson(fields, labelById, selectedIds, hoveredId), [fields, hoveredId, labelById, selectedIds]);
   // Labels depend only on the fields, not hover/selection, so hovering never re-runs label placement.
-  const labelCandidates = useMemo(() => createBoundaryLabels(createBoundaryGeojson(fields, labelById)), [fields, labelById]);
+  const labelCandidates = useMemo(
+    () => (showLabels ? createBoundaryLabels(createBoundaryGeojson(fields, labelById)) : []),
+    [fields, labelById, showLabels],
+  );
   const { current: map } = useMap();
   const visibleLabels = useVisibleBoundaryLabels(labelCandidates, map, showLabels);
   useBoundaryInteractions(map, onFieldClick, onFieldHover);

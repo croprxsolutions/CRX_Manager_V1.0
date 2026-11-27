@@ -44,6 +44,9 @@
 --      5 more billed taxed; a return of 1 is refused, never credited at a blend of the two prices.
 --   S  At create, a rep who cannot read the draft keeps the old words (RETURN_QUANTITY_EXCEEDS_BILLED_SHARE), so the
 --      refusal never reveals a draft the rep cannot see.
+--   T  The posted-unit check runs even when the price does not change: a gal line with one posted lot in gal and one
+--      in ea, the tax box ticked, a return at an unchanged price is refused at receive (RETURN_CREDIT_UNIT_MISMATCH)
+--      before anything is restocked, not left for the credit to refuse.
 --
 -- Tax is written at commit (deferred triggers). This file runs as ONE statement, so each step ends with
 -- SET CONSTRAINTS ALL IMMEDIATE / DEFERRED: the commit point of that call in the app.
@@ -768,6 +771,35 @@ BEGIN
     PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     v_fails := v_fails || ' (S) setup failed: ' || SQLERRM || ';';
+  END;
+
+  -- T: a posted lot in another unit, with the return's price unchanged.
+  DECLARE
+    v_inv2 uuid;
+  BEGIN
+    v_order := pg_temp.rtx_order(v_admin, v_product.id, v_product.current_cost, v_customer, 't-' || v_suffix);
+    v_invoice := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 't1-' || v_suffix);
+    v_inv2 := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 't2-' || v_suffix);
+    -- fixture only: the second lot is billed in another unit
+    UPDATE invoice_items SET unit_size = 'ea' WHERE invoice_id = v_inv2 AND product_id IS NOT NULL AND charge_type IS NULL;
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-t1-' || v_suffix));
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_inv2, v_inv2, 'smk-rtx-post-t2-' || v_suffix));
+    IF NOT EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+                    WHERE i.id = v_inv2 AND i.status IN ('posted', 'overdue', 'paid') AND ii.unit_size = 'ea') THEN
+      RAISE EXCEPTION 'the second lot is not a posted ea lot';
+    END IF;
+    v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 2, 't-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-rtx-tax-t-' || v_suffix));
+    BEGIN
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-t-' || v_suffix));
+      v_fails := v_fails || ' (T) a return of a line with a posted lot in another unit was received;';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'RETURN_CREDIT_UNIT_MISMATCH%' THEN
+        v_fails := v_fails || ' (T) the refusal is not RETURN_CREDIT_UNIT_MISMATCH: ' || SQLERRM || ';';
+      END IF;
+    END;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (T) setup failed: ' || SQLERRM || ';';
   END;
 
   IF v_fails <> '' THEN

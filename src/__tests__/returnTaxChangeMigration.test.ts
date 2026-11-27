@@ -49,6 +49,10 @@ describe('20270313040000 return credit after a tax change', () => {
       // a cents shortfall is named after the other return, never "post the draft"
       expect(b.indexOf('RETURN_REPRICE_OTHER_RETURN_PENDING')).toBeLessThan(b.indexOf("AND lp.applies AND NOT lp.fits\n"));
       expect(b).toContain('AND lp.applies AND lp.not_invoiced');
+      // the unit and mixed-price checks run for every lot-priced line, before the re-price block (not only when it re-prices)
+      const block = b.indexOf("AND (NOT lp.fits");
+      expect(b.indexOf("RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'")).toBeLessThan(block);
+      expect(b.indexOf("RAISE EXCEPTION 'RETURN_REPRICE_MIXED_RATES")).toBeLessThan(block);
       // a line billed at two prices is not re-priced (Taha, 27 Nov; until A2)
       expect(b.indexOf("RAISE EXCEPTION 'RETURN_REPRICE_MIXED_RATES")).toBeLessThan(b.indexOf('UPDATE public.return_items ri'));
       expect(b).toContain('RETURN_UNITS_NOT_INVOICED');

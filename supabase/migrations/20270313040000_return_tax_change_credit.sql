@@ -685,6 +685,33 @@ BEGIN
            AND NOT (hidden.created_by IS NOT DISTINCT FROM auth.uid()
                     OR hidden.salesman_id IS NOT DISTINCT FROM auth.uid())
       ) THEN RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'; END IF;
+      -- (#2066, Taha 27 Nov) For every line priced from posted lots, whether or not its price changes: a posted sale line in
+      -- another unit can never back the credit (create_return's check), and a line billed at more than one price is not
+      -- priced automatically (credit it by hand until per-line pricing, A2). Both before anything is restocked.
+      IF EXISTS (
+        SELECT 1
+          FROM public.return_items ri
+          CROSS JOIN LATERAL public._return_order_price_lot_price(
+            v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
+          JOIN public.order_items oi ON oi.id = ri.order_item_id AND oi.order_id = v_order_id
+          JOIN public.invoice_items ii ON ii.order_item_id = oi.id AND ii.product_id = oi.product_id AND ii.quantity > 0
+          JOIN public.invoices i ON i.id = ii.invoice_id
+         WHERE ri.return_id = p_return_id
+           AND ri.priced_from = 'order_price' AND lp.applies
+           AND i.invoice_type <> 'credit_memo'
+           AND i.status IN ('posted', 'overdue', 'paid')
+           AND i.deleted_at IS NULL
+           AND ii.unit_size IS DISTINCT FROM coalesce(oi.unit_size, 'ea')
+      ) THEN RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'; END IF;
+      IF EXISTS (
+        SELECT 1
+          FROM public.return_items ri
+          CROSS JOIN LATERAL public._return_order_price_lot_price(
+            v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
+         WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND lp.mixed_rates
+      ) THEN
+        RAISE EXCEPTION 'RETURN_REPRICE_MIXED_RATES: this product was billed at more than one price on this sale, so the return cannot be re-priced automatically; credit it by hand from the right invoice line';
+      END IF;
       IF EXISTS (
         SELECT 1
           FROM public.return_items ri
@@ -695,22 +722,6 @@ BEGIN
                 OR ri.extended_cents IS DISTINCT FROM lp.extended_cents
                 OR ri.unit_price_cents IS DISTINCT FROM lp.unit_price_cents)
       ) THEN
-        -- A posted sale line of a re-priced order line in another unit can never back the credit (create_return's check).
-        IF EXISTS (
-          SELECT 1
-            FROM public.return_items ri
-            CROSS JOIN LATERAL public._return_order_price_lot_price(
-              v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
-            JOIN public.order_items oi ON oi.id = ri.order_item_id AND oi.order_id = v_order_id
-            JOIN public.invoice_items ii ON ii.order_item_id = oi.id AND ii.product_id = oi.product_id AND ii.quantity > 0
-            JOIN public.invoices i ON i.id = ii.invoice_id
-           WHERE ri.return_id = p_return_id
-             AND ri.priced_from = 'order_price' AND lp.applies
-             AND i.invoice_type <> 'credit_memo'
-             AND i.status IN ('posted', 'overdue', 'paid')
-             AND i.deleted_at IS NULL
-             AND ii.unit_size IS DISTINCT FROM coalesce(oi.unit_size, 'ea')
-        ) THEN RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'; END IF;
         IF EXISTS (
           SELECT 1
             FROM public.return_items ri
@@ -728,16 +739,6 @@ BEGIN
            WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND lp.not_invoiced
         ) THEN
           RAISE EXCEPTION 'RETURN_UNITS_NOT_INVOICED: some returned units are not on any invoice of this sale yet, and the sale has sales tax or a discount, so their credit cannot be priced; invoice them first';
-        END IF;
-        -- (#2066, Taha 27 Nov) a line billed at more than one price is not re-priced automatically (credit it by hand until A2)
-        IF EXISTS (
-          SELECT 1
-            FROM public.return_items ri
-            CROSS JOIN LATERAL public._return_order_price_lot_price(
-              v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
-           WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND lp.mixed_rates
-        ) THEN
-          RAISE EXCEPTION 'RETURN_REPRICE_MIXED_RATES: this product was billed at more than one price on this sale, so the return cannot be re-priced automatically; credit it by hand from the right invoice line';
         END IF;
         IF EXISTS (
           SELECT 1
@@ -1176,6 +1177,33 @@ BEGIN
          AND NOT (hidden.created_by IS NOT DISTINCT FROM auth.uid()
                   OR hidden.salesman_id IS NOT DISTINCT FROM auth.uid())
     ) THEN RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'; END IF;
+    -- (#2066, Taha 27 Nov) For every line priced from posted lots, whether or not its price changes: a posted sale line in
+    -- another unit can never back the credit (create_return's check), and a line billed at more than one price is not
+    -- priced automatically (credit it by hand until per-line pricing, A2). Both before anything is restocked.
+    IF EXISTS (
+      SELECT 1
+        FROM public.return_items ri
+        CROSS JOIN LATERAL public._return_order_price_lot_price(
+          v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
+        JOIN public.order_items oi ON oi.id = ri.order_item_id AND oi.order_id = v_order_id
+        JOIN public.invoice_items ii ON ii.order_item_id = oi.id AND ii.product_id = oi.product_id AND ii.quantity > 0
+        JOIN public.invoices i ON i.id = ii.invoice_id
+       WHERE ri.return_id = p_return_id
+         AND ri.priced_from = 'order_price' AND lp.applies
+         AND i.invoice_type <> 'credit_memo'
+         AND i.status IN ('posted', 'overdue', 'paid')
+         AND i.deleted_at IS NULL
+         AND ii.unit_size IS DISTINCT FROM coalesce(oi.unit_size, 'ea')
+    ) THEN RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'; END IF;
+    IF EXISTS (
+      SELECT 1
+        FROM public.return_items ri
+        CROSS JOIN LATERAL public._return_order_price_lot_price(
+          v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
+       WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND lp.mixed_rates
+    ) THEN
+      RAISE EXCEPTION 'RETURN_REPRICE_MIXED_RATES: this product was billed at more than one price on this sale, so the return cannot be re-priced automatically; credit it by hand from the right invoice line';
+    END IF;
     IF EXISTS (
       SELECT 1
         FROM public.return_items ri
@@ -1186,22 +1214,6 @@ BEGIN
               OR ri.extended_cents IS DISTINCT FROM lp.extended_cents
               OR ri.unit_price_cents IS DISTINCT FROM lp.unit_price_cents)
     ) THEN
-      -- A posted sale line of a re-priced order line in another unit can never back the credit (create_return's check).
-      IF EXISTS (
-        SELECT 1
-          FROM public.return_items ri
-          CROSS JOIN LATERAL public._return_order_price_lot_price(
-            v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
-          JOIN public.order_items oi ON oi.id = ri.order_item_id AND oi.order_id = v_order_id
-          JOIN public.invoice_items ii ON ii.order_item_id = oi.id AND ii.product_id = oi.product_id AND ii.quantity > 0
-          JOIN public.invoices i ON i.id = ii.invoice_id
-         WHERE ri.return_id = p_return_id
-           AND ri.priced_from = 'order_price' AND lp.applies
-           AND i.invoice_type <> 'credit_memo'
-           AND i.status IN ('posted', 'overdue', 'paid')
-           AND i.deleted_at IS NULL
-           AND ii.unit_size IS DISTINCT FROM coalesce(oi.unit_size, 'ea')
-      ) THEN RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'; END IF;
       IF EXISTS (
         SELECT 1
           FROM public.return_items ri
@@ -1219,16 +1231,6 @@ BEGIN
          WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND lp.not_invoiced
       ) THEN
         RAISE EXCEPTION 'RETURN_UNITS_NOT_INVOICED: some returned units are not on any invoice of this sale yet, and the sale has sales tax or a discount, so their credit cannot be priced; invoice them first';
-      END IF;
-      -- (#2066, Taha 27 Nov) a line billed at more than one price is not re-priced automatically (credit it by hand until A2)
-      IF EXISTS (
-        SELECT 1
-          FROM public.return_items ri
-          CROSS JOIN LATERAL public._return_order_price_lot_price(
-            v_order_id, ri.order_item_id, v_customer_id, p_return_id, ri.quantity) lp
-         WHERE ri.return_id = p_return_id AND ri.priced_from = 'order_price' AND lp.applies AND lp.mixed_rates
-      ) THEN
-        RAISE EXCEPTION 'RETURN_REPRICE_MIXED_RATES: this product was billed at more than one price on this sale, so the return cannot be re-priced automatically; credit it by hand from the right invoice line';
       END IF;
       IF EXISTS (
         SELECT 1

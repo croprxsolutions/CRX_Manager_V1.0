@@ -475,6 +475,8 @@ export default function Returns() {
   const updateItem = (idx: number, field: keyof EditItem, value: EditItem[keyof EditItem]) => {
     const updated = [...newItems];
     updated[idx] = { ...updated[idx], [field]: value };
+    // Decision 17 (Mason, 25 Nov): a damaged or opened line does not go back to stock by default; staff can tick it again.
+    if (field === 'condition' && (value === 'damaged' || value === 'opened')) updated[idx].restock = false;
     setNewItems(updated);
   };
 

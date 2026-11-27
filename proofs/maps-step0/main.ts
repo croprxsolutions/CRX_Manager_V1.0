@@ -363,6 +363,9 @@ map.on('load', () => {
       savedDraftJson = JSON.stringify(draw.getAll());
     }
     status.value = savedDraft ? 'Reopened synthetic draft · picture A' : 'Picture A';
+    if (stagingProof && !livePicturesEnabled) {
+      status.value += ' · live imagery unavailable: staging Mapbox token missing or invalid';
+    }
   } catch {
     status.value = 'Saved synthetic draft could not be reopened · picture A';
   }
@@ -454,8 +457,13 @@ toolbar.querySelector('#save-draft')!.addEventListener('click', () => {
 toolbar.querySelector('#reopen-draft')!.addEventListener('click', () => {
   if (!proof.ready) return;
   const draft = draw.getAll();
-  if (draw.getMode() === 'draw_polygon' || (draft.features.length && JSON.stringify(draft) !== savedDraftJson)) {
-    status.value = 'Save or clear the current sketch before reopening';
+  if (draw.getMode() === 'draw_polygon') {
+    status.value = 'Finish or clear the current sketch before reopening';
+    return;
+  }
+  const hasUnsavedChanges = savedDraftJson === null ? draft.features.length > 0 : JSON.stringify(draft) !== savedDraftJson;
+  if (hasUnsavedChanges) {
+    status.value = 'Save changes before reopening';
     return;
   }
   location.reload();

@@ -234,6 +234,9 @@ test('draws a polygon using Mapbox Draw on one MapLibre map', async ({ page, bro
   await page.locator('#proof-draw-control .mapbox-gl-draw_trash').click();
   await expect.poll(async () =>
     (await callProof<ReturnType<ProofApi['getDraft']>>(page, 'getDraft')).features.length).toBe(0);
+  await page.getByRole('button', { name: 'Reopen' }).click();
+  await expect(page.locator('#proof-status')).toHaveText('Save changes before reopening');
+  expect(await callProof<string>(page, 'mapInstanceId')).toBe(mapInstanceId);
   await save.click();
   await expect(page.locator('#proof-status')).toHaveText('Cleared the saved synthetic draft');
   await page.getByRole('button', { name: 'Reopen' }).click();

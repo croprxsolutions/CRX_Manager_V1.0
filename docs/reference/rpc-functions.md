@@ -420,7 +420,7 @@ safe_cents_qty(p_cents bigint, p_qty numeric) RETURNS bigint
 ```
 
 ## Rebate RPCs (audit #33, 2026-05-13)
-- `create_rebate_claim(p_program_id uuid, p_quantity numeric, p_claim_amount_cents bigint, p_order_id uuid?, p_customer_id uuid?, p_product_id uuid?, p_notes text?, p_idempotency_key text?)` — atomic claim create with auto-generated `RC-YYYY-NNNN` claim_number from per-year `rebate_claim_counters` table (atomic via `INSERT ... ON CONFLICT DO UPDATE` row-lock). Replaces the racy `count(*) + 1` pattern in `Rebates.tsx`. SECURITY DEFINER, role-gated to admin/sales_rep.
+- `create_rebate_claim(p_program_id uuid, p_quantity numeric, p_claim_amount_cents bigint, p_order_id uuid?, p_customer_id uuid?, p_product_id uuid?, p_notes text?, p_idempotency_key text?)` — creates a pending claim with a generated `RC-YYYY-NNNN` number. Admins and active sales reps use the same checks for an effective billed customer and an explicit program product. A rep with Rebates hidden cannot create or replay a claim. A caller who retains access can replay a saved claim after billing eligibility changes.
 - `transition_rebate_claim(p_claim_id uuid, p_new_status text, p_paid_amount_cents bigint?, p_manufacturer_ref text?, p_idempotency_key text?)` — state-machine transition under `SELECT FOR UPDATE` row lock. Validates pending→submitted/rejected, submitted→approved/rejected, approved→paid. Raises `INVALID_TRANSITION` token on stale-state. For `'paid'`, writes `paid_amount_cents` (defaults to `claim_amount_cents`) — closes the gap where the original UI never set this column. Admin-only.
 
 ## Sell-Side: Pricing & Booking (2026-06-14, roadmap #2 / #4 / #6)

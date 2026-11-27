@@ -84,6 +84,25 @@ describe('Sales follow-ups', () => {
     expect(screen.queryByRole('region', { name: 'Stale quotes' })).not.toBeInTheDocument();
   });
 
+  it('shows other reps’ and unassigned callbacks in the admin team queue', async () => {
+    const tasks = read([
+      { ...callback('pine-task', 'Pine Rep call', '2026-11-27'), assigned_to: 'pine-rep' },
+      { ...callback('unassigned-task', 'Unassigned call', '2026-11-28'), assigned_to: null },
+    ]);
+    db.from.mockImplementation((table) => {
+      if (table === 'team_notes') return tasks;
+      if (table === 'customers') return read([{ id: 'farm', farm_name: 'Oak Farm' }]);
+      return read([{ id: 'pine-rep', full_name: 'Pine Rep' }]);
+    });
+    render(<MemoryRouter><SalesFollowUps profile={{ id: 'admin', role: 'admin' }} deniedPages={['quotes']} /></MemoryRouter>);
+    const list = screen.getByRole('region', { name: 'Team callbacks' });
+    expect(await within(list).findByRole('link', { name: 'Pine Rep call' })).toHaveAttribute('href', '/team-board?note=pine-task');
+    expect(within(list).getByRole('link', { name: 'Unassigned call' })).toHaveAttribute('href', '/team-board?note=unassigned-task');
+    expect(within(list).getByText(/· Pine Rep/)).toBeVisible();
+    expect(within(list).getByText(/· Unassigned/)).toBeVisible();
+    expect(tasks.eq).not.toHaveBeenCalledWith('assigned_to', expect.anything());
+  });
+
   it('opens the existing exact callback and offers scheduling for a different quote', async () => {
     const approvedQuoteTasks = read([{ id: 'task-id', linked_entity_id: 'quote-1' }]);
     const myTasks = read([]);
@@ -161,6 +180,31 @@ describe('Sales follow-ups', () => {
     fireEvent.click(schedule);
     expect(await screen.findByRole('link', { name: 'Open callback for quote Q-1' })).toHaveAttribute('href', '/team-board?note=new-task');
     expect(screen.queryByRole('dialog', { name: 'Schedule callback' })).not.toBeInTheDocument();
+  });
+
+  it('refreshes both lists when closing after an unconfirmed callback save', async () => {
+    let saved = false;
+    const task = callback('saved-task', 'Saved callback', '2026-11-27', 'quote');
+    const insert = vi.fn().mockImplementation(async () => {
+      saved = true;
+      return { error: new Error('Lost save response') };
+    });
+    db.from.mockImplementation((table) => {
+      if (table === 'team_notes') return { insert, select: () => read(saved ? [task] : []) };
+      if (table === 'quotes') return read([{ id: 'quote-1', quote_number: 'Q-1', customer: { farm_name: 'Oak Farm' } }]);
+      return read(names);
+    });
+    render(<MemoryRouter><SalesFollowUps profile={profile} deniedPages={[]} /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Schedule callback for quote Q-1' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Schedule callback' });
+    const save = within(dialog).getByRole('button', { name: 'Save callback' });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+    await waitFor(() => expect(db.toast).toHaveBeenCalledWith('error', 'Lost save response'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByRole('link', { name: 'Saved callback' })).toHaveAttribute('href', '/team-board?note=saved-task');
+    expect(await screen.findByRole('link', { name: 'Open callback for quote Q-1' })).toHaveAttribute('href', '/team-board?note=saved-task');
+    expect(insert).toHaveBeenCalledOnce();
   });
 
   it('waits for a prefilled assignee, refuses an inactive selection, and saves an exact quote todo', async () => {

@@ -199,16 +199,18 @@ describe('QuoteBuilder — acres on a new line', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     await waitFor(() => expect(acres()).toEqual(['', '80', '80']));
 
-    // Clearing the field drops the acres it filled in, hint and all.
+    // Clearing the field never changes acres: the filled lines keep theirs and stay flagged (Mason, #2713).
     fireEvent.click(screen.getByRole('button', { name: /^Clear field/ }));
-    await waitFor(() => expect(acres()).toEqual(['', '', '']));
-    expect(screen.queryByText(/^(Filled from field|Copied from line above)/)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Field for Section 1' })).toHaveValue(''));
+    expect(acres()).toEqual(['', '80', '80']);
+    expect(screen.getByText(/^Filled from field: check/)).toBeInTheDocument();
+    expect(screen.getByText(/^Copied from line above: check/)).toBeInTheDocument();
 
     // The third line is still untouched after the clear: closing its picker drops it.
     const selects = screen.getAllByRole('button', { name: /Select product/ });
     fireEvent.click(selects[selects.length - 1]);
     fireEvent.keyDown(await screen.findByPlaceholderText('Search by name, SKU, category, or vendor...'), { key: 'Escape' });
-    await waitFor(() => expect(acres()).toEqual(['', '']));
+    await waitFor(() => expect(acres()).toEqual(['', '80']));
   });
 
   it("a reopened quote's new line below a saved line starts empty: neither the saved acres nor the field's are guessed (Taha, Sol, #2445)", { timeout: 20000 }, async () => {
@@ -228,9 +230,11 @@ describe('QuoteBuilder — acres on a new line', () => {
     fireEvent.change(fieldBox, { target: { value: 'West' } });
     fireEvent.click(await screen.findByRole('option', { name: /West Half/ }));
     await waitFor(() => expect(fieldBox).toHaveValue('West Half'));
-    // The saved line keeps its acres, and the rep is told to check them.
+    // The saved line keeps its acres, flagged for the rep to check before the next save (Sol, #2713).
     expect(acres()).toEqual(['80']);
     expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('saved lines keep their acres'));
+    expect(screen.getByText(/^Field changed: check/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Acres')).toHaveClass('bg-amber-50');
 
     // The saved 80 may be stale (field changed) or a partial treatment: the new line is left for the rep.
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
@@ -255,7 +259,7 @@ describe('QuoteBuilder — acres on a new line', () => {
     expect(screen.queryByText(/^(Filled from field|Copied from line above)/)).not.toBeInTheDocument();
   });
 
-  it('a copy of typed acres follows a field picked afterwards, and the typed line keeps its acres (Sol, #2445)', { timeout: 20000 }, async () => {
+  it('a field picked afterwards never rewrites acres: the typed line and its copy keep 40, both flagged (Mason, #2713)', { timeout: 20000 }, async () => {
     renderNewQuote();
     await pickCustomer();
     fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
@@ -267,11 +271,13 @@ describe('QuoteBuilder — acres on a new line', () => {
     const fieldBox = await screen.findByRole('combobox', { name: 'Field for Section 1' });
     fireEvent.change(fieldBox, { target: { value: 'Ho' } });
     fireEvent.click(await screen.findByRole('option', { name: /Home Quarter/ }));
-    await waitFor(() => expect(acres()).toEqual(['40', '80']));
-    expect(screen.queryByText(/^Copied from line above/)).not.toBeInTheDocument();
+    await waitFor(() => expect(fieldBox).toHaveValue('Home Quarter'));
+    expect(acres()).toEqual(['40', '40']);
+    expect(screen.getByText(/^Field changed: check/)).toBeInTheDocument();
+    expect(screen.getByText(/^Copied from line above: check/)).toBeInTheDocument();
   });
 
-  it('a copy confirmed by a save is still a copy: a later field change drops and refills it (Sol, #2713)', { timeout: 20000 }, async () => {
+  it('acres confirmed by a save are flagged again by a later field change, never rewritten (Sol, Mason, #2713)', { timeout: 20000 }, async () => {
     mockFrom.mockImplementation((table: string) => rowChain(
       table === 'quotes' ? savedQuote : table === 'quote_sections' ? [savedSection] : table === 'quote_items' ? [savedItem]
         : table === 'customers' ? [customer] : table === 'products' ? [product] : table === 'fields' ? [field, fieldB] : [],
@@ -296,12 +302,29 @@ describe('QuoteBuilder — acres on a new line', () => {
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
     await waitFor(() => expect(screen.getAllByLabelText('Acres')[1]).not.toHaveClass('bg-amber-50'));
 
-    // A new 120-acre field: line A keeps its typed 40; the confirmed copy is refilled and highlighted again.
+    // A new 120-acre field: both lines keep 40 and are highlighted again, so the next save asks.
     const fieldBox = await screen.findByRole('combobox', { name: 'Field for Section 1' });
     fireEvent.change(fieldBox, { target: { value: 'West' } });
     fireEvent.click(await screen.findByRole('option', { name: /West Half/ }));
-    await waitFor(() => expect(acres()).toEqual(['40', '120']));
-    expect(screen.getAllByLabelText('Acres')[1]).toHaveClass('bg-amber-50');
+    await waitFor(() => expect(fieldBox).toHaveValue('West Half'));
+    expect(acres()).toEqual(['40', '40']);
+    for (const box of screen.getAllByLabelText('Acres')) expect(box).toHaveClass('bg-amber-50');
+    fireEvent.click(screen.getByText('Save draft'));
+    expect(await screen.findByText(/^2 lines have acres filled in automatically/)).toBeInTheDocument();
+  });
+
+  it('Download PDF refuses a rate line with no acres, which would print at $0 (Sol, #2713)', { timeout: 20000 }, async () => {
+    renderNewQuote();
+    await pickCustomer();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
+    await pickProductOnLastLine();
+    expect(acres()).toEqual(['']);
+
+    const { downloadQuotePdf } = await import('../lib/quotePdf');
+    fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Download PDF/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('has a rate but no acres')));
+    expect(downloadQuotePdf).not.toHaveBeenCalled();
   });
 
   it('saves and prices the filled acres exactly as typed acres', { timeout: 20000 }, async () => {

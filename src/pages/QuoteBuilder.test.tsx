@@ -756,7 +756,7 @@ describe('QuoteBuilder', () => {
     expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining("Check those lines' acres"));
   });
 
-  it('drops the acres a cleared section field filled in when the customer changes, and keeps typed acres', async () => {
+  it("a customer change that clears the section field keeps every line's acres and flags them (Mason, #2713)", async () => {
     const { quote, product, section, item } = makeQuoteFixture('draft', 7);
     const typedItem = { ...item, id: 'item-2', sort_order: 1, acres: 15 };
     mockFrom.mockImplementation((table: string) => buildChain({
@@ -790,12 +790,14 @@ describe('QuoteBuilder', () => {
     fireEvent.change(customerBox, { target: { value: 'Far' } });
     fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
 
-    // Home Quarter belongs to another customer: the section drops it and the acres it filled in.
+    // Home Quarter belongs to another customer: the section drops it; acres are never rewritten,
+    // only flagged for the rep to check (Mason, 2026-11-27, #2713).
     await waitFor(() => expect(fieldBox).toHaveValue(''));
-    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['', '40']);
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['40', '40']);
+    for (const box of screen.getAllByLabelText('Acres')) expect(box).toHaveClass('bg-amber-50');
   });
 
-  it('drops the acres a field filled in when the field is cleared or replaced by hand, and keeps typed acres', async () => {
+  it('replacing or clearing the field by hand never rewrites acres, and flags every line (Mason, #2713)', async () => {
     const { quote, product, section, item } = makeQuoteFixture('draft', 7);
     const typedItem = { ...item, id: 'item-2', sort_order: 1, acres: 15 };
     mockFrom.mockImplementation((table: string) => buildChain({
@@ -824,15 +826,17 @@ describe('QuoteBuilder', () => {
     fireEvent.click(await screen.findByRole('option', { name: /Home Quarter/ }));
     await waitFor(() => expect(acres()).toEqual(['40', '15']));
 
-    // Replacing the field swaps in the new field's acres; the typed line is untouched.
+    // Replacing the field keeps every line's acres and flags them for the rep to check.
     fireEvent.change(fieldBox, { target: { value: 'No' } });
     fireEvent.click(await screen.findByRole('option', { name: /North Eighty/ }));
-    await waitFor(() => expect(acres()).toEqual(['80', '15']));
+    await waitFor(() => expect(fieldBox).toHaveValue('North Eighty'));
+    expect(acres()).toEqual(['40', '15']);
+    for (const box of screen.getAllByLabelText('Acres')) expect(box).toHaveClass('bg-amber-50');
 
-    // Clearing the field drops the acres it filled in.
+    // Clearing the field changes no acres either.
     fireEvent.click(screen.getByRole('button', { name: /^Clear field/ }));
     await waitFor(() => expect(fieldBox).toHaveValue(''));
-    expect(acres()).toEqual(['', '15']);
+    expect(acres()).toEqual(['40', '15']);
   });
 
   it('refuses to clear a saved field while it is still loading, then clears it once loaded, keeping saved acres', async () => {

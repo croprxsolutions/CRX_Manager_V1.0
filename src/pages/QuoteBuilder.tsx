@@ -206,9 +206,11 @@ interface LocalItem {
   // A new line's acres this page copied from the line above or the section's field, so the rep
   // need not retype them (Mason, 2026-11-24). A one-time copy, so the hint says "Copied". Shown as a hint by the Acres box until the rep types
   // there; not saved. A prefilled line with nothing else in it still counts as untouched.
-  acres_prefill?: 'line_above' | 'field';
-  // The rep confirmed these auto-filled acres when saving: no longer highlighted, but still a copy,
-  // so a later field change drops them like any other copy (Sol, #2713).
+  // 'field_changed': the section's field changed or was cleared after these acres were set. Acres
+  // are never rewritten then, only flagged for the rep to check (Mason, 2026-11-27, #2713).
+  acres_prefill?: 'line_above' | 'field' | 'field_changed';
+  // The rep confirmed these flagged acres when saving: no longer highlighted. A later field change
+  // or product change flags them again (Mason, 2026-11-27, #2713).
   acres_confirmed?: boolean;
   total_units_needed: number | null;
   unit_size: string | null;
@@ -286,7 +288,8 @@ function LineAcres({ item, onAcres }: { item: LocalItem; onAcres: (acres: number
       />
       {unchecked && (
         <p id={hintId} className="mt-1 text-xs text-amber-800">
-          {item.acres_prefill === 'line_above' ? 'Copied from line above' : 'Filled from field'}: check
+          {item.acres_prefill === 'line_above' ? 'Copied from line above'
+            : item.acres_prefill === 'field_changed' ? 'Field changed' : 'Filled from field'}: check
         </p>
       )}
     </>
@@ -387,7 +390,7 @@ function hasUserEnteredItemValues(item: LocalItem): boolean {
     || item.price_override !== null
     || item.actual_rate !== null
     || item.rate_unit !== null
-    || (item.acres !== null && !item.acres_prefill)
+    || (item.acres !== null && (!item.acres_prefill || item.acres_prefill === 'field_changed'))
     || item.total_units_needed !== null
     || item.unit_size !== null
     || item.price_unit !== null
@@ -1866,8 +1869,7 @@ export default function QuoteBuilder() {
     recalcAllForTier(cust.assigned_tier);
     // A section's field must belong to the quote's customer: clear any that does not. A saved
     // field still loading by id is kept; the unresolved-field check blocks saving until it loads.
-    // A field-filled acre count is dropped with the field; acres typed by hand are kept, so the
-    // user is told to check them (Luna, #1017).
+    // Every line keeps its acres and is flagged for the rep to check (Mason, 2026-11-27, #2713).
     const clearedSections = sections.filter((sec) => sec.field_id && fields[sec.field_id] && fields[sec.field_id].customer_id !== cust.id);
     if (clearedSections.length > 0) {
       setSections((prev) => prev.map((sec) => (
@@ -1924,32 +1926,18 @@ export default function QuoteBuilder() {
     [products, getTierPrice, unitConversions, lineBasisFor]
   );
 
-  // Clearing a section's field drops the acres that field filled in this session, and keeps acres
-  // typed by hand. A line loaded from the database has no recorded source, so its acres are kept
-  // even when they equal the field's: guessing could overwrite typed acres and bill them (Sol,
-  // #1049). The callers warn the user to check those lines' acres.
-  // The line keeps its unit price (a customer change has already re-priced every line for the new
-  // tier), and nothing is converted: a rate line with no acres needs nothing (rate × no acres), and
-  // a units line's totals do not use acres, only its per-acre figures do. So this needs neither the
-  // product nor the unit conversions, which may still be loading.
-  const clearSectionField = (sec: LocalSection): LocalSection => {
-    // An untouched copy of the line above was made for the old field, so it goes too (Sol, #2445).
-    const filledByField = (item: LocalItem) =>
-      item.acres != null && (item.acres_source === 'field' || item.acres_prefill === 'line_above');
-    return {
-      ...sec,
-      field_id: null,
-      items: sec.items.map((item) => {
-        if (!filledByField(item)) return item;
-        const cleared: LocalItem = { ...item, acres: null, acres_source: undefined, acres_prefill: undefined, acres_confirmed: undefined };
-        // A prefilled line with no product is still untouched: leave its quantity blank (Sol, #2445).
-        if (item.acres_prefill && !item.product_id) return cleared;
-        return item.calc_mode === 'units_direct'
-          ? { ...cleared, oz_per_acre: null, price_per_acre: null }
-          : { ...cleared, total_units_needed: 0, total_price: 0, profit: 0, net_margin: 0 };
-      }),
-    };
-  };
+  // Clearing a section's field never changes a line's acres, quantity or price: every line with
+  // acres is flagged instead, so the rep checks it before the next save or PDF (Mason, 2026-11-27,
+  // #2713: "flag, don't rewrite"). Dropping acres had let a cleared field export a $0 line, and a
+  // saved line's acres have no known source to drop by (Sol, #2713). Nothing is repriced, so this
+  // needs neither the product nor the unit conversions, which may still be loading.
+  const clearSectionField = (sec: LocalSection): LocalSection => ({
+    ...sec,
+    field_id: null,
+    items: sec.items.map((item) => ((item.acres ?? 0) > 0
+      ? { ...item, acres_prefill: item.acres_prefill ?? 'field_changed', acres_confirmed: undefined }
+      : item)),
+  });
   const clearSectionFieldRef = useLatestRef(clearSectionField);
   // The saved field ids whose by-id read has finished (loaded, missing or failed). Until it has, the
   // acres a field filled in cannot be told apart, so the section's field cannot be cleared or
@@ -2188,6 +2176,8 @@ export default function QuoteBuilder() {
             if (item._key !== itemKey) return item;
             const updated: LocalItem = {
               ...item,
+              // A new product's acres are checked again: the old product's check does not carry over (Sol, #2713).
+              acres_confirmed: undefined,
               product_id: product.id,
               product,
               notes: preferredQuoteNotes(product),
@@ -2282,9 +2272,11 @@ export default function QuoteBuilder() {
     setSections((prev) =>
       prev.map((section) => {
         if (section._key !== sectionKey) return section;
-        // Clearing or replacing the field first drops the acres the old field filled in, as a
-        // customer change does; typed acres stay (Codex, #1049). A first field also drops untouched
-        // copies of the line above, made before any field was known (Sol, #2445).
+        // Picking the same field again changes nothing (Sol, #2713).
+        if ((field?.id ?? null) === (section.field_id ?? null)) return section;
+        // A new, replaced or cleared field never changes acres already on a line; those lines are
+        // flagged for the rep to check, and only lines with no acres take the new field's (Mason,
+        // 2026-11-27, #2713).
         const cleared = clearSectionField(section);
         const withField = { ...cleared, field_id: field?.id ?? null };
         if (effectiveAcres == null) return withField;
@@ -2341,7 +2333,7 @@ export default function QuoteBuilder() {
       // be a partial-field treatment (Sol, #2445), so neither they nor the field's are guessed and
       // the new line starts empty, as before.
       if (above.acres_source === undefined) return null;
-      // Field-filled acres stay tied to the field, so clearing the field drops this copy too.
+      // A copy keeps the source of the acres it copied.
       return { acres: above.acres, acres_source: above.acres_source, acres_prefill: 'line_above' };
     }
     // Acres typed as 0 on the line above mean "none here": the new line starts empty (Luna, #2445).
@@ -3181,6 +3173,14 @@ export default function QuoteBuilder() {
 
   // === GAP FIX #1: Download Quote as PDF ===
   const handleDownloadPdf = async () => {
+    // A rate line with no acres prices at $0; Save refuses it, so the PDF does too (Sol, #2713).
+    const noAcres = sections.flatMap((sec) => sec.items).find((i) => i.product_id
+      && i.calc_mode !== 'units_direct' && (i.actual_rate ?? 0) > 0 && !((i.acres ?? 0) > 0));
+    if (noAcres) {
+      const prod = noAcres.product || products.find((p) => p.id === noAcres.product_id);
+      toast('error', `"${prod?.product_name || 'An item'}" has a rate but no acres. Add its acres before downloading the PDF.`);
+      return;
+    }
     if (!(await confirmAutoAcres())) return;
     await runCriticalAction({
       action: async () => {

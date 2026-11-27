@@ -27,6 +27,8 @@ interface CustomerSearchPickerProps<T extends CustomerSearchResult = CustomerSea
   excludeIds?: readonly string[];
   placeholder?: string;
   ariaLabel?: string;
+  /** See RecordSearchPicker: an emptied box left by blur keeps the customer; the X still clears. */
+  keepLabelOnEmptyBlur?: boolean;
   id?: string;
   disabled?: boolean;
   className?: string;
@@ -52,6 +54,7 @@ export default function CustomerSearchPicker<T extends CustomerSearchResult = Cu
   excludeIds,
   placeholder = 'Search customers...',
   ariaLabel = 'Search customers',
+  keepLabelOnEmptyBlur,
   id,
   disabled,
   className,
@@ -78,6 +81,7 @@ export default function CustomerSearchPicker<T extends CustomerSearchResult = Cu
       sentryContext="customer_search_picker"
       placeholder={placeholder}
       ariaLabel={ariaLabel}
+      keepLabelOnEmptyBlur={keepLabelOnEmptyBlur}
       id={id}
       disabled={disabled}
       className={className}

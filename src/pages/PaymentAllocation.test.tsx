@@ -420,6 +420,151 @@ describe('Record Payments: faster entry', () => {
     expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
   });
 
+  it('emptying the customer box and clicking away keeps the typed check and allocations', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.change(screen.getByLabelText('Check #'), { target: { value: '301' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(box, { target: { value: '' } });
+    fireEvent.blur(box);
+
+    expect(box).toHaveValue('Big Farm');
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
+    expect(screen.getByLabelText('Check #')).toHaveValue('301');
+    expect(screen.getByText('INV-OLD')).toBeInTheDocument();
+    // Posting waits until the user picks a customer or keeps this one.
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'keep Big Farm' }));
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled();
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
+  });
+
+  it('emptying the box with nothing typed still clears the customer', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(box, { target: { value: '' } });
+    fireEvent.blur(box);
+    await waitFor(() => expect(screen.queryByText('INV-OLD')).not.toBeInTheDocument());
+    expect(box).toHaveValue('');
+  });
+
+  it('the X still clears the customer and the typed check (only an emptied box left by blur keeps them)', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear customer' }));
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    await waitFor(() => expect(screen.queryByText('INV-OLD')).not.toBeInTheDocument());
+    expect(box).toHaveValue('');
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('');
+  });
+
+  it('"keep" with nothing typed keeps the customer: pressing it does not blur the emptied box first', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    box.focus();
+    fireEvent.change(box, { target: { value: '' } });
+    const keep = screen.getByRole('button', { name: 'keep Big Farm' });
+    // A browser blurs the focused box on mousedown unless the button prevents it.
+    expect(fireEvent.mouseDown(keep)).toBe(false);
+    fireEvent.click(keep);
+    expect(box).toHaveValue('Big Farm');
+    fireEvent.blur(box);
+    expect(box).toHaveValue('Big Farm');
+    expect(screen.getByText('INV-OLD')).toBeInTheDocument();
+    expect(screen.queryByText(/You started a new customer search/)).not.toBeInTheDocument();
+  });
+
+  it('re-picking the customer reloads its invoices; a changed list clears the amounts and says so', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$80.00');
+    const invoiceReads = mockFrom.mock.calls.filter(([t]) => t === 'invoices').length;
+    // Someone posts an older invoice for this farm while the page is open.
+    const posted = [invoice('i0', 'INV-POSTED', '2026-07-01', 1000), ...openInvoices];
+    mockFrom.mockImplementation((table: string) => buildChain(
+      table === 'customers' ? { data: [customer], error: null }
+        : table === 'invoices' ? { data: posted, error: null, count: posted.length } as { data: unknown; error: unknown }
+          : { data: [], error: null },
+    ));
+
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(box, { target: { value: 'Big' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
+
+    expect(box).toHaveValue('Big Farm');
+    // A fresh read, so an invoice posted since shows up (Sol, 2026-11-27).
+    expect(mockFrom.mock.calls.filter(([t]) => t === 'invoices')).toHaveLength(invoiceReads + 1);
+    await screen.findByText('INV-POSTED');
+    // The older invoice posted since: the old amounts would skip it, so they clear (Mason, 2026-11-27).
+    expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$0.00');
+    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/open invoices changed since you allocated/));
+    expect(screen.getByLabelText('Check Amount')).toHaveValue('80.00');
+  });
+
+  it('while the re-pick reload runs the allocation buttons are locked; the amounts come back when it lands', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+    const allocated = () => screen.getByText('Allocated:').parentElement!;
+    expect(allocated()).toHaveTextContent('$80.00');
+    let release!: () => void;
+    const held = new Promise<{ data: unknown; error: unknown; count: number }>((resolve) => {
+      release = () => resolve({ data: openInvoices, error: null, count: openInvoices.length });
+    });
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'invoices') return buildChain(table === 'customers' ? { data: [customer], error: null } : { data: [], error: null });
+      const chain = buildChain({ data: null, error: null });
+      chain.then = held.then.bind(held);
+      return chain;
+    });
+
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(box, { target: { value: 'Big' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
+    // The old list must not be allocated against while the fresh one loads (Sol, 2026-11-27).
+    expect(screen.getByRole('button', { name: /Auto-Allocate/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Pay full balance/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeDisabled();
+    release();
+    await waitFor(() => expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled());
+    expect(screen.getByRole('button', { name: /Auto-Allocate/ })).toBeEnabled();
+    expect(allocated()).toHaveTextContent('$80.00');
+  });
+
+  it('a failed re-pick reload keeps the allocations, and Retry keeps them too', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+    const allocated = () => screen.getByText('Allocated:').parentElement!;
+    let failRead = true;
+    mockFrom.mockImplementation((table: string) => buildChain(
+      table === 'customers' ? { data: [customer], error: null }
+        : table === 'invoices'
+          ? (failRead ? { data: null, error: { message: 'network' } } : { data: openInvoices, error: null, count: openInvoices.length }) as { data: unknown; error: unknown }
+          : { data: [], error: null },
+    ));
+
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(box, { target: { value: 'Big' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
+    const retry = await screen.findByRole('button', { name: /Try again/ });
+    expect(allocated()).toHaveTextContent('$80.00');
+    failRead = false;
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled());
+    expect(allocated()).toHaveTextContent('$80.00');
+  });
+
   it('Pay full balance is admin-only: a sales rep sees only their own invoices, so the total could be short', async () => {
     mockAuth.role = 'sales_rep';
     try {
@@ -523,7 +668,11 @@ describe('Record Payments: faster entry', () => {
 
     it('ignores a late prepay balance for the first customer once the second is chosen', async () => {
       renderPayments();
-      await chooseByKeyboard();
+      // Pick Big Farm by name (the keyboard helper's ArrowDown lands on Small Farm in this list).
+      const box = screen.getByRole('combobox', { name: 'Customer' });
+      fireEvent.change(box, { target: { value: 'Big' } });
+      fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
+      await screen.findByText('INV-OLD');
       fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
       fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
       fireEvent.click(screen.getByRole('button', { name: /Apply Payment/ }));

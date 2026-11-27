@@ -228,11 +228,18 @@ export default function PaymentAllocation() {
 
   /* ── Load invoices when customer selected ──────────────────────────── */
 
-  const fetchInvoices = useCallback(async (customerId: string) => {
+  // The list on screen, read when a same-customer reload lands.
+  const invoicesRef = useRef(invoices);
+  useEffect(() => { invoicesRef.current = invoices; }, [invoices]);
+
+  // keepAllocations: a reload of the same customer keeps the amounts on screen only when the open invoices
+  // and their balances are unchanged; otherwise they clear and the clerk is told to allocate again
+  // (Mason, 2026-11-27), so a check is never posted against a list that has since changed.
+  const fetchInvoices = useCallback(async (customerId: string, keepAllocations = false) => {
     const seq = ++invoiceLoadSeq.current;
     setLoadingInvoices(true);
     // The previous customer's invoices must never stay on screen to be paid against.
-    setInvoices([]);
+    if (!keepAllocations) setInvoices([]);
     const today = new Date();
     // Every open invoice, page by page: a check could only be applied to the
     // customer's first 200 before (2026-10-20 Goal 4 part 2).
@@ -273,13 +280,29 @@ export default function PaymentAllocation() {
       allocated_cents: 0,
     }));
 
-    setInvoices(mapped);
+    const prev = invoicesRef.current;
+    const unchanged = prev.length === mapped.length
+      && mapped.every((inv, i) => prev[i].invoice_id === inv.invoice_id && prev[i].balance_cents === inv.balance_cents);
+    if (keepAllocations && unchanged) {
+      setInvoices(prev.map((inv, i) => ({ ...mapped[i], allocated_cents: inv.allocated_cents })));
+    } else {
+      if (keepAllocations && prev.some((inv) => inv.allocated_cents > 0)) {
+        toast('warning', "This customer's open invoices changed since you allocated. The amounts were cleared: allocate the check again.");
+      }
+      setInvoices(mapped);
+    }
     setLoadingInvoices(false);
   }, [toast]);
 
   const selectCustomer = useCallback((c: CustomerOption) => {
-    focusAmountAfterPick.current = true;
     setCustomerBoxText(null);
+    // Re-picking the farm already chosen reloads its invoices (one may have been posted since) and keeps
+    // the typed check and the amounts on invoices still open. A saved check still starts fresh.
+    if (selectedCustomer?.id === c.id && !lastResult) {
+      fetchInvoices(c.id, true);
+      return;
+    }
+    focusAmountAfterPick.current = true;
     // Switching to another farm starts a fresh check, so one farm's check can't be posted to another (Mason, 2026-11-25).
     // The date goes back to the one this check started with, so an abandoned date is not carried.
     if (selectedCustomer && selectedCustomer.id !== c.id) {
@@ -295,7 +318,7 @@ export default function PaymentAllocation() {
     setLastResult(null);
     setRetryRefused(false);
     fetchInvoices(c.id);
-  }, [fetchInvoices, selectedCustomer, startingPaymentDate]);
+  }, [fetchInvoices, selectedCustomer, lastResult, startingPaymentDate]);
 
   const clearCustomer = useCallback(() => {
     // A load still running for the cleared customer must not refill the list.
@@ -666,6 +689,9 @@ export default function PaymentAllocation() {
                     if (customer) selectCustomer(customer);
                     else clearCustomer();
                   }}
+                  // Leaving an emptied box keeps a typed check: the name comes back and posting waits for a
+                  // pick or "keep". The X still clears on purpose.
+                  keepLabelOnEmptyBlur={hasUnsavedPayment}
                   select={PAYMENT_CUSTOMER_SELECT}
                   disabled={submitting}
                   placeholder="Search by name or account #..."
@@ -678,7 +704,18 @@ export default function PaymentAllocation() {
                 {customerBeingChanged && (
                   <p className="mt-1 text-xs text-amber-600">
                     You started a new customer search. Pick a customer from the list to switch, or{' '}
-                    <button type="button" className="underline font-medium" onClick={() => setCustomerBoxText(null)}>
+                    <button
+                      type="button"
+                      className="underline font-medium"
+                      // No blur first: an emptied box would clear the farm before the click lands. "Keep" is
+                      // Escape in the box, which puts the name back there and here.
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        document.getElementById('payment-customer')
+                          ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                        setCustomerBoxText(null);
+                      }}
+                    >
                       keep {selectedCustomer.farm_name}
                     </button>
                     .
@@ -818,7 +855,8 @@ export default function PaymentAllocation() {
                       size="sm"
                       icon={<Zap className="w-4 h-4" />}
                       onClick={handleAutoAllocate}
-                      disabled={submitting || customerBeingChanged || checkCents <= 0 || invoices.length === 0}
+                      // Locked while the invoices (re)load: a re-pick keeps the old list on screen until the fresh one lands.
+                      disabled={submitting || customerBeingChanged || invoicesNotReady || checkCents <= 0 || invoices.length === 0}
                     >
                       Auto-Allocate
                     </Button>
@@ -841,7 +879,7 @@ export default function PaymentAllocation() {
                       icon={<RotateCcw className="w-4 h-4" />}
                       onClick={handleClearAllocations}
                       showChevron={false}
-                      disabled={submitting || !hasAllocations}
+                      disabled={submitting || loadingInvoices || !hasAllocations}
                     >
                       Clear
                     </Button>
@@ -856,7 +894,8 @@ export default function PaymentAllocation() {
                   // Not "no open invoices": a failed read must not look like a paid-up customer.
                   <LoadFailedState
                     title="Open invoices could not be loaded, so the check cannot be applied"
-                    onRetry={() => { void fetchInvoices(selectedCustomer.id); }}
+                    // Retrying keeps any amounts still on screen (a failed re-pick reload keeps them).
+                    onRetry={() => { void fetchInvoices(selectedCustomer.id, true); }}
                   />
                 ) : invoices.length === 0 ? (
                   <div className="text-center py-12 text-secondary text-sm">

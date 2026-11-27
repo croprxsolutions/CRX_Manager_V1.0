@@ -46,6 +46,8 @@ export interface RecordSearchPickerProps<T extends { id: string }> {
   placeholder?: string;
   ariaLabel: string;
   clearLabel?: string;
+  /** Leaving an emptied box puts the label back instead of clearing; the X still clears. Off by default. */
+  keepLabelOnEmptyBlur?: boolean;
   id?: string;
   disabled?: boolean;
   className?: string;
@@ -79,6 +81,7 @@ export default function RecordSearchPicker<T extends { id: string }>({
   placeholder,
   ariaLabel,
   clearLabel,
+  keepLabelOnEmptyBlur = false,
   id,
   disabled = false,
   className = '',
@@ -201,7 +204,7 @@ export default function RecordSearchPicker<T extends { id: string }>({
   const handleBlur = () => {
     // Only text the user emptied clears the choice; a label still loading (or that failed
     // to load, or that arrived while the box had focus) must not drop the saved record.
-    if (editedRef.current && !query.trim()) {
+    if (editedRef.current && !query.trim() && !keepLabelOnEmptyBlur) {
       clear();
       return;
     }

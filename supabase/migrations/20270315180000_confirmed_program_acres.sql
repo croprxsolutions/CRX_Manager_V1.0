@@ -68,8 +68,8 @@ BEGIN
         CROSS JOIN LATERAL (
           -- A pass with field details uses those details. Only a fieldless
           -- section can use a manual acreage total from a pass with no details.
-          SELECT SUM(CASE WHEN (f.field_id = p.field_id OR
-            (p.field_id IS NULL AND field.customer_id = p.customer_id))
+          SELECT SUM(CASE WHEN field.customer_id = p.customer_id
+            AND (p.field_id IS NULL OR f.field_id = p.field_id)
             AND f.applied_acres >= 0 AND f.applied_acres < 'Infinity'::numeric
             THEN f.applied_acres ELSE 0 END) AS acres
           FROM public.job_applied_record_fields f

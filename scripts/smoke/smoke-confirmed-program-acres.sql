@@ -53,7 +53,8 @@ BEGIN
       VALUES ('SMOKE-ACRES-' || v_tag || '-' || i, v_farm, v_admin, true,
         CASE WHEN i = 5 THEN v_season - 1 ELSE v_season END) RETURNING id INTO v_quote;
     INSERT INTO public.quote_sections (quote_id, section_name, field_id)
-      VALUES (v_quote, 'Test program ' || v_tag || ' ' || i, CASE WHEN i <> 3 THEN v_field END)
+      VALUES (v_quote, 'Test program ' || v_tag || ' ' || i,
+        CASE i WHEN 2 THEN v_other_farm_field WHEN 3 THEN NULL ELSE v_field END)
       RETURNING id INTO v_section;
     INSERT INTO public.quote_items (quote_id, section_id, product_id, acres, price_per_unit)
       VALUES (v_quote, v_section, v_product, 100, 12);
@@ -119,6 +120,10 @@ BEGIN
     VALUES (v_jobs[3], v_today, v_admin, 30) RETURNING id INTO v_record;
   INSERT INTO public.job_applied_record_fields (application_record_id, field_id, applied_acres)
     VALUES (v_record, v_other_farm_field, 30);
+  INSERT INTO public.job_applied_records (job_id, application_date, created_by)
+    VALUES (v_jobs[2], v_today, v_admin) RETURNING id INTO v_record;
+  INSERT INTO public.job_applied_record_fields (application_record_id, field_id, applied_acres)
+    VALUES (v_record, v_other_farm_field, 30);
 
   INSERT INTO public.blend_tickets (ticket_number, uploaded_by, customer_id, job_id, season,
     status, review_status)
@@ -168,7 +173,7 @@ BEGIN
   SELECT row INTO STRICT v_row FROM jsonb_array_elements(v_report) AS rows(row)
     WHERE row->>'section_id' = v_sections[2]::text;
   IF NOT (v_row @> '{"completed_acres":0,"completion_pct":0,"status":"in_progress","blend_ticket_count":2}') THEN
-    RAISE EXCEPTION 'SMOKE_FAIL tickets alone credited application: %', v_row;
+    RAISE EXCEPTION 'SMOKE_FAIL ticket-only or wrong-farm acres credited application: %', v_row;
   END IF;
   SELECT row INTO STRICT v_row FROM jsonb_array_elements(v_report) AS rows(row)
     WHERE row->>'section_id' = v_sections[3]::text;

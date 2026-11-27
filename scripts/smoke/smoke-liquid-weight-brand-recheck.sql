@@ -40,6 +40,26 @@ BEGIN
     jsonb_build_array(jsonb_build_object('product_id', v_size, 'product_name', '[SMOKE] Rename Size', 'quantity', 10, 'unit', 'Gal')),
     '[]'::jsonb, false, v_reviewer, 'rename-ticket-' || v_tag);
 
+  BEGIN
+    EXECUTE 'RESET ROLE';
+    EXECUTE $closed$
+      CREATE OR REPLACE FUNCTION public.liquid_density_review_open() RETURNS boolean
+      LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS 'SELECT false';
+    $closed$;
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM public.upsert_parent_brand(v_parent, v_size, 'Closed Switch Brand', '12345-1', 'Smoke Maker', true,
+      NULL, NULL, v_brand, 1, p_idempotency_key => 'rename-closed-' || v_tag);
+    v_result := public.get_product_weights(ARRAY[v_size])->'products'->v_size::text;
+    IF (v_result->'weight'->>'lb_per_unit')::numeric IS DISTINCT FROM 9.5 OR
+       (v_result->'subject'->>'version')::bigint IS DISTINCT FROM 2::bigint THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: a rename while the switch is closed must preserve the approval and version';
+    END IF;
+    RAISE EXCEPTION 'SMOKE_CLOSED_ROLLBACK';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'SMOKE_CLOSED_ROLLBACK' THEN RAISE; END IF;
+  END;
+
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   PERFORM public.upsert_parent_brand(v_parent, v_size, E'  sMOKE\t  BRAND A  ', '12345-1', 'Smoke Maker', true,
     NULL, NULL, v_brand, 1, p_idempotency_key => 'rename-cosmetic-' || v_tag);
@@ -64,13 +84,14 @@ BEGIN
   IF (v_result->'weight'->>'lb_per_unit')::numeric IS DISTINCT FROM 9.5 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a rechecked weight must be available for new paperwork';
   END IF;
-  FOREACH v_change IN ARRAY ARRAY['name', 'EPA registration'] LOOP
+  FOREACH v_change IN ARRAY ARRAY['name', 'EPA registration', 'manufacturer'] LOOP
     BEGIN
       EXECUTE 'RESET ROLE';
       UPDATE public.product_parents SET is_active = false WHERE id = v_parent;
       UPDATE public.product_parent_brands
          SET brand_name = CASE WHEN v_change = 'name' THEN 'Inactive Brand Correction' ELSE brand_name END,
-             epa_registration = CASE WHEN v_change = 'EPA registration' THEN '12345-2' ELSE epa_registration END
+             epa_registration = CASE WHEN v_change = 'EPA registration' THEN '12345-2' ELSE epa_registration END,
+             manufacturer = CASE WHEN v_change = 'manufacturer' THEN 'Second Smoke Maker' ELSE manufacturer END
        WHERE id = v_brand;
       IF (SELECT review_state FROM public.product_parent_density_values WHERE id = v_approved) IS DISTINCT FROM 'draft' THEN
         RAISE EXCEPTION 'SMOKE_FAIL: a % change must withdraw an inactive group approval', v_change;

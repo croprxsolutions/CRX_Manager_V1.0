@@ -5,6 +5,9 @@ SET LOCAL lock_timeout = '5s';
 
 DO $preflight$
 BEGIN
+  IF public.liquid_density_review_open() IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'PREFLIGHT_LIQUID_WEIGHT_BRAND_RECHECK: the weight review switch must be closed';
+  END IF;
   IF EXISTS (
     SELECT 1 FROM (VALUES
       ('public.approve_weights(jsonb,text)', 'adda6f0854f3de86bca3e5d50ae88113'),

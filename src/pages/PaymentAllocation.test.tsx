@@ -535,6 +535,31 @@ describe('Record Payments: faster entry', () => {
     expect(allocated()).toHaveTextContent('$0.00');
   });
 
+  it('a failed re-pick reload keeps the allocations, and Retry keeps them too', async () => {
+    renderPayments();
+    await chooseByKeyboard();
+    fireEvent.change(screen.getByLabelText('Check Amount'), { target: { value: '80.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Pay full balance/ }));
+    const allocated = () => screen.getByText('Allocated:').parentElement!;
+    let failRead = true;
+    mockFrom.mockImplementation((table: string) => buildChain(
+      table === 'customers' ? { data: [customer], error: null }
+        : table === 'invoices'
+          ? (failRead ? { data: null, error: { message: 'network' } } : { data: openInvoices, error: null, count: openInvoices.length }) as { data: unknown; error: unknown }
+          : { data: [], error: null },
+    ));
+
+    const box = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(box, { target: { value: 'Big' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Big Farm/ }));
+    const retry = await screen.findByRole('button', { name: /Try again/ });
+    expect(allocated()).toHaveTextContent('$80.00');
+    failRead = false;
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeEnabled());
+    expect(allocated()).toHaveTextContent('$80.00');
+  });
+
   it('Pay full balance is admin-only: a sales rep sees only their own invoices, so the total could be short', async () => {
     mockAuth.role = 'sales_rep';
     try {

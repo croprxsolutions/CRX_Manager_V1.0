@@ -885,7 +885,8 @@ export default function PaymentAllocation() {
                   // Not "no open invoices": a failed read must not look like a paid-up customer.
                   <LoadFailedState
                     title="Open invoices could not be loaded, so the check cannot be applied"
-                    onRetry={() => { void fetchInvoices(selectedCustomer.id); }}
+                    // Retrying keeps any amounts still on screen (a failed re-pick reload keeps them).
+                    onRetry={() => { void fetchInvoices(selectedCustomer.id, true); }}
                   />
                 ) : invoices.length === 0 ? (
                   <div className="text-center py-12 text-secondary text-sm">

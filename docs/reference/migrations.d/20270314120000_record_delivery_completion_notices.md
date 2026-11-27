@@ -1,6 +1,8 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270314120000_record_delivery_completion_notices.sql` (SQL sha256: `b3a404ade53b42b0283c67d309036971650f10c1f790896147a001efe9208c41`) registers a saved interactive delivery completion for its checked follow-up sender. The existing completion-history sequence supplies the durable identity. The original signed-in actor and receipt must still be authorized to send.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270314120000_record_delivery_completion_notices.sql` (SQL sha256: `35c9a0d6bf76ce5183dd03ef0bc83219c5720dc2cd12eeee4565290d01311282`) registers a saved interactive delivery completion for its checked follow-up sender. The existing completion-history sequence supplies the durable identity. The original signed-in actor and receipt must still be authorized to send.
 
 The ordinary completion response, legacy arguments, proof-of-load inputs and offline recovery remain compatible.
+
+Install after proof-of-load and whole-item quantity enforcement. The migration checks that the whole-item triggers on orders and deliveries are active before creating any objects. A sealed local replay refused installation when the delivery trigger was temporarily disabled and verified the rollback restored the rule.
 
 Old screens continue their current sends. The database comes before the separate screen cutover. Roll back the screens first and keep the database entry points available to cached clients. Do not remove recorded notices or completion receipts.
 

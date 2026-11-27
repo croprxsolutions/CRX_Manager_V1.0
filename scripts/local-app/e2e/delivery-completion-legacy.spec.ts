@@ -86,6 +86,16 @@ test.afterEach(() => {
     DELETE FROM public.financial_audit_log WHERE entity_id IN (${delivery}, ${order}) OR entity_id IN (${invoiceIds});
     DELETE FROM public.invoice_items WHERE invoice_id IN (${invoiceIds});
     DELETE FROM public.invoices WHERE delivery_id = ${delivery};
+    DO $cleanup$
+    BEGIN
+      IF to_regclass('public.delivery_completion_notice_events') IS NOT NULL THEN
+        DELETE FROM public.delivery_completion_notice_claims WHERE completion_seq IN
+          (SELECT seq FROM public.delivery_brand_events WHERE delivery_id = ${delivery});
+        DELETE FROM public.delivery_completion_notice_events WHERE completion_seq IN
+          (SELECT seq FROM public.delivery_brand_events WHERE delivery_id = ${delivery});
+      END IF;
+    END;
+    $cleanup$;
     DELETE FROM public.delivery_brand_events WHERE delivery_id = ${delivery};
     DELETE FROM public.idempotency_keys WHERE operation IN ('complete_delivery','start_and_complete_delivery')
       AND result ->> 'delivery_id' = '${deliveryId}';

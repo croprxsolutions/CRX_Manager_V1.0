@@ -3,6 +3,17 @@
 -- offline recovery retain their original save and notice paths.
 SET LOCAL lock_timeout = '5s';
 
+DO $quantity_dependency$
+BEGIN
+  IF (SELECT count(*) FROM pg_trigger
+      WHERE tgrelid IN ('public.order_items'::regclass, 'public.delivery_items'::regclass)
+        AND tgname = 'a3_whole_item_quantity' AND tgenabled IN ('O', 'A')
+        AND tgfoid = to_regprocedure('public._enforce_whole_item_quantity()')) <> 2 THEN
+    RAISE EXCEPTION 'COMPLETION_NOTICE_WHOLE_ITEM_RULE_REQUIRED';
+  END IF;
+END;
+$quantity_dependency$;
+
 CREATE TABLE public.delivery_completion_notice_events (
   completion_seq bigint PRIMARY KEY REFERENCES public.delivery_brand_events(seq),
   receipt_id uuid NOT NULL UNIQUE,

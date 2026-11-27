@@ -167,6 +167,13 @@ BEGIN
   RESET ROLE;
   IF (SELECT count(*) FROM public.notifications WHERE notification_type = 'credit_limit_exceeded' AND related_entity_id = farm_id AND created_by = rep_id)
      <> (SELECT count(*) FROM public.profiles WHERE role='admin' AND is_active)
+     OR (SELECT count(DISTINCT user_id) FROM public.notifications WHERE notification_type = 'credit_limit_exceeded' AND related_entity_id = farm_id AND created_by = rep_id)
+     <> (SELECT count(*) FROM public.profiles WHERE role='admin' AND is_active)
+     OR EXISTS (
+       SELECT 1 FROM public.notifications AS n
+       WHERE n.notification_type = 'credit_limit_exceeded' AND n.related_entity_id = farm_id AND n.created_by = rep_id
+         AND NOT EXISTS (SELECT 1 FROM public.profiles AS p WHERE p.id = n.user_id AND p.role = 'admin' AND p.is_active)
+     )
      OR EXISTS (
        SELECT 1 FROM public.notifications
        WHERE notification_type = 'credit_limit_exceeded' AND related_entity_id = farm_id

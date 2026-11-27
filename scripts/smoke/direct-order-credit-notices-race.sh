@@ -10,6 +10,9 @@ for id in "$actor" "$farm" "$product"; do
   test "${#id}" -eq 36 || exit 2
 done
 test "$tag" = "local-credit-race-$farm" || exit 2
+# Refuse anywhere but a container, and drop libpq overrides so psql can only reach the local socket.
+test -f /.dockerenv || exit 2
+unset PGHOST PGHOSTADDR PGPORT PGSERVICE PGSERVICEFILE PGDATABASE PGUSER PGOPTIONS
 psqlq() { psql -U supabase_admin -d postgres -XqAt -v ON_ERROR_STOP=1 "$@"; }
 scratch=$(mktemp -d)
 trap 'rm -f "$scratch/first" "$scratch/second"; rmdir "$scratch"' EXIT
@@ -82,5 +85,9 @@ prove_pair notice "$notice" "$notice"
 test "$(psqlq -c "SELECT
   (SELECT count(*) FROM public.notifications WHERE notification_type='credit_limit_exceeded' AND related_entity_id='$farm' AND created_by='$actor')
     = (SELECT count(*) FROM public.profiles WHERE role='admin' AND is_active)
+  AND (SELECT count(DISTINCT user_id) FROM public.notifications WHERE notification_type='credit_limit_exceeded' AND related_entity_id='$farm' AND created_by='$actor')
+    = (SELECT count(*) FROM public.profiles WHERE role='admin' AND is_active)
+  AND NOT EXISTS (SELECT 1 FROM public.notifications n WHERE n.notification_type='credit_limit_exceeded' AND n.related_entity_id='$farm' AND n.created_by='$actor'
+    AND NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id=n.user_id AND p.role='admin' AND p.is_active))
   AND (SELECT result #>> '{_direct_order_credit_notice,handled}' = 'true' FROM public.idempotency_keys WHERE idempotency_key='$tag-new' AND operation='create_direct_order');")" = t
 printf 'LOCAL_CREDIT_RACE_NOTICE_PASS\n'

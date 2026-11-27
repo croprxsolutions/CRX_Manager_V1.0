@@ -204,7 +204,7 @@ interface LocalItem {
   // cannot be told apart, and guessing could delete typed acres.
   acres_source?: 'field' | 'typed';
   // A new line's acres this page copied from the line above or the section's field, so the rep
-  // need not retype them (Mason, 2026-11-24). Shown as a hint by the Acres box until the rep types
+  // need not retype them (Mason, 2026-11-24). A one-time copy, so the hint says "Copied". Shown as a hint by the Acres box until the rep types
   // there; not saved. A prefilled line with nothing else in it still counts as untouched.
   acres_prefill?: 'line_above' | 'field';
   total_units_needed: number | null;
@@ -281,7 +281,7 @@ function LineAcres({ item, onAcres }: { item: LocalItem; onAcres: (acres: number
       />
       {item.acres_prefill && (
         <p id={hintId} className="mt-1 text-xs text-secondary">
-          {item.acres_prefill === 'line_above' ? 'Filled from line above' : 'Filled from field'}
+          {item.acres_prefill === 'line_above' ? 'Copied from line above' : 'Filled from field'}
         </p>
       )}
     </>
@@ -2303,15 +2303,18 @@ export default function QuoteBuilder() {
   // filled: existing lines and anything typed are never changed here.
   function prefilledAcres(sec: LocalSection): Pick<LocalItem, 'acres' | 'acres_source' | 'acres_prefill'> | null {
     const above = sec.items[sec.items.length - 1];
-    if (above?.acres != null && above.acres > 0) {
-      // Acres the field filled in stay tied to the field, so clearing the field drops this copy too.
-      return { acres: above.acres, acres_source: above.acres_source === 'field' ? 'field' : 'typed', acres_prefill: 'line_above' };
-    }
     const field = sec.field_id ? fields[sec.field_id] : undefined;
     const fieldAcres = field ? billableAcres(field.override_acres, field.measured_acres, field.total_acres) : null;
-    if (fieldAcres != null && fieldAcres > 0) {
-      return { acres: fieldAcres, acres_source: 'field', acres_prefill: 'field' };
+    const fromField = { acres: fieldAcres, acres_source: 'field', acres_prefill: 'field' } as const;
+    if (above?.acres != null && above.acres > 0) {
+      // A saved line's acres have no known source and may predate a field change, so the field's
+      // acres win when it has some (Taha, #2445 MED).
+      if (above.acres_source === undefined && fieldAcres != null && fieldAcres > 0) return fromField;
+      // The copy keeps the above line's source as is: field-filled acres stay tied to the field, and
+      // an unknown source stays unknown so the "check them" warning still covers it.
+      return { acres: above.acres, acres_source: above.acres_source, acres_prefill: 'line_above' };
     }
+    if (fieldAcres != null && fieldAcres > 0) return fromField;
     return null;
   }
 

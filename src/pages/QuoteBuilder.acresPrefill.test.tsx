@@ -71,6 +71,33 @@ const product = {
   unit_size: 'gal', inventory_unit: 'gal', rate_per_acre: 2, rate_unit: 'gal',
 };
 const field = { id: 'field-1', field_name: 'Home Quarter', customer_id: 'customer-1', total_acres: 80, measured_acres: null, override_acres: null };
+const fieldB = { id: 'field-2', field_name: 'West Half', customer_id: 'customer-1', total_acres: 120, measured_acres: null, override_acres: null };
+
+/** A saved draft: one section on Home Quarter, one line at 80 ac (a loaded line has no acres source). */
+const savedQuote = {
+  id: 'quote-1', quote_number: 'Q-2026-0009', customer_id: 'customer-1', customer, created_by: 'user-1', tier: 1,
+  valid_days: 30, header_notes: '', footer_notes: '', status: 'draft', is_planned: false,
+  commission_split: { splits: [] }, created_at: new Date().toISOString(), row_version: 3,
+};
+const savedSection = {
+  id: 'section-1', quote_id: 'quote-1', section_name: 'Section 1', sort_order: 0, section_notes: null,
+  section_header_notes: null, needed_by_date: null, field_id: 'field-1',
+};
+const savedItem = {
+  id: 'item-1', quote_id: 'quote-1', section_id: 'section-1', product_id: 'product-1', sort_order: 0, product,
+  calc_mode: 'rate_acres', total_units_needed: 160, price_per_unit: 10, price_override: null, current_cost: 6,
+  suggested_rate: 2, actual_rate: 2, rate_unit: 'gal', oz_per_acre: null, price_per_acre: null, acres: 80,
+  unit_size: 'gal', profit: 640, total_price: 1600, net_margin: 40, notes: null,
+};
+
+/** Like `chain`, but a single-row read answers the row (the saved quote's header). */
+function rowChain(data: unknown) {
+  const self = chain(data);
+  const row = Array.isArray(data) ? data[0] ?? null : data;
+  self.single = () => Promise.resolve({ data: row, error: null });
+  self.maybeSingle = () => Promise.resolve({ data: row, error: null });
+  return self;
+}
 
 /** A Supabase-like query chain: every filter returns itself, awaiting it answers `data`. */
 function chain(data: unknown) {
@@ -134,14 +161,14 @@ describe('QuoteBuilder — acres on a new line', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     await waitFor(() => expect(acres()).toEqual(['40', '40']));
-    const hint = screen.getByText('Filled from line above');
+    const hint = screen.getByText('Copied from line above');
     expect(screen.getAllByLabelText('Acres')[1]).toHaveAttribute('aria-describedby', hint.id);
     expect(screen.getAllByLabelText('Acres')[0]).not.toHaveAttribute('aria-describedby');
 
     // The rep's own number replaces it; the hint goes, and the line above keeps its acres.
     fireEvent.change(screen.getAllByLabelText('Acres')[1], { target: { value: '55' } });
     expect(acres()).toEqual(['40', '55']);
-    expect(screen.queryByText('Filled from line above')).not.toBeInTheDocument();
+    expect(screen.queryByText('Copied from line above')).not.toBeInTheDocument();
 
     // A later line copies the line just above it, not the first line.
     fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
@@ -172,6 +199,33 @@ describe('QuoteBuilder — acres on a new line', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Clear field/ }));
     await waitFor(() => expect(acres()).toEqual(['', '']));
     expect(screen.queryByText('Filled from field')).not.toBeInTheDocument();
+  });
+
+  it("a reopened quote's new line takes the new field's acres, not the saved line's old ones (Taha, #2445)", { timeout: 20000 }, async () => {
+    mockFrom.mockImplementation((table: string) => rowChain(
+      table === 'quotes' ? savedQuote : table === 'quote_sections' ? [savedSection] : table === 'quote_items' ? [savedItem]
+        : table === 'customers' ? [customer] : table === 'products' ? [product] : table === 'fields' ? [field, fieldB] : [],
+    ));
+    mockRpc.mockImplementation((name: string) => Promise.resolve({ data: name === 'get_quote_versions' ? [] : null, error: null }));
+    const router = createMemoryRouter(
+      [{ path: '/quotes/:id/edit', element: <QuoteBuilder /> }],
+      { initialEntries: ['/quotes/quote-1/edit'] },
+    );
+    render(<RouterProvider router={router} />);
+    await waitFor(() => expect(acres()).toEqual(['80']));
+
+    const fieldBox = await screen.findByRole('combobox', { name: 'Field for Section 1' });
+    fireEvent.change(fieldBox, { target: { value: 'West' } });
+    fireEvent.click(await screen.findByRole('option', { name: /West Half/ }));
+    await waitFor(() => expect(fieldBox).toHaveValue('West Half'));
+    // The saved line keeps its acres, and the rep is told to check them.
+    expect(acres()).toEqual(['80']);
+    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('saved lines keep their acres'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
+    await waitFor(() => expect(acres()).toEqual(['80', '120']));
+    expect(screen.getByText('Filled from field')).toBeInTheDocument();
+    expect(screen.queryByText('Copied from line above')).not.toBeInTheDocument();
   });
 
   it('saves and prices the filled acres exactly as typed acres', { timeout: 20000 }, async () => {

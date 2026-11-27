@@ -191,8 +191,11 @@ vi.mock('../lib/activityLogger', () => ({
   logActivity: H.logActivity,
 }));
 
-// Supplier evidence has its own focused tests. Keep this suite scoped to the
-// EPA draft mutation so its assertions are not polluted by the history read.
+// Supplier evidence has its own focused tests. Keep the RPC spy scoped to EPA drafts.
+vi.mock('../lib/supplierPricing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/supplierPricing')>()),
+  getProductPriceHistory: async (productId: string) => ({ product_id: productId, points: [] }),
+}));
 vi.mock('../components/products/ProductPriceHistory', () => ({
   default: () => null,
 }));

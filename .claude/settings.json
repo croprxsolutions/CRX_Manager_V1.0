@@ -512,7 +512,7 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/posttool-router.mjs\"",
-            "timeout": 20
+            "timeout": 40
           }
         ]
       }

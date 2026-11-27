@@ -9,6 +9,7 @@ import { promptModulesFor } from "./prompt-router.mjs";
 import { postToolModulesFor } from "./posttool-router.mjs";
 import { dirtyWarning, pushDir, pushTargets } from "./post-push-dirty-warning.mjs";
 import { dedupeContextBlocks } from "./hook-router-runtime.mjs";
+import { askTahaAfterSol, ghCommandCwd, githubAncestry, laterSolRisk, proofReader, readyTarget, solCoversHead } from "./taha-ready-after-sol.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -153,7 +154,9 @@ for (const surface of ["claude", "codex"]) {
 }
 eq(postToolModulesFor({ tool_name: "Edit" }, "claude"), ["./posttooluse-migration.mjs", "./eslint-autofix.mjs", "./session-heartbeat.mjs"], "write/edit path is explicit");
 eq(postToolModulesFor({ tool_name: "mcp__supabase__apply_migration" }, "codex"), ["./registry-freshness.mjs", "./applied-snapshot-invalidate.mjs"], "Codex apply path is explicit");
-eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "git -C C:/x push origin HEAD" } }, "codex"), ["./post-push-dirty-warning.mjs"], "a push routes the DIRTY-PR warning");
+eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "git -C C:/x push origin HEAD" } }, "codex"), ["./post-push-dirty-warning.mjs", "./taha-ready-after-sol.mjs"], "a push routes the DIRTY-PR warning and the Taha label check");
+eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "gh pr create --base staging --fill" } }, "codex"), ["./taha-ready-after-sol.mjs"], "opening a PR routes the Taha label check");
+eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "gh pr ready 12" } }, "codex"), ["./taha-ready-after-sol.mjs"], "marking a PR ready routes the Taha label check");
 eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "git status" } }, "codex"), [], "a non-push command does not");
 {
   // Warning only: DIRTY warns, UNKNOWN is retried once, anything else (or a gh failure) is silent.
@@ -212,6 +215,156 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
     configuredHooksFor(codex, toolName).some((hook) => `${hook.command} ${hook.commandWindows || ""}`.includes("production-action-guard.mjs")),
     `configured Codex ${toolName} path invokes the production guard`,
   );
+}
+
+// A clean Sol on a lane PR's current head labels it for Taha (agents kept forgetting; #2610, 2026-11-26).
+{
+  const HEAD = "a".repeat(40), BASE = "b".repeat(40), EARLIER = "c".repeat(40), OTHER = "d".repeat(40), NEW_BASE = "e".repeat(40);
+  const now = Date.now();
+  const stamp = new Date(now - 60 * 60 * 1000).toISOString();
+  const proof = (head, extra = {}) => ({ codex_ran: true, verdict: "clean", head_sha: head, base_sha: BASE, timestamp: stamp, model: "gpt-6.2-sol", reasoning_effort: "high", ...extra });
+  const basePr = { number: 7, state: "OPEN", isDraft: false, isCrossRepository: false, author: { login: "MasonWells" }, headRefName: "claude/x",
+    headRefOid: HEAD, baseRefName: "staging", baseRefOid: BASE, commits: [{ oid: HEAD }], reviews: [] };
+  const laneFiles = ["modified", "src/pages/Quotes.tsx", "", HEAD].join("\t") + "\n";
+  const otherFiles = ["modified", "src/pages/Fields.tsx", "", HEAD].join("\t") + "\n";
+  const TAHA_ID = "50602678";
+  const attempt = ({ pr = {}, files = laneFiles, proofs = { [HEAD]: proof(HEAD) }, headSha = HEAD, fail = null, views = null, approvedHead = null, compare = () => "0", budgetMs = 20_000, delayOn = null, delayMs = 0 } = {}) => {
+    const calls = [];
+    let viewed = 0;
+    const gh = (args) => {
+      calls.push(args.join(" "));
+      if (delayOn && args.some((a) => a.includes(delayOn))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+      if (fail && args.some((a) => a.includes(fail))) throw new Error("HTTP 403");
+      if (args[0] === "pr") return JSON.stringify({ ...basePr, ...pr, ...(views ? views[Math.min(viewed++, views.length - 1)] : {}) });
+      if (args.some((a) => a.endsWith("/files?per_page=100"))) return files;
+      if (args.some((a) => a.includes("/compare/"))) return compare(args);
+      if (args.some((a) => a.includes("/timeline"))) return "";
+      if (args.some((a) => a.includes("/reviews?"))) return approvedHead ? [TAHA_ID, "APPROVED", approvedHead, stamp, "1"].join("\t") + "\n" : "";
+      return "{}";
+    };
+    const note = askTahaAfterSol({ cwd: ".", headSha, gh, readProof: (sha) => proofs[sha] ?? null, now, budgetMs, retryDelayMs: 1, wait: () => {} });
+    return { note, calls, wrote: calls.filter((c) => c.includes("/labels") || c.includes("/requested_reviewers")) };
+  };
+  const done = attempt();
+  ok(done.note.includes("PR #7") && done.wrote.length === 2, "clean Sol + lane + current head: label and review request");
+  ok(done.wrote[0].includes("reviewers[]=TahaKhanAbdalli") && done.wrote[1].includes("labels[]=ready-for-taha"), "the same two calls the bot makes, the review request first (Taha LOW 5)");
+  for (const [why, args] of [
+    ["no clean Sol proof", { proofs: {} }],
+    ["not in Taha's lane", { files: otherFiles }],
+    ["draft", { pr: { isDraft: true } }],
+    ["Taha's own PR (author)", { pr: { author: { login: "TahaKhanAbdalli" } } }],
+    ["Taha's own PR (branch)", { pr: { headRefName: "taha/billing" } }],
+    ["fork", { pr: { isCrossRepository: true } }],
+    ["closed", { pr: { state: "MERGED" } }],
+    ["Taha already reviewed this head", { pr: { reviews: [{ author: { login: "tahakhanabdalli" }, state: "APPROVED", commit: { oid: HEAD } }] } }],
+  ]) {
+    const r = attempt(args);
+    ok(r.note === "" && r.wrote.length === 0, `no label when: ${why}`);
+  }
+  const failed = attempt({ fail: "requested_reviewers" });
+  ok(failed.note.includes("could not ask Taha") && failed.note.includes("gh pr edit 7 --add-label ready-for-taha --add-reviewer TahaKhanAbdalli") && failed.wrote.length === 1, "a failed review request prints the manual command and adds no label on its own");
+  const labelFailed = attempt({ fail: "/labels" });
+  ok(labelFailed.note.includes("Taha is asked to review, but the ready-for-taha label could not be added") && labelFailed.note.includes("gh pr edit 7 --add-label ready-for-taha"), "request sent, label failed: says exactly that (Taha LOW 5)");
+  // Taha LOW 2 / Codex bot: an unreadable file list is not "not in the lane".
+  const noFiles = attempt({ fail: "/files" });
+  ok(noFiles.wrote.length === 0 && noFiles.note.includes("not labelled for Taha yet") && noFiles.note.includes("changed files"), "file list unreadable: one line with the manual command");
+  // Taha LOW 7: the lane is unknown then, so the command is conditional, and no sign-off of his is claimed.
+  ok(noFiles.note.includes("could not tell whether it changes Taha's areas") && noFiles.note.includes("Only if it does, run: gh pr edit 7") && !noFiles.note.includes("signed off"), "unknown lane: the command is only for a PR in his areas");
+  const manyFiles = laneFiles + Array.from({ length: 249 }, (_, i) => ["modified", `docs/n${i}.md`, "", HEAD].join("\t")).join("\n") + "\n";
+  const many = attempt({ files: manyFiles });
+  ok(many.wrote.length === 0 && many.note.includes("Only if it does, run: gh pr edit 7"), "250+ changed files (maybe cut short): lane unknown, conditional line (Codex bot)");
+  const MIG = "supabase/migrations/20270101000000_field_x.sql";
+  const migFiles = ["added", MIG, "", HEAD].join("\t") + "\n";
+  const unreadSql = attempt({ files: migFiles, fail: "/contents/" });
+  ok(unreadSql.wrote.length === 0 && unreadSql.note.includes("migrations' SQL") && unreadSql.note.includes("Only if it does") && !unreadSql.note.includes("signed off"), "only unreadable migration SQL: lane unknown, conditional line, no sign-off claimed");
+  const slowSql = attempt({ files: migFiles, budgetMs: 200, delayOn: "/files", delayMs: 300 });
+  ok(slowSql.wrote.length === 0 && !slowSql.note.includes("signed off"), "out of time in the lane check with no sign-off of his: never says he signed off");
+  // Codex bot: `gh pr ready <n>` from another branch asks about PR n, judged on its own head.
+  // Taha LOW 8 / Codex bot: a literal `cd <dir> &&` before gh pr create|ready is followed.
+  // Absolute paths built for this OS, so the case holds on the Linux CI runner and on Windows.
+  const here = path.resolve("base");
+  const lane = path.resolve("wt", "lane"), spaced = path.resolve("wt", "my lane");
+  const slash = (p) => p.replaceAll("\\", "/");
+  eq([ghCommandCwd(`cd ${slash(lane)} && gh pr create --base staging --fill`, here), ghCommandCwd(`cd "${slash(spaced)}" && gh pr ready`, here), ghCommandCwd("gh pr ready", here), ghCommandCwd("cd $W && gh pr ready", here), ghCommandCwd("cd ../x && gh pr ready", here)],
+    [lane, spaced, here, here, path.resolve(here, "../x")], "the folder a gh pr create/ready runs in");
+  eq([readyTarget("gh pr ready 2643"), readyTarget("gh pr ready --undo"), readyTarget("gh pr ready"), readyTarget("gh pr create --fill")], ["2643", null, null, null], "the PR a gh pr ready names");
+  const named = (() => { const calls = []; const note = askTahaAfterSol({ cwd: ".", pr: "7", gh: (args) => { calls.push(args.join(" ")); return args[0] === "pr" ? JSON.stringify(basePr) : args.some((a) => a.includes("/files")) ? laneFiles : "0"; }, readProof: (sha) => (sha === HEAD ? proof(HEAD) : null), now }); return { note, calls }; })();
+  ok(named.calls[0].startsWith("pr view 7 ") && named.note.includes("Taha is asked"), "gh pr ready <n>: that PR is asked about and labelled");
+  ok(askTahaAfterSol({ cwd: ".", headSha: HEAD, gh: () => { throw new Error("no pull requests found for branch \"claude/x\""); }, readProof: () => proof(HEAD), now }) === "", "no PR yet: silent");
+
+  // Taha MED 1: his earlier sign-off that still carries over (staging catch-up, docs/ note, restamp) is not re-asked.
+  const signedOff = { pr: { reviews: [{ author: { login: "TahaKhanAbdalli" }, state: "DISMISSED", commit: { oid: EARLIER } }] } };
+  const carried = attempt({ ...signedOff, approvedHead: HEAD });
+  ok(carried.note === "" && carried.wrote.length === 0, "Taha's earlier sign-off carries over to this head: no label, no new review request");
+  ok(carried.calls.some((c) => c.includes("/timeline")), "the carry-over is asked of GitHub, as the bot does");
+  const notCarried = attempt({ ...signedOff, approvedHead: null });
+  ok(notCarried.wrote.length === 2, "his earlier sign-off does not carry over: label and re-ask him");
+  const carryTimedOut = attempt({ ...signedOff, approvedHead: HEAD, budgetMs: 200, delayOn: "/timeline", delayMs: 300 });
+  ok(carryTimedOut.wrote.length === 0 && carryTimedOut.note.includes("no time to check whether it carries over") && carryTimedOut.note.includes("Only if this push changed code"), "carry check out of time: no plain re-ask, a conditional line (Taha MED 1, delta)");
+  ok(!done.calls.some((c) => c.includes("/timeline")), "no sign-off of his on the PR: the carry-over check costs no calls");
+
+  // Taha LOW 2: GitHub behind the push is asked once more, and never silently dropped when a clean Sol is on disk.
+  const caughtUp = attempt({ views: [{ headRefOid: OTHER, commits: [{ oid: OTHER }] }, {}] });
+  ok(caughtUp.wrote.length === 2 && caughtUp.calls.filter((c) => c.startsWith("pr view")).length === 2, "GitHub catches up on the second look: labelled");
+  const behind = attempt({ views: [{ headRefOid: OTHER, commits: [{ oid: OTHER }] }] });
+  ok(behind.wrote.length === 0 && behind.note.includes("not labelled for Taha yet") && behind.note.includes("gh pr edit 7"), "GitHub still behind the push: one line with the manual command");
+  ok(attempt({ views: [{ headRefOid: OTHER, commits: [{ oid: OTHER }] }], proofs: {} }).note === "", "GitHub behind but no clean Sol on disk: silent");
+  const slow = askTahaAfterSol({ cwd: ".", headSha: HEAD, gh: () => { throw new Error("ETIMEDOUT"); }, readProof: () => proof(HEAD), now });
+  ok(slow.includes("not labelled for Taha yet") && slow.includes("ETIMEDOUT"), "GitHub does not answer while a clean Sol is on disk: says so");
+  // Staging moved since Sol: GitHub's compare answers the ancestry (no local fetch needed); if it cannot, say so.
+  const moved = { pr: { baseRefOid: NEW_BASE } };
+  const movedOk = attempt({ ...moved, compare: (args) => (args.includes(".merge_base_commit.sha") ? BASE : "0") });
+  ok(movedOk.wrote.length === 2, "staging moved since Sol: GitHub's merge-base confirms coverage, labelled");
+  const movedUnknown = attempt({ ...moved, compare: (args) => { if (args.includes(".merge_base_commit.sha")) throw new Error("HTTP 502"); return "0"; } });
+  ok(movedUnknown.wrote.length === 0 && movedUnknown.note.includes("could not confirm"), "GitHub cannot say whether Sol covers the head: one line, no label");
+
+  // Taha LOW 3: one deadline for the whole hook; each call gets only what is left.
+  const timeouts = [];
+  askTahaAfterSol({ cwd: ".", headSha: HEAD, gh: (args, _cwd, timeout) => { timeouts.push(timeout); return args[0] === "pr" ? JSON.stringify(basePr) : args.some((a) => a.includes("/files")) ? laneFiles : "0"; }, readProof: () => proof(HEAD), now, budgetMs: 4_000 });
+  ok(timeouts.length > 0 && timeouts.every((t) => t >= 1 && t <= 4_000), "every GitHub call is capped by the hook's one deadline");
+  const outOfTime = attempt({ budgetMs: 0 });
+  ok(outOfTime.wrote.length === 0 && outOfTime.note.includes("not labelled for Taha yet"), "out of time before GitHub answers: one line, no half-done label");
+
+  // "Covers" follows the merge gate: a clean Sol of this head or of an earlier commit of this PR.
+  const pr = { headRefOid: HEAD, baseRefOid: BASE, baseRefName: "staging", commits: [{ oid: EARLIER }, { oid: HEAD }] };
+  // History: BASE <- EARLIER <- HEAD; OTHER is unrelated.
+  const chain = [BASE, EARLIER, HEAD];
+  const isAncestor = (a, b) => (chain.includes(a) && chain.includes(b) ? chain.indexOf(a) <= chain.indexOf(b) : false);
+  const covers = (proofs, more = {}) => solCoversHead({ pr, readProof: (sha) => proofs[sha] ?? null, isAncestor, mergeBase: () => BASE, laterRisky: () => false, now, ...more });
+  ok(covers({ [HEAD]: proof(HEAD) }) === true, "a clean Sol of the current head covers it");
+  ok(covers({ [EARLIER]: proof(EARLIER) }) === true, "a clean Sol of an earlier commit of this PR covers a fix pushed after it");
+  ok(covers({ [OTHER]: proof(OTHER) }) === false, "a proof of a commit outside this PR does not");
+  ok(covers({ [EARLIER]: proof(EARLIER, { owner_accepted: [{ code: "1" }] }) }) === false, "a Sol with findings Mason accepted is not clean here");
+  ok(covers({ [EARLIER]: proof(EARLIER, { model: "gpt-6-luna" }) }) === false, "a Luna review is not Sol");
+  ok(covers({ [EARLIER]: proof(EARLIER, { timestamp: new Date(now - 25 * 60 * 60 * 1000).toISOString() }) }) === false, "a Sol older than 24 hours does not");
+  ok(covers({ [EARLIER]: proof(EARLIER, { review_ref: "origin/main" }) }) === false, "a review against main does not cover a PR into staging");
+  ok(covers({}) === false, "no proof: not covered");
+  ok(covers({ [EARLIER]: proof(EARLIER) }, { isAncestor: () => null }) === null, "ancestry unknown: unsure (null), never a plain no");
+  // Codex bot: as the merge gate, an earlier commit's Sol covers only later commits that stay off the Sol list.
+  ok(covers({ [EARLIER]: proof(EARLIER) }, { laterRisky: () => true }) === false, "a later commit on the Sol list: the earlier Sol does not cover the head");
+  ok(covers({ [EARLIER]: proof(EARLIER) }, { laterRisky: () => null }) === null, "later commits unreadable: unsure, never covered");
+  ok(covers({ [HEAD]: proof(HEAD) }, { laterRisky: () => true }) === true, "a Sol of the head itself needs no later-commit check");
+  const compareWith = (files) => () => JSON.stringify({ status: "ahead", ahead_by: 1, head: HEAD, files: files.map((filename) => ({ filename, status: "modified" })) });
+  ok(laterSolRisk(compareWith(["src/pages/Quotes.tsx"]))(EARLIER, HEAD) === true, "the merge gate's Sol-risk check: a quotes screen is on the list");
+  ok(laterSolRisk(compareWith(["docs/notes.md"]))(EARLIER, HEAD) === false, "the merge gate's Sol-risk check: a docs note is not");
+  ok(laterSolRisk(() => { throw new Error("HTTP 502"); })(EARLIER, HEAD) === null, "the comparison unreadable: unknown, not covered");
+
+  // Taha LOW 4: the real proof reader (files across checkouts) and the GitHub-backed ancestry answers.
+  const main = tempDir("crx-taha-ready-main-");
+  const other = tempDir("crx-taha-ready-wt-");
+  mkdirSync(path.join(other, ".claude", "session-state"), { recursive: true });
+  writeFileSync(path.join(other, ".claude", "session-state", `codex-review-${EARLIER}.json`), JSON.stringify(proof(EARLIER)));
+  const read = proofReader(main, () => `worktree ${main}\nHEAD ${HEAD}\n\nworktree ${other}\nHEAD ${EARLIER}\n`);
+  ok(read(EARLIER)?.head_sha === EARLIER, "a proof written in another worktree of this checkout is found");
+  ok(read(HEAD) === null && read("../x") === null, "no proof, or not a commit id: null");
+  ok(proofReader(main, () => { throw new Error("no git"); })(EARLIER) === null, "worktree list unavailable: only this checkout is searched");
+  const answers = (reply) => githubAncestry((args) => reply(args));
+  ok(answers(() => "0").isAncestor(BASE, HEAD) === true, "GitHub: not behind, so contained");
+  ok(answers(() => "3").isAncestor(BASE, HEAD) === false, "GitHub: behind, so not contained");
+  ok(answers(() => { throw new Error("HTTP 404"); }).isAncestor(BASE, HEAD) === null, "GitHub error (e.g. a commit it lacks): unknown, not false");
+  ok(answers(() => `${BASE}\n`).mergeBase(HEAD, NEW_BASE) === BASE && answers(() => { throw new Error("x"); }).mergeBase(HEAD, NEW_BASE) === null, "merge-base from GitHub; an error is unknown");
+  const realCovers = solCoversHead({ pr: { ...pr, baseRefOid: NEW_BASE }, readProof: read, ...answers((args) => (args.includes(".merge_base_commit.sha") ? BASE : args.some((a) => a.includes(`${EARLIER}...${NEW_BASE}`)) ? "1" : "0")), laterRisky: () => false, now });
+  ok(realCovers === true, "end to end: another worktree's Sol of an earlier commit covers the head after staging moved");
 }
 
 console.log(`hook-router: ${pass} assertions passed`);

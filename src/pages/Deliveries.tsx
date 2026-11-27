@@ -51,8 +51,9 @@ import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { digestIntentPayload, fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { isValidDeliveredOn, isValidNoProofReason, MAX_PAPER_TICKET_PHOTOS, NO_PROOF_REASON_MAX_CHARS, NO_PROOF_REASON_MIN_CHARS, NO_PROOF_SIGNER, noProofReasonLength, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
-import { COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, mergePhotosById, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadEvidencePhoto, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, countTicketPhotosForLoad, staleProofPhotoMessage, COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, type LineSeen, loadProofProblem, sameLinesSeen, isSignatureDataUrl, isSignatureImageMissing, evidencePhotoForLoad, mergePhotosById, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadEvidencePhoto, uploadSignatureImage } from '../lib/deliveryEvidence';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
+import { useLoadBoundSignature } from '../hooks/useLoadBoundSignature';
 import { notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import BatchCancelModal from '../components/deliveries/BatchCancelModal';
 import QuickDeliveryModal from '../components/deliveries/QuickDeliveryModal';
@@ -296,11 +297,31 @@ export default function Deliveries() {
     setCompleteSignature(null);
     setNoProofReason('');
     setTicketPhotos(null);
+    setCompleteLines(null);
+  };
+  // The delivery's lines (full delivery: delivered = scheduled quantity), read when the dialog opens and
+  // after a refusal. The customer signs, or the ticket photo is taken, only once they are loaded (20270309170000).
+  const [completeLines, setCompleteLines] = useState<{ deliveryId: string; lines: LineSeen[]; shown: Array<{ id: string; name: string; quantity: number }> } | null>(null);
+  const loadCompleteLines = async (deliveryId: string, dialogGen: number) => {
+    // The old lines stop counting at once: a failed reload must not leave proof controls bound to them (Luna).
+    setCompleteLines(null);
+    const { data, error } = await supabase.from('delivery_items')
+      .select('id, order_item_id, product_id, quantity, product:products(product_name)').eq('delivery_id', deliveryId);
+    if (completeDialogGenRef.current !== dialogGen) return;
+    if (error || !data) {
+      Sentry.captureException(error ?? new Error('delivery_items read returned no list'), { extra: { context: 'Load delivery lines for Mark Delivered' } });
+      toast('error', 'The products on this delivery could not be loaded. Close and reopen this dialog to try again.');
+      return;
+    }
+    const rows = data as unknown as Array<{ id: string; order_item_id: string; product_id: string; quantity: number; product: { product_name: string } | null }>;
+    // The products shown beside the proof controls are the ones the proof is bound to (Codex review on #2614).
+    const shown = rows.map((row) => ({ id: row.id, name: row.product?.product_name ?? 'Unknown product', quantity: Number(row.quantity) }));
+    setCompleteLines({ deliveryId, lines: buildLinesSeen(rows), shown });
   };
   const loadTicketPhotos = async (deliveryId: string, dialogGen: number) => {
     const seq = ++ticketPhotoSeqRef.current;
     const { data, error } = await supabase.from('delivery_photos')
-      .select('id, storage_path, image_url, caption, uploaded_at')
+      .select('id, storage_path, image_url, caption, uploaded_at, lines_seen')
       .eq('delivery_id', deliveryId).eq('caption', PAPER_TICKET_PHOTO_CAPTION)
       .order('uploaded_at');
     if (completeDialogGenRef.current !== dialogGen) return;
@@ -315,7 +336,13 @@ export default function Deliveries() {
     setTicketPhotos({ deliveryId, photos: (data || []) as DeliveryEvidencePhoto[] });
   };
   const currentTicketPhotos = ticketPhotos && ticketPhotos.deliveryId === completeTarget?.id ? ticketPhotos.photos : [];
-  const currentTicketPhoto = latestEvidencePhoto(currentTicketPhotos, PAPER_TICKET_PHOTO_CAPTION);
+  const currentCompleteLines = completeLines && completeLines.deliveryId === completeTarget?.id ? completeLines.lines : null;
+  const currentCompleteShown = completeLines && completeLines.deliveryId === completeTarget?.id ? completeLines.shown : null;
+  const currentTicketPhoto = evidencePhotoForLoad(currentTicketPhotos, PAPER_TICKET_PHOTO_CAPTION, currentCompleteLines);
+  const currentCompleteLinesRef = useLatestRef(currentCompleteLines);
+  // The ticket photo sent (the newest taken for these lines, else the newest) counts only when it was taken for these lines (a photo without lines never does).
+  const ticketPhotoMatchesLoad = !!currentTicketPhoto && sameLinesSeen(currentTicketPhoto.lines_seen, currentCompleteLines);
+  const completeSig = useLoadBoundSignature(completeSignature, setCompleteSignature, currentCompleteLines);
   const canRecordWithoutProof = role === 'admin';
   // A role change (or a profile that loads late) never leaves a non-admin on the no-proof path.
   useEffect(() => {
@@ -690,6 +717,18 @@ export default function Deliveries() {
     }
   };
 
+  // The ticket-photo and proof-binding checks (20270309170000), run before anything (the signature image)
+  // is uploaded. Returns the p_lines_seen part of the call, or null after showing why it cannot be sent.
+  const completeProofParams = (evidence: DeliveryCompletionEvidence): { p_lines_seen?: LineSeen[] } | null => {
+    if (evidence === 'paper_ticket' && !currentTicketPhoto) {
+      toast('error', 'Add a photo of the signed paper ticket before completing');
+      return null;
+    }
+    const problem = loadProofProblem(evidence, currentCompleteLines, completeSig.signedLines, currentTicketPhoto?.lines_seen);
+    if (problem) { completeSig.reportProofProblem(problem); return null; }
+    return evidence === 'signature' && completeSig.signedLines ? { p_lines_seen: completeSig.signedLines } : {};
+  };
+
   const runCompleteConfirm = async () => {
     if (!completeTarget || !profile) return;
     // The submitted mode decides every follow-up below (never a checkbox read later).
@@ -714,10 +753,8 @@ export default function Deliveries() {
       toast('error', INVALID_SIGNATURE_MESSAGE);
       return;
     }
-    if (submittedEvidence === 'paper_ticket' && !currentTicketPhoto) {
-      toast('error', 'Add a photo of the signed paper ticket before completing');
-      return;
-    }
+    const proofParams = completeProofParams(submittedEvidence);
+    if (!proofParams) return;
     const target = completeTarget;
     const signatureAtSubmit = completeSignature;
     const ticketPhotoAtSubmit = submittedEvidence === 'paper_ticket' ? currentTicketPhoto : undefined;
@@ -737,6 +774,8 @@ export default function Deliveries() {
       ...(ticketPhotoAtSubmit ? { p_evidence_ref: ticketPhotoAtSubmit.id } : {}),
       // no_proof: the reason exactly as typed (the server collapses whitespace; an exact retry resends it).
       ...(submittedEvidence === 'no_proof' ? { p_evidence_ref: reasonAtSubmit } : {}),
+      // The lines the customer signed for (part of the key's scope: another list is a new attempt).
+      ...proofParams,
     };
     // The server binds the key to this exact request (mode, signer, date, photo or reason), so a
     // retry with an edited value mints a fresh key instead of being refused. The scope uses the
@@ -767,6 +806,8 @@ export default function Deliveries() {
         if (!(await hasSignal())) return 'no_signal';
         if (!stillOpenForTarget()) return 'cancelled';
         if (!inputsUnchanged()) return 'changed';
+        // Lines reloaded since signing: stop before the image goes up (the screen asks for a new signature).
+        if (proofParams.p_lines_seen && !sameLinesSeen(proofParams.p_lines_seen, currentCompleteLinesRef.current)) return 'changed';
         // The server completes only once this attempt's signature image is saved, so it goes up
         // first. A failed upload does not stop the call: after a lost reply the earlier attempt may
         // already have completed the delivery (storage then refuses the re-upload). The same key
@@ -836,7 +877,14 @@ export default function Deliveries() {
           } else if (reconciled.kind === 'open' && completeDialogGenRef.current === dialogGen) {
             // Still open: the dialog stays, with the SAME retained key (unless retired above), so a retry
             // after a lost response replays the saved result. Its ticket photos are re-read.
-            await loadTicketPhotos(target.id, dialogGen);
+            // Nothing delivered, or the proof is not for this load: the signature is cleared and the lines
+            // re-read, so a stale ticket photo no longer counts. No automatic retry.
+            if (isLoadProofRefusal(error)) {
+              completeSig.clearSignature();
+              await Promise.all([loadTicketPhotos(target.id, dialogGen), loadCompleteLines(target.id, dialogGen)]);
+            } else {
+              await loadTicketPhotos(target.id, dialogGen);
+            }
           }
           throw new CriticalActionHandledError('Completion failure already reported and reconciled');
         }
@@ -1570,6 +1618,7 @@ export default function Deliveries() {
           setDeliveredOnDate(businessToday());
           resetCompleteEvidence();
           void loadTicketPhotos(row.id, dialogGen);
+          void loadCompleteLines(row.id, dialogGen);
         }}
         title={row.status === 'scheduled' ? 'Mark this delivery delivered' : 'Mark this delivery complete'}
         aria-label={`Mark delivery ${row.delivery_number} ${row.status === 'scheduled' ? 'delivered' : 'complete'}`}
@@ -2249,6 +2298,16 @@ export default function Deliveries() {
               <HelpTip text="Only when there is no signature and no ticket photo, for example a delivery confirmed by phone. Your name, the time and your written reason are saved with the delivery. No receipt is emailed." className="ml-1" />
             </div>
           )}
+          {currentCompleteShown && completeEvidence !== 'no_proof' && (
+            <div className="text-sm border border-gray-200 rounded-lg p-3 bg-gray-50">
+              <p className="font-medium text-gray-700 mb-1">The signature or ticket photo covers these products:</p>
+              <ul className="space-y-0.5">
+                {currentCompleteShown.map((line) => (
+                  <li key={line.id} className="flex justify-between gap-3"><span>{line.name}</span><span className="tabular-nums">{line.quantity}</span></li>
+                ))}
+              </ul>
+            </div>
+          )}
           {completeEvidence === 'no_proof' ? (
             <div className="space-y-2 border border-amber-300 rounded-lg p-3 bg-amber-50">
               <label htmlFor="complete-no-proof-reason" className="flex items-center gap-2 text-sm font-medium text-amber-900">
@@ -2284,14 +2343,16 @@ export default function Deliveries() {
                   e.target.value = '';
                   const target = completeTargetRef.current;
                   const dialogGen = completeDialogGenRef.current;
-                  if (!file || !target || !profile) return;
-                  if (currentTicketPhotos.length >= MAX_PAPER_TICKET_PHOTOS) {
-                    toast('error', `Maximum ${MAX_PAPER_TICKET_PHOTOS} ticket photos per delivery`);
+                  // The lines on screen at the shutter, saved with the photo (20270309170000).
+                  const linesAtPhoto = currentCompleteLinesRef.current;
+                  if (!file || !target || !profile || !linesAtPhoto) return;
+                  if (countTicketPhotosForLoad(currentTicketPhotos, currentCompleteLines) >= MAX_PAPER_TICKET_PHOTOS) {
+                    toast('error', `Maximum ${MAX_PAPER_TICKET_PHOTOS} ticket photos for these products and amounts`);
                     return;
                   }
                   setUploadingTicketGen(dialogGen);
                   try {
-                    const saved = await uploadEvidencePhoto(target.id, file, profile.id, PAPER_TICKET_PHOTO_CAPTION);
+                    const saved = await uploadEvidencePhoto(target.id, file, profile.id, PAPER_TICKET_PHOTO_CAPTION, linesAtPhoto);
                     // Only the dialog session that took the photo shows it (and its toast).
                     if (completeDialogGenRef.current === dialogGen && completeTargetRef.current?.id === target.id) {
                       ticketPhotoSeqRef.current++; // an older in-flight read must not replace the list without it
@@ -2309,10 +2370,12 @@ export default function Deliveries() {
                   setUploadingTicketGen((current) => (current === dialogGen ? null : current));
                 }}
               />
-              {currentTicketPhoto ? (
+              {ticketPhotoMatchesLoad ? (
                 <p className="flex items-center gap-2 text-sm text-green-700">
                   <CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the signed ticket saved
                 </p>
+              ) : currentTicketPhoto && currentCompleteLines ? (
+                <p className="text-sm text-amber-700">{staleProofPhotoMessage(currentTicketPhoto.lines_seen, 'ticket')}</p>
               ) : (
                 <p className="text-sm text-amber-700">A photo of the signed paper ticket is required.</p>
               )}
@@ -2320,18 +2383,22 @@ export default function Deliveries() {
                 variant="secondary"
                 onClick={() => ticketInputRef.current?.click()}
                 loading={uploadingTicket}
-                disabled={!isOnline || currentTicketPhotos.length >= MAX_PAPER_TICKET_PHOTOS}
+                disabled={!isOnline || !currentCompleteLines || countTicketPhotosForLoad(currentTicketPhotos, currentCompleteLines) >= MAX_PAPER_TICKET_PHOTOS}
               >
                 Add Photo of Signed Ticket
               </Button>
             </div>
           ) : (
             <div className="border border-gray-200 rounded-lg p-3 bg-white">
-              <SignatureCanvas
-                key={completeTarget?.id ?? 'none'}
-                onSignatureChange={setCompleteSignature}
-                label="Customer Signature"
-              />
+              {currentCompleteLines ? (
+                <SignatureCanvas
+                  key={`${completeTarget?.id ?? 'none'}-${completeSig.canvasKey}`}
+                  onSignatureChange={completeSig.onSignatureChange}
+                  label="Customer Signature"
+                />
+              ) : (
+                <p className="text-sm text-secondary">Loading the products on this delivery before the customer signs…</p>
+              )}
             </div>
           )}
           <div className="flex justify-end gap-3 pt-2">

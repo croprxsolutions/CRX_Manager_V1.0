@@ -2,6 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { isCommissionPayoutsOff, sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('tells the admin to reload after a stale purchase order cost correction', () => {
+    expect(sanitizeError({ code: 'P0001', message: 'PO_COST_CHANGED_SINCE_LOADED: stale line' }))
+      .toBe('A line’s cost or product changed since you opened this purchase order. Nothing was saved. Review the reloaded lines and save again');
+  });
+
+  it.each(['COST_INVALID', 'PRODUCT_INVALID', 'PAIR_REQUIRED'])('maps the PO_EXPECTED_%s error', (code) => {
+    expect(sanitizeError(`PO_EXPECTED_${code}: invalid details`))
+      .toBe('The purchase order line details could not be verified. Reload the purchase order and try again');
+  });
+
   it('keeps document-link errors actionable and strips control characters', () => {
     expect(sanitizeError({ message: 'BRAND_DOCUMENT_URL_BLOCKED: Use a manufacturer link.\tChoose another URL.' }))
       .toBe('Use a manufacturer link. Choose another URL.');
@@ -178,6 +188,7 @@ describe('sanitizeError', () => {
     ['PRODUCT_STOCK_UNIT_UNKNOWN', '"Tote" is not a known unit; pick a stock unit from the list.'],
     ['PRODUCT_UNIT_HAS_STOCK', 'this product\'s stock unit cannot change to "Qt" while it has stock counted in "Gal". Bring its stock to zero (or convert it) first.'],
     ['STOCK_ROW_UNIT_NOT_STOCK_UNIT', 'this stock row is in "Qt" but the product is stocked in "Gal".'],
+    ['WHOLE_ITEMS_ONLY', 'Seed Corn 80K is sold by the whole item (Unit), so 14.8 can\'t be used. Enter a whole number. Change the rate or acres, or type the number of items.'],
     ['PRODUCT_UNIT_HAS_HISTORY', 'this product\'s stock unit cannot change to "Qt" because it already has orders, purchases, deliveries, returns, stock movements or holds (order ORD-0001, return RMA-0001). Set up a new product for the new unit.'],
   ])('explains a %s refusal without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);

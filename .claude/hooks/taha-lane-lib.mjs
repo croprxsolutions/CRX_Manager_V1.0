@@ -10,8 +10,8 @@
 //
 // Mason can still let ONE named PR through: the merge refusal issues a 6-digit
 // code for that PR at its current head, and his chat message `taha override #<PR> <code>`
-// (taha-lane-prompt.mjs) turns it into a 24-hour override for that PR, later pushes
-// included (Mason, 2026-11-25), except on a PR that changes the block's own wiring
+// (taha-lane-prompt.mjs) turns it into an override for that PR: 24 hours for a staging merge, later pushes included
+// (Mason, 2026-11-25); 30 minutes for a live apply, at the head it was issued for only. Except on a PR that changes the block's own wiring
 // (BLOCK_FILES_RE): there it covers only the head it was issued for, as agreed on #2303.
 // On a live apply it stands in for Taha only when Mason's line also says Taha is
 // unavailable (`... unavailable: <reason>`, Mason 2026-11-25). When it is used the
@@ -29,6 +29,8 @@ import { ghApiRepoPath } from "./codex-push-lib.mjs";
 
 export const TAHA_LANE_CODE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const TAHA_LANE_OVERRIDE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// A live-apply override counts for 30 minutes, the same as READY_WINDOW_MS in migration-landing-gate-lib (Taha, PR 3).
+export const TAHA_APPLY_OVERRIDE_MAX_AGE_MS = 30 * 60 * 1000;
 const MAX_FILES = 250; // GitHub's compare can stop short silently; at this size, fail closed.
 const MAX_BYTES = 4096;
 
@@ -533,7 +535,7 @@ export const tahaOverrideCommand = (reply) => {
 export const tahaOverrideAttempt = (reply) => !tahaOverrideCommand(reply) && /\btaha\s+override\b/i.test(String(reply ?? ""));
 
 /**
- * Turn Mason's code into a 24-hour override for the PR and head it was issued
+ * Turn Mason's code into an override (24 hours for a staging merge, 30 minutes for a live apply) for the PR and head it was issued
  * for. The PR he named must be that PR. Returns { ok: true, payload } or { ok: false, reason }.
  */
 export function recordTahaLaneOverride({ dirs, pullRequest, code, tahaUnavailable, now = Date.now() }) {
@@ -548,7 +550,9 @@ export function recordTahaLaneOverride({ dirs, pullRequest, code, tahaUnavailabl
   if (request.pullRequest !== pullRequest) return { ok: false, reason: `code ${code} was issued for #${request.pullRequest}, not #${pullRequest}` };
   const unavailable = typeof tahaUnavailable === "string" && tahaUnavailable.trim();
   if (unavailable && request.kind !== "apply") return { ok: false, reason: `code ${code} came from a staging merge refusal; "unavailable:" needs the code a live-apply refusal gives` };
-  const payload = { pullRequest: request.pullRequest, headSha: request.headSha, code, kind: request.kind === "apply" ? "apply" : "merge", issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_OVERRIDE_MAX_AGE_MS).toISOString(),
+  const kind = request.kind === "apply" ? "apply" : "merge";
+  const maxAge = kind === "apply" ? TAHA_APPLY_OVERRIDE_MAX_AGE_MS : TAHA_LANE_OVERRIDE_MAX_AGE_MS;
+  const payload = { pullRequest: request.pullRequest, headSha: request.headSha, code, kind, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + maxAge).toISOString(),
     ...(unavailable ? { tahaUnavailable: unavailable.slice(0, 200) } : {}) };
   let wrote = 0;
   for (const dir of dirs || []) {
@@ -563,7 +567,8 @@ export function recordTahaLaneOverride({ dirs, pullRequest, code, tahaUnavailabl
 }
 
 /**
- * Mason's live override for this PR, or null. It covers every later push to the PR for its 24 hours
+ * Mason's live override for this PR, or null. For a staging merge it covers every later push to the PR for its 24 hours
+ * (a live apply's lasts 30 minutes and covers one head; see findTahaUnavailableOverride)
  * (Mason, 2026-11-25: one message per PR, not per commit), unless `oneHead`: then only `headSha`.
  */
 export function findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead = false, accept = () => true, now = Date.now() }) {
@@ -583,7 +588,8 @@ export function findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead = fal
  */
 export function findTahaUnavailableOverride({ dirs, pullRequest, headSha, now = Date.now() }) {
   return findTahaLaneOverride({ dirs, pullRequest, headSha, oneHead: true, now,
-    accept: (data) => data.kind === "apply" && typeof data.tahaUnavailable === "string" && Boolean(data.tahaUnavailable.trim()) });
+    accept: (data) => data.kind === "apply" && typeof data.tahaUnavailable === "string" && Boolean(data.tahaUnavailable.trim()) &&
+      live(data, TAHA_APPLY_OVERRIDE_MAX_AGE_MS, now) });
 }
 
 /** Records on the override that Taha was told (tahaToldAt for a merge; tahaToldApplyFor, the migrations, for a live apply). */

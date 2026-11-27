@@ -188,7 +188,6 @@ vi.mock('../lib/criticalAction', () => ({
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/notificationTriggers', () => ({
   notifyDamagedReceiving: vi.fn(),
-  notifyOverReceive: vi.fn(),
 }));
 vi.mock('../lib/receivingPdf', () => ({
   downloadReceivingPdf: mocks.downloadReceivingPdf,
@@ -227,7 +226,7 @@ describe('PurchaseOrderDetail receiving — post-commit corridor', () => {
     // rejection. The passthrough stub this file used to carry hid that entirely.
     receiveResponse = { data: { receiving_record_ids: ['rr-1'] }, error: null };
     mocks.rpc.mockImplementation((name: string) => (
-      name === 'receive_po_items'
+      name === 'receive_po_items_with_excess_notice'
         ? Promise.resolve(receiveResponse)
         : Promise.resolve({ data: [], error: null })
     ));
@@ -363,7 +362,7 @@ describe('PurchaseOrderDetail receiving — post-commit corridor', () => {
 
     // Positive sentinel: the submission completed.
     await waitFor(() => {
-      expect(mocks.rpc).toHaveBeenCalledWith('receive_po_items', expect.anything());
+      expect(mocks.rpc).toHaveBeenCalledWith('receive_po_items_with_excess_notice', expect.anything());
     });
     await waitFor(() => {
       expect(mocks.toast).toHaveBeenCalledWith('success', expect.stringContaining('Receiving reconciled'));
@@ -400,7 +399,7 @@ describe('PurchaseOrderDetail receiving — post-commit corridor', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: control }));
     expect(screen.queryByRole('dialog', { name: /receive.*items/i })).not.toBeInTheDocument();
     expect(mocks.resolveIntent).not.toHaveBeenCalled();
-    expect(mocks.rpc).not.toHaveBeenCalledWith('receive_po_items', expect.anything());
+    expect(mocks.rpc).not.toHaveBeenCalledWith('receive_po_items_with_excess_notice', expect.anything());
   });
 
   // gpt-5.6-sol on 2ff8bdafc: the retry after a failed cleanup is the MOST likely
@@ -436,6 +435,6 @@ describe('PurchaseOrderDetail receiving — post-commit corridor', () => {
       'Receiving could not be safely prepared. Nothing was received; refresh and try again.',
     );
     // Nothing was sent to the server on this attempt.
-    expect(mocks.rpc).not.toHaveBeenCalledWith('receive_po_items', expect.anything());
+    expect(mocks.rpc).not.toHaveBeenCalledWith('receive_po_items_with_excess_notice', expect.anything());
   });
 });

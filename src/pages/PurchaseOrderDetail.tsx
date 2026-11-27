@@ -9,7 +9,7 @@ import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, sanitizeError, assertRpcResult } from '../lib/db';
+import { supabase, sanitizeError, assertRpcResult, hasRpcCode } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useActiveWarehouses, warehouseOptions } from '../hooks/useActiveWarehouses';
@@ -25,7 +25,7 @@ import {
   purchaseOrderUnitCostCents,
 } from '../lib/purchaseOrderMoney';
 import { buildPurchaseOrderEditItemsPayload } from '../lib/purchaseOrderEditPayload';
-import { notifyDamagedReceiving, notifyOverReceive } from '../lib/notificationTriggers';
+import { notifyDamagedReceiving } from '../lib/notificationTriggers';
 import { logActivity } from '../lib/activityLogger';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { parseLocalDate } from '../lib/dateUtils';
@@ -192,6 +192,7 @@ export default function PurchaseOrderDetail() {
 
   /* Admin unit-cost entry, correction and confirmation (Option B, Mason 2026-10-20: reps order and receive without cost) */
   const [costOpen, setCostOpen] = useState(false);
+  const [costItems, setCostItems] = useState<PurchaseOrderItem[]>([]);
   const [costDrafts, setCostDrafts] = useState<Record<string, string>>({});
   const [costReason, setCostReason] = useState('');
   /* Admin-only cost history (purchase_order_item_cost_changes; RLS returns nothing to anyone else) */
@@ -673,7 +674,7 @@ export default function PurchaseOrderDetail() {
 
     await runCriticalAction({
       action: async () => {
-        const { data, error } = await supabase.rpc('receive_po_items', {
+        const { data, error } = await supabase.rpc('receive_po_items_with_excess_notice', {
           p_items: request.finalPayload,
           p_performed_by: request.performedBy,
           p_idempotency_key: idemKey,
@@ -705,7 +706,7 @@ export default function PurchaseOrderDetail() {
             }
           }
         } else {
-          responseData = assertRpcResult(data, 'receive_po_items');
+          responseData = assertRpcResult(data, 'receive_po_items_with_excess_notice');
         }
         // POST-COMMIT, and it can reject: resolveIntent() writes to IndexedDB, which
         // fails on quota, in a private window, or against a corrupted store. The
@@ -805,33 +806,6 @@ export default function PurchaseOrderDetail() {
           }
         }
 
-        // AUDIT: Notify admins about over-received items.
-        //
-        // This one STAYS scoped to a first, non-replay commit. Unlike the damaged
-        // notification it carries no idempotency key, so a replay would re-alert;
-        // and the "remaining" quantity it reports is derived from `items` held in
-        // memory, which the earlier commit has already moved past. On a replay it
-        // would send a duplicate alert quoting the wrong numbers.
-        if (po && !completedElsewhere && !wasLockedReplay) {
-          const overItems = request.itemsPayload
-            .filter((ip) => {
-              const poItem = items.find((i) => i.id === ip.po_item_id);
-              if (!poItem) return false;
-              const remaining = poItem.quantity_ordered - poItem.quantity_received;
-              return ip.quantity > remaining;
-            })
-            .map((ip) => {
-              const poItem = items.find((i) => i.id === ip.po_item_id);
-              return {
-                productName: (poItem?.product as unknown as { product_name: string } | undefined)?.product_name || 'Unknown',
-                quantityOrdered: poItem?.quantity_ordered || 0,
-                quantityReceived: ip.quantity,
-              };
-            });
-          if (overItems.length > 0) {
-            notifyOverReceive(po.po_number, overItems, po.id);
-          }
-        }
         } catch (notifyErr) {
           // Never surface a post-commit notification failure as a receiving
           // failure — see the comment above this block. The reporter itself is
@@ -849,8 +823,7 @@ export default function PurchaseOrderDetail() {
 
         // Offer PDF download.
         //
-        // Scoped to a first, non-replay commit for the same reason as the
-        // over-receive alert above: the slip is stamped with `new Date()` and the
+        // Scoped to a first, non-replay commit: the slip is stamped with `new Date()` and the
         // CURRENT operator, but a replay is answering for a receipt that committed
         // EARLIER, possibly in another tab or by another person. Regenerating it
         // here produced a receiving document stating the wrong time and the wrong
@@ -1300,6 +1273,7 @@ export default function PurchaseOrderDetail() {
   };
 
   const openCostModal = () => {
+    setCostItems(items);
     setCostDrafts(Object.fromEntries(items.map((item) => [item.id, String(item.unit_cost ?? 0)])));
     setCostReason('');
     setCostOpen(true);
@@ -1322,7 +1296,7 @@ export default function PurchaseOrderDetail() {
   // A line with any receiving record counts as received even after a reversal took its quantity back
   // to zero: the server requires a reason for those too (Luna).
   const receivedLineIds = new Set(receivingHistory.map((r) => r.po_item_id));
-  const costChanges = items.flatMap((item) => {
+  const costChanges = costItems.flatMap((item) => {
     const draft = costDrafts[item.id];
     if (draft === undefined || draft.trim() === '') return [];
     const cents = parseCostDraft(draft);
@@ -1330,9 +1304,13 @@ export default function PurchaseOrderDetail() {
     const currentCents = purchaseOrderUnitCostCents(item.unit_cost ?? 0);
     const changed = cents !== currentCents;
     return changed || item.cost_needs_review
-      ? [{ id: item.id, unit_cost_cents: cents, changed, lowered: cents < currentCents, received: item.quantity_received > 0 || receivedLineIds.has(item.id) }]
+      ? [{
+        // The server compares COALESCE(unit_cost_cents, 0) on the locked row, so send the stored cents the screen loaded.
+        line: { id: item.id, unit_cost_cents: cents, expected_unit_cost_cents: item.unit_cost_cents === undefined ? currentCents : (item.unit_cost_cents ?? 0), expected_product_id: item.product_id },
+        changed, lowered: cents < currentCents, received: item.quantity_received > 0 || receivedLineIds.has(item.id),
+      }]
       : [];
-  }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }).sort((a, b) => (a.line.id < b.line.id ? -1 : a.line.id > b.line.id ? 1 : 0));
   // A change to a received line must say why (Mason, 2026-10-20); the server refuses it otherwise.
   const costReasonRequired = costChanges.some((c) => c.changed && c.received);
 
@@ -1340,7 +1318,11 @@ export default function PurchaseOrderDetail() {
   // and the purchase order total; never inventory or the product's catalog cost.
   const handleSaveCosts = async () => {
     if (!po || !profile || !isAdmin) return;
-    const invalid = items.some((item) => {
+    if (costItems.some((item) => item.purchase_order_id !== id)) {
+      toast('error', 'Reload the purchase order and try again');
+      return;
+    }
+    const invalid = costItems.some((item) => {
       const draft = costDrafts[item.id];
       if (draft === undefined || draft.trim() === '') return false;
       return parseCostDraft(draft) === null;
@@ -1367,7 +1349,7 @@ export default function PurchaseOrderDetail() {
       toast('error', 'Keep the reason to 500 characters');
       return;
     }
-    const lines = costChanges.map(({ id: lineId, unit_cost_cents }) => ({ id: lineId, unit_cost_cents }));
+    const lines = costChanges.map(({ line }) => line);
     setSaving(true);
     const costScope = `set-po-costs:${id}:${fingerprintIntentPayload([lines, reason])}`;
     try {
@@ -1393,6 +1375,11 @@ export default function PurchaseOrderDetail() {
       } else {
         Sentry.captureException(err, { tags: { source: 'write', action: 'set_purchase_order_item_costs' } });
         toast('error', sanitizeError(err));
+        // A stale screen: reload so reopening the modal shows (and expects) the current costs.
+        if (hasRpcCode(err, 'PO_COST_CHANGED_SINCE_LOADED')) {
+          setCostOpen(false);
+          fetchPO();
+        }
       }
     }
     setSaving(false);
@@ -2335,7 +2322,7 @@ export default function PurchaseOrderDetail() {
 
       {/* Unit cost: set, correct or confirm (admins only) */}
       {/* Gated on isAdmin too: a role change mid-session must not leave loaded costs on screen. */}
-      <Modal open={isAdmin && costOpen} onClose={() => setCostOpen(false)} title="Unit" accent="Cost">
+      <Modal open={isAdmin && costOpen && costItems[0]?.purchase_order_id === id} onClose={() => setCostOpen(false)} title="Unit" accent="Cost">
         <div className="space-y-4">
           <p className="text-sm text-secondary">
             Unit cost per line, received lines included. This changes only the purchase order&apos;s cost and total:
@@ -2348,7 +2335,7 @@ export default function PurchaseOrderDetail() {
               bill or with a vendor credit.
             </p>
           )}
-          {items.map((item) => (
+          {costItems.map((item) => (
             <div key={item.id} className="grid grid-cols-3 items-center gap-3">
               <span className="col-span-2 text-sm text-nav-dark">
                 {(item.product as unknown as { product_name: string })?.product_name || item.product_name || 'Unknown'}

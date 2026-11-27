@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   isReleaseOrHotfixHead, flowEnabled, releaseExtraFiles, proofLink, heldOffNote, isBackMerge, labelProblem,
   pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments, botFileProblems, versionProblems, versionIsNewer,
-  hotfixStagingCarry, backportAllowed,
+  hotfixStagingCarry, backportAllowed, gateEntry,
 } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
@@ -296,4 +296,16 @@ test("only Taha's hotfix-backport label, added after the latest push, lets a bac
   assert.equal(ok([commit('h1'), lab('labeled', 'TahaKhanAbdalli'), commit('h2')]), false, 'a push after the label needs the label again');
   assert.equal(ok([commit('h1'), lab('labeled', 'TahaKhanAbdalli')]), false, 'the head commit must be in the timeline');
   assert.equal(backportAllowed({ events: [commit('h2'), lab('labeled', 'TahaKhanAbdalli')], labels: [], head: 'h2' }), false);
+});
+
+test('release-gate exemptions name exactly one commit (as #2422) and one back-merge PR (#2494)', () => {
+  const unlinked = '54b58ab17f811e41bb05436c98b69e2abb8f2f7f';
+  assert.deepEqual(gateEntry(unlinked, []), { prNumber: 2422 });
+  assert.deepEqual(gateEntry('54b58ab17f811e41bb05436c98b69e2abb8f2f7e', []), { pr: null }, 'any other unlinked commit stays an orphan');
+  assert.deepEqual(gateEntry('54b58ab17', []), { pr: null }, 'a short sha is not the exemption');
+  const pr = (number, head) => ({ number, merge_commit_sha: 'abc', base: { ref: 'staging' }, merged_at: 'x', head: { ref: head } });
+  assert.deepEqual(gateEntry('abc', [pr(2494, 'main')]), { skip: true });
+  assert.deepEqual(gateEntry('abc', [pr(2495, 'main')]), { pr: pr(2495, 'main') }, 'no other back-merge number is skipped');
+  assert.deepEqual(gateEntry('abc', [pr(2494, 'feature/x')]), { pr: pr(2494, 'feature/x') }, '#2494 is skipped only as a back-merge');
+  assert.deepEqual(gateEntry('abc', [pr(2600, 'feature/x')]), { pr: pr(2600, 'feature/x') });
 });

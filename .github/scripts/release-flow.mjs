@@ -176,6 +176,27 @@ export function pickPr(sha, pulls) {
   return pulls.find((p) => p.merge_commit_sha === sha && p.base?.ref === 'staging' && p.merged_at) ?? null;
 }
 
+// Release-gate exemptions (Taha, 2026-11-27, v0.2.1; Mason's gate tooling, Taha approves each entry).
+// Exact shas and PR numbers only, never patterns; remove an entry once the release that carries it ships.
+// A staging first-parent commit that IS a PR's work but that GitHub links to no PR: counted as that PR,
+// so the PR's own proof line still decides the gate.
+export const GATE_COMMIT_AS_PR = {
+  '54b58ab17f811e41bb05436c98b69e2abb8f2f7f': { pr: 2422, reason: "#2422's code, pushed to staging unlinked; its merge commit 1dbeae322 is empty" },
+};
+// A merged PR that isn't release work and can't carry a label: left out of the release list.
+export const GATE_SKIP_PRS = {
+  2494: "the bot's back-merge of main into staging, squash-merged, so it isn't skipped as a merge commit and check-label strips its labels",
+};
+
+// What one staging first-parent commit adds to the release list: { pr } (null = commit without a PR),
+// { prNumber } (an exempt commit counted as that PR) or { skip: true }.
+export function gateEntry(sha, pulls) {
+  if (Object.hasOwn(GATE_COMMIT_AS_PR, sha)) return { prNumber: GATE_COMMIT_AS_PR[sha].pr };
+  const pr = pickPr(sha, pulls);
+  if (pr && Object.hasOwn(GATE_SKIP_PRS, pr.number) && isBackMerge(pr.head?.ref)) return { skip: true };
+  return { pr };
+}
+
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const SEMVER = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -508,7 +529,13 @@ const commands = {
       const [sha, parents, subject] = line.split('\t');
       const second = parents.split(' ')[1];
       if (second && isAncestor(second, 'origin/main')) continue;
-      const p = pickPr(sha, await gh(`/commits/${sha}/pulls`));
+      const entry = gateEntry(sha, await gh(`/commits/${sha}/pulls`));
+      if (entry.skip) continue;
+      let p = entry.pr;
+      if (entry.prNumber) {
+        const named = await gh(`/pulls/${entry.prNumber}`);
+        p = named?.base?.ref === 'staging' && named.merged_at ? named : null;
+      }
       if (!p) orphans.push(subject);
       else if (!prs.some((x) => x.number === p.number)) {
         prs.push({ number: p.number, title: p.title, body: p.body ?? '', labels: p.labels.map((l) => l.name), comments: await humanComments(p.number) });

@@ -2,6 +2,14 @@
 -- Today and Program Tracker share this office report. A planned acreage estimate
 -- or a pending ticket is not evidence of application. Preserve the office-wide
 -- role gate and result contract already used by both browser callers.
+DO $preflight$
+BEGIN
+  IF to_regprocedure('public._job_transfer_shares_20270207(uuid)') IS NULL THEN
+    RAISE EXCEPTION 'PROGRAM_ACRES_PAYER_LOOKUP_MISSING: apply 20270226150000_job_transfer_below_cost_whole_line first';
+  END IF;
+END
+$preflight$;
+
 CREATE OR REPLACE FUNCTION public.get_program_completion(p_season integer DEFAULT NULL::integer)
 RETURNS jsonb
 LANGUAGE plpgsql

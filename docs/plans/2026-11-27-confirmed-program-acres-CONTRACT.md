@@ -13,5 +13,7 @@ Mason approved the reporting rule on 2026-11-27. Today and Program Tracker count
 
 - The local database test passed and rolled back the fixtures. It covered pending and approved tickets, confirmed partial and fieldless passes, duplicate sources, removed plans, field and farm mismatches, season attribution, and access for an admin, a sales rep and a driver.
 - In the local browser, both screens used the same synthetic plans and excluded removed and prior-season plans. The shared-field regression checks the Field Setup fallback and the precedence of saved job payers.
+- The local booking guard rejected both attempts to create mismatched jobs. A read-only production count on 2026-11-27 found zero active section jobs with a conflicting quote or customer. Keep the report's exact-link filters as a second check for any legacy data.
+- The migration checks for the payer helper from `20270226150000_job_transfer_below_cost_whole_line.sql` before it replaces the report.
 - The release PR must carry a reviewed update to the cost-exposure sweep fingerprint for `get_program_completion` in `scripts/db-invariant-sweeps/allowlist.json`. After the release applies the migration, rerun the full read-only sweep before the release merges.
 - The migration can precede the display adjustment in later delivery. Recovery is a reviewed forward migration restoring the earlier reader body.

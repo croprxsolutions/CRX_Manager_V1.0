@@ -101,9 +101,10 @@ BEGIN
         CASE WHEN v_pass.removed THEN now() END)
       RETURNING id INTO v_job;
     EXCEPTION WHEN raise_exception THEN
-      -- The current write guard blocks new mismatched jobs. If a legacy
-      -- fixture can be inserted, the reader must still exclude its acres.
+      -- Exercise the current write guard without disabling it. If this fixture
+      -- runs against an older schema, the reader must exclude the legacy row.
       IF v_pass.label IN ('wrong-quote', 'wrong-farm') AND SQLERRM LIKE 'JOB_NEEDS_BOOKING:%' THEN
+        RAISE NOTICE 'Local booking guard refused the % fixture', v_pass.label;
         CONTINUE;
       END IF;
       RAISE;

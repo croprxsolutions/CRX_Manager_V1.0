@@ -63,11 +63,15 @@ BEGIN
   INSERT INTO public.products (product_name, unit_size, epa_registration, product_form, inventory_unit)
   VALUES ('[SMOKE] Start Complete Product ' || v_suffix, 'Gal', '999999-99999', 'liquid', 'Gal')
   RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, product_form, inventory_unit, unit_size)
+  VALUES ('Invented Whole Item ' || v_suffix, 'each', 'Ea', 'Ea') RETURNING id INTO v_each_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page', NULL,
-    jsonb_build_array(jsonb_build_object(
-      'product_id', v_product, 'row_version', 1, 'pricing_mode', 'price_driven',
-      'new_cost', '6.00', 'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00')),
+    jsonb_build_array(
+      jsonb_build_object('product_id', v_product, 'row_version', 1, 'pricing_mode', 'price_driven',
+        'new_cost', '6.00', 'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00'),
+      jsonb_build_object('product_id', v_each_product, 'row_version', 1, 'pricing_mode', 'price_driven',
+        'new_cost', '6.00', 'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00')),
     v_admin, v_prefix || 'pricing-preview');
   IF v_pricing->>'status' IS DISTINCT FROM 'previewed' THEN
     RAISE EXCEPTION 'SMOKE_SETUP: governed product pricing preview failed: %', v_pricing;
@@ -379,13 +383,6 @@ BEGIN
       AND n.message LIKE 'Your customer %') <> 1
   ) THEN RAISE EXCEPTION 'The office completion did not preserve the legacy commission audiences'; END IF;
 
-  -- Match the existing whole-item prover's rolled-back product fixture, then re-enable all triggers.
-  SET LOCAL session_replication_role = replica;
-  INSERT INTO public.products (product_name, product_form, inventory_unit, unit_size, current_cost,
-    tier1_price, tier2_price, tier3_price, pricing_version)
-  VALUES ('Invented Whole Item ' || v_suffix, 'each', 'Ea', 'Ea', 6, 10, 10, 10, 1)
-  RETURNING id INTO v_each_product;
-  SET LOCAL session_replication_role = origin;
   INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
   VALUES (v_each_product, 'Main Warehouse', 10, 2, 'Ea');
   INSERT INTO public.order_items (order_id, product_id, product_name, unit_size, total_units_needed,

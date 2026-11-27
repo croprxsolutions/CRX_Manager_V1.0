@@ -7,6 +7,13 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "get_program_completion": {
+      "chain": "smoke-confirmed-program-acres.sql",
+      "psql_only": true,
+      "area": ["regression", "security"],
+      "description": "Confirmed program acreage on a migrated database. Saved passes, field and quote-season attribution, excluded ticket-only and removed plans, unchanged invoice cents, and office role boundaries. Invented records roll back.",
+      "covers": ["get_program_completion"]
+    },
     "get_deliveries_page": {
       "chain": "smoke-goal4-deliveries-page.sql",
       "container_prover": "prove-deliveries-page-real-schema.mjs",

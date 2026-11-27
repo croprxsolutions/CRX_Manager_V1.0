@@ -94,7 +94,7 @@ vi.mock('../lib/db', async () => ({
         }));
       }
       if (functionName === 'get_program_completion') {
-        return paged(Promise.resolve({ data: [{ completion_pct: 75 }], error: null }));
+        return paged(Promise.resolve({ data: [{ completion_pct: 150 }, { completion_pct: 0 }], error: null }));
       }
       return paged(Promise.resolve({ data: null, error: null }));
     }),
@@ -144,7 +144,7 @@ describe('OfficeCockpit morning screen', () => {
     expect(snapshotHeading.compareDocumentPosition(inventoryHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(inventoryHeading.compareDocumentPosition(quickActionsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('Active Orders')).toBeInTheDocument();
-    expect(screen.getByText('Program Progress')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Program Progress 50%' })).toBeInTheDocument();
     expect(screen.getByText('Floor Stock')).toBeInTheDocument();
     expect(await screen.findByText('$12,345.67')).toBeInTheDocument();
 

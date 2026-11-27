@@ -300,7 +300,9 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
   const notCarried = attempt({ ...signedOff, approvedHead: null });
   ok(notCarried.wrote.length === 2, "his earlier sign-off does not carry over: label and re-ask him");
   const carryTimedOut = attempt({ ...signedOff, approvedHead: HEAD, budgetMs: 200, delayOn: "/timeline", delayMs: 300 });
-  ok(carryTimedOut.wrote.length === 0 && carryTimedOut.note.includes("no time to check whether it carries over") && carryTimedOut.note.includes("Only if this push changed code"), "carry check out of time: no plain re-ask, a conditional line (Taha MED 1, delta)");
+  ok(carryTimedOut.wrote.length === 0 && carryTimedOut.note.includes("could not finish checking whether it carries over") && carryTimedOut.note.includes("Only if this push changed code"), "carry check out of time: no plain re-ask, a conditional line (Taha MED 1, delta)");
+  const carryFailed = attempt({ ...signedOff, approvedHead: HEAD, fail: "/timeline" });
+  ok(carryFailed.wrote.length === 0 && carryFailed.note.includes("could not finish checking") && carryFailed.note.includes("Only if this push changed code"), "carry check hits a GitHub error: no re-ask, a conditional line (Codex bot)");
   ok(!done.calls.some((c) => c.includes("/timeline")), "no sign-off of his on the PR: the carry-over check costs no calls");
 
   // Taha LOW 2: GitHub behind the push is asked once more, and never silently dropped when a clean Sol is on disk.
@@ -308,6 +310,12 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
   ok(caughtUp.wrote.length === 2 && caughtUp.calls.filter((c) => c.startsWith("pr view")).length === 2, "GitHub catches up on the second look: labelled");
   const behind = attempt({ views: [{ headRefOid: OTHER, commits: [{ oid: OTHER }] }] });
   ok(behind.wrote.length === 0 && behind.note.includes("not labelled for Taha yet") && behind.note.includes("gh pr edit 7"), "GitHub still behind the push: one line with the manual command");
+  // Taha LOW 7: before the lane is read the line is conditional, plus the code-change condition once he signed off.
+  ok(behind.note.includes("Only if it does, run: gh pr edit 7") && !behind.note.includes("changed code"), "GitHub behind: conditional line, lane unknown");
+  const behindSigned = attempt({ ...signedOff, views: [{ ...signedOff.pr, headRefOid: OTHER, commits: [{ oid: OTHER }] }] });
+  ok(behindSigned.wrote.length === 0 && behindSigned.note.includes("Only if it does and this push changed code"), "GitHub behind on a PR he signed off: both conditions");
+  const filesFailSigned = attempt({ ...signedOff, fail: "/files" });
+  ok(filesFailSigned.wrote.length === 0 && filesFailSigned.note.includes("Only if it does and this push changed code"), "file list unreadable on a PR he signed off: both conditions");
   ok(attempt({ views: [{ headRefOid: OTHER, commits: [{ oid: OTHER }] }], proofs: {} }).note === "", "GitHub behind but no clean Sol on disk: silent");
   const slow = askTahaAfterSol({ cwd: ".", headSha: HEAD, gh: () => { throw new Error("ETIMEDOUT"); }, readProof: () => proof(HEAD), now });
   ok(slow.includes("not labelled for Taha yet") && slow.includes("ETIMEDOUT"), "GitHub does not answer while a clean Sol is on disk: says so");

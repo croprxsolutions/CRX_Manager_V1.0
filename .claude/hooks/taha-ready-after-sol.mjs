@@ -5,9 +5,10 @@
 // Runs when the proof is written (write-codex-push-proof.mjs) and after a push, `gh pr create`
 // or `gh pr ready` (posttool-router.mjs), because Sol usually runs before the PR exists.
 // Best-effort: never blocks or fails anything. When a clean Sol proof is on disk but the hook cannot
-// finish (GitHub slow or behind the push), it prints one line with the manual command instead of staying silent.
+// finish (GitHub slow or behind the push), it prints one conditional line with the manual command instead of staying silent.
 // "Covers" is the merge gate's own rule (proofValidForMerge): a clean Sol of this head or of an earlier
-// commit of this PR, so a fix pushed after Sol asks Taha again too. Ancestry is asked of GitHub, like the gate.
+// commit of this PR whose later commits stay off the Sol list, so a fix pushed after Sol asks Taha again too.
+// Ancestry and the later commits are asked of GitHub, like the gate.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -31,6 +32,7 @@ const manual = (n) => `gh pr edit ${n ? `${n} ` : ""}--add-label ${LABEL} --add-
 const FILES_UNREADABLE = "GitHub did not return the PR's full list of changed files";
 const LANE_UNKNOWN = "GitHub did not return its migrations' SQL";
 const UNREAD_SQL = "(its SQL could not be read)"; // tahaLaneProblem's marker
+const SIGNED_OFF_IF = "this push changed code (not just a staging catch-up, docs/ notes or a migration restamp)";
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** Why this PR should NOT be labelled now, or null when it should. `files()` (GitHub calls) is asked last. */
@@ -140,14 +142,18 @@ export function askTahaAfterSol({ cwd, headSha = null, pr: target = null, gh = d
   };
   let reader = readProof;
   const read = (sha) => (reader ??= proofReader(cwd))(sha);
+  // Lines printed before the checks finish are conditional (Taha LOW 7): the lane may not be his, and once he
+  // signed off some commit, only a code change needs him again.
+  const signedOff = (p) => (p?.reviews ?? []).some((r) => isTaha(r.author?.login) && ["APPROVED", "DISMISSED"].includes(r.state));
+  const unfinished = (p, n, why) => `PR #${n ?? "?"}: not labelled for Taha yet (${why}, so it could not tell whether it changes Taha's areas). `
+    + `Only if it does${signedOff(p) ? ` and ${SIGNED_OFF_IF}` : ""}, run: ${manual(n)}`;
   // Silent unless a clean Sol proof of one of these commits is on disk: then something may be due, so say so.
-  const notYet = (n, why, shas) => (shas.map(lower).some((sha) => cleanSolShape(read(sha), now))
-    ? `PR #${n ?? "?"}: not labelled for Taha yet (${why}); run: ${manual(n)}` : "");
+  const notYet = (p, n, why, shas) => (shas.map(lower).some((sha) => cleanSolShape(read(sha), now)) ? unfinished(p, n, why) : "");
   const view = () => JSON.parse(call(["pr", "view", ...(target ? [String(target)] : []), "--json", PR_FIELDS]));
 
   let pr;
   try { pr = view(); } catch (error) {
-    return /no (open )?pull requests? found/i.test(error.message) ? "" : notYet(null, `GitHub did not answer: ${error.message}`, [headSha].filter(Boolean));
+    return /no (open )?pull requests? found/i.test(error.message) ? "" : notYet(null, null, `GitHub did not answer: ${error.message}`, [headSha].filter(Boolean));
   }
   if (headSha && lower(pr.headRefOid) !== lower(headSha)) {
     if (deadline - Date.now() > retryDelayMs + 1_000) {
@@ -155,7 +161,7 @@ export function askTahaAfterSol({ cwd, headSha = null, pr: target = null, gh = d
       try { pr = view(); } catch { /* judged below */ }
     }
     if (lower(pr.headRefOid) !== lower(headSha)) {
-      return notYet(pr.number, "GitHub does not show the pushed commit yet", [headSha, pr.headRefOid, ...(pr.commits ?? []).map((c) => c?.oid)]);
+      return notYet(pr, pr.number, "GitHub does not show the pushed commit yet", [headSha, pr.headRefOid, ...(pr.commits ?? []).map((c) => c?.oid)]);
     }
   }
   try {
@@ -164,20 +170,19 @@ export function askTahaAfterSol({ cwd, headSha = null, pr: target = null, gh = d
     const files = () => prFilesOnGitHub({ repo: undefined, gh: call, number: pr.number, headSha: pr.headRefOid });
     const problem = tahaReadyAfterSolProblem({ pr, proofClean: covered !== false, files });
     // An unreadable list is not "not lane" (Taha LOW 2, Codex bot): say so, as the other unfinished paths do.
-    // The lane is unknown then, so the command is conditional (Taha LOW 7): never a bare ask on a PR that may not be his.
-    if (problem === FILES_UNREADABLE || problem === LANE_UNKNOWN) {
-      return `PR #${pr.number}: not labelled for Taha yet (${problem}, so it could not tell whether it changes Taha's areas). `
-        + `Only if it does, run: ${manual(pr.number)}`;
-    }
+    if (problem === FILES_UNREADABLE || problem === LANE_UNKNOWN) return unfinished(pr, pr.number, problem);
     if (problem) return "";
     // His Approve of an earlier commit still counts after a staging catch-up, docs/ note or restamp (taha-ready.mjs
     // tahaVerdict; Taha MED 1). Asked only when he approved some commit (a push dismisses it): it costs several calls.
-    const approvedEarlier = (pr.reviews ?? []).some((r) => isTaha(r.author?.login) && ["APPROVED", "DISMISSED"].includes(r.state));
-    if (approvedEarlier && tahaApprovedOnGitHub({ repo: undefined, gh: call, pullRequest: pr.number, headSha: pr.headRefOid })) return "";
+    const approvedEarlier = signedOff(pr);
+    // tahaApprovedOnGitHub reads a failed call as "not carried", so a failure is recorded here (Codex bot).
+    let carryFailed = false;
+    const carryCall = (args) => { try { return call(args); } catch (error) { carryFailed = true; throw error; } };
+    if (approvedEarlier && tahaApprovedOnGitHub({ repo: undefined, gh: carryCall, pullRequest: pr.number, headSha: pr.headRefOid })) return "";
     // Unfinished carry check: never a plain re-ask, since his sign-off may still stand (Taha MED 1, delta).
-    if (approvedEarlier && Date.now() >= deadline) {
-      return `PR #${pr.number}: not labelled for Taha yet. Taha signed off an earlier commit and there was no time to check whether it carries over. `
-        + `Only if this push changed code (not just a staging catch-up, docs/ notes or a migration restamp), run: ${manual(pr.number)}`;
+    if (approvedEarlier && (carryFailed || Date.now() >= deadline)) {
+      return `PR #${pr.number}: not labelled for Taha yet. Taha signed off an earlier commit and GitHub could not finish checking whether it carries over. `
+        + `Only if ${SIGNED_OFF_IF}, run: ${manual(pr.number)}`;
     }
     if (covered === null) return `PR #${pr.number}: not labelled for Taha yet (GitHub could not confirm the Sol covers this head); run: ${manual(pr.number)}`;
     // The request first: a label alone would claim he was asked (Taha LOW 5).
@@ -189,7 +194,7 @@ export function askTahaAfterSol({ cwd, headSha = null, pr: target = null, gh = d
     }
     return `PR #${pr.number}: a clean Sol covers its current head, so Taha is asked to review and it is labelled ${LABEL}.`;
   } catch (error) {
-    return `PR #${pr.number}: could not ask Taha automatically (${error.message}); run: ${manual(pr.number)}`;
+    return `PR #${pr.number}: could not ask Taha automatically (${error.message}); ${signedOff(pr) ? `only if ${SIGNED_OFF_IF}, ` : ""}run: ${manual(pr.number)}`;
   }
 }
 

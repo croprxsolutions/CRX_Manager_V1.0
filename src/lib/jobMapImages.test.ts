@@ -357,10 +357,10 @@ describe('fetchJobMapImages', () => {
     const result = fetchJobMapImages('job-1');
     await vi.advanceTimersByTimeAsync(25_000);
     await expect(result).resolves.toBeNull();
-    expect(fetcher).toHaveBeenCalledTimes(3);
-    expect(aborted).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenCalledTimes(7);
+    expect(aborted).toHaveBeenCalledTimes(7);
     await vi.advanceTimersByTimeAsync(120_000);
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenCalledTimes(7);
   });
 
   it('keeps a completed overview and reaches the next field when image conversion stalls', async () => {

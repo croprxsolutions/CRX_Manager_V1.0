@@ -54,17 +54,20 @@ it('attaches unfiltered hazards by saved field and only treats a verified empty 
   vi.useFakeTimers();
   try {
     vi.mocked(readFieldMarkers).mockClear();
-    vi.mocked(readFieldMarkers).mockImplementation((id) => id === 'a'
-      ? new Promise(() => undefined)
-      : Promise.resolve({ available: true, count: 0, markers: [] }));
-    const pending = prepareApplicatorSheetPrintData('job-1', data, {
+    vi.mocked(readFieldMarkers).mockImplementation((id) => id === 'd'
+      ? Promise.resolve({ available: true, count: 1, markers: [{ ...marker, field_id: 'd' }] })
+      : new Promise(() => undefined));
+    const pending = prepareApplicatorSheetPrintData('job-1', {
+      ...data, fields: [...data.fields, { ...data.fields[0], field_id: 'd', stop: 4 }],
+    }, {
       ...DEFAULT_APPLICATOR_PRINT_OPTIONS, mapPages: 'none', includeBillingSplits: false,
     });
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(5_000);
     const timedOut = await pending;
-    expect(timedOut.fields[0].hazards).toEqual({ complete: false, markers: [] });
-    expect(timedOut.fields[1].hazards).toEqual({ complete: true, markers: [] });
-    expect(vi.mocked(readFieldMarkers).mock.calls[0][1].aborted).toBe(true);
+    for (const field of timedOut.fields.slice(0, 3)) expect(field.hazards).toEqual({ complete: false, markers: [] });
+    expect(timedOut.fields[3].hazards?.markers[0].note).toBe('Check after rain');
+    const stalled = vi.mocked(readFieldMarkers).mock.calls.slice(0, 3);
+    expect(stalled.every(([, signal]) => signal.aborted)).toBe(true);
   } finally {
     vi.useRealTimers();
   }

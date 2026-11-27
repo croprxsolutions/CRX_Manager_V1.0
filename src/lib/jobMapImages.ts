@@ -745,6 +745,7 @@ export async function fetchJobMapImages(
   });
   try {
     await Promise.race([collectJobMapImages(jobId, opts, token.trim(), controller.signal, result), cutoff]);
+    result.perField.sort((first, second) => (first.sprayNumber ?? 0) - (second.sprayNumber ?? 0));
     return result.overview || result.perField.length > 0 ? result : null;
   } finally {
     clearTimeout(timeoutId);
@@ -827,7 +828,8 @@ async function collectJobMapImages(
       token,
     };
 
-    if (opts.overview !== false) {
+    async function readOverview() {
+      if (opts.overview === false) return;
       const overviewImage = buildOverviewStaticImage(fields, token);
       if (overviewImage) {
         const overview = await fetchImageDataUrl(
@@ -843,8 +845,11 @@ async function collectJobMapImages(
       }
     }
 
-    if (opts.perField !== false) {
-      for (const field of fields) {
+    let nextField = 0;
+    async function readFieldPictures() {
+      if (opts.perField === false) return;
+      while (!signal.aborted && nextField < fields.length) {
+        const field = fields[nextField++];
         const fieldObstacles = obstacles.get(field.id) ?? [];
         const image = buildStaticImageUrl([field], fieldObstacles.map((pin) => pin.feature), perFieldOptions);
         if (!image) {
@@ -868,7 +873,7 @@ async function collectJobMapImages(
         });
       }
     }
-
+    await Promise.all([readOverview(), readFieldPictures(), readFieldPictures()]);
   } catch (error) {
     if (!signal.aborted) console.warn('Unable to load applicator-sheet field maps.', error);
   }

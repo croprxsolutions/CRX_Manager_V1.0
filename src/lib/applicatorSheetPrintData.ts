@@ -245,6 +245,23 @@ async function sheetSafety(products: ApplicatorSheetData['products']): Promise<A
 }
 
 const hazardsUnavailable: ApplicatorSheetHazards = { complete: false, markers: [] };
+const PRINT_FIELD_HAZARD_TIMEOUT_MS = 5_000;
+
+async function readPrintFieldMarkers(id: string, jobSignal: AbortSignal) {
+  const request = new AbortController();
+  const abort = () => request.abort();
+  jobSignal.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(abort, PRINT_FIELD_HAZARD_TIMEOUT_MS);
+  const cutoff = new Promise<null>((resolve) => {
+    request.signal.addEventListener('abort', () => resolve(null), { once: true });
+  });
+  try {
+    return await Promise.race([readFieldMarkers(id, request.signal), cutoff]);
+  } finally {
+    clearTimeout(timer);
+    jobSignal.removeEventListener('abort', abort);
+  }
+}
 
 async function readSheetHazards(fields: ApplicatorSheetData['fields']) {
   const ids = [...new Set(fields.flatMap(({ field_id }) => field_id ? [field_id] : []))];
@@ -257,9 +274,9 @@ async function readSheetHazards(fields: ApplicatorSheetData['fields']) {
     while (!request.signal.aborted && next < ids.length) {
       const id = ids[next++];
       try {
-        const snapshot = await readFieldMarkers(id, request.signal);
+        const snapshot = await readPrintFieldMarkers(id, request.signal);
         if (request.signal.aborted) return;
-        if (!snapshot.available || !Array.isArray(snapshot.markers)) continue;
+        if (!snapshot?.available || !Array.isArray(snapshot.markers)) continue;
         const markers = new Map(snapshot.markers.filter((marker) => marker?.field_id === id && typeof marker.id === 'string')
           .map((marker) => [marker.id, marker]));
         results.set(id, {

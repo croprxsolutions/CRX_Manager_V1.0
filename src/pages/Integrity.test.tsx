@@ -38,9 +38,9 @@ describe('Integrity', () => {
     expect(screen.getByRole('tabpanel')).toHaveTextContent('Integrity cleanup panel');
   });
 
-  it('falls back to the report for an unknown tab', () => {
+  it.each(['unknown', 'constructor', 'checks'])('opens the report for tab=%s', (tab) => {
     render(
-      <MemoryRouter initialEntries={['/integrity?tab=unknown']}>
+      <MemoryRouter initialEntries={[`/integrity?tab=${tab}`]}>
         <Integrity />
       </MemoryRouter>
     );

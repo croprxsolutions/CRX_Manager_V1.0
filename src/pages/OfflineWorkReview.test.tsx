@@ -102,6 +102,33 @@ beforeEach(() => {
 });
 
 describe('OfflineWorkReview', () => {
+  it('shows the unresolved total and can open receipts beyond the first page', async () => {
+    const secondPageItem = {
+      ...queueItem,
+      client_action_id: '66666666-6666-4666-8666-666666666666',
+      failure_summary: 'Receipt on the second page.',
+    };
+    mockRpc.mockImplementation((_name: string, params: { p_offset: number }) => Promise.resolve({
+      data: { success: true, items: [params.p_offset === 0 ? queueItem : secondPageItem], total: 101 },
+      error: null,
+    }));
+
+    render(<MemoryRouter><OfflineWorkReview /></MemoryRouter>);
+    expect(await screen.findAllByText('101')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Receipt on the second page.')).toBeInTheDocument();
+    expect(mockRpc).toHaveBeenLastCalledWith('get_offline_action_review_queue', {
+      p_include_resolved: false, p_limit: 100, p_offset: 100,
+    });
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Include resolved history' }));
+    expect(await screen.findByText(queueItem.failure_summary)).toBeInTheDocument();
+    expect(mockRpc).toHaveBeenLastCalledWith('get_offline_action_review_queue', {
+      p_include_resolved: true, p_limit: 100, p_offset: 0,
+    });
+  });
+
   it('records a confirmed audited resolution without a business-action RPC', async () => {
     render(
       <MemoryRouter>

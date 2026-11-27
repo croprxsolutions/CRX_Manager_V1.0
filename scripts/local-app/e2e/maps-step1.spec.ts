@@ -611,6 +611,27 @@ ${error.stack ?? ''}`)}`);
   await expect(page.getByRole('heading', { name: fieldName })).toBeVisible();
   await screenshot(page, 'field-dashboard');
 
+  // Codex P2: the dashboard map is only 200px tall on a phone; the picture menu must stay inside it.
+  await page.setViewportSize(phoneViewport);
+  await page.reload();
+  await mapCanvas(page);
+  const dashboardToggle = page.locator('.crx-map-layer-toggle');
+  await dashboardToggle.locator(':scope > button').click();
+  const menuInsideMap = await dashboardToggle.evaluate((toggle) => {
+    const map = (toggle as HTMLElement).offsetParent!.getBoundingClientRect();
+    const menu = toggle.querySelector(':scope > div')!.getBoundingClientRect();
+    return { map: [map.top, map.bottom], menu: [menu.top, menu.bottom] };
+  });
+  expect(menuInsideMap.map[1] - menuInsideMap.map[0]).toBeLessThanOrEqual(220);
+  expect(menuInsideMap.menu[0]).toBeGreaterThanOrEqual(menuInsideMap.map[0]);
+  expect(menuInsideMap.menu[1]).toBeLessThanOrEqual(menuInsideMap.map[1]);
+  // Every option is reachable: the lowest one scrolls into the menu and takes a real tap.
+  // trial: Playwright's hit-target check without choosing, so the remembered picture is unchanged.
+  await dashboardToggle.locator(':scope > div').getByRole('button', { name: 'USDA aerial', exact: true }).click({ trial: true });
+  await screenshot(page, 'phone-field-dashboard-picture-menu', false);
+  await dashboardToggle.locator(':scope > button').click();
+  await page.setViewportSize({ width: 1280, height: 720 });
+
   customerMapCaptureFieldId = fieldId;
   captureCustomerMapResponse = true;
   await page.goto(`/customers/${customerId}`);

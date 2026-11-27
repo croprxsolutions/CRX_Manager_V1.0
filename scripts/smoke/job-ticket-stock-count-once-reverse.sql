@@ -1,7 +1,7 @@
 -- Rollback for 20270314150000_job_ticket_stock_count_once.sql, BEFORE the first posting under it only.
 -- After any job_applied row carries application_record_id (every posting under the new bodies), fix forward instead.
--- Restores the three previous bodies and drops the group helper. The two ledger columns and their
--- index stay (the ledger is write-once; unused columns are harmless).
+-- Restores the three previous bodies and the number generator, and drops the group helpers and the number-retiring
+-- trigger. The two ledger columns, their index and the (empty) retired-numbers table stay (harmless when unused).
 -- Run in one transaction: psql -1 -f scripts/smoke/job-ticket-stock-count-once-reverse.sql
 
 \set ON_ERROR_STOP on
@@ -14,9 +14,14 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.inventory_transactions WHERE application_record_id IS NOT NULL OR already_counted IS NOT NULL) THEN
     RAISE EXCEPTION 'COUNT_ONCE_ROLLBACK_REFUSED: postings under the count-once rule exist; fix forward with a new migration';
   END IF;
+  -- The old generator ignores retired numbers, so it would hand one out again.
+  IF EXISTS (SELECT 1 FROM public.application_record_numbers_retired) THEN
+    RAISE EXCEPTION 'COUNT_ONCE_ROLLBACK_REFUSED: an undone record number is retired; fix forward with a new migration';
+  END IF;
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)')), chr(13), '')) IS DISTINCT FROM '0fc4e07bd31e23a56c37ca7bf8c9301b'
      OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)')), chr(13), '')) IS DISTINCT FROM '65ff342c6eccd4043ea3db7c4f7635d1'
-     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.reverse_application_record(uuid, text)')), chr(13), '')) IS DISTINCT FROM '8f3656f84e005203248b9f933543fd7a' THEN
+     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.reverse_application_record(uuid, text)')), chr(13), '')) IS DISTINCT FROM '8f3656f84e005203248b9f933543fd7a'
+     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.next_application_record_number()')), chr(13), '')) IS DISTINCT FROM '20aae1cd55a9cf4da1057293d5e49ebe' THEN
     RAISE EXCEPTION 'COUNT_ONCE_ROLLBACK_REFUSED: the live bodies are not the count-once bodies';
   END IF;
 END;
@@ -986,6 +991,50 @@ BEGIN
 END;
 $function$;
 
+
+CREATE OR REPLACE FUNCTION public.next_application_record_number()
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $fn$
+DECLARE
+  v_actor uuid;
+  v_year text;
+  v_max_num int;
+  v_next text;
+BEGIN
+  v_actor := auth.uid();
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles
+     WHERE id = v_actor
+       AND is_active = true
+       AND role IN ('admin', 'sales_rep', 'applicator')
+  ) THEN RAISE EXCEPTION 'INSUFFICIENT_ROLE'; END IF;
+
+  v_year := extract(year FROM (now() AT TIME ZONE 'America/Chicago')::date)::text;
+  PERFORM pg_advisory_xact_lock(hashtext('next_application_record_number'));
+  SELECT COALESCE(
+    MAX(
+      CASE
+        WHEN record_number ~ ('^APP-' || v_year || '-\d+$')
+        THEN CAST(split_part(record_number, '-', 3) AS int)
+        ELSE 0
+      END
+    ),
+    0
+  )
+  INTO v_max_num
+  FROM application_records;
+  v_next := 'APP-' || v_year || '-' || lpad((v_max_num + 1)::text, 4, '0');
+  RETURN v_next;
+END;
+$fn$;
+
+DROP TRIGGER trg_retire_application_record_number ON public.application_records;
+DROP FUNCTION public._retire_application_record_number_20270314();
+
 DROP FUNCTION public._job_stock_group_20270310(uuid, uuid);
 DROP FUNCTION public._job_stock_customer_20270310(uuid);
 
@@ -993,7 +1042,8 @@ DO $check$
 BEGIN
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)')), chr(13), '')) IS DISTINCT FROM '3bd9dfe0729d8175ffbb1cf16b258b5c'
      OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)')), chr(13), '')) IS DISTINCT FROM '0ad9a78b900cb953e0aa7d2a0d87bda0'
-     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.reverse_application_record(uuid, text)')), chr(13), '')) IS DISTINCT FROM 'bb7b45f8dca986c9cf39b5b6a41aa75b' THEN
+     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.reverse_application_record(uuid, text)')), chr(13), '')) IS DISTINCT FROM 'bb7b45f8dca986c9cf39b5b6a41aa75b'
+     OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.next_application_record_number()')), chr(13), '')) IS DISTINCT FROM '9bf10abef4830cd6b0ee3aea41c07469' THEN
     RAISE EXCEPTION 'COUNT_ONCE_ROLLBACK: restored bodies do not match the previous ones';
   END IF;
 END;

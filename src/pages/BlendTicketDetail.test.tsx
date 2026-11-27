@@ -886,6 +886,51 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     expect(ticketLoads()).toBe(loadsAfterMove);
   });
 
+  it('does not give a late filing reply to another ticket opened meanwhile', async () => {
+    mockFrom.mockReset();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
+      return buildChain({ data: [], error: null });
+    });
+    let finishCreate: (value: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => name === 'create_application_record_from_blend_ticket'
+      ? new Promise((resolve) => { finishCreate = resolve; })
+      : Promise.resolve({ data: null, error: null }));
+    const router = createMemoryRouter([{ path: '/blend-tickets/:id', element: <BlendTicketDetail /> }], {
+      initialEntries: ['/blend-tickets/tk-1'],
+    });
+    render(<RouterProvider router={router} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Create App Record' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Record' }));
+    await waitFor(() => expect(mockRpc.mock.calls.some(([name]) => name === 'create_application_record_from_blend_ticket')).toBe(true));
+
+    await act(async () => { await router.navigate('/blend-tickets/tk-2'); });
+    await act(async () => { finishCreate({ data: ['app-record-1'], error: null }); });
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Application record created successfully'));
+    // The other ticket has no filing: no Undo Filing for the first ticket's record.
+    expect(screen.queryByRole('button', { name: 'Undo Filing' })).not.toBeInTheDocument();
+  });
+
+  it('says no stock changed when the undone ticket had taken none', async () => {
+    mockFrom.mockReset();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
+      if (table === 'application_records') return buildChain({ data: [{ id: 'app-record-1' }], error: null });
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string) => name === 'reverse_application_record'
+      ? Promise.resolve({ data: { success: true, status: 'reversed', inventory_transactions_reversed: 0, kept_on_job_lines: 0, over_taken_lines: 0 }, error: null })
+      : Promise.resolve({ data: null, error: null }));
+
+    renderTicket();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo Filing' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Undo Filing' })[1]);
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('No stock changed')));
+  });
+
   it('locks application-field controls when an application record exists', async () => {
     const unreviewedTicket = { ...baseTicket, review_status: 'unreviewed' };
     mockFrom.mockReset();

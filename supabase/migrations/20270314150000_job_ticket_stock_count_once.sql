@@ -18,6 +18,8 @@
 -- keeps the job's claim unchanged); extra another ticket took because of this one comes back as a positive 'adjusted'
 -- row linked to the job record, which the group counts as returned. A ticket with an active invoice is refused.
 -- It takes the application-record number lock first, the lock completion and filing already take before any stock row.
+-- Record numbers are never reused (Sol round 6, Mason 2026-11-26): a deleted application record's number is kept in
+-- application_record_numbers_retired (an AFTER DELETE trigger), and next_application_record_number() counts it.
 --
 -- Rows posted before this migration carry no link (the ledger is write-once: trg_guard_inventory_transactions_immutable
 -- refuses UPDATE, so they cannot be backfilled and the link has no foreign key). The group still counts them, found the way
@@ -33,6 +35,9 @@
 --   _create_app_record_from_bt_replay_impl_20261015 :: called only by create_application_record_from_blend_ticket.
 --   reverse_application_record :: public RPC, same signature, grants unchanged (authenticated, service_role); no screen caller.
 --   _job_stock_group_20270310 :: called only by the two bodies above.
+--   next_application_record_number :: same signature and grants (service_role only); called by the job and ticket bodies.
+--   _retire_application_record_number_20270314 :: trigger only (AFTER DELETE ON application_records); owner-only.
+-- rls: application_record_numbers_retired has RLS on; admins may read it; no API role may write it (the trigger writes).
 --
 -- ROLLBACK (before first use): scripts/smoke/job-ticket-stock-count-once-reverse.sql. After the first counted posting, fix
 --   forward with a new migration: the old bodies would ignore the stored credits.
@@ -52,7 +57,8 @@ BEGIN
       FROM (VALUES
         ('public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)', '3bd9dfe0729d8175ffbb1cf16b258b5c'),
         ('public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)', '0ad9a78b900cb953e0aa7d2a0d87bda0'),
-        ('public.reverse_application_record(uuid, text)', 'bb7b45f8dca986c9cf39b5b6a41aa75b')
+        ('public.reverse_application_record(uuid, text)', 'bb7b45f8dca986c9cf39b5b6a41aa75b'),
+        ('public.next_application_record_number()', '9bf10abef4830cd6b0ee3aea41c07469')
       ) AS x(sig, md5)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(x.sig)
   LOOP
@@ -65,7 +71,8 @@ BEGIN
   END LOOP;
   -- The columns survive a rollback (the ledger is write-once), so only the helpers mark this as applied.
   IF to_regprocedure('public._job_stock_group_20270310(uuid, uuid)') IS NOT NULL
-     OR to_regprocedure('public._job_stock_customer_20270310(uuid)') IS NOT NULL THEN
+     OR to_regprocedure('public._job_stock_customer_20270310(uuid)') IS NOT NULL
+     OR to_regprocedure('public._retire_application_record_number_20270314()') IS NOT NULL THEN
     RAISE EXCEPTION 'COUNT_ONCE_PREFLIGHT: already applied';
   END IF;
   -- Old pairs (both posted before this rule) are left as they are; say how many so staging data is visible.
@@ -136,6 +143,44 @@ AS $fn$
           AND ar.source_id IN (SELECT bt.id FROM public.blend_tickets bt WHERE bt.job_id = p_job_id));
 $fn$;
 REVOKE ALL ON FUNCTION public._job_stock_group_20270310(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
+
+-- Record numbers are never reused (Mason, 2026-11-26): undoing a filing deletes its application record, and the
+-- generator took the next number from surviving records only, so the newest undone number was handed out again and
+-- two legal records could carry one number. A deleted record's number is kept here; the generator counts it too.
+-- Write-once (no updated_at): a retired number never changes.
+CREATE TABLE IF NOT EXISTS public.application_record_numbers_retired (
+  record_number          text PRIMARY KEY,
+  application_record_id  uuid NOT NULL,
+  retired_at             timestamptz NOT NULL DEFAULT now(),
+  retired_by             uuid
+);
+COMMENT ON TABLE public.application_record_numbers_retired IS
+  'Application record numbers whose record was deleted (an undone filing). next_application_record_number() never hands one out again. Write-once.';
+ALTER TABLE public.application_record_numbers_retired ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.application_record_numbers_retired FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE public.application_record_numbers_retired TO authenticated;
+DROP POLICY IF EXISTS application_record_numbers_retired_admin_select ON public.application_record_numbers_retired;
+CREATE POLICY application_record_numbers_retired_admin_select ON public.application_record_numbers_retired
+  FOR SELECT TO authenticated USING (public.is_admin());
+
+-- Every delete path retires the number, not only reverse_application_record.
+CREATE FUNCTION public._retire_application_record_number_20270314()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $fn$
+BEGIN
+  INSERT INTO public.application_record_numbers_retired (record_number, application_record_id, retired_by)
+  VALUES (OLD.record_number, OLD.id, auth.uid())
+  ON CONFLICT (record_number) DO NOTHING;
+  RETURN OLD;
+END;
+$fn$;
+REVOKE ALL ON FUNCTION public._retire_application_record_number_20270314() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER trg_retire_application_record_number
+  AFTER DELETE ON public.application_records
+  FOR EACH ROW EXECUTE FUNCTION public._retire_application_record_number_20270314();
 
 CREATE OR REPLACE FUNCTION public._complete_job_replay_impl_20261015(p_job_id uuid, p_applied_info jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
@@ -1281,6 +1326,51 @@ BEGIN
 END;
 $function$;
 
+-- Same body, with retired numbers counted (grants unchanged: EXECUTE stays with service_role only).
+
+CREATE OR REPLACE FUNCTION public.next_application_record_number()
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $fn$
+DECLARE
+  v_actor uuid;
+  v_year text;
+  v_max_num int;
+  v_next text;
+BEGIN
+  v_actor := auth.uid();
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles
+     WHERE id = v_actor
+       AND is_active = true
+       AND role IN ('admin', 'sales_rep', 'applicator')
+  ) THEN RAISE EXCEPTION 'INSUFFICIENT_ROLE'; END IF;
+
+  v_year := extract(year FROM (now() AT TIME ZONE 'America/Chicago')::date)::text;
+  PERFORM pg_advisory_xact_lock(hashtext('next_application_record_number'));
+  SELECT COALESCE(
+    MAX(
+      CASE
+        WHEN record_number ~ ('^APP-' || v_year || '-\d+$')
+        THEN CAST(split_part(record_number, '-', 3) AS int)
+        ELSE 0
+      END
+    ),
+    0
+  )
+  INTO v_max_num
+  -- Retired numbers count too: an undone filing's number is never reused.
+  FROM (SELECT ar.record_number FROM public.application_records ar
+        UNION ALL
+        SELECT rn.record_number FROM public.application_record_numbers_retired rn) n;
+  v_next := 'APP-' || v_year || '-' || lpad((v_max_num + 1)::text, 4, '0');
+  RETURN v_next;
+END;
+$fn$;
+
 DO $postflight$
 DECLARE
   v_fn record;
@@ -1311,6 +1401,28 @@ BEGIN
      OR has_function_privilege('authenticated', 'public._job_stock_group_20270310(uuid, uuid)', 'EXECUTE')
      OR has_function_privilege('service_role', 'public._job_stock_group_20270310(uuid, uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'COUNT_ONCE_POSTFLIGHT: a new helper is executable by an API role';
+  END IF;
+  -- The number generator: reviewed body, service_role only (as since 20260903160000).
+  SELECT p.oid, p.prosrc, p.prosecdef, p.proconfig INTO v_fn
+    FROM pg_proc p WHERE p.oid = to_regprocedure('public.next_application_record_number()');
+  IF v_fn.oid IS NULL OR md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM '20aae1cd55a9cf4da1057293d5e49ebe'
+     OR NOT v_fn.prosecdef OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp'] THEN
+    RAISE EXCEPTION 'COUNT_ONCE_POSTFLIGHT: next_application_record_number() is not the reviewed body';
+  END IF;
+  IF has_function_privilege('anon', v_fn.oid, 'EXECUTE')
+     OR has_function_privilege('authenticated', v_fn.oid, 'EXECUTE')
+     OR NOT has_function_privilege('service_role', v_fn.oid, 'EXECUTE') THEN
+    RAISE EXCEPTION 'COUNT_ONCE_POSTFLIGHT: next_application_record_number() grants changed';
+  END IF;
+  IF has_function_privilege('anon', 'public._retire_application_record_number_20270314()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._retire_application_record_number_20270314()', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._retire_application_record_number_20270314()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'COUNT_ONCE_POSTFLIGHT: the number-retiring trigger function is executable by an API role';
+  END IF;
+  IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.application_record_numbers_retired'::regclass)
+     OR has_table_privilege('anon', 'public.application_record_numbers_retired', 'SELECT')
+     OR has_table_privilege('authenticated', 'public.application_record_numbers_retired', 'INSERT,UPDATE,DELETE,TRUNCATE') THEN
+    RAISE EXCEPTION 'COUNT_ONCE_POSTFLIGHT: retired record numbers are not locked down';
   END IF;
 END;
 $postflight$;

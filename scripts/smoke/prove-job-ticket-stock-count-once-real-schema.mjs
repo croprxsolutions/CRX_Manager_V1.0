@@ -26,11 +26,12 @@ const { buildContainer, removeContainer, seedUsers, psql, scalar, docker, USERS,
 const CANDIDATE = '20270314150000_job_ticket_stock_count_once.sql';
 const ROLLBACK = path.join(ROOT, 'scripts', 'smoke', 'job-ticket-stock-count-once-reverse.sql');
 const CUST = id('c1'), FIELD = id('c2'), CUST2 = id('c3');
-const PRE = { job: '3bd9dfe0729d8175ffbb1cf16b258b5c', bt: '0ad9a78b900cb953e0aa7d2a0d87bda0', rev: 'bb7b45f8dca986c9cf39b5b6a41aa75b' };
+const PRE = { job: '3bd9dfe0729d8175ffbb1cf16b258b5c', bt: '0ad9a78b900cb953e0aa7d2a0d87bda0', rev: 'bb7b45f8dca986c9cf39b5b6a41aa75b', gen: '9bf10abef4830cd6b0ee3aea41c07469' };
 const SIG = {
   job: 'public._complete_job_replay_impl_20261015(uuid, jsonb, uuid, text)',
   bt: 'public._create_app_record_from_bt_replay_impl_20261015(uuid, uuid, text)',
   rev: 'public.reverse_application_record(uuid, text)',
+  gen: 'public.next_application_record_number()',
 };
 const WRAPPERS = ['public.complete_job(uuid, jsonb, uuid, text)', 'public.create_application_record_from_blend_ticket(uuid, uuid, text)'];
 
@@ -152,7 +153,7 @@ try {
     INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD}', '${CUST}', '[PROVER] Count Once Field');
     INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST2}', '[PROVER] Count Once Other Farm', true);`);
   for (let n = 0; n <= 9; n += 1) product(n);
-  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]) product(n);
+  for (const n of ['a', 'b', 'c', 'd', 'e', 'f', 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]) product(n);
   const wrapperAcl = WRAPPERS.map(acl);
 
   // BEFORE: the bug. Ticket 6 on an in-progress job, then the job's 10: 16 out.
@@ -377,6 +378,25 @@ try {
   assert.match(ok(USERS.admin, `SELECT public.reverse_application_record('${record28}', '${key()}');`), /"status": "already_reversed"/);
   balance(28, 10, 'zero-move ticket reversed, then retried with a fresh key');
 
+  // Sol r6 HIGH (Mason 2026-11-26): undoing the newest filing never frees its number for the next filing.
+  ticket(41, null, [[31, 1]]); ticket(42, null, [[32, 1]]);
+  file(T(41));
+  const number31 = scalar(`SELECT record_number FROM public.application_records WHERE source_type = 'blend_ticket' AND source_id = '${T(41)}';`);
+  const record31 = scalar(`SELECT ${recordOf(T(41))};`);
+  assert.equal(number31, scalar(`SELECT max(record_number) FROM public.application_records;`), 'ticket 31 holds the newest number');
+  ok(USERS.admin, reverseSql(T(41)));
+  assert.equal(scalar(`SELECT application_record_id FROM public.application_record_numbers_retired WHERE record_number = '${number31}';`), record31, 'the undone number is retired');
+  file(T(42));
+  const number32 = scalar(`SELECT record_number FROM public.application_records WHERE source_type = 'blend_ticket' AND source_id = '${T(42)}';`);
+  assert.notEqual(number32, number31, 'the undone number is not handed out again');
+  assert.equal(Number(number32.split('-')[2]), Number(number31.split('-')[2]) + 1, `the next filing takes the next number: ${number31} -> ${number32}`);
+  // Who may see or write the retired list: admins read it, nobody writes it directly.
+  assert.equal(ok(USERS.rep, `SELECT count(*) FROM public.application_record_numbers_retired;`).split('\n').pop(), '0', 'a rep cannot read retired numbers');
+  assert.notEqual(ok(USERS.admin, `SELECT count(*) FROM public.application_record_numbers_retired;`).split('\n').pop(), '0', 'an admin can read retired numbers');
+  refused(USERS.admin, `INSERT INTO public.application_record_numbers_retired (record_number, application_record_id) VALUES ('APP-X', '${record31}');`, /permission denied/);
+  refused(USERS.admin, `DELETE FROM public.application_record_numbers_retired;`, /permission denied/);
+  console.log(`[COUNT-ONCE] RECORD NUMBERS: undoing ${number31} retires it; the next filing gets ${number32}; admins read the list, nobody writes it`);
+
   // Races: each must wait for the completion's lock, then act on the committed job record.
   job(11, [['d', 10]]); ticket(11, 11, [['d', 6]]);
   let b = await whileCompleting(J(11), USERS.rep, fileSql(T(11)));
@@ -416,12 +436,18 @@ try {
     input: `SET session_replication_role = replica; DELETE FROM public.inventory_transactions WHERE already_counted IS NOT NULL; SET session_replication_role = origin;\n${rollback}` });
   r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/rollback-uncounted.sql'], { allowFailure: true });
   assert.notEqual(r.status, 0, 'an uncounted linked posting refuses the rollback'); assert.match(out(r), /COUNT_ONCE_ROLLBACK_REFUSED: postings under the count-once rule exist/);
+  // Sol r6: with no counted posting left, a retired number still refuses it (the old generator would reuse it).
+  docker(['exec', '-i', NAME, 'sh', '-c', `cat > /tmp/rollback-retired.sql`], {
+    input: `SET session_replication_role = replica; DELETE FROM public.inventory_transactions WHERE application_record_id IS NOT NULL OR already_counted IS NOT NULL; SET session_replication_role = origin;\n${rollback}` });
+  r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/rollback-retired.sql'], { allowFailure: true });
+  assert.notEqual(r.status, 0, 'a retired number refuses the rollback'); assert.match(out(r), /COUNT_ONCE_ROLLBACK_REFUSED: an undone record number is retired/);
   // Prover-only: clear the counted rows (triggers off) in the same transaction as the rollback, as if none had posted yet.
   docker(['exec', '-i', NAME, 'sh', '-c', `cat > /tmp/rollback-clean.sql`], {
-    input: `SET session_replication_role = replica; DELETE FROM public.inventory_transactions WHERE application_record_id IS NOT NULL OR already_counted IS NOT NULL; SET session_replication_role = origin;\n${rollback}` });
+    input: `SET session_replication_role = replica; DELETE FROM public.inventory_transactions WHERE application_record_id IS NOT NULL OR already_counted IS NOT NULL; DELETE FROM public.application_record_numbers_retired; SET session_replication_role = origin;\n${rollback}` });
   r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/rollback-clean.sql'], { allowFailure: true });
   assert.equal(r.status, 0, `rollback applies: ${out(r)}`);
-  assert.deepEqual([md5(SIG.job), md5(SIG.bt), md5(SIG.rev)], [PRE.job, PRE.bt, PRE.rev], 'previous bodies restored');
+  assert.deepEqual([md5(SIG.job), md5(SIG.bt), md5(SIG.rev), md5(SIG.gen)], [PRE.job, PRE.bt, PRE.rev, PRE.gen], 'previous bodies restored');
+  assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_retire_application_record_number';`), '0', 'the number-retiring trigger is gone');
   assert.deepEqual(WRAPPERS.map(acl), wrapperAcl, 'wrapper grants unchanged after rollback');
   job(15, [[0, 1]]); complete(J(15));
   // The documented command (no -v ON_ERROR_STOP): the file sets it, so a refusal still exits non-zero.
@@ -431,6 +457,7 @@ try {
   r = applyFile();
   assert.equal(r.status, 0, `re-apply after rollback: ${out(r)}`);
   assert.notDeepEqual([md5(SIG.job), md5(SIG.bt), md5(SIG.rev)], [PRE.job, PRE.bt, PRE.rev], 'count-once bodies back');
+  assert.notEqual(md5(SIG.gen), PRE.gen, 'the number generator counts retired numbers again');
   console.log('[COUNT-ONCE] ROLLBACK: refused once counted rows exist; otherwise restores the previous bodies, a job still completes, a refused run exits non-zero, and the migration re-applies');
 
   console.log('JOB_TICKET_COUNT_ONCE_PROOF_PASS');

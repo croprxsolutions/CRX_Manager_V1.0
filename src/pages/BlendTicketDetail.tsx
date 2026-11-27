@@ -1006,6 +1006,7 @@ export function BlendTicketDetail() {
       toast('error', 'Save your ticket changes before creating an application record.');
       return;
     }
+    const createRouteId = id;
     setCreatingAppRecord(true);
     try {
       const appRecKey = appRecordIdem.getKey();
@@ -1025,11 +1026,14 @@ export function BlendTicketDetail() {
       appRecordIdem.resetKey();
       // The record exists before this page is refreshed, so arm the same
       // downstream lock immediately and do not allow a newly dirty field draft
-      // that the database trigger would reject.
-      setHasApplicationRecord(true);
-      // The RPC returns the new record ids (uuid[]); a ticket files one record.
-      const createdRecordId = Array.isArray(appRecData) ? appRecData[0] : null;
-      setApplicationRecordId(typeof createdRecordId === 'string' ? createdRecordId : null);
+      // that the database trigger would reject. Only if this ticket is still on screen:
+      // another ticket opened meanwhile must not take this one's record id (Sol r6).
+      if (routeIdRef.current === createRouteId) {
+        setHasApplicationRecord(true);
+        // The RPC returns the new record ids (uuid[]); a ticket files one record.
+        const createdRecordId = Array.isArray(appRecData) ? appRecData[0] : null;
+        setApplicationRecordId(typeof createdRecordId === 'string' ? createdRecordId : null);
+      }
       logActivity({ event: 'application_record_created', description: `Application record created from blend ticket ${ticket.ticket_number}`, performedBy: profile.id, entityType: 'blend_ticket', entityId: ticket.id, customerId: ticket.customer_id || undefined });
       toast('success', 'Application record created successfully');
     } catch (err: unknown) {
@@ -1072,7 +1076,9 @@ export function BlendTicketDetail() {
       // The record is gone (reversed, or already gone): a filing key kept from a lost reply would replay the
       // deleted record on the next Create App Record instead of filing again (Codex P2 on #2679).
       appRecordIdem.resetKey();
-      const result = data as { status?: string; kept_on_job_lines?: number; over_taken_lines?: number } | null;
+      const result = data as {
+        status?: string; inventory_transactions_reversed?: number; kept_on_job_lines?: number; over_taken_lines?: number;
+      } | null;
       // reverse_application_record writes its own application_record_reversed activity entry.
       if (result?.status !== 'reversed') {
         // not_found / already_reversed: this call changed no stock; reload to show the current state.
@@ -1082,9 +1088,13 @@ export function BlendTicketDetail() {
           (result.kept_on_job_lines ?? 0) > 0 && 'Some stock stays with the linked job.',
           (result.over_taken_lines ?? 0) > 0 && 'Extra stock other tickets for the job had taken is back in Main Warehouse.',
         ].filter(Boolean);
+        // A ticket its job had already counted took nothing, so undoing it moves nothing (Sol r6).
+        const movedNothing = notes.length === 0 && result.inventory_transactions_reversed === 0;
         toast('success', notes.length > 0
           ? `Filing undone. ${notes.join(' ')} The lines are flagged for review in inventory.`
-          : 'Filing undone. The ticket’s stock is back in Main Warehouse.');
+          : movedNothing
+            ? 'Filing undone. No stock changed: this ticket had not taken any (its linked job had already counted it).'
+            : 'Filing undone. The ticket’s stock is back in Main Warehouse.');
       }
       // Moved to another ticket meanwhile: reloading would put this ticket's data on that ticket's screen.
       if (routeIdRef.current === undoRouteId) await loadTicketData();

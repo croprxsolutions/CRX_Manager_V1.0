@@ -581,11 +581,7 @@ test.describe.serial('Team Board V2 Features', () => {
       await titleInput.fill(updatedTitle);
 
       // Change priority to urgent
-      const selects = modal.locator('select');
-      const _selectCount = await selects.count();
-      if (selectCount > 1) {
-        await selects.nth(1).selectOption('urgent');
-      }
+      await modal.getByLabel('Priority', { exact: true }).selectOption('urgent');
 
       // Save
       const saveBtn = modal.locator('button:has-text("Save Changes"), button:has-text("Save"), button:has-text("Update")').first();

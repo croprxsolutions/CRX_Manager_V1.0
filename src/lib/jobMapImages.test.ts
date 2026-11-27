@@ -344,9 +344,10 @@ describe('fetchJobMapImages', () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
-  it('keeps a completed overview when a field image conversion exceeds the cutoff', async () => {
+  it('keeps a completed overview and reaches the next field when image conversion stalls', async () => {
     vi.useFakeTimers();
     setupRpc();
+    mockRpc.mockResolvedValue({ data: [makeRow(), { ...makeRow(), id: 'field-2', sort_order: 1 }], error: null });
     const encoded = 'data:image/png;base64,cG5n';
     let readCount = 0;
     vi.stubGlobal('FileReader', class {
@@ -354,7 +355,7 @@ describe('fetchJobMapImages', () => {
       result = encoded;
       readAsDataURL() {
         readCount += 1;
-        setTimeout(() => this.onloadend?.(), readCount === 1 ? 1 : 30_000);
+        setTimeout(() => this.onloadend?.(), readCount === 2 ? 30_000 : 1);
       }
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -363,11 +364,12 @@ describe('fetchJobMapImages', () => {
     }));
 
     const result = fetchJobMapImages('job-1');
-    await vi.advanceTimersByTimeAsync(25_000);
+    await vi.advanceTimersByTimeAsync(10_005);
     const snapshot = await result;
-    expect(snapshot).toEqual({ overview: encoded, perField: [] });
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(snapshot).toEqual({ overview: encoded, perField: [] });
+    expect(snapshot?.overview).toBe(encoded);
+    expect(snapshot?.perField.map((image) => image.fieldId)).toEqual(['field-2']);
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(snapshot?.perField.map((image) => image.fieldId)).toEqual(['field-2']);
   });
 
   it('returns null when a hanging Mapbox request reaches the ten-second timeout', async () => {

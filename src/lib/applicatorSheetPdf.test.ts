@@ -349,7 +349,7 @@ describe('map pages only print', () => {
 
   it.each([false, true])('prints hidden hazards even without any map image (maps only: %s)', async (mapsOnly) => {
     const { default: autoTable } = await import('jspdf-autotable');
-    const data = makeSheetData({ maps: null });
+    const data = makeSheetData({ maps: null, fieldMapPagesRequested: true });
     const [field] = data.fields;
     data.fields = [
       { ...field, hazards: { complete: false, markers: [{ name: 'Washout', note: 'Stay west', hasValidPoint: false }] } },
@@ -366,8 +366,9 @@ describe('map pages only print', () => {
     expect(table?.body).toEqual([
       ['1', 'North 40', 'Washout · Stay west · Pin could not be placed'],
       ['1', 'North 40', 'Obstacles could not be checked — confirm on site'],
-      ['1', 'North 40', 'Some listed hazards may not appear as map pins'],
+      ['1', 'North 40', 'Map picture unavailable for this stop'],
       ['2', 'South', 'None recorded'],
+      ['2', 'South', 'Map picture unavailable for this stop'],
     ]);
     expect(mockDoc.addImage).not.toHaveBeenCalled();
     expect(mockDoc.save).toHaveBeenCalledOnce();

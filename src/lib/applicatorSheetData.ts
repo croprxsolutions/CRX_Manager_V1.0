@@ -116,12 +116,12 @@ export function serializeCustomConfig(cfg: ApplicatorSheetCustomConfig): string 
 
 // ── The shared sheet data model ──────────────────────────────────────────────
 
-/** One field/location on the sheet, already placed in route order. */
 export interface ApplicatorSheetHazards {
   complete: boolean;
   markers: Array<{ name: string; note: string | null; hasValidPoint: boolean }>;
 }
 
+/** One field/location on the sheet, already placed in route order. */
 export interface ApplicatorSheetField {
   /** Saved field id, used to attach optional application-history sections. */
   field_id?: string;
@@ -224,6 +224,7 @@ export interface ApplicatorSheetSafety {
 
 /** The full, format-agnostic sheet payload. All three layouts read this. */
 export interface ApplicatorSheetData {
+  fieldMapPagesRequested?: boolean;
   job_number: string;
   customers: ApplicatorSheetCustomer[];
   scheduled_date: string; // YYYY-MM-DD

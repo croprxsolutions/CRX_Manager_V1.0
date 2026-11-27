@@ -50,6 +50,24 @@ it('attaches unfiltered hazards by saved field and only treats a verified empty 
     { complete: false, markers: [] },
   ]);
   expect(result.maps).toBeNull();
+
+  vi.useFakeTimers();
+  try {
+    vi.mocked(readFieldMarkers).mockClear();
+    vi.mocked(readFieldMarkers).mockImplementation((id) => id === 'a'
+      ? new Promise(() => undefined)
+      : Promise.resolve({ available: true, count: 0, markers: [] }));
+    const pending = prepareApplicatorSheetPrintData('job-1', data, {
+      ...DEFAULT_APPLICATOR_PRINT_OPTIONS, mapPages: 'none', includeBillingSplits: false,
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    const timedOut = await pending;
+    expect(timedOut.fields[0].hazards).toEqual({ complete: false, markers: [] });
+    expect(timedOut.fields[1].hazards).toEqual({ complete: true, markers: [] });
+    expect(vi.mocked(readFieldMarkers).mock.calls[0][1].aborted).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 describe('fetchApplicatorSheetBillingSplits', () => {

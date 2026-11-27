@@ -24,7 +24,7 @@ interface JobMapImageOptions {
 
 export interface JobFieldMapImage {
   fieldId: string;
-  hazardPinsOmitted?: boolean;
+  hazardPinCount?: number;
   /** Spray order on this job, 1-based (from job_fields.sort_order; restarts per job). */
   sprayNumber?: number;
   fieldName: string;
@@ -571,6 +571,9 @@ async function fetchImageDataUrl(
   const abortForJob = () => controller.abort();
   jobSignal.addEventListener('abort', abortForJob, { once: true });
   const timeoutId = setTimeout(() => controller.abort(), MAPBOX_FETCH_TIMEOUT_MS);
+  const cutoff = new Promise<null>((resolve) => {
+    controller.signal.addEventListener('abort', () => resolve(null), { once: true });
+  });
   try {
     const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) {
@@ -586,11 +589,11 @@ async function fetchImageDataUrl(
       console.warn(`Mapbox ${label} print image returned an unusable image type.`);
       return null;
     }
-    const dataUrl = await blobToDataUrl(blob);
-    if (controller.signal.aborted) return null;
-    return overview
-      ? addAcreageLabels(blob, dataUrl, overview.fields, overview.features, overview.options)
-      : dataUrl;
+    const dataUrl = await Promise.race([blobToDataUrl(blob), cutoff]);
+    if (!dataUrl || !overview) return dataUrl;
+    return await Promise.race([
+      addAcreageLabels(blob, dataUrl, overview.fields, overview.features, overview.options), cutoff,
+    ]);
   } catch {
     console.warn(`Mapbox ${label} print image ${controller.signal.aborted ? 'timed out' : 'failed'}.`);
     return null;
@@ -835,7 +838,7 @@ async function collectJobMapImages(
         if (!dataUrl) continue;
         result.perField.push({
           fieldId: field.id,
-          hazardPinsOmitted: fieldObstacles.length > image.features.filter(({ geometry }) => geometry.type === 'Point').length,
+          hazardPinCount: image.features.filter(({ geometry }) => geometry.type === 'Point').length,
           sprayNumber: field.sprayNumber,
           fieldName: field.name,
           customerName: customerNames.get(field.customerId) ?? null,

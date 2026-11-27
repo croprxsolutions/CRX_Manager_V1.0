@@ -320,6 +320,7 @@ export async function prepareApplicatorSheetPrintData(
     ...data,
     fields,
     maps,
+    fieldMapPagesRequested: options.mapPages === 'both' || options.mapPages === 'per-field',
     previousApplications,
     billingSplits,
     // Safety is off unless chosen; when chosen it prints on its own sheet (Mason, 2026-11-24).
@@ -329,7 +330,7 @@ export async function prepareApplicatorSheetPrintData(
 
 /**
  * The "Map pages only" print: overview plus per-field maps for a saved job, with no
- * job order. Throws NO_MAP_PAGES_MESSAGE when the job has no map.
+ * job order. The hazard list still prints when no map image is available.
  */
 export async function printApplicatorMapPages(jobId: string, data: ApplicatorSheetData): Promise<void> {
   const options: ApplicatorPrintOptions = {

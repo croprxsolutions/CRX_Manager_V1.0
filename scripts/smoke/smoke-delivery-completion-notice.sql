@@ -25,6 +25,7 @@ DECLARE
   v_fp text;
   v_actor uuid;
   v_fail_user uuid := gen_random_uuid();
+  v_inactive_admin uuid := gen_random_uuid();
   v_notice jsonb;
   v_driver uuid := gen_random_uuid();
   v_tiny_line uuid;
@@ -199,8 +200,10 @@ BEGIN
   ALTER TABLE public.delivery_completion_notice_events DROP CONSTRAINT completion_registration_smoke_fault;
 
 
-  INSERT INTO auth.users(id,email,raw_user_meta_data)
-  VALUES (v_driver,v_driver || '@fixture.example.test', jsonb_build_object('full_name','Invented Completion Driver','role','driver'));
+  INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES
+    (v_driver,v_driver || '@fixture.example.test', jsonb_build_object('full_name','Invented Completion Driver','role','driver')),
+    (v_inactive_admin,v_inactive_admin || '@fixture.example.test', jsonb_build_object('full_name','Invented Inactive Admin','role','admin'));
+  UPDATE public.profiles SET is_active = false WHERE id = v_inactive_admin;
   UPDATE public.deliveries SET assigned_driver = v_driver, created_by = v_driver, status = 'in_progress' WHERE id = v_del[3];
   INSERT INTO public.order_items (order_id, product_id, product_name, price_per_unit, cost_per_unit,
     total_units_needed, total_price, profit, net_margin, quantity_delivered, quantity_remaining)
@@ -219,10 +222,12 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_driver, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_driver::text, true);
   SET LOCAL ROLE authenticated;
-  v_res := public.complete_delivery(v_del[3], 'Invented signed delivery', v_driver, v_amounts, NULL, NULL,
+  v_res := public.complete_delivery(v_del[3], 'Invented signed delivery', v_driver, v_amounts, 'other', 'Invented quantity difference',
     v_driver_key, NULL, 'signature', v_signature, p_lines_seen => v_lines, p_record_completion_notice => true);
   v_notice := public.notify_saved_delivery_completion(v_del[3], v_driver_key, v_prefix || 'driver-notice');
   RESET ROLE;
+  SET CONSTRAINTS driver_delivery_issue_notice IMMEDIATE;
+  SET CONSTRAINTS driver_delivery_issue_notice DEFERRED;
   IF v_res->>'status' IS DISTINCT FROM 'partial' OR v_notice <> '{"status":"sent"}'::jsonb
     OR (SELECT quantity_delivered FROM public.delivery_items WHERE id = v_tiny_line) IS DISTINCT FROM 0::numeric
     OR (SELECT count(*) FROM public.notifications WHERE related_entity_id = v_del[3] AND user_id = v_driver
@@ -232,8 +237,14 @@ BEGIN
     OR NOT EXISTS (SELECT FROM public.notifications WHERE related_entity_id = v_del[3] AND user_id = v_driver
       AND notification_type = 'delivery_remainder' AND message LIKE '%: 0.004/2')
   THEN RAISE EXCEPTION 'Driver legacy recipients or tiny display changed: %, %', v_res, v_notice; END IF;
-
-
+  IF EXISTS (
+    SELECT FROM public.profiles p WHERE p.role = 'admin' AND p.is_active
+      AND (SELECT count(*) FROM public.notifications n WHERE n.related_entity_id = v_del[3]
+        AND n.user_id = p.id AND n.created_by = v_driver AND n.notification_type = 'delivery_issue_reported') <> 1
+  ) OR EXISTS (
+    SELECT FROM public.notifications WHERE related_entity_id = v_del[3]
+      AND user_id = v_inactive_admin AND notification_type = 'delivery_issue_reported'
+  ) THEN RAISE EXCEPTION 'Driver issue alert did not reach each active admin exactly once'; END IF;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -298,6 +309,33 @@ BEGIN
     OR EXISTS (SELECT FROM public.notifications WHERE related_entity_id = v_del[5])
   THEN RAISE EXCEPTION 'Offline recovery changed the delivery notice behavior: %', v_res; END IF;
 
+  UPDATE public.profiles SET denied_pages = ARRAY['reports'] WHERE id = v_other_rep;
+  v_rep_key := v_prefix || 'sales-rep-reports-hidden';
+  v_signature := 'signatures/' || v_del[5] || '/' ||
+    left(encode(sha256(convert_to(v_rep_key, 'UTF8')), 'hex'), 32) || '.png';
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+  VALUES ('delivery-signatures', v_signature, v_other_rep::text, '{"size":1000,"mimetype":"image/png"}');
+  SELECT jsonb_agg(jsonb_build_object('order_item_id', di.order_item_id, 'product_id', di.product_id,
+    'quantity', di.quantity, 'delivered', di.quantity))
+  INTO v_lines FROM public.delivery_items AS di WHERE di.delivery_id = v_del[5];
+
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_other_rep, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_other_rep::text, true);
+  SET LOCAL ROLE authenticated;
+  v_res := public.complete_delivery(v_del[5], 'Invented signed sale with Reports hidden', v_other_rep,
+    NULL, NULL, NULL, v_rep_key, NULL, 'signature', v_signature,
+    p_lines_seen => v_lines, p_record_completion_notice => true);
+  v_notice := public.notify_saved_delivery_completion(v_del[5], v_rep_key, v_prefix || 'reports-hidden-notice');
+  RESET ROLE;
+  IF v_res->>'status' IS DISTINCT FROM 'completed' OR v_notice <> '{"status":"sent"}'::jsonb
+    OR NOT EXISTS (SELECT FROM public.notifications WHERE related_entity_id = v_del[5] AND user_id = v_admin
+      AND notification_type = 'delivery_completed' AND created_by = v_other_rep)
+    OR EXISTS (SELECT FROM public.notifications WHERE related_entity_id = v_del[5] AND user_id = v_other_rep
+      AND notification_type = 'delivery_completed' AND message LIKE 'Your customer %')
+  THEN RAISE EXCEPTION 'Hiding Reports changed ordinary delivery alerts or allowed a commission alert'; END IF;
+
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   SET LOCAL ROLE authenticated;
   v_res := public.create_quick_delivery(v_customer,
     jsonb_build_array(jsonb_build_object('product_id',v_product,'quantity',2,'unit_size','Gal','price_cents',1000)),
@@ -307,6 +345,11 @@ BEGIN
   IF NOT EXISTS(SELECT FROM public.deliveries WHERE id = v_quick_delivery AND status = 'scheduled' AND is_quick_delivery)
     OR EXISTS (SELECT FROM public.notifications WHERE related_entity_id = v_quick_delivery)
   THEN RAISE EXCEPTION 'Quick Delivery unexpectedly notified on creation'; END IF;
+  INSERT INTO public.commissions (order_id, customer_id, recipient, recipient_user_id, order_date)
+  SELECT order_id, v_customer, fixture.recipient, fixture.user_id, v_today
+  FROM public.deliveries
+  CROSS JOIN (VALUES (v_driver::text, v_driver), ('Invented Completion Sales Rep', v_rep)) fixture(recipient, user_id)
+  WHERE id = v_quick_delivery;
   SET LOCAL ROLE authenticated;
   v_res := public.start_and_complete_delivery(v_quick_delivery, 'No proof — recorded by office',
     v_today, v_admin, NULL, NULL, NULL, v_prefix || 'quick-complete', 'no_proof', 'Invented quick delivery confirmed',
@@ -316,7 +359,28 @@ BEGIN
   IF v_res->>'status' IS DISTINCT FROM 'completed' OR v_notice <> '{"status":"sent"}'::jsonb
     OR (SELECT count(*) FROM public.notifications WHERE related_entity_id = v_quick_delivery
       AND user_id = v_driver AND notification_type = 'delivery_completed' AND created_by = v_admin) <> 1
+    OR EXISTS (SELECT FROM public.notifications WHERE related_entity_id = v_quick_delivery
+      AND user_id IN (v_rep, v_inactive_admin))
   THEN RAISE EXCEPTION 'Quick Delivery completion did not retain the expected driver notice: %, %', v_res, v_notice; END IF;
+
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_fail_user, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_fail_user::text, true);
+  SET LOCAL ROLE authenticated;
+  UPDATE public.profiles SET role = 'sales_rep' WHERE id = v_admin;
+  RESET ROLE;
+  IF (SELECT role FROM public.profiles WHERE id = v_admin) IS DISTINCT FROM 'sales_rep' THEN
+    RAISE EXCEPTION 'Role change fixture did not take effect';
+  END IF;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    PERFORM public.notify_saved_delivery_completion(v_del[1], v_key, v_prefix || 'after-role-change');
+    RAISE EXCEPTION 'A role change kept the old alert authority';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'DELIVERY_COMPLETION_NOTICE_RECEIPT_REQUIRED' THEN RAISE; END IF;
+  END;
+  RESET ROLE;
 END;
 $smoke$;
 SET CONSTRAINTS ALL IMMEDIATE;

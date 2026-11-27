@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270314120000_record_delivery_completion_notices.sql` (SQL sha256: `49a479b27cf1d0df3508947ee39053aa5357ae305993bb6e06caecd0ec682243`) registers a saved interactive delivery completion for its checked follow-up sender. The existing completion-history sequence supplies the durable identity. The original signed-in actor and receipt must still be authorized to send.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270314120000_record_delivery_completion_notices.sql` (SQL sha256: `6b4bce6c333ae4f367a943d4998494153e608cf3dfe723df940e2e35515b1d26`) registers a saved interactive delivery completion for its checked follow-up sender. The existing completion-history sequence supplies the durable identity. The original signed-in actor and receipt must still be authorized to send.
 
 The ordinary completion response, legacy arguments, proof-of-load inputs and offline recovery remain compatible.
 

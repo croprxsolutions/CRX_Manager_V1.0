@@ -82,6 +82,7 @@ AS $notice$
 DECLARE
   v_actor uuid := auth.uid();
   v_role text;
+  v_denied_pages text[];
   v_delivery public.deliveries%ROWTYPE;
   v_event record;
   v_partial boolean;
@@ -101,7 +102,8 @@ BEGIN
   -- Use the same delivery-then-profile lock order as completion. A concurrent void, reassignment
   -- or role change cannot occur between validating the completion and addressing the notices.
   SELECT * INTO v_delivery FROM public.deliveries WHERE id = p_delivery_id FOR UPDATE;
-  SELECT role INTO v_role FROM public.profiles WHERE id = v_actor AND is_active FOR SHARE;
+  SELECT role, denied_pages INTO v_role, v_denied_pages
+    FROM public.profiles WHERE id = v_actor AND is_active FOR SHARE;
   IF v_delivery.status IS DISTINCT FROM 'completed' OR v_delivery.deleted_at IS NOT NULL OR v_role IS NULL
     OR NOT (v_role IN ('admin', 'sales_rep') OR
       (v_role = 'driver' AND v_delivery.assigned_driver IS NOT DISTINCT FROM v_actor)) THEN
@@ -165,7 +167,8 @@ BEGIN
       FROM public.commissions AS c
       WHERE c.order_id = v_delivery.order_id AND c.status <> 'cancelled'
         AND c.recipient IS DISTINCT FROM v_delivery.assigned_driver::text
-        AND (v_role = 'admin' OR (v_role = 'sales_rep' AND c.recipient_user_id = v_actor))
+        AND (v_role = 'admin' OR (v_role = 'sales_rep' AND c.recipient_user_id = v_actor
+          AND NOT COALESCE('reports' = ANY(v_denied_pages), false)))
     ), recipients AS (
       SELECT id, 'completion' AS kind FROM admins
       UNION SELECT v_delivery.assigned_driver, 'completion'
@@ -210,6 +213,7 @@ BEGIN
 END;
 $notice$;
 
+ALTER FUNCTION public.notify_saved_delivery_completion(uuid, text, text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.notify_saved_delivery_completion(uuid, text, text)
   FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.notify_saved_delivery_completion(uuid, text, text) TO authenticated;
@@ -298,6 +302,8 @@ $function$;
 ALTER FUNCTION public.complete_delivery(uuid,text,uuid,jsonb,text,text,text,timestamptz,text,text,boolean,bigint,jsonb,boolean) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.complete_delivery(uuid,text,uuid,jsonb,text,text,text,timestamptz,text,text,boolean,bigint,jsonb,boolean) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.complete_delivery(uuid,text,uuid,jsonb,text,text,text,timestamptz,text,text,boolean,bigint,jsonb,boolean) TO authenticated, service_role;
+COMMENT ON FUNCTION public.complete_delivery(uuid,text,uuid,jsonb,text,text,text,timestamptz,text,text,boolean,bigint,jsonb,boolean) IS
+  'Completes a delivery with its saved evidence and proof-of-load figures. p_record_completion_notice optionally registers a fresh interactive save for a checked follow-up alert.';
 
 ALTER FUNCTION public.start_and_complete_delivery(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint,jsonb) RENAME TO _start_and_complete_delivery_before_notice_20270314;
 REVOKE ALL ON FUNCTION public._start_and_complete_delivery_before_notice_20270314(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint,jsonb) FROM PUBLIC, anon, authenticated, service_role;
@@ -352,6 +358,8 @@ $function$;
 ALTER FUNCTION public.start_and_complete_delivery(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint,jsonb,boolean) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.start_and_complete_delivery(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint,jsonb,boolean) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.start_and_complete_delivery(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint,jsonb,boolean) TO authenticated;
+COMMENT ON FUNCTION public.start_and_complete_delivery(uuid,text,date,uuid,jsonb,text,text,text,text,text,bigint,jsonb,boolean) IS
+  'Starts and completes a delivery with its saved evidence and proof-of-load figures. p_record_completion_notice optionally registers the fresh list save for a checked follow-up alert.';
 
 DO $postflight$
 DECLARE

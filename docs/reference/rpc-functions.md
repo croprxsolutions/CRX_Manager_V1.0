@@ -512,6 +512,11 @@ Migration `20270310140000` limits browser writes to the existing `refresh_watchd
 
 - `retire_uncertain_request(p_request_key text, p_first_check_token text DEFAULT NULL, p_idempotency_key text DEFAULT NULL)` → jsonb `{safe, reason, checked_at, wait_until?, first_check_token?}` — SECURITY DEFINER, authenticated EXECUTE, any active staff account (admin, sales_rep, driver, applicator) for its own requests (migration `20261107150000_uncertain_request_clear_check.sql`; widened from admins only by `20261110120000_uncertain_request_clear_any_staff.sql`). Tells the "clear this" button whether a stuck request may be cleared, judged by server time: `in_progress` (refused while the request's lock is held), `recorded` (safe; a request-key receipt must match the key's prefix operation, and an `adjust_inventory_batch` request counts a row `<request key>:<uuid>` saved under `adjust_inventory`), `first_check` / `waiting` (refused until a second check 15+ minutes later that sends back the `first_check_token` the server signed for that request), `not_recorded_after_wait` or `retired` (safe). Every safe answer records the request in `retired_uncertain_requests`, and the receipt insert guard then refuses any later save of the request or (inventory batches) a row under it (`IDEMPOTENCY_REQUEST_RETIRED`). Only the caller's own `<operation>:<auth.uid()>:<uuid>` keys are accepted (`REQUEST_KEY_NOT_OWNED`); inactive accounts and `entity_recipient` service profiles get `NOT_AUTHORIZED`; `p_idempotency_key` must be NULL or the request key.
 
+### Saved delivery alerts
+
+- `notify_saved_delivery_completion(p_delivery_id uuid, p_completion_key text, p_idempotency_key text)` — the three interactive completion screens call this after a saved delivery. It verifies the signed-in actor and the return value is JSON with `status: sent` or `status: pending` and a failed-recipient count. A retry does not repeat notices already sent.
+- `complete_delivery` and `start_and_complete_delivery` accept the optional `p_record_completion_notice` argument. Its default keeps the behavior of older screens and offline recovery. When true, a fresh successful save registers the receipt for a checked follow-up alert.
+
 ## Internal / Trigger Functions
 
 These are NOT called directly from the frontend. They power triggers, guards, and infrastructure.
@@ -580,7 +585,6 @@ These are NOT called directly from the frontend. They power triggers, guards, an
 
 ### Notification Triggers
 - `notify_damaged_receiving()` — notify on damaged item receipt
-- `notify_saved_delivery_completion(p_delivery_id uuid, p_completion_key text, p_idempotency_key text)` — uses the signed-in completer's saved interactive receipt to send eligible completion and remainder notices. Returns JSON with `status: sent` or `status: pending` and a failed-recipient count. A retry does not repeat notices already sent.
 - `notify_mentioned_users_in_comment()` — notify users @mentioned in comments
 
 ### Blend Ticket Helpers

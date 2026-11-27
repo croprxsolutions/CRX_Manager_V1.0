@@ -109,3 +109,16 @@ export function blockedUnitSaveMessage(
   }
   return null;
 }
+
+/** A product stocked in a count unit (Ea or Unit) is sold by the whole item; the database refuses fractions (WHOLE_ITEMS_ONLY). */
+export function isWholeItemUnit(unit: string | null | undefined): boolean {
+  const u = (unit ?? '').trim().toLowerCase();
+  return u === 'ea' || u === 'unit';
+}
+
+/** The message for a fractional figure on a whole-item line, matching the database's sentence. */
+export function wholeItemMessage(productName: string, unit: string, qty: number): string | null {
+  return isWholeItemUnit(unit) && !Number.isInteger(qty)
+    ? `${productName} is sold by the whole item (${unit.trim()}), so ${qty} can't be used. Enter a whole number.`
+    : null;
+}

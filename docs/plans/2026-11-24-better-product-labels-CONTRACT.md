@@ -40,16 +40,21 @@ In the staging browser, submit a conflicting grouping through the ordinary appro
 
 Proof in local migrated SQL and staging browser: separate entry and approval, stale group and stale density refusal, duplicate submission does not replace the draft, brand insertion and reactivation invalidate within the same transaction, an approved value plus pending draft retains the draft on invalidation, concurrent approval and brand changes leave a consistent result, and the normal print proof uses the correct captured weight or an explicit missing-weight reason.
 
+Mason approved staging-only activation. Taha or Mason lands the staging database job preparation first. That job supplies a transaction-local marker for the activation migration, verifies the switch opened before recording it, and keeps the original migration bytes in the ledger. The staging schema comparison mirrors this. A replay without the verified staging marker keeps the switch closed. A future production activation needs its own approval after the previously approved groups are checked.
+
+Before activation, verify the closed Weight card and workbook paths, legacy approval, and both PDF outputs. After activation, verify that a different admin can approve, stale and duplicate submissions are refused, and the old direct and bulk routes cannot bypass review. Check both staged PDFs for approved, missing and rechecked weights, then compare the pre-activation saved ticket. Reconcile the switch difference before restoring staging from production or refreshing the schema baseline.
+
 ## Owner decisions
 
 - Mason confirmed on 24 November 2026 that only admins enter links and draft weights. A different admin approves a draft.
 - An admin splits mismatched brands through the existing Product Setup workflow before approving either density.
 - Verify the existing outputs and add printed Blend Ticket Detail proof.
 - Check every previously approved multi-brand liquid group on the private Step 0 worklist before rollout so correct weights remain available. Mason confirmed this on 24 November 2026. Split and reapprove confirmed mismatches before cutover.
+- On 26 November 2026, Mason confirmed that a substantive active-brand rename returns the approved weight to draft even when EPA registration and manufacturer stay the same. Brand-name capitalization and whitespace edits keep approval. Keep any draft already waiting and preserve saved paperwork.
 
 ## Staging release and brand rename follow-through
 
-On November 26 Mason authorized continuing staged preparation and the recommended substantive-rename rule. Exact staging activation approval is separate. Preparation #2633 landed and the staging Database workflow passed on b5ed2bb65. The activation remains unpublished. The ordinary release records the staging enable file as a no-op. A future production activation needs a different migration name and separate approval. Production is outside this work.
+Preparation #2633 landed and the staging Database workflow passed on b5ed2bb65. The earlier activation is recorded on staging. Restore the closed switch through the reviewed forward recovery before landing the preparation. Any reopening on staging needs approval of that exact commit. The ordinary release records the original staging enable file as a no-op. A future production activation needs a different migration name and separate approval.
 
 - Compare active-brand names after lowercasing, trimming and collapsing ordinary whitespace runs to a single space. Case, tabs and repeated internal or surrounding ordinary spaces are cosmetic. A real rename of an active brand on any liquid parent, including an inactive one, invalidates the approval while review is open. Keep existing EPA/manufacturer comparisons, old paperwork, audit entries and any waiting draft. Existing EPA/manufacturer and active-brand join rechecks also cover inactive liquid parents. Distinguish withdrawal of an approval from returning it to draft using the resulting event state. Users may need to reload an in-progress review after a cosmetic roster change.
 - Use a new forward migration. Leave the switch closed and existing rows alone. Move the definitive legacy bulk liquid approval check after its existing liquid parent locks. Keep dry approval, permissions, idempotency and receipt replay. Existing single-brand approvals carry forward. After cutover every new liquid approval uses the two-admin path. Production's multi-brand worklist is separate.

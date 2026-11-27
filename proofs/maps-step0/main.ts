@@ -255,7 +255,10 @@ if (livePicturesEnabled) {
       if (!response.ok || !response.headers.get('Content-Type')?.startsWith('image/')) {
         throw new Error('Picture provider returned no image');
       }
-      const data = await response.arrayBuffer();
+      const blob = await response.blob();
+      const bitmap = await createImageBitmap(blob);
+      bitmap.close();
+      const data = await blob.arrayBuffer();
       if (!stillCurrent()) throw new Error('Tile belongs to an earlier picture');
       liveAttemptWithImage = pictureAttempt;
       liveBatchImages += 1;
@@ -429,11 +432,17 @@ retryButton.addEventListener('click', () => proof.switchPicture(chosenPicture));
 toolbar.querySelector('#save-draft')!.addEventListener('click', () => {
   if (!proof.ready) return;
   const draft = draw.getAll();
-  if (draw.getMode() === 'draw_polygon' || !draft.features.length) {
+  if (draw.getMode() === 'draw_polygon' || (!draft.features.length && !savedDraftJson)) {
     status.value = 'Finish a polygon before saving';
     return;
   }
   try {
+    if (!draft.features.length) {
+      sessionStorage.removeItem(saveKey);
+      savedDraftJson = null;
+      status.value = 'Cleared the saved synthetic draft';
+      return;
+    }
     const draftJson = JSON.stringify(draft);
     sessionStorage.setItem(saveKey, draftJson);
     savedDraftJson = draftJson;

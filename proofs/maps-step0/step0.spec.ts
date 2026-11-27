@@ -228,6 +228,17 @@ test('draws a polygon using Mapbox Draw on one MapLibre map', async ({ page, bro
   await expectOneFourCornerPolygon(page);
   await expectRasterBelowDraw(page);
   expect(await callProof<string>(page, 'mapInstanceId')).toBe(mapInstanceId);
+  const save = page.getByRole('button', { name: 'Save synthetic draft' });
+  await save.click();
+  await expect(page.locator('#proof-status')).toHaveText('Saved synthetic draft in this tab');
+  await page.locator('#proof-draw-control .mapbox-gl-draw_trash').click();
+  await expect.poll(async () =>
+    (await callProof<ReturnType<ProofApi['getDraft']>>(page, 'getDraft')).features.length).toBe(0);
+  await save.click();
+  await expect(page.locator('#proof-status')).toHaveText('Cleared the saved synthetic draft');
+  await page.getByRole('button', { name: 'Reopen' }).click();
+  await expect(page.locator('#proof-status')).toHaveText('Picture A');
+  expect((await callProof<ReturnType<ProofApi['getDraft']>>(page, 'getDraft')).features).toEqual([]);
   await expectNoExternalRequestsOrErrors(externalRequests, consoleErrors);
 });
 

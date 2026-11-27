@@ -17,11 +17,22 @@ export default function EnvBanner({
   const { className, line } = LOOK[env];
   // Only staging claims "test data only", and only when its database is positively the staging project.
   const text = env === 'staging' && !isStagingDatabase(supabaseUrl) ? 'STAGING · check which database this uses' : LOOK[env].text;
+  const showMapsProofs = env === 'staging' && window.location.hostname === 'staging.croprxsolutions.app';
   // A plain label, not a live region: screen readers shouldn't announce it on every load.
   return (
     <>
       <div className={`${className} text-center text-xs font-semibold tracking-wide py-0.5`}>
-        {text}
+        <span>{text}</span>
+        {showMapsProofs && (
+          <nav aria-label="Staging maps checks" className="flex flex-wrap justify-center">
+            <a href="/api/maps-step0-draw/index.html" className="inline-flex min-h-11 touch-manipulation items-center px-3 underline">
+              Map drawing proof
+            </a>
+            <a href="/api/maps-step0?places=1" className="inline-flex min-h-11 touch-manipulation items-center px-3 underline">
+              Google Places check
+            </a>
+          </nav>
+        )}
       </div>
       <div aria-hidden="true" className={`${line} pointer-events-none fixed inset-x-0 top-0 z-[60] h-1`} />
     </>

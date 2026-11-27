@@ -13,4 +13,5 @@ Mason approved the reporting rule on 2026-11-27. Today and Program Tracker count
 
 - The local database test passed and rolled back the fixtures. It covered pending and approved tickets, confirmed partial and fieldless passes, duplicate sources, removed plans, field and farm mismatches, season attribution, and access for an admin, a sales rep and a driver.
 - In the local browser, Today and Program Tracker each showed 47%. Tracker showed 120, 0 and 40 confirmed acres for the three current plans, omitted the removed and prior-season plans, and reported the same result after reload.
+- The release PR must carry a reviewed update to the cost-exposure sweep fingerprint for `get_program_completion` in `scripts/db-invariant-sweeps/allowlist.json`. After the release applies the migration, rerun the full read-only sweep before the release merges.
 - The migration can precede the display adjustment in later delivery. Recovery is a reviewed forward migration restoring the earlier reader body.

@@ -1,7 +1,7 @@
 -- idempotency-body-check: exempt -- _complete_delivery_authorized_impl only reads check_idempotency to skip a replay
 -- (#2324's body, unchanged); the key is saved by _complete_delivery_authorized_impl_20270122 and the evidence step.
 -- Written 2026-11-25. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270313033100_proof_binding_required.md.
+-- docs/reference/migrations.d/20270315083100_proof_binding_required.md.
 --
 -- WHY: 20270309170000 checks the customer's proof against the load only when the proof carries a list of the lines
 --   the screen showed. An old app copy (or a call queued before the screen fix) sends a signature with no list, and a

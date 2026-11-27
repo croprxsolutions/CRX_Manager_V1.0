@@ -1,15 +1,15 @@
--- Reverse of 20270313033100_proof_binding_required: puts back 20270309170000's shared completion step (proof
+-- Reverse of 20270315083100_proof_binding_required: puts back 20270309170000's shared completion step (proof
 -- checked only when it carries a list) and its _delivery_lines_match (no under-0.01 rule). Run as postgres in one transaction. Undo this before the 20270309170000 reverse.
 DO $preflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
      IS DISTINCT FROM '85f7bbe5eb3e9a6507fd0922fdd2506f' THEN
-    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _complete_delivery_authorized_impl is not the 20270313033100 body';
+    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _complete_delivery_authorized_impl is not the 20270315083100 body';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._delivery_lines_match(uuid,jsonb,jsonb)'))
      IS DISTINCT FROM '0fa6b8c0d10033f1374f192d17641bb7' THEN
-    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _delivery_lines_match is not the 20270313033100 body';
+    RAISE EXCEPTION 'PROOF_REQUIRED_REVERSE: _delivery_lines_match is not the 20270315083100 body';
   END IF;
 END
 $preflight$;

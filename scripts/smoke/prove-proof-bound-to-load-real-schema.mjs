@@ -31,7 +31,7 @@ const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270309170000_proof_bound_to_load.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-bound-to-load-reverse.sql');
 const REQUIRED_REVERSE = path.join(ROOT, 'scripts', 'smoke', 'proof-binding-required-reverse.sql');
-const FOLLOW_UPS = [path.join(MIGRATIONS, '20270313033100_proof_binding_required.sql')];  // step 4: the binding is required
+const FOLLOW_UPS = [path.join(MIGRATIONS, '20270315083100_proof_binding_required.sql')];  // step 4: the binding is required
 // #2562 (Taha's review, LOW 3): it wraps _complete_delivery_authorized_impl_20270122, the body this proof's step calls
 // by name, and leaves the step, the wrappers and the helper alone.
 const LATER_READ_ONLY = new Set(['20270309180000_tiny_line_counts_as_zero.sql']);
@@ -621,7 +621,7 @@ function afterCases() {
   console.log('[case 9] anon cannot call either completion; no client role can call the renamed bodies, the helper or the trigger function');
 }
 
-// Step 4 (20270313033100): proof with no list is refused like proof for another load; nothing else changes.
+// Step 4 (20270315083100): proof with no list is refused like proof for another load; nothing else changes.
 const MATCH_MD5 = "SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._delivery_lines_match(uuid,jsonb,jsonb)'::regprocedure;";
 const STEP_MD5 = "SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure;";
 function requiredCases() {

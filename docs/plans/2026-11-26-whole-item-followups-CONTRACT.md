@@ -162,6 +162,15 @@ bodies. Returns are next to Taha's return-credit work (#2537 changes credits, no
 ## Luna round 3 (head 28b363777): 1 LOW refuted
 - Count rounding (3.99999 saves 4): a repeat of rounds 1 and 2; the existing 4-place rule, named in the changelog.
 
+## Sol round 3 (gpt-6.2-sol high, head f3ded9b20, 2026-11-26): CLEAN (0 BLOCKER/HIGH); MED/LOW named
+- 1 count rounding: repeat, refuted (Luna rounds 1-3).
+- 2 a split sale rebilled to one payer after a 0.5 return keeps that return against delivered: deferred, rare office
+  correction; the office cancels the open return before rebilling (cancelled returns do not count).
+- 3 Cycle Counts autosaves a half-typed figure (0 while typing 0.5): existing screen behavior for every count, deferred.
+- 4 preflight names depend on search_path: deferred; applies run with the standard path, which the proof uses.
+- 5 rollback must run as one transaction: run it with `psql -1 -v ON_ERROR_STOP=1`.
+- 6, 7 test hygiene (local leftovers; SQLSTATE assert): deferred, test-only.
+
 ## Business decisions settled on this PR
 - **Split-payer returns of a whole item.** Mason chose to allow fractions (D5): a sale split between payers is
   returned in shares. The trigger and postflight skip return lines whose sale line is on live invoices of two or more payers;

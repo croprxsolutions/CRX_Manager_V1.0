@@ -1,0 +1,62 @@
+# Close fixed issues when a PR merges into staging (Mason, 2026-11-19).
+# GitHub only acts on "Closes #N" when a PR merges into the default branch (main); feature PRs
+# merge into staging, so their issues stayed open and needed hand clean-up. This reads the merged
+# PR's description and closes each issue on a line that STARTS with a closing word ("Closes #N",
+# "- Fixes #N"), so "do not close #N" mid-sentence never closes anything. Write
+# "Part of #N" for partial work: it is left open. No checkout: no PR code runs with this token.
+name: Close fixed issues on staging merge
+
+on:
+  pull_request:
+    branches: [staging]
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  close:
+    name: Close fixed issues
+    if: github.event.pull_request.merged && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - run: |
+          # One visible reference per line ("Closes #N", "- Fixes #N", at most 3 leading spaces as
+          # 4 is an indented code block). Fenced code and <!-- --> blocks are skipped; a fence closes
+          # only on the same character, at least as long, with nothing after it (CommonMark).
+          # The number must end there (#123abc is not #123).
+          nums=$(printf '%s\n' "$BODY" | tr -d '\r' \
+            | awk '
+                incomment { if (index($0, "-->")) incomment = 0; next }
+                match($0, /^[ ]?[ ]?[ ]?(```|~~~)/) {
+                  s = substr($0, RSTART + RLENGTH - 3); c = substr(s, 1, 1); n = 0
+                  while (substr(s, n + 1, 1) == c) n++
+                  if (fc == "") { fc = c; fn = n; next }
+                  if (c == fc && n >= fn && substr(s, n + 1) ~ /^[ \t]*$/) { fc = ""; next }
+                }
+                fc == "" && /^[ ]?[ ]?[ ]?<!--/ && !index($0, "-->") { incomment = 1; next }
+                fc == ""' \
+            | grep -oiE '^ {0,3}([-*][[:space:]]+)?(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*:?[[:space:]]+#[0-9]+([^[:alnum:]_]|$)' \
+            | grep -oE '#[0-9]+' | tr -d '#' | sort -un || true)
+          [ -z "$nums" ] && { echo "No closing references in #$PR."; exit 0; }
+          failed=0
+          for n in $nums; do
+            info=$(gh api "repos/$GH_REPO/issues/$n" --jq '[.state, (.pull_request != null)] | @tsv' 2>/dev/null) \
+              || { echo "::error::Could not look up #$n"; failed=1; continue; }
+            state=${info%%$'\t'*}; is_pr=${info##*$'\t'}
+            if [ "$is_pr" = "true" ] || [ "$state" != "open" ]; then echo "Skip #$n ($state, pr=$is_pr)"; continue; fi
+            # One failed close must not skip the rest; the job still fails at the end so it is seen.
+            if gh issue close "$n" --reason completed \
+              --comment "Fixed by #$PR, merged into staging. It goes live with the next release."; then
+              echo "Closed #$n"
+            else
+              echo "::error::Could not close #$n"; failed=1
+            fi
+          done
+          exit $failed

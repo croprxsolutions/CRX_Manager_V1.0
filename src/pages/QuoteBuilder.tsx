@@ -2994,7 +2994,8 @@ export default function QuoteBuilder() {
       if (isAdmin && savedLineIdsRef.current.size > 0) {
         await refreshSavedLineCosts(editingSessionChanged);
       }
-      acceptAutoAcres(checkedAcres);
+      // A rep who moved to another quote meanwhile never checked that quote's acres (Codex, #2713).
+      if (!editingSessionChanged()) acceptAutoAcres(checkedAcres);
       return savedQuoteId;
     } catch (err: unknown) {
       if (isBelowCostApprovalHandledError(err)) return null;

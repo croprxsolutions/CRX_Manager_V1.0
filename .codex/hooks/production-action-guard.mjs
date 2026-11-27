@@ -377,6 +377,8 @@ function defaultRunGh(args, cwd) {
         cwd,
         encoding: "utf8",
         timeout: CODEX_CALL_TIMEOUT_MS,
+        // The same 16 MiB as pr-merge-guard: a PR's file list with patches can pass Node's 1 MiB default (Taha, #2639 LOW 3).
+        maxBuffer: 16 * 1024 * 1024,
         stdio: ["ignore", "pipe", "pipe"],
       }).trim();
     } catch (error) {

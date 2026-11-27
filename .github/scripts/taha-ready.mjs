@@ -21,7 +21,7 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneProblem } from '../../.claude/hooks/taha-lane-lib.mjs';
+import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneProblem, wiringOnly } from '../../.claude/hooks/taha-lane-lib.mjs';
 import { solRiskOnGitHub } from '../../.claude/hooks/sol-risk-lib.mjs';
 import { TAHA_LOGIN } from '../../.claude/hooks/migration-landing-gate-lib.mjs';
 import { esc, link, slack } from './release-slack.mjs';
@@ -48,11 +48,22 @@ export const tahaReviewedHead = (pr) => (pr.reviews ?? []).some((r) => isTaha(r.
 // A hotfix into main (Mason, 2026-11-25): Taha is a code owner of .github/, and release-gate waits on his approval,
 // so it can't hold back asking him. A failed release guard is skipped only when its one reason is the missing
 // hotfix-backport label (backport()); red for anything else, it holds the ask like any check (Taha, 2026-11-25).
+// A back-merge of main is judged like any PR: main needs no review, so a hotfix Mason merged by hand may not have
+// reached Taha (Taha's review of #2639, LOW 4).
+// Only the lane block's launchers and settings are not his work: wiringOnly, shared from taha-lane-lib.mjs.
 export const isMainHotfix = (pr) => pr.baseRefName === 'main' && /^hotfix\//.test(pr.headRefName ?? '');
 const GATE_CHECKS = ['Release flow guard (main)', 'release-gate'];
 // A pending guard still waits: it may yet ask for the label, and the ping is sent once per head (Codex on #2589).
 const checksFor = (pr, checks, backport = () => false) => (isMainHotfix(pr) && Array.isArray(checks)
   ? checks.filter((c) => !(c.name === GATE_CHECKS[1] || (c.name === GATE_CHECKS[0] && c.bucket === 'fail' && backport()))) : checks);
+// Taha's lane files plus, on a hotfix into main, the .github/ files he owns: both lists, so a hotfix that also
+// changes lane wiring is not skipped as wiring-only (Codex bot on #2639).
+export function laneFor(pr, files) {
+  const lane = tahaLaneProblem({ files });
+  const owned = isMainHotfix(pr) ? githubOwned(files) : null;
+  if (lane?.files?.length && owned) return { files: [...lane.files, ...owned.files], reason: `${lane.reason}; ${owned.reason}` };
+  return lane ?? owned;
+}
 // True when the guard run's failure annotations ask only for the hotfix-backport label (GitHub adds its own
 // "Process completed with exit code" line to every failed step). Anything else, or nothing readable, is false.
 // Matched on check-hotfix-content's own sentence, not the bare label: the bad-name error quotes the branch name (Taha on #2663).
@@ -97,6 +108,8 @@ export function decide(pr, { checks, lane, sol, carried, backport }) {
   if (!inLane) return skip("not in Taha's lane");
   // Unreadable or cut-short file lists block a merge, but never label: no named lane file, no label.
   if (!inLane.files?.length) return skip(`lane unclear: ${inLane.reason}`);
+  // Only the lane block's own files: Mason's code lets it merge; it is not Taha's work (Mason, 2026-11-26).
+  if (inLane.files.every(wiringOnly)) return skip("only the lane block's own files: needs Mason's code, not Taha's review");
   const risk = sol();
   if (risk?.risky !== false) return skip(`Sol needed (${risk?.reason ?? 'unknown'}): the bot cannot see Sol proofs; the agent labels it after Sol`);
   return { act: true, why: `${hasLabel(pr) ? 're-request Taha' : 'label + request Taha'}: ${inLane.reason}; ${risk.reason}; required checks green` };
@@ -147,7 +160,7 @@ export function askedAfterPush(pushTimes, askTimes) {
 // because the bot cannot see Sol proofs and a request or label can outlive a push.
 // checks/sol/asked/carried are thunks as in decide(); backport() says the release guard wants Taha's hotfix-backport label.
 // Returns { ping, why, backport }.
-export function needsPing(pr, comments, { checks, sol, asked, carried, backport = () => false }) {
+export function needsPing(pr, comments, { checks, lane, sol, asked, carried, backport = () => false }) {
   const no = (why) => ({ ping: false, why });
   // His approval survives a merge from main, but the label must follow the latest push: ask for the label alone.
   if (isMainHotfix(pr) && !pr.isDraft && !isTahasPr(pr) && !pr.isCrossRepository && tahaVerdict(pr, carried) === APPROVED) {
@@ -165,6 +178,9 @@ export function needsPing(pr, comments, { checks, sol, asked, carried, backport 
   if (!tahaRequested(pr)) return no('Taha is not requested');
   const checkProblem = requiredChecksProblem(checksFor(pr, checks(), backport));
   if (checkProblem) return no(checkProblem);
+  const inLane = lane?.();
+  // Same skip as decide(), for a PR someone labelled by hand (advisory Sol on PR 2, MED 11).
+  if (inLane?.files?.length && inLane.files.every(wiringOnly)) return no("only the lane block's own files: needs Mason's code, not Taha's review");
   const yes = (why) => ({ ping: true, why, backport: isMainHotfix(pr) && Boolean(backport()) });
   if (sol()?.risky === false) return yes('no Sol needed, checks green');
   if (asked()) return yes('Sol-list PR labelled or re-requested after its latest push');
@@ -173,9 +189,12 @@ export function needsPing(pr, comments, { checks, sol, asked, carried, backport 
 
 // One reminder per head, 24 h after its first ping, while Taha is still requested, has not decided this head
 // (a comment alone still counts as waiting) and required checks are green. The clock is the ping comment's time.
-export function needsReminder(pr, comments, now, { checks, carried, backport }) {
+export function needsReminder(pr, comments, now, { checks, carried, lane, backport }) {
   const no = (why) => ({ remind: false, why });
   if (!hasLabel(pr) || pr.isDraft || isTahasPr(pr) || pr.isCrossRepository || !tahaRequested(pr)) return no('not a labelled PR waiting on Taha');
+  // Same skip as needsPing(), for a wiring-only PR pinged before that skip existed (Codex bot on #2639).
+  const inLane = lane?.();
+  if (inLane?.files?.length && inLane.files.every(wiringOnly)) return no("only the lane block's own files: needs Mason's code, not Taha's review");
   if (tahaVerdict(pr)) return no('Taha decided this head');
   const first = pinged(comments, pr.headRefOid)[0];
   if (!first) return no('not pinged for this head yet');
@@ -307,8 +326,7 @@ async function handle(pr, mode, dry) {
   const facts = {
     checks: () => requiredChecks(pr.number),
     lane: () => {
-      const files = prFilesOnGitHub({ repo: REPO, gh, number: pr.number, headSha: pr.headRefOid });
-      return tahaLaneProblem({ files }) ?? (isMainHotfix(pr) ? githubOwned(files) : null);
+      return laneFor(pr, prFilesOnGitHub({ repo: REPO, gh, number: pr.number, headSha: pr.headRefOid }));
     },
     // The guard's latest run on this head failed only for the label (its ::error:: lines are annotations). Memoized:
     // the check filter, ping and reminder all ask.

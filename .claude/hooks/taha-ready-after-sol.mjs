@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { APP_REPO_NAME } from "./app-repo-identity.mjs";
 import { gitPushCwd, headContainsBaseOnGitHub, isGitPush, mergeBaseOnGitHub, nativeFolder, proofSearchDirs, proofValid, proofValidForMerge } from "./codex-push-lib.mjs";
 import { solRiskOnGitHub } from "./sol-risk-lib.mjs";
-import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneProblem, TAHA_LOGIN } from "./taha-lane-lib.mjs";
+import { prFilesOnGitHub, tahaApprovedOnGitHub, tahaLaneProblem, TAHA_LOGIN, wiringOnly } from "./taha-lane-lib.mjs";
 
 const LABEL = "ready-for-taha";
 // One deadline for the whole hook (Taha LOW 3). The router's 40 s limit holds the DIRTY-PR warning (up to 15 s)
@@ -49,6 +49,8 @@ export function tahaReadyAfterSolProblem({ pr, proofClean, files }) {
   if (lane && !lane.files?.length) return FILES_UNREADABLE;
   const hits = lane?.files ?? [];
   if (!hits.length) return "not in Taha's lane";
+  // Only the lane block's own launchers and settings: Mason's code, not Taha's review (the Taha ready bot's skip; Taha on #2639).
+  if (hits.every(wiringOnly)) return "only the lane block's own files";
   // A migration whose SQL could not be read counts as lane for the merge gates, but here it only means "unknown".
   if (hits.every((hit) => hit.endsWith(UNREAD_SQL))) return LANE_UNKNOWN;
   return null;

@@ -72,6 +72,60 @@ const STRONG_LANE_WORDS = new Set(["quote", "quotes", "hold", "holds", "prepay",
 
 // The block's own wiring: a PR that edits or unhooks it needs Mason's code too (Taha's review of #2303).
 const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router|sol-risk-lib|migration-landing-gate-lib|migration-apply-lib|migration-apply-guard|teammate-comments-lib)\.mjs|scripts\/apply-migration-file\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
+/** The block's own wiring: needs Mason's code, but is not Taha's work to review (Mason, 2026-11-26). */
+export const isTahaGateWiring = (name) => BLOCK_FILES_RE.test(String(name ?? "").replace(/\\/g, "/"));
+// Only the lane block's launchers and settings are not his work (Taha's review of #2639, MED 2); its libraries define his
+// lane and his live-apply hold, so they still go to him (advisory Sol on #2639, MED 18). pr-merge-guard and the Codex
+// production-action-guard call his lane gate themselves, so they go to him too (Taha's delta at a9143eb27, MED 2).
+// Exported so the Taha ready bot and #2660's after-Sol labeller share one rule (Taha's delta at 979ddf01a).
+export const wiringOnly = (file) => isTahaGateWiring(file) &&
+  /(?:^|\/)(?:merge-guard-launcher|prompt-router|migration-apply-guard)\.mjs$|(?:^|\/)(?:settings|hooks)\.json$/.test(String(file ?? "").replace(/\\/g, "/"));
+
+// Mason, 2026-11-26 (#2451): a change to one of Taha's screens that only edits words people read (strings, JSX text,
+// comments) is not his work. True only when the changed lines, with those stripped, are the same code before and after.
+// Words are: a string given to a label-like name (label, title, placeholder…), JSX text between tags, and comments.
+// Every other string is code (a tab key or route can change behaviour), kept exactly, spaces included; so are
+// tool comments (@ts-…, eslint, @vite-ignore, webpack…) and line breaks. Each block of changed lines is compared
+// in place, so code moved from one spot to another is a change (Luna, PR 2 rounds 1–2).
+// A missing patch (GitHub leaves it out of big diffs) is not text-only.
+// shortcut: pattern matching, not a parser; an honest-mistake net like the SQL check, not a security boundary.
+const TEXT_TOKEN_RE = /((?<![\w$.-])(?:label|title|subtitle|placeholder|description|aria-label|alt|tooltip|helperText|emptyText|emptyMessage|heading)(?:=(?!=)|\s*:)\s*\{?\s*)(?:'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\$])*`)|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?<=[\w"'}])(?<!<(?:option|textarea)\b[^<>]*)>([^<>{}\n]*)(?=<\/)/g;
+// A JSX attribute (`label="…"`, no space before `=`) is words. An object's `label: '…'` is words only on a menu or
+// tab entry (a `path`, `to`, `href` or `key` on the same line); elsewhere it may be data the app saves
+// (Taha's review of #2639, HIGH 1: the prepay split default `{ label: '' }`).
+// The route or key must itself be written out as a string (`key: customer.id` is a saved row; advisory Sol on #2639, HIGH 9).
+const NAV_ENTRY_RE = /(?<![\w$.-])(?:path|to|href|key)\s*:\s*['"`]/;
+const lineAt = (text, at) => text.slice(text.lastIndexOf("\n", at) + 1).split("\n")[0];
+const TOOL_COMMENT_RE =/^\/\/\/|@|#__|\b(?:eslint|prettier|istanbul|webpack|vite|jsx|c8|v8|ts-)/i;
+function codeOnly(lines) {
+  const kept = [];
+  const keep = (m) => `\u0001${kept.push(m) - 1}\u0001`;
+  const text = lines.join("\n");
+  return text
+    .replace(TEXT_TOKEN_RE, (m, key, jsx, at) => key !== undefined ? (key.includes(":") && !NAV_ENTRY_RE.test(lineAt(text, at)) ? keep(m) : `${key.replace(/\s+/g, "")}S`) : jsx !== undefined ? ">"
+      : m.startsWith("/") ? (TOOL_COMMENT_RE.test(m) ? keep(m) : "") : keep(m))
+    .split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean).join("\n")
+    .replace(/\u0001(\d+)\u0001/g, (_, i) => kept[Number(i)]);
+}
+export function isTextOnlyPatch(patch) {
+  if (typeof patch !== "string" || !patch.trim()) return false;
+  const blocks = [];
+  let block = null;
+  for (const line of patch.split(/\r?\n/)) {
+    const sign = line[0];
+    if (sign === "-" || sign === "+") {
+      if (!block || (sign === "-" && block.added.length)) blocks.push(block = { removed: [], added: [] });
+      (sign === "-" ? block.removed : block.added).push(line.slice(1));
+    } else if (sign !== "\\") block = null; // a context or @@ line ends the block; "\ No newline" does not
+  }
+  return blocks.length > 0 && blocks.every((b) => codeOnly(b.removed) === codeOnly(b.added));
+}
+
+// Money screens and customer documents: their wording is Taha's too (Taha's review of #2639, MED 1, and his
+// delta at a9143eb27: every money screen in his lane, so the named lane files below get no words-only pass either;
+// his delta at 82ef25520 added the commission and month-end pages; his delta at 979ddf01a the bill and commission split editors).
+const MONEY_DOC_RE = /^src\/(?:components\/(?:invoices|prepay|statements)\/|components\/orders\/(?:Sale|WhoPays|LineBillSplit)|components\/ui\/CommissionSplit|lib\/(?:invoice|statement|customerStatement)|pages\/(?:Invoice|Payment|Prepay|AR|AccountsReceivable|CommissionPayments|MonthEndClose))|(?:Pdf|Email)\.[jt]sx?$/i;
+const isMoneyScreen = (file) => MONEY_DOC_RE.test(file) || LANE_FILE_PREFIXES.some((p) => file.startsWith(p));
 
 /** True when this changed file is app or database code in Taha's lane (and not field billing), or the block itself. */
 export function isTahaLanePath(name) {
@@ -116,7 +170,8 @@ const TAHA_LANE_FUNCTIONS_RE = new RegExp("^_?(?:complete_delivery|start_and_com
   "|edit_delivery|fix_delivery|correct_delivery_brands|batch_cancel_deliveries|delivery_line_matches_order_line" +
   "|enforce_delivery_items_parent_lock|prebook_quick_delivery_inventory" +
   // Taha's review of #2408: read-only billing reports, the month lock, and NEW-setting triggers the write sweep missed.
-  "|get_customer_year_end_summary|get_batch_year_end_summaries|check_period_open|preview_finance_charges" +
+  // The customer year-end summaries are money statements and stay his (Taha's review of #2639, HIGH 2).
+  "|check_period_open|preview_finance_charges|get_customer_year_end_summary|get_batch_year_end_summaries" +
   "|get_sales_summary_report|get_sales_detail_report|get_gross_sales_report|get_profitability_report|financial_dashboard_summary" +
   "|bump_order_edit_version|prevent_oifa_edit_after_post|guard_order_reopen_inactive_product" +
   ")(?=_|$)|^_?get_ar_|accounting_period|credit_memo", "i");
@@ -147,6 +202,97 @@ export const TAHA_LANE_TABLES = [
 // writes the shared invoice tables). Every other lane table still counts there (Taha's review of #2382, HIGH 1);
 // "commissions" is here because Taha asked that #2260, which deletes a field invoice's commissions, keep passing.
 const FIELD_BILLING_TABLES = new Set(["invoices", "invoice_items", "invoice_shares", "invoice_line_shares", "commissions"]);
+// A migration named for a product's units that also converts the product's own units may take table locks and UPDATE
+// only the unit columns (unit_size, rate_unit) of order and quote lines, scoped by a WHERE (Mason, 2026-11-26: #2267 converted one product from mg to grams, its lines included, and locked what
+// it re-checks so nothing moved under it; a unit fix is not Taha's). Any other write to those tables (a status, a price,
+// a policy, a column, a delete) and every other lane table still count (Luna, PR 2 rounds 1 and 3).
+// A LOCK statement starts a statement; `IF lock THEN` is a variable (advisory Sol on PR 2, HIGH 4).
+// `lock := …` is a variable assignment, not a table lock (advisory Sol on #2639, HIGH 8).
+const UNIT_FIX_LOCK_RE = /(?<=(?:^|;|\b(?:begin|then|else|loop)\b|\$\$)\s*)lock\s+(?!:=)(?:table\s+)?[^;]*/gi;
+const updateOf = (tables) => new RegExp(String.raw`\bupdate\s+(?:only\s+)?(?:"?public"?\s*\.\s*)?"?(?:${tables})"?(?![\w$])(?:\s+(?:as\s+)?(?!set\b)\w+)?\s+set\s+`, "gi");
+const UNIT_LINE_UPDATE_RE = updateOf("order_items|quote_items");
+// The fix must convert the product itself in the same SQL, as #2267 did (Taha's review of #2639, MED 3).
+const PRODUCT_UPDATE_RE = updateOf("products");
+// Only the unit labels; the line quantity (total_units_needed) and prices stay his (Taha's review of #2639, LOW 1).
+const UNIT_COLUMN_RE = /^(?:unit_size|rate_unit)$/i;
+const ROW_LOCK_IN_RE = /\bfor\s+(?:no\s+key\s+)?(?:update|share|key\s+share)\b/i;
+// The first top-level stop word (`stop(word)`), `;` or unmatched `)` from i. Brackets are skipped, so EXTRACT(… FROM …)
+// and a WHERE inside a subquery do not count; strings and "quoted" names must already be blanked out.
+const scanTo = (s, i, stop) => {
+  for (let depth = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "(") depth++;
+    else if (c === ")") { if (!depth) return i; depth--; }
+    else if (c === ";" && !depth) return i;
+    else if (/[a-z_]/i.test(c) && !/[\w$]/.test(s[i - 1] ?? "")) {
+      const word = /^\w+/.exec(s.slice(i, i + 64))[0];
+      if (!depth && stop(word, i)) return i;
+      i += word.length - 1;
+    }
+  }
+  return i;
+};
+const afterDistinct = (s, i) => { let j = i - 1; while (j >= 0 && /\s/.test(s[j])) j--; return /(?:^|[^\w$])distinct$/i.test(s.slice(Math.max(0, j - 8), j + 1)); };
+// Where a SET list ends: a top-level WHERE, RETURNING or FROM; not IS DISTINCT FROM (Taha's review of #2639).
+const setEnd = (s, i) => scanTo(s, i, (w, at) => /^(?:where|returning)$/i.test(w) || (/^from$/i.test(w) && !afterDistinct(s, at)));
+const setColumns = (set) => {
+  const cols = [...set.matchAll(/(?:^|,)\s*"?(\w+)"?\s*=/g)].map((m) => m[1]);
+  // SET (a, b) = (...) tuple assignments (Luna, PR 2 round 4).
+  for (const m of set.matchAll(/(?:^|,)\s*\(([^()]*)\)\s*=/g)) cols.push(...m[1].split(",").map((c) => c.trim().replace(/"/g, "")));
+  return cols;
+};
+const unitOnlySet = (set) => { const cols = setColumns(set); return cols.length > 0 && cols.every((c) => UNIT_COLUMN_RE.test(c)) && !/\(\s*select\b/i.test(set); };
+// Blank out '...' literal contents (same length) so a WHERE or ; inside a string is not read as SQL (Luna, PR 2 round 4).
+// E'…' strings take backslash escapes, by the same rule withoutComments uses (an E not after a word character)
+// (Taha's delta at a9143eb27, LOW 5: E'g\'' must not run on into the next statement).
+// $tag$…$tag$ literals are blanked too, except a DO or AS body: that is code (the real #2267 unit fix runs inside
+// DO $$), so it is scanned, with its own inner literals blanked (Taha's delta at 82ef25520, LOW 7).
+// One left-to-right pass: whichever of ', E' or $tag$ opens first is blanked to its own end, so a '$$' string can't
+// open a dollar literal that hides the statements after it (Taha's delta at 979ddf01a, LOW 8).
+const maskStrings = (text) => {
+  const re = /(?<![\w$])\$(?:[A-Za-z_]\w*)?\$|(?<![\w$])[eE]'(?:\\[\s\S]|[^'\\]|'')*'|'(?:[^']|'')*'/g;
+  let out = "", at = 0, m;
+  while ((m = re.exec(text))) {
+    if (m[0].endsWith("'")) {
+      const q = m[0].indexOf("'");
+      out += text.slice(at, m.index) + `${m[0].slice(0, q)}'${" ".repeat(m[0].length - q - 2)}'`;
+      at = re.lastIndex;
+      continue;
+    }
+    const open = m.index + m[0].length, close = text.indexOf(m[0], open);
+    if (close < 0) continue; // an unclosed tag stays; literals after it are still blanked
+    const body = text.slice(open, close);
+    const code = /\b(?:do|as)\s*$/i.test(text.slice(Math.max(0, m.index - 12), m.index));
+    out += text.slice(at, open) + (code ? maskStrings(body) : " ".repeat(body.length));
+    at = close; re.lastIndex = close + m[0].length;
+  }
+  return out + text.slice(at);
+};
+// …and "quoted" names too, for the clause scanner (advisory Sol on #2639, HIGH 6: src."from").
+const maskNames = (text) => text.replace(/"(?:[^"]|"")*"/g, (s) => `"${"x".repeat(s.length - 2)}"`);
+const withoutUnitFix = (text) => {
+  const masked = maskStrings(text), bare = maskNames(masked);
+  // The product's own unit columns must be SET, not merely named in a WHERE (advisory Sol on #2639, HIGH 5).
+  if (![...masked.matchAll(PRODUCT_UPDATE_RE)].some((m) => { const from = m.index + m[0].length;
+    return setColumns(masked.slice(from, setEnd(bare, from))).some((c) => UNIT_COLUMN_RE.test(c)); })) return text;
+  const cuts = [...masked.matchAll(UNIT_FIX_LOCK_RE)].map((m) => [m.index, m.index + m[0].length]);
+  for (const m of masked.matchAll(UNIT_LINE_UPDATE_RE)) {
+    const from = m.index + m[0].length, set = setEnd(bare, from);
+    // The cut ends where this UPDATE ends (a CTE's closing bracket or `;`), so a write after it is still read (Codex bot on #2639).
+    const end = scanTo(bare, set, () => false);
+    // An unscoped UPDATE converts every line (Luna, PR 2 round 5): it needs its own top-level WHERE, not one in a subquery.
+    const where = scanTo(bare, set, (w) => /^where$/i.test(w));
+    if (unitOnlySet(masked.slice(from, set)) && where < end && !ROW_LOCK_IN_RE.test(masked.slice(m.index, end))) cuts.push([m.index, end]);
+  }
+  cuts.sort((a, b) => a[0] - b[0]);
+  let out = "", at = 0;
+  for (const [start, end] of cuts) { if (start >= at) out += text.slice(at, start); at = Math.max(at, end); }
+  return out + text.slice(at);
+};
+// "unit(s)" alone is too common a word to count (a delivery_units fix could be his).
+const UNIT_WORDS = new Set(["uom", "gram", "grams", "mg", "oz", "ounce", "ounces", "lb", "lbs", "pound", "pounds",
+  "gallon", "gallons", "quart", "quarts", "pint", "pints", "liter", "liters", "litre", "litres"]);
+const isProductUnitName = (name) => wordsOf(name).some((w) => UNIT_WORDS.has(w)) && !isLaneName(name);
 const tableRe = (tables) => String.raw`(?:"?public"?\s*\.\s*)?"?(?:${tables.join("|")})"?(?![\w$]|\s*\.)`;
 // "INTO" covers INSERT, MERGE and SELECT INTO; "ON" covers triggers, policies, indexes, grants and comments;
 // TABLE / ONLY / IF [NOT] EXISTS are optional fillers, and a list (TRUNCATE a, invoices) is read to its end (LOW 5).
@@ -225,11 +371,13 @@ function withoutComments(sql) {
 /**
  * True when this migration SQL touches Taha's lane; unreadable SQL (null) counts, so the block fails closed.
  * `fieldBilling`: the file is named for field billing, so writes to FIELD_BILLING_TABLES are Mason's.
+ * `productUnits`: the file is named for a product's units, so its table locks and UPDATEs of order and quote lines
+ * are not Taha's (Mason, 2026-11-26; withoutUnitFix).
  */
-export function isTahaLaneSql(sql, { fieldBilling = false } = {}) {
+export function isTahaLaneSql(sql, { fieldBilling = false, productUnits = false } = {}) {
   if (typeof sql !== "string") return true;
   const { write, read } = fieldBilling ? FIELD_RES : LANE_RES;
-  const text = withoutComments(sql);
+  const text = productUnits ? withoutUnitFix(withoutComments(sql)) : withoutComments(sql);
   // Second pass joins string pieces ('UPDATE ' || 'invoices …'), so dynamic SQL built in parts still counts.
   const joined = text.replace(/'\s*\|\|\s*'/g, "");
   if ([text, joined].some((t) => write.test(t) || PREBOOKED_RE.test(t) || PREBOOKED_MORE_RE.test(t) || PREBOOKED_RE.test(withoutParens(t)))) return true;
@@ -248,13 +396,17 @@ export function tahaLaneProblem({ files }) {
   if (files.length >= MAX_FILES) return { files: [], reason: `${files.length} changed files may be a cut-short list` };
   const hits = [];
   for (const entry of files) {
-    for (const name of [entry?.filename, entry?.previous_filename]) {
-      if (typeof name === "string" && isTahaLanePath(name) && !hits.includes(name)) hits.push(name);
-    }
     const name = entry?.filename;
+    // A label-only edit of an app file in his lane, not renamed (Mason, 2026-11-26, #2451).
+    // Only an edited file: adding or deleting one is code even when it holds only comments (advisory Sol on PR 2, MED 15).
+    const wordsOnly = entry?.status === "modified" && !entry?.previous_filename && typeof name === "string" && /^src\/.+\.[jt]sx?$/i.test(name) &&
+      !isTahaGateWiring(name) && !isMoneyScreen(name.replace(/\\/g, "/")) && isTextOnlyPatch(entry?.patch);
+    for (const n of wordsOnly ? [] : [entry?.filename, entry?.previous_filename]) {
+      if (typeof n === "string" && isTahaLanePath(n) && !hits.includes(n)) hits.push(n);
+    }
     // A migration named for field billing stays Mason's when it writes the shared invoice tables (Mason, 2026-11-23),
     // but the rest of its SQL is still read (Taha's review of #2382, HIGH 1).
-    if (entry && "sql" in entry && typeof name === "string" && !hits.includes(name) && isTahaLaneSql(entry.sql, { fieldBilling: isFieldBillingName(name) })) {
+    if (entry && "sql" in entry && typeof name === "string" && !hits.includes(name) && isTahaLaneSql(entry.sql, { fieldBilling: isFieldBillingName(name), productUnits: isProductUnitName(name) })) {
       hits.push(entry.sql === null ? `${name} (its SQL could not be read)` : name);
     }
   }
@@ -270,13 +422,18 @@ export function prFilesOnGitHub({ repo, gh, number, headSha }) {
   if (!repoPath || !Number.isInteger(number) || number < 1) return null;
   try {
     const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq",
-      '.[] | [.status, .filename, (.previous_filename // ""), ((.contents_url // "") | ([capture("[?&]ref=(?<r>[0-9a-f]{40})").r][0] // ""))] | @tsv']))
+      '.[] | [.status, .filename, (.previous_filename // ""), ((.contents_url // "") | ([capture("[?&]ref=(?<r>[0-9a-f]{40})").r][0] // "")), ' +
+      // Only app code files' patches are used; the rest would only fill the buffer (Taha's review of #2639, LOW 3).
+      '(if .status == "modified" and (.filename | test("^src/.+[.][jt]sx?$"; "i")) then (.patch // "") else "" end)] | @tsv']))
       .split(/\r?\n/).filter(Boolean).map((line) => line.split("\t"));
-    if (rows.some((r) => r.length < 2 || r.length > 4 || !r[1])) return null;
+    if (rows.some((r) => r.length < 2 || r.length > 5 || !r[1])) return null;
     // The whole list must be GitHub's answer for the pinned head, not a later push (advisory Sol on #2382).
     if (usableHead(headSha) && rows.some(([status, , , ref]) => status !== "removed" && ref && ref.toLowerCase() !== headSha.toLowerCase())) return null;
-    return rows.map(([status, filename, previous, ref = ""]) => {
+    return rows.map(([status, filename, previous, ref = "", patch = ""]) => {
       const entry = { filename, previous_filename: previous || undefined };
+      // The diff of an app file, for the label-only rule (@tsv escaped its line breaks).
+      // Only a patch GitHub read at the pinned head (advisory Sol on #2639, MED 16).
+      if (patch && /^src\//i.test(filename) && (!usableHead(headSha) || ref.toLowerCase() === headSha.toLowerCase())) Object.assign(entry, { status, patch: patch.replace(/\\(.)/g, (_, c) => ({ n: "\n", r: "\r", t: "\t" })[c] ?? c) });
       // Migrations, baselines and hand-run undo scripts are judged by their SQL at the head the merge is pinned to;
       // a removed or unreadable one, or one GitHub lists at another commit, counts as Taha's (Taha's review of #2382, LOW 7, LOW 8).
       // A SQL file moved out of the read folders counts as removed there (advisory Sol on #2382).

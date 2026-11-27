@@ -266,6 +266,8 @@ test('reminder: once per head, 24 h after the first ping, while Taha has not dec
   const day = T0 + 24 * 3600e3;
   assert.equal(needsReminder(waiting, pingedAt, day, { checks: green }).remind, true);
   assert.equal(needsReminder(waiting, pingedAt, day - 1, { checks: green }).remind, false, 'under 24 h');
+  assert.equal(needsReminder(waiting, pingedAt, day, { checks: green, lane: () => ({ files: ['.claude/hooks/merge-guard-launcher.mjs'] }) }).remind, false, 'wiring-only: no reminder');
+  assert.equal(needsReminder(waiting, pingedAt, day, { checks: green, lane: () => ({ files: ['.claude/hooks/merge-guard-launcher.mjs', 'src/pages/Quotes.tsx'] }) }).remind, true, 'wiring plus a lane file: reminded');
   assert.equal(needsReminder(waiting, [], day, { checks: green }).remind, false, 'never pinged');
   assert.equal(needsReminder(waiting, [bot(`x ${pingMarker(NEW)}`)], day, { checks: green }).remind, false, 'pinged for another head only');
   assert.equal(needsReminder(waiting, [...pingedAt, bot(`y ${remindMarker(HEAD)}`)], day, { checks: green }).remind, false, 'already reminded');
@@ -337,6 +339,36 @@ test("strangers' fork PRs are never labelled or pinged", () => {
   assert.equal(needsPing({ ...fork, labels: [{ name: 'ready-for-taha' }] }, [], { checks: green, sol: noSol, asked: () => [] }).ping, false);
 });
 
+// Mason, 2026-11-26: PRs that change only the lane block's launchers and settings need Mason's code, not Taha's review.
+test('back-merges of main into staging are judged like any PR (Taha, #2639 LOW 4)', () => {
+  assert.equal(decide(pr({ headRefName: 'main', baseRefName: 'staging' }), ok).act, true, 'main needs no review, so a back-merge can carry a hotfix Taha never saw');
+  assert.equal(P(labelled({ ...T, headRefName: 'main', baseRefName: 'staging' }), []), true, 'a labelled back-merge is pinged');
+});
+
+test('a PR that only changes the lane block launchers is not sent to Taha', () => {
+  const wiring = () => ({ files: ['.claude/hooks/merge-guard-launcher.mjs', '.claude/settings.json'], reason: "it changes Taha's areas" });
+  const d = decide(pr(), { ...ok, lane: wiring, sol: never });
+  assert.equal(d.act, false);
+  assert.match(d.why, /Mason's code/);
+  const lib = () => ({ files: ['.claude/hooks/taha-lane-lib.mjs', '.claude/hooks/pr-merge-guard.mjs'], reason: "it changes Taha's areas" });
+  assert.equal(decide(pr(), { ...ok, lane: lib }).act, true, 'a change to the lane definition goes to Taha (#2639 MED 2)');
+  const mixed = () => ({ files: ['.claude/hooks/merge-guard-launcher.mjs', 'src/pages/Quotes.tsx'], reason: "it changes Taha's areas" });
+  assert.equal(decide(pr(), { ...ok, lane: mixed }).act, true, 'wiring plus a lane file still goes to Taha');
+  for (const guard of ['.claude/hooks/pr-merge-guard.mjs', '.codex/hooks/production-action-guard.mjs']) {
+    assert.equal(decide(pr(), { ...ok, lane: () => ({ files: [guard], reason: "it changes Taha's areas" }) }).act, true, `${guard} calls his lane gate, so it goes to Taha (delta at a9143eb27, MED 2)`);
+    assert.equal(P(labelled(T), [], { ...ok, lane: () => ({ files: [guard], reason: "it changes Taha's areas" }) }), true, `${guard} pings him`);
+  }
+});
+
+test('a hand-labelled wiring-only PR is not pinged either (advisory Sol on PR 2, MED 11)', () => {
+  const wiring = () => ({ files: ['.claude/hooks/merge-guard-launcher.mjs'], reason: "it changes Taha's areas" });
+  assert.equal(P(labelled(T), [], { ...ok, lane: wiring }), false, 'only the lane block launchers');
+  const lib = () => ({ files: ['.claude/hooks/taha-lane-lib.mjs'], reason: "it changes Taha's areas" });
+  assert.equal(P(labelled(T), [], { ...ok, lane: lib }), true, 'the lane definition still pings');
+  const mixed = () => ({ files: ['.claude/hooks/merge-guard-launcher.mjs', 'src/pages/Quotes.tsx'], reason: "it changes Taha's areas" });
+  assert.equal(P(labelled(T), [], { ...ok, lane: mixed }), true, 'wiring plus a lane file still pings');
+});
+
 import { backportList, BRING_CAP, FILE_CAP } from './taha-ready.mjs';
 
 test('a backport ping lists what the hotfix brings to live: PRs, bare commits, merges, then files (Taha, 2026-11-26)', () => {
@@ -369,4 +401,19 @@ test('the backport list is capped, counts unlisted commits, and says so when Git
   assert.equal(list.at(-2), '• …and 5 more');
   assert.equal(list.at(-1), `Files changed (15): ${files.slice(0, FILE_CAP).map((f) => `\`${f}\``).join(', ')} and 5 more`);
   assert.match(backportList(null), /Could not read what this brings to live/);
+});
+
+import { laneFor } from './taha-ready.mjs';
+test('a hotfix into main that changes lane wiring and .github/ keeps both lists (Codex bot on #2639)', () => {
+  const hotfix = { baseRefName: 'main', headRefName: 'hotfix/x' };
+  const files = [{ filename: '.claude/hooks/pr-merge-guard.mjs' }, { filename: '.github/workflows/ci.yml' }];
+  const lane = laneFor(hotfix, files);
+  assert.deepEqual(lane.files, ['.claude/hooks/pr-merge-guard.mjs', '.github/workflows/ci.yml']);
+  assert.equal(decide(pr({ baseRefName: 'main', headRefName: 'hotfix/x' }), { ...ok, lane: () => lane }).act, true, 'not skipped as wiring-only');
+  assert.deepEqual(laneFor({ baseRefName: 'staging', headRefName: 'f' }, files).files, ['.claude/hooks/pr-merge-guard.mjs'], 'into staging only the lane list');
+});
+
+test('a PR that changes the live-apply gate library still goes to Taha (advisory Sol on #2639, MED 18)', () => {
+  const gate = () => ({ files: ['.claude/hooks/migration-landing-gate-lib.mjs'], reason: "it changes Taha's areas" });
+  assert.equal(decide(pr(), { ...ok, lane: gate }).act, true);
 });

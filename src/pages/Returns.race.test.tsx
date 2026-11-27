@@ -227,6 +227,41 @@ describe('Returns loading and retry behavior', () => {
     expect(calls[1][1].p_return.notes).toBe('corrected payload');
   });
 
+  // Decision 17 (Mason, 25 Nov): marking a line Damaged or Opened clears its restock tick; staff can tick it back on.
+  it('clears the restock tick when a line is marked Damaged or Opened, and lets staff tick it back on', async () => {
+    setupCreateReturnData();
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'create_return'
+      ? { data: { return_id: 'return-d17', return_number: 'RMA-D17', item_count: 1 }, error: null }
+      : { data: null, error: null }));
+
+    render(<MemoryRouter><Returns /></MemoryRouter>);
+    await screen.findByText('No returns yet');
+    const dialog = await fillCreateReturn();
+    const restock = within(dialog).getByLabelText('Restock return item 1');
+    const condition = within(dialog).getByLabelText('Return condition 1');
+    expect(restock).toBeChecked();
+
+    fireEvent.change(condition, { target: { value: 'damaged' } });
+    expect(restock).not.toBeChecked();
+    fireEvent.click(restock);
+    expect(restock).toBeChecked();
+
+    fireEvent.change(condition, { target: { value: 'unopened' } });
+    expect(restock).toBeChecked();
+    fireEvent.change(condition, { target: { value: 'opened' } });
+    expect(restock).not.toBeChecked();
+    // Expired is not part of decision 17: the tick stays as staff left it.
+    fireEvent.click(restock);
+    fireEvent.change(condition, { target: { value: 'expired' } });
+    expect(restock).toBeChecked();
+
+    fireEvent.change(condition, { target: { value: 'damaged' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Return' }));
+    await waitFor(() => expect(mockRpc.mock.calls.some(([name]) => name === 'create_return')).toBe(true));
+    const [, args] = mockRpc.mock.calls.find(([name]) => name === 'create_return')!;
+    expect(args.p_items[0]).toEqual(expect.objectContaining({ condition: 'damaged', restock: false }));
+  });
+
   it('lists every return past the 1,000-row server cap', async () => {
     const returns = Array.from({ length: 1500 }, (_, i) => ({
       id: `return-${String(i).padStart(4, '0')}`, return_number: `RMA-PAGED-${i + 1}`, customer: { farm_name: 'Farm P' },

@@ -14,7 +14,7 @@
 import { supabase, assertRpcResult, checkMutationResult } from './db';
 import { compressImage } from './imageCompression';
 import { Sentry } from './sentry';
-import { normalizeNoProofReason } from './paperTicket';
+import { normalizeNoProofReason, PAPER_TICKET_PHOTO_CAPTION } from './paperTicket';
 import type { DeliveryEvidencePhoto, ReceiptRecipient } from '../types';
 
 /**
@@ -123,6 +123,16 @@ export function latestEvidencePhoto<T extends { id: string; caption?: string | n
   return latest;
 }
 
+/** The evidence photo to send for these lines: the newest one taken for them, so an older photo of the current load
+ * still counts after an amount is changed and changed back; otherwise the newest overall (the screen says it is stale). */
+export function evidencePhotoForLoad<T extends { id: string; caption?: string | null; uploaded_at?: string | null; lines_seen?: ReadonlyArray<LineSeen> | null }>(
+  photos: ReadonlyArray<T>,
+  caption: string,
+  lines: ReadonlyArray<LineSeen> | null | undefined,
+): T | undefined {
+  return latestEvidencePhoto(photos.filter((photo) => sameLinesSeen(photo.lines_seen, lines)), caption) ?? latestEvidencePhoto(photos, caption);
+}
+
 /** Merges two photo lists by id (later entries replace earlier ones with the same id). */
 export function mergePhotosById<T extends { id: string }>(first: ReadonlyArray<T>, second: ReadonlyArray<T>): T[] {
   const byId = new Map<string, T>();
@@ -130,12 +140,13 @@ export function mergePhotosById<T extends { id: string }>(first: ReadonlyArray<T
   return [...byId.values()];
 }
 
-/** Saves one evidence photo (file + delivery_photos row) for the Deliveries list's dialog; throws on failure. */
+/** Saves one evidence photo (file + delivery_photos row) for the Deliveries list's dialog; throws on failure. `linesSeen`: ticket photos only. */
 export async function uploadEvidencePhoto(
   deliveryId: string,
   rawFile: File,
   uploadedBy: string,
   caption: string,
+  linesSeen?: LineSeen[],
 ): Promise<DeliveryEvidencePhoto> {
   const file = await compressImage(rawFile);
   const ext = file.name.split('.').pop() || 'jpg';
@@ -161,7 +172,9 @@ export async function uploadEvidencePhoto(
     file_size: file.size,
     sort_order: count ?? 0,
     caption,
-  }).select('id, storage_path, image_url, caption, uploaded_at');
+    // A signed-ticket photo carries the lines the screen showed when it was taken (20270309170000).
+    ...(linesSeen ? { lines_seen: linesSeen } : {}),
+  }).select('id, storage_path, image_url, caption, uploaded_at, lines_seen');
   checkMutationResult(result, 'Insert delivery photo');
   const row = (result.data || [])[0] as DeliveryEvidencePhoto | undefined;
   if (!row) throw new Error('The photo was uploaded but not recorded. Please try again.');
@@ -255,3 +268,167 @@ export async function storedNoProofReason(deliveryId: string, typedReason: strin
   const stored = (data as { completion_evidence_ref?: string | null } | null)?.completion_evidence_ref;
   return stored && stored.trim() ? stored : normalizeNoProofReason(typedReason);
 }
+
+/**
+ * Proof bound to the load (migration 20270309170000). One delivery line as the screen showed it when
+ * the customer signed or the ticket photo was taken: its order line, product, scheduled quantity and
+ * the delivered amount on screen (the scheduled quantity for a full delivery).
+ */
+// A type alias, not an interface, so it is assignable to the generated Json type.
+export type LineSeen = {
+  order_item_id: string;
+  product_id: string;
+  quantity: number;
+  delivered: number;
+};
+
+/** The lines the screen shows now; `deliveredFor` gives a line's delivered figure (default: the scheduled quantity). */
+export function buildLinesSeen<T extends { id: string; order_item_id?: string | null; product_id?: string | null; quantity: number | string }>(
+  items: ReadonlyArray<T>,
+  deliveredFor: (item: T) => number | string = (item) => item.quantity,
+): LineSeen[] {
+  return items.map((item) => ({
+    order_item_id: item.order_item_id ?? '',
+    product_id: item.product_id ?? '',
+    quantity: Number(item.quantity),
+    delivered: Number(deliveredFor(item)),
+  }));
+}
+
+// A non-negative amount to 6 decimal places, half away from zero, from its decimal text (as PostgreSQL rounds the
+// numeric it parses from the same JSON), not from the binary float as toFixed does (Sol on #2614).
+// shortcut: amounts of 1e21 and above fall back to toFixed; delivery quantities never get near that.
+export function roundAmount6(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return String(value);
+  const text = String(value);
+  if (/e-/.test(text)) return value >= 5e-7 ? '0.000001' : '0.000000';
+  if (/e/.test(text)) return value.toFixed(6);
+  const [whole, fraction = ''] = text.split('.');
+  const padded = (fraction + '0000000').slice(0, 7);
+  let units = BigInt(whole + padded.slice(0, 6));
+  if (Number(padded[6]) >= 5) units += 1n;
+  const digits = units.toString().padStart(7, '0');
+  return `${digits.slice(0, -6)}.${digits.slice(-6)}`;
+}
+
+// One entry as the server compares it: ids lower-cased, delivered kept between 0 and the quantity, amounts to 6
+// decimal places (20270309170000's round(…, 6)). An amount under 0.01 is NOT counted as 0 here: the database
+// that ships first compares it as sent, so the screen is never more lenient than it (Sol on #2614). This is a
+// screen hint, the server decides.
+function lineSeenKey(line: LineSeen): string {
+  const quantity = Number(line.quantity);
+  const delivered = Math.max(0, Math.min(Number(line.delivered), quantity));
+  return `${String(line.order_item_id).toLowerCase()}|${String(line.product_id).toLowerCase()}|${roundAmount6(quantity)}|${roundAmount6(delivered)}`;
+}
+
+// A saved list entry the comparison can read (the column accepts any JSON, e.g. [null]).
+function isLineSeen(line: unknown): line is LineSeen {
+  return typeof line === 'object' && line !== null && !Array.isArray(line);
+}
+
+/** Ticket (or, with its caption, drop-location) photos taken for these lines: only they count toward the photo cap,
+ * so a photo of an older load never blocks the photo the current load needs (Luna). */
+export function countTicketPhotosForLoad(
+  photos: ReadonlyArray<{ caption?: string | null; lines_seen?: ReadonlyArray<LineSeen> | null }>,
+  lines: ReadonlyArray<LineSeen> | null | undefined,
+  caption: string = PAPER_TICKET_PHOTO_CAPTION,
+): number {
+  return photos.filter((photo) => photo.caption === caption && sameLinesSeen(photo.lines_seen, lines)).length;
+}
+
+/** True when both lists hold the same entries, each as many times (the server's _delivery_lines_match). */
+export function sameLinesSeen(a: ReadonlyArray<LineSeen> | null | undefined, b: ReadonlyArray<LineSeen> | null | undefined): boolean {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  if (!a.every(isLineSeen) || !b.every(isLineSeen)) return false;
+  const counts = new Map<string, number>();
+  for (const line of a) counts.set(lineSeenKey(line), (counts.get(lineSeenKey(line)) ?? 0) + 1);
+  for (const line of b) {
+    const key = lineSeenKey(line);
+    const left = counts.get(key);
+    if (!left) return false;
+    counts.set(key, left - 1);
+  }
+  return true;
+}
+
+/** A reloaded line's delivered amount: the one entered before the reload (kept between 0 and the line's
+ * quantity), or the full quantity for a line that was not on screen. */
+export function keptQuantity(keepQtys: Readonly<Record<string, number>> | undefined, lineId: string, quantity: number): number {
+  const kept = keepQtys?.[lineId];
+  return kept === undefined ? quantity : Math.max(0, Math.min(kept, quantity));
+}
+
+/** Some line has a delivered amount of at least 0.01 (the server's DELIVERY_NOTHING_DELIVERED rule). */
+export function hasDeliveredAmount(lines: ReadonlyArray<LineSeen>): boolean {
+  return lines.some((line) => Math.max(0, Math.min(Number(line.delivered), Number(line.quantity))) >= 0.01);
+}
+
+/** The server refused because nothing was delivered or the proof is not for this load: clear the proof and reload. */
+export function isLoadProofRefusal(error: unknown): boolean {
+  const code = completionRefusalCode(error);
+  return code === 'DELIVERY_NOTHING_DELIVERED' || code === 'DELIVERY_LOAD_CHANGED' || code === 'PAPER_TICKET_LOAD_CHANGED'
+    || code === 'LEFT_AT_SITE_LOAD_CHANGED' || code === 'DELIVERY_QUANTITIES_STALE';
+}
+
+/** The stop's lines on the server differ from the ones on screen (a line added, removed or replaced, or its
+ * quantity changed), read just before completing: an "all full" completion sends no amounts, so the server
+ * would otherwise deliver its own quantities against proof taken for the screen's (Sol on #2614, HIGH 1). */
+export async function linesChangedOnServer(
+  deliveryId: string,
+  onScreen: ReadonlyArray<{ id: string; order_item_id?: string | null; product_id?: string | null; quantity: number | string }>,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('delivery_items')
+    .select('id, order_item_id, product_id, quantity')
+    .eq('delivery_id', deliveryId);
+  if (error) throw error;
+  const key = (line: { id: string; order_item_id?: string | null; product_id?: string | null; quantity: number | string }) =>
+    `${line.id}|${line.order_item_id ?? ''}|${line.product_id ?? ''}|${roundAmount6(Number(line.quantity))}`;
+  const server = ((data ?? []) as Array<{ id: string; order_item_id: string | null; product_id: string | null; quantity: number | string }>).map(key).sort();
+  const screen = onScreen.map(key).sort();
+  return server.length !== screen.length || server.some((line, i) => line !== screen[i]);
+}
+
+export const LINES_CHANGED_ON_SERVER_MESSAGE =
+  'The products or amounts on this delivery were changed by the office. They have been reloaded: check them and take the proof again.';
+
+/**
+ * The client's copy of the server's proof-binding refusals, checked before anything (the signature
+ * image) is uploaded: lines not loaded, nothing delivered, or a signature, ticket photo or drop-location
+ * photo taken for other lines or amounts (`photoLines`: the evidence photo's lines). Returns the message to
+ * show, or null. No-proof is not bound.
+ */
+export function loadProofProblem(
+  evidence: string,
+  currentLines: ReadonlyArray<LineSeen> | null,
+  signedLines: ReadonlyArray<LineSeen> | null,
+  photoLines: ReadonlyArray<LineSeen> | null | undefined,
+): string | null {
+  if (evidence !== 'signature' && evidence !== 'paper_ticket' && evidence !== 'left_at_site') return null;
+  if (!currentLines) return LINES_LOADING_MESSAGE;
+  if (!hasDeliveredAmount(currentLines)) return NOTHING_DELIVERED_MESSAGE;
+  if (evidence === 'signature' && !sameLinesSeen(signedLines, currentLines)) return SIGNATURE_LOAD_CHANGED_MESSAGE;
+  if (evidence === 'paper_ticket' && !sameLinesSeen(photoLines, currentLines)) return staleProofPhotoMessage(photoLines, 'ticket');
+  // Mason, 2026-11-25: the drop-location photo is bound to the load like a ticket photo.
+  if (evidence === 'left_at_site' && !sameLinesSeen(photoLines, currentLines)) return staleProofPhotoMessage(photoLines, 'left_at_site');
+  return null;
+}
+
+export const LINES_LOADING_MESSAGE = 'The products on this delivery are still loading. Wait a moment, then try again.';
+export const SIGNATURE_LOAD_CHANGED_MESSAGE =
+  'The products or amounts changed after the customer signed. The signature was cleared; have the customer sign again.';
+export const TICKET_PHOTO_LOAD_CHANGED_MESSAGE =
+  'The products or amounts changed since this ticket photo. Get the ticket signed for the current amounts and take a new photo.';
+export const LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE =
+  'The products or amounts changed since the drop-location photo. Take a new photo of where you left the delivery.';
+export const TICKET_PHOTO_NO_LIST_MESSAGE =
+  'This ticket photo was saved before CRX recorded which products a photo covers. Take a new photo of the signed ticket.';
+export const LEFT_AT_SITE_PHOTO_NO_LIST_MESSAGE =
+  'This drop-location photo was saved before CRX recorded which products a photo covers. Take a new photo of where you left the delivery.';
+
+/** Why a saved proof photo does not count: saved with no product list (before this change), or for other lines. */
+export function staleProofPhotoMessage(photoLines: unknown, kind: 'ticket' | 'left_at_site'): string {
+  if (!Array.isArray(photoLines)) return kind === 'ticket' ? TICKET_PHOTO_NO_LIST_MESSAGE : LEFT_AT_SITE_PHOTO_NO_LIST_MESSAGE;
+  return kind === 'ticket' ? TICKET_PHOTO_LOAD_CHANGED_MESSAGE : LEFT_AT_SITE_PHOTO_LOAD_CHANGED_MESSAGE;
+}
+export const NOTHING_DELIVERED_MESSAGE = 'At least one item must have a delivered quantity of at least 0.01.';

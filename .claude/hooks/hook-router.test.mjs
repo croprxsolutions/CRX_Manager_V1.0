@@ -308,6 +308,12 @@ for (const toolName of ["Write", "Edit", "apply_patch"]) {
   ok(caughtUp.wrote.length === 2 && caughtUp.calls.filter((c) => c.startsWith("pr view")).length === 2, "GitHub catches up on the second look: labelled");
   const behind = attempt({ views: [{ headRefOid: OTHER, commits: [{ oid: OTHER }] }] });
   ok(behind.wrote.length === 0 && behind.note.includes("not labelled for Taha yet") && behind.note.includes("gh pr edit 7"), "GitHub still behind the push: one line with the manual command");
+  // Taha LOW 7: before the lane is read the line is conditional, plus the code-change condition once he signed off.
+  ok(behind.note.includes("Only if it does, run: gh pr edit 7") && !behind.note.includes("changed code"), "GitHub behind: conditional line, lane unknown");
+  const behindSigned = attempt({ ...signedOff, views: [{ ...signedOff.pr, headRefOid: OTHER, commits: [{ oid: OTHER }] }] });
+  ok(behindSigned.wrote.length === 0 && behindSigned.note.includes("Only if it does and this push changed code"), "GitHub behind on a PR he signed off: both conditions");
+  const filesFailSigned = attempt({ ...signedOff, fail: "/files" });
+  ok(filesFailSigned.wrote.length === 0 && filesFailSigned.note.includes("Only if it does and this push changed code"), "file list unreadable on a PR he signed off: both conditions");
   ok(attempt({ views: [{ headRefOid: OTHER, commits: [{ oid: OTHER }] }], proofs: {} }).note === "", "GitHub behind but no clean Sol on disk: silent");
   const slow = askTahaAfterSol({ cwd: ".", headSha: HEAD, gh: () => { throw new Error("ETIMEDOUT"); }, readProof: () => proof(HEAD), now });
   ok(slow.includes("not labelled for Taha yet") && slow.includes("ETIMEDOUT"), "GitHub does not answer while a clean Sol is on disk: says so");

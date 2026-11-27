@@ -53,6 +53,19 @@
 --   KNOWN LIMIT until A2 (per-line pricing, planned): a line whose posted lots bill more than one unit price is not
 --      re-priced automatically; the office credits it by hand (RETURN_REPRICE_MIXED_RATES; Taha, 27 Nov). Lots at one
 --      price but different tax or discount are priced from their blend, as share returns already are.
+--   KNOWN LIMITS until A2 (Taha, 27 Nov; #2066 goes live only together with A2, v0.2.2):
+--      - The blend: when a line's posted lots share one base price but differ in discount or tax, and an earlier
+--        return of the line was credited at another lot's rate, one return can be credited more or less than its own
+--        units' price (e.g. $0 or $118 for a $50 or $106 unit). The line's credits together never exceed what was
+--        charged, and the last return takes what is left. A2's per-line pricing replaces the blend.
+--        The same pooled share is reachable at create, and was already on staging for taxed or discounted lines: a
+--        return CREATED after a second lot at another price has posted with tax is priced by create_return's share
+--        (the mixed-price refusal covers only order-price lines re-priced at receive or credit). After 5 units were
+--        credited at the first price, one unit of a $110 lot can credit $33.75 too much, and one of a $50 lot can come
+--        to $0 (refused at credit, RETURN_CREDIT_EMPTY). Chain case U pins it; A2 fixes it.
+--      - A tax or discount removed after a return was re-priced at receipt (the draft's discount taken off, so the
+--        sale no longer has one) leaves that return refused at credit (RETURN_SOURCE_NOT_VERIFIED). No wrong money; the
+--        office cancels and recreates the return.
 --   The tax ledger freeze (#2591) is not touched: a re-priced line's units are all on posted lots, so it freezes as today.
 --   Applying: like every migration here, the preflight relies on the file running as one transaction with
 --   ON_ERROR_STOP (the apply gate and the staging DB job do); run statement by statement it stops at the preflight.

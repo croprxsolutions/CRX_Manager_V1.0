@@ -44,6 +44,9 @@
 --      5 more billed taxed; a return of 1 is refused, never credited at a blend of the two prices.
 --   S  At create, a rep who cannot read the draft keeps the old words (RETURN_QUANTITY_EXCEEDS_BILLED_SHARE), so the
 --      refusal never reveals a draft the rep cannot see.
+--   U  KNOWN LIMIT until A2 (pinned so A2 flips it): a return CREATED after a second, taxed lot at a higher price has
+--      posted takes the pooled share at create (create_return's share pricing, as on staging): after 5 units were
+--      credited at the first price, one returned unit of the second lot is credited more than that unit was billed.
 --   T  The posted-unit check runs even when the price does not change: a gal line with one posted lot in gal and one
 --      in ea, the tax box ticked, a return at an unchanged price is refused at receive (RETURN_CREDIT_UNIT_MISMATCH)
 --      before anything is restocked, not left for the credit to refuse.
@@ -800,6 +803,42 @@ BEGIN
     END;
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (T) setup failed: ' || SQLERRM || ';';
+  END;
+
+  -- U: KNOWN LIMIT until A2. A return created after the taxed second lot posted takes the pooled share.
+  DECLARE
+    v_inv2 uuid;
+    v_ret_a uuid;
+    v_unit2 bigint;
+  BEGIN
+    v_order := pg_temp.rtx_order(v_admin, v_product.id, v_product.current_cost, v_customer, 'u-' || v_suffix);
+    v_invoice := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 'u1-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_invoice, v_invoice, 'smk-rtx-post-u1-' || v_suffix));
+    v_ret_a := pg_temp.rtx_return(v_admin, v_customer, v_order, 5, 'ua-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret_a, v_admin, 'smk-rtx-rc-ua-' || v_suffix));
+    PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret_a, v_admin, 'smk-rtx-ic-ua-' || v_suffix));
+    UPDATE order_items SET price_per_unit = price_per_unit + 10, total_price = (price_per_unit + 10) * total_units_needed
+     WHERE order_id = v_order;
+    PERFORM pg_temp.rtx_step(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-rtx-tax-u-' || v_suffix));
+    v_inv2 := pg_temp.rtx_deliver(v_admin, v_order, v_customer, 5, 'u2-' || v_suffix);
+    PERFORM pg_temp.rtx_step(format('SELECT post_invoice(%L, _invoice_post_version(%L), %L)', v_inv2, v_inv2, 'smk-rtx-post-u2-' || v_suffix));
+    -- what one unit of the second lot was billed, tax included
+    v_unit2 := round((SELECT total_amount_cents FROM invoices WHERE id = v_inv2) / 5.0)::bigint;
+    BEGIN
+      v_ret := pg_temp.rtx_return(v_admin, v_customer, v_order, 1, 'ub-' || v_suffix);
+      PERFORM pg_temp.rtx_step(format('SELECT receive_return(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-rc-ub-' || v_suffix));
+      PERFORM pg_temp.rtx_step(format('SELECT issue_return_credit(%L, %L, %L)', v_ret, v_admin, 'smk-rtx-ic-ub-' || v_suffix));
+      IF (SELECT priced_from FROM return_items WHERE return_id = v_ret) IS DISTINCT FROM 'billed_share'
+         OR pg_temp.rtx_credit(v_ret) <= v_unit2 THEN
+        v_fails := v_fails || format(' (U) the known limit changed: one unit billed %s cents now credits %s (A2 should flip this case);',
+          v_unit2, pg_temp.rtx_credit(v_ret));
+      END IF;
+      RAISE NOTICE 'RTX_KNOWN_LIMIT_U: one unit billed % cents, credited % cents (pooled share at create)', v_unit2, pg_temp.rtx_credit(v_ret);
+    EXCEPTION WHEN OTHERS THEN
+      v_fails := v_fails || ' (U) the pooled-share return failed: ' || SQLERRM || ';';
+    END;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (U) setup failed: ' || SQLERRM || ';';
   END;
 
   IF v_fails <> '' THEN

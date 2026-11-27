@@ -675,11 +675,8 @@ export async function fetchJobFieldLocations(jobId: string): Promise<Map<string,
     }, JOB_MAP_DEADLINE_MS);
   });
   try {
-    const response = await Promise.race([
-      supabase.rpc('get_job_fields_with_geojson', { p_job_id: jobId }).abortSignal(controller.signal), cutoff,
-    ]);
-    if (!response || response.error) return locations;
-    assertRpcResult<JobMapFieldRow[]>(response.data, 'get_job_fields_with_geojson').forEach((row) => {
+    const rows = await Promise.race([readJobMapFieldRows(jobId, controller.signal), cutoff]);
+    rows?.forEach((row) => {
       const { lat, lng } = centroidFromGeoJson(row.centroid_geojson);
       if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) locations.set(row.id, { lat, lng });
     });
@@ -737,11 +734,16 @@ export async function fetchJobMapImages(
   }
 }
 
-async function loadJobMapFields(jobId: string, signal: AbortSignal): Promise<ParsedJobField[]> {
+async function readJobMapFieldRows(jobId: string, signal: AbortSignal): Promise<JobMapFieldRow[]> {
   const { data, error } = await supabase.rpc('get_job_fields_with_geojson', { p_job_id: jobId }).abortSignal(signal);
   if (signal.aborted) return [];
   if (error) throw error;
-  const rows = assertRpcResult<JobMapFieldRow[]>(data, 'get_job_fields_with_geojson');
+  return assertRpcResult<JobMapFieldRow[]>(data, 'get_job_fields_with_geojson');
+}
+
+async function loadJobMapFields(jobId: string, signal: AbortSignal): Promise<ParsedJobField[]> {
+  const rows = await readJobMapFieldRows(jobId, signal);
+  if (signal.aborted) return [];
   const jobAcresByFieldId = new Map<string, number | null>();
   try {
     const { data: jobFields, error: jobFieldsError } = await supabase

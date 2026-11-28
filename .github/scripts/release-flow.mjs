@@ -443,12 +443,12 @@ export function firstParagraph(body, max = 200) {
   return '';
 }
 
-function summaryMarkdown(prs, gate) {
+function summaryMarkdown(prs, gate, perPr = true) {
   const verified = prs.filter((p) => prState(p) === 'verified').length;
   const held = prs.filter((p) => prState(p) === 'held').length;
   const lines = [`${prs.length} PR(s) since the last release: ${verified} verified on staging, ${held} held off.`];
   lines.push(gate.ok ? 'Release gate: ✅ ready.' : `Release gate: ❌ waiting on ${gate.blocking.join(', ')}.`);
-  for (const p of prs) {
+  for (const p of perPr ? prs : []) {
     const first = firstParagraph(p.body);
     if (first) lines.push(`* #${p.number}: ${first}`);
   }
@@ -462,6 +462,33 @@ function statusMarkdown(prs, orphans) {
     return `| #${p.number} | ${cell(p.title)} | ${state} | ${proof ? `[proof](${proof})` : ''} |`;
   };
   return ['| PR | Title | Staging | Proof |', '|---|---|---|---|', ...prs.map(row), ...orphans.map((s) => `| — | ${cell(s)} | ❌ commit without a PR | |`)].join('\n');
+}
+
+// GitHub refuses a PR body over 65,536 characters (Release PR run 46138320695, 376 PRs: 422).
+// Over the cap the per-PR blocks shrink to PR numbers grouped by staging state. Nothing reads them
+// back: the gate comes from the plan, the GitHub Release from CHANGELOG.md, Slack from its marker.
+export const BODY_CAP = 60000;
+export function releaseBodyFor(template, plan, previousBody, cap = BODY_CAP) {
+  const shipping = plan.prs.filter((p) => !p.labels.includes('held-off'));
+  const full = {
+    version: plan.version,
+    date: plan.date,
+    summary: summaryMarkdown(plan.prs, plan.gate),
+    changelog: changelogMarkdown(groupChangelog(shipping)),
+    status: statusMarkdown(plan.prs, plan.orphans),
+    users: shipping.flatMap((p) => usersSee(p.body)).map((x) => `* ${x}`).join('\n') || '_Nothing user-facing._',
+    migrations: plan.migrations.length ? plan.migrations.map((m) => `\`${m}\``).join(', ') : 'None',
+  };
+  const body = renderReleaseBody(template, full, previousBody);
+  if (body.length <= cap) return body;
+  const note = `_Shortened: ${plan.prs.length} PRs don't fit in one PR description. The full changelog is CHANGELOG.md on release/next (the GitHub Release uses it); the release-gate status names what is still waiting._`;
+  const states = [['❌ not verified', 'unverified'], ['❌ label without proof or reason', 'missing'], ['⏸️ held off', 'held'], ['✅ verified', 'verified']];
+  const status = states.map(([label, state]) => [label, plan.prs.filter((p) => prState(p) === state).map((p) => `#${p.number}`)])
+    .filter(([, nums]) => nums.length).map(([label, nums]) => `* ${label} (${nums.length}): ${nums.join(', ')}`);
+  if (plan.orphans.length) status.push(`* ❌ commit without a PR: ${plan.orphans.map(cell).join('; ')}`);
+  const short = { ...full, summary: summaryMarkdown(plan.prs, plan.gate, false), changelog: note, status: [note, ...status].join('\n') };
+  const shorter = renderReleaseBody(template, short, previousBody);
+  return shorter.length <= cap ? shorter : renderReleaseBody(template, { ...short, users: note }, previousBody);
 }
 
 // Loaded only by the commands that post to Slack, so the guard and label jobs need just this file.
@@ -583,16 +610,8 @@ const commands = {
   async 'release-pr'() {
     const plan = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/release.json`, 'utf8'));
     const template = readFileSync(`${process.env.RUNNER_TEMP}/release-pr-template.md`, 'utf8');
-    const shipping = plan.prs.filter((p) => !p.labels.includes('held-off'));
-    const body = renderReleaseBody(template, {
-      version: plan.version,
-      date: plan.date,
-      summary: summaryMarkdown(plan.prs, plan.gate),
-      changelog: changelogMarkdown(groupChangelog(shipping)),
-      status: statusMarkdown(plan.prs, plan.orphans),
-      users: shipping.flatMap((p) => usersSee(p.body)).map((s) => `* ${s}`).join('\n') || '_Nothing user-facing._',
-      migrations: plan.migrations.length ? plan.migrations.map((m) => `\`${m}\``).join(', ') : 'None',
-    }, plan.existing?.body);
+    // Used for both the POST (new PR) and the PATCH (refresh), so both stay under GitHub's limit.
+    const body = releaseBodyFor(template, plan, plan.existing?.body);
     const title = `release: ${plan.version}`;
     const S = await slackKit();
     if (process.env.DRY_RUN) {

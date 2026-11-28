@@ -1,10 +1,11 @@
 // Run: node --test .github/scripts/release-flow.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   isReleaseOrHotfixHead, flowEnabled, releaseExtraFiles, proofLink, heldOffNote, isBackMerge, labelProblem,
   pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments, botFileProblems, versionProblems, versionIsNewer,
-  hotfixStagingCarry, backportAllowed, gateEntry,
+  hotfixStagingCarry, backportAllowed, gateEntry, releaseBodyFor, BODY_CAP,
 } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
@@ -308,4 +309,28 @@ test('release-gate exemptions name exactly one commit (as #2422) and one back-me
   assert.deepEqual(gateEntry('abc', [pr(2495, 'main')]), { pr: pr(2495, 'main') }, 'no other back-merge number is skipped');
   assert.deepEqual(gateEntry('abc', [pr(2494, 'feature/x')]), { pr: pr(2494, 'feature/x') }, '#2494 is skipped only as a back-merge');
   assert.deepEqual(gateEntry('abc', [pr(2600, 'feature/x')]), { pr: pr(2600, 'feature/x') });
+});
+
+test('the release PR body stays under GitHub\'s 65,536-character limit with 400 PRs; a small one is untouched', () => {
+  const template = readFileSync(new URL('../release-pr-template.md', import.meta.url), 'utf8');
+  const fake = (n, labels = []) => ({ number: n, title: `fix(db): a long enough title for PR ${n} `.repeat(3), labels, comments: [],
+    body: `${'This PR changes how one screen saves its rows, with a long first paragraph. '.repeat(4)}\n\nWhat users see: screen ${n} saves faster`,
+  });
+  const plan = (prs, orphans = []) => ({ version: 'v0.2.1', date: '2026-11-28', prs, orphans, gate: { ok: false, blocking: prs.map((p) => `#${p.number}`) }, migrations: ['20270301130000_x.sql'] });
+  const big = plan(Array.from({ length: 400 }, (_, i) => fake(i + 1, i % 3 ? ['verified-on-staging'] : [])), ['feat: an unlinked commit']);
+  const body = releaseBodyFor(template, big, null);
+  assert.ok(body.length <= BODY_CAP, `body is ${body.length} characters`);
+  assert.ok(BODY_CAP <= 65536 - 1000, 'room is left for the Slack marker');
+  for (const key of ['version', 'date', 'summary', 'changelog', 'status', 'users', 'migrations']) assert.match(body, new RegExp(`<!-- bot:${key} -->[\\s\\S]*<!-- /bot:${key} -->`), key);
+  assert.match(body, /400 PR\(s\) since the last release/);
+  assert.match(body, /Release gate: ❌ waiting on #1, #2/);
+  assert.match(body, /#400\b/, 'every PR number is still listed');
+  assert.match(body, /commit without a PR: feat: an unlinked commit/);
+  // A refresh of that shortened body stays under the cap too.
+  assert.ok(releaseBodyFor(template, big, body).length <= BODY_CAP);
+  const small = plan([fake(1), fake(2, ['verified-on-staging'])]);
+  const smallBody = releaseBodyFor(template, small, null);
+  assert.equal(smallBody, releaseBodyFor(template, small, null, Infinity), 'under the cap nothing is shortened');
+  assert.match(smallBody, /\| #1 \| fix\(db\)/);
+  assert.match(smallBody, /\* #2: This PR changes/);
 });

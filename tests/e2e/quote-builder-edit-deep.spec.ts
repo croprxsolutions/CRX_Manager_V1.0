@@ -264,7 +264,7 @@ test.describe.serial('Quote Builder Edit Deep (QBE1–QBE14)', () => {
     expect(visible || true).toBeTruthy(); // soft — might be revised status
   });
 
-  test('QBE12: Convert to Order visibility check (soft)', async ({ page }) => {
+  test('QBE12: Draw from booking visibility check (soft)', async ({ page }) => {
     if (!quoteUrl) {
       test.skip(true, 'No quote URL');
       return;
@@ -272,8 +272,8 @@ test.describe.serial('Quote Builder Edit Deep (QBE1–QBE14)', () => {
     await page.goto(quoteUrl);
     await waitForPageStable(page, 3000);
 
-    // Convert to Order only shows on sent/accepted quotes — just verify no crash
-    const convertBtn = page.locator('button').filter({ hasText: /Convert to Order/i });
+    // Draw from booking only shows on booked (sent), revised or accepted quotes — just verify no crash
+    const convertBtn = page.locator('button').filter({ hasText: /Draw from booking/i });
     const visible = await convertBtn.isVisible({ timeout: 3000 }).catch(() => false);
     // This is a soft check — may or may not be visible depending on status
     expect(visible || !visible).toBeTruthy();

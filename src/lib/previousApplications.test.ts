@@ -18,7 +18,7 @@ vi.mock('./db', () => ({
   },
 }));
 
-vi.mock('./jobMapImages', () => ({ fetchJobMapImages: mockFetchJobMapImages }));
+vi.mock('./jobMapImages', () => ({ fetchJobMapImages: mockFetchJobMapImages, fetchJobFieldLocations: async () => new Map() }));
 
 import { fetchPreviousApplications, prepareApplicatorSheetPrintData } from './applicatorSheetPrintData';
 import type { ApplicatorSheetData } from './applicatorSheetData';
@@ -212,6 +212,7 @@ describe('fetchPreviousApplications', () => {
       blankSections: 0,
       includeBillingSplits: false,
       showBanner: true,
+      includeSafetySheet: false,
     });
 
     expect(mockFetchJobMapImages).not.toHaveBeenCalled();

@@ -10,6 +10,7 @@
  * wildcard read of any of these tables anywhere in src/.
  */
 import { assertRpcResult, supabase } from './db';
+import type { UserRole } from '../types';
 
 /** The cost, profit and margin columns of each table; only get_admin_cost_fields returns them. */
 export const COST_COLUMNS = {
@@ -31,7 +32,7 @@ export const COST_COLUMNS = {
 export type CostTable = keyof typeof COST_COLUMNS;
 
 // Every non-cost column, in table order (live information_schema, 2026-10-19).
-export const PRODUCT_COLUMNS = 'id, product_name, sku, category, vendor, manufacturer, container_size, unit_size, tier1_price, tier2_price, tier3_price, tier1_price_per_acre, tier2_price_per_acre, tier3_price_per_acre, suggested_rate, rate_per_acre, rate_unit, notes, is_active, created_at, updated_at, epa_registration, product_form, inventory_unit, container_unit, container_type, is_rup, signal_word, internal_notes, rei_hours, phi_days, max_label_rate, max_label_rate_unit, use_timing, use_timings, pricing_version, quoting_notes, product_family_id, return_policy, packaging_variant, is_full_tote_only' as const;
+export const PRODUCT_COLUMNS = 'id, product_name, sku, category, vendor, manufacturer, container_size, unit_size, tier1_price, tier2_price, tier3_price, tier1_price_per_acre, tier2_price_per_acre, tier3_price_per_acre, suggested_rate, rate_per_acre, rate_unit, notes, is_active, created_at, updated_at, epa_registration, product_form, inventory_unit, container_unit, container_type, is_rup, signal_word, internal_notes, rei_hours, phi_days, rei_not_applicable, phi_not_applicable, max_label_rate, max_label_rate_unit, use_timing, use_timings, pricing_version, quoting_notes, product_family_id, return_policy, packaging_variant, is_full_tote_only' as const;
 export const QUOTE_COLUMNS = 'id, quote_number, customer_id, created_by, tier, status, commission_split, total_price, valid_days, expires_at, chosen_expiry_date, header_notes, footer_notes, created_at, updated_at, sent_at, is_planned, season, salesman_id, deleted_at, pdf_template_id, pdf_columns_override, row_version' as const;
 export const QUOTE_ITEM_COLUMNS = 'id, quote_id, section_id, product_id, sort_order, notes, price_per_unit, suggested_rate, actual_rate, rate_unit, oz_per_acre, price_per_acre, acres, total_units_needed, unit_size, total_price, calc_mode, price_unit, price_override' as const;
 export const ORDER_COLUMNS = 'id, order_number, quote_id, customer_id, status, commission_split, total_price, order_date, notes, created_at, updated_at, season, salesman_id, deleted_at, order_name, customer_po_number, is_planned, program_notes, booking_draw, pricing_status, pricing_reminder_sent_at, pricing_escalation_sent_at, needs_split_billing, row_version, sales_tax' as const;
@@ -49,6 +50,16 @@ export const INVOICES_POSTABLE = 'invoices_postable' as const;
 export const INVOICE_ITEM_COLUMNS = 'id, invoice_id, order_item_id, product_id, charge_type, description, quantity, unit_price_cents, extended_cents, sort_order, rate_per_acre, acres, unit_size, notes, created_at, updated_at, rate_unit, total_applied, total_applied_unit, total_applied_gl_lb, gl_lb_unit, epa_registration, product_form, is_application_fee, tote_number, quoted_price_cents, price_source, warehouse, vendor, billing_line_id, return_credit_source_item_id, price_tier_at_sale, brand_lines' as const;
 export const JOB_COLUMNS = 'id, job_number, customer_id, status, job_date, scheduled_time, applicator_id, vehicle_id, recipe_id, notes, tags, batch_id, season, total_acres, total_price_cents, invoice_id, created_by, deleted_at, created_at, updated_at, priority, estimated_hours, quote_id, quote_section_id, application_service_id, call_date, date_proposed, time_proposed, schedule_date, date_expires, consultant_id, loader_comment, additional_info, internal_memo, applied_acres, updated_by, printed_at, remaining_acres, ground_crew_id, batch_ref, last_printed_by, carrier_rate_gpa, loader_tank_capacity, commission_split, completed_at' as const;
 export const JOB_CHEMICAL_COLUMNS = 'id, job_id, product_id, quantity, unit, rate_per_acre, rate_unit, price_per_unit_cents, sort_order, diluent_rate, rei_hours, phi_days, warehouse, vendor, customer_supplied, driver' as const;
+// Crew projections match the read-only views in migration 20270308040000.
+export const JOB_CREW_COLUMNS = 'id, job_number, customer_id, status, job_date, scheduled_time, applicator_id, vehicle_id, recipe_id, notes, tags, batch_id, season, total_acres, invoice_id, created_by, deleted_at, created_at, updated_at, priority, estimated_hours, quote_id, quote_section_id, application_service_id, call_date, date_proposed, time_proposed, schedule_date, date_expires, consultant_id, loader_comment, additional_info, applied_acres, updated_by, printed_at, remaining_acres, ground_crew_id, batch_ref, last_printed_by, carrier_rate_gpa, loader_tank_capacity, completed_at' as const;
+export const JOB_CHEMICAL_CREW_COLUMNS = 'id, job_id, product_id, quantity, unit, rate_per_acre, rate_unit, sort_order, diluent_rate, rei_hours, phi_days, warehouse, vendor, customer_supplied, driver' as const;
+export const JOB_FIELD_SHARE_CREW_COLUMNS = 'id, job_id, field_id, customer_id, is_primary, created_at' as const;
+export const FIELD_BILLING_DEFAULT_CREW_COLUMNS = 'field_id, customer_id, is_primary' as const;
+
+export function usesOfficeJobReads(role: UserRole | null | undefined): boolean {
+  return role === 'admin' || role === 'sales_rep';
+}
+
 export const PURCHASE_ORDER_COLUMNS = 'id, po_number, vendor, status, submitted_date, expected_delivery_date, notes, created_by, created_at, updated_at, cancelled_at, cancelled_by, cancel_reason, closed_at, closed_by, close_reason' as const;
 export const PURCHASE_ORDER_ITEM_COLUMNS = 'id, purchase_order_id, product_id, quantity_ordered, quantity_received, unit_size, notes, product_name, product_supplier_link_id, supplier_price_observation_id, inventory_units_per_supplier_unit_snapshot, cost_provenance, cost_snapshot_at, inventory_unit_snapshot, cost_needs_review' as const;
 export const BLEND_TICKET_PRODUCT_COLUMNS = 'id, blend_ticket_id, product_id, product_name, quantity, unit, lot_number, sequence_order, confidence_score, manually_corrected, created_at, rate_per_acre, rate_per_acre_unit, unit_price_cents' as const;

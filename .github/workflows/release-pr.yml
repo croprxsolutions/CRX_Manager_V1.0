@@ -23,9 +23,10 @@ on:
 permissions: {}
 
 # ponytail: a queued run replaces an older queued one; a lost Thursday run is redone by hand
-# (Actions → Release PR → Run workflow).
+# (Actions → Release PR → Run workflow). A hotfix gate queues apart, per PR: only posts a status, and
+# in the shared group the frequent refresh dispatches replaced it while queued (#2482, #2495).
 concurrency:
-  group: release-pr
+  group: release-pr${{ inputs.hotfix_pr && format('-hotfix-{0}', inputs.hotfix_pr) || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -50,7 +51,7 @@ jobs:
       - name: Release bot token
         if: steps.on.outputs.yes
         id: app
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_KEY }}

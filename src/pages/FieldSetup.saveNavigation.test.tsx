@@ -78,6 +78,23 @@ function chain(row: unknown) {
   return self;
 }
 
+// FP-1 split tables: one version whose payers are [customer id, farm, micro-percent].
+function withSplit(payers: Array<[string, string, number]>, fieldRow: unknown) {
+  return (table: string) => {
+    if (table !== 'field_billing_split_versions') return chain(table === 'fields' ? fieldRow : null);
+    const self = chain(null);
+    const rows = Promise.resolve({ data: [{
+      id: 'version-1', version_number: 1, effective_from: '1900-01-01', history_known: false, created_by: null,
+      created_at: '2026-11-24T00:00:00Z',
+      field_billing_split_payers: payers.map(([id, farm, micro]) => ({
+        customer_id: id, product_share_micro_pct: micro, application_share_micro_pct: micro, customer: { farm_name: farm },
+      })),
+    }], error: null });
+    self.then = rows.then.bind(rows);
+    return self;
+  };
+}
+
 // The tab-close warning is armed exactly while the page holds unsaved changes (useUnsavedChanges).
 function leaveWarningArmed() {
   const event = new Event('beforeunload', { cancelable: true });
@@ -127,6 +144,7 @@ describe('FieldSetup — a new field whose acreage step fails', () => {
 
     await screen.findByRole('button', { name: /Save Changes/ });
     expect(saveFieldCalls()).toHaveLength(1);
+    fireEvent.change(screen.getByDisplayValue('Select crop...'), { target: { value: 'corn' } });
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
     await waitFor(() => expect(saveFieldCalls()).toHaveLength(2));
     expect(saveFieldCalls()[1][1]).toMatchObject({ p_field_id: 'field-1' });
@@ -179,30 +197,6 @@ describe('FieldSetup — a new field whose acreage step fails', () => {
     expect(mockToast).not.toHaveBeenCalledWith('warning', expect.anything());
   });
 
-  it('a changed retry is not trusted when the saved billing splits differ from what it sent', async () => {
-    mockRpc.mockImplementationOnce(() => Promise.reject(new TypeError('Failed to fetch')));
-    await renderNewField();
-    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
-    await waitFor(() => expect(saveFieldCalls()).toHaveLength(1));
-
-    mockHasKey.mockReturnValue(true);
-    mockFrom.mockImplementation((table: string) => {
-      if (table !== 'field_billing_defaults') {
-        return chain(table === 'fields' ? { field_name: 'South 40', customer_id: 'customer-1', state: 'IL', irrigation: false, is_active: true } : null);
-      }
-      const self = chain(null);
-      const splits = Promise.resolve({ data: [{ customer_id: 'customer-9', split_pct: 100, is_primary: true, notes: null }], error: null });
-      self.then = splits.then.bind(splits);
-      return self;
-    });
-    fireEvent.change(screen.getByLabelText(/Field Name/), { target: { value: 'South 40' } });
-    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '35' } });
-    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
-
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('An earlier save may already have created this field')));
-    expect(mockRpc.mock.calls.some(([name]) => name === 'set_field_override_acres')).toBe(false);
-  });
-
   it('a retry that changes only the acreage saves it on the field', async () => {
     mockRpc.mockImplementationOnce(() => Promise.reject(new TypeError('Failed to fetch')));
     await renderNewField();
@@ -238,12 +232,12 @@ describe('FieldSetup — an attribute-only save after a boundary save (KI-31)', 
     fireEvent.click(await screen.findByRole('button', { name: 'Draw boundary' }));
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Field updated'));
-    expect(saveFieldCalls()[0][1].p_field_payload).toMatchObject({ total_acres: 12 });
+    expect(saveFieldCalls()).toHaveLength(0); // a boundary-only save changes no field details
 
     fireEvent.change(screen.getByDisplayValue('Select crop...'), { target: { value: 'corn' } });
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
-    await waitFor(() => expect(saveFieldCalls()).toHaveLength(2));
-    expect(saveFieldCalls()[1][1].p_field_payload).toMatchObject({ crop_type: 'corn', total_acres: 40 });
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(1));
+    expect(saveFieldCalls()[0][1].p_field_payload).toMatchObject({ crop_type: 'corn', total_acres: 40 });
     expect(mockRpc.mock.calls.filter(([name]) => name === 'set_field_boundary')).toHaveLength(1);
     expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
   });
@@ -262,37 +256,28 @@ describe('FieldSetup — an attribute-only save after a boundary save (KI-31)', 
 
     fireEvent.change(screen.getByDisplayValue('Select crop...'), { target: { value: 'corn' } });
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
-    await waitFor(() => expect(saveFieldCalls()).toHaveLength(2));
-    expect(saveFieldCalls()[1][1].p_field_payload).toMatchObject({ crop_type: 'corn', total_acres: 55 });
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(1));
+    expect(saveFieldCalls()[0][1].p_field_payload).toMatchObject({ crop_type: 'corn', total_acres: 55 });
     expect(mockRpc.mock.calls.filter(([name]) => name === 'set_field_override_acres')).toHaveLength(1);
   });
 
   it('leaves with no prompt after a save that synced acres and changed a billing split', async () => {
-    mockFrom.mockImplementation((table: string) => {
-      if (table !== 'field_billing_defaults') {
-        return chain(table === 'fields' ? { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1', total_acres: 12 } : null);
-      }
-      const self = chain(null);
-      const splits = Promise.resolve({ data: [
-        { customer_id: 'customer-1', customer: { farm_name: 'Test Farm' }, split_pct: 60, is_primary: true, notes: null },
-        { customer_id: 'customer-2', customer: { farm_name: 'Other Farm' }, split_pct: 40, is_primary: false, notes: null },
-      ], error: null });
-      self.then = splits.then.bind(splits);
-      return self;
-    });
+    const fieldRow = { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1', total_acres: 12 };
+    mockFrom.mockImplementation(withSplit([['customer-1', 'Test Farm', 60_000_000], ['customer-2', 'Other Farm', 40_000_000]], fieldRow));
     const router = createMemoryRouter(
       [{ path: '/fields/:id', element: <FieldSetup /> }, { path: '/other', element: <div>Other page</div> }],
       { initialEntries: ['/fields/field-1'] },
     );
     render(<RouterProvider router={router} />);
-    fireEvent.change(await screen.findByDisplayValue('60'), { target: { value: '70' } });
-    fireEvent.change(screen.getByDisplayValue('40'), { target: { value: '30' } });
+    for (const input of await screen.findAllByDisplayValue('60.00')) fireEvent.change(input, { target: { value: '70' } });
+    for (const input of screen.getAllByDisplayValue('40.00')) fireEvent.change(input, { target: { value: '30' } });
     fireEvent.click(screen.getByRole('button', { name: 'Draw boundary' }));
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Field updated'));
-    expect(saveFieldCalls()[0][1].p_billing_defaults).toEqual([
-      { customer_id: 'customer-1', split_pct: 70, is_primary: true, notes: null },
-      { customer_id: 'customer-2', split_pct: 30, is_primary: false, notes: null },
+    const splitCall = mockRpc.mock.calls.find(([name]) => name === 'set_field_billing_split');
+    expect(splitCall?.[1].p_payers).toEqual([
+      { customer_id: 'customer-1', product_share_micro_pct: 70_000_000, application_share_micro_pct: 70_000_000 },
+      { customer_id: 'customer-2', product_share_micro_pct: 30_000_000, application_share_micro_pct: 30_000_000 },
     ]);
 
     await waitFor(() => expect(leaveWarningArmed()).toBe(false)); // the post-save dirty check has settled clean
@@ -303,18 +288,10 @@ describe('FieldSetup — an attribute-only save after a boundary save (KI-31)', 
   });
 
   it('offers no per-acre price or pricing note on a billing split (retired 2026-11-22)', async () => {
-    mockFrom.mockImplementation((table: string) => {
-      if (table !== 'field_billing_defaults') {
-        return chain(table === 'fields' ? { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1', total_acres: 12 } : null);
-      }
-      const self = chain(null);
-      const splits = Promise.resolve({ data: [{ customer_id: 'customer-1', customer: { farm_name: 'Test Farm' }, split_pct: 100, is_primary: true, notes: null }], error: null });
-      self.then = splits.then.bind(splits);
-      return self;
-    });
+    mockFrom.mockImplementation(withSplit([['customer-1', 'Test Farm', 100_000_000]], { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1', total_acres: 12 }));
     const router = createMemoryRouter([{ path: '/fields/:id', element: <FieldSetup /> }], { initialEntries: ['/fields/field-1'] });
     render(<RouterProvider router={router} />);
-    expect(await screen.findByDisplayValue('100')).toBeInTheDocument();
+    expect((await screen.findAllByDisplayValue('100.00')).length).toBe(2);
     expect(screen.queryByText(/Price Override/)).not.toBeInTheDocument();
     expect(screen.queryByText('Pricing Note')).not.toBeInTheDocument();
   });

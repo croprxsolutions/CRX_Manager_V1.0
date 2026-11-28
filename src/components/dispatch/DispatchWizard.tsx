@@ -6,7 +6,7 @@
  * (job_fields rows) across jobs, assigns each selected location to an applicator
  * OR a crew (different locations can go to different assignees in one session),
  * and commits — each location is recorded in job_location_dispatches with a
- * dispatch timestamp via the dispatch_job_locations RPC.
+ * dispatch timestamp via the dispatch_location_with_notices RPC.
  *
  * Dark, touch-friendly, matches the DispatchBoard field aesthetic. Pure
  * selection/assignment/payload logic lives in src/lib/dispatchWizard.ts (unit
@@ -28,7 +28,6 @@ import type { Json } from '../../types/supabase';
 import ConfirmModal from '../ui/ConfirmModal';
 import { Sentry } from '../../lib/sentry';
 import { useToast } from '../ui/Toast';
-import { notifyApplicatorDispatched } from '../../lib/notificationTriggers';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import {
   DISPATCH_STEPS,
@@ -46,6 +45,7 @@ import {
   type DispatchLocation,
   type DispatchAssignee,
   type AssignmentMap,
+  type DispatchAssignmentPayload,
 } from '../../lib/dispatchWizard';
 
 export interface WizardApplicator {
@@ -68,7 +68,8 @@ interface DispatchWizardProps {
   /** Admins may override an expired-license dispatch (mirrors assign flow). */
   isAdmin: boolean;
   /** Called after a successful commit so the board can refetch. */
-  onDispatched: () => void;
+  /** Called with the assignments just dispatched. */
+  onDispatched: (sent: DispatchAssignmentPayload[]) => void;
   /**
    * U13 (#15-21/#111): job-field-ids to pre-select in Step 1 when the wizard
    * opens (e.g. JobDetail's "Dispatch Locations" button pre-selects the whole
@@ -211,33 +212,18 @@ export default function DispatchWizard({
     setSubmitting(true);
     try {
       const payload = buildDispatchPayload(selected, assignments);
-      const { data, error } = await supabase.rpc('dispatch_job_locations', {
+      const { data, error } = await supabase.rpc('dispatch_location_with_notices', {
+        p_mode: 'wizard',
         p_assignments: payload as unknown as Json,
-        p_performed_by: performedBy,
         p_idempotency_key: dispatchIdem.getKey(),
         p_license_override: licenseOverride,
       });
       if (error) throw error;
-      const result = assertRpcResult<{ dispatched: number }>(data, 'dispatch_job_locations');
+      const result = assertRpcResult<{ dispatched: number }>(data, 'dispatch_location_with_notices');
       dispatchIdem.resetKey();
       toast('success', `Dispatched ${result.dispatched} location${result.dispatched === 1 ? '' : 's'}${licenseOverride ? ' (license override)' : ''}`);
 
-      // U12: notify each dispatched APPLICATOR (not crews — no single user to
-      // notify). De-dupe to one notice per (applicator, job) pair so a job
-      // split across several of the caller's selected locations, all going to
-      // the same applicator, doesn't fire duplicate notifications.
-      const notified = new Set<string>();
-      for (const jobFieldId of selected) {
-        const assignee = assignments[jobFieldId];
-        const loc = locations.find((l) => l.jobFieldId === jobFieldId);
-        if (!assignee || assignee.kind !== 'applicator' || !loc) continue;
-        const dedupeKey = `${assignee.id}:${loc.jobId}`;
-        if (notified.has(dedupeKey)) continue;
-        notified.add(dedupeKey);
-        void notifyApplicatorDispatched(assignee.id, loc.jobNumber, loc.customerName, null, loc.jobId);
-      }
-
-      onDispatched();
+      onDispatched(payload);
       handleClose();
     } catch (err) {
       // An assignee's licenses are all expired: an admin can override; others are blocked.

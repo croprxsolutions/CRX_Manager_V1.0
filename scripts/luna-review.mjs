@@ -7,7 +7,10 @@
 //   node scripts/luna-review.mjs --commit <sha>       one commit
 //   node scripts/luna-review.mjs --uncommitted        working tree, including untracked files
 //   node scripts/luna-review.mjs --sol --reason "..." advisory Sol escalation (never a gate pass)
-//   node scripts/luna-review.mjs --settled <file>     findings already refuted or deferred (Luna only)
+//   node scripts/luna-review.mjs --terra               one Terra final review of ordinary code (off
+//                                                     the Sol list; advisory, never a gate pass)
+//   node scripts/luna-review.mjs --settled <file>     findings already refuted or deferred (Luna only;
+//                                                      without it, a plan contract in the diff supplies them)
 //   node scripts/luna-review.mjs --after-simplify "..."   past the 6-round cap (also --after-rebase,
 //                                                         --after-new-approach); see "round caps"
 //
@@ -37,6 +40,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { isMoneyPath } from "../.claude/hooks/codex-bot-review-lib.mjs";
+import { solRiskPathProblem } from "../.claude/hooks/sol-risk-lib.mjs";
+import { isTahaLanePath } from "../.claude/hooks/taha-lane-lib.mjs";
 import {
   CODEX_REVIEW_EFFORT,
   CODEX_REVIEW_MODEL,
@@ -52,6 +58,27 @@ import {
 // a one-line change here; see docs/reference/codex-model-tuning.md for how to probe a name.
 export const LUNA_MODEL = "gpt-6-luna";
 export const LUNA_EFFORT = "xhigh";
+// Final review for ordinary code off the Sol list (Mason, 2026-11-23). `gpt-6.2-terra` is refused
+// for this account like a bogus name (probed 2026-11-23), so Terra stays 6.1.
+export const TERRA_MODEL = "gpt-6.1-terra";
+export const TERRA_EFFORT = "high";
+let RESULT = "LUNA";
+
+// Terra is only for ordinary code: refuse a diff touching the Sol list, money code (tests included),
+// any .sql file, or Taha's lanes while they run (Taha's review of PR #2405). Returns why, or null.
+export function terraRefusal(diff, now = Date.now()) {
+  const headers = diff.match(/^diff --git .*$/gm) ?? [];
+  const names = headers.flatMap((h) => h.match(/^diff --git a\/(\S+) b\/(\S+)$/)?.slice(1) ?? []);
+  if (names.length !== headers.length * 2) return "a changed file name could not be read";
+  for (const name of names) {
+    const sol = solRiskPathProblem(name);
+    if (sol) return `${sol}: run Luna, then Sol`;
+    if (isMoneyPath(name)) return `${name} is money or inventory code: run Luna, then Sol`;
+    if (/\.sql$/i.test(name)) return `${name} is SQL: run Luna, then Sol`;
+    if (isTahaLanePath(name)) return `${name} is in Taha's lanes: run Luna`;
+  }
+  return null;
+}
 export const EXIT_CLEAN = 0;
 export const EXIT_FINDINGS = 1;
 export const EXIT_DID_NOT_RUN = 2;
@@ -66,7 +93,7 @@ const OPAQUE_CHANGE_RE = /^(?:Binary files .* differ|GIT binary patch)$/m;
 export const SETTLED_MAX_BYTES = 8 * 1024;
 
 export function parseArgs(argv) {
-  const opts = { base: null, commit: null, uncommitted: false, sol: false, reason: "", settled: null, after: null };
+  const opts = { base: null, commit: null, uncommitted: false, sol: false, terra: false, reason: "", settled: null, after: null };
   const value = (flag, index) => {
     const next = argv[index];
     // A leading dash would reach git as an option, and an option is not a reason.
@@ -81,6 +108,7 @@ export function parseArgs(argv) {
     else if (arg === "--settled") opts.settled = value(arg, ++i);
     else if (arg === "--uncommitted") opts.uncommitted = true;
     else if (arg === "--sol") opts.sol = true;
+    else if (arg === "--terra") opts.terra = true;
     else if (AFTER_FLAGS[arg]) {
       if (opts.after) throw new Error("Give one --after-* flag per run: the one step you actually took.");
       opts.after = { step: AFTER_FLAGS[arg], reason: value(arg, ++i).trim() };
@@ -91,6 +119,9 @@ export function parseArgs(argv) {
   if ([opts.base, opts.commit, opts.uncommitted].filter(Boolean).length > 1) {
     throw new Error("Choose one scope: --base, --commit or --uncommitted.");
   }
+  if (opts.sol && opts.terra) throw new Error("Choose one reviewer: --sol or --terra.");
+  // Terra stays independent: it never sees what an earlier round decided.
+  if (opts.terra && opts.settled) throw new Error("--terra is an independent final review; drop --settled.");
   if (opts.sol && !opts.reason) throw new Error('--sol requires --reason "<why Luna was not enough>".');
   if (opts.reason && !opts.sol) throw new Error("--reason only applies to --sol.");
   // Sol stays independent: it never sees what an earlier round decided (retro, Mason, 2026-11-09).
@@ -117,6 +148,34 @@ export function readSettled(file) {
   const text = bytes.toString("utf8").replace(/\r/g, "").trim();
   if (!text) throw new Error("--settled file is empty.");
   return text;
+}
+
+// Retro (Mason, 2026-11-26): on PR #2610 Luna rounds 3 and 4 re-raised findings its plan contract
+// had already refuted, because nobody passed --settled. A Luna round with no --settled now gets the
+// "## Settled for Luna" section of every docs/plans/*-CONTRACT.md in the diff: only lines the author
+// wrote there as refuted or deferred, never whole review sections with fixed or open items in them
+// (Taha, #2669 MED 1). The contract is read at the reviewed commit, not from the disk (MED 2).
+const CONTRACT_IN_DIFF_RE = /^diff --git a\/\S+ b\/(docs\/plans\/[^\s/]+-CONTRACT\.md)$/gm;
+const SETTLED_HEADING_RE = /^## Settled for Luna[ \t]*$/i;
+
+export function contractSettled(text) {
+  // Any heading ends the section, so an "### Open" subsection under it is never sent as settled.
+  return text.replace(/\r/g, "").split(/^(?=#{1,6} )/m)
+    .filter((section) => SETTLED_HEADING_RE.test(section.split("\n", 1)[0]))
+    .flatMap((section) => section.split("\n").slice(1).filter((line) => line.trim()))
+    .join("\n");
+}
+
+// readContract(path) returns the contract's text at the reviewed commit, or null when it has none.
+export function contractSettledFromDiff(diff, readContract) {
+  const found = [...new Set([...diff.matchAll(CONTRACT_IN_DIFF_RE)].map((m) => m[1]))]
+    .map((p) => [p, contractSettled(readContract(p) ?? "")])
+    .filter(([, settled]) => settled);
+  if (!found.length) return null;
+  const text = found
+    .map(([p, settled]) => `From ${p} (from the plan contract; same rules as the settled list):\n${settled}`)
+    .join("\n\n");
+  return { text, paths: found.map(([p]) => p) };
 }
 
 // With no settled list the prompt is byte-identical to the one before --settled existed.
@@ -340,6 +399,7 @@ function freezeDiff(git, opts) {
     // the prompt. It also leaves an --allow-empty commit truly empty, so the check below sees it.
     return {
       label: `commit ${sha}`,
+      ref: sha,
       diff: gitOutput(git, ["show", "--no-ext-diff", "--no-textconv", "--format=", "--no-notes", sha]),
     };
   }
@@ -352,6 +412,7 @@ function freezeDiff(git, opts) {
   return {
     label: `branch against ${base} (${baseSha.slice(0, 9)}) at head ${headSha}`,
     baseSha,
+    ref: headSha,
     defaultBase: !opts.base,
     diff: gitOutput(git, ["diff", "--no-ext-diff", "--no-textconv", `${baseSha}...${headSha}`]),
   };
@@ -424,7 +485,7 @@ function lunaCapStop(rounds) {
   console.log('  (a) simplify: run a fresh "attack this plan for simplicity" session      --after-simplify "<session or reason>"');
   console.log('  (b) merge or rebase onto current main, then re-plan                      --after-rebase "<what changed>"');
   console.log('  (c) change approach: ask Mason the business rule behind the mechanism   --after-new-approach "<his answer>"');
-  console.log(`LUNA RESULT: STOPPED after ${rounds.luna} whole-branch Luna rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);
+  console.log(`${RESULT} RESULT: STOPPED after ${rounds.luna} whole-branch Luna rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);
   return EXIT_FINDINGS;
 }
 
@@ -483,7 +544,7 @@ export function scopeHint(label, dirty = false, defaultBase = false) {
 }
 
 function reportDidNotRun(reason, advice) {
-  console.log(`LUNA RESULT: DID NOT RUN (exit ${EXIT_DID_NOT_RUN}). THIS IS NOT A REVIEW AND NOT A CLEAN RESULT.`);
+  console.log(`${RESULT} RESULT: DID NOT RUN (exit ${EXIT_DID_NOT_RUN}). THIS IS NOT A REVIEW AND NOT A CLEAN RESULT.`);
   console.log(`Why: ${reason}`);
   if (advice) console.log(advice);
   return EXIT_DID_NOT_RUN;
@@ -499,7 +560,7 @@ function report(run, { label, defaultBase, diffLines, files, model, effort, dirt
   }
   console.log(run.text.trimEnd());
   console.log();
-  console.log(`LUNA RESULT: ${run.outcome === "clean" ? "CLEAN" : `FINDINGS ${run.count}`} (exit ${exitCode})`);
+  console.log(`${RESULT} RESULT: ${run.outcome === "clean" ? "CLEAN" : `FINDINGS ${run.count}`} (exit ${exitCode})`);
   console.log(`Reviewed: ${label}, ${files} file(s), ${diffLines} diff lines, by ${model} at ${effort}.`);
   console.log("Advisory only: this is not a Sol proof and satisfies no gate.");
   if (settledNote) console.log(settledNote);
@@ -514,9 +575,10 @@ function report(run, { label, defaultBase, diffLines, files, model, effort, dirt
 export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth = codeHealthGate } = {}) {
   try {
     const opts = parseArgs(argv);
-    const model = opts.sol ? CODEX_REVIEW_MODEL : LUNA_MODEL;
-    const effort = opts.sol ? CODEX_REVIEW_EFFORT : LUNA_EFFORT;
+    const model = opts.sol ? CODEX_REVIEW_MODEL : opts.terra ? TERRA_MODEL : LUNA_MODEL;
+    const effort = opts.sol ? CODEX_REVIEW_EFFORT : opts.terra ? TERRA_EFFORT : LUNA_EFFORT;
     if (opts.sol) console.error(`[luna-review] advisory Sol escalation, reason: ${opts.reason}`);
+    RESULT = opts.terra ? "TERRA" : "LUNA";
 
     const root = spawnSync(fixedGitExecutable(), ["rev-parse", "--show-toplevel"], { encoding: "utf8", windowsHide: true });
     if (root.status !== 0) throw new Error("Not inside a git checkout.");
@@ -532,7 +594,23 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
       );
     }
     const frozen = freezeDiff(git, opts);
-    const settled = opts.settled ? readSettled(opts.settled) : null;
+    let settled = opts.settled ? readSettled(opts.settled) : null;
+    let settledNote = settled
+      ? `Settled list: ${opts.settled} (${settled.split("\n").filter((line) => line.trim()).length} line(s)) was given to Luna; it never goes to Sol.`
+      : null;
+    // Branch and --commit rounds read the contract at the reviewed commit; only --uncommitted reads the disk.
+    const readContract = frozen.ref
+      ? (p) => { const r = git(["show", `${frozen.ref}:${p}`]); return r.error || r.status !== 0 ? null : r.stdout; }
+      : (p) => { const file = path.join(rootDir, p); return existsSync(file) ? readFileSync(file, "utf8") : null; };
+    const fromContract = settled || opts.sol || opts.terra ? null : contractSettledFromDiff(frozen.diff, readContract);
+    if (fromContract && Buffer.byteLength(fromContract.text) > SETTLED_MAX_BYTES) {
+      settledNote = `Settled list: NOT given to Luna; the "Settled for Luna" sections of ${fromContract.paths.join(", ")} are over ${SETTLED_MAX_BYTES} bytes. Pass a short --settled file.`;
+    } else if (fromContract) {
+      settled = fromContract.text;
+      settledNote = `Settled list: refuted and deferred findings from ${fromContract.paths.join(", ")} were given to Luna; it never goes to Sol.`;
+    }
+    const refused = opts.terra && frozen.diff.trim() ? terraRefusal(frozen.diff, codexDeps.now ?? Date.now()) : null;
+    if (refused) return reportDidNotRun(`Not ordinary code, so Terra may not give the final review: ${refused}.`);
 
     if (!frozen.diff.trim()) return reportDidNotRun(`Empty diff for ${frozen.label}: nothing was reviewed.`);
     // A binary file, or a text file marked -diff in .gitattributes, carries no content to review.
@@ -545,12 +623,13 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
     }
 
     // Luna rounds only: the advisory Sol escalation is the documented way past the guard cap.
+    // Terra rounds count toward both caps like Luna rounds (Terra review of this change, 2026-11-23).
     const guardChange = !opts.sol && GUARD_DIFF_RE.test(frozen.diff);
     const wholeBranch = !opts.sol && Boolean(frozen.baseSha);
     const rounds = guardChange || wholeBranch ? branchRounds(git, rootDir) : null;
     if (guardChange && rounds.guard >= GUARD_ROUND_LIMIT) {
       console.log("STOP: third review round on a guard change — drop the carve-out or hand the decision to Mason (AGENTS.md stop rule).");
-      console.log(`LUNA RESULT: STOPPED after ${rounds.guard} guard-change rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);
+      console.log(`${RESULT} RESULT: STOPPED after ${rounds.guard} guard-change rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);
       return EXIT_FINDINGS;
     }
     // shortcut: a detached HEAD has no branch to count against, so it is not capped; check out a branch to be capped.
@@ -588,9 +667,6 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
     }
     if (run.kind === "output-limit") run.advice = oversizedAdvice(git, frozen);
     const dirty = gitOutput(git, ["status", "--porcelain"]).trim() !== "";
-    const settledNote = settled
-      ? `Settled list: ${opts.settled} (${settled.split("\n").filter((line) => line.trim()).length} line(s)) was given to Luna; it never goes to Sol.`
-      : null;
     return report(run, { label: frozen.label, defaultBase: frozen.defaultBase, diffLines, files, model, effort, dirty, healthNote, settledNote });
   } catch (error) {
     return reportDidNotRun(error.message);

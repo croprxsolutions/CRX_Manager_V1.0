@@ -113,6 +113,7 @@ vi.mock('../components/customers/CustomerSearchPicker', async (importOriginal) =
   ),
 }));
 vi.mock('../lib/productParents', () => ({ getProductParents: async () => [], searchProductParents: async () => [] }));
+vi.mock('../lib/epaBatchFill', () => ({ fetchBrandEpaOwners: async () => ({ parentIds: new Set(), productIds: new Set() }) }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/csvExport', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/csvExport')>()),

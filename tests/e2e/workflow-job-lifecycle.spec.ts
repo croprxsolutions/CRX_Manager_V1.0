@@ -268,32 +268,36 @@ test.describe.serial('Job Lifecycle — Create to Invoice', () => {
     const jobPath = state.jobUrl!.replace(/.*localhost:\d+/, '');
 
     // The "Complete Job" button only appears when status is 'in_progress'.
-    // Transition the job from 'scheduled' to 'in_progress' via Supabase REST.
+    // Transition the job from 'scheduled' to 'in_progress' through start_job.
     const jobIdMatch = jobPath.match(/\/jobs\/([0-9a-f-]+)/);
     if (jobIdMatch) {
       const jobId = jobIdMatch[1];
       // Get Supabase session token from the app's localStorage
       await page.goto('/');
       await waitForPage(page, 2000);
-      await page.evaluate(async ({ jid, supa }) => {
+      const started = await page.evaluate(async ({ jid, supa }) => {
         const raw = localStorage.getItem(`sb-${new URL(supa.url).hostname.split('.')[0]}-auth-token`);
-        if (!raw) return;
+        if (!raw) return 'no session';
         const session = JSON.parse(raw);
         const token = session.access_token || '';
-        await fetch(
-          `${supa.url}/rest/v1/jobs?id=eq.${jid}`,
-          {
-            method: 'PATCH',
-            headers: {
-              apikey: supa.key,
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-              Prefer: 'return=minimal',
-            },
-            body: JSON.stringify({ status: 'in_progress' }),
-          }
-        );
+        // start_job is the server action Job Detail calls; direct table writes are closed.
+        const res = await fetch(`${supa.url}/rest/v1/rpc/start_job`, {
+          method: 'POST',
+          headers: {
+            apikey: supa.key,
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          // Same arguments Job Detail sends: start_job refuses a missing actor or idempotency key.
+          body: JSON.stringify({
+            p_job_id: jid,
+            p_performed_by: session.user?.id,
+            p_idempotency_key: crypto.randomUUID(),
+          }),
+        });
+        return res.ok ? 'ok' : `${res.status} ${await res.text()}`;
       }, { jid: jobId, supa: SUPA });
+      expect(started, 'start_job should start the scheduled job').toBe('ok');
     }
 
     await page.goto(jobPath);

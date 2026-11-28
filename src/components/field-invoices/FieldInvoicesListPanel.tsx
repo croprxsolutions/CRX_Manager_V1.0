@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { FileText, Check, Ban, Download, ClipboardCheck, Printer, FileClock, Mail, Layers, MoreHorizontal } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
-import Badge from '../ui/Badge';
 import DataTable, { type Column } from '../ui/DataTable';
 import { useToast } from '../ui/Toast';
 import { supabase, sanitizeError } from '../../lib/db';
@@ -32,6 +31,7 @@ import { openOrInSeasonFilter } from '../../lib/invoiceSeasonWindow';
 import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import { LoadFailedState } from '../ui/EmptyState';
 import SeasonTag from '../invoices/SeasonTag';
+import { DueDate, InvoiceStatusBadge } from '../invoices/InvoiceListCells';
 import { toSentryError } from '../../lib/sentryError';
 
 // Field / Application invoices are the SECOND, segregated sale type (the work CRX
@@ -54,20 +54,6 @@ const STATUS_OPTIONS: { value: InvoiceStatus | ''; label: string }[] = [
   { value: 'voided', label: 'Voided' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
-
-const statusBadge = (status: InvoiceStatus) => {
-  const map: Record<InvoiceStatus, { variant: 'default' | 'warning' | 'success' | 'error' | 'info'; label: string }> = {
-    draft: { variant: 'default', label: 'Draft' },
-    unposted: { variant: 'warning', label: 'Unposted' },
-    posted: { variant: 'success', label: 'Posted' },
-    paid: { variant: 'info', label: 'Paid' },
-    overdue: { variant: 'error', label: 'Overdue' },
-    voided: { variant: 'error', label: 'Voided' },
-    cancelled: { variant: 'default', label: 'Cancelled' },
-  };
-  const s = map[status] || { variant: 'default' as const, label: status };
-  return <Badge variant={s.variant}>{s.label}</Badge>;
-};
 
 const invoicePath = (row: FieldInvoiceRow): string =>
   !row.job_id && !row.blend_ticket_id && (row.status === 'draft' || row.status === 'unposted')
@@ -352,6 +338,7 @@ export default function FieldInvoicesListPanel() {
     });
   };
 
+  // The same leading columns as the Chemical Invoices list: Invoice #, Customer, Date, Due, Total, Status.
   const columns: Column<FieldInvoiceRow>[] = [
     {
       key: 'invoice_number',
@@ -381,18 +368,6 @@ export default function FieldInvoicesListPanel() {
       ),
     },
     {
-      key: 'applicator_name',
-      header: 'Applicator',
-      sortable: true,
-      render: (row) => row.applicator_name || '-',
-    },
-    {
-      key: 'total_acres',
-      header: 'Acres',
-      sortable: true,
-      render: (row) => (row.total_acres != null ? row.total_acres : '-'),
-    },
-    {
       key: 'invoice_date',
       header: 'Date',
       sortable: true,
@@ -404,10 +379,22 @@ export default function FieldInvoicesListPanel() {
       ),
     },
     {
+      key: 'due_date',
+      header: 'Due',
+      sortable: true,
+      render: (row) => <DueDate date={row.due_date} />,
+    },
+    {
       key: 'total_amount_cents',
       header: 'Total',
       sortable: true,
       render: (row) => <span className="font-medium">{fmt(row.total_amount_cents)}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      render: (row) => <InvoiceStatusBadge status={row.status} />,
     },
     {
       key: 'balance_cents',
@@ -420,10 +407,16 @@ export default function FieldInvoicesListPanel() {
       ),
     },
     {
-      key: 'status',
-      header: 'Status',
+      key: 'applicator_name',
+      header: 'Applicator',
       sortable: true,
-      render: (row) => statusBadge(row.status),
+      render: (row) => row.applicator_name || '-',
+    },
+    {
+      key: 'total_acres',
+      header: 'Acres',
+      sortable: true,
+      render: (row) => (row.total_acres != null ? row.total_acres : '-'),
     },
     {
       key: 'id',
@@ -698,7 +691,7 @@ export default function FieldInvoicesListPanel() {
               <div className="min-w-0">
                 <p className="truncate font-semibold text-nav-dark">{row.customer_name}</p>
                 <p className="mt-1 text-xs text-secondary">#{row.invoice_number} · {new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">{statusBadge(row.status)}<SeasonTag season={row.season} /></div>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5"><InvoiceStatusBadge status={row.status} /><SeasonTag season={row.season} /></div>
               </div>
               <div className="shrink-0 text-right">
                 <p className="font-semibold text-nav-dark">{fmt(row.total_amount_cents)}</p>

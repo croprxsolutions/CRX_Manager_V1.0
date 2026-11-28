@@ -16,6 +16,7 @@ import { assertInvoiceLifecycleSendable, assertInvoiceSendable } from '../lib/in
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useSaveShortcut } from '../hooks/useSaveShortcut';
 import { createdInvoiceAddressSearch, createdInvoiceIdFromAddress } from '../lib/fieldAppNewInvoiceAddress';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { logActivity } from '../lib/activityLogger';
@@ -2944,6 +2945,12 @@ export default function FieldApplicationInvoice() {
   const handleCancel = () => {
     navigate('/field-invoices');
   };
+
+  // Ctrl+S / Cmd+S presses Save, only while the invoice (not the loading or failed screen below) shows an enabled Save.
+  // A function: the screen gates read the route ref, which is read here at key time, never during render.
+  useSaveShortcut(handleSave, () => canEdit && !saving && !posting && fetchingWeather === null && (isNew || (
+    loadedInvoice?.id === id && loadedInvoice.route === invoiceLoadRef.current.route
+    && !(loadFailed?.id === id && loadFailed.route === invoiceLoadRef.current.route))));
 
   // eslint-disable-next-line react-hooks/refs -- the failed load is bound to the route it ran under, like the gate below
   if (!isNew && loadFailed?.id === id && loadFailed.route === invoiceLoadRef.current.route) {

@@ -62,7 +62,7 @@ export default function FinanceSnapshotCard() {
   const tiles: { label: string; value: string; icon: React.ReactNode; to: string; tone: string }[] = [
     { label: 'Open AR', value: formatUSD(ar), icon: <DollarSign className="w-4 h-4" />, to: '/accounts-receivable', tone: ar > 0 ? 'red' : 'green' },
     { label: 'Overdue 60+', value: formatUSD(overdue60), icon: <Clock className="w-4 h-4" />, to: '/ar-aging', tone: overdue60 > 0 ? 'red' : 'green' },
-    { label: 'Unused Prepay', value: formatUSD(prepay), icon: <Wallet className="w-4 h-4" />, to: '/accounts-receivable?tab=prepayments', tone: 'green' },
+    { label: 'Unused Prepay', value: formatUSD(prepay), icon: <Wallet className="w-4 h-4" />, to: '/prepay?tab=manager', tone: 'green' },
     { label: 'On Order', value: formatUSD(onOrder), icon: <Package className="w-4 h-4" />, to: '/receiving-hub', tone: 'teal' },
     { label: 'Period Profit', value: formatUSD(profit), icon: <TrendingUp className="w-4 h-4" />, to: '/financial-dashboard', tone: 'navy' },
   ];

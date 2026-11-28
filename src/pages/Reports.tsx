@@ -10,6 +10,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPageAccess } from '../lib/pagePermissions';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
+import { isCommissionPayoutsOff } from '../lib/errorSanitizer';
 import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
 import { unavailableReasonText } from '../lib/historicalBalanceReasons';
@@ -641,9 +642,11 @@ export default function Reports() {
     const seq = reportLoadSeq.current;
     const { data, error } = await fetchAllRows<InventoryCostRow>((from, to) => supabase
       .rpc('get_inventory_cost_report', undefined, { count: 'exact' })
-      // The function's own order (product name), then the unique product id.
+      // The function's own order (product name), then product id + location: unique per stock row,
+      // so a product stocked in two places can't be split or repeated across pages.
       .order('product_name')
       .order('product_id')
+      .order('location')
       .range(from, to));
     if (seq !== reportLoadSeq.current) return;
     if (error) {
@@ -1052,6 +1055,11 @@ export default function Reports() {
         logActivity({ event: 'commission_payment_batch_created', description: `${totalBatched} commission(s) added to unposted payment batches via Reports`, performedBy: actor.id });
       }
     } catch (err: unknown) {
+      // Payouts are off until M16 (20270309010000): a definite refusal, nothing was created or paid.
+      if (totalBatched === 0 && isCommissionPayoutsOff(err)) {
+        toast('error', sanitizeError(err));
+        return;
+      }
       // Backstop only. The scoping above should make a binding refusal
       // unreachable from this page, so if one arrives the scope and the server
       // fingerprint have drifted apart — drop the one key that was refused so
@@ -1249,6 +1257,7 @@ export default function Reports() {
         { key: 'product_name', header: 'Product' },
         { key: 'sku', header: 'SKU' },
         { key: 'category', header: 'Category' },
+        { key: 'location', header: 'Location' },
         { key: 'quantity_available', header: 'Qty Available' },
         { key: 'unit_cost', header: 'Unit Cost', format: fmtCSV },
         { key: 'total_cost_value', header: 'Total Value', format: (v) => (v == null ? '' : fmtCSV(v)) },
@@ -1412,6 +1421,7 @@ export default function Reports() {
     { key: 'product_name', header: 'Product', sortable: true, render: (r) => <span className="font-medium text-nav-dark">{r.product_name}</span> },
     { key: 'sku', header: 'SKU' },
     { key: 'category', header: 'Category', sortable: true },
+    { key: 'location', header: 'Location', sortable: true, render: (r) => r.location ?? <span className="text-secondary">No stock record</span> },
     { key: 'quantity_available', header: 'Qty', sortable: true },
     { key: 'net_available', header: 'Net Available', sortable: true, render: (r) => <span className="font-mono">{r.net_available}</span> },
     { key: 'unit_cost', header: 'Unit Cost', render: (r) => <span className="font-mono">{fmt(r.unit_cost)}</span> },
@@ -1513,13 +1523,16 @@ export default function Reports() {
   const dateFilterBar = (onCSV: () => void, csvDisabled = false) => (
     <Card>
       <div className="flex flex-wrap items-end gap-3">
+        {category === 'operational' && operationalTab === 'inventory_cost' ? (
+          <p className="py-2 text-sm text-secondary">Stock as of when this report loaded. Dates don't apply to this report.</p>
+        ) : (<>
         <div>
           <label className="block text-xs font-medium text-secondary mb-1">Start Date</label>
-          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
+          <input type="date" aria-label="Start Date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
         </div>
         <div>
           <label className="block text-xs font-medium text-secondary mb-1">End Date</label>
-          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
+          <input type="date" aria-label="End Date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
         </div>
         <div className="flex gap-1.5">
           {[
@@ -1535,6 +1548,7 @@ export default function Reports() {
             </button>
           ))}
         </div>
+        </>)}
 
         {/* Gross sales group-by selector */}
         {category === 'financial' && isAdmin && financialTab === 'gross_sales' && (
@@ -1771,7 +1785,7 @@ export default function Reports() {
             ))}
           </div>
 
-          {dateFilterBar(handleOperationalCSV, reportFailed || (operationalTab === 'price_list' && !priceListExportReady))}
+          {dateFilterBar(handleOperationalCSV, reportFailed || (operationalTab === 'price_list' && !priceListExportReady) || (operationalTab === 'inventory_cost' && loading))}
 
           {reportFailedBanner}
 
@@ -1787,21 +1801,28 @@ export default function Reports() {
           )}
 
           {/* Inventory cost total */}
-          {isAdmin && operationalTab === 'inventory_cost' && inventoryCostData.length > 0 && (() => {
+          {/* Hidden while loading so the strip never shows the previous load's stock. */}
+          {isAdmin && operationalTab === 'inventory_cost' && !loading && inventoryCostData.length > 0 && (() => {
+            // A row with no location is an active product with no stock record, not a stock row.
+            const stockRows = (rows: InventoryCostRow[]) => rows.filter((r) => r.location != null).length;
+            const stockRowsLabel = (n: number) => `${n} stock ${n === 1 ? 'row' : 'rows'}`;
+            const belowReorder = inventoryCostData.filter((r) => r.below_reorder);
             const valuation = summarizeInventoryValue(inventoryCostData.map((r) => ({ quantity: r.quantity_available, unitCost: r.unit_cost, rowValue: r.total_cost_value })));
             const note = inventoryValueNote(valuation);
             return (
             <div className="flex flex-wrap items-center gap-6 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
               <span className="text-sm text-blue-800">
-                <span className="font-semibold">Inventory value at price-list cost:</span>{' '}
+                <span className="font-semibold">Current inventory value at price-list cost:</span>{' '}
                 {formatCents(valuation.valueCents)}
                 {note && <span className="ml-2 text-xs">({note})</span>}
               </span>
               <span className="text-sm text-blue-800">
-                <span className="font-semibold">Products:</span> {inventoryCostData.length}
+                <span className="font-semibold">Products:</span> {new Set(inventoryCostData.map((r) => r.product_id)).size}
+                {' '}({stockRowsLabel(stockRows(inventoryCostData))})
               </span>
               <span className="text-sm text-red-600">
-                <span className="font-semibold">Below Reorder:</span> {inventoryCostData.filter((r) => r.below_reorder).length}
+                <span className="font-semibold">Below Reorder:</span> {new Set(belowReorder.map((r) => r.product_id)).size}
+                {' '}({stockRowsLabel(stockRows(belowReorder))})
               </span>
             </div>
             );
@@ -1829,7 +1850,7 @@ export default function Reports() {
           {!reportFailed && !(operationalTab === 'price_list' && priceListError) && <Card padding={false}>
             <div className="p-5">
               {isAdmin && operationalTab === 'stale_costs' && <DataTable data={staleCostData} columns={staleCostCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'category', 'vendor']} emptyTitle="No stale costs" emptyDescription="Every active product's cost changed within the selected age." loading={loading} />}
-              {isAdmin && operationalTab === 'inventory_cost' && <DataTable data={inventoryCostData as unknown as Record<string, unknown>[]} columns={inventoryCostCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'category']} emptyTitle="No inventory data" loading={loading} />}
+              {isAdmin && operationalTab === 'inventory_cost' && <DataTable data={inventoryCostData as unknown as Record<string, unknown>[]} columns={inventoryCostCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'category', 'location']} emptyTitle="No inventory data" loading={loading} />}
               {operationalTab === 'chemical_history' && <DataTable data={chemHistoryData as unknown as Record<string, unknown>[]} columns={chemHistoryCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No chemical history" emptyDescription="Select a product and date range" loading={loading} />}
               {operationalTab === 'posted_applications' && <DataTable data={postedAppsData} columns={postedAppsCols} searchable searchKeys={['customer_name', 'record_number']} emptyTitle="No posted applications" loading={loading} />}
               {operationalTab === 'price_list' && <DataTable data={priceListData} columns={priceListCols} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'vendor']} emptyTitle="No products" loading={loading || priceListPending} />}

@@ -44,6 +44,13 @@ export interface ResolvedBilledCustomers {
   complete: boolean;
 }
 
+/** Job-level payer identities, including co-payers hidden by customer row security. */
+export async function fetchJobBilledCustomerRows(jobId: string): Promise<BilledCustomerRpcRow[]> {
+  const { data, error } = await supabase.rpc('get_job_billed_customers', { p_job_id: jobId });
+  if (error) throw error;
+  return assertRpcResult<BilledCustomerRpcRow[]>(data, 'get_job_billed_customers');
+}
+
 /**
  * Resolve a job's billed customers via the SECURITY DEFINER RPC. Returns the deduped
  * customer list AND a `complete` flag the caller uses to refuse an incomplete
@@ -53,9 +60,7 @@ export interface ResolvedBilledCustomers {
  * caller's existing try/catch surfaces that as a toast, never a silent partial PDF.
  */
 export async function resolveBilledCustomers(jobId: string): Promise<ResolvedBilledCustomers> {
-  const { data, error } = await supabase.rpc('get_job_billed_customers', { p_job_id: jobId });
-  if (error) throw error;
-  const rows = assertRpcResult<BilledCustomerRpcRow[]>(data, 'get_job_billed_customers');
+  const rows = await fetchJobBilledCustomerRows(jobId);
 
   // Dedup by customer_id (the RPC's stable identity), preserving the RPC's order.
   // NOTE: do NOT dedup by name+account — two DISTINCT co-billed customers that happen

@@ -13,7 +13,7 @@ vi.mock('./db', () => ({
   assertRpcResult: <T,>(data: unknown): T => data as T,
 }));
 
-import { fetchJobMapImages } from './jobMapImages';
+import { fetchJobFieldLocations, fetchJobMapImages, sprayNumbersByFieldId } from './jobMapImages';
 
 const squareBoundary = JSON.stringify({
   type: 'Polygon',
@@ -142,15 +142,13 @@ describe('fetchJobMapImages', () => {
       features: Array<{ geometry: { type: string }; properties: Record<string, string> }>;
     };
     const marker = overlay.features.find((feature) => feature.geometry.type === 'Point');
-    expect(marker?.properties).toMatchObject({
-      kind: 'oil_well',
-      label: 'West well',
+    expect(marker?.properties).toEqual({
       'marker-color': '#dc2626',
       'marker-size': 'small',
     });
   });
 
-  it('drops oversized obstacle points before dropping the field fill', async () => {
+  it('keeps an obstacle and the field fill even if private text would exceed the URL limit', async () => {
     setupRpc();
     mockObstacleIn.mockResolvedValue({
       data: [{
@@ -179,7 +177,8 @@ describe('fetchJobMapImages', () => {
     const overlay = JSON.parse(decodeURIComponent(encodedOverlay?.[1] ?? '')) as {
       features: Array<{ geometry: { type: string }; properties: Record<string, string | number> }>;
     };
-    expect(overlay.features.some((feature) => feature.geometry.type === 'Point')).toBe(false);
+    expect(overlay.features.some((feature) => feature.geometry.type === 'Point')).toBe(true);
+    expect(JSON.stringify(overlay)).not.toContain('x'.repeat(100));
     expect(overlay.features[0].properties).toMatchObject({
       fill: '#FFD700',
       'fill-opacity': 0.15,
@@ -200,7 +199,7 @@ describe('fetchJobMapImages', () => {
     expect(result?.perField).toHaveLength(1);
   });
 
-  it('draws an overview acreage label at the Mercator-matched position for a non-square bbox', async () => {
+  it.each([['north', 0.25], ['center', 0.5], ['south', 0.75]])('places a %s acreage label correctly on a wide overview', async (_side, fractionFromTop) => {
     const minLatitude = 39;
     const maxLatitude = 39.1;
     const mercatorY = (latitude: number) => {
@@ -208,9 +207,11 @@ describe('fetchJobMapImages', () => {
       return (1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) / 2;
     };
     const latitudeForMercatorY = (y: number) => Math.atan(Math.sinh(Math.PI * (1 - 2 * y))) * 180 / Math.PI;
+    const northY = mercatorY(maxLatitude);
+    const southY = mercatorY(minLatitude);
     const centroid: [number, number] = [
       -89.85,
-      latitudeForMercatorY((mercatorY(minLatitude) + mercatorY(maxLatitude)) / 2),
+      latitudeForMercatorY(northY + (southY - northY) * fractionFromTop),
     ];
     const nonSquareBoundary = JSON.stringify({
       type: 'Polygon',
@@ -244,9 +245,13 @@ describe('fetchJobMapImages', () => {
     const height = Number(size?.[2]);
     expect(width / height).toBeGreaterThan(2);
     const [text, x, y] = context.fillText.mock.calls[0] as [string, number, number];
-    expect(text).toBe('10 ac');
+    expect(text).toBe('1 · 10 ac');
     expect(Math.abs(x - width / 2)).toBeLessThanOrEqual(1);
-    expect(Math.abs(y - height / 2)).toBeLessThanOrEqual(1);
+    const padding = new URL(url).searchParams.get('padding');
+    expect(padding).not.toBeNull();
+    const inset = Number(padding);
+    const expectedY = inset + (height - 2 * inset) * fractionFromTop;
+    expect(Math.abs(y - expectedY)).toBeLessThanOrEqual(1);
   });
 
   it('omits acreage when the job-field acreage query fails', async () => {
@@ -343,5 +348,39 @@ describe('fetchJobMapImages', () => {
 
     expect(result).toBeNull();
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('sprayNumbersByFieldId', () => {
+  it('numbers fields 1, 2, 3 by sort_order and restarts for each job printed together', () => {
+    const jobA = sprayNumbersByFieldId([
+      { id: 'a-west', sort_order: 7 },
+      { id: 'a-east', sort_order: 2 },
+      { id: 'a-north', sort_order: 5 },
+    ]);
+    const jobB = sprayNumbersByFieldId([{ id: 'b-only', sort_order: 9 }, { id: 'b-unset', sort_order: null }]);
+    expect([...jobA.entries()]).toEqual([['a-east', 1], ['a-north', 2], ['a-west', 3]]);
+    // An unset order counts as 0, as on the sheet, so it is Stop 1 here too (Codex P2).
+    expect([...jobB.entries()]).toEqual([['b-unset', 1], ['b-only', 2]]);
+  });
+
+  it('keeps the database order for tied sort_order values', () => {
+    expect([...sprayNumbersByFieldId([{ id: 'x', sort_order: 0 }, { id: 'y', sort_order: 0 }]).entries()])
+      .toEqual([['x', 1], ['y', 2]]);
+  });
+});
+
+describe('fetchJobFieldLocations', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns each mapped field pin and skips a field without one', async () => {
+    mockRpc.mockResolvedValue({ data: [makeRow(), { ...makeRow(), id: 'field-2', centroid_geojson: null }], error: null });
+    const locations = await fetchJobFieldLocations('job-1');
+    expect([...locations.entries()]).toEqual([['field-1', { lat: 39.15, lng: -89.05 }]]);
+  });
+
+  it('returns no pins when the read is refused', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: 'denied' } });
+    expect((await fetchJobFieldLocations('job-1')).size).toBe(0);
   });
 });

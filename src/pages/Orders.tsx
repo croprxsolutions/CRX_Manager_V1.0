@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Upload, Download, FileText, Trash2, Users, Truck, Printer, ClipboardList, PanelRightOpen } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -16,7 +16,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, checkMutationResult } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
-import { buildOrdersQuery, fetchOrdersPage, fetchAllMatchingOrders, isBookmarkRefused, type OrderListRow, type OrdersQuery } from '../lib/ordersPage';
+import { buildOrdersQuery, fetchOrdersPage, fetchAllMatchingOrders, fetchMyOrders, isBookmarkRefused, type OrderListRow, type OrdersQuery } from '../lib/ordersPage';
+import { listSortParam, oneOf, parseListSort, useUrlListState } from '../hooks/useUrlListState';
 import type { Json } from '../types/supabase';
 import type { SortDir } from '../lib/tableSearchSort';
 import { ORDER_ITEM_COLUMNS } from '../lib/costFields';
@@ -32,6 +33,8 @@ import type { PickListData } from '../lib/orderPickListPdf';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
+import MineToggle from '../components/ui/MineToggle';
+import { filteredEmptyProps } from '../components/ui/filteredEmpty';
 import type { Order } from '../types';
 import { getSeasonDates } from '../utils/season';
 import { toSentryError } from '../lib/sentryError';
@@ -43,6 +46,15 @@ const ORDERS_PAGE_SIZE = 50;
 const FIRST_PAGE: (Json | null)[] = [null];
 
 type NextBookmark = { key: string; page: number; cursor: Json | null };
+
+// Search, filters, sort and Mine/All live in the address, so Back from an order brings the same view back.
+// The page number does not: a page is read from a bookmark that only holds for the list as it was.
+const LIST_DEFAULTS = { q: '', status: '', plan: '', pricing: '', split: '', sort: '', mine: '' } as const;
+const STATUS_VALUES = ['', 'confirmed', 'partially_fulfilled', 'fulfilled', 'cancelled', 'voided'] as const;
+const PLAN_VALUES = ['', 'planned', 'committed'] as const;
+const PRICING_VALUES = ['', 'needs_pricing', 'priced'] as const;
+const SPLIT_VALUES = ['', 'needs_split'] as const;
+const SORTABLE_KEYS = ['order_number', 'status', 'total_price', 'order_date', 'fulfillment_pct', 'invoiced_pct'];
 /** The bookmark after the page on screen, only when it came from that same query and page. */
 function nextBookmarkFor(next: NextBookmark | null, key: string, page: number): Json | null {
   return next && next.key === key && next.page === page ? next.cursor : null;
@@ -51,7 +63,7 @@ function nextBookmarkFor(next: NextBookmark | null, key: string, page: number): 
 export default function Orders() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { role, deniedPages } = useAuth();
+  const { role, deniedPages, profile } = useAuth();
   // Customer 360 peek exposes AR balance + credit tier — gate it with the canonical
   // customers-page permission (blocks a rep who is denied /customers — Codex P2).
   const canPeekCustomer = hasPageAccess(role, deniedPages, 'customers');
@@ -65,15 +77,19 @@ export default function Orders() {
   const [pageLoading, setPageLoading] = useState(false);
   // The last list read failed: no rows, so it never reads as "No orders yet".
   const [loadFailed, setLoadFailed] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('');
-  const [planFilter, setPlanFilter] = useState('');
+  const [list, setList] = useUrlListState(LIST_DEFAULTS);
+  const statusFilter = oneOf(list.status, STATUS_VALUES, '');
+  const planFilter = oneOf(list.plan, PLAN_VALUES, '');
   // Ship-now/price-later (sell-side #2): filter unpriced rush orders.
-  const [pricingFilter, setPricingFilter] = useState('');
+  const pricingFilter = oneOf(list.pricing, PRICING_VALUES, '');
   // U7 SAFE-SCOPE: filter orders complete_delivery queued for manual split billing.
-  const [splitFilter, setSplitFilter] = useState('');
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [sort, setSort] = useState<{ key: string | null; dir: SortDir }>({ key: null, dir: 'asc' });
+  const splitFilter = oneOf(list.split, SPLIT_VALUES, '');
+  const search = list.q;
+  // Back from an order restores a search already settled, so the list does not wait out the debounce.
+  const [debouncedSearch, setDebouncedSearch] = useState(() => search.trim());
+  const sort = useMemo(() => parseListSort(list.sort, SORTABLE_KEYS), [list.sort]);
+  const setSort = (next: { key: string | null; dir: SortDir }) => setList({ sort: listSortParam(next) });
+  const { myId, mineOnly } = mineView(role, profile, list.mine);
   const [showImportModal, setShowImportModal] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -95,8 +111,11 @@ export default function Orders() {
     search: debouncedSearch, status: statusFilter, plan: planFilter, pricing: pricingFilter, split: splitFilter,
     sortKey: sort.key, sortDir: sort.dir,
   }), [debouncedSearch, statusFilter, planFilter, pricingFilter, splitFilter, sort]);
-  const queryKey = JSON.stringify(query);
+  // Mine is part of what is on screen, so switching it starts again at page one like any filter.
+  const queryKey = JSON.stringify([query, mineOnly]);
   const listBusy = isListBusy(pageLoading, search, debouncedSearch);
+  const filtering = hasOrderFilters(search, [statusFilter, planFilter, pricingFilter, splitFilter, mineOnly]);
+  const clearFilters = () => setList({ q: '', status: '', plan: '', pricing: '', split: '', mine: '' });
 
   // Each page is read from the bookmark (the last row) of the page before it, so orders removed in
   // between never push one past the screen. afters[i] is page i's bookmark; the last one is on screen.
@@ -138,7 +157,10 @@ export default function Orders() {
     const seq = ++fetchSeq.current;
     clearBulkSelection();
     setPageLoading(true);
-    const { data, error } = await fetchOrdersPage(query, ORDERS_PAGE_SIZE, 0, after);
+    // Mine shows every one of the rep's matching orders on one page (no bookmark to page from).
+    const { data, error } = mineOnly && myId
+      ? await fetchMyOrders(query, myId)
+      : await fetchOrdersPage(query, ORDERS_PAGE_SIZE, 0, after);
     if (seq !== fetchSeq.current) return;
     // Rows ticked against the old list while this read ran do not carry over to the new one.
     clearBulkSelection();
@@ -167,7 +189,7 @@ export default function Orders() {
     }
     setLoading(false);
     setPageLoading(false);
-  }, [query, queryKey, afters, page, after, toast, clearBulkSelection]);
+  }, [query, queryKey, afters, page, after, toast, clearBulkSelection, mineOnly, myId]);
 
   useEffect(() => {
     fetchOrders();
@@ -682,30 +704,28 @@ export default function Orders() {
             // The database searches order number, customer, farm group and products, sorts and pages.
             serverSide
             searchValue={search}
-            onSearchChange={setSearch}
+            onSearchChange={(q) => setList({ q })}
             sortState={sort}
             onSortChange={setSort}
             onRowClick={(row) => navigate(`/orders/${row.id}`)}
-            emptyTitle="No orders yet"
-            emptyDescription="Start by creating a quote in Sales → Quotes, then convert it to an order. Or create a direct order below."
-            emptyAction={
-              <div className="flex gap-2">
-                <Button variant="secondary" icon={<FileText className="w-4 h-4" />} onClick={() => navigate('/quotes/new')}>
-                  New Quote
-                </Button>
-                <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/orders/new')}>
-                  New Order
-                </Button>
-              </div>
-            }
+            mobileRow={(row) => (
+              <OrderPhoneRow
+                row={row}
+                checkbox={canBulkAction ? checkboxCol.render?.(row) : null}
+                selected={(allMatchingIds ?? selected).has(row.id)}
+                onOpen={() => navigate(`/orders/${row.id}`)}
+              />
+            )}
+            {...ordersEmptyProps(filtering, clearFilters, navigate)}
             loading={listBusy}
             loadError={loadFailed}
             onRetry={fetchOrders}
             filters={
               <>
+                <OrdersMineToggle myId={myId} mine={mineOnly} onChange={(mine) => setList({ mine: mine ? '1' : '' })} />
                 <select
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
+                  onChange={(e) => setList({ status: e.target.value })}
                   aria-label="Filter by order status"
                   className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
@@ -718,7 +738,7 @@ export default function Orders() {
                 </select>
                 <select
                   value={planFilter}
-                  onChange={(e) => setPlanFilter(e.target.value)}
+                  onChange={(e) => setList({ plan: e.target.value })}
                   aria-label="Filter by planned or committed"
                   className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
@@ -728,7 +748,7 @@ export default function Orders() {
                 </select>
                 <select
                   value={pricingFilter}
-                  onChange={(e) => setPricingFilter(e.target.value)}
+                  onChange={(e) => setList({ pricing: e.target.value })}
                   aria-label="Filter by pricing status"
                   className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
@@ -738,7 +758,7 @@ export default function Orders() {
                 </select>
                 <select
                   value={splitFilter}
-                  onChange={(e) => setSplitFilter(e.target.value)}
+                  onChange={(e) => setList({ split: e.target.value })}
                   aria-label="Filter by split billing status"
                   className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
@@ -828,6 +848,42 @@ function isListBusy(pageLoading: boolean, search: string, debouncedSearch: strin
   return pageLoading || selectingAll || search.trim() !== debouncedSearch;
 }
 
+/** "No orders yet" only when nothing hides them: a search or filter that matches nothing says so and offers to clear it. */
+function ordersEmptyProps(filtering: boolean, onClear: () => void, navigate: (to: string) => void) {
+  if (filtering) return filteredEmptyProps('orders', onClear);
+  return {
+    emptyTitle: 'No orders yet',
+    emptyDescription: 'Start by creating a quote in Sales → Quotes and sending it to book it, then draw orders from the booking. Or create a direct order below.',
+    emptyAction: (
+      <div className="flex gap-2">
+        <Button variant="secondary" icon={<FileText className="w-4 h-4" />} onClick={() => navigate('/quotes/new')}>
+          New Quote
+        </Button>
+        <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/orders/new')}>
+          New Order
+        </Button>
+      </div>
+    ),
+  };
+}
+
+/** Mine / All for a sales rep (a view filter, never a permission). Default All: nothing changes for the office. */
+function mineView(role: string | null, profile: { id: string } | null, mineParam: string) {
+  const myId = role === 'sales_rep' && profile ? profile.id : null;
+  return { myId, mineOnly: myId !== null && mineParam === '1' };
+}
+
+/** The Mine / All toggle, shown to a sales rep only. */
+function OrdersMineToggle({ myId, mine, onChange }: { myId: string | null; mine: boolean; onChange: (mine: boolean) => void }) {
+  if (!myId) return null;
+  return <MineToggle label="Show my orders or all orders" mine={mine} onChange={onChange} />;
+}
+
+/** A typed search or any filter narrows the list, so an empty list is not proof there are no orders. */
+function hasOrderFilters(search: string, filters: Array<string | boolean>): boolean {
+  return search.trim() !== '' || filters.some(Boolean);
+}
+
 /** State saved for one query (page, totals, "select all"), or null once the query has changed. */
 function forQuery<T extends { key: string }>(state: T | null, key: string): T | null {
   return state !== null && state.key === key ? state : null;
@@ -845,4 +901,40 @@ function selectionScope(totals: { count: number } | null, rowsShown: number, all
   // After "select all", unticking rows brings the "Select All" button back.
   const allMatchingSelected = allMatching !== null && totals !== null && allMatching.length >= totals.count;
   return { moreThanThisPage, everythingSelected: allMatchingSelected || (pageAllSelected && !moreThanThisPage) };
+}
+
+/** Phone layout of one order (below 768px): customer, number and date, with the total and status on the right. */
+function OrderPhoneRow({ row, checkbox, selected, onOpen }: {
+  row: OrderWithFulfillment;
+  checkbox: ReactNode;
+  selected: boolean;
+  onOpen: () => void;
+}) {
+  const customerName = (row.customer as unknown as { farm_name: string } | null)?.farm_name || '-';
+  return (
+    <div className={`flex items-start gap-1 px-4 py-2 ${selected ? 'bg-crx-green-tint' : ''}`}>
+      {/* A 44px tap area around the small checkbox; a spacer keeps rows aligned without one. */}
+      {checkbox
+        ? <label className="-ml-3 flex h-11 w-11 shrink-0 items-center justify-center">{checkbox}<span className="sr-only">Select order {row.order_number}</span></label>
+        : <span aria-hidden="true" className="-ml-3 w-11 shrink-0" />}
+      <button type="button" onClick={onOpen} className="flex min-h-11 min-w-0 flex-1 items-start gap-3 py-1.5 text-left">
+        <span className="min-w-0 flex-1 space-y-0.5">
+          <span className="block break-words font-semibold leading-snug text-nav-dark">{customerName}</span>
+          <span className="flex flex-wrap items-center gap-x-1.5 text-sm text-secondary">
+            <span>{row.order_number}</span>
+            <span aria-hidden="true">·</span>
+            <span>{new Date(row.order_date + 'T00:00:00').toLocaleDateString()}</span>
+          </span>
+          {row.order_name && <span className="block break-words text-xs text-secondary">{row.order_name}</span>}
+          <span className="block text-xs text-secondary">{row.fulfillment_pct}% delivered</span>
+        </span>
+        <span className="flex shrink-0 flex-col items-end gap-1">
+          <span className="font-semibold tabular-nums text-nav-dark">{fmt(row.total_price)}</span>
+          <Badge variant={statusToBadgeVariant[row.status] || 'default'}>{row.status.replace(/_/g, ' ')}</Badge>
+          {row.is_planned && <Badge variant="warning">Planned</Badge>}
+          {row.needs_split_billing && <Badge variant="warning">Needs Split Billing</Badge>}
+        </span>
+      </button>
+    </div>
+  );
 }

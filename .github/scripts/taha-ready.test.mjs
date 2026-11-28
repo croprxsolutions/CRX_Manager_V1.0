@@ -1,0 +1,372 @@
+// Run: node --test .github/scripts/taha-ready.test.mjs
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { askedAfterPush, decide, needsPing, pingMarker, pingText, requiredChecksProblem } from './taha-ready.mjs';
+
+const HEAD = 'a'.repeat(40);
+const NEW = 'b'.repeat(40);
+const pr = (o = {}) => ({ number: 7, title: 'fix: <!channel> quotes', url: 'https://github.com/x/y/pull/7', isDraft: false, author: { login: 'masonwells1' },
+  headRefName: 'fix/q', headRefOid: HEAD, labels: [], reviewRequests: [], reviews: [], ...o });
+const green = () => [{ name: 'CI', bucket: 'pass' }, { name: 'Vercel', bucket: 'skipping' }];
+const inLane = () => ({ files: ['src/components/quotes/Q.tsx'], reason: "it changes Taha's areas (src/components/quotes/Q.tsx)" });
+const noSol = () => ({ risky: false, reason: '1 file(s), none on the Sol list' });
+const ok = { checks: green, lane: inLane, sol: noSol };
+const never = () => { throw new Error('should not be called'); };
+
+test('labels only when lane + no Sol + required checks green', () => {
+  assert.equal(decide(pr(), ok).act, true);
+  assert.match(decide(pr(), ok).why, /^label \+ request Taha/);
+  assert.equal(decide(pr(), { ...ok, lane: () => null }).act, false);
+  assert.equal(decide(pr(), { ...ok, sol: () => ({ risky: true, reason: 'supabase/ needs Sol' }) }).act, false);
+  assert.equal(decide(pr(), { ...ok, sol: () => undefined }).act, false);
+  assert.equal(decide(pr(), { ...ok, checks: () => [{ name: 'CI', bucket: 'pending' }] }).act, false);
+  assert.equal(decide(pr(), { ...ok, checks: () => [{ name: 'CI', bucket: 'fail' }] }).act, false);
+  assert.equal(decide(pr(), { ...ok, checks: () => [] }).act, false);
+  assert.equal(decide(pr(), { ...ok, checks: () => null }).act, false);
+});
+
+test('an unreadable or cut-short file list never labels', () => {
+  assert.equal(decide(pr(), { ...ok, lane: () => ({ files: [], reason: 'could not be read' }) }).act, false);
+});
+
+test("drafts, Taha's own PRs and already-waiting PRs are left alone without GitHub calls", () => {
+  const lazy = { checks: never, lane: never, sol: never };
+  assert.equal(decide(pr({ isDraft: true }), lazy).why, 'draft');
+  assert.equal(decide(pr({ author: { login: 'TahaKhanAbdalli' } }), lazy).act, false);
+  assert.equal(decide(pr({ headRefName: 'taha/x' }), lazy).act, false);
+  assert.equal(decide(pr({ labels: [{ name: 'ready-for-taha' }], reviewRequests: [{ login: 'TahaKhanAbdalli' }] }), lazy).act, false);
+  assert.equal(decide(pr({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: HEAD } }] }), lazy).act, false);
+});
+
+test('a labelled PR at a new head is re-requested once ready again', () => {
+  const p = pr({ labels: [{ name: 'ready-for-taha' }], reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: NEW } }] });
+  assert.match(decide(p, ok).why, /^re-request Taha/);
+});
+
+test('requiredChecksProblem names what is not green', () => {
+  assert.equal(requiredChecksProblem(green()), null);
+  assert.match(requiredChecksProblem([{ name: 'CI', bucket: 'fail' }]), /CI: fail/);
+});
+
+const bot = (sha) => ({ author: { login: 'github-actions' }, body: `Pinged.\n\n${pingMarker(sha)}` });
+const labelled = (o) => pr({ labels: [{ name: 'ready-for-taha' }], ...o });
+
+const T = { reviewRequests: [{ login: 'TahaKhanAbdalli' }] };
+const solList = { ...ok, sol: () => ({ risky: true, reason: 'supabase/' }) };
+const P = (p, c, f = ok) => needsPing(p, c, { asked: () => false, ...f }).ping;
+
+test('ping dedupe: once per head, never twice; a new head pings again', () => {
+  assert.equal(P(labelled(T), []), true);
+  assert.equal(P(labelled(T), [bot(HEAD)]), false);
+  assert.equal(P(labelled({ ...T, headRefOid: NEW }), [bot(HEAD)]), true);
+});
+
+test('no ping unless Taha is requested and required checks are green', () => {
+  assert.equal(P(labelled(), []), false);
+  assert.equal(P(labelled(T), [], { ...ok, checks: () => [{ name: 'CI', bucket: 'pending' }] }), false);
+});
+
+test('a Sol-list head pings only when labelled or re-requested after its push', () => {
+  assert.equal(P(labelled(T), [], solList), false);
+  assert.equal(P(labelled({ ...T, headRefOid: NEW }), [bot(HEAD)], solList), false);
+  assert.equal(P(labelled({ ...T, headRefOid: NEW }), [bot(HEAD)], { ...solList, asked: () => true }), true);
+  assert.equal(P(labelled(T), [], { ...ok, sol: () => undefined, asked: () => false }), false);
+});
+
+test('askedAfterPush compares the newest ask with the push', () => {
+  const push = '2026-11-24T10:00:00Z\n2026-11-24T10:05:00Z';
+  assert.equal(askedAfterPush(push, '2026-11-24T09:00:00Z\n2026-11-24T10:01:00Z'), true);
+  assert.equal(askedAfterPush(push, '2026-11-24T09:59:00Z'), false);
+  assert.equal(askedAfterPush(null, '2026-11-24T11:00:00Z'), false);
+  assert.equal(askedAfterPush(push, null), false);
+  assert.equal(askedAfterPush('garbage', 'garbage'), false);
+});
+
+test('only the bot can write a dedupe record', () => {
+  assert.equal(P(labelled(T), [{ author: { login: 'masonwells1' }, body: pingMarker(HEAD) }]), true);
+});
+
+test('no ping without the label, on drafts, on Taha PRs, or once he reviewed the head', () => {
+  const lazy = { checks: never, sol: never, asked: never };
+  assert.equal(P(pr(T), [], lazy), false);
+  assert.equal(P(labelled({ ...T, isDraft: true }), [], lazy), false);
+  assert.equal(P(labelled({ ...T, author: { login: 'TahaKhanAbdalli' } }), [], lazy), false);
+  assert.equal(P(labelled({ ...T, reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'CHANGES_REQUESTED', commit: { oid: HEAD } }] }), [], lazy), false);
+  // A dismissed review no longer counts as having seen the head.
+  assert.equal(P(labelled({ ...T, reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'DISMISSED', commit: { oid: HEAD } }] }), []), true);
+});
+
+test('ping text escapes PR titles and names the short head', () => {
+  const t = pingText(pr());
+  assert.match(t, /&lt;!channel&gt;/);
+  assert.match(t, /head aaaaaaa\)/);
+  assert.match(t, /<https:\/\/github.com\/x\/y\/pull\/7\|#7>/);
+});
+
+// ── Hotfixes into main (Mason, 2026-11-25) ─────────────────────────────────────────────────────
+import { cutAtSentence, failedLatestRunId, githubOwned, isMainHotfix, onlyBackportReason } from './taha-ready.mjs';
+
+const hotfix = (o) => pr({ baseRefName: 'main', headRefName: 'hotfix/q', ...o });
+const gateWaiting = () => [...green(), { name: 'Release flow guard (main)', bucket: 'fail' }, { name: 'release-gate', bucket: 'pending' }];
+
+test('a hotfix into main is asked for even while the guard and release-gate wait on Taha; other checks still count', () => {
+  const wantsLabel = { ...ok, checks: gateWaiting, backport: () => true };
+  assert.equal(isMainHotfix(hotfix()), true);
+  assert.equal(isMainHotfix(pr({ baseRefName: 'staging', headRefName: 'hotfix/q' })), false);
+  assert.equal(isMainHotfix(pr({ baseRefName: 'main', headRefName: 'release/next' })), false);
+  assert.equal(decide(hotfix(), wantsLabel).act, true);
+  assert.equal(decide(hotfix(), { ...wantsLabel, checks: () => [...gateWaiting(), { name: 'CI', bucket: 'fail' }] }).act, false);
+  // Not a hotfix: the guard still blocks.
+  assert.equal(decide(pr({ baseRefName: 'main', headRefName: 'release/next' }), wantsLabel).act, false);
+  assert.equal(P(labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' }), [], wantsLabel), true);
+});
+
+test('a hotfix whose guard is red for any other reason is held: no label, ping or reminder (Taha, 2026-11-25)', () => {
+  const otherReason = { ...ok, checks: gateWaiting, backport: () => false };
+  assert.match(decide(hotfix(), otherReason).why, /Release flow guard \(main\): fail/);
+  assert.equal(decide(hotfix(), { ...ok, checks: gateWaiting }).act, false, 'no backport() answer: held');
+  assert.equal(P(labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' }), [], otherReason), false);
+  // Green guard: backport() is never asked (it costs GitHub calls).
+  assert.equal(decide(hotfix(), { ...ok, checks: () => [...green(), { name: 'Release flow guard (main)', bucket: 'pass' }], backport: never }).act, true);
+});
+
+test("the guard's reason is read from its failure annotations: only the hotfix-backport ask counts (as on #2573)", () => {
+  const exit = { annotation_level: 'failure', message: 'Process completed with exit code 1.' };
+  const label = { annotation_level: 'failure', message: "This hotfix carries work staging has that main hasn't released (commit 99d9872f3). Cut hotfix/<name> from main with only the fix; a deliberate backport needs Taha's hotfix-backport label, added after the latest push." };
+  const behind = { annotation_level: 'failure', message: 'This branch is missing commits that are on main. Merge main into it (merge commit), then push.' };
+  assert.equal(onlyBackportReason([exit, label]), true);
+  assert.equal(onlyBackportReason([label, { annotation_level: 'notice', message: 'Release flow not switched on yet' }]), true);
+  assert.equal(onlyBackportReason([exit, behind]), false);
+  assert.equal(onlyBackportReason([exit, label, behind]), false);
+  assert.equal(onlyBackportReason([exit]), false, 'no reason given: held');
+  // The bad-name error quotes the branch, which can contain the label's text (Taha on #2663, LOW 1).
+  const badName = { annotation_level: 'failure', message: "Only release/next (the weekly release) and hotfix/<name> branches may open a PR into main; 'hotfix/fix/hotfix-backport-note' should target staging." };
+  assert.equal(onlyBackportReason([exit, badName]), false);
+  assert.equal(onlyBackportReason([]), false);
+  assert.equal(onlyBackportReason(null), false);
+});
+
+test("only the guard's newest run on the head counts, whatever order GitHub lists them in (Taha on #2663)", () => {
+  const run = (id, conclusion, status = 'completed') => ({ id, status, conclusion });
+  // #2573's head: older runs failed, the newest passed.
+  assert.equal(failedLatestRunId([run(139465093828, 'failure'), run(139502621931, 'success'), run(139491508402, 'failure')]), null);
+  assert.equal(failedLatestRunId([run(139502621931, 'failure'), run(139491508402, 'success')]), 139502621931);
+  assert.equal(failedLatestRunId([run(2, null, 'in_progress'), run(1, 'failure')]), null, 'a newer run still going: no stale reason');
+  assert.equal(failedLatestRunId([]), null);
+  assert.equal(failedLatestRunId(null), null);
+});
+
+test('a hotfix waits while the guard is still running: it may yet ask for the label (Codex on #2589)', () => {
+  const guardPending = () => [...green(), { name: 'Release flow guard (main)', bucket: 'pending' }];
+  assert.equal(decide(hotfix(), { ...ok, checks: guardPending }).act, false);
+  assert.equal(P(labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' }), [], { ...ok, checks: guardPending }), false);
+});
+
+test('summaries end at a sentence, or a whole word with an ellipsis, never mid-word', () => {
+  assert.equal(cutAtSentence('Short.', 350), 'Short.');
+  const two = `${'a'.repeat(200)}. ${'b '.repeat(150)}`;
+  assert.equal(cutAtSentence(two, 350), `${'a'.repeat(200)}.`);
+  assert.equal(cutAtSentence('word '.repeat(100), 350), `${'word '.repeat(70).trim()}…`);
+});
+
+test('.github/ files count as Taha\'s on a hotfix (he is a code owner)', () => {
+  assert.deepEqual(githubOwned([{ filename: '.github/workflows/release-pr.yml' }, { filename: 'README.md' }]).files, ['.github/workflows/release-pr.yml']);
+  assert.equal(githubOwned([{ filename: 'docs/x.md' }]), null);
+  assert.equal(githubOwned(null), null);
+});
+
+test('the ping asks for the hotfix-backport label only on a hotfix whose guard wants it', () => {
+  const h = labelled({ ...T, baseRefName: 'main', headRefName: 'hotfix/q' });
+  const p = needsPing(h, [], { ...ok, asked: () => false, backport: () => true });
+  assert.equal(p.backport, true);
+  assert.match(pingText(h, null, p), /Approve \+ `hotfix-backport` label \(add it after the latest push\) \(head aaaaaaa\)/);
+  assert.equal(needsPing(h, [], { ...ok, asked: () => false, backport: () => false }).backport, false);
+  assert.equal(needsPing(labelled(T), [], { ...ok, asked: () => false, backport: never }).backport, false);
+  assert.doesNotMatch(pingText(pr()), /hotfix-backport/);
+});
+
+test('an approved hotfix whose guard still wants the label gets one label-only ping (as on #2573)', () => {
+  const approved = hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: HEAD } }] });
+  const lazy = { checks: never, sol: never, asked: never };
+  const gate = { ...lazy, checks: gateWaiting, carried: () => true }; // the merge gate accepts his Approve of this head
+  assert.equal(needsPing(approved, [], { ...lazy, carried: () => false, backport: () => true }).ping, false, 'retargeted since his Approve: no label-only ping');
+  const p = needsPing(approved, [], { ...gate, backport: () => true });
+  assert.equal(p.ping, true);
+  assert.match(pingText(approved, null, p), /waiting on your `hotfix-backport` label \(add it after the latest push\) \(head/);
+  assert.doesNotMatch(pingText(approved, null, p), /Approve/);
+  assert.equal(needsPing(approved, [bot(HEAD)], { ...gate, backport: () => true }).ping, false);
+  assert.equal(needsPing(approved, [], { ...gate, backport: () => false }).ping, false);
+  // Other required checks red: held, or his label is wasted by the fix push (Taha on #2663, LOW 2).
+  const red = needsPing(approved, [], { ...gate, checks: () => [...gateWaiting(), { name: 'CI', bucket: 'fail' }], backport: () => true });
+  assert.equal(red.ping, false);
+  assert.match(red.why, /CI: fail/);
+  // Approved on an older head, or not a hotfix: the normal rules apply.
+  assert.equal(needsPing(hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: NEW } }] }), [], { ...lazy, backport: () => true }).ping, false);
+  assert.equal(needsPing(pr({ reviews: approved.reviews }), [], { ...lazy, backport: never }).ping, false);
+  // An older-head Approve the merge gate carries over (#2605) still gets the label-only ping after a push.
+  const carriedOver = hotfix({ reviews: [{ author: { login: 'TahaKhanAbdalli' }, state: 'APPROVED', commit: { oid: NEW } }] });
+  const c = needsPing(carriedOver, [], { ...gate, backport: () => true });
+  assert.equal(c.ping, true);
+  assert.equal(c.labelOnly, true);
+});
+
+// ── Taha's verdict labels, reminder, Haiku (Mason, 2026-11-24) ─────────────────────────────────
+import { needsReminder, parseTopics, remindMarker, reviewLabelChanges, summarize, tahaVerdict } from './taha-ready.mjs';
+
+const rv = (state, oid = HEAD, login = 'TahaKhanAbdalli') => ({ author: { login }, state, commit: { oid } });
+const L = (...names) => names.map((name) => ({ name }));
+
+test("Taha's verdict on the current head: latest decisive review wins, comments and old heads don't count", () => {
+  const gate = () => true; // the merge gate's own check (tahaApprovedOnGitHub) agrees
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED')] }), gate), 'taha-approved');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED'), rv('CHANGES_REQUESTED')] }), gate), 'taha-changes');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('CHANGES_REQUESTED'), rv('APPROVED')] }), gate), 'taha-approved');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED'), rv('COMMENTED')] }), gate), 'taha-approved');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED')] }), () => false), null, 'an Approve of this head the merge gate rejects (base retargeted since) is not shown (Sol r2)');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('DISMISSED')] })), null);
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED', NEW)] })), null, 'approval of another head');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED', HEAD, 'masonwells1')] })), null, 'not Taha');
+});
+
+test('review labels: exactly one of approved / changes, or neither after a push', () => {
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED')] }), () => true), { add: ['taha-approved'], remove: [] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED')], labels: L('taha-approved') }), () => true), { add: [], remove: [] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED')], labels: L('taha-approved') }), () => false), { add: [], remove: ['taha-approved'] }, 'retargeted: the label comes off');
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('CHANGES_REQUESTED')], labels: L('taha-approved') })), { add: ['taha-changes'], remove: ['taha-approved'] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED', NEW)], labels: L('taha-approved', 'taha-changes') })), { add: [], remove: ['taha-approved', 'taha-changes'] });
+  assert.deepEqual(reviewLabelChanges(pr({ author: { login: 'TahaKhanAbdalli' }, reviews: [rv('APPROVED')] })), { add: [], remove: [] }, "Taha's own PR untouched");
+});
+
+test("carried-over Approve (Mason, 2026-11-25): shows as approved, takes ready-for-taha off, stops re-labels and pings", () => {
+  const yes = () => true;
+  const old = pr({ reviews: [rv('APPROVED', NEW)], labels: L('ready-for-taha'), reviewRequests: [{ login: 'TahaKhanAbdalli' }] });
+  assert.equal(tahaVerdict(old, yes), 'taha-approved');
+  assert.equal(tahaVerdict(old, () => false), null, 'not carried: no verdict');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('DISMISSED', NEW)] }), yes), 'taha-approved', 'a push-dismissed Approve is checked too (Luna r3)');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('CHANGES_REQUESTED', NEW)] }), never), null, 'no earlier Approve: GitHub is not asked');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED', NEW), rv('CHANGES_REQUESTED')] }), never), 'taha-changes', 'a verdict on this head wins without asking');
+  assert.deepEqual(reviewLabelChanges(old, yes), { add: ['taha-approved'], remove: ['ready-for-taha'] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('CHANGES_REQUESTED')], labels: L('ready-for-taha') })), { add: ['taha-changes'], remove: [] },
+    'changes requested keeps it, so the fixed head is pinged again (Sol)');
+  assert.deepEqual(reviewLabelChanges(old, () => false), { add: [], remove: [] }, 'a real change keeps it waiting');
+  assert.match(decide(pr({ reviews: [rv('APPROVED', NEW)] }), { checks: never, lane: never, sol: never, carried: yes }).why, /carries over/);
+  assert.equal(decide(pr({ reviews: [rv('APPROVED', NEW)] }), { ...ok, carried: () => false }).act, true, 'not carried: asked again');
+  assert.equal(needsPing(old, [], { ...ok, asked: never, carried: yes }).ping, false);
+  const day = Date.parse('2026-11-26T00:00:00Z');
+  const pingedAt = [{ author: { login: 'github-actions' }, body: pingMarker(HEAD), createdAt: '2026-11-24T00:00:00Z' }];
+  assert.equal(needsReminder(old, pingedAt, day, { checks: never, carried: yes }).remind, false);
+  assert.equal(needsReminder(old, pingedAt, day, { checks: green, carried: () => false }).remind, true);
+});
+
+test('reminder: once per head, 24 h after the first ping, while Taha has not decided', () => {
+  const T0 = Date.UTC(2026, 10, 24, 12);
+  const bot = (body, createdAt = new Date(T0).toISOString()) => ({ author: { login: 'github-actions' }, body, createdAt });
+  const waiting = pr({ labels: L('ready-for-taha'), reviewRequests: [{ login: 'TahaKhanAbdalli' }] });
+  const pingedAt = [bot(`x ${pingMarker(HEAD)}`)];
+  const day = T0 + 24 * 3600e3;
+  assert.equal(needsReminder(waiting, pingedAt, day, { checks: green }).remind, true);
+  assert.equal(needsReminder(waiting, pingedAt, day - 1, { checks: green }).remind, false, 'under 24 h');
+  assert.equal(needsReminder(waiting, [], day, { checks: green }).remind, false, 'never pinged');
+  assert.equal(needsReminder(waiting, [bot(`x ${pingMarker(NEW)}`)], day, { checks: green }).remind, false, 'pinged for another head only');
+  assert.equal(needsReminder(waiting, [...pingedAt, bot(`y ${remindMarker(HEAD)}`)], day, { checks: green }).remind, false, 'already reminded');
+  assert.equal(needsReminder({ ...waiting, reviews: [rv('APPROVED')] }, pingedAt, day, { checks: green, carried: () => true }).remind, false, 'Taha approved');
+  assert.equal(needsReminder({ ...waiting, reviews: [rv('APPROVED')] }, pingedAt, day, { checks: green, carried: () => false }).remind, true, 'his Approve no longer counts (base retargeted): reminded');
+  assert.equal(needsReminder({ ...waiting, reviews: [rv('COMMENTED')] }, pingedAt, day, { checks: green }).remind, true, 'a comment still waits on his decision');
+  assert.equal(needsReminder(waiting, pingedAt, day, { checks: () => [{ name: 'CI', bucket: 'fail' }] }).remind, false, 'checks red');
+  assert.equal(needsReminder(waiting, [{ ...pingedAt[0], author: { login: 'someone' } }], day, { checks: green }).remind, false, "a person's copy of the marker doesn't count");
+  // A hotfix: a red guard holds the reminder unless its only reason is the hotfix-backport label (Taha on #2663, LOW 3).
+  const hot = { ...waiting, baseRefName: 'main', headRefName: 'hotfix/q' };
+  const gate = () => [...green(), { name: 'Release flow guard (main)', bucket: 'fail' }, { name: 'release-gate', bucket: 'pending' }];
+  assert.equal(needsReminder(hot, pingedAt, day, { checks: gate, backport: () => false }).remind, false, 'guard red for another reason');
+  assert.equal(needsReminder(hot, pingedAt, day, { checks: gate, backport: () => true }).remind, true, 'guard waits only on the label');
+});
+
+test('topics: only from the fixed list, at most 3, model noise ignored', () => {
+  assert.deepEqual(parseTopics('Billing, quotes'), ['topic:billing', 'topic:quotes']);
+  assert.deepEqual(parseTopics('ready-for-taha, hotfix, billing, billing'), ['topic:billing']);
+  assert.deepEqual(parseTopics('maps, driver, deliveries, reports'), ['topic:maps', 'topic:driver', 'topic:deliveries']);
+  assert.deepEqual(parseTopics(null), []);
+});
+
+test('summary: only title, description and file names go out; the answer is escaped and cut; failures mean no summary', async () => {
+  let sent;
+  const fetchImpl = async (url, init) => { sent = { url, body: JSON.parse(init.body), key: init.headers['x-api-key'] };
+    return { ok: true, json: async () => ({ content: [{ type: 'text', text: 'Hi <!channel> <@U1>\n'.repeat(60) }] }) }; };
+  const s = await summarize(pr({ body: 'desc' }), ['src/a.ts'], { key: 'k', fetchImpl });
+  assert.equal(sent.url, 'https://api.anthropic.com/v1/messages');
+  assert.equal(sent.body.model, 'claude-haiku-5-5');
+  assert.deepEqual(sent.body.thinking, { type: 'disabled' }, 'thinking off, or it eats the small max_tokens');
+  assert.match(sent.body.messages[0].content, /Title: fix: <!channel> quotes\nDescription:\ndesc\nChanged files:\nsrc\/a\.ts$/);
+  assert.ok(!s.includes('<') && s.length <= 400 && !s.includes('\n'), 'no Slack control text, no newlines, capped');
+  assert.equal(await summarize(pr(), [], { key: '', fetchImpl: never }), null, 'no key, no call');
+  assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false }) }), null, 'API error');
+  assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: async () => { throw new Error('timeout'); } }), null, 'network error');
+  const logged = [];
+  const log = console.log;
+  console.log = (m) => logged.push(m);
+  try {
+    await summarize(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({ error: { type: 'authentication_error', message: 'invalid x-api-key' } }) }) });
+  } finally { console.log = log; }
+  assert.deepEqual(logged, ['::warning::Haiku call failed: HTTP 401 authentication_error invalid x-api-key'], 'the API reason reaches the run log');
+  assert.match(pingText(pr(), s), /\n> AI summary of the author's description, not checked: Hi &lt;!channel&gt;/);
+  assert.doesNotMatch(pingText(pr(), null), /\n/);
+  const reply = (text) => async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text }] }) });
+  assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: reply('Safe, *approve* now: https://evil.example/x ok') }), 'Safe, approve now: ok',
+    'links and Slack formatting are stripped');
+  assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: reply('https://only.a/link') }), null, 'nothing left means no summary');
+});
+
+test('topics: an outage is retried (null), only a real but unusable answer becomes topic:none ([])', async () => {
+  const { pickTopics } = await import('./taha-ready.mjs');
+  const reply = (text) => async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text }] }) });
+  assert.equal(await pickTopics(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false }) }), null, 'API error');
+  const log = console.log;
+  console.log = () => {};
+  try {
+    const noText = async () => ({ ok: true, json: async () => ({ stop_reason: 'max_tokens', content: [{ type: 'thinking', thinking: '' }] }) });
+    assert.equal(await pickTopics(pr(), [], { key: 'k', fetchImpl: noText }), null, 'no text means retry, not topic:none');
+  } finally { console.log = log; }
+  assert.equal(await pickTopics(pr(), [], { key: 'k', fetchImpl: async () => { throw new Error('timeout'); } }), null, 'timeout');
+  assert.deepEqual(await pickTopics(pr(), [], { key: 'k', fetchImpl: reply('nothing fits') }), [], 'answered, nothing usable');
+  assert.deepEqual(await pickTopics(pr(), [], { key: 'k', fetchImpl: reply('billing') }), ['topic:billing']);
+});
+
+test("strangers' fork PRs are never labelled or pinged", () => {
+  const fork = pr({ isCrossRepository: true });
+  assert.equal(decide(fork, { checks: green, lane: inLane, sol: noSol }).act, false);
+  assert.equal(needsPing({ ...fork, labels: [{ name: 'ready-for-taha' }] }, [], { checks: green, sol: noSol, asked: () => [] }).ping, false);
+});
+
+import { backportList, BRING_CAP, FILE_CAP } from './taha-ready.mjs';
+
+test('a backport ping lists what the hotfix brings to live: PRs, bare commits, merges, then files (Taha, 2026-11-26)', () => {
+  const list = backportList({ total: 4, files: ['src/a.ts', 'src/<b>.ts'], commits: [
+    { sha: 'c'.repeat(40), message: 'feat(billing): M4 commission <x> (#2525)\n\nbody', parents: 1 },
+    { sha: 'd'.repeat(40), message: 'fix typo in the hotfix', parents: 1 },
+    { sha: 'e'.repeat(40), message: "Merge branch 'staging' into hotfix/q", parents: 2 },
+    { sha: 'f'.repeat(40), message: 'feat(billing): M4 commission (cherry-picked again) (#2525)', parents: 1 },
+  ] });
+  assert.equal(list, [
+    'Brings to live (4 commits main does not have):',
+    '• <https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/2525|#2525> feat(billing): M4 commission &lt;x&gt;',
+    '• `ddddddd` fix typo in the hotfix',
+    "• `eeeeeee` Merge branch 'staging' into hotfix/q _(merge: check any conflict fixes)_",
+    '• <https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/2525|#2525> feat(billing): M4 commission (cherry-picked again)',
+    'Files changed (2): `src/a.ts`, `src/&lt;b&gt;.ts`',
+  ].join('\n'));
+  const h = hotfix({});
+  assert.match(pingText(h, null, { backport: true, brings: list }), /\(head aaaaaaa\)\nBrings to live \(4 commits main does not have\):/);
+  // Only a backport ask carries the list.
+  assert.doesNotMatch(pingText(h, null, { backport: false, brings: list }), /Brings to live/);
+});
+
+test('the backport list is capped, counts unlisted commits, and says so when GitHub could not be read', () => {
+  const commits = Array.from({ length: BRING_CAP + 3 }, (_, i) => ({ sha: String(i).padStart(40, '0'), message: `change ${i} (#${100 + i})`, parents: 1 }));
+  const files = Array.from({ length: FILE_CAP + 5 }, (_, i) => `f${i}.ts`);
+  const list = backportList({ commits, files, total: commits.length + 2 }).split('\n');
+  assert.equal(list[0], `Brings to live (${BRING_CAP + 5} commits main does not have):`);
+  assert.equal(list.filter((l) => l.startsWith('• <')).length, BRING_CAP);
+  assert.equal(list.at(-2), '• …and 5 more');
+  assert.equal(list.at(-1), `Files changed (15): ${files.slice(0, FILE_CAP).map((f) => `\`${f}\``).join(', ')} and 5 more`);
+  assert.match(backportList(null), /Could not read what this brings to live/);
+});

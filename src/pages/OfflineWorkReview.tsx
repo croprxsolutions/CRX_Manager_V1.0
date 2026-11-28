@@ -16,6 +16,8 @@ import type {
   ResolveOfflineActionResult,
 } from '../types';
 
+const PAGE_SIZE = 100;
+
 function recordHref(item: OfflineActionReviewQueueItem): string {
   return item.operation === 'complete_delivery'
     ? `/deliveries/${item.entity_id}`
@@ -32,11 +34,27 @@ function resolutionLabel(resolution: OfflineActionReviewResolution | null): stri
   return 'Unresolved';
 }
 
+function QueuePager({ offset, total, onPage }: { offset: number; total: number; onPage: (offset: number) => void }) {
+  if (offset === 0 && total <= PAGE_SIZE) return null;
+  return (
+    <nav aria-label="Offline work review pages" className="flex flex-wrap items-center gap-3">
+      <Button variant="secondary" disabled={offset === 0} onClick={() => onPage(offset - PAGE_SIZE)}>
+        Previous
+      </Button>
+      <span className="text-sm text-secondary">Page {Math.floor(offset / PAGE_SIZE) + 1}</span>
+      <Button variant="secondary" disabled={offset + PAGE_SIZE >= total} onClick={() => onPage(offset + PAGE_SIZE)}>
+        Next
+      </Button>
+    </nav>
+  );
+}
+
 export default function OfflineWorkReview() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const [items, setItems] = useState<OfflineActionReviewQueueItem[]>([]);
   const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [includeResolved, setIncludeResolved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -48,9 +66,10 @@ export default function OfflineWorkReview() {
   const [saving, setSaving] = useState(false);
   const loadRequestSequence = useRef(0);
 
-  const loadQueue = useCallback(async () => {
+  const loadQueue = useCallback(async (requestedOffset = 0) => {
     const requestSequence = ++loadRequestSequence.current;
     setLoading(true);
+    setOffset(requestedOffset);
     setLoadError(null);
     // A permanent resolution is only safe against the queue snapshot it was opened from.
     // Invalidate it before every refresh, rather than leaving it actionable while a newer
@@ -62,8 +81,8 @@ export default function OfflineWorkReview() {
     try {
       const { data, error } = await supabase.rpc('get_offline_action_review_queue', {
         p_include_resolved: includeResolved,
-        p_limit: 100,
-        p_offset: 0,
+        p_limit: PAGE_SIZE,
+        p_offset: requestedOffset,
       });
       if (error) throw error;
       const result = assertRpcResult<OfflineActionReviewQueueResult>(
@@ -175,6 +194,8 @@ export default function OfflineWorkReview() {
     ? 'This records that the work was independently verified as already handled. It does not mark this receipt as server-processed and does not change inventory.'
     : 'This records that the saved action must never run. It does not undo any work that may already exist and does not delete the permanent receipt.';
 
+  const queueReady = !loading && !loadError;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -187,17 +208,20 @@ export default function OfflineWorkReview() {
         <Button
           variant="secondary"
           icon={<RefreshCw className="h-4 w-4" />}
-          onClick={() => void loadQueue()}
+          onClick={() => void loadQueue(offset)}
           loading={loading}
         >
           Refresh
         </Button>
       </div>
 
+      {queueReady && (
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Needs review</p>
-          <p className="mt-1 text-2xl font-bold text-amber-900">{unresolvedCount}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+            {includeResolved ? 'Needs review on this page' : 'Needs review'}
+          </p>
+          <p className="mt-1 text-2xl font-bold text-amber-900">{includeResolved ? unresolvedCount : total}</p>
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-secondary">Shown</p>
@@ -208,6 +232,7 @@ export default function OfflineWorkReview() {
           <p className="mt-1 text-2xl font-bold text-primary">{total}</p>
         </div>
       </div>
+      )}
 
       <label className="flex min-h-11 items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-primary">
         <input
@@ -220,20 +245,26 @@ export default function OfflineWorkReview() {
       </label>
 
       {loadError && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
           {loadError}
         </div>
       )}
 
-      {!loading && !loadError && items.length === 0 && (
+      {queueReady && items.length === 0 && (
         <div className="rounded-xl border border-gray-200 bg-white py-12 text-center">
           <CheckCircle2 className="mx-auto mb-3 h-10 w-10 text-crx-green" />
-          <p className="font-medium text-primary">No offline work needs office review.</p>
+          <p className="font-medium text-primary">
+            {offset > 0 ? 'No receipts remain on this page.' : includeResolved ? 'No offline work receipts to show.' : 'No offline work needs office review.'}
+          </p>
         </div>
       )}
 
+      {loading && <p role="status" className="text-sm text-secondary">Loading offline work…</p>}
+
+      {queueReady && <QueuePager offset={offset} total={total} onPage={(nextOffset) => void loadQueue(nextOffset)} />}
+
       <div className="space-y-3">
-        {items.map((item) => {
+        {queueReady && items.map((item) => {
           const resolved = item.resolved_at !== null;
           return (
             <article key={item.client_action_id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">

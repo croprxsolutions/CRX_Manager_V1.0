@@ -1,0 +1,3 @@
+## 2026-11-23 — KI-114 Piksi MG -> grams (#2267): ship after staging catch-up
+
+**Decision (Mason, 2026-11-23, in the Lane C session: "lets tell merge captain to merge piski dust 2267 and i will skip").** #2267 goes ahead now: one more Sol round (round 6) runs on the caught-up head, which carries the migration restamped to `20270303180000_piksi_mg_to_grams`. The three Sol findings Mason accepted on 2026-11-22 (DECISION_LOG.md, KI-114 entry) stay accepted; if Sol raises only those again, Mason answers the owner-accept prompt for this head in the Lane C session himself. A new BLOCKER or HIGH is fixed or brought back to him. The live apply stays a separate, held step.

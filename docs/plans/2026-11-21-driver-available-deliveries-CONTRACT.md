@@ -164,3 +164,101 @@ Proof (prover parts 6-8): five safe fields only, address rule, unknown and dupli
 | 33, 34 | Settled by Mason's two-step go-live; rollback stated in the migration header. |
 | 35 | Release 2: old devices hold only what the driver already saw; the whole-row read ends there. |
 | 36 | Screens PR: browser proof of take, open the stop, see the farm contact. |
+
+## Release 2 (#2162): drivers read farms only through `get_driver_customers`
+
+Read at `origin/staging` 3a9694685 (2026-11-22), plus #2165 head 09d7ffade for the screens; real-schema container with every migration.
+
+### Facts
+
+- `customers_select` (`20261013220000`, unchanged since; live md5 `7b5322d9…`): admin, sales rep, a driver for any farm on a delivery assigned to them dated yesterday or later (whole row), an applicator for the farm of their job in the last 7 days. `customers_select_location_dispatchee` is a separate rule (job dispatches; no crew member is a driver live, 2026-11-22).
+- Invoker functions a driver's screens call that read `customers`: only `get_deliveries_keyset_page` (the driver Deliveries list) and `get_notes_for_entity` (notes linked to a customer: a driver loses them, as they lose the farm row; delivery notes are unaffected). No view reads `customers`; no other table's rule reads it except office-only storage rules.
+- #2165 screens: every driver farm read goes through `get_driver_customers`. Three direct reads still run for a driver and come back empty after this change with no visible effect: the office customer filter on Deliveries (hidden for drivers), the team-board note context card (hidden when empty), the related-invoice embed on DeliveryDetail (never shown to drivers).
+- Live, 2026-11-22: 154 customers, 110 deliveries, 2 active drivers; deliveries assigned to non-drivers are admin or sales rep only.
+- Old app copies (before #2165) read `customers` directly in FieldRoute, FieldStop and DeliveryDetail; after this change they show "Unknown customer" and no phone or address.
+
+### Outcome and authority
+
+1. `customers_select` loses its driver branch; everything else in it is unchanged. `customers_select_location_dispatchee` is unchanged: office staff may add any profile to a field crew (`ground_crew_members_insert`), and a driver on a dispatched crew is field crew and sees what field crew sees, the whole farm record and the job paperwork included (Mason, 2026-11-22, "2: Yes"; Astra #2, Sol round 1 #1). Live: no driver is on a crew.
+2. New `_delivery_list_customer_labels()` (definer, stable, fixed search path, authenticated + service_role): `id, farm_name, farm_group_name` (top parent) only. Active admin or sales rep: every customer on a delivery. Active driver: customers on deliveries assigned to them. Sales rep and driver need the Deliveries page (the `get_available_deliveries_for_driver` check); an admin is always admitted, as in the app. Anyone else (inactive, or another role holding an assignment): nothing, as `is_driver()` gave them before (Astra #3). A driver already may see every farm's name (Mason, 2026-11-21), so this is narrower than allowed.
+3. `get_deliveries_keyset_page` reads names from the helper; otherwise byte-for-byte the `20270201110000` body (still invoker). Office output identical. A driver's list now also shows the top farm group and names on deliveries older than yesterday (before: none and "Unknown", since a driver could not read the parent farm), within Mason's "every farm's name" decision.
+4. No screen change: #2165 already reads farms through the lookup.
+
+### Delivery (timing)
+
+- The open release PR follows `staging`, so a merge into `staging` ships in the next release. This PR was first held until #2165 was live in production, so the farm read would end one release after the screens that replace it. **Mason lifted that hold on 2026-11-24** ("i dont understand why we cant merge 2217 we have no hold"): #2165 and #2162 ship in the same release. Opening the app does not prove a driver runs the new screens: it can resume an old copy, and the update prompt offers "Later" (`src/components/UpdatePrompt.tsx`), so the office confirms each driver fully closed and reopened it after the app went live. (The earlier two-release plan had each driver reload before the production apply; Sol rounds 2-3.)
+- **Same-release go-live (Luna, 2026-11-24):** a release migration applies to production a few minutes before the release's app goes live, so for those minutes every driver runs the old screens against the new rule and sees "Unknown customer" and no phone or address; a reload before the apply cannot help, because the new screens are not live yet. So: (1) apply this migration when no driver is out on a route (evening or before the day starts); (2) once the release's app is live, the office has both drivers fully close and reopen the app; until a driver does, their stop screens show no farm details (no data or money affected).
+- Recovery: fix forward (repair the helper, the list or the screens). Restoring the drivers' whole-row read would reopen the exposure and needs Mason's explicit security decision first.
+
+### Proof cases (`scripts/smoke/prove-drivers-read-farms-only-through-lookup-real-schema.mjs`, local Docker)
+
+1. When a driver reads `customers` directly, then no row through a delivery, not even the farm on their own delivery (before: the whole row); a driver on a dispatched crew still reads that job's farm; an inactive driver on that crew reads nothing.
+2. When admin or sales rep read `customers`, then every row and column; an applicator still reads their recent job's farm and the farm of a job location dispatched to them, and no other.
+3. When a driver loads their Deliveries list, then each delivery keeps its farm name and top farm group (also an old delivery), search by farm group works, no other delivery and no secret appears; admin and sales rep responses are identical to before for every sort key both ways, two searches, a status filter and a short page.
+4. When anyone calls the helper, then only three columns; driver: their deliveries' farms; office: every farm on a delivery; an applicator holding a delivery assignment, an inactive driver, and a driver or sales rep denied the Deliveries page: nothing; anon: no execute.
+5. When a driver calls `get_driver_customers`, then it still answers. Since #2392 (`20270228150000`, merged 2026-11-24) the lookup only returns farms on the driver's own recent or open deliveries; the preflight pins that body (md5 `d0750901…`), and the migration was restamped to `20270302120000` to run after it.
+6. When a driver calls every function a signed-in user may run (definer and invoker; every uuid argument tried as the delivery farm, the crew farm, its job and its job field), then none returns the delivery farms' seeded credit limit, prepay, terms or notes; the same sweep as an admin does find them. Limit: other argument types get NULL and erroring calls are skipped; the guarantee is the read rule, proved directly in case 1.
+
+### Challenge settlement (Astra gpt-6.2-astra high, 38 findings, 2026-11-22)
+
+| Finding | Settlement |
+|---|---|
+| #2 crew-dispatched driver keeps the whole row | DECISION: Mason, 2026-11-22: a driver on a crew is field crew ("2: Yes"); rule unchanged; proof 1 |
+| #3 helper gave labels to any active assignee | Fixed: driver only; proof 4 |
+| #4 inactive driver | Refuted: `is_driver()` requires an active profile, same as before; proof 4 |
+| #5 helper office branch vs `is_admin()`/`is_sales_rep()` | Refuted: same active-role check; no service_role caller of the list |
+| #6 farm group shown to drivers | Settled: Mason's "drivers see every farm's name" (2026-11-21); the Available list already shows it |
+| #1, #38 a smaller design (no helper) | Refuted: #2162 prescribes a server-side farm-name source for drivers; the helper is narrower than `get_driver_customers` |
+| #11, #14 screen still offers direct reads | Server denies; the three remaining reads are hidden or empty (Facts) |
+| #12 team-board context card | Only the credit-limit card disappears for drivers, as intended |
+| #24, #25 office parity coverage | Proof 3 widened to 20 variants; driver list is unpaged |
+| #28-#30 old app copies / timing | Delivery (timing) above; Mason's two-step decision |
+| #31 cached REST responses | Refuted: the service worker does not cache Supabase REST |
+| #36, #37 rollback reopens exposure | Recovery is fix-forward |
+| #15-#18 | Belong to #2165 or earlier proofs |
+| Others | Wording, or declined as out of scope |
+
+### Sol round 1 settlement (2026-11-22)
+
+| Finding | Settlement |
+|---|---|
+| HIGH 1 crew driver gets account number via billed-customer functions | DECISION: Mason "2: Yes", crew drivers are field crew; dispatch rule left unchanged |
+| HIGH 2 preflight passes without the address lookup | Fixed: preflight pins the 20270207120000 `get_driver_customers` body |
+| MED 3 helper skips the Deliveries page check | Fixed: driver branch requires the page; proof 4 |
+| MED 4 service_role / applicator assignee lose labels | Refuted: no service_role caller (no Edge Function calls the list); live, non-driver assignees are admin or sales rep only |
+| MED 5 autocommit without ON_ERROR_STOP | Refuted: `scripts/apply-migration-file.mjs` runs the file and its ledger row in one transaction |
+| MED 6 row level security off | Fixed: preflight and postflight require it on `customers` |
+| MED 7 sweep uses one uuid | Fixed: four uuids; remaining limit named in proof 6 |
+| LOW 8 comment | Fixed |
+
+### Sol round 2 settlement (2026-11-22)
+
+| Finding | Settlement |
+|---|---|
+| HIGH 1 opening the app is not proof of the update | Fixed: Delivery (timing) now requires each driver's confirmed reload before the release merges |
+| MED rep denied the page still gets labels | Fixed: page check for every role; proof 4 |
+| MED autocommit without stop-on-error | Refuted as round 1: the apply script wraps the file in one transaction |
+| MED lookup execute grant drift | Fixed: preflight requires authenticated execute on `get_driver_customers` |
+| MED no lock timeout | Fixed: `SET LOCAL lock_timeout = '5s'` |
+| LOW service_role / applicator assignee | Refuted as round 1: no such caller or live row |
+| LOW keyset bookmark across the apply | Accepted: one page may skip an old delivery once, at the apply moment; reload fixes it |
+| LOW sweep claim | Fixed: comment narrowed |
+| LOW wrong function name in comment | Fixed |
+
+### Sol round 3 settlement (2026-11-22)
+
+| Finding | Settlement |
+|---|---|
+| HIGH 1 lookup could be SECURITY INVOKER | Fixed: preflight requires `get_driver_customers` to be SECURITY DEFINER |
+| HIGH 2 confirmation placed after the apply | Fixed: drivers confirm a reload before the production apply; residual one-reload risk named |
+| MED 3 admin with a stored page denial | Fixed: admins always get labels |
+| MED 4 service_role caller | Refuted as rounds 1-2: no service_role caller of the list |
+| MED 5 autocommit without stop-on-error | Refuted as rounds 1-2: the apply script wraps the file in one transaction |
+| MED 6 changelog claim too broad | Fixed: names the whole-record read only; site addresses and receipt contacts are other, earlier paths |
+| LOW 7 sweep timeout inside the statement | Declined: the sweep has finished in seconds on every run |
+| LOW 8 old delivery shares a farm | Fixed: the old delivery uses its own farm (Bravo) |
+| LOW 9 cursor across the apply | Accepted as round 2 |
+
+### Open business decisions
+
+None. Mason, 2026-11-22: a driver put on a field crew is field crew ("2: Yes"). Mason, 2026-11-21: two-step go-live, drivers see every farm's name, phone, email and addresses through the lookup only.

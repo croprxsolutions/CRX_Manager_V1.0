@@ -40,6 +40,7 @@ Choose exactly one:
 
 - `uncommitted` for staged, unstaged, and untracked work in this checkout.
 - `base-main` for a branch review against `main`.
+- `base-staging` for the full committed feature branch diff since its merge base with `origin/staging`. Fetch staging first and start from a clean checkout.
 - `commit` for one commit SHA.
 
 If the scope is unclear, ask Mason one short question.
@@ -58,6 +59,18 @@ For a branch review:
 node scripts/run-claude-review.mjs --scope base-main --model opus --effort high --timeout-ms 900000 --reason "<what Claude should review>"
 ```
 
+For a Codex feature branch targeting staging, run the trusted base version of the wrapper. If the branch changes the wrapper itself, or the trusted version lacks `base-staging`, supply the exact frozen staging diff to a separate read-only review with the trusted runner.
+
+```powershell
+git fetch origin refs/heads/staging:refs/remotes/origin/staging
+if ($LASTEXITCODE -ne 0) { throw 'Could not refresh origin/staging' }
+$dirty = git status --porcelain
+if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Use a clean checkout before reviewing' }
+git diff --no-ext-diff --no-textconv --quiet origin/staging HEAD -- scripts/run-claude-review.mjs
+if ($LASTEXITCODE -ne 0) { throw 'Use the trusted runner with the frozen staging diff' }
+node scripts/run-claude-review.mjs --scope base-staging --model claude-opus-5-5 --effort high --timeout-ms 900000 --reason "Review the full staging feature branch diff before push"
+```
+
 For one commit:
 
 ```powershell
@@ -70,12 +83,14 @@ The wrapper captures Claude's output at:
 
 The wrapper supplies the exact scoped diff in the prompt and restricts the headless reviewer to `Read`, `Grep`, and `Glob`. Bash and write-capable tools are denied, so a normal read-only review does not depend on plan-mode handoffs or shell permission prompts.
 
-It also writes a unique per-run capture under `.claude/session-state/history/` and records the requested/resolved model, effort, CLI version, repo HEAD, scope fingerprint, prompt hash, terminal reason, and permission denials. A clean base-main run additionally mints (or clears) the HEAD-bound Claude push proof at `.claude/session-state/claude-review-push.json`.
+It also writes a unique per-run capture under `.claude/session-state/history/` and records the requested/resolved model, effort, CLI version, repo HEAD, scope fingerprint, prompt hash, terminal reason, and permission denials. A clean base-main run additionally mints (or clears) the HEAD-bound Claude push proof at `.claude/session-state/claude-review-push.json`. The staging scope leaves that legacy proof alone and blocks the capture if the head, staging ref, merge base, or checkout cleanliness changes during review.
 
 The wrapper emits one execution state:
 
 - `VERIFIED` — Claude returned a complete structured result with no permission denials.
 - `BLOCKED` — timeout, CLI failure, invalid/missing output, or denied evidence access. `BLOCKED` is never a clean review and never satisfies a ship or dry-cycle gate.
+
+For the staging scope, require the separate clean verdict and confirm the capture identifies the actual reviewer as `claude-opus-5-5` and covers the full proposed range. A `VERIFIED` execution state by itself only confirms that the model returned a complete result.
 
 ## Step 3 - Reconcile
 

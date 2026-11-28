@@ -128,6 +128,13 @@ export interface ApplicatorSheetField {
   acres: number;
   crop: string | null;
   pest: string | null;
+  /** The field's map pin, for the printed directions link (saved jobs only). */
+  location?: { lat: number; lng: number } | null;
+}
+
+/** Google Maps driving directions to a field's map pin. */
+export function fieldDirectionsUrl(location: { lat: number; lng: number }): string {
+  return `https://www.google.com/maps/dir/?api=1&destination=${location.lat.toFixed(6)},${location.lng.toFixed(6)}`;
 }
 
 /** One product line, with the per-product total + gallon/lb conversion. */
@@ -165,6 +172,15 @@ export interface ApplicatorSheetCustomer {
   account_number: string | null;
 }
 
+/** A crew field sheet requires a complete payer list before it can print. */
+export function requireApplicatorSheetPayers(
+  customers: ApplicatorSheetCustomer[],
+  complete: boolean,
+): ApplicatorSheetCustomer[] {
+  if (!complete || customers.length === 0) throw new Error('Could not load billed customers for the field sheet');
+  return customers;
+}
+
 /** One prior application shown under a field on the operational sheet. */
 export interface PreviousApplicationRecord {
   date: string;
@@ -187,6 +203,19 @@ export interface ApplicatorSheetBillingSplit {
   phone: string | null;
 }
 
+/**
+ * One job order line's safety facts for the optional safety sheet, ALL read from the
+ * product's record at print time (Mason, 2026-11-24: "Yes, today's records"). The job
+ * order itself keeps its own saved REI/PHI. null = not on file (prints "See label").
+ */
+export interface ApplicatorSheetSafety {
+  product_name: string;
+  epa_registration: string | null;
+  signal_word: string | null;
+  rei_hours: number | null;
+  phi_days: number | null;
+}
+
 /** The full, format-agnostic sheet payload. All three layouts read this. */
 export interface ApplicatorSheetData {
   job_number: string;
@@ -206,6 +235,8 @@ export interface ApplicatorSheetData {
   previousApplications?: PreviousFieldApplications[];
   /** Optional billed-customer allocation rows for the operational packet. */
   billingSplits?: ApplicatorSheetBillingSplit[];
+  /** Present only when the safety sheet was chosen: one row per saved product line; null = could not be read. */
+  safety?: ApplicatorSheetSafety[] | null;
 }
 
 // ── Raw input shapes (what JobDetail hands in) ───────────────────────────────

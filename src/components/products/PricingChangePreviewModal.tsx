@@ -6,10 +6,12 @@ import {
   type PricingPreviewResult,
   type PricingPreviewRow,
 } from '../../lib/productPricing';
+import { nearCostProducts } from '../../lib/nearCostPricing';
 import type { ProductCostBasisType } from '../../types';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import PricingWarningAcknowledgements from './PricingWarningAcknowledgements';
+import NearCostConfirmations from './NearCostConfirmations';
 
 interface PricingChangePreviewModalProps {
   open: boolean;
@@ -25,9 +27,37 @@ const ERROR_MESSAGES: Record<string, string> = {
   PRICING_ROW_CONFLICT:
     'This product changed after the pricing data was loaded. Refresh the product and preview it again.',
   PRICING_REASON_REQUIRED:
-    'Give a reason for this price or cost change.',
+    'Give a reason for this price or cost change (the change_reason column on a price sheet).',
   PRICING_SOURCE_REQUIRED:
-    'Choose a source for the new price or cost.',
+    'Say where the new price or cost came from, such as a supplier quote (the price_source column on a price sheet).',
+  // The database refuses these before saving anything; say which cell rule broke, not the code.
+  PRICING_DOLLARS_INVALID:
+    'A price or cost on this row is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34: no $ sign, commas, letters or minus sign. A row you are repricing needs a cost; a price-driven row also needs all three tier prices.',
+  PRICING_PRICE_INVALID:
+    'A tier price must be 0 or more, with at most 2 decimals.',
+  PRICING_COST_INVALID:
+    'The cost must be 0 or more, with at most 2 decimals. A margin-driven row needs a cost above 0.',
+  PRICING_MARGIN_PERCENT_INVALID:
+    'Each margin % must be a plain number from 0 up to, but not including, 100, like 18.5.',
+  PRICING_MARGIN_INVALID:
+    'Each margin % must be from 0 up to, but not including, 100.',
+  PRICE_DRIVEN_FIELDS_INVALID:
+    'A price-driven change needs all three tier prices filled in, and no margin % changes.',
+  MARGIN_DRIVEN_FIELDS_INVALID:
+    'A margin-driven change needs all three tier margin % values filled in, and no price changes.',
+  // The database allows each companion cell only blank or exactly as downloaded, in either mode.
+  PRICE_DRIVEN_COMPANION_FIELDS_CHANGED:
+    'This row is price-driven, so its margin % cells must stay as downloaded. To change margins instead, first put all three tier price cells back as downloaded, then set pricing_mode to margin_driven.',
+  MARGIN_DRIVEN_COMPANION_FIELDS_CHANGED:
+    'This row is margin-driven, so its tier price cells must stay as downloaded. To change prices instead, first put all three margin % cells back as downloaded, then set pricing_mode to price_driven.',
+  PRICING_MODE_INVALID:
+    'Choose price_driven or margin_driven in the pricing_mode column.',
+  PRICING_ZERO_PRICE_BELOW_COST:
+    'A tier price of 0 is below this product\'s cost. Enter the real price.',
+  PRICING_PRODUCT_INACTIVE:
+    'This product is turned off, so its prices cannot be changed here.',
+  WORKBOOK_UNKNOWN_PRODUCT:
+    'This product was not in the price sheet you downloaded. Download a fresh price sheet to price it.',
   PRICING_REASON_TOO_LONG:
     'The reason is longer than 500 characters. Shorten it and try again.',
   PRICING_SOURCE_TOO_LONG:
@@ -37,7 +67,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   WORKBOOK_IDENTITY_OR_BASELINE_TAMPERED:
     'Protected product or baseline pricing details no longer match the exported worksheet.',
   WORKBOOK_BLANK_MODE_CHANGED_VALUES:
-    'Pricing values changed, but no pricing mode was selected for this row.',
+    'Prices, costs or margin % changed on this row, but its pricing_mode cell is blank. Choose price_driven or margin_driven.',
   WORKBOOK_V2_EXPORT_REQUIRED:
     'This workbook is from an older template. Export a fresh Product pricing workbook and try again.',
   PRODUCT_INFO_FIELDS_REQUIRED:
@@ -143,7 +173,7 @@ function displayDollars(value: string | null): string {
 }
 
 function displayMargin(value: string | null): string {
-  return value === null ? '—' : `${value}%`;
+  return value === null ? '—' : `${Number(Number(value).toFixed(2))}%`;
 }
 
 function displayPerAcre(value: bigint | null | undefined): string | null {
@@ -210,7 +240,7 @@ function PricingEffectDetails({ effect }: { effect: PricingEffect }) {
           const oldPerAcre = displayPerAcre(tier.oldPerAcreCents);
           const grossMargin = tier.grossMargin == null
             ? null
-            : `${Number((tier.grossMargin * 100).toFixed(8))}%`;
+            : displayMargin(String(tier.grossMargin * 100));
 
           return (
             <div
@@ -309,6 +339,73 @@ function ProductInfoEffectDetails({ effect }: { effect: PricingEffect }) {
   );
 }
 
+const ROW_ORDER: Record<PricingPreviewRow['row_status'], number> = {
+  invalid: 0,
+  conflict: 1,
+  ready: 2,
+  unchanged: 3,
+};
+
+/** An unchanged row with nothing to approve; a basis-only selection is unchanged but still shown. */
+function isFoldedRow(row: PricingPreviewRow): boolean {
+  return row.row_status === 'unchanged' && row.submitted_row.basis_selection !== true;
+}
+
+function PreviewRow({ row, sheet }: { row: PricingPreviewRow; sheet: boolean }) {
+  const product = productLabel(row);
+  const errorMessage = readableError(row.error_code);
+  const hasNegativeMargin = Boolean(
+    row.effect && [
+      row.effect.tier1_margin,
+      row.effect.tier2_margin,
+      row.effect.tier3_margin,
+    ].some((margin) => typeof margin === 'number' && margin < 0),
+  );
+
+  return (
+    <li className={`rounded-xl border p-4 ${hasNegativeMargin ? 'border-amber-300' : 'border-gray-200'}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-nav-dark">{product.name}</div>
+          {product.detail && <div className="mt-0.5 text-xs text-secondary">{product.detail}</div>}
+          {/* sequence is the row's 1-based place in the upload; row 1 of the sheet is the header. */}
+          {sheet && <div className="mt-0.5 text-xs text-secondary">Excel row {row.sequence + 1}</div>}
+        </div>
+        <span
+          className={`rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_CLASSES[row.row_status]}`}
+        >
+          {STATUS_LABELS[row.row_status]}
+        </span>
+      </div>
+      {errorMessage && (
+        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+          {errorMessage}
+        </div>
+      )}
+      <BasisReviewDetails row={row} />
+      {row.effect && <ProductInfoEffectDetails effect={row.effect} />}
+      {row.effect && row.effect.pricing_changed !== false
+        && <PricingEffectDetails effect={row.effect} />}
+    </li>
+  );
+}
+
+/** The whole preview is refused when any row is: say so, and say how to fix it. */
+function NothingSavedNotice({ preview }: { preview: PricingPreviewResult }) {
+  const problems = preview.invalid_count + preview.conflict_count;
+  const sheet = preview.source === 'pricing_worksheet';
+  if (problems === 0) return null;
+  return (
+    <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="status">
+      Nothing was saved. {problems} row{problems === 1 ? ' needs' : 's need'} attention and {problems === 1 ? 'is' : 'are'} listed first below.
+      {sheet && preview.invalid_count > 0 && ' Fix the Invalid rows in your Excel file, then upload it again. If a row cannot be fixed there (for example, the product was turned off), download a fresh price sheet.'}
+      {sheet && preview.conflict_count > 0
+        && ' A Conflict row changed in CRX after you downloaded the sheet: download a fresh price sheet and make that change there.'}
+      {!sheet && ' Fix the problem shown below, then preview again.'}
+    </p>
+  );
+}
+
 export default function PricingChangePreviewModal({
   open,
   preview,
@@ -325,13 +422,31 @@ export default function PricingChangePreviewModal({
   const reasonsByProduct = reasons.changeSetId === changeSetId ? reasons.byProduct : {};
   const warnings = preview?.warnings ?? [];
   const acknowledgements = pricingAcknowledgements(warnings, reasonsByProduct);
+  // Near-cost ticks belong to one preview, like the reasons: a new preview starts unticked.
+  const [nearCostTicks, setNearCostTicks] = useState<{ changeSetId: string | null; products: ReadonlySet<string> }>(
+    { changeSetId: null, products: new Set() },
+  );
+  const tickedNearCost = nearCostTicks.changeSetId === changeSetId ? nearCostTicks.products : new Set<string>();
+  const nearCost = preview ? nearCostProducts(preview.rows) : [];
+  const nearCostConfirmed = nearCost.every((product) => tickedNearCost.has(product.product_id));
   const canApprove = Boolean(
     preview?.apply_allowed
       && (preview.status === 'previewed' || preview.status === 'no_changes')
       && (preview.ready_count > 0 || (preview.basis_change_count ?? 0) > 0)
-      && acknowledgements !== null,
+      && acknowledgements !== null
+      && nearCostConfirmed,
   );
   const orderedRows = preview ? [...preview.rows].sort((a, b) => a.sequence - b.sequence) : [];
+  // A full price sheet has ~1,200 rows: problems first, then ready rows; plain unchanged rows fold away.
+  const shownRows = orderedRows
+    .filter((row) => !isFoldedRow(row))
+    .sort((a, b) => ROW_ORDER[a.row_status] - ROW_ORDER[b.row_status]);
+  const foldedRows = orderedRows.filter(isFoldedRow);
+  const [unchangedOpenFor, setUnchangedOpenFor] = useState<PricingPreviewResult | null>(null);
+  // Closing the modal folds the unchanged rows again, even if the same preview reopens.
+  if (!open && unchangedOpenFor !== null) setUnchangedOpenFor(null);
+  const showUnchanged = preview !== null && unchangedOpenFor === preview;
+  const sheet = preview?.source === 'pricing_worksheet';
 
   return (
     <Modal
@@ -347,7 +462,7 @@ export default function PricingChangePreviewModal({
           </Button>
           {(preview?.status === 'previewed'
             || (preview?.status === 'no_changes' && (preview.basis_change_count ?? 0) > 0)) && (
-            <Button onClick={() => acknowledgements && onApprove(acknowledgements)} disabled={!canApprove} loading={applying}>
+            <Button onClick={() => canApprove && acknowledgements && onApprove(acknowledgements)} disabled={!canApprove} loading={applying}>
               Apply approved changes
             </Button>
           )}
@@ -412,49 +527,41 @@ export default function PricingChangePreviewModal({
             />
           )}
 
-          <ol className="space-y-3" aria-label="Pricing preview rows">
-            {orderedRows.map((row) => {
-              const product = productLabel(row);
-              const errorMessage = readableError(row.error_code);
-              const hasNegativeMargin = Boolean(
-                row.effect && [
-                  row.effect.tier1_margin,
-                  row.effect.tier2_margin,
-                  row.effect.tier3_margin,
-                ].some((margin) => typeof margin === 'number' && margin < 0),
-              );
+          {preview.status === 'previewed' && (
+            <NearCostConfirmations
+              products={nearCost}
+              ticked={tickedNearCost}
+              disabled={applying}
+              onTickChange={(productId, ticked) => {
+                const next = new Set(tickedNearCost);
+                if (ticked) next.add(productId); else next.delete(productId);
+                setNearCostTicks({ changeSetId, products: next });
+              }}
+            />
+          )}
 
-              return (
-                <li
-                  key={`${row.sequence}-${row.product_id ?? 'unknown'}`}
-                  className={`rounded-xl border p-4 ${
-                    hasNegativeMargin ? 'border-amber-300' : 'border-gray-200'
-                  }`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-nav-dark">{product.name}</div>
-                      {product.detail && <div className="mt-0.5 text-xs text-secondary">{product.detail}</div>}
-                    </div>
-                    <span
-                      className={`rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_CLASSES[row.row_status]}`}
-                    >
-                      {STATUS_LABELS[row.row_status]}
-                    </span>
-                  </div>
-                  {errorMessage && (
-                    <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
-                      {errorMessage}
-                    </div>
-                  )}
-                  <BasisReviewDetails row={row} />
-                  {row.effect && <ProductInfoEffectDetails effect={row.effect} />}
-                  {row.effect && row.effect.pricing_changed !== false
-                    && <PricingEffectDetails effect={row.effect} />}
-                </li>
-              );
-            })}
+          {preview.status === 'invalid' && <NothingSavedNotice preview={preview} />}
+
+          <ol className="space-y-3" aria-label="Pricing preview rows">
+            {shownRows.map((row) => <PreviewRow key={`${row.sequence}-${row.product_id ?? 'unknown'}`} row={row} sheet={sheet} />)}
           </ol>
+          {foldedRows.length > 0 && (
+            <Button
+              variant="secondary"
+              aria-expanded={showUnchanged}
+              onClick={() => setUnchangedOpenFor(showUnchanged ? null : preview)}
+            >
+              {showUnchanged ? 'Hide' : 'Show'} {foldedRows.length.toLocaleString()} unchanged row{foldedRows.length === 1 ? '' : 's'}
+            </Button>
+          )}
+          {/* After the button, so moving forward from it reaches the rows it reveals. */}
+          {showUnchanged && (
+            <ol className="space-y-3" aria-label="Unchanged pricing preview rows">
+              {foldedRows.map((row) => (
+                <PreviewRow key={`${row.sequence}-${row.product_id ?? 'unknown'}`} row={row} sheet={sheet} />
+              ))}
+            </ol>
+          )}
         </div>
       )}
     </Modal>

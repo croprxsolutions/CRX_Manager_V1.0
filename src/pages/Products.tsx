@@ -17,7 +17,8 @@ import PricingSourceReasonModal, { type PricingSourceReason } from '../component
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, sanitizeError, checkMutationResult, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
-import { isSetupIncomplete, listProductCategories, type SetupFilter } from '../lib/productSetup';
+import { epaCoveredProductIds, isSetupIncomplete, listProductCategories, type SetupFilter } from '../lib/productSetup';
+import { fetchBrandEpaOwners } from '../lib/epaBatchFill';
 import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
@@ -30,6 +31,7 @@ import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
 import ProductRateLockControl from '../components/products/ProductRateLockControl';
 import ProductSetupWorkbookModal from '../components/products/ProductSetupWorkbookModal';
+import BrandDocumentFixList from '../components/products/BrandDocumentFixList';
 import RateReviewWorkbookModal from '../components/products/RateReviewWorkbookModal';
 import { loadProductRateLock } from '../lib/productRateLock';
 import type { Product, ProductCategory, ProductRateLock, SalesSheetFormat } from '../types';
@@ -38,6 +40,7 @@ import {
   approvePricingChangeSet,
   createPricingWorkbookExport,
   defaultPricingMode,
+  getPricingWorkbookExportRefusalReason,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
   pricingMarginTextIsValid,
@@ -51,8 +54,11 @@ import {
 } from '../lib/productPricing';
 import {
   groupedUseTimingRefusal,
+  isPriceSheetRefusal,
   MAX_PRICING_WORKBOOK_FILE_BYTES,
   MAX_PRICING_WORKBOOK_ROWS,
+  priceSheetReasonText,
+  priceSheetRefusalText,
 } from '../lib/productPricingWorkbook';
 import {
   generateProductPricingWorkbookWithSupplierEvidence,
@@ -146,6 +152,7 @@ function storedMarginPercent(value: number | null | undefined): string | null {
 }
 
 const NO_ROWS: never[] = [];
+const NO_IDS: ReadonlySet<string> = new Set();
 
 /** A read that failed, or whose last refresh failed (its data may be out of date). */
 function readFailed(read: LoadState<unknown>): boolean {
@@ -189,6 +196,26 @@ function NetMarginNote({ margin, floor }: { margin: number; floor: number | unde
   );
 }
 
+/**
+ * A price sheet upload's error message. For the server's combined refusal the database names the one reason;
+ * NONE, an unknown code or a failed lookup keeps the general message.
+ */
+async function priceSheetUploadErrorText(
+  error: unknown,
+  exportId: string | null,
+  expiresAt: string | null,
+): Promise<string> {
+  const message = (expiresAt && priceSheetRefusalText(error, expiresAt)) || sanitizeError(error);
+  if (!exportId || !isPriceSheetRefusal(error)) return message;
+  const reason = await getPricingWorkbookExportRefusalReason(exportId).catch((lookupError: unknown) => {
+    // Sentry keeps only a breadcrumb's category (src/lib/sentry.ts), so the category tells a timeout from a failure.
+    const timedOut = lookupError instanceof Error && lookupError.name === 'TimeoutError';
+    Sentry.addBreadcrumb({ category: timedOut ? 'pricing.refusal_reason_timeout' : 'pricing.refusal_reason_failed', level: 'warning' });
+    return null;
+  });
+  return (reason && priceSheetReasonText(reason)) || message;
+}
+
 export default function Products() {
   const { role, profile } = useAuth();
   const navigate = useNavigate();
@@ -208,6 +235,8 @@ export default function Products() {
   const [parentsReload, setParentsReload] = useState(0);
   const parentsRead = useLoad('product-parents', readProductParents,
     { refreshToken: parentsReload, report: { extra: { context: 'get_product_parents' } } });
+  // Generics keep their EPA numbers on their brands; until this loads, the badge checks the product's own number only.
+  const brandEpaRead = useLoad('product-brand-epa-owners', fetchBrandEpaOwners, { report: { extra: { context: 'brand_epa_owners' } } });
 
   const loadError = productsRead.status === 'failed';
   // A failed refresh keeps the old rows on screen; actions on them wait for a fresh list.
@@ -221,6 +250,12 @@ export default function Products() {
   const loadedFloors = floorsRead.status === 'loaded' && !floorsRead.stale ? floorsRead.data : null;
   const categoryChoices = categoriesRead.status === 'loaded' ? categoriesRead.data : NO_ROWS;
   const parents = parentsRead.status === 'loaded' ? parentsRead.data : NO_ROWS;
+  const brandEpaData = brandEpaRead.status === 'loaded' ? brandEpaRead.data : null;
+
+  const epaCovered = useMemo(() => epaCoveredProductIds(parents, loadedProducts,
+    brandEpaData?.parentIds ?? NO_IDS,
+    brandEpaData?.productIds ?? NO_IDS), [parents, loadedProducts, brandEpaData]);
+  const setupIncomplete = useCallback((row: Product) => isSetupIncomplete(row, epaCovered), [epaCovered]);
 
   const { parentByProduct, parentIndex } = useMemo(() => {
     const byProduct = new Map<string, ProductParent>();
@@ -265,6 +300,8 @@ export default function Products() {
   const [vendorFilter, setVendorFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
   const [setupFilter, setSetupFilter] = useState<SetupFilter>('');
+  // The table owns its search box; it reports the text so the price sheet can match what the table shows.
+  const [tableSearch, setTableSearch] = useState('');
   const [bulkProductImportOpen, setBulkProductImportOpen] = useState(false);
   const [setupWorkbookOpen, setSetupWorkbookOpen] = useState(false);
   const [rateReviewOpen, setRateReviewOpen] = useState(false);
@@ -290,7 +327,19 @@ export default function Products() {
   const [workbookBusy, setWorkbookBusy] = useState(false);
   const [tableRevision, setTableRevision] = useState(0);
   const [isEditingProducts, setIsEditingProducts] = useState(false);
+  // A floor read failed while the table was in edit mode: its floor drafts were typed against floors that may since
+  // have changed, so they stay unsaveable until the edit is cancelled or saved, even after Try again (#2308).
+  const [floorDraftsVoid, setFloorDraftsVoid] = useState(false);
+  if (floorsFailed && isEditingProducts && !floorDraftsVoid) setFloorDraftsVoid(true);
+  const changeEditMode = (editing: boolean) => {
+    setIsEditingProducts(editing);
+    if (!editing) setFloorDraftsVoid(false);
+  };
   const pricingWorkbookInputRef = useRef<HTMLInputElement>(null);
+  // Each price sheet upload's number: only the latest chosen file may show a review or a message.
+  const pricingUploadSeq = useRef(0);
+  // Leaving the page retires any upload still waiting, so its late message never shows on a later visit.
+  useEffect(() => () => { pricingUploadSeq.current += 1; }, []);
 
   const previewPricingIdem = useIdempotencyKey('preview_product_pricing_changes', profile?.id || '');
   const approvePricingIdem = useIdempotencyKey('approve_pricing_change_set', profile?.id || '');
@@ -318,8 +367,8 @@ export default function Products() {
     if (statusFilter === 'inactive' && p.is_active) return false;
     return true;
   });
-  const incompleteCount = listFiltered.filter(isSetupIncomplete).length;
-  const filtered = setupFilter === 'incomplete' ? listFiltered.filter(isSetupIncomplete) : listFiltered;
+  const incompleteCount = listFiltered.filter(setupIncomplete).length;
+  const filtered = setupFilter === 'incomplete' ? listFiltered.filter(setupIncomplete) : listFiltered;
 
   const { selected, toggleSelect, toggleAll, clearSelection, selectedCount, selectedRows, allSelected } =
     useRowSelection({
@@ -561,12 +610,14 @@ export default function Products() {
     floorsFailed && 'margin floors',
     readFailed(categoriesRead) && 'product categories',
     readFailed(parentsRead) && 'product groups',
+    readFailed(brandEpaRead) && 'brand EPA numbers',
   ].filter(Boolean);
   const retryFailedReads = () => {
     if (listStale) void reloadProducts();
     if (floorsFailed) void reloadFloors();
     if (readFailed(categoriesRead)) void categoriesRead.reload();
     if (readFailed(parentsRead)) void parentsRead.reload();
+    if (readFailed(brandEpaRead)) void brandEpaRead.reload();
   };
 
   const applyActiveReview = async () => {
@@ -763,6 +814,7 @@ export default function Products() {
       if (hasFloor) {
         // A draft typed before the floors read failed must not save over floors this page cannot show (#2160).
         if (marginFloorsLoadFailed) throw new Error('Margin floors have not loaded. Use Try again, then enter the floor changes again.');
+        if (floorDraftsVoid) throw new Error('Margin floors were read again after a failure. Cancel, then enter the floor changes again.');
         return await saveMarginFloors(changes);
       }
 
@@ -898,7 +950,8 @@ export default function Products() {
   const handleExportPricingWorkbook = async (fullSheet: boolean) => {
     // The workbook marks grouped sizes, so it waits for the groups as well as a current list.
     if (!profile || listBlocked || !parentsReady) return;
-    const productIds = (fullSheet ? products : selectedRows.length > 0 ? selectedRows : filtered)
+    const shown = tableSearch ? filtered.filter((product) => searchProducts(product, tableSearch)) : filtered;
+    const productIds = (fullSheet ? products : selectedRows.length > 0 ? selectedRows : shown)
       .filter((product) => product.is_active)
       .map((product) => product.id);
     if (productIds.length === 0) {
@@ -931,7 +984,7 @@ export default function Products() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `crx-product-pricing-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      anchor.download = `crx-product-pricing-${todayInBusinessTz()}.xlsx`;
       anchor.click();
       URL.revokeObjectURL(url);
       exportPricingIdem.resetKeyFor(exportIntent);
@@ -944,9 +997,15 @@ export default function Products() {
   };
 
   const handlePricingWorkbookUpload = async (file: File) => {
+    // Every chosen file is a new upload, even one refused below, so an earlier file's late answer is dropped.
+    const upload = ++pricingUploadSeq.current;
+    // An earlier file's review closes, so it cannot be applied after another file was chosen.
+    setPricingPreview(null);
+    setPricingSourceFile(null);
     // The review refuses a grouped size's use timing, so it waits for the groups.
     if (!profile || !parentsReady) {
       // Clear the pick so the same file can be chosen again once the groups load (#2160).
+      setWorkbookBusy(false);
       if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
       if (profile) toast('error', 'Product groups have not loaded. Use Try again, then choose the file again.');
       return;
@@ -956,15 +1015,21 @@ export default function Products() {
         'error',
         `Pricing workbooks must be ${MAX_PRICING_WORKBOOK_FILE_BYTES / 1024 / 1024} MB or smaller.`,
       );
+      setWorkbookBusy(false);
       if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
       return;
     }
     setWorkbookBusy(true);
+    let expiresAt: string | null = null;
+    let exportId: string | null = null;
     try {
       const parsed = await parseProductPricingWorkbookWithSupplierEvidence(await file.arrayBuffer());
+      expiresAt = parsed.expiresAt;
+      exportId = parsed.exportId;
       const sourceFile: PricingSourceFile = { name: file.name, sha256: await sha256Hex(file) };
       // One key per exact request (the file's bytes decide the rows), as for the inline preview.
       const intent = JSON.stringify(['workbook', sourceFile.sha256]);
+      if (upload !== pricingUploadSeq.current) return;
       const preview = await previewProductPricingChanges({
         source: 'pricing_worksheet',
         exportId: parsed.exportId,
@@ -973,6 +1038,7 @@ export default function Products() {
         idempotencyKey: previewPricingIdem.getKeyFor(intent),
       });
       previewPricingIdem.resetKeyFor(intent);
+      if (upload !== pricingUploadSeq.current) return;
       // A grouped size's use timing is set on its parent; the database refuses it too.
       const groupedRefusal = groupedUseTimingRefusal(preview, groupedParentNames);
       if (groupedRefusal) {
@@ -982,10 +1048,15 @@ export default function Products() {
       setPricingSourceFile(sourceFile);
       setPricingPreview(preview);
     } catch (error) {
-      toast('error', sanitizeError(error));
+      if (upload !== pricingUploadSeq.current) return;
+      const message = await priceSheetUploadErrorText(error, exportId, expiresAt);
+      if (upload === pricingUploadSeq.current) toast('error', message);
     } finally {
-      setWorkbookBusy(false);
-      if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
+      // A later upload owns the busy state and the file input.
+      if (upload === pricingUploadSeq.current) {
+        setWorkbookBusy(false);
+        if (pricingWorkbookInputRef.current) pricingWorkbookInputRef.current.value = '';
+      }
     }
   };
 
@@ -1042,7 +1113,7 @@ export default function Products() {
         <div className="max-w-xs">
           <p className="font-medium text-nav-dark truncate">{row.product_name}</p>
           {row.sku && <p className="text-xs text-gray-400">{row.sku}</p>}
-          {isSetupIncomplete(row) && <Badge variant="warning" className="mt-1">Incomplete setup</Badge>}
+          {setupIncomplete(row) && <Badge variant="warning" className="mt-1">Incomplete setup</Badge>}
         </div>
       ),
     },
@@ -1353,7 +1424,7 @@ export default function Products() {
                 onClick={() => void handleExportPricingWorkbook(false)}
                 loading={workbookBusy}
                 disabled={listBlocked || !parentsReady || filtered.length === 0}
-                title="The selected products, or every active product the filters show"
+                title="The selected products, or every active product the filters and search show"
               >
                 Pricing .xlsx
               </Button>
@@ -1390,6 +1461,7 @@ export default function Products() {
               >
                 Setup Workbook
               </Button>
+              <BrandDocumentFixList />
               <Button
                 variant="secondary"
                 icon={<FileSpreadsheet className="w-4 h-4" />}
@@ -1439,6 +1511,7 @@ export default function Products() {
             loadError={loadError}
             onRetry={retryProducts}
             parentIndex={parentIndex}
+            epaCovered={epaCovered}
           />
         </div>
         <div
@@ -1453,6 +1526,7 @@ export default function Products() {
             searchable
             searchPlaceholder="Search products..."
             searchMatcher={searchProducts}
+            onSearchChange={setTableSearch}
             onRowClick={(row) => navigate(`/products/${row.id}`)}
             emptyTitle={products.length > 0 ? 'No matching products' : 'No products yet'}
             emptyDescription={products.length > 0 ? 'Try a different search or filter' : 'Add your first product to get started'}
@@ -1466,7 +1540,7 @@ export default function Products() {
             loadError={loadError}
             onRetry={retryProducts}
             canEdit={isAdmin && !listStale}
-            onEditModeChange={setIsEditingProducts}
+            onEditModeChange={changeEditMode}
             onSave={handleBulkSave}
             headerActions={(
               <>

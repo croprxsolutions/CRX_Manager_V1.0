@@ -162,3 +162,6 @@ ${deliverySafe}`);
   docker(['stop', '--time', '1', container], { allowFailure: true });
   docker(['rm', container], { allowFailure: true });
 }
+
+// The audit exception also relies on the audit table's catalog configuration.
+await import('./audit-log-completeness-predicate.test.mjs');

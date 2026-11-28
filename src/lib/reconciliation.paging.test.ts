@@ -14,6 +14,7 @@ const H = vi.hoisted(() => ({ tables: {} as Record<string, Row[]> }));
 
 vi.mock('./db', () => ({
   supabase: { from: (table: string) => buildInMemoryQuery(H.tables[table] ?? []) },
+  supabaseUntyped: { from: (table: string) => buildInMemoryQuery(H.tables[table] ?? []) },
 }));
 
 import { runReconciliationChecks } from './reconciliation';

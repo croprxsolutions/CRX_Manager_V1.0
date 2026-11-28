@@ -92,12 +92,17 @@ describe('statement PDF real renderer', () => {
     expect(pageCommands).not.toContain('Page 2');
   });
 
-  it('labels the oldest aging bucket "120+ Days" like the AR Aging page (KI-18 batch 3 ranges)', async () => {
+  it('labels the aging buckets with the AR Aging page\'s day ranges (KI-18 batch 3 ranges)', async () => {
     const doc = await generateStatementPdf(renderedStatement);
     const pageCommands = doc.internal.pages.flat().join('\n');
 
-    expect(pageCommands.split('120+ Days').length - 1).toBe(2);
+    expect(pageCommands.split('120+ days').length - 1).toBe(2);
     expect(pageCommands).not.toContain('Over 120');
+    expect(pageCommands).not.toContain('(30 Days)');
+    // jsPDF writes the en dash as its WinAnsi byte (0x96); on paper it reads "30–59 days".
+    for (const label of ['(30\u009659 days)', '(60\u009689 days)', '(90\u0096119 days)', '(Current)']) {
+      expect(pageCommands).toContain(label);
+    }
   });
 
   it('prints the Settings address in the letterhead only; the remit-to block keeps its own address', async () => {

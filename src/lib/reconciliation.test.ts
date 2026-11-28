@@ -18,6 +18,7 @@ import {
   type InventoryTransactionRow,
   type InvoiceRow,
   type InvoiceLineAllocationRow,
+  type InvoicePaymentReversalRow,
   type CommissionRow,
   type QuoteHoldRow,
   type HoldRow,
@@ -471,6 +472,35 @@ describe('checkInvoicePayments', () => {
     ];
 
     expect(checkInvoicePayments(invoices, allocations)).toEqual([]);
+  });
+  it('counts only allocations of active payment sets when they are given (voided, non-payment or missing sets do not count)', () => {
+    const invoices: InvoiceRow[] = [
+      { id: 'i1', invoice_number: 'INV-001', invoice_type: 'chemical_sale', order_id: 'ord1', paid_amount_cents: 2500, prepay_applied_cents: 0, write_off_cents: 0, credit_applied_cents: 0, total_amount_cents: 10000, balance_cents: 7500 },
+    ];
+    const allocations: InvoiceLineAllocationRow[] = [
+      { invoice_id: 'i1', amount_cents: 10000, allocation_set_id: 'voided' },
+      { invoice_id: 'i1', amount_cents: 5000, allocation_set_id: 'an-order-set' },
+      { invoice_id: 'i1', amount_cents: 700 },
+      { invoice_id: 'i1', amount_cents: 2500, allocation_set_id: 'live' },
+    ];
+
+    expect(checkInvoicePayments(invoices, allocations, [], new Set(['live']))).toEqual([]);
+    expect(checkInvoicePayments(invoices, allocations).map((d) => d.expected)).toEqual([18200]);
+  });
+
+  it('subtracts a returned check (M9): the allocation stays, the paid amount went back down', () => {
+    const invoices: InvoiceRow[] = [
+      { id: 'i1', invoice_number: 'INV-001', invoice_type: 'chemical_sale', order_id: 'ord1', paid_amount_cents: 0, prepay_applied_cents: 0, write_off_cents: 0, credit_applied_cents: 0, total_amount_cents: 123700, balance_cents: 123700 },
+      { id: 'i2', invoice_number: 'INV-002', invoice_type: 'chemical_sale', order_id: 'ord2', paid_amount_cents: 0, prepay_applied_cents: 0, write_off_cents: 0, credit_applied_cents: 0, total_amount_cents: 5000, balance_cents: 5000 },
+    ];
+    const allocations: InvoiceLineAllocationRow[] = [
+      { invoice_id: 'i1', amount_cents: 123700 },
+      { invoice_id: 'i2', amount_cents: 5000 },
+    ];
+    const reversals: InvoicePaymentReversalRow[] = [{ invoice_id: 'i1', amount_cents: 123700 }];
+
+    expect(checkInvoicePayments(invoices, allocations, reversals).map((d) => d.entity)).toEqual(['INV-002']);
+    expect(checkInvoicePayments(invoices, allocations).map((d) => d.entity)).toEqual(['INV-001', 'INV-002']);
   });
 });
 

@@ -188,10 +188,10 @@ describe('fetchChemicalApplicationReportData — the EPA number the job kept (KI
     expect(await epaOf()).toBe('999-1');
   });
 
-  it('prints Unknown for a product kept with no number, and Not recorded for a backfilled job', async () => {
+  it('prints a dash for a product kept with no number, and Not recorded for a backfilled job', async () => {
     mockResolveBilledCustomers.mockResolvedValue(resolved);
     wireSupabase(JOB_ROW, PRODUCT_LABEL_ROWS, [{ product_id: 'p1', epa_registration: null, not_recorded: false }]);
-    expect(await epaOf()).toBe('Unknown');
+    expect(await epaOf()).toBe('—');
     wireSupabase(JOB_ROW, PRODUCT_LABEL_ROWS, [{ product_id: 'p1', epa_registration: null, not_recorded: true }]);
     expect(await epaOf()).toBe('Not recorded');
   });

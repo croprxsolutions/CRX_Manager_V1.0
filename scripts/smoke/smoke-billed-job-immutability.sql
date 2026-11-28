@@ -9,7 +9,7 @@
 -- the two sanctioned SECURITY DEFINER transfer writers all still work.
 --
 -- Role-sim: setup runs as the table owner (RLS bypassed). Each "non-admin"
--- assertion runs under `SET LOCAL ROLE authenticated` with request.jwt.claims
+-- assertion runs as the owner with request.jwt.claims
 -- sub = a real sales_rep (so is_admin()=false, is_sales_rep()=true). RESET ROLE
 -- returns to owner for the admin/hatch/transfer asserts.
 --
@@ -118,10 +118,11 @@ BEGIN
   v_inv2 := (v_res->>'invoice_id')::uuid;
 
   -- ════════════════════════════════════════════════════════════════════════
-  -- NON-ADMIN BLOCKED PATHS — become the sales_rep with RLS enforced.
+  -- NON-ADMIN BLOCKED PATHS — the sales_rep's JWT, as the owner.
   -- ════════════════════════════════════════════════════════════════════════
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_sales, 'role','authenticated')::text, true);
-  SET LOCAL ROLE authenticated;
+  -- Runs as the owner with the rep's JWT: since 20270303110000 the API roles cannot write jobs at all,
+  -- so this guards the trigger for owner-rights writers (is_admin() reads the JWT, not the role).
 
   -- B1: soft-delete a billed job -> RAISES.
   BEGIN

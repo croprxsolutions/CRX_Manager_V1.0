@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useLayoutEffect, type ComponentProps } from 'react';
+import { useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo, type ComponentProps } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Phone, MapPin, CheckCircle2, Package, Download, WifiOff,
@@ -15,8 +15,11 @@ import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
-import SignatureCanvas from '../components/ui/SignatureCanvas';
+import CompletionProofFields, { ProofOption } from '../components/deliveries/CompletionProofFields';
+import { ISSUE_TYPE_LABELS } from '../lib/deliveryIssueTypes';
+import { useLoadBoundSignature } from '../hooks/useLoadBoundSignature';
 import { useToast } from '../components/ui/Toast';
+import { isWholeItemUnit, wholeItemMessage } from '../lib/units';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -32,14 +35,14 @@ import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail, EmailUnconfirmedError } from '../lib/emailService';
 import { buildDeliveryReceiptHtml } from '../lib/deliveryReceiptEmail';
 import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
-import { fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { buildLinesSeen, countTicketPhotosForLoad, fetchReceiptRecipient, LINES_CHANGED_ON_SERVER_MESSAGE, linesChangedOnServer, staleProofPhotoMessage, INVALID_SIGNATURE_MESSAGE, isLoadProofRefusal, isNetworkFailure, keptQuantity, LINES_LOADING_MESSAGE, type LineSeen, loadProofProblem, NOTHING_DELIVERED_MESSAGE, sameLinesSeen, SIGNATURE_LOAD_CHANGED_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, evidencePhotoForLoad, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
 import FixDeliveryModal from '../components/deliveries/FixDeliveryModal';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
-import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey, isValidNoProofReason, NO_PROOF_REASON_MAX_CHARS, NO_PROOF_REASON_MIN_CHARS, NO_PROOF_SIGNER, noProofReasonLength } from '../lib/paperTicket';
+import { countOrdinaryPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey, isValidNoProofReason, NO_PROOF_REASON_MAX_CHARS, NO_PROOF_REASON_MIN_CHARS, NO_PROOF_SIGNER, noProofReasonLength } from '../lib/paperTicket';
 import type { Json } from '../types/supabase';
 import { compressImage } from '../lib/imageCompression';
 import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
@@ -52,7 +55,7 @@ import {
   receiptMayAlreadyBeSent, readQueuedReceipt, queuedMeanwhileWarning, type ReceiptCloseResult,
 } from '../lib/receiptsToCheck';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
-import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
+import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery, fetchDeliveryBillingRemainders, fetchOrderBillingRemainder, unbilledRemainderLabel, type DeliveryBillingRemainder } from '../lib/deliveryInvoiceCoverage';
 import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { addDeliveryEditItem, removeDeliveryEditItem, type AvailableDeliveryEditItem, type DeliveryEditItem } from '../lib/deliveryEditItems';
@@ -75,17 +78,6 @@ import type {
   Customer, CustomerAddress, Profile, OrderItem, DeliveryIssueType, DeliveryCompletionEvidence, ReceiptRecipient,
   LinkedEntityType,
 } from '../types';
-
-const ISSUE_TYPE_LABELS: Record<string, string> = {
-  none: 'None',
-  customer_not_home: 'Customer Not Home',
-  gate_locked: 'Gate Locked',
-  road_blocked: 'Road Blocked',
-  wrong_address: 'Wrong Address',
-  refused: 'Refused',
-  weather: 'Weather',
-  other: 'Other',
-};
 
 const PRIORITY_LABELS: Record<string, string> = {
   low: 'Low',
@@ -122,6 +114,8 @@ export default function DeliveryDetail() {
   // Only the latest attempt keeps its retry key: going back to an older edit applies it again instead of
   // replaying a result that a later edit may have replaced.
   const lastEditScopeRef = useRef<string | null>(null);
+  // An Unassigned save with no confirmed reply may have cleared the driver (Sol r7 HIGH 4, #2364).
+  const clearUnconfirmedRef = useRef(false);
   const cancelIdem = useIdempotencyKey('cancel_delivery', profile?.id || '');
   // F1: create_followup_delivery is the ONLY retained key on this page, and it is
   // scoped by the route id. Its payload is exactly (p_original_delivery_id,
@@ -205,6 +199,7 @@ export default function DeliveryDetail() {
   // Edit mode state
   const [editing, setEditing] = useState(false);
   const [editDriver, setEditDriver] = useState('');
+  const [editDriverAtOpen, setEditDriverAtOpen] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
   const [editWindowStart, setEditWindowStart] = useState('');
@@ -265,6 +260,9 @@ export default function DeliveryDetail() {
 
   // Office re-bill state for a completed delivery with no active covering invoice.
   const [createInvoiceConfirmOpen, setCreateInvoiceConfirmOpen] = useState(false);
+  // A4: what the confirmation showed, frozen when it opened, for the delivery it opened on; the server refuses a
+  // different scope, amount or quantity (UNBILLED_SCOPE_CHANGED).
+  const [confirmIntent, setConfirmIntent] = useState<ConfirmIntent>(NO_CONFIRM_INTENT);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
 
   // Photo upload state
@@ -287,6 +285,10 @@ export default function DeliveryDetail() {
   const [relatedInvoices, setRelatedInvoices] = useState<RelatedInvoice[]>([]);
   // False until this delivery's invoice reads return: the card says Loading, never "No invoice yet".
   const [invoicesLoaded, setInvoicesLoaded] = useState(false);
+  // A4: delivered units no active invoice bills yet, when an invoice covers this delivery only in part.
+  const [billingRemainder, setBillingRemainder] = useState<DeliveryBillingRemainder | null>(null);
+  // The remainder read failed: the page must not look fully billed.
+  const [remainderUnknown, setRemainderUnknown] = useState(false);
 
   // H5: true when the server's ORDER_NEEDS_SPLIT_BILLING guard would refuse a
   // single backfilled invoice for this delivery's order. Defaults to false and
@@ -304,6 +306,11 @@ export default function DeliveryDetail() {
   const [parentQuote, setParentQuote] = useState<{ id: string; quote_number: string } | null>(null);
   // Load call order, so only the newest fetchDelivery for this route may publish.
   const fetchSeqRef = useRef(0);
+  // Edit stays locked until the reload started after a save (or a doubtful clear) has fully loaded,
+  // so Edit never opens on the delivery as it was before that save (Sol #2364 r9).
+  const [editRefreshSeq, setEditRefreshSeq] = useState(0);
+  const [loadedSeq, setLoadedSeq] = useState(0);
+  const editLocked = editRefreshSeq > loadedSeq;
 
   // The order context, invoices and remainders belong to the delivery they were read for:
   // drop them on a route change so none shows under the next delivery while it loads.
@@ -312,6 +319,9 @@ export default function DeliveryDetail() {
     setParentOrder(null);
     setRelatedInvoices([]);
     setInvoicesLoaded(false);
+    setBillingRemainder(null);
+    setCreateInvoiceConfirmOpen(false);
+    setConfirmIntent(NO_CONFIRM_INTENT);
     setSiblingDeliveries([]);
     setParentQuote(null);
   }, [id]);
@@ -347,22 +357,60 @@ export default function DeliveryDetail() {
     activeInvoiceCoversDelivery(invoice, delivery.id, delivery.order_id)
     || (invoice.delivery_id === delivery.id && activeInvoiceCountsTowardBilling(invoice))
   );
+  // A4: an invoice bills fewer units than were delivered, so the rest is still to bill. Admins only: other roles may
+  // not see every invoice (invoices RLS), so their remainder could count billed units as unbilled.
+  const shortBilled = isAdmin && hasActiveRelatedInvoice && billingRemainder !== null;
+  const needsBilling = !hasActiveRelatedInvoice || shortBilled;
+  // A whole-order invoice covers the order, so Bill the rest drafts every unbilled unit on the order.
+  const wholeOrderInvoiced = relatedInvoices.some((invoice) => invoice.delivery_id === null && activeInvoiceCountsTowardBilling(invoice));
+  // Re-read after every invoice load (a Create Invoice reloads them), only where the note can show.
+  const remainderDeliveryId = isAdmin && invoicesLoaded && delivery?.status === 'completed' && hasActiveRelatedInvoice ? delivery.id : null;
+  useEffect(() => {
+    setBillingRemainder(null);
+    setRemainderUnknown(false);
+    if (!remainderDeliveryId) return undefined;
+    let live = true;
+    void loadBillingRemainder(remainderDeliveryId).then((r) => {
+      if (!live) return;
+      setBillingRemainder(r === 'failed' ? null : r);
+      setRemainderUnknown(r === 'failed');
+    });
+    return () => { live = false; };
+  }, [remainderDeliveryId, relatedInvoices]);
+  // A Bill Split sale's rest is redrafted by voiding its group; the server refuses Bill the rest on it.
+  const billSplitRest = shortBilled && relatedInvoices.some((invoice) =>
+    invoice.delivery_id === delivery?.id && invoice.invoice_group_id !== null && activeInvoiceCountsTowardBilling(invoice));
+  // What the confirmation shows is what the server must still find (UNBILLED_SCOPE_CHANGED otherwise).
+  const expectedScope = !hasActiveRelatedInvoice ? 'new' : wholeOrderInvoiced ? 'rest_order' : 'rest_delivery';
+  // A4: freeze what the confirmation shows. On a whole-order invoice the rest is the order's, read fresh.
+  const openCreateInvoiceConfirm = async () => {
+    if (!delivery) return;
+    let rest = shortBilled ? billingRemainder : null;
+    if (expectedScope === 'rest_order' && delivery.order_id) {
+      rest = await fetchOrderBillingRemainder(delivery.order_id);
+      if (!rest) { toast('error', 'Could not read what is left to bill on this order. Refresh the page and try again.'); return; }
+    }
+    setConfirmIntent({ deliveryId: delivery.id, scope: expectedScope, rest: rest ? unbilledRemainderLabel(rest) : null,
+      cents: expectedScope === 'new' || !rest ? null : rest.unbilledCents, units: expectedScope === 'new' || !rest ? null : rest.unbilledQty });
+    setCreateInvoiceConfirmOpen(true);
+  };
   // RPC is admin-only (finding #78's backfill twin); sales_reps bill jobs, not stray deliveries.
   // H5: also mirror the server's ORDER_NEEDS_SPLIT_BILLING refusal via the shared
   // predicate, so this surface and IntegrityCleanupPanel cannot drift apart.
   const canCreateInvoice = isAdmin
     && delivery?.status === 'completed'
-    && !hasActiveRelatedInvoice
+    && needsBilling
     && !orderNeedsSplitBilling
     && billedOutsideCrxReason === null;
   // Only worth explaining where the button would otherwise have been offered.
   const splitBillingBlocksInvoice = isAdmin
     && delivery?.status === 'completed'
-    && !hasActiveRelatedInvoice
+    && needsBilling
     && orderNeedsSplitBilling
     && billedOutsideCrxReason === null;
 
-  const fetchDelivery = useCallback(async () => {
+  // keepQtys: the entered partial amounts, kept (within each reloaded line) after a load-proof refusal (Luna).
+  const fetchDelivery = useCallback(async (keepQtys?: Record<string, number>) => {
     // Never carry the previous delivery's billed-outside-CRX badge onto this one.
     setBilledOutsideCrxReason(null);
     // This page is reused across deliveries: a slow load for the previous one must
@@ -434,7 +482,7 @@ export default function DeliveryDetail() {
         const loadedItems = (itemsRes.data || []) as unknown as DeliveryItem[];
         setItems(loadedItems);
         const initQtys: Record<string, number> = {};
-        loadedItems.forEach((item) => { initQtys[item.id] = item.quantity; });
+        loadedItems.forEach((item) => { initQtys[item.id] = keptQuantity(keepQtys, item.id, item.quantity); });
         setDeliveryQtys(initQtys);
         setAddress(addrRes.data as CustomerAddress | null);
         setDriver(driverRes.data as Profile | null);
@@ -577,12 +625,11 @@ export default function DeliveryDetail() {
             Sentry.captureException(remError ?? new Error('delivery_remainders read returned no list'), { extra: { context: 'load_delivery_remainders', deliveryId: del.id } });
             failLoad('Failed to load this delivery\'s remaining items');
             return;
-          } else {
-            setRemainders((remData as Array<DeliveryRemainder & { product?: { product_name: string } | null }>).map((r) => ({
-              ...r,
-              product_name: r.product?.product_name || 'Unknown',
-            })) as DeliveryRemainder[]);
           }
+          setRemainders((remData as Array<DeliveryRemainder & { product?: { product_name: string } | null }>).map((r) => ({
+            ...r,
+            product_name: r.product?.product_name || 'Unknown',
+          })) as DeliveryRemainder[]);
 
           // Generate signed URL for signature (privacy: no permanent public URLs)
           if (del.signature_url) {
@@ -608,7 +655,14 @@ export default function DeliveryDetail() {
     }
     setLoadFailedId(null);
     setLoading(false);
+    setLoadedSeq(seq);
   }, [id, toast, loadAsDriver]);
+
+  // fetchDelivery takes its load number before its first await, so this lock waits for exactly that load.
+  const refreshAfterEdit = () => {
+    fetchDelivery();
+    setEditRefreshSeq(fetchSeqRef.current);
+  };
 
   useEffect(() => {
     if (id) fetchDelivery();
@@ -680,13 +734,29 @@ export default function DeliveryDetail() {
   // an edit made during it is never silently dropped in favour of the values captured at confirm.
   const completionInputs = JSON.stringify([signedBy, deliveryQtys, driverIssueType, driverIssueNotes, usePaperTicket, paperDeliveredOn, signatureDataUrl, emailOnComplete, completionEvidence, noProofReason]);
   const completionInputsRef = useLatestRef(completionInputs);
-  const hasAnyQty = items.some((item) => (deliveryQtys[item.id] ?? item.quantity) > 0);
+  // Under 0.01 counts as nothing delivered, as on the server (DELIVERY_NOTHING_DELIVERED).
+  const hasAnyQty = items.some((item) => (deliveryQtys[item.id] ?? item.quantity) >= 0.01);
+  // The lines on screen with their delivered amounts: the signature and the ticket photo are bound to
+  // them (20270309170000). Null until the delivery's lines are loaded.
+  const currentLinesSeen = useMemo(
+    () => (items.length ? buildLinesSeen(items, (item) => deliveryQtys[item.id] ?? item.quantity) : null),
+    [items, deliveryQtys],
+  );
+  const currentLinesSeenRef = useLatestRef(currentLinesSeen);
+  const currentTicketPhoto = evidencePhotoForLoad(photos, PAPER_TICKET_PHOTO_CAPTION, currentLinesSeen);
+  // The ticket photo sent (the newest taken for these lines, else the newest) counts only when it was taken for these lines and amounts (one without lines never does).
+  const ticketPhotoMatchesLoad = !!currentTicketPhoto && sameLinesSeen(currentTicketPhoto.lines_seen, currentLinesSeen);
+  const sig = useLoadBoundSignature(signatureDataUrl, setSignatureDataUrl, currentLinesSeen);
 
   // ── Edit Mode ──────────────────────────────────────────────────────────
 
   const startEditing = async () => {
-    if (!delivery || !customer) return;
+    if (!delivery || !customer || editLocked) return;
+    // A reload that starts while the form loads makes this copy of the delivery old (Sol #2364 r11).
+    const openSeq = fetchSeqRef.current;
     setEditDriver(delivery.assigned_driver || '');
+    setEditDriverAtOpen(delivery.assigned_driver || '');
+    clearUnconfirmedRef.current = false;
     setEditDate(delivery.scheduled_date);
     setEditTime(delivery.scheduled_time || '');
     setEditWindowStart(delivery.delivery_window_start || '');
@@ -801,6 +871,7 @@ export default function DeliveryDetail() {
       setAvailableOrderItems([]);
     }
 
+    if (fetchSeqRef.current !== openSeq) { toast('info', 'This delivery just changed. Click Edit again.'); return; }
     setEditing(true);
   };
 
@@ -820,21 +891,19 @@ export default function DeliveryDetail() {
       return;
     }
 
+    const editFraction = activeEditItems.map((i) => wholeItemMessage(i.product_name, i.unit_size || '', i.quantity)).find(Boolean);
+    if (editFraction) {
+      toast('error', `Nothing was saved. ${editFraction}`);
+      return;
+    }
+
     setSavingEdit(true);
 
-    // Build items payload only for scheduled deliveries
-    const itemsPayload = isScheduled
-      ? activeEditItems.map((i) => ({
-          order_item_id: i.order_item_id,
-          product_id: i.product_id,
-          quantity: i.quantity,
-          unit_size: i.unit_size || null,
-        }))
-      : null;
+    const itemsPayload = editItemsPayload(isScheduled, activeEditItems);
 
     const editArgs = {
       p_delivery_id: id!,
-      p_assigned_driver: editDriver || undefined,
+      p_assigned_driver: pickedDriverArg(editDriver, editDriverAtOpen, clearUnconfirmedRef.current),
       p_scheduled_date: editDate,
       p_scheduled_time: editTime || undefined,
       p_delivery_window_start: editWindowStart || undefined,
@@ -843,33 +912,47 @@ export default function DeliveryDetail() {
       p_delivery_notes: editNotes || undefined,
       p_priority: editPriority,
       p_items: itemsPayload,
+      ...clearDriverArg(editDriver, editDriverAtOpen),
     };
     // One key per delivery and exact edit: an exact retry reuses it, a different edit gets its own.
     const editScope = fingerprintIntentPayload([editArgs]);
     if (lastEditScopeRef.current && lastEditScopeRef.current !== editScope) editIdem.resetKeyFor(lastEditScopeRef.current);
     lastEditScopeRef.current = editScope;
-    const { data, error } = await supabase.rpc('edit_delivery', {
-      ...editArgs,
-      p_performed_by: profile.id,
-      p_idempotency_key: editIdem.getKeyFor(editScope),
-    });
+    // finally: an empty reply (assertRpcResult throws) must not leave Save, Cancel and the driver list locked.
+    try {
+      const { data, error } = await supabase.rpc('edit_delivery', {
+        ...editArgs,
+        p_performed_by: profile.id,
+        p_idempotency_key: editIdem.getKeyFor(editScope),
+      });
 
-    if (error) {
-      toast('error', sanitizeError(error));
-    } else {
-      const edited = assertRpcResult<{ brand_lines_dropped?: { old_delivery_item_id: string; product_id: string | null }[] }>(data, 'edit_delivery');
-      editIdem.resetKeyFor(editScope);
-      // A changed or removed line loses its brand picks (20270104120000); say which, so they are picked again.
-      const dropped = (edited.brand_lines_dropped ?? []).map((d) => (
-        (items.find((i) => i.product_id === d.product_id)?.product as { product_name?: string } | undefined)?.product_name || 'a product'));
-      if (dropped.length > 0) toast('warning', `Brand picks were cleared for ${[...new Set(dropped)].join(', ')}. Pick the brands again.`);
-      // Unsaved choices on those lines described the old line, so they are dropped too, never re-saved.
-      void brandState.reload({ discard: (edited.brand_lines_dropped ?? []).map((d) => d.old_delivery_item_id) });
-      toast('success', isScheduled ? 'Delivery and items updated' : 'Delivery updated');
-      setEditing(false);
-      fetchDelivery();
+      if (error) {
+        toast('error', sanitizeError(error));
+        // The form is stale: close it and reload, so the next edit starts from the current delivery.
+        if (isStaleEditFormError(error)) { setEditing(false); refreshAfterEdit(); }
+      } else {
+        applyEditSaved(assertRpcResult<EditDeliveryResult>(data, 'edit_delivery'), editScope, isScheduled);
+      }
+    } catch (err) {
+      // An unconfirmed reply keeps the key, so Save again replays the server's answer.
+      toast('error', sanitizeError(err));
+      if (editArgs.p_clear_driver) clearUnconfirmedRef.current = true;
+    } finally {
+      setSavingEdit(false);
     }
-    setSavingEdit(false);
+  };
+
+  const applyEditSaved = (edited: EditDeliveryResult, editScope: string, isScheduled: boolean) => {
+    editIdem.resetKeyFor(editScope);
+    // A changed or removed line loses its brand picks (20270104120000); say which, so they are picked again.
+    const dropped = (edited.brand_lines_dropped ?? []).map((d) => (
+      (items.find((i) => i.product_id === d.product_id)?.product as { product_name?: string } | undefined)?.product_name || 'a product'));
+    if (dropped.length > 0) toast('warning', `Brand picks were cleared for ${[...new Set(dropped)].join(', ')}. Pick the brands again.`);
+    // Unsaved choices on those lines described the old line, so they are dropped too, never re-saved.
+    void brandState.reload({ discard: (edited.brand_lines_dropped ?? []).map((d) => d.old_delivery_item_id) });
+    toast('success', isScheduled ? 'Delivery and items updated' : 'Delivery updated');
+    setEditing(false);
+    refreshAfterEdit();
   };
 
   // ── Cancel Delivery ────────────────────────────────────────────────────
@@ -1005,13 +1088,17 @@ export default function DeliveryDetail() {
       toast('error', 'Maximum 10 photos per delivery');
       return;
     }
-    if (caption === PAPER_TICKET_PHOTO_CAPTION && countPaperTicketPhotos(photos) + files.length > MAX_PAPER_TICKET_PHOTOS) {
-      toast('error', 'Maximum 2 ticket photos per delivery');
+    // A ticket or drop-location photo is bound to the lines on screen, so it waits until they are loaded (Luna).
+    if (caption === PAPER_TICKET_PHOTO_CAPTION && !currentLinesSeen) { toast('error', LINES_LOADING_MESSAGE); return; }
+    if (caption === PAPER_TICKET_PHOTO_CAPTION && countTicketPhotosForLoad(photos, currentLinesSeen) + files.length > MAX_PAPER_TICKET_PHOTOS) {
+      toast('error', 'Maximum 2 ticket photos for these products and amounts');
       return;
     }
 
     setUploadingPhoto(true);
     let uploadCount = 0;
+    // A signed-ticket photo is saved with the lines and amounts on screen when it was taken (20270309170000).
+    const linesAtPhoto = caption === PAPER_TICKET_PHOTO_CAPTION ? currentLinesSeen : null;
 
     for (const rawFile of Array.from(files)) {
       try {
@@ -1040,6 +1127,7 @@ export default function DeliveryDetail() {
           file_size: file.size,
           sort_order: photos.length + uploadCount,
           ...(caption ? { caption } : {}),
+          ...(linesAtPhoto ? { lines_seen: linesAtPhoto } : {}),
         }).select();
         if (photoResult.error) {
           toast('error', `Photo saved to storage but DB record failed: ${photoResult.error.message}`);
@@ -1149,7 +1237,7 @@ export default function DeliveryDetail() {
     }
     if (!delivery || !profile) return;
     if (!hasAnyQty) {
-      toast('error', 'At least one item must have a quantity greater than 0');
+      toast('error', NOTHING_DELIVERED_MESSAGE);
       return;
     }
     if (completionEvidence === 'no_proof') {
@@ -1176,6 +1264,8 @@ export default function DeliveryDetail() {
       toast('error', 'Take a photo of the signed paper ticket before completing');
       return;
     }
+    const proofProblem = loadProofProblem(completionEvidence, currentLinesSeen, sig.signedLines, currentTicketPhoto?.lines_seen);
+    if (proofProblem) { sig.reportProofProblem(proofProblem); return; }
     if (usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn)) {
       toast('error', 'Enter the delivery date from the paper ticket (today or earlier)');
       return;
@@ -1217,6 +1307,20 @@ export default function DeliveryDetail() {
       toast('error', `Write why there is no proof (${NO_PROOF_REASON_MIN_CHARS} to ${NO_PROOF_REASON_MAX_CHARS} characters)`);
       return;
     }
+    // Products sold by the whole item (Ea, Unit) take whole figures; the server refuses a fraction too (WHOLE_ITEMS_ONLY).
+    const fraction = items.map((item) => wholeItemMessage(
+      (item.product as unknown as { product_name?: string } | null)?.product_name || 'This product',
+      item.unit_size || '', deliveryQtys[item.id] ?? item.quantity,
+    )).find(Boolean);
+    if (fraction) {
+      toast('error', `The delivery was not completed. ${fraction}`);
+      return;
+    }
+    // Caught here, before the signature image is uploaded: nothing delivered, or proof taken for other lines or amounts.
+    if (!hasAnyQty) { toast('error', NOTHING_DELIVERED_MESSAGE); return; }
+    const signedLinesAtSubmit = submittedEvidence === 'signature' ? sig.signedLines : null;
+    const proofProblem = loadProofProblem(submittedEvidence, currentLinesSeen, signedLinesAtSubmit, currentTicketPhoto?.lines_seen);
+    if (proofProblem) { sig.reportProofProblem(proofProblem); return; }
     setCompleting(true);
     const deliveryId = id!;
 
@@ -1224,7 +1328,7 @@ export default function DeliveryDetail() {
       ? Object.fromEntries(items.map((item) => [item.id, deliveryQtys[item.id] ?? item.quantity]))
       : null;
 
-    const ticketPhoto = usePaperTicket ? latestEvidencePhoto(photos, PAPER_TICKET_PHOTO_CAPTION) : undefined;
+    const ticketPhoto = usePaperTicket ? currentTicketPhoto : undefined;
     const intentParams = {
       p_delivery_id: deliveryId,
       p_signed_by: completionSignedBy,
@@ -1241,6 +1345,8 @@ export default function DeliveryDetail() {
       ...(ticketPhoto ? { p_evidence_ref: ticketPhoto.id } : {}),
       // no_proof: the reason exactly as typed (the server collapses whitespace; an exact retry resends it).
       ...(submittedEvidence === 'no_proof' ? { p_evidence_ref: noProofReason } : {}),
+      // The lines the customer signed for (part of the key's scope: another list is a new attempt).
+      ...(signedLinesAtSubmit ? { p_lines_seen: signedLinesAtSubmit } : {}),
     };
     // check_idempotency replays a saved result by key and operation only, so bind the
     // key to this exact payload: an edited retry (signer, quantities, issue, ticket date)
@@ -1273,6 +1379,7 @@ export default function DeliveryDetail() {
       p_evidence: DeliveryCompletionEvidence;
       p_evidence_ref?: string;
       p_email_receipt?: boolean;
+      p_lines_seen?: LineSeen[];
     } = { ...intentParams, ...(signaturePath ? { p_evidence_ref: signaturePath } : {}), p_idempotency_key: idemKey };
 
     // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;
@@ -1296,9 +1403,33 @@ export default function DeliveryDetail() {
         toast('error', 'Details changed while checking for signal. The delivery was not completed; check them and tap Complete Delivery again.');
         return false;
       }
+      // Lines or amounts changed since signing: stop before the image goes up (the screen asks for a new signature).
+      if (signedLinesAtSubmit && !sameLinesSeen(signedLinesAtSubmit, currentLinesSeenRef.current)) {
+        toast('error', SIGNATURE_LOAD_CHANGED_MESSAGE);
+        return false;
+      }
       return true;
     };
     if (!stillSameAttempt()) return;
+    // The lines may have changed since this screen loaded them, and an "all full" completion sends no amounts:
+    // proof is checked against the server's lines first (Sol on #2614, HIGH 1). No proof is not bound.
+    if (submittedEvidence !== 'no_proof') {
+      let serverLinesChanged: boolean;
+      try {
+        serverLinesChanged = await linesChangedOnServer(deliveryId, items);
+      } catch (linesErr) {
+        Sentry.captureException(toSentryError(linesErr), { level: 'warning', extra: { context: 'Line check before delivery completion failed' } });
+        toast('error', 'Could not check the products on this delivery. It was not completed; try again.');
+        return;
+      }
+      if (serverLinesChanged) {
+        toast('error', LINES_CHANGED_ON_SERVER_MESSAGE);
+        sig.clearSignature();
+        await fetchDelivery(deliveryQtys);
+        return;
+      }
+      if (!stillSameAttempt()) return;
+    }
     // The server completes only once this attempt's signature image is saved, so it goes up first.
     // A failed upload does not stop the call: after a lost reply the earlier attempt may already have
     // completed the delivery (storage then refuses the re-upload). The same key replays that
@@ -1453,6 +1584,11 @@ export default function DeliveryDetail() {
       // then send as full. Still open: refresh only the photos (a refused photo may be gone).
       if (outcome.kind === 'completed_not_replayed' || outcome.kind === 'closed') {
         await fetchDelivery();
+      } else if (outcome.kind === 'open' && isLoadProofRefusal(error)) {
+        // Nothing delivered, or the proof is not for this load: clear the signature and reload the
+        // delivery's lines and photos, so the stale proof no longer counts. No automatic retry.
+        sig.clearSignature();
+        await fetchDelivery(deliveryQtys);
       } else if (outcome.kind === 'open') {
         const photoSeq = ++photoSeqRef.current;
         const { data: refreshedPhotos, error: photosErr } = await supabase
@@ -1485,7 +1621,12 @@ export default function DeliveryDetail() {
   };
 
   // After the hand send: mark the paused receipt handled. A failure only leaves it on the office list.
-  const closeSentReceipt = async (deliveryId: string, queuedAt: string | null, deliveryNumber: string) => {
+  const closeSentReceipt = async (deliveryId: string, queuedAt: string | null, deliveryNumber: string, pausedNow: boolean) => {
+    // Only an admin marks a receipt handled, a rep's own hand send included (Mason, 2026-11-24): the server refuses it.
+    if (!isAdmin && pausedNow) {
+      toast('info', `Delivery ${deliveryNumber}: its receipt stays on "Customer receipts to check" until an admin marks it handled.`);
+      return;
+    }
     if (!queuedAt) {
       // None was queued when the send started, so none is closed; one queued meanwhile may still be emailed (Sol LOW).
       // A failed read says so rather than staying silent; each warning names its delivery, as the page may have moved on (#2291).
@@ -1510,13 +1651,13 @@ export default function DeliveryDetail() {
         level: 'warning', extra: { context: 'close_delivery_receipt after Email Confirmation', deliveryId },
       });
       // Not "mark it handled": the close may have failed because a newer receipt the customer is owed replaced it (Sol HIGH).
-      toast('warning', 'The email went out, but the app could not confirm its receipt was closed. Check "Customer receipts to check" before marking anything handled: if this delivery was completed again, the customer may be owed a newer receipt.');
+      toast('warning', 'The email went out, but the app could not confirm its receipt was closed. It stays on "Customer receipts to check" for an admin, who should check it before marking anything handled: if this delivery was completed again, the customer may be owed a newer receipt.');
     }
   };
 
   // A paused receipt whose hand send never went out: the server will not send it either, so say so (Taha LOW).
   const warnHeldNotSent = (deliveryNumber: string) => {
-    toast('warning', `Delivery ${deliveryNumber}: the email did not go out. Its receipt is on "Customer receipts to check" and the server will not send it. Send it again or mark it handled.`);
+    toast('warning', `Delivery ${deliveryNumber}: the email did not go out. Its receipt is on "Customer receipts to check" and the server will not send it. Send it again, or an admin can mark it handled.`);
   };
 
   // ── Resend Delivery Confirmation Email ──────────────────────────────────
@@ -1572,13 +1713,13 @@ export default function DeliveryDetail() {
       });
       heldNotSent = false;
       toast('success', `Confirmation email sent to ${customer.email}`);
-      await closeSentReceipt(delivery.id, paused.queued_at, delivery.delivery_number);
+      await closeSentReceipt(delivery.id, paused.queued_at, delivery.delivery_number, paused.outcome === 'paused');
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
       // No answer came back: the email may have gone out, so never say it did not (Codex P2).
       if (heldNotSent && err instanceof EmailUnconfirmedError) {
         heldNotSent = false;
-        toast('warning', `Delivery ${delivery.delivery_number}: the email may have gone out. Its receipt is on "Customer receipts to check" and the server will not send it. Check before sending again, then mark it handled.`);
+        toast('warning', `Delivery ${delivery.delivery_number}: the email may have gone out. Its receipt is on "Customer receipts to check" and the server will not send it. Check before sending again; an admin can mark it handled.`);
       }
     } finally {
       if (heldNotSent) warnHeldNotSent(delivery.delivery_number);
@@ -1589,13 +1730,18 @@ export default function DeliveryDetail() {
   // U16a: office-visible twin of IntegrityCleanup's admin-only backfill (finding #78).
   const handleCreateInvoice = async () => {
     if (!delivery || !profile) return;
+    // The confirmation belongs to the delivery it opened on.
+    if (confirmIntent.deliveryId !== delivery.id) { setCreateInvoiceConfirmOpen(false); return; }
     setCreatingInvoice(true);
 
     try {
       const { data, error } = await supabase.rpc('create_invoice_for_unbilled_delivery', {
-        p_delivery_id: delivery.id,
+        p_delivery_id: confirmIntent.deliveryId,
         p_performed_by: profile.id,
-        p_idempotency_key: createInvoiceIdem.getKeyFor(delivery.id),
+        p_idempotency_key: createInvoiceIdem.getKeyFor(confirmIntent.deliveryId),
+        p_expected_scope: confirmIntent.scope,
+        p_expected_cents: confirmIntent.cents ?? undefined,
+        p_expected_units: confirmIntent.units ?? undefined,
       });
       if (error) throw error;
 
@@ -1703,6 +1849,25 @@ export default function DeliveryDetail() {
       />
     </>
   );
+
+  // The signed-paper-ticket proof, as the shared completion step shows it (driver and office alike).
+  const paperTicketProof = {
+    // Only a photo of the current load counts (a NULL or older photo never matches).
+    hasPhoto: ticketPhotoMatchesLoad,
+    staleMessage: hasPaperTicketPhoto(photos) ? staleProofPhotoMessage(currentTicketPhoto?.lines_seen, 'ticket') : undefined,
+    deliveredOn: paperDeliveredOn,
+    onDeliveredOnChange: setPaperDeliveredOn,
+    onTakePhoto: () => paperTicketInputRef.current?.click(),
+    takePhotoDisabled: uploadingPhoto || !isOnline || !currentLinesSeen || countTicketPhotosForLoad(photos, currentLinesSeen) >= MAX_PAPER_TICKET_PHOTOS,
+    uploading: uploadingPhoto,
+  };
+  // A problem with the delivery, reported in the same completion step (driver and office alike) and sent with it.
+  const completionIssue = {
+    type: driverIssueType,
+    notes: driverIssueNotes,
+    onTypeChange: setDriverIssueType,
+    onNotesChange: setDriverIssueNotes,
+  };
 
   if (isDriver) {
     const isActive = delivery.status !== 'completed' && delivery.status !== 'cancelled';
@@ -1869,7 +2034,7 @@ export default function DeliveryDetail() {
                           onChange={(e) => updateDeliveryQty(item.id, parseFloat(e.target.value) || 0, item.quantity)}
                           className="h-12 w-0 min-w-0 flex-1 rounded-xl border border-gray-300 bg-white text-center font-heading text-[1.75rem]! font-bold tabular-nums text-nav-dark focus:outline-none focus:ring-2 focus:ring-crx-green focus:border-crx-green"
                           min="0"
-                          step="any"
+                          step={isWholeItemUnit(item.unit_size) ? 1 : 'any'}
                           aria-label={`Quantity for ${productName || 'item'}`}
                         />
                         <button
@@ -1952,128 +2117,23 @@ export default function DeliveryDetail() {
             </section>
           )}
 
-          {/* Issue reporting (driver, when in_progress) */}
-          {delivery.status === 'in_progress' && (
-            <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-              <h2 className="font-heading text-xl font-bold text-nav-dark">Report Issue (Optional)</h2>
-              <select
-                value={driverIssueType}
-                onChange={(e) => setDriverIssueType(e.target.value as DeliveryIssueType)}
-                aria-label="Issue type"
-                className={DRIVER_FIELD_CLASS}
-              >
-                {Object.entries(ISSUE_TYPE_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-              {driverIssueType !== 'none' && (
-                <textarea
-                  value={driverIssueNotes}
-                  onChange={(e) => setDriverIssueNotes(e.target.value)}
-                  placeholder="Describe the issue..."
-                  aria-label="Issue notes"
-                  rows={2}
-                  className={`${DRIVER_FIELD_CLASS} resize-none`}
-                />
-              )}
-            </section>
-          )}
-
           {/* Complete delivery section — only when in_progress; the Complete button is pinned at the bottom */}
           {delivery.status === 'in_progress' && (
             <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
               <h2 className="flex items-center font-heading text-xl font-bold text-nav-dark">Complete Delivery<HelpTip text="Finalizes the delivery. Inventory is deducted, the customer gets an email receipt, and a draft invoice is created automatically." className="ml-1" /></h2>
-              <div>
-                <label htmlFor="driver-signed-by" className="block text-sm font-semibold text-nav-dark mb-1">Signed By</label>
-                <input
-                  id="driver-signed-by"
-                  type="text"
-                  value={signedBy}
-                  onChange={(e) => setSignedBy(e.target.value)}
-                  placeholder="Customer name"
-                  className={DRIVER_FIELD_CLASS}
-                />
-              </div>
-              <div className="flex items-center gap-1">
-              <label className="flex items-center gap-2 text-sm text-nav-dark cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={usePaperTicket}
-                  onChange={(e) => {
-                    setUsePaperTicket(e.target.checked);
-                    if (e.target.checked) setSignatureDataUrl(null);
-                  }}
-                  className="w-5 h-5 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                />
-                Customer signed a paper ticket (no signal at the site)
-              </label>
-              {/* Outside the label, so opening help never toggles paper mode. */}
-              <HelpTip text="Use this when there was no signal at the customer and they signed a paper delivery ticket. Take a photo of the signed ticket instead of an on-screen signature." className="ml-1" />
-              </div>
-              {usePaperTicket ? (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
-                  <input
-                    ref={paperTicketInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)}
-                    className="hidden"
-                  />
-                  {hasPaperTicketPhoto(photos) ? (
-                    <p className="flex items-center gap-2 text-sm text-crx-green">
-                      <CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the signed ticket saved
-                    </p>
-                  ) : (
-                    <p className="text-sm text-amber-800">A photo of the signed paper ticket is required.</p>
-                  )}
-                  <div>
-                    <label htmlFor="paper-delivered-on" className="block text-sm font-semibold text-nav-dark mb-1">Delivered on (date on the ticket)</label>
-                    <input
-                      id="paper-delivered-on"
-                      type="date"
-                      value={paperDeliveredOn}
-                      max={todayInBusinessTz()}
-                      onChange={(e) => setPaperDeliveredOn(e.target.value)}
-                      className={DRIVER_FIELD_CLASS}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => paperTicketInputRef.current?.click()}
-                    disabled={uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS}
-                    className="w-full min-h-12 flex items-center justify-center gap-2 font-semibold text-nav-dark bg-white border border-gray-300 rounded-xl hover:bg-cream-dark disabled:opacity-50 transition-colors"
-                  >
-                    <Camera className="w-5 h-5" />
-                    {uploadingPhoto ? 'Uploading...' : 'Take Photo of Signed Ticket'}
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center gap-1 mb-1">
-                    <span className="text-sm font-semibold text-nav-dark">Customer Signature</span>
-                    <HelpTip text="Have the customer sign with their finger or mouse. This saves as part of the delivery record for your files." className="ml-1" />
-                  </div>
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                    <SignatureCanvas
-                      onSignatureChange={setSignatureDataUrl}
-                      label=""
-                      height={120}
-                    />
-                  </div>
-                </>
-              )}
-              {/* Always shown: a receipt is asked for unless unticked, even when this screen cannot see the email. */}
-              <label className="flex items-center gap-2 text-sm text-nav-dark cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={emailOnComplete}
-                  onChange={(e) => setEmailOnComplete(e.target.checked)}
-                  className="w-5 h-5 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                />
-                Email delivery receipt to customer
-                <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />
-              </label>
+              <CompletionProofFields
+                idPrefix="driver"
+                signedBy={signedBy}
+                onSignedByChange={setSignedBy}
+                usePaperTicket={usePaperTicket}
+                onUsePaperTicketChange={setUsePaperTicket}
+                paperTicket={paperTicketProof}
+                onSignatureChange={sig.onSignatureChange}
+                signatureKey={String(sig.canvasKey)}
+                receipt={{ checked: emailOnComplete, onChange: setEmailOnComplete }}
+                issue={completionIssue}
+              />
+              <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
               {!isOnline && (
                 <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
                   <WifiOff className="h-4 w-4 shrink-0" />
@@ -2198,6 +2258,7 @@ export default function DeliveryDetail() {
                 icon={<Pencil className="w-4 h-4" />}
                 showChevron={false}
                 onClick={startEditing}
+                disabled={editLocked}
               >
                 Edit
               </Button>
@@ -2291,7 +2352,7 @@ export default function DeliveryDetail() {
               open={resendCopyCheck !== null && resendCopyCheck.delivery_id === delivery.id}
               onClose={() => {
                 // The server may already have sent it: never say it did not go out (Taha LOW).
-                if (resendCopyCheck?.outcome === 'paused') toast('warning', `Delivery ${delivery.delivery_number}: the server may already have emailed this receipt. It is on "Customer receipts to check" and the server will not send it again. Check with the customer before sending, then mark it handled.`);
+                if (resendCopyCheck?.outcome === 'paused') toast('warning', `Delivery ${delivery.delivery_number}: the server may already have emailed this receipt. It is on "Customer receipts to check" and the server will not send it again. Check with the customer before sending; an admin can mark it handled.`);
                 setResendCopyCheck(null);
               }}
               onConfirm={() => { void handleResendEmail(resendCopyCheck?.delivery_id); }}
@@ -2413,9 +2474,17 @@ export default function DeliveryDetail() {
                 <select
                   value={editDriver}
                   onChange={(e) => setEditDriver(e.target.value)}
+                  disabled={savingEdit}
                   className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
-                  <option value="">Unassigned</option>
+                  {/* The server refuses to unassign a started delivery; assign another driver instead. */}
+                  <option value="" disabled={!!editDriverAtOpen && delivery.status === 'in_progress'}>Unassigned</option>
+                  {/* Keyed on the driver at open, so it stays selectable after another pick. */}
+                  {editDriverAtOpen && !drivers.some((d) => d.id === editDriverAtOpen) && (
+                    <option value={editDriverAtOpen}>
+                      {driver?.full_name ? `Current driver: ${driver.full_name}` : 'Current driver (not in list)'}
+                    </option>
+                  )}
                   {drivers.map((d) => (
                     <option key={d.id} value={d.id}>{d.full_name} ({d.role})</option>
                   ))}
@@ -2548,7 +2617,7 @@ export default function DeliveryDetail() {
                           className="w-20 text-center px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                           min="0"
                           max={item.max_quantity}
-                          step="any"
+                          step={isWholeItemUnit(item.unit_size) ? 1 : 'any'}
                         />
                         <button
                           onClick={() => setEditItems((prev) =>
@@ -2608,7 +2677,11 @@ export default function DeliveryDetail() {
             </div>
 
             <div className="flex justify-end gap-3 pt-2">
-              <Button variant="secondary" onClick={() => setEditing(false)}>Cancel</Button>
+              <Button variant="secondary" onClick={() => {
+                setEditing(false);
+                // After a clear whose reply never came, reload: the cached driver may no longer be true.
+                if (clearUnconfirmedRef.current) refreshAfterEdit();
+              }} disabled={savingEdit}>Cancel</Button>
               <Button onClick={saveEdit} loading={savingEdit}>Save Changes</Button>
             </div>
           </div>
@@ -2662,12 +2735,14 @@ export default function DeliveryDetail() {
           invoices={relatedInvoices}
           deliveryId={delivery.id}
           loading={!invoicesLoaded}
-          unbilled={delivery.status === 'completed' && invoicesLoaded && !hasActiveRelatedInvoice ? {
+          remainderUnknown={delivery.status === 'completed' && invoicesLoaded && remainderUnknown}
+          unbilled={delivery.status === 'completed' && invoicesLoaded && needsBilling ? {
             isAdmin,
+            rest: shortBilled && billingRemainder ? unbilledRemainderLabel(billingRemainder) : null,
             billedOutsideCrxReason,
-            createInvoice: canCreateInvoice ? 'offer' : splitBillingBlocksInvoice ? 'split' : null,
+            createInvoice: billSplitRest ? 'bill_split' : canCreateInvoice ? 'offer' : splitBillingBlocksInvoice ? 'split' : null,
             creating: creatingInvoice,
-            onCreate: () => setCreateInvoiceConfirmOpen(true),
+            onCreate: () => { void openCreateInvoiceConfirm(); },
           } : null}
         />
       )}
@@ -2814,7 +2889,7 @@ export default function DeliveryDetail() {
                       onChange={(e) => updateDeliveryQty(item.id, parseFloat(e.target.value) || 0, item.quantity)}
                       className="w-20 text-center px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                       min="0"
-                      step="any"
+                      step={isWholeItemUnit(item.unit_size) ? 1 : 'any'}
                     />
                     <button
                       onClick={() => updateDeliveryQty(item.id, currentQty + 1, item.quantity)}
@@ -2828,170 +2903,70 @@ export default function DeliveryDetail() {
             })}
           </div>
 
-          {/* Signed by */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            <Input
-              label="Signed By"
-              value={completionSignedBy}
-              onChange={(e) => setSignedBy(e.target.value)}
-              placeholder="Customer name"
-              disabled={completionEvidence === 'no_proof'}
-              required
-            />
-            <div>
-              <label className="block text-sm font-medium text-secondary mb-1">Issue (Optional)</label>
-              <select
-                value={driverIssueType}
-                onChange={(e) => setDriverIssueType(e.target.value as DeliveryIssueType)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-              >
-                {Object.entries(ISSUE_TYPE_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {driverIssueType !== 'none' && (
-            <div className="mb-4">
-              <Input
-                label="Issue Notes"
-                value={driverIssueNotes}
-                onChange={(e) => setDriverIssueNotes(e.target.value)}
-                placeholder="Describe the issue..."
-              />
-            </div>
-          )}
-
-          {completionEvidence !== 'no_proof' && (
-            <div className="flex items-center gap-1 mb-3">
-              <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={usePaperTicket}
-                  onChange={(e) => {
-                    setUsePaperTicket(e.target.checked);
-                    if (e.target.checked) setSignatureDataUrl(null);
-                  }}
-                  className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                />
-                Customer signed a paper ticket
-              </label>
-              <HelpTip text="Use this when the customer signed a paper delivery ticket instead of the screen. A photo of the signed ticket is required in place of the on-screen signature." className="ml-1" />
-            </div>
-          )}
-
-          {isAdmin && (
-            <div className="flex items-center gap-1 mb-3">
-              <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer">
-                <input
-                  type="checkbox"
+          <div className="mb-4 max-w-2xl">
+            <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
+            <CompletionProofFields
+              idPrefix="office"
+              signedBy={completionSignedBy}
+              onSignedByChange={setSignedBy}
+              signerLocked={completionEvidence === 'no_proof'}
+              usePaperTicket={usePaperTicket}
+              onUsePaperTicketChange={setUsePaperTicket}
+              showPaperTicketOption={completionEvidence !== 'no_proof'}
+              paperTicket={paperTicketProof}
+              onSignatureChange={sig.onSignatureChange}
+              signatureKey={String(sig.canvasKey)}
+              extraOptions={isAdmin && (
+                <ProofOption
                   checked={useNoProof}
-                  onChange={(e) => {
-                    setUseNoProof(e.target.checked);
-                    if (e.target.checked) { setUsePaperTicket(false); setSignatureDataUrl(null); }
+                  onChange={(checked) => {
+                    setUseNoProof(checked);
+                    if (checked) { setUsePaperTicket(false); setSignatureDataUrl(null); }
                   }}
-                  className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                />
-                Record without proof (admin only)
-              </label>
-              <HelpTip text="Only when there is no signature and no ticket photo, for example a delivery confirmed by phone. Your name, the time and your written reason are saved with the delivery. No receipt is emailed automatically." className="ml-1" />
-            </div>
-          )}
-
-          {completionEvidence === 'no_proof' ? (
-            <div className="mb-4 border border-amber-300 rounded-lg p-3 bg-amber-50 space-y-2">
-              <label htmlFor="no-proof-reason" className="flex items-center gap-2 text-sm font-medium text-amber-900">
-                <AlertTriangle className="w-4 h-4 shrink-0" /> Why is there no proof? (required)
-              </label>
-              <textarea
-                id="no-proof-reason"
-                value={noProofReason}
-                onChange={(e) => setNoProofReason(e.target.value)}
-                rows={3}
-                maxLength={2000}
-                placeholder="For example: customer confirmed by phone on 10/21 that all items arrived"
-                aria-describedby="no-proof-reason-count"
-                className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-              />
-              <p
-                id="no-proof-reason-count"
-                className={`text-xs ${isValidNoProofReason(noProofReason) ? 'text-secondary' : 'text-amber-800'}`}
-              >
-                {noProofReasonLength(noProofReason)} / {NO_PROOF_REASON_MAX_CHARS} characters (at least {NO_PROOF_REASON_MIN_CHARS})
-              </p>
-              <div>
-                <label htmlFor="no-proof-delivered-on" className="block text-sm font-medium text-amber-900 mb-1">Delivered on</label>
-                <input
-                  id="no-proof-delivered-on"
-                  type="date"
-                  value={paperDeliveredOn}
-                  max={todayInBusinessTz()}
-                  onChange={(e) => setPaperDeliveredOn(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                />
-              </div>
-            </div>
-          ) : usePaperTicket ? (
-            <div className="mb-4 border border-gray-200 rounded-lg p-3 bg-white space-y-3">
-              <input
-                ref={paperTicketInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)}
-                className="hidden"
-              />
-              {hasPaperTicketPhoto(photos) ? (
-                <p className="flex items-center gap-2 text-sm text-green-700">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the signed ticket saved
-                </p>
-              ) : (
-                <p className="text-sm text-amber-700">A photo of the signed paper ticket is required.</p>
+                  help="Only when there is no signature and no ticket photo, for example a delivery confirmed by phone. Your name, the time and your written reason are saved with the delivery. No receipt is emailed automatically."
+                >
+                  Record without proof (admin only)
+                </ProofOption>
               )}
-              <div>
-                <label htmlFor="paper-delivered-on-office" className="block text-sm font-medium text-secondary mb-1">Delivered on (date on the ticket)</label>
-                <input
-                  id="paper-delivered-on-office"
-                  type="date"
-                  value={paperDeliveredOn}
-                  max={todayInBusinessTz()}
-                  onChange={(e) => setPaperDeliveredOn(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                />
-              </div>
-              <Button
-                variant="secondary"
-                icon={<Camera className="w-4 h-4" />}
-                onClick={() => paperTicketInputRef.current?.click()}
-                disabled={uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS}
-              >
-                {uploadingPhoto ? 'Uploading...' : 'Add Photo of Signed Ticket'}
-              </Button>
-            </div>
-          ) : (
-            <div className="mb-4 border border-gray-200 rounded-lg p-3 bg-white">
-              <SignatureCanvas
-                onSignatureChange={setSignatureDataUrl}
-                label="Customer Signature"
-                height={120}
-              />
-            </div>
-          )}
-
-          {/* Shown whenever a receipt can be asked for, even when this screen cannot see the email. */}
-          {completionEvidence !== 'no_proof' && (
-            <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer mb-4">
-              <input
-                type="checkbox"
-                checked={emailOnComplete}
-                onChange={(e) => setEmailOnComplete(e.target.checked)}
-                className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-              />
-              Email delivery receipt to customer
-              <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />
-            </label>
-          )}
+              alternateProof={completionEvidence === 'no_proof' ? (
+                  <div className="border border-amber-300 rounded-lg p-3 bg-amber-50 space-y-2">
+                    <label htmlFor="no-proof-reason" className="flex items-center gap-2 text-sm font-medium text-amber-900">
+                      <AlertTriangle className="w-4 h-4 shrink-0" /> Why is there no proof? (required)
+                    </label>
+                    <textarea
+                      id="no-proof-reason"
+                      value={noProofReason}
+                      onChange={(e) => setNoProofReason(e.target.value)}
+                      rows={3}
+                      maxLength={2000}
+                      placeholder="For example: customer confirmed by phone on 10/21 that all items arrived"
+                      aria-describedby="no-proof-reason-count"
+                      className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                    />
+                    <p
+                      id="no-proof-reason-count"
+                      className={`text-xs ${isValidNoProofReason(noProofReason) ? 'text-secondary' : 'text-amber-800'}`}
+                    >
+                      {noProofReasonLength(noProofReason)} / {NO_PROOF_REASON_MAX_CHARS} characters (at least {NO_PROOF_REASON_MIN_CHARS})
+                    </p>
+                    <div>
+                      <label htmlFor="no-proof-delivered-on" className="block text-sm font-medium text-amber-900 mb-1">Delivered on</label>
+                      <input
+                        id="no-proof-delivered-on"
+                        type="date"
+                        value={paperDeliveredOn}
+                        max={todayInBusinessTz()}
+                        onChange={(e) => setPaperDeliveredOn(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                      />
+                    </div>
+                  </div>
+              ) : undefined}
+              // Shown whenever a receipt can be asked for, even when this screen cannot see the email.
+              receipt={completionEvidence !== 'no_proof' ? { checked: emailOnComplete, onChange: setEmailOnComplete } : undefined}
+              issue={completionIssue}
+            />
+          </div>
 
           {!isOnline && (
             <p role="alert" className="flex items-start gap-2 mb-4 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -3239,9 +3214,11 @@ export default function DeliveryDetail() {
           if (!creatingInvoice) setCreateInvoiceConfirmOpen(false);
         }}
         onConfirm={() => { void handleCreateInvoice(); }}
-        title="Create an invoice for this delivery?"
-        message={`This makes a draft invoice for completed delivery ${delivery.delivery_number}.`}
-        confirmLabel="Create invoice"
+        title={confirmIntent.scope !== 'new' ? 'Bill the rest of this delivery?' : 'Create an invoice for this delivery?'}
+        message={confirmIntent.scope !== 'new'
+          ? `This makes a draft invoice for the units of delivery ${delivery.delivery_number} not billed yet (${confirmIntent.rest ?? 'see the invoices card'}).${confirmIntent.scope === 'rest_order' ? ' This order has a whole-order invoice, so the draft bills every unbilled unit on the order.' : ''} If the billing changes before you confirm, nothing is drafted and the page asks you to reload.`
+          : `This makes a draft invoice for completed delivery ${delivery.delivery_number}.`}
+        confirmLabel={confirmIntent.scope !== 'new' ? 'Bill the rest' : 'Create invoice'}
         variant="info"
         loading={creatingInvoice}
       />
@@ -3269,8 +3246,6 @@ const DRIVER_STEPS = [
   { status: 'in_progress', label: 'Started' },
   { status: 'completed', label: 'Completed' },
 ];
-const DRIVER_FIELD_CLASS =
-  'w-full px-4 py-3 text-base text-nav-dark bg-white border border-gray-300 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green focus:border-crx-green';
 const DRIVER_MAIN_ACTION_CLASS =
   'flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-crx-green font-heading text-xl font-bold text-white hover:bg-crx-green-hover disabled:opacity-50 transition-colors';
 
@@ -3278,11 +3253,13 @@ interface RelatedInvoice {
   id: string; invoice_number: string; invoice_date: string; status: string;
   total_amount_cents: number; order_id: string; delivery_id: string | null;
   invoice_type: string; deleted_at: string | null;
+  /** Set on a Bill Split (or field split) group's invoices. */
+  invoice_group_id: string | null;
   /** The invoice's customer (each payer has its own invoice on a Bill Split). */
   bill_to: string | null;
 }
 
-const RELATED_INVOICE_COLUMNS = 'id, invoice_number, invoice_date, status, total_amount_cents, order_id, delivery_id, invoice_type, deleted_at, customer:customers!invoices_customer_id_fkey(farm_name)';
+const RELATED_INVOICE_COLUMNS = 'id, invoice_number, invoice_date, status, total_amount_cents, order_id, delivery_id, invoice_type, deleted_at, invoice_group_id, customer:customers!invoices_customer_id_fkey(farm_name)';
 
 /** Read-only, same RLS as the order read: invoices linked by delivery_id, or null (reported) when the read fails. */
 async function fetchInvoicesByDelivery(deliveryId: string): Promise<Record<string, unknown>[] | null> {
@@ -3292,6 +3269,34 @@ async function fetchInvoicesByDelivery(deliveryId: string): Promise<Record<strin
     return null;
   }
   return data as unknown as Record<string, unknown>[];
+}
+
+// The server keeps a driver it is not given, so picking "Unassigned" over the driver the form opened with asks it
+// to clear that driver; it refuses (DRIVER_CHANGED) if the delivery has another driver by then (20270226163000).
+// A form that opened with no driver never clears (a Take Delivery since then must survive its save).
+type EditDeliveryResult = { brand_lines_dropped?: { old_delivery_item_id: string; product_id: string | null }[] };
+
+// Refusals that mean the form showed an older delivery (driver changed, or the delivery started).
+function isStaleEditFormError(error: { message?: string }): boolean {
+  return /^(DRIVER_CHANGED|DRIVER_CLEAR_STARTED|Cannot edit delivery items once delivery is in progress)\b/.test(error.message ?? '');
+}
+
+// Send a driver only when the user changed it: an untouched list keeps whatever driver the delivery has now,
+// so a stale form saving other fields never puts back a driver dispatch replaced (Taha, #2364).
+// After an unconfirmed Unassigned the delivery may have no driver, so a picked driver is always sent.
+function pickedDriverArg(chosen: string, atOpen: string, clearUnconfirmed: boolean): string | undefined {
+  return chosen && (chosen !== atOpen || clearUnconfirmed) ? chosen : undefined;
+}
+
+function clearDriverArg(chosen: string, atOpen: string): { p_clear_driver?: true; p_expected_driver?: string } {
+  return !chosen && atOpen ? { p_clear_driver: true, p_expected_driver: atOpen } : {};
+}
+
+/** The edit's line items: sent only for a scheduled delivery. */
+function editItemsPayload(isScheduled: boolean, active: { order_item_id: string; product_id: string; quantity: number; unit_size?: string | null }[]) {
+  return isScheduled
+    ? active.map((i) => ({ order_item_id: i.order_item_id, product_id: i.product_id, quantity: i.quantity, unit_size: i.unit_size || null }))
+    : null;
 }
 
 /** The order's invoices plus those linked by delivery_id, one row per invoice id, newest first. */
@@ -3316,8 +3321,28 @@ function toRelatedInvoice(inv: Record<string, unknown>): RelatedInvoice {
     delivery_id: inv.delivery_id as string | null,
     invoice_type: inv.invoice_type as string,
     deleted_at: inv.deleted_at as string | null,
+    invoice_group_id: (inv.invoice_group_id as string | null | undefined) ?? null,
     bill_to: (inv.customer as { farm_name?: string | null } | null)?.farm_name ?? null,
   };
+}
+
+interface ConfirmIntent {
+  deliveryId: string | null;
+  scope: 'new' | 'rest_delivery' | 'rest_order';
+  rest: string | null;
+  cents: number | null;
+  units: number | null;
+}
+const NO_CONFIRM_INTENT: ConfirmIntent = { deliveryId: null, scope: 'new', rest: null, cents: null, units: null };
+
+/** A4: what an invoice leaves unbilled on this delivery; 'failed' when it could not be read. */
+async function loadBillingRemainder(deliveryId: string): Promise<DeliveryBillingRemainder | null | 'failed'> {
+  const { data, error } = await fetchDeliveryBillingRemainders([deliveryId]);
+  if (error || !data) {
+    Sentry.captureException(error, { extra: { context: 'load_delivery_billing_remainder', deliveryId } });
+    return 'failed';
+  }
+  return data.get(deliveryId) ?? null;
 }
 
 /**
@@ -3325,11 +3350,12 @@ function toRelatedInvoice(inv: Record<string, unknown>): RelatedInvoice {
  * delivery's own invoices carry a "This delivery" tag. Once completed it never disappears: with
  * nothing billing this delivery it says so (see UnbilledNote).
  */
-function DeliveryInvoicesCard({ invoices, deliveryId, loading, unbilled }: {
+function DeliveryInvoicesCard({ invoices, deliveryId, loading, unbilled, remainderUnknown }: {
   invoices: RelatedInvoice[];
   deliveryId: string;
   loading: boolean;
   unbilled: UnbilledNoteProps | null;
+  remainderUnknown: boolean;
 }) {
   return (
     <SectionCard id="delivery-invoices" icon={<FileText className="w-5 h-5" />} title="Invoices on this sale">
@@ -3346,6 +3372,12 @@ function DeliveryInvoicesCard({ invoices, deliveryId, loading, unbilled }: {
         )}
         {loading && <p role="status" className="text-sm text-secondary">Loading invoices…</p>}
         {unbilled && <div className={invoices.length > 0 ? 'mt-3' : ''}><UnbilledNote {...unbilled} /></div>}
+        {remainderUnknown && !unbilled && (
+          <p role="alert" className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-900">
+            <AlertTriangle className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+            Could not check whether every delivered unit is billed. Refresh the page to check again.
+          </p>
+        )}
       </div>
     </SectionCard>
   );
@@ -3353,8 +3385,10 @@ function DeliveryInvoicesCard({ invoices, deliveryId, loading, unbilled }: {
 
 interface UnbilledNoteProps {
   isAdmin: boolean;
+  /** A4: an invoice bills this delivery only in part ("4 of 10 not billed ($160.00)"). */
+  rest: string | null;
   billedOutsideCrxReason: string | null;
-  createInvoice: 'offer' | 'split' | null;
+  createInvoice: 'offer' | 'split' | 'bill_split' | null;
   creating: boolean;
   onCreate: () => void;
 }
@@ -3364,7 +3398,8 @@ interface UnbilledNoteProps {
  * an admin is told nothing is billed and gets Create invoice… under today's condition (or the
  * disabled split-billing button with its reason); others may not see every invoice (invoices RLS).
  */
-function UnbilledNote({ isAdmin, billedOutsideCrxReason, createInvoice, creating, onCreate }: UnbilledNoteProps) {
+function UnbilledNote({ isAdmin, rest, billedOutsideCrxReason, createInvoice, creating, onCreate }: UnbilledNoteProps) {
+  const label = rest ? 'Bill the rest…' : 'Create invoice…';
   // The stored reason is admin-only, as before this card; others get the plain empty text below.
   if (isAdmin && billedOutsideCrxReason !== null) {
     return (
@@ -3377,18 +3412,23 @@ function UnbilledNote({ isAdmin, billedOutsideCrxReason, createInvoice, creating
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-900">
       <AlertTriangle className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-      {isAdmin
+      {rest
+        ? <p className="min-w-0 flex-1"><strong>Not fully billed.</strong> {rest}: the invoice bills fewer units than were delivered.</p>
+        : isAdmin
         ? <p className="min-w-0 flex-1"><strong>No invoice yet.</strong> This delivery is complete but nothing has been billed.</p>
         : <p className="min-w-0 flex-1"><strong>No invoices you can see for this delivery.</strong> Ask the office whether it has been billed.</p>}
       {createInvoice === 'offer' && (
         <Button variant="secondary" size="sm" showChevron={false} onClick={onCreate} disabled={creating} className="min-h-11 md:min-h-0">
-          Create invoice…
+          {label}
         </Button>
+      )}
+      {createInvoice === 'bill_split' && (
+        <p className="w-full text-xs">Billed per payer (Bill Split): void its Bill Split invoices, then Create invoice drafts it again in full.</p>
       )}
       {/* H5: the server would refuse this one. Show it disabled with the reason. */}
       {createInvoice === 'split' && (
         <span className="flex items-center gap-1">
-          <Button variant="secondary" size="sm" showChevron={false} disabled className="min-h-11 md:min-h-0">Create invoice…</Button>
+          <Button variant="secondary" size="sm" showChevron={false} disabled className="min-h-11 md:min-h-0">{label}</Button>
           <HelpTip text={SPLIT_BILLING_BLOCK_REASON} />
         </span>
       )}

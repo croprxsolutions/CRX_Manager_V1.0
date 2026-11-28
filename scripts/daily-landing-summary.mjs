@@ -149,7 +149,19 @@ export function collectApplies({ merged = [], changes = [] }) {
   return [...seen].map(([name, source]) => ({ name, source }));
 }
 
-export function buildSummary({ now, hours, merged, changes, landedMigrations, waiting }) {
+// Taha's review state of the open PRs, from the labels the Taha ready bot keeps
+// (.github/scripts/taha-ready.mjs). Display only: the merge gates read his real
+// review from GitHub.
+export function tahaReviews(open = []) {
+  const has = (pr, name) => (pr.labels || []).some((label) => String(label?.name || label) === name);
+  const pick = (name) => open.filter((pr) => has(pr, name));
+  const approved = pick("taha-approved");
+  const changes = pick("taha-changes").filter((pr) => !approved.includes(pr));
+  const waiting = pick("ready-for-taha").filter((pr) => !approved.includes(pr) && !changes.includes(pr));
+  return { waiting, changes, approved };
+}
+
+export function buildSummary({ now, hours, merged, changes, landedMigrations, waiting, taha = { waiting: [], changes: [], approved: [] } }) {
   const day = new Date(now).toLocaleDateString("en-US", { timeZone: "America/Chicago", month: "long", day: "numeric", year: "numeric" });
   const applied = collectApplies({ merged, changes });
   const lines = [
@@ -174,6 +186,14 @@ export function buildSummary({ now, hours, merged, changes, landedMigrations, wa
     lines.push(...waiting.map((pr) => `- #${pr.number} ${plainText(pr.title)} — ${pr.reasons.join("; ")}.`));
   } else {
     lines.push("- Nothing needs you today.");
+  }
+  const tahaCount = taha.waiting.length + taha.changes.length + taha.approved.length;
+  if (tahaCount) {
+    const list = (label, prs) => (prs.length ? [`${label}:`, ...prs.map((pr) => `- #${pr.number} ${plainText(pr.title)}`)] : []);
+    lines.push("", `**Taha reviews: ${tahaCount}**`,
+      ...list("Taha approved (the merge gates still check his review on GitHub)", taha.approved),
+      ...list("Sent back by Taha", taha.changes),
+      ...list("Waiting on Taha", taha.waiting));
   }
   if (changes.length) {
     lines.push("", "Changes recorded in this window:", ...changes.slice(0, 20).map((change) => `- ${plainText(change.heading)}`));
@@ -242,7 +262,7 @@ async function main() {
     if (reasons.length) waiting.push({ number: pr.number, title: pr.title, reasons });
   }
 
-  const summary = buildSummary({ now, hours, merged, changes, landedMigrations, waiting });
+  const summary = buildSummary({ now, hours, merged, changes, landedMigrations, waiting, taha: tahaReviews(open) });
   if (!post) {
     process.stdout.write(`${summary}\n\n(dry run — nothing was posted; pass --post to post it)\n`);
     return;

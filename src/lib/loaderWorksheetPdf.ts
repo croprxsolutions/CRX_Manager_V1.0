@@ -21,6 +21,7 @@ import { CRX_GREEN, CHARCOAL, GRAY, ALT_ROW_BG, type JsPDFWithAutoTable } from '
 import { companyFooterInternal, fitCompanyNameFont, type CompanyInfo } from './companyInfo';
 import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { fmtNum, type ApplicatorSheetCustomer } from './applicatorSheetData';
+import { fmtLoaderGallons, fmtLoaderWater, loaderTankWater, loaderWaterNotes, type LoaderWater } from './loaderWorksheetWater';
 import { loaderGroupWeightText, loaderLoadWeights, loaderWeightCaption, type LoaderProductWeights, type LoaderSourceLine } from './loaderWeights';
 import type { WeightUnitFactors } from '../types';
 import {
@@ -197,6 +198,41 @@ ${loaderGroupWeightText(w, groupIndexes(column), pi)}${mark}`);
 }
 
 /**
+ * The "Finished gallons" and "Water to add" rows under the mix table (Sol 62), per tank and for the
+ * whole job as one batch, in loader units, plus the warnings to print under the table.
+ */
+export function loaderPdfWaterRows(data: LoaderWorksheetPdfData, plan: ReturnType<typeof buildLoaderWorksheetPdfPlan>):
+  { rows: string[][]; warnings: string[] } {
+  const ws = plan.worksheet;
+  const tanks = plan.columns.map((column) => ({ column, water: loaderTankWater(column.load.volume, column.load.products, data.products) }));
+  const batchProducts = (ws.loads[0]?.products ?? []).map((product, pi) => ({
+    ...product, amount: ws.loads.reduce((sum, load) => sum + (load.products[pi]?.amount ?? 0), 0) }));
+  const batch = loaderTankWater(ws.spray_volume, batchProducts, data.products);
+  const each = (column: LoaderWorksheetPdfLoadColumn) => (column.loads.length > 1 ? ' each' : '');
+  const marks = (water: LoaderWater) => (water.over ? ' (!)' : '');
+  // The row itself says what its marks mean, so a page break can never part the numbers from the reason.
+  const label = ['Water to add',
+    ...(tanks.some(({ water }) => water.over) || batch.over ? ['(!) products exceed finished gallons: check recipe'] : []),
+    ...(batch.water_gal === null ? [`— = not known: ${[
+      ...(batch.unknown.length > 0 ? ['set liquid/dry on the product'] : []),
+      ...(batch.unsized.length > 0 ? ["a liquid's unit has no gallon size"] : []),
+      ...(batch.missing.length > 0 ? ['an amount is missing'] : [])].join('; ')}`] : []),
+    ...(batch.dry ? ['dry products not counted as volume'] : [])].join('\n');
+  const rows = [
+    ['Finished gallons', ...tanks.map(({ column, water }) => `${fmtLoaderGallons(water.finished_gal)}${each(column)}`), fmtLoaderGallons(batch.finished_gal)],
+    [label, ...tanks.map(({ column, water }) => `${fmtLoaderWater(water)}${marks(water)}${water.water_gal === null ? '' : each(column)}`),
+      `${fmtLoaderWater(batch)}${marks(batch)}`],
+  ];
+  const warnings: string[] = [];
+  const over = tanks.filter(({ water }) => water.over).map(({ column }) => column.label);
+  if (over.length > 0 || batch.over) {
+    warnings.push(`(!) The products are more than the finished gallons${over.length > 0 ? ` on ${over.join(', ')}` : ''}:${batch.water_gal === null ? '' : ' water to add prints 0.'} Check the recipe and carrier rate.`);
+  }
+  warnings.push(...loaderWaterNotes(batch));
+  return { rows, warnings };
+}
+
+/**
  * Generate and download the Loader Worksheet PDF for a field job. The loads and
  * per-load split are computed from the data; an INVALID worksheet (no capacity /
  * carrier rate / acres) still produces a clear PDF stating what is missing rather
@@ -363,7 +399,7 @@ function drawLoaderWorksheet(
       const each = column.loads.length > 1 ? ' each' : '';
       head.push(`${column.done ? '✓ ' : ''}${column.label}\n${fmtNum(column.load.volume)} gal${column.load.is_partial ? ' (partial)' : ''}${each}`);
     });
-    head.push('Total');
+    head.push('One batch (total)');
 
     // Index-align with computeLoaderWorksheet: it pushes one entry per input
     // product, IN ORDER, onto every load — so load.products[pi] is THIS product
@@ -371,17 +407,31 @@ function drawLoaderWorksheet(
     // would collapse the duplicates onto the first line's amount). Total = the sum
     // across loads at the same index (independently per duplicate row).
     const { body, caption } = loaderPdfMixBody(data, plan);
+    const water = loaderPdfWaterRows(data, plan);
     autoTable(doc, {
       startY: y,
       margin: { left: margin, right: margin },
       head: [head],
-      body,
+      body: [...body, ...water.rows],
       styles: { fontSize: 9, cellPadding: 4, halign: 'right' },
       headStyles: { fillColor: CRX_GREEN, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 8 },
       alternateRowStyles: { fillColor: ALT_ROW_BG },
       columnStyles: { 0: { halign: 'left', fontStyle: 'bold', textColor: CHARCOAL } },
+      rowPageBreak: 'avoid',
+      didParseCell: (cell) => {
+        if (cell.section === 'body' && cell.row.index >= body.length) cell.cell.styles.fontStyle = 'bold';
+      },
     });
     y = doc.lastAutoTable.finalY + 16;
+    water.warnings.forEach((warning) => {
+      const lines = doc.splitTextToSize(warning, pageW - margin * 2);
+      y = ensureRoom(doc, y, lines.length * 11 + 4, margin);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(180, 83, 9);
+      doc.text(lines, margin, y - 4);
+      y += lines.length * 11 + 2;
+    });
     if (caption) {
       y = ensureRoom(doc, y, 14, margin);
       doc.setFont('helvetica', 'italic');

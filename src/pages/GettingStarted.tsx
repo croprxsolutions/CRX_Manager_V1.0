@@ -175,8 +175,8 @@ function FirstCycleTracker() {
   }, []);
 
   const steps = [
-    { label: 'Quote sent', icon: <FileText className="w-6 h-6" />, path: '/quotes', hint: 'Build a quote and send it to a customer.' },
-    { label: 'Order created', icon: <ShoppingCart className="w-6 h-6" />, path: '/orders', hint: 'Convert an accepted quote into an order.' },
+    { label: 'Quote booked', icon: <FileText className="w-6 h-6" />, path: '/quotes', hint: 'Build a quote and send it to a customer. A sent quote shows as Booked.' },
+    { label: 'Order created', icon: <ShoppingCart className="w-6 h-6" />, path: '/orders', hint: 'Draw an order from a booked quote with Draw from booking.' },
     { label: 'Delivery completed', icon: <Truck className="w-6 h-6" />, path: '/deliveries', hint: 'Schedule a delivery, then Start and Complete it.' },
     { label: 'Invoice posted', icon: <Receipt className="w-6 h-6" />, path: '/invoices', hint: 'Post the draft invoice so it counts toward what customers owe.' },
     { label: 'Payment recorded', icon: <DollarSign className="w-6 h-6" />, path: '/payments', hint: 'Record the customer payment against the invoice.' },
@@ -253,7 +253,7 @@ function FirstCycleTracker() {
 const adminSteps: Step[] = [
   { label: 'Create Quote', icon: <FileText className="w-6 h-6" /> },
   { label: 'Send to Customer', icon: <Send className="w-6 h-6" /> },
-  { label: 'Convert to Order', icon: <ShoppingCart className="w-6 h-6" /> },
+  { label: 'Draw from Booking', icon: <ShoppingCart className="w-6 h-6" /> },
   { label: 'Schedule Delivery', icon: <Truck className="w-6 h-6" /> },
   { label: 'Invoice & Collect', icon: <Receipt className="w-6 h-6" /> },
 ];
@@ -400,13 +400,13 @@ export default function GettingStarted() {
             <p>Toggle <strong>&quot;Planned Program&quot;</strong> to reserve inventory via holds. This tells the system the customer is likely to buy — their products are set aside. Planned quotes show a special badge in the customer&apos;s quote list.</p>
           </GuideStep>
           <GuideStep num={5} title="Send to customer">
-            <p>Click <strong>&quot;Send Quote&quot;</strong>. This generates a PDF, emails it to the customer (if they have an email on file), and changes the status to &quot;Sent&quot;. You can revise and resend as many times as needed.</p>
+            <p>Click <strong>&quot;Send Quote&quot;</strong>. This generates a PDF, emails it to the customer (if they have an email on file), and changes the status to &quot;Booked&quot;. You can revise and resend as many times as needed.</p>
           </GuideStep>
-          <GuideStep num={6} title="Convert to order">
-            <p>When the customer accepts, click <strong>&quot;Convert to Order&quot;</strong>. This creates an order with all the quoted items, releases any inventory holds, and books the prebooked quantities. The quote status changes to &quot;Accepted&quot;.</p>
+          <GuideStep num={6} title="Draw from booking">
+            <p>When the customer wants product, click <strong>&quot;Draw from booking&quot;</strong>. <strong>&quot;Whole booking&quot;</strong> creates an order with all the quoted items, releases any inventory holds, and books the prebooked quantities; the quote status changes to &quot;Accepted&quot;. <strong>&quot;Choose amounts&quot;</strong> sends only part, and the rest stays on the booking for later draws.</p>
           </GuideStep>
           <Tip>Use the <strong>version history</strong> panel (top-right of the quote builder) to snapshot your quote before making changes. You can always restore a previous version.</Tip>
-          <Tip>The <strong>&quot;New from Last Quote&quot;</strong> button on the customer detail page lets you quickly create a new quote pre-filled with the customer&apos;s most recent quote items — great for repeat orders.</Tip>
+          <Tip>The <strong>&quot;Repeat last quote&quot;</strong> button at the top of the customer page creates a new quote pre-filled with the customer&apos;s most recent quote items — great for repeat orders.</Tip>
         </GuideSection>
       )}
 
@@ -431,7 +431,7 @@ export default function GettingStarted() {
             <p>On the <strong>Inventory</strong> page, the &quot;Planned Holds&quot; column shows how much is reserved by planned quotes. &quot;Net Free&quot; = Available − Prebooked − Planned Holds.</p>
           </GuideStep>
           <GuideStep num={3} title="Converting releases holds">
-            <p>When a planned quote is converted to an order, holds are automatically released and the inventory is booked instead. No manual cleanup needed.</p>
+            <p>When an order is drawn from a planned booking, holds are automatically released and the inventory is booked instead. No manual cleanup needed.</p>
           </GuideStep>
           <Tip>If a customer declines or a quote expires, holds are automatically released and inventory becomes available again.</Tip>
         </GuideSection>

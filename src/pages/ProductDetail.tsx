@@ -17,6 +17,7 @@ import ProductSellPriceHistory from '../components/products/ProductSellPriceHist
 import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 import CancelledRegistrationBanner from '../components/products/CancelledRegistrationBanner';
+import { fetchParentEpaNumbers } from '../lib/epaProposals';
 import {
   CHECK_TIMEOUT_MS, normalizeEpaRegistration, registrationCheck, useCancelledRegistrations, useStickyCancellations,
 } from '../lib/epaRegistrationStatus';
@@ -41,8 +42,10 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
 import { sanitizeError, assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, supabase, supabaseUntyped } from '../lib/db';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
-import { localToday } from '../lib/dateUtils';
+import { BUSINESS_TIMEZONE, localToday } from '../lib/dateUtils';
 import { formatExactUSD } from '../lib/money';
+import { costBasisSourceLabel, sourceLabel } from '../lib/sellPriceHistory';
+import { getProductPriceHistory } from '../lib/supplierPricing';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
 import { Sentry } from '../lib/sentry';
 import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, PRODUCT_FORM_OPTIONS } from '../lib/units';
@@ -50,7 +53,7 @@ import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { useLoad } from '../hooks/useLoad';
 import { usePhoneSections } from '../hooks/usePhoneSections';
-import type { CostHistory, EpaLookupResult, Product, ProductBrand, ProductRateLock, UnitConversion } from '../types';
+import type { EpaLookupResult, Product, ProductBrand, ProductRateLock, UnitConversion } from '../types';
 import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
@@ -78,7 +81,7 @@ import {
 } from '../lib/productCostBasis';
 import { PRODUCT_COLUMNS, withAdminCost } from '../lib/costFields';
 import {
-  duplicateProductDraft, duplicateProductSource, listProductCategories, missingProductSetup, nearMatchNames, normalizedProductSetup,
+  duplicateProductDraft, matchReadIntervals, duplicateProductSource, listProductCategories, missingProductSetup, nearMatchNames, normalizedProductSetup,
   productSetupValidationMessage, visibleProductCategories, type DuplicateProductSource,
 } from '../lib/productSetup';
 import { listProductCropOptions, listProductUseTimingOptions } from '../lib/productUseTimings';
@@ -93,12 +96,14 @@ const PRODUCT_NONPRICING_FIELDS = [
   'notes', 'epa_registration', 'product_form', 'inventory_unit',
   'container_unit', 'container_type', 'is_rup', 'signal_word', 'internal_notes',
   'quoting_notes',
-  'rei_hours', 'phi_days', 'max_label_rate', 'max_label_rate_unit', 'use_timings',
+  'rei_hours', 'phi_days', 'rei_not_applicable', 'phi_not_applicable', 'max_label_rate', 'max_label_rate_unit', 'use_timings',
 ] as const satisfies ReadonlyArray<keyof Product>;
 
 // Other screens write these (commit_label_draft writes the six label fields).
 const PRODUCT_FIELDS_WRITTEN_ELSEWHERE = [
   'vendor', 'signal_word', 'rei_hours', 'phi_days', 'epa_registration', 'max_label_rate', 'max_label_rate_unit',
+  // A real label number written elsewhere clears these in the database, so an open page must not re-send them.
+  'rei_not_applicable', 'phi_not_applicable',
 ] as const satisfies ReadonlyArray<(typeof PRODUCT_NONPRICING_FIELDS)[number]>;
 
 const PRODUCT_PRICING_FIELDS = [
@@ -114,6 +119,27 @@ type ProductPricingMarginDrafts = Partial<Record<ProductPricingMarginField, stri
 // PAR-1: a grouped size's parent owns these; the page never sends them for one.
 const PARENT_OWNED_FIELDS = ['category', 'use_timings', 'epa_registration', ...PRODUCT_RATE_KEYS] as const;
 
+/** The "label gives no interval" tick under REI or PHI. Ticking clears the number: never a fake 0. */
+function IntervalNotApplicable({ label, checked, disabled, epaPending, onChange }: {
+  label: string; checked: boolean; disabled: boolean; epaPending: boolean; onChange: (checked: boolean) => void;
+}) {
+  return (
+    <>
+    <label className="mt-2 flex items-center gap-2 cursor-pointer">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        disabled={disabled}
+        className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+      />
+      <span className="text-sm text-secondary">{label}</span>
+    </label>
+    {epaPending && <p className="mt-1 text-xs text-secondary">Save the new EPA number first, then tick for its label.</p>}
+    </>
+  );
+}
+
 function nonpricingProductPayload(product: Partial<Product>, persisted?: Product, parentOwned = false): Record<string, unknown> {
   const payload: Record<string, unknown> = Object.fromEntries([
     ...PRODUCT_NONPRICING_FIELDS.map((field) => [field, product[field]] as const),
@@ -127,6 +153,11 @@ function nonpricingProductPayload(product: Partial<Product>, persisted?: Product
   if (persisted) {
     for (const field of PRODUCT_FIELDS_WRITTEN_ELSEWHERE) {
       if (payload[field] === (persisted[field] ?? null)) delete payload[field];
+    }
+    // A new EPA number clears the ticks in the database (a new label needs a fresh review), so none ride along.
+    if ('epa_registration' in payload) {
+      delete payload.rei_not_applicable;
+      delete payload.phi_not_applicable;
     }
   }
   return payload;
@@ -254,6 +285,8 @@ function ParentOwnedHint({ parentName, identity = false }: { parentName?: string
 }
 
 const NO_ROWS: never[] = [];
+const WEIGHT_REVIEW_CHANGE_EVENT = 'crx:weight-review-change';
+type WeightReviewChange = { productId: string; parentId?: string };
 
 async function readUnitConversions(): Promise<UnitConversion[]> {
   const { data, error } = await supabase.from('unit_conversions').select('*').order('unit');
@@ -313,11 +346,24 @@ export default function ProductDetail() {
   const [parentLoadFailed, setParentLoadFailed] = useState(false);
   // DM-1: a weight save on this page re-reads cost per lb of active.
   const [weightSaves, setWeightSaves] = useState(0);
+  const [weightReviewReload, setWeightReviewReload] = useState(0);
   const [parentReload, setParentReload] = useState(0);
   // Category, use timings, EPA number and rates belong to the parent; until the page knows there is
   // none, they stay read-only.
   const parentOwned = isNew ? Boolean(addSizeTo) : parent !== null;
   const shownParent = isNew ? addSizeTo ?? null : parent ?? null;
+  const weightParentId = shownParent?.id;
+  // A late brand save should refresh the same group without interrupting another product's draft.
+  useEffect(() => {
+    const refreshWeight = (event: Event) => {
+      const change = (event as CustomEvent<WeightReviewChange>).detail;
+      if (change && (change.productId === id || (change.parentId != null && change.parentId === weightParentId))) {
+        setWeightReviewReload((revision) => revision + 1);
+      }
+    };
+    window.addEventListener(WEIGHT_REVIEW_CHANGE_EVENT, refreshWeight);
+    return () => window.removeEventListener(WEIGHT_REVIEW_CHANGE_EVENT, refreshWeight);
+  }, [id, weightParentId]);
   // BLK-1a: a fixed tote with a Bulk fill source can be filled from that Bulk; the database rechecks everything else.
   const fillableTote = !isNew && Boolean(parent?.sizes.some((size) =>
     size.product_id === id && size.size_role === 'fixed_tote' && size.fill_source_product_id));
@@ -399,6 +445,8 @@ export default function ProductDetail() {
   const [nameRequired, setNameRequired] = useState(false);
   const [unitRequired, setUnitRequired] = useState(false);
   const [reiDraft, setReiDraft] = useState('');
+  // What the REI/PHI box held when its "not applicable" tick went on, so unticking puts it back.
+  const intervalDraftBeforeTick = useRef<{ read?: Product | null; rei?: string; phi?: string }>({});
   const [phiDraft, setPhiDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [costModal, setCostModal] = useState(false);
@@ -447,21 +495,35 @@ export default function ProductDetail() {
   const productStale = productRead.status === 'loaded' && productRead.stale;
   const reloadRequired = pricingReloadRequired || productStale;
   // cost_history is admin-only under RLS (the panel only renders for admins).
-  const costHistoryRead = useLoad<CostHistory[]>(isAdmin && !isNew && id ? `cost-history:${id}` : null, async () => {
-    const { data, error } = await supabase
+  const costHistoryRead = useLoad(isAdmin && !isNew && id ? `cost-history:${id}` : null, async () => {
+    // cost_history also logs price-only changes (cost unchanged) for Sell Price History. PostgREST cannot
+    // compare two columns, so read every row and keep the newest 20 whose cost really changed.
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('cost_history')
-      .select('*')
+      .select('id, old_cost, new_cost, change_note, changed_at, change_source, change_set_id, price_source, changer:profiles!cost_history_changed_by_fkey(full_name)', { count: 'exact' })
       .eq('product_id', id!)
       // The starting snapshot (20261026140000) records no change; the Sell Price History card shows it.
       .neq('change_source', 'starting_snapshot')
       .order('changed_at', { ascending: false })
-      .limit(20);
+      .order('id', { ascending: false })
+      .range(from, to)));
     if (error) throw error;
     if (!Array.isArray(data)) throw new Error('cost history read returned no list');
-    return data as CostHistory[];
+    const priceSources = new Map<string, string>();
+    for (const row of data) {
+      const source = row.price_source?.trim();
+      if (row.change_set_id && source && !priceSources.has(row.change_set_id)) priceSources.set(row.change_set_id, source);
+    }
+    return { changes: data.filter((row) => row.old_cost !== row.new_cost).slice(0, 20), priceSources };
   }, { report: { tags: { read: 'product_detail_cost_history' } } });
   const reloadCostHistory = costHistoryRead.reload;
-  const costHistory = costHistoryRead.status === 'loaded' ? costHistoryRead.data : NO_ROWS;
+  const costHistory = costHistoryRead.status === 'loaded' ? costHistoryRead.data.changes : NO_ROWS;
+  const costHistoryPriceSources = costHistoryRead.status === 'loaded' ? costHistoryRead.data.priceSources : undefined;
+  const supplierHistoryRead = useLoad(isAdmin && !isNew && id ? `supplier-price-history:${id}` : null, async () => {
+    const result = await getProductPriceHistory(id!);
+    if (result.product_id !== id) throw new Error('Price history returned the wrong Product.');
+    return result;
+  }, { refreshToken: priceHistoryReloadToken, report: { extra: { context: 'product_price_history' } } });
   const costBasisRead = useLoad<ProductCostBasisWorkspace>(isAdmin && !isNew && id ? `cost-basis:${id}` : null, async () => {
     const workspace = await getProductCostBasisWorkspace(id!);
     if (workspace.product.id !== id) throw new Error('Cost-basis workspace returned the wrong Product.');
@@ -469,10 +531,23 @@ export default function ProductDetail() {
   }, { report: { tags: { read: 'product_detail_cost_basis' } } });
   const reloadCostBasis = costBasisRead.reload;
   const costBasisWorkspace = costBasisRead.status === 'loaded' ? costBasisRead.data : null;
+  const currentBasis = costBasisWorkspace?.current_basis;
+  const currentBasisPoint = currentBasis && supplierHistoryRead.status === 'loaded'
+    ? supplierHistoryRead.data.points.find((point) => point.stream === 'selected_cost_basis' && point.source_id === currentBasis.id)
+    : undefined;
+  const currentBasisLabel = currentBasis
+    ? costBasisSourceLabel(currentBasis.basis_type, currentBasisPoint?.provenance.pricing_change_set_id, costHistoryPriceSources)
+    : 'No baseline';
   const costBasisLoading = costBasisRead.status === 'loading';
   const costBasisLoadFailed = costBasisRead.status === 'failed';
   // Refreshing or out of date: the options shown may be from before a pricing change, so no selection.
   const costBasisUnsure = costBasisRead.status === 'loaded' && (costBasisRead.refreshing || costBasisRead.stale);
+  // Which side cards show a settled, current read now; a late Reload Product warning skips a card that a
+  // Try again already recovered (#2308 LOW, Luna r1).
+  const sideCardsRecoveredRef = useLatestRef({
+    'Cost History': costHistoryRead.status === 'loaded' && !costHistoryRead.refreshing && !costHistoryRead.stale,
+    'Cost Basis': costBasisRead.status === 'loaded' && !costBasisRead.refreshing && !costBasisRead.stale,
+  });
   const [persistedLabelFields, setPersistedLabelFields] = useState<{
     signalWord: Product['signal_word'];
     epaRegistration: string | null;
@@ -540,6 +615,18 @@ export default function ProductDetail() {
   }, [productIdRef]);
   // Another product's brands never sit under this product's number.
   useEffect(() => { setBrandRegistrations([]); setBrandsRead('loading'); }, [id]);
+  // Generics keep their EPA numbers on the group's brands (the four places fetchParentEpaNumbers reads), for the setup badge.
+  const [groupHasEpa, setGroupHasEpa] = useState(false);
+  useEffect(() => { setGroupHasEpa(false); }, [shownParent]);
+  // Re-read after every brand list change too, so clearing a brand's last number brings the badge back without a reload.
+  useEffect(() => {
+    if (!shownParent) return undefined;
+    let cancelled = false;
+    fetchParentEpaNumbers(shownParent.id)
+      .then((numbers) => { if (!cancelled) setGroupHasEpa(numbers.length > 0); })
+      .catch((error: unknown) => Sentry.captureException(error, { extra: { context: 'product_detail_group_epa' } }));
+    return () => { cancelled = true; };
+  }, [shownParent, brandRegistrations]);
   const productLoaded = persistedProduct?.id === id;
   // The brand list's clock starts once the product (and so the Brands section) has loaded.
   const [brandsReadSlow, setBrandsReadSlow] = useState(false);
@@ -582,7 +669,13 @@ export default function ProductDetail() {
     setManualBasisCost('');
     setCostBasisPricingBehavior('keep_sell_prices');
     pricingPreviewIntentRef.current = null;
+    intervalDraftBeforeTick.current = {};
   }, [id, resetApplyPricingKey, resetPreviewPricingKey]);
+
+  // Ticks belong to the saved EPA number; while a new one is unsaved they show off and stay locked (the save drops them).
+  const epaPending = Boolean(persistedProduct) && (product.epa_registration?.trim() || null) !== (persistedProduct?.epa_registration?.trim() || null);
+  const reiNotApplicable = Boolean(product.rei_not_applicable) && !epaPending;
+  const phiNotApplicable = Boolean(product.phi_not_applicable) && !epaPending;
 
   const saveExistingProductDetails = async () => {
     const validation = productSetupValidationMessage(product, reiDraft, phiDraft, persistedProduct);
@@ -595,12 +688,13 @@ export default function ProductDetail() {
     if (!persistedProduct || persistedProduct.id !== id || !Number.isInteger(persistedProduct.pricing_version)) {
       throw new Error('Reload this Product before saving details.');
     }
-    const result = await supabaseUntyped
+    const payload = nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct), persistedProduct, parentOwned);
+    const query = supabaseUntyped
       .from('products')
-      .update(nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct), persistedProduct, parentOwned))
+      .update(payload)
       .eq('id', id!)
-      .eq('pricing_version', persistedProduct.pricing_version)
-      .select('id');
+      .eq('pricing_version', persistedProduct.pricing_version);
+    const result = await matchReadIntervals(query, payload, persistedProduct).select('id');
     if (!result.error && Array.isArray(result.data) && result.data.length === 0) {
       throw new Error('Product details changed after this page loaded. Reload before saving.');
     }
@@ -1054,30 +1148,34 @@ export default function ProductDetail() {
     const reloadRequest = ++pricingReloadRequestRef.current;
     setPricingReloading(true);
     setPriceHistoryReloadToken((current) => current + 1);
-    const sideReads = Promise.all([fetchCostHistory(), fetchCostBasisWorkspace()]);
+    const historyRead = fetchCostHistory();
+    const basisRead = fetchCostBasisWorkspace();
     const productRead = await reloadProduct();
     // Only the Product read holds the button (#2200): the side cards show their own loading and Try again.
     // A newer Reload Product owns the button now, so only the newest one releases it.
     if (reloadRequest === pricingReloadRequestRef.current) setPricingReloading(false);
     // Skipped: the page closed or a newer read took over, which reports itself (#2308 LOW).
-    if (productRead.status === 'skipped') return false;
+    if (productRead.status === 'skipped') return;
     if (productRead.status !== 'applied' || productRead.data.product === null) {
       toast('error', 'This Product could not be reloaded. Try again before making another change.');
-      return false;
+      return;
     }
     // The Product is current, so callers go on; the side cards report later (#2308 MED: a hung
-    // Cost Basis read no longer holds the rate-correction window open).
-    void sideReads.then(([historyReloaded, basisReloaded]) => {
-      // A newer Reload Product took over the side reads; only that one reports them.
-      if (reloadRequest !== pricingReloadRequestRef.current) return;
-      toast(
-        historyReloaded && basisReloaded ? 'success' : 'warning',
-        historyReloaded && basisReloaded
-          ? 'Product reloaded.'
-          : 'Product reloaded, but Cost History or Cost Basis did not load. Use Try again on that card.',
-      );
+    // Cost Basis read no longer holds the rate-correction window open). A newer Reload Product
+    // owns the side reads; only that one reports them.
+    const current = () => reloadRequest === pricingReloadRequestRef.current;
+    // Each failed card is reported as soon as it fails, so the warning never names a card that a
+    // later Try again already recovered (#2308 LOW).
+    const reportFailure = (read: Promise<boolean>, card: 'Cost History' | 'Cost Basis') => read.then((reloaded) => {
+      if (!reloaded && current() && !sideCardsRecoveredRef.current[card]) {
+        toast('warning', `Product reloaded, but ${card} did not load. Use Try again on that card.`);
+      }
+      return reloaded;
     });
-    return true;
+    void Promise.all([reportFailure(historyRead, 'Cost History'), reportFailure(basisRead, 'Cost Basis')])
+      .then(([historyReloaded, basisReloaded]) => {
+        if (historyReloaded && basisReloaded && current()) toast('success', 'Product reloaded.');
+      });
   };
 
   const handleEpaLookup = async () => {
@@ -1323,7 +1421,7 @@ export default function ProductDetail() {
     ? persistedLabelFields.epaRegistration.trim()
     : null;
 
-  const missingSetup = missingProductSetup(product);
+  const missingSetup = missingProductSetup(product, groupHasEpa || brandRegistrations.some((b) => b.epaRegistration?.trim()));
   // What a new quote line will show once this edit saves; existing quote lines keep their copied note.
   const quoteLine = !isNew && persistedProduct && persistedProduct.id === product.id ? quoteLineChange(persistedProduct, product) : null;
 
@@ -1436,7 +1534,7 @@ export default function ProductDetail() {
               }}
             />
           )}
-          {/* DM-2: weight per gallon (on the parent) or per pack; re-read when the product or its parent is saved. */}
+          {/* DM-2: re-read weight and its review context after changes to the product, parent, or brand documents. */}
           {!isNew && persistedProduct && persistedProduct.id === id && profile && (
             <ProductWeightCard
               productId={id!}
@@ -1445,7 +1543,7 @@ export default function ProductDetail() {
               busy={isDirty || reloadRequired || saving}
               reloadKey={JSON.stringify([persistedProduct.updated_at, persistedProduct.product_form, persistedProduct.inventory_unit,
                 persistedProduct.container_size, persistedProduct.container_unit, persistedProduct.container_type, persistedProduct.unit_size,
-                parent?.id ?? null, parent?.parent_version ?? null])}
+                parent?.id ?? null, parent?.parent_version ?? null, weightReviewReload])}
               onSaved={() => setWeightSaves((n) => n + 1)}
             />
           )}
@@ -1455,6 +1553,7 @@ export default function ProductDetail() {
               parentId={parent.id}
               parentVersion={parent.parent_version}
               refreshKey={JSON.stringify([persistedProduct?.updated_at ?? null, persistedProduct?.pricing_version ?? null, weightSaves])}
+              weightReviewRevision={weightReviewReload}
               isAdmin={isAdmin}
               profileId={profile.id}
               busy={isDirty || reloadRequired || saving}
@@ -1640,34 +1739,80 @@ export default function ProductDetail() {
                   <option value="Caution">Caution</option>
                 </select>
               </div>
-              <Input
-                label="REI (hours)"
-                type="number"
-                min={0}
-                step={1}
-                value={reiDraft}
-                onChange={(e) => {
-                  if (reloadRequired) return;
-                  setReiDraft(e.target.value);
-                  update('rei_hours', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
-                }}
-                disabled={!isAdmin}
-                placeholder="From label, e.g. 12"
-              />
-              <Input
-                label="PHI (days)"
-                type="number"
-                min={0}
-                step={1}
-                value={phiDraft}
-                onChange={(e) => {
-                  if (reloadRequired) return;
-                  setPhiDraft(e.target.value);
-                  update('phi_days', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
-                }}
-                disabled={!isAdmin}
-                placeholder="From label, e.g. 30"
-              />
+              <div>
+                <Input
+                  label="REI (hours)"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={reiDraft}
+                  onChange={(e) => {
+                    if (reloadRequired) return;
+                    const value = e.target.value;
+                    setReiDraft(value);
+                    const hours = /^\d+$/.test(value) ? Number(value) : null;
+                    if (hours !== null) update('rei_not_applicable', false);
+                    update('rei_hours', hours);
+                  }}
+                  disabled={!isAdmin || saving || reloadRequired || reiNotApplicable}
+                  placeholder={reiNotApplicable ? 'Not applicable' : 'From label, e.g. 12'}
+                />
+                {!isNew && (
+                  <IntervalNotApplicable
+                    label="Label gives no REI"
+                    checked={reiNotApplicable}
+                    disabled={!isAdmin || saving || reloadRequired || epaPending}
+                    epaPending={epaPending}
+                    onChange={(checked) => {
+                      if (reloadRequired || epaPending) return;
+                      update('rei_not_applicable', checked);
+                      // Unticking puts back what the box held before this read's tick, so a mis-click never erases a number.
+                      if (intervalDraftBeforeTick.current.read !== persistedProduct) intervalDraftBeforeTick.current = { read: persistedProduct };
+                      if (checked) intervalDraftBeforeTick.current.rei = reiDraft;
+                      const draft = checked ? '' : intervalDraftBeforeTick.current.rei ?? String(persistedProduct?.rei_hours ?? '');
+                      setReiDraft(draft);
+                      update('rei_hours', /^\d+$/.test(draft) ? Number(draft) : null);
+                    }}
+                  />
+                )}
+              </div>
+              <div>
+                <Input
+                  label="PHI (days)"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={phiDraft}
+                  onChange={(e) => {
+                    if (reloadRequired) return;
+                    const value = e.target.value;
+                    setPhiDraft(value);
+                    const days = /^\d+$/.test(value) ? Number(value) : null;
+                    if (days !== null) update('phi_not_applicable', false);
+                    update('phi_days', days);
+                  }}
+                  disabled={!isAdmin || saving || reloadRequired || phiNotApplicable}
+                  placeholder={phiNotApplicable ? 'Not applicable' : 'From label, e.g. 30'}
+                />
+                {!isNew && (
+                  <IntervalNotApplicable
+                    label="Label gives no PHI"
+                    checked={phiNotApplicable}
+                    disabled={!isAdmin || saving || reloadRequired || epaPending}
+                    epaPending={epaPending}
+                    onChange={(checked) => {
+                      if (reloadRequired || epaPending) return;
+                      update('phi_not_applicable', checked);
+                      // Unticking puts back what the box held before this read's tick, so a mis-click never erases a number.
+                      if (intervalDraftBeforeTick.current.read !== persistedProduct) intervalDraftBeforeTick.current = { read: persistedProduct };
+                      if (checked) intervalDraftBeforeTick.current.phi = phiDraft;
+                      const draft = checked ? '' : intervalDraftBeforeTick.current.phi ?? String(persistedProduct?.phi_days ?? '');
+                      setPhiDraft(draft);
+                      update('phi_days', /^\d+$/.test(draft) ? Number(draft) : null);
+                    }}
+                  />
+                )}
+              </div>
             </div>
 
             {epaLookupResult && (
@@ -2099,8 +2244,8 @@ export default function ProductDetail() {
             <PhoneSection title="Brands" {...sectionProps('brands', reloadRequired)}>
               <ProductBrandsSection
                 // Shown only once this page's own product has loaded, and remounted for each product, so one
-                // product's name, brands, open form or copy picker never reach (or get saved onto) the next.
-                key={id}
+                // product's name, brands, open form or copy picker never reach the next product or group.
+                key={`${id}:${shownParent?.id ?? ''}`}
                 productId={id}
                 productName={persistedProduct.product_name}
                 isAdmin={isAdmin}
@@ -2111,6 +2256,9 @@ export default function ProductDetail() {
                 canEditAdjuvants={canEditAdjuvants}
                 onAdjuvantsSaved={refreshRegistrations}
                 onBrandsChange={handleBrandsChange}
+                onWeightReviewChange={(parentId) => window.dispatchEvent(new CustomEvent<WeightReviewChange>(WEIGHT_REVIEW_CHANGE_EVENT, {
+                  detail: { productId: id, parentId },
+                }))}
               />
             </PhoneSection>
           )}
@@ -2315,7 +2463,7 @@ export default function ProductDetail() {
                     <div className="grid gap-3 rounded-lg border border-gray-200 p-4 sm:grid-cols-3">
                       <div>
                         <p className="text-xs text-secondary">Current selected basis</p>
-                        <p className="font-semibold">{costBasisWorkspace.current_basis?.basis_type.replace(/_/g, ' ') ?? 'No baseline'}</p>
+                        <p className="font-semibold">{currentBasisLabel}</p>
                       </div>
                       <div>
                         <p className="text-xs text-secondary">Selected cost</p>
@@ -2392,9 +2540,10 @@ export default function ProductDetail() {
               <PhoneSection title="Price & Cost History" {...sectionProps('history')}>
               <ProductPriceHistory
                 productId={id}
+                read={supplierHistoryRead}
+                costHistoryPriceSources={costHistoryPriceSources}
                 costBasisWorkspace={costBasisWorkspace}
                 costBasisBusy={costBasisBusy || costBasisUnsure || reloadRequired}
-                reloadToken={priceHistoryReloadToken}
                 onSelectSupplierBasis={(candidate) => void handleSupplierBasisSelection(candidate)}
                 onSelectPurchaseBasis={(candidate) => void handlePurchaseBasisSelection(candidate)}
               />
@@ -2420,11 +2569,15 @@ export default function ProductDetail() {
                     {costHistory.map((ch) => (
                       <div key={ch.id} className="border-b border-gray-50 pb-3 last:border-0">
                         <div className="flex justify-between text-sm">
-                          <span className="text-red-500 line-through">${ch.old_cost?.toFixed(2)}</span>
-                          <span className="text-crx-green font-medium">${ch.new_cost?.toFixed(2)}</span>
+                          <span className="text-red-500 line-through">{ch.old_cost == null ? 'No cost' : formatExactUSD(ch.old_cost)}</span>
+                          <span className="text-crx-green font-medium">{ch.new_cost == null ? 'No cost' : formatExactUSD(ch.new_cost)}</span>
                         </div>
                         {ch.change_note && <p className="text-xs text-secondary mt-1">{ch.change_note}</p>}
-                        <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString()}</p>
+                        <p className="text-xs text-secondary mt-1">
+                          {ch.changer?.full_name?.trim() || 'Unknown user'} · {sourceLabel(ch.change_source)}
+                          {ch.price_source?.trim() && ` · ${ch.price_source.trim()}`}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString('en-US', { timeZone: BUSINESS_TIMEZONE })}</p>
                       </div>
                     ))}
                   </div>
@@ -2433,8 +2586,12 @@ export default function ProductDetail() {
                 ) : (
                   <div className="space-y-2 text-sm text-secondary">
                     <p>No legacy cost changes recorded.</p>
-                    {costBasisWorkspace?.current_basis && costBasisRead.status === 'loaded' && costBasisRead.stale ? (
+                    {/* Refreshing or out of date: the cached basis may no longer be current, and an empty cache
+                        does not prove there is none (#2308 MED). */}
+                    {costBasisUnsure && costBasisRead.status === 'loaded' && costBasisRead.stale ? (
                       <p>Governed cost-basis details could not be refreshed, so the current basis is not shown. Try again in Cost Basis above.</p>
+                    ) : costBasisUnsure ? (
+                      <p>Governed cost-basis details are refreshing, so the current basis is not shown yet.</p>
                     ) : costBasisWorkspace?.current_basis ? (
                       costBasisWorkspace.current_basis.selection_source === 'migration_baseline' ? (
                         <p>
@@ -2454,7 +2611,7 @@ export default function ProductDetail() {
                           <strong className="text-nav-dark">
                             ${formatCostBasisDollars(costBasisWorkspace.current_basis.cost_cents)}
                           </strong>{' '}
-                          ({costBasisWorkspace.current_basis.basis_type.replace(/_/g, ' ')}) selected on{' '}
+                          ({currentBasisLabel}) selected on{' '}
                           {new Date(costBasisWorkspace.current_basis.selected_at).toLocaleDateString()}. This is
                           current cost provenance, not a backfilled historical price-change event.
                         </p>
@@ -2471,7 +2628,7 @@ export default function ProductDetail() {
               </Card>
               </PhoneSection>
             )}
-            <ProductChangeHistory productId={id} reloadToken={priceHistoryReloadToken} />
+            <ProductChangeHistory productId={id} reloadToken={priceHistoryReloadToken} showPriceHistoryNote={isAdmin} />
           </div>
         )}
       </div>
@@ -2532,7 +2689,7 @@ export default function ProductDetail() {
           unitOptions={rateUnitOptionsForProduct(unitConversions, persistedProduct.product_form, persistedProduct.inventory_unit).map((uc) => uc.unit)}
           onClose={() => setCorrectingRates(false)}
           // A correction bumps pricing_version, so reload the cost-basis workspace and histories too;
-          // the window stays over the form until then, so no edit is lost to the reload.
+          // the window stays over the form until the Product reloads, so no edit is lost to the reload.
           // Until the product reloads, edits stay blocked and Reload Product stays offered.
           onCorrected={() => {
             setPricingReloadRequired(true);

@@ -3,23 +3,41 @@
  *
  * Sprint 11: Financial Workflows
  */
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { DollarSign, XCircle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { loadReturnedCheckCredits, loadReturnedPayments } from '../lib/m9Reversals';
+import { PaymentActions, PaymentMobileRow, PaymentStatus, ReturnCheckDialog } from '../components/prepay/PaymentHistoryParts';
+import { Sentry } from '../lib/sentry';
+import { toSentryError } from '../lib/sentryError';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
-import Badge from '../components/ui/Badge';
 import Input from '../components/ui/Input';
+import DatePicker from '../components/ui/DatePicker';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Modal from '../components/ui/Modal';
+import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
+import PrepayChecksNote from '../components/prepay/PrepayChecksNote';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, assertRpcResult } from '../lib/db';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
+import { fetchPrepayChecks, prepayChecksShown, type PrepayCheck } from '../lib/prepayChecks';
 import { runCriticalAction } from '../lib/criticalAction';
 import { exportToCSV, fmtCSV } from '../lib/csvExport';
-import { parseLocalDate } from '../lib/dateUtils';
+import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
+import {
+  dateRangeCaption,
+  dateRangePreset,
+  dayParam,
+  firstOfBusinessMonth,
+  isDayInRange,
+  isRangeBackwards,
+  paymentBusinessDate,
+} from '../lib/paymentDateRange';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useCustomerParam } from '../hooks/useCustomerParam';
 import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { formatCents as fmt } from '../lib/money';
 
@@ -50,12 +68,87 @@ interface InvoiceAllocation {
   bill_to_farm_name?: string;
 }
 
+const QUICK_CHOICES = [
+  { key: 'today', label: 'Today' },
+  { key: 'month', label: 'This month' },
+  { key: 'all', label: 'All dates' },
+] as const;
+
+// The customer box, From/To pickers plus Today / This month / All dates. Days are Chicago business days.
+function PaymentDateFilter({ customerBox, fromDate, toDate, onChange }: {
+  customerBox: ReactNode;
+  fromDate: string | null;
+  toDate: string | null;
+  onChange: (from: string | null, to: string | null) => void;
+}) {
+  const activePreset = dateRangePreset(fromDate, toDate);
+  const choose = (key: (typeof QUICK_CHOICES)[number]['key']) => {
+    const today = todayInBusinessTz();
+    if (key === 'today') onChange(today, today);
+    else if (key === 'month') onChange(firstOfBusinessMonth(), today);
+    else onChange(null, null);
+  };
+  return (
+    <Card>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start">
+        {customerBox}
+        <div className="w-full sm:w-48">
+          <DatePicker label="From" value={fromDate} onChange={(v) => onChange(v, toDate)} />
+        </div>
+        <div className="w-full sm:w-48">
+          <DatePicker
+            label="To"
+            value={toDate}
+            onChange={(v) => onChange(fromDate, v)}
+            error={isRangeBackwards(fromDate, toDate) ? 'To is before From' : undefined}
+          />
+        </div>
+        <div className="flex flex-wrap gap-2 sm:pt-6" role="group" aria-label="Quick date choices">
+          {QUICK_CHOICES.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => choose(key)}
+              aria-pressed={activePreset === key}
+              className={`h-11 md:h-10 px-3 rounded-full border text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2 ${
+                activePreset === key
+                  ? 'border-crx-green bg-crx-green-light text-crx-green'
+                  : 'border-gray-300 bg-white text-nav-dark hover:bg-gray-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+const isAdminProfile = (p: { role?: string | null } | null | undefined) => p?.role === 'admin';
+
+// What the empty list says, by which filters are set.
+function emptyListText(customerChosen: boolean, datesChosen: boolean): { title: string; description: string } {
+  if (customerChosen) {
+    return { title: `No payments for this customer${datesChosen ? ' in these dates' : ''}`, description: 'Change the customer or the dates' };
+  }
+  if (datesChosen) return { title: 'No payments in these dates', description: 'Change the dates or choose All dates' };
+  return { title: 'No payments yet', description: 'Payment allocations will appear here after you record payments' };
+}
+
+/** The open payment, or null when the filters now hide it from the list. */
+function shownExpandedId(expandedId: string | null, shown: ReadonlyArray<{ id: string }>): string | null {
+  return expandedId && shown.some((p) => p.id === expandedId) ? expandedId : null;
+}
+
 export default function PaymentHistory() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const voidPaymentIdem = useIdempotencyKey('void_payment', profile?.id || '');
 
   const [payments, setPayments] = useState<AllocationSet[]>([]);
+  // Payments received also include checks entered on Prepay Credits; they count in the totals and export.
+  const [prepayChecks, setPrepayChecks] = useState<PrepayCheck[]>([]);
   const [loading, setLoading] = useState(true);
   // The last list read failed: no rows or totals, so it never reads as "No payments yet".
   const [loadFailed, setLoadFailed] = useState(false);
@@ -73,12 +166,27 @@ export default function PaymentHistory() {
   const [voidReason, setVoidReason] = useState('');
   const [savingVoid, setSavingVoid] = useState(false);
 
+  // M9: returned checks (payment id -> the day the return was recorded) and the one being marked returned.
+  const [returnedOn, setReturnedOn] = useState<Map<string, string>>(new Map());
+  // Prepay Credits check buckets that were returned (M9): they leave the received totals too.
+  const [returnedCredits, setReturnedCredits] = useState<ReadonlySet<string>>(new Set());
+  const [returnPayment, setReturnPayment] = useState<AllocationSet | null>(null);
+  const isAdmin = isAdminProfile(profile);
+  // Date filter (Chicago business days, inclusive). Empty = all dates, as before. A link may
+  // open the page on a range (?from=YYYY-MM-DD&to=YYYY-MM-DD, e.g. from Month-End Close).
+  const [searchParams] = useSearchParams();
+  const [fromDate, setFromDate] = useState<string | null>(() => dayParam(searchParams.get('from')));
+  const [toDate, setToDate] = useState<string | null>(() => dayParam(searchParams.get('to')));
+  // The A/R screens' shared customer box (?customer=, carried between tabs). Empty = every customer.
+  const { customerId, customerName, customerLabel, setCustomer } = useCustomerParam();
+
   // A refresh after voiding a payment is a multi-page read; an older, slower
   // load must not overwrite the newer list, so only the latest may set state.
   const fetchSeq = useRef(0);
   const fetchPayments = useCallback(async () => {
     const seq = ++fetchSeq.current;
     setLoading(true);
+    const prepayRead = fetchPrepayChecks();
     const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('allocation_sets')
       .select(`
@@ -90,12 +198,15 @@ export default function PaymentHistory() {
       .order('created_at', { ascending: false })
       .order('id')
       .range(from, to)));
+    const { data: prepayRows, error: prepayError } = await prepayRead;
     if (seq !== fetchSeq.current) return;
 
-    if (error || !data) {
+    // Either read failing leaves totals short, so both fail together.
+    if (error || !data || prepayError || !prepayRows) {
       toast('error', 'Failed to load payment history');
       // An older list, or none, would look current under zero totals.
       setPayments([]);
+      setPrepayChecks([]);
       setLoadFailed(true);
       // Close the open payment too: its allocations may have changed (a void) and it is no longer listed.
       allocSeq.current += 1;
@@ -108,16 +219,38 @@ export default function PaymentHistory() {
       setLoading(false);
       return;
     }
-    setLoadFailed(false);
-
     const mapped: AllocationSet[] = data.map((row: Record<string, unknown>) => ({
       ...(row as AllocationSet),
       farm_name: (row.customers as { farm_name: string } | null)?.farm_name || 'Unknown',
     }));
 
+    // Which of them came back (admin read), before the list shows: a returned check must never show as Active
+    // with Void and Return offered (Sol r1 MED 7). A failed read fails the list, as the list read does.
+    let returned = new Map<string, string>();
+    let returnedCreditIds: ReadonlySet<string> = new Set();
+    if (isAdmin) {
+      try {
+        returned = await loadReturnedPayments(mapped.map((p) => p.id));
+        returnedCreditIds = await loadReturnedCheckCredits();
+      } catch (err) {
+        Sentry.captureException(toSentryError(err), { extra: { context: 'payment_history_returned' } });
+        if (seq !== fetchSeq.current) return;
+        toast('error', 'Failed to load payment history');
+        setPayments([]);
+        setLoadFailed(true);
+        setVoidPayment(null);
+        setLoading(false);
+        return;
+      }
+    }
+    if (seq !== fetchSeq.current) return;
+    setLoadFailed(false);
+    setReturnedOn(returned);
+    setReturnedCredits(returnedCreditIds);
     setPayments(mapped);
+    setPrepayChecks(prepayRows);
     setLoading(false);
-  }, [toast]);
+  }, [toast, isAdmin]);
 
   useEffect(() => {
     fetchPayments();
@@ -156,14 +289,18 @@ export default function PaymentHistory() {
     setLoadingAllocs(false);
   }, [toast]);
 
+  const closeExpanded = useCallback(() => {
+    // A read still running for the closed payment must not fill the list.
+    allocSeq.current += 1;
+    setExpandedId(null);
+    setAllocations([]);
+    setAllocsFailed(false);
+    setLoadingAllocs(false);
+  }, []);
+
   const toggleExpand = (id: string) => {
     if (expandedId === id) {
-      // A read still running for the closed payment must not fill the list.
-      allocSeq.current += 1;
-      setExpandedId(null);
-      setAllocations([]);
-      setAllocsFailed(false);
-      setLoadingAllocs(false);
+      closeExpanded();
     } else {
       setExpandedId(id);
       fetchAllocations(id);
@@ -214,9 +351,43 @@ export default function PaymentHistory() {
     });
   };
 
-  const totalPayments = payments.filter((p) => p.is_active).reduce((s, p) => s + (p.total_payment_cents || 0), 0);
-  const activeCount = payments.filter((p) => p.is_active).length;
-  const voidedCount = payments.filter((p) => !p.is_active).length;
+  // A range that hides the opened payment closes it through the openId effect below.
+  const changeRange = (from: string | null, to: string | null) => {
+    setFromDate(from);
+    setToDate(to);
+  };
+
+  const rangeInvalid = isRangeBackwards(fromDate, toDate);
+  const isFiltered = !!(fromDate || toDate);
+  // Display only: the list, totals and export cover the chosen customer's payments dated inside the range.
+  const shownPayments = rangeInvalid
+    ? []
+    : payments.filter((p) => (!customerId || p.customer_id === customerId)
+      && isDayInRange(paymentBusinessDate(p.payment_date, p.created_at), fromDate, toDate));
+  // A payment the filters now hide must not keep its allocations open under another customer.
+  const openId = shownExpandedId(expandedId, shownPayments);
+  useEffect(() => {
+    if (expandedId && !openId) closeExpanded();
+  }, [expandedId, openId, closeExpanded]);
+  const customerCaption = customerId ? ` for ${customerName || 'this customer'}` : '';
+  const rangeCaption = dateRangeCaption(fromDate, toDate) + customerCaption;
+  const emptyText = emptyListText(!!customerId, isFiltered);
+
+  // Money received in the range, as Month-End Close counts it: Record Payments plus Prepay Credits checks. A
+  // returned check never brought money in (M9), so it is not an active payment, whichever way it was entered.
+  const shownPrepayChecks = prepayChecksShown(prepayChecks, customerId, fromDate, toDate)
+    .filter((c) => !c.ids.some((id) => returnedCredits.has(id)));
+  const prepayCheckCents = shownPrepayChecks.reduce((s, c) => s + c.cents, 0);
+  const counted = shownPayments.filter((p) => p.is_active && !returnedOn.has(p.id));
+  const totalPayments = counted.reduce((s, p) => s + (p.total_payment_cents || 0), 0) + prepayCheckCents;
+  const activeCount = counted.length + shownPrepayChecks.length;
+  const voidedCount = shownPayments.filter((p) => !p.is_active).length;
+
+  // M9: the ⋯ menu (Mark check as returned, then Void payment last), the status and the phone card.
+  const actionsFor = (r: AllocationSet) => (isAdmin
+    ? <PaymentActions r={r} returnedOn={returnedOn.get(r.id)} onReturn={setReturnPayment} onVoid={openVoid} /> : null);
+  const statusBadge = (r: AllocationSet) => <PaymentStatus r={r} returned={returnedOn.has(r.id)} />;
+  const mobileRow = (r: AllocationSet) => <PaymentMobileRow r={r} status={statusBadge(r)} actions={actionsFor(r)} />;
 
   const columns: Column<AllocationSet>[] = [
     {
@@ -247,32 +418,18 @@ export default function PaymentHistory() {
     {
       key: 'total_allocated_cents',
       header: 'Allocated',
-      render: (r) => <span>{fmt(r.total_allocated_cents || 0)}</span>,
+      // A returned check's invoice payments were reversed, so nothing of it is allocated any more.
+      render: (r) => <span>{fmt(returnedOn.has(r.id) ? 0 : r.total_allocated_cents || 0)}</span>,
     },
     {
       key: 'is_active',
       header: 'Status',
-      render: (r) => r.is_active
-        ? <Badge variant="success">Active</Badge>
-        : <Badge variant="danger">Voided</Badge>,
+      render: (r) => statusBadge(r),
     },
     {
       key: 'id',
       header: '',
-      render: (r) => (
-        r.is_active && profile?.role === 'admin' ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<XCircle className="w-3 h-3" />}
-            onClick={(e: React.MouseEvent) => { e.stopPropagation(); openVoid(r); }}
-            showChevron={false}
-            className="text-red-600 hover:bg-red-50"
-          >
-            Void
-          </Button>
-        ) : null
-      ),
+      render: (r) => actionsFor(r),
     },
   ];
 
@@ -282,7 +439,7 @@ export default function PaymentHistory() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold font-heading text-nav-dark">Payment History</h2>
-          <p className="text-sm text-secondary mt-1">View past payments and void incorrect entries</p>
+          <p className="text-sm text-secondary mt-1">View payments, mark returned checks and void incorrect entries</p>
         </div>
         <div className="flex gap-2">
           <Button
@@ -301,8 +458,16 @@ export default function PaymentHistory() {
             disabled={loadFailed || loading}
             onClick={() =>
               exportToCSV(
-                payments as unknown as Record<string, unknown>[],
                 [
+                  // Same Check # as the table: a typed reference when there is no check number.
+                  ...shownPayments.map((p) => ({ ...p, check_number: p.check_number || p.reference_number, source: 'Record Payments' })),
+                  ...shownPrepayChecks.map((c) => ({
+                    payment_date: c.day, farm_name: c.farm_name, payment_method: 'check', check_number: c.reference,
+                    total_payment_cents: c.cents, total_allocated_cents: 0, is_active: true, source: 'Prepay Credits',
+                  })),
+                ] as unknown as Record<string, unknown>[],
+                [
+                  { key: 'source', header: 'Entered On' },
                   { key: 'payment_date', header: 'Date' },
                   { key: 'farm_name', header: 'Customer' },
                   { key: 'payment_method', header: 'Method' },
@@ -320,8 +485,31 @@ export default function PaymentHistory() {
         </div>
       </div>
 
-      {/* Summary Cards: hidden while loading and after a failed load, where $0 would read as "no payments". */}
-      {!loadFailed && !loading && (
+      {/* Date filter: totals a day's deposit or a month's payments. */}
+      <PaymentDateFilter
+        customerBox={(
+          <div className="w-full sm:w-64">
+            <label htmlFor="payment-history-customer" className="block text-sm font-medium text-nav-dark mb-1">Customer</label>
+            <CustomerSearchPicker
+              id="payment-history-customer"
+              value={customerId}
+              selectedLabel={customerLabel}
+              onSelect={(customer) => setCustomer(customer)}
+              // A past payment can belong to a customer who is inactive now.
+              activeOnly={false}
+              placeholder="All customers"
+              ariaLabel="Payment History customer"
+            />
+          </div>
+        )}
+        fromDate={fromDate}
+        toDate={toDate}
+        onChange={changeRange}
+      />
+
+      {/* Summary Cards: hidden while loading, after a failed load, and for an impossible range, where $0 would read as "no payments". */}
+      {!loadFailed && !loading && !rangeInvalid && (
+      <>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <div className="flex items-center gap-3 mb-2">
@@ -331,7 +519,7 @@ export default function PaymentHistory() {
             <span className="text-sm text-secondary">Active Payments</span>
           </div>
           <p className="text-2xl font-semibold font-heading text-crx-green">{fmt(totalPayments)}</p>
-          <p className="text-xs text-secondary mt-1">{activeCount} payment(s)</p>
+          <p className="text-xs text-secondary mt-1">{activeCount} payment(s) {rangeCaption}</p>
         </Card>
         <Card>
           <div className="flex items-center gap-3 mb-2">
@@ -340,8 +528,8 @@ export default function PaymentHistory() {
             </div>
             <span className="text-sm text-secondary">Total Payments</span>
           </div>
-          <p className="text-2xl font-semibold font-heading text-blue-600">{payments.length}</p>
-          <p className="text-xs text-secondary mt-1">all time</p>
+          <p className="text-2xl font-semibold font-heading text-blue-600">{shownPayments.length + shownPrepayChecks.length}</p>
+          <p className="text-xs text-secondary mt-1">{rangeCaption}</p>
         </Card>
         <Card>
           <div className="flex items-center gap-3 mb-2">
@@ -351,35 +539,38 @@ export default function PaymentHistory() {
             <span className="text-sm text-secondary">Voided Payments</span>
           </div>
           <p className="text-2xl font-semibold font-heading text-red-600">{voidedCount}</p>
-          <p className="text-xs text-secondary mt-1">reversed</p>
+          <p className="text-xs text-secondary mt-1">payments dated {rangeCaption}</p>
         </Card>
       </div>
+      <PrepayChecksNote count={shownPrepayChecks.length} cents={prepayCheckCents} />
+      </>
       )}
 
       {/* Data Table */}
       <Card padding={false}>
         <div className="p-5">
           <DataTable
-            data={payments as unknown as Record<string, unknown>[]}
+            data={shownPayments as unknown as Record<string, unknown>[]}
             columns={columns as unknown as Column<Record<string, unknown>>[]}
             searchable
-            searchPlaceholder="Search payments..."
+            searchPlaceholder="Search by customer or check #"
+            mobileRow={mobileRow as unknown as (row: Record<string, unknown>) => React.ReactNode}
             searchKeys={['farm_name', 'check_number', 'reference_number', 'payment_method']}
-            emptyTitle="No payments yet"
-            emptyDescription="Payment allocations will appear here after you record payments"
+            emptyTitle={emptyText.title}
+            emptyDescription={emptyText.description}
             loading={loading}
             loadError={loadFailed}
             onRetry={() => { void fetchPayments(); }}
           />
 
           {/* Expanded allocations for selected payment */}
-          {expandedId && (
+          {openId && (
             <div className="mt-4 border-t border-gray-100 pt-4">
               <h3 className="text-sm font-semibold text-nav-dark mb-3">Invoice Allocations</h3>
               {loadingAllocs ? (
                 <p className="text-sm text-secondary py-4 text-center">Loading allocations...</p>
               ) : allocsFailed ? (
-                <LoadFailedState title="This payment's allocations could not be loaded" onRetry={() => { void fetchAllocations(expandedId); }} />
+                <LoadFailedState title="This payment's allocations could not be loaded" onRetry={() => { void fetchAllocations(openId); }} />
               ) : allocations.length === 0 ? (
                 <p className="text-sm text-secondary py-4 text-center">No invoice allocations for this payment</p>
               ) : (
@@ -410,6 +601,8 @@ export default function PaymentHistory() {
           )}
         </div>
       </Card>
+
+      <ReturnCheckDialog payment={returnPayment} onClose={() => setReturnPayment(null)} onRecorded={() => { void fetchPayments(); }} />
 
       {/* Void Payment Modal */}
       <Modal open={!!voidPayment} onClose={() => setVoidPayment(null)} title="Void Payment">

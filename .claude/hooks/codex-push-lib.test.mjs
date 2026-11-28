@@ -104,9 +104,11 @@ for (const command of [
   "cd C:/other && git push origin main",
   "cd /c/other; git add a && git push origin main",
   'W="C:/other"; cd "$W" && git push origin main',
-  "cd C:/a && git -C C:/b push origin x; cd C:/c",
-  "git -C C:/b push origin x; cd C:/c",
   "(cd C:/a && git push origin main)",
+  "cd /c/x && git -C ../y push origin b",
+  "cd /c/x && git -C /c/x push origin b && git push origin c",
+  "cd /c/x && git -C $HOME/x push origin b",
+  "cd /c/x && git -C ~/x push origin b",
   "git push origin main; cd C:/c",
   // Luna final review, 2026-11-03: a bare cd/popd.
   "cd && git push origin main",
@@ -116,6 +118,16 @@ for (const command of [
   "cd C:/a && GIT_DIR=C:/b/.git git push origin main",
 ]) assert.equal(pushContextIsAmbiguous(command), true, command);
 assert.equal(pushContextIsAmbiguous("Set-Location C:/other; git.exe push origin main"), true);
+// 2026-11-23 (Mason): a cd is harmless when every push names an absolute repo
+// with -C. Real blocked commands from the week of 11-17.
+for (const command of [
+  "cd C:/a && git -C C:/b push origin x; cd C:/c",
+  "git -C C:/b push origin x; cd C:/c",
+  "cd /c/CRX_wt/lane-f-tools && git log --oneline -2 && git -C /c/CRX_wt/lane-f-tools push -u origin fix/lane-f-2115-2148 2>&1 | tail -8",
+  "cd C:/CRX_wt/f05b && grep -nE x docs/a.md | head -5; git -C C:/CRX_wt/f05b push -u origin claude/f05b",
+  'W=/c/CRX_wt/x; cd $W && git -C "$W" push origin b',
+  'cd "C:/CRX_wt/a b" && git -C "C:/CRX_wt/a b" push origin b',
+]) assert.equal(pushContextIsAmbiguous(command), false, command);
 // P1 (2026-11-03): Git Bash `/c/...` paths name the real drive on Windows.
 assert.equal(nativeFolder("/c/CRX_Manager/x", "win32"), "C:/CRX_Manager/x");
 assert.equal(nativeFolder("/d", "win32"), "D:/");

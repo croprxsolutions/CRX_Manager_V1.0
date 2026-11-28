@@ -1,69 +1,34 @@
-import { supabase } from './db';
-import { withAdminCosts } from './costFields';
+import { assertRpcResult, supabase } from './db';
+import type { DispatchAssignmentPayload } from './dispatchWizard';
 
 /**
- * What a job Save overwrites: the job columns this screen edits plus its field, billing-split, product (an admin's
- * cost too) and per-field dispatch lines (a whole-job reassignment rewrites those).
- * Someone else changing any of them after the page loaded refuses the save (same idea as the PO cost check,
- * KI-197). Left out on purpose: updated_at (printing and applied records bump it, which would refuse ordinary
- * saves), printed_at, applied_acres, remaining_acres, line ids (lines are compared by content).
- * The read selects no cost column: an admin's chemical cost comes through withAdminCosts, as on the page load.
+ * The job's edit version as the database computes it (`job_edit_version`, migration 20270302160000): a hash of the
+ * job's edited columns and lines, plus one "job_field_id|applicator_id|crew_id|dispatch_status" string per field
+ * dispatch. Save sends it back as `expected_version`; `save_job` refuses JOB_CHANGED_SINCE_LOADED under the job row
+ * lock if the job no longer matches, and a lost-reply retry with the same key gets the stored result instead.
  */
-const JOB_STALE_CHECK_COLUMNS = [
-  'status', 'customer_id', 'job_date', 'scheduled_time', 'applicator_id', 'vehicle_id', 'recipe_id',
-  'application_service_id', 'notes', 'batch_id', 'total_acres', 'total_price_cents', 'call_date',
-  'date_proposed', 'time_proposed', 'schedule_date', 'date_expires', 'consultant_id', 'loader_comment',
-  'additional_info', 'internal_memo', 'ground_crew_id', 'carrier_rate_gpa', 'loader_tank_capacity',
-  'invoice_id', 'deleted_at', 'tags',
-];
-const JOB_STALE_CHECK_LINES: Record<string, string[]> = {
-  job_fields: ['field_id', 'acres_to_treat', 'planted_acres', 'crop', 'strip', 'pests', 'sort_order'],
-  job_field_shares: ['field_id', 'customer_id', 'split_pct', 'is_primary'],
-  job_chemicals: ['product_id', 'quantity', 'unit', 'rate_per_acre', 'rate_unit', 'price_per_unit_cents',
-    'sort_order', 'diluent_rate', 'rei_hours', 'phi_days', 'warehouse', 'vendor', 'customer_supplied', 'driver',
-    'cost_per_unit_cents'],
-  job_location_dispatches: ['job_field_id', 'applicator_id', 'crew_id', 'dispatch_status'],
-};
-/** Literal so the cost-column scan (costFields.test.ts) can read it; must match the lists above. */
-const JOB_STALE_CHECK_SELECT =
-  'status, customer_id, job_date, scheduled_time, applicator_id, vehicle_id, recipe_id, application_service_id, notes, batch_id, total_acres, total_price_cents, call_date, date_proposed, time_proposed, schedule_date, date_expires, consultant_id, loader_comment, additional_info, internal_memo, ground_crew_id, carrier_rate_gpa, loader_tank_capacity, invoice_id, deleted_at, tags, job_fields(field_id, acres_to_treat, planted_acres, crop, strip, pests, sort_order), job_field_shares(field_id, customer_id, split_pct, is_primary), job_chemicals(id, product_id, quantity, unit, rate_per_acre, rate_unit, price_per_unit_cents, sort_order, diluent_rate, rei_hours, phi_days, warehouse, vendor, customer_supplied, driver), job_location_dispatches(job_field_id, applicator_id, crew_id, dispatch_status)';
-
-export type JobStaleSnapshot = Record<string, string>;
+/** rev moves on every write to the job's rows; save_job does not compare it, the page uses it to spot a write during its load. */
+export type JobEditVersion = { core: string; dispatches: string[]; rev: string };
 
 export const JOB_CHANGED_SINCE_LOADED_MESSAGE =
-  'This job changed after you opened it (by someone else, or by an earlier save of yours whose reply did not arrive). Nothing was saved. Reload the page to see the job as it is now, then make your edits again.';
+  'This job changed after you opened it. Nothing was saved. Reload the page to see the job as it is now, then make your edits again.';
 
-/** A comparable copy of a job row as read with its lines (the page load or the pre-save re-read). */
-export function pickJobStaleSnapshot(row: Record<string, unknown>): JobStaleSnapshot {
-  const out: JobStaleSnapshot = {};
-  for (const c of JOB_STALE_CHECK_COLUMNS) out[c] = JSON.stringify(row[c] ?? null);
-  for (const [table, cols] of Object.entries(JOB_STALE_CHECK_LINES)) {
-    const lines = Array.isArray(row[table]) ? (row[table] as Record<string, unknown>[]) : [];
-    out[table] = JSON.stringify(lines.map((l) => JSON.stringify(cols.map((c) => l[c] ?? null))).sort());
-  }
-  return out;
+/** Read before the page's job select, so a change landing in between can only refuse a save, never be overwritten. */
+export async function readJobEditVersion(jobId: string): Promise<JobEditVersion> {
+  const { data, error } = await supabase.rpc('job_edit_version', { p_job_id: jobId });
+  if (error) throw error;
+  const v = assertRpcResult<JobEditVersion>(data, 'job_edit_version');
+  if (typeof v?.core !== 'string' || !Array.isArray(v.dispatches) || typeof v.rev !== 'string') throw new Error('job_edit_version returned no version');
+  return v;
 }
 
 /**
- * Re-reads the job and returns what changed since `loaded` (column or line-table names). Throws on a failed read.
- * shortcut: checked just before save_job, not inside it, so two saves clicked within the same moment can still
- * both pass (Mason chose this over a database change, 2026-11-23); move the compare into save_job if that matters.
+ * The version after this page's own Dispatch wizard: only the dispatched locations' strings are replaced, with what
+ * the wizard sent (dispatch always sets status 'dispatched'). Anyone else's change still refuses the next Save.
  */
-export async function jobChangedSinceLoaded(jobId: string, loaded: JobStaleSnapshot, isAdmin: boolean): Promise<string[]> {
-  const { data, error } = await supabase.from('jobs').select(JOB_STALE_CHECK_SELECT).eq('id', jobId).single();
-  if (error) throw error;
-  const row = { ...((data ?? {}) as unknown as Record<string, unknown>) };
-  const chems = Array.isArray(row.job_chemicals) ? (row.job_chemicals as { id: string }[]) : [];
-  row.job_chemicals = await withAdminCosts('job_chemicals', chems, isAdmin);
-  const current = pickJobStaleSnapshot(row);
-  return Object.keys(current).filter((k) => current[k] !== loaded[k]);
-}
-
-/** The snapshot with its dispatch lines re-read, after this page's own Dispatch wizard changed them. */
-export async function withFreshDispatches(jobId: string, snapshot: JobStaleSnapshot): Promise<JobStaleSnapshot> {
-  const { data, error } = await supabase
-    .from('job_location_dispatches').select('job_field_id, applicator_id, crew_id, dispatch_status').eq('job_id', jobId);
-  if (error) throw error;
-  const fresh = pickJobStaleSnapshot({ job_location_dispatches: data ?? [] });
-  return { ...snapshot, job_location_dispatches: fresh.job_location_dispatches };
+export function withOwnDispatches(version: JobEditVersion, sent: DispatchAssignmentPayload[]): JobEditVersion {
+  const ids = new Set(sent.map((a) => a.job_field_id));
+  const kept = version.dispatches.filter((d) => !ids.has(d.split('|')[0]));
+  const mine = sent.map((a) => `${a.job_field_id}|${a.applicator_id ?? ''}|${a.crew_id ?? ''}|dispatched`);
+  return { ...version, dispatches: [...kept, ...mine].sort() };
 }

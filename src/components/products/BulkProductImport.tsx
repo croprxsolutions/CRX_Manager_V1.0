@@ -114,8 +114,8 @@ function useResetOnClose(open: boolean, reset: () => void) {
   }
 }
 
-function ImportPreview({ rows, ready, skipped, ratesLocked, ignored }: {
-  rows: Row[]; ready: number; skipped: number; ratesLocked: boolean; ignored: string[];
+function ImportPreview({ rows, ready, skipped, ratesLocked, ignored, warnings }: {
+  rows: Row[]; ready: number; skipped: number; ratesLocked: boolean; ignored: string[]; warnings: string[];
 }) {
   return (
     <div className="space-y-3">
@@ -141,6 +141,11 @@ function ImportPreview({ rows, ready, skipped, ratesLocked, ignored }: {
           <Lock className="w-4 h-4" /> Rates are locked. Rows that set a rate are skipped; remove the rate columns or ask an admin to unlock rates.
         </p>
       )}
+      {warnings.map((w) => (
+        <p key={w} role="status" className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /> {w}
+        </p>
+      ))}
       {ignored.length > 0 && (
         <p className="text-xs text-amber-700">Columns not recognised, ignored: {ignored.join(', ')}</p>
       )}
@@ -255,6 +260,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [ignored, setIgnored] = useState<string[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [ratesLocked, setRatesLocked] = useState(false);
   const [imported, setImported] = useState<number | null>(null);
   // Bumped whenever the file or preview changes; a reply from an older generation is ignored.
@@ -263,7 +269,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
 
   const reset = () => {
     generation.current += 1;
-    setFile(null); setRows(null); setIgnored([]); setImported(null); setRatesLocked(false);
+    setFile(null); setRows(null); setIgnored([]); setWarnings([]); setImported(null); setRatesLocked(false);
   };
   // Never wipe an import mid-check or mid-save, so a late reply lands on the import it belongs to.
   const resetIfSettled = () => { if (!busy) reset(); };
@@ -345,6 +351,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
       }
       if (gen !== generation.current) return;
       setIgnored(mapping.ignored);
+      setWarnings(mapping.warnings);
       setRows(built);
     } catch (error) {
       Sentry.captureException(error);
@@ -476,7 +483,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
         )}
 
         {stage === 'preview' && rows && (
-          <ImportPreview rows={rows} ready={ready.length} skipped={skipped.length} ratesLocked={ratesLocked} ignored={ignored} />
+          <ImportPreview rows={rows} ready={ready.length} skipped={skipped.length} ratesLocked={ratesLocked} ignored={ignored} warnings={warnings} />
         )}
 
         {stage === 'done' && (

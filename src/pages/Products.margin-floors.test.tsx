@@ -92,6 +92,7 @@ vi.mock('../components/products/ProductsMobileList', async () => {
   return { ...actual, default: () => null };
 });
 vi.mock('../lib/productParents', () => ({ getProductParents: async () => [], searchProductParents: async () => [] }));
+vi.mock('../lib/epaBatchFill', () => ({ fetchBrandEpaOwners: async () => ({ parentIds: new Set(), productIds: new Set() }) }));
 vi.mock('../lib/productSetup', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/productSetup')>()),
   listProductCategories: async () => [
@@ -227,6 +228,29 @@ describe('Products list margin floors', () => {
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(
       'error', 'Margin floors have not loaded. Use Try again, then enter the floor changes again.'));
     expect(mocks.setMarginFloors).not.toHaveBeenCalled();
+  });
+
+  it('refuses a floor draft typed before a floors failure even after Try again recovers (#2308)', async () => {
+    const input = await openFloorEditor();
+    fireEvent.change(input, { target: { value: '16' } });
+    mocks.fetchMarginFloors.mockRejectedValueOnce(new Error('offline'));
+    await act(async () => { mocks.setupWorkbookSaved?.(); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load margin floors.');
+    // Try again reads the floors (another admin may have changed one meanwhile); the old draft must not save.
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Save (1)' }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(
+      'error', 'Margin floors were read again after a failure. Cancel, then enter the floor changes again.'));
+    expect(mocks.setMarginFloors).not.toHaveBeenCalled();
+    // After Cancel, a new edit saves normally.
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard edits' }));
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+    const again = screen.getByLabelText('Margin floor percent for Floor Product') as HTMLInputElement;
+    fireEvent.change(again, { target: { value: '17' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save (1)' }));
+    await waitFor(() => expect(mocks.setMarginFloors).toHaveBeenCalled());
   });
 
   it('keeps the catalog when floors fail to load, with the floor column read-only', async () => {

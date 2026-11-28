@@ -6,8 +6,7 @@
  * URL limit, and returns PNG data URLs that a PDF renderer can draw directly.
  */
 import { supabase, assertRpcResult } from './db';
-import { fieldObstacleToGeoJsonFeature } from './fieldObstacles';
-import type { FieldObstacle } from '../types';
+import { isFieldObstaclePoint } from './fieldObstacles';
 
 const MAPBOX_STYLE = 'mapbox/satellite-streets-v12';
 const MAPBOX_STATIC_URL = `https://api.mapbox.com/styles/v1/${MAPBOX_STYLE}/static`;
@@ -17,6 +16,8 @@ const MAPBOX_FETCH_TIMEOUT_MS = 10_000;
 
 export interface JobFieldMapImage {
   fieldId: string;
+  /** Spray order on this job, 1-based (from job_fields.sort_order; restarts per job). */
+  sprayNumber?: number;
   fieldName: string;
   customerName: string | null;
   acres: number | null;
@@ -107,6 +108,7 @@ interface BoundaryFeatureCollection {
 
 interface ParsedJobField {
   id: string;
+  sprayNumber: number;
   name: string;
   customerId: string;
   acres: number | null;
@@ -308,19 +310,6 @@ function boundaryFeature(field: ParsedJobField, includeFill: boolean, tolerance:
   return { type: 'Feature', properties, geometry: simplifyGeometry(field.geometry, tolerance) };
 }
 
-function obstacleFeature(obstacle: FieldObstacle): BoundaryFeature | null {
-  const feature = fieldObstacleToGeoJsonFeature(obstacle);
-  if (!feature) return null;
-  return {
-    type: 'Feature',
-    properties: { ...feature.properties },
-    geometry: {
-      type: 'Point',
-      coordinates: [feature.geometry.coordinates[0], feature.geometry.coordinates[1]],
-    },
-  };
-}
-
 function staticImageUrl(features: BoundaryFeature[], options: BuildStaticUrlOptions): string {
   const collection: BoundaryFeatureCollection = { type: 'FeatureCollection', features };
   const encodedOverlay = encodeURIComponent(JSON.stringify(collection));
@@ -512,8 +501,9 @@ async function addAcreageLabels(
   options: Pick<BuildStaticUrlOptions, 'width' | 'height' | 'padding'>,
 ): Promise<string> {
   const labels: AcreageLabel[] = fields.flatMap((field) => {
-    const text = formatAcreageLabel(field.acres);
-    return field.centroidLat != null && field.centroidLng != null && text
+    const acres = formatAcreageLabel(field.acres);
+    const text = acres ? `${field.sprayNumber} · ${acres}` : String(field.sprayNumber);
+    return field.centroidLat != null && field.centroidLng != null
       ? [{ lat: field.centroidLat, lng: field.centroidLng, text }]
       : [];
   });
@@ -541,7 +531,7 @@ async function addAcreageLabels(
     const contentHeight = options.height - options.padding * 2;
     labels.forEach((label) => {
       const x = options.padding + ((label.lng - viewportBounds.minLongitude) / (viewportBounds.maxLongitude - viewportBounds.minLongitude)) * contentWidth;
-      const y = options.padding + ((viewportBounds.maxMercatorLatitude - mapMercatorY(label.lat)) / (viewportBounds.maxMercatorLatitude - viewportBounds.minMercatorLatitude)) * contentHeight;
+      const y = options.padding + ((mapMercatorY(label.lat) - viewportBounds.minMercatorLatitude) / (viewportBounds.maxMercatorLatitude - viewportBounds.minMercatorLatitude)) * contentHeight;
       const textWidth = context.measureText(label.text).width;
       context.fillStyle = 'rgba(0, 0, 0, 0.72)';
       context.fillRect(x - textWidth / 2 - 6, y - 12, textWidth + 12, 24);
@@ -610,24 +600,64 @@ async function customerNamesById(customerIds: string[]): Promise<Map<string, str
   return names;
 }
 
-async function fieldObstacleFeatures(fieldIds: string[]): Promise<BoundaryFeature[]> {
-  if (fieldIds.length === 0) return [];
+async function fieldObstacleFeatures(fieldIds: string[]): Promise<Map<string, BoundaryFeature[]>> {
+  const byField = new Map<string, BoundaryFeature[]>();
+  if (fieldIds.length === 0) return byField;
   try {
     const { data, error } = await supabase
       .from('field_obstacles')
-      .select('*')
+      .select('field_id, point_geojson')
       .in('field_id', fieldIds);
     if (error) {
       console.warn('Unable to load field obstacles for applicator-sheet maps.', error);
-      return [];
+      return byField;
     }
-    return ((data ?? []) as unknown as FieldObstacle[])
-      .map(obstacleFeature)
-      .filter((feature): feature is BoundaryFeature => feature !== null);
+    for (const { field_id, point_geojson } of data ?? []) {
+      if (!isFieldObstaclePoint(point_geojson)) continue;
+      const features = byField.get(field_id) ?? [];
+      const [longitude, latitude] = point_geojson.coordinates;
+      features.push({
+        type: 'Feature',
+        properties: { 'marker-color': '#dc2626', 'marker-size': 'small' },
+        geometry: { type: 'Point', coordinates: [longitude, latitude] },
+      });
+      byField.set(field_id, features);
+    }
   } catch (error) {
     console.warn('Unable to load field obstacles for applicator-sheet maps.', error);
-    return [];
   }
+  return byField;
+}
+
+/**
+ * Each job field's map pin (boundary centroid) for the sheet's directions links.
+ * Best effort: a failed read returns an empty map and the sheet prints without links.
+ */
+export async function fetchJobFieldLocations(jobId: string): Promise<Map<string, { lat: number; lng: number }>> {
+  const locations = new Map<string, { lat: number; lng: number }>();
+  try {
+    const { data, error } = await supabase.rpc('get_job_fields_with_geojson', { p_job_id: jobId });
+    if (error) return locations;
+    assertRpcResult<JobMapFieldRow[]>(data, 'get_job_fields_with_geojson').forEach((row) => {
+      const { lat, lng } = centroidFromGeoJson(row.centroid_geojson);
+      if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) locations.set(row.id, { lat, lng });
+    });
+  } catch {
+    // Directions are optional; the crew sheet still prints.
+  }
+  return locations;
+}
+
+/**
+ * Number one job's fields 1..n in spray order (sort_order, then the RPC's order),
+ * counting every job field, mapped or not, so map numbers match the sheet's stops.
+ * An unset sort_order counts as 0, exactly as the sheet's fetch does (chemicalApplicationReportFetch).
+ */
+export function sprayNumbersByFieldId(rows: Array<Pick<JobMapFieldRow, 'id' | 'sort_order'>>): Map<string, number> {
+  return new Map(rows
+    .map((row, index) => ({ id: row.id, order: row.sort_order ?? 0, index }))
+    .sort((first, second) => first.order - second.order || first.index - second.index)
+    .map((row, rank) => [row.id, rank + 1] as const));
 }
 
 /**
@@ -666,6 +696,8 @@ export async function fetchJobMapImages(
     } catch (error) {
       console.warn('Unable to load job-specific field acres for applicator-sheet maps.', error);
     }
+    // Spray numbers 1, 2, 3 follow job_fields.sort_order for THIS job only (Sol 86).
+    const sprayNumberById = sprayNumbersByFieldId(rows);
     const fields = rows
       .map((row): ParsedJobField | null => {
         const geometry = parseGeoJsonGeometry(row.boundary_geojson);
@@ -673,6 +705,7 @@ export async function fetchJobMapImages(
         const centroid = centroidFromGeoJson(row.centroid_geojson);
         return {
           id: row.id,
+          sprayNumber: sprayNumberById.get(row.id) ?? 0,
           name: row.field_name,
           customerId: row.customer_id,
           acres: jobAcresByFieldId.get(row.id) ?? null,
@@ -681,7 +714,8 @@ export async function fetchJobMapImages(
           geometry,
         };
       })
-      .filter((field): field is ParsedJobField => field !== null);
+      .filter((field): field is ParsedJobField => field !== null)
+      .sort((first, second) => first.sprayNumber - second.sprayNumber);
 
     if (fields.length === 0) {
       console.warn('Skipping applicator-sheet maps because this job has no field boundaries.');
@@ -718,7 +752,7 @@ export async function fetchJobMapImages(
     const perField: JobFieldMapImage[] = [];
     if (opts.perField !== false) {
       for (const field of fields) {
-        const fieldObstacles = obstacles.filter((feature) => feature.properties.field_id === field.id);
+        const fieldObstacles = obstacles.get(field.id) ?? [];
         const image = buildStaticImageUrl([field], fieldObstacles, perFieldOptions);
         if (!image) {
           console.warn(`Skipping map for ${field.name} because its geometry exceeds Mapbox URL limits.`);
@@ -728,6 +762,7 @@ export async function fetchJobMapImages(
         if (!dataUrl) continue;
         perField.push({
           fieldId: field.id,
+          sprayNumber: field.sprayNumber,
           fieldName: field.name,
           customerName: customerNames.get(field.customerId) ?? null,
           acres: field.acres,

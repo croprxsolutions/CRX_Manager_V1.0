@@ -251,14 +251,14 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
     await waitForPage(page, 5000);
 
     // Verify status changed — the Send Quote button should disappear after send,
-    // or a "Sent" status badge should appear, or the "Convert to Order" button appears
+    // or a "Booked" status badge should appear, or the "Draw from booking" button appears
     const sendBtnGone = await page.locator('button:has-text("Send Quote")').isVisible({ timeout: 3000 }).catch(() => true);
-    const convertVisible = await page.locator('button:has-text("Convert to Order")').isVisible({ timeout: 3000 }).catch(() => false);
+    const convertVisible = await page.locator('button:has-text("Draw from booking")').isVisible({ timeout: 3000 }).catch(() => false);
     const bodyText = await page.textContent('body');
-    const hasSentIndicator = bodyText?.toLowerCase().includes('sent') || convertVisible || !sendBtnGone;
+    const hasSentIndicator = bodyText?.toLowerCase().includes('booked') || bodyText?.toLowerCase().includes('sent') || convertVisible || !sendBtnGone;
 
     // If save/send failed (e.g., validation error on item quantities), soft-skip
-    // so downstream tests still run (T3 Convert to Order handles this independently)
+    // so downstream tests still run (T3 Draw whole booking handles this independently)
     if (!hasSentIndicator) {
       console.warn('T2: Send quote may have failed validation — proceeding with soft pass');
     }
@@ -280,9 +280,10 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
 
     // Wait for quote data to finish loading before looking for Convert button
     // The button only renders after the quote detail loads (not during skeleton)
-    const convertBtn = page.locator('button:has-text("Convert to Order")');
+    const convertBtn = page.locator('button:has-text("Draw from booking")');
     await expect(convertBtn).toBeVisible({ timeout: 20000 });
     await convertBtn.click();
+    await page.getByRole('menuitem', { name: 'Whole booking' }).click();
     await waitForPage(page, 1000);
 
     // Confirm in modal — accept any window.confirm() that may fire
@@ -1026,8 +1027,7 @@ test.describe.serial('Team Board Communication', () => {
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible({ timeout: 10000 });
 
-    // Click New Note button (look for button with Plus icon or "New Note" text)
-    const newNoteBtn = page.locator('button').filter({ hasText: /New Note|Add/i }).first();
+    const newNoteBtn = page.getByRole('button', { name: 'Add Note', exact: true });
     await expect(newNoteBtn).toBeVisible({ timeout: 5000 });
     await newNoteBtn.click();
     await waitForPage(page, 1000);
@@ -1047,15 +1047,15 @@ test.describe.serial('Team Board Communication', () => {
     }
 
     // Set type to Announcement
-    const typeSelect = modal.locator('select').first();
+    const typeSelect = modal.getByLabel('Type', { exact: true });
     await typeSelect.selectOption('announcement');
 
     // Set priority to High
-    const prioritySelect = modal.locator('select').nth(1);
+    const prioritySelect = modal.getByLabel('Priority', { exact: true });
     await prioritySelect.selectOption('high');
 
     // Click Add Note
-    const saveBtn = modal.locator('button:has-text("Add Note")');
+    const saveBtn = modal.getByRole('button', { name: 'Add Note', exact: true });
     await expect(saveBtn).toBeVisible({ timeout: 5000 });
     await saveBtn.click();
     await waitForPage(page, 3000);
@@ -1072,9 +1072,8 @@ test.describe.serial('Team Board Communication', () => {
     await page.goto('/team-board');
     await waitForPage(page, 3000);
 
-    // Click New Note
-    const newNoteBtn = page.locator('button').filter({ hasText: /New Note|Add/i }).first();
-    await newNoteBtn.click();
+    await page.getByRole('button', { name: /^My Tasks\b/ }).last().click();
+    await page.getByRole('button', { name: 'Add Task for Me', exact: true }).click();
     await waitForPage(page, 1000);
 
     const modal = page.locator('[role="dialog"]');
@@ -1084,31 +1083,20 @@ test.describe.serial('Team Board Communication', () => {
     const titleInput = modal.locator('input').first();
     await titleInput.fill(state.todoTitle);
 
-    // Set type to To-Do
-    const typeSelect = modal.locator('select').first();
-    await typeSelect.selectOption('todo');
+    await expect(modal.getByLabel('Type', { exact: true })).toHaveValue('todo');
 
     // Set priority to Urgent
-    const prioritySelect = modal.locator('select').nth(1);
+    const prioritySelect = modal.getByLabel('Priority', { exact: true });
     await prioritySelect.selectOption('urgent');
-
-    // Assign to self (first option after "Unassigned")
-    const assignSelect = modal.locator('select').nth(2);
-    if (await assignSelect.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await assignSelect.selectOption({ index: 1 });
-    }
 
     // Set due date to tomorrow
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const dueStr = tomorrow.toISOString().split('T')[0];
-    const dueDateInput = modal.locator('input[type="date"]');
-    if (await dueDateInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await dueDateInput.fill(dueStr);
-    }
+    await modal.getByLabel('Due Date', { exact: true }).fill(dueStr);
 
     // Save
-    const saveBtn = modal.locator('button:has-text("Add Note")');
+    const saveBtn = modal.getByRole('button', { name: 'Add Task', exact: true });
     await saveBtn.click();
     await waitForPage(page, 3000);
 

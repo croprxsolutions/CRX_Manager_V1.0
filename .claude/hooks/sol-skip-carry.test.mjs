@@ -118,6 +118,10 @@ try {
   const entry = carriedDecisionLogEntry({ record: same, accepted: ok.accepted });
   assert.match(entry, /carried from ref d240b31a7419 at `[0-9a-f]{12}` to `[0-9a-f]{12}`; Sol marked it the same/);
   assert.ok(!entry.includes("stale screen"), "the finding's wording stays out of the public log");
+  // Each carried skip records the base Mason first skipped it against, not the newer base it carried onto.
+  assert.equal(ok.accepted[0].carried_from.original_base_sha, base1);
+  assert.notEqual(base1, base2);
+  assert.ok(entry.includes(`first skipped against base \`${base1.slice(0, 12)}\``), "the log names the original base");
   const proof = {
     ...buildCarryForwardProof({
       headSha: "f".repeat(40), baseSha: base2, mode: OWNER_ACCEPTED_CARRIED,
@@ -125,6 +129,7 @@ try {
     }),
     owner_accepted: carriedProofEntries(ok.accepted),
   };
+  assert.equal(proof.owner_accepted[0].carried_from.original_base_sha, base1, "the carried proof keeps the original base");
   assert.equal(proof.carry.root_review.timestamp, same.timestamp, "the 24-hour clock is the fresh Sol run");
   assert.equal(proof.owner_accepted[0].accepted_at, acceptedAt, "Mason's 7-day clock is never refreshed");
   assert.ok(carriedSolProof(proof));

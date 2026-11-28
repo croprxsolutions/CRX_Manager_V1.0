@@ -47,7 +47,7 @@ This runner makes those queries **standing executable gates** that run **before*
 | `returns-lifecycle-rpc-owned.sql` | return lifecycle fields, creation, and line mutations stay behind canonical RPCs/triggers | **zero** (catches direct `returns` INSERT policy/grant drift and direct `return_items` mutation policy/grant drift) |
 | `save-field-actor-binding.sql` | exact reviewed `save_field(uuid,jsonb,jsonb,uuid,text)` actor-binding body | **zero** (missing signature or any body drift fails closed) |
 | `product-name-vs-return-policy.sql` | a product whose **name** asserts it cannot be returned is classified `return_policy = 'no_return'` | **zero** (a business-**data** predicate — emits the product **id** only, never the name or SKU; see *Output containment* below) |
-| `audit-log-completeness.sql` | a money-mutating SECDEF function that writes no `financial_audit_log` or `activity_feed` row | **zero** |
+| `audit-log-completeness.sql` | a money-mutating SECDEF function that writes no audit or activity row, or `financial_audit_log:actor-contract` for a changed actor default, trigger, or rewrite rule | **zero**. Never allowlist the actor-contract row. |
 | `cost-exposure-review.sql` | a signed-in-executable function that names a cost, profit or margin field (or turns a cost-bearing row into JSON), directly or through any helper it calls; the key fingerprints every reached function (identity, owner, settings, body) | **zero** after the allowlist (each reviewed key cites `docs/audits/2026-11-02-cost-margin-definer-function-audit.md`; a changed chain re-flags for review). The five functions `20261102200000` fixes carry their post-apply keys, so they show until that migration is applied |
 | `dispatch-sync-nonqualifying-profile.sql` | an open job assigned to a profile that is not an active applicator, leaving a field with no dispatch row (so it never reaches the Dispatch Board) | **zero** in normal operation (measures a known trigger gap that is not yet fixed; emits ids only) |
 | `office-only-pricing-secdef-gates.sql` | `compute_application_service_fee` and `get_program_completion` keep their in-body office-role gate, SECURITY DEFINER, and pinned `search_path` | **zero** |
@@ -248,7 +248,8 @@ node scripts/db-invariant-sweeps/run-sweeps.mjs --explain <predicate>  # header 
   detector, contract SELECT and matcher. Public actor-check removal and private-helper-only drift
   must actually allow forged attribution in the disposable mutant and remain unallowlisted. New
   direct/inherited EXECUTE permission, owner, identity-source and missing-dependency drift must
-  also fail closed. No live schema/data or detector predicate is changed by this proof.
+  also fail closed. The command also verifies audit actor configuration drift in a separate
+  disposable database. No live schema/data or detector predicate is changed by this proof.
 - **Re-keying after a shared-helper change** (`cost-exposure-review` keys hash every reached helper):
   first re-read the changed chain live, then save the sweep output and re-key from it:
   `npm run db-sweeps:live > sweep-output.txt`, then

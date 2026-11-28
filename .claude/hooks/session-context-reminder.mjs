@@ -66,10 +66,11 @@ const COMPACT_REANCHOR =
   "unless the summary says they were run and observed. Mason cannot read code or safely review a diff — " +
   "explain in plain English.";
 
-// Codex loads AGENTS.md but not CLAUDE.md, so it must not be told CLAUDE.md is in context.
-const CONTEXT_ALREADY_LOADED = process.env.CRX_AGENT_SURFACE === "codex"
-  ? "AGENTS.md (the shared contract) is already in context; do not re-read it. "
-  : "AGENTS.md (the shared contract) and CLAUDE.md (Claude-only routing) are already in context; do not re-read AGENTS.md or CLAUDE.md. ";
+// Only Claude (or the legacy unset entry) loads CLAUDE.md; Codex and any other marker must not be told it is in context.
+const SURFACE = process.env.CRX_AGENT_SURFACE;
+const CONTEXT_ALREADY_LOADED = !SURFACE || SURFACE === "claude"
+  ? "AGENTS.md (the shared contract) and CLAUDE.md (Claude-only routing) are already in context; do not re-read AGENTS.md or CLAUDE.md. "
+  : "AGENTS.md (the shared contract) is already in context; do not re-read it. ";
 
 const SESSION_ONBOARDING =
   "You are starting a new session on the CRX Manager project. " + CONTEXT_ALREADY_LOADED +
@@ -78,8 +79,8 @@ const SESSION_ONBOARDING =
   "and explain outcomes and risk in plain English. Post a short plan, then continue routine implementation " +
   "without waiting for approval or repeated pauses (Mason, 2026-10-03). Every hard-gated live action listed in AGENTS.md—including each destructive migration, " +
   "Edge Function deployment, and data deletion—requires Mason's current approval immediately beforehand. " +
-  "Under his autonomous-landing rule (2026-09-26) a NON-destructive migration and the merge need no ask once " +
-  "the exact-SHA Sol proof is clean and checks are green; the gates enforce it. CodeRabbit is advisory. " +
+  "Landing follows AGENTS.md and .claude/commands/ship.md: Codex follows the pre-push reviews and stops at PR readiness; " +
+  "Claude handles guarded staging merges. Mason's explicit holds apply to both roles. CodeRabbit is advisory. " +
   "A change touching no file on docs/reference/sol-required-paths.md needs no Sol proof; the merge gates check its file list. " +
   "Clearly identify the rare action or business decision only Mason can make.";
 
@@ -87,10 +88,14 @@ const SESSION_ONBOARDING =
 // worktree. On 2026-11-01 that made a merge guard enforce a rule replaced two days earlier.
 function staleGuardsWarning(cwd) {
   if (!cwd) return "";
+  // One shared budget, not 1s per call: on a loaded PC a single git call took 1.3s and
+  // silently dropped the warning (2026-11-26). Three calls still fit Codex's 5-second hook limit.
+  // Tests raise it: under load one git call measured 3.2s, so a fixed budget cannot make them deterministic.
+  const deadline = Date.now() + (Number(process.env.CRX_SESSION_REMINDER_GIT_BUDGET_MS) || 3_000);
   const git = (dir, ...args) => execFileSync("git", ["-C", dir, ...args], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
-    timeout: 1_000, // three calls must fit Codex's 5-second hook limit
+    timeout: Math.max(1, deadline - Date.now()),
   }).trim();
   try {
     const guardsRoot = git(fileURLToPath(new URL(".", import.meta.url)), "rev-parse", "--show-toplevel");

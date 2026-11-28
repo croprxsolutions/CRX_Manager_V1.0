@@ -22,6 +22,8 @@ type Props = {
   onVendorFilterChange: (value: string) => void;
   onStatusFilterChange: (value: 'active' | 'inactive' | 'all') => void;
   setupFilter?: SetupFilter;
+  /** Products whose group carries an EPA number (see epaCoveredProductIds). */
+  epaCovered?: ReadonlySet<string>;
   onSetupFilterChange?: (value: SetupFilter) => void;
   onOpenProduct: (product: MobileProduct) => void;
   /** Left out for anyone who may not change prices. */
@@ -53,6 +55,7 @@ export default function ProductsMobileList({
   loadError = false,
   onRetry,
   parentIndex,
+  epaCovered,
 }: Props) {
   const [search, setSearch] = useState('');
   const [visibleCount, setVisibleCount] = useState(MOBILE_PAGE_SIZE);
@@ -64,8 +67,9 @@ export default function ProductsMobileList({
     if (statusFilter === 'inactive' && product.is_active) return false;
     return !search || matchesProductSearch(product, search, parentIndex);
   }), [categoryFilter, parentIndex, products, search, statusFilter, vendorFilter]);
-  const incompleteCount = useMemo(() => listProducts.filter(isSetupIncomplete).length, [listProducts]);
-  const filteredProducts = setupFilter === 'incomplete' ? listProducts.filter(isSetupIncomplete) : listProducts;
+  const setupIncomplete = (product: MobileProduct) => isSetupIncomplete(product, epaCovered);
+  const incompleteCount = useMemo(() => listProducts.filter((product) => isSetupIncomplete(product, epaCovered)).length, [listProducts, epaCovered]);
+  const filteredProducts = setupFilter === 'incomplete' ? listProducts.filter(setupIncomplete) : listProducts;
 
   const resetVisibleCount = () => setVisibleCount(MOBILE_PAGE_SIZE);
 
@@ -172,7 +176,7 @@ export default function ProductsMobileList({
                   </Badge>
                 </div>
                 <p className="mt-2 text-sm text-secondary">{product.category || 'Uncategorized'}</p>
-                {isSetupIncomplete(product) && <Badge variant="warning" className="mt-2">Incomplete setup</Badge>}
+                {setupIncomplete(product) && <Badge variant="warning" className="mt-2">Incomplete setup</Badge>}
                 <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-gray-100 pt-3">
                   <div>
                     <dt className="text-xs font-medium text-secondary">Tier 1</dt>

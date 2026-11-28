@@ -5,6 +5,7 @@
  * Sprint 10: Month-End Close
  */
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { Calendar, CheckCircle, AlertCircle, FileText, Download, Lock, RotateCcw } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -28,6 +29,7 @@ import type { DetailedStatementData, StatementOptions, YearEndSummaryData } from
 import type { YearEndSummaryOptions } from '../lib/yearEndSummaryPdf';
 import { getRecognizedInvoiceCustomerIds } from '../lib/recognizedInvoiceCustomers';
 import { toSentryError } from '../lib/sentryError';
+import { fetchPrepayTie, type PrepayTie } from '../lib/m9Reversals';
 
 interface PeriodInfo {
   id?: string;
@@ -47,6 +49,9 @@ interface MonthlySummary {
   // basis 'billed_share': the database counts commission on the share of each sale billed (KI-125); absent before that is live
   commissions: { earned_cents: number; paid_count: number; basis?: 'billed_share' };
   ar_balance_cents: number;
+  // M9 (20270301180000): refunds paid outside CRX and returned checks recorded in the month (absent before that is live)
+  refunds?: { count: number; total_cents: number };
+  returned_checks?: { count: number; total_cents: number };
   // #2175: fingerprint of this month's figures; the close is refused unless it still matches (absent before that is live)
   review_token?: string;
 }
@@ -62,6 +67,20 @@ function closeRefusal(err: unknown): 'changed' | 'review' | 'reload' | 'reopened
 }
 
 
+/** Money moved this month: payments received, returned checks or refunds paid outside CRX (M9, audit X2). */
+const moneyMoved = (m: MonthlySummary) => m.payments.count > 0 || (m.returned_checks?.count ?? 0) > 0 || (m.refunds?.count ?? 0) > 0;
+
+function paymentsReviewDetail(m: MonthlySummary): string {
+  if (!moneyMoved(m)) return 'No payments this period';
+  const parts = [
+    // The count includes checks entered on Prepay Credits, which Payment History's list does not show.
+    m.payments.count > 0 ? `${m.payments.count} payments totaling ${fmt(m.payments.total_cents)} (includes checks entered on Prepay Credits)` : '',
+    m.returned_checks?.count ? `${m.returned_checks.count} returned check${m.returned_checks.count === 1 ? '' : 's'} (${fmt(m.returned_checks.total_cents)})` : '',
+    m.refunds?.count ? `${m.refunds.count} refund${m.refunds.count === 1 ? '' : 's'} paid outside CRX (${fmt(m.refunds.total_cents)})` : '',
+  ].filter(Boolean);
+  return `${parts.join(' and ')} — verify and check box to confirm`;
+}
+
 // A9: period for an arbitrary (year, month) so month-end can view/close ANY month,
 // not just the current one. `month` is 0-indexed (JS Date convention).
 function getPeriodForMonth(year: number, month: number): { start: string; end: string; label: string } {
@@ -70,6 +89,28 @@ function getPeriodForMonth(year: number, month: number): { start: string; end: s
   const end = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
   const label = new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   return { start, end, label };
+}
+
+interface ChecklistLink {
+  to: string;
+  label: string;
+}
+
+// Where each checklist line's items can be opened. Display only: the checks themselves are unchanged.
+// Invoices has no URL filter (its open drafts show from every season by default); Field Invoices
+// opens on its Drafts tab; Payment History opens on this month's dates.
+function checklistLinks(period: { start: string; end: string }): Record<string, ChecklistLink[]> {
+  return {
+    invoices: [
+      { to: '/invoices', label: 'Open chemical invoices' },
+      { to: '/field-invoices?tab=drafts', label: 'Open field invoice drafts' },
+    ],
+    payments: [{ to: `/payment-history?from=${period.start}&to=${period.end}`, label: 'Open payment history' }],
+    deliveries: [{ to: '/deliveries', label: 'Open deliveries' }],
+    commissions: [{ to: '/commission-payments', label: 'Open commission payments' }],
+    rushOrders: [{ to: '/orders', label: 'Open orders' }],
+    financeCharges: [{ to: '/ar-aging', label: 'Open AR Aging' }],
+  };
 }
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -103,6 +144,9 @@ export default function MonthEndClose() {
   const [needsPricingCount, setNeedsPricingCount] = useState(0);
   const [needsPricingError, setNeedsPricingError] = useState(false);
   const [yeLoading, setYeLoading] = useState(false);
+  // M9: the prepay balance check (today's figures). null while loading; a failed check blocks the close.
+  const [prepayTie, setPrepayTie] = useState<PrepayTie[] | null>(null);
+  const [prepayTieFailed, setPrepayTieFailed] = useState(false);
 
   // A9: month/year picker — defaults to the current business-clock month.
   const [initialBusinessToday] = useState(() => todayInBusinessTz());
@@ -130,6 +174,9 @@ export default function MonthEndClose() {
   // synchronous update, so no render ever treats the prior period's checklist/summary as
   // valid for the newly selected month (closes the one-render-frame stale-state window).
   const changePeriod = (year: number, month: number) => {
+    // The period already shown: nothing to reload, and the fetch below would never re-run for it, so the page
+    // would stay on its loading state (e2e, M9).
+    if (year === selectedYear && month === selectedMonth) return;
     // A9 (Codex R5): invalidate any in-flight fetch for the OLD period SYNCHRONOUSLY, the
     // instant the period changes — otherwise a stale response resolving in the gap before
     // fetchData's own token bump could still set the old summary under the new period.
@@ -202,6 +249,20 @@ export default function MonthEndClose() {
     }
     setNeedsPricingCount(npCount || 0);
 
+    // M9: every customer's stored prepay against its credits. Fail closed: no answer, no close.
+    try {
+      const rows = await fetchPrepayTie();
+      if (token !== fetchTokenRef.current) return;
+      if (!Array.isArray(rows)) throw new Error('get_prepay_balance_check returned no list');
+      setPrepayTie(rows);
+      setPrepayTieFailed(false);
+    } catch (err) {
+      if (token !== fetchTokenRef.current) return;
+      Sentry.captureException(toSentryError(err), { extra: { context: 'month_end_prepay_tie' } });
+      setPrepayTie(null);
+      setPrepayTieFailed(true);
+    }
+
     setLoading(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current.start, current.end]);
@@ -226,6 +287,7 @@ export default function MonthEndClose() {
   }, [current.start, current.end, isClosed]);
 
   // Checklist items
+  const links = checklistLinks(current);
   const checklist = summary
     ? [
         {
@@ -234,20 +296,22 @@ export default function MonthEndClose() {
           detail: summary.invoices.draft_count > 0
             ? `${summary.invoices.draft_count} unposted invoice(s) remain`
             : `${summary.invoices.posted_count} recognized, ${summary.invoices.voided_count} voided`,
+          links: summary.invoices.draft_count > 0 ? links.invoices : undefined,
         },
         {
           label: 'Payments reconciled',
-          // M1: require explicit confirmation when payments exist (not trivially satisfied)
-          done: summary.payments.count === 0 || reviewedPayments,
-          detail: summary.payments.count === 0
-            ? 'No payments this period'
-            : `${summary.payments.count} payments totaling ${fmt(summary.payments.total_cents)} — verify and check box to confirm`,
-          reviewKey: summary.payments.count > 0 ? 'payments' : undefined,
+          // M1: require explicit confirmation when money moved (not trivially satisfied). M9 (audit X2): a returned
+          // check or a refund paid outside CRX is money moved too, even in a month with no payment received.
+          done: !moneyMoved(summary) || reviewedPayments,
+          detail: paymentsReviewDetail(summary),
+          reviewKey: moneyMoved(summary) ? 'payments' : undefined,
+          links: moneyMoved(summary) ? links.payments : undefined,
         },
         {
           label: 'Deliveries completed',
           done: summary.deliveries.count === summary.deliveries.completed_count || summary.deliveries.count === 0,
           detail: `${summary.deliveries.completed_count}/${summary.deliveries.count} deliveries completed`,
+          links: summary.deliveries.completed_count < summary.deliveries.count ? links.deliveries : undefined,
         },
         {
           label: 'Commissions reviewed',
@@ -257,6 +321,7 @@ export default function MonthEndClose() {
             ? 'No commissions this period'
             : `${fmt(summary.commissions.earned_cents)} ${summary.commissions.basis === 'billed_share' ? 'on sales billed this period' : 'earned'}, ${summary.commissions.paid_count} paid — verify and check box to confirm`,
           reviewKey: summary.commissions.earned_cents !== 0 ? 'commissions' : undefined,
+          links: summary.commissions.earned_cents !== 0 ? links.commissions : undefined,
         },
         {
           label: 'Rush orders priced',
@@ -272,11 +337,22 @@ export default function MonthEndClose() {
               ? 'No unpriced rush orders'
               : `${needsPricingCount} order(s) still need pricing (unbilled revenue) — price them or verify and check the box`,
           reviewKey: needsPricingError || needsPricingCount > 0 ? 'needs_pricing' : undefined,
+          links: needsPricingError || needsPricingCount > 0 ? links.rushOrders : undefined,
         },
         {
           label: 'Finance charges generated (optional)',
           done: true,
           detail: 'Generate from AR Aging page if needed — this step is optional',
+          links: links.financeCharges,
+        },
+        {
+          label: 'Prepay balances tie',
+          // M9: a customer whose stored prepay is not what its credits add up to blocks the close until it is fixed.
+          done: !prepayTieFailed && prepayTie !== null && prepayTie.every((r) => r?.ok === true),
+          detail: prepayTieFailed
+            ? 'The prepay balance check could not run. Reload the page to try again'
+            : prepayTie === null ? 'Checking prepay balances…' : `All ${prepayTie.length} customers with prepay tie.`,
+          prepayTie: true,
         },
         // #2175: without the figures' review token the server refuses the close; say why Close stays off.
         ...(summary.review_token ? [] : [{
@@ -498,7 +574,7 @@ export default function MonthEndClose() {
         title="Month-End Close"
         subtitle="Review and close accounting periods"
         actions={(
-          <div className="flex gap-2 items-center">
+          <div className="flex flex-wrap gap-2 items-center">
           {/* A9 month/year picker — view/close any month. STRUCTURAL race guard (Codex R6):
               the selects are disabled while a fetch (loading) OR a close (closing) is in
               flight, so at most ONE is ever in play — no stale response / post-close refresh
@@ -606,6 +682,18 @@ export default function MonthEndClose() {
                 <span className="text-secondary">Payments Received</span>
                 <span className="font-medium">{summary.payments.count} — {fmt(summary.payments.total_cents)}</span>
               </div>
+              {summary.refunds && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-secondary">Prepay refunded</span>
+                  <span className="font-medium">{summary.refunds.count} · {fmt(summary.refunds.total_cents)}</span>
+                </div>
+              )}
+              {summary.returned_checks && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-secondary">Checks returned</span>
+                  <span className="font-medium">{summary.returned_checks.count} · {fmt(summary.returned_checks.total_cents)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-secondary">Orders</span>
                 <span className="font-medium">{summary.orders.count} — {fmt(summary.orders.total_cents)}</span>
@@ -638,7 +726,9 @@ export default function MonthEndClose() {
         <Card>
           <h3 className="text-sm font-semibold text-nav-dark mb-4">Close Checklist</h3>
           <div className="space-y-3">
-            {checklist.map((item, i) => (
+            {checklist.map((item, i) => 'prepayTie' in item && !item.done && prepayTie && !prepayTieFailed ? (
+              <PrepayTieRow key={i} rows={prepayTie.filter((r) => !!r && r.ok !== true)} />
+            ) : (
               <div key={i} className="flex items-start gap-3">
                 {item.done ? (
                   <CheckCircle className="w-5 h-5 text-crx-green shrink-0 mt-0.5" />
@@ -650,6 +740,19 @@ export default function MonthEndClose() {
                     {item.label}
                   </p>
                   <p className="text-xs text-secondary">{item.detail}</p>
+                  {item.links && (
+                    <div className="flex flex-wrap gap-x-4">
+                      {item.links.map((l) => (
+                        <Link
+                          key={l.to}
+                          to={l.to}
+                          className="inline-flex min-h-[44px] items-center text-xs font-medium text-crx-green hover:underline sm:min-h-0 sm:pt-1"
+                        >
+                          {l.label}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
                   {'reviewKey' in item && item.reviewKey && !item.done && (
                     <label className="mt-1.5 flex items-center gap-2 cursor-pointer">
                       <input
@@ -821,6 +924,54 @@ export default function MonthEndClose() {
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/** M9: the customers whose stored prepay does not tie to their credits, each with a way to its prepay history. */
+function PrepayTieRow({ rows }: { rows: PrepayTie[] }) {
+  const total = rows.reduce((s, r) => s + Math.abs(r.difference_cents), 0);
+  const signed = (c: number) => `${c > 0 ? '+' : c < 0 ? '−' : ''}${fmt(Math.abs(c))}`;
+  const historyLink = (r: PrepayTie) => `/customers/${r.customer_id}?section=financials`;
+  return (
+    <div className="border-t border-gray-100 pt-3">
+      <div className="flex items-start gap-3">
+        <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <p className="text-sm font-medium text-amber-700">Prepay balances don't tie · {rows.length} customer{rows.length === 1 ? '' : 's'}</p>
+          <p className="text-xs text-secondary">{fmt(total)} in total. Open the history to find the cause.</p>
+        </div>
+      </div>
+      <div className="mt-2.5 overflow-x-auto rounded-xl border border-gray-200">
+        <table className="phone-stack w-full text-sm" aria-label="Customers whose prepay does not tie">
+          <thead>
+            <tr className="border-b border-gray-200 bg-cream-dark/50">
+              <th className="px-4 py-2.5 text-left font-medium text-secondary">Customer</th>
+              <th className="px-4 py-2.5 text-right font-medium text-secondary">Stored</th>
+              <th className="whitespace-nowrap px-4 py-2.5 text-right font-medium text-secondary">Credits add up to</th>
+              <th className="px-4 py-2.5 text-right font-medium text-secondary">Difference</th>
+              <th className="px-4 py-2.5"><span className="sr-only">Action</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.customer_id} className="border-b border-gray-50 last:border-b-0">
+                <td className="max-w-56 px-4 py-2"><Link to={historyLink(r)} title={r.farm_name} className="flex min-h-11 items-center font-medium text-crx-green md:min-h-10"><span className="truncate whitespace-nowrap">{r.farm_name}</span></Link></td>
+                <td data-label="Stored" className="px-4 py-2 text-right tabular-nums">{fmt(r.stored_cents)}</td>
+                <td data-label="Credits add up to" className="px-4 py-2 text-right tabular-nums">{fmt(r.credits_cents)}</td>
+                <td data-label="Difference" className="px-4 py-2 text-right font-semibold tabular-nums">{signed(r.difference_cents)}</td>
+                <td className="px-4 py-2 text-right">
+                  {/* Its own layer, so no part of a stacked phone row can sit over the button (e2e F7). */}
+                  <Link to={historyLink(r)} aria-label={`Open ${r.farm_name} prepay history`}
+                    className="relative z-10 inline-flex h-11 items-center justify-center whitespace-nowrap rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-nav-dark hover:bg-gray-50 md:h-10 max-md:w-full">
+                    Open history
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

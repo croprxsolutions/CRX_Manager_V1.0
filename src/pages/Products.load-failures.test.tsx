@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   fetchMarginFloors: vi.fn(),
   listProductCategories: vi.fn(),
   getProductParents: vi.fn(),
+  fetchBrandEpaOwners: vi.fn(),
 }));
 
 const product = {
@@ -70,6 +71,7 @@ vi.mock('../lib/productSetup', async (importOriginal) => ({
   listProductCategories: mocks.listProductCategories,
 }));
 vi.mock('../lib/productParents', () => ({ getProductParents: mocks.getProductParents }));
+vi.mock('../lib/epaBatchFill', () => ({ fetchBrandEpaOwners: mocks.fetchBrandEpaOwners }));
 vi.mock('../lib/productRateLock', () => ({ loadProductRateLock: async () => null }));
 vi.mock('../components/products/ProductRateLockControl', () => ({ default: () => null }));
 vi.mock('../components/products/BulkProductImport', () => ({ default: () => null }));
@@ -113,6 +115,36 @@ describe('Products list reads', () => {
     mocks.fetchMarginFloors.mockResolvedValue(new Map());
     mocks.listProductCategories.mockResolvedValue(categories);
     mocks.getProductParents.mockResolvedValue([]);
+    mocks.fetchBrandEpaOwners.mockResolvedValue({ parentIds: new Set(), productIds: new Set() });
+  });
+
+  it('retries a failed brand EPA read and refreshes the setup badge', async () => {
+    const completeGeneric = {
+      ...product,
+      product_form: 'liquid',
+      inventory_unit: 'gal',
+      container_size: 1,
+      container_unit: 'jug',
+      epa_registration: null,
+      signal_word: 'Caution',
+      rei_hours: 0,
+      phi_days: 0,
+      rei_not_applicable: false,
+      phi_not_applicable: false,
+    };
+    mocks.products.splice(0, mocks.products.length, completeGeneric);
+    mocks.fetchBrandEpaOwners
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ parentIds: new Set(), productIds: new Set([product.id]) });
+
+    render(<Products />);
+
+    expect(await screen.findByText('Incomplete setup')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('brand EPA numbers');
+    fireEvent.click(tryAgain());
+
+    await waitFor(() => expect(mocks.fetchBrandEpaOwners).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText('Incomplete setup')).not.toBeInTheDocument());
   });
 
   it('says the product list could not be loaded instead of "No products yet", and Try again loads it', async () => {

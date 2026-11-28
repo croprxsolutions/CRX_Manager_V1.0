@@ -18,7 +18,7 @@ import Card, { CardHeader } from '../components/ui/Card';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import { SkeletonCard } from '../components/ui/Skeleton';
-import { useToast } from '../components/ui/Toast';
+import { LoadFailedState } from '../components/ui/EmptyState';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, assertRpcResult } from '../lib/db';
 import { Sentry } from '../lib/sentry';
@@ -224,8 +224,8 @@ const defaultData: OperationalData = {
 export default function Dashboard() {
   const { role } = useAuth();
   const navigate = useNavigate();
-  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [data, setData] = useState<OperationalData>(defaultData);
   // Daily-brief "open to-dos" count — a DISTINCT metric from the dashboard's
   // attention-filtered action-items widget (operational_dashboard_summary's
@@ -258,7 +258,7 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, [role]);
 
-  const fetchDashboard = useCallback(async () => {
+  const fetchDashboard = useCallback(async (runChecks: boolean) => {
     setLoading(true);
     try {
       const { data: rpc, error } = await supabase.rpc('operational_dashboard_summary');
@@ -305,11 +305,14 @@ export default function Dashboard() {
         periodDaysRemaining: Number(d.period_days_remaining) || 0,
         recentActivity: d.recent_activity || [],
       });
+      setLoadFailed(false);
     } catch (err) {
       Sentry.captureException(err, { tags: { source: 'fetch', page: 'dashboard' } });
-      toast('error', 'Failed to load dashboard data. Please refresh.');
+      setLoadFailed(true);
     }
     setLoading(false);
+
+    if (!runChecks) return;
 
     // Low-stock and expiring-quote notifications now run via the U18 run_morning_notification_checks cron.
 
@@ -344,11 +347,11 @@ export default function Dashboard() {
         p_idempotency_key: crypto.randomUUID(),
       }).then(({ error: logErr }) => { if (logErr) Sentry.captureException(logErr, { tags: { source: 'mutation', action: 'log_failed_notification' } }); });
     }
-  }, [role, toast]);
+  }, [role]);
 
   useEffect(() => {
-    fetchDashboard();
-  }, [role, fetchDashboard]);
+    void fetchDashboard(true);
+  }, [fetchDashboard]);
 
   if (loading) {
     return (
@@ -358,6 +361,15 @@ export default function Dashboard() {
             <SkeletonCard key={i} />
           ))}
         </div>
+      </div>
+    );
+  }
+
+  if (loadFailed) {
+    return (
+      <div className="space-y-6">
+        <LoadFailedState title="The dashboard summary could not be loaded" onRetry={() => void fetchDashboard(false)} />
+        <ActionQueue />
       </div>
     );
   }
@@ -576,7 +588,7 @@ export default function Dashboard() {
               </div>
               <div className="flex gap-2">
                 <Badge variant="draft">{data.quotePipelineDraft} draft</Badge>
-                <Badge variant="sent">{data.quotePipelineSent} sent</Badge>
+                <Badge variant="sent">{data.quotePipelineSent} booked</Badge>
                 <Badge variant="accepted">{data.quotePipelineAccepted} accepted</Badge>
               </div>
             </Card>

@@ -191,8 +191,11 @@ vi.mock('../lib/activityLogger', () => ({
   logActivity: H.logActivity,
 }));
 
-// Supplier evidence has its own focused tests. Keep this suite scoped to the
-// EPA draft mutation so its assertions are not polluted by the history read.
+// Supplier evidence has its own focused tests. Keep the RPC spy scoped to EPA drafts.
+vi.mock('../lib/supplierPricing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/supplierPricing')>()),
+  getProductPriceHistory: async (productId: string) => ({ product_id: productId, points: [] }),
+}));
 vi.mock('../components/products/ProductPriceHistory', () => ({
   default: () => null,
 }));
@@ -255,6 +258,33 @@ describe('ProductDetail label link and adjuvants (USE-2)', () => {
     expect(screen.queryByRole('link', { name: /View the EPA label/ })).toBeNull();
     expect(screen.queryByText('Requires one of:', { exact: false })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Edit adjuvants' })).toBeNull();
+  });
+
+  it.each([
+    ['REI (hours)', 'Label gives no REI', '12'],
+    ['PHI (days)', 'Label gives no PHI', '30'],
+  ])('typing a %s number keeps its no-interval tick off after restoring the EPA number', async (intervalLabel, tickLabel, value) => {
+    H.role = 'admin';
+    H.product = baseProduct({
+      epa_registration: '264-849',
+      rei_not_applicable: true,
+      phi_not_applicable: true,
+    });
+    render(<ProductDetail />);
+
+    const epaInput = await screen.findByLabelText('EPA Registration');
+    const noIntervalTick = await screen.findByLabelText(tickLabel);
+    expect(noIntervalTick).toBeChecked();
+
+    fireEvent.change(epaInput, { target: { value: '100-1' } });
+    expect(noIntervalTick).not.toBeChecked();
+
+    const intervalInput = screen.getByLabelText(intervalLabel);
+    fireEvent.change(intervalInput, { target: { value } });
+    fireEvent.change(epaInput, { target: { value: '264-849' } });
+
+    expect(noIntervalTick).not.toBeChecked();
+    expect(intervalInput).toHaveValue(Number(value));
   });
 });
 

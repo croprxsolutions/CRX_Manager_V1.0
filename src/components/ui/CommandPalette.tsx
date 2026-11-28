@@ -43,12 +43,18 @@ import { getRecentItems } from '../../lib/recentPages';
 import { PAGE_PERMISSIONS, hasPageAccess } from '../../lib/pagePermissions';
 import { useAuth } from '../../contexts/AuthContext';
 import type { GlobalSearchResult, SearchEntityType } from '../../types';
+import { fetchProductListPrices, searchQuotesForPalette, type PaletteQuoteResult } from '../../lib/paletteSearch';
+import { formatUSD } from '../../lib/money';
+import { quoteStatusLabel } from '../../lib/quoteStatusLabel';
 
 // ── Types ──────────────────────────────────────────────────────────
 
+// global_search's record types, plus quotes, which this palette reads itself.
+type PaletteEntityType = SearchEntityType | 'quote';
+
 interface SearchResult {
   id: string;
-  type: 'recent' | 'page' | SearchEntityType;
+  type: 'recent' | 'page' | PaletteEntityType;
   label: string;
   subtitle?: string;
   path: string;
@@ -62,25 +68,30 @@ interface CommandPaletteProps {
 // ── Constants ──────────────────────────────────────────────────────
 
 const DEBOUNCE_MS = 300;
+/** The most results the list shows at once. */
+const MAX_RESULTS = 25;
 
-const ENTITY_ICONS: Record<SearchEntityType, React.ReactNode> = {
+const ENTITY_ICONS: Record<PaletteEntityType, React.ReactNode> = {
   customer: <Users className="w-4 h-4" />,
+  quote: <FileText className="w-4 h-4" />,
   order: <ClipboardList className="w-4 h-4" />,
   invoice: <Receipt className="w-4 h-4" />,
   delivery: <Truck className="w-4 h-4" />,
   product: <Package className="w-4 h-4" />,
 };
 
-const ENTITY_COLORS: Record<SearchEntityType, string> = {
+const ENTITY_COLORS: Record<PaletteEntityType, string> = {
   customer: 'bg-blue-100 text-blue-700',
+  quote: 'bg-sky-100 text-sky-700',
   order: 'bg-amber-100 text-amber-700',
   invoice: 'bg-green-100 text-green-700',
   delivery: 'bg-purple-100 text-purple-700',
   product: 'bg-rose-100 text-rose-700',
 };
 
-const ENTITY_PATHS: Record<SearchEntityType, string> = {
+const ENTITY_PATHS: Record<PaletteEntityType, string> = {
   customer: '/customers/',
+  quote: '/quotes/',
   order: '/orders/',
   invoice: '/invoices/',
   delivery: '/deliveries/',
@@ -156,6 +167,21 @@ const EXTRA_PAGES: { path: string; label: string; pageKey?: string; allRoles?: b
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+// Names pages had before the 2026-11 menu rename (#2451): typing an old name still finds the page.
+const FORMER_PAGE_NAMES: Record<string, string> = {
+  invoices: 'Invoices — Chemical',
+  'to-ship': 'To-Ship',
+  'application-records': 'Record Book (Applications)',
+  field: 'Field View (phone preview)',
+  'accounts-receivable': 'A/R Workspace',
+  'ar-aging': 'A/R Aging',
+  'accounts-payable': 'A/P & Vendor Bills',
+  'lot-trace': 'Lot Trace (recall lookup)',
+  'blend-tickets': 'Blend Tickets (OCR)',
+  dashboard: 'Overview (KPI Dashboard)',
+  'application-services': 'Application Services (fees)',
+};
+
 function fuzzyMatch(query: string, text: string): boolean {
   const q = query.toLowerCase();
   const t = text.toLowerCase();
@@ -187,6 +213,9 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [entityResults, setEntityResults] = useState<GlobalSearchResult[]>([]);
+  const [quoteResults, setQuoteResults] = useState<PaletteQuoteResult[]>([]);
+  // Tier 1 (list) price of each product found, by id; only office staff see prices.
+  const [productPrices, setProductPrices] = useState<ReadonlyMap<string, number>>(new Map());
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // AppLayout is withheld while auth loads; the fallback keeps isolated component
@@ -197,7 +226,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
     const permissionPages = PAGE_PERMISSIONS
       .filter((page) => page.roles.includes(role) && hasPageAccess(role, deniedPages, page.key))
-      .map((page) => ({ path: page.path, label: page.label }));
+      .map((page) => ({ path: page.path, label: page.label, formerName: FORMER_PAGE_NAMES[page.key] }));
     const isOfficeRole = role === 'admin' || role === 'sales_rep';
     const extraPages = EXTRA_PAGES
       .filter((page) => {
@@ -206,10 +235,13 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
         // Office deep-links: office role + the linked page's deny-list gate.
         return isOfficeRole && (!page.pageKey || hasPageAccess(role, deniedPages, page.pageKey));
       })
-      .map(({ path, label }) => ({ path, label }));
+      .map(({ path, label }) => ({ path, label, formerName: undefined as string | undefined }));
 
     return [...permissionPages, ...extraPages];
   }, [deniedPages, role]);
+  // Quotes are searched only for someone who may open the Quotes page.
+  const canSearchQuotes = availablePages.some((p) => p.path === '/quotes');
+  const canSeePrices = role === 'admin' || role === 'sales_rep';
 
   // Reset state when opening
   useEffect(() => {
@@ -217,6 +249,8 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
       setQuery('');
       setActiveIndex(0);
       setEntityResults([]);
+      setQuoteResults([]);
+      setProductPrices(new Map());
       setLoading(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
@@ -239,23 +273,43 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
     if (query.trim().length < 2) {
       setEntityResults([]);
+      setQuoteResults([]);
+      setProductPrices(new Map());
       setLoading(false);
       return;
     }
 
     setLoading(true);
     debounceRef.current = setTimeout(async () => {
+      const trimmed = query.trim();
+      // The quote search is its own read; a failure there leaves the other results standing.
+      const quotesRead = canSearchQuotes
+        ? searchQuotesForPalette(trimmed, 5).catch(() => [] as PaletteQuoteResult[])
+        : Promise.resolve([] as PaletteQuoteResult[]);
       try {
         const { data, error } = await supabase.rpc('global_search', {
-          p_query: query.trim(),
+          p_query: trimmed,
           p_limit: 5,
         });
         if (cancelled) return; // query changed while in-flight
         if (error) throw error;
         const results = assertRpcResult<GlobalSearchResult[]>(data, 'global_search');
+        const productIds = canSeePrices ? results.filter((r) => r.entity_type === 'product').map((r) => r.id) : [];
+        // A failed price read shows the products without a price, never a wrong one.
+        const [quotes, prices] = await Promise.all([
+          quotesRead,
+          fetchProductListPrices(productIds).catch(() => new Map<string, number>()),
+        ]);
+        if (cancelled) return;
         setEntityResults(results);
+        setQuoteResults(quotes);
+        setProductPrices(prices);
       } catch {
-        if (!cancelled) setEntityResults([]);
+        const quotes = await quotesRead;
+        if (cancelled) return;
+        setEntityResults([]);
+        setQuoteResults(quotes);
+        setProductPrices(new Map());
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -265,7 +319,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
       cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query]);
+  }, [query, canSearchQuotes, canSeePrices]);
 
   // Build combined results
   const results: SearchResult[] = useMemo(() => {
@@ -287,7 +341,9 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
     }
 
     // Pages (client-side fuzzy match, instant)
-    const matchingPages = availablePages.filter((p) => fuzzyMatch(trimmed, p.label));
+    const q = trimmed.toLowerCase();
+    const matchingPages = availablePages.filter((p) => fuzzyMatch(trimmed, p.label)
+      || !!p.formerName?.toLowerCase().includes(q));
     for (const p of matchingPages.slice(0, 5)) {
       items.push({
         id: `page-${p.path}`,
@@ -298,19 +354,36 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
       });
     }
 
+    // Quotes come from their own read after the entity search. Keep room for them, so a broad
+    // search whose other matches fill the list still shows its matching quotes.
+    // Checked again here, not only when the read ran: results kept from before a role change never show.
+    const shownQuotes = canSearchQuotes ? quoteResults : [];
+    const entityRoom = Math.max(0, MAX_RESULTS - items.length - shownQuotes.length);
+
     // Entity results from RPC
-    for (const r of entityResults) {
+    for (const r of entityResults.slice(0, entityRoom)) {
+      const price = r.entity_type === 'product' && canSeePrices ? productPrices.get(r.id) : undefined;
       items.push({
         id: `${r.entity_type}-${r.id}`,
         type: r.entity_type,
         label: r.primary_text,
-        subtitle: r.secondary_text,
+        subtitle: price === undefined ? r.secondary_text : [r.secondary_text, `Tier 1 ${formatUSD(price)}`].filter(Boolean).join(' · '),
         path: ENTITY_PATHS[r.entity_type] + r.id,
       });
     }
 
-    return items.slice(0, 25);
-  }, [query, entityResults, availablePages]);
+    for (const q of shownQuotes) {
+      items.push({
+        id: `quote-${q.id}`,
+        type: 'quote',
+        label: `Quote ${q.quote_number}`,
+        subtitle: [q.customer?.farm_name, quoteStatusLabel(q.status)].filter(Boolean).join(' · '),
+        path: ENTITY_PATHS.quote + q.id,
+      });
+    }
+
+    return items.slice(0, MAX_RESULTS);
+  }, [query, entityResults, quoteResults, productPrices, availablePages, canSearchQuotes, canSeePrices]);
 
   // Reset active index when results change
   useEffect(() => {
@@ -410,7 +483,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search pages, customers, orders, invoices..."
+            placeholder="Search pages, customers, quotes, orders, invoices..."
             className="flex-1 text-sm bg-transparent outline-none placeholder:text-gray-500"
             aria-label="Search"
           />

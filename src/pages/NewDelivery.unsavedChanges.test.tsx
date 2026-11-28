@@ -39,7 +39,6 @@ vi.mock('../lib/db', async () => {
 });
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn(), captureMessage: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
-vi.mock('../lib/notificationTriggers', () => ({ notifyDriverAssigned: vi.fn() }));
 vi.mock('../lib/rupCompliance', () => ({ checkRUPCompliance: () => Promise.resolve({ compliant: true, warnings: [] }) }));
 vi.mock('../hooks/useGuardrails', () => ({ useOverloadedDriverCheck: () => ({ warning: null, checkDriverLoad: vi.fn() }) }));
 // Records every isDirty value the page hands the unsaved-changes guard.

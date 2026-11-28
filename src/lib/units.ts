@@ -53,7 +53,11 @@ export function rateUnitOptionsForProduct(
   form: string | null | undefined,
   inventoryUnit: string | null | undefined,
 ): UnitConversion[] {
-  if (form !== 'seed' && form !== 'each') return unitOptionsForForm(conversions, form);
+  if (form !== 'seed' && form !== 'each') {
+    const options = unitOptionsForForm(conversions, form);
+    // A gram-stocked product never takes MG: picking it saved 1/1000 of the amount (KI-114, Taha 2026-11-24).
+    return inventoryUnit?.trim().toLowerCase() === 'g' ? options.filter((uc) => uc.unit.toLowerCase() !== 'mg') : options;
+  }
   if (!inventoryUnit?.trim()) return [];
   const exact = conversions.find((uc) => uc.unit === inventoryUnit);
   if (exact) return [exact];
@@ -104,4 +108,17 @@ export function blockedUnitSaveMessage(
     return 'No units are set up yet, so a unit is still blank. Add unit conversions before saving.';
   }
   return null;
+}
+
+/** A product stocked in a count unit (Ea or Unit) is sold by the whole item; the database refuses fractions (WHOLE_ITEMS_ONLY). */
+export function isWholeItemUnit(unit: string | null | undefined): boolean {
+  const u = (unit ?? '').trim().toLowerCase();
+  return u === 'ea' || u === 'unit';
+}
+
+/** The message for a fractional figure on a whole-item line, matching the database's sentence. */
+export function wholeItemMessage(productName: string, unit: string, qty: number): string | null {
+  return isWholeItemUnit(unit) && !Number.isInteger(qty)
+    ? `${productName} is sold by the whole item (${unit.trim()}), so ${qty} can't be used. Enter a whole number.`
+    : null;
 }

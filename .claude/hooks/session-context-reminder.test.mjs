@@ -12,8 +12,12 @@ const hookPath = fileURLToPath(new URL("./session-context-reminder.mjs", import.
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 const adapterPath = fileURLToPath(new URL("../../.codex/hooks/codex-hook-adapter.mjs", import.meta.url));
 
+// Claude runs the hook with no surface marker; drop any the calling shell carries.
+const { CRX_AGENT_SURFACE: _inheritedSurface, ...claudeEnv } = process.env;
+
 function runRaw(input) {
   const result = spawnSync(process.execPath, [hookPath], {
+    env: claudeEnv,
     input,
     encoding: "utf8",
   });
@@ -36,8 +40,11 @@ assert.match(startup, /Post a short plan, then continue routine implementation w
 assert.doesNotMatch(startup, /get his approval after a short plan/);
 assert.match(startup, /Every hard-gated live action listed in AGENTS\.md/);
 assert.match(startup, /each destructive migration.*current approval immediately beforehand/);
-// Mason's autonomous-landing rule (2026-09-26) — the conditions travel with it.
-assert.match(startup, /NON-destructive migration and the merge need no ask once the exact-SHA Sol proof is clean and checks are green/);
+// Landing is attributed per role: Codex stops at PR readiness, Claude does guarded staging merges.
+assert.match(startup, /Landing follows AGENTS\.md and \.claude\/commands\/ship\.md/);
+assert.match(startup, /Codex follows the pre-push reviews and stops at PR readiness/);
+assert.match(startup, /Claude handles guarded staging merges\. Mason's explicit holds apply to both roles/);
+assert.doesNotMatch(startup, /need no ask/);
 assert.match(startup, /CodeRabbit is advisory/);
 // The documentation-only exception (Mason, 2026-10-07) travels with it.
 assert.match(startup, /A change touching no file on docs\/reference\/sol-required-paths\.md needs no Sol proof/);
@@ -65,7 +72,8 @@ try {
   const guardsRepo = path.join(scratch, "old-checkout");
   const sessionRepo = path.join(scratch, "worktree");
   const scratchHook = path.join(guardsRepo, ".claude", "hooks", "session-context-reminder.mjs");
-  const env = scratchHookEnvironment(scratch);
+  // A generous git budget: this checks the warning's logic, not how fast a loaded PC runs git.
+  const env = { ...scratchHookEnvironment(scratch), CRX_SESSION_REMINDER_GIT_BUDGET_MS: "60000" };
   const git = (cwd, ...args) => {
     const result = spawnSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", ...args], { cwd, env, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
@@ -92,8 +100,10 @@ try {
     return JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
   };
 
-  assert.match(reminder(sessionRepo), /WARNING: this session's guards and skills run from .*old-checkout, not this worktree/);
-  assert.match(reminder(sessionRepo), /Follow the gate anyway/);
+  // One output for both phrases: the warning is all-or-nothing, so two spawns only doubled the timing exposure.
+  const staleWarning = reminder(sessionRepo);
+  assert.match(staleWarning, /WARNING: this session's guards and skills run from .*old-checkout, not this worktree/);
+  assert.match(staleWarning, /Follow the gate anyway/);
   assert.doesNotMatch(reminder(guardsRepo), /WARNING/, "guards loaded from the session's own folder are not this problem");
   assert.doesNotMatch(reminder(path.join(scratch, "missing")), /WARNING/, "a bad cwd stays silent");
 
@@ -133,10 +143,25 @@ assert.match(codexStartup, /AGENTS\.md \(the shared contract\) is already in con
 assert.doesNotMatch(codexStartup, /CLAUDE\.md/, "Codex does not load CLAUDE.md");
 assert.match(codexStartup, /Load only the workflow and reference documents/);
 assert.match(codexStartup, /Every hard-gated live action listed in AGENTS\.md/);
+assert.match(codexStartup, /Codex follows the pre-push reviews and stops at PR readiness/);
+assert.match(codexStartup, /Claude handles guarded staging merges\. Mason's explicit holds apply to both roles/);
+assert.doesNotMatch(codexStartup, /need no ask/);
 assert.ok(codexStartup.length < 1_200, `Codex startup reminder grew to ${codexStartup.length} characters`);
 assert.equal(runCodex("resume"), codexStartup);
 assert.equal(runCodex("fork"), codexStartup);
 assert.equal(runCodex("compact"), compact, "both harnesses get the same re-anchor");
 assert.equal(runCodexRaw("{"), "", "malformed input stays silent through the adapter");
+
+// An unknown nonempty surface marker must not be told CLAUDE.md is loaded.
+const unknownRun = spawnSync(process.execPath, [hookPath], {
+  env: { ...process.env, CRX_AGENT_SURFACE: "other-tool" },
+  input: JSON.stringify({ source: "startup" }),
+  encoding: "utf8",
+});
+assert.equal(unknownRun.status, 0, unknownRun.stderr);
+const unknownStartup = JSON.parse(unknownRun.stdout).hookSpecificOutput.additionalContext;
+assert.match(unknownStartup, /AGENTS\.md \(the shared contract\) is already in context/);
+assert.doesNotMatch(unknownStartup, /CLAUDE\.md/, "unknown surface must not imply CLAUDE.md is loaded");
+assert.match(unknownStartup, /Mason's explicit holds apply to both roles/);
 
 console.log("session-context-reminder: startup routing and compact re-anchor passed on Claude and Codex");

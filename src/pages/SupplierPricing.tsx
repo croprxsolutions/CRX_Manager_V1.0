@@ -44,9 +44,11 @@ import {
   uploadSupplierSourcePdf,
   upsertProductSupplierLink,
   type SupplierImportReview,
+  type SupplierEvidenceDetail,
   type SupplierImportReviewRow,
   type SupplierPricingWorkspace,
 } from '../lib/supplierPricing';
+import { supplierUnitCostCents } from '../lib/supplierUnitCost';
 import {
   generateSupplierQuoteWorkbook,
   MAX_SUPPLIER_QUOTE_BYTES,
@@ -55,6 +57,28 @@ import {
 import { toSentryError } from '../lib/sentryError';
 
 const today = () => localToday();
+
+// The staging RPC flags rows with codes; staff read the rule instead of the code.
+const ROW_ERROR_MESSAGES: Record<string, string> = {
+  // No fix-it advice or example amount: every version Sol reviewed could mislead (the cost is a package
+  // total, and a second link for the same supplier SKU is refused).
+  PRICE_UNIT_MISMATCH: "The price unit does not match this product's supplier link, so this row cannot be compared or approved. Check the quote's unit and package size.",
+  PRICE_UNIT_REQUIRED: 'Enter the supplier price unit.',
+  COST_INVALID: 'The cost is not a plain dollar amount. Type numbers only, with at most 2 decimals, like 12.34.',
+  COST_MUST_BE_POSITIVE: 'The cost must be more than $0.',
+  COST_TOO_LARGE: 'The cost is over $10,000,000 for one line. Check the amount.',
+  PACKAGE_QUANTITY_INVALID: 'Package quantity must be a number of at least 0.001.',
+  EFFECTIVE_DATE_INVALID: 'The effective date is not a valid date.',
+  EFFECTIVE_RANGE_INVALID: 'The end date is before the effective date.',
+  FORMULA_NOT_ALLOWED: 'This row has an Excel formula. Replace it with a plain value.',
+  LINK_REQUIRED: 'This row is not linked to a product.',
+  LINK_ID_INVALID: "This row's product link is not valid. Download a fresh quote sheet.",
+  LINK_VENDOR_MISMATCH: 'This product link belongs to another supplier or is turned off.',
+  LINK_NOT_CONFIRMED_FOR_REUSE: 'This product link is not confirmed yet. Confirm it on the Product links tab.',
+  PRICE_KIND_INVALID: 'Choose a price type: list, quote, contract, promo or manual.',
+};
+
+const rowErrorText = (code: string) => ROW_ERROR_MESSAGES[code] ?? `${code.toLowerCase().split('_').join(' ')}.`;
 
 const blankLink = {
   productId: '',
@@ -81,6 +105,117 @@ const blankQuickQuote = {
 
 function eligibleReviewRow(status: string): boolean {
   return status === 'new' || status === 'changed' || status === 'cannot_compare';
+}
+
+// cost_cents is the total for package_quantity units, so never label it "per" unless that is 1.
+function packageUnitText(row: SupplierImportReviewRow): string {
+  if (!row.price_unit) return '';
+  return row.package_quantity != null && row.package_quantity !== 1
+    ? ` for ${row.package_quantity} ${row.price_unit}`
+    : ` per ${row.price_unit}`;
+}
+
+/**
+ * The cost per inventory unit the server records for this quote, or why it is not shown. Only for rows that become
+ * (or became) an observation: a refused row's unit may not be the link's, so its conversion means nothing.
+ */
+function rowUnitCost(
+  row: SupplierImportReviewRow,
+  workspace: SupplierPricingWorkspace | null,
+): { cents: bigint; unit: string; factor: number | string } | string | null {
+  if (!eligibleReviewRow(row.row_status) && row.row_status !== 'approved') return null;
+  const link = workspace?.links.find((item) => item.id === row.product_supplier_link_id);
+  if (!link || row.cost_cents === null) return null;
+  // The server gives no per-unit cost unless the link is comparable with a factor above 0.
+  const factor = link.inventory_units_per_supplier_unit;
+  const inventoryUnit = workspace?.products.find((product) => product.id === link.product_id)?.inventory_unit;
+  // Cost-basis selection also needs the link's unit to be the product's inventory unit.
+  const unitsDiffer = !!inventoryUnit && !!link.conversion_unit
+    && inventoryUnit.trim().toLowerCase() !== link.conversion_unit.trim().toLowerCase();
+  if (link.comparison_status !== 'comparable' || !link.is_active || factor === null || !(Number(factor) > 0) || unitsDiffer) {
+    return 'cannot compare to inventory units';
+  }
+  const unitCost = supplierUnitCostCents(row.cost_cents, row.package_quantity, factor);
+  // A quantity too large to repeat exactly: say so rather than guess.
+  if (unitCost === null) return 'converted cost not shown (package size too large)';
+  return { cents: unitCost, unit: inventoryUnit || link.conversion_unit || 'inventory unit', factor };
+}
+
+// Quotes are above $0, so a per-unit cost that rounds to 0 cents is a fraction of a cent, not free.
+function unitCentsText(cents: bigint | null): string {
+  return cents === 0n ? 'less than $0.01' : formatSupplierCents(cents);
+}
+
+function convertedCostText(row: SupplierImportReviewRow, workspace: SupplierPricingWorkspace | null): string | null {
+  const cost = rowUnitCost(row, workspace);
+  return cost === null || typeof cost === 'string' ? cost : `= ${unitCentsText(cost.cents)} per ${cost.unit}`;
+}
+
+// Mason, 2026-11-25: warn, never block, on a price swing of more than 40% either way from the link's current
+// approved price per unit (above 1.4x or below 0.6x).
+
+type ApprovedPriceByLink = Map<string, SupplierEvidenceDetail>;
+
+// Evidence holds each active link's current approved observation (effective today), at the link's conversion.
+function approvedPriceByLink(workspace: SupplierPricingWorkspace | null): ApprovedPriceByLink {
+  return new Map((workspace?.evidence ?? []).flatMap((product) => product.suppliers)
+    .map((supplier) => [supplier.product_supplier_link_id, supplier] as const));
+}
+
+function jumpDirection(quoted: bigint, approved: bigint): string | null {
+  if (approved <= 0n) return null;
+  return quoted * 10n > approved * 14n ? 'more than 40% above'
+    : quoted * 10n < approved * 6n ? 'more than 40% below' : null;
+}
+
+/** A plain-English warning when a pending row's per-unit cost is far from the link's current approved price. */
+function priceJumpText(
+  row: SupplierImportReviewRow,
+  workspace: SupplierPricingWorkspace | null,
+  approvedPrices: ApprovedPriceByLink,
+): string | null {
+  if (!eligibleReviewRow(row.row_status) || !row.product_supplier_link_id || row.cost_cents === null) return null;
+  const cost = rowUnitCost(row, workspace);
+  if (cost === null || typeof cost === 'string') return null;
+  const last = approvedPrices.get(row.product_supplier_link_id);
+  if (!last || last.normalized_cost_cents === null) return null;
+  const lastCents = last.normalized_cost_cents;
+  // Per-unit cents are rounded, so a few-cents-per-unit price can hide a real swing. When this row's package size
+  // reproduces the approved per-unit price, compare the exact package prices (same link, same conversion).
+  // The exact check can only add a warning: the inferred package size is never trusted to clear one.
+  // shortcut: evidence does not return the approved package quantity, so it is inferred. Under a few cents per unit a
+  // different package size can pass this check and warn wrongly (warning only), and rounded cents can still hide a
+  // swing; return package_quantity from get_supplier_market_evidence (#2561).
+  const samePackage = supplierUnitCostCents(last.quoted_package_cost_cents, row.package_quantity, cost.factor) === lastCents;
+  const rounded = jumpDirection(cost.cents, lastCents);
+  const direction = (samePackage ? jumpDirection(row.cost_cents, last.quoted_package_cost_cents) : null) ?? rounded;
+  if (!direction) return null;
+  // Name the package prices when the rounded per-unit prices alone do not show the swing.
+  const packages = direction === rounded ? ''
+    : `${formatSupplierCents(row.cost_cents)} vs ${formatSupplierCents(last.quoted_package_cost_cents)}${packageUnitText(row)}; `;
+  return `Check this price: ${unitCentsText(cost.cents)} per ${cost.unit} is ${direction} the current approved `
+    + `${unitCentsText(lastCents)} per ${cost.unit} (${packages}effective ${last.effective_from}). This warning does not block approval.`;
+}
+
+function approveMessage(
+  review: SupplierImportReview | null,
+  selectedRowIds: Set<string>,
+  workspace: SupplierPricingWorkspace | null,
+  approvedPrices: ApprovedPriceByLink,
+): string {
+  const rows = (review?.rows ?? []).filter((row) => selectedRowIds.has(row.id));
+  const costs = rows.slice(0, 10).map((row) => {
+    const converted = convertedCostText(row, workspace);
+    const quoted = `${formatSupplierCents(row.cost_cents)}${packageUnitText(row)}`;
+    const joiner = converted?.startsWith('=') ? ' ' : ', ';
+    return `${row.product_name || 'Unmatched Product'}: ${quoted}${converted ? `${joiner}${converted}` : ''}.`;
+  });
+  const more = rows.length > 10 ? ` And ${rows.length - 10} more; see the Cost column.` : '';
+  const jumps = rows.filter((row) => priceJumpText(row, workspace, approvedPrices) !== null).length;
+  // First, so a long list of costs cannot push it out of sight.
+  const jumpNote = jumps > 0 ? ` Check first: ${jumps} selected row(s) are more than 40% away from the current approved price.` : '';
+  return `You are adding ${selectedRowIds.size} supplier observations. You are changing ZERO sell prices.${jumpNote}`
+    + `${costs.length > 0 ? ` ${costs.join(' ')}` : ''}${more}`;
 }
 
 export default function SupplierPricing() {
@@ -114,8 +249,6 @@ export default function SupplierPricing() {
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const workspaceRequestRef = useRef(0);
   const workspaceRefreshPendingRef = useRef(false);
-  const importRequestRef = useRef(0);
-  const importRequestPendingRef = useRef(false);
   const basisWorkspaceRequestRef = useRef(0);
   const selectedVendorIdRef = useRef(selectedVendorId);
   const selectedProductIdRef = useRef(selectedProductId);
@@ -142,29 +275,27 @@ export default function SupplierPricing() {
   const aliasReviewIdem = useIdempotencyKey('review_vendor_alias', profile?.id || '');
   const correctionIdem = useIdempotencyKey('correct_supplier_price_observation', profile?.id || '');
 
-  const loadWorkspace = useCallback(async () => {
+  // Opening an import reloads the workspace too, so its warnings use current approved prices and suppliers.
+  const loadWorkspace = useCallback(async (openImportId: string | null = null) => {
     const requestId = ++workspaceRequestRef.current;
-    const reviewIdToRefresh = reviewRef.current?.id ?? null;
-    importRequestRef.current += 1;
-    if (importRequestPendingRef.current) {
-      importRequestPendingRef.current = false;
-      setBusy(false);
-    }
+    const reviewIdToRefresh = openImportId ?? reviewRef.current?.id ?? null;
     workspaceRefreshPendingRef.current = true;
     setLoading(true);
     try {
       const result = await getSupplierPricingWorkspace();
       if (workspaceRequestRef.current !== requestId) return;
       let refreshedReview: SupplierImportReview | null = null;
-      if (reviewIdToRefresh && result.imports.some((item) => item.id === reviewIdToRefresh)) {
+      if (reviewIdToRefresh && (openImportId || result.imports.some((item) => item.id === reviewIdToRefresh))) {
         try {
           refreshedReview = await getSupplierPriceImport(reviewIdToRefresh);
         } catch (reviewError) {
           if (workspaceRequestRef.current !== requestId) return;
           Sentry.captureException(toSentryError(reviewError), {
-            extra: { context: 'refresh_supplier_price_import' },
+            extra: { context: openImportId ? 'open_supplier_price_import' : 'refresh_supplier_price_import' },
           });
           toast('error', sanitizeError(reviewError));
+          // A failed open keeps the import already on screen, as before opens reloaded the workspace.
+          if (openImportId) refreshedReview = reviewRef.current;
         }
       }
       if (workspaceRequestRef.current !== requestId) return;
@@ -198,6 +329,7 @@ export default function SupplierPricing() {
       });
       setAliasVendorId((current) => result.vendors.some((vendor) => vendor.id === current) ? current : '');
       commitReview(refreshedReview);
+      if (openImportId && refreshedReview) setActiveTab('quotes');
       setSelectedRowIds(new Set());
       setApproveOpen(false);
       setRejectOpen(false);
@@ -213,6 +345,11 @@ export default function SupplierPricing() {
       Sentry.captureException(toSentryError(error), {
         extra: { context: 'load_supplier_pricing_workspace' },
       });
+      // A failed open leaves the page as it was; Refresh is what clears a workspace that cannot load.
+      if (openImportId) {
+        toast('error', sanitizeError(error));
+        return;
+      }
       setWorkspace(null);
       selectedVendorIdRef.current = '';
       selectedProductIdRef.current = '';
@@ -312,6 +449,7 @@ export default function SupplierPricing() {
     () => workspace?.evidence.find((item) => item.product_id === selectedProductId) ?? null,
     [selectedProductId, workspace],
   );
+  const approvedPrices = useMemo(() => approvedPriceByLink(workspace), [workspace]);
   const linkProduct = useMemo(
     () => workspace?.products.find((product) => product.id === linkForm.productId) ?? null,
     [linkForm.productId, workspace],
@@ -550,25 +688,6 @@ export default function SupplierPricing() {
       toast('error', sanitizeError(error));
     } finally {
       setBusy(false);
-    }
-  };
-
-  const openImport = async (importId: string) => {
-    const requestId = ++importRequestRef.current;
-    importRequestPendingRef.current = true;
-    setBusy(true);
-    try {
-      const result = await getSupplierPriceImport(importId);
-      if (importRequestRef.current !== requestId) return;
-      commitReview(result);
-      setActiveTab('quotes');
-    } catch (error) {
-      if (importRequestRef.current === requestId) toast('error', sanitizeError(error));
-    } finally {
-      if (importRequestRef.current === requestId) {
-        importRequestPendingRef.current = false;
-        setBusy(false);
-      }
     }
   };
 
@@ -839,6 +958,14 @@ export default function SupplierPricing() {
           <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-900">
             You are adding {selectedRowIds.size} supplier observations. You are changing ZERO sell prices.
           </div>
+          {/* Mason, 2026-11-24: an archived supplier's quote stays approvable, with a warning. The workspace lists only
+              suppliers that are not archived, and evidence and cost basis skip archived suppliers. */}
+          {review.status === 'needs_review' && workspace && !workspace.vendors.some((vendor) => vendor.id === review.vendor_id) && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              This supplier is archived. Approving saves the price, but it won&apos;t show in supplier evidence or cost basis
+              unless the supplier is restored.
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className="border-b border-gray-200 text-xs uppercase text-secondary">
@@ -854,6 +981,8 @@ export default function SupplierPricing() {
               <tbody>
                 {review.rows.map((row) => {
                   const eligible = eligibleReviewRow(row.row_status);
+                  const convertedCost = convertedCostText(row, workspace);
+                  const priceJump = review.status === 'needs_review' ? priceJumpText(row, workspace, approvedPrices) : null;
                   return (
                     <tr key={row.id} className="border-b border-gray-100">
                       <td className="px-2 py-2">
@@ -871,14 +1000,19 @@ export default function SupplierPricing() {
                       </td>
                       <td className="px-2 py-2 font-medium">{row.product_name || 'Unmatched Product'}</td>
                       <td className="px-2 py-2">{row.supplier_product_name || row.supplier_sku || '—'}</td>
-                      <td className="px-2 py-2 tabular-nums">{formatSupplierCents(row.cost_cents)}</td>
+                      <td className="px-2 py-2 tabular-nums">
+                        {formatSupplierCents(row.cost_cents)}
+                        {row.price_unit && <span className="text-secondary">{packageUnitText(row)}</span>}
+                        {convertedCost && <p className="text-xs text-secondary">{convertedCost}</p>}
+                        {priceJump && <p className="mt-1 max-w-xs text-xs font-medium text-amber-800">{priceJump}</p>}
+                      </td>
                       <td className="px-2 py-2">{row.effective_from || '—'}</td>
                       <td className="px-2 py-2">
                         <Badge variant={eligible ? 'info' : row.row_status === 'approved' ? 'success' : 'warning'}>
                           {row.row_status.replace(/_/g, ' ')}
                         </Badge>
                         {row.validation_errors.length > 0 && (
-                          <p className="mt-1 text-xs text-red-700">{row.validation_errors.join(', ')}</p>
+                          <p className="mt-1 text-xs text-red-700">{row.validation_errors.map(rowErrorText).join(' ')}</p>
                         )}
                         {isAdmin && row.row_status === 'approved' && row.observation_id && (
                           <Button
@@ -904,7 +1038,7 @@ export default function SupplierPricing() {
               <Button
                 type="button"
                 icon={<ShieldCheck className="h-4 w-4" />}
-                disabled={selectedRowIds.size === 0}
+                disabled={selectedRowIds.size === 0 || loading}
                 onClick={() => setApproveOpen(true)}
               >
                 Approve selected observations
@@ -912,6 +1046,7 @@ export default function SupplierPricing() {
               <Button
                 type="button"
                 variant="ghost"
+                disabled={loading}
                 onClick={() => { rejectImportIdem.resetKey(); setRejectReason(''); setRejectOpen(true); }}
               >
                 Reject import
@@ -930,7 +1065,7 @@ export default function SupplierPricing() {
               type="button"
               disabled={busy || loading}
               className="flex w-full items-center justify-between rounded-lg border border-gray-200 p-3 text-left hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => void openImport(item.id)}
+              onClick={() => void loadWorkspace(item.id)}
             >
               <span>
                 <span className="block font-medium text-nav-dark">{item.vendor_name}</span>
@@ -967,7 +1102,7 @@ export default function SupplierPricing() {
           <>
             <div className="mb-4 grid gap-3 sm:grid-cols-3">
               <div><p className="text-xs text-secondary">Best comparable supplier</p><p className="font-semibold">{selectedEvidence.best_supplier || 'Cannot compare'}</p></div>
-              <div><p className="text-xs text-secondary">Replacement cost</p><p className="font-semibold tabular-nums">{formatSupplierCents(selectedEvidence.replacement_cost_cents)}</p></div>
+              <div><p className="text-xs text-secondary">Replacement cost</p><p className="font-semibold tabular-nums">{unitCentsText(selectedEvidence.replacement_cost_cents)}</p></div>
               <div><p className="text-xs text-secondary">Latest comparable date</p><p className="font-semibold">{selectedEvidence.replacement_cost_as_of || '—'}</p></div>
             </div>
             <div className="space-y-2">
@@ -975,7 +1110,7 @@ export default function SupplierPricing() {
                 <div key={supplier.product_supplier_link_id} className="grid gap-2 rounded-lg border border-gray-200 p-3 sm:grid-cols-4">
                   <span className="font-medium">{supplier.vendor_name}</span>
                   <span className="tabular-nums">Package: {formatSupplierCents(supplier.quoted_package_cost_cents)}</span>
-                  <span className="tabular-nums">Normalized: {formatSupplierCents(supplier.normalized_cost_cents)}</span>
+                  <span className="tabular-nums">Normalized: {unitCentsText(supplier.normalized_cost_cents)}</span>
                   <Badge variant={supplier.comparison_status === 'comparable' ? 'success' : 'warning'}>
                     {supplier.comparison_status === 'comparable' ? 'Comparable' : 'Cannot compare'}
                   </Badge>
@@ -1176,7 +1311,7 @@ export default function SupplierPricing() {
         onClose={() => setApproveOpen(false)}
         onConfirm={handleApprove}
         title="Approve supplier observations?"
-        message={`You are adding ${selectedRowIds.size} supplier observations. You are changing ZERO sell prices.`}
+        message={approveOpen ? approveMessage(review, selectedRowIds, workspace, approvedPrices) : ''}
         confirmLabel="Approve observations"
         variant="info"
         loading={busy}

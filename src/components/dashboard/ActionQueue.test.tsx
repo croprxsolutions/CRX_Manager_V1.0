@@ -195,8 +195,26 @@ describe('ActionQueue', () => {
     renderQueue();
     expect(await screen.findByText('Overdue Invoices (12)')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Dismiss for today'));
-    // The only loaded example is dismissed, so the group leaves the queue.
-    await waitFor(() => expect(screen.queryByText(/Overdue Invoices/)).not.toBeInTheDocument());
+    expect(screen.queryByText('INV-001')).not.toBeInTheDocument();
+    expect(screen.getByText('Overdue Invoices (11)')).toBeInTheDocument();
+    expect(screen.getByText('+11 more items')).toBeInTheDocument();
+    expect(screen.queryByText(/All Clear/)).not.toBeInTheDocument();
+  });
+
+  it('collapses an initially expanded category on the first click', async () => {
+    mockRpc.mockResolvedValue({
+      data: { overdue_deliveries: [{ id: 'd-1', primary_text: 'DEL-001' }] },
+      error: null,
+    });
+    renderQueue();
+    const header = await screen.findByRole('button', { name: 'Overdue Deliveries (1)' });
+    expect(screen.getByText('DEL-001')).toBeInTheDocument();
+    fireEvent.click(header);
+    expect(header).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('DEL-001')).not.toBeInTheDocument();
+    fireEvent.click(header);
+    expect(header).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('DEL-001')).toBeInTheDocument();
   });
 
   it('without a server count, a full group of 10 is shown as 10+, never as a complete 10', async () => {

@@ -1,4 +1,4 @@
-import type { Cell, CellValue, Worksheet } from 'exceljs';
+import type { Cell, CellValue, Workbook, Worksheet } from 'exceljs';
 import type {
   PricingPreviewResult,
   PricingWorkbookExport,
@@ -105,6 +105,16 @@ const MARGIN_HEADERS = new Set<PricingWorkbookHeader>([
   'tier2_margin_percent',
   'tier3_margin_percent',
 ]);
+
+// Locked current margins are shown as numbers to 2 decimals. The parser reads the full number back,
+// so a cell is written as a number only when that reads back to the server's exact text.
+const LOCKED_MARGIN_HEADERS = [
+  'current_tier1_margin_percent',
+  'current_tier2_margin_percent',
+  'current_tier3_margin_percent',
+] as const satisfies readonly PricingWorkbookHeader[];
+
+export const DOLLAR_HEADER_NOTE = 'Dollars per inventory unit (see the inventory_unit column)';
 
 const COLUMN_WIDTHS: Record<PricingWorkbookHeader, number> = {
   product_id: 38,
@@ -301,13 +311,13 @@ export async function validatePricingWorkbookArchive(arrayBuffer: ArrayBuffer): 
     );
   }
   if (arrayBuffer.byteLength < ZIP_END_OF_CENTRAL_DIRECTORY_BYTES) {
-    throw new PricingWorkbookFormatError('The uploaded file is not a readable .xlsx workbook.');
+    throw new PricingWorkbookFormatError('This file could not be read as an Excel workbook. Open it in Excel, save it as .xlsx, and upload it again.');
   }
 
   const view = new DataView(arrayBuffer);
   const endOffset = findZipEndOfCentralDirectory(view);
   if (endOffset < 0) {
-    throw new PricingWorkbookFormatError('The uploaded file is not a readable .xlsx workbook.');
+    throw new PricingWorkbookFormatError('This file could not be read as an Excel workbook. Open it in Excel, save it as .xlsx, and upload it again.');
   }
 
   const commentLength = view.getUint16(endOffset + 20, true);
@@ -425,6 +435,36 @@ export async function loadExcelJs(): Promise<typeof import('exceljs')> {
   return (imported.default ?? imported) as typeof import('exceljs');
 }
 
+function exportCents(text: string | null): bigint | null {
+  const match = /^(\d+)\.(\d{2})$/.exec(text ?? '');
+  return match ? BigInt(match[1]) * 100n + BigInt(match[2]) : null;
+}
+
+/**
+ * Audit 2026-11-24 #4, Mason Q4 (2026-11-25): a cost-only edit on the sheet keeps the margins, so the
+ * prices move with cost. Fill margin_driven only when the database would re-derive today's exact prices
+ * from today's margins (round(cost / (1 - margin), 2), as _calculate_product_pricing does), so an
+ * untouched row still previews as unchanged. Anything else stays blank, as before, for the admin to choose.
+ * The export sends '' for a missing value.
+ */
+export function exportedPricingMode(row: PricingWorkbookExportRow): 'margin_driven' | '' {
+  const cost = exportCents(row.current_cost);
+  if (cost === null || cost <= 0n) return '';
+  for (const tier of [1, 2, 3] as const) {
+    const price = exportCents(row[`current_tier${tier}_price`]);
+    const match = /^(\d+)(?:\.(\d{1,8}))?$/.exec(row[`current_tier${tier}_margin_percent`] ?? '');
+    if (price === null || !match) return '';
+    const scale = 10n ** BigInt((match[2] ?? '').length);
+    const marginScaled = BigInt(match[1] + (match[2] ?? ''));
+    const denominator = 100n * scale - marginScaled;
+    if (denominator <= 0n) return '';
+    const numerator = cost * 100n * scale;
+    // Round half up, matching PostgreSQL round() for a positive value.
+    if ((2n * numerator + denominator) / (2n * denominator) !== price) return '';
+  }
+  return 'margin_driven';
+}
+
 function workbookRow(exportRow: PricingWorkbookExportRow): Record<PricingWorkbookHeader, string | number> {
   return {
     product_id: exportRow.product_id,
@@ -444,7 +484,7 @@ function workbookRow(exportRow: PricingWorkbookExportRow): Record<PricingWorkboo
     current_tier2_price: exportRow.current_tier2_price ?? '',
     current_tier3_margin_percent: exportRow.current_tier3_margin_percent ?? '',
     current_tier3_price: exportRow.current_tier3_price ?? '',
-    pricing_mode: '',
+    pricing_mode: exportedPricingMode(exportRow),
     new_cost: exportRow.current_cost ?? '',
     tier1_margin_percent: exportRow.current_tier1_margin_percent ?? '',
     tier1_price: exportRow.current_tier1_price ?? '',
@@ -524,7 +564,7 @@ function stylePricingWorksheet(worksheet: Worksheet, rowCount: number): void {
       formulae: ['"margin_driven,price_driven"'],
       showInputMessage: true,
       promptTitle: 'Pricing mode',
-      prompt: 'Leave blank for no change, or choose margin_driven or price_driven.',
+      prompt: 'margin_driven: a cost change moves prices and keeps margins. price_driven: prices stay. Blank: no change.',
       showErrorMessage: true,
       errorTitle: 'Invalid pricing mode',
       error: 'Choose margin_driven, price_driven, or leave the cell blank.',
@@ -549,6 +589,21 @@ export async function generateProductPricingWorkbook(
     worksheet.addRow(PRICING_WORKBOOK_HEADERS.map((header) => row[header]));
   }
   stylePricingWorksheet(worksheet, pricingExport.rows.length);
+  for (const header of DOLLAR_HEADERS) {
+    worksheet.getCell(1, PRICING_WORKBOOK_HEADERS.indexOf(header) + 1).note = DOLLAR_HEADER_NOTE;
+  }
+  for (const header of LOCKED_MARGIN_HEADERS) {
+    const column = PRICING_WORKBOOK_HEADERS.indexOf(header) + 1;
+    for (let row = 2; row <= pricingExport.rows.length + 1; row += 1) {
+      const cell = worksheet.getCell(row, column);
+      const text = cell.value;
+      if (typeof text !== 'string' || text === '') continue;
+      const number = Number(text);
+      if (!Number.isFinite(number) || numberToPlainDecimal(number, header) !== text) continue;
+      cell.value = number;
+      cell.numFmt = '0.00';
+    }
+  }
   const useTimingColumn = PRICING_WORKBOOK_HEADERS.indexOf('use_timing') + 1;
   for (let row = 2; row <= pricingExport.rows.length + 1; row += 1) {
     const cell = worksheet.getCell(row, useTimingColumn);
@@ -678,10 +733,10 @@ function readManifest(manifest: Worksheet): Record<(typeof MANIFEST_KEYS)[number
   return Object.fromEntries(entries) as Record<(typeof MANIFEST_KEYS)[number], string>;
 }
 
-function validateHeaders(worksheet: Worksheet): void {
+function validateHeaders(worksheet: Worksheet, ignoredTrailingColumns: number): void {
   const headerRow = worksheet.getRow(1);
   const headers = Array.from(
-    { length: headerRow.cellCount },
+    { length: Math.max(headerRow.cellCount - ignoredTrailingColumns, 0) },
     (_, index) => {
       const cell = headerRow.getCell(index + 1);
       if (isFormulaValue(cell.value)) {
@@ -721,19 +776,48 @@ function parsePricingRow(worksheet: Worksheet, rowNumber: number): PricingWorksh
   };
 }
 
-export async function parseProductPricingWorkbook(
-  arrayBuffer: ArrayBuffer,
-): Promise<ParsedPricingWorkbook> {
+/** Archive safety checks, then one ExcelJS load. */
+export async function loadPricingWorkbook(arrayBuffer: ArrayBuffer): Promise<Workbook> {
   await validatePricingWorkbookArchive(arrayBuffer);
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   try {
     await workbook.xlsx.load(arrayBuffer);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new PricingWorkbookFormatError(`The uploaded file is not a readable .xlsx workbook: ${message}`);
+  } catch {
+    throw new PricingWorkbookFormatError(
+      'This file could not be read as an Excel price sheet. Open it in Excel, save it as .xlsx, and upload it again.',
+    );
   }
+  return workbook;
+}
 
+/** Rows holding any value outside the ignored columns, as actualRowCount would count them were those columns removed. */
+function rowsWithValues(worksheet: Worksheet, ignoredFrom: number, ignoredTo: number): number {
+  let count = 0;
+  worksheet.eachRow((row) => {
+    let counted = false;
+    row.eachCell((_, column) => {
+      if (column < ignoredFrom || column > ignoredTo) counted = true;
+    });
+    if (counted) count += 1;
+  });
+  return count;
+}
+
+export async function parseProductPricingWorkbook(
+  arrayBuffer: ArrayBuffer,
+): Promise<ParsedPricingWorkbook> {
+  return parseLoadedPricingWorkbook(await loadPricingWorkbook(arrayBuffer));
+}
+
+/**
+ * Parse an already loaded price sheet. ignoredTrailingColumns skips that many locked columns right
+ * after the CRX headers (the supplier-evidence summary); the caller must have checked their headers.
+ */
+export function parseLoadedPricingWorkbook(
+  workbook: Workbook,
+  ignoredTrailingColumns = 0,
+): ParsedPricingWorkbook {
   const worksheet = workbook.getWorksheet(PRICING_WORKBOOK_SHEET);
   if (!worksheet) {
     throw new PricingWorkbookFormatError(`Missing required worksheet ${PRICING_WORKBOOK_SHEET}.`);
@@ -743,7 +827,7 @@ export async function parseProductPricingWorkbook(
     throw new PricingWorkbookFormatError('Missing CRX workbook manifest. Export a fresh pricing workbook.');
   }
 
-  validateHeaders(worksheet);
+  validateHeaders(worksheet, ignoredTrailingColumns);
   const manifest = readManifest(manifestWorksheet);
   if (!/^(?:0|[1-9][0-9]*)$/.test(manifest.row_count)) {
     throw new PricingWorkbookFormatError('The workbook manifest row count is invalid.');
@@ -752,8 +836,17 @@ export async function parseProductPricingWorkbook(
   if (rowCount > MAX_PRICING_WORKBOOK_ROWS) {
     throw new PricingWorkbookFormatError(`Pricing workbooks are limited to ${MAX_PRICING_WORKBOOK_ROWS} rows.`);
   }
-  if (worksheet.actualRowCount - 1 !== rowCount) {
-    throw new PricingWorkbookFormatError('The Pricing Update row count does not match the CRX manifest.');
+  const valueRows = ignoredTrailingColumns === 0
+    ? worksheet.actualRowCount
+    : rowsWithValues(
+      worksheet,
+      PRICING_WORKBOOK_HEADERS.length + 1,
+      PRICING_WORKBOOK_HEADERS.length + ignoredTrailingColumns,
+    );
+  if (valueRows - 1 !== rowCount) {
+    throw new PricingWorkbookFormatError(
+      'Rows were added to or deleted from the Pricing Update sheet. Keep every downloaded row (leave a row as it is to skip it), or download a fresh price sheet.',
+    );
   }
   const rows: PricingWorksheetPreviewRow[] = [];
   for (let rowNumber = 2; rowNumber <= rowCount + 1; rowNumber += 1) {
@@ -768,6 +861,45 @@ export async function parseProductPricingWorkbook(
     rowCount,
     rows,
   };
+}
+
+// The server refuses a used, expired or another user's price sheet with one combined code
+// (errorSanitizer keeps the combined wording as the fallback); the sheet's own expiry says which.
+const PRICE_SHEET_REFUSED = /^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/;
+const PRICE_SHEET_EXPIRED_TEXT = 'No prices were changed. This price sheet expired (sheets last 7 days). Download a fresh one';
+const PRICE_SHEET_USED_TEXT = 'No prices were changed. This price sheet was already applied, was downloaded by another user, or came from an older template. Download a fresh one';
+
+/** The refusal for a price sheet already past its expires_at; null while it is current or unreadable. */
+export function priceSheetExpiredText(expiresAt: string, now = Date.now()): string | null {
+  const expiry = Date.parse(expiresAt);
+  return Number.isFinite(expiry) && expiry <= now ? PRICE_SHEET_EXPIRED_TEXT : null;
+}
+
+/** True for the server's combined price sheet refusal, the only error whose single reason is looked up. */
+export function isPriceSheetRefusal(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : (error as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && PRICE_SHEET_REFUSED.test(message);
+}
+
+/** Plain words for the server's combined price sheet refusal; null for any other error. */
+export function priceSheetRefusalText(error: unknown, expiresAt: string, now = Date.now()): string | null {
+  if (!isPriceSheetRefusal(error) || !Number.isFinite(Date.parse(expiresAt))) return null;
+  return priceSheetExpiredText(expiresAt, now) ?? PRICE_SHEET_USED_TEXT;
+}
+
+// get_pricing_workbook_export_refusal_reason's codes. ALREADY_APPLIED means a change set from this sheet was
+// applied, not that these exact edits went live; an old sheet that also expired reports OLD_TEMPLATE.
+const PRICE_SHEET_REASON_TEXT = new Map<string, string>([
+  ['EXPORT_NOT_FOUND', 'No prices were changed. CRX Manager has no record of this price sheet. Download a fresh one'],
+  ['DOWNLOADED_BY_OTHER_USER', 'No prices were changed. Another user downloaded this price sheet, and only the person who downloads a sheet can upload it. Download a fresh one yourself'],
+  ['ALREADY_APPLIED', "No prices were changed. This price sheet was already used; each product's Sell Price History, Cost History or Change History shows what it changed. To make more changes, download a fresh one"],
+  ['OLD_TEMPLATE', 'No prices were changed. This price sheet came from an older template. Download a fresh one'],
+  ['EXPIRED', PRICE_SHEET_EXPIRED_TEXT],
+]);
+
+/** One sentence for the database's refusal reason; null for NONE or an unknown code, which keep today's message. */
+export function priceSheetReasonText(reason: string): string | null {
+  return PRICE_SHEET_REASON_TEXT.get(reason) ?? null;
 }
 
 /**

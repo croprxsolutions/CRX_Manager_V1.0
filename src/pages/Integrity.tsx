@@ -4,14 +4,6 @@ import IntegrityCleanupPanel from '../components/integrity/IntegrityCleanupPanel
 import Tabs, { type TabItem } from '../components/ui/Tabs';
 import PageHeader from '../components/ui/PageHeader';
 
-type IntegrityTab = 'report' | 'cleanup';
-
-const TAB_ALIASES: Record<string, IntegrityTab> = {
-  report: 'report',
-  checks: 'report',
-  cleanup: 'cleanup',
-};
-
 /**
  * Single admin surface for read-only reconciliation and action-driven cleanup.
  * Each original page body stays independently mounted as a tab panel so its
@@ -19,7 +11,7 @@ const TAB_ALIASES: Record<string, IntegrityTab> = {
  */
 export default function Integrity() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = TAB_ALIASES[searchParams.get('tab') ?? 'report'] ?? 'report';
+  const activeTab = searchParams.get('tab') === 'cleanup' ? 'cleanup' : 'report';
 
   const tabs: TabItem[] = [
     { key: 'report', label: 'Report', content: <IntegrityReportPanel /> },

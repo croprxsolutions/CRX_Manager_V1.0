@@ -81,39 +81,10 @@ async function logNotificationFailure(
 }
 
 /**
- * Notify a driver when they're assigned to a delivery.
- * Call this from NewDelivery page after creating a delivery.
- */
-export async function notifyDriverAssigned(
-  driverId: string,
-  deliveryNumber: string,
-  customerName: string,
-  scheduledDate: string,
-  deliveryId: string
-) {
-  try {
-    await createNotification(
-      driverId,
-      'New Delivery Assigned',
-      `You've been assigned delivery ${deliveryNumber} for ${customerName} on ${parseLocalDate(scheduledDate).toLocaleDateString()}`,
-      'delivery_assigned',
-      'delivery',
-      deliveryId
-    );
-  } catch (err) {
-    await logNotificationFailure('delivery_assigned', err, 'delivery', deliveryId, {
-      context: 'notifyDriverAssigned',
-      driverId,
-      deliveryNumber,
-    });
-  }
-}
-
-/**
  * Notify an applicator when a job is dispatched/assigned to them — either the
  * whole-job legacy assign (JobDetail assigning jobs.applicator_id) or a
- * per-location dispatch (DispatchWizard / DispatchBoard reassign). Mirrors
- * notifyDriverAssigned's shape exactly. U12 (2026-07-06): applicators had NO
+ * per-location dispatch (DispatchWizard / DispatchBoard reassign).
+ * U12 (2026-07-06): applicators had NO
  * notification at all before this — verified by grepping JobDetail.tsx/
  * DispatchWizard.tsx/DispatchBoard.tsx for any notify-style/createNotification
  * call around the assign/dispatch RPCs; none existed.
@@ -393,38 +364,6 @@ export async function notifyDeliveryRemainder(
       context: 'notifyDeliveryRemainder',
       deliveryNumber,
       orderNumber,
-    });
-  }
-}
-
-/**
- * Notify admins when PO items are received beyond the ordered quantity.
- * Call this from PurchaseOrderDetail after receive_po_items() completes
- * with over-received items.
- */
-export async function notifyOverReceive(
-  poNumber: string,
-  overItems: Array<{ productName: string; quantityOrdered: number; quantityReceived: number }>,
-  poId: string
-) {
-  if (!overItems || overItems.length === 0) return;
-
-  try {
-    const summary = overItems
-      .map((i) => `${i.productName} (received ${i.quantityReceived}, ordered ${i.quantityOrdered})`)
-      .join(', ');
-
-    await notifyAdmins(
-      'Over-Receive Alert',
-      `PO ${poNumber} has items received beyond ordered quantity: ${summary}`,
-      'over_receive',
-      'purchase_order',
-      poId
-    );
-  } catch (err) {
-    await logNotificationFailure('over_receive', err, 'purchase_order', poId, {
-      context: 'notifyOverReceive',
-      poNumber,
     });
   }
 }

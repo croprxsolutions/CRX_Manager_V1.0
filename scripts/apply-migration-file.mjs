@@ -435,7 +435,7 @@ if (verdict?.decision !== "allow") {
 console.log("APPLY GATE PASSED — ordering, autopilot state, destructive-content, reviewer proof and Codex gate all satisfied.");
 const ownerApproval = verdict.ownerApproval || null;
 if (ownerApproval) {
-  console.log(`OWNER APPROVAL: an approval recorded from Mason's reply in this session covers this exact file, pull request and head (valid until ${ownerApproval.expiresAt}; one use).`);
+  console.log(`OWNER APPROVAL: an approval recorded from Mason's reply covers this exact file and pull request (valid until ${ownerApproval.expiresAt}; one use).`);
 }
 // Mason's per-PR "skip coderabbit" waiver stood in for the review: say so,
 // never "clean" (Codex App P2 on #1035).

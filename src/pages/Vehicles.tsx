@@ -14,8 +14,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, checkMutationResult } from '../lib/db';
 import { Sentry } from '../lib/sentry';
 import { exportToCSV } from '../lib/csvExport';
+import { applyTableSearchSort } from '../lib/tableSearchSort';
 import { downloadReportPdf } from '../lib/reportPdf';
 import type { Vehicle, VehicleType, VehicleStatus } from '../types';
+
+const VEHICLE_SEARCH_KEYS = ['vehicle_name', 'category', 'registration'];
 
 const statusVariant: Record<VehicleStatus, BadgeVariant> = {
   active: 'success',
@@ -32,19 +35,20 @@ export default function Vehicles() {
   const [loadError, setLoadError] = useState(false);
   // Only the newest read may change the list or its error state: a slow older read must not overwrite a newer one.
   const loadSeqRef = useRef(0);
+  const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<VehicleType | ''>('');
   const [statusFilter, setStatusFilter] = useState<VehicleStatus | ''>('');
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const canBulkAction = role === 'admin' || role === 'sales_rep';
+  const canBulkAction = role === 'admin';
 
   const fetchVehicles = useCallback(async () => {
     const seq = ++loadSeqRef.current;
     setLoading(true);
     const { data, error } = await supabase
-      .from('vehicles')
+      .from('admin_vehicle_register')
       .select('*')
       .order('vehicle_name');
     if (seq !== loadSeqRef.current) return;
@@ -71,8 +75,11 @@ export default function Vehicles() {
     return true;
   });
 
+  const visibleRows = applyTableSearchSort(filtered, VEHICLE_SEARCH_KEYS, search.trim(), null, 'asc');
+  const hasFilters = Boolean(search.trim() || typeFilter || statusFilter);
+
   const { selected, toggleSelect, toggleAll, clearSelection, selectedCount, selectedRows, allSelected } =
-    useRowSelection({ data: filtered, getId: (v) => v.id });
+    useRowSelection({ data: visibleRows, getId: (v) => v.id });
 
   const checkboxCol = useMemo(
     () => createCheckboxColumn<Vehicle>(selected, toggleSelect, (v) => v.id),
@@ -119,7 +126,7 @@ export default function Vehicles() {
     setDeleting(true);
     try {
       const ids = selectedRows.map((v) => v.id);
-      const result = await supabase.from('vehicles').delete().in('id', ids).select();
+      const result = await supabase.from('vehicles').delete().in('id', ids).select('id');
       checkMutationResult(result, 'Delete vehicles');
       toast('success', `Deleted ${ids.length} vehicle(s)`);
       clearSelection();
@@ -199,7 +206,7 @@ export default function Vehicles() {
         <div className="flex-1 flex items-center gap-3">
           <SplitHeading title="Vehicles" accent="& Equipment" />
           {/* Bulk actions act on the selection, so they wait while the rows are hidden by a failed load. */}
-          {canBulkAction && !loadError && (
+          {canBulkAction && !loading && !loadError && (
             <BulkActionBar selectedCount={selectedCount} actions={bulkActions} onDeselectAll={clearSelection} />
           )}
         </div>
@@ -212,7 +219,7 @@ export default function Vehicles() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value as VehicleType | '')}
@@ -234,7 +241,7 @@ export default function Vehicles() {
           <option value="inactive">Inactive</option>
           <option value="maintenance">Maintenance</option>
         </select>
-        {canBulkAction && !loadError && filtered.length > 0 && (
+        {canBulkAction && !loading && !loadError && visibleRows.length > 0 && (
           <button
             onClick={toggleAll}
             className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors"
@@ -247,13 +254,14 @@ export default function Vehicles() {
       <Card padding={false}>
         <div className="p-5">
           <DataTable<Vehicle>
-            data={filtered}
+            data={visibleRows}
             columns={columns}
             searchable
             searchPlaceholder="Search vehicles..."
-            searchKeys={['vehicle_name', 'category', 'registration']}
-            emptyTitle="No vehicles"
-            emptyDescription="Add your first vehicle to get started."
+            searchValue={search}
+            onSearchChange={setSearch}
+            emptyTitle={hasFilters ? 'No matching vehicles' : 'No vehicles'}
+            emptyDescription={hasFilters ? 'Try another search or change the filters.' : 'Add your first vehicle to get started.'}
             loading={loading}
             loadError={loadError}
             onRetry={() => void fetchVehicles()}

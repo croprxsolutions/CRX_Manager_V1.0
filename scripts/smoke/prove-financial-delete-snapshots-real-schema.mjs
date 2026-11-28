@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -41,6 +41,11 @@ const LEDGER_ONLY = new Set([
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
 const TOUCHED = /financial_audit_log_operation_type_check|_snapshot_financial_hard_delete|_fill_audit_actor\(|guard_audit_log_immutable\(/i;
+// M9 re-adds financial_audit_log_operation_type_check as a superset (every existing type kept, plus
+// 'prepay_refunded_outside' and 'payment_returned'), so every audit row this proof writes is still accepted.
+// Pinned to the reviewed bytes: an edited M9 trips this proof's guard again.
+const LATER_READ_ONLY = new Map([['20270301180000_m9_refunds_and_returned_checks.sql', 'b26ac174f8da26b2873c2bbf89ac1ddf869968c20022a4d0f6233185f4bfae75']]);
+const laterReadOnly = (file) => LATER_READ_ONLY.get(path.basename(file)) === createHash('sha256').update(readFileSync(file)).digest('hex');
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -145,7 +150,7 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  for (const file of all.slice(at + 1)) {
+  for (const file of all.slice(at + 1).filter((f) => !laterReadOnly(f))) {
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);

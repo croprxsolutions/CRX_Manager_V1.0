@@ -86,7 +86,7 @@ describe('fetchBatchCandidates reads', () => {
     const registry: Record<string, string[]> = JSON.parse(readFileSync(join(__dirname, '..', '..', '.claude', 'schema-registry.json'), 'utf8')).columns;
     const source = readFileSync(join(__dirname, 'epaBatchFill.ts'), 'utf8');
     const reads = [...source.matchAll(/readAll<[^>]*>\(\s*'(\w+)',\s*'([^']+)',\s*'(\w+)'/g)];
-    expect(reads).toHaveLength(10);
+    expect(reads).toHaveLength(12);
     for (const [, table, columns, order] of reads) {
       const cols = columns.split(',').map((c) => c.trim());
       for (const col of cols) expect(registry[table], `${table}.${col}`).toContain(col);

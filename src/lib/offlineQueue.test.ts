@@ -18,6 +18,7 @@ import {
   getFailedActions,
   getActionOwnerUserId,
   getQueueSummary,
+  getQueuedJobCompletionIds,
   getOfflineStorageErrorMessage,
   OFFLINE_DB_UPGRADE_BLOCKED_MESSAGE,
   OFFLINE_MAX_RETRIES,
@@ -435,5 +436,64 @@ describe('getFailedActions', () => {
     await updateAction({ ...actions[0], retryCount: 5, lastError: 'Server 500' });
     const failed = await getFailedActions(3);
     expect(failed[0].lastError).toBe('Server 500');
+  });
+});
+
+// ── getQueuedJobCompletionIds ──────────────────────────────────────────────
+
+describe('getQueuedJobCompletionIds', () => {
+  const completeJob = (jobId: string, overrides: Partial<Omit<PendingAction, 'id'>> = {}) => makeAction({
+    operation: 'complete_job',
+    params: { p_job_id: jobId, p_performed_by: 'user-1', p_idempotency_key: `complete_job:user-1:${jobId}` },
+    entityTable: 'jobs',
+    entityId: jobId,
+    ...overrides,
+  });
+
+  it("lists this user's job completions still waiting to send", async () => {
+    await queueAction(completeJob('job-1'));
+    await queueAction(completeJob('job-2', { status: 'retry_wait', retryCount: 1 }));
+    await queueAction(makeAction()); // a delivery completion is not a job
+
+    expect([...await getQueuedJobCompletionIds('user-1')].sort()).toEqual(['job-1', 'job-2']);
+  });
+
+  it('leaves out completions that need attention, were resolved, or belong to another user', async () => {
+    await queueAction(completeJob('job-attention', { status: 'needs_attention' }));
+    await queueAction(completeJob('job-out-of-retries', { retryCount: OFFLINE_MAX_RETRIES }));
+    await queueAction(completeJob('job-resolved', { status: 'office_resolved' }));
+    await queueAction(completeJob('job-other', {
+      ownerUserId: 'user-2',
+      params: { p_job_id: 'job-other', p_performed_by: 'user-2', p_idempotency_key: 'complete_job:user-2:job-other' },
+    }));
+
+    expect([...await getQueuedJobCompletionIds('user-1')]).toEqual([]);
+    expect([...await getQueuedJobCompletionIds(null)]).toEqual([]);
+  });
+
+  it('counts an older saved completion that carries the job only in params', async () => {
+    await getPendingActions(); // create the current store
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open('crx_offline_queue');
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    const { entityId: _omit, ...legacyRow } = completeJob('job-legacy');
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('pending_actions', 'readwrite');
+      tx.objectStore('pending_actions').add(legacyRow);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+
+    expect(await getQueuedJobCompletionIds('user-1')).toEqual(new Set(['job-legacy']));
+  });
+
+  it('drops a completion once it is removed from the queue (sent or discarded)', async () => {
+    const id = await queueAction(completeJob('job-1'));
+    expect(await getQueuedJobCompletionIds('user-1')).toEqual(new Set(['job-1']));
+    await removeAction(id);
+    expect(await getQueuedJobCompletionIds('user-1')).toEqual(new Set());
   });
 });

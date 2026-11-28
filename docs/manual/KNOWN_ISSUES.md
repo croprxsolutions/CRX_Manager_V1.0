@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-23 for the live ledger only (latest live row `20261121061349`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates. Triage 2026-11-22: see changelog.d.
+**Last verified:** 2026-11-25 for the live ledger only (latest live row `20261124070916`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates. Triage 2026-11-22: see changelog.d.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -74,7 +74,7 @@ Each item's full entry is in its area section below. "Severity unsure" marks a r
 | Guards and release | SOL-12 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A release-pass command naming an invalid PR number counts as approval for the open release. | None (closed) |
 | Guards and release | KI-48 | HIGH (severity unsure) | Open | Some protections around applying live database changes have known gaps; the live migration ledger is the backstop. | Mason decision |
 | Reports | SOL-7 | HIGH | Fixed on staging (#2201, merged 2026-11-22), not live | A broken or absurd order total would distort the commission in profit reports. | Agent (release) |
-| Reports | KI-129 (+#2195) | HIGH | Payments part fixed on staging (#2242, merged 2026-11-22), not live | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. Fix: migration `20270224120000` (with the #2175 close re-check). | Lane B agent |
+| Reports | KI-129 (+#2195) | HIGH | Fixed on staging (count #2149, payments #2242; re-proved 2026-11-26), not live | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. Fix: migration `20270224120000` (with the #2175 close re-check). | Lane B agent |
 | Reports | KI-125 | HIGH | Fixed on staging, not live | Profit reports showed a fake large loss because commission was counted on sales billed elsewhere. | Taha (release) |
 | Field applications | #2196 | HIGH | Fixed on staging (#2222, merged 2026-11-22), not live | A sales rep may still be able to delete a completed, billable job outside the screens, so it drops out of Unbilled Jobs. | Mason (field-app billing) |
 | Field applications | KI-185 | HIGH | Open | A job sprayed on 80 acres but planned at 100 bills for 100, and deducts stock for 100. | Mason (field-app billing) |
@@ -262,9 +262,10 @@ A receipt asked for at completion is recorded in the same save in `delivery_rece
 PR #1495) and emailed with retries by the Edge Function `send-delivery-receipts` (PR #1647, live 2026-11-08); the app
 switch to the server receipt merged 2026-11-09 (PR #1649). The close action `close_delivery_receipt`
 (`20261221100000`, ledger `20261109152447`, PR #1678) now has its screens (2026-11-22): each row on "Customer receipts
-to check" (Deliveries) has **Mark handled**, so a handled receipt leaves the list and the server never emails it, and
+to check" (Deliveries) has **Mark handled** (admin-only since `20270301220000`, Mason 2026-11-23; sales reps see the
+list without it), so a handled receipt leaves the list and the server never emails it, and
 Email Confirmation pauses any receipt still queued before its hand send, then marks it handled once the email goes
-out (a failed hand send leaves it on the list). Still open: provider bounce handling (no email bounces are tracked
+out when an admin sent it (a rep's hand send stays listed for an admin; a failed hand send leaves it on the list). Still open: provider bounce handling (no email bounces are tracked
 on any path). The three rare duplicates Mason accepted on 2026-11-09 (DECISION_LOG) stay accepted.
 
 ### KI-26 — Delivery completion-evidence leftovers
@@ -402,6 +403,7 @@ this number is fixed and live (archive, 2026-11-05).
 ### KI-114 — Four kinds of old product rate data are wrong or have no rate basis
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-08 · #1958. Mason answered the label question 2026-11-21 (18 grams per acre); the remaining work is the data fix.
+> **2026-11-22 — Piksi grams fix in review:** Mason: Piksi is grams everywhere, price unchanged. Migration `20270303180000_piksi_mg_to_grams` (not live yet) relabels every Piksi MG row to `g` with no number changed ([contract](../plans/2026-11-22-ki114-piksi-grams-CONTRACT.md)). The Piksi bullet below closes when it is live; the seed-treatment, liquid-unit and per-ton bullets stay open.
 
 **MED · OPEN, planned (RT-2/RT-3) · products/rates · found 2026-11-08 ([RT-1 build sheet](../plans/2026-11-08-product-RT1-BUILD-SHEET.md) section 1)**
 RT-1's draft rates (`20261229110000`, live 2026-11-10) copy these as they are; nothing here is fixed yet. RT-2 step 1
@@ -446,6 +448,8 @@ recomputing margins from prices; consider failing closed instead of defaulting t
 Re-checked 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md)): 587 of 588 margins
 consistent, 1 outlier. Related catalog gaps found the same day, all for Mason (To-Do decision 27): 3 products have
 Tier 2 above Tier 3; 3 active products have no cost, 4 have no Tier 1 price, and 12 have no container size.
+Answered 2026-11-23 (Mason: "Intended, leave them"): those catalog gaps are intended and need no fix. The stale
+margins above are not part of that answer.
 
 ### KI-160 — Two stock counts open on the same product apply the same correction twice
 
@@ -805,7 +809,7 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   for the same product (LOW).
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
   defaults (MED). Decided for field splits (Mason, 2026-11-08): only payers saved on the field's split, or on
-  the job's own split; built in foundation 18.1 (`docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`). Any rep can read another rep's
+  the job's own split; built in foundation 18.1 (`docs/plans/field-application/CONTRACT-who-pays.md`). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).
 - Invoice lines could be written with no unit (from an order line or delivery line with no unit), so they could never
   get a return credit (MED): FIXED by `20270106100000` (applied live 2026-11-11, PR #1731). A new order line with no unit takes the product's
@@ -861,6 +865,15 @@ click, correct focus and Escape, exactly one approval, Approved after reload.
 ---
 
 ## Payments and receivables
+
+### KI-207 — Payment History's day and month totals leave out checks entered on Prepay Credits
+
+**MED · FIXED ON BRANCH (PR #2438) · money/reporting · found 2026-11-25 (Sol review of PR #2438)**
+Payment History read Record Payments only (`allocation_sets`), so a check entered through Prepay Credits > New
+Check (`prepay_credits`) was missing from its Today / date-range total while Month-End Close counted it. Fixed:
+the totals, count and CSV export now include those checks, grouped one per check the way Month-End Close's
+`_month_payments_received` groups them; a line under the cards says how many (each is in the CSV export).
+Mason asked to fix it rather than log it (2026-11-25).
 
 ### KI-120 — Any rep can change a customer's payment terms and finance-charge settings
 
@@ -1003,6 +1016,8 @@ invoice records: plan it with Taha (billing until 2026-12-15). Commission rows t
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** On staging, not live · MED · Agent (unassigned) · plan R-11 · #2149.
 
+> **Re-checked 2026-11-26 on staging `e48d4a2d3`:** fixed on staging, not live. On a test database built from the staging migrations, 100 acres of fee at $200 total cost plus $30 of chemical cost show $230 cost of goods on both Month-End and the P&L (the old formula gave $20,030). [2026-11-26 proof](../audits/2026-11-26-report-bugs-ki126-129-130-proof.md).
+
 **MED (latent) · OPEN (fixed on staging with KI-125 (#2149; both reports use the fee-cost case, `20270206110000` get_monthly_summary ~L207 and the P&L cost function ~L249; awaiting the production release) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2)**
 Fee lines store cost already extended by acres, with quantity = acres; both reports compute `cost_cents x quantity`.
 100 acres at $2/acre cost would show $20,000 COGS instead of $200. Latent: every live application service costs $0
@@ -1012,9 +1027,11 @@ today. Fix: use the `is_application_fee` case `save_invoice` already uses, plus 
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · HIGH · Agent (unassigned) · plan W1-01 · #2149 (count part), #2195 (payments part). Invoice count fixed on staging (#2149). Payments received still totals the old payments table, counts deleted payments and misses allocation-set receipts (#2195, Sol on #2189), so a month paid through allocations can show $0 received.
 
+> **Re-checked 2026-11-26 on staging `e48d4a2d3`:** fixed on staging (count #2149, payments #2242), not live. Test month: payments received $2,090 on Month-End and the close receipt, matching the hand count (old formula $50 / $127 with a deleted payment); 4 invoices counted, including one paid and one overdue (old count 2). [2026-11-26 proof](../audits/2026-11-26-report-bugs-ki126-129-130-proof.md).
+
 > **2026-11-22:** payments part fixed on staging by #2242 (merged 2026-11-23 UTC, `20270224120000_month_close_payments_received_recheck.sql`, with #2175; awaiting the production release): Record Payment checks + prepayment checks (month entered, current amount) + live legacy payments; the close re-checks the reviewed figures.
 
-**MED · PARTIAL (the close receipt's invoice count is fixed on staging with KI-125 (#2149), awaiting the production release; payments received is OPEN, a follow-up: it needs a rule for prepayment checks, which can be edited or deleted later, and a re-check at close that the figures still match what the admin reviewed) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6)**
+**MED · FIXED ON STAGING (invoice count #2149, payments received #2242; awaiting the production release) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6)**
 Both read the legacy `payments` table (0 rows; payments now live in `allocation_sets`), so the one July 2026 customer
 payment shows as $0. The close summary also counts only invoices still `posted`, missing ones since paid or overdue.
 Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`. Fix: sum active payment
@@ -1023,6 +1040,8 @@ Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`
 ### KI-130 — Monthly Summary's "AR balance" is always today's AR
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** On staging, not live · LOW · Agent (unassigned) · plan R-14 · #2149.
+
+> **Re-checked 2026-11-26 on staging `e48d4a2d3`:** fixed on staging by the label (screen says "Current AR (today)"), not live. The figure is still today's open receivables, by design: a true month-end balance cannot be rebuilt for a customer who has paid since (`get_ar_aging` as of a past date leaves those customers out), so reusing it would quietly under-report. AR as of a past date stays on the AR Aging tab. Showing month-end AR here would be a new feature and needs Mason's go-ahead. [2026-11-26 proof](../audits/2026-11-26-report-bugs-ki126-129-130-proof.md).
 
 **LOW · OPEN (fixed on staging with KI-125: #2149, screen label only, "Current AR (today)"; awaiting the production release) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #7)**
 `get_monthly_summary.ar_balance_cents` has no date filter, so a past month shows today's receivables. The AR Aging tab
@@ -1040,7 +1059,7 @@ order's invoices or payments. Also unsettled: how partial deliveries, partial pa
 credits move a commission (returns are KI-13). Decided 2026-11-13 (DECISION_LOG): commission counts in profit when its sale
 is invoiced (by share billed, KI-125) and becomes payable only when the customer pays, a partial payment releasing the
 same share. Fix later: enforce the payable rule, per sale and per paid share, in the payout function.
-- **Commission basis ignores the standing discount (re-verified 2026-11-21, [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)).** Order commission is figured from `orders.total_profit` before the standing grower discount (`20270117130000_standing_discount_in_order_profit.sql` ~L21 says "commission after the discount is its own planned change"), while the invoice and profit reports subtract the discount. Not tracked elsewhere; latent on production while the billing switch is off. Separate from the payout gap above (payout checks pending status ~L1154-1183 and header-to-items balance ~L744-761 in `20261204100000`, but no customer-payment eligibility). To-Do 8.5 needs two distinct acceptance checks: commission is figured on profit after the standing discount, and it is released in proportion to customer payments.
+- **Commission basis ignores the standing discount: fix pending (`20270308140000_commission_settles_on_posting`, staging candidate, 2026-11-25: when a chemical-sale invoice is posted, voided or unposted, commission settles on the profit after its standing discount and never tax; drafts never move it; paid or batched rows keep their amount; new column `commissions.discount_settled_at`).** Re-verified 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)): order commission is figured from `orders.total_profit` before the standing grower discount (`20270117130000_standing_discount_in_order_profit.sql` ~L21 says "commission after the discount is its own planned change"), while the invoice and profit reports subtract the discount. Not tracked elsewhere; latent on production while the billing switch is off. Separate from the payout gap above (payout checks pending status ~L1154-1183 and header-to-items balance ~L744-761 in `20261204100000`, but no customer-payment eligibility). To-Do 8.5 needs two distinct acceptance checks: commission is figured on profit after the standing discount, and it is released in proportion to customer payments.
 
 ### Also open in this area (tracked as GitHub issues or parked fixes; plain-English detail in [the plan](MASTER_FIX_PLAN.md))
 
@@ -1534,7 +1553,10 @@ improvement candidates" table. To-Do section 17; decisions 34 and 35.
   uninvoiced order.
 - Purchasing: show ordered cost, receipt snapshot, corrected PO cost and current product cost distinctly, and the
   effect of a correction before it is applied.
-- Pricing workbook: point at the invalid row when Apply is disabled; tell an already-applied replay from a bad file.
+- Pricing workbook: point at the invalid row when Apply is disabled. (A refused upload now names its one reason, already used,
+  another user's, expired or not on record, when the reason lookup answers within 5 seconds; otherwise it keeps the
+  general message: `docs/plans/2026-11-24-price-sheet-refusal-reason-CONTRACT.md`. A real
+  v1 sheet still stops at the parser's "format is not supported" before any lookup.)
 - Pricing history: label current tier, last charged and quoted amounts with their scope, date and source.
 - Office exceptions and documents: an end-to-end dashboard-to-fix check by role, and one quote-to-statement trail
   that highlights differences.

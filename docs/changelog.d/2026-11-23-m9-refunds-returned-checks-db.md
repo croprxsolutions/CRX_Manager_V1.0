@@ -1,0 +1,49 @@
+## 2026-11-23 - M9 (database): refunds paid outside CRX, prepay balance check, returned checks
+
+- `record_outside_refund` records a refund paid back to a customer outside CRX (for example a QuickBooks check).
+  - It takes the money off the customer's prepay, oldest credit first or one picked credit, and never below $0.
+  - It is refused in a closed month.
+  - It leaves a refund record (who, when, amount, reference, reason, and how much came from each credit). Today's workaround of editing the credit down left no record.
+- `record_returned_check` records a bounced check, either a Record Payment or a Prepayment Manager check (Mason's decision 18).
+  - The entry is dated in the open month.
+  - The invoices the check paid, directly or through its prepay, are unpaid again, and its prepay comes off.
+  - The closed month stays closed. Its payment and prepay-application rows are kept as they were, but the invoices that check paid (even ones dated in the closed month) owe money again, so their status and balance change on the day the bounce is recorded.
+- `get_prepay_balance_check` compares each customer's prepay (received − applied − refunded − returned) with the stored balance and the credits. It is read-only and fixes nothing.
+- Month-End: a returned check comes off "payments received" in the month it is recorded. Refunds and returned checks are new figures on the summary and the close receipt.
+- Statement: the statement shows "Returned check" and "Refund paid (outside CRX)" rows.
+- Guards: a returned payment, or one whose prepay was refunded, cannot be voided. A credit with a refund or a returned check cannot have its balance edited or be deleted.
+- No screen yet; the UI/UX stage adds the dialog, the badge and the Month-End row. Migration `20270301180000` (local candidate, not applied). Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs`.
+- Sol round 1 fixes (same migration, still a local candidate):
+  - Only a check payment can be returned.
+  - A split Prepayment Manager check comes back as one event at its face value.
+  - Edited or deleted check credits are refused.
+  - Refunds draw only credit received by their date and refuse a drifted credit.
+  - The bank's date is kept, even in a closed month, while the entry stays in the open month.
+  - Reopened invoices go overdue when past due.
+  - The balance check names each mismatched credit.
+  - An invoice a returned check paid gets a clear refusal on void.
+  - Reconciliation (Integrity report) subtracts returned checks.
+- Sol round 2 fixes (same migration, still a local candidate):
+  - A second refund with the same reference needs the admin to confirm it (any amount since round 3).
+  - A refund can draw a payment's prepay from the payment's date, is refused if a drawn credit was edited after the refund date, and checks only the credits it draws.
+  - A return refuses a drifted credit, a payment whose records don't add up to the check, an undated payment, and a Prepayment Manager check whose buckets can't be identified.
+  - The Integrity report stops counting voided payments' allocations.
+- Sol round 3 changes (same migration, still a local candidate):
+  - A refund is now recorded on the day it is entered, with an optional "paid on" date kept for the record (it may be in a closed month).
+  - Before any refund or return, one check confirms the records it touches agree: same customer, complete check, totals, invoice amounts and balances. If they don't, it is refused "needs a hand check" with the reason.
+  - Two Prepayment Manager checks entered together count as two payments on Month-End.
+  - Statements show the check or refund reference only, never the staff reason.
+- Sol round 4 changes (same migration, now `20270301180000`, still a local candidate):
+  - Before any refund or return, the whole customer's prepay must agree: every credit matches its history, the stored balance is the credits' total, and every credit came from this customer's own payment and was used on this customer's invoices. Otherwise it is refused "needs a hand check".
+  - A Prepayment Manager check comes back only as its whole entry; a partial list of its buckets, or buckets that don't add up to the check, is refused.
+  - A returned check never changes a draft, void or deleted invoice.
+  - Only admins can read the refund and returned-check records directly; reps still see the statement rows.
+  - Void Payment refuses anything that is not a payment.
+  - Round 5: a prepay credit with no known source, or one its payment never funded, blocks refunds and returns for that customer until it is checked by hand; a Prepayment Manager entry that mixes two checks is refused.
+  - Round 6: a Prepayment Manager credit with no record of its entry, or one whose entry belongs to another customer, is refused; a returned check is refused if another payment put a negative amount on the same invoice.
+  - Round 8: a refund or returned check is refused unless every Prepayment Manager check of the customer matches its entry (its buckets, reference and total); refunding part of a split check locks the amounts of its other buckets too. Migration now `20270301180000`.
+  - Round 9: a refund locks all of the customer's prepay while it runs, so editing another bucket of the same check waits and is then refused; malformed legacy check records are refused.
+  - Round 10: a past-date A/R report is flagged as not rebuildable when a check applied before that date was later unapplied by an invoice void and then returned.
+  - Round 11: a Prepayment Manager check's amount can no longer be edited (notes and reference still can); deleting a check deletes all of its buckets together, and a check that was applied or refunded cannot be deleted. Migration now `20270301180000`.
+  - Prepayment Manager screen (round 12): a check's balance shows read-only with a note on how to correct a mistyped check; notes and reference edits still save. Deleting a check says the whole check (all its parts) goes, and the confirmation names how many parts were removed. The two new refusals show plain messages.
+  - Round 13: a check received in a closed month cannot be deleted; a delete is refused unless the check's records are whole; the delete confirmation shows the whole check's total and number of parts; a retried delete shows the same result. Accepted by Taha (2026-11-24): four cases that need malformed legacy data, which Mason's live reset cleared. Migration now `20270301180000`.

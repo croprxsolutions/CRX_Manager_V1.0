@@ -2,17 +2,12 @@ import { useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp, Clock, User } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Badge from '../ui/Badge';
-import { parseLocalDate } from '../../lib/dateUtils';
+import { daysSinceBusinessDate } from '../../lib/dateUtils';
 import type { ExtendedTeamNote } from '../../types';
 
 interface Props {
   notes: ExtendedTeamNote[];
   onClickNote: (note: ExtendedTeamNote) => void;
-}
-
-function getDaysOverdue(dueDate: string): number {
-  const diff = new Date().getTime() - parseLocalDate(dueDate).getTime();
-  return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 
 function getEscalationLevel(daysOverdue: number): 'amber' | 'red' | 'critical' {
@@ -24,7 +19,7 @@ function getEscalationLevel(daysOverdue: number): 'amber' | 'red' | 'critical' {
 const escalationStyles = {
   amber: 'bg-amber-50 border-amber-200 text-amber-800',
   red: 'bg-red-50 border-red-200 text-red-800',
-  critical: 'bg-red-100 border-red-300 text-red-900 animate-pulse',
+  critical: 'bg-red-100 border-red-300 text-red-900 motion-safe:animate-pulse',
 };
 
 const entityRoutes: Record<string, (id: string) => string> = {
@@ -41,12 +36,11 @@ export default function StaleTasksAlert({ notes, onClickNote }: Props) {
 
   // Filter to overdue, incomplete, non-deleted notes with due dates
   const staleTasks = notes
-    .filter(n => !n.is_completed && !n.deleted_at && n.due_date && parseLocalDate(n.due_date) < new Date())
-    .map(n => ({
-      ...n,
-      daysOverdue: getDaysOverdue(n.due_date!),
-      level: getEscalationLevel(getDaysOverdue(n.due_date!)),
-    }))
+    .flatMap(note => {
+      if (note.is_completed || note.deleted_at || !note.due_date) return [];
+      const daysOverdue = daysSinceBusinessDate(note.due_date);
+      return daysOverdue > 0 ? [{ ...note, daysOverdue, level: getEscalationLevel(daysOverdue) }] : [];
+    })
     .sort((a, b) => b.daysOverdue - a.daysOverdue);
 
   if (staleTasks.length === 0) return null;
@@ -58,9 +52,10 @@ export default function StaleTasksAlert({ notes, onClickNote }: Props) {
     <div className="bg-red-50 border border-red-200 rounded-xl overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-red-100/50 transition-colors"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <AlertTriangle className="w-5 h-5 text-red-600" />
           <span className="font-semibold text-red-800">
             {staleTasks.length} Overdue Task{staleTasks.length !== 1 ? 's' : ''}
@@ -83,7 +78,7 @@ export default function StaleTasksAlert({ notes, onClickNote }: Props) {
               role="button"
               tabIndex={0}
               onClick={() => onClickNote(task)}
-              onKeyDown={(e) => { if (e.key === 'Enter') onClickNote(task); }}
+              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClickNote(task); } }}
               className={`flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors hover:opacity-80 ${escalationStyles[task.level]}`}
             >
               <div className="flex-1 min-w-0">

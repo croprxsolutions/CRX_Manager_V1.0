@@ -7,5 +7,5 @@
 - A run Sol marks all-repeat is never put to Mason; the skip request refuses it ("Yes, never ask").
 - Codex's merge guard never lands a carried skip; it hands the merge to Claude ("Yes, hand to Claude"). A live migration apply never accepts a carried skip.
 - Accepted risk ("Yes, accept and open"): the saved root proof file is trusted without re-reading Mason's chat reply, the same trust as today's skip. Sol may also mislabel a new issue as "same"; the file/diff/severity checks limit that, they do not remove it.
-- This partly reverses the 2026-11-22 PR #2226 rule that skipped findings never carry: they still never carry onto a newer base, but now carry across heads of the same PR on staging.
+- This partly reverses the 2026-11-22 PR #2226 rule that skipped findings never carry: they now carry across heads of the same PR on staging, including onto a newer base after a catch-up merge, once Sol's fresh full review marks every finding the same. Each carried skip records the base Mason first skipped it against (Mason, 2026-11-24). A saved Sol proof itself still never carries onto a newer base (`--carry-forward`).
 - This PR opens as a draft without a clean Sol round 4; Mason or Taha merges it by hand.

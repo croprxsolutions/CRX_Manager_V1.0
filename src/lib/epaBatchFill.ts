@@ -34,6 +34,19 @@ async function readAll<T>(table: string, columns: string, order: string, filter:
   return data ?? [];
 }
 
+/** Parents with an active brand, and products with a legacy brand, that carry an EPA number (for the setup badge). */
+export async function fetchBrandEpaOwners(): Promise<{ parentIds: Set<string>; productIds: Set<string> }> {
+  type Num = { epa_registration: string | null };
+  const [parentBrands, legacyBrands] = await Promise.all([
+    readAll<Num & { id: string; parent_id: string }>('product_parent_brands', 'id, parent_id, epa_registration', 'id', { eq: ['status', 'active'] }),
+    readAll<Num & { id: string; product_id: string }>('product_brands', 'id, product_id, epa_registration', 'id'),
+  ]);
+  return {
+    parentIds: new Set(parentBrands.filter((b) => normalizeEpaNumber(b.epa_registration)).map((b) => b.parent_id)),
+    productIds: new Set(legacyBrands.filter((b) => normalizeEpaNumber(b.epa_registration)).map((b) => b.product_id)),
+  };
+}
+
 /** Active parents with no ingredient row (any status), each with its EPA number or the reason it is skipped. */
 export async function fetchBatchCandidates(now = Date.now()): Promise<BatchCandidate[]> {
   type Num = { epa_registration: string | null };

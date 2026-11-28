@@ -29,6 +29,8 @@ const mockDoc = {
   getTextWidth: vi.fn(() => 50),
   addPage: vi.fn(),
   save: vi.fn(),
+  addImage: vi.fn(),
+  getImageProperties: vi.fn(() => ({ width: 1125, height: 660 })),
   lastAutoTable: { finalY: 400 },
 };
 
@@ -50,6 +52,7 @@ vi.mock('jspdf-autotable', () => ({
 }));
 
 import {
+  fitSignature,
   generateDeliveryPdf,
   downloadDeliveryPdf,
   generateBatchDeliveryPdf,
@@ -288,6 +291,41 @@ describe('generateDeliveryPdf', () => {
     expect(hasSig).toBe(true);
   });
 
+  it('prints a tall phone signature at its own shape, not squashed into a fixed box', async () => {
+    // A 375 x 220 phone signing box at 3x: 1125 x 660 pixels.
+    mockDoc.getImageProperties.mockReturnValueOnce({ width: 1125, height: 660 });
+    await generateDeliveryPdf(makeDeliveryData({ signature_image_data_url: 'data:image/png;base64,iVBORw0KGgo', signed_by: 'Pat Farmer' }));
+    const [, format, , , w, h] = mockDoc.addImage.mock.calls[0];
+    expect(format).toBe('PNG');
+    expect(w / h).toBeCloseTo(1125 / 660, 5);
+    expect(h).toBeCloseTo(80, 5);
+    expect(w).toBeLessThanOrEqual(220);
+    expect(mockDoc.text).toHaveBeenCalledWith('Signed by: Pat Farmer', expect.any(Number), expect.any(Number));
+  });
+
+  it('starts the signature on a new page when it would run into the bottom of the page', async () => {
+    const notes = 'Long delivery notes';
+    mockDoc.splitTextToSize.mockImplementation((text: string) => (text === notes ? Array(30).fill('note line') : [text]));
+    try {
+      await generateDeliveryPdf(makeDeliveryData({ delivery_notes: notes, signature_image_data_url: 'data:image/png;base64,iVBORw0KGgo' }));
+      expect(mockDoc.addPage).toHaveBeenCalledTimes(1);
+      const [, , , y, , h] = mockDoc.addImage.mock.calls[0];
+      expect(y).toBe(60);
+      expect(mockDoc.text).toHaveBeenCalledWith(`${makeDeliveryData().delivery_number} (continued)`, 40, 40);
+      expect(y + h).toBeLessThan(792 - 45);
+    } finally {
+      mockDoc.splitTextToSize.mockImplementation((text: string) => [text]);
+    }
+  });
+
+  it('still prints older, wider signatures across the signature area', async () => {
+    mockDoc.getImageProperties.mockReturnValueOnce({ width: 800, height: 240 });
+    await generateDeliveryPdf(makeDeliveryData({ signature_image_data_url: 'data:image/png;base64,iVBORw0KGgo' }));
+    const [, , , , w, h] = mockDoc.addImage.mock.calls[0];
+    expect(w).toBeCloseTo(220, 5);
+    expect(h).toBeCloseTo(66, 5);
+  });
+
   it('renders footer with Crop RX branding', async () => {
     await generateDeliveryPdf(makeDeliveryData());
     const textCalls = mockDoc.text.mock.calls;
@@ -397,5 +435,20 @@ describe('generateBatchDeliveryPdf', () => {
     await generateBatchDeliveryPdf(deliveries);
     const saveName = mockDoc.save.mock.calls[0][0] as string;
     expect(saveName).toMatch(/\.pdf$/);
+  });
+});
+
+describe('fitSignature', () => {
+  it('keeps the image proportions inside the 220 x 80 point signature area', () => {
+    const phone = fitSignature({ width: 1125, height: 660 });
+    expect(phone.height).toBeCloseTo(80, 5);
+    expect(phone.width).toBeCloseTo(80 * (1125 / 660), 5);
+    const wide = fitSignature({ width: 1600, height: 400 });
+    expect(wide.width).toBeCloseTo(220, 5);
+    expect(wide.height).toBeCloseTo(55, 5);
+  });
+
+  it('falls back to the full area for an image with no readable size', () => {
+    expect(fitSignature({ width: 0, height: 0 })).toEqual({ width: 220, height: 80 });
   });
 });

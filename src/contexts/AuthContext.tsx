@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Sentry } from '../lib/sentry';
 import { supabase } from '../lib/db';
 import { setUserContext, clearUserContext } from '../lib/metrics';
+import { dropAllSnapshots } from '../lib/todaySnapshot';
+import { syncPendingMarkerSession } from '../lib/fieldMarkerPending';
 import type { Profile, UserRole } from '../types';
 import type { Session } from '@supabase/supabase-js';
 
@@ -92,7 +94,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    let initialSessionSuperseded = false;
     supabase.auth.getSession().then(({ data: { session: s } }) => {
+      if (initialSessionSuperseded || signedOutLocallyRef.current) return;
+      // A null session at startup can mean offline refresh. Null cleanup belongs to sign-out.
+      if (s) void syncPendingMarkerSession(s);
       activeUserIdRef.current = s?.user.id ?? null;
       setSession(s);
       if (s?.user) {
@@ -102,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }).catch(() => {
       // Network error during initial session check — show login
-      setLoading(false);
+      if (!initialSessionSuperseded && !signedOutLocallyRef.current) setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
@@ -114,6 +120,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // only an explicit signIn call clears this local sign-out intent.
       if (signedOutLocallyRef.current && event !== 'SIGNED_OUT') return;
 
+      initialSessionSuperseded = true;
+      if (s || event === 'SIGNED_OUT') void syncPendingMarkerSession(s);
       const nextUserId = s?.user.id ?? null;
       const isSameUser = nextUserId !== null && activeUserIdRef.current === nextUserId;
       activeUserIdRef.current = nextUserId;
@@ -148,7 +156,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      initialSessionSuperseded = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
@@ -165,6 +176,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     // Clear local state immediately so the UI goes to login
     clearUserContext();
+    dropAllSnapshots();
+    const pendingCleared = syncPendingMarkerSession(null);
     signedOutLocallyRef.current = true;
     activeUserIdRef.current = null;
     setProfile(null);
@@ -175,6 +188,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Offline or network error — local state is already cleared,
       // so user still gets redirected to login. Session cookie will
       // expire naturally on its own.
+    }
+    if (!await pendingCleared) {
+      Sentry.captureException(new Error('Pending marker storage cleanup deferred after sign-out'), { tags: { action: 'clear_pending_field_markers' } });
     }
   }, []);
 

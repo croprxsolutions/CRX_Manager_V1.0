@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Product } from '../types';
 import { hasRpcCode, RpcErrorCodes } from './db';
 import {
-  missingProductSetup, nearMatchNames, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories,
+  matchReadIntervals,
+  epaCoveredProductIds, isSetupIncomplete, missingProductSetup, nearMatchNames, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories,
 } from './productSetup';
 
 describe('product setup validation and options', () => {
@@ -80,10 +81,41 @@ describe('complete setup and near-match warnings', () => {
     expect(missingProductSetup({ ...pesticide, rei_hours: null, phi_days: null })).toEqual(['REI', 'PHI']);
   });
 
+  it('counts a blank REI/PHI marked not applicable as set, each field on its own', () => {
+    const blank = { ...pesticide, rei_hours: null, phi_days: null };
+    expect(missingProductSetup({ ...blank, rei_not_applicable: true })).toEqual(['PHI']);
+    expect(missingProductSetup({ ...blank, phi_not_applicable: true })).toEqual(['REI']);
+    expect(missingProductSetup({ ...blank, rei_not_applicable: true, phi_not_applicable: true })).toEqual([]);
+    expect(missingProductSetup({ ...blank, rei_not_applicable: false, phi_not_applicable: false })).toEqual(['REI', 'PHI']);
+    expect(isSetupIncomplete({ ...blank, rei_not_applicable: true, phi_not_applicable: true })).toBe(false);
+  });
+
   it('classes a pesticide by category or by an EPA number', () => {
     expect(missingProductSetup({ ...base, category: 'Fungicide' })).toEqual(['EPA number', 'Signal word', 'REI', 'PHI']);
     expect(missingProductSetup({ ...base, category: 'Adjuvant', epa_registration: '100-1234' })).toEqual(['Signal word', 'REI', 'PHI']);
     expect(missingProductSetup({ ...base, category: 'Adjuvant' })).toEqual([]);
+  });
+
+  it('counts a generic as having an EPA number when its group carries one', () => {
+    const generic = { ...pesticide, id: 'gen', epa_registration: null };
+    expect(missingProductSetup(generic, true)).toEqual([]);
+    expect(isSetupIncomplete(generic)).toBe(true);
+    expect(isSetupIncomplete(generic, new Set(['gen']))).toBe(false);
+    // Other label fields still count.
+    expect(missingProductSetup({ ...base, category: 'Adjuvant' }, true)).toEqual(['Signal word', 'REI', 'PHI']);
+    expect(isSetupIncomplete({ ...generic, signal_word: null }, new Set(['gen']))).toBe(true);
+
+    const size = (id: string) => ({ product_id: id });
+    const parents = [
+      { id: 'p-brand', generic_epa_registration: null, sizes: [size('a1'), size('a2')] },
+      { id: 'p-generic', generic_epa_registration: '524-475', sizes: [size('b1')] },
+      { id: 'p-sibling', generic_epa_registration: null, sizes: [size('c1'), size('c2')] },
+      { id: 'p-legacy', generic_epa_registration: null, sizes: [size('d1'), size('d2')] },
+      { id: 'p-none', generic_epa_registration: ' ', sizes: [size('e1')] },
+    ];
+    const products = [{ id: 'c2', epa_registration: '100-1' }, { id: 'e1', epa_registration: null }];
+    expect([...epaCoveredProductIds(parents, products, new Set(['p-brand']), new Set(['d2', 'solo']))].sort())
+      .toEqual(['a1', 'a2', 'b1', 'c1', 'c2', 'd1', 'd2', 'solo']);
   });
 
   it('suggests close spellings of an existing name and stays quiet on an exact one', () => {
@@ -95,5 +127,41 @@ describe('complete setup and near-match warnings', () => {
     expect(nearMatchNames('', makers)).toEqual([]);
     expect(nearMatchNames('Syn', makers)).toEqual([]);
     expect(nearMatchNames('Bayer Crop', makers)).toEqual([]);
+  });
+});
+
+describe('matchReadIntervals', () => {
+  const recorder = () => {
+    const calls: string[] = [];
+    const q = {
+      is(column: string, value: null) { calls.push(`${column} is ${value}`); return q; },
+      eq(column: string, value: unknown) { calls.push(`${column} = ${String(value)}`); return q; },
+    };
+    return { q, calls };
+  };
+  const read = { rei_hours: null, rei_not_applicable: false, phi_days: 30, epa_registration: '100-1234' } as Product;
+
+  it('adds no filter when neither interval nor flag is saved', () => {
+    const { q, calls } = recorder();
+    matchReadIntervals(q, { product_name: 'x' }, read);
+    expect(calls).toEqual([]);
+  });
+
+  it('saves a tick only over the blank interval, flag and EPA number the page read', () => {
+    const { q, calls } = recorder();
+    matchReadIntervals(q, { rei_not_applicable: true, rei_hours: null }, read);
+    expect(calls).toEqual(['rei_hours is null', 'rei_not_applicable = false', 'epa_registration = 100-1234']);
+  });
+
+  it('guards a changed PHI number on the number and EPA number read', () => {
+    const { q, calls } = recorder();
+    matchReadIntervals(q, { phi_days: 14 }, read);
+    expect(calls).toEqual(['phi_days = 30', 'phi_not_applicable = false', 'epa_registration = 100-1234']);
+  });
+
+  it('guards a flag-only save (number unchanged, so not sent) the same way', () => {
+    const { q, calls } = recorder();
+    matchReadIntervals(q, { phi_not_applicable: false }, { ...read, phi_days: null, phi_not_applicable: true });
+    expect(calls).toEqual(['phi_days is null', 'phi_not_applicable = true', 'epa_registration = 100-1234']);
   });
 });

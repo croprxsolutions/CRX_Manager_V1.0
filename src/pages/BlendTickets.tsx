@@ -12,12 +12,16 @@ import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Input from '../components/ui/Input';
-import EmptyState from '../components/ui/EmptyState';
+import EmptyState, { LoadFailedState } from '../components/ui/EmptyState';
 import Skeleton from '../components/ui/Skeleton';
 import BulkActionBar from '../components/ui/BulkActionBar';
 import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
 import { BulkTicketUpload } from '../components/blendtickets/BulkTicketUpload';
 import { ManualTicketCreate } from '../components/blendtickets/ManualTicketCreate';
+
+// Scanned (OCR) ticket upload is hidden: hand tickets are entered manually (Mason, 2026-11-25).
+// Set to true to bring the Upload Tickets button back.
+const SCAN_UPLOAD_ENABLED = false;
 import DataTable, { type Column } from '../components/ui/DataTable';
 import PageHeader from '../components/ui/PageHeader';
 import { usePageMeta } from '../hooks/usePageMeta';
@@ -31,6 +35,19 @@ import { parseLocalDate } from '../lib/dateUtils';
 import { useOCRThresholds } from '../hooks/useOCRThresholds';
 import type { BlendTicket, Customer } from '../types';
 
+type QuickFilter = 'needsReview' | 'lowConfidence' | 'duplicates';
+
+function matchesSearch(ticket: BlendTicket, query: string) {
+  return !query || [
+    ticket.ticket_number,
+    ticket.customer?.farm_name,
+    ticket.driver_name,
+    ticket.job_number,
+    ticket.field?.field_name,
+    ticket.field_names,
+  ].some(value => value?.toLowerCase().includes(query));
+}
+
 export function BlendTickets() {
   usePageMeta();
   const { role, profile } = useAuth();
@@ -38,10 +55,11 @@ export function BlendTickets() {
   const ocrThresholds = useOCRThresholds();
   const [tickets, setTickets] = useState<BlendTicket[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [showUpload, setShowUpload] = useState(false);
   const [showManualCreate, setShowManualCreate] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [quickFilter, setQuickFilter] = useState<QuickFilter | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [reviewFilter, setReviewFilter] = useState<string>('all');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
@@ -57,7 +75,8 @@ export function BlendTickets() {
   const batchRejectIdem = useIdempotencyKey('batch_reject_blend_tickets', profile?.id || '');
 
   const canBulkAction = role === 'admin' || role === 'sales_rep';
-  const { isProcessing, processedCount } = useOCRProcessor(true);
+  // With upload hidden, stop the 30s queue poll that sends scans to OCR; Re-process OCR calls the function directly.
+  const { isProcessing, processedCount } = useOCRProcessor(SCAN_UPLOAD_ENABLED);
 
   // Each OCR completion and every refresh re-reads both lists page by page; an
   // older, slower load must not overwrite a newer one, so only the latest may set state.
@@ -134,40 +153,53 @@ export function BlendTickets() {
       if (seq !== fetchSeq.current) return;
       setTickets(enriched);
       setCustomers((customersResult.data || []) as Customer[]);
+      setLoadState('ready');
     } catch (error) {
       if (seq !== fetchSeq.current) return;
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_blend_tickets' } });
-      toast('error', 'Failed to load blend tickets. Please try again.');
-    } finally {
-      if (seq === fetchSeq.current) setLoading(false);
+      setLoadState('failed');
     }
-  }, [toast]);
+  }, []);
 
   useEffect(() => {
     loadData();
   }, [processedCount, loadData]);
 
-  const filteredTickets = tickets.filter(ticket => {
-    const matchesSearch =
-      ticket.ticket_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      ticket.customer?.farm_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      ticket.driver_name?.toLowerCase().includes(searchTerm.toLowerCase());
-
-    const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
-    const matchesReview = reviewFilter === 'all' || ticket.review_status === reviewFilter;
-    const matchesPayment = paymentFilter === 'all' || ticket.payment_status === paymentFilter;
-
-    return matchesSearch && matchesStatus && matchesReview && matchesPayment;
-  });
-
-  // E6: Detect duplicate ticket numbers across all tickets
   const duplicateTicketNumbers = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const t of tickets) {
-      if (t.ticket_number) counts[t.ticket_number] = (counts[t.ticket_number] || 0) + 1;
+    const seen = new Set<string>();
+    const duplicates = new Set<string>();
+    for (const { ticket_number: number } of tickets) {
+      if (!number) continue;
+      if (seen.has(number)) duplicates.add(number);
+      seen.add(number);
     }
-    return new Set(Object.entries(counts).filter(([, c]) => c > 1).map(([num]) => num));
+    return duplicates;
   }, [tickets]);
+
+  const queues = useMemo(() => ({
+    needsReview: tickets.filter(t => t.status === 'completed' && t.review_status === 'unreviewed'),
+    lowConfidence: tickets.filter(t => t.ocr_confidence_score > 0 && t.ocr_confidence_score < ocrThresholds.needs_review),
+    duplicates: tickets.filter(t => duplicateTicketNumbers.has(t.ticket_number)),
+  }), [tickets, duplicateTicketNumbers, ocrThresholds.needs_review]);
+
+  const query = searchTerm.trim().toLowerCase();
+  const filteredTickets = useMemo(() => (quickFilter ? queues[quickFilter] : tickets).filter(ticket =>
+    matchesSearch(ticket, query) &&
+    (statusFilter === 'all' || ticket.status === statusFilter) &&
+    (reviewFilter === 'all' || ticket.review_status === reviewFilter) &&
+    (paymentFilter === 'all' || ticket.payment_status === paymentFilter)
+  ), [quickFilter, queues, tickets, query, statusFilter, reviewFilter, paymentFilter]);
+
+  function resetFilters(next: QuickFilter | null = null) {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setReviewFilter('all');
+    setPaymentFilter('all');
+    setQuickFilter(next);
+  }
+
+  const hasFilters = quickFilter !== null || searchTerm !== '' ||
+    statusFilter !== 'all' || reviewFilter !== 'all' || paymentFilter !== 'all';
 
   const { selected, toggleSelect, toggleAll, clearSelection, selectedCount, selectedRows, allSelected } =
     useRowSelection({
@@ -176,7 +208,9 @@ export function BlendTickets() {
     });
 
   const checkboxCol = useMemo(
-    () => createCheckboxColumn<BlendTicket>(selected, toggleSelect, (t) => t.id),
+    () => createCheckboxColumn<BlendTicket>(selected, toggleSelect, (t) => t.id, undefined, {
+      getLabel: (t) => `Select ticket ${t.ticket_number}`,
+    }),
     [selected, toggleSelect]
   );
 
@@ -206,7 +240,7 @@ export function BlendTickets() {
           const c = v as { farm_name?: string } | undefined;
           return c?.farm_name || '-';
         }},
-        { header: 'Date', key: 'ticket_date', format: (v) => v ? new Date(String(v)).toLocaleDateString() : '-' },
+        { header: 'Date', key: 'ticket_date', format: (v) => v ? parseLocalDate(String(v)).toLocaleDateString() : '-' },
         { header: 'Driver', key: 'driver_name', format: (v) => String(v || '-') },
         { header: 'Status', key: 'status' },
         { header: 'Review', key: 'review_status' },
@@ -455,6 +489,7 @@ export function BlendTickets() {
     {
       key: 'ticket_date',
       header: 'Date',
+      sortable: true,
       render: (ticket: BlendTicket) => (
         <span>
           {ticket.ticket_date
@@ -528,11 +563,25 @@ export function BlendTickets() {
 
   const columns = canBulkAction ? [checkboxCol, ...dataColumns] : dataColumns;
 
-  if (loading) {
+  if (loadState === 'loading') {
     return (
       <div className="space-y-6">
         <Skeleton className="h-12 w-64" />
         <Skeleton className="h-96 w-full" />
+      </div>
+    );
+  }
+
+  if (loadState === 'failed') {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Blend" accent="Tickets" />
+        <Card>
+          <LoadFailedState title="Blend tickets could not be loaded" onRetry={() => {
+            setLoadState('loading');
+            void loadData();
+          }} />
+        </Card>
       </div>
     );
   }
@@ -542,7 +591,7 @@ export function BlendTickets() {
       <PageHeader
         title="Blend"
         accent="Tickets"
-        subtitle="Upload and manage blend ticket images with automatic OCR processing"
+        subtitle={SCAN_UPLOAD_ENABLED ? "Upload and manage blend ticket images with automatic OCR processing" : "Create and manage blend tickets"}
         actions={(
           <>
           {canBulkAction && (
@@ -569,6 +618,7 @@ export function BlendTickets() {
             <Plus className="h-4 w-4" />
             {showManualCreate ? 'Hide Manual' : 'Create Manual'}
           </Button>
+          {SCAN_UPLOAD_ENABLED && (
           <Button
             onClick={() => {
               setShowUpload(!showUpload);
@@ -578,12 +628,13 @@ export function BlendTickets() {
             <Upload className="h-4 w-4" />
             {showUpload ? 'Hide Upload' : 'Upload Tickets'}
           </Button>
+          )}
           </div>
           </>
         )}
       />
 
-      {showUpload && (
+      {SCAN_UPLOAD_ENABLED && showUpload && (
         <BulkTicketUpload
           customers={customers}
           onUploadComplete={() => {
@@ -603,68 +654,52 @@ export function BlendTickets() {
         />
       )}
 
-      {/* E9: Quick filter chips */}
       <div className="flex flex-wrap gap-2">
-        {(() => {
-          const needsReviewCount = tickets.filter(t => t.status === 'completed' && t.review_status === 'unreviewed').length;
-          const lowConfidenceCount = tickets.filter(t => t.ocr_confidence_score > 0 && t.ocr_confidence_score < ocrThresholds.needs_review).length;
-          const dupeCount = tickets.filter(t => duplicateTicketNumbers.has(t.ticket_number)).length;
+        {([
+          { key: 'needsReview', label: 'Needs Review' },
+          { key: 'lowConfidence', label: 'Low Confidence' },
+          { key: 'duplicates', label: 'Duplicates' },
+        ] satisfies Array<{ key: QuickFilter; label: string }>).map(({ key, label }) => {
+          const count = queues[key].length;
+          const active = quickFilter === key;
+          if (!count && !active) return null;
           return (
-            <>
-              {needsReviewCount > 0 && (
-                <button
-                  onClick={() => { setStatusFilter('completed'); setReviewFilter('unreviewed'); }}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                    statusFilter === 'completed' && reviewFilter === 'unreviewed'
-                      ? 'bg-amber-200 text-amber-900'
-                      : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-                  }`}
-                >
-                  <AlertCircle className="w-3 h-3" />
-                  Needs Review ({needsReviewCount})
-                </button>
-              )}
-              {lowConfidenceCount > 0 && (
-                <button
-                  onClick={() => { setStatusFilter('all'); setReviewFilter('all'); setSearchTerm(''); }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100 transition-colors"
-                  title="Tickets with OCR confidence below review threshold"
-                >
-                  Low Confidence ({lowConfidenceCount})
-                </button>
-              )}
-              {dupeCount > 0 && (
-                <button
-                  onClick={() => setSearchTerm('')}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-yellow-50 text-yellow-700 hover:bg-yellow-100 transition-colors"
-                  title="Tickets with duplicate ticket numbers"
-                >
-                  Duplicates ({dupeCount})
-                </button>
-              )}
-              {(statusFilter !== 'all' || reviewFilter !== 'all' || paymentFilter !== 'all') && (
-                <button
-                  onClick={() => { setStatusFilter('all'); setReviewFilter('all'); setPaymentFilter('all'); setSearchTerm(''); }}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium text-gray-500 hover:bg-gray-100 transition-colors"
-                >
-                  <X className="w-3 h-3" />
-                  Clear Filters
-                </button>
-              )}
-            </>
+            <button
+              key={key}
+              type="button"
+              aria-pressed={active}
+              onClick={() => resetFilters(active ? null : key)}
+              className={`inline-flex min-h-11 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors md:min-h-10 ${
+                active ? 'bg-crx-green-light text-crx-green' : 'bg-gray-100 text-nav-dark hover:bg-gray-200'
+              }`}
+            >
+              {active && <CheckCircle className="h-3.5 w-3.5" />}
+              {label} ({count})
+            </button>
           );
-        })()}
+        })}
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={() => resetFilters()}
+            className="inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-xs font-medium text-secondary hover:bg-gray-100 md:min-h-10"
+          >
+            <X className="h-3.5 w-3.5" />
+            Clear Filters
+          </button>
+        )}
       </div>
 
-      <Card className="p-6">
-        <div className="mb-6 space-y-4">
+      <Card className="p-4 sm:p-6">
+        <div className="mb-4 space-y-3">
           <div className="flex flex-wrap gap-4">
-            <div className="flex-1 min-w-[200px]">
+            <div className="flex-1 basis-full sm:basis-[200px]">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
                 <Input
-                  type="text"
-                  placeholder="Search tickets..."
+                  type="search"
+                  aria-label="Search tickets"
+                  placeholder="Search tickets, farms, drivers, jobs or fields"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -672,7 +707,7 @@ export function BlendTickets() {
               </div>
             </div>
 
-            <div className="w-48">
+            <div className="w-full sm:w-48">
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
@@ -688,7 +723,7 @@ export function BlendTickets() {
               </select>
             </div>
 
-            <div className="w-48">
+            <div className="w-full sm:w-48">
               <select
                 value={reviewFilter}
                 onChange={(e) => setReviewFilter(e.target.value)}
@@ -702,7 +737,7 @@ export function BlendTickets() {
               </select>
             </div>
 
-            <div className="w-48">
+            <div className="w-full sm:w-48">
               <select
                 value={paymentFilter}
                 onChange={(e) => setPaymentFilter(e.target.value)}
@@ -726,6 +761,9 @@ export function BlendTickets() {
               </button>
             )}
           </div>
+          <p className="text-sm text-secondary" role="status">
+            Showing {filteredTickets.length} of {tickets.length} tickets
+          </p>
         </div>
 
         {filteredTickets.length === 0 ? (
@@ -734,15 +772,22 @@ export function BlendTickets() {
             title="No blend tickets found"
             description={
               tickets.length === 0
-                ? "Upload your first blend ticket to get started"
+                ? (SCAN_UPLOAD_ENABLED ? "Upload your first blend ticket to get started" : "Create your first blend ticket to get started")
                 : "No tickets match your current filters"
             }
             action={
               tickets.length === 0 ? (
-                <Button onClick={() => setShowUpload(true)}>
-                  <Upload className="h-4 w-4" />
-                  Upload Tickets
-                </Button>
+                SCAN_UPLOAD_ENABLED ? (
+                  <Button onClick={() => setShowUpload(true)}>
+                    <Upload className="h-4 w-4" />
+                    Upload Tickets
+                  </Button>
+                ) : (
+                  <Button onClick={() => setShowManualCreate(true)}>
+                    <Plus className="h-4 w-4" />
+                    Create Manual
+                  </Button>
+                )
               ) : undefined
             }
           />

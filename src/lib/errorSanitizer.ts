@@ -5,12 +5,38 @@
  */
 
 const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
+  [/^PRODUCT_WEIGHT_REVIEW_NOT_OPEN\b/, 'Nothing was saved. Weight review changed. Check the current Weight card before trying again'],
+  // M9 (20270301180000): a Prepayment Manager check's amount is locked; a check with an application is not deleted.
+  [/^PREPAY_CHECK_AMOUNT_LOCKED\b/, "Nothing was saved. A prepayment check's amount cannot be edited. To correct a mistyped check, delete the whole check and enter it again"],
+  [/^PREPAY_OVERPAYMENT_LOCKED\b/, "Nothing was saved. An overpayment's amount comes from its payment, so it cannot be edited or deleted here. To undo it, void the payment"],
+  [/^PREPAY_CHECK_APPLIED\b/, 'Nothing was deleted. Part of this check was applied to an invoice, so the check cannot be deleted'],
   // KI-85: stock may be placed only at Main Warehouse until transfers exist; nothing was received or added.
   [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. Stock can go only into Main Warehouse until transfers between warehouses exist. Choose Main Warehouse and try again'],
   // #2000 (20270201120000): an inactive customer gets no new orders, deliveries, holds or spray jobs.
   [/^CUSTOMER_INACTIVE_NEW_WORK\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added'],
+  // #2089 (20270308130000): no sales invoice is created or posted, and no invoice restored or moved, for an inactive customer (credit memos and payment corrections allowed).
+  [/^CUSTOMER_INACTIVE_POSTING\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before a sales invoice is created or posted for them, or an invoice is restored or moved to them'],
+  // 20270226213000 (#2331): a delivery line's quantities must be finite numbers.
+  [/violates check constraint "delivery_items_quantity(_delivered)?_finite_chk"/, 'Nothing was saved. Delivery quantities must be ordinary numbers. Reload the delivery and enter them again'],
   [/violates check constraint "inventory_holds_source_needs_customer"/, 'Nothing was saved. A stock hold for a spray job or quote must name its customer'],
   [/^WORK_CUSTOMER_MOVE_NOT_ALLOWED\b/, 'Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery'],
+  // Product price sheet: the server refuses a used, expired or someone else's sheet, or a sheet listing a product twice.
+  [/^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/,
+   'No prices were changed. This price sheet can no longer be used: it was already applied, is more than 7 days old, came from an older template, or was downloaded by another user. Download a fresh price sheet and make your changes in it'],
+  // Supplier Pricing (phase 1b upsert_product_supplier_link): a link needs SKU, price unit and pack description.
+  [/^SUPPLIER_LINK_REUSE_FIELDS_REQUIRED\b/,
+   'Nothing was saved. Fill in Supplier SKU, Supplier price unit and Supplier pack description, then save the link again'],
+  [/^SUPPLIER_PRODUCT_NAME_REQUIRED\b/, 'Nothing was saved. Fill in Supplier Product name, then save the link again'],
+  // Supplier Pricing (20270305200000): bounds that keep the converted cost per inventory unit a sane number.
+  [/^SUPPLIER_CONVERSION_INVALID\b|violates check constraint "product_supplier_links_conversion_floor"/,
+   'Nothing was saved. Inventory units per supplier unit must be a number of at least 0.001, with at most 8 decimals'],
+  [/violates check constraint "supplier_price_observations_package_quantity_floor"/,
+   'Nothing was saved. Package quantity must be 0.001 or more'],
+  [/violates check constraint "supplier_price_observations_cost_ceiling"/,
+   'Nothing was saved. A supplier cost cannot be more than $10,000,000 for one line. Check the amount'],
+  [/violates check constraint "supplier_price_import_rows_pending_bounds"/,
+   'Nothing was saved. A quote line needs a package quantity of 0.001 or more and a cost of $10,000,000 or less. Check the line and try again'],
+  [/^PRICING_DUPLICATE_PRODUCT_ID\b/, 'No prices were changed. The same product appears on more than one row of the price sheet. Download a fresh price sheet and make your changes in it, without copying or pasting product rows'],
   [/^PRODUCT_CATEGORY_RETIRED\b/, 'This category is retired. Choose an active category'],
   [/^PRODUCT_CATEGORY_NAME_REQUIRED\b/, 'Enter a category name'],
   [/^PRODUCT_CATEGORY_FIELDS_REQUIRED\b/, 'Choose a category status and sort order'],
@@ -47,6 +73,10 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Nothing was changed. This request was cleared after it got stuck. Check the record, then enter it again as a new request if it is still needed'],
   [/^IDEMPOTENCY_(?:RESULT_INVALID|RECEIPT_MISSING)\b/,
    'Nothing was changed now: the outcome of this request could not be confirmed. Refresh the page before trying again'],
+  // Delivery edit "Unassigned" (20270225170000, 20270226163000): the whole edit rolled back.
+  [/^DRIVER_CHANGED\b/, 'Nothing was saved. The driver was changed since you opened this form. The page now shows the current driver; edit again if needed'],
+  [/^DRIVER_CLEAR_STARTED\b/, 'Nothing was saved. This delivery has started, so it cannot be unassigned. The page now shows it; pick another driver if needed'],
+  [/^Cannot edit delivery items once delivery is in progress/, 'Nothing was saved. This delivery has started, so its items cannot be edited. The page now shows it'],
   // A completion retried under a fresh key after an earlier attempt already completed the record.
   [/^Delivery must be in_progress to complete \(current status: completed\)/,
    'This delivery is already completed. Refresh the page to see it'],
@@ -88,6 +118,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Reps work with any customer (2026-10-13, migration 20261013220000) with these exceptions.
   [/^REP_CANNOT_REASSIGN\b/i,
    'Only an admin can change which sales rep a customer is assigned to'],
+  // Mason 2026-11-25 (20270309010000): no commission payout batch is created or paid until M16 is live.
+  [/^COMMISSION_PAYOUTS_OFF_UNTIL_M16\b/,
+   'Nothing was created or paid. Commission payouts are switched off until commission-on-payment (M16) is live. Voiding an existing payment still works'],
   // Admin-only since 2026-10-14 (migration 20261027080200).
   [/^COMMISSION_SPLIT_ADMIN_ONLY\b/i,
    "Only an admin can set or change a customer's default commission split"],
@@ -109,10 +142,16 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Say why the cost of a received line is changing'],
   [/^PO_COST_REASON_TOO_LONG\b/i,
    'Keep the reason to 500 characters'],
+  [/^PO_COST_CHANGED_SINCE_LOADED\b/i,
+   'A line’s cost or product changed since you opened this purchase order. Nothing was saved. Review the reloaded lines and save again'],
+  [/^PO_EXPECTED_(?:COST_INVALID|PRODUCT_INVALID|PAIR_REQUIRED)\b/i,
+   'The purchase order line details could not be verified. Reload the purchase order and try again'],
   [/^PO_CANCELLED\b/i,
    'This purchase order is cancelled, so its cost cannot change'],
   [/^PO_COST_BELOW_BILLED\b/i,
    'This would put the vendor bills more than 5% over what has arrived on the purchase order, or over its ordered total. Void or adjust the bill first'],
+  [/^PO_BILLED_LINES_LOCKED\b/,
+   "This purchase order has a vendor bill, so its lines can't be changed here. To change lines, void the bill (if it has a payment, void that first), edit, then enter the bill again. To fix only a cost, an admin can use Correct Unit Cost"],
   [/^PREPAY_BALANCE_SERVER_ONLY\b/i,
    'A prepay balance changes only through prepayments and payments'],
   [/^RETURN_NOT_FOUND\b/i,
@@ -183,6 +222,13 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was changed. A line share can't move to another line"],
   [/^BILL_SPLIT_NOTHING_TO_BILL\b/,
    "Nothing was billed. This delivery has no delivered quantity"],
+  // create_invoice_for_unbilled_delivery (A4, 20270311010000).
+  [/^UNBILLED_SCOPE_CHANGED\b/,
+   "Nothing was billed. This delivery's billing changed since the page loaded. Reload the page and check again"],
+  [/^UNBILLED_REST_LINE_AMBIGUOUS\b/,
+   "Nothing was billed. An invoice line for this product has no order line, and the order has the product on more than one order line at different prices. Link the line to its order line first"],
+  [/^BILL_SPLIT_REST_NOT_SUPPORTED\b/,
+   "Nothing was billed. This delivery is billed per payer. Void its Bill Split invoices, then Create Invoice bills it again in full"],
   // create_invoice_from_order refuses an order split across fields (20261022021000): it is billed
   // per field owner. The page offers that path once it sees the order's field allocations.
   [/^ORDER_HAS_FIELD_SPLIT\b/,
@@ -339,6 +385,12 @@ function deliveryCapReason(message: string): string | null {
   return null;
 }
 
+/** create/post_commission_payment refused: payouts are off until M16 (20270309010000); nothing was created or paid. */
+export function isCommissionPayoutsOff(error: unknown): boolean {
+  const message = typeof error === 'string' ? error : (error as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && /^COMMISSION_PAYOUTS_OFF_UNTIL_M16\b/.test(message);
+}
+
 export function sanitizeError(error: unknown): string {
   if (!error) return 'An unexpected error occurred';
 
@@ -355,6 +407,11 @@ export function sanitizeError(error: unknown): string {
     return message.slice('PRODUCT_INACTIVE'.length).replace(/^:\s*/, '').trim()
       || 'This product is turned off. Ask an admin to reactivate it.';
   }
+  if (/^BRAND_(?:DOCUMENT_)?CHANGED:/.test(message)) return 'This brand or link changed. Review it and try again.';
+  if (/^BRAND_DOCUMENT_(?:URL_INVALID|URL_BLOCKED|REASON_REQUIRED|GROUP_CONFLICT|MOVE_CONFLICT|IDENTITY_CHANGED):/.test(message)) {
+    return message.slice(message.indexOf(':') + 1).replace(/\p{Cc}+/gu, ' ').trim();
+  }
+  if (message === 'BRAND_DOCUMENT_INVALID') return 'Check the document link, state and expiration date, then try again.';
   if (/^PRODUCT_DEACTIVATION_BLOCKED(?::|$)/.test(message)) {
     return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
       || 'This product cannot be turned off while required work is open. Review its blockers.';
@@ -366,6 +423,17 @@ export function sanitizeError(error: unknown): string {
       .replace(/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '').trim();
     return detail ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`
       : 'This customer still has open work (orders, deliveries, holds, quotes, invoices, spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.';
+  }
+  // M9 (20270301180000): a refund or returned check the records behind it can't prove; the office records it by hand.
+  const handCheck = /^RECORD_NEEDS_HAND_CHECK:\s*([A-Z_]+)/.exec(message)?.[1];
+  if (handCheck) {
+    return `Nothing was saved. The records this touches don't agree (${handCheck}), so this has to be recorded by hand.${/BALANCE|DRIFT/.test(handCheck) ? " Month-End's prepay check shows the customer's stored and credit totals." : ''}`;
+  }
+  // M9: the server's sentence after the token says what is wrong and what to do.
+  const m9 = /^(?:CHECK_PREPAY_REFUNDED|CHECK_ALREADY_RETURNED|PREPAY_REFUND_EXCEEDS_AVAILABLE|RETURNED_BEFORE_RECEIVED|RETURNED_DATE_IN_FUTURE|PAID_ON_IN_FUTURE|NOT_A_CHECK_PAYMENT|PAYMENT_VOIDED|PAYMENT_UNDATED|RETURN_INVOICE_NOT_OPEN|NOTHING_TO_RETURN|PAYMENT_RETURNED|PAYMENT_PREPAY_REFUNDED|INVOICE_HAS_RETURNED_PAYMENT|PREPAY_CREDIT_HAS_REVERSALS|REFUND_DRAW_INCOMPLETE|REFUND_DUPLICATE_REFERENCE|CREDIT_NOT_FOUND):\s*(.+)$/s.exec(message)?.[1];
+  if (m9) {
+    const detail = m9.split('\n')[0].replace(/;?\s*nothing was saved\.?\s*$/i, '').trim();
+    return `Nothing was saved. ${detail.charAt(0).toUpperCase()}${detail.slice(1)}${/[.!?]$/.test(detail) ? '' : '.'}`;
   }
   // 20270226150000 (Sol round 1 MED): Create Invoice on a job deleted since the screen opened.
   if (/^JOB_DELETED(?::|$)/.test(message)) {
@@ -493,8 +561,8 @@ export function sanitizeError(error: unknown): string {
   // The server sentence names the product and says what to do, so it is kept.
   const chemPriceRequired = message.match(/^CHEM_PRICE_REQUIRED:\s*(.+)$/s);
   if (chemPriceRequired) return `Nothing was saved. ${chemPriceRequired[1].trim()}`;
-  // Unit rules (20270121110000): the server sentence names the unit and what to do, so it is kept.
-  const unitRule = message.match(/^(?:LINE_UNIT_NOT_STOCK_UNIT|PRODUCT_UNIT_HAS_OPEN_LINES|PRODUCT_UNIT_HAS_STOCK|PRODUCT_UNIT_HAS_HISTORY|STOCK_ROW_UNIT_NOT_STOCK_UNIT|PRODUCT_STOCK_UNIT_UNKNOWN|QUOTE_RATE_UNIT_UNKNOWN|QUOTE_STOCK_UNIT_UNKNOWN):\s*(.+)$/s);
+  // Unit rules (20270121110000) and whole-item quantities (20270313003100): the server sentence names the unit and what to do, so it is kept.
+  const unitRule = message.match(/^(?:LINE_UNIT_NOT_STOCK_UNIT|PRODUCT_UNIT_HAS_OPEN_LINES|PRODUCT_UNIT_HAS_STOCK|PRODUCT_UNIT_HAS_HISTORY|STOCK_ROW_UNIT_NOT_STOCK_UNIT|PRODUCT_STOCK_UNIT_UNKNOWN|QUOTE_RATE_UNIT_UNKNOWN|QUOTE_STOCK_UNIT_UNKNOWN|WHOLE_ITEMS_ONLY):\s*(.+)$/s);
   if (unitRule) return `Nothing was saved. ${unitRule[1].trim()}`;
   // Delivery lines match their order lines (20270126110000, KI-161) and fit what was ordered (F05,
   // 20270224100000): the server sentence says what is wrong.
@@ -505,9 +573,18 @@ export function sanitizeError(error: unknown): string {
   if (overActive) {
     return `Nothing was saved. Other open deliveries for this order already hold ${overActive[1]} of this product, so only ${overActive[2]} more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.`;
   }
-  // Partial completion figures (20270203120000, #1942) and completing past the order (F05): the server sentence says what to do.
-  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER):\s*(.+)$/s);
-  if (deliveryQuantities) return `The delivery was not completed. ${deliveryQuantities[1].trim()}`;
+  // Partial completion figures (20270203120000, #1942), completing past the order (F05) and proof taken for another
+  // load (20270309170000): the server sentence says what to do.
+  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER|DELIVERY_NOTHING_DELIVERED|DELIVERY_LOAD_CHANGED|PAPER_TICKET_LOAD_CHANGED|LEFT_AT_SITE_LOAD_CHANGED):\s*(.+)$/s);
+  if (deliveryQuantities) {
+    // The server sentences start lowercase (they follow the token); start the second sentence with a capital,
+    // unless it starts with a mixed-case product name such as "pH Plus" (Sol r5 LOW). DELIVERY_EXCEEDS_ORDER always
+    // starts with the product name, kept exactly as written ("acme Plus": Sol r11 LOW on #2324).
+    const sentence = deliveryQuantities[1].trim();
+    const keepName = message.startsWith('DELIVERY_EXCEEDS_ORDER:');
+    const capital = !keepName && /^[a-z](?![A-Z])/.test(sentence) ? sentence.charAt(0).toUpperCase() : sentence.charAt(0);
+    return `The delivery was not completed. ${capital}${sentence.slice(1)}`;
+  }
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.
   const countRule = message.match(/^(?:CYCLE_COUNT_ROW_ALREADY_OPEN|CYCLE_COUNT_ROW_WRONG_PLACE|CYCLE_COUNT_REOPEN_FORBIDDEN|CYCLE_COUNT_REVERSE_BLOCKED|CYCLE_COUNT_QTY_INVALID):\s*(.+)$/s);
   if (countRule) return `Nothing was saved. ${countRule[1].trim()}`;
@@ -517,6 +594,9 @@ export function sanitizeError(error: unknown): string {
   // Customer receipt refusals (close_delivery_receipt, KI-25): plain words, no database code.
   if (/^DELIVERY_NOT_COMPLETED:.*receipt/s.test(message)) {
     return 'Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.';
+  }
+  if (/^RECEIPT_HANDLED_ADMIN_ONLY(?::|$)/.test(message)) {
+    return 'Nothing was changed. Only an admin can mark a customer receipt handled.';
   }
   if (/^DELIVERY_RECEIPT_CHANGED(?::|$)/.test(message)) {
     return 'Nothing was changed. This delivery\'s receipt was queued again since. Reload the page.';

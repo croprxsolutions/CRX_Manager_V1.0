@@ -7,14 +7,19 @@ const {
   mockFrom,
   mockToast,
   mockCheckMutationResult,
+  mockOcrEnabled,
+  mockDownloadReportPdf,
   selectedTicket,
 } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
+  mockOcrEnabled: vi.fn(),
+  mockDownloadReportPdf: vi.fn(),
   mockToast: vi.fn(),
   mockCheckMutationResult: vi.fn(),
   selectedTicket: {
     id: 'ticket-1',
     ticket_number: 'BT-DELETE-1',
+    ticket_date: '2026-11-26',
     status: 'completed',
     review_status: 'approved',
     order_link_status: 'unlinked',
@@ -84,7 +89,10 @@ vi.mock('../components/ui/Toast', () => ({
 }));
 
 vi.mock('../hooks/useOCRProcessor', () => ({
-  useOCRProcessor: () => ({ isProcessing: false, processedCount: 0 }),
+  useOCRProcessor: (enabled: boolean) => {
+    mockOcrEnabled(enabled);
+    return { isProcessing: false, processedCount: 0 };
+  },
 }));
 
 vi.mock('../hooks/useOCRThresholds', () => ({
@@ -123,6 +131,7 @@ vi.mock('../components/blendtickets/BulkTicketUpload', () => ({ BulkTicketUpload
 vi.mock('../components/blendtickets/ManualTicketCreate', () => ({
   ManualTicketCreate: ({ customers }: { customers: unknown[] }) => <div>manual create: {customers.length} customers</div>,
 }));
+vi.mock('../lib/reportPdf', () => ({ downloadReportPdf: mockDownloadReportPdf }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/errorSanitizer', () => ({
   sanitizeError: (error: unknown) => error instanceof Error ? error.message : 'Request failed',
@@ -245,4 +254,104 @@ describe('BlendTickets list reads every row', () => {
     expect(customers.order).toHaveBeenCalledWith('id');
     expect(mockToast).not.toHaveBeenCalled();
   }, 30000);
+});
+
+describe('BlendTickets scanned-ticket upload is hidden', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('offers Create Manual and no Upload Tickets, also on the empty list', async () => {
+    mockFrom.mockImplementation(() => buildChain({ data: [], error: null }));
+
+    renderPage();
+
+    expect(await screen.findByText('No blend tickets found')).toBeInTheDocument();
+    expect(screen.getByText('Create your first blend ticket to get started')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Upload Tickets/ })).not.toBeInTheDocument();
+    // The OCR queue poll is off while upload is hidden (Taha, #2543).
+    expect(mockOcrEnabled).toHaveBeenCalledWith(false);
+    expect(mockOcrEnabled).not.toHaveBeenCalledWith(true);
+    expect(screen.getAllByRole('button', { name: /Create Manual/ })).toHaveLength(2);
+    // The empty-state button opens the manual form.
+    fireEvent.click(screen.getAllByRole('button', { name: /Create Manual/ })[1]);
+    expect(await screen.findByText(/manual create:/)).toBeInTheDocument();
+  });
+});
+
+describe('BlendTickets office list', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function loadTickets(rows: unknown[]) {
+    const tickets = buildChain({ data: rows, error: null });
+    const empty = buildChain({ data: [], error: null });
+    mockFrom.mockImplementation((table: string) => table === 'blend_tickets' ? tickets : empty);
+  }
+
+  it.each([
+    { chip: /Low Confidence/, count: 1 },
+    { chip: /Duplicates/, count: 2 },
+    { chip: /Needs Review/, count: 1 },
+  ])('shows the full queue named by $chip and clears the filter', async ({ chip, count }) => {
+    loadTickets([
+      { ...selectedTicket, id: 'a', ticket_number: 'DUP-1' },
+      { ...selectedTicket, id: 'b', ticket_number: 'DUP-1', ocr_confidence_score: 40 },
+      { ...selectedTicket, id: 'c', ticket_number: 'UNIQUE', review_status: 'unreviewed' },
+      { ...selectedTicket, id: 'd', ticket_number: 'MANUAL', ocr_confidence_score: 0 },
+    ]);
+    renderPage();
+
+    const quickFilter = await screen.findByRole('button', { name: chip });
+    fireEvent.change(screen.getByPlaceholderText(/Search tickets/i), { target: { value: 'no match' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter by payment status' }), { target: { value: 'billed' } });
+    fireEvent.click(quickFilter);
+
+    expect(quickFilter).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('ticket table: ' + count + ' rows')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Filters' }));
+    expect(quickFilter).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText('ticket table: 4 rows')).toBeInTheDocument();
+  });
+
+  it('finds job and field references with a trimmed search and offers a reset', async () => {
+    loadTickets([
+      { ...selectedTicket, id: 'a', job_number: 'WO-42', field_names: 'North Prairie' },
+      { ...selectedTicket, id: 'b', ticket_number: 'OTHER', field: { field_name: 'South Prairie' } },
+    ]);
+    renderPage();
+
+    const search = await screen.findByRole('searchbox', { name: 'Search tickets' });
+    for (const value of ['  wo-42  ', 'north prairie', 'south prairie']) {
+      fireEvent.change(search, { target: { value } });
+      expect(screen.getByText('ticket table: 1 rows')).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Filters' }));
+    expect(search).toHaveValue('');
+    expect(screen.getByText('ticket table: 2 rows')).toBeInTheDocument();
+  });
+
+  it('shows a retry for an unavailable list and recovers after the next successful read', async () => {
+    loadTickets([selectedTicket]);
+    mockFrom.mockReturnValueOnce(buildChain({ data: null, error: new Error('offline') }));
+    renderPage();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Blend tickets could not be loaded');
+    expect(screen.queryByText('No blend tickets found')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('ticket table: 1 rows')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('exports the saved calendar date to PDF in the office time zone', async () => {
+    loadTickets([selectedTicket]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Download PDF' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Downloaded PDF with 1 ticket(s)'));
+    const [{ columns }] = mockDownloadReportPdf.mock.calls[0];
+    const dateColumn = columns.find((column: { key: string }) => column.key === 'ticket_date');
+    expect(dateColumn.format(selectedTicket.ticket_date)).toBe(new Date(2026, 10, 26).toLocaleDateString());
+  });
 });

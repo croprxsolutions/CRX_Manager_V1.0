@@ -31,7 +31,7 @@ const WORKSPACES: Workspace[] = [
       { path: '/invoices', label: 'Chemical Invoices', roles: ['admin', 'sales_rep'] },
       { path: '/field-invoices', label: 'Field Invoices', roles: ['admin', 'sales_rep'] },
       { path: '/payments', label: 'Record Payments', roles: ['admin', 'sales_rep'] },
-      { path: '/accounts-receivable', label: 'A/R Workspace', roles: ['admin'] },
+      { path: '/accounts-receivable', label: 'Accounts Receivable', roles: ['admin'] },
     ],
   },
   {

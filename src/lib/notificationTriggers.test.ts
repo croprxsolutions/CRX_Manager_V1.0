@@ -27,46 +27,15 @@ vi.mock('./activityLogger', () => ({
 
 // Import after mocks
 import {
-  notifyDriverAssigned,
   notifyOrderStatusChange,
   notifyLargeOrder,
 } from './notificationTriggers';
-import { createNotification, notifyAdmins } from './activityLogger';
+import { notifyAdmins } from './activityLogger';
 
-const mockCreateNotification = vi.mocked(createNotification);
 const mockNotifyAdmins = vi.mocked(notifyAdmins);
 
 beforeEach(() => {
   vi.clearAllMocks();
-});
-
-describe('notifyDriverAssigned', () => {
-  it('creates a notification for the driver', async () => {
-    await notifyDriverAssigned('driver-1', 'DEL-001', 'Smith Farms', '2026-03-01', 'del-uuid');
-
-    expect(mockCreateNotification).toHaveBeenCalledWith(
-      'driver-1',
-      'New Delivery Assigned',
-      expect.stringContaining('DEL-001'),
-      'delivery_assigned',
-      'delivery',
-      'del-uuid'
-    );
-  });
-
-  it('includes customer name in the message', async () => {
-    await notifyDriverAssigned('driver-1', 'DEL-002', 'Jones Ranch', '2026-04-15', 'del-2');
-
-    const message = mockCreateNotification.mock.calls[0][2];
-    expect(message).toContain('Jones Ranch');
-  });
-
-  it('does not throw on failure', async () => {
-    mockCreateNotification.mockRejectedValueOnce(new Error('fail'));
-    await expect(
-      notifyDriverAssigned('d', 'D-1', 'C', '2026-01-01', 'id')
-    ).resolves.toBeUndefined();
-  });
 });
 
 describe('notifyOrderStatusChange', () => {

@@ -9,6 +9,7 @@ const {
   mockProductEq,
   mockToast,
   mockGetCostBasisWorkspace,
+  mockGetProductPriceHistory,
   mockNavigate,
 } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
@@ -19,6 +20,7 @@ const {
   mockProductEq: vi.fn(),
   mockToast: vi.fn(),
   mockGetCostBasisWorkspace: vi.fn(),
+  mockGetProductPriceHistory: vi.fn(),
 }));
 
 const product = {
@@ -185,10 +187,14 @@ vi.mock('../lib/productCostBasis', async (importOriginal) => {
   return { ...actual, getProductCostBasisWorkspace: mockGetCostBasisWorkspace };
 });
 
+vi.mock('../lib/supplierPricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/supplierPricing')>();
+  return { ...actual, getProductPriceHistory: mockGetProductPriceHistory };
+});
+
 vi.mock('../components/products/ProductPriceHistory', () => ({
-  default: ({ costBasisWorkspace, costBasisBusy, reloadToken, onSelectSupplierBasis, onSelectPurchaseBasis }: {
+  default: ({ costBasisWorkspace, costBasisBusy, onSelectSupplierBasis, onSelectPurchaseBasis }: {
     costBasisBusy?: boolean;
-    reloadToken?: number;
     costBasisWorkspace?: {
       supplier_candidates: Array<{ supplier_price_observation_id: string }>;
       purchase_candidates: Array<{ purchase_order_item_id: string }>;
@@ -196,7 +202,7 @@ vi.mock('../components/products/ProductPriceHistory', () => ({
     onSelectSupplierBasis?: (candidate: unknown) => void;
     onSelectPurchaseBasis?: (candidate: unknown) => void;
   }) => (
-    <div data-testid="price-history" data-token={reloadToken} data-busy={String(Boolean(costBasisBusy))}>
+    <div data-testid="price-history" data-busy={String(Boolean(costBasisBusy))}>
       {costBasisWorkspace?.supplier_candidates.map((candidate) => (
         <button key={candidate.supplier_price_observation_id} type="button" onClick={() => onSelectSupplierBasis?.(candidate)}>
           Select supplier evidence
@@ -264,6 +270,7 @@ describe('ProductDetail governed pricing flow', () => {
     routeState = null;
     productLoadResults = [];
     costHistoryLoadResult = { data: [], error: null };
+    mockGetProductPriceHistory.mockResolvedValue({ product_id: product.id, points: [] });
     productMutationResult = { data: [product], error: null };
     mockPreviewPricing.mockResolvedValue({
       change_set_id: '22222222-2222-4222-8222-222222222222',
@@ -441,6 +448,9 @@ describe('ProductDetail governed pricing flow', () => {
         old_cost: 49,
         new_cost: 50,
         change_note: 'Legacy cost update',
+        change_source: 'product_page',
+        price_source: 'Vendor price list',
+        changer: { full_name: 'Casey Green' },
         changed_at: '2026-08-04T12:00:00Z',
       }],
       error: null,
@@ -450,7 +460,53 @@ describe('ProductDetail governed pricing flow', () => {
     render(<ProductDetail />);
 
     expect(await screen.findByText('Legacy cost update')).toBeInTheDocument();
+    expect(screen.getByText('Casey Green · Product page · Vendor price list')).toBeInTheDocument();
     expect(screen.queryByText('Loading cost history…')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['vendor-change-set', 'Vendor price list (recorded as manual override)'],
+    ['newer-manual-change-set', 'manual override'],
+  ])('shows the current basis source from its own change set (%s)', async (changeSetId, label) => {
+    const workspace = await mockGetCostBasisWorkspace();
+    mockGetCostBasisWorkspace.mockResolvedValue({
+      ...workspace,
+      current_basis: {
+        id: 'current-basis', basis_type: 'manual_override', cost_cents: 5000n, reason: 'Updated cost',
+        selection_source: 'product_page', selected_at: '2026-08-05T12:00:00Z',
+      },
+    });
+    mockGetProductPriceHistory.mockResolvedValue({ product_id: product.id, points: [
+      { stream: 'selected_cost_basis', source_id: 'current-basis', provenance: { pricing_change_set_id: changeSetId } },
+    ] });
+    costHistoryLoadResult = { error: null, data: [
+      { id: 'vendor-history', change_set_id: 'vendor-change-set', old_cost: 49, new_cost: 50,
+        price_source: 'Vendor price list', change_source: 'product_page', changed_at: '2026-08-04T12:00:00Z' },
+    ] };
+
+    render(<ProductDetail />);
+    const basis = await screen.findByText('Current selected basis');
+    expect(await within(basis.parentElement!).findByText(label)).toBeInTheDocument();
+  });
+
+  it('Cost History lists only real cost changes, the newest 20, with No cost for a blank side and business-day dates', async () => {
+    // Newest first, as the server sorts: price-only rows (cost unchanged) sit among 30 real changes.
+    const rows = Array.from({ length: 35 }, (_, i) => (i % 7 === 3
+      ? { id: `same-${i}`, old_cost: 50, new_cost: 50, change_note: `Price only ${i}`, changed_at: '2026-08-04T12:00:00Z' }
+      : { id: `real-${i}`, old_cost: i === 0 ? null : 49, new_cost: 50, change_note: `Real change ${i}`,
+        // 03:00 UTC on Aug 5 is still Aug 4 in the business time zone.
+        changed_at: '2026-08-05T03:00:00Z' }));
+    costHistoryLoadResult = { data: rows, error: null };
+    render(<ProductDetail />);
+    const first = await screen.findByText('Real change 0');
+    expect(screen.getAllByText(/^Real change \d+$/)).toHaveLength(20);
+    expect(screen.queryByText(/^Price only/)).not.toBeInTheDocument();
+    expect(screen.getByText('Real change 22')).toBeInTheDocument();
+    expect(screen.queryByText('Real change 23')).not.toBeInTheDocument();
+    const entry = first.parentElement!;
+    expect(within(entry).getByText('No cost')).toBeInTheDocument();
+    expect(within(entry).getByText('8/4/2026')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('$undefined');
   });
 
   it('rejects a direct detail save when the loaded pricing version is stale', async () => {
@@ -1246,7 +1302,79 @@ describe('ProductDetail governed pricing flow', () => {
     expect(await screen.findByText(/could not be refreshed, so the current basis is not shown/i)).toBeInTheDocument();
     expect(screen.queryByText(/Current governed cost baseline:/)).not.toBeInTheDocument();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
-      'warning', 'Product reloaded, but Cost History or Cost Basis did not load. Use Try again on that card.'));
+      'warning', 'Product reloaded, but Cost Basis did not load. Use Try again on that card.'));
+  });
+
+  it('#2308: Cost History does not call the cached basis current while Cost Basis is still refreshing', async () => {
+    mockGetCostBasisWorkspace.mockResolvedValueOnce({
+      enabled: true,
+      product: {
+        id: product.id, product_name: product.product_name, sku: product.sku, pricing_version: product.pricing_version,
+        current_cost_cents: 5_000n, tier1_margin_percent: '20', tier2_margin_percent: '15', tier3_margin_percent: '10',
+      },
+      current_basis: {
+        id: 'basis-current', basis_type: 'migration_baseline', cost_cents: 5_000n, supplier_price_observation_id: null,
+        purchase_order_item_id: null, selection_source: 'migration_baseline', reason: 'Current cost baseline',
+        selected_at: '2026-08-04T12:00:00Z',
+      },
+      supplier_candidates: [],
+      purchase_candidates: [],
+    });
+    render(<ProductDetail />);
+    expect(await screen.findByText(/Current governed cost baseline:/)).toBeInTheDocument();
+    const quotingNotes = screen.getByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Reload Product' })).toBeNull());
+    expect(await screen.findByText(/details are refreshing, so the current basis is not shown yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Current governed cost baseline:/)).not.toBeInTheDocument();
+  });
+
+  it('#2308: a card that fails and recovers before the Product reloads is not reported', async () => {
+    render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    let settleProduct: (value: unknown) => void = () => {};
+    productLoadResults.push(new Promise((resolve) => { settleProduct = resolve; }) as never);
+    costHistoryLoadResult = { data: null, error: { message: 'history unavailable' } };
+    mockToast.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    const stale = await screen.findByText('Could not refresh the cost history. It may be out of date.');
+    costHistoryLoadResult = { data: [], error: null };
+    fireEvent.click(within(stale.parentElement!).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.queryByText('Could not refresh the cost history. It may be out of date.')).toBeNull());
+    settleProduct({ data: product, error: null });
+    await waitFor(() => expect(screen.queryByText(/could not be refreshed, so what is shown may be out of date/i)).toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockToast.mock.calls.filter(([, message]) => String(message).includes('did not load'))).toEqual([]);
+  });
+
+  it('#2308: a failed card is reported when it fails, not after another card recovers', async () => {
+    render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    let settleBasis: (value: unknown) => void = () => {};
+    mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise((resolve) => { settleBasis = resolve; }));
+    costHistoryLoadResult = { data: null, error: { message: 'history unavailable' } };
+    mockToast.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'warning', 'Product reloaded, but Cost History did not load. Use Try again on that card.'));
+    settleBasis(await mockGetCostBasisWorkspace.getMockImplementation()?.());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockToast.mock.calls.filter(([, message]) => String(message).startsWith('Product reloaded'))).toEqual([
+      ['warning', 'Product reloaded, but Cost History did not load. Use Try again on that card.'],
+    ]);
   });
 
   it('a failed cost history read offers Try again, which recovers', async () => {
@@ -1275,7 +1403,7 @@ describe('ProductDetail governed pricing flow', () => {
   it('after a pricing apply the history cards refresh at once and cost-basis selection waits for the new options', async () => {
     render(<ProductDetail />);
     await screen.findByRole('button', { name: 'Select supplier evidence' });
-    expect(screen.getByTestId('price-history')).toHaveAttribute('data-token', '0');
+    expect(mockGetProductPriceHistory).toHaveBeenCalledTimes(1);
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
     fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
@@ -1285,7 +1413,7 @@ describe('ProductDetail governed pricing flow', () => {
     // The cost-basis re-read never answers: the cards must not wait for it (Sol r2 #29).
     mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise(() => {}));
     fireEvent.click(screen.getByRole('button', { name: 'Apply approved changes' }));
-    await waitFor(() => expect(screen.getByTestId('price-history')).toHaveAttribute('data-token', '1'));
+    await waitFor(() => expect(mockGetProductPriceHistory).toHaveBeenCalledTimes(2));
     expect(screen.getByTestId('price-history')).toHaveAttribute('data-busy', 'true');
     expect(screen.getByText('Refreshing the cost-basis options…')).toBeInTheDocument();
   });

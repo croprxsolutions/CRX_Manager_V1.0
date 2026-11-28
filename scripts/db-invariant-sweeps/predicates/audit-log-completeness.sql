@@ -50,6 +50,16 @@
 --     Verify it moves no customer money before allowlisting.
 --   NEVER allowlist a function that genuinely moves money without logging — add
 --   the audit INSERT instead.
+--
+-- ACTOR CONTRACT ROW (financial_audit_log:actor-contract)
+--   The audit row is only useful if it records WHO. Function hashes do not cover
+--   the column default or trigger attachment, so this also flags one row unless
+--   financial_audit_log.actor_user_id is uuid NOT NULL DEFAULT auth.uid() (not
+--   generated/identity) AND trg_fill_audit_actor is attached to that table as an
+--   enabled (origin or always) BEFORE INSERT FOR EACH ROW trigger (tgtype 7, no
+--   WHEN clause, no arguments) calling public._fill_audit_actor(). No other
+--   user-defined INSERT trigger or rewrite rule may intercept audit rows.
+--   Verified live on production and staging 2026-11-24. Never allowlist this row.
 
 WITH money_tables AS (
   SELECT '(payments|vendor_payments|write_offs|prepay_applications|prepay_credits'
@@ -80,4 +90,58 @@ SELECT proname || '(' || args || ')' AS violation_key,
          AS reason
 FROM money_mutators
 WHERE prosrc !~* '\minsert\s+into\s+(public\.)?(financial_audit_log|activity_feed)\M'
+
+UNION ALL
+
+SELECT 'financial_audit_log:actor-contract' AS violation_key,
+       'financial_audit_log must keep its signed-in actor default and its sole user-defined INSERT trigger, with no rewrite rules'::text
+         AS reason
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM pg_attribute a
+        JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+        WHERE a.attrelid = to_regclass('public.financial_audit_log')
+          AND a.attname = 'actor_user_id'
+          AND NOT a.attisdropped
+          AND a.atttypid = 'uuid'::regtype
+          AND a.attnotnull
+          AND a.attgenerated = ''
+          AND a.attidentity = ''
+          -- Deparsing may omit the schema when auth is on search_path. The
+          -- catalog dependency still has to resolve to the real auth.uid().
+          AND pg_get_expr(d.adbin, d.adrelid) IN ('auth.uid()', 'uid()')
+          AND EXISTS (
+                SELECT 1
+                FROM pg_depend dep
+                WHERE dep.classid = 'pg_attrdef'::regclass
+                  AND dep.objid = d.oid
+                  AND dep.refclassid = 'pg_proc'::regclass
+                  AND dep.refobjid = to_regprocedure('auth.uid()')
+              )
+      )
+   OR NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger t
+        WHERE t.tgrelid = to_regclass('public.financial_audit_log')
+          AND t.tgname = 'trg_fill_audit_actor'
+          AND NOT t.tgisinternal
+          AND t.tgfoid = to_regprocedure('public._fill_audit_actor()')
+          AND t.tgenabled IN ('O', 'A')
+          AND t.tgtype = 7  -- ROW(1) | BEFORE(2) | INSERT(4)
+          AND t.tgqual IS NULL
+          AND t.tgnargs = 0
+      )
+   OR EXISTS (
+        SELECT 1
+        FROM pg_trigger t
+        WHERE t.tgrelid = to_regclass('public.financial_audit_log')
+          AND NOT t.tgisinternal
+          AND t.tgname <> 'trg_fill_audit_actor'
+          AND (t.tgtype & 4) = 4  -- INSERT
+      )
+   OR EXISTS (
+        SELECT 1
+        FROM pg_rewrite r
+        WHERE r.ev_class = to_regclass('public.financial_audit_log')
+      )
 ORDER BY violation_key;

@@ -51,7 +51,7 @@ describe('WorkspaceTabs', () => {
   it('hides admin-only tabs from a sales rep', () => {
     mockRole.mockReturnValue('sales_rep');
     renderAt('/invoices');
-    expect(screen.queryByText('A/R Workspace')).not.toBeInTheDocument();
+    expect(screen.queryByText('Accounts Receivable')).not.toBeInTheDocument();
     expect(screen.getByText('Chemical Invoices')).toBeInTheDocument();
   });
 

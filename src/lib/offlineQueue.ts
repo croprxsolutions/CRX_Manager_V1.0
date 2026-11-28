@@ -399,3 +399,24 @@ export async function getQueueSummary(currentUserId: string | null): Promise<Off
     nextAutoSyncAt,
   };
 }
+
+/**
+ * Jobs whose completion this user saved offline and that is still waiting to send
+ * (pending or waiting to retry). A completion that needs attention or was resolved
+ * by the office is left out: it no longer sends by itself.
+ */
+export async function getQueuedJobCompletionIds(currentUserId: string | null): Promise<Set<string>> {
+  const queued = new Set<string>();
+  if (!currentUserId) return queued;
+  for (const action of await getPendingActions()) {
+    if (action.operation !== 'complete_job') continue;
+    // Older saved rows carry the job only in params, as prepareLegacyQueuedAction reads it.
+    const jobId = action.entityId ?? action.params.p_job_id;
+    if (typeof jobId !== 'string' || jobId.length === 0) continue;
+    if (getActionOwnerUserId(action) !== currentUserId) continue;
+    if (action.status === 'needs_attention' || action.status === 'office_resolved') continue;
+    if (action.retryCount >= OFFLINE_MAX_RETRIES) continue;
+    queued.add(jobId);
+  }
+  return queued;
+}

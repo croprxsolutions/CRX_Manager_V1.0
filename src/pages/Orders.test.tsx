@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { buildPaginatedQueryChain as buildChain, type QueryResult } from '../test-utils/supabaseChain';
 
 const {
@@ -9,11 +9,13 @@ const {
   mockRpc,
   mockToast,
   mockCheckMutationResult,
+  mockAuth,
 } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockRpc: vi.fn(),
   mockToast: vi.fn(),
   mockCheckMutationResult: vi.fn(),
+  mockAuth: { role: 'admin', deniedPages: [] as string[], profile: { id: 'admin-1', role: 'admin' } },
 }));
 
 vi.mock('../lib/db', () => ({
@@ -27,7 +29,7 @@ vi.mock('../lib/db', () => ({
 }));
 
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ role: 'admin', deniedPages: [] }),
+  useAuth: () => mockAuth,
 }));
 
 vi.mock('../components/ui/Toast', () => ({
@@ -39,22 +41,26 @@ vi.mock('../components/ui/PageHeader', () => ({
 }));
 // The table shows each row's tick box (the first column) and the filters, so selection can be driven.
 vi.mock('../components/ui/DataTable', () => ({
-  default: ({ data, columns, filters, loading, loadError, searchValue, onSearchChange }: {
+  default: ({ data, columns, filters, loading, loadError, searchValue, onSearchChange, emptyTitle, emptyAction, onRowClick }: {
     data: Array<{ id: string; order_number: string }>;
+    onRowClick?: (row: { id: string; order_number: string }) => void;
     searchValue?: string;
     onSearchChange?: (v: string) => void;
     columns: Array<{ key: string; render?: (row: unknown) => ReactNode }>;
     filters?: ReactNode;
     loading?: boolean;
     loadError?: boolean;
+    emptyTitle?: string;
+    emptyAction?: ReactNode;
   }) => (
     <div>
       <input aria-label="Search orders or products…" value={searchValue ?? ''} onChange={(e) => onSearchChange?.(e.target.value)} />
       {filters}
       {loadError ? <span>could not be loaded</span> : <span>{`${data.length} rows shown`}</span>}
+      {!loading && !loadError && data.length === 0 && <div>{emptyTitle}{emptyAction}</div>}
       {loading ? <span>rows loading</span> : data.map((row) => (
         <div key={row.id}>
-          {row.order_number}
+          <button type="button" onClick={() => onRowClick?.(row)}>{row.order_number}</button>
           {columns[0].key === '_select' && columns[0].render?.(row)}
         </div>
       ))}
@@ -222,6 +228,34 @@ describe('Orders list pages through the database', () => {
     await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_keyset_page', expect.objectContaining({ p_needs_split_billing: true })));
     expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Select All 120/ })).not.toBeInTheDocument();
+  });
+
+  it('an empty list says the filters hide the orders, and Clear filters brings the whole list back', async () => {
+    const all = Array.from({ length: 3 }, (_, i) => order(i));
+    mockRpc.mockImplementation((_fn: string, args: PageArgs & { p_status?: string; p_search?: string }) =>
+      Promise.resolve({ data: pageOf(args.p_status || args.p_search ? [] : all, args), error: null }));
+    renderPage();
+    await screen.findByText('3 rows shown');
+
+    fireEvent.change(screen.getByLabelText('Filter by order status'), { target: { value: 'voided' } });
+    fireEvent.change(screen.getByLabelText('Search orders or products…'), { target: { value: 'nothing' } });
+    expect(await screen.findByText('No orders match your search or filters')).toBeInTheDocument();
+    expect(screen.queryByText('No orders yet')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(await screen.findByText('3 rows shown')).toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by order status')).toHaveValue('');
+    expect(screen.getByLabelText('Search orders or products…')).toHaveValue('');
+    const lastArgs = mockRpc.mock.calls[mockRpc.mock.calls.length - 1][1];
+    expect(lastArgs.p_status).toBeUndefined();
+    expect(lastArgs.p_search).toBeUndefined();
+  });
+
+  it('says "No orders yet" only when no search or filter is set', async () => {
+    serveOrders([]);
+    renderPage();
+    expect(await screen.findByText('No orders yet')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument();
   });
 
   it('a failed read says so and shows no count or total', async () => {
@@ -454,5 +488,84 @@ describe('Orders bulk-delete lifecycle guard', () => {
       );
     });
     expect(mockCheckMutationResult).not.toHaveBeenCalled();
+  });
+});
+
+describe('Orders list remembers the view and offers Mine to a sales rep', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.role = 'admin';
+    mockAuth.profile = { id: 'admin-1', role: 'admin' };
+  });
+
+  it('Back from an order brings back the search and filters', async () => {
+    function OrderPage() {
+      const navigate = useNavigate();
+      return <button type="button" onClick={() => navigate(-1)}>Back to orders</button>;
+    }
+    serveOrders(Array.from({ length: 3 }, (_, i) => order(i)));
+    render(
+      <MemoryRouter initialEntries={['/orders']}>
+        <Routes>
+          <Route path="/orders" element={<Orders />} />
+          <Route path="/orders/:id" element={<OrderPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText('3 rows shown');
+    fireEvent.change(screen.getByLabelText('Filter by order status'), { target: { value: 'fulfilled' } });
+    fireEvent.change(screen.getByLabelText('Search orders or products…'), { target: { value: 'ORD-1' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'ORD-1' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to orders' }));
+
+    expect(await screen.findByLabelText('Filter by order status')).toHaveValue('fulfilled');
+    expect(screen.getByLabelText('Search orders or products…')).toHaveValue('ORD-1');
+    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_keyset_page', expect.objectContaining({
+      p_status: 'fulfilled', p_search: 'ORD-1',
+    })));
+  });
+
+  it('the office sees no Mine / All toggle', async () => {
+    serveOrders([order(1)]);
+    renderPage();
+    await screen.findByText('1 rows shown');
+    expect(screen.queryByRole('group', { name: 'Show my orders or all orders' })).not.toBeInTheDocument();
+  });
+
+  it('Mine shows a rep the orders they sold or whose grower is theirs, with that count and total', async () => {
+    mockAuth.role = 'sales_rep';
+    mockAuth.profile = { id: 'rep-1', role: 'sales_rep' };
+    const all = [
+      { ...order(1), salesman_id: 'rep-1', total_price: 10.005 },
+      { ...order(2), salesman_id: 'rep-2', customer_id: 'my-grower', total_price: 20 },
+      { ...order(3), salesman_id: 'rep-2', customer_id: 'their-grower', total_price: 30 },
+    ];
+    serveOrders(all);
+    mockFrom.mockImplementation(() => buildChain({ data: [{ id: 'my-grower' }], error: null }));
+    renderPage();
+    await screen.findByText('3 rows shown');
+    const group = screen.getByRole('group', { name: 'Show my orders or all orders' });
+    expect(within(group).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Mine' }));
+    expect(await screen.findByText('2 rows shown')).toBeInTheDocument();
+    expect(screen.getByText('ORD-1')).toBeInTheDocument();
+    expect(screen.getByText('ORD-2')).toBeInTheDocument();
+    expect(screen.queryByText('ORD-3')).not.toBeInTheDocument();
+    // Each order rounded to whole cents and summed, as the database totals the full list.
+    expect(screen.getByText('Showing 1–2 of 2 orders · $30.01 total')).toBeInTheDocument();
+    expect(mockFrom).toHaveBeenCalledWith('customers');
+
+    fireEvent.click(within(group).getByRole('button', { name: 'All' }));
+    expect(await screen.findByText('3 rows shown')).toBeInTheDocument();
+  });
+
+  it('Mine fails closed: a failed read of the rep\'s growers shows "could not be loaded", never a short list', async () => {
+    mockAuth.role = 'sales_rep';
+    mockAuth.profile = { id: 'rep-1', role: 'sales_rep' };
+    serveOrders([order(1)]);
+    mockFrom.mockImplementation(() => buildChain({ data: null, error: { message: 'timeout' } }));
+    render(<MemoryRouter initialEntries={['/orders?mine=1']}><Orders /></MemoryRouter>);
+    expect(await screen.findByText('could not be loaded')).toBeInTheDocument();
   });
 });

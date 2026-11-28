@@ -21,8 +21,9 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { evaluateMigrationApply, normalizeMigName, ownerApprovalNeeded, resolveMigrationSource, originFetchAgeMs } from "./migration-apply-lib.mjs";
 import { checkWrappable } from "./migration-wrappability-lib.mjs";
-import { evaluateLandingGate, hotfixStampProblem, readyToMergeProblem } from "./migration-landing-gate-lib.mjs";
+import { evaluateLandingGate, hotfixStampProblem, readyToMergeProblem, tahaUnavailableLabelled } from "./migration-landing-gate-lib.mjs";
 import { cancelCodeRabbitSkip, recordCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
+import { recordTahaLaneOverride } from "./taha-lane-lib.mjs";
 import { generateKeyPairSync } from "node:crypto";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
@@ -1632,7 +1633,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   const gateDir = tempDir("crx-landing-gate-");
   mkdirSync(path.join(gateDir, ".claude", "session-state"), { recursive: true });
   const goodProof = { codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
-    head_sha: HEAD_SHA, base_sha: BASE_SHA, timestamp: new Date().toISOString() };
+    head_sha: HEAD_SHA, base_sha: BASE_SHA, timestamp: new Date().toISOString(), review_ref: "origin/main", release_rules: false };
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`), JSON.stringify(goodProof));
   const readyPr = {
     number: 900, url: "https://github.com/masonwells1/CRX_Manager_V1.0/pull/900",
@@ -1664,7 +1665,8 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false, threadsHead = HEAD_SHA,
     crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false,
     trees = { main: ['20260101000000_old.sql'], staging: ['20260101000000_old.sql'] }, treesError = null,
-    workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40), stagingTip = "d".repeat(40), stagingBehind = "0", openStaging = [] } = {}) => evaluateLandingGate({
+    workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40), stagingTip = "d".repeat(40), stagingBehind = "0", openStaging = [],
+    posts = null, timeline = [], prLabels = [], pushes = [{ after: HEAD_SHA, timestamp: new Date(Date.now() - 20 * 60_000).toISOString() }] } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
       const key = args.join(" ");
@@ -1679,6 +1681,22 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       throw new Error(`unexpected git ${key}`);
     },
     runGh: (args) => {
+      // The PR comment telling Taha an override let the apply through: `posts` records it, or (null) the post fails.
+      // Taha's taha-unavailable label: the PR's issue timeline and current labels.
+      if (args[0] === "api" && String(args[1]).includes(`/issues/${pr.number ?? 900}/timeline?`)) {
+        if (timeline instanceof Error) throw timeline;
+        return JSON.stringify(timeline);
+      }
+      if (args[0] === "api" && String(args[1]).includes(`/issues/${pr.number ?? 900}/labels?`)) return JSON.stringify(prLabels);
+      if (args[0] === "api" && String(args[1]).includes("/activity?ref=refs%2Fheads%2F")) {
+        if (pushes instanceof Error) throw pushes;
+        return JSON.stringify(pushes);
+      }
+      if (args[0] === "api" && args[1] === "-X" && args[2] === "POST") {
+        if (!posts) throw new Error("HTTP 502");
+        posts.push(args);
+        return "4242\n";
+      }
       if (args[0] === "api" && args[1] === "graphql" && args.some((a) => /pullRequests\(baseRefName:\\?"staging/.test(String(a)))) {
         if (openStaging instanceof Error) throw openStaging;
         return JSON.stringify({ data: { repository: { pullRequests: { totalCount: openStaging.length, nodes: openStaging.map((paths) => ({ files: { totalCount: paths.length, nodes: paths.map((p) => ({ path: p })) } })) } } } });
@@ -1868,6 +1886,122 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ pr: { headRefName: "release/next", comments: [] } }), "Taha hasn't given the go-ahead", "the release too");
   // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
   ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");
+  // Mason, 2026-11-25: release/next skips the 4-hour hold (its changes were each held on staging),
+  // and his `taha override #<PR> <code> unavailable: <reason>` stands in for Taha's go-ahead and the hold; a plain override does not.
+  {
+    const young = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    refused(gate({ pr: { headRefName: "release/next", createdAt: young, comments: [] } }), "Taha hasn't given the go-ahead",
+      "a young release is not refused for the 4-hour hold, only for the go-ahead");
+    const asked = gate({ pr: { createdAt: young, comments: [] } });
+    refused(asked, "4-hour review hold", "a young hotfix is still held");
+    const code = /taha override #900 (\d{6})/.exec(String(asked.reason))?.[1];
+    ok(Boolean(code), "the refusal hands Mason an override code for this PR");
+    const stateDir = path.join(gateDir, ".claude", "session-state");
+    const overrideFile = path.join(stateDir, "taha-lane-override-pr900.json");
+    ok(/unavailable: <why Taha can't>/.test(String(asked.reason)), "and says it needs Taha to be unavailable");
+    ok(recordTahaLaneOverride({ dirs: [stateDir], pullRequest: 900, code }).ok === true, "Mason's plain override records");
+    try {
+      refused(gate({ pr: { createdAt: young, comments: [] } }), "4-hour review hold", "a plain override does not lift the hold on a live apply");
+      refused(gate({ pr: { headRefName: "release/next", comments: [] } }), "Taha hasn't given the go-ahead", "nor Taha's go-ahead on the release");
+    } finally { rmSync(overrideFile, { force: true }); }
+    const code2 = /taha override #900 (\d{6})/.exec(String(gate({ pr: { createdAt: young, comments: [] } }).reason))?.[1];
+    ok(recordTahaLaneOverride({ dirs: [stateDir], pullRequest: 900, code: code2, tahaUnavailable: "out sick today" }).ok === true, "Mason's unavailable override records");
+    try {
+      // Taha's audit (2026-11-25): an override-allowed live apply tags him on the PR, or is refused.
+      refused(gate({ pr: { createdAt: young, comments: [] } }), "comment telling Taha could not be posted", "no comment posted → the apply is refused");
+      const posts = [];
+      ok(gate({ pr: { createdAt: young, comments: [] }, posts }).ok === true, "Mason's override lifts the hold and the go-ahead on a hotfix");
+      ok(posts.length === 1 && posts[0].includes("repos/{owner}/{repo}/issues/900/comments")
+        && posts[0].some((a) => a.startsWith("body=@TahaKhanAbdalli") && a.includes(HEAD_SHA) && !a.includes("out sick today")), "and tags Taha on the PR, naming the head but not Mason's private reason (Sol)");
+      ok(gate({ pr: { createdAt: young, comments: [] }, posts }).ok === true && posts.length === 1, "Taha is told once per migration, not on every retry");
+      // The release gets its own first post (Sol): clear the hotfix's receipt.
+      const saved = JSON.parse(readFileSync(overrideFile, "utf8"));
+      writeFileSync(overrideFile, JSON.stringify({ ...saved, tahaToldApplyFor: [] }));
+      ok(gate({ pr: { headRefName: "release/next", comments: [] }, posts }).ok === true, "and on the release");
+      ok(posts.length === 2 && posts[1].some((a) => a.startsWith("body=@TahaKhanAbdalli")), "which tags Taha too");
+      ok(gate({ pr: { comments: [] }, migName: "20260101000001_second", posts }).ok === true, "a second migration on the same head applies");
+      ok(posts.length === 3 && posts[2].some((a) => a.includes("20260101000001_second")), "is told to Taha too, by name (Luna, round 2)");
+      ok(JSON.parse(readFileSync(overrideFile, "utf8")).kind === "apply", "the override came from the apply refusal's code (Sol)");
+      const quiet = [];
+      ok(gate({ posts: quiet }).ok === true && quiet.length === 0, "when Taha's own go-ahead lets it through, no override comment");
+      ok(gate({ pr: { comments: [] }, git: { "rev-parse HEAD": `${"e".repeat(40)}\n` } }).ok === false, "but never the other gates");
+      refused(gate({ pr: { number: 901, comments: [] } }), "Taha hasn't given the go-ahead", "another PR is not covered");
+      // Live applies: the override covers only the head it was issued for (Luna, PR 1 round 1).
+      const pushed = "f".repeat(40);
+      refused(gate({ pr: { comments: [], headRefOid: pushed }, git: { "rev-parse HEAD": `${pushed}\n` }, posts }), "Taha hasn't given the go-ahead", "a later push needs a new code");
+    } finally { rmSync(overrideFile, { force: true }); }
+    refused(gate({ pr: { comments: [] } }), "Taha hasn't given the go-ahead", "without the override the go-ahead is needed again");
+  }
+  // Taha, 2026-11-26: his own taha-unavailable label stands in for his go-ahead and the hold, 30 minutes, this head only.
+  {
+    const young = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const now = Date.now();
+    const label = { name: "taha-unavailable" };
+    const added = (over = {}) => ({ event: "labeled", label, actor: { login: "TahaKhanAbdalli", id: 50602678 }, created_at: new Date(now - 5 * 60_000).toISOString(), ...over });
+    const commit = { event: "committed", sha: HEAD_SHA };
+    const pushed = (minutesAgo, after = HEAD_SHA) => ({ after, timestamp: new Date(now - minutesAgo * 60_000).toISOString() });
+    const t = (events, labels = [label], pushes = [pushed(20)]) => ({ events, labels, pushes, head: HEAD_SHA, now });
+    ok(tahaUnavailableLabelled(t([commit, added()])) === true, "Taha's fresh label after the head counts");
+    ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "MasonWells1", id: 1 } })])) === false, "Mason's shared account doesn't count");
+    ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "TahaKhanAbdalli", id: 999 } })])) === false, "another account under Taha's old login doesn't count (Luna, PR 3)");
+    ok(tahaUnavailableLabelled(t([commit, added({ actor: { login: "taha-renamed", id: 50602678 } })])) === true, "his account after a rename still counts");
+    ok(tahaUnavailableLabelled(t([commit, added({ created_at: new Date(now - 31 * 60_000).toISOString() })])) === false, "older than 30 minutes doesn't count");
+    ok(tahaUnavailableLabelled(t([added(), commit], [label], [pushed(2)])) === false, "a label added before the latest push doesn't count");
+    ok(tahaUnavailableLabelled(t([commit, added()], [])) === false, "a label since removed doesn't count");
+    // Luna, PR 3: head A, label, push B, force-push back to A.
+    const other = { event: "committed", sha: "b".repeat(40) };
+    ok(tahaUnavailableLabelled(t([commit, added(), other, { event: "head_ref_force_pushed" }], [label], [pushed(2), pushed(8, "b".repeat(40)), pushed(20)])) === false, "a force-push back to an older head needs the label again");
+    ok(tahaUnavailableLabelled(t([commit, added(), other, commit], [label], [pushed(2), pushed(20)])) === false, "the head's latest arrival is what counts");
+    ok(tahaUnavailableLabelled(t([commit, other, { event: "head_ref_force_pushed" }, added()], [label], [pushed(10), pushed(15, "b".repeat(40))])) === true, "a label after the force-push counts");
+    ok(tahaUnavailableLabelled(t([commit, added(), added({ event: "unlabeled" })])) === false, "an unlabel after it voids it");
+    ok(tahaUnavailableLabelled(t([commit, added({ label: { name: "hotfix-backport" } })])) === false, "another label doesn't count");
+    ok(tahaUnavailableLabelled(t([added(), commit])) === true, "a future-dated commit listed after the label doesn't hide it: push time decides (Luna, PR 3 round 4)");
+    ok(tahaUnavailableLabelled({ events: undefined, labels: [label], head: HEAD_SHA, now }) === false, "an unreadable timeline fails closed");
+    // Taha's review of #2668, HIGH 1: the timeline orders commits by commit date; a commit made before his label but
+    // pushed after it sits before the label there, so push time decides.
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2)])) === false, "a head pushed after his label doesn't count, whatever the timeline order");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2), pushed(20)])) === false, "the head's latest push decides");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [pushed(2, "b".repeat(40)), pushed(20)])) === false, "a newer push of another head: the branch moved on, so it doesn't count (advisory Sol, PR 3)");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], [])) === false, "no push of this head found doesn't count");
+    ok(tahaUnavailableLabelled(t([commit, added()], [label], null)) === false, "unreadable push activity fails closed");
+
+    const quiet = [];
+    ok(gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added()], prLabels: [label], posts: quiet }).ok === true,
+      "Taha's label lifts the 4-hour hold and the go-ahead on a hotfix");
+    ok(quiet.length === 0, "and no override comment is posted (the signal came from him)");
+    ok(gate({ pr: { headRefName: "release/next", comments: [] }, timeline: [commit, added()], prLabels: [label] }).ok === true, "and on the release");
+    const asked = gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added({ actor: { login: "masonwells1" } })], prLabels: [label] });
+    refused(asked, "4-hour review hold", "someone else's label does not");
+    ok(/taha-unavailable/.test(String(asked.reason)) && /unavailable: <why Taha can't>/.test(String(asked.reason)), "the refusal names the label and keeps Mason's override as the backup");
+    refused(gate({ pr: { createdAt: young, comments: [] }, timeline: new Error("HTTP 502"), prLabels: [label] }), "4-hour review hold", "an unreadable timeline fails closed");
+    refused(gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added()], prLabels: [label], pushes: [{ after: HEAD_SHA, timestamp: new Date().toISOString() }] }), "4-hour review hold",
+      "the gate reads push times: a head pushed after the label is refused (Taha, #2668 HIGH 1)");
+    refused(gate({ pr: { createdAt: young, comments: [] }, timeline: [commit, added()], prLabels: [label], pushes: new Error("HTTP 502") }), "4-hour review hold", "unreadable push activity fails closed");
+    const full = Array.from({ length: 100 }, () => ({ event: "commented" }));
+    refused(gate({ pr: { createdAt: young, comments: [] }, timeline: [...full.slice(0, 98), commit, added()], prLabels: [label] }), "4-hour review hold",
+      "a full first page (more may follow, never ending here) is never read as complete");
+    ok(gate({ pr: { comments: [] }, git: { "rev-parse HEAD": `${"e".repeat(40)}\n` }, timeline: [commit, added()], prLabels: [label] }).ok === false, "but never the other gates");
+  }
+  // A proof made under the release-only rules proves only the release PR, never a hotfix (Sol r8, #2226).
+  {
+    const proofFile = path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`);
+    writeFileSync(proofFile, JSON.stringify({ ...goodProof, review_ref: "origin/main", release_rules: true }));
+    try {
+      refused(gate(), "no fresh gpt-6.2-sol/high proof", "a release-rules proof does not prove a hotfix");
+      ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "a release-rules proof still proves the release PR");
+      writeFileSync(proofFile, JSON.stringify({ ...goodProof, review_ref: "origin/main", release_rules: false }));
+      ok(gate().ok === true, "a hotfix's own main review still proves it");
+      // Nor a proof that records no review kind, or a staging review (Sol r1 HIGH 3 and LOW on the follow-up).
+      const { review_ref: _ref, release_rules: _rules, ...unkinded } = goodProof;
+      for (const [proof, why] of [[unkinded, "a proof with no review kind"], [{ ...goodProof, review_ref: "origin/staging" }, "a staging review"]]) {
+        writeFileSync(proofFile, JSON.stringify(proof));
+        refused(gate(), "no fresh gpt-6.2-sol/high proof", `${why} does not prove a hotfix`);
+        refused(gate({ pr: { headRefName: "release/next" } }), "no fresh gpt-6.2-sol/high proof", `${why} does not prove the release`);
+      }
+    } finally {
+      writeFileSync(proofFile, JSON.stringify(goodProof));
+    }
+  }
   // The name alone is not enough: main's release guard must have passed on this head.
   const build = readyPr.statusCheckRollup[0];
   const guardRun = readyPr.statusCheckRollup[1];
@@ -2005,7 +2139,10 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   const replyDir = tempDir("crx-apply-reply-");
   let replies = 0;
   const markFor = (content) => {
-    const f = path.join(replyDir, `t${replies++}.jsonl`);
+    // Claude Code names a transcript by its session id; the apply checks the receipt against it.
+    const tdir = path.join(replyDir, `t${replies++}`);
+    mkdirSync(tdir, { recursive: true });
+    const f = path.join(tdir, "sess-mason-chat-0001.jsonl");
     const said = (id, text) => JSON.stringify({ type: "assistant", message: { id, role: "assistant", content: [{ type: "text", text }] } });
     writeFileSync(f, `${said("m1", "Approve this ONE change ...")}\n`);
     const mark = replyMark(f, "approve 482913");
@@ -2153,15 +2290,32 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   }) }), ACCESS), "picture or file", "an approval whose reply came with a picture is refused at the apply (Codex P1, PR #900)");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {}, { replyMark: undefined }) }), ACCESS),
     "does not say where his reply is", "an approval that does not say where his reply is is refused");
-  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {
-    issuedAt: new Date(Date.now() - OWNER_APPROVAL_MAX_AGE_MS - 2 * 60_000).toISOString(),
-    expiresAt: new Date(Date.now() - 2 * 60_000).toISOString(),
-  }, { approvedAt: new Date(Date.now() - OWNER_APPROVAL_MAX_AGE_MS - 60_000).toISOString() }) }), ACCESS),
-    "24 hours after Mason replied", "an approval more than 24 hours after his reply is refused");
-  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS, { ownerSessionId: "sess-other-chat-0002" }),
-    "different conversation", "an approval given in another conversation is refused by the session applying it");
-  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS, { ownerSessionId: undefined }),
-    "applying session is unknown", "an apply with no session id fails closed");
+  { // One clock reading: separate Date.now() calls a millisecond apart made the request over 24h long (flaky on Windows CI).
+    const t = Date.now();
+    denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {
+      issuedAt: new Date(t - OWNER_APPROVAL_MAX_AGE_MS - 2 * 60_000).toISOString(),
+      expiresAt: new Date(t - 2 * 60_000).toISOString(),
+    }, { approvedAt: new Date(t - OWNER_APPROVAL_MAX_AGE_MS - 60_000).toISOString() }) }), ACCESS),
+      "24 hours after Mason replied", "an approval more than 24 hours after his reply is refused");
+  }
+  // Mason, 2026-11-23: his yes carries to whichever session lands it (the merge captain).
+  allows(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS, { ownerSessionId: "sess-other-chat-0002" }),
+    "an approval given in another conversation is accepted by the session applying it");
+  {
+    // ...and from another checkout: the request was built, and answered, in the worker's worktree.
+    const root = ownerFixture(ACCESS);
+    const sibling = tempDir("crx-captain-sibling-");
+    const sibState = path.join(sibling, ".claude", "session-state");
+    mkdirSync(sibState, { recursive: true });
+    const approval = approvalFor(ACCESS);
+    writeFileSync(path.join(sibState, `owner-approval-${SAFE}.json`), JSON.stringify(approval), "utf8");
+    const list = () => `worktree ${root}\nHEAD ${"a".repeat(40)}\n\nworktree ${sibling}\nHEAD ${"b".repeat(40)}\n`;
+    allows(scriptDoor(root, ACCESS, { gitWorktreeList: list, ownerSessionId: "sess-captain-0003" }),
+      "an approval saved in another checkout of the repository is found by the captain's apply");
+    writeFileSync(path.join(sibState, `owner-approval-used-${JSON.parse(approval.payload).nonce}.json`), "{}", "utf8");
+    denies(scriptDoor(root, ACCESS, { gitWorktreeList: list }), "already used", "and its use there is seen too, so it still works once");
+    rmSync(sibling, { recursive: true, force: true });
+  }
   // Mason, 2026-11-20: his yes survives the PR head moving; the exact SQL is what it binds.
   allows(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { prHead: "f".repeat(40) }) }), ACCESS),
     "an approval given at an earlier head still applies the same SQL");

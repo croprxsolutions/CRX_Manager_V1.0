@@ -18,7 +18,7 @@ The earlier third-party principles and Karpathy experiment-loop passage Mason as
 ## Make Surgical Changes
 
 - Every changed line should trace to the requested outcome, a required test, or a directly exposed defect.
-- Match existing style and reuse shared helpers, types, components, and database patterns.
+- Match existing style and reuse shared helpers, types, components, and database patterns: shared types from `src/types/index.ts`, `ConfirmModal` (never `confirm()`/`alert()`), toasts, Lucide icons, Tailwind CSS, and Sentry through `src/lib/sentry` (moved from `AGENTS.md` › CRX Hard Rules, 2026-11-25).
 - Do not add `any` or `@ts-ignore`. The existing `src/lib/reportPdf.ts` `columnStyles` cast is the one narrow compatibility exception; do not copy it elsewhere.
 - Do not reformat or refactor adjacent code merely because you would write it differently.
 - Remove imports, branches, helpers, and tests made obsolete by your change. Mention unrelated dead code; do not remove it unless asked.

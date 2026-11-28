@@ -41,7 +41,8 @@ const labels = () =>
 describe('jobEpaText', () => {
   it('kept number, kept with no number, not recorded, else the catalog', () => {
     expect(jobEpaText({ epa_registration: '100-1', not_recorded: false }, '100-9')).toBe('100-1');
-    expect(jobEpaText({ epa_registration: null, not_recorded: false }, '200-2')).toBe('Unknown');
+    expect(jobEpaText({ epa_registration: null, not_recorded: false }, '200-2')).toBe('—');
+    expect(jobEpaText({ epa_registration: '  ', not_recorded: false }, '200-2')).toBe('—');
     expect(jobEpaText({ epa_registration: null, not_recorded: true }, '300-9')).toBe('Not recorded');
     expect(jobEpaText({ epa_registration: '9-9', not_recorded: true }, '300-9')).toBe('Not recorded');
     expect(jobEpaText(undefined, '400-4')).toBe('400-4');
@@ -65,7 +66,7 @@ describe('applyKeptEpa', () => {
   it('replaces the catalog number with the kept one and asks only for the printed products', async () => {
     const m = labels();
     await applyKeptEpa('job-1', m);
-    expect([...m.values()].map((l) => l.epa_registration)).toEqual(['100-1', 'Unknown', 'Not recorded', '400-4']);
+    expect([...m.values()].map((l) => l.epa_registration)).toEqual(['100-1', '—', 'Not recorded', '400-4']);
     expect(db.keptFilter).toEqual(['p-corrected', 'p-none', 'p-old', 'p-open']);
   });
 
@@ -112,7 +113,7 @@ describe('proof email EPA line (KI-195)', () => {
     weather: null,
   });
 
-  it('prints the kept number, Unknown, Not recorded and an unlocked catalog number in the HTML and text', () => {
+  it('prints the kept number, a dash for no number, Not recorded and an unlocked catalog number in the HTML and text', () => {
     const draft = buildProofDraft(
       data([
         product('Kept', { epa_registration: '100-1', epa_kept: true, epa_not_recorded: false }),
@@ -122,15 +123,17 @@ describe('proof email EPA line (KI-195)', () => {
         product('OpenBlank', { epa_registration: '  ', epa_kept: false, epa_not_recorded: false }),
       ]),
     );
-    expect(draft.products.map((p) => p.epa)).toEqual(['100-1', 'Unknown', 'Not recorded', '400-4', null]);
+    expect(draft.products.map((p) => p.epa)).toEqual(['100-1', '—', 'Not recorded', '400-4', null]);
     const html = renderProofHtml({ customerName: 'Farm', draft });
-    for (const t of ['EPA Reg. No. 100-1', 'EPA Reg. No. Unknown', 'EPA Reg. No. Not recorded', 'EPA Reg. No. 400-4']) {
+    for (const t of ['EPA Reg. No. 100-1', 'EPA Reg. No. —', 'EPA Reg. No. Not recorded', 'EPA Reg. No. 400-4']) {
       expect(html).toContain(t);
     }
     expect(html.match(/EPA Reg\. No\./g)).toHaveLength(4);
     const text = renderProofText({ customerName: 'Farm', draft });
     expect(text).toContain('    EPA Reg. No. 100-1');
+    expect(text).toContain('    EPA Reg. No. —');
     expect(text).toContain('    EPA Reg. No. Not recorded');
+    expect(html + text).not.toContain('Unknown');
   });
 
   it('prints no EPA line from a database that does not yet send epa_kept', () => {

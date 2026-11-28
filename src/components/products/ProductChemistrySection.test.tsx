@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -26,8 +26,9 @@ const costs = (lbPerGal: number) => ({
   parent_figures: null, sizes: [],
 });
 
-const section = (refreshKey: string, isAdmin = true) => (
-  <ProductChemistrySection parentId="par1" parentVersion={1} refreshKey={refreshKey} isAdmin={isAdmin} profileId="u1" busy={false} />
+const section = (refreshKey: string, isAdmin = true, weightReviewRevision = 0) => (
+  <ProductChemistrySection parentId="par1" parentVersion={1} refreshKey={refreshKey} weightReviewRevision={weightReviewRevision}
+    isAdmin={isAdmin} profileId="u1" busy={false} />
 );
 
 const ingredientRow = (id: string, name: string) => ({
@@ -61,6 +62,33 @@ describe('ProductChemistrySection', () => {
     rerender(section('["t1",1,1]'));
     expect(await screen.findByText('Weight per gallon: 12 lb/gal (approved)')).toBeInTheDocument();
     await waitFor(() => expect(mocks.fetchActiveCostsWithVersion).toHaveBeenCalledTimes(2));
+  });
+
+  it('re-reads weight and cost after a brand change without reloading the other chemistry data', async () => {
+    const sizes = [{ product_id: 'size-1', product_name: 'Small jug', is_active: true, priced_unit: 'Gal',
+      cost_per_base: null, cost_reason: null, figures: [] }];
+    mocks.fetchActiveCostsWithVersion.mockResolvedValueOnce({ costs: { ...costs(10), sizes }, refVersion: 0 })
+      .mockResolvedValueOnce({ costs: { ...costs(12), sizes }, refVersion: 0 })
+      .mockResolvedValueOnce({ costs: { ...costs(13), sizes }, refVersion: 1 });
+    const { rerender } = render(section('unchanged'));
+    expect(await screen.findByText('Weight per gallon: 10 lb/gal (approved)')).toBeInTheDocument();
+    const sizesPanel = screen.getByText('Each size').closest('details');
+    if (!sizesPanel) throw new Error('Expected size disclosure');
+    sizesPanel.open = true;
+    fireEvent(sizesPanel, new Event('toggle'));
+    const label = 'Reference size (no active bulk size)';
+    fireEvent.change(screen.getByLabelText(label), { target: { value: 'size-1' } });
+
+    rerender(section('unchanged', true, 1));
+
+    expect(await screen.findByText('Weight per gallon: 12 lb/gal (approved)')).toBeInTheDocument();
+    expect(screen.getByLabelText(label)).toHaveValue('size-1');
+    expect(screen.getByText('Each size').closest('details')).toHaveAttribute('open');
+    expect(mocks.fetchParentChemistry).toHaveBeenCalledTimes(1);
+
+    rerender(section('unchanged', true, 2));
+    expect(await screen.findByText('Weight per gallon: 13 lb/gal (approved)')).toBeInTheDocument();
+    expect(screen.getByLabelText(label)).toHaveValue('');
   });
 
   // MOA-1 sheet 3.3: each row of the table, the summary, and "group not recorded".

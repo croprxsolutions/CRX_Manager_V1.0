@@ -2,7 +2,7 @@
 // Tests for the daily landing summary's pure parts (Mason's autonomous-landing
 // rule, 2026-09-26). The GitHub/git reads are exercised by a real dry run.
 import assert from "node:assert/strict";
-import { applyRecords, buildSummary, changelogHeading, collectApplies, migrationName, plainText, slackText, waitingReasons } from "./daily-landing-summary.mjs";
+import { applyRecords, buildSummary, changelogHeading, collectApplies, migrationName, plainText, slackText, tahaReviews, waitingReasons } from "./daily-landing-summary.mjs";
 
 let pass = 0;
 const ok = (value, message) => { assert.ok(value, message); pass += 1; };
@@ -119,5 +119,20 @@ ok(!slack.includes("**") && slack.includes("*Went live (merged): 0*"), "Slack co
 ok(slack.includes(":warning: *Security warnings open:* Dependabot 1, code scanning could not check"),
   "open warnings are flagged and an unreadable count says so");
 ok(!slackText(quiet, { dependabot: 0, codeScanning: 0 }, "o/r").includes(":warning:"), "no warnings → no flag");
+
+// ── Taha reviews (from the Taha ready bot's labels) ─────────────────────────
+const L = (...names) => names.map((name) => ({ name }));
+const taha = tahaReviews([
+  { number: 1, title: "waits", labels: L("ready-for-taha") },
+  { number: 2, title: "sent back", labels: L("ready-for-taha", "taha-changes") },
+  { number: 3, title: "approved", labels: L("ready-for-taha", "taha-approved") },
+  { number: 4, title: "not his", labels: L("needs-mason") },
+]);
+eq([taha.waiting, taha.changes, taha.approved].map((group) => group.map((pr) => pr.number)), [[1], [2], [3]],
+  "each PR lands in exactly one Taha group; unlabelled PRs are left out");
+const withTaha = buildSummary({ now: Date.now(), hours: 24, merged: [], changes: [], landedMigrations: [], waiting: [], taha });
+ok(withTaha.includes("**Taha reviews: 3**") && withTaha.includes("- #3 approved") && withTaha.includes("Sent back by Taha:"),
+  "the summary lists Taha's reviews");
+ok(!quiet.includes("Taha reviews"), "no Taha PRs → no Taha section");
 
 console.log(`daily-landing-summary: ${pass} assertions passed`);

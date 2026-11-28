@@ -56,7 +56,16 @@ interface CustomerOption extends CustomerSearchResult {
   payment_terms: string | null;
 }
 
-export default function CustomerInvoiceSummaryPanel() {
+interface CustomerInvoiceSummaryPanelProps {
+  /** Where the back arrow goes: the list this tab sits on (Field Invoices or Chemical Invoices). */
+  backPath?: string;
+  backLabel?: string;
+}
+
+export default function CustomerInvoiceSummaryPanel({
+  backPath = '/field-invoices',
+  backLabel = 'Back to field invoices',
+}: CustomerInvoiceSummaryPanelProps = {}) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -184,9 +193,9 @@ export default function CustomerInvoiceSummaryPanel() {
       <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={() => navigate('/field-invoices')}
+          onClick={() => navigate(backPath)}
           className="p-1.5 rounded-lg hover:bg-gray-100 text-secondary"
-          aria-label="Back to field invoices"
+          aria-label={backLabel}
         >
           <ArrowLeft className="w-4 h-4" />
         </button>

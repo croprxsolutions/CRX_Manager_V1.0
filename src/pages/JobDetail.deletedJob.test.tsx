@@ -35,6 +35,11 @@ function buildChain(result: { data: unknown; error: unknown }): Record<string, u
   return self;
 }
 
+// The page reads the job's edit version before Save (save_job checks it).
+vi.mock('../lib/jobStaleEdit', async (orig) => ({
+  ...(await (orig() as Promise<Record<string, unknown>>)),
+  readJobEditVersion: async () => ({ core: 'v', dispatches: [], rev: 'r' }),
+}));
 vi.mock('../lib/db', async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return {
@@ -168,15 +173,15 @@ describe('JobDetail — deleted job (#2188)', () => {
   it('a save that finds the job deleted meanwhile reloads it as deleted and locked', async () => {
     serveJob(makeJob({}), makeJob({ deleted_at: '2026-11-02T15:00:00Z' }));
     mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'save_job'
-      ? { data: { job_id: 'job-x' }, error: null }
+      ? { data: null, error: { code: 'P0001', message: 'JOB_CHANGED_SINCE_LOADED: changed', details: null, hint: null } }
       : fn === 'edit_jobs' ? editJobsReply([{ id: 'job-x', reason: 'deleted' }]) : { data: null, error: null }));
     mountAt('/jobs/job-x');
     await screen.findByRole('heading', { name: 'J-0001' });
     fireEvent.change(screen.getByLabelText('Ground crew'), { target: { value: 'crew-1' } });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Save Changes/ })); });
     expect(await screen.findByText(/deleted on 11\/2\/2026/)).toBeTruthy();
-    expect(jobsCalls).toBe(3); // load, the #2337 stale re-read (finds it deleted), the reload
-    expect(mockRpc).not.toHaveBeenCalledWith('save_job', expect.anything());
+    expect(jobsCalls).toBe(3); // load, the deleted check after save_job's refusal, the reload
+    expect(mockToast).toHaveBeenCalledWith('info', 'Not saved: this job was deleted.');
     for (const name of [/Save Changes/, /Cancel Job/, /Start Job/, /Complete Job/]) {
       expect(screen.queryByRole('button', { name })).toBeNull();
     }

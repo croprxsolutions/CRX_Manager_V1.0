@@ -116,5 +116,5 @@ test('the sales sheet shows the assigned customer one price and no tier, on desk
   await pickCustomer(page, assignedFarm);
   await expect(page.getByRole('button', { name: 'Download PDF' })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Download PDF' })).toBeInViewport();
-  await page.screenshot({ path: 'scripts/local-app/.state/customer-sheet-phone.png' });
+  await page.screenshot({ path: test.info().outputPath('customer-sheet-phone.png') });
 });

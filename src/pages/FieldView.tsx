@@ -77,23 +77,26 @@ import {
   ShieldAlert,
   WifiOff,
   AlertCircle,
+  CloudUpload,
 } from 'lucide-react';
 import type { MapRef } from 'react-map-gl/mapbox';
 import type { Json } from '../types/supabase';
-import CRXMap from '../components/map/CRXMap';
-import FieldBoundaryLayer from '../components/map/FieldBoundaryLayer';
+import CrewFieldMarkerMap from '../components/map/CrewFieldMarkerMap';
 import ErrorBoundary from '../components/ErrorBoundary';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import PhoneHeader from '../components/ui/PhoneHeader';
+import CompletionWeatherFields from '../components/jobs/CompletionWeatherFields';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
+import { usesOfficeJobReads } from '../lib/costFields';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useQueuedJobCompletions } from '../hooks/useQueuedJobCompletions';
 import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { getOfflineStorageErrorMessage, queueAction } from '../lib/offlineQueue';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
-import { fetchAllRows } from '../lib/pagedRead';
+import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { localToday, parseLocalDate } from '../lib/dateUtils';
 import {
@@ -109,8 +112,12 @@ import {
   cardDetailCacheKey,
   type DispatchedListRow,
   type FieldViewJobCard,
+  distinctFieldNames,
 } from '../lib/dispatchDisplay';
-import type { Field } from '../types';
+import type { Field, Profile } from '../types';
+import { saveTodaySnapshot, savedCopyAfterFailure } from '../lib/todaySnapshot';
+import { isNetworkFailure } from '../lib/deliveryEvidence';
+import SavedCopyBanner from '../components/route/SavedCopyBanner';
 
 // The Supabase Data API caps a single response at ~1000 rows; page get_dispatched_list
 // via .range() until a short page ends the scan (same pattern as the DispatchBoard's
@@ -159,10 +166,69 @@ function emptyCompleteForm(): CompleteForm {
 
 type ViewMode = 'list' | 'map';
 
+function crewMarkerScope(profile: Profile | null, loading: boolean, assignmentsChecked: boolean,
+  { savedCopyAt, isOnline, mapAssignmentFailed, mapReadFailed }: { savedCopyAt: string | null; isOnline: boolean; mapAssignmentFailed: boolean; mapReadFailed: boolean }) {
+  const mapChecking = loading || !assignmentsChecked;
+  const markerUser = {
+    actorId: profile?.id ?? '',
+    office: profile?.role === 'admin' || profile?.role === 'sales_rep',
+    // A failed boundary read leaves outlines possibly stale, so new pins wait for a clean recheck.
+    placementAllowed: isOnline && !(mapChecking || savedCopyAt || mapAssignmentFailed || mapReadFailed),
+  };
+  return { mapChecking, markerUser };
+}
+
+/** Sign-in or permission refusals: the crew member may have lost access, so a loaded list must not survive them. */
+function isAccessRefusal(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const { code, status } = error as { code?: unknown; status?: unknown };
+  return status === 401 || status === 403
+    || (typeof code === 'string' && (code === '42501' || /^PGRST30[1-3]$/.test(code.trim().toUpperCase())));
+}
+
+function jobLoadFallback(error: unknown, actorId: string | undefined, forMap: boolean) {
+  const lostSignal = isNetworkFailure(error);
+  // A map recheck keeps the loaded list through any temporary failure; the map-check warning still blocks new pins.
+  if (forMap && !isAccessRefusal(error)) return { kind: 'keep-current' } as const;
+  const saved = savedCopyAfterFailure<FieldViewJobCard[]>(MY_DAY_SNAPSHOT, actorId, lostSignal);
+  return saved && Array.isArray(saved.data) ? { kind: 'saved', saved } as const : { kind: 'unavailable' } as const;
+}
+
+function FieldMapReadWarning({ jobsFailed, fieldsFailed, mapAssignmentFailed, savedCopyAt, offline, loading, retry }: {
+  jobsFailed: boolean;
+  offline: boolean;
+  fieldsFailed: boolean;
+  mapAssignmentFailed: boolean;
+  savedCopyAt: string | null;
+  loading: boolean;
+  retry: () => void;
+}) {
+  // Offline, assignments cannot be rechecked, so the shown fields may be out of date.
+  if (!jobsFailed && !fieldsFailed && !mapAssignmentFailed && !savedCopyAt && !offline) {
+    return loading ? <p role="status" className="m-3 text-sm">Checking assigned fields…</p> : null;
+  }
+  return (
+    <div className="m-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+      <p role="status">Couldn't check all assigned fields. Some markers may be missing. Confirm hazards on site.</p>
+      <button type="button" disabled={loading || offline} onClick={retry}
+        className="mt-2 min-h-[44px] rounded-lg border border-amber-300 bg-white px-3 font-semibold disabled:opacity-50">
+        {loading ? 'Checking assigned fields…' : 'Reload map'}
+      </button>
+    </div>
+  );
+}
+
+// Whole-job assignments for FieldView's legacy tail; crew read the price-free view.
+function selectLegacyAssignedJobs(office: boolean) {
+  const columns = 'id, job_number, job_date, status, total_acres, applied_acres, customer_id, customer:customers(farm_name)';
+  return office ? supabase.from('jobs').select(columns) : supabase.from('jobs_crew').select(columns);
+}
+
 export default function FieldView() {
   usePageMeta();
   const { toast } = useToast();
-  const { profile } = useAuth();
+  const { profile, role } = useAuth();
+  const office = usesOfficeJobReads(role);
   const isOnline = useOnlineStatus();
   const startIdem = useIdempotencyKey('start_job', profile?.id || '');
   const completeIdem = useIdempotencyKey('complete_job', profile?.id || '');
@@ -170,9 +236,13 @@ export default function FieldView() {
 
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
+  const [mapAssignmentFailed, setMapAssignmentFailed] = useState(false);
+  // When the job list failed to load and today's saved copy is shown instead (read-only): when it was loaded.
+  const [savedCopyAt, setSavedCopyAt] = useState<string | null>(null);
   const [cards, setCards] = useState<FieldViewJobCard[]>([]);
   const [search, setSearch] = useState('');
   const [view, setView] = useState<ViewMode>('list');
+  const [mapOpenCount, setMapOpenCount] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Per-job expanded detail, fetched lazily on first expand and cached.
@@ -189,16 +259,29 @@ export default function FieldView() {
   const [completeForm, setCompleteForm] = useState<CompleteForm>(emptyCompleteForm());
   const [completeConfirmFor, setCompleteConfirmFor] = useState<FieldViewJobCard | null>(null);
   const [completing, setCompleting] = useState(false);
+  // Jobs whose completion is saved on this phone and still waiting to send: no second
+  // Complete for them until it sends, needs attention, or is discarded.
+  const { queuedJobIds, markQueued } = useQueuedJobCompletions(profile);
 
   // Map geometry (best-effort; the list view never depends on it).
   const [mapFields, setMapFields] = useState<Field[]>([]);
+  const [mapActorId, setMapActorId] = useState<string>();
+  const [mapReadFailed, setMapReadFailed] = useState(false);
+  const [mapCheckedCards, setMapCheckedCards] = useState(cards);
+  const { mapChecking, markerUser } = crewMarkerScope(profile, loading, cards === mapCheckedCards, {
+    savedCopyAt, isOnline, mapAssignmentFailed, mapReadFailed,
+  });
   const mapRef = useRef<MapRef | null>(null);
-  const [fieldToJob, setFieldToJob] = useState<Map<string, string>>(() => new Map());
+  const [jobsByField, setJobsByField] = useState<Map<string, string[]>>(() => new Map());
+  const jobLoadSequence = useRef(0);
 
   // --- Load "my jobs" (the dispatched-location rows for the caller) -----------------
-  const fetchCards = useCallback(async () => {
+  const fetchCards = useCallback(async (forMap = false) => {
+    const sequence = ++jobLoadSequence.current;
+    const applyLatest = (update: () => void) => {
+      if (sequence === jobLoadSequence.current) update();
+    };
     setLoading(true);
-    setFetchError(false);
     try {
       const all: DispatchedListRow[] = [];
       for (let from = 0; ; from += PAGE) {
@@ -234,9 +317,7 @@ export default function FieldView() {
       // linger for legacy jobs is harmless.
       if (profile?.id) {
         const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-        const legacyRes = await supabase
-          .from('jobs')
-          .select('id, job_number, job_date, status, total_acres, applied_acres, customer_id, customer:customers(farm_name)')
+        const legacyRes = await selectLegacyAssignedJobs(office)
           .eq('applicator_id', profile.id)
           .is('deleted_at', null)
           .or(`status.in.(scheduled,in_progress),and(status.in.(completed,invoiced),updated_at.gte.${sevenDaysAgoIso})`);
@@ -264,47 +345,114 @@ export default function FieldView() {
         grouped.sort((a, b) => a.job_number.localeCompare(b.job_number));
       }
 
-      setCards(grouped);
+      applyLatest(() => {
+        // Today's read-only copy for a dead spot (src/lib/todaySnapshot.ts): the cards as shown, nothing more.
+        if (profile?.id) saveTodaySnapshot(MY_DAY_SNAPSHOT, profile.id, grouped);
+        setFetchError(false);
+        setSavedCopyAt(null);
+        setMapAssignmentFailed(false);
+        setCards(grouped);
+      });
     } catch (err) {
-      Sentry.captureException(err, { tags: { source: 'fetch', action: 'field_view_my_jobs' } });
-      // Honest error state: distinguish "couldn't load" from "genuinely no jobs" —
-      // the empty-state copy below only shows when fetchError is false.
-      setFetchError(true);
-      toast('error', 'Failed to load your jobs');
-      setCards([]);
+      applyLatest(() => {
+        Sentry.captureException(err, { tags: { source: 'fetch', action: 'field_view_my_jobs' } });
+        const fallback = jobLoadFallback(err, profile?.id, forMap);
+        if (fallback.kind === 'keep-current') {
+          // Checking pins must not turn an already loaded job into a read-only copy.
+          setMapAssignmentFailed(true);
+          return;
+        }
+        if (fallback.kind === 'saved') {
+          // Shown read-only: Start and Complete stay off until a load succeeds (the banner says why), and an open
+          // Complete form closes, as it did when a failed load emptied the list.
+          setCompleteFormOpenFor(null);
+          setFetchError(false);
+          setSavedCopyAt(fallback.saved.savedAt);
+          setCards(fallback.saved.data);
+        } else {
+          // Honest error state: distinguish "couldn't load" from "genuinely no jobs" —
+          // the empty-state copy below only shows when fetchError is false.
+          setSavedCopyAt(null);
+          setFetchError(true);
+          toast('error', 'Failed to load your jobs');
+          setCards([]);
+        }
+      });
+    } finally {
+      applyLatest(() => setLoading(false));
     }
-    setLoading(false);
-  }, [toast, profile?.id]);
+  }, [toast, profile?.id, office]);
 
-  useEffect(() => { fetchCards(); }, [fetchCards]);
+  useEffect(() => {
+    void fetchCards();
+    return () => { jobLoadSequence.current += 1; };
+  }, [fetchCards]);
+
+  useEffect(() => {
+    if (view !== 'map' || mapChecking) return;
+    function onMapResume() {
+      if (document.visibilityState !== 'visible' || !navigator.onLine) return;
+      setMapOpenCount((count) => count + 1);
+      void fetchCards(true);
+    }
+    document.addEventListener('visibilitychange', onMapResume);
+    window.addEventListener('online', onMapResume);
+    return () => {
+      document.removeEventListener('visibilitychange', onMapResume);
+      window.removeEventListener('online', onMapResume);
+    };
+  }, [view, mapChecking, fetchCards]);
+
+  // A saved completion left the queue (sent, needs attention, or discarded): reload so a
+  // sent one shows the job as done instead of offering Complete again. Wait for signal:
+  // a reload that fails offline would blank the whole job list.
+  const prevQueuedJobIds = useRef(queuedJobIds);
+  const reloadAfterSend = useRef(false);
+  useEffect(() => {
+    if ([...prevQueuedJobIds.current].some((id) => !queuedJobIds.has(id))) reloadAfterSend.current = true;
+    prevQueuedJobIds.current = queuedJobIds;
+    if (reloadAfterSend.current && isOnline) {
+      reloadAfterSend.current = false;
+      void fetchCards();
+    }
+  }, [queuedJobIds, fetchCards, isOnline]);
 
   // --- Map geometry for the visible job locations (best-effort) ---------------------
   useEffect(() => {
-    if (cards.length === 0) { setMapFields([]); setFieldToJob(new Map()); return; }
+    if (cards.length === 0) { setMapReadFailed(false); setMapFields([]); setJobsByField(new Map()); setMapCheckedCards(cards); return; }
     let cancelled = false;
+    let checkedJobs: Map<string, string[]> | undefined;
     (async () => {
       try {
         const myJobFieldIds = cards.flatMap((c) => c.locations.map((l) => l.job_field_id));
-        if (myJobFieldIds.length === 0) { if (!cancelled) { setMapFields([]); setFieldToJob(new Map()); } return; }
-        const jfRows: { job_id: string; field_id: string | null }[] = [];
+        const jfRows: { id: string; job_id: string; field_id: string | null }[] = [];
         for (const chunk of chunkIds(myJobFieldIds)) {
           const jfRes = await supabase
             .from('job_fields')
-            .select('job_id, field_id')
+            .select('id, job_id, field_id')
             .in('id', chunk);
           if (jfRes.error) throw jfRes.error;
-          jfRows.push(...((jfRes.data || []) as { job_id: string; field_id: string | null }[]));
+          jfRows.push(...(jfRes.data ?? []));
         }
-        const f2j = new Map<string, string>();
-        for (const r of jfRows) {
-          if (r.field_id && !f2j.has(r.field_id)) f2j.set(r.field_id, r.job_id);
+        // Read by job ID only for whole-job cards. A split job can include fields dispatched to another crew.
+        const wholeJobIds = cards.filter((card) => card.locations.length === 0).map((card) => card.job_id);
+        const wholeJobFields = await fetchAllRowsForIds(wholeJobIds, (jobIds, from, to) => pageWithList(supabase
+          .from('job_fields').select('id, job_id, field_id', { count: 'exact' })
+          .in('job_id', jobIds).order('id').range(from, to)));
+        if (wholeJobFields.error) throw wholeJobFields.error;
+        for (const row of wholeJobFields.data ?? []) jfRows.push(row);
+        const mappedJobs = new Map<string, string[]>();
+        for (const { field_id, job_id } of jfRows) {
+          if (!field_id) continue;
+          const jobs = mappedJobs.get(field_id);
+          if (jobs) jobs.push(job_id);
+          else mappedJobs.set(field_id, [job_id]);
         }
-        if (!cancelled) setFieldToJob(f2j);
-        const fieldIds = Array.from(new Set(Array.from(f2j.keys())));
-        if (fieldIds.length === 0) { if (!cancelled) setMapFields([]); return; }
+        checkedJobs = mappedJobs;
+        const fieldIds = [...mappedJobs.keys()];
         // Every requested field, page by page (one reply stopped at the server's row cap, Goal 4 N8).
         // A page with neither rows nor an error is a silent denial: reported, not read as "no fields".
-        const { data: geoData, error: geoErr } = await fetchAllRows(async (from, to) => {
+        const { data: geoData, error: geoErr } = fieldIds.length === 0 ? { data: [], error: null } : await fetchAllRows(async (from, to) => {
           const page = await supabase
             .rpc('get_fields_geojson_by_ids', { p_field_ids: fieldIds }, { count: 'exact' })
             .order('field_name').order('id').range(from, to);
@@ -315,14 +463,44 @@ export default function FieldView() {
         });
         if (geoErr) throw geoErr;
         const fRows = (assertRpcResult<Array<Field>>(geoData, 'get_fields_geojson_by_ids') || []) as unknown as Field[];
-        if (!cancelled) setMapFields(fRows);
+        if (!cancelled) {
+          const locationIds = new Set(jfRows.map((row) => row.id));
+          const mappedIds = new Set(fRows.map((field) => field.id));
+          setMapReadFailed([
+            jfRows.some((row) => !row.field_id),
+            myJobFieldIds.some((id) => !locationIds.has(id)),
+            fieldIds.some((id) => !mappedIds.has(id)),
+          ].some(Boolean));
+          setJobsByField(mappedJobs);
+          setMapFields(fRows);
+          setMapActorId(markerUser.actorId);
+          setMapCheckedCards(cards);
+        }
       } catch (err) {
         Sentry.captureException(err, { tags: { source: 'fetch', action: 'field_view_map_fields' } });
-        if (!cancelled) { setMapFields([]); setFieldToJob(new Map()); }
+        if (cancelled) return;
+        setMapCheckedCards(cards);
+        setMapReadFailed(true);
+        if (!isNetworkFailure(err)) {
+          setMapFields([]);
+          setJobsByField(new Map());
+        } else if (checkedJobs) {
+          setJobsByField(checkedJobs);
+        } else if (!savedCopyAt) {
+          // A fresh legacy job card alone does not identify the fields now on that job.
+          const splitJobs = new Set(cards.filter((card) => card.locations.length > 0).map((card) => card.job_id));
+          setJobsByField((previous) => {
+            const kept = new Map<string, string[]>();
+            for (const [id, jobs] of previous) {
+              kept.set(id, jobs.filter((job) => splitJobs.has(job)));
+            }
+            return kept;
+          });
+        }
       }
     })();
     return () => { cancelled = true; };
-  }, [cards]);
+  }, [cards, markerUser.actorId, savedCopyAt]);
 
   useEffect(() => {
     if (view !== 'map' || !mapRef.current) return;
@@ -336,13 +514,23 @@ export default function FieldView() {
     [visibleCards, today]
   );
 
-  const visibleMapFields = useMemo(() => {
-    const visibleJobIds = new Set(visibleCards.map((c) => c.job_id));
-    return mapFields.filter((f) => {
-      const jobId = fieldToJob.get(f.id);
-      return jobId != null && visibleJobIds.has(jobId);
-    });
-  }, [visibleCards, mapFields, fieldToJob]);
+  const fieldToJob = useMemo(() => {
+    const visibleFieldJobs = new Map<string, string>();
+    if (mapActorId !== markerUser.actorId) return visibleFieldJobs;
+    const currentJobs = new Map(cards.map((card) => [card.job_id, card.locations]));
+    for (const [fieldId, jobIds] of jobsByField) {
+      const jobId = [...jobIds].sort().find((id) => {
+        const locations = currentJobs.get(id);
+        return locations && (locations.length === 0 || locations.some((location) => location.field_id === fieldId));
+      });
+      if (jobId) visibleFieldJobs.set(fieldId, jobId);
+    }
+    return visibleFieldJobs;
+  }, [cards, jobsByField, mapActorId, markerUser.actorId]);
+  const visibleMapFields = useMemo(() => distinctFieldNames(
+    mapFields.filter((field) => fieldToJob.has(field.id)),
+    (field) => cards.find((card) => card.job_id === fieldToJob.get(field.id)),
+  ), [mapFields, fieldToJob, cards]);
 
   // --- Lazy-load a card's read-only detail on first expand --------------------------
   const loadDetail = useCallback(async (card: FieldViewJobCard) => {
@@ -354,9 +542,10 @@ export default function FieldView() {
     try {
       // updated_at is the offline-conflict snapshot for a queued Complete — must be
       // captured HERE (while online) so a later offline Complete has a value to send.
-      const jobRes = await supabase
-        .from('jobs')
-        .select('job_date, updated_at')
+      const jobQuery = office
+        ? supabase.from('jobs').select('job_date, updated_at')
+        : supabase.from('jobs_crew').select('job_date, updated_at');
+      const jobRes = await jobQuery
         .eq('id', card.job_id)
         .maybeSingle();
       if (jobRes.error) throw jobRes.error;
@@ -390,9 +579,9 @@ export default function FieldView() {
 
       // Chemicals (job_chemicals) — rate/quantity + REI/PHI only, NO pricing on this
       // screen (owner decision, U12). Readable via job_chemicals_select_location_dispatchee.
-      const chemRes = await supabase
-        .from('job_chemicals')
-        .select('id, quantity, unit, rate_per_acre, rate_unit, sort_order, product:products(product_name, rei_hours, phi_days)')
+      const columns = 'id, quantity, unit, rate_per_acre, rate_unit, sort_order, product:products(product_name, rei_hours, phi_days)';
+      const chemQuery = office ? supabase.from('job_chemicals').select(columns) : supabase.from('job_chemicals_crew').select(columns);
+      const chemRes = await chemQuery
         .eq('job_id', card.job_id)
         .order('sort_order', { ascending: true, nullsFirst: false });
       if (chemRes.error) throw chemRes.error;
@@ -442,7 +631,7 @@ export default function FieldView() {
       inFlightDetail.current.delete(cacheKey);
       setDetailLoading(null);
     }
-  }, [details, toast]);
+  }, [details, office, toast]);
 
   const toggleExpand = useCallback((card: FieldViewJobCard) => {
     setExpandedId((prev) => (prev === card.job_id ? null : card.job_id));
@@ -506,6 +695,7 @@ export default function FieldView() {
 
   // --- Complete Job (queues offline) --------------------------------------------------
   const openCompleteForm = (card: FieldViewJobCard) => {
+    if (queuedJobIds.has(card.job_id)) return;
     setExpandedId(card.job_id); // Complete lives in the expanded panel (needs detail loaded)
     // U12 Codex R4 #2: completeForm is ONE shared state — without a reset, values
     // typed for job A (wind/notes/gallons) silently submit for job B after
@@ -523,6 +713,7 @@ export default function FieldView() {
   };
 
   const requestComplete = (card: FieldViewJobCard) => {
+    if (queuedJobIds.has(card.job_id)) return;
     setCompleteConfirmFor(card);
   };
 
@@ -531,6 +722,8 @@ export default function FieldView() {
     if (!card || !profile) return;
     const detail = details[cardDetailCacheKey(card)];
     setCompleteConfirmFor(null); // close confirm immediately
+    // A completion for this job is already saved on this phone: a second one is never queued or sent.
+    if (queuedJobIds.has(card.job_id)) return;
     setCompleting(true);
 
     // field_id comes from get_dispatched_list (U12 Codex P1 — the RPC now returns
@@ -578,6 +771,7 @@ export default function FieldView() {
           snapshotAt: detail?.jobUpdatedAt ?? undefined,
         });
         completeIdem.resetKey();
+        markQueued(card.job_id);
         toast('success', `Job ${card.job_number} saved offline — it will retry when connected and remain saved if it needs attention`);
         setCompleteFormOpenFor(null);
         setCompleteForm(emptyCompleteForm());
@@ -639,7 +833,8 @@ export default function FieldView() {
       ? (card.job_date === today ? 'Today' : parseLocalDate(card.job_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
       : null;
     const reiPhi = detail ? maxLabelReiPhi(detail.chemicals) : { reiHours: null, phiDays: null };
-    const showingCompleteForm = completeFormOpenFor === card.job_id;
+    const completionQueued = queuedJobIds.has(card.job_id);
+    const showingCompleteForm = completeFormOpenFor === card.job_id && !completionQueued;
 
     return (
       <div
@@ -684,8 +879,8 @@ export default function FieldView() {
           </div>
         </button>
 
-        {/* Quick actions — visible on the card face, no expand required for Start. */}
-        {!isTerminal && (
+        {/* Quick actions — visible on the card face, no expand required for Start. Off on a saved copy. */}
+        {!isTerminal && !savedCopyAt && (
           <div className="px-4 pb-3 flex gap-2">
             {card.job_status === 'scheduled' && (
               <button
@@ -697,7 +892,12 @@ export default function FieldView() {
                 <PlayCircle className="w-5 h-5" aria-hidden="true" /> Start Job
               </button>
             )}
-            {card.job_status === 'in_progress' && (
+            {card.job_status === 'in_progress' && (completionQueued ? (
+              <p role="status" className="flex-1 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-base font-semibold text-amber-900">
+                <CloudUpload className="w-5 h-5 shrink-0" aria-hidden="true" />
+                Completion saved on this phone — will send when signal returns
+              </p>
+            ) : (
               <button
                 type="button"
                 onClick={() => openCompleteForm(card)}
@@ -705,10 +905,10 @@ export default function FieldView() {
               >
                 <CheckCircle2 className="w-5 h-5" aria-hidden="true" /> Complete Job
               </button>
-            )}
+            ))}
           </div>
         )}
-        {!isOnline && card.job_status === 'scheduled' && (
+        {!isOnline && !savedCopyAt && card.job_status === 'scheduled' && (
           <p className="px-4 pb-3 -mt-1 flex items-center gap-1.5 text-sm text-amber-800">
             <WifiOff className="w-4 h-4" aria-hidden="true" /> Connect to the internet to start this job.
           </p>
@@ -801,15 +1001,12 @@ export default function FieldView() {
                         <WifiOff className="w-4 h-4" aria-hidden="true" /> You're offline &mdash; this will save now and sync when you reconnect.
                       </p>
                     )}
+                    <CompletionWeatherFields
+                      value={completeForm}
+                      onChange={(patch) => setCompleteForm((p) => ({ ...p, ...patch }))}
+                      otherJobs={cards.filter((c) => c.job_id !== card.job_id)}
+                    />
                     <div className="grid grid-cols-2 gap-2 mb-3">
-                      <FieldInput label="Wind Speed (mph)" value={completeForm.wind_speed}
-                        onChange={(v) => setCompleteForm((p) => ({ ...p, wind_speed: v }))} />
-                      <FieldInput label="Wind Direction" value={completeForm.wind_direction}
-                        onChange={(v) => setCompleteForm((p) => ({ ...p, wind_direction: v }))} placeholder="e.g. NW" />
-                      <FieldInput label="Temperature (°F)" value={completeForm.temperature}
-                        onChange={(v) => setCompleteForm((p) => ({ ...p, temperature: v }))} />
-                      <FieldInput label="Humidity (%)" value={completeForm.humidity}
-                        onChange={(v) => setCompleteForm((p) => ({ ...p, humidity: v }))} />
                       <FieldInput label="Actual Gallons" value={completeForm.actual_gallons_applied}
                         onChange={(v) => setCompleteForm((p) => ({ ...p, actual_gallons_applied: v }))} />
                     </div>
@@ -895,7 +1092,12 @@ export default function FieldView() {
               <ListIcon className="w-4 h-4" aria-hidden="true" /> List
             </button>
             <button
-              onClick={() => setView('map')}
+              onClick={() => {
+                if (view === 'map') return;
+                if (mapOpenCount > 0 && !mapChecking && isOnline) void fetchCards(true);
+                setMapOpenCount((count) => count + 1);
+                setView('map');
+              }}
               aria-pressed={view === 'map'}
               className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-semibold min-h-[44px] ${
                 view === 'map' ? 'bg-crx-green text-white' : 'text-gray-300 hover:text-white'
@@ -921,7 +1123,7 @@ export default function FieldView() {
               />
             </div>
             <button
-              onClick={fetchCards}
+              onClick={() => void fetchCards()}
               aria-label="Reload my jobs"
               className="inline-flex items-center justify-center w-11 h-11 rounded-lg bg-white/10 hover:bg-white/20 text-white shrink-0"
             >
@@ -931,34 +1133,49 @@ export default function FieldView() {
         )}
       </PhoneHeader>
 
+      <SavedCopyBanner
+        what="your jobs"
+        savedAt={savedCopyAt}
+        blocked="You can't start or complete jobs until signal returns."
+        onRetry={() => void fetchCards()}
+        retrying={loading}
+        className="m-3 sm:mx-4 mb-0"
+      />
+
       {/* CONTENT */}
-      {loading ? (
+      {/* Preserve the marker draft and retry ID when someone checks their job list. */}
+      {mapOpenCount > 0 && (
+        <div hidden={view !== 'map'} className="m-3 rounded-xl border border-gray-200">
+          <FieldMapReadWarning jobsFailed={fetchError} fieldsFailed={mapReadFailed} mapAssignmentFailed={mapAssignmentFailed}
+            savedCopyAt={savedCopyAt} offline={!isOnline} loading={mapChecking} retry={() => void fetchCards(true)} />
+          <ErrorBoundary inline>
+            <CrewFieldMarkerMap
+              key={markerUser.actorId}
+              fields={visibleMapFields}
+              jobByField={fieldToJob}
+              refreshKey={mapOpenCount}
+              active={view === 'map'}
+              {...markerUser}
+              onMapLoad={(map) => { mapRef.current = map; }}
+              onFieldClick={(fieldId) => {
+                const jobId = resolveFieldToJob(fieldToJob, fieldId);
+                if (!jobId) return;
+                const card = cards.find((c) => c.job_id === jobId);
+                if (card) {
+                  if (!visibleCards.some((visible) => visible.job_id === jobId)) setSearch('');
+                  setView('list');
+                  setExpandedId(card.job_id);
+                }
+              }}
+            />
+          </ErrorBoundary>
+        </div>
+      )}
+      {view === 'map' ? null : loading ? (
         <div className="p-3 sm:p-4 space-y-3">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-24 rounded-xl bg-gray-200/70 animate-pulse" />
           ))}
-        </div>
-      ) : view === 'map' ? (
-        <div className="h-[calc(100vh-9rem)] m-3 rounded-xl overflow-hidden border border-gray-200">
-          <ErrorBoundary inline>
-            <CRXMap
-              className="h-full min-h-[360px]"
-              showLayerToggle
-              interactive
-              onMapLoad={(map) => { mapRef.current = map; }}
-            >
-              <FieldBoundaryLayer
-                fields={visibleMapFields as (Field & { customer_name?: string })[]}
-                showLabels
-                onFieldClick={(fieldId) => {
-                  const jobId = resolveFieldToJob(fieldToJob, fieldId);
-                  if (!jobId) return;
-                  const card = visibleCards.find((c) => c.job_id === jobId);
-                  if (card) { setView('list'); setExpandedId(card.job_id); }
-                }}
-              />
-            </CRXMap>
-          </ErrorBoundary>
         </div>
       ) : fetchError && visibleCards.length === 0 ? (
         <div className="p-3 sm:p-4">
@@ -967,7 +1184,7 @@ export default function FieldView() {
             <p className="mt-3 font-heading text-xl font-bold text-amber-900">Couldn't load your jobs</p>
             <p className="mt-1 text-sm text-amber-800">Check your connection and try again.</p>
             <button
-              onClick={fetchCards}
+              onClick={() => void fetchCards()}
               className="mt-4 inline-flex items-center gap-2 px-4 min-h-[44px] rounded-lg bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 text-sm font-semibold"
             >
               <RefreshCw className="w-4 h-4" aria-hidden="true" /> Retry
@@ -1034,6 +1251,7 @@ export default function FieldView() {
   );
 }
 
+const MY_DAY_SNAPSHOT = 'my-day';
 const JOB_LIST = 'bg-white rounded-xl border border-gray-200 overflow-hidden divide-y divide-gray-100';
 const ROW_ACTION = 'flex-1 inline-flex h-12 items-center justify-center gap-2 bg-crx-green text-white font-heading text-lg font-bold rounded-xl hover:bg-crx-green-hover active:scale-[0.99] disabled:opacity-50 disabled:active:scale-100';
 
@@ -1065,15 +1283,16 @@ function Section({ icon, title, tone = 'green', children }: { icon: JSX.Element;
 
 /** Compact labeled number input for the Complete Job form. */
 function FieldInput({
-  label, value, onChange, placeholder,
-}: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  label, value, onChange,
+}: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <label className="block">
       <span className="block text-sm font-semibold text-nav-dark mb-1">{label}</span>
       <input
-        type={placeholder ? 'text' : 'number'}
+        type="number"
+        inputMode="decimal"
+        step="any"
         value={value}
-        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         className="h-11 w-full bg-white border border-gray-300 rounded-lg px-3 text-base text-nav-dark placeholder:text-gray-500"
       />

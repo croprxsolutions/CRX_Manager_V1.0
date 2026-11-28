@@ -35,6 +35,8 @@ const COST_TABLES = Object.keys(COST_COLUMNS) as CostTable[];
 // staging migration. Remove this exact overlay after 20261231120000_sales_tax_checkbox applies live.
 const PENDING_STAGING_COLUMNS: Partial<Record<CostTable, readonly string[]>> = {
   orders: ['sales_tax'],
+  // 20270303130000 (local candidate): REI/PHI not-applicable flags. Prune once the registry is regenerated.
+  products: ['rei_not_applicable', 'phi_not_applicable'],
 };
 
 function sourceFiles(dir: string, out: string[] = []): string[] {

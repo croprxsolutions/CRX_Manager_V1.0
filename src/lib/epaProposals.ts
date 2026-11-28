@@ -89,7 +89,7 @@ async function rows<T>(query: PromiseLike<{ data: unknown; error: unknown }>): P
 }
 
 /** The same four places `start_epa_lookup` and the typed-chemistry gate read. */
-async function fetchParentEpaNumbers(parentId: string): Promise<string[]> {
+export async function fetchParentEpaNumbers(parentId: string): Promise<string[]> {
   const [parents, members, brands] = await Promise.all([
     rows<{ generic_epa_registration: string | null }>(supabaseUntyped.from('product_parents')
       .select('generic_epa_registration').eq('id', parentId)),

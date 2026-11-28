@@ -2225,7 +2225,7 @@ describe('Idempotency BODY verification (reads migration SQL)', () => {
     // Either add the canonical idempotency block to the SQL, or (if genuinely
     // naturally idempotent) add the RPC to IDEMPOTENCY_BODY_EXEMPT with a reason.
     expect(offenders).toEqual([]);
-  });
+  }, 30_000); // parses generated types + every migration; slow under CI shard load
 
   it('save_job specifically uses idempotency_keys (regression guard for the 2026-05-29 fix)', () => {
     // Since 20261019230000 public.save_job is a cost wrapper (cost is admin-only) that forwards
@@ -2535,8 +2535,18 @@ describe('Idempotency BODY verification (reads migration SQL)', () => {
 type GeneratedRpcShape = { name: string; source: string };
 type MigrationFunctionDefinition = { body: string; definition: string; fileName: string };
 
+/**
+ * Parse once per file: the inputs are fixed on-disk files, and re-parsing on every
+ * call made these tests flake past Vitest's 5s default under CI shard load.
+ * Callers only read the cached values.
+ */
+function once<T>(compute: () => T): () => T {
+  let cached: { value: T } | undefined;
+  return () => (cached ??= { value: compute() }).value;
+}
+
 /** Current RPC names and Args blocks from the generated Supabase types. */
-function generatedRpcShapes(): GeneratedRpcShape[] {
+const generatedRpcShapes = once((): GeneratedRpcShape[] => {
   const supabaseTypesPath = join(
     dirname(fileURLToPath(import.meta.url)),
     '..',
@@ -2559,16 +2569,14 @@ function generatedRpcShapes(): GeneratedRpcShape[] {
     out.push({ name: marks[i].name, source: block.slice(s, e) });
   }
   return out;
-}
+});
 
 /** RPC names whose generated Args include p_idempotency_key. */
-function generatedRpcsDeclaringIdempotencyKey(): Set<string> {
-  return new Set(
-    generatedRpcShapes()
-      .filter(({ source }) => /p_idempotency_key\??:/.test(source))
-      .map(({ name }) => name)
-  );
-}
+const generatedRpcsDeclaringIdempotencyKey = once((): Set<string> => new Set(
+  generatedRpcShapes()
+    .filter(({ source }) => /p_idempotency_key\??:/.test(source))
+    .map(({ name }) => name)
+));
 
 /**
  * Build the current disk-side function inventory from migration history.
@@ -2577,7 +2585,7 @@ function generatedRpcsDeclaringIdempotencyKey(): Set<string> {
  * application RPCs this guard covers. Intersecting this with generated types
  * removes dropped functions and trigger-only helpers from the client RPC set.
  */
-function latestMigrationFunctions(): Map<string, MigrationFunctionDefinition> {
+const latestMigrationFunctions = once((): Map<string, MigrationFunctionDefinition> => {
   const latest = new Map<string, MigrationFunctionDefinition>();
   const signature = /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?"?([a-z_][a-z0-9_]*)"?\s*\(/gi;
   for (const file of getMigrationFiles()) {
@@ -2599,13 +2607,7 @@ function latestMigrationFunctions(): Map<string, MigrationFunctionDefinition> {
     }
   }
   return latest;
-}
-
-function latestMigrationFunctionBodies(): Map<string, string> {
-  return new Map(
-    [...latestMigrationFunctions()].map(([name, value]) => [name, value.body]),
-  );
-}
+});
 
 function stripSqlComments(body: string): string {
   let sql = '';
@@ -2700,13 +2702,12 @@ function transitiveMutatingFunctionNames(bodies: Map<string, string>): Set<strin
   let changed = true;
   while (changed) {
     changed = false;
+    if (mutators.size === 0) break;
+    const mutatorNames = [...mutators].map(escapeRegExp).join('|');
+    const callPattern = new RegExp(`\\b(?:${mutatorNames})\\s*\\(`, 'i');
     for (const [name, body] of bodies) {
       if (mutators.has(name)) continue;
-      const sql = stripSqlComments(body);
-      const callsKnownMutator = [...mutators].some((mutator) =>
-        new RegExp(`\\b${escapeRegExp(mutator)}\\s*\\(`, 'i').test(sql),
-      );
-      if (callsKnownMutator) {
+      if (callPattern.test(stripSqlComments(body))) {
         mutators.add(name);
         changed = true;
       }
@@ -2759,10 +2760,12 @@ function registryMigrationHighWater(): string {
 // the staging-only M4 candidates below the applied-name high-water; production
 // has not applied these definitions, so their staging overlay stays explicit.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
+  '20270307205900', // Liquid-weight draft rejection.
   '20270109100100',
   '20270109100200',
   '20270109100300',
   '20270109100400',
+  '20270307210000', // Whole-group liquid weight review.
   '20270110110000', // Inactive rate-history cleanup: optional read argument, pending apply/type regeneration.
 ]);
 
@@ -2857,10 +2860,11 @@ function migrationsAwaitingTypeRegeneration(): Set<string> {
  * The latter closes the normal pre-apply gap where a PR migration exists before
  * src/types/supabase.ts can truthfully be regenerated from production.
  */
-function generatedMutatingRpcInventory(): Set<string> {
+const generatedMutatingRpcInventory = once((): Set<string> => {
   const generatedNames = new Set(generatedRpcShapes().map(({ name }) => name));
   const functions = latestMigrationFunctions();
-  const mutators = transitiveMutatingFunctionNames(latestMigrationFunctionBodies());
+  const bodies = new Map([...functions].map(([name, definition]) => [name, definition.body]));
+  const mutators = transitiveMutatingFunctionNames(bodies);
   const highWater = registryMigrationHighWater();
   const pendingTimestamps = migrationsAwaitingTypeRegeneration();
   const migrationDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'supabase', 'migrations');
@@ -2880,7 +2884,7 @@ function generatedMutatingRpcInventory(): Set<string> {
     return generatedNames.has(name)
       || (timestamp !== '' && (timestamp > highWater || pendingTimestamps.has(timestamp)));
   }));
-}
+});
 
 /** Date high-water cannot settle a parked candidate; actual applied identity is authoritative. */
 function unappliedLocalCandidateTimestamps(history: string, appliedNames: string[], diskNames: string[]): Set<string> {
@@ -2931,12 +2935,16 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 // names are present in the full snapshot, and the pending M4 functions are
 // explicitly retained in the staging schema overlay.
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
+  'change_brand_document_links', // 20270306170000. Prune once generated types cover this RPC.
+  'reject_liquid_density_draft', // 20270307205900. Prune once generated types cover this RPC.
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
   'set_registration_adjuvants',
   // 20270130100000 (#1976, local candidate): the EPA batch fill's save; replays through _product_parent_replay and
   // commit_epa_proposal saves the receipt. Prune once the generated types carry it.
   'commit_epa_proposal_batch',
+  'approve_liquid_density_draft', // 20270307210000. Prune once generated types cover this RPC.
+  'submit_liquid_density_draft',
   // 20270203120000 (#1942, local candidate): re-emits the private completion body under its current name
   // (20270126110000 renamed it, so no generated type carries it yet); keyed by complete_delivery's p_idempotency_key.
   // Prune once the generated types carry it.
@@ -2950,6 +2958,16 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * as soon as the inventory no longer needs them.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  carry_last_size_document_reports:
+    'membership update trigger (20270306170000): transfers reports inside the keyed move only, with API-role EXECUTE revoked',
+  _process_brand_document_links:
+    'private helper (20270306170000): API-role EXECUTE is revoked and writes run only within the keyed save',
+  preview_brand_document_links:
+    'read-only workbook validation (20270306170000): invokes the private helper with the preview flag fixed to true, skipping every lock and write',
+  carry_grouped_brand_document_links:
+    'constraint trigger only (20270306170000): it runs on the protected mapping writes of the keyed grouping approval, with API-role EXECUTE revoked',
+  return_liquid_density_to_draft_for_brand:
+    'private trigger (20270307210000): changes density only inside the parent brand transaction, with API-role EXECUTE revoked',
   // Generated public-schema functions are not necessarily app-callable RPCs.
   _delivery_brand_event:
     "private SECURITY DEFINER delivery-brand history writer called within keyed brand workflows; live catalog denies EXECUTE to anon, authenticated, and service_role",
@@ -2965,6 +2983,13 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // M4a sales tax (local candidate 20270109100200): trigger function, never an RPC.
   _sales_tax_record_rate_20261231:
     'AFTER INSERT / UPDATE OF invoice_type row trigger on invoices: records a taxed sale\'s draft at the Settings rate once (ON CONFLICT DO NOTHING), and re-records only when a draft really switches type, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  // M4 commission settles on posting (local candidate 20270308140000): trigger function and its helper, never RPCs.
+  _settle_order_commission_20270306:
+    'helper of the invoice posting trigger and four commission writers: puts a sale\'s pending, unbatched commission rows whose stored base differs onto its profit after the posted standing discount, writing nothing when they already sit on it, so a replay is a no-op; every API-role EXECUTE is revoked',
+  _invoice_settles_commission_20270306:
+    'AFTER UPDATE OF status, deleted_at row trigger on chemical-sale invoices entering or leaving the posted set: calls _settle_order_commission_20270306, a no-op when the rows are right, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _invoice_lines_settle_commission_20270306:
+    'AFTER INSERT statement trigger on invoice_items: for lines added to a posted chemical-sale or misc-charge invoice, calls _settle_order_commission_20270306, a no-op when the rows are right, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   // M4b standing discount (local candidate 20270109100100): trigger functions and their recompute helper, never RPCs.
   _recompute_standing_discount_20261231:
     'helper of the standing-discount triggers and set_invoice_standing_discount: records a draft\'s rate once (ON CONFLICT DO NOTHING) and rewrites its computed discount line and total, writing nothing when they are already right, so a replay is a no-op; every API-role EXECUTE is revoked',
@@ -2981,6 +3006,9 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // KI-156 follow-up (local candidate 20270120150000): the below-cost wall, re-emitted; a trigger function, never an RPC.
   _enforce_below_cost_line:
     'BEFORE INSERT/UPDATE row trigger on order_items, invoice_items and quote_items: refuses a below-cost line or records its admin approval for the line being written; the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function, and no browser role can EXECUTE it. Prune once the candidate is in the generated snapshot',
+  // #2617 (local candidate 20270315073100): the below-cost list check now writes the approvals of a marked reason.
+  _raise_below_cost_reason_list:
+    'DEFERRABLE INITIALLY DEFERRED constraint trigger on order_items, quote_items and invoice_items: at commit either refuses the save or, for a reason bound to the shown list, inserts one approval per surviving noted line and clears the note, so it runs once per transaction; the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function, and EXECUTE is postgres and service_role only. Prune once the candidate is in the generated snapshot',
   // Sprayed jobs keep each product's EPA number (20261204120000).
   _job_epa_freeze:
     'internal helper called only by its trigger: marks a job sprayed and inserts one lock row per product on its lines ON CONFLICT DO NOTHING, so a replay inserts nothing; every API-role EXECUTE (incl. service_role) is revoked',
@@ -3029,11 +3057,14 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // 20270109100400 (#1868 sales tax not revenue, local candidate): private helper and trigger function. Prune once applied.
   _freeze_credit_sales_tax_20270109: 'internal #1868 helper (20270109100400): called only by its deferred trigger and the one-time backfill; writes one row per credited line pool of a posted return credit (skips one already frozen) or clears them when the credit leaves posted; every API-role EXECUTE is revoked',
   trg_freeze_credit_sales_tax_20270109: '#1868 trigger function (20270109100400): deferred constraint trigger and immediate clear trigger on invoices for credit memos, both call _freeze_credit_sales_tax_20270109; never an RPC, every API-role EXECUTE is revoked',
+  // REI/PHI not applicable (local candidate 20270303130000): re-issued trigger function, never an RPC. Prune once applied.
+  write_product_change_history: 'product history trigger function (re-issued in 20270303130000 to watch the REI/PHI not-applicable flags): AFTER INSERT/UPDATE row trigger on products, appends one history row per changed watched field inside the writing statement; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   _relabel_empty_stock_rows: 'units-batch trigger function (20270121110000): AFTER UPDATE trigger on products, relabels the product\'s stock rows (already proven empty by the BEFORE trigger) to the new stock unit; runs only as a trigger, every API-role EXECUTE is revoked',
   // Brand PR B part B-1b private helpers, applied live 2026-11-12; these remain internal to the recopy workflow.
   _invoice_brand_recopy: 'internal B-1b helper (20270106110000): called only by the recopy trigger and the one-time backfill; rewrites only the derived brand snapshot on open drafts; every API-role EXECUTE is revoked',
   _invoice_brand_recopy_invoice: 'internal B-1b helper (20270106110000): called only by _invoice_brand_recopy and the backfill; rewrites only the derived brand snapshot on one open draft; every API-role EXECUTE is revoked',
   _sync_invoice_line_brand_captures: 'internal B-1b helper (20270106110000): called only by the _capture_invoice_line_rup trigger to keep one RUP capture per brand on a line; every API-role EXECUTE is revoked',
+  _capture_invoice_line_rup: '#2341 re-emit (local candidate 20270303100000): AFTER INSERT OR UPDATE row trigger function on invoice_items; writes the line\'s RUP capture only for the line being written (the line\'s writer owns idempotency); Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked. Prune once the candidate is in the generated snapshot',
   // DM-2 private helpers: the keyed weight writers own replay protection and trigger functions are not callable.
   _write_parent_density: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',
   _write_size_net_weight: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',
@@ -3101,12 +3132,22 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   //     the moment its migration stopped being newer than the high-water. It is
   //     not exempt from anything now; it is simply no longer discovered, and a
   //     dead entry would silently pre-suppress any future RPC reusing the name.
+  // M9 (local candidate 20270301180000): the statement-level trigger on money_reversal_lines; never an RPC.
+  _recompute_prepay_credits_from_lines_20270225:
+    'AFTER INSERT FOR EACH STATEMENT trigger on money_reversal_lines: sets each credit its new lines name to the balance its own rows give (convergent, so a replay writes the same value); the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked. Prune once the candidate is in the generated snapshot',
+  // M9 (local candidate 20270301180000): re-emitted with the reversal-line terms; a trigger function, never an RPC.
+  _recompute_prepay_credit_balance:
+    'AFTER INSERT/DELETE trigger on prepay_applications: recomputes one credit balance from its rows, now including M9 reversal lines (convergent, so a replay writes the same value); the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function and M9 revokes API-role EXECUTE. Prune once the candidate is in the generated snapshot',
   _recompute_po_on_order_for_products:
     'internal convergent PO-cache recomputation helper; trigger parents own the transaction and direct browser EXECUTE is revoked',
+  _record_standard_delivery_assignment_notice:
+    'internal notice writer called only by create_delivery_with_items after it binds a fresh actor-specific receipt; every API-role EXECUTE is revoked',
   // Trigger-only helpers whose migrations are now at or below the live registry
   // high-water are absent from generated client types and this inventory. Keeping
   // dead exemptions would silently pre-suppress any future RPC reusing a name.
   _sync_job_holds: 'internal convergent hold-sync helper; direct client EXECUTE is revoked',
+  _send_dispatch_location_notice:
+    'internal notice writer called only for a fresh dispatch or removal using the existing actor-bound receipt; every API-role EXECUTE is revoked',
   _sync_planned_holds: 'internal convergent hold-sync helper called within parent transactions',
   _sync_quote_job_reservations: 'internal convergent reservation-sync helper called by parent RPCs',
   check_idempotency: 'idempotency infrastructure helper; mutation only purges an expired key',
@@ -3116,7 +3157,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   check_remainder_reminders: 'maintenance reminder sweep uses persisted sent markers to deduplicate',
   check_unpriced_orders: 'cron reminder sweep uses persisted reminder and escalation sent markers',
   mark_overdue_invoices: 'service-role maintenance updates only invoices currently eligible as overdue',
+  _lock_job_stock_rows_in_order:
+    'AFTER row trigger on jobs (20270227170000): locks existing Main Warehouse stock rows in product order; creates and locks a missing one only when complete_job marked this job (crx.complete_job_rpc), after complete_job checked its idempotency key and took the number lock. Postgres refuses a direct call of a trigger function and every API-role EXECUTE is revoked',
   recompute_job_applied_acres: 'trigger-only derived-total recomputation; direct client EXECUTE is revoked',
+  record_field_marker_create_receipt:
+    'AFTER INSERT trigger on field_obstacles; direct API execution is revoked. Its unique receipt reserves the pin ID in the INSERT transaction, even after a user deletes the pin.',
   // Pruned 2026-10-19: _enforce_below_cost_line, re-emitted by the cost-admin-only
   //   candidate 20261019010000, which is now in the applied-name snapshot (ledger
   //   20261019182757), so the trigger left the discovered inventory.
@@ -3136,6 +3181,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   run_weekly_db_backup: 'cron-only maintenance with authenticated and anonymous EXECUTE revoked; each dated snapshot is independently retained and pruned',
   save_idempotency: 'idempotency infrastructure helper that stores the parent operation result',
   set_primary_customer_contact: 'convergent primary-contact promotion; replays settle to the same single-primary state; SECURITY INVOKER under customer RLS',
+  set_field_marker_write_metadata:
+    'BEFORE INSERT/UPDATE trigger on field_obstacles; PostgreSQL rejects direct calls and API-role EXECUTE is revoked. Creates use the client marker primary key and a duplicate INSERT rolls back its counter increment.',
   settle_applied_record_acres: 'trigger-only derived-acre recomputation; direct client EXECUTE is revoked',
   // trg_recalc_order_totals was listed here only for the pre-apply window: the
   // inventory admits a discovered mutator whose defining migration is still
@@ -3151,6 +3198,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // RETURNS trigger, so no API role can call it.
   // write_product_change_history (20261102100000) was pruned on 2026-11-02, when it
   // applied live and the registry high-water moved past it. It RETURNS trigger.
+  // Field application FP-1 (20270305190000) private helpers: every API-role EXECUTE (incl. service_role) is revoked.
+  _set_field_billing_split_20270303: 'internal FP-1 split writer (20270305190000): called only by set_field_billing_split and save_field after their own replay checks (and by the one-time import); binds p_actor to auth.uid(); every API-role EXECUTE is revoked',
+  _refresh_field_billing_defaults_copy_20270303: 'internal FP-1 helper (20270305190000): rewrites the read-only field_billing_defaults copy of one field only when it differs from the version in force, so a replay changes nothing; every API-role EXECUTE is revoked',
+  _refresh_all_field_billing_copies_20270303: 'internal FP-1 pg_cron job (20270305190000): rewrites only stale copies, so a rerun changes nothing; every API-role EXECUTE is revoked',
+  _fields_owner_change_refresh_copy_20270305: 'FP-1 follow-up trigger function (20270307150000): RETURNS trigger, fires only on an actual fields.customer_id change and calls the copy refresh, which changes nothing on a replay; every API-role EXECUTE is revoked',
 };
 
 
@@ -3227,15 +3279,17 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
     `)).toBe(false);
   });
 
-  it('classifies wrappers that mutate only by calling another function', () => {
+  it('classifies chains of wrappers that mutate only by calling another function', () => {
     const syntheticBodies = new Map([
+      ['client_wrapper', 'BEGIN PERFORM public.NESTED_WRAPPER (); END'],
+      ['nested_wrapper', 'BEGIN PERFORM internal_writer(); END'],
       ['internal_writer', 'BEGIN INSERT INTO public.example(id) VALUES (1); END'],
-      ['client_wrapper', 'BEGIN PERFORM internal_writer(); END'],
-      ['pure_reader', 'BEGIN RETURN QUERY SELECT 1; END'],
+      ['pure_reader', 'BEGIN PERFORM other_internal_writer(); END'],
     ]);
     expect([...transitiveMutatingFunctionNames(syntheticBodies)].sort()).toEqual([
       'client_wrapper',
       'internal_writer',
+      'nested_wrapper',
     ]);
   });
 
@@ -3267,7 +3321,7 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
     // fails here until explicitly classified. Never baseline a business mutator
     // as exempt merely to make this test green.
     expect(unclassified).toEqual([]);
-  });
+  }, 30_000); // parses generated types + every migration; slow under CI shard load
 
   it('migration-only idempotent RPCs are explicit and really enforce the key', () => {
     const generatedNames = new Set(generatedRpcShapes().map(({ name }) => name));
@@ -3280,7 +3334,7 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
         || !usesIdempotencyThroughDelegates(current?.body || '');
     });
     expect(stale).toEqual([]);
-  });
+  }, 30_000); // parses generated types + every migration; slow under CI shard load
 
   it('mutator inventory exemptions are current, explicit, and non-empty', () => {
     const mutators = generatedMutatingRpcInventory();
@@ -3304,7 +3358,7 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
       .filter((rpc) => !generatedNames.has(rpc) || declaresKey.has(rpc))
       .sort();
     expect(stale).toEqual([]);
-  });
+  }, 30_000); // parses generated types + every migration; slow under CI shard load
 
   it('save_job_applied_record declares p_idempotency_key in the generated types (regression lock for Section 6 HIGH-1)', () => {
     expect(generatedRpcsDeclaringIdempotencyKey().has('save_job_applied_record')).toBe(true);
@@ -3341,7 +3395,7 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
     // A covered RPC no longer declaring the param = it lost idempotency in a re-emit,
     // or the name drifted. Re-verify against the live DB and fix the SQL or the list.
     expect(offenders).toEqual([]);
-  });
+  }, 30_000); // parses generated types + every migration; slow under CI shard load
 
   it('every key-declaring generated mutator has a real replay mechanism', () => {
     const generatedWithKey = generatedRpcsDeclaringIdempotencyKey();
@@ -3361,5 +3415,5 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
     // treated as coverage: every discovered mutator must use the canonical
     // ledger helpers or carry a narrow, evidence-backed exemption.
     expect(offenders).toEqual([]);
-  });
+  }, 30_000); // parses generated types + every migration; slow under CI shard load
 });

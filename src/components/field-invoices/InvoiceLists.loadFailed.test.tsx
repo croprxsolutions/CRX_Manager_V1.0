@@ -110,7 +110,8 @@ describe('Field Invoices panels', () => {
       expect(await screen.findByText(failedTitle)).toBeInTheDocument();
       expect(screen.queryByText(/No .*field invoices/i)).not.toBeInTheDocument();
       expect(screen.queryByText('$0.00')).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /Post All|Unpost All/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Post All|Unpost All|Select All|^Post / })).not.toBeInTheDocument();
+      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
 
       H.failing.delete('invoices');
       tryAgain();

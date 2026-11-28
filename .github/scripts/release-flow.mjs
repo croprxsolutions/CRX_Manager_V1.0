@@ -176,6 +176,27 @@ export function pickPr(sha, pulls) {
   return pulls.find((p) => p.merge_commit_sha === sha && p.base?.ref === 'staging' && p.merged_at) ?? null;
 }
 
+// Release-gate exemptions (Taha, 2026-11-27, v0.2.1; Mason's gate tooling, Taha approves each entry).
+// Exact shas and PR numbers only, never patterns; remove an entry once the release that carries it ships.
+// A staging first-parent commit that IS a PR's work but that GitHub links to no PR: counted as that PR,
+// so the PR's own proof line still decides the gate.
+export const GATE_COMMIT_AS_PR = {
+  '54b58ab17f811e41bb05436c98b69e2abb8f2f7f': { pr: 2422, reason: "#2422's code, pushed to staging unlinked; its merge commit 1dbeae322 is empty" },
+};
+// A merged PR that isn't release work and can't carry a label: left out of the release list.
+export const GATE_SKIP_PRS = {
+  2494: "the bot's back-merge of main into staging, squash-merged, so it isn't skipped as a merge commit and check-label strips its labels",
+};
+
+// What one staging first-parent commit adds to the release list: { pr } (null = commit without a PR),
+// { prNumber } (an exempt commit counted as that PR) or { skip: true }.
+export function gateEntry(sha, pulls) {
+  if (Object.hasOwn(GATE_COMMIT_AS_PR, sha)) return { prNumber: GATE_COMMIT_AS_PR[sha].pr };
+  const pr = pickPr(sha, pulls);
+  if (pr && Object.hasOwn(GATE_SKIP_PRS, pr.number) && isBackMerge(pr.head?.ref)) return { skip: true };
+  return { pr };
+}
+
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const SEMVER = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -422,12 +443,12 @@ export function firstParagraph(body, max = 200) {
   return '';
 }
 
-function summaryMarkdown(prs, gate) {
+function summaryMarkdown(prs, gate, perPr = true) {
   const verified = prs.filter((p) => prState(p) === 'verified').length;
   const held = prs.filter((p) => prState(p) === 'held').length;
   const lines = [`${prs.length} PR(s) since the last release: ${verified} verified on staging, ${held} held off.`];
   lines.push(gate.ok ? 'Release gate: ✅ ready.' : `Release gate: ❌ waiting on ${gate.blocking.join(', ')}.`);
-  for (const p of prs) {
+  for (const p of perPr ? prs : []) {
     const first = firstParagraph(p.body);
     if (first) lines.push(`* #${p.number}: ${first}`);
   }
@@ -441,6 +462,36 @@ function statusMarkdown(prs, orphans) {
     return `| #${p.number} | ${cell(p.title)} | ${state} | ${proof ? `[proof](${proof})` : ''} |`;
   };
   return ['| PR | Title | Staging | Proof |', '|---|---|---|---|', ...prs.map(row), ...orphans.map((s) => `| — | ${cell(s)} | ❌ commit without a PR | |`)].join('\n');
+}
+
+// GitHub refuses a PR body over 65,536 characters (Release PR run 46138320695, 376 PRs: 422).
+// Over the cap the per-PR blocks shrink to PR numbers grouped by staging state. Nothing reads them
+// back: the gate comes from the plan, the GitHub Release from CHANGELOG.md, Slack from its marker.
+// The cap leaves room for the Slack marker written after it (one state per PR, ~19 characters each):
+// its real size for this plan, plus a fixed allowance for ts, channel, groups and flags, plus a margin.
+const GITHUB_BODY_MAX = 65536;
+export const bodyCapFor = (plan) => GITHUB_BODY_MAX - JSON.stringify(cardState(plan)).length - 1000 - 1000;
+export function releaseBodyFor(template, plan, previousBody, cap = bodyCapFor(plan)) {
+  const shipping = plan.prs.filter((p) => !p.labels.includes('held-off'));
+  const full = {
+    version: plan.version,
+    date: plan.date,
+    summary: summaryMarkdown(plan.prs, plan.gate),
+    changelog: changelogMarkdown(groupChangelog(shipping)),
+    status: statusMarkdown(plan.prs, plan.orphans),
+    users: shipping.flatMap((p) => usersSee(p.body)).map((x) => `* ${x}`).join('\n') || '_Nothing user-facing._',
+    migrations: plan.migrations.length ? plan.migrations.map((m) => `\`${m}\``).join(', ') : 'None',
+  };
+  const body = renderReleaseBody(template, full, previousBody);
+  if (body.length <= cap) return body;
+  const note = `_Shortened: ${plan.prs.length} PRs don't fit in one PR description. The full changelog is CHANGELOG.md on release/next (the GitHub Release uses it); the release-gate status names what is still waiting._`;
+  const states = [['❌ not verified', 'unverified'], ['❌ label without proof or reason', 'missing'], ['⏸️ held off', 'held'], ['✅ verified', 'verified']];
+  const status = states.map(([label, state]) => [label, plan.prs.filter((p) => prState(p) === state).map((p) => `#${p.number}`)])
+    .filter(([, nums]) => nums.length).map(([label, nums]) => `* ${label} (${nums.length}): ${nums.join(', ')}`);
+  if (plan.orphans.length) status.push(`* ❌ commit without a PR: ${plan.orphans.map(cell).join('; ')}`);
+  const short = { ...full, summary: summaryMarkdown(plan.prs, plan.gate, false), changelog: note, status: [note, ...status].join('\n') };
+  const shorter = renderReleaseBody(template, short, previousBody);
+  return shorter.length <= cap ? shorter : renderReleaseBody(template, { ...short, users: note }, previousBody);
 }
 
 // Loaded only by the commands that post to Slack, so the guard and label jobs need just this file.
@@ -508,7 +559,13 @@ const commands = {
       const [sha, parents, subject] = line.split('\t');
       const second = parents.split(' ')[1];
       if (second && isAncestor(second, 'origin/main')) continue;
-      const p = pickPr(sha, await gh(`/commits/${sha}/pulls`));
+      const entry = gateEntry(sha, await gh(`/commits/${sha}/pulls`));
+      if (entry.skip) continue;
+      let p = entry.pr;
+      if (entry.prNumber) {
+        const named = await gh(`/pulls/${entry.prNumber}`);
+        p = named?.base?.ref === 'staging' && named.merged_at ? named : null;
+      }
       if (!p) orphans.push(subject);
       else if (!prs.some((x) => x.number === p.number)) {
         prs.push({ number: p.number, title: p.title, body: p.body ?? '', labels: p.labels.map((l) => l.name), comments: await humanComments(p.number) });
@@ -556,16 +613,8 @@ const commands = {
   async 'release-pr'() {
     const plan = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/release.json`, 'utf8'));
     const template = readFileSync(`${process.env.RUNNER_TEMP}/release-pr-template.md`, 'utf8');
-    const shipping = plan.prs.filter((p) => !p.labels.includes('held-off'));
-    const body = renderReleaseBody(template, {
-      version: plan.version,
-      date: plan.date,
-      summary: summaryMarkdown(plan.prs, plan.gate),
-      changelog: changelogMarkdown(groupChangelog(shipping)),
-      status: statusMarkdown(plan.prs, plan.orphans),
-      users: shipping.flatMap((p) => usersSee(p.body)).map((s) => `* ${s}`).join('\n') || '_Nothing user-facing._',
-      migrations: plan.migrations.length ? plan.migrations.map((m) => `\`${m}\``).join(', ') : 'None',
-    }, plan.existing?.body);
+    // Used for both the POST (new PR) and the PATCH (refresh), so both stay under GitHub's limit.
+    const body = releaseBodyFor(template, plan, plan.existing?.body);
     const title = `release: ${plan.version}`;
     const S = await slackKit();
     if (process.env.DRY_RUN) {

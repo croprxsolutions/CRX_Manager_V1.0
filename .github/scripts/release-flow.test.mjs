@@ -1,11 +1,13 @@
 // Run: node --test .github/scripts/release-flow.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   isReleaseOrHotfixHead, flowEnabled, releaseExtraFiles, proofLink, heldOffNote, isBackMerge, labelProblem,
   pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments, botFileProblems, versionProblems, versionIsNewer,
-  hotfixStagingCarry, backportAllowed,
+  hotfixStagingCarry, backportAllowed, gateEntry, releaseBodyFor, bodyCapFor, syncCard,
 } from './release-flow.mjs';
+import * as Slack from './release-slack.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
   for (const ok of ['release/next', 'hotfix/fix-x', 'hotfix/2026-11-10-cents']) assert.equal(isReleaseOrHotfixHead(ok), true, ok);
@@ -296,4 +298,49 @@ test("only Taha's hotfix-backport label, added after the latest push, lets a bac
   assert.equal(ok([commit('h1'), lab('labeled', 'TahaKhanAbdalli'), commit('h2')]), false, 'a push after the label needs the label again');
   assert.equal(ok([commit('h1'), lab('labeled', 'TahaKhanAbdalli')]), false, 'the head commit must be in the timeline');
   assert.equal(backportAllowed({ events: [commit('h2'), lab('labeled', 'TahaKhanAbdalli')], labels: [], head: 'h2' }), false);
+});
+
+test('release-gate exemptions name exactly one commit (as #2422) and one back-merge PR (#2494)', () => {
+  const unlinked = '54b58ab17f811e41bb05436c98b69e2abb8f2f7f';
+  assert.deepEqual(gateEntry(unlinked, []), { prNumber: 2422 });
+  assert.deepEqual(gateEntry('54b58ab17f811e41bb05436c98b69e2abb8f2f7e', []), { pr: null }, 'any other unlinked commit stays an orphan');
+  assert.deepEqual(gateEntry('54b58ab17', []), { pr: null }, 'a short sha is not the exemption');
+  const pr = (number, head) => ({ number, merge_commit_sha: 'abc', base: { ref: 'staging' }, merged_at: 'x', head: { ref: head } });
+  assert.deepEqual(gateEntry('abc', [pr(2494, 'main')]), { skip: true });
+  assert.deepEqual(gateEntry('abc', [pr(2495, 'main')]), { pr: pr(2495, 'main') }, 'no other back-merge number is skipped');
+  assert.deepEqual(gateEntry('abc', [pr(2494, 'feature/x')]), { pr: pr(2494, 'feature/x') }, '#2494 is skipped only as a back-merge');
+  assert.deepEqual(gateEntry('abc', [pr(2600, 'feature/x')]), { pr: pr(2600, 'feature/x') });
+});
+
+test('the release PR body, with the Slack marker written, stays within GitHub\'s 65,536 characters; a small one is untouched', async () => {
+  const template = readFileSync(new URL('../release-pr-template.md', import.meta.url), 'utf8');
+  const fake = (n, labels = []) => ({ number: n, title: `fix(db): a long enough title for PR ${n} `.repeat(3), labels, comments: [],
+    body: `${'This PR changes how one screen saves its rows, with a long first paragraph. '.repeat(4)}\n\nWhat users see: screen ${n} saves faster`,
+  });
+  const plan = (prs, orphans = []) => ({ version: 'v0.2.1', date: '2026-11-28', prs, orphans, gate: { ok: false, blocking: prs.map((p) => `#${p.number}`) }, migrations: ['20270301130000_x.sql'] });
+  Object.assign(process.env, { GITHUB_REPOSITORY: 'o/r', SLACK_RELEASE_CHANNEL: 'C0123456789AB' });
+  const kit = { ...Slack, slack: async () => ({ ts: '1764328477.123456' }) };
+  for (const count of [400, 600]) {
+    const big = plan(Array.from({ length: count }, (_, i) => fake(i + 1, i % 3 ? ['verified-on-staging'] : [])), ['feat: an unlinked commit']);
+    // Create: the body is POSTed, then the new card's marker is PATCHed on (release-pr's create path).
+    const created = releaseBodyFor(template, big, null);
+    const { marker } = await syncCard(kit, big, 'https://github.com/o/r/pull/1', null);
+    const createdWithMarker = Slack.writeMarker(created, { ...marker, done: false, warned: false, at: Date.now() });
+    assert.ok(createdWithMarker.length <= 65536, `${count} PRs, create: ${createdWithMarker.length} characters`);
+    // Refresh: the old body (with its marker) is re-rendered and PATCHed with the updated marker.
+    const refreshed = releaseBodyFor(template, big, createdWithMarker);
+    const again = await syncCard(kit, big, 'https://github.com/o/r/pull/1', Slack.readMarker(createdWithMarker));
+    assert.ok(Slack.writeMarker(refreshed, again.marker).length <= 65536, `${count} PRs, refresh`);
+    assert.ok(refreshed.length <= bodyCapFor(big) && bodyCapFor(big) < 65536 - JSON.stringify(marker).length);
+    for (const key of ['version', 'date', 'summary', 'changelog', 'status', 'users', 'migrations']) assert.match(created, new RegExp(`<!-- bot:${key} -->[\\s\\S]*<!-- /bot:${key} -->`), key);
+    assert.match(created, new RegExp(`${count} PR\\(s\\) since the last release`));
+    assert.match(created, /Release gate: ❌ waiting on #1, #2/);
+    assert.match(created, new RegExp(`#${count}\\b`), 'every PR number is still listed');
+    assert.match(created, /commit without a PR: feat: an unlinked commit/);
+  }
+  const small = plan([fake(1), fake(2, ['verified-on-staging'])]);
+  const smallBody = releaseBodyFor(template, small, null);
+  assert.equal(smallBody, releaseBodyFor(template, small, null, Infinity), 'under the cap nothing is shortened');
+  assert.match(smallBody, /\| #1 \| fix\(db\)/);
+  assert.match(smallBody, /\* #2: This PR changes/);
 });

@@ -5,8 +5,9 @@ import { readFileSync } from 'node:fs';
 import {
   isReleaseOrHotfixHead, flowEnabled, releaseExtraFiles, proofLink, heldOffNote, isBackMerge, labelProblem,
   pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments, botFileProblems, versionProblems, versionIsNewer,
-  hotfixStagingCarry, backportAllowed, gateEntry, releaseBodyFor, BODY_CAP,
+  hotfixStagingCarry, backportAllowed, gateEntry, releaseBodyFor, bodyCapFor, syncCard,
 } from './release-flow.mjs';
+import * as Slack from './release-slack.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
   for (const ok of ['release/next', 'hotfix/fix-x', 'hotfix/2026-11-10-cents']) assert.equal(isReleaseOrHotfixHead(ok), true, ok);
@@ -311,23 +312,32 @@ test('release-gate exemptions name exactly one commit (as #2422) and one back-me
   assert.deepEqual(gateEntry('abc', [pr(2600, 'feature/x')]), { pr: pr(2600, 'feature/x') });
 });
 
-test('the release PR body stays under GitHub\'s 65,536-character limit with 400 PRs; a small one is untouched', () => {
+test('the release PR body, with the Slack marker written, stays within GitHub\'s 65,536 characters; a small one is untouched', async () => {
   const template = readFileSync(new URL('../release-pr-template.md', import.meta.url), 'utf8');
   const fake = (n, labels = []) => ({ number: n, title: `fix(db): a long enough title for PR ${n} `.repeat(3), labels, comments: [],
     body: `${'This PR changes how one screen saves its rows, with a long first paragraph. '.repeat(4)}\n\nWhat users see: screen ${n} saves faster`,
   });
   const plan = (prs, orphans = []) => ({ version: 'v0.2.1', date: '2026-11-28', prs, orphans, gate: { ok: false, blocking: prs.map((p) => `#${p.number}`) }, migrations: ['20270301130000_x.sql'] });
-  const big = plan(Array.from({ length: 400 }, (_, i) => fake(i + 1, i % 3 ? ['verified-on-staging'] : [])), ['feat: an unlinked commit']);
-  const body = releaseBodyFor(template, big, null);
-  assert.ok(body.length <= BODY_CAP, `body is ${body.length} characters`);
-  assert.ok(BODY_CAP <= 65536 - 1000, 'room is left for the Slack marker');
-  for (const key of ['version', 'date', 'summary', 'changelog', 'status', 'users', 'migrations']) assert.match(body, new RegExp(`<!-- bot:${key} -->[\\s\\S]*<!-- /bot:${key} -->`), key);
-  assert.match(body, /400 PR\(s\) since the last release/);
-  assert.match(body, /Release gate: ❌ waiting on #1, #2/);
-  assert.match(body, /#400\b/, 'every PR number is still listed');
-  assert.match(body, /commit without a PR: feat: an unlinked commit/);
-  // A refresh of that shortened body stays under the cap too.
-  assert.ok(releaseBodyFor(template, big, body).length <= BODY_CAP);
+  Object.assign(process.env, { GITHUB_REPOSITORY: 'o/r', SLACK_RELEASE_CHANNEL: 'C0123456789AB' });
+  const kit = { ...Slack, slack: async () => ({ ts: '1764328477.123456' }) };
+  for (const count of [400, 600]) {
+    const big = plan(Array.from({ length: count }, (_, i) => fake(i + 1, i % 3 ? ['verified-on-staging'] : [])), ['feat: an unlinked commit']);
+    // Create: the body is POSTed, then the new card's marker is PATCHed on (release-pr's create path).
+    const created = releaseBodyFor(template, big, null);
+    const { marker } = await syncCard(kit, big, 'https://github.com/o/r/pull/1', null);
+    const createdWithMarker = Slack.writeMarker(created, { ...marker, done: false, warned: false, at: Date.now() });
+    assert.ok(createdWithMarker.length <= 65536, `${count} PRs, create: ${createdWithMarker.length} characters`);
+    // Refresh: the old body (with its marker) is re-rendered and PATCHed with the updated marker.
+    const refreshed = releaseBodyFor(template, big, createdWithMarker);
+    const again = await syncCard(kit, big, 'https://github.com/o/r/pull/1', Slack.readMarker(createdWithMarker));
+    assert.ok(Slack.writeMarker(refreshed, again.marker).length <= 65536, `${count} PRs, refresh`);
+    assert.ok(refreshed.length <= bodyCapFor(big) && bodyCapFor(big) < 65536 - JSON.stringify(marker).length);
+    for (const key of ['version', 'date', 'summary', 'changelog', 'status', 'users', 'migrations']) assert.match(created, new RegExp(`<!-- bot:${key} -->[\\s\\S]*<!-- /bot:${key} -->`), key);
+    assert.match(created, new RegExp(`${count} PR\\(s\\) since the last release`));
+    assert.match(created, /Release gate: ❌ waiting on #1, #2/);
+    assert.match(created, new RegExp(`#${count}\\b`), 'every PR number is still listed');
+    assert.match(created, /commit without a PR: feat: an unlinked commit/);
+  }
   const small = plan([fake(1), fake(2, ['verified-on-staging'])]);
   const smallBody = releaseBodyFor(template, small, null);
   assert.equal(smallBody, releaseBodyFor(template, small, null, Infinity), 'under the cap nothing is shortened');

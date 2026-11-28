@@ -467,8 +467,11 @@ function statusMarkdown(prs, orphans) {
 // GitHub refuses a PR body over 65,536 characters (Release PR run 46138320695, 376 PRs: 422).
 // Over the cap the per-PR blocks shrink to PR numbers grouped by staging state. Nothing reads them
 // back: the gate comes from the plan, the GitHub Release from CHANGELOG.md, Slack from its marker.
-export const BODY_CAP = 60000;
-export function releaseBodyFor(template, plan, previousBody, cap = BODY_CAP) {
+// The cap leaves room for the Slack marker written after it (one state per PR, ~19 characters each):
+// its real size for this plan, plus a fixed allowance for ts, channel, groups and flags, plus a margin.
+const GITHUB_BODY_MAX = 65536;
+export const bodyCapFor = (plan) => GITHUB_BODY_MAX - JSON.stringify(cardState(plan)).length - 1000 - 1000;
+export function releaseBodyFor(template, plan, previousBody, cap = bodyCapFor(plan)) {
   const shipping = plan.prs.filter((p) => !p.labels.includes('held-off'));
   const full = {
     version: plan.version,
